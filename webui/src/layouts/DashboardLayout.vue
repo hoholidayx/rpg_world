@@ -136,7 +136,7 @@ onUnmounted(() => {
 })
 
 const siderTheme = computed(() =>
-  themeStore.effective === 'dark' ? 'dark' : 'dark',
+  themeStore.effective === 'dark' ? 'dark' : 'light',
 )
 
 watch(
