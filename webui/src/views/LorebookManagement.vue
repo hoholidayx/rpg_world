@@ -17,14 +17,13 @@
     <!-- Table -->
     <a-table
       v-else
-      :data-source="entries"
+      :data-source="items"
       :columns="columns"
       :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }"
       row-key="name"
       :scroll="{ x: 700 }"
     >
       <template #bodyCell="{ column, record }">
-        <!-- Enable switch -->
         <template v-if="column.key === 'enable'">
           <a-switch
             :checked="!!record.enable"
@@ -32,7 +31,6 @@
           />
         </template>
 
-        <!-- Tags -->
         <template v-if="column.key === 'tags'">
           <a-tag
             v-for="tag in record.tags || []"
@@ -44,7 +42,6 @@
           <span v-if="!record.tags?.length" class="no-tags">-</span>
         </template>
 
-        <!-- Actions -->
         <template v-if="column.key === 'actions'">
           <a-space>
             <a-button type="link" size="small" @click="openEdit(record)">
@@ -164,9 +161,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick } from 'vue'
-import { message } from 'ant-design-vue'
+import { onMounted } from 'vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
+import { useCRUD } from '@/composables/useCRUD'
 import {
   listEntries,
   createEntry,
@@ -178,173 +175,44 @@ const columns = [
   { title: '名称', dataIndex: 'name', key: 'name', width: 180 },
   { title: '启用', key: 'enable', width: 80, align: 'center' },
   { title: '标签', key: 'tags', width: 200 },
-  {
-    title: '内容',
-    dataIndex: 'content',
-    key: 'content',
-    ellipsis: true,
-  },
+  { title: '内容', dataIndex: 'content', key: 'content', ellipsis: true },
   { title: '操作', key: 'actions', width: 140, fixed: 'right' },
 ]
 
-const entries = ref([])
-const loading = ref(true)
-const modalVisible = ref(false)
-const saving = ref(false)
-const editing = ref(null)
-
-// Form
-const formRef = ref(null)
-const form = reactive({
-  name: '',
-  enable: false,
-  content: '',
-  tags: [],
+const {
+  items,
+  loading,
+  modalVisible,
+  saving,
+  editing,
+  formRef,
+  form,
+  dynamicFields,
+  rules,
+  tagInputVisible,
+  tagInput,
+  tagInputRef,
+  loadData,
+  openCreate,
+  openEdit,
+  resetForm,
+  handleSave,
+  handleDelete,
+  toggleEnable,
+  showTagInput,
+  addTag,
+  removeTag,
+  addField,
+  removeField,
+} = useCRUD({
+  listFn: listEntries,
+  createFn: createEntry,
+  updateFn: updateEntry,
+  deleteFn: deleteEntry,
+  fixedFields: ['name', 'enable', 'content', 'tags'],
+  hasTags: true,
+  nameLabel: '条目名称',
 })
-const dynamicFields = reactive({})
-
-// Tag input
-const tagInputVisible = ref(false)
-const tagInput = ref('')
-const tagInputRef = ref(null)
-
-const rules = {
-  name: [{ required: true, message: '请输入条目名称' }],
-}
-
-// --- Data ---
-async function loadData() {
-  loading.value = true
-  try {
-    entries.value = await listEntries()
-  } catch (e) {
-    message.error('加载世界书失败: ' + e.message)
-  } finally {
-    loading.value = false
-  }
-}
-
-// --- CRUD ---
-function openCreate() {
-  editing.value = null
-  form.name = ''
-  form.enable = false
-  form.content = ''
-  form.tags = []
-  Object.keys(dynamicFields).forEach((k) => delete dynamicFields[k])
-  modalVisible.value = true
-}
-
-function openEdit(record) {
-  editing.value = record.name
-  form.name = record.name
-  form.enable = !!record.enable
-  form.content = record.content || ''
-  form.tags = [...(record.tags || [])]
-
-  const fixed = new Set(['name', 'enable', 'content', 'tags'])
-  Object.keys(dynamicFields).forEach((k) => delete dynamicFields[k])
-  for (const [k, v] of Object.entries(record)) {
-    if (!fixed.has(k)) {
-      dynamicFields[k] = String(v ?? '')
-    }
-  }
-  modalVisible.value = true
-}
-
-async function handleSave() {
-  try {
-    await formRef.value.validate()
-  } catch {
-    return
-  }
-  saving.value = true
-  try {
-    const payload = {
-      name: form.name,
-      enable: form.enable,
-      content: form.content,
-      tags: form.tags,
-    }
-    for (const [k, v] of Object.entries(dynamicFields)) {
-      payload[k] = v
-    }
-    if (editing.value) {
-      await updateEntry(editing.value, payload)
-      message.success('已更新')
-    } else {
-      await createEntry(payload)
-      message.success('已创建')
-    }
-    modalVisible.value = false
-    await loadData()
-  } catch (e) {
-    message.error('操作失败: ' + e.message)
-  } finally {
-    saving.value = false
-  }
-}
-
-async function handleDelete(record) {
-  try {
-    await deleteEntry(record.name)
-    message.success('已删除')
-    await loadData()
-  } catch (e) {
-    message.error('删除失败: ' + e.message)
-  }
-}
-
-function resetForm() {
-  editing.value = null
-  form.name = ''
-  form.enable = false
-  form.content = ''
-  form.tags = []
-  Object.keys(dynamicFields).forEach((k) => delete dynamicFields[k])
-}
-
-// --- Toggle enable ---
-async function toggleEnable(record, val) {
-  try {
-    const payload = { ...record, enable: val }
-    await updateEntry(record.name, payload)
-    record.enable = val
-    message.success(val ? '已启用' : '已禁用')
-  } catch (e) {
-    message.error('操作失败: ' + e.message)
-  }
-}
-
-// --- Tags ---
-function showTagInput() {
-  tagInputVisible.value = true
-  nextTick(() => {
-    tagInputRef.value?.focus()
-  })
-}
-
-function addTag() {
-  const t = tagInput.value.trim()
-  if (t && !form.tags.includes(t)) {
-    form.tags.push(t)
-  }
-  tagInput.value = ''
-  tagInputVisible.value = false
-}
-
-function removeTag(i) {
-  form.tags.splice(i, 1)
-}
-
-// --- Dynamic fields ---
-function addField() {
-  dynamicFields[`field_${Date.now()}`] = ''
-}
-
-function removeField(key) {
-  delete dynamicFields[key]
-}
 
 onMounted(loadData)
 </script>

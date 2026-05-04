@@ -17,13 +17,12 @@
     <!-- Table -->
     <a-table
       v-else
-      :data-source="characters"
+      :data-source="items"
       :columns="columns"
       :pagination="false"
       row-key="name"
       :scroll="{ x: 600 }"
     >
-      <!-- Enable switch -->
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'enable'">
           <a-switch
@@ -32,7 +31,6 @@
           />
         </template>
 
-        <!-- Actions -->
         <template v-if="column.key === 'actions'">
           <a-space>
             <a-button type="link" size="small" @click="openEdit(record)">
@@ -48,7 +46,6 @@
         </template>
       </template>
 
-      <!-- Empty state -->
       <template #emptyText>
         <a-empty description="暂无角色卡，点击「新增角色」创建" />
       </template>
@@ -126,9 +123,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
+import { onMounted } from 'vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
+import { useCRUD } from '@/composables/useCRUD'
 import {
   listCharacters,
   createCharacter,
@@ -138,155 +135,37 @@ import {
 
 const columns = [
   { title: '名称', dataIndex: 'name', key: 'name', width: 180 },
-  {
-    title: '启用',
-    key: 'enable',
-    width: 80,
-    align: 'center',
-  },
-  {
-    title: '内容',
-    dataIndex: 'content',
-    key: 'content',
-    ellipsis: true,
-  },
+  { title: '启用', key: 'enable', width: 80, align: 'center' },
+  { title: '内容', dataIndex: 'content', key: 'content', ellipsis: true },
   { title: '操作', key: 'actions', width: 140, fixed: 'right' },
 ]
 
-const characters = ref([])
-const loading = ref(true)
-const modalVisible = ref(false)
-const saving = ref(false)
-const editing = ref(null)
-
-// Form state
-const formRef = ref(null)
-const form = reactive({
-  name: '',
-  enable: false,
-  content: '',
+const {
+  items,
+  loading,
+  modalVisible,
+  saving,
+  editing,
+  formRef,
+  form,
+  dynamicFields,
+  rules,
+  loadData,
+  openCreate,
+  openEdit,
+  resetForm,
+  handleSave,
+  handleDelete,
+  toggleEnable,
+  addField,
+  removeField,
+} = useCRUD({
+  listFn: listCharacters,
+  createFn: createCharacter,
+  updateFn: updateCharacter,
+  deleteFn: deleteCharacter,
+  fixedFields: ['name', 'enable', 'content'],
 })
-const dynamicFields = reactive({})
-
-const rules = {
-  name: [{ required: true, message: '请输入角色名称' }],
-}
-
-// --- Data loading ---
-async function loadData() {
-  loading.value = true
-  try {
-    characters.value = await listCharacters()
-  } catch (e) {
-    message.error('加载角色列表失败: ' + e.message)
-  } finally {
-    loading.value = false
-  }
-}
-
-// --- Create / Edit ---
-function openCreate() {
-  editing.value = null
-  form.name = ''
-  form.enable = false
-  form.content = ''
-  Object.keys(dynamicFields).forEach((k) => delete dynamicFields[k])
-  modalVisible.value = true
-}
-
-function openEdit(record) {
-  editing.value = record.name
-  form.name = record.name
-  form.enable = !!record.enable
-  form.content = record.content || ''
-
-  // Populate dynamic fields (everything except fixed fields)
-  const fixed = new Set(['name', 'enable', 'content'])
-  Object.keys(dynamicFields).forEach((k) => delete dynamicFields[k])
-  for (const [k, v] of Object.entries(record)) {
-    if (!fixed.has(k)) {
-      dynamicFields[k] = String(v ?? '')
-    }
-  }
-
-  modalVisible.value = true
-}
-
-function resetForm() {
-  editing.value = null
-  form.name = ''
-  form.enable = false
-  form.content = ''
-  Object.keys(dynamicFields).forEach((k) => delete dynamicFields[k])
-}
-
-async function handleSave() {
-  try {
-    await formRef.value.validate()
-  } catch {
-    return
-  }
-
-  saving.value = true
-  try {
-    // Merge fixed fields + dynamic fields
-    const payload = {
-      name: form.name,
-      enable: form.enable,
-      content: form.content,
-    }
-    for (const [k, v] of Object.entries(dynamicFields)) {
-      payload[k] = v
-    }
-
-    if (editing.value) {
-      await updateCharacter(editing.value, payload)
-      message.success('已更新')
-    } else {
-      await createCharacter(payload)
-      message.success('已创建')
-    }
-    modalVisible.value = false
-    await loadData()
-  } catch (e) {
-    message.error('操作失败: ' + e.message)
-  } finally {
-    saving.value = false
-  }
-}
-
-// --- Delete ---
-async function handleDelete(record) {
-  try {
-    await deleteCharacter(record.name)
-    message.success('已删除')
-    await loadData()
-  } catch (e) {
-    message.error('删除失败: ' + e.message)
-  }
-}
-
-// --- Toggle enable ---
-async function toggleEnable(record, val) {
-  try {
-    const payload = { ...record, enable: val }
-    await updateCharacter(record.name, payload)
-    record.enable = val
-    message.success(val ? '已启用' : '已禁用')
-  } catch (e) {
-    message.error('操作失败: ' + e.message)
-  }
-}
-
-// --- Dynamic fields ---
-function addField() {
-  const key = `field_${Date.now()}`
-  dynamicFields[key] = ''
-}
-
-function removeField(key) {
-  delete dynamicFields[key]
-}
 
 onMounted(loadData)
 </script>
