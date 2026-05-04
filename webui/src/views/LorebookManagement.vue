@@ -3,10 +3,18 @@
     <!-- Header bar -->
     <div class="page-header">
       <h2>世界书管理</h2>
-      <a-button type="primary" @click="openCreate">
-        <template #icon><PlusOutlined /></template>
-        新增条目
-      </a-button>
+      <div class="header-actions">
+        <a-input-search
+          v-model:value="searchText"
+          placeholder="搜索名称或内容"
+          allow-clear
+          style="width: 260px"
+        />
+        <a-button type="primary" @click="openCreate">
+          <template #icon><PlusOutlined /></template>
+          新增条目
+        </a-button>
+      </div>
     </div>
 
     <!-- Loading -->
@@ -17,7 +25,7 @@
     <!-- Table -->
     <a-table
       v-else
-      :data-source="items"
+      :data-source="filteredItems"
       :columns="columns"
       :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }"
       row-key="name"
@@ -161,7 +169,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { useCRUD } from '@/composables/useCRUD'
 import {
@@ -170,6 +178,18 @@ import {
   updateEntry,
   deleteEntry,
 } from '@/api/lorebook'
+
+const searchText = ref('')
+
+const filteredItems = computed(() => {
+  const keyword = searchText.value.trim().toLowerCase()
+  if (!keyword) return items.value
+  return items.value.filter(
+    (item) =>
+      item.name.toLowerCase().includes(keyword) ||
+      (item.content || '').toLowerCase().includes(keyword),
+  )
+})
 
 const columns = [
   { title: '名称', dataIndex: 'name', key: 'name', width: 180 },
@@ -229,6 +249,11 @@ onMounted(loadData)
   align-items: center;
   margin-bottom: 16px;
   flex-wrap: wrap;
+  gap: 8px;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 .page-header h2 {
