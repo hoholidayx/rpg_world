@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from rpg_world.api.deps import get_character_manager
 from rpg_world.rpg_core.character import CharacterManager
-from rpg_world.models import CharacterData
+from rpg_world.models import CharacterData, CharacterDetail
 
 router = APIRouter(tags=["character"])
 
@@ -71,3 +71,76 @@ def delete_character(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"status": "deleted", "name": name}
+
+
+# --- L2 Detail routes ---
+
+
+@router.get("/characters/{name}/details")
+def list_details(
+    name: str,
+    manager: CharacterManager = Depends(get_character_manager),
+) -> dict:
+    """Return all L2 details for a character."""
+    try:
+        return {"details": manager.list_details(name)}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/characters/{name}/details/{detail_name}")
+def get_detail(
+    name: str,
+    detail_name: str,
+    manager: CharacterManager = Depends(get_character_manager),
+) -> dict:
+    """Return a single L2 detail by name."""
+    try:
+        return manager.get_detail(name, detail_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/characters/{name}/details")
+def create_detail(
+    name: str,
+    body: CharacterDetail,
+    manager: CharacterManager = Depends(get_character_manager),
+) -> dict:
+    """Create a new L2 detail for a character."""
+    try:
+        data = manager.add_detail(name, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"status": "created", "data": data}
+
+
+@router.put("/characters/{name}/details/{detail_name}")
+def update_detail(
+    name: str,
+    detail_name: str,
+    body: CharacterDetail,
+    manager: CharacterManager = Depends(get_character_manager),
+) -> dict:
+    """Update an existing L2 detail."""
+    try:
+        data = manager.update_detail(name, detail_name, body.model_dump(exclude_unset=True))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"status": "updated", "data": data}
+
+
+@router.delete("/characters/{name}/details/{detail_name}")
+def delete_detail(
+    name: str,
+    detail_name: str,
+    manager: CharacterManager = Depends(get_character_manager),
+) -> dict:
+    """Delete an L2 detail."""
+    try:
+        manager.remove_detail(name, detail_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"status": "deleted", "name": detail_name}
