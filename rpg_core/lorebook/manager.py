@@ -2,38 +2,45 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
+from rpg_world.rpg_core.utils.manager_base import BaseManager
 from rpg_world.rpg_core.lorebook.loader import LorebookLoader
 
 
-class LorebookManager:
+class LorebookManager(BaseManager):
     """Manages lorebook entries in memory with CRUD operations.
 
     Supports both single-file and directory-backed storage.
     """
 
     def __init__(self, path: str | Path) -> None:
-        self.loader = LorebookLoader(path)
+        self.path = Path(path).resolve()
+        self.loader = LorebookLoader(self.path)
         self.data: dict[str, Any] = {}  # will hold {"entries": [...]}
+        super().__init__()
 
     # ------------------------------------------------------------------
-    # Lifecycle
+    # BaseManager abstract methods
     # ------------------------------------------------------------------
 
-    def load(self) -> dict[str, Any]:
-        """Load all entries from disk into memory.
+    def _data_dir(self) -> Path:
+        return self.path
 
-        Returns ``self.data`` for convenience.
-        """
+    def reload(self) -> None:
+        """Re-read all entries from disk into memory."""
+        logger = logging.getLogger("rpg_core.manager")
+        logger.info("LorebookManager.reload from %s", self.path)
         entries = self.loader.load()
         self.data = {"entries": entries}
-        return self.data
+        logger.info("  -> loaded %d entries", len(entries))
 
-    def reload(self) -> dict[str, Any]:
-        """Alias for ``load()`` — re-reads all files from disk."""
-        return self.load()
+    def load(self) -> dict[str, Any]:
+        """Alias for ``reload()`` returning ``self.data``."""
+        self.reload()
+        return self.data
 
     # ------------------------------------------------------------------
     # Queries
@@ -142,4 +149,5 @@ class LorebookManager:
     def _persist(self, entries: list[dict[str, Any]]) -> None:
         """Write the entry list to disk and update in-memory state."""
         self.loader.save_all(entries)
-        self.data = {"entries": entries}
+        # Merge into existing data to preserve fields not tracked in entries
+        self.data = {**self.data, "entries": entries}

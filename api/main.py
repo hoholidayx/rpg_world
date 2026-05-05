@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
+import logging
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Enable rpg_core logging (add handlers so logs appear regardless of uvicorn config)
+for _name in ("rpg_core.watcher", "rpg_core.manager"):
+    _log = logging.getLogger(_name)
+    _log.setLevel(logging.INFO)
+    if not _log.handlers:
+        _log.addHandler(logging.StreamHandler(sys.stderr))
 
 from rpg_world.api.routers import character, context, lorebook
 
