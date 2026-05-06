@@ -11,7 +11,7 @@ class CharacterData(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str
-    enable: bool = False
+    enable: bool = True
     content: str = ""
 
 
@@ -35,5 +35,5 @@ class LorebookEntry(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str
-    enable: bool = False
+    enable: bool = True
     content: str = ""

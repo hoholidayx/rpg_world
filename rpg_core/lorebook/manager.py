@@ -54,7 +54,7 @@ class LorebookManager(BaseManager):
 
     def list_enabled_entries(self) -> list[dict[str, Any]]:
         """Return only entries where ``enable`` is ``True``."""
-        return [e for e in self.list_entries() if e.get("enable")]
+        return [e for e in self.list_entries() if e.get("enable", True)]
 
     def get_entry(self, name: str) -> dict[str, Any]:
         """Return a single entry by name.
@@ -94,6 +94,7 @@ class LorebookManager(BaseManager):
         if any(e.get("name") == name for e in entries):
             raise ValueError(f"Entry already exists: {name}")
 
+        data.setdefault("enable", True)
         data.setdefault("content", "")
         entries.append(data)
 

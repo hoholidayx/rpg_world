@@ -61,7 +61,7 @@ class CharacterManager(BaseManager):
 
     def list_enabled_characters(self) -> list[dict[str, Any]]:
         """Return only character cards where ``enable`` is ``True``."""
-        return [c for c in self.list_characters() if c.get("enable")]
+        return [c for c in self.list_characters() if c.get("enable", True)]
 
     def get_character(self, name: str) -> dict[str, Any]:
         """Return a single character card by name.
@@ -159,6 +159,27 @@ class CharacterManager(BaseManager):
             if detail.get("name") == detail_name:
                 return detail
         raise FileNotFoundError(f"Detail not found: {detail_name}")
+
+    def list_detail_names(self, character_name: str) -> list[str]:
+        """返回角色中所有启用的 detail 名称列表（按 enable 过滤）。"""
+        return [
+            d["name"] for d in self.list_details(character_name)
+            if d.get("enable", True)
+        ]
+
+    def get_details_by_names(
+        self, character_name: str, detail_names: list[str]
+    ) -> list[dict[str, Any]]:
+        """根据 detail 名称列表查询，只返回已启用的 detail。"""
+        name_set = set(detail_names)
+        return [
+            d for d in self.list_details(character_name)
+            if d.get("name") in name_set and d.get("enable", True)
+        ]
+
+    def get_all_details(self, character_name: str) -> list[dict[str, Any]]:
+        """返回角色所有已启用的完整 detail 数据。"""
+        return [d for d in self.list_details(character_name) if d.get("enable", True)]
 
     # ------------------------------------------------------------------
     # L2 Detail mutations
