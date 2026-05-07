@@ -41,6 +41,10 @@
           <BookOutlined />
           <span>世界书管理</span>
         </a-menu-item>
+        <a-menu-item key="/status">
+          <ProfileOutlined />
+          <span>状态管理</span>
+        </a-menu-item>
       </a-menu>
       <div class="sider-footer">
         <ThemeToggle />
@@ -85,6 +89,10 @@
           <BookOutlined />
           <span>世界书管理</span>
         </a-menu-item>
+        <a-menu-item key="/status">
+          <ProfileOutlined />
+          <span>状态管理</span>
+        </a-menu-item>
       </a-menu>
       <div style="padding: 16px; border-top: 1px solid #f0f0f0; margin-top: 16px;">
         <ThemeToggle />
@@ -110,6 +118,7 @@ import {
   DashboardOutlined,
   UserOutlined,
   BookOutlined,
+  ProfileOutlined,
 } from '@ant-design/icons-vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useThemeStore } from '@/stores/theme'

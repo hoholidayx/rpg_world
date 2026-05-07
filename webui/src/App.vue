@@ -29,6 +29,10 @@ const themeConfig = computed(() => ({
   --text-secondary: #999;
   --text-tertiary: #bbb;
   --sider-bg: #001529;
+  --header-bg: #fafafa;
+  --border-color: #e8e8e8;
+  --hover-bg: rgba(0, 0, 0, 0.04);
+  --active-bg: rgba(24, 144, 255, 0.1);
 }
 
 [data-theme='dark'] {
@@ -38,6 +42,10 @@ const themeConfig = computed(() => ({
   --text-secondary: rgba(255, 255, 255, 0.45);
   --text-tertiary: rgba(255, 255, 255, 0.3);
   --sider-bg: #141414;
+  --header-bg: #2a2a2a;
+  --border-color: #303030;
+  --hover-bg: rgba(255, 255, 255, 0.04);
+  --active-bg: rgba(24, 144, 255, 0.2);
 }
 
 body {

@@ -23,6 +23,12 @@ const routes = [
     component: () => import('@/views/LorebookManagement.vue'),
     meta: { title: '世界书管理' },
   },
+  {
+    path: '/status',
+    name: 'StatusManagement',
+    component: () => import('@/views/StatusManagement.vue'),
+    meta: { title: '状态管理' },
+  },
 ]
 
 const router = createRouter({

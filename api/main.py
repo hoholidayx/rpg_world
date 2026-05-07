@@ -15,7 +15,7 @@ for _name in ("rpg_core.watcher", "rpg_core.manager"):
     if not _log.handlers:
         _log.addHandler(logging.StreamHandler(sys.stderr))
 
-from rpg_world.api.routers import character, context, lorebook
+from rpg_world.api.routers import character, context, lorebook, status
 
 app = FastAPI(title="RPG World API")
 
@@ -32,3 +32,4 @@ app.add_middleware(
 app.include_router(character.router, prefix="/api/v1")
 app.include_router(lorebook.router, prefix="/api/v1")
 app.include_router(context.router, prefix="/api/v1")
+app.include_router(status.router, prefix="/api/v1")

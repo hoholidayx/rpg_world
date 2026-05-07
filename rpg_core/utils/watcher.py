@@ -117,7 +117,7 @@ class FileWatcher:
                 self._observer.schedule(
                     _Handler(watched_path, lambda p=watched_path: self._on_change(p)),
                     watch_target,
-                    recursive=False,
+                    recursive=True,
                 )
             else:
                 logger.warning("  path does not exist, skipping: %s", watched_path)

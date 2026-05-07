@@ -43,6 +43,10 @@ class Settings:
     def lorebook_path(self) -> str:
         return _resolve(self._raw.get("lorebook_path", "data/lorebook"))
 
+    @property
+    def status_path(self) -> str:
+        return _resolve(self._raw.get("status_path", "data/status"))
+
 
 # Singleton
 settings = Settings()
