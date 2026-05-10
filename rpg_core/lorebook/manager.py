@@ -106,7 +106,8 @@ class LorebookManager(BaseManager):
 
         If the ``name`` field in *data* differs from *name*, the entry
         is renamed.  Raises ``FileNotFoundError`` if *name* does not
-        exist.
+        exist.  Raises ``ValueError`` if *new_name* already belongs to
+        another entry.
         """
         entries = self.list_entries()
         idx = next(
@@ -118,6 +119,9 @@ class LorebookManager(BaseManager):
 
         new_name = data.get("name", name)
         if new_name != name:
+            # Ensure the new name is not taken by another entry
+            if any(e.get("name") == new_name for i, e in enumerate(entries) if i != idx):
+                raise ValueError(f"Lorebook entry already exists: {new_name}")
             merged = dict(entries[idx])
             merged.update(data)
             entries[idx] = merged

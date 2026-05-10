@@ -63,6 +63,8 @@ class LorebookLoader:
             data = load_json(self.path)
 
         if isinstance(data, dict):
+            if not data:  # empty dict from an empty directory
+                return []
             return [data]
         if isinstance(data, list):
             return [item for item in data if isinstance(item, dict)]

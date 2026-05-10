@@ -85,7 +85,6 @@
           <a-input
             v-model:value="form.name"
             placeholder="条目名称"
-            :disabled="!!editing"
           />
         </a-form-item>
 
@@ -181,6 +180,13 @@ import {
 
 const searchText = ref('')
 
+const otherNames = computed(() => {
+  const current = editing.value
+  return items.value
+    .filter((item) => item.name !== current)
+    .map((item) => item.name.toLowerCase())
+})
+
 const filteredItems = computed(() => {
   const keyword = searchText.value.trim().toLowerCase()
   if (!keyword) return items.value
@@ -233,6 +239,18 @@ const {
   hasTags: true,
   nameLabel: '条目名称',
 })
+
+// Name uniqueness validator (frontend check before backend submit)
+const nameValidator = async (_rule, value) => {
+  if (!value) return
+  if (otherNames.value.includes(value.trim().toLowerCase())) {
+    throw new Error('名称已存在，请使用其他名称')
+  }
+}
+rules.name = [
+  ...rules.name,
+  { validator: nameValidator, trigger: 'change' },
+]
 
 onMounted(loadData)
 </script>
