@@ -1,4 +1,6 @@
 {
+  "active_workspace": "非公开行程",
   "character_path": "data/character",
-  "lorebook_path": "data/lorebook"
+  "lorebook_path": "data/lorebook",
+  "status_path": "data/status"
 }

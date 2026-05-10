@@ -91,6 +91,9 @@ class FileWatcher:
         """Register a path to watch with a reload callback.
 
         Multiple callbacks for the same path are composed (all fire).
+
+        If the observer is already running, the new path is scheduled
+        immediately so late-registering managers are covered as well.
         """
         watched_path = watched_path.resolve()
         logger.info("register path=%s", watched_path)
@@ -99,6 +102,17 @@ class FileWatcher:
             self._callbacks[watched_path] = lambda: (existing(), on_reload())
         else:
             self._callbacks[watched_path] = on_reload
+
+        # If observer already running, schedule this path now
+        if self._started and self._observer is not None:
+            watch_target = str(watched_path.parent if watched_path.is_file() else watched_path)
+            if watched_path.exists():
+                self._observer.schedule(
+                    _Handler(watched_path, lambda p=watched_path: self._on_change(p)),
+                    watch_target,
+                    recursive=True,
+                )
+                logger.info("  -> scheduled with running observer")
 
     def start(self) -> None:
         """Start the watchdog observer (no-op if already running)."""
@@ -124,6 +138,16 @@ class FileWatcher:
         self._observer.start()
         self._started = True
         logger.info("FileWatcher started")
+
+    def clear_all(self) -> None:
+        """Clear all registered callbacks and debounce state.
+
+        Call before re-registering paths (e.g. after a workspace switch).
+        Does **not** stop the observer — use :meth:`stop` first if needed.
+        """
+        self._callbacks.clear()
+        self._debounce_until.clear()
+        logger.info("FileWatcher — all callbacks cleared")
 
     def stop(self) -> None:
         """Stop the watchdog observer."""

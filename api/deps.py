@@ -38,3 +38,17 @@ def get_status_manager() -> StatusManager:
     mgr = StatusManager(settings.status_path)
     _try_start_watcher()
     return mgr
+
+
+def reset_all() -> None:
+    """Reset all manager singletons and watcher state.
+
+    Called after switching workspaces so the next request creates fresh
+    managers pointing at the new data paths.
+    """
+    get_character_manager.cache_clear()
+    get_lorebook_manager.cache_clear()
+    get_status_manager.cache_clear()
+    watcher = get_watcher()
+    watcher.stop()
+    watcher.clear_all()
