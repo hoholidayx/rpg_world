@@ -59,6 +59,12 @@ export function useCRUD(options) {
     form.enable = false
     form.content = ''
     form.tags = []
+    // Reset extra fixed fields beyond the core set
+    for (const field of fixedFields) {
+      if (!['name', 'enable', 'content', 'tags'].includes(field)) {
+        form[field] = ''
+      }
+    }
     Object.keys(dynamicFields).forEach((k) => delete dynamicFields[k])
     modalVisible.value = true
   }
@@ -69,6 +75,13 @@ export function useCRUD(options) {
     form.enable = !!record.enable
     form.content = record.content || ''
     form.tags = hasTags ? [...(record.tags || [])] : []
+
+    // Populate extra fixed fields from the record
+    for (const field of fixedFields) {
+      if (!['name', 'enable', 'content', 'tags'].includes(field) && field in record) {
+        form[field] = record[field]
+      }
+    }
 
     const fixed = new Set(fixedFields)
     Object.keys(dynamicFields).forEach((k) => delete dynamicFields[k])
@@ -104,6 +117,12 @@ export function useCRUD(options) {
       }
       if (hasTags) {
         payload.tags = form.tags
+      }
+      // Include extra fixed fields beyond the core set
+      for (const field of fixedFields) {
+        if (!['name', 'enable', 'content', 'tags'].includes(field) && field in form) {
+          payload[field] = form[field]
+        }
       }
       for (const [k, v] of Object.entries(dynamicFields)) {
         payload[k] = v

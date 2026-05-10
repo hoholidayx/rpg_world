@@ -23,7 +23,7 @@ _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 # Known data-type subdirectories inside data/
-_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "status"})
+_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "milestone", "status"})
 
 
 def _load() -> dict[str, Any]:
@@ -72,6 +72,13 @@ class Settings:
     def lorebook_path(self) -> str:
         return _resolve(
             self._raw.get("lorebook_path", "data/lorebook"),
+            self.active_workspace,
+        )
+
+    @property
+    def milestone_path(self) -> str:
+        return _resolve(
+            self._raw.get("milestone_path", "data/milestone"),
             self.active_workspace,
         )
 
