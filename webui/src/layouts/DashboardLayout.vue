@@ -23,6 +23,25 @@
       :theme="siderTheme"
     >
       <div class="logo">{{ collapsed ? 'RPG' : 'RPG World' }}</div>
+
+      <!-- Workspace selector -->
+      <div v-if="!collapsed" class="workspace-section">
+        <a-dropdown :trigger="['click']" placement="bottomLeft">
+          <div class="workspace-trigger">
+            <FolderOutlined />
+            <span class="ws-label">{{ activeWorkspaceLabel }}</span>
+            <DownOutlined class="ws-arrow" />
+          </div>
+          <template #overlay>
+            <a-menu @click="onWorkspaceChange" :selectedKeys="[workspaceStore.activeWorkspace]">
+              <a-menu-item v-for="ws in workspaceStore.workspaces" :key="ws.name">
+                {{ ws.label }}
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
+      </div>
+
       <a-menu
         v-model:selectedKeys="selectedKeys"
         mode="inline"
@@ -72,6 +91,18 @@
       <div class="drawer-header">
         <span class="drawer-title">RPG World</span>
       </div>
+      <!-- Workspace selector (mobile) -->
+      <div class="drawer-workspace">
+        <span class="drawer-ws-label"><FolderOutlined /> 工作区</span>
+        <a-select
+          v-model:value="workspaceStore.activeWorkspace"
+          :options="workspaceOptions"
+          size="small"
+          style="width: 100%; margin-top: 8px;"
+          @change="onWorkspaceChange"
+        />
+      </div>
+
       <a-menu
         v-model:selectedKeys="selectedKeys"
         mode="inline"
@@ -119,13 +150,17 @@ import {
   UserOutlined,
   BookOutlined,
   ProfileOutlined,
+  FolderOutlined,
+  DownOutlined,
 } from '@ant-design/icons-vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useThemeStore } from '@/stores/theme'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const router = useRouter()
 const route = useRoute()
 const themeStore = useThemeStore()
+const workspaceStore = useWorkspaceStore()
 
 const collapsed = ref(false)
 const drawerVisible = ref(false)
@@ -139,6 +174,7 @@ function checkMobile() {
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  workspaceStore.load()
 })
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
@@ -146,6 +182,20 @@ onUnmounted(() => {
 
 const siderTheme = computed(() =>
   themeStore.effective === 'dark' ? 'dark' : 'light',
+)
+
+const activeWorkspaceLabel = computed(() => {
+  const found = workspaceStore.workspaces.find(
+    (w) => w.name === workspaceStore.activeWorkspace,
+  )
+  return found ? found.label : '默认工作区'
+})
+
+const workspaceOptions = computed(() =>
+  workspaceStore.workspaces.map((w) => ({
+    value: w.name,
+    label: w.label,
+  })),
 )
 
 watch(
@@ -158,6 +208,14 @@ watch(
 function onMenuClick({ key }) {
   router.push(key)
   drawerVisible.value = false
+}
+
+function onWorkspaceChange(value) {
+  // Desktop a-menu passes { key }, mobile a-select passes the value directly
+  const name = typeof value === 'object' ? value.key : value
+  if (name !== workspaceStore.activeWorkspace) {
+    workspaceStore.switchWorkspace(name)
+  }
 }
 </script>
 
@@ -239,6 +297,46 @@ function onMenuClick({ key }) {
 .content-area {
   margin: 16px;
   min-height: calc(100vh - 32px);
+}
+
+/* ---- Workspace Selector ---- */
+.workspace-section {
+  padding: 4px 12px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 4px;
+}
+.workspace-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+  transition: background 0.2s, color 0.2s;
+}
+.workspace-trigger:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.ws-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-arrow {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.drawer-workspace {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+.drawer-ws-label {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 /* ---- Responsive ---- */

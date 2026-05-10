@@ -1,0 +1,20 @@
+{
+  "name": "Bob",
+  "enable": true,
+  "content": "A brave knight.",
+  "personality": "bold",
+  "details": [
+    {
+      "name": "战斗风格",
+      "enable": true,
+      "content": "擅长双手重剑，战斗时喜欢正面冲锋。在关键时刻会进入一种近乎狂战士的状态，无视伤痛继续战斗。",
+      "tags": ["战斗"]
+    },
+    {
+      "name": "内心矛盾",
+      "enable": true,
+      "content": "虽然外表刚毅，但内心深处害怕失去战友。每次战斗后都会默默检查同伴的安危，这种责任感是他最大的软肋。",
+      "tags": ["心理"]
+    }
+  ]
+}
