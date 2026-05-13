@@ -1,14 +1,13 @@
 """RPG World settings — shared by core and API layers.
 
-Settings are read from ``rpg_world/settings.json``.  Relative paths
-in the file are resolved against the ``rpg_world/`` package root.
+Settings are read from ``rpg_world/settings.json``.  Path resolution:
 
-Workspace support:
-  - ``active_workspace`` (default ``""``) selects a named subdirectory under
-    ``data/`` — paths like ``data/character`` resolve to
-    ``data/<workspace>/character`` when set.
-  - Workspaces are auto-detected as subdirectories under ``data/`` (excluding
-    known data-type directories ``character``, ``lorebook``, ``status``).
+- Absolute path (starts with ``/``) — returned as-is.
+- Relative path — resolved relative to ``rpg_world/``.  If
+  ``active_workspace`` is set and the path starts with ``data/``, the
+  workspace name is injected: ``data/character`` → ``data/<ws>/character``.
+
+See :func:`rpg_world.rpg_core.utils.path_utils.resolve_rpg_path` for details.
 """
 
 from __future__ import annotations
@@ -17,13 +16,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+from rpg_world.rpg_core.utils.path_utils import resolve_rpg_path
+
 # Location of settings.json relative to this module
 _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
 # Package root used to resolve relative paths
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 # Known data-type subdirectories inside data/
-_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "milestone", "status"})
+_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "milestone", "status", "summary", "delta_memory"})
 
 
 def _load() -> dict[str, Any]:
@@ -33,25 +34,24 @@ def _load() -> dict[str, Any]:
     return {}
 
 
-def _resolve(value: str, workspace: str = "") -> str:
-    """Resolve a path — return as-is if absolute, else relative to package root.
-
-    If *workspace* is non-empty and the relative path starts with ``data/``,
-    the workspace name is inserted: ``data/character`` → ``data/<ws>/character``.
-    """
-    p = Path(value)
-    if p.is_absolute():
-        return str(p)
-    if workspace and p.parts[0] == "data":
-        p = Path(*([p.parts[0], workspace] + list(p.parts[1:])))
-    return str(_PACKAGE_ROOT / p)
-
-
 class Settings:
     """Read-write settings proxy.  Attributes mirror keys in settings.json."""
 
     def __init__(self) -> None:
         self._raw = _load()
+
+    # ------------------------------------------------------------------
+    # Internal helper
+    # ------------------------------------------------------------------
+
+    def _resolve(self, key: str, default: str) -> str:
+        """Resolve a settings value, delegating to :func:`resolve_rpg_path`."""
+        value = self._raw.get(key, default)
+        return str(resolve_rpg_path(
+            value=value,
+            rpg_root=_PACKAGE_ROOT,
+            rpg_workspace=self.active_workspace,
+        ))
 
     # ------------------------------------------------------------------
     # Public properties
@@ -63,31 +63,31 @@ class Settings:
 
     @property
     def character_path(self) -> str:
-        return _resolve(
-            self._raw.get("character_path", "data/character"),
-            self.active_workspace,
-        )
+        return self._resolve("character_path", "data/character")
 
     @property
     def lorebook_path(self) -> str:
-        return _resolve(
-            self._raw.get("lorebook_path", "data/lorebook"),
-            self.active_workspace,
-        )
+        return self._resolve("lorebook_path", "data/lorebook")
 
     @property
     def milestone_path(self) -> str:
-        return _resolve(
-            self._raw.get("milestone_path", "data/milestone"),
-            self.active_workspace,
-        )
+        return self._resolve("milestone_path", "data/milestone")
 
     @property
     def status_path(self) -> str:
-        return _resolve(
-            self._raw.get("status_path", "data/status"),
-            self.active_workspace,
-        )
+        return self._resolve("status_path", "data/status")
+
+    @property
+    def summary_path(self) -> str:
+        return self._resolve("summary_path", "data/summary")
+
+    @property
+    def delta_memory_path(self) -> str:
+        return self._resolve("delta_memory_path", "data/delta_memory")
+
+    @property
+    def persistent_memory_path(self) -> str:
+        return self._resolve("persistent_memory_path", "data/persistent_memory.md")
 
     # ------------------------------------------------------------------
     # Workspace operations

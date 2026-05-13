@@ -1,0 +1,7 @@
+{% if milestone_index %}
+## 里程碑索引
+
+{% for item in milestone_index %}
+- {{ item.name }}{% if item.description %}: {{ item.description }}{% endif %}
+{% endfor %}
+{% endif %}

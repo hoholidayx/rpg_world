@@ -3,5 +3,8 @@
   "character_path": "data/character",
   "lorebook_path": "data/lorebook",
   "milestone_path": "data/milestone",
-  "status_path": "data/status"
+  "status_path": "data/status",
+  "summary_path": "data/summary",
+  "delta_memory_path": "data/delta_memory",
+  "persistent_memory_path": "data/persistent_memory.md"
 }

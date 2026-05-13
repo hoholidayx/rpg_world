@@ -1,0 +1,14 @@
+{% if status_tables %}
+## 状态表格
+
+{% for table in status_tables %}
+### {{ table.name }}
+
+| {% for col in table.headers %}{{ col }} |{% endfor %}
+|{% for col in table.headers %} --- |{% endfor %}
+{% for row in table.rows %}
+| {% for cell in row %}{{ cell }} |{% endfor %}
+{% endfor %}
+
+{% endfor %}
+{% endif %}

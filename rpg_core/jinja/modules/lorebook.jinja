@@ -1,0 +1,16 @@
+{% if lorebook_entries %}
+## 世界书
+
+{% for entry in lorebook_entries %}
+### {{ entry.name }}
+{% if entry.description %}
+> {{ entry.description }}
+{% endif %}
+{% if entry.tags %}
+标签: {{ entry.tags | join(', ') }}
+{% endif %}
+
+{{ entry.content }}
+
+{% endfor %}
+{% endif %}

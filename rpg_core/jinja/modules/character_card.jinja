@@ -1,0 +1,20 @@
+{% if characters %}
+## 角色卡
+
+{% for char in characters %}
+### {{ char.name }}
+{% if char.personality %}
+个性: {{ char.personality }}
+{% endif %}
+
+{{ char.content }}
+
+{% if char.details %}
+**深层设定:**
+{% for detail in char.details %}
+- {{ detail.name }}: {{ detail.content }}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+{% endif %}
