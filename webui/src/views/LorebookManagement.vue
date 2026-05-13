@@ -88,6 +88,14 @@
           />
         </a-form-item>
 
+        <!-- 一句话描述 (optional) -->
+        <a-form-item label="一句话描述" name="description">
+          <a-input
+            v-model:value="form.description"
+            placeholder="用一句话简述本条目的内容（可选）"
+          />
+        </a-form-item>
+
         <a-form-item label="启用状态" name="enable">
           <a-switch v-model:checked="form.enable" />
           <span class="form-hint">
@@ -235,7 +243,7 @@ const {
   createFn: createEntry,
   updateFn: updateEntry,
   deleteFn: deleteEntry,
-  fixedFields: ['name', 'enable', 'content', 'tags'],
+  fixedFields: ['name', 'enable', 'content', 'tags', 'description'],
   hasTags: true,
   nameLabel: '条目名称',
 })
