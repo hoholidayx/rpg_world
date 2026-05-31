@@ -1,10 +1,15 @@
 {
   "active_workspace": "data/非公开行程",
+  "agent_config": {
+    "max_tool_call_limit": 10,
+    "include_tool_records": true
+  },
   "character_path": "character",
   "lorebook_path": "lorebook",
   "milestone_path": "milestone",
   "status_path": "status",
   "summary_path": "summary",
   "delta_memory_path": "delta_memory",
-  "persistent_memory_path": "persistent_memory.md"
+  "persistent_memory_path": "persistent_memory.md",
+  "history_path": "history"
 }

@@ -93,6 +93,14 @@ class Settings:
     def history_path(self) -> str:
         return self._resolve("history_path", "history")
 
+    @property
+    def max_tool_calls(self) -> int:
+        return self._raw.get("agent_config", {}).get("max_tool_call_limit", 10)
+
+    @property
+    def include_tool_records(self) -> bool:
+        return self._raw.get("agent_config", {}).get("include_tool_records", True)
+
     # ------------------------------------------------------------------
     # Workspace operations
     # ------------------------------------------------------------------

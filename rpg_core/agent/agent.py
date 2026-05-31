@@ -6,8 +6,17 @@ import json
 from pathlib import Path
 from typing import Any
 
+from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
+from rpg_world.rpg_core.agent.tools import (
+    BaseTool,
+    GrepTool,
+    ListFilesTool,
+    ReadFileTool,
+    ToolRegistry,
+    WriteFileTool,
+)
 from rpg_world.rpg_core.settings import settings
 
 
@@ -36,6 +45,7 @@ class RPGGameAgent:
         max_tokens: int | None = None,
         temperature: float | None = None,
         history_enabled: bool = True,
+        tools: list[BaseTool] | None = None,
     ) -> None:
         self._session_id = session_id
         self._world_name = world_name
@@ -45,6 +55,7 @@ class RPGGameAgent:
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._history_enabled = history_enabled
+        self._extra_tools = tools or []
 
         # Lazy-init
         self._initialized: bool = False
@@ -56,11 +67,13 @@ class RPGGameAgent:
         self._provider: OpenAIProvider | None = None
         self._system_prompt: str = ""
         self._history: list[dict] = []
+        self._tool_registry: ToolRegistry | None = None
+        self._last_tool_records: list[ToolCallRecord] | None = None
 
     # ── public API ─────────────────────────────────────────────────────
 
-    async def single_turn(self, user_input: str, record_history: bool = False) -> str:
-        """One-shot message — send user text, get assistant reply.
+    async def single_turn(self, user_input: str, record_history: bool = False) -> AgentReply:
+        """One-shot message — send user text, get structured reply.
 
         Delegates to ``send()`` for the core logic, then rolls back
         ``_history`` so that no conversation state persists across
@@ -82,41 +95,51 @@ class RPGGameAgent:
         del self._history[before:]
         return reply
 
-    async def send(self, user_input: str) -> str:
-        """Send user text and return the assistant reply.
+    async def send(self, user_input: str) -> AgentReply:
+        """Send user text and return a structured ``AgentReply``.
 
-        Steps:
-          1. Lazy-init on first call.
-          2. Append ``{"role": "user", "content": user_input}`` to history.
-          3. Build the 6-layer RPG context via ``RPGContextBuilder.build()``.
-          4. Call OpenAPI with the transformed messages.
-          5. Append the reply to history.
-          6. Return the reply text.
+        May involve multiple LLM round-trips when tool calls are needed
+        (the chat loop).  The 6-layer context is built once; subsequent
+        iterations append raw assistant/tool messages.
         """
         await self._ensure_initialized()
 
         self._history.append({"role": "user", "content": user_input})
         self._append_history("user", user_input)
 
-        transformed = self._builder.build(
-            system_prompt=self._system_prompt,
-            messages=self._history,
-            character_mgr=self._character_mgr,
-            lorebook_mgr=self._lorebook_mgr,
-            milestone_mgr=self._milestone_mgr,
-            status_mgr=self._status_mgr,
+        messages = self._build_transformed_context()
+        schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
+
+        reply_text, records = await run_chat_loop(
+            provider=self._provider,
+            tool_registry=self._tool_registry,
+            messages=messages,
+            schemas=schemas,
         )
+        self._last_tool_records = records
 
-        reply = await self._provider.chat(transformed)
+        if settings.include_tool_records:
+            result = AgentReply(text=reply_text, tool_records=records or None)
+        else:
+            result = AgentReply(text=reply_text)
 
-        self._history.append({"role": "assistant", "content": reply})
-        self._append_history("assistant", reply)
-        return reply
+        self._history.append({"role": "assistant", "content": reply_text})
+        self._append_history("assistant", reply_text)
+        return result
 
     @property
     def history(self) -> list[dict]:
         """Read-only view of the raw conversation history (before RPG transform)."""
         return list(self._history)
+
+    @property
+    def last_tool_records(self) -> list[ToolCallRecord] | None:
+        """Tool-call records from the most recent ``send()`` / ``single_turn()``.
+
+        ``None`` if no tool calls were made.  Useful for displaying
+        intermediate tool usage in UIs without persisting them to history.
+        """
+        return self._last_tool_records
 
     def clear_history(self) -> None:
         """Reset history to just the system prompt (RPG data stays loaded).
@@ -145,7 +168,34 @@ class RPGGameAgent:
         self._milestone_mgr = ctx["milestone_mgr"]
         self._status_mgr = ctx["status_mgr"]
 
-    # ── internals ──────────────────────────────────────────────────────
+    # ── internals — context & tools ────────────────────────────────────
+
+    def _build_transformed_context(self) -> list[dict]:
+        """Build the 6-layer RPG context from the current history."""
+        return self._builder.build(
+            system_prompt=self._system_prompt,
+            messages=self._history,
+            character_mgr=self._character_mgr,
+            lorebook_mgr=self._lorebook_mgr,
+            milestone_mgr=self._milestone_mgr,
+            status_mgr=self._status_mgr,
+        )
+
+    def _setup_tool_registry(self) -> None:
+        """Create and populate the ToolRegistry with built-in file tools."""
+        ws_root = Path(settings.history_path).parent
+        self._tool_registry = ToolRegistry()
+        self._tool_registry.register_all([
+            ListFilesTool(ws_root),
+            ReadFileTool(ws_root),
+            WriteFileTool(ws_root),
+            GrepTool(ws_root),
+        ])
+        if self._extra_tools:
+            self._tool_registry.register_all(self._extra_tools)
+
+
+    # ── internals — history persistence ────────────────────────────────
 
     def _history_path(self) -> Path:
         """Return the JSONL file path for this session's persisted history."""
@@ -203,6 +253,8 @@ class RPGGameAgent:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
         )
+
+        self._setup_tool_registry()
 
         self._initialized = True
 
