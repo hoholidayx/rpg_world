@@ -24,7 +24,7 @@ _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 # Known data-type subdirectories inside data/
-_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "milestone", "status", "summary", "delta_memory"})
+_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "milestone", "status", "summary", "delta_memory", "history"})
 
 
 def _load() -> dict[str, Any]:
@@ -88,6 +88,10 @@ class Settings:
     @property
     def persistent_memory_path(self) -> str:
         return self._resolve("persistent_memory_path", "persistent_memory.md")
+
+    @property
+    def history_path(self) -> str:
+        return self._resolve("history_path", "history")
 
     # ------------------------------------------------------------------
     # Workspace operations

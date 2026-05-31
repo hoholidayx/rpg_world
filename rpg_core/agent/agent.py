@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
+from rpg_world.rpg_core.settings import settings
 
 
 class RPGGameAgent:
@@ -32,6 +35,7 @@ class RPGGameAgent:
         base_url: str | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        history_enabled: bool = True,
     ) -> None:
         self._session_id = session_id
         self._world_name = world_name
@@ -40,6 +44,7 @@ class RPGGameAgent:
         self._base_url = base_url
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._history_enabled = history_enabled
 
         # Lazy-init
         self._initialized: bool = False
@@ -54,7 +59,7 @@ class RPGGameAgent:
 
     # ── public API ─────────────────────────────────────────────────────
 
-    async def single_turn(self, user_input: str) -> str:
+    async def single_turn(self, user_input: str, record_history: bool = False) -> str:
         """One-shot message — send user text, get assistant reply.
 
         Delegates to ``send()`` for the core logic, then rolls back
@@ -62,11 +67,17 @@ class RPGGameAgent:
         calls.  Each invocation is stateless while sharing the same
         internal send path.
 
-        This is useful for scripting, testing, or any scenario where
-        each interaction should stand alone.
+        When *record_history* is ``False`` (default), no history is
+        loaded from or saved to disk.  Pass ``record_history=True`` to
+        persist this single turn to the JSONL file for the session.
         """
         before = len(self._history)
-        reply = await self.send(user_input)
+        original = self._history_enabled
+        self._history_enabled = record_history
+        try:
+            reply = await self.send(user_input)
+        finally:
+            self._history_enabled = original
         # Roll back history — single_turn must be stateless
         del self._history[before:]
         return reply
@@ -85,6 +96,7 @@ class RPGGameAgent:
         await self._ensure_initialized()
 
         self._history.append({"role": "user", "content": user_input})
+        self._append_history("user", user_input)
 
         transformed = self._builder.build(
             system_prompt=self._system_prompt,
@@ -98,6 +110,7 @@ class RPGGameAgent:
         reply = await self._provider.chat(transformed)
 
         self._history.append({"role": "assistant", "content": reply})
+        self._append_history("assistant", reply)
         return reply
 
     @property
@@ -106,9 +119,17 @@ class RPGGameAgent:
         return list(self._history)
 
     def clear_history(self) -> None:
-        """Reset history to just the system prompt (RPG data stays loaded)."""
+        """Reset history to just the system prompt (RPG data stays loaded).
+
+        Also truncates the JSONL file on disk so the next session starts
+        fresh.
+        """
         if self._initialized:
             self._history = [{"role": "system", "content": self._system_prompt}]
+        if self._history_enabled:
+            path = self._history_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("")
 
     async def reload_rpg_context(self) -> None:
         """Re-run ``build_rpg_context()`` to pick up filesystem changes."""
@@ -126,6 +147,35 @@ class RPGGameAgent:
 
     # ── internals ──────────────────────────────────────────────────────
 
+    def _history_path(self) -> Path:
+        """Return the JSONL file path for this session's persisted history."""
+        return Path(settings.history_path) / f"{self._session_id}.jsonl"
+
+    def _load_history_from_disk(self) -> None:
+        """Append persisted messages from the JSONL file to ``_history``."""
+        path = self._history_path()
+        if not path.exists():
+            return
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                    self._history.append(msg)
+                except json.JSONDecodeError:
+                    continue
+
+    def _append_history(self, role: str, content: str) -> None:
+        """Append one message to the JSONL file (no-op if history disabled)."""
+        if not self._history_enabled:
+            return
+        path = self._history_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"role": role, "content": content}, ensure_ascii=False) + "\n")
+
     async def _ensure_initialized(self) -> None:
         if self._initialized:
             return
@@ -142,6 +192,9 @@ class RPGGameAgent:
 
         self._system_prompt = PromptManager(self._world_name).system_prompt
         self._history = [{"role": "system", "content": self._system_prompt}]
+
+        if self._history_enabled:
+            self._load_history_from_disk()
 
         self._provider = OpenAIProvider(
             model=self._model,
