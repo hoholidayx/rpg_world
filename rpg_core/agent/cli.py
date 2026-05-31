@@ -1,9 +1,12 @@
 """CLI entry point for testing the standalone RPG agent.
 
-Usage::
+Usage:
 
-    uv run python -m rpg_world.agent.cli [--model gpt-4o] [--session-id default]
-                                         [--api-key ...] [--base-url ...]
+    # Interactive REPL (default)
+    uv run python -m rpg_world.agent.cli [--model gpt-4o] [--session-id default] ...
+
+    # Single-turn mode — send one message and exit
+    uv run python -m rpg_world.agent.cli --single-turn "look around the room"
 
 Interactive commands:
   /clear   — reset conversation history
@@ -29,6 +32,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="https://api.deepseek.com", help="OpenAI-compatible base URL")
     parser.add_argument("--max-tokens", type=int, default=None, help="Max tokens per response")
     parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature")
+    parser.add_argument("--single-turn", "-m", type=str, default=None,
+                        help="Single-turn mode: send one message and exit")
     return parser.parse_args()
 
 
@@ -79,6 +84,11 @@ async def _repl(agent: RPGGameAgent) -> None:
 
 def main() -> None:
     args = _parse_args()
+
+    if args.single_turn:
+        _run_single_turn(args)
+        return
+
     agent = RPGGameAgent(
         session_id=args.session_id,
         model=args.model,
@@ -88,6 +98,21 @@ def main() -> None:
         temperature=args.temperature,
     )
     asyncio.run(_repl(agent))
+
+
+def _run_single_turn(args: argparse.Namespace) -> None:
+    """Single-turn: create agent, send message, print reply, exit."""
+    agent = RPGGameAgent(
+        session_id=args.session_id,
+        model=args.model,
+        api_key=args.api_key,
+        base_url=args.base_url,
+        max_tokens=args.max_tokens,
+        temperature=args.temperature,
+    )
+
+    reply = asyncio.run(agent.single_turn(args.single_turn))
+    print(reply)
 
 
 if __name__ == "__main__":

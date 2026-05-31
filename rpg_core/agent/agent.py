@@ -54,6 +54,23 @@ class RPGGameAgent:
 
     # ── public API ─────────────────────────────────────────────────────
 
+    async def single_turn(self, user_input: str) -> str:
+        """One-shot message — send user text, get assistant reply.
+
+        Delegates to ``send()`` for the core logic, then rolls back
+        ``_history`` so that no conversation state persists across
+        calls.  Each invocation is stateless while sharing the same
+        internal send path.
+
+        This is useful for scripting, testing, or any scenario where
+        each interaction should stand alone.
+        """
+        before = len(self._history)
+        reply = await self.send(user_input)
+        # Roll back history — single_turn must be stateless
+        del self._history[before:]
+        return reply
+
     async def send(self, user_input: str) -> str:
         """Send user text and return the assistant reply.
 
