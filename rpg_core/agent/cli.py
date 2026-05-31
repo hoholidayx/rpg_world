@@ -18,7 +18,7 @@ import argparse
 import asyncio
 import sys
 
-from rpg_world.agent import RPGGameAgent
+from rpg_world.rpg_core.agent import RPGGameAgent
 
 
 def _parse_args() -> argparse.Namespace:

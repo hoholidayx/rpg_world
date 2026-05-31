@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from rpg_world.agent.openai_provider import OpenAIProvider
-from rpg_world.agent.prompt import PromptManager
+from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
+from rpg_world.rpg_core.agent.prompt import PromptManager
 
 
 class RPGGameAgent:
