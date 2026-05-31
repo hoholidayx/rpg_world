@@ -25,7 +25,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="RPG Agent CLI")
     parser.add_argument("--model", default="deepseek-v4-flash", help="OpenAI model name")
     parser.add_argument("--session-id", default="default", help="Session identifier")
-    parser.add_argument("--api-key", default="sk-xxx", help="OpenAI API key (default: OPENAI_API_KEY env)")
+    parser.add_argument("--api-key", default=None, help="OpenAI API key (default: OPENAI_API_KEY env)")
     parser.add_argument("--base-url", default="https://api.deepseek.com", help="OpenAI-compatible base URL")
     parser.add_argument("--max-tokens", type=int, default=None, help="Max tokens per response")
     parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature")
