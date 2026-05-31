@@ -4,8 +4,8 @@ Settings are read from ``rpg_world/settings.json``.  Path resolution:
 
 - Absolute path (starts with ``/``) — returned as-is.
 - Relative path — resolved relative to ``rpg_world/``.  If
-  ``active_workspace`` is set and the path starts with ``data/``, the
-  workspace name is injected: ``data/character`` → ``data/<ws>/character``.
+  ``active_workspace`` is set (e.g. ``"data/非公开行程"``), it is used
+  as the base directory; otherwise ``data/`` is used as the default base.
 
 See :func:`rpg_world.rpg_core.utils.path_utils.resolve_rpg_path` for details.
 """
@@ -63,31 +63,31 @@ class Settings:
 
     @property
     def character_path(self) -> str:
-        return self._resolve("character_path", "data/character")
+        return self._resolve("character_path", "character")
 
     @property
     def lorebook_path(self) -> str:
-        return self._resolve("lorebook_path", "data/lorebook")
+        return self._resolve("lorebook_path", "lorebook")
 
     @property
     def milestone_path(self) -> str:
-        return self._resolve("milestone_path", "data/milestone")
+        return self._resolve("milestone_path", "milestone")
 
     @property
     def status_path(self) -> str:
-        return self._resolve("status_path", "data/status")
+        return self._resolve("status_path", "status")
 
     @property
     def summary_path(self) -> str:
-        return self._resolve("summary_path", "data/summary")
+        return self._resolve("summary_path", "summary")
 
     @property
     def delta_memory_path(self) -> str:
-        return self._resolve("delta_memory_path", "data/delta_memory")
+        return self._resolve("delta_memory_path", "delta_memory")
 
     @property
     def persistent_memory_path(self) -> str:
-        return self._resolve("persistent_memory_path", "data/persistent_memory.md")
+        return self._resolve("persistent_memory_path", "persistent_memory.md")
 
     # ------------------------------------------------------------------
     # Workspace operations
@@ -99,7 +99,8 @@ class Settings:
         Returns a list of ``{"name": …, "label": …}`` dicts.  The first
         entry is always the default workspace (``name=""``, ``label="默认"``).
         Named workspaces are subdirectories of ``data/`` that are not
-        known data-type directories.
+        known data-type directories.  Their ``name`` is ``"data/<dir>"`` so
+        that ``resolve_rpg_path`` resolves paths under the workspace.
         """
         workspaces: list[dict[str, str]] = [
             {"name": "", "label": "默认（根工作区）"},
@@ -108,7 +109,7 @@ class Settings:
         if data_dir.is_dir():
             for entry in sorted(data_dir.iterdir()):
                 if entry.is_dir() and entry.name not in _KNOWN_DATA_DIRS:
-                    workspaces.append({"name": entry.name, "label": entry.name})
+                    workspaces.append({"name": f"data/{entry.name}", "label": entry.name})
         return workspaces
 
     def set_active_workspace(self, name: str) -> None:

@@ -4,9 +4,13 @@ Resolution rules (applied in order):
 
 1. Absolute path (starts with ``/``) — returned as-is.
 2. Relative path — resolved relative to the **RPG world package root**
-   (``rpg_world/``).  If an RPG workspace name is set and the path starts with
-   ``data/``, the workspace name is injected: ``data/character`` →
-   ``data/<workspace>/character``.
+   (``rpg_world/``).
+
+   * If ``active_workspace`` is set (e.g. ``"data/非公开行程"``), the
+     workspace path is used as the base: ``character`` →
+     ``rpg_world/data/非公开行程/character``.
+   * If no workspace is set, ``data/`` is used as the base: ``character`` →
+     ``rpg_world/data/character``.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ def resolve_rpg_path(
     Args:
         value: Raw path string from settings.
         rpg_root: RPG world package root directory (``rpg_world/``).
-        rpg_workspace: Active RPG workspace name (e.g. ``"非公开行程"``).
+        rpg_workspace: Active RPG workspace path (e.g. ``"data/非公开行程"``).
 
     Returns:
         Resolved absolute :class:`Path`.
@@ -35,7 +39,10 @@ def resolve_rpg_path(
     if p.is_absolute():
         return p
 
-    # Inject RPG workspace name into data/ paths
-    if rpg_workspace and p.parts[0] == "data":
-        p = Path(*([p.parts[0], rpg_workspace] + list(p.parts[1:])))
-    return (rpg_root / p).resolve()
+    if rpg_workspace:
+        ws = Path(rpg_workspace)
+        base = ws if ws.is_absolute() else rpg_root / ws
+    else:
+        base = rpg_root / "data"
+
+    return (base / p).resolve()

@@ -1,10 +1,10 @@
 {
-  "active_workspace": "非公开行程",
-  "character_path": "data/character",
-  "lorebook_path": "data/lorebook",
-  "milestone_path": "data/milestone",
-  "status_path": "data/status",
-  "summary_path": "data/summary",
-  "delta_memory_path": "data/delta_memory",
-  "persistent_memory_path": "data/persistent_memory.md"
+  "active_workspace": "data/非公开行程",
+  "character_path": "character",
+  "lorebook_path": "lorebook",
+  "milestone_path": "milestone",
+  "status_path": "status",
+  "summary_path": "summary",
+  "delta_memory_path": "delta_memory",
+  "persistent_memory_path": "persistent_memory.md"
 }
