@@ -1,8 +1,16 @@
 {
   "active_workspace": "data/非公开行程",
+  "sub_agent_path": "memory_sub_agent",
   "agent_config": {
     "max_tool_call_limit": 10,
-    "include_tool_records": true
+    "include_tool_records": true,
+    "memory_sub_agent": {
+      "enabled": false,
+      "model": null,
+      "summary_trigger_rounds": 20,
+      "max_recall_items": 5,
+      "max_story_details": 10
+    }
   },
   "character_path": "character",
   "lorebook_path": "lorebook",

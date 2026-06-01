@@ -24,7 +24,7 @@ _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 # Known data-type subdirectories inside data/
-_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "milestone", "status", "summary", "story_memory", "history"})
+_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "milestone", "status", "summary", "story_memory", "history", "memory_sub_agent"})
 
 
 def _load() -> dict[str, Any]:
@@ -92,6 +92,14 @@ class Settings:
     @property
     def history_path(self) -> str:
         return self._resolve("history_path", "history")
+
+    @property
+    def sub_agent_path(self) -> str:
+        return self._resolve("sub_agent_path", "memory_sub_agent")
+
+    @property
+    def memory_sub_agent_config(self) -> dict[str, Any]:
+        return self._raw.get("agent_config", {}).get("memory_sub_agent", {})
 
     @property
     def max_tool_calls(self) -> int:
