@@ -1,7 +1,0 @@
-{% if summary_index %}
-## 对话摘要索引
-
-{% for item in summary_index %}
-- 第 {{ item.round_start }}-{{ item.round_end }} 轮: {{ item.brief }}
-{% endfor %}
-{% endif %}

@@ -1,4 +1,4 @@
-"""RPG World context — 6-layer context builder and factory."""
+"""RPG World context — 5-layer context builder and factory."""
 
 from rpg_world.rpg_core.context.builder import RPGContextBuilder
 from rpg_world.rpg_core.context.config import RPGContextConfig

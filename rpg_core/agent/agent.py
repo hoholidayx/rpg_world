@@ -1,4 +1,4 @@
-"""RPGGameAgent — orchestrates history, 6-layer context build, and LLM call."""
+"""RPGGameAgent — orchestrates history, 5-layer context build, and LLM call."""
 
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ class RPGGameAgent:
         """Send user text and return a structured ``AgentReply``.
 
         May involve multiple LLM round-trips when tool calls are needed
-        (the chat loop).  The 6-layer context is built once; subsequent
+        (the chat loop).  The 5-layer context is built once; subsequent
         iterations append raw assistant/tool messages.
         """
         await self._ensure_initialized()
@@ -171,7 +171,7 @@ class RPGGameAgent:
     # ── internals — context & tools ────────────────────────────────────
 
     def _build_transformed_context(self) -> list[dict]:
-        """Build the 6-layer RPG context from the current history."""
+        """Build the 5-layer RPG context from the current history."""
         return self._builder.build(
             system_prompt=self._system_prompt,
             messages=self._history,

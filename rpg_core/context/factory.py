@@ -25,23 +25,23 @@ def build_rpg_context(
     from rpg_world.rpg_core.settings import settings as rpg_settings
     from rpg_world.rpg_core.context.builder import RPGContextBuilder
     from rpg_world.rpg_core.context.config import RPGContextConfig
-    from rpg_world.rpg_core.memory.delta_memory import DeltaMemoryStore
     from rpg_world.rpg_core.memory.persist_memory import PersistentMemoryStore
+    from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
+    from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
     from rpg_world.rpg_core.summary.store import SummaryStore
 
     config = RPGContextConfig()
     builder = RPGContextBuilder(
         config=config,
-        workspace=None,
-        session_id=session_id,
         world_name=world_name,
     )
 
     # ── Stores ────────────────────────────────────────────────────────
     summary_path = Path(rpg_settings.summary_path)
-    delta_path = Path(rpg_settings.delta_memory_path)
     builder.set_summary_store(SummaryStore(summary_path))
-    builder.set_delta_memory_store(DeltaMemoryStore(delta_path, session_id))
+    story_path = Path(rpg_settings.story_memory_path)
+    builder.set_story_memory_store(StoryMemoryStore(story_path, session_id))
+    builder.set_recalled_memory_store(RecalledMemoryStore())
     builder.set_persistent_memory_store(
         PersistentMemoryStore(Path(rpg_settings.persistent_memory_path))
     )

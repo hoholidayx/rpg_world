@@ -1,4 +1,4 @@
-"""RPGContextBuilder — transform raw messages into the 6-layer RPG structure."""
+"""RPGContextBuilder — transform raw messages into the 5-layer RPG structure."""
 
 from __future__ import annotations
 
@@ -10,8 +10,9 @@ from jinja2 import Environment, FileSystemLoader
 from rpg_world.rpg_core.context.config import RPGContextConfig
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.memory.delta_memory import DeltaMemoryStore
     from rpg_world.rpg_core.memory.persist_memory import PersistentMemoryStore
+    from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
+    from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
     from rpg_world.rpg_core.summary.store import SummaryStore
 
 
@@ -43,22 +44,39 @@ def _flatten_status_tables(
 
 
 class RPGContextBuilder:
-    """将原始消息列表转换为 6 层 RPG 结构。
+    """将原始消息列表转换为 5 层 RPG 结构。
 
-    Layers:
-        1. Fixed Layer (system) — system prompt + lorebook + character + persistent memory
-        2. Summary Layer (system) — summary index + summary content (conditional)
-        3. History Layer (dict list) — raw user/assistant/tool messages (windowed)
-        4. Dynamic Layer (system) — milestone index + milestone content + realtime memory + status tables
-        5. Dynamic Extension Layer (system) — attention anchor, random events, etc.
-        6. User message — user extension modules + user input
+    Layers (ordered for LLM prefix-cache efficiency):
+
+        Index  Role       Content                         Change frequency
+        ─────  ─────────  ─────────────────────────────── ─────────────────
+        [0]    system     Fixed Layer (prompt/lore/char)   ★ almost never
+        [1]    system     Persistent Memory (常驻记忆)      ★ offline update only
+        [2]    system     Summary Layer (conditional)      ★☆ rarely
+        [3..N] mixed      Hot History (windowed)           ★★☆ every turn (appended)
+        [N+1]  system     Milestones                       ★★☆ plot-driven
+        [N+2]  system     Story Memory (剧情记忆)          ★★☆ accumulated details
+        [N+3]  system     Recalled Memory (召回)            ★★★ dynamically injected
+        [N+4]  system     Status Tables                    ★★★★ most volatile
+        [N+5]  user       User Message                     always new
+
+    Prefix cache rule: content after the first changed position is a miss.
+    Persistent Memory is split out of Fixed Layer as its own [1] because
+    it changes offline (MEMORY.md update) — without the split, any offline
+    memory update would invalidate the entire Fixed Layer cache.
+    Volatile modules are placed AFTER history so a status-table update only
+    evicts [N+3..N+4]; the Fixed + Persistent + Summary + History + Milestones
+    prefix remains cached.
+
+    Story Memory lifecycle: records accumulate in day-to-day play, then get
+    distilled into Persistent Memory during offline summary — after which
+    the store is cleared and the cycle repeats.  This moves the expensive
+    cache-miss (PM write) out of the online path.
     """
 
     def __init__(
         self,
         config: RPGContextConfig,
-        workspace: Path,
-        session_id: str = "default",
         world_name: str = "Nanobot Realm",
     ) -> None:
         self.config = config
@@ -70,22 +88,23 @@ class RPGContextBuilder:
             loader=FileSystemLoader(str(jinja_dir)),
             autoescape=False,
         )
-        self._jinja_dir = jinja_dir
 
         # Lazy-initialised stores
         self._summary_store: SummaryStore | None = None
-        self._delta_memory: DeltaMemoryStore | None = None
         self._persist_memory: PersistentMemoryStore | None = None
-        self._workspace = workspace
-        self._session_id = session_id
+        self._story_memory: StoryMemoryStore | None = None
+        self._recalled_memory: RecalledMemoryStore | None = None
 
     # ── store injection (set by hook after construction) ─────────────
 
     def set_summary_store(self, store: SummaryStore) -> None:
         self._summary_store = store
 
-    def set_delta_memory_store(self, store: DeltaMemoryStore) -> None:
-        self._delta_memory = store
+    def set_recalled_memory_store(self, store: RecalledMemoryStore) -> None:
+        self._recalled_memory = store
+
+    def set_story_memory_store(self, store: StoryMemoryStore) -> None:
+        self._story_memory = store
 
     def set_persistent_memory_store(self, store: PersistentMemoryStore) -> None:
         self._persist_memory = store
@@ -101,7 +120,7 @@ class RPGContextBuilder:
         milestone_mgr: Any = None,
         status_mgr: Any = None,
     ) -> list[dict]:
-        """构建 6 层消息结构。
+        """构建 5 层消息结构。
 
         Args:
             system_prompt: 系统提示词。
@@ -135,22 +154,28 @@ class RPGContextBuilder:
             except Exception:
                 pass
 
-        persistent_memory = ""
-        if self._persist_memory and self.config.enable_persistent_memory:
-            try:
-                persistent_memory = self._persist_memory.get_content()
-            except Exception:
-                pass
-
         fixed_content = self._render_layer("layers/fixed_layer.jinja", {
             "system_prompt": system_prompt,
             "world_name": self.world_name,
             "lorebook_entries": lorebook_entries,
             "characters": characters,
-            "persistent_memory": persistent_memory,
         })
 
-        # ── 3. Build Summary Layer (conditional) ────────────────────
+        # ── 3. Build Persistent Memory Layer ─────────────────────────
+        persistent_content: str | None = None
+        if self._persist_memory and self.config.enable_persistent_memory:
+            try:
+                pm = self._persist_memory.get_content()
+                if pm:
+                    persistent_content = self._render_layer("modules/persistent_memory.jinja", {
+                        "persistent_memory": pm,
+                    })
+                    if not persistent_content.strip():
+                        persistent_content = None
+            except Exception:
+                pass
+
+        # ── 4. Build Summary Layer (conditional) ────────────────────
         summary_content: str | None = None
         if (
             self.config.enable_summaries
@@ -174,12 +199,14 @@ class RPGContextBuilder:
             if not summary_content or not summary_content.strip():
                 summary_content = None
 
-        # ── 4. Extract Hot History ──────────────────────────────────
+        # ── 5. Extract Hot History ──────────────────────────────────
         history_messages = messages[:-1]  # exclude current user message
         # Filter to keep only rounds >= total_rounds - hot_history_rounds
         hot_history = _slice_hot_history(history_messages, self.config.hot_history_rounds)
 
-        # ── 5. Build Dynamic Layer ──────────────────────────────────
+        # ── 6. Build Dynamic Layer modules ──────────────────────────
+        # Ordered by change frequency (low → high) for prefix cache efficiency:
+        #   milestones (least volatile) → story memory → recalled memory → status tables (most volatile)
         milestones: list[dict] = []
         if milestone_mgr and self.config.enable_milestones:
             try:
@@ -187,29 +214,50 @@ class RPGContextBuilder:
             except Exception:
                 pass
 
-        realtime_memory = ""
-        if self._delta_memory and self.config.enable_realtime_memory:
+        milestone_content: str | None = None
+        if milestones:
+            milestone_content = self._render_layer("modules/milestone.jinja", {
+                "milestone_index": [
+                    {"name": ms.get("name", ""), "description": ms.get("description", "")}
+                    for ms in milestones
+                ],
+                "milestones": milestones,
+            })
+            if not milestone_content.strip():
+                milestone_content = None
+
+        story_memory_content: str | None = None
+        story_details: list[dict] = []
+        if self._story_memory and self.config.enable_story_memory:
             try:
-                realtime_memory = self._delta_memory.get_content()
+                story_details = self._story_memory.get_all()
             except Exception:
                 pass
+        sm = self._render_layer("modules/story_memory.jinja", {
+            "story_details": story_details,
+        })
+        story_memory_content = sm if sm.strip() else None
 
+        recalled_memory_content: str | None = None
+        recalled_items: list[str] = []
+        if self._recalled_memory and self.config.enable_recalled_memory:
+            try:
+                recalled_items = self._recalled_memory.get_items()
+            except Exception:
+                pass
+        rm = self._render_layer("modules/recalled_memory.jinja", {
+            "recalled_items": recalled_items,
+        })
+        recalled_memory_content = rm if rm.strip() else None
+
+        status_tables_content: str | None = None
         status_tables: list[dict] = []
         if status_mgr and self.config.enable_status_tables:
             status_tables = _flatten_status_tables(status_mgr)
-
-        dynamic_content = self._render_layer("layers/dynamic_layer.jinja", {
-            "milestone_index": [{"name": ms.get("name", ""), "description": ms.get("description", "")} for ms in milestones],
-            "milestones": milestones,
-            "realtime_memory": realtime_memory,
+        st = self._render_layer("modules/status_tables.jinja", {
             "status_tables": status_tables,
         })
-
-        # ── 6. Build Dynamic Extension Layer ────────────────────────
-        ext_content = self._build_extension_content(self.config.dynamic_extension, {
-            "attention_anchor": "请专注于当前任务，保持角色设定的一致性。",
-            "random_event": "",
-        })
+        status_tables_content = st if st.strip() else None
 
         # ── 7. Build user message with User Extension Layer ─────────
         user_before = self._build_extension_content(
@@ -230,20 +278,29 @@ class RPGContextBuilder:
             parts.append(user_after)
         user_content = "\n\n".join(parts)
 
-        # ── 8. Assemble ─────────────────────────────────────────────
+        # ── 8. Assemble (stable-first for prefix cache) ─────────────
         result: list[dict] = []
         result.append({"role": "system", "content": fixed_content})
+
+        if persistent_content:
+            result.append({"role": "system", "content": persistent_content})
 
         if summary_content:
             result.append({"role": "system", "content": summary_content})
 
         result.extend(hot_history)
 
-        if dynamic_content:
-            result.append({"role": "system", "content": dynamic_content})
+        if milestone_content:
+            result.append({"role": "system", "content": milestone_content})
 
-        if ext_content:
-            result.append({"role": "system", "content": ext_content})
+        if story_memory_content:
+            result.append({"role": "system", "content": story_memory_content})
+
+        if recalled_memory_content:
+            result.append({"role": "system", "content": recalled_memory_content})
+
+        if status_tables_content:
+            result.append({"role": "system", "content": status_tables_content})
 
         result.append({"role": "user", "content": user_content})
 

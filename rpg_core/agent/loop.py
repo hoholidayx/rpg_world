@@ -63,7 +63,7 @@ async def run_chat_loop(
     tool_registry:
         Registered tool instances — used to dispatch ``tool_calls`` by name.
     messages:
-        The working message buffer (e.g. 6-layer RPG context).  Assistant
+        The working message buffer (e.g. 5-layer RPG context).  Assistant
         tool-call messages and tool results are appended here for subsequent
         LLM rounds.  **Not** the agent's persistent ``_history``.
     schemas:

@@ -1,0 +1,7 @@
+{% if story_details %}
+## 剧情记忆
+
+{% for item in story_details %}
+- {{ item.text }}
+{% endfor %}
+{% endif %}

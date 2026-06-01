@@ -9,7 +9,7 @@
   "milestone_path": "milestone",
   "status_path": "status",
   "summary_path": "summary",
-  "delta_memory_path": "delta_memory",
+  "story_memory_path": "story_memory",
   "persistent_memory_path": "persistent_memory.md",
   "history_path": "history"
 }

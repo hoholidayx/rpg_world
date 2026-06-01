@@ -1,0 +1,7 @@
+{% if recalled_items %}
+## 召回记忆
+
+{% for item in recalled_items %}
+- {{ item }}
+{% endfor %}
+{% endif %}
