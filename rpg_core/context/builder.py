@@ -182,20 +182,11 @@ class RPGContextBuilder:
             and total_rounds > self.config.hot_history_rounds
             and self._summary_store
         ):
-            all_summaries = self._summary_store.get_all_summaries()
-            max_round = total_rounds - self.config.hot_history_rounds
-            relevant = [s for s in all_summaries if s.get("round_end", 0) <= max_round]
-
-            summary_index_items = [
-                {"round_start": s["round_start"], "round_end": s["round_end"], "brief": _brief(s.get("text", ""))}
-                for s in relevant
-            ]
+            summaries = self._summary_store.get_all_summaries()
 
             summary_content = self._render_layer("layers/summary_layer.jinja", {
-                "summary_index": summary_index_items,
-                "summaries": relevant,
+                "summaries": summaries,
             })
-            # Render as None when no content (template returned empty markup)
             if not summary_content or not summary_content.strip():
                 summary_content = None
 
@@ -334,12 +325,6 @@ class RPGContextBuilder:
 
 
 # ── module-level helpers ─────────────────────────────────────────────
-
-
-def _brief(text: str, max_len: int = 60) -> str:
-    """Return the first line of *text*, capped at *max_len* chars."""
-    first_line = text.split("\n")[0] if text else ""
-    return first_line[:max_len] + "…" if len(first_line) > max_len else first_line
 
 
 def _slice_hot_history(history: list[dict], hot_rounds: int) -> list[dict]:
