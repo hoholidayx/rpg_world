@@ -25,12 +25,20 @@ def _count_rounds(messages: list[dict]) -> int:
 
 def _flatten_status_tables(
     status_mgr: Any,
+    exclude_tables: set[tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Flatten StatusManager data into a list of ``{name, headers, rows}``."""
+    """Flatten StatusManager data into a list of ``{name, headers, rows}``.
+
+    If *exclude_tables* is given (set of ``(type_name, table_name)`` tuples),
+    those tables are skipped — used by SceneTracker to avoid duplicating the
+    ``当前场景`` table in the generic status layer.
+    """
     tables: list[dict[str, Any]] = []
     try:
         for type_name in status_mgr.list_types():
             for table_name in status_mgr.list_tables(type_name):
+                if exclude_tables and (type_name, table_name) in exclude_tables:
+                    continue
                 try:
                     tbl = status_mgr.get_table(type_name, table_name)
                     tables.append(tbl)
@@ -120,6 +128,7 @@ class RPGContextBuilder:
         lorebook_mgr: Any = None,
         milestone_mgr: Any = None,
         status_mgr: Any = None,
+        scene_tracker: Any = None,
     ) -> RPGContext:
         """构建 5 层 RPGContext。
 
@@ -245,7 +254,14 @@ class RPGContextBuilder:
         status_tables_content: str | None = None
         status_tables: list[dict] = []
         if status_mgr and self.config.enable_status_tables:
-            status_tables = _flatten_status_tables(status_mgr)
+            # 排除 SceneTracker 持有的场景表，避免重复
+            exclude = None
+            if scene_tracker:
+                try:
+                    exclude = {scene_tracker.table_key}
+                except Exception:
+                    pass
+            status_tables = _flatten_status_tables(status_mgr, exclude_tables=exclude)
         st = self._render_layer("modules/status_tables.jinja", {
             "status_tables": status_tables,
         })

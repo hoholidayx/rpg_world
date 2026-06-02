@@ -79,6 +79,17 @@ async def _repl(agent: RPGGameAgent) -> None:
             print(f"[error] {exc}\n")
             continue
 
+        # ── tool call records ──────────────────────────────────────
+        if reply.tool_records:
+            for i, rec in enumerate(reply.tool_records):
+                tool_names = []
+                for tc in rec.assistant_message.get("tool_calls", []):
+                    tool_names.append(tc["function"]["name"])
+                print(f"  ── tool call [{i+1}]: {', '.join(tool_names)}")
+                for tr in rec.tool_results:
+                    print(f"     → {tr['content']}")
+            print()
+
         print(f"\n{reply}\n")
 
 

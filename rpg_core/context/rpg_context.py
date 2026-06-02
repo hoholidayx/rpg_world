@@ -119,7 +119,7 @@ class RPGContext:
         self._add(msgs, "system", self.recalled_memory, LayerType.RECALLED_MEMORY)
         self._add(msgs, "system", self.status_tables, LayerType.STATUS_TABLES)
 
-        # User message: merged from before/input/after for API compatibility
+        # User message: before → input → after for API compatibility
         parts: list[str] = []
         if self.user_before:
             parts.append(f"[user_prefix]{self.user_before}[/user_prefix]")

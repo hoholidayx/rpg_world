@@ -17,6 +17,7 @@ from rpg_world.rpg_core.agent.tools import (
     ToolRegistry,
     WriteFileTool,
 )
+from rpg_world.rpg_core.scene import SceneTracker
 from rpg_world.rpg_core.settings import settings
 
 
@@ -64,6 +65,7 @@ class RPGGameAgent:
         self._lorebook_mgr: Any = None
         self._milestone_mgr: Any = None
         self._status_mgr: Any = None
+        self._scene_tracker: SceneTracker | None = None
         self._provider: OpenAIProvider | None = None
         self._system_prompt: str = ""
         self._history: list[dict] = []
@@ -101,11 +103,22 @@ class RPGGameAgent:
         May involve multiple LLM round-trips when tool calls are needed
         (the chat loop).  The 5-layer context is built once; subsequent
         iterations append raw assistant/tool messages.
+
+        The user message in ``_history`` / JSONL includes the ``[scene]``
+        context so that MemorySubAgent can see scene timeline during
+        summarization (it filters ``role == "system"`` messages).
         """
         await self._ensure_initialized()
 
-        self._history.append({"role": "user", "content": user_input})
-        self._append_history("user", user_input)
+        # Build scene context and embed into stored user message
+        scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
+        if scene_ctx:
+            stored_input = f"{scene_ctx}\n\n{user_input}"
+        else:
+            stored_input = user_input
+
+        self._history.append({"role": "user", "content": stored_input})
+        self._append_history("user", stored_input)
 
         messages = self._build_transformed_context()
         schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
@@ -167,6 +180,7 @@ class RPGGameAgent:
         self._lorebook_mgr = ctx["lorebook_mgr"]
         self._milestone_mgr = ctx["milestone_mgr"]
         self._status_mgr = ctx["status_mgr"]
+        self._scene_tracker = ctx.get("scene_tracker")
 
     # ── internals — context & tools ────────────────────────────────────
 
@@ -179,6 +193,7 @@ class RPGGameAgent:
             lorebook_mgr=self._lorebook_mgr,
             milestone_mgr=self._milestone_mgr,
             status_mgr=self._status_mgr,
+            scene_tracker=self._scene_tracker,
         )
         return ctx.to_messages()
 
@@ -192,6 +207,8 @@ class RPGGameAgent:
             WriteFileTool(ws_root),
             GrepTool(ws_root),
         ])
+        if self._scene_tracker:
+            self._tool_registry.register_all(self._scene_tracker.get_tools())
         if self._extra_tools:
             self._tool_registry.register_all(self._extra_tools)
 
@@ -240,6 +257,7 @@ class RPGGameAgent:
         self._lorebook_mgr = ctx["lorebook_mgr"]
         self._milestone_mgr = ctx["milestone_mgr"]
         self._status_mgr = ctx["status_mgr"]
+        self._scene_tracker = ctx.get("scene_tracker")
 
         self._system_prompt = PromptManager(self._world_name).system_prompt
         self._history = []

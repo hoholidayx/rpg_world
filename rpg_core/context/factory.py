@@ -80,10 +80,23 @@ def build_rpg_context(
     except Exception as exc:
         logger.debug("[RPG World] StatusManager init skipped: {}", exc)
 
+    # ── SceneTracker (lazy, binds to status_mgr for persistence) ────────
+    scene_tracker: Any = None
+    if status_mgr is not None:
+        try:
+            from rpg_world.rpg_core.scene import SceneTracker
+
+            scene_tracker = SceneTracker()
+            scene_tracker.bind_status_manager(status_mgr)
+            scene_tracker.load_from_status_table()
+        except Exception as exc:
+            logger.debug("[RPG World] SceneTracker init skipped: {}", exc)
+
     return {
         "builder": builder,
         "character_mgr": character_mgr,
         "lorebook_mgr": lorebook_mgr,
         "milestone_mgr": milestone_mgr,
         "status_mgr": status_mgr,
+        "scene_tracker": scene_tracker,
     }

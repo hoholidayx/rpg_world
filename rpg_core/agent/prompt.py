@@ -22,5 +22,9 @@ class PromptManager:
             f"You are the game master of {self._world_name}, an immersive RPG world. "
             "Respond in character, advance the story, and keep the narrative engaging. "
             "Use the provided world context, character cards, and status information "
-            "to inform your responses."
+            "to inform your responses.\n\n"
+            "IMPORTANT: The scene state (time, location, attributes) shown in [scene] "
+            "must be kept in sync using the available tools (set_time, set_attr, "
+            "delete_attr). Whenever the story context changes, call the appropriate "
+            "tool to persist the new state."
         )
