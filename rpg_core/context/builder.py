@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from jinja2 import Environment, FileSystemLoader
 
 from rpg_world.rpg_core.context.config import RPGContextConfig
+from rpg_world.rpg_core.context.rpg_context import RPGContext
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.memory.persist_memory import PersistentMemoryStore
@@ -119,8 +120,8 @@ class RPGContextBuilder:
         lorebook_mgr: Any = None,
         milestone_mgr: Any = None,
         status_mgr: Any = None,
-    ) -> list[dict]:
-        """构建 5 层消息结构。
+    ) -> RPGContext:
+        """构建 5 层 RPGContext。
 
         Args:
             system_prompt: 系统提示词。
@@ -269,33 +270,20 @@ class RPGContextBuilder:
             parts.append(user_after)
         user_content = "\n\n".join(parts)
 
-        # ── 8. Assemble (stable-first for prefix cache) ─────────────
-        result: list[dict] = []
-        result.append({"role": "system", "content": fixed_content})
-
-        if persistent_content:
-            result.append({"role": "system", "content": persistent_content})
-
-        if summary_content:
-            result.append({"role": "system", "content": summary_content})
-
-        result.extend(hot_history)
-
-        if milestone_content:
-            result.append({"role": "system", "content": milestone_content})
-
-        if story_memory_content:
-            result.append({"role": "system", "content": story_memory_content})
-
-        if recalled_memory_content:
-            result.append({"role": "system", "content": recalled_memory_content})
-
-        if status_tables_content:
-            result.append({"role": "system", "content": status_tables_content})
-
-        result.append({"role": "user", "content": user_content})
-
-        return result
+        # ── 8. Assemble into RPGContext (stable-first for prefix cache) ─
+        return RPGContext(
+            fixed_layer=fixed_content,
+            persistent_memory=persistent_content,
+            summary=summary_content,
+            hot_history=hot_history,
+            milestones=milestone_content,
+            story_memory=story_memory_content,
+            recalled_memory=recalled_memory_content,
+            status_tables=status_tables_content,
+            user_before=user_before or None,
+            user_input=user_text,
+            user_after=user_after or None,
+        )
 
     # ── internal helpers ─────────────────────────────────────────────
 

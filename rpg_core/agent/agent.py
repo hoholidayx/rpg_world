@@ -142,13 +142,13 @@ class RPGGameAgent:
         return self._last_tool_records
 
     def clear_history(self) -> None:
-        """Reset history to just the system prompt (RPG data stays loaded).
+        """清空对话历史（RPG 数据保留不动）。
 
         Also truncates the JSONL file on disk so the next session starts
         fresh.
         """
         if self._initialized:
-            self._history = [{"role": "system", "content": self._system_prompt}]
+            self._history = []
         if self._history_enabled:
             path = self._history_path()
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,8 +171,8 @@ class RPGGameAgent:
     # ── internals — context & tools ────────────────────────────────────
 
     def _build_transformed_context(self) -> list[dict]:
-        """Build the 5-layer RPG context from the current history."""
-        return self._builder.build(
+        """Build the 5-layer RPG context and flatten to message list."""
+        ctx = self._builder.build(
             system_prompt=self._system_prompt,
             messages=self._history,
             character_mgr=self._character_mgr,
@@ -180,6 +180,7 @@ class RPGGameAgent:
             milestone_mgr=self._milestone_mgr,
             status_mgr=self._status_mgr,
         )
+        return ctx.to_messages()
 
     def _setup_tool_registry(self) -> None:
         """Create and populate the ToolRegistry with built-in file tools."""
@@ -241,7 +242,7 @@ class RPGGameAgent:
         self._status_mgr = ctx["status_mgr"]
 
         self._system_prompt = PromptManager(self._world_name).system_prompt
-        self._history = [{"role": "system", "content": self._system_prompt}]
+        self._history = []
 
         if self._history_enabled:
             self._load_history_from_disk()
