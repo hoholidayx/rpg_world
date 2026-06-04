@@ -12,6 +12,7 @@ from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
+from rpg_world.rpg_core.agent.sub_agents import StatusSubAgent, SubAgentContext
 from rpg_world.rpg_core.agent.tokenizer import TiktokenTokenCounter, TokenCounter
 from rpg_world.rpg_core.agent.tools import (
     BaseTool,
@@ -22,7 +23,6 @@ from rpg_world.rpg_core.agent.tools import (
     WriteFileTool,
 )
 from rpg_world.rpg_core.scene import SceneTracker
-from rpg_world.rpg_core.agent.status_sub_agent import StatusSubAgent
 from rpg_world.rpg_core.settings import settings
 
 _TAG = "[MainAgent]"
@@ -213,8 +213,16 @@ class RPGGameAgent:
         self._status_mgr = ctx["status_mgr"]
         self._scene_tracker = ctx.get("scene_tracker")
 
-        if self._status_sub_agent is not None and self._scene_tracker is not None:
-            self._status_sub_agent.update_tracker_ref(self._scene_tracker)
+        # 刷新 SubAgentContext：bind_context 内部自动处理各子 Agent 的引用刷新
+        from rpg_world.rpg_core.agent.sub_agents import SubAgentContext
+
+        _sub_ctx = SubAgentContext.from_managers(
+            system_prompt=self._system_prompt,
+            character_mgr=self._character_mgr,
+            lorebook_mgr=self._lorebook_mgr,
+        )
+        if self._status_sub_agent is not None:
+            self._status_sub_agent.bind_context(_sub_ctx)
 
     # ── context inspection (no LLM call) ─────────────────────────────
 
@@ -365,6 +373,13 @@ class RPGGameAgent:
             temperature=self._temperature,
         )
 
+        # ── SubAgentContext（世界书 + 角色卡，供所有子 Agent 共享） ──
+        _sub_ctx = SubAgentContext.from_managers(
+            system_prompt=self._system_prompt,
+            character_mgr=self._character_mgr,
+            lorebook_mgr=self._lorebook_mgr,
+        )
+
         # ── StatusSubAgent ────────────────────────────────────────────
         status_cfg = settings.status_sub_agent_config
         status_model = status_cfg.get("model")
@@ -375,8 +390,9 @@ class RPGGameAgent:
             base_url=status_cfg.get("base_url") or self._base_url,
             enabled=status_cfg.get("enabled", True),
         )
-        if self._status_sub_agent and self._scene_tracker:
-            self._status_sub_agent.register_scene_tools(self._scene_tracker)
+        if self._scene_tracker:
+            self._status_sub_agent.add_tool_provider(self._scene_tracker)
+        self._status_sub_agent.bind_context(_sub_ctx)
 
         self._setup_tool_registry()
 

@@ -1,16 +1,11 @@
 """StatusSubAgent — 统一状态表预更新子 Agent.
 
+继承 ``BaseSubAgent``，通过 ``SubAgentContext`` 获取世界书 + 角色卡上下文，
+确保场景状态变更判断不会 OOC。
+
 编排层（``RPGGameAgent.send``）在构建 5 层 RPG context *之前* 调用，
 用精简上下文（历史 + 状态描述 + 用户输入）预处理状态表变更，
 避免主 LLM chat loop 的场景工具 round-trip 开销。
-
-当前注册场景状态工具（SetTimeTool / SetAttrTool / DeleteAttrTool），
-后续可通过 ``register_tools()`` 扩展其他状态表操作工具。
-
-Provider 模式与 ``MemorySubAgent`` 一致：
-
-- 传 ``provider=`` → 共享主 Agent 的 LLM（默认）
-- 传 ``provider=None, model="xxx"`` → 自建独立 LLM（如 gpt-4o-mini）
 
 Usage::
 
@@ -19,10 +14,8 @@ Usage::
         # provider=None, model="gpt-4o-mini",  # 或独立 LLM
     )
     agent.register_scene_tools(scene_tracker)
+    agent.bind_context(sub_agent_context)
     result = await agent.update(history, scene_ctx, user_input)
-    if result.updated:
-        for rec in result.records:
-            print(f"{rec['tool_name']}({rec['arguments']}) -> {rec['result']}")
 """
 
 from __future__ import annotations
@@ -33,17 +26,17 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
+from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, ToolProvider
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
 from rpg_world.rpg_core.settings import settings
 
+if TYPE_CHECKING:
+    from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
+
 # ── constants ──────────────────────────────────────────────────────────
 
 _TAG = "[StatusSubAgent]"
-
-if TYPE_CHECKING:
-    from rpg_world.rpg_core.scene.tracker import SceneTracker
-
 
 # ── system prompt ─────────────────────────────────────────────────────
 
@@ -59,7 +52,6 @@ SYSTEM_PROMPT = (
     "3. If nothing changes, call no tools.\n"
     "4. Use Chinese for attribute keys and values."
 )
-
 
 # ── result type ───────────────────────────────────────────────────────
 
@@ -77,11 +69,11 @@ class StatusSubAgentResult:
 # ── sub-agent ─────────────────────────────────────────────────────────
 
 
-class StatusSubAgent:
+class StatusSubAgent(BaseSubAgent):
     """状态表更新子 Agent。
 
-    编排层在 ``send()`` 中预处理用户输入，更新场景/状态表。
-    使用精简上下文（历史 + 状态描述 + 输入），避免主 loop round-trip。
+    继承自 ``BaseSubAgent``，使用基类的 provider 管理、重入守卫以及
+    SubAgentContext 绑定。
 
     Parameters
     ----------
@@ -106,15 +98,13 @@ class StatusSubAgent:
         base_url: str | None = None,
         enabled: bool = True,
     ) -> None:
-        # ── Provider 管理（与 MemorySubAgent 一致） ────────────────────
-        self._shared_provider = provider
-        self._model = model
-        self._api_key = api_key
-        self._base_url = base_url
-        self._own_provider: LLMProvider | None = None
-
-        self._enabled = enabled
-        self._is_updating: bool = False
+        super().__init__(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            enabled=enabled,
+        )
 
         # ── 可扩展工具集 ──────────────────────────────────────────────
         self._tool_registry = ToolRegistry()
@@ -132,23 +122,13 @@ class StatusSubAgent:
             [t.name for t in tools],
         )
 
-    def register_scene_tools(self, tracker: SceneTracker) -> None:
-        """快捷方式：注册场景状态工具（位置 / 时间 / 属性）。"""
-        self.register_tools(tracker.get_tools())
+    # ── Context 绑定（覆盖基类） ─────────────────────────────────────
 
-    # ── Provider ─────────────────────────────────────────────────────
-
-    def _get_provider(self) -> LLMProvider:
-        """获取有效 LLM provider——共享或自建。"""
-        if self._shared_provider is not None:
-            return self._shared_provider
-        if self._own_provider is None:
-            self._own_provider = OpenAIProvider(
-                model=self._model or "gpt-4o",
-                api_key=self._api_key,
-                base_url=self._base_url,
-            )
-        return self._own_provider
+    def bind_context(self, context: SubAgentContext) -> None:
+        """绑定 SubAgentContext，同时刷新所有工具提供者的工具。"""
+        super().bind_context(context)
+        self.clear_tools()
+        self.register_tools(self._collect_provider_tools())
 
     # ── 核心方法 ─────────────────────────────────────────────────────
 
@@ -176,14 +156,14 @@ class StatusSubAgent:
         -------
         ``StatusSubAgentResult``，包含是否更新以及工具调用记录。
         """
-        if self._is_updating:
+        if self._busy:
             logger.debug(_TAG + " skipped (re-entrancy guard)")
             return StatusSubAgentResult()
 
         if not self._enabled or not self._schemas:
             return StatusSubAgentResult()
 
-        self._is_updating = True
+        self._busy = True
         result = StatusSubAgentResult()
         try:
             if settings.verbose_logging:
@@ -253,22 +233,12 @@ class StatusSubAgent:
             logger.warning(_TAG + " update failed: {}", exc)
             return result
         finally:
-            self._is_updating = False
+            self._busy = False
 
     def clear_tools(self) -> None:
         """清空已注册的工具集（重新注册前调用避免重复）。"""
         self._tool_registry = ToolRegistry()
         self._schemas = []
-
-    # ── 引用同步（reload_rpg_context 后调用） ─────────────────────────
-
-    def update_tracker_ref(self, tracker: SceneTracker) -> None:
-        """重新注册场景工具（绑定新的 tracker 引用）。
-
-        有其他状态表需要同步时以此类推。
-        """
-        self.clear_tools()
-        self.register_scene_tools(tracker)
 
     # ── internal helpers ──────────────────────────────────────────────
 
@@ -279,10 +249,11 @@ class StatusSubAgent:
         user_input: str,
         max_rounds: int,
     ) -> list[dict]:
-        """组装子 Agent 消息：系统提示 + 历史窗口 + 场景 + 用户输入。"""
+        """组装子 Agent 消息：系统上下文（含世界书/角色卡） + 历史窗口 + 场景 + 用户输入。"""
         recent = self._format_history_window(history, max_rounds)
+        system_content = self._build_system_context(SYSTEM_PROMPT)
         return [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_content},
             {
                 "role": "user",
                 "content": (

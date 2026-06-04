@@ -1,21 +1,25 @@
 """MemorySubAgent — 总结归纳、记忆记录、召回子 Agent.
 
+继承 ``BaseSubAgent``，通过 ``SubAgentContext`` 获取世界书 + 角色卡上下文，
+确保记忆提取/召回/摘要判断不会 OOC。
+
 纯函数式设计：接受 ``context: dict``，处理，返回结果，不维护轮次状态。
 调用方决定传入什么内容、何时触发摘要。
 
 Usage::
 
-    from rpg_world.rpg_core.agent.memory_sub_agent import MemorySubAgent
+    from rpg_world.rpg_core.agent.sub_agents import MemorySubAgent, SubAgentContext
 
     agent = MemorySubAgent(
         recalled_store=recalled_store,
         story_store=story_store,
         summary_store=summary_store,
     )
+    agent.bind_context(sub_agent_context)
     result = await agent.process({
-        "recall": recent_conversation,   # optional
-        "story": new_content,            # optional
-        "summary": content_to_summarize, # optional
+        "recall": recent_conversation,
+        "story": new_content,
+        "summary": content_to_summarize,
     })
 """
 
@@ -27,7 +31,7 @@ from typing import Any
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
+from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
 
 # ── constants ──────────────────────────────────────────────────────────
 
@@ -155,8 +159,11 @@ class MemoryAgentResult:
 # ── sub-agent ─────────────────────────────────────────────────────────
 
 
-class MemorySubAgent:
+class MemorySubAgent(BaseSubAgent):
     """记忆子 Agent —— 三个独立处理管道：召回 / 剧情记忆 / 摘要。
+
+    继承自 ``BaseSubAgent``，使用基类的 provider 管理、重入守卫以及
+    SubAgentContext 绑定。每个 pipeline 的提示词中都会注入世界书 + 角色卡上下文。
 
     纯函数式、无状态设计。``process()`` 接受一个 ``context`` dict，
     调用方决定传入什么内容，sub_agent 不维护轮次或进度状态。
@@ -193,7 +200,7 @@ class MemorySubAgent:
         recalled_store: Any = None,
         story_store: Any = None,
         summary_store: Any = None,
-        provider: OpenAIProvider | None = None,
+        provider: Any = None,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -202,22 +209,24 @@ class MemorySubAgent:
         max_story_details: int = 10,
         max_window_rounds: int = 10,
     ) -> None:
+        super().__init__(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            enabled=enabled,
+        )
+
+        # MemorySubAgent 不使用独立的 _own_provider（通过基类 _get_provider 获取）
+        # 但保留旧的 _provider 属性用于兼容（如果有外部代码直接访问）
+        self._provider: Any = provider
+
         self._recalled_store = recalled_store
         self._story_store = story_store
         self._summary_store = summary_store
-        self._enabled = enabled
         self._max_recall_items = max_recall_items
         self._max_story_details = max_story_details
         self._max_window_rounds = max_window_rounds
-
-        # LLM provider (lazy)
-        self._provider: OpenAIProvider | None = provider
-        self._model = model
-        self._api_key = api_key
-        self._base_url = base_url
-
-        # Re-entrancy guard
-        self._is_processing: bool = False
 
     # ── public API ─────────────────────────────────────────────────────
 
@@ -236,14 +245,14 @@ class MemorySubAgent:
 
         每个 key 独立处理，互不影响。
         """
-        if self._is_processing:
+        if self._busy:
             logger.debug(_TAG + " skipped (re-entrancy guard)")
             return MemoryAgentResult(skipped=True)
 
         if not self._enabled:
             return MemoryAgentResult(skipped=True)
 
-        self._is_processing = True
+        self._busy = True
         try:
             result = MemoryAgentResult()
 
@@ -265,7 +274,7 @@ class MemorySubAgent:
             return result
 
         finally:
-            self._is_processing = False
+            self._busy = False
 
     def update_store_refs(
         self,
@@ -287,13 +296,12 @@ class MemorySubAgent:
         """提取召回项，全量替换 RecalledMemoryStore。"""
         window = self._format_conversation_window(conv, self._max_window_rounds)
 
+        system_content = self._build_system_context(
+            RECALL_PROMPT.replace("{max_items}", str(self._max_recall_items))
+        )
+
         messages = [
-            {
-                "role": "system",
-                "content": RECALL_PROMPT.replace(
-                    "{max_items}", str(self._max_recall_items)
-                ),
-            },
+            {"role": "system", "content": system_content},
             {
                 "role": "user",
                 "content": (
@@ -329,13 +337,12 @@ class MemorySubAgent:
             max_items=self._max_story_details,
         )
 
+        system_content = self._build_system_context(
+            STORY_MEMORY_PROMPT.replace("{max_items}", str(self._max_story_details))
+        )
+
         messages = [
-            {
-                "role": "system",
-                "content": STORY_MEMORY_PROMPT.replace(
-                    "{max_items}", str(self._max_story_details)
-                ),
-            },
+            {"role": "system", "content": system_content},
             {
                 "role": "user",
                 "content": (
@@ -371,8 +378,10 @@ class MemorySubAgent:
         """生成摘要文本，追加到 SummaryStore。"""
         window = self._format_conversation_window(conv)
 
+        system_content = self._build_system_context(SUMMARY_PROMPT)
+
         messages = [
-            {"role": "system", "content": SUMMARY_PROMPT},
+            {"role": "system", "content": system_content},
             {
                 "role": "user",
                 "content": (
@@ -405,15 +414,11 @@ class MemorySubAgent:
         schema: dict[str, Any],
     ) -> dict[str, Any]:
         """Call provider with *messages* and *schema*, return parsed arguments."""
-        if self._provider is None:
-            self._provider = OpenAIProvider(
-                model=self._model,
-                api_key=self._api_key,
-                base_url=self._base_url,
-            )
+        # _provider 字段保留给 old _call_llm 兼容；新代码通过基类 _get_provider() 获取
+        provider = self._get_provider()
 
         try:
-            result = await self._provider.chat(messages, tools=[schema])
+            result = await provider.chat(messages, tools=[schema])
         except Exception as exc:
             logger.warning(_TAG + " LLM call failed: {}", exc)
             return {}
