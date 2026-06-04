@@ -24,6 +24,7 @@ from rpg_world.rpg_core.agent.tools import (
 )
 from rpg_world.rpg_core.scene import SceneTracker
 from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.utils.watcher import get_watcher
 
 _TAG = "[MainAgent]"
 
@@ -200,29 +201,13 @@ class RPGGameAgent:
             path.write_text("")
 
     async def reload_rpg_context(self) -> None:
-        """Re-run ``build_rpg_context()`` to pick up filesystem changes."""
+        """重新构建 RPG context 管理器，拾取文件变更。
+
+        复用 ``_refresh_rpg_context()`` 与初始化流程一致的逻辑。
+        """
         if not self._initialized:
             return
-        ctx = _build_rpg_context(
-            world_name=self._world_name,
-            session_id=self._session_id,
-        )
-        self._builder = ctx["builder"]
-        self._character_mgr = ctx["character_mgr"]
-        self._lorebook_mgr = ctx["lorebook_mgr"]
-        self._status_mgr = ctx["status_mgr"]
-        self._scene_tracker = ctx.get("scene_tracker")
-
-        # 刷新 SubAgentContext：bind_context 内部自动处理各子 Agent 的引用刷新
-        from rpg_world.rpg_core.agent.sub_agents import SubAgentContext
-
-        _sub_ctx = SubAgentContext.from_managers(
-            system_prompt=self._system_prompt,
-            character_mgr=self._character_mgr,
-            lorebook_mgr=self._lorebook_mgr,
-        )
-        if self._status_sub_agent is not None:
-            self._status_sub_agent.bind_context(_sub_ctx)
+        self._refresh_rpg_context()
 
     # ── context inspection (no LLM call) ─────────────────────────────
 
@@ -285,6 +270,31 @@ class RPGGameAgent:
         return ctx
 
     # ── internals — context & tools ────────────────────────────────────
+
+    def _refresh_rpg_context(self) -> None:
+        """构建/刷新 RPG context 管理器（初始化与 reload 共用）。
+
+        重新执行 ``_build_rpg_context()`` 并更新 manager 引用，
+        然后刷新 SubAgentContext。不涉及 provider / history / tools 等一次性初始化。
+        """
+        ctx = _build_rpg_context(
+            world_name=self._world_name,
+            session_id=self._session_id,
+        )
+        self._builder = ctx["builder"]
+        self._character_mgr = ctx["character_mgr"]
+        self._lorebook_mgr = ctx["lorebook_mgr"]
+        self._status_mgr = ctx["status_mgr"]
+        self._scene_tracker = ctx.get("scene_tracker")
+
+        # 刷新 SubAgentContext（世界书 + 角色卡）
+        _sub_ctx = SubAgentContext.from_managers(
+            system_prompt=self._system_prompt,
+            character_mgr=self._character_mgr,
+            lorebook_mgr=self._lorebook_mgr,
+        )
+        if self._status_sub_agent is not None:
+            self._status_sub_agent.bind_context(_sub_ctx)
 
     def _build_transformed_context(self) -> list[dict]:
         """Build the 5-layer RPG context and flatten to message list."""
@@ -349,15 +359,8 @@ class RPGGameAgent:
         if self._initialized:
             return
 
-        ctx = _build_rpg_context(
-            world_name=self._world_name,
-            session_id=self._session_id,
-        )
-        self._builder = ctx["builder"]
-        self._character_mgr = ctx["character_mgr"]
-        self._lorebook_mgr = ctx["lorebook_mgr"]
-        self._status_mgr = ctx["status_mgr"]
-        self._scene_tracker = ctx.get("scene_tracker")
+        # 构建 RPG context 管理器（与 reload 共用同一套逻辑）
+        self._refresh_rpg_context()
 
         self._system_prompt = PromptManager(self._world_name).system_prompt
         self._history = []
@@ -395,6 +398,9 @@ class RPGGameAgent:
         self._status_sub_agent.bind_context(_sub_ctx)
 
         self._setup_tool_registry()
+
+        # 启动文件监听（管理器已在 BaseManager.__init__ 中注册路径）
+        get_watcher().start()
 
         self._initialized = True
 
