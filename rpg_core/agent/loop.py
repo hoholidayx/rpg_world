@@ -7,13 +7,20 @@ and ``RPGGameAgent`` stays focused on orchestration.
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 from loguru import logger
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.tools import ToolRegistry
-from rpg_world.rpg_core.agent.types import CallRecord, LLMResponse, TurnStats
+from rpg_world.rpg_core.agent.types import (
+    AgentStreamEvent,
+    CallRecord,
+    LLMResponse,
+    StreamEventKind,
+    TurnStats,
+)
 from rpg_world.rpg_core.settings import settings
 
 _TAG = "[MainAgent]"
@@ -216,3 +223,188 @@ async def run_chat_loop(
     msg = f"[已达到工具调用上限 {max_calls} 次，终止循环]"
     logger.warning(_TAG + " {}", msg)
     return msg, records
+
+
+async def run_chat_loop_stream(
+    provider: LLMProvider,
+    tool_registry: ToolRegistry,
+    messages: list[dict],
+    schemas: list[dict] | None,
+    turn_stats: TurnStats | None = None,
+) -> AsyncIterator[AgentStreamEvent]:
+    """Streaming variant of ``run_chat_loop()``.
+
+    Yields ``AgentStreamEvent`` objects for real-time consumption.
+    When tool calls occur, ``TOOL_CALL`` events are yielded, tools
+    execute internally, and a subsequent ``ROUND_START`` begins the
+    next generation phase.
+
+    Final event is ``DONE``, after which the generator stops.
+    """
+    max_calls = settings.max_tool_calls
+    tool_call_count = 0
+    records: list[ToolCallRecord] = []
+
+    while tool_call_count < max_calls:
+        yield AgentStreamEvent(
+            kind=StreamEventKind.ROUND_START,
+            round_index=tool_call_count,
+        )
+
+        # ── Accumulation buffers for this round ─────────────────────
+        round_content_parts: list[str] = []
+        round_reasoning_parts: list[str] = []
+        finish_reason: str | None = None
+        last_usage: LLMUsage | None = None
+        last_model: str | None = None
+        tool_call_acc: dict[int, dict] = {}
+
+        t0 = time.monotonic()
+
+        try:
+            async for chunk in provider.chat_stream(messages, tools=schemas):
+                # ── text ────────────────────────────────────────────
+                if chunk.content:
+                    yield AgentStreamEvent(
+                        kind=StreamEventKind.TEXT,
+                        content=chunk.content,
+                    )
+                    round_content_parts.append(chunk.content)
+
+                # ── reasoning ───────────────────────────────────────
+                if chunk.reasoning_content:
+                    yield AgentStreamEvent(
+                        kind=StreamEventKind.THINKING,
+                        content=chunk.reasoning_content,
+                    )
+                    round_reasoning_parts.append(chunk.reasoning_content)
+
+                # ── finish_reason / usage / model (末 chunk) ────────
+                if chunk.finish_reason:
+                    finish_reason = chunk.finish_reason
+                if chunk.usage is not None:
+                    last_usage = chunk.usage
+                if chunk.model:
+                    last_model = chunk.model
+                if chunk.tool_calls:
+                    for tc in chunk.tool_calls:
+                        idx = tc.get("index", 0) if isinstance(tc.get("index"), int) else len(tool_call_acc)
+                        tool_call_acc[idx] = tc
+
+        except Exception as exc:
+            logger.error("{} chat_stream error: {}", _TAG, exc)
+            yield AgentStreamEvent(
+                kind=StreamEventKind.ERROR,
+                content=str(exc),
+            )
+            return
+
+        duration_ms = (time.monotonic() - t0) * 1000
+
+        # ── Record LLM call in turn_stats ──────────────────────────
+        if turn_stats is not None:
+            turn_stats.add_call(CallRecord(
+                source="chat_loop",
+                model=last_model or provider.get_default_model(),
+                usage=last_usage,
+                duration_ms=duration_ms,
+            ))
+
+        round_text = "".join(round_content_parts)
+
+        yield AgentStreamEvent(
+            kind=StreamEventKind.ROUND_END,
+            content=round_text,
+            round_index=tool_call_count,
+            finish_reason=finish_reason,
+        )
+
+        # ── Build complete tool_calls list ─────────────────────────
+        tool_calls: list[dict] | None = None
+        if tool_call_acc:
+            tool_calls = [tool_call_acc[i] for i in sorted(tool_call_acc)]
+            for tc in tool_calls:
+                if not tc.get("id"):
+                    tc["id"] = f"call_stream_{id(tc)}"
+
+        # ── No tool calls → final answer ───────────────────────────
+        if not tool_calls:
+            reasoning_text = "".join(round_reasoning_parts) if round_reasoning_parts else None
+            yield AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content=round_text,
+                usage=last_usage,
+                model=last_model or provider.get_default_model(),
+                finish_reason=finish_reason,
+                duration_ms=duration_ms,
+                reasoning_content=reasoning_text,
+            )
+            return  # Generator stops
+
+        # ── Tool call limit check ──────────────────────────────────
+        tool_call_count += 1
+        if tool_call_count > max_calls:
+            msg = f"[已达到工具调用上限 {max_calls} 次，终止循环]"
+            logger.warning(_TAG + " {}", msg)
+            yield AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content=msg,
+            )
+            return
+
+        # ── Yield tool call events ─────────────────────────────────
+        for tc in tool_calls:
+            yield AgentStreamEvent(
+                kind=StreamEventKind.TOOL_CALL,
+                tool_name=tc.get("function", {}).get("name", ""),
+                tool_arguments=tc.get("function", {}).get("arguments", ""),
+                tool_call_id=tc.get("id", ""),
+                content="",
+            )
+
+        # ── Append assistant message ───────────────────────────────
+        asst_msg: dict = {
+            "role": "assistant",
+            "content": round_text,
+            "tool_calls": tool_calls,
+        }
+        messages.append(asst_msg)
+
+        # ── Execute tools ─────────────────────────────────────────
+        tool_results: list[dict] = []
+        for tc in tool_calls:
+            name = tc["function"]["name"]
+            args = tc["function"]["arguments"]
+            if settings.verbose_logging:
+                logger.info(_TAG + " calling tool: {}({})", name, args)
+
+            tool_result = await tool_registry.execute(name, args)
+
+            if settings.verbose_logging:
+                logger.info(_TAG + " tool result {}: {}", name, str(tool_result)[:200])
+
+            result_str = str(tool_result)
+            tool_msg = {
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": result_str,
+            }
+            messages.append(tool_msg)
+            tool_results.append(tool_msg)
+
+            yield AgentStreamEvent(
+                kind=StreamEventKind.TOOL_RESULT,
+                tool_name=name,
+                tool_result=result_str,
+                tool_result_preview=result_str[:200],
+            )
+
+        records.append(ToolCallRecord(
+            asst_msg,
+            tool_results,
+            usage=last_usage,
+            model=last_model,
+            duration_ms=duration_ms,
+        ))
+
+        # ── Loop back for next phase ───────────────────────────────

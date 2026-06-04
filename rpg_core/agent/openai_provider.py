@@ -7,13 +7,14 @@ Implements the ``LLMProvider`` ABC.
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 from openai import AsyncOpenAI
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
-from rpg_world.rpg_core.agent.types import LLMResponse, LLMUsage
+from rpg_world.rpg_core.agent.types import LLMResponse, LLMUsage, ProviderChunk
 
 
 class OpenAIProvider(LLMProvider):
@@ -114,3 +115,100 @@ class OpenAIProvider(LLMProvider):
             created=getattr(response, "created", None),
             reasoning_content=reasoning_content,
         )
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[ProviderChunk]:
+        """Stream response chunks from the OpenAI API.
+
+        Yields one ``ProviderChunk`` per API response chunk.  The caller
+        is responsible for accumulating content and tool-call deltas.
+        """
+        kwargs: dict = {
+            "model": self._model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if self._max_tokens is not None:
+            kwargs["max_tokens"] = self._max_tokens
+        if self._temperature is not None:
+            kwargs["temperature"] = self._temperature
+        if tools is not None:
+            kwargs["tools"] = tools
+
+        stream = await self._client.chat.completions.create(**kwargs)
+
+        # Accumulate tool call deltas across chunks
+        tool_call_acc: dict[int, dict] = {}
+
+        async for raw_chunk in stream:
+            choice = raw_chunk.choices[0] if raw_chunk.choices else None
+
+            # usage may appear on the final chunk
+            usage: LLMUsage | None = None
+            if raw_chunk.usage is not None:
+                u = raw_chunk.usage
+                usage = LLMUsage(
+                    prompt_tokens=u.prompt_tokens or 0,
+                    completion_tokens=u.completion_tokens or 0,
+                    total_tokens=u.total_tokens or 0,
+                    prompt_tokens_details=(
+                        dict(u.prompt_tokens_details) if u.prompt_tokens_details else None
+                    ),
+                    completion_tokens_details=(
+                        dict(u.completion_tokens_details) if u.completion_tokens_details else None
+                    ),
+                )
+
+            content_delta = ""
+            reasoning_delta: str | None = None
+            finish_reason: str | None = None
+
+            if choice:
+                delta = choice.delta
+                if delta.content:
+                    content_delta = delta.content
+                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    reasoning_delta = delta.reasoning_content
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_call_acc:
+                            tool_call_acc[idx] = {
+                                "id": tc_delta.id or "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        acc = tool_call_acc[idx]
+                        if tc_delta.id:
+                            acc["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                acc["function"]["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                acc["function"]["arguments"] += tc_delta.function.arguments
+                finish_reason = choice.finish_reason
+
+            # On the last chunk (or any chunk with finish_reason), emit accumulated tool calls
+            tool_calls: list[dict] | None = None
+            if finish_reason and tool_call_acc:
+                tool_calls = [tool_call_acc[i] for i in sorted(tool_call_acc)]
+
+            # Usage may come on a standalone chunk with no choices
+            if not choice and not usage:
+                # Skip usage-only chunks (OpenAI sends these as separate events)
+                continue
+
+            yield ProviderChunk(
+                content=content_delta,
+                reasoning_content=reasoning_delta,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+                usage=usage,
+                model=getattr(raw_chunk, "model", None) or self._model,
+                request_id=getattr(raw_chunk, "id", None),
+                created=getattr(raw_chunk, "created", None),
+            )

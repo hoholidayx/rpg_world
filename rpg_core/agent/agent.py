@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import json
 import time as _time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
-from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop
+from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
 from rpg_world.rpg_core.agent.sub_agents import StatusSubAgent, SubAgentContext
 from rpg_world.rpg_core.agent.tokenizer import TiktokenTokenCounter, TokenCounter
-from rpg_world.rpg_core.agent.types import TurnStats
+from rpg_world.rpg_core.agent.types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_world.rpg_core.agent.tools import (
     BaseTool,
     GrepTool,
@@ -193,6 +194,127 @@ class RPGGameAgent:
         self._history.append({"role": "assistant", "content": reply_text})
         self._append_history("assistant", reply_text)
         return result
+
+    async def send_stream(self, user_input: str) -> AsyncIterator[AgentStreamEvent]:
+        """Streaming variant of ``send()``.
+
+        Yields ``AgentStreamEvent`` objects for real-time consumption.
+        The stream ends with a ``DONE`` event carrying aggregated
+        usage/stats metadata.
+
+        Usage::
+
+            async for event in agent.send_stream("look around"):
+                match event.kind:
+                    case StreamEventKind.TEXT:
+                        print(event.content, end="", flush=True)
+                    case StreamEventKind.DONE:
+                        _print_stats(event)
+
+        StatusSubAgent pre-update, scene context embedding, history
+        persistence all mirror ``send()`` exactly.
+        """
+        await self._ensure_initialized()
+
+        # ── TurnStats 聚合器 ───────────────────────────────────────
+        turn_stats = TurnStats(started_at=_time.monotonic())
+
+        # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ────
+        status_records = None
+        if self._status_sub_agent and self._scene_tracker:
+            scene_ctx_before = self._scene_tracker.get_context()
+            sub_result = await self._status_sub_agent.update(
+                history=self._history,
+                state_context=scene_ctx_before,
+                user_input=user_input,
+                turn_stats=turn_stats,
+            )
+            if sub_result.updated:
+                logger.info(
+                    _TAG + " StatusSubAgent updated scene via {}",
+                    [r["tool_name"] for r in sub_result.records],
+                )
+                status_records = sub_result.records
+
+        # ── Build scene context and embed into stored user message ──
+        scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
+        if scene_ctx:
+            stored_input = f"{scene_ctx}\n\n{user_input}"
+        else:
+            stored_input = user_input
+
+        self._history.append({"role": "user", "content": stored_input})
+        self._append_history("user", stored_input)
+
+        messages = self._build_transformed_context()
+        schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
+
+        # ── Stream loop ────────────────────────────────────────────
+        final_content = ""
+        final_event: AgentStreamEvent | None = None
+
+        try:
+            async for event in run_chat_loop_stream(
+                provider=self._provider,
+                tool_registry=self._tool_registry,
+                messages=messages,
+                schemas=schemas,
+                turn_stats=turn_stats,
+            ):
+                if event.kind == StreamEventKind.DONE:
+                    final_content = event.content
+                    final_event = event
+                else:
+                    yield event
+        except Exception as exc:
+            logger.error("{} send_stream error: {}", _TAG, exc)
+            yield AgentStreamEvent(
+                kind=StreamEventKind.ERROR,
+                content=str(exc),
+            )
+            return
+
+        # ── Agent-level cleanup（流结束后执行） ────────────────────
+        turn_stats.finished_at = _time.monotonic()
+
+        if settings.verbose_logging and turn_stats.calls:
+            logger.info(
+                _TAG + " turn stats: {}",
+                turn_stats.summary(),
+            )
+
+        # Only persist to history if we got valid content
+        if final_content:
+            self._history.append({"role": "assistant", "content": final_content})
+            self._append_history("assistant", final_content)
+
+        # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
+        # Compute aggregate usage across all LLM calls (main loop + sub-agents)
+        from rpg_world.rpg_core.agent.types import LLMUsage
+
+        total_pt = turn_stats.total_prompt_tokens
+        total_ct = turn_stats.total_completion_tokens
+        total_cached = turn_stats.total_cached_tokens
+        aggregate_usage = LLMUsage(
+            prompt_tokens=total_pt,
+            completion_tokens=total_ct,
+            total_tokens=total_pt + total_ct,
+            prompt_tokens_details={"cached_tokens": total_cached} if total_cached else None,
+        )
+
+        if final_event is not None:
+            final_event.duration_ms = turn_stats.total_duration_ms
+            final_event.usage = aggregate_usage
+            final_event.stats = turn_stats
+            yield final_event
+        else:
+            yield AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content=final_content,
+                usage=aggregate_usage,
+                duration_ms=turn_stats.total_duration_ms,
+                model=self._model,
+            )
 
     @property
     def history(self) -> list[dict]:

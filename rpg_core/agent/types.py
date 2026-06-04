@@ -2,12 +2,18 @@
 
 提供统一的 ``LLMUsage``、``LLMResponse``、``CallRecord``、``TurnStats``，
 替代原始 dict 传递，确保 usage / reasoning / timing 数据不被丢弃。
+
+Streaming types:
+  - ``ProviderChunk`` — provider 原始 delta chunk
+  - ``StreamEventKind`` — 语义事件枚举
+  - ``AgentStreamEvent`` — 消费者层面的事件结构
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 
@@ -163,3 +169,86 @@ class TurnStats:
             parts.append(f"cache: {cached} hit")
         parts.append(f"{self.total_duration_ms:.0f}ms")
         return " | ".join(parts)
+
+
+# ── 流式输出类型 ──────────────────────────────────────────────────────
+
+
+@dataclass
+class ProviderChunk:
+    """Provider 层原始 streaming delta chunk。
+
+    由 ``LLMProvider.chat_stream()`` 产出，每对应一次 API chunk。
+    ``tool_calls`` / ``usage`` / ``model`` / ``finish_reason`` 仅在末 chunk 非空。
+    """
+
+    content: str = ""
+    reasoning_content: str | None = None
+
+    # 以下只在末 chunk 非空：
+    tool_calls: list[dict] | None = None
+    finish_reason: str | None = None
+    usage: LLMUsage | None = None
+    model: str | None = None
+    request_id: str | None = None
+    created: int | None = None
+
+
+class StreamEventKind(str, Enum):
+    """流式事件的语义类型枚举。"""
+
+    TEXT = "text"
+    """文本增量——逐 chunk 实时显示。"""
+    THINKING = "thinking"
+    """推理/思考增量（DeepSeek R1 等）。"""
+    TOOL_CALL = "tool_call"
+    """模型发起了一个 tool call。"""
+    TOOL_RESULT = "tool_result"
+    """一个 tool 执行完毕，结果可供显示。"""
+    ROUND_START = "round_start"
+    """一轮新 LLM 生成开始（多轮 tool calling 时标记 phase）。"""
+    ROUND_END = "round_end"
+    """一轮 LLM 生成结束。"""
+    DONE = "done"
+    """流结束——携带完整 reply 文本和聚合元数据。"""
+    ERROR = "error"
+    """流式过程中发生错误。"""
+
+
+@dataclass
+class AgentStreamEvent:
+    """消费者层面的语义事件。
+
+    Consumer 通过 ``match event.kind`` 分支处理：:
+
+        async for event in agent.send_stream("hello"):
+            match event.kind:
+                case StreamEventKind.TEXT:
+                    print(event.content, end="", flush=True)
+                case StreamEventKind.DONE:
+                    ...
+    """
+
+    kind: StreamEventKind
+    content: str = ""
+
+    # ── TOOL_CALL 字段 ─────────────────────────────────────────────
+    tool_name: str | None = None
+    tool_arguments: str | None = None
+    tool_call_id: str | None = None
+
+    # ── TOOL_RESULT 字段 ───────────────────────────────────────────
+    tool_result: str | None = None
+    tool_result_preview: str | None = None
+
+    # ── 轮次跟踪 ──────────────────────────────────────────────────
+    round_index: int = 0
+
+    # ── 流结束后才收齐的元数据（DONE 事件携带） ─────────────────
+    usage: LLMUsage | None = None
+    model: str | None = None
+    finish_reason: str | None = None
+    duration_ms: float = 0.0
+    reasoning_content: str | None = None
+    stats: TurnStats | None = None
+    """完整 LLM 调用明细（含 SubAgent 细分）。仅在 DONE 事件携带。"""

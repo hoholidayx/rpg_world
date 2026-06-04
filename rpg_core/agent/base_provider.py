@@ -7,8 +7,9 @@ The current concrete implementation is ``OpenAIProvider``.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 
-from rpg_world.rpg_core.agent.types import LLMResponse
+from rpg_world.rpg_core.agent.types import LLMResponse, ProviderChunk
 
 
 class LLMProvider(ABC):
@@ -29,6 +30,25 @@ class LLMProvider(ABC):
         Returns:
             ``LLMResponse`` with content, tool_calls, finish_reason,
             plus usage / model / reasoning metadata when available.
+        """
+        ...
+
+    @abstractmethod
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[ProviderChunk]:
+        """Stream a chat completion, yielding ``ProviderChunk`` deltas.
+
+        Args:
+            messages: OpenAI-format message list.
+            tools: Optional list of OpenAI tool/function schemas.
+
+        Yields:
+            ``ProviderChunk`` objects with incremental content / reasoning
+            deltas.  The last yielded chunk carries ``tool_calls``,
+            ``usage``, ``model``, ``finish_reason`` if available.
         """
         ...
 
