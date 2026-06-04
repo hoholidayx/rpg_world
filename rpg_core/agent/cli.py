@@ -12,6 +12,7 @@ Interactive commands:
   /clear   — reset conversation history
   /reload  — reload RPG context from disk
   /history — print raw history
+  /context — show current context structure and token usage
   /quit    — exit
 """
 
@@ -38,7 +39,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 async def _repl(agent: RPGGameAgent) -> None:
-    print("RPG Agent ready.  Commands: /clear  /reload  /history  /quit")
+    print("RPG Agent ready.  Commands: /clear  /reload  /history  /context  /quit")
     print()
 
     while True:
@@ -69,6 +70,12 @@ async def _repl(agent: RPGGameAgent) -> None:
                 role = msg["role"]
                 preview = (msg.get("content") or "")[:80]
                 print(f"  [{i}] {role}: {preview}...")
+            print()
+            continue
+        if text == "/context":
+            md = await agent.get_context_markdown()
+            print()
+            print(md)
             print()
             continue
 

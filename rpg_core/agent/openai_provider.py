@@ -1,6 +1,7 @@
 """Thin wrapper around ``openai.AsyncOpenAI`` for text-only send-reply.
 
 Supports optional tool/function calling via the ``tools`` parameter.
+Implements the ``LLMProvider`` ABC.
 """
 
 from __future__ import annotations
@@ -11,14 +12,14 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
+from rpg_world.rpg_core.agent.base_provider import LLMProvider
 
-class OpenAIProvider:
+
+class OpenAIProvider(LLMProvider):
     """Minimal OpenAI chat completion provider.
 
     Supports both plain-text and tool-call responses.  When *tools* is
     provided, the returned dict may contain ``"tool_calls"``.
-
-    No streaming, no tool calls — pure text generation for the MVP.
 
     If your environment has a proxy that ``httpx`` cannot handle
     (e.g. ``socks://``), pass ``http_client=httpx.AsyncClient(proxy=None)``
@@ -34,7 +35,7 @@ class OpenAIProvider:
         temperature: float | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.model = model
+        self._model = model
         self._max_tokens = max_tokens
         self._temperature = temperature
 
@@ -44,6 +45,9 @@ class OpenAIProvider:
             base_url=base_url,
             http_client=http_client,
         )
+
+    def get_default_model(self) -> str:
+        return self._model
 
     async def chat(
         self,
@@ -64,7 +68,7 @@ class OpenAIProvider:
 
         Raises ``openai.OpenAIError`` on API / network errors.
         """
-        kwargs: dict = {"model": self.model, "messages": messages}
+        kwargs: dict = {"model": self._model, "messages": messages}
         if self._max_tokens is not None:
             kwargs["max_tokens"] = self._max_tokens
         if self._temperature is not None:

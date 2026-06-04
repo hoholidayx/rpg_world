@@ -10,7 +10,7 @@ from typing import Any
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
+from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.tools import ToolRegistry
 from rpg_world.rpg_core.settings import settings
 
@@ -55,7 +55,7 @@ class AgentReply:
 
 
 async def run_chat_loop(
-    provider: OpenAIProvider,
+    provider: LLMProvider,
     tool_registry: ToolRegistry,
     messages: list[dict],
     schemas: list[dict] | None,
