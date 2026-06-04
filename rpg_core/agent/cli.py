@@ -23,6 +23,7 @@ import asyncio
 import sys
 
 from rpg_world.rpg_core.agent import RPGGameAgent
+from rpg_world.rpg_core.agent.types import TurnStats
 
 
 def _parse_args() -> argparse.Namespace:
@@ -105,11 +106,77 @@ async def _repl(agent: RPGGameAgent) -> None:
                 for tc in rec.assistant_message.get("tool_calls", []):
                     tool_names.append(tc["function"]["name"])
                 print(f"  ── tool call [{i+1}]: {', '.join(tool_names)}")
+                if rec.reasoning_content:
+                    print(f"     [thinking] {rec.reasoning_content[:200]}")
                 for tr in rec.tool_results:
                     print(f"     → {tr['content']}")
             print()
 
+        # ── LLM usage stats ────────────────────────────────────────
+        if reply.stats:
+            _print_stats(reply.stats)
+
         print(f"\n{reply}\n")
+
+
+def _print_stats(stats: TurnStats) -> None:
+    """Render LLM usage statistics panel for CLI output."""
+    lines: list[str] = []
+    lines.append("  " + "─" * 50)
+    lines.append("  LLM Stats")
+
+    # 主循环调用
+    chat_calls = stats.chat_loop_calls
+    sub_calls = stats.sub_agent_calls
+
+    if chat_calls:
+        chat_prompt = sum(c.usage.prompt_tokens for c in chat_calls if c.usage)
+        chat_comp = sum(c.usage.completion_tokens for c in chat_calls if c.usage)
+        chat_total = chat_prompt + chat_comp
+        chat_dur = sum(c.duration_ms for c in chat_calls)
+        lines.append(
+            f"    Main loop ({len(chat_calls)} call(s)): "
+            f"{chat_prompt}p + {chat_comp}c = {chat_total}t  |  {chat_dur:.0f}ms"
+        )
+        for i, c in enumerate(chat_calls):
+            p = c.usage.prompt_tokens if c.usage else 0
+            co = c.usage.completion_tokens if c.usage else 0
+            cached = c.usage.cached_tokens if c.usage else 0
+            suffix = f"  [cache: {cached} hit]" if cached else ""
+            lines.append(
+                f"      [{i+1}] {p}p + {co}c = {p+co}t  "
+                f"|  {c.duration_ms:.0f}ms  [model: {c.model}]{suffix}"
+            )
+
+    if sub_calls:
+        sub_prompt = sum(c.usage.prompt_tokens for c in sub_calls if c.usage)
+        sub_comp = sum(c.usage.completion_tokens for c in sub_calls if c.usage)
+        sub_total = sub_prompt + sub_comp
+        sub_dur = sum(c.duration_ms for c in sub_calls)
+        lines.append(
+            f"    Sub-agent ({len(sub_calls)} call(s)): "
+            f"{sub_prompt}p + {sub_comp}c = {sub_total}t  |  {sub_dur:.0f}ms"
+        )
+        for c in sub_calls:
+            cached = c.usage.cached_tokens if c.usage else 0
+            suffix = f"  [cache: {cached} hit]" if cached else ""
+            lines.append(
+                f"      [{c.source}] {c.model}{suffix}"
+            )
+
+    # 合计
+    lines.append("  " + "─" * 50)
+    total_pt = stats.total_prompt_tokens
+    total_ct = stats.total_completion_tokens
+    total_cached = stats.total_cached_tokens
+    cache_str = f"  |  cache: {total_cached} hit" if total_cached else ""
+    lines.append(
+        f"  Total: {total_pt}p + {total_ct}c = {total_pt + total_ct}t"
+        f"{cache_str}  |  {stats.total_duration_ms:.0f}ms"
+    )
+    lines.append("")
+
+    print("\n".join(lines))
 
 
 def main() -> None:

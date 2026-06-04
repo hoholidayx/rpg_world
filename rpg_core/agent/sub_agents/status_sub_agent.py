@@ -29,6 +29,7 @@ from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, ToolProvider
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
+from rpg_world.rpg_core.agent.types import CallRecord, TurnStats
 from rpg_world.rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -64,6 +65,8 @@ class StatusSubAgentResult:
     """是否有状态表被修改。"""
     records: list[dict[str, Any]] = field(default_factory=list)
     """工具调用记录，每项含 ``tool_name`` / ``arguments`` / ``result``。"""
+    call_stats: list[CallRecord] = field(default_factory=list)
+    """此更新涉及的 LLM 调用记录（usage / timing）。"""
 
 
 # ── sub-agent ─────────────────────────────────────────────────────────
@@ -138,6 +141,7 @@ class StatusSubAgent(BaseSubAgent):
         state_context: str,
         user_input: str,
         max_history_rounds: int = 5,
+        turn_stats: TurnStats | None = None,
     ) -> StatusSubAgentResult:
         """根据用户输入预更新状态表。
 
@@ -151,6 +155,8 @@ class StatusSubAgent(BaseSubAgent):
             用户原始输入（最新一条）。
         max_history_rounds:
             传递给 LLM 的最大用户轮次数。
+        turn_stats:
+            可选的外部聚合器——传入后 LLM 调用数据也会归入其中。
 
         Returns
         -------
@@ -178,8 +184,29 @@ class StatusSubAgent(BaseSubAgent):
                 history, state_context, user_input, max_history_rounds
             )
 
+            # ── LLM call with timing ────────────────────────────────
+            import time
+
+            t0 = time.monotonic()
             llm_result = await self._get_provider().chat(messages, tools=self._schemas)
-            tool_calls = llm_result.get("tool_calls")
+            duration_ms = (time.monotonic() - t0) * 1000
+
+            # 捕获 CallRecord
+            from rpg_world.rpg_core.agent.types import LLMResponse
+
+            if isinstance(llm_result, LLMResponse):
+                call_rec = CallRecord(
+                    source="status_sub_agent",
+                    model=llm_result.model or self._get_provider().get_default_model(),
+                    usage=llm_result.usage,
+                    duration_ms=duration_ms,
+                    reasoning_content=llm_result.reasoning_content,
+                )
+                result.call_stats.append(call_rec)
+                if turn_stats is not None:
+                    turn_stats.add_call(call_rec)
+
+            tool_calls = llm_result.get("tool_calls") if isinstance(llm_result, dict) else llm_result.tool_calls
             if not tool_calls:
                 if settings.verbose_logging:
                     logger.info(_TAG + " no state changes needed")
@@ -250,7 +277,14 @@ class StatusSubAgent(BaseSubAgent):
         max_rounds: int,
     ) -> list[dict]:
         """组装子 Agent 消息：系统上下文（含世界书/角色卡） + 历史窗口 + 场景 + 用户输入。"""
+        total_user_rounds = sum(1 for m in history if m.get("role") == "user")
         recent = self._format_history_window(history, max_rounds)
+        if settings.verbose_logging:
+            kept = min(total_user_rounds, max_rounds)
+            logger.info(
+                _TAG + " history window: {}/{} user rounds (max_rounds={})",
+                kept, total_user_rounds, max_rounds,
+            )
         system_content = self._build_system_context(SYSTEM_PROMPT)
         return [
             {"role": "system", "content": system_content},

@@ -26,12 +26,13 @@ Usage::
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
 
 from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
+from rpg_world.rpg_core.agent.types import CallRecord, LLMResponse
 
 # ── constants ──────────────────────────────────────────────────────────
 
@@ -154,6 +155,8 @@ class MemoryAgentResult:
     story_details_added: int = 0
     summary_generated: bool = False
     skipped: bool = False
+    call_stats: list[CallRecord] = field(default_factory=list)
+    """此过程涉及的 LLM 调用记录（usage / timing）。"""
 
 
 # ── sub-agent ─────────────────────────────────────────────────────────
@@ -311,7 +314,9 @@ class MemorySubAgent(BaseSubAgent):
             },
         ]
 
-        decision = await self._call_llm(messages, RECALL_SCHEMA)
+        decision, call_rec = await self._call_llm(messages, RECALL_SCHEMA)
+        if call_rec:
+            result.call_stats.append(call_rec)
         recalls = decision.get("recalls", [])[: self._max_recall_items]
 
         if recalls and self._recalled_store:
@@ -354,7 +359,9 @@ class MemorySubAgent(BaseSubAgent):
             },
         ]
 
-        decision = await self._call_llm(messages, STORY_DETAIL_SCHEMA)
+        decision, call_rec = await self._call_llm(messages, STORY_DETAIL_SCHEMA)
+        if call_rec:
+            result.call_stats.append(call_rec)
         details = decision.get("story_details", [])[: self._max_story_details]
 
         added = 0
@@ -391,7 +398,9 @@ class MemorySubAgent(BaseSubAgent):
             },
         ]
 
-        decision = await self._call_llm(messages, SUMMARY_SCHEMA)
+        decision, call_rec = await self._call_llm(messages, SUMMARY_SCHEMA)
+        if call_rec:
+            result.call_stats.append(call_rec)
         text = decision.get("summary_text", "")
 
         if text and self._summary_store:
@@ -412,29 +421,51 @@ class MemorySubAgent(BaseSubAgent):
         self,
         messages: list[dict],
         schema: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Call provider with *messages* and *schema*, return parsed arguments."""
-        # _provider 字段保留给 old _call_llm 兼容；新代码通过基类 _get_provider() 获取
+    ) -> tuple[dict[str, Any], CallRecord | None]:
+        """Call provider with *messages* and *schema*, return parsed arguments.
+
+        Returns
+        -------
+        ``(parsed_args, call_record)`` — *parsed_args* 是函数参数字典，
+        *call_record* 包含 usage/timing 信息（API 返回时）。
+        """
+        import time
+
+        t0 = time.monotonic()
         provider = self._get_provider()
 
         try:
             result = await provider.chat(messages, tools=[schema])
         except Exception as exc:
             logger.warning(_TAG + " LLM call failed: {}", exc)
-            return {}
+            return {}, None
 
-        tool_calls = result.get("tool_calls")
+        duration_ms = (time.monotonic() - t0) * 1000
+
+        # 捕获 CallRecord
+        call_record: CallRecord | None = None
+        if isinstance(result, LLMResponse):
+            call_record = CallRecord(
+                source="memory_sub_agent",
+                model=result.model or provider.get_default_model(),
+                usage=result.usage,
+                duration_ms=duration_ms,
+                reasoning_content=result.reasoning_content,
+            )
+
+        tool_calls = result.get("tool_calls") if isinstance(result, dict) else result.tool_calls
         if not tool_calls:
             logger.warning(_TAG + " LLM returned no tool calls")
-            return {}
+            return {}, call_record
 
         try:
-            return json.loads(tool_calls[0]["function"]["arguments"])
+            parsed = json.loads(tool_calls[0]["function"]["arguments"])
+            return parsed, call_record
         except (KeyError, json.JSONDecodeError, IndexError) as exc:
             logger.warning(
                 _TAG + " failed to parse function args: {}", exc
             )
-            return {}
+            return {}, call_record
 
     def _format_conversation_window(
         self,

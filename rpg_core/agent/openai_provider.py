@@ -13,13 +13,14 @@ import httpx
 from openai import AsyncOpenAI
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
+from rpg_world.rpg_core.agent.types import LLMResponse, LLMUsage
 
 
 class OpenAIProvider(LLMProvider):
     """Minimal OpenAI chat completion provider.
 
-    Supports both plain-text and tool-call responses.  When *tools* is
-    provided, the returned dict may contain ``"tool_calls"``.
+    Supports both plain-text and tool-call responses.
+    Captures usage / model / reasoning metadata from API responses.
 
     If your environment has a proxy that ``httpx`` cannot handle
     (e.g. ``socks://``), pass ``http_client=httpx.AsyncClient(proxy=None)``
@@ -53,18 +54,11 @@ class OpenAIProvider(LLMProvider):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
-    ) -> dict[str, Any]:
-        """Send *messages* to the model and return a result dict.
+    ) -> LLMResponse:
+        """Send *messages* to the model and return a structured ``LLMResponse``.
 
-        Args:
-            messages: OpenAI-format message list.
-            tools: Optional list of OpenAI tool/function schemas.
-
-        Returns:
-            A dict with keys:
-                ``content`` — text content (may be empty when tool_calls present)
-                ``tool_calls`` — list of OpenAI tool-call dicts, or ``None``
-                ``finish_reason`` — ``"stop"``, ``"tool_calls"``, etc.
+        Captures ``usage``, ``model``, ``request_id``, ``created`` timestamp
+        and ``reasoning_content`` from the API response when available.
 
         Raises ``openai.OpenAIError`` on API / network errors.
         """
@@ -80,13 +74,43 @@ class OpenAIProvider(LLMProvider):
         choice = response.choices[0]
         msg = choice.message
 
-        result: dict[str, Any] = {
-            "content": msg.content or "",
-            "tool_calls": None,
-            "finish_reason": choice.finish_reason,
-        }
+        # ── usage ────────────────────────────────────────────────────
+        usage: LLMUsage | None = None
+        if response.usage is not None:
+            raw = response.usage
+            usage = LLMUsage(
+                prompt_tokens=raw.prompt_tokens or 0,
+                completion_tokens=raw.completion_tokens or 0,
+                total_tokens=raw.total_tokens or 0,
+                prompt_tokens_details=(
+                    dict(raw.prompt_tokens_details)
+                    if raw.prompt_tokens_details else None
+                ),
+                completion_tokens_details=(
+                    dict(raw.completion_tokens_details)
+                    if raw.completion_tokens_details else None
+                ),
+            )
 
+        # ── reasoning / thinking ─────────────────────────────────────
+        reasoning_content: str | None = None
+        if hasattr(msg, "reasoning_content"):
+            reasoning_content = msg.reasoning_content
+        if not reasoning_content and hasattr(msg, "reasoning"):
+            reasoning_content = msg.reasoning
+
+        # ── tool_calls ───────────────────────────────────────────────
+        tool_calls: list[dict[str, Any]] | None = None
         if msg.tool_calls:
-            result["tool_calls"] = [tc.to_dict() for tc in msg.tool_calls]
+            tool_calls = [tc.to_dict() for tc in msg.tool_calls]
 
-        return result
+        return LLMResponse(
+            content=msg.content or "",
+            tool_calls=tool_calls,
+            finish_reason=choice.finish_reason,
+            usage=usage,
+            model=getattr(response, "model", None) or self._model,
+            request_id=getattr(response, "id", None),
+            created=getattr(response, "created", None),
+            reasoning_content=reasoning_content,
+        )

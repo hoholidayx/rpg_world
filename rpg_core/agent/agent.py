@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time as _time
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
 from rpg_world.rpg_core.agent.sub_agents import StatusSubAgent, SubAgentContext
 from rpg_world.rpg_core.agent.tokenizer import TiktokenTokenCounter, TokenCounter
+from rpg_world.rpg_core.agent.types import TurnStats
 from rpg_world.rpg_core.agent.tools import (
     BaseTool,
     GrepTool,
@@ -118,7 +120,12 @@ class RPGGameAgent:
         context so that MemorySubAgent can see scene timeline during
         summarization (it filters ``role == "system"`` messages).
         """
+        
+
         await self._ensure_initialized()
+
+        # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
+        turn_stats = TurnStats(started_at=_time.monotonic())
 
         # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ──────
         status_records = None
@@ -128,6 +135,7 @@ class RPGGameAgent:
                 history=self._history,
                 state_context=scene_ctx_before,
                 user_input=user_input,
+                turn_stats=turn_stats,
             )
             if sub_result.updated:
                 logger.info(
@@ -154,19 +162,32 @@ class RPGGameAgent:
             tool_registry=self._tool_registry,
             messages=messages,
             schemas=schemas,
+            turn_stats=turn_stats,
         )
         self._last_tool_records = records
 
+        turn_stats.finished_at = _time.monotonic()
+
+        # ── 日志摘要 ────────────────────────────────────────────────
+        if settings.verbose_logging and turn_stats.calls:
+            logger.info(
+                _TAG + " turn stats: {}",
+                turn_stats.summary(),
+            )
+
+        # ── 构建 AgentReply ──────────────────────────────────────────
         if settings.include_tool_records:
             result = AgentReply(
                 text=reply_text,
                 tool_records=records or None,
                 status_sub_agent_records=status_records,
+                stats=turn_stats,
             )
         else:
             result = AgentReply(
                 text=reply_text,
                 status_sub_agent_records=status_records,
+                stats=turn_stats,
             )
 
         self._history.append({"role": "assistant", "content": reply_text})

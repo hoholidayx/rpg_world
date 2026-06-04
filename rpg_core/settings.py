@@ -107,6 +107,21 @@ class Settings:
         return self._raw.get("agent_config", {}).get("verbose_logging", False)
 
     @property
+    def log_llm_calls(self) -> bool:
+        """每轮记录每个 LLM 的 usage（token、计时、模型）。"""
+        return self._raw.get("agent_config", {}).get("log_llm_calls", self.verbose_logging)
+
+    @property
+    def log_reasoning(self) -> bool:
+        """在日志输出中包含推理/思考内容（可能很长）。"""
+        return self._raw.get("agent_config", {}).get("log_reasoning", False)
+
+    @property
+    def log_tool_timing(self) -> bool:
+        """记录每次工具执行的时间。"""
+        return self._raw.get("agent_config", {}).get("log_tool_timing", self.verbose_logging)
+
+    @property
     def memory_sub_agent_config(self) -> dict[str, Any]:
         return self._raw.get("agent_config", {}).get("memory_sub_agent", {})
 
