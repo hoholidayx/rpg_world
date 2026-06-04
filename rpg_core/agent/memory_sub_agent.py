@@ -29,6 +29,9 @@ from loguru import logger
 
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 
+# ── constants ──────────────────────────────────────────────────────────
+
+_TAG = "[MemorySubAgent]"
 
 # ── function schemas (one per pipeline) ───────────────────────────────
 
@@ -191,7 +194,7 @@ class MemorySubAgent:
         story_store: Any = None,
         summary_store: Any = None,
         provider: OpenAIProvider | None = None,
-        model: str = "gpt-4o",
+        model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         enabled: bool = True,
@@ -234,7 +237,7 @@ class MemorySubAgent:
         每个 key 独立处理，互不影响。
         """
         if self._is_processing:
-            logger.debug("[MemorySubAgent] skipped (re-entrancy guard)")
+            logger.debug(_TAG + " skipped (re-entrancy guard)")
             return MemoryAgentResult(skipped=True)
 
         if not self._enabled:
@@ -306,10 +309,10 @@ class MemorySubAgent:
         if recalls and self._recalled_store:
             try:
                 self._recalled_store.set_items(recalls)
-                logger.debug("[MemorySubAgent] injected {} recall items", len(recalls))
+                logger.debug(_TAG + " injected {} recall items", len(recalls))
                 return len(recalls)
             except Exception as exc:
-                logger.warning("[MemorySubAgent] failed to write recalls: {}", exc)
+                logger.warning(_TAG + " failed to write recalls: {}", exc)
 
         return 0
 
@@ -355,10 +358,10 @@ class MemorySubAgent:
                     added += 1
                 except Exception as exc:
                     logger.warning(
-                        "[MemorySubAgent] failed to add story detail: {}", exc
+                        _TAG + " failed to add story detail: {}", exc
                     )
             if added:
-                logger.debug("[MemorySubAgent] added {} story details", added)
+                logger.debug(_TAG + " added {} story details", added)
 
         return added
 
@@ -385,11 +388,11 @@ class MemorySubAgent:
         if text and self._summary_store:
             try:
                 self._summary_store.set_summary(text)
-                logger.debug("[MemorySubAgent] generated summary")
+                logger.debug(_TAG + " generated summary")
                 return True
             except Exception as exc:
                 logger.warning(
-                    "[MemorySubAgent] failed to write summary: {}", exc
+                    _TAG + " failed to write summary: {}", exc
                 )
 
         return False
@@ -412,19 +415,19 @@ class MemorySubAgent:
         try:
             result = await self._provider.chat(messages, tools=[schema])
         except Exception as exc:
-            logger.warning("[MemorySubAgent] LLM call failed: {}", exc)
+            logger.warning(_TAG + " LLM call failed: {}", exc)
             return {}
 
         tool_calls = result.get("tool_calls")
         if not tool_calls:
-            logger.warning("[MemorySubAgent] LLM returned no tool calls")
+            logger.warning(_TAG + " LLM returned no tool calls")
             return {}
 
         try:
             return json.loads(tool_calls[0]["function"]["arguments"])
         except (KeyError, json.JSONDecodeError, IndexError) as exc:
             logger.warning(
-                "[MemorySubAgent] failed to parse function args: {}", exc
+                _TAG + " failed to parse function args: {}", exc
             )
             return {}
 

@@ -4,12 +4,19 @@
   "agent_config": {
     "max_tool_call_limit": 10,
     "include_tool_records": true,
+    "verbose_logging": true,
     "memory_sub_agent": {
       "enabled": false,
       "model": null,
       "summary_trigger_rounds": 20,
       "max_recall_items": 5,
       "max_story_details": 10
+    },
+    "status_sub_agent": {
+      "enabled": true,
+      "model": null,
+      "api_key": null,
+      "base_url": null
     }
   },
   "character_path": "character",

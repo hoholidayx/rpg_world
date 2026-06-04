@@ -8,9 +8,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
+
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.tools import ToolRegistry
 from rpg_world.rpg_core.settings import settings
+
+_TAG = "[MainAgent]"
 
 
 class ToolCallRecord:
@@ -40,9 +44,11 @@ class AgentReply:
         self,
         text: str,
         tool_records: list[ToolCallRecord] | None = None,
+        status_sub_agent_records: list[dict[str, Any]] | None = None,
     ) -> None:
         self.text = text
         self.tool_records = tool_records
+        self.status_sub_agent_records = status_sub_agent_records
 
     def __str__(self) -> str:
         return self.text
@@ -86,6 +92,12 @@ async def run_chat_loop(
             return result["content"], records
 
         tool_call_count += 1
+        if settings.verbose_logging:
+            tool_names = [tc["function"]["name"] for tc in result["tool_calls"]]
+            logger.info(
+                _TAG + " round {}: {} tool call(s): {}",
+                tool_call_count, len(tool_names), tool_names,
+            )
 
         # Assistant tool-call message
         asst_msg: dict[str, Any] = {
@@ -98,10 +110,19 @@ async def run_chat_loop(
         # Execute tools and collect results
         tool_results: list[dict[str, Any]] = []
         for tc in result["tool_calls"]:
-            tool_result = await tool_registry.execute(
-                tc["function"]["name"],
-                tc["function"]["arguments"],
-            )
+            name = tc["function"]["name"]
+            args = tc["function"]["arguments"]
+            if settings.verbose_logging:
+                logger.info(_TAG + " calling tool: {}({})", name, args)
+
+            tool_result = await tool_registry.execute(name, args)
+
+            if settings.verbose_logging:
+                logger.info(
+                    _TAG + " tool result {}: {}",
+                    name, str(tool_result)[:200],
+                )
+
             tool_msg: dict[str, Any] = {
                 "role": "tool",
                 "tool_call_id": tc["id"],
@@ -112,4 +133,6 @@ async def run_chat_loop(
 
         records.append(ToolCallRecord(asst_msg, tool_results))
 
-    return f"[已达到工具调用上限 {max_calls} 次，终止循环]", records
+    msg = f"[已达到工具调用上限 {max_calls} 次，终止循环]"
+    logger.warning(_TAG + " {}", msg)
+    return msg, records

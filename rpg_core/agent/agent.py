@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
@@ -18,7 +20,10 @@ from rpg_world.rpg_core.agent.tools import (
     WriteFileTool,
 )
 from rpg_world.rpg_core.scene import SceneTracker
+from rpg_world.rpg_core.agent.status_sub_agent import StatusSubAgent
 from rpg_world.rpg_core.settings import settings
+
+_TAG = "[MainAgent]"
 
 
 class RPGGameAgent:
@@ -71,6 +76,7 @@ class RPGGameAgent:
         self._history: list[dict] = []
         self._tool_registry: ToolRegistry | None = None
         self._last_tool_records: list[ToolCallRecord] | None = None
+        self._status_sub_agent: StatusSubAgent | None = None
 
     # ── public API ─────────────────────────────────────────────────────
 
@@ -110,6 +116,22 @@ class RPGGameAgent:
         """
         await self._ensure_initialized()
 
+        # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ──────
+        status_records = None
+        if self._status_sub_agent and self._scene_tracker:
+            scene_ctx_before = self._scene_tracker.get_context()
+            sub_result = await self._status_sub_agent.update(
+                history=self._history,
+                state_context=scene_ctx_before,
+                user_input=user_input,
+            )
+            if sub_result.updated:
+                logger.info(
+                    _TAG + " StatusSubAgent updated scene via {}",
+                    [r["tool_name"] for r in sub_result.records],
+                )
+                status_records = sub_result.records
+
         # Build scene context and embed into stored user message
         scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
         if scene_ctx:
@@ -132,9 +154,16 @@ class RPGGameAgent:
         self._last_tool_records = records
 
         if settings.include_tool_records:
-            result = AgentReply(text=reply_text, tool_records=records or None)
+            result = AgentReply(
+                text=reply_text,
+                tool_records=records or None,
+                status_sub_agent_records=status_records,
+            )
         else:
-            result = AgentReply(text=reply_text)
+            result = AgentReply(
+                text=reply_text,
+                status_sub_agent_records=status_records,
+            )
 
         self._history.append({"role": "assistant", "content": reply_text})
         self._append_history("assistant", reply_text)
@@ -181,6 +210,9 @@ class RPGGameAgent:
         self._milestone_mgr = ctx["milestone_mgr"]
         self._status_mgr = ctx["status_mgr"]
         self._scene_tracker = ctx.get("scene_tracker")
+
+        if self._status_sub_agent is not None and self._scene_tracker is not None:
+            self._status_sub_agent.update_tracker_ref(self._scene_tracker)
 
     # ── internals — context & tools ────────────────────────────────────
 
@@ -272,6 +304,19 @@ class RPGGameAgent:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
         )
+
+        # ── StatusSubAgent ────────────────────────────────────────────
+        status_cfg = settings.status_sub_agent_config
+        status_model = status_cfg.get("model")
+        self._status_sub_agent = StatusSubAgent(
+            provider=None if status_model else self._provider,
+            model=status_model or self._model,
+            api_key=status_cfg.get("api_key") or self._api_key,
+            base_url=status_cfg.get("base_url") or self._base_url,
+            enabled=status_cfg.get("enabled", True),
+        )
+        if self._status_sub_agent and self._scene_tracker:
+            self._status_sub_agent.register_scene_tools(self._scene_tracker)
 
         self._setup_tool_registry()
 

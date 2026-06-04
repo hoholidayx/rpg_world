@@ -98,8 +98,16 @@ class Settings:
         return self._resolve("sub_agent_path", "memory_sub_agent")
 
     @property
+    def verbose_logging(self) -> bool:
+        return self._raw.get("agent_config", {}).get("verbose_logging", False)
+
+    @property
     def memory_sub_agent_config(self) -> dict[str, Any]:
         return self._raw.get("agent_config", {}).get("memory_sub_agent", {})
+
+    @property
+    def status_sub_agent_config(self) -> dict[str, Any]:
+        return self._raw.get("agent_config", {}).get("status_sub_agent", {})
 
     @property
     def max_tool_calls(self) -> int:

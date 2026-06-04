@@ -79,6 +79,18 @@ async def _repl(agent: RPGGameAgent) -> None:
             print(f"[error] {exc}\n")
             continue
 
+        # ── status sub-agent records ───────────────────────────────
+        if reply.status_sub_agent_records:
+            tools_str = ', '.join(
+                f"{r['tool_name']}({r['arguments']})"
+                for r in reply.status_sub_agent_records
+            )
+            print(f"  ── StatusSubAgent: {tools_str}")
+            for r in reply.status_sub_agent_records:
+                result_preview = r['result'][:120]
+                print(f"     → {result_preview}")
+            print()
+
         # ── tool call records ──────────────────────────────────────
         if reply.tool_records:
             for i, rec in enumerate(reply.tool_records):
