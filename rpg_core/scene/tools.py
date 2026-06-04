@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class SetTimeTool(BaseTool):
     """直接设置场景的绝对时间（非增量推进）。"""
 
-    name = "set_time"
+    name = "scene_time"
     description = (
         "直接设置当前场景的绝对时间。hour 使用 24h 制（0-23）。"
         " 使用示例：\n"
@@ -83,7 +83,7 @@ class SetTimeTool(BaseTool):
 class SetAttrTool(BaseTool):
     """创建或更新当前场景的属性。"""
 
-    name = "set_attr"
+    name = "scene_attr"
     description = "创建或更新当前场景的属性。例如设置位置、天气、氛围、季节等任意场景上下文。"
 
     def __init__(self, tracker: SceneTracker) -> None:
@@ -113,7 +113,7 @@ class SetAttrTool(BaseTool):
 class DeleteAttrTool(BaseTool):
     """删除当前场景的一个属性。"""
 
-    name = "delete_attr"
+    name = "scene_del_attr"
     description = "删除当前场景的某个属性。"
 
     def __init__(self, tracker: SceneTracker) -> None:

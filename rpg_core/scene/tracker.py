@@ -192,7 +192,7 @@ class SceneTracker:
             else:
                 lines.append(f"{k}: ")
         lines.append("")
-        lines.append("（场景状态已由 StatusSubAgent 自动预处理。如需手动修正，可使用 set_time / set_attr / delete_attr 工具）")
+        lines.append("（场景状态已由 StatusSubAgent 自动预处理。如需手动修正，可使用 scene_time / scene_attr / scene_del_attr 工具）")
         lines.append("[/scene]")
         return "\n".join(lines)
 

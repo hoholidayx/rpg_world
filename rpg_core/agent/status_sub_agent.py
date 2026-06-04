@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 SYSTEM_PROMPT = (
     "You are a state table updater for an RPG game world.\n\n"
     "Available operations and the state tables they modify:\n"
-    "- set_time / set_attr / delete_attr: Update the current scene state "
+    "- scene_time / scene_attr / scene_del_attr: Update the current scene state "
     "(time, location, weather, atmosphere, NPCs present, etc.)\n\n"
     "Rules:\n"
     "1. Call a tool only when the user's action explicitly or implicitly "
