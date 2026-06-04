@@ -60,10 +60,6 @@
           <BookOutlined />
           <span>世界书管理</span>
         </a-menu-item>
-        <a-menu-item key="/milestones">
-          <FlagOutlined />
-          <span>里程碑管理</span>
-        </a-menu-item>
         <a-menu-item key="/status">
           <ProfileOutlined />
           <span>状态管理</span>
@@ -123,10 +119,6 @@
         <a-menu-item key="/lorebook">
           <BookOutlined />
           <span>世界书管理</span>
-        </a-menu-item>
-        <a-menu-item key="/milestones">
-          <FlagOutlined />
-          <span>里程碑管理</span>
         </a-menu-item>
         <a-menu-item key="/status">
           <ProfileOutlined />

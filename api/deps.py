@@ -6,7 +6,6 @@ from functools import lru_cache
 
 from rpg_world.rpg_core.character import CharacterManager
 from rpg_world.rpg_core.lorebook import LorebookManager
-from rpg_world.rpg_core.milestone import MilestoneManager
 from rpg_world.rpg_core.status import StatusManager
 from rpg_world.rpg_core.settings import settings
 from rpg_world.rpg_core.utils.watcher import get_watcher
@@ -35,13 +34,6 @@ def get_lorebook_manager() -> LorebookManager:
 
 
 @lru_cache
-def get_milestone_manager() -> MilestoneManager:
-    mgr = MilestoneManager(settings.milestone_path)
-    _try_start_watcher()
-    return mgr
-
-
-@lru_cache
 def get_status_manager() -> StatusManager:
     mgr = StatusManager(settings.status_path)
     _try_start_watcher()
@@ -56,7 +48,6 @@ def reset_all() -> None:
     """
     get_character_manager.cache_clear()
     get_lorebook_manager.cache_clear()
-    get_milestone_manager.cache_clear()
     get_status_manager.cache_clear()
     watcher = get_watcher()
     watcher.stop()

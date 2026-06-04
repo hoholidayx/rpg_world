@@ -40,12 +40,3 @@ class LorebookEntry(BaseModel):
     description: str = ""
 
 
-class MilestoneEntry(BaseModel):
-    """Milestone entry — ``name``, ``enable``, ``content``, ``description`` are fixed; extra fields allowed."""
-
-    model_config = ConfigDict(extra="allow")
-
-    name: str
-    enable: bool = True
-    content: str = ""
-    description: str = ""

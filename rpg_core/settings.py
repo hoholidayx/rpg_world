@@ -24,7 +24,7 @@ _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 # Known data-type subdirectories inside data/
-_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "milestone", "status", "summary", "story_memory", "history", "memory_sub_agent"})
+_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "status", "summary", "story_memory", "history", "memory_sub_agent"})
 
 
 def _load() -> dict[str, Any]:
@@ -88,6 +88,11 @@ class Settings:
     @property
     def persistent_memory_path(self) -> str:
         return self._resolve("persistent_memory_path", "persistent_memory.md")
+
+    @property
+    def pm_details_path(self) -> str:
+        """路径：PM 可展开条目的详情文件（JSON，预留）。"""
+        return self._resolve("pm_details_path", "pm_details.json")
 
     @property
     def history_path(self) -> str:

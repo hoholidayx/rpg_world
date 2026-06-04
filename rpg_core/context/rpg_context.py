@@ -29,9 +29,6 @@ class LayerType:
     HOT_HISTORY = "hot_history"
     """[3..N] Hot History: recent N user/assistant rounds."""
 
-    MILESTONES = "milestones"
-    """[N+1] Milestones: active plot milestones."""
-
     STORY_MEMORY = "story_memory"
     """[N+2] Story Memory: accumulated character/plot details."""
 
@@ -101,9 +98,6 @@ class RPGContext:
     hot_history: list[dict] = field(default_factory=list)
     """[3..N] Hot History — recent user/assistant message dicts."""
 
-    milestones: str | None = None
-    """[N+1] Milestones — rendered milestone module."""
-
     story_memory: str | None = None
     """[N+2] Story Memory — rendered story detail items."""
 
@@ -143,7 +137,6 @@ class RPGContext:
             h["type"] = LayerType.HOT_HISTORY
             msgs.append(h)
 
-        self._add(msgs, "system", self.milestones, LayerType.MILESTONES)
         self._add(msgs, "system", self.story_memory, LayerType.STORY_MEMORY)
         self._add(msgs, "system", self.recalled_memory, LayerType.RECALLED_MEMORY)
         self._add(msgs, "system", self.status_tables, LayerType.STATUS_TABLES)
@@ -170,7 +163,6 @@ class RPGContext:
             LayerType.FIXED: self.fixed_layer,
             LayerType.PERSISTENT_MEMORY: self.persistent_memory,
             LayerType.SUMMARY: self.summary,
-            LayerType.MILESTONES: self.milestones,
             LayerType.STORY_MEMORY: self.story_memory,
             LayerType.RECALLED_MEMORY: self.recalled_memory,
             LayerType.STATUS_TABLES: self.status_tables,
@@ -236,11 +228,7 @@ class RPGContext:
                 description="-",
             ))
 
-        # [N+1] Milestones
-        _add(LayerType.MILESTONES, "system", self.milestones,
-             _build_milestone_desc(self.milestones))
-
-        # [N+2] Story Memory
+        # [N+1] Story Memory
         _add(LayerType.STORY_MEMORY, "system", self.story_memory,
              _build_story_memory_desc(self.story_memory))
 
@@ -351,7 +339,6 @@ def _layer_display_name(type_: str) -> str:
         LayerType.PERSISTENT_MEMORY: "Persistent Memory",
         LayerType.SUMMARY: "Summary",
         LayerType.HOT_HISTORY: "Hot History",
-        LayerType.MILESTONES: "Milestones",
         LayerType.STORY_MEMORY: "Story Memory",
         LayerType.RECALLED_MEMORY: "Recalled Memory",
         LayerType.STATUS_TABLES: "Status Tables",
@@ -375,14 +362,6 @@ def _build_fixed_desc(lore_count: int, char_count: int) -> str:
     if char_count > 0:
         parts.append(f"{char_count} 张角色卡")
     return " + ".join(parts) if len(parts) > 1 else parts[0]
-
-
-def _build_milestone_desc(content: str | None) -> str:
-    """Estimate milestone count from rendered content."""
-    if not content:
-        return "-"
-    count = content.count("### ")  # each milestone rendered as ### name
-    return f"{count} 个活跃里程碑" if count > 0 else _truncate_text(content, 50)
 
 
 def _build_story_memory_desc(content: str | None) -> str:

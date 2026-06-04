@@ -24,12 +24,6 @@ const routes = [
     meta: { title: '世界书管理' },
   },
   {
-    path: '/milestones',
-    name: 'MilestoneManagement',
-    component: () => import('@/views/MilestoneManagement.vue'),
-    meta: { title: '里程碑管理' },
-  },
-  {
     path: '/status',
     name: 'StatusManagement',
     component: () => import('@/views/StatusManagement.vue'),

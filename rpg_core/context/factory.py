@@ -49,7 +49,6 @@ def build_rpg_context(
     # ── Managers (lazy, may fail if data directories don't exist) ──────
     character_mgr: Any = None
     lorebook_mgr: Any = None
-    milestone_mgr: Any = None
     status_mgr: Any = None
 
     try:
@@ -65,13 +64,6 @@ def build_rpg_context(
         lorebook_mgr = LorebookManager(rpg_settings.lorebook_path)
     except Exception as exc:
         logger.debug("[RPG World] LorebookManager init skipped: {}", exc)
-
-    try:
-        from rpg_world.rpg_core.milestone import MilestoneManager
-
-        milestone_mgr = MilestoneManager(rpg_settings.milestone_path)
-    except Exception as exc:
-        logger.debug("[RPG World] MilestoneManager init skipped: {}", exc)
 
     try:
         from rpg_world.rpg_core.status import StatusManager
@@ -96,7 +88,6 @@ def build_rpg_context(
         "builder": builder,
         "character_mgr": character_mgr,
         "lorebook_mgr": lorebook_mgr,
-        "milestone_mgr": milestone_mgr,
         "status_mgr": status_mgr,
         "scene_tracker": scene_tracker,
     }

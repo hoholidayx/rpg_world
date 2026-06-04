@@ -38,7 +38,6 @@ class RPGContextConfig:
     enable_summaries: bool = True
 
     # ── 动态层开关 ──────────────────────────────────
-    enable_milestones: bool = True
     enable_story_memory: bool = True
     enable_recalled_memory: bool = True
     enable_status_tables: bool = True

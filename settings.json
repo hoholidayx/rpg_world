@@ -21,7 +21,7 @@
   },
   "character_path": "character",
   "lorebook_path": "lorebook",
-  "milestone_path": "milestone",
+  "pm_details_path": "pm_details.json",
   "status_path": "status",
   "summary_path": "summary",
   "story_memory_path": "story_memory",

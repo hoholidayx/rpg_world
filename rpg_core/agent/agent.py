@@ -72,7 +72,6 @@ class RPGGameAgent:
         self._builder: Any = None
         self._character_mgr: Any = None
         self._lorebook_mgr: Any = None
-        self._milestone_mgr: Any = None
         self._status_mgr: Any = None
         self._scene_tracker: SceneTracker | None = None
         self._provider: LLMProvider | None = None
@@ -211,7 +210,6 @@ class RPGGameAgent:
         self._builder = ctx["builder"]
         self._character_mgr = ctx["character_mgr"]
         self._lorebook_mgr = ctx["lorebook_mgr"]
-        self._milestone_mgr = ctx["milestone_mgr"]
         self._status_mgr = ctx["status_mgr"]
         self._scene_tracker = ctx.get("scene_tracker")
 
@@ -271,7 +269,6 @@ class RPGGameAgent:
             messages=test_messages,
             character_mgr=self._character_mgr,
             lorebook_mgr=self._lorebook_mgr,
-            milestone_mgr=self._milestone_mgr,
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
         )
@@ -288,7 +285,6 @@ class RPGGameAgent:
             messages=self._history,
             character_mgr=self._character_mgr,
             lorebook_mgr=self._lorebook_mgr,
-            milestone_mgr=self._milestone_mgr,
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
         )
@@ -352,7 +348,6 @@ class RPGGameAgent:
         self._builder = ctx["builder"]
         self._character_mgr = ctx["character_mgr"]
         self._lorebook_mgr = ctx["lorebook_mgr"]
-        self._milestone_mgr = ctx["milestone_mgr"]
         self._status_mgr = ctx["status_mgr"]
         self._scene_tracker = ctx.get("scene_tracker")
 

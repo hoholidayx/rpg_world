@@ -126,7 +126,6 @@ class RPGContextBuilder:
         messages: list[dict] | None = None,
         character_mgr: Any = None,
         lorebook_mgr: Any = None,
-        milestone_mgr: Any = None,
         status_mgr: Any = None,
         scene_tracker: Any = None,
     ) -> RPGContext:
@@ -137,7 +136,6 @@ class RPGContextBuilder:
             messages: 原始消息列表。仅用于提取历史记录和当前用户输入。
             character_mgr: 角色卡管理器，为 None 时固定层跳过角色卡模块。
             lorebook_mgr: 世界书管理器，为 None 时固定层跳过世界书模块。
-            milestone_mgr: 里程碑管理器，为 None 时动态层跳过里程碑模块。
             status_mgr: 状态管理器，为 None 时动态层跳过状态表格模块。
         """
         if not messages:
@@ -207,26 +205,7 @@ class RPGContextBuilder:
 
         # ── 6. Build Dynamic Layer modules ──────────────────────────
         # Ordered by change frequency (low → high) for prefix cache efficiency:
-        #   milestones (least volatile) → story memory → recalled memory → status tables (most volatile)
-        milestones: list[dict] = []
-        if milestone_mgr and self.config.enable_milestones:
-            try:
-                milestones = milestone_mgr.list_enabled_entries()
-            except Exception:
-                pass
-
-        milestone_content: str | None = None
-        if milestones:
-            milestone_content = self._render_layer("modules/milestone.jinja", {
-                "milestone_index": [
-                    {"name": ms.get("name", ""), "description": ms.get("description", "")}
-                    for ms in milestones
-                ],
-                "milestones": milestones,
-            })
-            if not milestone_content.strip():
-                milestone_content = None
-
+        #   story memory → recalled memory → status tables (most volatile)
         story_memory_content: str | None = None
         story_details: list[dict] = []
         if self._story_memory and self.config.enable_story_memory:
@@ -292,7 +271,6 @@ class RPGContextBuilder:
             persistent_memory=persistent_content,
             summary=summary_content,
             hot_history=hot_history,
-            milestones=milestone_content,
             story_memory=story_memory_content,
             recalled_memory=recalled_memory_content,
             status_tables=status_tables_content,
