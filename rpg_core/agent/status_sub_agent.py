@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
+from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
 from rpg_world.rpg_core.settings import settings
@@ -100,7 +100,7 @@ class StatusSubAgent:
     def __init__(
         self,
         *,
-        provider: OpenAIProvider | None = None,
+        provider: LLMProvider | None = None,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -111,7 +111,7 @@ class StatusSubAgent:
         self._model = model
         self._api_key = api_key
         self._base_url = base_url
-        self._own_provider: OpenAIProvider | None = None
+        self._own_provider: LLMProvider | None = None
 
         self._enabled = enabled
         self._is_updating: bool = False
@@ -138,7 +138,7 @@ class StatusSubAgent:
 
     # ── Provider ─────────────────────────────────────────────────────
 
-    def _get_provider(self) -> OpenAIProvider:
+    def _get_provider(self) -> LLMProvider:
         """获取有效 LLM provider——共享或自建。"""
         if self._shared_provider is not None:
             return self._shared_provider

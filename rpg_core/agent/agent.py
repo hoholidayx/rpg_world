@@ -8,9 +8,11 @@ from typing import Any
 
 from loguru import logger
 
+from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
+from rpg_world.rpg_core.agent.tokenizer import TiktokenTokenCounter, TokenCounter
 from rpg_world.rpg_core.agent.tools import (
     BaseTool,
     GrepTool,
@@ -52,6 +54,7 @@ class RPGGameAgent:
         temperature: float | None = None,
         history_enabled: bool = True,
         tools: list[BaseTool] | None = None,
+        token_counter: TokenCounter | None = None,
     ) -> None:
         self._session_id = session_id
         self._world_name = world_name
@@ -62,6 +65,7 @@ class RPGGameAgent:
         self._temperature = temperature
         self._history_enabled = history_enabled
         self._extra_tools = tools or []
+        self._token_counter = token_counter or TiktokenTokenCounter()
 
         # Lazy-init
         self._initialized: bool = False
@@ -71,7 +75,7 @@ class RPGGameAgent:
         self._milestone_mgr: Any = None
         self._status_mgr: Any = None
         self._scene_tracker: SceneTracker | None = None
-        self._provider: OpenAIProvider | None = None
+        self._provider: LLMProvider | None = None
         self._system_prompt: str = ""
         self._history: list[dict] = []
         self._tool_registry: ToolRegistry | None = None
@@ -213,6 +217,67 @@ class RPGGameAgent:
 
         if self._status_sub_agent is not None and self._scene_tracker is not None:
             self._status_sub_agent.update_tracker_ref(self._scene_tracker)
+
+    # ── context inspection (no LLM call) ─────────────────────────────
+
+    async def get_context_info(self, user_input: str = "") -> list["LayerInfo"]:
+        """Build the full 5-layer context and return structured layer metadata.
+
+        Uses the current ``_history`` and *user_input* (optional) to assemble
+        the context **without** sending it to the LLM.  ``_history`` is not
+        modified.
+
+        Returns a list of ``LayerInfo``, one per layer, with token counts
+        estimated using the agent's ``_token_counter``.
+        """
+        from rpg_world.rpg_core.context.rpg_context import LayerInfo
+
+        await self._ensure_initialized()
+        ctx = self._build_ctx_for_inspection(user_input)
+        return ctx.layer_summary(self._token_counter)
+
+    async def get_context_markdown(self, user_input: str = "") -> str:
+        """Build the full 5-layer context and return a Markdown-formatted table.
+
+        Convenience wrapper around ``get_context_info()`` that renders the
+        result as a Markdown table string suitable for CLI display or tool
+        output.
+        """
+        await self._ensure_initialized()
+        ctx = self._build_ctx_for_inspection(user_input)
+        return ctx.to_markdown(self._token_counter)
+
+    def _build_ctx_for_inspection(self, user_input: str = "") -> "RPGContext":
+        """Build context for inspection (no _history mutation, no LLM call)."""
+        from rpg_world.rpg_core.context.rpg_context import RPGContext
+
+        # Build scene context same way as send()
+        scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
+
+        test_messages = list(self._history)
+        if user_input or scene_ctx:
+            parts = []
+            if scene_ctx:
+                parts.append(scene_ctx)
+            if user_input:
+                parts.append(user_input)
+            stored_input = "\n\n".join(parts)
+            test_messages.append({"role": "user", "content": stored_input})
+        elif not test_messages:
+            test_messages.append({"role": "user", "content": "(no input)"})
+
+        ctx: RPGContext = self._builder.build(
+            system_prompt=self._system_prompt,
+            messages=test_messages,
+            character_mgr=self._character_mgr,
+            lorebook_mgr=self._lorebook_mgr,
+            milestone_mgr=self._milestone_mgr,
+            status_mgr=self._status_mgr,
+            scene_tracker=self._scene_tracker,
+        )
+        # Wire the hot_history_rounds config for to_markdown()
+        ctx._hot_history_rounds = self._builder.config.hot_history_rounds  # type: ignore[attr-defined]
+        return ctx
 
     # ── internals — context & tools ────────────────────────────────────
 
