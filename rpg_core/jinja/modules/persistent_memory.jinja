@@ -1,5 +1,11 @@
 {% if persistent_memory %}
 ## 常驻记忆
 
-{{ persistent_memory }}
+{% for section in persistent_memory %}
+{% if section.title %}
+### {{ section.title }}
+{% endif %}
+{{ section.content }}
+
+{% endfor %}
 {% endif %}

@@ -204,8 +204,8 @@ class Settings:
         return self.session_dir(session_id) / "story_memory.json"
 
     def get_persistent_memory_path(self, session_id: str) -> Path:
-        """Return the ``persistent_memory.md`` file path for the given session."""
-        return self.session_dir(session_id) / "persistent_memory.md"
+        """Return the ``persistent_memory.json`` file path for the given session."""
+        return self.session_dir(session_id) / "persistent_memory.json"
 
     # ── Session file listing ──────────────────────────────────────────
 

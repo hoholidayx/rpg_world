@@ -173,7 +173,7 @@ class RPGContextBuilder:
         persistent_content: str | None = None
         if self._persist_memory and self.config.enable_persistent_memory:
             try:
-                pm = self._persist_memory.get_content()
+                pm = self._persist_memory.get_sections()
                 if pm:
                     persistent_content = self._render_layer("modules/persistent_memory.jinja", {
                         "persistent_memory": pm,
