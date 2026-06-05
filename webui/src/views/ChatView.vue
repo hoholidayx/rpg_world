@@ -41,6 +41,12 @@
             <DeleteOutlined />
           </a-button>
         </a-popconfirm>
+        <!-- Settings -->
+        <a-tooltip :title="hasApiKey ? 'API Key 已配置' : '点击配置 API Key'">
+          <a-button size="small" @click="openSettings" :type="hasApiKey ? 'default' : 'primary'">
+            <SettingOutlined />
+          </a-button>
+        </a-tooltip>
       </div>
     </header>
 
@@ -143,6 +149,29 @@
       </div>
     </div>
 
+    <!-- ── Settings modal ──────────────────────────── -->
+    <a-modal
+      v-model:open="settingsVisible"
+      title="设置"
+      @ok="handleSaveSettings"
+      :confirm-loading="false"
+      :width="420"
+      :destroy-on-close="true"
+    >
+      <a-form layout="vertical">
+        <a-form-item
+          label="OpenAI API Key"
+          :validate-status="apiKeyError ? 'error' : undefined"
+          :help="apiKeyError || '保存后自动通过 HTTP Header 传入后端，仅存储在你浏览器本地。'"
+        >
+          <a-input-password
+            v-model:value="apiKeyInput"
+            placeholder="sk-..."
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
     <!-- ── Create session modal ──────────────────────────── -->
     <a-modal
       v-model:open="createSessionVisible"
@@ -182,6 +211,7 @@ import {
   SendOutlined,
   StopOutlined,
   MessageOutlined,
+  SettingOutlined,
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -207,9 +237,16 @@ const newSessionId = ref('')
 const cloneEnabled = ref(false)
 const cloneSourceId = ref(null)
 
+// Settings modal
+const settingsVisible = ref(false)
+const apiKeyInput = ref('')
+const apiKeyError = ref('')
+
 // ── Computed ──────────────────────────────────────────────
 
 const isDefaultSession = computed(() => sessionStore.activeSession === 'default')
+
+const hasApiKey = computed(() => !!localStorage.getItem('rpg_openai_api_key'))
 
 const workspaceOptions = computed(() =>
   workspaceStore.workspaces.map((w) => ({
@@ -442,6 +479,28 @@ async function handleDeleteSession() {
   } catch (e) {
     message.error('删除会话失败: ' + (e.response?.data?.detail || e.message))
   }
+}
+
+// ── Settings handlers ─────────────────────────────────────
+
+function openSettings() {
+  apiKeyInput.value = localStorage.getItem('rpg_openai_api_key') || ''
+  apiKeyError.value = ''
+  settingsVisible.value = true
+}
+
+function handleSaveSettings() {
+  const trimmed = apiKeyInput.value.trim()
+  if (!trimmed) {
+    localStorage.removeItem('rpg_openai_api_key')
+  } else {
+    localStorage.setItem('rpg_openai_api_key', trimmed)
+  }
+  settingsVisible.value = false
+  message.success(trimmed ? 'API Key 已保存' : 'API Key 已清除')
+  // Reload history so the next request uses the new key
+  messages.value = []
+  loadHistory()
 }
 </script>
 

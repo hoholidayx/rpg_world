@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from rpg_world.rpg_core.agent import RPGGameAgent
@@ -12,46 +12,76 @@ from rpg_world.rpg_core.settings import settings
 
 router = APIRouter(tags=["chat"])
 
-# ── Agent instance cache (per-session) ───────────────────────────────────
+# ── Agent instance cache (per-session + per-api-key) ─────────────────────
 
 _agent_instances: dict[str, RPGGameAgent] = {}
 
 
-def _get_agent(session_id: str = "default") -> RPGGameAgent:
+def _cache_key(session_id: str, api_key: str | None) -> str:
+    """Build a cache key from session_id and api_key.
+
+    Including api_key in the key ensures that if a user changes their
+    key, a new agent is created rather than reusing one with the old key.
+    """
+    return f"{session_id}::{api_key or ''}"
+
+
+def _get_agent(
+    session_id: str = "default",
+    api_key: str | None = None,
+) -> RPGGameAgent:
     """Get or create an RPGGameAgent for the given session.
 
-    Agent instances are cached by session_id to preserve in-memory
-    conversation history and avoid re-initialization on each request.
+    Agent instances are cached by session_id (+ api_key) to preserve
+    in-memory conversation history and avoid re-initialization on each
+    request.
+
+    When *api_key* is provided it takes precedence over the environment
+    variable ``OPENAI_API_KEY`` (the RPGGameAgent default fallback).
     """
-    if session_id not in _agent_instances:
+    key = _cache_key(session_id, api_key)
+    if key not in _agent_instances:
         agent = RPGGameAgent(
             session_id=session_id,
             model=settings.agent_model,
+            api_key=api_key,
             base_url=settings.agent_base_url or None,
             max_tokens=settings.agent_max_tokens,
             temperature=settings.agent_temperature,
         )
-        _agent_instances[session_id] = agent
-    return _agent_instances[session_id]
+        _agent_instances[key] = agent
+    return _agent_instances[key]
 
 
 # ── Routes ──────────────────────────────────────────────────────────────
 
 
 @router.get("/chat/history")
-async def get_chat_history(session_id: str = "default") -> dict:
+async def get_chat_history(
+    session_id: str = "default",
+    x_openai_api_key: str | None = Header(None),
+) -> dict:
     """Return the conversation history for the given session.
 
     The agent maintains history in-memory and persists to a JSONL file
     under the session's data directory.
     """
-    agent = _get_agent(session_id)
-    await agent._ensure_initialized()
+    agent = _get_agent(session_id, api_key=x_openai_api_key)
+    try:
+        await agent._ensure_initialized()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent initialization failed (api_key missing or invalid?): {exc}",
+        )
     return {"history": agent.history}
 
 
 @router.post("/chat/send")
-async def chat_send(body: dict) -> dict:
+async def chat_send(
+    body: dict,
+    x_openai_api_key: str | None = Header(None),
+) -> dict:
     """Send a message and receive the full buffered reply.
 
     This is a thin wrapper around ``RPGGameAgent.send()``.  The primary
@@ -61,8 +91,14 @@ async def chat_send(body: dict) -> dict:
     """
     session_id = body.get("session_id", "default")
     message = body.get("message", "")
-    agent = _get_agent(session_id)
-    reply = await agent.send(message)
+    agent = _get_agent(session_id, api_key=x_openai_api_key)
+    try:
+        reply = await agent.send(message)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chat send failed (api_key missing or invalid?): {exc}",
+        )
 
     result: dict = {"reply": reply.text}
     if reply.tool_records:
@@ -87,7 +123,10 @@ async def chat_send(body: dict) -> dict:
 
 
 @router.post("/chat/stream")
-async def chat_stream(body: dict) -> StreamingResponse:
+async def chat_stream(
+    body: dict,
+    x_openai_api_key: str | None = Header(None),
+) -> StreamingResponse:
     """Send a message and stream the response via Server-Sent Events.
 
     Each event is a ``data: {json}\n\n`` line.  See ``AgentStreamEvent.to_dict()``
@@ -101,25 +140,14 @@ async def chat_stream(body: dict) -> StreamingResponse:
       * ``round_start`` — a new LLM round begins
       * ``done`` — stream complete, carries aggregated usage/duration/metadata
       * ``error`` — an error occurred during streaming
-
-    Usage (JavaScript / fetch):
-
-    .. code-block:: javascript
-
-        const response = await fetch('/api/v1/chat/stream', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({message: 'hello', session_id: 'default'}),
-        });
-        const reader = response.body.getReader();
-        // read lines with reader.read(), parse "data: {json}" lines
     """
     session_id = body.get("session_id", "default")
     message = body.get("message", "")
-    agent = _get_agent(session_id)
+    agent = _get_agent(session_id, api_key=x_openai_api_key)
 
     async def event_generator():
         try:
+            await agent._ensure_initialized()
             async for event in agent.send_stream(message):
                 yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except Exception as exc:

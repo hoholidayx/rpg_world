@@ -1,11 +1,28 @@
 import api from './index'
 
+/**
+ * Read the saved OpenAI API key from localStorage.
+ * Returns empty string if not set.
+ */
+function getApiKey() {
+  return localStorage.getItem('rpg_openai_api_key') || ''
+}
+
 export function getHistory(sessionId = 'default') {
-  return api.get('/chat/history', { params: { session_id: sessionId } })
+  const headers = {}
+  const key = getApiKey()
+  if (key) headers['X-OpenAI-Api-Key'] = key
+  return api.get('/chat/history', {
+    params: { session_id: sessionId },
+    headers,
+  })
 }
 
 export function sendMessage(message, sessionId = 'default') {
-  return api.post('/chat/send', { message, session_id: sessionId })
+  const headers = {}
+  const key = getApiKey()
+  if (key) headers['X-OpenAI-Api-Key'] = key
+  return api.post('/chat/send', { message, session_id: sessionId }, { headers })
 }
 
 /**
@@ -20,6 +37,9 @@ export function streamMessage(message, sessionId = 'default', onEvent) {
   const controller = new AbortController()
 
   const headers = { 'Content-Type': 'application/json' }
+  const key = getApiKey()
+  if (key) headers['X-OpenAI-Api-Key'] = key
+
   // Dynamic base URL — supports both Vite proxy (dev) and production
   const base = import.meta.env.DEV ? '' : `${import.meta.env.VITE_API_BASE || ''}`
   const url = `${base}/api/v1/chat/stream`
