@@ -25,6 +25,7 @@ class LLMUsage:
     """一次 LLM API 调用的 token 消耗。
 
     字段对应 OpenAI / DeepSeek ``response.usage`` 结构。
+    prompt_cache_hit / miss 为通用字段，不依赖特定厂商字段名。
     """
 
     prompt_tokens: int = 0
@@ -33,12 +34,19 @@ class LLMUsage:
     prompt_tokens_details: dict[str, Any] | None = None
     completion_tokens_details: dict[str, Any] | None = None
 
+    # ── 缓存统计（通用字段，provider 层从原始 usage 中提取） ────────
+    prompt_cache_hit_tokens: int = 0
+    """本次 prompt 中命中缓存的 token 数。"""
+    prompt_cache_miss_tokens: int = 0
+    """本次 prompt 中未命中缓存、需实际计算的 token 数。"""
+
+    raw_usage: dict[str, Any] | None = None
+    """API 原始 ``response.usage`` 全量字段快照，用于调试。"""
+
     @property
     def cached_tokens(self) -> int:
-        """取 prompt_tokens_details 中的 cached_tokens（DeepSeek 等）。"""
-        if self.prompt_tokens_details:
-            return self.prompt_tokens_details.get("cached_tokens", 0)
-        return 0
+        """取缓存命中 token 数（兼容旧代码）。"""
+        return self.prompt_cache_hit_tokens
 
     @property
     def has_usage(self) -> bool:

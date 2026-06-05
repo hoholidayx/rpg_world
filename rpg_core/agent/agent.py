@@ -156,6 +156,16 @@ class RPGGameAgent:
         self._append_history("user", stored_input)
 
         messages = self._build_transformed_context()
+        if settings.verbose_logging:
+            sys_msgs = sum(1 for m in messages if m.get("role") == "system")
+            user_msgs = sum(1 for m in messages if m.get("role") == "user")
+            asst_msgs = sum(1 for m in messages if m.get("role") == "assistant")
+            total_chars = sum(len(m.get("content", "")) for m in messages)
+            logger.debug(
+                _TAG + " context messages: {} total (sys={}, user={}, asst={}) chars={}",
+                len(messages), sys_msgs, user_msgs, asst_msgs, total_chars,
+            )
+
         schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
 
         reply_text, records = await run_chat_loop(

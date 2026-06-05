@@ -208,39 +208,72 @@ def _print_stats(stats: TurnStats) -> None:
     chat_calls = stats.chat_loop_calls
     sub_calls = stats.sub_agent_calls
 
+    def _cache_info(prompt: int, cached: int, missed: int) -> str:
+        parts = []
+        if cached:
+            rate = cached / prompt * 100
+            parts.append(f"cache: {cached:,} ({rate:.0f}%)")
+        if missed:
+            parts.append(f"miss: {missed:,}")
+        if parts:
+            return "  [" + ", ".join(parts) + "]"
+        return ""
+
+    def _missed(usage) -> int:
+        return usage.prompt_cache_miss_tokens if usage else 0
+
     if chat_calls:
         chat_prompt = sum(c.usage.prompt_tokens for c in chat_calls if c.usage)
         chat_comp = sum(c.usage.completion_tokens for c in chat_calls if c.usage)
+        chat_cached = sum(c.usage.cached_tokens for c in chat_calls if c.usage)
+        chat_missed = sum(_missed(c.usage) for c in chat_calls)
         chat_total = chat_prompt + chat_comp
         chat_dur = sum(c.duration_ms for c in chat_calls)
         lines.append(
             f"    Main loop ({len(chat_calls)} call(s)): "
-            f"{chat_prompt}p + {chat_comp}c = {chat_total}t  |  {chat_dur:.0f}ms"
+            f"prompt {chat_prompt:,} + completion {chat_comp:,} = total {chat_total:,} tokens"
+            f"{_cache_info(chat_prompt, chat_cached, chat_missed)}"
+            f"  |  {chat_dur:.0f}ms"
         )
         for i, c in enumerate(chat_calls):
-            p = c.usage.prompt_tokens if c.usage else 0
-            co = c.usage.completion_tokens if c.usage else 0
-            cached = c.usage.cached_tokens if c.usage else 0
-            suffix = f"  [cache: {cached} hit]" if cached else ""
+            u = c.usage
+            if not u:
+                continue
+            prompt_n = u.prompt_tokens
+            comp_n = u.completion_tokens
+            cached_n = u.cached_tokens
+            missed_n = _missed(u)
             lines.append(
-                f"      [{i+1}] {p}p + {co}c = {p+co}t  "
-                f"|  {c.duration_ms:.0f}ms  [model: {c.model}]{suffix}"
+                f"      [{i+1}] prompt {prompt_n:,} + completion {comp_n:,} = {prompt_n + comp_n:,} tokens"
+                f"{_cache_info(prompt_n, cached_n, missed_n)}"
+                f"  |  {c.duration_ms:.0f}ms  [model: {c.model}]"
             )
 
     if sub_calls:
         sub_prompt = sum(c.usage.prompt_tokens for c in sub_calls if c.usage)
         sub_comp = sum(c.usage.completion_tokens for c in sub_calls if c.usage)
+        sub_cached = sum(c.usage.cached_tokens for c in sub_calls if c.usage)
+        sub_missed = sum(_missed(c.usage) for c in sub_calls)
         sub_total = sub_prompt + sub_comp
         sub_dur = sum(c.duration_ms for c in sub_calls)
         lines.append(
             f"    Sub-agent ({len(sub_calls)} call(s)): "
-            f"{sub_prompt}p + {sub_comp}c = {sub_total}t  |  {sub_dur:.0f}ms"
+            f"prompt {sub_prompt:,} + completion {sub_comp:,} = total {sub_total:,} tokens"
+            f"{_cache_info(sub_prompt, sub_cached, sub_missed)}"
+            f"  |  {sub_dur:.0f}ms"
         )
         for c in sub_calls:
-            cached = c.usage.cached_tokens if c.usage else 0
-            suffix = f"  [cache: {cached} hit]" if cached else ""
+            u = c.usage
+            if not u:
+                continue
+            prompt_n = u.prompt_tokens
+            comp_n = u.completion_tokens
+            cached_n = u.cached_tokens
+            missed_n = _missed(u)
             lines.append(
-                f"      [{c.source}] {c.model}{suffix}"
+                f"      [{c.source}] prompt {prompt_n:,} + completion {comp_n:,} = {prompt_n + comp_n:,} tokens"
+                f"{_cache_info(prompt_n, cached_n, missed_n)}"
+                f"  |  {c.duration_ms:.0f}ms  [model: {c.model}]"
             )
 
     # 合计
@@ -248,10 +281,11 @@ def _print_stats(stats: TurnStats) -> None:
     total_pt = stats.total_prompt_tokens
     total_ct = stats.total_completion_tokens
     total_cached = stats.total_cached_tokens
-    cache_str = f"  |  cache: {total_cached} hit" if total_cached else ""
+    total_missed = sum(_missed(c.usage) for c in stats.calls)
     lines.append(
-        f"  Total: {total_pt}p + {total_ct}c = {total_pt + total_ct}t"
-        f"{cache_str}  |  {stats.total_duration_ms:.0f}ms"
+        f"  Total: prompt {total_pt:,} + completion {total_ct:,} = {total_pt + total_ct:,} tokens"
+        f"{_cache_info(total_pt, total_cached, total_missed)}"
+        f"  |  {stats.total_duration_ms:.0f}ms"
     )
     lines.append("")
 

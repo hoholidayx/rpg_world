@@ -11,10 +11,58 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
+from loguru import logger
 from openai import AsyncOpenAI
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.agent_types import LLMResponse, LLMUsage, ProviderChunk
+from rpg_world.rpg_core.settings import settings
+
+
+def _build_usage(raw, raw_dict: dict[str, Any] | None) -> LLMUsage | None:
+    """从 API response.usage 构建 ``LLMUsage``，统一提取缓存统计。
+
+    兼容 OpenAI / DeepSeek 等不同厂商的字段命名差异：
+    - ``prompt_tokens_details.cached_tokens``（OpenAI 标准）
+    - ``prompt_cache_hit_tokens`` / ``prompt_cache_miss_tokens``（DeepSeek 顶层）
+    """
+    if raw is None:
+        return None
+
+    # 从原始 dict 中提取缓存数据（兼容不同厂商字段名）
+    if raw_dict:
+        hit = raw_dict.get("prompt_cache_hit_tokens",
+              raw_dict.get("cache_read_input_tokens", 0))
+        miss = raw_dict.get("prompt_cache_miss_tokens",
+               raw_dict.get("prompt_tokens", 0) - hit)
+        if raw_dict.get("prompt_tokens_details"):
+            details_hit = raw_dict["prompt_tokens_details"].get("cached_tokens", 0)
+            if not hit:
+                hit = details_hit
+    else:
+        # fallback：从 prompt_tokens_details 读取
+        hit = 0
+        if getattr(raw, "prompt_tokens_details", None):
+            hit = getattr(raw.prompt_tokens_details, "cached_tokens", 0) or 0
+        miss = 0
+
+    if settings.verbose_logging and raw_dict:
+        logger.debug("[OpenAIProvider] raw usage: {}", raw_dict)
+
+    return LLMUsage(
+        prompt_tokens=raw.prompt_tokens or 0,
+        completion_tokens=raw.completion_tokens or 0,
+        total_tokens=raw.total_tokens or 0,
+        prompt_tokens_details=(
+            dict(raw.prompt_tokens_details) if raw.prompt_tokens_details else None
+        ),
+        completion_tokens_details=(
+            dict(raw.completion_tokens_details) if raw.completion_tokens_details else None
+        ),
+        prompt_cache_hit_tokens=hit,
+        prompt_cache_miss_tokens=miss,
+        raw_usage=raw_dict,
+    )
 
 
 class OpenAIProvider(LLMProvider):
@@ -76,22 +124,14 @@ class OpenAIProvider(LLMProvider):
         msg = choice.message
 
         # ── usage ────────────────────────────────────────────────────
-        usage: LLMUsage | None = None
+        raw_dict: dict[str, Any] | None = None
         if response.usage is not None:
-            raw = response.usage
-            usage = LLMUsage(
-                prompt_tokens=raw.prompt_tokens or 0,
-                completion_tokens=raw.completion_tokens or 0,
-                total_tokens=raw.total_tokens or 0,
-                prompt_tokens_details=(
-                    dict(raw.prompt_tokens_details)
-                    if raw.prompt_tokens_details else None
-                ),
-                completion_tokens_details=(
-                    dict(raw.completion_tokens_details)
-                    if raw.completion_tokens_details else None
-                ),
-            )
+            try:
+                raw = response.usage
+                raw_dict = raw.to_dict() if hasattr(raw, "to_dict") else dict(raw)
+            except Exception:
+                raw_dict = None
+        usage = _build_usage(response.usage, raw_dict)
 
         # ── reasoning / thinking ─────────────────────────────────────
         reasoning_content: str | None = None
@@ -150,18 +190,12 @@ class OpenAIProvider(LLMProvider):
             # usage may appear on the final chunk
             usage: LLMUsage | None = None
             if raw_chunk.usage is not None:
-                u = raw_chunk.usage
-                usage = LLMUsage(
-                    prompt_tokens=u.prompt_tokens or 0,
-                    completion_tokens=u.completion_tokens or 0,
-                    total_tokens=u.total_tokens or 0,
-                    prompt_tokens_details=(
-                        dict(u.prompt_tokens_details) if u.prompt_tokens_details else None
-                    ),
-                    completion_tokens_details=(
-                        dict(u.completion_tokens_details) if u.completion_tokens_details else None
-                    ),
-                )
+                raw_dict: dict[str, Any] | None = None
+                try:
+                    raw_dict = raw_chunk.usage.to_dict() if hasattr(raw_chunk.usage, "to_dict") else dict(raw_chunk.usage)
+                except Exception:
+                    raw_dict = None
+                usage = _build_usage(raw_chunk.usage, raw_dict)
 
             content_delta = ""
             reasoning_delta: str | None = None
