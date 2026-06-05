@@ -74,6 +74,10 @@
           <DashboardOutlined />
           <span>概览</span>
         </a-menu-item>
+        <a-menu-item key="/chat">
+          <MessageOutlined />
+          <span>聊天</span>
+        </a-menu-item>
         <a-menu-item key="/characters">
           <UserOutlined />
           <span>角色卡管理</span>
@@ -149,6 +153,10 @@
           <DashboardOutlined />
           <span>概览</span>
         </a-menu-item>
+        <a-menu-item key="/chat">
+          <MessageOutlined />
+          <span>聊天</span>
+        </a-menu-item>
         <a-menu-item key="/characters">
           <UserOutlined />
           <span>角色卡管理</span>
@@ -208,6 +216,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   MenuOutlined,
+  MessageOutlined,
   LeftOutlined,
   RightOutlined,
   DashboardOutlined,

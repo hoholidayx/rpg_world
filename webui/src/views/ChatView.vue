@@ -1,0 +1,647 @@
+<template>
+  <div class="chat-page">
+    <!-- ── Top bar ──────────────────────────────────────── -->
+    <header class="chat-header">
+      <div class="header-left">
+        <a-button type="text" class="back-btn" @click="goBack">
+          <ArrowLeftOutlined /> 返回
+        </a-button>
+      </div>
+      <div class="header-center">
+        <span class="header-title">RPG Chat</span>
+      </div>
+      <div class="header-right">
+        <!-- Workspace selector -->
+        <a-select
+          v-model:value="workspaceStore.activeWorkspace"
+          :options="workspaceOptions"
+          style="width: 140px;"
+          size="small"
+          @change="onWorkspaceChange"
+          :loading="workspaceStore.switching"
+        />
+        <!-- Session selector -->
+        <a-select
+          v-model:value="sessionStore.activeSession"
+          :options="sessionOptions"
+          style="width: 140px;"
+          size="small"
+          @change="onSessionChange"
+        />
+        <a-button size="small" type="dashed" @click="openCreateSession">
+          <PlusOutlined />
+        </a-button>
+        <a-popconfirm
+          title="确定删除当前会话？此操作不可恢复。"
+          @confirm="handleDeleteSession"
+          ok-text="确认删除"
+          cancel-text="取消"
+        >
+          <a-button size="small" danger :disabled="isDefaultSession">
+            <DeleteOutlined />
+          </a-button>
+        </a-popconfirm>
+      </div>
+    </header>
+
+    <!-- ── Message list ──────────────────────────────────── -->
+    <div class="message-container" ref="messageContainer">
+      <div v-if="messages.length === 0 && !loadingHistory" class="empty-state">
+        <a-empty description="开始一段新的冒险吧">
+          <template #image>
+            <MessageOutlined style="font-size: 48px; color: var(--text-secondary);" />
+          </template>
+        </a-empty>
+      </div>
+
+      <div v-if="loadingHistory" class="loading-history">
+        <a-spin size="small" /> 加载历史消息...
+      </div>
+
+      <div
+        v-for="(msg, idx) in messages"
+        :key="idx"
+        class="message-row"
+        :class="{ 'is-user': msg.role === 'user', 'is-assistant': msg.role === 'assistant' }"
+      >
+        <div class="message-bubble">
+          <!-- Role label -->
+          <div class="msg-role">{{ msg.role === 'user' ? 'User' : 'Assistant' }}</div>
+
+          <!-- Thinking content -->
+          <div v-if="msg.thinking" class="msg-thinking">
+            <a-collapse ghost size="small">
+              <a-collapse-panel key="thinking" header="思考过程">
+                <pre class="thinking-text">{{ msg.thinking }}</pre>
+              </a-collapse-panel>
+            </a-collapse>
+          </div>
+
+          <!-- Main content -->
+          <div class="msg-content" v-html="renderContent(msg.content)"></div>
+
+          <!-- Streaming indicator -->
+          <div v-if="msg.streaming" class="streaming-indicator">
+            <a-spin size="small" />
+          </div>
+
+          <!-- Tool calls -->
+          <div v-if="msg.tool_calls && msg.tool_calls.length" class="msg-tools">
+            <a-collapse ghost size="small">
+              <a-collapse-panel key="tools" :header="`工具调用 (${msg.tool_calls.length})`">
+                <div v-for="(tc, tci) in msg.tool_calls" :key="tci" class="tool-item">
+                  <code>{{ tc.tool_name }}({{ tc.tool_arguments }})</code>
+                  <div v-if="tc.tool_result_preview" class="tool-result">{{ tc.tool_result_preview }}</div>
+                </div>
+              </a-collapse-panel>
+            </a-collapse>
+          </div>
+
+          <!-- Stats (on done) -->
+          <div v-if="msg.stats" class="msg-stats">
+            tokens: {{ msg.stats.total_tokens || '-' }} |
+            {{ msg.stats.total_duration_ms ? (msg.stats.total_duration_ms / 1000).toFixed(1) + 's' : '-' }}
+            <template v-if="msg.stats.total_cached_tokens">
+              | cache: {{ msg.stats.total_cached_tokens }}
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Input area ────────────────────────────────────── -->
+    <div class="input-area">
+      <div class="input-wrapper">
+        <a-textarea
+          v-model:value="inputText"
+          placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
+          :rows="2"
+          :disabled="sending"
+          @keydown.enter.prevent="onSendKeydown"
+          class="chat-input"
+        />
+        <div class="input-actions">
+          <span class="input-hint">Enter 发送 · Shift+Enter 换行</span>
+          <div class="input-buttons">
+            <a-button
+              v-if="sending"
+              danger
+              @click="handleStop"
+            >
+              <StopOutlined /> 停止
+            </a-button>
+            <a-button
+              v-else
+              type="primary"
+              @click="handleSend"
+              :disabled="!inputText.trim()"
+            >
+              <SendOutlined /> 发送
+            </a-button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Create session modal ──────────────────────────── -->
+    <a-modal
+      v-model:open="createSessionVisible"
+      title="新建会话"
+      :confirm-loading="createSessionSaving"
+      @ok="handleCreateSession"
+      @cancel="resetCreateSessionForm"
+      :destroy-on-close="true"
+      :width="400"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="会话 ID" :required="true">
+          <a-input v-model:value="newSessionId" placeholder="如：campaign-2" />
+        </a-form-item>
+        <a-form-item label="从现有会话克隆（可选）">
+          <a-checkbox v-model:checked="cloneEnabled">克隆数据</a-checkbox>
+          <a-select
+            v-if="cloneEnabled"
+            v-model:value="cloneSourceId"
+            :options="sessionOptions"
+            style="width: 100%; margin-top: 8px;"
+            placeholder="选择源会话"
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import {
+  ArrowLeftOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  SendOutlined,
+  StopOutlined,
+  MessageOutlined,
+} from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { useSessionStore } from '@/stores/session'
+import { getHistory, streamMessage } from '@/api/chat'
+
+const router = useRouter()
+const workspaceStore = useWorkspaceStore()
+const sessionStore = useSessionStore()
+
+// ── State ─────────────────────────────────────────────────
+const messages = ref([])
+const inputText = ref('')
+const sending = ref(false)
+const abortStream = ref(null)
+const messageContainer = ref(null)
+const loadingHistory = ref(false)
+
+// Create session modal
+const createSessionVisible = ref(false)
+const createSessionSaving = ref(false)
+const newSessionId = ref('')
+const cloneEnabled = ref(false)
+const cloneSourceId = ref(null)
+
+// ── Computed ──────────────────────────────────────────────
+
+const isDefaultSession = computed(() => sessionStore.activeSession === 'default')
+
+const workspaceOptions = computed(() =>
+  workspaceStore.workspaces.map((w) => ({
+    value: w.name,
+    label: w.label,
+  })),
+)
+
+const sessionOptions = computed(() =>
+  sessionStore.sessions.map((s) => ({
+    value: s.session_id || s,
+    label: s.session_id || s,
+  })),
+)
+
+// ── Lifecycle ─────────────────────────────────────────────
+
+onMounted(async () => {
+  await Promise.all([workspaceStore.load(), sessionStore.load()])
+  await loadHistory()
+})
+
+// ── Watch session changes ────────────────────────────────
+
+watch(
+  () => sessionStore.activeSession,
+  () => {
+    messages.value = []
+    loadHistory()
+  },
+)
+
+// ── Methods ───────────────────────────────────────────────
+
+function goBack() {
+  router.push('/overview')
+}
+
+async function loadHistory() {
+  loadingHistory.value = true
+  try {
+    const res = await getHistory(sessionStore.activeSession)
+    const history = res.data.history || []
+    // Filter out system messages, keep user/assistant pairs
+    messages.value = history
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({
+        role: m.role,
+        content: m.content || '',
+        thinking: null,
+        tool_calls: [],
+        stats: null,
+        streaming: false,
+      }))
+    await scrollToBottom()
+  } catch (e) {
+    // Silent — empty history is fine
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+async function handleSend() {
+  const text = inputText.value.trim()
+  if (!text || sending.value) return
+
+  inputText.value = ''
+  sending.value = true
+
+  // Push user message
+  messages.value.push({
+    role: 'user',
+    content: text,
+    thinking: null,
+    tool_calls: [],
+    stats: null,
+    streaming: false,
+  })
+
+  // Create empty assistant message for streaming
+  const asstMsg = {
+    role: 'assistant',
+    content: '',
+    thinking: null,
+    tool_calls: [],
+    stats: null,
+    streaming: true,
+  }
+  messages.value.push(asstMsg)
+  await scrollToBottom()
+
+  // Accumulate tool calls across rounds
+  const toolCallAcc = {}
+
+  abortStream.value = streamMessage(
+    text,
+    sessionStore.activeSession,
+    (event) => {
+      switch (event.kind) {
+        case 'text':
+          asstMsg.content += event.content
+          break
+        case 'thinking':
+          asstMsg.thinking = (asstMsg.thinking || '') + event.content
+          break
+        case 'tool_call':
+          toolCallAcc[event.tool_name] = event
+          break
+        case 'tool_result':
+          // Match tool result to the last tool call with the same name
+          if (event.tool_name && toolCallAcc[event.tool_name]) {
+            const existing = asstMsg.tool_calls.find(
+              (t) => t.tool_name === event.tool_name,
+            )
+            if (!existing) {
+              asstMsg.tool_calls.push({
+                tool_name: event.tool_name,
+                tool_arguments: toolCallAcc[event.tool_name].tool_arguments || '',
+                tool_result_preview: event.tool_result_preview || '',
+              })
+            } else {
+              existing.tool_result_preview = event.tool_result_preview || existing.tool_result_preview
+            }
+          }
+          break
+        case 'done':
+          asstMsg.streaming = false
+          asstMsg.stats = event.usage || null
+          sending.value = false
+          break
+        case 'error':
+          asstMsg.streaming = false
+          asstMsg.content += `\n\n[错误] ${event.content}`
+          sending.value = false
+          message.error(event.content)
+          break
+      }
+      scrollToBottom()
+    },
+  )
+}
+
+function handleStop() {
+  if (abortStream.value) {
+    abortStream.value()
+    abortStream.value = null
+    sending.value = false
+    // Mark the last assistant message as done
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant' && last.streaming) {
+      last.streaming = false
+    }
+  }
+}
+
+function onSendKeydown(e) {
+  if (e.shiftKey) return // Shift+Enter = newline
+  handleSend()
+}
+
+async function scrollToBottom() {
+  await nextTick()
+  if (messageContainer.value) {
+    messageContainer.value.scrollTop = messageContainer.value.scrollHeight
+  }
+}
+
+function renderContent(text) {
+  if (!text) return ''
+  // Escape HTML, then convert newlines to <br>
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  return escaped.replace(/\n/g, '<br>')
+}
+
+// ── Workspace ─────────────────────────────────────────────
+
+function onWorkspaceChange(value) {
+  if (value !== workspaceStore.activeWorkspace) {
+    workspaceStore.switchWorkspace(value)
+  }
+}
+
+// ── Session handlers ──────────────────────────────────────
+
+function onSessionChange(value) {
+  if (value !== sessionStore.activeSession) {
+    sessionStore.switchSession(value)
+  }
+}
+
+function openCreateSession() {
+  newSessionId.value = ''
+  cloneEnabled.value = false
+  cloneSourceId.value = null
+  createSessionVisible.value = true
+}
+
+function resetCreateSessionForm() {
+  createSessionVisible.value = false
+  newSessionId.value = ''
+  cloneEnabled.value = false
+  cloneSourceId.value = null
+}
+
+async function handleCreateSession() {
+  if (!newSessionId.value.trim()) return
+  createSessionSaving.value = true
+  try {
+    if (cloneEnabled.value && cloneSourceId.value) {
+      await sessionStore.duplicateSession(cloneSourceId.value, newSessionId.value)
+    } else {
+      await sessionStore.createNewSession(newSessionId.value)
+    }
+    createSessionVisible.value = false
+    sessionStore.switchSession(newSessionId.value)
+  } catch (e) {
+    message.error('创建会话失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    createSessionSaving.value = false
+  }
+}
+
+async function handleDeleteSession() {
+  try {
+    await sessionStore.removeSession(sessionStore.activeSession)
+    message.success('会话已删除')
+  } catch (e) {
+    message.error('删除会话失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+</script>
+
+<style scoped>
+/* ── Page layout ───────────────────────────────────────── */
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-color);
+  overflow: hidden;
+}
+
+/* ── Header ────────────────────────────────────────────── */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-center {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.back-btn {
+  color: var(--text-color);
+}
+
+/* ── Message container ─────────────────────────────────── */
+.message-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+.loading-history {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 24px;
+}
+
+/* ── Message bubbles ───────────────────────────────────── */
+.message-row {
+  display: flex;
+  flex-direction: column;
+}
+.is-user {
+  align-items: flex-end;
+}
+.is-assistant {
+  align-items: flex-start;
+}
+.message-bubble {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  word-break: break-word;
+}
+.is-user .message-bubble {
+  background: #1677ff;
+  color: #fff;
+  border-color: #1677ff;
+}
+.is-assistant .message-bubble {
+  background: var(--card-bg);
+  color: var(--text-color);
+}
+
+.msg-role {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+
+.is-user .msg-content {
+  color: #fff;
+}
+
+/* ── Thinking section ──────────────────────────────────── */
+.msg-thinking {
+  margin: 4px 0;
+  font-size: 13px;
+  background: rgba(128, 128, 128, 0.08);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.is-user .msg-thinking {
+  background: rgba(255, 255, 255, 0.12);
+}
+.thinking-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  margin: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ── Tool calls ────────────────────────────────────────── */
+.msg-tools {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.is-user .msg-tools {
+  display: none;
+}
+.tool-item {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.tool-item:last-child {
+  border-bottom: none;
+}
+.tool-item code {
+  font-size: 12px;
+  color: #1677ff;
+  word-break: break-all;
+}
+.tool-result {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Stats footer ──────────────────────────────────────── */
+.msg-stats {
+  margin-top: 6px;
+  font-size: 10px;
+  opacity: 0.5;
+  text-align: right;
+}
+
+/* ── Streaming indicator ───────────────────────────────── */
+.streaming-indicator {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  gap: 4px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+/* ── Input area ────────────────────────────────────────── */
+.input-area {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  background: var(--card-bg);
+  border-top: 1px solid var(--border-color);
+}
+.input-wrapper {
+  max-width: 800px;
+  margin: 0 auto;
+}
+.chat-input {
+  resize: none;
+}
+.input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.input-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.input-buttons {
+  display: flex;
+  gap: 6px;
+}
+</style>

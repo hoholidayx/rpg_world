@@ -92,10 +92,6 @@ class Settings:
         return self._resolve("pm_details_path", "pm_details.json")
 
     @property
-    def sub_agent_path(self) -> str:
-        return self._resolve("sub_agent_path", "memory_sub_agent")
-
-    @property
     def verbose_logging(self) -> bool:
         return self._raw.get("agent_config", {}).get("verbose_logging", False)
 
@@ -129,6 +125,24 @@ class Settings:
     @property
     def include_tool_records(self) -> bool:
         return self._raw.get("agent_config", {}).get("include_tool_records", True)
+
+    @property
+    def agent_model(self) -> str:
+        """用于 API 层创建 RPGGameAgent 的默认模型名。"""
+        return self._raw.get("agent_config", {}).get("model", "deepseek-v4-flash")
+
+    @property
+    def agent_base_url(self) -> str | None:
+        """用于 API 层创建 RPGGameAgent 的 base URL。None 表示使用 SDK 默认值。"""
+        return self._raw.get("agent_config", {}).get("base_url")
+
+    @property
+    def agent_max_tokens(self) -> int | None:
+        return self._raw.get("agent_config", {}).get("max_tokens")
+
+    @property
+    def agent_temperature(self) -> float | None:
+        return self._raw.get("agent_config", {}).get("temperature")
 
     # ------------------------------------------------------------------
     # Workspace operations

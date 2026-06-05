@@ -1,13 +1,12 @@
 <template>
   <a-config-provider :theme="themeConfig">
-    <DashboardLayout />
+    <router-view />
   </a-config-provider>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import { theme } from 'ant-design-vue'
-import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import { useThemeStore } from '@/stores/theme'
 
 const themeStore = useThemeStore()

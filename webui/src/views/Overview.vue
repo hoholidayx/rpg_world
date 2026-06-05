@@ -2,15 +2,19 @@
   <div class="overview">
     <a-card>
       <template #title>
-        <DashboardOutlined /> 概览
+        <DashboardOutlined /> RPG World
       </template>
       <a-result
-        status="info"
-        title="全局状态观测"
-        sub-title="此页面用于展示 RPG World 的整体运行状态，后续实现。"
+        status="success"
+        title="欢迎使用 RPG World"
       >
         <template #icon>
           <DashboardOutlined />
+        </template>
+        <template #extra>
+          <a-button type="primary" size="large" @click="$router.push('/chat')">
+            <MessageOutlined /> 进入聊天
+          </a-button>
         </template>
       </a-result>
     </a-card>
@@ -18,7 +22,7 @@
 </template>
 
 <script setup>
-import { DashboardOutlined } from '@ant-design/icons-vue'
+import { DashboardOutlined, MessageOutlined } from '@ant-design/icons-vue'
 </script>
 
 <style scoped>

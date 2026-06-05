@@ -1,7 +1,10 @@
 {
   "active_workspace": "data/非公开行程",
-  "sub_agent_path": "memory_sub_agent",
   "agent_config": {
+    "model": "deepseek-v4-flash",
+    "base_url": "https://api.deepseek.com",
+    "max_tokens": null,
+    "temperature": null,
     "max_tool_call_limit": 10,
     "include_tool_records": true,
     "verbose_logging": true,
@@ -21,10 +24,5 @@
   },
   "character_path": "character",
   "lorebook_path": "lorebook",
-  "pm_details_path": "pm_details.json",
-  "status_path": "status",
-  "summary_path": "summary",
-  "story_memory_path": "story_memory",
-  "persistent_memory_path": "persistent_memory.md",
-  "history_path": "history"
+  "pm_details_path": "pm_details.json"
 }

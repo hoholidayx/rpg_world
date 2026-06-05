@@ -260,3 +260,31 @@ class AgentStreamEvent:
     reasoning_content: str | None = None
     stats: TurnStats | None = None
     """完整 LLM 调用明细（含 SubAgent 细分）。仅在 DONE 事件携带。"""
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为 JSON-safe dict，供 SSE 传输。"""
+        d: dict[str, Any] = {"kind": self.kind.value}
+        if self.content:
+            d["content"] = self.content
+        if self.tool_name:
+            d["tool_name"] = self.tool_name
+        if self.tool_arguments:
+            d["tool_arguments"] = self.tool_arguments
+        if self.tool_result_preview:
+            d["tool_result_preview"] = self.tool_result_preview
+        if self.round_index:
+            d["round_index"] = self.round_index
+        if self.usage:
+            d["usage"] = {
+                "prompt_tokens": self.usage.prompt_tokens,
+                "completion_tokens": self.usage.completion_tokens,
+                "total_tokens": self.usage.total_tokens,
+                "cached_tokens": self.usage.cached_tokens,
+            }
+        if self.duration_ms:
+            d["duration_ms"] = round(self.duration_ms, 1)
+        if self.model:
+            d["model"] = self.model
+        if self.finish_reason:
+            d["finish_reason"] = self.finish_reason
+        return d

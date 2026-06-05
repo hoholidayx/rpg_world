@@ -77,6 +77,9 @@ def reset_all() -> None:
     get_character_manager.cache_clear()
     get_lorebook_manager.cache_clear()
     _session_managers.clear()
+    from rpg_world.api.routers.chat import _agent_instances
+
+    _agent_instances.clear()
     watcher = get_watcher()
     watcher.stop()
     watcher.clear_all()
