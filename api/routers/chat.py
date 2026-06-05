@@ -46,6 +46,7 @@ async def get_chat_history(session_id: str = "default") -> dict:
     under the session's data directory.
     """
     agent = _get_agent(session_id)
+    await agent._ensure_initialized()
     return {"history": agent.history}
 
 
