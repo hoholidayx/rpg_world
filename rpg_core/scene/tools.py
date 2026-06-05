@@ -84,18 +84,23 @@ class SetAttrTool(BaseTool):
     """创建或更新当前场景的属性。"""
 
     name = "scene_attr"
-    description = "创建或更新当前场景的属性。例如设置位置、天气、氛围、季节等任意场景上下文。"
 
     def __init__(self, tracker: SceneTracker) -> None:
         self._tracker = tracker
 
     def parameters(self) -> dict[str, Any]:
+        defaults = ", ".join(self._tracker.DEFAULT_ATTRS)
         return {
             "type": "object",
             "properties": {
                 "key": {
                     "type": "string",
-                    "description": "属性名，例如“位置”、“天气”、“季节”、“在场人物”",
+                    "description": (
+                        f"属性名，如 {defaults} 等。"
+                        f"建议优先复用现有属性名而非创建新属性。"
+                        f"总数上限 {self._tracker.MAX_ATTRS} 个（含默认属性），"
+                        f"超出需先删除不再需要的属性。"
+                    ),
                 },
                 "value": {
                     "type": "string",
@@ -106,18 +111,21 @@ class SetAttrTool(BaseTool):
         }
 
     async def execute(self, key: str, value: str) -> str:
-        self._tracker.set_attr(key, value)
-        return f"场景属性已设置：{key} = {value}"
+        try:
+            self._tracker.set_attr(key, value)
+            return f"场景属性已设置：{key} = {value}"
+        except ValueError as e:
+            return f"设置失败：{e}"
 
 
 class DeleteAttrTool(BaseTool):
-    """删除当前场景的一个属性。"""
+    """删除当前场景的一个非默认属性。"""
 
     name = "scene_del_attr"
-    description = "删除当前场景的某个属性。"
 
     def __init__(self, tracker: SceneTracker) -> None:
         self._tracker = tracker
+        self._protected = ", ".join(tracker.DEFAULT_ATTRS)
 
     def parameters(self) -> dict[str, Any]:
         return {
@@ -125,12 +133,16 @@ class DeleteAttrTool(BaseTool):
             "properties": {
                 "key": {
                     "type": "string",
-                    "description": "要删除的属性名",
+                    "description": (
+                        f"要删除的属性名。注意 {self._protected} 为默认属性，不可删除。"
+                    ),
                 },
             },
             "required": ["key"],
         }
 
     async def execute(self, key: str) -> str:
+        if key in self._tracker.protected_attrs:
+            return f"「{key}」为默认属性，不可删除"
         self._tracker.delete_attr(key)
         return f"场景属性已删除：{key}"

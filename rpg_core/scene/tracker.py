@@ -41,7 +41,10 @@ class SceneTracker:
     DEFAULT_ATTRS: dict[str, str] = {
         "时间": "第 1 年 1 月 1 日 6 时",
         "位置": "",
+        "在场人物": "",
     }
+    MAX_ATTRS = 8
+    """场景属性总数上限（含默认属性），超出后 set_attr 返回错误。"""
 
     def __init__(self) -> None:
         # 结构化时间字段
@@ -164,16 +167,35 @@ class SceneTracker:
         self._save_to_status_table()
         return dict(self._attrs)
 
+    @property
+    def protected_attrs(self) -> set[str]:
+        """不可被删除的默认属性 key 集合。"""
+        return set(self.DEFAULT_ATTRS.keys())
+
+    @property
+    def attr_count(self) -> int:
+        return len(self._attrs)
+
     # ── 场景属性操作 ────────────────────────────────────────────────
 
     def set_attr(self, key: str, value: str) -> dict[str, str]:
-        """创建或更新场景属性。"""
+        """创建或更新场景属性。
+
+        超出 ``MAX_ATTRS`` 上限时抛 ``ValueError``。
+        """
+        if key not in self._attrs and len(self._attrs) >= self.MAX_ATTRS:
+            raise ValueError(
+                f"场景属性已达上限（{self.MAX_ATTRS} 个），"
+                f"请先删除不再需要的属性再新增"
+            )
         self._attrs[key] = value
         self._save_to_status_table()
         return dict(self._attrs)
 
     def delete_attr(self, key: str) -> dict[str, str]:
-        """删除场景属性。key 不存在时静默忽略。"""
+        """删除场景属性。默认属性（如时间、位置）不可删除，静默忽略。"""
+        if key in self.protected_attrs:
+            return dict(self._attrs)
         self._attrs.pop(key, None)
         self._save_to_status_table()
         return dict(self._attrs)
@@ -192,7 +214,7 @@ class SceneTracker:
             else:
                 lines.append(f"{k}: ")
         lines.append("")
-        lines.append("（场景状态已由 StatusSubAgent 自动预处理。如需手动修正，可使用 scene_time / scene_attr / scene_del_attr 工具）")
+        lines.append("（场景状态已由 StatusSubAgent 自动预处理。需要手动调整时可使用 scene_time / scene_attr / scene_del_attr 工具）")
         lines.append("[/scene]")
         return "\n".join(lines)
 
