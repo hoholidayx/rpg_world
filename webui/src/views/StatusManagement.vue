@@ -215,7 +215,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import {
   PlusOutlined,
   EditOutlined,
@@ -238,6 +238,10 @@ import {
   renameTable,
   deleteTable,
 } from '@/api/status'
+import { useSessionStore } from '@/stores/session'
+
+const sessionStore = useSessionStore()
+const sessionId = computed(() => sessionStore.activeSession)
 
 // ============================================================================
 // Types
@@ -250,13 +254,22 @@ const selectedType = ref(null)
 async function loadTypes() {
   typesLoading.value = true
   try {
-    types.value = await listTypes()
+    types.value = await listTypes(sessionId.value)
   } catch (e) {
     message.error('加载类型失败: ' + e.message)
   } finally {
     typesLoading.value = false
   }
 }
+
+// Reload all data when session changes
+watch(sessionId, () => {
+  selectedType.value = null
+  selectedTable.value = null
+  localHeaders.value = []
+  localRows.value = []
+  loadTypes()
+})
 
 function selectType(name) {
   selectedType.value = name
@@ -278,7 +291,7 @@ async function loadTables() {
   if (!selectedType.value) return
   tablesLoading.value = true
   try {
-    tables.value = await listTables(selectedType.value)
+    tables.value = await listTables(selectedType.value, sessionId.value)
   } catch (e) {
     message.error('加载表格失败: ' + e.message)
   } finally {
@@ -307,7 +320,7 @@ const saving = ref(false)
 
 async function loadTableData(name) {
   try {
-    const data = await getTable(selectedType.value, name)
+    const data = await getTable(selectedType.value, name, sessionId.value)
     localHeaders.value = data.headers || []
     localRows.value = data.rows || []
   } catch (e) {
@@ -323,7 +336,7 @@ async function saveTableData() {
     await saveTable(selectedType.value, selectedTable.value, {
       headers: localHeaders.value,
       rows: localRows.value,
-    })
+    }, sessionId.value)
     message.success('已保存')
   } catch (e) {
     message.error('保存失败: ' + e.message)
@@ -395,13 +408,13 @@ async function handleTypeSave() {
   typeSaving.value = true
   try {
     if (typeEditing.value) {
-      await renameType(typeEditing.value, typeForm.name)
+      await renameType(typeEditing.value, typeForm.name, sessionId.value)
       if (selectedType.value === typeEditing.value) {
         selectedType.value = typeForm.name
       }
       message.success('已重命名')
     } else {
-      await createType(typeForm.name)
+      await createType(typeForm.name, sessionId.value)
       message.success('已创建')
     }
     typeModalVisible.value = false
@@ -415,7 +428,7 @@ async function handleTypeSave() {
 
 async function handleDeleteType(name) {
   try {
-    await deleteType(name)
+    await deleteType(name, sessionId.value)
     if (selectedType.value === name) {
       selectedType.value = null
       selectedTable.value = null
@@ -468,7 +481,7 @@ async function handleTableSave() {
   tableSaving.value = true
   try {
     if (tableEditing.value) {
-      await renameTable(selectedType.value, tableEditing.value, tableForm.name)
+      await renameTable(selectedType.value, tableEditing.value, tableForm.name, sessionId.value)
       if (selectedTable.value === tableEditing.value) {
         selectedTable.value = tableForm.name
       }
@@ -478,7 +491,7 @@ async function handleTableSave() {
         name: tableForm.name,
         headers: [],
         rows: [],
-      })
+      }, sessionId.value)
       message.success('已创建')
     }
     tableModalVisible.value = false
@@ -487,6 +500,21 @@ async function handleTableSave() {
     message.error('操作失败: ' + e.message)
   } finally {
     tableSaving.value = false
+  }
+}
+
+async function handleDeleteTable(tableName) {
+  try {
+    await deleteTable(selectedType.value, tableName, sessionId.value)
+    if (selectedTable.value === tableName) {
+      selectedTable.value = null
+      localHeaders.value = []
+      localRows.value = []
+    }
+    message.success('已删除表格')
+    await loadTables()
+  } catch (e) {
+    message.error('删除失败: ' + e.message)
   }
 }
 

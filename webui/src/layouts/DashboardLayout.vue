@@ -42,6 +42,28 @@
         </a-dropdown>
       </div>
 
+      <!-- Session selector (desktop) -->
+      <div v-if="!collapsed" class="session-section">
+        <a-dropdown :trigger="['click']" placement="bottomLeft">
+          <div class="session-trigger">
+            <FileTextOutlined />
+            <span class="session-label">{{ activeSessionLabel }}</span>
+            <DownOutlined class="session-arrow" />
+          </div>
+          <template #overlay>
+            <a-menu @click="onSessionMenuClick" :selectedKeys="[sessionStore.activeSession]">
+              <a-menu-item v-for="s in sessionStore.sessions" :key="s.session_id || s">
+                {{ s.session_id || s }}
+              </a-menu-item>
+              <a-menu-divider />
+              <a-menu-item key="__create__">
+                <PlusOutlined /> 新建会话
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
+      </div>
+
       <a-menu
         v-model:selectedKeys="selectedKeys"
         mode="inline"
@@ -103,6 +125,21 @@
         />
       </div>
 
+      <!-- Session selector (mobile) -->
+      <div class="drawer-session">
+        <span class="drawer-session-label"><FileTextOutlined /> 会话</span>
+        <a-select
+          v-model:value="sessionStore.activeSession"
+          :options="sessionOptions"
+          size="small"
+          style="width: 100%; margin-top: 8px;"
+          @change="onSessionChange"
+        />
+        <a-button size="small" type="dashed" block style="margin-top: 6px;" @click="openCreateSession">
+          <PlusOutlined /> 新建会话
+        </a-button>
+      </div>
+
       <a-menu
         v-model:selectedKeys="selectedKeys"
         mode="inline"
@@ -136,6 +173,33 @@
         <router-view />
       </a-layout-content>
     </a-layout>
+
+    <!-- Create session modal -->
+    <a-modal
+      v-model:open="createSessionVisible"
+      title="新建会话"
+      :confirm-loading="createSessionSaving"
+      @ok="handleCreateSession"
+      @cancel="resetCreateSessionForm"
+      :destroy-on-close="true"
+      :width="420"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="会话 ID" :required="true">
+          <a-input v-model:value="newSessionId" placeholder="如：campaign-2" />
+        </a-form-item>
+        <a-form-item label="从现有会话克隆（可选）">
+          <a-checkbox v-model:checked="cloneEnabled">从已有会话克隆</a-checkbox>
+          <a-select
+            v-if="cloneEnabled"
+            v-model:value="cloneSourceId"
+            :options="sessionOptions"
+            style="width: 100%; margin-top: 8px;"
+            placeholder="选择源会话"
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </a-layout>
 </template>
 
@@ -149,24 +213,35 @@ import {
   DashboardOutlined,
   UserOutlined,
   BookOutlined,
-  FlagOutlined,
   ProfileOutlined,
   FolderOutlined,
   DownOutlined,
+  FileTextOutlined,
+  PlusOutlined,
 } from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useThemeStore } from '@/stores/theme'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useSessionStore } from '@/stores/session'
 
 const router = useRouter()
 const route = useRoute()
 const themeStore = useThemeStore()
 const workspaceStore = useWorkspaceStore()
+const sessionStore = useSessionStore()
 
 const collapsed = ref(false)
 const drawerVisible = ref(false)
 const selectedKeys = ref([route.path])
 const isMobile = ref(false)
+
+// ── Create session modal state ─────────────────────────────────────────
+const createSessionVisible = ref(false)
+const createSessionSaving = ref(false)
+const newSessionId = ref('')
+const cloneEnabled = ref(false)
+const cloneSourceId = ref(null)
 
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
@@ -176,6 +251,7 @@ onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
   workspaceStore.load()
+  sessionStore.load()
 })
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
@@ -199,6 +275,15 @@ const workspaceOptions = computed(() =>
   })),
 )
 
+const activeSessionLabel = computed(() => sessionStore.activeSession)
+
+const sessionOptions = computed(() =>
+  sessionStore.sessions.map((s) => ({
+    value: s.session_id || s,
+    label: s.session_id || s,
+  })),
+)
+
 watch(
   () => route.path,
   (p) => {
@@ -212,10 +297,59 @@ function onMenuClick({ key }) {
 }
 
 function onWorkspaceChange(value) {
-  // Desktop a-menu passes { key }, mobile a-select passes the value directly
   const name = typeof value === 'object' ? value.key : value
   if (name !== workspaceStore.activeWorkspace) {
     workspaceStore.switchWorkspace(name)
+  }
+}
+
+// ── Session handlers ───────────────────────────────────────────────────
+
+function onSessionMenuClick({ key }) {
+  if (key === '__create__') {
+    openCreateSession()
+    return
+  }
+  if (key !== sessionStore.activeSession) {
+    sessionStore.switchSession(key)
+  }
+}
+
+function onSessionChange(value) {
+  if (value !== sessionStore.activeSession) {
+    sessionStore.switchSession(value)
+  }
+}
+
+function openCreateSession() {
+  newSessionId.value = ''
+  cloneEnabled.value = false
+  cloneSourceId.value = null
+  createSessionVisible.value = true
+}
+
+function resetCreateSessionForm() {
+  createSessionVisible.value = false
+  newSessionId.value = ''
+  cloneEnabled.value = false
+  cloneSourceId.value = null
+}
+
+async function handleCreateSession() {
+  if (!newSessionId.value.trim()) return
+  createSessionSaving.value = true
+  try {
+    if (cloneEnabled.value && cloneSourceId.value) {
+      await sessionStore.duplicateSession(cloneSourceId.value, newSessionId.value)
+    } else {
+      await sessionStore.createNewSession(newSessionId.value)
+    }
+    createSessionVisible.value = false
+    sessionStore.switchSession(newSessionId.value)
+  } catch (e) {
+    message.error('创建会话失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    createSessionSaving.value = false
   }
 }
 </script>
@@ -298,6 +432,46 @@ function onWorkspaceChange(value) {
 .content-area {
   margin: 16px;
   min-height: calc(100vh - 32px);
+}
+
+/* ---- Session Selector ---- */
+.session-section {
+  padding: 4px 12px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 4px;
+}
+.session-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+  transition: background 0.2s, color 0.2s;
+}
+.session-trigger:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.session-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-arrow {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.drawer-session {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+.drawer-session-label {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 /* ---- Workspace Selector ---- */
