@@ -14,17 +14,39 @@ from pathlib import Path
 from typing import Any
 
 
+def _register_watcher(file_path: Path, callback) -> None:
+    """向 FileWatcher 注册单个文件的变更回调。
+
+    轻量工具函数，不引入 BaseManager 的完整开销。
+    在 watcher start 之前或之后都可以注册。
+    """
+    from rpg_world.rpg_core.utils.watcher import get_watcher
+
+    get_watcher().register(file_path.resolve(), callback)
+
+
 class StoryMemoryStore:
     """剧情记忆 —— 对应动态层中"剧情记忆"模块。
 
-    文件位置: data/story_memory/{session_id}.json
+    构造时传入完整文件路径（见 :func:`Settings.workspace_root`），
     内容为剧情推进中产生的需要记住的小细节，
     总量可控，定期提炼到常驻记忆后清空。
+
+    通过 FileWatcher 监听文件变更，外部修改后自动 reload。
     """
 
-    def __init__(self, data_path: Path, session_id: str = "default") -> None:
-        self._file = data_path / f"{session_id}.json"
+    def __init__(self, file_path: Path) -> None:
+        self._file = file_path
         self._details: list[dict[str, Any]] = self._load()
+        if not self._file.exists():
+            self._save()  # ensure file exists for FileWatcher
+        _register_watcher(self._file, self.reload)
+
+    # ── public API ────────────────────────────────────────
+
+    def reload(self) -> None:
+        """从磁盘重新加载，响应 FileWatcher 事件。"""
+        self._details = self._load()
 
     # ── public API ────────────────────────────────────────
 

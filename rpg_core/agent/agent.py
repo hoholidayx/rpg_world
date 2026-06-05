@@ -16,7 +16,7 @@ from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
 from rpg_world.rpg_core.agent.sub_agents import StatusSubAgent, SubAgentContext
 from rpg_world.rpg_core.agent.tokenizer import TiktokenTokenCounter, TokenCounter
-from rpg_world.rpg_core.agent.types import AgentStreamEvent, StreamEventKind, TurnStats
+from rpg_world.rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_world.rpg_core.agent.tools import (
     BaseTool,
     GrepTool,
@@ -290,7 +290,7 @@ class RPGGameAgent:
 
         # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
         # Compute aggregate usage across all LLM calls (main loop + sub-agents)
-        from rpg_world.rpg_core.agent.types import LLMUsage
+        from rpg_world.rpg_core.agent.agent_types import LLMUsage
 
         total_pt = turn_stats.total_prompt_tokens
         total_ct = turn_stats.total_completion_tokens
@@ -351,6 +351,23 @@ class RPGGameAgent:
         if not self._initialized:
             return
         self._refresh_rpg_context()
+
+    async def switch_session(self, session_id: str) -> None:
+        """原地切换到指定会话，不退出 REPL/Agent。
+
+        依次执行：
+        1. 更新 session_id
+        2. 重建所有 manager/store（build_rpg_context 接收新 session_id）
+        3. 清空并重载历史
+        4. 重建工具注册表
+        """
+        self._session_id = session_id
+        self._refresh_rpg_context()
+        self._history = []
+        if self._history_enabled:
+            self._load_history_from_disk()
+        self._setup_tool_registry()
+        logger.info("[MainAgent] switched to session: {}", session_id)
 
     # ── context inspection (no LLM call) ─────────────────────────────
 
@@ -453,7 +470,7 @@ class RPGGameAgent:
 
     def _setup_tool_registry(self) -> None:
         """Create and populate the ToolRegistry with built-in file tools."""
-        ws_root = Path(settings.history_path).parent
+        ws_root = settings.workspace_root
         self._tool_registry = ToolRegistry()
         self._tool_registry.register_all([
             ListFilesTool(ws_root),
@@ -471,7 +488,7 @@ class RPGGameAgent:
 
     def _history_path(self) -> Path:
         """Return the JSONL file path for this session's persisted history."""
-        return Path(settings.history_path) / f"{self._session_id}.jsonl"
+        return settings.get_history_path(self._session_id)
 
     def _load_history_from_disk(self) -> None:
         """Append persisted messages from the JSONL file to ``_history``."""

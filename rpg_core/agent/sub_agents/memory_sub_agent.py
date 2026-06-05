@@ -32,7 +32,7 @@ from typing import Any
 from loguru import logger
 
 from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
-from rpg_world.rpg_core.agent.types import CallRecord, LLMResponse
+from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
 
 # ── constants ──────────────────────────────────────────────────────────
 

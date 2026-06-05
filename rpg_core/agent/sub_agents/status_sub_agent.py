@@ -29,7 +29,7 @@ from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, ToolProvider
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
-from rpg_world.rpg_core.agent.types import CallRecord, TurnStats
+from rpg_world.rpg_core.agent.agent_types import CallRecord, TurnStats
 from rpg_world.rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -192,7 +192,7 @@ class StatusSubAgent(BaseSubAgent):
             duration_ms = (time.monotonic() - t0) * 1000
 
             # 捕获 CallRecord
-            from rpg_world.rpg_core.agent.types import LLMResponse
+            from rpg_world.rpg_core.agent.agent_types import LLMResponse
 
             if isinstance(llm_result, LLMResponse):
                 call_rec = CallRecord(

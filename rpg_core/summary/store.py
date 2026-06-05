@@ -4,18 +4,41 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, Callable
+
+
+def _register_watcher(file_path: Path, callback: Callable[[], None]) -> None:
+    """向 FileWatcher 注册单个文件的变更回调。
+
+    轻量工具函数，不引入 BaseManager 的完整开销。
+    在 watcher start 之前或之后都可以注册。
+    """
+    from rpg_world.rpg_core.utils.watcher import get_watcher
+
+    get_watcher().register(file_path.resolve(), callback)
 
 
 class SummaryStore:
     """摘要持久化存储。
 
-    文件位置: data/summary/rpg_summaries.json
+    文件位置: sessions/{session_id}/rpg_summaries.json
     数据格式: ["summary text 1", "summary text 2", ...]
+
+    注册 FileWatcher 监听文件变更，异步/离线归纳后自动同步。
     """
 
-    def __init__(self, data_path: Path) -> None:
-        self._file = data_path / "rpg_summaries.json"
+    def __init__(self, file_path: Path) -> None:
+        self._file = file_path
         self._summaries: list[str] = self._load()
+        if not self._file.exists():
+            self._save()  # ensure file exists for FileWatcher
+        _register_watcher(self._file, self.reload)
+
+    # ── public API ────────────────────────────────────────
+
+    def reload(self) -> None:
+        """从磁盘重新加载，响应 FileWatcher 事件。"""
+        self._summaries = self._load()
 
     # ── public API ────────────────────────────────────────
 

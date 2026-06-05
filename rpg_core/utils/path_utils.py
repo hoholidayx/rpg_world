@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-__all__ = ["resolve_rpg_path"]
+__all__ = ["resolve_rpg_path", "resolve_workspace_root", "get_session_dir"]
 
 
 def resolve_rpg_path(
@@ -46,3 +46,28 @@ def resolve_rpg_path(
         base = rpg_root / "data"
 
     return (base / p).resolve()
+
+
+def resolve_workspace_root(
+    rpg_root: Path,
+    rpg_workspace: str = "",
+) -> Path:
+    """Return the resolved absolute path to the workspace root directory.
+
+    Cross-session data (character, lorebook) lives directly under this root.
+    Session-scoped data lives under ``root / "sessions" / {session_id}``.
+    """
+    if rpg_workspace:
+        ws = Path(rpg_workspace)
+        return ws if ws.is_absolute() else (rpg_root / ws).resolve()
+    return (rpg_root / "data").resolve()
+
+
+def get_session_dir(
+    rpg_root: Path,
+    rpg_workspace: str = "",
+    session_id: str = "default",
+) -> Path:
+    """Return the session directory for a given session_id."""
+    ws_root = resolve_workspace_root(rpg_root, rpg_workspace)
+    return ws_root / "sessions" / session_id

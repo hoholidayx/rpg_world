@@ -23,7 +23,7 @@ import asyncio
 import sys
 
 from rpg_world.rpg_core.agent import RPGGameAgent
-from rpg_world.rpg_core.agent.types import StreamEventKind, TurnStats
+from rpg_world.rpg_core.agent.agent_types import StreamEventKind, TurnStats
 
 
 def _parse_args() -> argparse.Namespace:
@@ -42,7 +42,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 async def _repl(agent: RPGGameAgent, stream: bool = True) -> None:
-    print("RPG Agent ready.  Commands: /clear  /reload  /history  /context  /quit")
+    print("RPG Agent ready.  Commands: /clear  /reload  /history  /context  /sessions  /session-create  /session-switch  /quit")
     if stream:
         print("Streaming mode: text appears progressively as the LLM generates it.")
     print()
@@ -82,6 +82,45 @@ async def _repl(agent: RPGGameAgent, stream: bool = True) -> None:
             print()
             print(md)
             print()
+            continue
+        if text == "/sessions":
+            from rpg_world.rpg_core.settings import settings
+
+            sessions = settings.list_sessions()
+            current = agent._session_id  # type: ignore[attr-defined]
+            print(f"Sessions ({len(sessions)}):")
+            for s in sessions:
+                marker = "  *" if s == current else ""
+                print(f"  - {s}{marker}")
+            print()
+            continue
+        if text.startswith("/session-create "):
+            parts = text.split(maxsplit=1)
+            sid = parts[1].strip()
+            if not sid:
+                print("[error] session id is required\n")
+                continue
+            from rpg_world.rpg_core.settings import settings
+
+            try:
+                settings.create_session(sid)
+                print(f"[session created: {sid}]\n")
+            except FileExistsError:
+                print(f"[session already exists: {sid}]\n")
+            continue
+        if text.startswith("/session-switch "):
+            parts = text.split(maxsplit=1)
+            sid = parts[1].strip()
+            if not sid:
+                print("[error] session id is required\n")
+                continue
+            from rpg_world.rpg_core.settings import settings
+
+            if sid not in settings.list_sessions():
+                print(f"[session not found: {sid}]\n")
+                continue
+            await agent.switch_session(sid)
+            print(f"[switched to session: {sid}]\n")
             continue
 
         if stream:

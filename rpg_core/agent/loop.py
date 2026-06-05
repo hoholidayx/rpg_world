@@ -14,7 +14,7 @@ from loguru import logger
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.tools import ToolRegistry
-from rpg_world.rpg_core.agent.types import (
+from rpg_world.rpg_core.agent.agent_types import (
     AgentStreamEvent,
     CallRecord,
     LLMResponse,

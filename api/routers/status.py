@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from rpg_world.api.deps import get_status_manager
+from rpg_world.api.deps import get_session_status_manager
 from rpg_world.rpg_core.status import StatusManager
 
 router = APIRouter(tags=["status"])
@@ -17,7 +17,8 @@ router = APIRouter(tags=["status"])
 
 @router.get("/status/types")
 def list_types(
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Return all status type names."""
     return {"types": manager.list_types()}
@@ -26,7 +27,8 @@ def list_types(
 @router.post("/status/types")
 def create_type(
     body: dict,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Create a new status type (directory)."""
     name = body.get("name", "").strip()
@@ -43,7 +45,8 @@ def create_type(
 def rename_type(
     type_name: str,
     body: dict,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Rename a status type."""
     new_name = body.get("name", "").strip()
@@ -61,7 +64,8 @@ def rename_type(
 @router.delete("/status/types/{type_name}")
 def delete_type(
     type_name: str,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Delete a status type and all its tables."""
     try:
@@ -79,7 +83,8 @@ def delete_type(
 @router.get("/status/types/{type_name}/tables")
 def list_tables(
     type_name: str,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Return all table names for a type."""
     try:
@@ -93,7 +98,8 @@ def list_tables(
 def create_table(
     type_name: str,
     body: dict,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Create a new table in a type."""
     table_name = body.get("name", "").strip()
@@ -114,7 +120,8 @@ def create_table(
 def get_table(
     type_name: str,
     table_name: str,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Return a single table's CSV data (headers + rows)."""
     try:
@@ -128,7 +135,8 @@ def save_table(
     type_name: str,
     table_name: str,
     body: dict,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Save (overwrite) a table's CSV data."""
     headers = body.get("headers", [])
@@ -145,7 +153,8 @@ def rename_table(
     type_name: str,
     table_name: str,
     body: dict,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Rename a table."""
     new_name = body.get("name", "").strip()
@@ -164,7 +173,8 @@ def rename_table(
 def delete_table(
     type_name: str,
     table_name: str,
-    manager: StatusManager = Depends(get_status_manager),
+    session_id: str = "default",
+    manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Delete a table."""
     try:

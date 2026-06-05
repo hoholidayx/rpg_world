@@ -6,7 +6,6 @@ now-removed ``RpgWorldHook`` nanobot integration.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -19,8 +18,12 @@ def build_rpg_context(
     """Create and wire up the full RPG context stack.
 
     Returns a dict with keys ``builder``, ``character_mgr``, ``lorebook_mgr``,
-    ``milestone_mgr``, ``status_mgr`` — ready to pass to
+    ``status_mgr``, ``scene_tracker`` — ready to pass to
     ``RPGContextBuilder.build()``.
+
+    Cross-session data (character, lorebook) is loaded from workspace root.
+    Session-scoped data (status, summary, memory, history) is loaded from
+    ``sessions/{session_id}/`` under the active workspace.
     """
     from rpg_world.rpg_core.settings import settings as rpg_settings
     from rpg_world.rpg_core.context.builder import RPGContextBuilder
@@ -36,17 +39,19 @@ def build_rpg_context(
         world_name=world_name,
     )
 
-    # ── Stores ────────────────────────────────────────────────────────
-    summary_path = Path(rpg_settings.summary_path)
-    builder.set_summary_store(SummaryStore(summary_path))
-    story_path = Path(rpg_settings.story_memory_path)
-    builder.set_story_memory_store(StoryMemoryStore(story_path, session_id))
+    # ── Session-scoped Stores ─────────────────────────────────────────
+    builder.set_summary_store(
+        SummaryStore(rpg_settings.get_summary_path(session_id))
+    )
+    builder.set_story_memory_store(
+        StoryMemoryStore(rpg_settings.get_story_memory_path(session_id))
+    )
     builder.set_recalled_memory_store(RecalledMemoryStore())
     builder.set_persistent_memory_store(
-        PersistentMemoryStore(Path(rpg_settings.persistent_memory_path))
+        PersistentMemoryStore(rpg_settings.get_persistent_memory_path(session_id))
     )
 
-    # ── Managers (lazy, may fail if data directories don't exist) ──────
+    # ── Cross-session Managers (unchanged paths) ──────────────────────
     character_mgr: Any = None
     lorebook_mgr: Any = None
     status_mgr: Any = None
@@ -65,14 +70,15 @@ def build_rpg_context(
     except Exception as exc:
         logger.debug("[RPG World] LorebookManager init skipped: {}", exc)
 
+    # ── Session-scoped Manager ────────────────────────────────────────
     try:
         from rpg_world.rpg_core.status import StatusManager
 
-        status_mgr = StatusManager(rpg_settings.status_path)
+        status_mgr = StatusManager(str(rpg_settings.get_status_dir(session_id)))
     except Exception as exc:
         logger.debug("[RPG World] StatusManager init skipped: {}", exc)
 
-    # ── SceneTracker (lazy, binds to status_mgr for persistence) ────────
+    # ── SceneTracker (binds to status_mgr, both session-scoped) ────────
     scene_tracker: Any = None
     if status_mgr is not None:
         try:

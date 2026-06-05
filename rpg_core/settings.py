@@ -8,23 +8,31 @@ Settings are read from ``rpg_world/settings.json``.  Path resolution:
   as the base directory; otherwise ``data/`` is used as the default base.
 
 See :func:`rpg_world.rpg_core.utils.path_utils.resolve_rpg_path` for details.
+
+Session-scoped data paths are deterministic (not user-configurable):
+``{workspace_root}/sessions/{session_id}/{filename}``.
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
-from rpg_world.rpg_core.utils.path_utils import resolve_rpg_path
+from rpg_world.rpg_core.utils.path_utils import resolve_rpg_path, resolve_workspace_root
 
 # Location of settings.json relative to this module
 _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
 # Package root used to resolve relative paths
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
-# Known data-type subdirectories inside data/
-_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "status", "summary", "story_memory", "history", "memory_sub_agent"})
+# Known data-type subdirectories inside data/ — these are excluded from
+# workspace discovery in list_workspaces().
+_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "memory_sub_agent", "sessions"})
+
+# Session data directory name and filenames — deterministic, not configurable.
+_SESSION_DIR_NAME = "sessions"
 
 
 def _load() -> dict[str, Any]:
@@ -62,6 +70,15 @@ class Settings:
         return self._raw.get("active_workspace", "")
 
     @property
+    def workspace_root(self) -> Path:
+        """Resolved absolute path to the active workspace root.
+
+        Cross-session data (character, lorebook) lives directly under this.
+        Session-scoped data lives under ``workspace_root / "sessions" / {session_id}``.
+        """
+        return resolve_workspace_root(_PACKAGE_ROOT, self.active_workspace)
+
+    @property
     def character_path(self) -> str:
         return self._resolve("character_path", "character")
 
@@ -70,33 +87,9 @@ class Settings:
         return self._resolve("lorebook_path", "lorebook")
 
     @property
-    def milestone_path(self) -> str:
-        return self._resolve("milestone_path", "milestone")
-
-    @property
-    def status_path(self) -> str:
-        return self._resolve("status_path", "status")
-
-    @property
-    def summary_path(self) -> str:
-        return self._resolve("summary_path", "summary")
-
-    @property
-    def story_memory_path(self) -> str:
-        return self._resolve("story_memory_path", "story_memory")
-
-    @property
-    def persistent_memory_path(self) -> str:
-        return self._resolve("persistent_memory_path", "persistent_memory.md")
-
-    @property
     def pm_details_path(self) -> str:
         """路径：PM 可展开条目的详情文件（JSON，预留）。"""
         return self._resolve("pm_details_path", "pm_details.json")
-
-    @property
-    def history_path(self) -> str:
-        return self._resolve("history_path", "history")
 
     @property
     def sub_agent_path(self) -> str:
@@ -167,6 +160,84 @@ class Settings:
         with _SETTINGS_PATH.open("w", encoding="utf-8", newline="\n") as f:
             json.dump(self._raw, f, ensure_ascii=False, indent=2)
             f.write("\n")
+
+    # ------------------------------------------------------------------
+    # Session operations (deterministic paths, not from settings.json)
+    #
+    # Core principle: every session-scoped data domain has a dedicated
+    # getter method.  Do NOT join "sessions" / filenames outside this
+    # class — call the method instead.
+    # ------------------------------------------------------------------
+
+    def sessions_base_dir(self) -> Path:
+        """Return the ``sessions/`` base directory under the active workspace."""
+        return self.workspace_root / _SESSION_DIR_NAME
+
+    def session_dir(self, session_id: str) -> Path:
+        """Return the per-session directory for *session_id*.
+
+        All session-scoped data (status, history, summary, memory) lives
+        under this directory.  Use the dedicated getter methods below
+        (``get_status_dir``, ``get_history_path``, …) to access specific
+        sub-paths; avoid joining *session_dir* by hand.
+        """
+        return self.sessions_base_dir() / session_id
+
+    # ── Session-scoped directory getters ──────────────────────────────
+
+    def get_status_dir(self, session_id: str) -> Path:
+        """Return the ``status/`` directory for the given session."""
+        return self.session_dir(session_id) / "status"
+
+    # ── Session-scoped file path getters ──────────────────────────────
+
+    def get_history_path(self, session_id: str) -> Path:
+        """Return the ``history.jsonl`` file path for the given session."""
+        return self.session_dir(session_id) / "history.jsonl"
+
+    def get_summary_path(self, session_id: str) -> Path:
+        """Return the ``rpg_summaries.json`` file path for the given session."""
+        return self.session_dir(session_id) / "rpg_summaries.json"
+
+    def get_story_memory_path(self, session_id: str) -> Path:
+        """Return the ``story_memory.json`` file path for the given session."""
+        return self.session_dir(session_id) / "story_memory.json"
+
+    def get_persistent_memory_path(self, session_id: str) -> Path:
+        """Return the ``persistent_memory.md`` file path for the given session."""
+        return self.session_dir(session_id) / "persistent_memory.md"
+
+    # ── Session file listing ──────────────────────────────────────────
+
+    def list_session_files(self, session_id: str) -> list[Path]:
+        """List all files and directories inside a session's data dir."""
+        sdir = self.session_dir(session_id)
+        if not sdir.is_dir():
+            return []
+        return sorted(sdir.iterdir())
+
+    # ── Session lifecycle ─────────────────────────────────────────────
+
+    def list_sessions(self) -> list[str]:
+        """Discover available session IDs under the active workspace."""
+        sdir = self.sessions_base_dir()
+        if not sdir.is_dir():
+            return []
+        return sorted(
+            d.name for d in sdir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        )
+
+    def create_session(self, session_id: str) -> None:
+        """Create a new session directory. Raises ``FileExistsError`` if exists."""
+        sdir = self.session_dir(session_id)
+        sdir.mkdir(parents=True, exist_ok=False)
+
+    def delete_session(self, session_id: str) -> None:
+        """Delete a session directory and all its contents."""
+        sdir = self.session_dir(session_id)
+        if sdir.exists():
+            shutil.rmtree(sdir)
 
 
 # Singleton

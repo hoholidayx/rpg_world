@@ -14,7 +14,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
-from rpg_world.rpg_core.agent.types import LLMResponse, LLMUsage, ProviderChunk
+from rpg_world.rpg_core.agent.agent_types import LLMResponse, LLMUsage, ProviderChunk
 
 
 class OpenAIProvider(LLMProvider):
