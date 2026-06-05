@@ -51,7 +51,11 @@ SYSTEM_PROMPT = (
     "changes that state.\n"
     "2. Do NOT change attributes that remain the same.\n"
     "3. If nothing changes, call no tools.\n"
-    "4. Use Chinese for attribute keys and values."
+    "4. Proactively clean up: if an attribute is no longer relevant to the "
+    "current scene (e.g. a character left, a weather effect passed), "
+    "use scene_del_attr to remove it. Keeping only active attributes "
+    "prevents context bloat.\n"
+    "5. Use Chinese for attribute keys and values."
 )
 
 # ── result type ───────────────────────────────────────────────────────
