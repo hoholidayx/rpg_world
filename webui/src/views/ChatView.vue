@@ -115,26 +115,25 @@
       </div>
     </div>
 
-    <!-- ── Slash-command popup ──────────────────────────── -->
-    <div v-if="showCommandPopup" class="command-popup" ref="commandPopupRef">
-      <div class="command-popup-title">命令</div>
-      <div
-        v-for="(cmd, ci) in filteredCommands"
-        :key="cmd.command"
-        class="command-item"
-        :class="{ active: ci === commandHighlightIndex }"
-        @click="selectCommand(cmd)"
-        @mouseenter="commandHighlightIndex = ci"
-      >
-        <span class="cmd-name">{{ cmd.command }}</span>
-        <span class="cmd-desc">{{ cmd.description }}</span>
-      </div>
-    </div>
-
     <!-- ── Input area ────────────────────────────────────── -->
     <div class="input-area">
       <div class="input-wrapper">
         <div class="input-relative">
+          <!-- ── Slash-command popup ──────────────────────── -->
+          <div v-if="showCommandPopup" class="command-popup" ref="commandPopupRef">
+            <div class="command-popup-title">命令</div>
+            <div
+              v-for="(cmd, ci) in filteredCommands"
+              :key="cmd.command"
+              class="command-item"
+              :class="{ active: ci === commandHighlightIndex }"
+              @click="selectCommand(cmd)"
+              @mouseenter="commandHighlightIndex = ci"
+            >
+              <span class="cmd-name">{{ cmd.command }}</span>
+              <span class="cmd-desc">{{ cmd.description }}</span>
+            </div>
+          </div>
           <a-textarea
             v-model:value="inputText"
             placeholder="输入消息... (/ 查看命令, Enter 发送, Shift+Enter 换行)"
@@ -145,7 +144,6 @@
             @keydown.up.prevent="onCommandArrowUp"
             @keydown.down.prevent="onCommandArrowDown"
             @keydown.tab.exact.prevent="onCommandTab"
-            @input="onInputChange"
             class="chat-input"
             ref="inputRef"
           />
@@ -303,6 +301,28 @@ watch(
   },
 )
 
+// ── Watch input for slash-command popup ───────────────────
+
+watch(inputText, (val) => {
+  if (val === '/') {
+    showCommandPopup.value = true
+    commandHighlightIndex.value = 0
+  } else if (!val.startsWith('/')) {
+    showCommandPopup.value = false
+  } else {
+    const parts = val.split(/\s+/)
+    const typed = parts[0].toLowerCase()
+    if (typed === '/') {
+      showCommandPopup.value = true
+    } else if (COMMANDS.some(c => c.command.startsWith(typed))) {
+      showCommandPopup.value = true
+      commandHighlightIndex.value = 0
+    } else {
+      showCommandPopup.value = false
+    }
+  }
+})
+
 // ── Slash-command definitions ──────────────────────────
 const COMMANDS = [
   { command: '/clear', description: '清空当前会话的对话历史', detail: '重置对话上下文，清除所有已发送的消息记录。' },
@@ -329,27 +349,6 @@ const filteredCommands = computed(() => {
   if (COMMANDS.some(c => c.command === typed)) return []
   return COMMANDS.filter(c => c.command.startsWith(typed))
 })
-
-function onInputChange() {
-  const text = inputText.value
-  if (text === '/') {
-    showCommandPopup.value = true
-    commandHighlightIndex.value = 0
-  } else if (!text.startsWith('/')) {
-    showCommandPopup.value = false
-  } else {
-    const parts = text.split(/\s+/)
-    const typed = parts[0].toLowerCase()
-    if (typed === '/') {
-      showCommandPopup.value = true
-    } else if (COMMANDS.some(c => c.command.startsWith(typed))) {
-      showCommandPopup.value = true
-      commandHighlightIndex.value = 0
-    } else {
-      showCommandPopup.value = false
-    }
-  }
-}
 
 function closeCommandPopup() {
   showCommandPopup.value = false
