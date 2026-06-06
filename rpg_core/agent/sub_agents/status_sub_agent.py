@@ -139,6 +139,11 @@ class StatusSubAgent(BaseSubAgent):
 
     # ── 核心方法 ─────────────────────────────────────────────────────
 
+    @property
+    def system_prompt(self) -> str:
+        """返回状态表预更新子 Agent 的系统提示。"""
+        return SYSTEM_PROMPT
+
     async def update(
         self,
         history: list[dict],
@@ -289,7 +294,7 @@ class StatusSubAgent(BaseSubAgent):
                 _TAG + " history window: {}/{} user rounds (max_rounds={})",
                 kept, total_user_rounds, max_rounds,
             )
-        system_content = self._build_system_context(SYSTEM_PROMPT)
+        system_content = self._build_system_context()
         return [
             {"role": "system", "content": system_content},
             {

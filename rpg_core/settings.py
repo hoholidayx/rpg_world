@@ -92,7 +92,7 @@ class Settings:
         """路径：PM 可展开条目的详情文件（JSON，预留）。"""
         return self._resolve("pm_details_path", "pm_details.json")
 
-/    @property
+    @property
     def jinja_dir(self) -> Path:
         """Path to the Jinja template directory (rpg_core/jinja/)."""
         return _RPG_CORE_DIR / "jinja"
@@ -118,7 +118,35 @@ class Settings:
 
     @property
     def memory_sub_agent_config(self) -> dict[str, Any]:
+        """memory_sub_agent 完整配置 dict（保持向后兼容）。"""
         return self._raw.get("agent_config", {}).get("memory_sub_agent", {})
+
+    # ── memory_sub_agent 管线级配置 ────────────────────────────────
+
+    @property
+    def memory_summary_config(self) -> dict[str, Any]:
+        """summary 管线配置：compress_rounds / keep_rounds / trigger_rounds。"""
+        return self.memory_sub_agent_config.get("summary", {})
+
+    @property
+    def memory_recall_config(self) -> dict[str, Any]:
+        """recall 管线配置：max_items。"""
+        return self.memory_sub_agent_config.get("recall", {})
+
+    @property
+    def memory_story_config(self) -> dict[str, Any]:
+        """story 管线配置：max_details。"""
+        return self.memory_sub_agent_config.get("story", {})
+
+    @property
+    def memory_compress_rounds(self) -> int:
+        """从最老的对话轮次开始压缩的默认轮数。"""
+        return self.memory_summary_config.get("compress_rounds", 10)
+
+    @property
+    def memory_keep_rounds(self) -> int:
+        """压缩后保留的最近对话轮数。"""
+        return self.memory_summary_config.get("keep_rounds", 5)
 
     @property
     def status_sub_agent_config(self) -> dict[str, Any]:

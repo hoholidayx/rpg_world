@@ -9,11 +9,12 @@ Usage:
     uv run python -m rpg_world.agent.cli --single-turn "look around the room"
 
 Interactive commands:
-  /clear   — reset conversation history
-  /reload  — reload RPG context from disk
-  /history — print raw history
-  /context — show current context structure and token usage
-  /quit    — exit
+  /clear         — reset conversation history
+  /reload        — reload RPG context from disk
+  /history       — print raw history
+  /context       — show current context structure and token usage
+  /compact [N] [K] — compress oldest N user rounds into summary, keep K rounds
+  /quit          — exit
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 async def _repl(agent: RPGGameAgent, stream: bool = True) -> None:
-    print("RPG Agent ready.  Commands: /clear  /reload  /history  /context  /sessions  /session-create  /session-switch  /quit")
+    print("RPG Agent ready.  Commands: /clear  /reload  /history  /context  /compact  /sessions  /session-create  /session-switch  /quit")
     if stream:
         print("Streaming mode: text appears progressively as the LLM generates it.")
     print()
@@ -121,6 +122,40 @@ async def _repl(agent: RPGGameAgent, stream: bool = True) -> None:
                 continue
             await agent.switch_session(sid)
             print(f"[switched to session: {sid}]\n")
+            continue
+
+        # ── /compact ──────────────────────────────────────────────────
+        if text == "/compact" or text.startswith("/compact "):
+            parts = text.split()
+            compress_rounds: int | None = None
+            keep_rounds: int | None = None
+            if len(parts) >= 2:
+                try:
+                    compress_rounds = int(parts[1])
+                except ValueError:
+                    print("[error] compress_rounds must be an integer\n")
+                    continue
+            if len(parts) >= 3:
+                try:
+                    keep_rounds = int(parts[2])
+                except ValueError:
+                    print("[error] keep_rounds must be an integer\n")
+                    continue
+            result = await agent.compact_history(compress_rounds, keep_rounds)
+            if result.get("skipped"):
+                print(f"[compact skipped] {result['reason']}\n")
+            else:
+                summary_text = result.get("summary_text", "")
+                if summary_text:
+                    print(f"  ── Summary ({result['compress_rounds']} rounds compressed) ──\n")
+                    print(f"  {summary_text[:500]}")
+                    if len(summary_text) > 500:
+                        print("  ...")
+                else:
+                    print(f"  ── Summary ({result['compress_rounds']} rounds compressed, empty) ──")
+                print()
+                print(f"  History: {result['previous_history_msgs']} → {result['history_after_msgs']} msgs")
+            print()
             continue
 
         if stream:

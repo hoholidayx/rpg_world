@@ -14,7 +14,11 @@ from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.agent.prompt import PromptManager
-from rpg_world.rpg_core.agent.sub_agents import StatusSubAgent, SubAgentContext
+from rpg_world.rpg_core.agent.sub_agents import (
+    MemorySubAgent,
+    StatusSubAgent,
+    SubAgentContext,
+)
 from rpg_world.rpg_core.agent.tokenizer import TiktokenTokenCounter, TokenCounter
 from rpg_world.rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_world.rpg_core.agent.tools import (
@@ -84,6 +88,8 @@ class RPGGameAgent:
         self._tool_registry: ToolRegistry | None = None
         self._last_tool_records: list[ToolCallRecord] | None = None
         self._status_sub_agent: StatusSubAgent | None = None
+        self._memory_sub_agent: MemorySubAgent | None = None
+        self._rpg_ctx: dict[str, Any] = {}
 
     # ── public API ─────────────────────────────────────────────────────
 
@@ -439,6 +445,88 @@ class RPGGameAgent:
         ctx._hot_history_rounds = self._builder.config.hot_history_rounds  # type: ignore[attr-defined]
         return ctx
 
+    # ── compact history (manual summary trigger) ──────────────────────
+
+    async def compact_history(
+        self,
+        compress_rounds: int | None = None,
+        keep_rounds: int | None = None,
+    ) -> dict[str, Any]:
+        """压缩最老的对话轮次为摘要。
+
+        从最早的 user 轮次开始，压缩 ``compress_rounds`` 轮，保留最近
+        ``keep_rounds`` 轮不动。压缩完成后从 ``_history`` 中移除已压缩
+        的消息，并重写 JSONL 文件。
+
+        Args:
+            compress_rounds:
+                从最早的用户轮次开始压缩 N 轮。默认从 settings 读取。
+            keep_rounds:
+                保留最近 N 轮不压缩。默认从 settings 读取。
+
+        Returns:
+            包含 ``summary_text``、``compress_rounds``、``kept_rounds``、
+            ``previous_history_msgs``、``history_after_msgs`` 的 dict。
+        """
+        await self._ensure_initialized()
+
+        compress_rounds = compress_rounds or settings.memory_compress_rounds
+        keep_rounds = keep_rounds or settings.memory_keep_rounds
+
+        user_indices = [i for i, m in enumerate(self._history) if m.get("role") == "user"]
+        total = len(user_indices)
+        available = total - keep_rounds
+        if available <= 0:
+            logger.info(
+                _TAG + " compact skipped: history too short ({} user rounds <= {} keep)",
+                total, keep_rounds,
+            )
+            return {"skipped": True, "reason": f"history too short ({total} <= {keep_rounds})"}
+
+        actual = min(compress_rounds, available)
+        compress_end = user_indices[actual] if actual < len(user_indices) else len(self._history)
+
+        logger.info(
+            _TAG + " compact: total={} user rounds, compress={}, keep={}",
+            total, actual, keep_rounds,
+        )
+
+        compress_window = self._history[:compress_end]
+        result = await self._memory_sub_agent.process({"summary": compress_window})
+        summary_text = ""
+        if result.summary_generated:
+            summaries = self._builder._summary_store.get_all_summaries()
+            summary_text = summaries[-1] if summaries else ""
+            logger.info(
+                _TAG + " summary generated: {} chars", len(summary_text),
+            )
+
+        # 截断
+        before_len = len(self._history)
+        del self._history[:compress_end]
+        after_len = len(self._history)
+
+        # 重写 JSONL
+        if self._history_enabled:
+            path = self._history_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("w", encoding="utf-8") as f:
+                for msg in self._history:
+                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+
+        logger.info(
+            _TAG + " compact: deleted {} msgs, history now {} msgs",
+            before_len - after_len, after_len,
+        )
+
+        return {
+            "summary_text": summary_text,
+            "compress_rounds": actual,
+            "kept_rounds": keep_rounds,
+            "previous_history_msgs": before_len,
+            "history_after_msgs": after_len,
+        }
+
     # ── internals — context & tools ────────────────────────────────────
 
     def _refresh_rpg_context(self) -> None:
@@ -447,24 +535,23 @@ class RPGGameAgent:
         重新执行 ``_build_rpg_context()`` 并更新 manager 引用，
         然后刷新 SubAgentContext。不涉及 provider / history / tools 等一次性初始化。
         """
-        ctx = _build_rpg_context(
+        self._rpg_ctx = _build_rpg_context(
             world_name=self._world_name,
             session_id=self._session_id,
         )
-        self._builder = ctx["builder"]
-        self._character_mgr = ctx["character_mgr"]
-        self._lorebook_mgr = ctx["lorebook_mgr"]
-        self._status_mgr = ctx["status_mgr"]
-        self._scene_tracker = ctx.get("scene_tracker")
+        self._builder = self._rpg_ctx["builder"]
+        self._character_mgr = self._rpg_ctx["character_mgr"]
+        self._lorebook_mgr = self._rpg_ctx["lorebook_mgr"]
+        self._status_mgr = self._rpg_ctx["status_mgr"]
+        self._scene_tracker = self._rpg_ctx.get("scene_tracker")
 
-        # 刷新 SubAgentContext（世界书 + 角色卡）
-        _sub_ctx = SubAgentContext.from_managers(
-            system_prompt=self._system_prompt,
-            character_mgr=self._character_mgr,
-            lorebook_mgr=self._lorebook_mgr,
-        )
+        # 刷新 SubAgentContext——每个子 Agent 独立实例避免系统提示互相覆盖
         if self._status_sub_agent is not None:
-            self._status_sub_agent.bind_context(_sub_ctx)
+            _sub_ctx_status = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
+            self._status_sub_agent.bind_context(_sub_ctx_status)
+        if self._memory_sub_agent is not None:
+            _sub_ctx_memory = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
+            self._memory_sub_agent.bind_context(_sub_ctx_memory)
 
     def _build_transformed_context(self) -> list[dict]:
         """Build the 5-layer RPG context and flatten to message list."""
@@ -546,13 +633,6 @@ class RPGGameAgent:
             temperature=self._temperature,
         )
 
-        # ── SubAgentContext（世界书 + 角色卡，供所有子 Agent 共享） ──
-        _sub_ctx = SubAgentContext.from_managers(
-            system_prompt=self._system_prompt,
-            character_mgr=self._character_mgr,
-            lorebook_mgr=self._lorebook_mgr,
-        )
-
         # ── StatusSubAgent ────────────────────────────────────────────
         status_cfg = settings.status_sub_agent_config
         status_model = status_cfg.get("model")
@@ -565,7 +645,23 @@ class RPGGameAgent:
         )
         if self._scene_tracker:
             self._status_sub_agent.add_tool_provider(self._scene_tracker)
-        self._status_sub_agent.bind_context(_sub_ctx)
+        _status_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
+        self._status_sub_agent.bind_context(_status_ctx)
+
+        # ── MemorySubAgent ────────────────────────────────────────────
+        memory_cfg = settings.memory_sub_agent_config
+        memory_model = memory_cfg.get("model")
+        self._memory_sub_agent = MemorySubAgent(
+            provider=None if memory_model else self._provider,
+            model=memory_model or self._model,
+            api_key=memory_cfg.get("api_key") or self._api_key,
+            base_url=memory_cfg.get("base_url") or self._base_url,
+            enabled=memory_cfg.get("enabled", True),
+            summary_store=self._builder._summary_store if self._builder else None,
+            max_window_rounds=settings.memory_keep_rounds,
+        )
+        _memory_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
+        self._memory_sub_agent.bind_context(_memory_ctx)
 
         self._setup_tool_registry()
 
@@ -580,3 +676,31 @@ def _build_rpg_context(world_name: str, session_id: str) -> dict[str, Any]:
     from rpg_world.rpg_core.context.factory import build_rpg_context
 
     return build_rpg_context(world_name=world_name, session_id=session_id)
+
+
+def _build_sub_agent_context(
+    character_mgr: Any,
+    lorebook_mgr: Any,
+) -> SubAgentContext:
+    """从 Manager 读取已启用条目，构造 SubAgentContext。
+
+    主 Agent 读 Manager 后直接传 data，SubAgentContext 不依赖 Manager 类型。
+    """
+    lorebook_entries: list[dict[str, Any]] = []
+    if lorebook_mgr is not None:
+        try:
+            lorebook_entries = lorebook_mgr.list_enabled_entries()
+        except Exception:
+            pass
+
+    characters: list[dict[str, Any]] = []
+    if character_mgr is not None:
+        try:
+            characters = character_mgr.list_enabled_characters()
+        except Exception:
+            pass
+
+    return SubAgentContext(
+        lorebook_entries=lorebook_entries,
+        characters=characters,
+    )

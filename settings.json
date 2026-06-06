@@ -9,11 +9,19 @@
     "include_tool_records": true,
     "verbose_logging": true,
     "memory_sub_agent": {
-      "enabled": false,
+      "enabled": true,
       "model": null,
-      "summary_trigger_rounds": 20,
-      "max_recall_items": 5,
-      "max_story_details": 10
+      "summary": {
+        "compress_rounds": 10,
+        "keep_rounds": 5,
+        "trigger_rounds": 20
+      },
+      "recall": {
+        "max_items": 5
+      },
+      "story": {
+        "max_details": 10
+      }
     },
     "status_sub_agent": {
       "enabled": true,

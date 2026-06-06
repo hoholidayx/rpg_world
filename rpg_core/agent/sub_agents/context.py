@@ -1,24 +1,15 @@
 """SubAgentContext — 子 Agent 上下文容器。
 
-类似主 Agent RPGContext 的 Fixed Layer 概念，为子 Agent 提供
-系统提示 + 世界书 + 角色卡的轻量上下文，避免 OOC 判断。
+为子 Agent 提供世界书 + 角色卡的轻量上下文，避免 OOC 判断。
+系统提示不在此维护，由 ``BaseSubAgent.bind_context()`` 在绑定时注入。
 
 Usage::
 
-    # 直接构造
     ctx = SubAgentContext(
-        system_prompt="You are the state table updater...",
         lorebook_entries=[{"name": "世界设定", "content": "..."}],
         characters=[{"name": "Alice", "content": "..."}],
     )
     system_text = ctx.render()
-
-    # 从管理器工厂构建（自动读取已启用的条目）
-    ctx = SubAgentContext.from_managers(
-        system_prompt="...",
-        character_mgr=character_mgr,
-        lorebook_mgr=lorebook_mgr,
-    )
 """
 
 from __future__ import annotations
@@ -31,13 +22,12 @@ from rpg_world.rpg_core.context.builder import render_jinja_template
 class SubAgentContext:
     """子 Agent 上下文容器。
 
-    将系统提示、世界书条目和角色卡合并为一段格式化的系统级文本，
-    输出格式与 ``fixed_layer.jinja`` 模板一致。
+    只维护世界书条目和角色卡数据，系统提示由 ``BaseSubAgent`` 在绑定时
+    通过 ``set_system_prompt()`` 注入。输出格式与 ``fixed_layer.jinja``
+    模板一致。
 
     Parameters
     ----------
-    system_prompt:
-        系统提示文本。
     lorebook_entries:
         世界书条目列表，每项含 ``name``、``content``，可选 ``description``、``tags``。
     characters:
@@ -46,18 +36,21 @@ class SubAgentContext:
 
     def __init__(
         self,
-        system_prompt: str = "",
         lorebook_entries: list[dict[str, Any]] | None = None,
         characters: list[dict[str, Any]] | None = None,
     ) -> None:
-        self._system_prompt = system_prompt
+        self._system_prompt: str = ""  # 由 bind_context() 注入
         self._lorebook_entries = lorebook_entries or []
         self._characters = characters or []
 
     # ── public API ────────────────────────────────────────────────────
 
+    def set_system_prompt(self, prompt: str) -> None:
+        """设置子 Agent 自己的系统提示（由 BaseSubAgent.bind_context 调用）。"""
+        self._system_prompt = prompt
+
     def render(self) -> str:
-        """渲染完整上下文：系统提示 + 世界书 + 角色卡。
+        """渲染完整上下文：系统提示（子 Agent 自身） + 世界书 + 角色卡。
 
         空段自动跳过（若无世界书条目则世界书段不出现）。
         """
@@ -75,39 +68,6 @@ class SubAgentContext:
             parts.append(char_section)
 
         return "\n\n".join(parts)
-
-    # ── factory ───────────────────────────────────────────────────────
-
-    @classmethod
-    def from_managers(
-        cls,
-        system_prompt: str,
-        character_mgr: Any = None,
-        lorebook_mgr: Any = None,
-    ) -> SubAgentContext:
-        """从管理器实时读取已启用的条目构建上下文。
-
-        管理器可能为 ``None``（初始化失败时），此时对应数据段自动跳过。
-        """
-        lorebook_entries: list[dict[str, Any]] = []
-        if lorebook_mgr is not None:
-            try:
-                lorebook_entries = lorebook_mgr.list_enabled_entries()
-            except Exception:
-                pass
-
-        characters: list[dict[str, Any]] = []
-        if character_mgr is not None:
-            try:
-                characters = character_mgr.list_enabled_characters()
-            except Exception:
-                pass
-
-        return cls(
-            system_prompt=system_prompt,
-            lorebook_entries=lorebook_entries,
-            characters=characters,
-        )
 
     # ── internal renderers ────────────────────────────────────────────
 

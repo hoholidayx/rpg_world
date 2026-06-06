@@ -233,6 +233,11 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── public API ─────────────────────────────────────────────────────
 
+    @property
+    def system_prompt(self) -> str:
+        """多管线子 Agent，无统一系统提示。各管线自行提供。"""
+        return ""
+
     async def process(self, context: dict) -> MemoryAgentResult:
         """处理 *context* 中的内容，更新对应记忆存储。
 
@@ -258,22 +263,24 @@ class MemorySubAgent(BaseSubAgent):
         self._busy = True
         try:
             result = MemoryAgentResult()
+            call_stats: list[CallRecord] = []
 
             if "recall" in context and self._recalled_store:
                 result.recalls_injected = await self._pipeline_recall(
-                    context["recall"]
+                    context["recall"], call_stats
                 )
 
             if "story" in context and self._story_store:
                 result.story_details_added = await self._pipeline_story_memory(
-                    context["story"]
+                    context["story"], call_stats
                 )
 
             if "summary" in context and self._summary_store:
                 result.summary_generated = await self._pipeline_summary(
-                    context["summary"]
+                    context["summary"], call_stats
                 )
 
+            result.call_stats = call_stats
             return result
 
         finally:
@@ -295,7 +302,7 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Pipeline 1: 召回 ─────────────────────────────────────────────
 
-    async def _pipeline_recall(self, conv: list[dict]) -> int:
+    async def _pipeline_recall(self, conv: list[dict], call_stats: list[CallRecord]) -> int:
         """提取召回项，全量替换 RecalledMemoryStore。"""
         window = self._format_conversation_window(conv, self._max_window_rounds)
 
@@ -316,7 +323,7 @@ class MemorySubAgent(BaseSubAgent):
 
         decision, call_rec = await self._call_llm(messages, RECALL_SCHEMA)
         if call_rec:
-            result.call_stats.append(call_rec)
+            call_stats.append(call_rec)
         recalls = decision.get("recalls", [])[: self._max_recall_items]
 
         if recalls and self._recalled_store:
@@ -331,7 +338,7 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Pipeline 2: 剧情记忆 ─────────────────────────────────────────
 
-    async def _pipeline_story_memory(self, conv: list[dict]) -> int:
+    async def _pipeline_story_memory(self, conv: list[dict], call_stats: list[CallRecord]) -> int:
         """提取剧情细节，追加到 StoryMemoryStore。"""
         window = self._format_conversation_window(conv)
 
@@ -361,7 +368,7 @@ class MemorySubAgent(BaseSubAgent):
 
         decision, call_rec = await self._call_llm(messages, STORY_DETAIL_SCHEMA)
         if call_rec:
-            result.call_stats.append(call_rec)
+            call_stats.append(call_rec)
         details = decision.get("story_details", [])[: self._max_story_details]
 
         added = 0
@@ -381,7 +388,7 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Pipeline 3: 摘要 ─────────────────────────────────────────────
 
-    async def _pipeline_summary(self, conv: list[dict]) -> bool:
+    async def _pipeline_summary(self, conv: list[dict], call_stats: list[CallRecord]) -> bool:
         """生成摘要文本，追加到 SummaryStore。"""
         window = self._format_conversation_window(conv)
 
@@ -400,7 +407,7 @@ class MemorySubAgent(BaseSubAgent):
 
         decision, call_rec = await self._call_llm(messages, SUMMARY_SCHEMA)
         if call_rec:
-            result.call_stats.append(call_rec)
+            call_stats.append(call_rec)
         text = decision.get("summary_text", "")
 
         if text and self._summary_store:

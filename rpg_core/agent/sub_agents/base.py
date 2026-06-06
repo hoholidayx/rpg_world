@@ -4,16 +4,23 @@
 
 - LLM Provider 管理（共享主 Agent 的 provider 或自建独立 LLM）
 - 重入守卫（防止并发执行）
-- ``SubAgentContext`` 绑定（世界书 + 角色卡 + 系统提示）
+- ``SubAgentContext`` 绑定（世界书 + 角色卡 + 子 Agent 系统提示）
 - ``ToolProvider`` 接口 + 工具提供者管理（注册、去重、刷新）
-- ``_build_system_context()`` 渲染完整上下文
+- ``_build_system_context()`` 渲染完整系统上下文
 
-所有子 Agent 应继承此类，避免重复实现上述逻辑。
+所有子 Agent **必须**定义自己的 ``system_prompt`` 属性（类似 Java 抽象方法），
+单场景子 Agent 返回主提示词，多管线子 Agent 返回空串由各管线自行提供。
+
+子 Agent 的 ``system_prompt`` 通过 ``bind_context()`` 注入到 ``SubAgentContext``，
+调用 ``_build_system_context()`` 或 ``context.render()`` 可获得完整输出：
+``{system_prompt}\\n\\n## 世界书\\n\\n## 角色卡``
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+from loguru import logger
 
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 
@@ -76,6 +83,19 @@ class BaseSubAgent:
         self._context: SubAgentContext | None = None
         self._tool_providers: list[ToolProvider] = []
 
+    # ── Abstract-like ────────────────────────────────────────────────
+
+    @property
+    def system_prompt(self) -> str:
+        """子 Agent 自身系统提示。
+
+        子类必须覆盖此属性（类似 Java 抽象方法）。
+
+        - 单场景子 Agent（如 ``StatusSubAgent``）返回主提示词。
+        - 多管线子 Agent（如 ``MemorySubAgent``）返回空串，各管线自行提供。
+        """
+        return ""
+
     # ── Provider ─────────────────────────────────────────────────────
 
     def _get_provider(self) -> LLMProvider:
@@ -100,24 +120,38 @@ class BaseSubAgent:
     # ── Context 绑定 ─────────────────────────────────────────────────
 
     def bind_context(self, context: SubAgentContext) -> None:
-        """绑定 SubAgentContext（世界书 + 角色卡 + 系统提示）。
+        """绑定 ``SubAgentContext`` 并注入自身系统提示。
 
-        在构建子 Agent 之后调用，或在 ``reload_rpg_context()`` 时重新绑定。
+        将子 Agent 的 ``system_prompt`` 注入到上下文中，后续
+        ``context.render()`` 将输出完整内容：
+        ``{system_prompt}\\n\\n## 世界书\\n\\n## 角色卡``
         """
+        context.set_system_prompt(self.system_prompt)
         self._context = context
+        logger.debug(
+            "[BaseSubAgent] {} context bound (system_prompt={} chars)",
+            type(self).__name__, len(self.system_prompt),
+        )
 
-    def _build_system_context(self, pipeline_prompt: str) -> str:
-        """渲染子系统提示：*pipeline_prompt* 后追加 SubAgentContext（如果已绑定）。
+    def _build_system_context(self, pipeline_prompt: str | None = None) -> str:
+        """构建完整系统上下文。
 
-        允许子 Agent 的每个 pipeline 保留自己的专用提示，同时注入
-        世界书 + 角色卡作为系统级上下文。
+        如果提供了 ``pipeline_prompt``（多管线场景），在其后追加
+        ``context.render()``，否则直接返回 ``context.render()``
+        （其中已包含系统提示）。
+
+        Parameters
+        ----------
+        pipeline_prompt:
+            多管线子 Agent 可传入各管线的专属提示词。为 ``None`` 时
+            直接使用上下文中已有的系统提示。
         """
         if self._context is None:
-            return pipeline_prompt
+            return pipeline_prompt or ""
         rendered = self._context.render()
-        if not rendered:
-            return pipeline_prompt
-        return f"{pipeline_prompt}\n\n{rendered}"
+        if pipeline_prompt:
+            return f"{pipeline_prompt}\n\n{rendered}" if rendered else pipeline_prompt
+        return rendered
 
     # ── 工具提供者管理 ──────────────────────────────────────────────
 
@@ -138,4 +172,3 @@ class BaseSubAgent:
         for p in self._tool_providers:
             tools.extend(p.get_tools())
         return tools
-
