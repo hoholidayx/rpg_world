@@ -33,12 +33,12 @@ def _build_usage(raw, raw_dict: dict[str, Any] | None) -> LLMUsage | None:
     if raw_dict:
         hit = raw_dict.get("prompt_cache_hit_tokens",
               raw_dict.get("cache_read_input_tokens", 0))
-        miss = raw_dict.get("prompt_cache_miss_tokens",
-               raw_dict.get("prompt_tokens", 0) - hit)
         if raw_dict.get("prompt_tokens_details"):
             details_hit = raw_dict["prompt_tokens_details"].get("cached_tokens", 0)
             if not hit:
                 hit = details_hit
+        miss = raw_dict.get("prompt_cache_miss_tokens",
+               raw_dict.get("prompt_tokens", 0) - hit)
     else:
         # fallback：从 prompt_tokens_details 读取
         hit = 0

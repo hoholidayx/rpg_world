@@ -143,43 +143,55 @@ def format_event_stats(event: AgentStreamEvent) -> str:
         if chat_calls:
             chat_prompt = sum(c.usage.prompt_tokens for c in chat_calls if c.usage)
             chat_comp = sum(c.usage.completion_tokens for c in chat_calls if c.usage)
+            chat_cached = sum(c.usage.cached_tokens for c in chat_calls if c.usage)
+            chat_missed = sum(_get_missed_tokens(c.usage) for c in chat_calls)
             chat_total = chat_prompt + chat_comp
             chat_dur = sum(c.duration_ms for c in chat_calls)
             lines.append(
                 f"  Main loop ({len(chat_calls)} call(s)): "
                 f"prompt {chat_prompt:,} + completion {chat_comp:,} = {chat_total:,} tokens"
+                f"{_format_cache_info(chat_prompt, chat_cached, chat_missed)}"
                 f"  |  {chat_dur:.0f}ms"
             )
             for i, c in enumerate(chat_calls):
-                p = c.usage.prompt_tokens if c.usage else 0
-                co = c.usage.completion_tokens if c.usage else 0
-                cached = c.usage.cached_tokens if c.usage else 0
-                rate = (cached / p * 100) if p else 0
-                suffix = f"  cache: {cached:,} ({rate:.0f}%)" if cached else ""
+                u = c.usage
+                if not u:
+                    continue
+                p = u.prompt_tokens
+                co = u.completion_tokens
+                cached = u.cached_tokens
+                missed = _get_missed_tokens(u)
                 lines.append(
                     f"    [{i+1}] prompt {p:,} + completion {co:,} = {p+co:,} tokens"
-                    f"  |  {c.duration_ms:.0f}ms  {c.model}{suffix}"
+                    f"{_format_cache_info(p, cached, missed)}"
+                    f"  |  {c.duration_ms:.0f}ms  {c.model}"
                 )
 
         if sub_calls:
             sub_prompt = sum(c.usage.prompt_tokens for c in sub_calls if c.usage)
             sub_comp = sum(c.usage.completion_tokens for c in sub_calls if c.usage)
+            sub_cached = sum(c.usage.cached_tokens for c in sub_calls if c.usage)
+            sub_missed = sum(_get_missed_tokens(c.usage) for c in sub_calls)
             sub_total = sub_prompt + sub_comp
             sub_dur = sum(c.duration_ms for c in sub_calls)
             lines.append(
                 f"  Sub-agent ({len(sub_calls)} call(s)): "
                 f"prompt {sub_prompt:,} + completion {sub_comp:,} = {sub_total:,} tokens"
+                f"{_format_cache_info(sub_prompt, sub_cached, sub_missed)}"
                 f"  |  {sub_dur:.0f}ms"
             )
             for c in sub_calls:
-                p = c.usage.prompt_tokens if c.usage else 0
-                co = c.usage.completion_tokens if c.usage else 0
-                cached = c.usage.cached_tokens if c.usage else 0
-                rate = (cached / p * 100) if p else 0
-                suffix = f"  cache: {cached:,} ({rate:.0f}%)" if cached else ""
+                u = c.usage
+                if not u:
+                    continue
+                p = u.prompt_tokens
+                co = u.completion_tokens
+                cached = u.cached_tokens
+                missed = _get_missed_tokens(u)
                 lines.append(
                     f"    [{c.source}] prompt {p:,} + completion {co:,} = {p+co:,} tokens"
-                    f"  |  {c.duration_ms:.0f}ms  {c.model}{suffix}"
+                    f"{_format_cache_info(p, cached, missed)}"
+                    f"  |  {c.duration_ms:.0f}ms  {c.model}"
                 )
     else:
         # Fallback: just show aggregate usage
