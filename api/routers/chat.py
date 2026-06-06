@@ -8,7 +8,12 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from rpg_world.rpg_core.agent import RPGGameAgent
+from rpg_world.rpg_core.agent.agent_types import StreamEventKind
 from rpg_world.rpg_core.settings import settings
+
+from rpg_world.api.logger import chat_logger
+from rpg_world.api.settings import api_settings
+from rpg_world.rpg_core.agent.stats_formatter import format_event_stats, format_turn_stats
 
 router = APIRouter(tags=["chat"])
 
@@ -91,14 +96,26 @@ async def chat_send(
     """
     session_id = body.get("session_id", "default")
     message = body.get("message", "")
+
+    # Log raw user input
+    if api_settings.log_chat_messages:
+        chat_logger.info("USER [%s]: %s", session_id, message)
+
     agent = _get_agent(session_id, api_key=x_openai_api_key)
     try:
         reply = await agent.send(message)
     except Exception as exc:
+        chat_logger.error("SEND ERROR [%s]: %s", session_id, exc)
         raise HTTPException(
             status_code=400,
             detail=f"Chat send failed (api_key missing or invalid?): {exc}",
         )
+
+    # Log raw output and stats
+    if api_settings.log_chat_messages:
+        chat_logger.info("ASSISTANT [%s]: %s", session_id, reply.text)
+    if api_settings.log_llm_stats and reply.stats:
+        chat_logger.info("LLM Stats [%s]:\n%s", session_id, format_turn_stats(reply.stats))
 
     result: dict = {"reply": reply.text}
     if reply.tool_records:
@@ -137,6 +154,10 @@ async def chat_command(
     """
     session_id = body.get("session_id", "default")
     command: str = body.get("command", "").strip()
+
+    if api_settings.log_chat_messages:
+        chat_logger.info("CMD [%s]: %s", session_id, command)
+
     agent = _get_agent(session_id, api_key=x_openai_api_key)
 
     try:
@@ -150,6 +171,8 @@ async def chat_command(
     # 交由 agent 的 CommandDispatcher 执行，与 send() 逻辑一致
     cmd_result = await agent._cmd_dispatcher.dispatch(command)
     if cmd_result.handled:
+        if api_settings.log_chat_messages:
+            chat_logger.info("CMD REPLY [%s]: %s", session_id, cmd_result.reply)
         return {"reply": cmd_result.reply, "stats": cmd_result.stats}
     raise HTTPException(status_code=400, detail=f"未知命令: {command.split()[0] if command.strip() else '(empty)'}")
 
@@ -178,11 +201,23 @@ async def chat_stream(
     agent = _get_agent(session_id, api_key=x_openai_api_key)
 
     async def event_generator():
+        # Log raw user input
+        if api_settings.log_chat_messages:
+            chat_logger.info("USER [%s]: %s", session_id, message)
+
         try:
             await agent._ensure_initialized()
             async for event in agent.send_stream(message):
                 yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+
+                # Log on DONE
+                if event.kind == StreamEventKind.DONE:
+                    if api_settings.log_chat_messages:
+                        chat_logger.info("ASSISTANT [%s]: %s", session_id, event.content)
+                    if api_settings.log_llm_stats and event.usage:
+                        chat_logger.info("LLM Stats [%s]:\n%s", session_id, format_event_stats(event))
         except Exception as exc:
+            chat_logger.error("STREAM ERROR [%s]: %s", session_id, exc)
             yield f"data: {json.dumps({'kind': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

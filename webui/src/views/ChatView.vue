@@ -83,8 +83,8 @@
             </a-collapse>
           </div>
 
-          <!-- Main content -->
-          <div class="msg-content" v-html="renderContent(msg.content)"></div>
+          <!-- Main content (Markdown rendered) -->
+          <MarkdownContent :content="msg.content" />
 
           <!-- Streaming indicator -->
           <div v-if="msg.streaming" class="streaming-indicator">
@@ -240,6 +240,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import { getHistory, streamMessage } from '@/api/chat'
 import { useCommands, sendCommand } from '@/composables/useCommands'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
@@ -533,15 +534,6 @@ async function scrollToBottom() {
   }
 }
 
-function renderContent(text) {
-  if (!text) return ''
-  // Escape HTML, then convert newlines to <br>
-  const escaped = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  return escaped.replace(/\n/g, '<br>')
-}
 
 // ── Workspace ─────────────────────────────────────────────
 
@@ -721,10 +713,6 @@ function handleSaveSettings() {
   text-transform: uppercase;
   opacity: 0.7;
   margin-bottom: 4px;
-}
-
-.is-user .msg-content {
-  color: #fff;
 }
 
 /* ── Thinking section ──────────────────────────────────── */
