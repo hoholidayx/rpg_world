@@ -33,10 +33,13 @@ from loguru import logger
 
 from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
+from rpg_world.rpg_core.agent.command import CommandDef
 
 # ── constants ──────────────────────────────────────────────────────────
 
 _TAG = "[MemorySubAgent]"
+COMMAND_NAME = "/compact"
+"""此子 Agent 注册到 CommandDispatcher 的斜杠命令名。"""
 
 # ── function schemas (one per pipeline) ───────────────────────────────
 
@@ -241,19 +244,17 @@ class MemorySubAgent(BaseSubAgent):
     # ── Command interface ─────────────────────────────────────────────
 
     def get_command_def(self) -> dict | None:
-        from rpg_world.rpg_core.agent.command import CommandDef
-
         return CommandDef(
-            name="/compact",
+            name=COMMAND_NAME,
             description="压缩最老的对话轮次为摘要",
-            detail="可传参：/compact [压缩轮数] [保留轮数]，如 /compact 10 5",
+            detail=f"可传参：{COMMAND_NAME} [压缩轮数] [保留轮数]，如 {COMMAND_NAME} 10 5",
         )
 
     def accept_command(self, command: str) -> bool:
-        return command == "/compact"
+        return command == COMMAND_NAME
 
     async def execute_command(self, command: str, args: list[str], agent: Any = None) -> dict | None:
-        if command != "/compact":
+        if command != COMMAND_NAME:
             return None
         compress_rounds: int | None = None
         keep_rounds: int | None = None
@@ -268,7 +269,7 @@ class MemorySubAgent(BaseSubAgent):
             except ValueError:
                 return {"reply": f"keep_rounds 必须是整数，收到: {args[1]}"}
         if agent is None or not hasattr(agent, "compact_history"):
-            return {"reply": "未绑定主 Agent，无法执行 /compact"}
+            return {"reply": f"未绑定主 Agent，无法执行 {COMMAND_NAME}"}
         result = await agent.compact_history(compress_rounds, keep_rounds)
         if result.get("skipped"):
             return {"reply": f"压缩跳过：{result['reason']}"}
