@@ -240,8 +240,19 @@ class Settings:
     # ── Session-scoped file path getters ──────────────────────────────
 
     def get_history_path(self, session_id: str) -> Path:
-        """Return the ``history.jsonl`` file path for the given session."""
+        """Return the ``history.jsonl`` file path for the given session.
+
+        主历史文件，用于构建上下文和压缩。``compact_history()`` 会截断此文件。
+        """
         return self.session_dir(session_id) / "history.jsonl"
+
+    def get_cold_history_path(self, session_id: str) -> Path:
+        """Return the ``history_cold.jsonl`` file path for the given session.
+
+        冷备份历史文件，只追加写入，永不截断。与主 history.jsonl 同步写入，
+        用于后续的记忆搜寻和数据恢复。
+        """
+        return self.session_dir(session_id) / "history_cold.jsonl"
 
     def get_summary_path(self, session_id: str) -> Path:
         """Return the ``rpg_summaries.json`` file path for the given session."""

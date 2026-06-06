@@ -587,6 +587,13 @@ class RPGGameAgent:
         """Return the JSONL file path for this session's persisted history."""
         return settings.get_history_path(self._session_id)
 
+    def _cold_history_path(self) -> Path:
+        """Return the cold-backup JSONL file path for this session.
+
+        冷备份只追加写入，永不截断，用于后续记忆搜寻和数据恢复。
+        """
+        return settings.get_cold_history_path(self._session_id)
+
     def _load_history_from_disk(self) -> None:
         """Append persisted messages from the JSONL file to ``_history``."""
         path = self._history_path()
@@ -604,13 +611,25 @@ class RPGGameAgent:
                     continue
 
     def _append_history(self, role: str, content: str) -> None:
-        """Append one message to the JSONL file (no-op if history disabled)."""
+        """Append one message to the JSONL file (no-op if history disabled).
+
+        同时写入两份文件：
+        - history.jsonl：主文件，用于构建上下文和压缩（compact 时截断）
+        - history_cold.jsonl：冷备份，只追加写入永不截断，用于记忆搜寻
+        """
         if not self._history_enabled:
             return
+        record = json.dumps({"role": role, "content": content}, ensure_ascii=False)
+        # 主历史文件
         path = self._history_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"role": role, "content": content}, ensure_ascii=False) + "\n")
+            f.write(record + "\n")
+        # 冷备份文件——只追加，永远不截断
+        cold_path = self._cold_history_path()
+        cold_path.parent.mkdir(parents=True, exist_ok=True)
+        with cold_path.open("a", encoding="utf-8") as f:
+            f.write(record + "\n")
 
     async def _ensure_initialized(self) -> None:
         if self._initialized:
