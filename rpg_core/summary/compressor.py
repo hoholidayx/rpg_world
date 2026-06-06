@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.agent.memory_sub_agent import MemorySubAgent
+    from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
     from rpg_world.rpg_core.summary.store import SummaryStore
 
 
