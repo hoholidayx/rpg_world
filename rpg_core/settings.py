@@ -24,8 +24,9 @@ from rpg_world.rpg_core.utils.path_utils import resolve_rpg_path, resolve_worksp
 
 # Location of settings.json relative to this module
 _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
-# Package root used to resolve relative paths
+# Package roots used to resolve relative paths
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+_RPG_CORE_DIR = Path(__file__).resolve().parent
 
 # Known data-type subdirectories inside data/ — these are excluded from
 # workspace discovery in list_workspaces().
@@ -90,6 +91,11 @@ class Settings:
     def pm_details_path(self) -> str:
         """路径：PM 可展开条目的详情文件（JSON，预留）。"""
         return self._resolve("pm_details_path", "pm_details.json")
+
+/    @property
+    def jinja_dir(self) -> Path:
+        """Path to the Jinja template directory (rpg_core/jinja/)."""
+        return _RPG_CORE_DIR / "jinja"
 
     @property
     def verbose_logging(self) -> bool:

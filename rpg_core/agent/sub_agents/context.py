@@ -23,7 +23,9 @@ Usage::
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+from rpg_world.rpg_core.context.builder import render_jinja_template
 
 
 class SubAgentContext:
@@ -110,49 +112,19 @@ class SubAgentContext:
     # ── internal renderers ────────────────────────────────────────────
 
     def _render_lorebook(self) -> str:
-        """渲染世界书段落（与 lorebook.jinja 输出格式一致）。"""
+        """渲染世界书段落（复用 builder.py 的 Jinja 模板）。"""
         if not self._lorebook_entries:
             return ""
-
-        lines: list[str] = ["## 世界书\n"]
-        for entry in self._lorebook_entries:
-            name = entry.get("name", "")
-            lines.append(f"### {name}")
-            desc = entry.get("description")
-            if desc:
-                lines.append(f"> {desc}")
-            tags = entry.get("tags")
-            if tags:
-                lines.append(f"标签: {', '.join(tags)}")
-            content = entry.get("content", "")
-            if content:
-                lines.append(content)
-            lines.append("")
-
-        return "\n".join(lines).rstrip()
+        return render_jinja_template(
+            "modules/lorebook.jinja",
+            lorebook_entries=self._lorebook_entries,
+        )
 
     def _render_characters(self) -> str:
-        """渲染角色卡段落（与 character_card.jinja 输出格式一致）。"""
+        """渲染角色卡段落（复用 builder.py 的 Jinja 模板）。"""
         if not self._characters:
             return ""
-
-        lines: list[str] = ["## 角色卡\n"]
-        for char in self._characters:
-            name = char.get("name", "")
-            lines.append(f"### {name}")
-            personality = char.get("personality")
-            if personality:
-                lines.append(f"个性: {personality}")
-            content = char.get("content", "")
-            if content:
-                lines.append(content)
-            details = char.get("details")
-            if details:
-                lines.append("**深层设定:**")
-                for detail in details:
-                    d_name = detail.get("name", "")
-                    d_content = detail.get("content", "")
-                    lines.append(f"- {d_name}: {d_content}")
-            lines.append("")
-
-        return "\n".join(lines).rstrip()
+        return render_jinja_template(
+            "modules/character_card.jinja",
+            characters=self._characters,
+        )

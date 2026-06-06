@@ -2,19 +2,39 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, FileSystemLoader
 
 from rpg_world.rpg_core.context.config import RPGContextConfig
 from rpg_world.rpg_core.context.rpg_context import RPGContext
+from rpg_world.rpg_core.settings import settings
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.memory.persist_memory import PersistentMemoryStore
     from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
     from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
     from rpg_world.rpg_core.summary.store import SummaryStore
+
+
+# ── shared Jinja environment ──────────────────────────────────────────
+
+_JINJA_ENV: Environment | None = None
+
+
+def render_jinja_template(template_name: str, **context: Any) -> str:
+    """Render a Jinja template from the ``rpg_core/jinja/`` directory.
+
+    Uses a module-level cached Environment to avoid repeated setup cost.
+    """
+    global _JINJA_ENV
+    if _JINJA_ENV is None:
+        _JINJA_ENV = Environment(
+            loader=FileSystemLoader(str(settings.jinja_dir)),
+            autoescape=False,
+        )
+    tpl = _JINJA_ENV.get_template(template_name)
+    return tpl.render(**context).strip()
 
 
 def _count_rounds(messages: list[dict]) -> int:
@@ -90,13 +110,6 @@ class RPGContextBuilder:
     ) -> None:
         self.config = config
         self.world_name = world_name
-
-        # Jinja2 environment — resolves {% include %} relative to jinja/
-        jinja_dir = Path(__file__).resolve().parent.parent / "jinja"
-        self._env = Environment(
-            loader=FileSystemLoader(str(jinja_dir)),
-            autoescape=False,
-        )
 
         # Lazy-initialised stores
         self._summary_store: SummaryStore | None = None
@@ -283,8 +296,7 @@ class RPGContextBuilder:
 
     def _render_layer(self, template_name: str, context: dict[str, Any]) -> str:
         """Render a layer Jinja template with *context* vars."""
-        tpl = self._env.get_template(template_name)
-        return tpl.render(**context).strip()
+        return render_jinja_template(template_name, **context)
 
     def _build_extension_content(
         self,
@@ -297,8 +309,7 @@ class RPGContextBuilder:
             if not mod.enabled:
                 continue
             try:
-                tpl = self._env.get_template(mod.template)
-                rendered = tpl.render(**default_data).strip()
+                rendered = render_jinja_template(mod.template, **default_data)
                 if rendered:
                     blocks.append(rendered)
             except Exception:
