@@ -59,6 +59,7 @@ class SessionManager:
         self._load_meta()
         path = self._history_path()
         if not path.exists():
+            logger.debug(_TAG + " no history file for session '{}'", self._session_id)
             return
         self._history = []
         with path.open("r", encoding="utf-8") as f:
@@ -70,6 +71,10 @@ class SessionManager:
                     self._history.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
+        logger.debug(
+            _TAG + " loaded {} message(s) from {}",
+            len(self._history), path,
+        )
 
     def append(self, role: str, content: str) -> None:
         """Append a message to in-memory history.
@@ -107,6 +112,7 @@ class SessionManager:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("")
         self._update_meta(message_count=0)
+        logger.debug(_TAG + " cleared history for session '{}'", self._session_id)
 
     def truncate(self, keep_from_index: int) -> int:
         """Remove all messages before *keep_from_index* from memory and disk.
@@ -157,6 +163,7 @@ class SessionManager:
         self._load_meta()
         if self._history_enabled:
             self.load()
+        logger.debug(_TAG + " switched to session '{}'", session_id)
 
     # ── Metadata ───────────────────────────────────────────────────────
 
@@ -236,3 +243,8 @@ class SessionManager:
             json.dump(self._meta, f, ensure_ascii=False, indent=2)
             f.write("\n")
         tmp.replace(path)
+        logger.debug(
+            _TAG + " wrote session.json: msg_count={}, compacted={}",
+            self._meta.get("message_count", 0),
+            self._meta.get("compacted_rounds", 0),
+        )
