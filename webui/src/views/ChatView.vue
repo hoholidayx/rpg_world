@@ -115,19 +115,43 @@
       </div>
     </div>
 
+    <!-- ── Slash-command popup ──────────────────────────── -->
+    <div v-if="showCommandPopup" class="command-popup" ref="commandPopupRef">
+      <div class="command-popup-title">命令</div>
+      <div
+        v-for="(cmd, ci) in filteredCommands"
+        :key="cmd.command"
+        class="command-item"
+        :class="{ active: ci === commandHighlightIndex }"
+        @click="selectCommand(cmd)"
+        @mouseenter="commandHighlightIndex = ci"
+      >
+        <span class="cmd-name">{{ cmd.command }}</span>
+        <span class="cmd-desc">{{ cmd.description }}</span>
+      </div>
+    </div>
+
     <!-- ── Input area ────────────────────────────────────── -->
     <div class="input-area">
       <div class="input-wrapper">
-        <a-textarea
-          v-model:value="inputText"
-          placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-          :rows="2"
-          :disabled="sending"
-          @keydown.enter.prevent="onSendKeydown"
-          class="chat-input"
-        />
+        <div class="input-relative">
+          <a-textarea
+            v-model:value="inputText"
+            placeholder="输入消息... (/ 查看命令, Enter 发送, Shift+Enter 换行)"
+            :rows="2"
+            :disabled="sending"
+            @keydown.enter.prevent="onSendKeydown"
+            @keydown.escape="closeCommandPopup"
+            @keydown.up.prevent="onCommandArrowUp"
+            @keydown.down.prevent="onCommandArrowDown"
+            @keydown.tab.exact.prevent="onCommandTab"
+            @input="onInputChange"
+            class="chat-input"
+            ref="inputRef"
+          />
+        </div>
         <div class="input-actions">
-          <span class="input-hint">Enter 发送 · Shift+Enter 换行</span>
+          <span class="input-hint">/ 查看命令 · Enter 发送 · Shift+Enter 换行</span>
           <div class="input-buttons">
             <a-button
               v-if="sending"
@@ -278,6 +302,86 @@ watch(
     loadHistory()
   },
 )
+
+// ── Slash-command definitions ──────────────────────────
+const COMMANDS = [
+  { command: '/clear', description: '清空当前会话的对话历史', detail: '重置对话上下文，清除所有已发送的消息记录。' },
+  { command: '/compact', description: '压缩最老的对话轮次为摘要', detail: '可传参：/compact [压缩轮数] [保留轮数]，如 /compact 10 5' },
+  { command: '/reload', description: '重新加载 RPG 数据（角色卡、世界书）', detail: '从磁盘重新读取角色卡和世界书文件变更。' },
+  { command: '/history', description: '查看原始对话历史', detail: '显示所有历史消息的 role 和内容预览。' },
+  { command: '/context', description: '查看当前上下文结构和 token 用量', detail: '显示 5 层 RPG 上下文的每层信息。' },
+  { command: '/sessions', description: '列出所有可用会话', detail: '显示当前工作区下所有会话 ID 列表。' },
+  { command: '/session-create', description: '创建新会话', detail: '用法：/session-create <会话ID>' },
+  { command: '/session-switch', description: '切换到指定会话', detail: '用法：/session-switch <会话ID>' },
+]
+
+const showCommandPopup = ref(false)
+const commandHighlightIndex = ref(0)
+const inputRef = ref(null)
+const commandPopupRef = ref(null)
+
+const filteredCommands = computed(() => {
+  const text = inputText.value
+  if (!text.startsWith('/')) return COMMANDS
+  const parts = text.split(/\s+/)
+  if (parts.length <= 1) return COMMANDS
+  const typed = parts[0].toLowerCase()
+  if (COMMANDS.some(c => c.command === typed)) return []
+  return COMMANDS.filter(c => c.command.startsWith(typed))
+})
+
+function onInputChange() {
+  const text = inputText.value
+  if (text === '/') {
+    showCommandPopup.value = true
+    commandHighlightIndex.value = 0
+  } else if (!text.startsWith('/')) {
+    showCommandPopup.value = false
+  } else {
+    const parts = text.split(/\s+/)
+    const typed = parts[0].toLowerCase()
+    if (typed === '/') {
+      showCommandPopup.value = true
+    } else if (COMMANDS.some(c => c.command.startsWith(typed))) {
+      showCommandPopup.value = true
+      commandHighlightIndex.value = 0
+    } else {
+      showCommandPopup.value = false
+    }
+  }
+}
+
+function closeCommandPopup() {
+  showCommandPopup.value = false
+}
+
+function selectCommand(cmd) {
+  inputText.value = cmd.command + ' '
+  showCommandPopup.value = false
+  inputRef.value?.focus()
+}
+
+function onCommandArrowUp() {
+  if (!showCommandPopup.value) return
+  const len = filteredCommands.value.length
+  if (len === 0) return
+  commandHighlightIndex.value = (commandHighlightIndex.value - 1 + len) % len
+}
+
+function onCommandArrowDown() {
+  if (!showCommandPopup.value) return
+  const len = filteredCommands.value.length
+  if (len === 0) return
+  commandHighlightIndex.value = (commandHighlightIndex.value + 1) % len
+}
+
+function onCommandTab() {
+  if (!showCommandPopup.value) return
+  const cmds = filteredCommands.value
+  if (cmds.length === 0) return
+  const idx = Math.min(commandHighlightIndex.value, cmds.length - 1)
+  selectCommand(cmds[idx])
+}
 
 // ── Methods ───────────────────────────────────────────────
 
@@ -673,6 +777,61 @@ function handleSaveSettings() {
   gap: 4px;
   font-size: 12px;
   opacity: 0.6;
+}
+
+/* ── Slash-command popup ──────────────────────────────── */
+.command-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  margin-bottom: 4px;
+  z-index: 100;
+}
+.command-popup-title {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+}
+.command-item {
+  display: flex;
+  align-items: baseline;
+  padding: 8px 12px;
+  cursor: pointer;
+  gap: 8px;
+  transition: background 0.15s;
+}
+.command-item:hover,
+.command-item.active {
+  background: var(--active-bg);
+}
+.cmd-name {
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1677ff;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cmd-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.input-relative {
+  position: relative;
 }
 
 /* ── Input area ────────────────────────────────────────── */
