@@ -266,6 +266,10 @@ class Settings:
         """Return the ``persistent_memory.json`` file path for the given session."""
         return self.session_dir(session_id) / "persistent_memory.json"
 
+    def get_session_meta_path(self, session_id: str) -> Path:
+        """Return the ``session.json`` metadata file path for the given session."""
+        return self.session_dir(session_id) / "session.json"
+
     # ── Session file listing ──────────────────────────────────────────
 
     def list_session_files(self, session_id: str) -> list[Path]:

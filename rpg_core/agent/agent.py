@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import time as _time
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -31,6 +29,7 @@ from rpg_world.rpg_core.agent.tools import (
     WriteFileTool,
 )
 from rpg_world.rpg_core.scene import SceneTracker
+from rpg_world.rpg_core.session import SessionManager
 from rpg_world.rpg_core.settings import settings
 from rpg_world.rpg_core.utils.watcher import get_watcher
 
@@ -85,7 +84,10 @@ class RPGGameAgent:
         self._scene_tracker: SceneTracker | None = None
         self._provider: LLMProvider | None = None
         self._system_prompt: str = ""
-        self._history: list[dict] = []
+        self._session = SessionManager(
+            session_id=self._session_id,
+            history_enabled=self._history_enabled,
+        )
         self._tool_registry: ToolRegistry | None = None
         self._last_tool_records: list[ToolCallRecord] | None = None
         self._status_sub_agent: StatusSubAgent | None = None
@@ -107,15 +109,14 @@ class RPGGameAgent:
         loaded from or saved to disk.  Pass ``record_history=True`` to
         persist this single turn to the JSONL file for the session.
         """
-        before = len(self._history)
-        original = self._history_enabled
-        self._history_enabled = record_history
+        cp = self._session.checkpoint()
+        original = self._session.history_enabled
+        self._session.set_history_enabled(record_history)
         try:
             reply = await self.send(user_input)
         finally:
-            self._history_enabled = original
-        # Roll back history — single_turn must be stateless
-        del self._history[before:]
+            self._session.set_history_enabled(original)
+            self._session.rollback(cp)
         return reply
 
     async def send(self, user_input: str) -> AgentReply:
@@ -152,7 +153,7 @@ class RPGGameAgent:
         if self._status_sub_agent and self._scene_tracker:
             scene_ctx_before = self._scene_tracker.get_context()
             sub_result = await self._status_sub_agent.update(
-                history=self._history,
+                history=self._session.history,
                 state_context=scene_ctx_before,
                 user_input=user_input,
                 turn_stats=turn_stats,
@@ -171,8 +172,7 @@ class RPGGameAgent:
         else:
             stored_input = user_input
 
-        self._history.append({"role": "user", "content": stored_input})
-        self._append_history("user", stored_input)
+        self._session.append("user", stored_input)
 
         messages = self._build_transformed_context()
         if settings.verbose_logging:
@@ -220,8 +220,7 @@ class RPGGameAgent:
                 stats=turn_stats,
             )
 
-        self._history.append({"role": "assistant", "content": reply_text})
-        self._append_history("assistant", reply_text)
+        self._session.append("assistant", reply_text)
         return result
 
     async def send_stream(self, user_input: str) -> AsyncIterator[AgentStreamEvent]:
@@ -264,7 +263,7 @@ class RPGGameAgent:
         if self._status_sub_agent and self._scene_tracker:
             scene_ctx_before = self._scene_tracker.get_context()
             sub_result = await self._status_sub_agent.update(
-                history=self._history,
+                history=self._session.history,
                 state_context=scene_ctx_before,
                 user_input=user_input,
                 turn_stats=turn_stats,
@@ -283,8 +282,7 @@ class RPGGameAgent:
         else:
             stored_input = user_input
 
-        self._history.append({"role": "user", "content": stored_input})
-        self._append_history("user", stored_input)
+        self._session.append("user", stored_input)
 
         messages = self._build_transformed_context()
         schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
@@ -325,8 +323,7 @@ class RPGGameAgent:
 
         # Only persist to history if we got valid content
         if final_content:
-            self._history.append({"role": "assistant", "content": final_content})
-            self._append_history("assistant", final_content)
+            self._session.append("assistant", final_content)
 
         # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
         # Compute aggregate usage across all LLM calls (main loop + sub-agents)
@@ -359,7 +356,7 @@ class RPGGameAgent:
     @property
     def history(self) -> list[dict]:
         """Read-only view of the raw conversation history (before RPG transform)."""
-        return list(self._history)
+        return self._session.history
 
     @property
     def last_tool_records(self) -> list[ToolCallRecord] | None:
@@ -377,11 +374,7 @@ class RPGGameAgent:
         fresh.
         """
         if self._initialized:
-            self._history = []
-        if self._history_enabled:
-            path = self._history_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("")
+            self._session.clear()
 
     async def reload_rpg_context(self) -> None:
         """重新构建 RPG context 管理器，拾取文件变更。
@@ -403,9 +396,7 @@ class RPGGameAgent:
         """
         self._session_id = session_id
         self._refresh_rpg_context()
-        self._history = []
-        if self._history_enabled:
-            self._load_history_from_disk()
+        self._session.switch_to(session_id)
         self._setup_tool_registry()
         logger.info("[MainAgent] switched to session: {}", session_id)
 
@@ -445,7 +436,7 @@ class RPGGameAgent:
         # Build scene context same way as send()
         scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
 
-        test_messages = list(self._history)
+        test_messages = list(self._session.history)
         if user_input or scene_ctx:
             parts = []
             if scene_ctx:
@@ -497,7 +488,7 @@ class RPGGameAgent:
         compress_rounds = compress_rounds or settings.memory_compress_rounds
         keep_rounds = keep_rounds or settings.memory_keep_rounds
 
-        user_indices = [i for i, m in enumerate(self._history) if m.get("role") == "user"]
+        user_indices = [i for i, m in enumerate(self._session.history) if m.get("role") == "user"]
         total = len(user_indices)
         available = total - keep_rounds
         if available <= 0:
@@ -508,14 +499,14 @@ class RPGGameAgent:
             return {"skipped": True, "reason": f"history too short ({total} <= {keep_rounds})"}
 
         actual = min(compress_rounds, available)
-        compress_end = user_indices[actual] if actual < len(user_indices) else len(self._history)
+        compress_end = user_indices[actual] if actual < len(user_indices) else len(self._session.history)
 
         logger.info(
             _TAG + " compact: total={} user rounds, compress={}, keep={}",
             total, actual, keep_rounds,
         )
 
-        compress_window = self._history[:compress_end]
+        compress_window = self._session.history[:compress_end]
         result = await self._memory_sub_agent.process({"summary": compress_window})
         summary_text = ""
         if result.summary_generated:
@@ -525,18 +516,11 @@ class RPGGameAgent:
                 _TAG + " summary generated: {} chars", len(summary_text),
             )
 
-        # 截断
-        before_len = len(self._history)
-        del self._history[:compress_end]
-        after_len = len(self._history)
-
-        # 重写 JSONL
-        if self._history_enabled:
-            path = self._history_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("w", encoding="utf-8") as f:
-                for msg in self._history:
-                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        # 截断（委派 SessionManager）
+        before_len = len(self._session.history)
+        self._session.truncate(compress_end)
+        after_len = len(self._session.history)
+        self._session.increment_compacted_rounds(actual)
 
         logger.info(
             _TAG + " compact: deleted {} msgs, history now {} msgs",
@@ -581,7 +565,7 @@ class RPGGameAgent:
         """Build the 5-layer RPG context and flatten to message list."""
         ctx = self._builder.build(
             system_prompt=self._system_prompt,
-            messages=self._history,
+            messages=self._session.history,
             character_mgr=self._character_mgr,
             lorebook_mgr=self._lorebook_mgr,
             status_mgr=self._status_mgr,
@@ -605,56 +589,6 @@ class RPGGameAgent:
             self._tool_registry.register_all(self._extra_tools)
 
 
-    # ── internals — history persistence ────────────────────────────────
-
-    def _history_path(self) -> Path:
-        """Return the JSONL file path for this session's persisted history."""
-        return settings.get_history_path(self._session_id)
-
-    def _cold_history_path(self) -> Path:
-        """Return the cold-backup JSONL file path for this session.
-
-        冷备份只追加写入，永不截断，用于后续记忆搜寻和数据恢复。
-        """
-        return settings.get_cold_history_path(self._session_id)
-
-    def _load_history_from_disk(self) -> None:
-        """Append persisted messages from the JSONL file to ``_history``."""
-        path = self._history_path()
-        if not path.exists():
-            return
-        with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                    self._history.append(msg)
-                except json.JSONDecodeError:
-                    continue
-
-    def _append_history(self, role: str, content: str) -> None:
-        """Append one message to the JSONL file (no-op if history disabled).
-
-        同时写入两份文件：
-        - history.jsonl：主文件，用于构建上下文和压缩（compact 时截断）
-        - history_cold.jsonl：冷备份，只追加写入永不截断，用于记忆搜寻
-        """
-        if not self._history_enabled:
-            return
-        record = json.dumps({"role": role, "content": content}, ensure_ascii=False)
-        # 主历史文件
-        path = self._history_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(record + "\n")
-        # 冷备份文件——只追加，永远不截断
-        cold_path = self._cold_history_path()
-        cold_path.parent.mkdir(parents=True, exist_ok=True)
-        with cold_path.open("a", encoding="utf-8") as f:
-            f.write(record + "\n")
-
     async def _ensure_initialized(self) -> None:
         if self._initialized:
             return
@@ -663,10 +597,7 @@ class RPGGameAgent:
         self._refresh_rpg_context()
 
         self._system_prompt = PromptManager(self._world_name).system_prompt
-        self._history = []
-
-        if self._history_enabled:
-            self._load_history_from_disk()
+        self._session.load()
 
         self._provider = OpenAIProvider(
             model=self._model,
