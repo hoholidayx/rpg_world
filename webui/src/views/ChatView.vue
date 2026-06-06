@@ -239,6 +239,7 @@ import { message } from 'ant-design-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import { getHistory, streamMessage } from '@/api/chat'
+import { useCommands, sendCommand } from '@/composables/useCommands'
 
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
@@ -301,64 +302,20 @@ watch(
   },
 )
 
-// ── Watch input for slash-command popup ───────────────────
+// ── Slash-command composable ─────────────────────────
 
-watch(inputText, (val) => {
-  if (val === '/') {
-    showCommandPopup.value = true
-    commandHighlightIndex.value = 0
-  } else if (!val.startsWith('/')) {
-    showCommandPopup.value = false
-  } else {
-    const parts = val.split(/\s+/)
-    const typed = parts[0].toLowerCase()
-    if (typed === '/') {
-      showCommandPopup.value = true
-    } else if (COMMANDS.some(c => c.command.startsWith(typed))) {
-      showCommandPopup.value = true
-      commandHighlightIndex.value = 0
-    } else {
-      showCommandPopup.value = false
-    }
-  }
-})
+const {
+  showPopup: showCommandPopup,
+  highlightIndex: commandHighlightIndex,
+  filtered: filteredCommands,
+  isCommand: isKnownCommand,
+  select: selectCommand,
+  close: closeCommandPopup,
+  onInputChange,
+} = useCommands(inputText)
 
-// ── Slash-command definitions ──────────────────────────
-const COMMANDS = [
-  { command: '/clear', description: '清空当前会话的对话历史', detail: '重置对话上下文，清除所有已发送的消息记录。' },
-  { command: '/compact', description: '压缩最老的对话轮次为摘要', detail: '可传参：/compact [压缩轮数] [保留轮数]，如 /compact 10 5' },
-  { command: '/reload', description: '重新加载 RPG 数据（角色卡、世界书）', detail: '从磁盘重新读取角色卡和世界书文件变更。' },
-  { command: '/history', description: '查看原始对话历史', detail: '显示所有历史消息的 role 和内容预览。' },
-  { command: '/context', description: '查看当前上下文结构和 token 用量', detail: '显示 5 层 RPG 上下文的每层信息。' },
-  { command: '/sessions', description: '列出所有可用会话', detail: '显示当前工作区下所有会话 ID 列表。' },
-  { command: '/session-create', description: '创建新会话', detail: '用法：/session-create <会话ID>' },
-  { command: '/session-switch', description: '切换到指定会话', detail: '用法：/session-switch <会话ID>' },
-]
-
-const showCommandPopup = ref(false)
-const commandHighlightIndex = ref(0)
 const inputRef = ref(null)
 const commandPopupRef = ref(null)
-
-const filteredCommands = computed(() => {
-  const text = inputText.value
-  if (!text.startsWith('/')) return COMMANDS
-  const parts = text.split(/\s+/)
-  if (parts.length <= 1) return COMMANDS
-  const typed = parts[0].toLowerCase()
-  if (COMMANDS.some(c => c.command === typed)) return []
-  return COMMANDS.filter(c => c.command.startsWith(typed))
-})
-
-function closeCommandPopup() {
-  showCommandPopup.value = false
-}
-
-function selectCommand(cmd) {
-  inputText.value = cmd.command + ' '
-  showCommandPopup.value = false
-  inputRef.value?.focus()
-}
 
 function onCommandArrowUp() {
   if (!showCommandPopup.value) return
@@ -417,6 +374,65 @@ async function handleSend() {
   if (!text || sending.value) return
 
   inputText.value = ''
+
+  // ── Command handling（斜杠命令由后端直接执行，不经过 LLM） ──
+  if (text.startsWith('/')) {
+    const cmdName = text.split(/\s+/)[0].toLowerCase()
+    if (!isKnownCommand(text)) {
+      messages.value.push({
+        role: 'user',
+        content: text,
+        thinking: null,
+        tool_calls: [],
+        stats: null,
+        streaming: false,
+      })
+      messages.value.push({
+        role: 'assistant',
+        content: `未知命令，请检查后重试。输入 / 查看可用命令。`,
+        thinking: null,
+        tool_calls: [],
+        stats: null,
+        streaming: false,
+      })
+      await scrollToBottom()
+      return
+    }
+    messages.value.push({
+      role: 'user',
+      content: text,
+      thinking: null,
+      tool_calls: [],
+      stats: null,
+      streaming: false,
+    })
+    const asstMsg = {
+      role: 'assistant',
+      content: '',
+      thinking: null,
+      tool_calls: [],
+      stats: null,
+      streaming: true,
+    }
+    messages.value.push(asstMsg)
+    await scrollToBottom()
+    sending.value = true
+    try {
+      const res = await sendCommand(text, sessionStore.activeSession)
+      const data = res.data
+      asstMsg.content = data.reply || ''
+      asstMsg.stats = data.stats || null
+    } catch (e) {
+      asstMsg.content = `命令执行失败: ${e.response?.data?.detail || e.message}`
+    } finally {
+      asstMsg.streaming = false
+      sending.value = false
+      await scrollToBottom()
+    }
+    return
+  }
+
+  // ── Normal chat message ─────────────────────────────────
   sending.value = true
 
   // Push user message

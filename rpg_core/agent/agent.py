@@ -13,6 +13,7 @@ from loguru import logger
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
+from rpg_world.rpg_core.agent.command import CommandDispatcher
 from rpg_world.rpg_core.agent.prompt import PromptManager
 from rpg_world.rpg_core.agent.sub_agents import (
     MemorySubAgent,
@@ -90,6 +91,7 @@ class RPGGameAgent:
         self._status_sub_agent: StatusSubAgent | None = None
         self._memory_sub_agent: MemorySubAgent | None = None
         self._rpg_ctx: dict[str, Any] = {}
+        self._cmd_dispatcher: CommandDispatcher | None = None
 
     # ── public API ─────────────────────────────────────────────────────
 
@@ -130,6 +132,17 @@ class RPGGameAgent:
         
 
         await self._ensure_initialized()
+
+        # ── 斜杠命令分发（不走 LLM） ─────────────────────────────────
+        if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
+            cmd_result = await self._cmd_dispatcher.dispatch(user_input)
+            if cmd_result.handled:
+                _turn_stats = TurnStats(started_at=_time.monotonic())
+                _turn_stats.finished_at = _time.monotonic()
+                return AgentReply(
+                    text=cmd_result.reply,
+                    stats=_turn_stats,
+                )
 
         # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
         turn_stats = TurnStats(started_at=_time.monotonic())
@@ -231,6 +244,17 @@ class RPGGameAgent:
         persistence all mirror ``send()`` exactly.
         """
         await self._ensure_initialized()
+
+        # ── 斜杠命令分发（不走 LLM） ─────────────────────────────────
+        if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
+            cmd_result = await self._cmd_dispatcher.dispatch(user_input)
+            if cmd_result.handled:
+                yield AgentStreamEvent(
+                    kind=StreamEventKind.DONE,
+                    content=cmd_result.reply,
+                    model=self._model,
+                )
+                return
 
         # ── TurnStats 聚合器 ───────────────────────────────────────
         turn_stats = TurnStats(started_at=_time.monotonic())
@@ -681,6 +705,38 @@ class RPGGameAgent:
         )
         _memory_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
         self._memory_sub_agent.bind_context(_memory_ctx)
+
+        # ── CommandDispatcher ─────────────────────────────────────────
+        self._cmd_dispatcher = CommandDispatcher(agent=self)
+        # 内置命令
+        async def _cmd_clear(agent, args):
+            agent.clear_history()
+            return "对话历史已清空。"
+
+        async def _cmd_reload(agent, args):
+            await agent.reload_rpg_context()
+            return "RPG 数据已重新加载。"
+
+        async def _cmd_context(agent, args):
+            return await agent.get_context_markdown()
+
+        self._cmd_dispatcher.register_builtin(
+            "/clear", "清空当前会话的对话历史",
+            "重置对话上下文，清除所有已发送的消息记录。", _cmd_clear,
+        )
+        self._cmd_dispatcher.register_builtin(
+            "/reload", "重新加载 RPG 数据（角色卡、世界书）",
+            "从磁盘重新读取角色卡和世界书文件变更。", _cmd_reload,
+        )
+        self._cmd_dispatcher.register_builtin(
+            "/context", "查看当前上下文结构和 token 用量",
+            "显示 5 层 RPG 上下文的每层信息。", _cmd_context,
+        )
+        # 子 Agent 命令
+        if self._status_sub_agent is not None:
+            self._cmd_dispatcher.register_sub_agent(self._status_sub_agent)
+        if self._memory_sub_agent is not None:
+            self._cmd_dispatcher.register_sub_agent(self._memory_sub_agent)
 
         self._setup_tool_registry()
 

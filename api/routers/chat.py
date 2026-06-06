@@ -122,6 +122,38 @@ async def chat_send(
     return result
 
 
+@router.post("/chat/command")
+async def chat_command(
+    body: dict,
+    x_openai_api_key: str | None = Header(None),
+) -> dict:
+    """Execute a slash command on the agent (not sent to LLM).
+
+    Supported commands:
+      - ``/clear`` — clear conversation history
+      - ``/compact`` — compress old conversation rounds into summary
+      - ``/reload`` — reload RPG context from disk
+      - ``/context`` — show current context structure and token usage
+    """
+    session_id = body.get("session_id", "default")
+    command: str = body.get("command", "").strip()
+    agent = _get_agent(session_id, api_key=x_openai_api_key)
+
+    try:
+        await agent._ensure_initialized()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent initialization failed: {exc}",
+        )
+
+    # 交由 agent 的 CommandDispatcher 执行，与 send() 逻辑一致
+    cmd_result = await agent._cmd_dispatcher.dispatch(command)
+    if cmd_result.handled:
+        return {"reply": cmd_result.reply, "stats": cmd_result.stats}
+    raise HTTPException(status_code=400, detail=f"未知命令: {command.split()[0] if command.strip() else '(empty)'}")
+
+
 @router.post("/chat/stream")
 async def chat_stream(
     body: dict,

@@ -18,6 +18,13 @@ export function getHistory(sessionId = 'default') {
   })
 }
 
+export function sendCommand(command, sessionId = 'default') {
+  const headers = {}
+  const key = getApiKey()
+  if (key) headers['X-OpenAI-Api-Key'] = key
+  return api.post('/chat/command', { command, session_id: sessionId }, { headers })
+}
+
 export function sendMessage(message, sessionId = 'default') {
   const headers = {}
   const key = getApiKey()

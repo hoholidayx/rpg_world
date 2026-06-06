@@ -96,6 +96,30 @@ class BaseSubAgent:
         """
         return ""
 
+    # ── Command interface（子 Agent 可选的命令处理） ─────────────────
+
+    def get_command_def(self) -> Any | None:
+        """返回子 Agent 处理的命令定义，或 ``None`` 表示不处理任何命令。"""
+        return None
+
+    def accept_command(self, command: str) -> bool:
+        """判断此子 Agent 是否处理指定斜杠命令。"""
+        return False
+
+    async def execute_command(self, command: str, args: list[str], agent: Any = None) -> dict | None:
+        """执行命令，返回 ``{"reply": str, "stats": dict | None}`` 或 ``None``。
+
+        Parameters
+        ----------
+        command:
+            命令名（如 ``/compact``）。
+        args:
+            命令参数列表。
+        agent:
+            主 ``RPGGameAgent`` 实例，子 Agent 可通过它访问 agent 方法。
+        """
+        return None
+
     # ── Provider ─────────────────────────────────────────────────────
 
     def _get_provider(self) -> LLMProvider:

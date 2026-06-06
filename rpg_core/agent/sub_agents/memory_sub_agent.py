@@ -238,6 +238,47 @@ class MemorySubAgent(BaseSubAgent):
         """多管线子 Agent，无统一系统提示。各管线自行提供。"""
         return ""
 
+    # ── Command interface ─────────────────────────────────────────────
+
+    def get_command_def(self) -> dict | None:
+        from rpg_world.rpg_core.agent.command import CommandDef
+
+        return CommandDef(
+            name="/compact",
+            description="压缩最老的对话轮次为摘要",
+            detail="可传参：/compact [压缩轮数] [保留轮数]，如 /compact 10 5",
+        )
+
+    def accept_command(self, command: str) -> bool:
+        return command == "/compact"
+
+    async def execute_command(self, command: str, args: list[str], agent: Any = None) -> dict | None:
+        if command != "/compact":
+            return None
+        compress_rounds: int | None = None
+        keep_rounds: int | None = None
+        if len(args) >= 1:
+            try:
+                compress_rounds = int(args[0])
+            except ValueError:
+                return {"reply": f"compress_rounds 必须是整数，收到: {args[0]}"}
+        if len(args) >= 2:
+            try:
+                keep_rounds = int(args[1])
+            except ValueError:
+                return {"reply": f"keep_rounds 必须是整数，收到: {args[1]}"}
+        if agent is None or not hasattr(agent, "compact_history"):
+            return {"reply": "未绑定主 Agent，无法执行 /compact"}
+        result = await agent.compact_history(compress_rounds, keep_rounds)
+        if result.get("skipped"):
+            return {"reply": f"压缩跳过：{result['reason']}"}
+        summary_text = result.get("summary_text", "")
+        msg = f"已压缩 {result['compress_rounds']} 轮对话。"
+        if summary_text:
+            msg += f"\n\n摘要：{summary_text[:500]}"
+        msg += f"\n\n历史消息：{result['previous_history_msgs']} → {result['history_after_msgs']}"
+        return {"reply": msg, "stats": None}
+
     async def process(self, context: dict) -> MemoryAgentResult:
         """处理 *context* 中的内容，更新对应记忆存储。
 
