@@ -7,8 +7,6 @@ not persisted to disk — because recalled context is recomputed per request.
 
 from __future__ import annotations
 
-from typing import Any
-
 
 class RecalledMemoryStore:
     """召回记忆 —— 外部模块动态注入的临时上下文。

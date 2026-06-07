@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 
 class BaseTool(ABC):
@@ -20,7 +19,7 @@ class BaseTool(ABC):
     description: str = ""
 
     @abstractmethod
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         """Return the JSON Schema for this tool's arguments.
 
         The schema should follow the OpenAI function calling parameter
@@ -29,11 +28,11 @@ class BaseTool(ABC):
         ...
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: object) -> str:
         """Run the tool and return a text result for the LLM."""
         ...
 
-    def to_openai_schema(self) -> dict[str, Any]:
+    def to_openai_schema(self) -> dict[str, object]:
         """Return the full OpenAI-compatible tool schema dict."""
         return {
             "type": "function",

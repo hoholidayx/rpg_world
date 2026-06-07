@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from rpg_world.rpg_core.utils.path_utils import resolve_rpg_path, resolve_workspace_root
 
@@ -36,7 +36,7 @@ _KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "memory_sub_agent", "sess
 _SESSION_DIR_NAME = "sessions"
 
 
-def _load() -> dict[str, Any]:
+def _load() -> dict[str, object]:
     if _SETTINGS_PATH.is_file():
         with _SETTINGS_PATH.open(encoding="utf-8") as f:
             return json.load(f)
@@ -117,24 +117,24 @@ class Settings:
         return self._raw.get("agent_config", {}).get("log_tool_timing", self.verbose_logging)
 
     @property
-    def memory_sub_agent_config(self) -> dict[str, Any]:
+    def memory_sub_agent_config(self) -> dict[str, object]:
         """memory_sub_agent 完整配置 dict（保持向后兼容）。"""
         return self._raw.get("agent_config", {}).get("memory_sub_agent", {})
 
     # ── memory_sub_agent 管线级配置 ────────────────────────────────
 
     @property
-    def memory_summary_config(self) -> dict[str, Any]:
+    def memory_summary_config(self) -> dict[str, object]:
         """summary 管线配置：compress_rounds / keep_rounds / trigger_rounds。"""
         return self.memory_sub_agent_config.get("summary", {})
 
     @property
-    def memory_recall_config(self) -> dict[str, Any]:
+    def memory_recall_config(self) -> dict[str, object]:
         """recall 管线配置：max_items。"""
         return self.memory_sub_agent_config.get("recall", {})
 
     @property
-    def memory_story_config(self) -> dict[str, Any]:
+    def memory_story_config(self) -> dict[str, object]:
         """story 管线配置：trigger_rounds。"""
         return self.memory_sub_agent_config.get("story", {})
 
@@ -154,7 +154,7 @@ class Settings:
         return self.memory_summary_config.get("keep_rounds", 5)
 
     @property
-    def status_sub_agent_config(self) -> dict[str, Any]:
+    def status_sub_agent_config(self) -> dict[str, object]:
         return self._raw.get("agent_config", {}).get("status_sub_agent", {})
 
     @property

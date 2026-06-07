@@ -16,7 +16,6 @@ from __future__ import annotations
 import csv
 import shutil
 from pathlib import Path
-from typing import Any
 
 
 def _csv_name(fpath: Path) -> str:
@@ -86,7 +85,7 @@ class StatusLoader:
     def _table_path(self, type_name: str, table_name: str) -> Path:
         return (self.path / type_name / f"{table_name}.csv").resolve()
 
-    def get_table(self, type_name: str, table_name: str) -> dict[str, Any]:
+    def get_table(self, type_name: str, table_name: str) -> dict[str, object]:
         """Read a CSV table and return ``{"name": …, "headers": […], "rows": [[…], …]}``.
 
         Raises ``FileNotFoundError`` if the file does not exist.

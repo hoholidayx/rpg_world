@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from rpg_world.rpg_core.utils.manager_base import BaseManager
 from rpg_world.rpg_core.lorebook.loader import LorebookLoader
@@ -19,7 +18,7 @@ class LorebookManager(BaseManager):
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path).resolve()
         self.loader = LorebookLoader(self.path)
-        self.data: dict[str, Any] = {}  # will hold {"entries": [...]}
+        self.data: dict[str, object] = {}  # will hold {"entries": [...]}
         super().__init__()
 
     # ------------------------------------------------------------------
@@ -37,7 +36,7 @@ class LorebookManager(BaseManager):
         self.data = {"entries": entries}
         logger.info("  -> loaded %d entries", len(entries))
 
-    def load(self) -> dict[str, Any]:
+    def load(self) -> dict[str, object]:
         """Alias for ``reload()`` returning ``self.data``."""
         self.reload()
         return self.data
@@ -46,17 +45,17 @@ class LorebookManager(BaseManager):
     # Queries
     # ------------------------------------------------------------------
 
-    def list_entries(self) -> list[dict[str, Any]]:
+    def list_entries(self) -> list[dict[str, object]]:
         """Return all lorebook entries."""
         if not self.data:
             self.load()
         return self.data.get("entries", [])
 
-    def list_enabled_entries(self) -> list[dict[str, Any]]:
+    def list_enabled_entries(self) -> list[dict[str, object]]:
         """Return only entries where ``enable`` is ``True``."""
         return [e for e in self.list_entries() if e.get("enable", True)]
 
-    def get_entry(self, name: str) -> dict[str, Any]:
+    def get_entry(self, name: str) -> dict[str, object]:
         """Return a single entry by name.
 
         Raises ``FileNotFoundError`` if not found.
@@ -80,7 +79,7 @@ class LorebookManager(BaseManager):
     # Mutations
     # ------------------------------------------------------------------
 
-    def create_entry(self, data: dict[str, Any]) -> dict[str, Any]:
+    def create_entry(self, data: dict[str, object]) -> dict[str, object]:
         """Create a new lorebook entry.
 
         Requires at least a ``name`` key in *data*.  Persists to disk.
@@ -101,7 +100,7 @@ class LorebookManager(BaseManager):
         self._persist(entries)
         return data
 
-    def update_entry(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
+    def update_entry(self, name: str, data: dict[str, object]) -> dict[str, object]:
         """Update an existing lorebook entry.
 
         If the ``name`` field in *data* differs from *name*, the entry
@@ -151,7 +150,7 @@ class LorebookManager(BaseManager):
     # Internal
     # ------------------------------------------------------------------
 
-    def _persist(self, entries: list[dict[str, Any]]) -> None:
+    def _persist(self, entries: list[dict[str, object]]) -> None:
         """Write the entry list to disk and update in-memory state."""
         self.loader.save_all(entries)
         # Merge into existing data to preserve fields not tracked in entries

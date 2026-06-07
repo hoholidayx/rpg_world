@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from rpg_world.rpg_core.utils import delete_file, load_json, save_json
 
@@ -33,12 +32,12 @@ class CharacterLoader:
             return []
         return sorted(self.path.glob("*.json"))
 
-    def load_all(self) -> list[dict[str, Any]]:
+    def load_all(self) -> list[dict[str, object]]:
         """Load every character card from the directory.
 
         Returns a list of dicts (one per file).
         """
-        characters: list[dict[str, Any]] = []
+        characters: list[dict[str, object]] = []
         for fpath in self.list_files():
             data = load_json(fpath)
             if isinstance(data, dict):
@@ -49,7 +48,7 @@ class CharacterLoader:
                 )
         return characters
 
-    def load_one(self, name: str) -> dict[str, Any]:
+    def load_one(self, name: str) -> dict[str, object]:
         """Load a single character card by name.
 
         Tries ``<slug>.json`` first, then scans all files for a matching
@@ -69,7 +68,7 @@ class CharacterLoader:
                 return data
         raise FileNotFoundError(f"Character not found: {name}")
 
-    def save(self, name: str, data: dict[str, Any]) -> Path:
+    def save(self, name: str, data: dict[str, object]) -> Path:
         """Write (create or update) a character card.
 
         Returns the path of the written file.

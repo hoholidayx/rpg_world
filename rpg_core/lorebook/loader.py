@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from rpg_world.rpg_core.utils import delete_file, load_json, save_json
 
@@ -47,7 +46,7 @@ class LorebookLoader:
     # Read
     # ------------------------------------------------------------------
 
-    def load(self) -> list[dict[str, Any]]:
+    def load(self) -> list[dict[str, object]]:
         """Load all lorebook entries.
 
         Returns a list of entry dicts.
@@ -70,7 +69,7 @@ class LorebookLoader:
             return [item for item in data if isinstance(item, dict)]
         return []
 
-    def load_one(self, name: str) -> dict[str, Any]:
+    def load_one(self, name: str) -> dict[str, object]:
         """Load a single entry by name.
 
         In directory mode, tries ``<slug>.json`` first, then scans.
@@ -92,7 +91,7 @@ class LorebookLoader:
     # Write
     # ------------------------------------------------------------------
 
-    def save(self, name: str, data: dict[str, Any]) -> Path:
+    def save(self, name: str, data: dict[str, object]) -> Path:
         """Write (create or update) a single entry.
 
         In single-file mode, *data* is appended to the list after a
@@ -108,7 +107,7 @@ class LorebookLoader:
         save_json(fpath, data)
         return fpath
 
-    def save_all(self, entries: list[dict[str, Any]]) -> Path:
+    def save_all(self, entries: list[dict[str, object]]) -> Path:
         """Overwrite the entire entry list in single-file mode.
 
         In directory mode, writes each entry to its own file (removes

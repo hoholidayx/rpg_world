@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from rpg_world.rpg_core.utils.manager_base import BaseManager
 from rpg_world.rpg_core.character.loader import CharacterLoader
@@ -23,7 +22,7 @@ class CharacterManager(BaseManager):
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path).resolve()
         self.loader = CharacterLoader(self.path)
-        self.data: dict[str, dict[str, Any]] = {}  # name → card
+        self.data: dict[str, dict[str, object]] = {}  # name → card
         super().__init__()
 
     # ------------------------------------------------------------------
@@ -44,7 +43,7 @@ class CharacterManager(BaseManager):
                 self.data[name] = card
         logger.info("  -> loaded %d characters", len(self.data))
 
-    def load(self) -> dict[str, dict[str, Any]]:
+    def load(self) -> dict[str, dict[str, object]]:
         """Alias for ``reload()`` returning ``self.data``."""
         self.reload()
         return self.data
@@ -53,17 +52,17 @@ class CharacterManager(BaseManager):
     # Queries
     # ------------------------------------------------------------------
 
-    def list_characters(self) -> list[dict[str, Any]]:
+    def list_characters(self) -> list[dict[str, object]]:
         """Return all character cards (shallow copy list)."""
         if not self.data:
             self.load()
         return list(self.data.values())
 
-    def list_enabled_characters(self) -> list[dict[str, Any]]:
+    def list_enabled_characters(self) -> list[dict[str, object]]:
         """Return only character cards where ``enable`` is ``True``."""
         return [c for c in self.list_characters() if c.get("enable", True)]
 
-    def get_character(self, name: str) -> dict[str, Any]:
+    def get_character(self, name: str) -> dict[str, object]:
         """Return a single character card by name.
 
         Raises ``FileNotFoundError`` if not found.
@@ -84,7 +83,7 @@ class CharacterManager(BaseManager):
     # Mutations
     # ------------------------------------------------------------------
 
-    def create_character(self, data: dict[str, Any]) -> dict[str, Any]:
+    def create_character(self, data: dict[str, object]) -> dict[str, object]:
         """Create a new character card.
 
         Requires at least a ``name`` key in *data*.  Persists to disk.
@@ -103,7 +102,7 @@ class CharacterManager(BaseManager):
         self.data[name] = data
         return data
 
-    def update_character(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
+    def update_character(self, name: str, data: dict[str, object]) -> dict[str, object]:
         """Update an existing character card.
 
         Returns the updated dict.  If the ``name`` field in *data*
@@ -145,12 +144,12 @@ class CharacterManager(BaseManager):
     # L2 Detail queries
     # ------------------------------------------------------------------
 
-    def list_details(self, character_name: str) -> list[dict[str, Any]]:
+    def list_details(self, character_name: str) -> list[dict[str, object]]:
         """Return all L2 details for a character."""
         card = self.get_character(character_name)
         return list(card.get("details", []))
 
-    def get_detail(self, character_name: str, detail_name: str) -> dict[str, Any]:
+    def get_detail(self, character_name: str, detail_name: str) -> dict[str, object]:
         """Return a single L2 detail by name.
 
         Raises ``FileNotFoundError`` if character or detail not found.
@@ -169,7 +168,7 @@ class CharacterManager(BaseManager):
 
     def get_details_by_names(
         self, character_name: str, detail_names: list[str]
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """根据 detail 名称列表查询，只返回已启用的 detail。"""
         name_set = set(detail_names)
         return [
@@ -177,7 +176,7 @@ class CharacterManager(BaseManager):
             if d.get("name") in name_set and d.get("enable", True)
         ]
 
-    def get_all_details(self, character_name: str) -> list[dict[str, Any]]:
+    def get_all_details(self, character_name: str) -> list[dict[str, object]]:
         """返回角色所有已启用的完整 detail 数据。"""
         return [d for d in self.list_details(character_name) if d.get("enable", True)]
 
@@ -185,13 +184,13 @@ class CharacterManager(BaseManager):
     # L2 Detail mutations
     # ------------------------------------------------------------------
 
-    def _reload_and_save(self, character_name: str) -> dict[str, Any]:
+    def _reload_and_save(self, character_name: str) -> dict[str, object]:
         """Reload character from disk, return mutable dict."""
         card = self.loader.load_one(character_name)
         self.data[character_name] = card
         return card
 
-    def add_detail(self, character_name: str, detail_data: dict[str, Any]) -> dict[str, Any]:
+    def add_detail(self, character_name: str, detail_data: dict[str, object]) -> dict[str, object]:
         """Add an L2 detail to a character.
 
         Raises ``ValueError`` if a detail with the same name already exists.
@@ -213,8 +212,8 @@ class CharacterManager(BaseManager):
         return detail_data
 
     def update_detail(
-        self, character_name: str, detail_name: str, data: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, character_name: str, detail_name: str, data: dict[str, object]
+    ) -> dict[str, object]:
         """Update an L2 detail.
 
         Raises ``FileNotFoundError`` if detail not found.

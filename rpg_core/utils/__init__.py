@@ -7,10 +7,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 
-def load_json(path: str | Path) -> list[dict[str, Any]] | dict[str, Any]:
+def load_json(path: str | Path) -> list[dict[str, object]] | dict[str, object]:
     """Read JSON data from *path*.
 
     - If *path* is a file, reads and returns its content.
@@ -29,7 +28,7 @@ def load_json(path: str | Path) -> list[dict[str, Any]] | dict[str, Any]:
     raise FileNotFoundError(f"Path does not exist: {path}")
 
 
-def save_json(path: str | Path, data: Any) -> None:
+def save_json(path: str | Path, data: object) -> None:
     """Write *data* as JSON to *path* (creates parent dirs if needed)."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -42,14 +41,14 @@ def delete_file(path: str | Path) -> None:
     Path(path).unlink(missing_ok=True)
 
 
-def _read_json(path: Path) -> Any:
+def _read_json(path: Path) -> object:
     with path.open(encoding="utf-8") as f:
         return json.load(f)
 
 
-def _load_json_dir(path: Path) -> list[dict[str, Any]] | dict[str, Any]:
-    merged_list: list[dict[str, Any]] = []
-    merged_dict: dict[str, Any] = {}
+def _load_json_dir(path: Path) -> list[dict[str, object]] | dict[str, object]:
+    merged_list: list[dict[str, object]] = []
+    merged_dict: dict[str, object] = {}
     saw_list = False
     saw_dict = False
 

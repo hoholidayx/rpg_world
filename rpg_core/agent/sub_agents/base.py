@@ -27,6 +27,7 @@ from rpg_world.rpg_core.agent.tools.base import BaseTool
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.agent import RPGGameAgent
     from rpg_world.rpg_core.agent.base_provider import LLMProvider
+    from rpg_world.rpg_core.agent.command import CommandDef
     from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
 
 
@@ -99,7 +100,7 @@ class BaseSubAgent:
 
     # ── Command interface（子 Agent 可选的命令处理） ─────────────────
 
-    def get_command_def(self) -> Any | None:
+    def get_command_def(self) -> list[CommandDef] | None:
         """返回子 Agent 处理的命令定义，或 ``None`` 表示不处理任何命令。"""
         return None
 

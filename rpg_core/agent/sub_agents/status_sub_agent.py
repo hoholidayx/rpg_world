@@ -21,7 +21,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -66,7 +66,7 @@ class StatusSubAgentResult:
 
     updated: bool = False
     """是否有状态表被修改。"""
-    records: list[dict[str, Any]] = field(default_factory=list)
+    records: list[dict[str, object]] = field(default_factory=list)
     """工具调用记录，每项含 ``tool_name`` / ``arguments`` / ``result``。"""
     call_stats: list[CallRecord] = field(default_factory=list)
     """此更新涉及的 LLM 调用记录（usage / timing）。"""
@@ -114,7 +114,7 @@ class StatusSubAgent(BaseSubAgent):
 
         # ── 可扩展工具集 ──────────────────────────────────────────────
         self._tool_registry = ToolRegistry()
-        self._schemas: list[dict[str, Any]] = []
+        self._schemas: list[dict[str, object]] = []
 
     # ── 工具注册（可多次调用追加） ─────────────────────────────────────
 

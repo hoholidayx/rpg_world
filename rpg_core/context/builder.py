@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 _JINJA_ENV: Environment | None = None
 
 
-def render_jinja_template(template_name: str, **context: Any) -> str:
+def render_jinja_template(template_name: str, **context: object) -> str:
     """Render a Jinja template from the ``rpg_core/jinja/`` directory.
 
     Uses a module-level cached Environment to avoid repeated setup cost.
@@ -50,14 +50,14 @@ def _count_rounds(messages: list[Message]) -> int:
 def _flatten_status_tables(
     status_mgr: StatusManager | None,
     exclude_tables: set[tuple[str, str]] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Flatten StatusManager data into a list of ``{name, headers, rows}``.
 
     If *exclude_tables* is given (set of ``(type_name, table_name)`` tuples),
     those tables are skipped — used by SceneTracker to avoid duplicating the
     ``当前场景`` table in the generic status layer.
     """
-    tables: list[dict[str, Any]] = []
+    tables: list[dict[str, object]] = []
     try:
         for type_name in status_mgr.list_types():
             for table_name in status_mgr.list_tables(type_name):
@@ -298,13 +298,13 @@ class RPGContextBuilder:
 
     # ── internal helpers ─────────────────────────────────────────────
 
-    def _render_layer(self, template_name: str, context: dict[str, Any]) -> str:
+    def _render_layer(self, template_name: str, context: dict[str, object]) -> str:
         """Render a layer Jinja template with *context* vars."""
         return render_jinja_template(template_name, **context)
 
     def _build_extension_content(
         self,
-        modules: list[Any],
+        modules: list[object],
         default_data: dict[str, str],
     ) -> str:
         """Render enabled extension modules and concatenate."""

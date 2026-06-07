@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time as _time
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -99,7 +99,7 @@ class RPGGameAgent:
         self._last_tool_records: list[ToolCallRecord] | None = None
         self._status_sub_agent: StatusSubAgent | None = None
         self._memory_sub_agent: MemorySubAgent | None = None
-        self._rpg_ctx: dict[str, Any] = {}
+        self._rpg_ctx: dict[str, object] = {}
         self._cmd_dispatcher: CommandDispatcher | None = None
 
     # ── public API ─────────────────────────────────────────────────────
@@ -593,7 +593,7 @@ class RPGGameAgent:
         self._initialized = True
 
 
-def _build_rpg_context(world_name: str, session_id: str) -> dict[str, Any]:
+def _build_rpg_context(world_name: str, session_id: str) -> dict[str, object]:
     """Inline import of the factory to keep the top level free of side effects."""
     from rpg_world.rpg_core.context.factory import build_rpg_context
 
@@ -608,14 +608,14 @@ def _build_sub_agent_context(
 
     主 Agent 读 Manager 后直接传 data，SubAgentContext 不依赖 Manager 类型。
     """
-    lorebook_entries: list[dict[str, Any]] = []
+    lorebook_entries: list[dict[str, object]] = []
     if lorebook_mgr is not None:
         try:
             lorebook_entries = lorebook_mgr.list_enabled_entries()
         except Exception:
             pass
 
-    characters: list[dict[str, Any]] = []
+    characters: list[dict[str, object]] = []
     if character_mgr is not None:
         try:
             characters = character_mgr.list_enabled_characters()

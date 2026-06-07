@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.tokenizer import TokenCounter
@@ -130,8 +130,8 @@ class Message:
         """Whether this message is a tool result."""
         return self._role is Role.TOOL
 
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {MsgKey.ROLE: self._role.value, MsgKey.CONTENT: self._content}
+    def to_dict(self) -> dict[str, object]:
+        d: dict[str, object] = {MsgKey.ROLE: self._role.value, MsgKey.CONTENT: self._content}
         if self._rp_his_id:
             d[MsgKey.RP_HIS_ID] = self._rp_his_id
         if self._tool_call_id:
@@ -142,7 +142,7 @@ class Message:
 
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> Message:
+    def from_dict(cls, d: dict[str, object]) -> Message:
         return cls(
             role=d[MsgKey.ROLE],
             content=d.get(MsgKey.CONTENT, ""),
@@ -467,7 +467,7 @@ class RPGContext:
 
     @staticmethod
     def _add(
-        msgs: list[dict[str, Any]],
+        msgs: list[dict[str, object]],
         role: str,
         content: str | None,
         type_: str,

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 
@@ -29,7 +29,7 @@ class SetTimeTool(BaseTool):
     def __init__(self, tracker: SceneTracker) -> None:
         self._tracker = tracker
 
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         return {
             "type": "object",
             "properties": {
@@ -88,7 +88,7 @@ class SetAttrTool(BaseTool):
     def __init__(self, tracker: SceneTracker) -> None:
         self._tracker = tracker
 
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         defaults = ", ".join(self._tracker.DEFAULT_ATTRS)
         return {
             "type": "object",
@@ -127,7 +127,7 @@ class DeleteAttrTool(BaseTool):
         self._tracker = tracker
         self._protected = ", ".join(tracker.DEFAULT_ATTRS)
 
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         return {
             "type": "object",
             "properties": {

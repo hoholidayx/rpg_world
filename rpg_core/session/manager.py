@@ -17,7 +17,6 @@ import json
 import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
@@ -47,7 +46,7 @@ class SessionManager:
         self._session_id = session_id if session_id is not None else _DEFAULT_SESSION_ID
         self._history_enabled = history_enabled
         self._history: list[Message] = []
-        self._meta: dict[str, Any] = {}
+        self._meta: dict[str, str | int | float] = {}
 
     # ── Public API — history ───────────────────────────────────────────
 
@@ -178,7 +177,7 @@ class SessionManager:
     # ── Metadata ───────────────────────────────────────────────────────
 
     @property
-    def meta(self) -> dict[str, Any]:
+    def meta(self) -> dict[str, object]:
         return dict(self._meta)
 
     @property
@@ -246,7 +245,7 @@ class SessionManager:
         self._meta = self._default_meta()
         self._write_meta()
 
-    def _default_meta(self) -> dict[str, Any]:
+    def _default_meta(self) -> dict[str, object]:
         now = datetime.now(timezone.utc).isoformat()
         return {
             _META_CREATED_AT: now,
@@ -256,7 +255,7 @@ class SessionManager:
             _META_LAST_STORY_RP_HIS_ID: 0,
         }
 
-    def _update_meta(self, **kwargs: Any) -> None:
+    def _update_meta(self, **kwargs: object) -> None:
         """Update metadata fields and persist to disk atomically."""
         self._meta.update(kwargs)
         self._meta[_META_UPDATED_AT] = datetime.now(timezone.utc).isoformat()

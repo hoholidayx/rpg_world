@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from rpg_world.rpg_core.utils.manager_base import BaseManager
 from rpg_world.rpg_core.status.loader import StatusLoader
@@ -38,7 +37,7 @@ class StatusManager(BaseManager):
         self.path = Path(path).resolve()
         self.loader = StatusLoader(self.path)
         # {type_name: {table_name: {name, headers, rows}}}
-        self.data: dict[str, dict[str, dict[str, Any]]] = {}
+        self.data: dict[str, dict[str, dict[str, object]]] = {}
         super().__init__()
 
     # ------------------------------------------------------------------
@@ -54,7 +53,7 @@ class StatusManager(BaseManager):
         logger.info("StatusManager.reload from %s", self.path)
         self.data = {}
         for type_name in self.loader.list_types():
-            tables: dict[str, dict[str, Any]] = {}
+            tables: dict[str, dict[str, object]] = {}
             for table_name in self.loader.list_tables(type_name):
                 try:
                     tables[table_name] = self.loader.get_table(type_name, table_name)
@@ -63,7 +62,7 @@ class StatusManager(BaseManager):
             self.data[type_name] = tables
         logger.info("  -> loaded %d types", len(self.data))
 
-    def load(self) -> dict[str, dict[str, dict[str, Any]]]:
+    def load(self) -> dict[str, dict[str, dict[str, object]]]:
         """Alias for ``reload()`` returning ``self.data``."""
         self.reload()
         return self.data
@@ -122,7 +121,7 @@ class StatusManager(BaseManager):
         if not self.data:
             self.load()
 
-    def _type_tables(self, type_name: str) -> dict[str, dict[str, Any]]:
+    def _type_tables(self, type_name: str) -> dict[str, dict[str, object]]:
         """Return the table dict for *type_name*, loading if needed."""
         self._ensure_loaded()
         tables = self.data.get(type_name)
@@ -144,7 +143,7 @@ class StatusManager(BaseManager):
         """Return all table names for a type."""
         return list(self._type_tables(type_name).keys())
 
-    def get_table(self, type_name: str, table_name: str) -> dict[str, Any]:
+    def get_table(self, type_name: str, table_name: str) -> dict[str, object]:
         """Return a single table's data.
 
         Raises ``FileNotFoundError`` if type or table not found.
@@ -168,7 +167,7 @@ class StatusManager(BaseManager):
         table_name: str,
         headers: list[str] | None = None,
         rows: list[list[str]] | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Create a new table in a type.
 
         Raises ``ValueError`` if the table already exists.
@@ -192,7 +191,7 @@ class StatusManager(BaseManager):
         table_name: str,
         headers: list[str],
         rows: list[list[str]],
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Update an existing table's data.
 
         Raises ``FileNotFoundError`` if the table does not exist.
@@ -210,7 +209,7 @@ class StatusManager(BaseManager):
 
     def rename_table(
         self, type_name: str, old_name: str, new_name: str
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Rename a table.
 
         Raises ``FileNotFoundError`` if the old name does not exist.

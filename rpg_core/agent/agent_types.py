@@ -14,7 +14,12 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+
+
+# ── shared JSON type aliases ──────────────────────────────────────────
+
+JsonDict = dict[str, object]
+JsonValue = object
 
 
 # ── LLM 调用 usage 数据 ──────────────────────────────────────────────
@@ -31,8 +36,8 @@ class LLMUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    prompt_tokens_details: dict[str, Any] | None = None
-    completion_tokens_details: dict[str, Any] | None = None
+    prompt_tokens_details: dict[str, object] | None = None
+    completion_tokens_details: dict[str, object] | None = None
 
     # ── 缓存统计（通用字段，provider 层从原始 usage 中提取） ────────
     prompt_cache_hit_tokens: int = 0
@@ -40,7 +45,7 @@ class LLMUsage:
     prompt_cache_miss_tokens: int = 0
     """本次 prompt 中未命中缓存、需实际计算的 token 数。"""
 
-    raw_usage: dict[str, Any] | None = None
+    raw_usage: dict[str, object] | None = None
     """API 原始 ``response.usage`` 全量字段快照，用于调试。"""
 
     @property
@@ -66,13 +71,13 @@ class LLMUsage:
 
 @dataclass
 class LLMResponse:
-    """替换 ``dict[str, Any]`` 作为 ``LLMProvider.chat()`` 的返回类型。
+    """替换 ``dict[str, object]`` 作为 ``LLMProvider.chat()`` 的返回类型。
 
     包含 content/tool_calls 以及 usage/model/reasoning 等元数据。
     """
 
     content: str
-    tool_calls: list[dict[str, Any]] | None
+    tool_calls: list[dict[str, object]] | None
     finish_reason: str | None
     usage: LLMUsage | None = None
     model: str | None = None
@@ -261,9 +266,9 @@ class AgentStreamEvent:
     stats: TurnStats | None = None
     """完整 LLM 调用明细（含 SubAgent 细分）。仅在 DONE 事件携带。"""
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         """序列化为 JSON-safe dict，供 SSE 传输。"""
-        d: dict[str, Any] = {"kind": self.kind.value}
+        d: dict[str, object] = {"kind": self.kind.value}
         if self.content:
             d["content"] = self.content
         if self.tool_name:

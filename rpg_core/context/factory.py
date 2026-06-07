@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 def build_rpg_context(
     world_name: str = "Nanobot Realm",
     session_id: str = "default",
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Create and wire up the full RPG context stack.
 
     Returns a dict with keys ``builder``, ``character_mgr``, ``lorebook_mgr``,

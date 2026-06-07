@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 
@@ -34,7 +33,7 @@ class ListFilesTool(BaseTool):
     def __init__(self, workspace_root: Path) -> None:
         self._root = workspace_root
 
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         return {
             "type": "object",
             "properties": {
@@ -74,7 +73,7 @@ class ReadFileTool(BaseTool):
     def __init__(self, workspace_root: Path) -> None:
         self._root = workspace_root
 
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         return {
             "type": "object",
             "properties": {
@@ -118,7 +117,7 @@ class WriteFileTool(BaseTool):
     def __init__(self, workspace_root: Path) -> None:
         self._root = workspace_root
 
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         return {
             "type": "object",
             "properties": {
@@ -164,7 +163,7 @@ class GrepTool(BaseTool):
     def __init__(self, workspace_root: Path) -> None:
         self._root = workspace_root
 
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         return {
             "type": "object",
             "properties": {

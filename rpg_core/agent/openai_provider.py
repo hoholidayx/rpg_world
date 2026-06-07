@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
-from typing import Any
 
 import httpx
 from loguru import logger
@@ -19,7 +18,7 @@ from rpg_world.rpg_core.agent.agent_types import LLMResponse, LLMUsage, Provider
 from rpg_world.rpg_core.settings import settings
 
 
-def _build_usage(raw, raw_dict: dict[str, Any] | None) -> LLMUsage | None:
+def _build_usage(raw, raw_dict: dict[str, object] | None) -> LLMUsage | None:
     """从 API response.usage 构建 ``LLMUsage``，统一提取缓存统计。
 
     兼容 OpenAI / DeepSeek 等不同厂商的字段命名差异：
@@ -124,7 +123,7 @@ class OpenAIProvider(LLMProvider):
         msg = choice.message
 
         # ── usage ────────────────────────────────────────────────────
-        raw_dict: dict[str, Any] | None = None
+        raw_dict: dict[str, object] | None = None
         if response.usage is not None:
             try:
                 raw = response.usage
@@ -141,7 +140,7 @@ class OpenAIProvider(LLMProvider):
             reasoning_content = msg.reasoning
 
         # ── tool_calls ───────────────────────────────────────────────
-        tool_calls: list[dict[str, Any]] | None = None
+        tool_calls: list[dict[str, object]] | None = None
         if msg.tool_calls:
             tool_calls = [tc.to_dict() for tc in msg.tool_calls]
 
@@ -190,7 +189,7 @@ class OpenAIProvider(LLMProvider):
             # usage may appear on the final chunk
             usage: LLMUsage | None = None
             if raw_chunk.usage is not None:
-                raw_dict: dict[str, Any] | None = None
+                raw_dict: dict[str, object] | None = None
                 try:
                     raw_dict = raw_chunk.usage.to_dict() if hasattr(raw_chunk.usage, "to_dict") else dict(raw_chunk.usage)
                 except Exception:

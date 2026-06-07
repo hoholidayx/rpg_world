@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Callable
 
 
 def _register_watcher(file_path: Path, callback) -> None:
@@ -37,7 +37,7 @@ class StoryMemoryStore:
 
     def __init__(self, file_path: Path) -> None:
         self._file = file_path
-        self._details: list[dict[str, Any]] = self._load()
+        self._details: list[dict[str, object]] = self._load()
         if not self._file.exists():
             self._save()  # ensure file exists for FileWatcher
         _register_watcher(self._file, self.reload)
@@ -50,11 +50,11 @@ class StoryMemoryStore:
 
     # ── public API ────────────────────────────────────────
 
-    def get_all(self) -> list[dict[str, Any]]:
+    def get_all(self) -> list[dict[str, object]]:
         """返回所有剧情记忆条目。"""
         return list(self._details)
 
-    def add_detail(self, text: str, metadata: dict[str, Any] | None = None) -> None:
+    def add_detail(self, text: str, metadata: dict[str, object] | None = None) -> None:
         """追加一条剧情细节。"""
         self._details.append({
             "text": text,
@@ -62,7 +62,7 @@ class StoryMemoryStore:
         })
         self._save()
 
-    def set_details(self, details: list[dict[str, Any]]) -> None:
+    def set_details(self, details: list[dict[str, object]]) -> None:
         """批量设置剧情记忆（替换全部）。"""
         self._details = list(details)
         self._save()
@@ -74,7 +74,7 @@ class StoryMemoryStore:
 
     # ── I/O ───────────────────────────────────────────────
 
-    def _load(self) -> list[dict[str, Any]]:
+    def _load(self) -> list[dict[str, object]]:
         try:
             raw = self._file.read_text(encoding="utf-8")
             data = json.loads(raw)

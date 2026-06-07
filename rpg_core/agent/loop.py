@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
-from typing import Any
 
 from loguru import logger
 
@@ -51,8 +50,8 @@ class ToolCallRecord:
 
     def __init__(
         self,
-        assistant_message: dict[str, Any],
-        tool_results: list[dict[str, Any]],
+        assistant_message: dict[str, object],
+        tool_results: list[dict[str, object]],
         usage: LLMUsage | None = None,
         model: str | None = None,
         duration_ms: float = 0.0,
@@ -77,7 +76,7 @@ class AgentReply:
         self,
         text: str,
         tool_records: list[ToolCallRecord] | None = None,
-        status_sub_agent_records: list[dict[str, Any]] | None = None,
+        status_sub_agent_records: list[dict[str, object]] | None = None,
         stats: TurnStats | None = None,
     ) -> None:
         self.text = text
@@ -141,7 +140,7 @@ async def run_chat_loop(
             asst_msg_obj = Message(role=Role.ASSISTANT, content=content, tool_calls=tool_calls)
             asst_msg = asst_msg_obj.to_dict()
             messages.append(asst_msg_obj)
-            tool_results: list[dict[str, Any]] = []
+            tool_results: list[dict[str, object]] = []
             for tc in tool_calls:
                 name = tc["function"]["name"]
                 args = tc["function"]["arguments"]

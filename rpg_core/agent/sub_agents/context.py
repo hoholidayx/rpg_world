@@ -14,8 +14,6 @@ Usage::
 
 from __future__ import annotations
 
-from typing import Any
-
 from rpg_world.rpg_core.context.builder import render_jinja_template
 
 
@@ -36,8 +34,8 @@ class SubAgentContext:
 
     def __init__(
         self,
-        lorebook_entries: list[dict[str, Any]] | None = None,
-        characters: list[dict[str, Any]] | None = None,
+        lorebook_entries: list[dict[str, object]] | None = None,
+        characters: list[dict[str, object]] | None = None,
     ) -> None:
         self._system_prompt: str = ""  # 由 bind_context() 注入
         self._lorebook_entries = lorebook_entries or []

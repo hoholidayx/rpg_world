@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 
@@ -45,7 +44,7 @@ class ToolRegistry:
     # Schema
     # ------------------------------------------------------------------
 
-    def get_openai_schemas(self) -> list[dict[str, Any]]:
+    def get_openai_schemas(self) -> list[dict[str, object]]:
         """Return the full list of OpenAI tool-call schemas."""
         return [t.to_openai_schema() for t in self._tools.values()]
 

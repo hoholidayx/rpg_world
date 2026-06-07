@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 
 def _register_watcher(file_path: Path, callback: Callable[[], None]) -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Callable
 
 
 class TokenCounter(ABC):
@@ -22,7 +22,7 @@ class TokenCounter(ABC):
         """Count tokens in a single text string."""
         pass
 
-    def count_messages(self, messages: list[dict[str, Any]]) -> int:
+    def count_messages(self, messages: list[dict[str, object]]) -> int:
         """Count tokens in a list of message dicts."""
         total = 0
         for msg in messages:
