@@ -168,8 +168,8 @@ async def chat_command(
             detail=f"Agent initialization failed: {exc}",
         )
 
-    # 交由 agent 的 CommandDispatcher 执行，与 send() 逻辑一致
-    cmd_result = await agent._cmd_dispatcher.dispatch(command)
+    # 交由 agent 的消息队列执行（与 send() 共享同一队列，避免竞态）
+    cmd_result = await agent.execute_command(command)
     if cmd_result.handled:
         if api_settings.log_chat_messages:
             chat_logger.info("CMD REPLY [%s]: %s", session_id, cmd_result.reply)

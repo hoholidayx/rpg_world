@@ -7,13 +7,19 @@ Streaming types:
   - ``ProviderChunk`` — provider 原始 delta chunk
   - ``StreamEventKind`` — 语义事件枚举
   - ``AgentStreamEvent`` — 消费者层面的事件结构
+
+Queue types:
+  - ``QueueItem`` — 消息队列工作项
+  - ``_StreamSentinel`` — send_stream 事件流结束标记
 """
 
 from __future__ import annotations
 
 import time
+from asyncio import Queue as AsyncQueue
+from concurrent.futures import Future
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 # ── shared JSON type aliases ──────────────────────────────────────────
@@ -293,3 +299,50 @@ class AgentStreamEvent:
         if self.finish_reason:
             d["finish_reason"] = self.finish_reason
         return d
+
+
+# ── 消息队列类型 ──────────────────────────────────────────────────────────
+
+
+class QueueKind(StrEnum):
+    """队列工作项类型常量——替代 magic string。
+
+    使用 ``StrEnum`` 而非模块级常量，是因为：
+    1. Python 的 ``match/case`` 需要点号名（dotted name）才能做值比较而非捕获
+    2. ``kind: QueueKind`` 可作为类型注解，替代 ``Literal["send", "send_stream", "command"]``
+    """
+
+    SEND = "send"
+    """``send()`` 请求。"""
+    SEND_STREAM = "send_stream"
+    """``send_stream()`` 请求。"""
+    COMMAND = "command"
+    """``execute_command()`` 请求。"""
+
+
+@dataclass
+class QueueItem:
+    """消息队列工作项——send / send_stream / command 的入队单元。
+
+    Attributes
+    ----------
+    kind:
+        工作项类型。使用 ``QueueKind.*`` 常量赋值。
+    user_input:
+        用户输入文本（``send`` / ``send_stream`` 的消息，或 ``command`` 的完整命令）。
+    future:
+        用于返回结果的 Future。send → ``Future[AgentReply]``，command → ``Future[CommandResult]``。
+    event_queue:
+        仅 ``send_stream`` 使用：消费者向此队列推入事件，主协程从中读取并 yield。
+    """
+
+    kind: QueueKind
+    user_input: str
+    future: Future
+    event_queue: AsyncQueue | None = None
+
+
+class _StreamSentinel:
+    """标记 ``send_stream`` 事件流的结束。"""
+
+    pass

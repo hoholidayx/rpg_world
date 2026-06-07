@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import time as _time
+from asyncio import Future
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.agent_types import TurnStats, AgentStreamEvent, StreamEventKind
+from rpg_world.rpg_core.agent.agent_types import (
+    AgentStreamEvent,
+    QueueItem,
+    QueueKind,
+    StreamEventKind,
+    TurnStats,
+    _StreamSentinel,
+)
+from rpg_world.rpg_core.agent.command import CommandResult
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
 from rpg_world.rpg_core.agent.command import CommandDispatcher
 from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
@@ -102,6 +112,40 @@ class RPGGameAgent:
         self._rpg_ctx: dict[str, object] = {}
         self._cmd_dispatcher: CommandDispatcher | None = None
 
+        # 消息队列（初始化时创建，_ensure_initialized 末尾启动消费者）
+        self._queue: asyncio.Queue[QueueItem] = asyncio.Queue()
+        self._consumer_task: asyncio.Task | None = None
+
+    # ── 消息队列消费者 ─────────────────────────────────────────────────
+
+    async def _queue_consumer(self) -> None:
+        """后台消费者——逐个处理消息队列中的工作项。
+
+        所有 ``send()`` / ``send_stream()`` / 命令都经过此消费者串行执行。
+        ``_send_stream_impl`` 内部已捕获异常并通过 event_queue 传播，
+        此处的异常捕获仅作为安全网。
+        """
+        while True:
+            item: QueueItem = await self._queue.get()
+            logger.debug(_TAG + " consumer processing: kind={}, input={!r:.60}", item.kind, item.user_input)
+            try:
+                match item.kind:
+                    case QueueKind.SEND:
+                        result = await self._send_impl(item.user_input)
+                        item.future.set_result(result)
+                    case QueueKind.SEND_STREAM:
+                        await self._send_stream_impl(item.user_input, item.event_queue)
+                        item.future.set_result(None)
+                    case QueueKind.COMMAND:
+                        cmd_result = await self._cmd_dispatcher.dispatch(item.user_input)
+                        item.future.set_result(cmd_result)
+            except Exception as e:
+                logger.warning(_TAG + " consumer error on kind={}: {}", item.kind, e)
+                if not item.future.done():
+                    item.future.set_exception(e)
+            finally:
+                self._queue.task_done()
+
     # ── public API ─────────────────────────────────────────────────────
 
     async def single_turn(self, user_input: str, record_history: bool = False) -> AgentReply:
@@ -127,7 +171,22 @@ class RPGGameAgent:
         return reply
 
     async def send(self, user_input: str) -> AgentReply:
-        """Send user text and return a structured ``AgentReply``.
+        """Send user text through the message queue and return a structured ``AgentReply``.
+
+        If the agent is busy processing a previous message, this call waits
+        in the queue until the agent is free.  The actual processing logic
+        is in ``_send_impl()``.
+
+        Usage is identical to the old ``send()`` — no caller changes needed.
+        """
+        await self._ensure_initialized()
+        future: Future[AgentReply] = asyncio.get_event_loop().create_future()
+        await self._queue.put(QueueItem(kind=QueueKind.SEND, user_input=user_input, future=future))
+        logger.debug(_TAG + " send() enqueued: input={!r:.60}", user_input)
+        return await future
+
+    async def _send_impl(self, user_input: str) -> AgentReply:
+        """Internal send implementation — runs inside the queue consumer.
 
         May involve multiple LLM round-trips when tool calls are needed
         (the chat loop).  The 5-layer context is built once; subsequent
@@ -137,8 +196,6 @@ class RPGGameAgent:
         context so that MemorySubAgent can see scene timeline during
         summarization (it filters ``role == "system"`` messages).
         """
-
-        await self._ensure_initialized()
 
         # ── 斜杠命令分发（不走 LLM） ─────────────────────────────────
         if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
@@ -234,35 +291,49 @@ class RPGGameAgent:
         return result
 
     async def send_stream(self, user_input: str) -> AsyncIterator[AgentStreamEvent]:
-        """Streaming variant of ``send()``.
+        """Streaming variant of ``send()``, goes through the message queue.
 
-        Yields ``AgentStreamEvent`` objects for real-time consumption.
-        The stream ends with a ``DONE`` event carrying aggregated
-        usage/stats metadata.
+        Enqueues the request and streams events from a per-request event queue
+        so that the consumer's output is delivered incrementally to the caller.
 
-        Usage::
-
-            async for event in agent.send_stream("look around"):
-                match event.kind:
-                    case StreamEventKind.TEXT:
-                        print(event.content, end="", flush=True)
-                    case StreamEventKind.DONE:
-                        _print_stats(event)
-
-        StatusSubAgent pre-update, scene context embedding, history
-        persistence all mirror ``send()`` exactly.
+        Usage is identical to the old ``send_stream()`` — no caller changes needed.
         """
         await self._ensure_initialized()
+        event_queue: asyncio.Queue[AgentStreamEvent | BaseException | _StreamSentinel] = asyncio.Queue()
+        future: Future[None] = asyncio.get_event_loop().create_future()
+        await self._queue.put(QueueItem(
+            kind=QueueKind.SEND_STREAM, user_input=user_input, future=future, event_queue=event_queue,
+        ))
+        logger.debug(_TAG + " send_stream() enqueued: input={!r:.60}", user_input)
+        while True:
+            item = await event_queue.get()
+            if isinstance(item, _StreamSentinel):
+                break
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+        # 如果消费者侧有未预期的异常，在此处传播
+        if future.done() and future.exception():
+            raise future.exception()
+
+    async def _send_stream_impl(self, user_input: str, event_queue: asyncio.Queue) -> None:
+        """Internal send_stream implementation — runs inside the queue consumer.
+
+        Pushes ``AgentStreamEvent`` objects into *event_queue* instead of
+        yielding them directly.  Exceptions are also pushed into the queue
+        so the caller can re-raise them.
+        """
 
         # ── 斜杠命令分发（不走 LLM） ─────────────────────────────────
         if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
             cmd_result = await self._cmd_dispatcher.dispatch(user_input)
             if cmd_result.handled:
-                yield AgentStreamEvent(
+                await event_queue.put(AgentStreamEvent(
                     kind=StreamEventKind.DONE,
                     content=cmd_result.reply,
                     model=self._model,
-                )
+                ))
+                await event_queue.put(_StreamSentinel())
                 return
 
         # ── TurnStats 聚合器 ───────────────────────────────────────
@@ -317,13 +388,14 @@ class RPGGameAgent:
                     final_content = event.content
                     final_event = event
                 else:
-                    yield event
+                    await event_queue.put(event)
         except Exception as exc:
             logger.error("{} send_stream error: {}", _TAG, exc)
-            yield AgentStreamEvent(
+            await event_queue.put(AgentStreamEvent(
                 kind=StreamEventKind.ERROR,
                 content=str(exc),
-            )
+            ))
+            await event_queue.put(_StreamSentinel())
             return
 
         # ── Agent-level cleanup（流结束后执行） ────────────────────
@@ -357,15 +429,28 @@ class RPGGameAgent:
             final_event.duration_ms = turn_stats.total_duration_ms
             final_event.usage = aggregate_usage
             final_event.stats = turn_stats
-            yield final_event
+            await event_queue.put(final_event)
         else:
-            yield AgentStreamEvent(
+            await event_queue.put(AgentStreamEvent(
                 kind=StreamEventKind.DONE,
                 content=final_content,
                 usage=aggregate_usage,
                 duration_ms=turn_stats.total_duration_ms,
                 model=self._model,
-            )
+            ))
+        await event_queue.put(_StreamSentinel())
+
+    async def execute_command(self, command: str) -> CommandResult:
+        """将斜杠命令入队执行，返回执行结果。
+
+        通过消息队列串行化，避免与正在处理的 ``send()`` 竞态。
+        供 ``/chat/command`` API 端点使用。
+        """
+        await self._ensure_initialized()
+        future: Future[CommandResult] = asyncio.get_event_loop().create_future()
+        await self._queue.put(QueueItem(kind=QueueKind.COMMAND, user_input=command, future=future))
+        logger.debug(_TAG + " execute_command() enqueued: cmd={!r:.60}", command)
+        return await future
 
     @property
     def history(self) -> list[Message]:
@@ -589,6 +674,9 @@ class RPGGameAgent:
 
         # 启动文件监听（管理器已在 BaseManager.__init__ 中注册路径）
         get_watcher().start()
+
+        # 启动消息队列消费者
+        self._consumer_task = asyncio.create_task(self._queue_consumer())
 
         self._initialized = True
 
