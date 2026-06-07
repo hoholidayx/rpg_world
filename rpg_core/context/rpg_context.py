@@ -1,17 +1,157 @@
 """RPGContext — typed 5-layer context container with unified access.
 
-Each layer has a ``type`` tag for classification.  ``to_messages()`` flattens
-to OpenAI-compatible ``list[dict]`` with ``type`` keys preserved (ignored by
-the API, useful for middleware / logging).
+Each layer has a ``type`` tag for classification.  Messages flow through
+the pipeline as ``Message`` objects; dict conversion only happens at the
+LLM provider boundary (``Message.to_dict()``).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.tokenizer import TokenCounter
+
+
+class Role(StrEnum):
+    """Message role constants — eliminates hardcoded role strings."""
+
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
+
+
+class LayerType:
+    """Layer type constants — each maps to one entry in the 5-layer structure."""
+
+    FIXED = "fixed_layer"
+    """[0] Fixed: prompt + lorebook + character cards."""
+
+    PERSISTENT_MEMORY = "persistent_memory"
+    """[1] Persistent Memory: offline-updated long-term memory."""
+
+    SUMMARY = "summary"
+    """[2] Summary: compressed conversation summaries (conditional)."""
+
+    HOT_HISTORY = "hot_history"
+    """[3..N] Hot History: recent N user/assistant rounds."""
+
+    STORY_MEMORY = "story_memory"
+    """[N+2] Story Memory: accumulated character/plot details."""
+
+    RECALLED_MEMORY = "recalled_memory"
+    """[N+3] Recalled Memory: dynamically injected context items."""
+
+    STATUS_TABLES = "status_tables"
+    """[N+4] Status Tables: live game-state CSV data."""
+
+    USER_MESSAGE = "user_message"
+    """[N+5] User input (merged with before/after extensions)."""
+
+
+class MsgKey:
+    """Message dict field-name constants, avoids magic strings."""
+
+    ROLE = "role"
+    CONTENT = "content"
+    RP_HIS_ID = "rp_his_id"
+
+
+class Message:
+    """Typed wrapper for OpenAI-compatible message dicts.
+
+    Eliminates hardcoded string keys throughout the pipeline.
+    Convert to dict only at the LLM boundary via ``to_dict()``.
+    """
+
+    __slots__ = ("_role", "_content", "_rp_his_id", "_tool_call_id", "_tool_calls")
+
+    def __init__(
+        self,
+        role: Role | str,
+        content: str,
+        rp_his_id: int = 0,
+        tool_call_id: str = "",
+        tool_calls: list[dict] | None = None,
+    ) -> None:
+        self._role = Role(role) if isinstance(role, str) else role
+        self._content = content
+        self._rp_his_id = rp_his_id
+        self._tool_call_id = tool_call_id
+        self._tool_calls = tool_calls or None
+
+    @property
+    def role(self) -> Role:
+        """Message role as a ``Role`` enum — never a raw string."""
+        return self._role
+
+    @property
+    def content(self) -> str:
+        return self._content
+
+    @property
+    def rp_his_id(self) -> int:
+        return self._rp_his_id
+
+    @property
+    def tool_call_id(self) -> str:
+        """Tool call ID for tool-result messages (OpenAI API requirement)."""
+        return self._tool_call_id
+
+    @tool_call_id.setter
+    def tool_call_id(self, value: str) -> None:
+        self._tool_call_id = value
+
+    @property
+    def tool_calls(self) -> list[dict] | None:
+        """Tool calls attached to an assistant message (OpenAI format)."""
+        return self._tool_calls
+
+    @tool_calls.setter
+    def tool_calls(self, value: list[dict] | None) -> None:
+        self._tool_calls = value
+
+    def is_user(self) -> bool:
+        """Whether this message is from the user."""
+        return self._role is Role.USER
+
+    def is_system(self) -> bool:
+        """Whether this message is a system message."""
+        return self._role is Role.SYSTEM
+
+    def is_assistant(self) -> bool:
+        """Whether this message is from the assistant."""
+        return self._role is Role.ASSISTANT
+
+    def is_tool(self) -> bool:
+        """Whether this message is a tool result."""
+        return self._role is Role.TOOL
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {MsgKey.ROLE: self._role.value, MsgKey.CONTENT: self._content}
+        if self._rp_his_id:
+            d[MsgKey.RP_HIS_ID] = self._rp_his_id
+        if self._tool_call_id:
+            d["tool_call_id"] = self._tool_call_id
+        if self._tool_calls:
+            d["tool_calls"] = self._tool_calls
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Message:
+        return cls(
+            role=d[MsgKey.ROLE],
+            content=d.get(MsgKey.CONTENT, ""),
+            rp_his_id=d.get(MsgKey.RP_HIS_ID, 0),
+            tool_call_id=d.get("tool_call_id", ""),
+            tool_calls=d.get("tool_calls"),
+        )
+
+    def __repr__(self) -> str:
+        return f"Message(role={self._role.value!r}, content={self._content[:40]!r}...)"
 
 
 class LayerType:
@@ -74,14 +214,15 @@ class RPGContext:
 
     提供：
     - 结构化字段访问（``ctx.fixed_layer``、``ctx.summary``……）
-    - ``to_messages()`` 扁平化为 OpenAI 消息格式，每 dict 带 ``type``
+    - ``to_message_objects()`` 返回 ``list[Message]``（内部流转用）
     - ``get_layer(type_str)`` 按类型检索
 
     Usage::
 
         ctx: RPGContext = builder.build(...)
-        messages = ctx.to_messages()   # → list[dict]  for OpenAI
-        summary = ctx.get_layer("summary")
+        msgs = ctx.to_message_objects()   # → list[Message]
+        for m in msgs:
+            ...  # 按 Message API 访问
     """
 
     # ── Layers ─────────────────────────────────────────────────────────
@@ -95,8 +236,8 @@ class RPGContext:
     summary: str | None = None
     """[2] Summary Layer — compressed summaries (None if no summaries)."""
 
-    hot_history: list[dict] = field(default_factory=list)
-    """[3..N] Hot History — recent user/assistant message dicts."""
+    hot_history: list[Message] = field(default_factory=list)
+    """[3..N] Hot History — recent user/assistant Message objects."""
 
     story_memory: str | None = None
     """[N+2] Story Memory — rendered story detail items."""
@@ -120,28 +261,32 @@ class RPGContext:
 
     # ── Public API ─────────────────────────────────────────────────────
 
-    def to_messages(self) -> list[dict[str, Any]]:
-        """Flatten to OpenAI message list with ``type`` annotations.
+    def to_message_objects(self) -> list[Message]:
+        """Flatten to a list of ``Message`` objects (no dict conversion).
 
-        Each dict contains ``role``, ``content``, and ``type`` keys.
-        The ``type`` key is ignored by OpenAI but available for
-        middleware, logging, and debugging.
+        Use this when the caller wants to keep ``Message`` objects flowing
+        through internal layers and only convert to dicts at the LLM
+        provider boundary.
         """
-        msgs: list[dict[str, Any]] = []
+        msgs: list[Message] = []
 
-        self._add(msgs, "system", self.fixed_layer, LayerType.FIXED)
-        self._add(msgs, "system", self.persistent_memory, LayerType.PERSISTENT_MEMORY)
-        self._add(msgs, "system", self.summary, LayerType.SUMMARY)
+        if self.fixed_layer:
+            msgs.append(Message(role=Role.SYSTEM, content=self.fixed_layer))
+        if self.persistent_memory:
+            msgs.append(Message(role=Role.SYSTEM, content=self.persistent_memory))
+        if self.summary:
+            msgs.append(Message(role=Role.SYSTEM, content=self.summary))
 
         for h in self.hot_history:
-            h["type"] = LayerType.HOT_HISTORY
             msgs.append(h)
 
-        self._add(msgs, "system", self.story_memory, LayerType.STORY_MEMORY)
-        self._add(msgs, "system", self.recalled_memory, LayerType.RECALLED_MEMORY)
-        self._add(msgs, "system", self.status_tables, LayerType.STATUS_TABLES)
+        if self.story_memory:
+            msgs.append(Message(role=Role.SYSTEM, content=self.story_memory))
+        if self.recalled_memory:
+            msgs.append(Message(role=Role.SYSTEM, content=self.recalled_memory))
+        if self.status_tables:
+            msgs.append(Message(role=Role.SYSTEM, content=self.status_tables))
 
-        # User message: before → input → after for API compatibility
         parts: list[str] = []
         if self.user_before:
             parts.append(f"[user_prefix]{self.user_before}[/user_prefix]")
@@ -150,7 +295,8 @@ class RPGContext:
         if self.user_after:
             parts.append(f"[user_suffix]{self.user_after}[/user_suffix]")
         user_content = "\n\n".join(parts)
-        msgs.append({"role": "user", "content": user_content, "type": LayerType.USER_MESSAGE})
+        if user_content:
+            msgs.append(Message(role=Role.USER, content=user_content))
 
         return msgs
 
@@ -199,25 +345,25 @@ class RPGContext:
         # [0] Fixed Layer
         lore_count = self._count_tokens_of("lorebook_entries")
         char_count = self._count_tokens_of("characters")
-        _add(LayerType.FIXED, "system", self.fixed_layer,
+        _add(LayerType.FIXED, Role.SYSTEM, self.fixed_layer,
              _build_fixed_desc(lore_count, char_count))
 
         # [1] Persistent Memory
-        _add(LayerType.PERSISTENT_MEMORY, "system", self.persistent_memory,
+        _add(LayerType.PERSISTENT_MEMORY, Role.SYSTEM, self.persistent_memory,
              _truncate_text(self.persistent_memory or "", 50))
 
         # [2] Summary
-        _add(LayerType.SUMMARY, "system", self.summary,
+        _add(LayerType.SUMMARY, Role.SYSTEM, self.summary,
              _truncate_text(self.summary or "", 50))
 
         # [3..N] Hot History
         if self.hot_history:
             tokens = token_counter.count_messages(self.hot_history)
-            user_rounds = sum(1 for m in self.hot_history if m.get("role") == "user")
+            user_rounds = sum(1 for m in self.hot_history if m.is_user())
             layers.append(LayerInfo(
                 type=LayerType.HOT_HISTORY, role="mixed",
                 status="active",
-                char_count=sum(len(m.get("content") or "") for m in self.hot_history),
+                char_count=sum(len(m.content) for m in self.hot_history),
                 token_count=tokens,
                 description=f"{user_rounds} 轮对话 (user/assistant)",
             ))
@@ -229,15 +375,15 @@ class RPGContext:
             ))
 
         # [N+1] Story Memory
-        _add(LayerType.STORY_MEMORY, "system", self.story_memory,
+        _add(LayerType.STORY_MEMORY, Role.SYSTEM, self.story_memory,
              _build_story_memory_desc(self.story_memory))
 
         # [N+3] Recalled Memory
-        _add(LayerType.RECALLED_MEMORY, "system", self.recalled_memory,
+        _add(LayerType.RECALLED_MEMORY, Role.SYSTEM, self.recalled_memory,
              _truncate_text(self.recalled_memory or "", 50))
 
         # [N+4] Status Tables
-        _add(LayerType.STATUS_TABLES, "system", self.status_tables,
+        _add(LayerType.STATUS_TABLES, Role.SYSTEM, self.status_tables,
              _build_status_desc(self.status_tables))
 
         # [N+5] User Message
@@ -251,7 +397,7 @@ class RPGContext:
         user_content = "\n\n".join(user_parts)
         if user_content:
             layers.append(LayerInfo(
-                type=LayerType.USER_MESSAGE, role="user",
+                type=LayerType.USER_MESSAGE, role=Role.USER.value,
                 status="active",
                 char_count=len(user_content),
                 token_count=token_counter.count(user_content),
@@ -259,7 +405,7 @@ class RPGContext:
             ))
         else:
             layers.append(LayerInfo(
-                type=LayerType.USER_MESSAGE, role="user",
+                type=LayerType.USER_MESSAGE, role=Role.USER.value,
                 status="inactive", char_count=0, token_count=0,
                 description="-",
             ))
@@ -326,7 +472,9 @@ class RPGContext:
         type_: str,
     ) -> None:
         if content:
-            msgs.append({"role": role, "content": content, "type": type_})
+            d = Message(role=role, content=content).to_dict()
+            d["type"] = type_
+            msgs.append(d)
 
 
 # ── module-level helpers ──────────────────────────────────────────────

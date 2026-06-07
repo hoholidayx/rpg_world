@@ -32,13 +32,11 @@ Architecture::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from loguru import logger
+from rpg_world.rpg_core.context.rpg_context import Message
 
-if TYPE_CHECKING:
-    from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
-    from rpg_world.rpg_core.summary.store import SummaryStore
+from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
 
 
 @dataclass
@@ -105,7 +103,7 @@ class SummaryCompressor:
 
     # ── public API ─────────────────────────────────────────────────────
 
-    async def maybe_compress(self, history: list[dict]) -> CompressResult:
+    async def maybe_compress(self, history: list[Message]) -> CompressResult:
         """检查是否需要压缩，是则执行。
 
         当压缩触发时，*history* 会被**原地修改**：已压缩的旧消息被移除，
@@ -118,7 +116,7 @@ class SummaryCompressor:
 
         # 1. 统计用户消息数
         user_indices = [
-            i for i, m in enumerate(history) if m.get("role") == "user"
+            i for i, m in enumerate(history) if m.is_user()
         ]
         total_user_rounds = len(user_indices)
 
@@ -142,7 +140,7 @@ class SummaryCompressor:
 
         compress_portion = history[compress_start:compress_end]
         user_rounds_in_compress = sum(
-            1 for m in compress_portion if m.get("role") == "user"
+            1 for m in compress_portion if m.is_user()
         )
 
         if user_rounds_in_compress < self._min_rounds_per_compress:
@@ -153,9 +151,6 @@ class SummaryCompressor:
                 self._min_rounds_per_compress,
             )
             return CompressResult()
-
-        # 4. 执行摘要生成
-        summary_generated = False
         if self._memory_sub_agent is not None and self._summary_store is not None:
             try:
                 sub_result = await self._memory_sub_agent.process(

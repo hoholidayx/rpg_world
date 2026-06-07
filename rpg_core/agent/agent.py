@@ -8,10 +8,11 @@ from typing import Any
 
 from loguru import logger
 
+from rpg_world.rpg_core.agent.agent_types import TurnStats, AgentStreamEvent, StreamEventKind
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
+from rpg_world.rpg_core.agent.command import CommandDispatcher
 from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
-from rpg_world.rpg_core.agent.command import CommandDispatcher
 from rpg_world.rpg_core.agent.prompt import PromptManager
 from rpg_world.rpg_core.agent.sub_agents import (
     MemorySubAgent,
@@ -19,7 +20,6 @@ from rpg_world.rpg_core.agent.sub_agents import (
     SubAgentContext,
 )
 from rpg_world.rpg_core.agent.tokenizer import TiktokenTokenCounter, TokenCounter
-from rpg_world.rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_world.rpg_core.agent.tools import (
     BaseTool,
     GrepTool,
@@ -28,6 +28,8 @@ from rpg_world.rpg_core.agent.tools import (
     ToolRegistry,
     WriteFileTool,
 )
+from rpg_world.rpg_core.context import RPGContextBuilder
+from rpg_world.rpg_core.context.rpg_context import Role, Message
 from rpg_world.rpg_core.scene import SceneTracker
 from rpg_world.rpg_core.session import SessionManager
 from rpg_world.rpg_core.settings import settings
@@ -52,17 +54,17 @@ class RPGGameAgent:
     """
 
     def __init__(
-        self,
-        session_id: str = "default",
-        world_name: str = "Nanobot Realm",
-        model: str = "gpt-4o",
-        api_key: str | None = None,
-        base_url: str | None = None,
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-        history_enabled: bool = True,
-        tools: list[BaseTool] | None = None,
-        token_counter: TokenCounter | None = None,
+            self,
+            session_id: str = "default",
+            world_name: str = "Nanobot Realm",
+            model: str = "gpt-4o",
+            api_key: str | None = None,
+            base_url: str | None = None,
+            max_tokens: int | None = None,
+            temperature: float | None = None,
+            history_enabled: bool = True,
+            tools: list[BaseTool] | None = None,
+            token_counter: TokenCounter | None = None,
     ) -> None:
         self._session_id = session_id
         self._world_name = world_name
@@ -77,7 +79,7 @@ class RPGGameAgent:
 
         # Lazy-init
         self._initialized: bool = False
-        self._builder: Any = None
+        self._builder: RPGContextBuilder | None = None
         self._character_mgr: Any = None
         self._lorebook_mgr: Any = None
         self._status_mgr: Any = None
@@ -130,7 +132,6 @@ class RPGGameAgent:
         context so that MemorySubAgent can see scene timeline during
         summarization (it filters ``role == "system"`` messages).
         """
-        
 
         await self._ensure_initialized()
 
@@ -172,14 +173,18 @@ class RPGGameAgent:
         else:
             stored_input = user_input
 
-        self._session.append("user", stored_input)
+        self._session.append(Role.USER, stored_input)
+
+        # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
+        if self._memory_sub_agent:
+            await self._memory_sub_agent.maybe_auto_extract(self._session)
 
         messages = self._build_transformed_context()
         if settings.verbose_logging:
-            sys_msgs = sum(1 for m in messages if m.get("role") == "system")
-            user_msgs = sum(1 for m in messages if m.get("role") == "user")
-            asst_msgs = sum(1 for m in messages if m.get("role") == "assistant")
-            total_chars = sum(len(m.get("content", "")) for m in messages)
+            sys_msgs = sum(1 for m in messages if m.is_system())
+            user_msgs = sum(1 for m in messages if m.is_user())
+            asst_msgs = sum(1 for m in messages if m.is_assistant())
+            total_chars = sum(len(m.content) for m in messages)
             logger.debug(
                 _TAG + " context messages: {} total (sys={}, user={}, asst={}) chars={}",
                 len(messages), sys_msgs, user_msgs, asst_msgs, total_chars,
@@ -220,7 +225,7 @@ class RPGGameAgent:
                 stats=turn_stats,
             )
 
-        self._session.append("assistant", reply_text)
+        self._session.append(Role.ASSISTANT, reply_text)
         return result
 
     async def send_stream(self, user_input: str) -> AsyncIterator[AgentStreamEvent]:
@@ -282,7 +287,11 @@ class RPGGameAgent:
         else:
             stored_input = user_input
 
-        self._session.append("user", stored_input)
+        self._session.append(Role.USER, stored_input)
+
+        # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
+        if self._memory_sub_agent:
+            await self._memory_sub_agent.maybe_auto_extract(self._session)
 
         messages = self._build_transformed_context()
         schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
@@ -293,11 +302,11 @@ class RPGGameAgent:
 
         try:
             async for event in run_chat_loop_stream(
-                provider=self._provider,
-                tool_registry=self._tool_registry,
-                messages=messages,
-                schemas=schemas,
-                turn_stats=turn_stats,
+                    provider=self._provider,
+                    tool_registry=self._tool_registry,
+                    messages=messages,
+                    schemas=schemas,
+                    turn_stats=turn_stats,
             ):
                 if event.kind == StreamEventKind.DONE:
                     final_content = event.content
@@ -323,7 +332,7 @@ class RPGGameAgent:
 
         # Only persist to history if we got valid content
         if final_content:
-            self._session.append("assistant", final_content)
+            self._session.append(Role.ASSISTANT, final_content)
 
         # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
         # Compute aggregate usage across all LLM calls (main loop + sub-agents)
@@ -354,7 +363,7 @@ class RPGGameAgent:
             )
 
     @property
-    def history(self) -> list[dict]:
+    def history(self) -> list[Message]:
         """Read-only view of the raw conversation history (before RPG transform)."""
         return self._session.history
 
@@ -412,7 +421,6 @@ class RPGGameAgent:
         Returns a list of ``LayerInfo``, one per layer, with token counts
         estimated using the agent's ``_token_counter``.
         """
-        from rpg_world.rpg_core.context.rpg_context import LayerInfo
 
         await self._ensure_initialized()
         ctx = self._build_ctx_for_inspection(user_input)
@@ -436,7 +444,7 @@ class RPGGameAgent:
         # Build scene context same way as send()
         scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
 
-        test_messages = list(self._session.history)
+        test_messages: list[Message] = list(self._session.history)
         if user_input or scene_ctx:
             parts = []
             if scene_ctx:
@@ -444,9 +452,9 @@ class RPGGameAgent:
             if user_input:
                 parts.append(user_input)
             stored_input = "\n\n".join(parts)
-            test_messages.append({"role": "user", "content": stored_input})
+            test_messages.append(Message(role=Role.USER, content=stored_input))
         elif not test_messages:
-            test_messages.append({"role": "user", "content": "(no input)"})
+            test_messages.append(Message(role=Role.USER, content="(no input)"))
 
         ctx: RPGContext = self._builder.build(
             system_prompt=self._system_prompt,
@@ -463,9 +471,9 @@ class RPGGameAgent:
     # ── compact history (manual summary trigger) ──────────────────────
 
     async def compact_history(
-        self,
-        compress_rounds: int | None = None,
-        keep_rounds: int | None = None,
+            self,
+            compress_rounds: int | None = None,
+            keep_rounds: int | None = None,
     ) -> dict[str, Any]:
         """压缩最老的对话轮次为摘要。
 
@@ -488,7 +496,7 @@ class RPGGameAgent:
         compress_rounds = compress_rounds or settings.memory_compress_rounds
         keep_rounds = keep_rounds or settings.memory_keep_rounds
 
-        user_indices = [i for i, m in enumerate(self._session.history) if m.get("role") == "user"]
+        user_indices = [i for i, m in enumerate(self._session.history) if m.is_user()]
         total = len(user_indices)
         available = total - keep_rounds
         if available <= 0:
@@ -561,8 +569,8 @@ class RPGGameAgent:
             _sub_ctx_memory = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
             self._memory_sub_agent.bind_context(_sub_ctx_memory)
 
-    def _build_transformed_context(self) -> list[dict]:
-        """Build the 5-layer RPG context and flatten to message list."""
+    def _build_transformed_context(self) -> list[Message]:
+        """Build the 5-layer RPG context as Message objects."""
         ctx = self._builder.build(
             system_prompt=self._system_prompt,
             messages=self._session.history,
@@ -571,7 +579,7 @@ class RPGGameAgent:
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
         )
-        return ctx.to_messages()
+        return ctx.to_message_objects()
 
     def _setup_tool_registry(self) -> None:
         """Create and populate the ToolRegistry with built-in file tools."""
@@ -587,7 +595,6 @@ class RPGGameAgent:
             self._tool_registry.register_all(self._scene_tracker.get_tools())
         if self._extra_tools:
             self._tool_registry.register_all(self._extra_tools)
-
 
     async def _ensure_initialized(self) -> None:
         if self._initialized:
@@ -632,6 +639,7 @@ class RPGGameAgent:
             base_url=memory_cfg.get("base_url") or self._base_url,
             enabled=memory_cfg.get("enabled", True),
             summary_store=self._builder._summary_store if self._builder else None,
+            story_store=self._builder._story_memory if self._builder else None,
             max_window_rounds=settings.memory_keep_rounds,
         )
         _memory_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
@@ -639,6 +647,7 @@ class RPGGameAgent:
 
         # ── CommandDispatcher ─────────────────────────────────────────
         self._cmd_dispatcher = CommandDispatcher(agent=self)
+
         # 内置命令
         async def _cmd_clear(agent, args):
             agent.clear_history()
@@ -685,8 +694,8 @@ def _build_rpg_context(world_name: str, session_id: str) -> dict[str, Any]:
 
 
 def _build_sub_agent_context(
-    character_mgr: Any,
-    lorebook_mgr: Any,
+        character_mgr: Any,
+        lorebook_mgr: Any,
 ) -> SubAgentContext:
     """从 Manager 读取已启用条目，构造 SubAgentContext。
 

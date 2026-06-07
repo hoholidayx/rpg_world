@@ -20,7 +20,7 @@
         "max_items": 5
       },
       "story": {
-        "max_details": 10
+        "trigger_rounds": 0
       }
     },
     "status_sub_agent": {

@@ -34,11 +34,13 @@ from loguru import logger
 from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
 from rpg_world.rpg_core.agent.command import CommandDef
+from rpg_world.rpg_core.context.rpg_context import Message, Role
 
 # ── constants ──────────────────────────────────────────────────────────
 
 _TAG = "[MemorySubAgent]"
-COMMAND_NAME = "/compact"
+COMMAND_NAME_COMPACT = "/compact"
+COMMAND_NAME_STORY = "/story_memory"
 """此子 Agent 注册到 CommandDispatcher 的斜杠命令名。"""
 
 # ── function schemas (one per pipeline) ───────────────────────────────
@@ -194,8 +196,6 @@ class MemorySubAgent(BaseSubAgent):
         总开关。
     max_recall_items:
         每轮最大召回项数。
-    max_story_details:
-        每轮最大剧情记忆条目数。
     max_window_rounds:
         传入 LLM 的最大对话窗口（用户轮次数）。
     """
@@ -212,7 +212,6 @@ class MemorySubAgent(BaseSubAgent):
         base_url: str | None = None,
         enabled: bool = True,
         max_recall_items: int = 5,
-        max_story_details: int = 10,
         max_window_rounds: int = 10,
     ) -> None:
         super().__init__(
@@ -231,7 +230,6 @@ class MemorySubAgent(BaseSubAgent):
         self._story_store = story_store
         self._summary_store = summary_store
         self._max_recall_items = max_recall_items
-        self._max_story_details = max_story_details
         self._max_window_rounds = max_window_rounds
 
     # ── public API ─────────────────────────────────────────────────────
@@ -243,18 +241,69 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Command interface ─────────────────────────────────────────────
 
-    def get_command_def(self) -> dict | None:
-        return CommandDef(
-            name=COMMAND_NAME,
-            description="压缩最老的对话轮次为摘要",
-            detail=f"可传参：{COMMAND_NAME} [压缩轮数] [保留轮数]，如 {COMMAND_NAME} 10 5",
-        )
+    def get_command_def(self) -> list[CommandDef] | None:
+        """返回此子 Agent 注册的所有斜杠命令。"""
+        defs: list[CommandDef] = [
+            CommandDef(
+                name=COMMAND_NAME_COMPACT,
+                description="压缩最老的对话轮次为摘要",
+                detail=f"可传参：{COMMAND_NAME_COMPACT} [压缩轮数] [保留轮数]，如 {COMMAND_NAME_COMPACT} 10 5",
+            ),
+        ]
+        if self._story_store:
+            defs.append(CommandDef(
+                name=COMMAND_NAME_STORY,
+                description="手动提取剧情记忆",
+                detail="扫描对话历史，提取 notable 角色/剧情细节并持久化到剧情记忆。",
+            ))
+        return defs if defs else None
 
     def accept_command(self, command: str) -> bool:
-        return command == COMMAND_NAME
+        return command in (COMMAND_NAME_COMPACT, COMMAND_NAME_STORY)
 
     async def execute_command(self, command: str, args: list[str], agent: Any = None) -> dict | None:
-        if command != COMMAND_NAME:
+        if command == COMMAND_NAME_STORY:
+            if agent is None or not hasattr(agent, "_session"):
+                return {"reply": "未绑定主 Agent，无法执行 story_memory"}
+            conv = agent._session.history
+            last_idx = agent._session.last_story_rp_his_id
+            new_msgs = [m for m in conv if m.rp_his_id > last_idx]
+            if not new_msgs:
+                logger.info(_TAG + " story_memory skipped: no new messages since rp_his_id={}", last_idx)
+                return {"reply": "剧情记忆提取跳过：没有新消息需要处理。", "stats": None}
+            logger.info(
+                _TAG + " story_memory processing {} new messages (rp_his_id > {})",
+                len(new_msgs), last_idx,
+            )
+            result = await self.process({"story": new_msgs})
+            added = result.story_details_added
+            if added > 0:
+                last_user = next(
+                    (m for m in reversed(new_msgs) if m.is_user()),
+                    None,
+                )
+                if last_user:
+                    agent._session.set_last_story_rp_his_id(last_user.rp_his_id)
+            stats = None
+            if result.call_stats:
+                cr = result.call_stats[0]
+                stats = {
+                    "total_duration_ms": cr.duration_ms,
+                    "model": cr.model,
+                    "prompt_tokens": cr.usage.prompt_tokens if cr.usage else 0,
+                    "completion_tokens": cr.usage.completion_tokens if cr.usage else 0,
+                    "total_tokens": cr.usage.total_tokens if cr.usage else 0,
+                    "cached_tokens": cr.usage.cached_tokens if cr.usage else 0,
+                }
+                logger.info(
+                    _TAG + " story_memory done: added={}, tokens={}, duration={:.0f}ms",
+                    added, stats["total_tokens"], cr.duration_ms,
+                )
+            else:
+                logger.info(_TAG + " story_memory done: added={}, no LLM call", added)
+
+            return {"reply": f"已提取 {added} 条剧情记忆。", "stats": stats}
+        if command != COMMAND_NAME_COMPACT:
             return None
         compress_rounds: int | None = None
         keep_rounds: int | None = None
@@ -269,7 +318,7 @@ class MemorySubAgent(BaseSubAgent):
             except ValueError:
                 return {"reply": f"keep_rounds 必须是整数，收到: {args[1]}"}
         if agent is None or not hasattr(agent, "compact_history"):
-            return {"reply": f"未绑定主 Agent，无法执行 {COMMAND_NAME}"}
+            return {"reply": f"未绑定主 Agent，无法执行 {COMMAND_NAME_COMPACT}"}
         result = await agent.compact_history(compress_rounds, keep_rounds)
         if result.get("skipped"):
             return {"reply": f"压缩跳过：{result['reason']}"}
@@ -288,9 +337,9 @@ class MemorySubAgent(BaseSubAgent):
         ========= =========================  ============================
         key       值类型                     作用
         ========= =========================  ============================
-        ``recall`` ``list[dict]`` (optional)  扫描对话提取召回项
-        ``story`` ``list[dict]`` (optional)  提取剧情细节追加持久化
-        ``summary`` ``list[dict]`` (optional) 生成摘要追加到 SummaryStore
+        ``recall`` ``list[Message]`` (optional)  扫描对话提取召回项
+        ``story`` ``list[Message]`` (optional)  提取剧情细节追加持久化
+        ``summary`` ``list[Message]`` (optional) 生成摘要追加到 SummaryStore
         ========= =========================  ============================
 
         每个 key 独立处理，互不影响。
@@ -328,6 +377,34 @@ class MemorySubAgent(BaseSubAgent):
         finally:
             self._busy = False
 
+    # ── 自动触发剧情记忆提取 ──────────────────────────────────────────
+
+    async def maybe_auto_extract(self, session: Any) -> None:
+        """检查自动触发条件，满足时同步提取剧情记忆。
+
+        由主 Agent 在每轮对话结束后编排调用（await 等待完成）。
+        """
+        if not self._enabled or not self._story_store:
+            return
+        from rpg_world.rpg_core.settings import settings as _s
+        trigger = _s.memory_story_trigger_rounds
+        if trigger <= 0:
+            return
+
+        new_rounds = session.count_new_user_rounds_since_story()
+        if new_rounds < trigger:
+            return
+        logger.info(
+            _TAG + " auto story extraction: {} new rounds >= trigger {}",
+            new_rounds, trigger,
+        )
+        last_idx = session.last_story_rp_his_id
+        new_msgs = [m for m in session.history if m.rp_his_id > last_idx]
+        if not new_msgs:
+            return
+
+        await self.process({"story": new_msgs})
+
     def update_store_refs(
         self,
         recalled_store: Any = None,
@@ -344,7 +421,7 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Pipeline 1: 召回 ─────────────────────────────────────────────
 
-    async def _pipeline_recall(self, conv: list[dict], call_stats: list[CallRecord]) -> int:
+    async def _pipeline_recall(self, conv: list[Message], call_stats: list[CallRecord]) -> int:
         """提取召回项，全量替换 RecalledMemoryStore。"""
         window = self._format_conversation_window(conv, self._max_window_rounds)
 
@@ -353,14 +430,11 @@ class MemorySubAgent(BaseSubAgent):
         )
 
         messages = [
-            {"role": "system", "content": system_content},
-            {
-                "role": "user",
-                "content": (
-                    f"## Conversation\n\n{window}\n\n"
-                    f"Call `extract_recalls` with relevant context items."
-                ),
-            },
+            Message(role=Role.SYSTEM, content=system_content).to_dict(),
+            Message(role=Role.USER, content=(
+                f"## Conversation\n\n{window}\n\n"
+                f"Call `extract_recalls` with relevant context items."
+            )).to_dict(),
         ]
 
         decision, call_rec = await self._call_llm(messages, RECALL_SCHEMA)
@@ -380,38 +454,43 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Pipeline 2: 剧情记忆 ─────────────────────────────────────────
 
-    async def _pipeline_story_memory(self, conv: list[dict], call_stats: list[CallRecord]) -> int:
+    async def _pipeline_story_memory(self, conv: list[Message], call_stats: list[CallRecord]) -> int:
         """提取剧情细节，追加到 StoryMemoryStore。"""
+        logger.info(_TAG + " story pipeline starting: {} messages in window", len(conv))
         window = self._format_conversation_window(conv)
 
-        # 已有剧情记忆（去重参考）
+        # 已有剧情记忆（去重参考）——不限制条数，保留全量参考
+        existing_items = self._story_store.get_all() if self._story_store else []
         existing = _format_store_items(
-            self._story_store.get_all() if self._story_store else [],
+            existing_items,
             key=lambda d: d.get("text", str(d)) if isinstance(d, dict) else str(d),
-            max_items=self._max_story_details,
         )
+        if existing_items:
+            logger.info(_TAG + " story pipeline: {} existing items for dedup", len(existing_items))
 
-        system_content = self._build_system_context(
-            STORY_MEMORY_PROMPT.replace("{max_items}", str(self._max_story_details))
-        )
+        system_content = self._build_system_context(STORY_MEMORY_PROMPT)
 
         messages = [
-            {"role": "system", "content": system_content},
-            {
-                "role": "user",
-                "content": (
-                    f"## Conversation Content\n\n{window}\n\n"
-                    f"## Existing Story Memory (for deduplication)\n"
-                    f"{existing}\n\n"
-                    f"Call `extract_story_details` with notable details."
-                ),
-            },
+            Message(role=Role.SYSTEM, content=system_content).to_dict(),
+            Message(role=Role.USER, content=(
+                f"## Conversation Content\n\n{window}\n\n"
+                f"## Existing Story Memory (for deduplication)\n"
+                f"{existing}\n\n"
+                f"Call `extract_story_details` with notable details."
+            )).to_dict(),
         ]
 
         decision, call_rec = await self._call_llm(messages, STORY_DETAIL_SCHEMA)
         if call_rec:
             call_stats.append(call_rec)
-        details = decision.get("story_details", [])[: self._max_story_details]
+            logger.info(
+                _TAG + " story pipeline LLM: {} tokens (prompt={}, completion={}), {:.0f}ms",
+                call_rec.usage.total_tokens if call_rec.usage else 0,
+                call_rec.usage.prompt_tokens if call_rec.usage else 0,
+                call_rec.usage.completion_tokens if call_rec.usage else 0,
+                call_rec.duration_ms,
+            )
+        details = decision.get("story_details", [])
 
         added = 0
         if details and self._story_store:
@@ -430,21 +509,18 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Pipeline 3: 摘要 ─────────────────────────────────────────────
 
-    async def _pipeline_summary(self, conv: list[dict], call_stats: list[CallRecord]) -> bool:
+    async def _pipeline_summary(self, conv: list[Message], call_stats: list[CallRecord]) -> bool:
         """生成摘要文本，追加到 SummaryStore。"""
         window = self._format_conversation_window(conv)
 
         system_content = self._build_system_context(SUMMARY_PROMPT)
 
         messages = [
-            {"role": "system", "content": system_content},
-            {
-                "role": "user",
-                "content": (
-                    f"## Conversation\n\n{window}\n\n"
-                    f"Call `generate_summary` with the summary text."
-                ),
-            },
+            Message(role=Role.SYSTEM, content=system_content).to_dict(),
+            Message(role=Role.USER, content=(
+                f"## Conversation\n\n{window}\n\n"
+                f"Call `generate_summary` with the summary text."
+            )).to_dict(),
         ]
 
         decision, call_rec = await self._call_llm(messages, SUMMARY_SCHEMA)
@@ -518,24 +594,24 @@ class MemorySubAgent(BaseSubAgent):
 
     def _format_conversation_window(
         self,
-        history: list[dict],
+        history: list[Message],
         max_rounds: int | None = None,
     ) -> str:
         """Format conversation as readable ``Role: text`` lines, windowed."""
         if max_rounds is not None:
             user_indices = [
-                i for i, m in enumerate(history) if m.get("role") == "user"
+                i for i, m in enumerate(history) if m.is_user()
             ]
             if len(user_indices) > max_rounds:
                 history = history[user_indices[-max_rounds]:]
 
         lines: list[str] = []
         for msg in history:
-            role = msg.get("role", "")
-            content = (msg.get("content") or "").strip()
-            if not content or role == "system":
+            role = msg.role
+            content = (msg.content or "").strip()
+            if not content or role == Role.SYSTEM:
                 continue
-            label = {"user": "User", "assistant": "Assistant"}.get(
+            label = {Role.USER.value: "User", Role.ASSISTANT.value: "Assistant"}.get(
                 role, role.capitalize()
             )
             lines.append(f"{label}: {content[:500]}")

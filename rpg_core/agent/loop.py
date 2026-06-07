@@ -13,13 +13,14 @@ from typing import Any
 from loguru import logger
 
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
+from rpg_world.rpg_core.context.rpg_context import Message, Role
 from rpg_world.rpg_core.agent.tools import ToolRegistry
 from rpg_world.rpg_core.agent.agent_types import (
     AgentStreamEvent,
     CallRecord,
     LLMResponse,
     StreamEventKind,
-    TurnStats,
+    TurnStats, LLMUsage,
 )
 from rpg_world.rpg_core.settings import settings
 
@@ -91,7 +92,7 @@ class AgentReply:
 async def run_chat_loop(
     provider: LLMProvider,
     tool_registry: ToolRegistry,
-    messages: list[dict],
+    messages: list[Message],
     schemas: list[dict] | None,
     turn_stats: TurnStats | None = None,
 ) -> tuple[str, list[ToolCallRecord]]:
@@ -124,9 +125,9 @@ async def run_chat_loop(
     records: list[ToolCallRecord] = []
 
     while tool_call_count < max_calls:
-        # ── LLM call with timing ──────────────────────────────────
+        # ── LLM call with timing (convert Message → dict at provider boundary) ──
         t0 = time.monotonic()
-        result = await provider.chat(messages, tools=schemas)
+        result = await provider.chat([m.to_dict() for m in messages], tools=schemas)
         duration_ms = (time.monotonic() - t0) * 1000
 
         # Ensure result is an LLMResponse
@@ -137,23 +138,17 @@ async def run_chat_loop(
             if not tool_calls:
                 return content, records
             tool_call_count += 1
-            asst_msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": content,
-                "tool_calls": tool_calls,
-            }
-            messages.append(asst_msg)
+            asst_msg_obj = Message(role=Role.ASSISTANT, content=content, tool_calls=tool_calls)
+            asst_msg = asst_msg_obj.to_dict()
+            messages.append(asst_msg_obj)
             tool_results: list[dict[str, Any]] = []
             for tc in tool_calls:
                 name = tc["function"]["name"]
                 args = tc["function"]["arguments"]
                 tool_result = await tool_registry.execute(name, args)
-                tool_msg: dict[str, Any] = {
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": str(tool_result),
-                }
-                messages.append(tool_msg)
+                tool_msg_obj = Message(role=Role.TOOL, content=str(tool_result), tool_call_id=tc["id"])
+                tool_msg = tool_msg_obj.to_dict()
+                messages.append(tool_msg_obj)
                 tool_results.append(tool_msg)
             records.append(ToolCallRecord(asst_msg, tool_results))
             continue
@@ -180,12 +175,9 @@ async def run_chat_loop(
             )
 
         # Assistant tool-call message
-        asst_msg = {
-            "role": "assistant",
-            "content": result.content,
-            "tool_calls": result.tool_calls,
-        }
-        messages.append(asst_msg)
+        asst_msg_obj = Message(role=Role.ASSISTANT, content=result.content, tool_calls=result.tool_calls)
+        asst_msg = asst_msg_obj.to_dict()
+        messages.append(asst_msg_obj)
 
         # Execute tools and collect results
         tool_results = []
@@ -203,12 +195,9 @@ async def run_chat_loop(
                     name, str(tool_result)[:200],
                 )
 
-            tool_msg = {
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": str(tool_result),
-            }
-            messages.append(tool_msg)
+            tool_msg_obj = Message(role=Role.TOOL, content=str(tool_result), tool_call_id=tc["id"])
+            tool_msg = tool_msg_obj.to_dict()
+            messages.append(tool_msg_obj)
             tool_results.append(tool_msg)
 
         records.append(ToolCallRecord(
@@ -228,7 +217,7 @@ async def run_chat_loop(
 async def run_chat_loop_stream(
     provider: LLMProvider,
     tool_registry: ToolRegistry,
-    messages: list[dict],
+    messages: list[Message],
     schemas: list[dict] | None,
     turn_stats: TurnStats | None = None,
 ) -> AsyncIterator[AgentStreamEvent]:
@@ -262,7 +251,7 @@ async def run_chat_loop_stream(
         t0 = time.monotonic()
 
         try:
-            async for chunk in provider.chat_stream(messages, tools=schemas):
+            async for chunk in provider.chat_stream([m.to_dict() for m in messages], tools=schemas):
                 # ── text ────────────────────────────────────────────
                 if chunk.content:
                     yield AgentStreamEvent(
@@ -363,12 +352,9 @@ async def run_chat_loop_stream(
             )
 
         # ── Append assistant message ───────────────────────────────
-        asst_msg: dict = {
-            "role": "assistant",
-            "content": round_text,
-            "tool_calls": tool_calls,
-        }
-        messages.append(asst_msg)
+        asst_msg_obj = Message(role=Role.ASSISTANT, content=round_text, tool_calls=tool_calls)
+        asst_msg = asst_msg_obj.to_dict()
+        messages.append(asst_msg_obj)
 
         # ── Execute tools ─────────────────────────────────────────
         tool_results: list[dict] = []
@@ -384,12 +370,9 @@ async def run_chat_loop_stream(
                 logger.info(_TAG + " tool result {}: {}", name, str(tool_result)[:200])
 
             result_str = str(tool_result)
-            tool_msg = {
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": result_str,
-            }
-            messages.append(tool_msg)
+            tool_msg_obj = Message(role=Role.TOOL, content=result_str, tool_call_id=tc["id"])
+            tool_msg = tool_msg_obj.to_dict()
+            messages.append(tool_msg_obj)
             tool_results.append(tool_msg)
 
             yield AgentStreamEvent(

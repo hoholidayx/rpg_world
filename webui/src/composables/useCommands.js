@@ -24,6 +24,11 @@ const COMMAND_DEFS = [
     detail: '可传参：/compact [压缩轮数] [保留轮数]，如 /compact 10 5',
   },
   {
+    command: '/story_memory',
+    description: '提取剧情记忆（角色/剧情细节）',
+    detail: '自上次提取以来有新对话时，提取 notable 角色/剧情细节持久化到剧情记忆。',
+  },
+  {
     command: '/reload',
     description: '重新加载 RPG 数据（角色卡、世界书）',
     detail: '从磁盘重新读取角色卡和世界书文件变更。',

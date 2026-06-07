@@ -22,6 +22,7 @@ from typing import Any
 from loguru import logger
 
 from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.context.rpg_context import Message, Role
 
 _TAG = "[SessionManager]"
 
@@ -32,6 +33,7 @@ _META_CREATED_AT = "created_at"
 _META_UPDATED_AT = "updated_at"
 _META_MESSAGE_COUNT = "message_count"
 _META_COMPACTED_ROUNDS = "compacted_rounds"
+_META_LAST_STORY_RP_HIS_ID = "last_story_rp_his_id"
 
 
 class SessionManager:
@@ -44,13 +46,13 @@ class SessionManager:
     ) -> None:
         self._session_id = session_id if session_id is not None else _DEFAULT_SESSION_ID
         self._history_enabled = history_enabled
-        self._history: list[dict] = []
+        self._history: list[Message] = []
         self._meta: dict[str, Any] = {}
 
     # ── Public API — history ───────────────────────────────────────────
 
     @property
-    def history(self) -> list[dict]:
+    def history(self) -> list[Message]:
         """Read-only snapshot of in-memory history."""
         return list(self._history)
 
@@ -76,15 +78,15 @@ class SessionManager:
                 if not line:
                     continue
                 try:
-                    self._history.append(json.loads(line))
-                except json.JSONDecodeError:
+                    self._history.append(Message.from_dict(json.loads(line)))
+                except (json.JSONDecodeError, Exception):
                     continue
         logger.debug(
             _TAG + " loaded {} message(s) from {}",
             len(self._history), path,
         )
 
-    def append(self, role: str, content: str) -> None:
+    def append(self, role: Role | str, content: str) -> None:
         """Append a message to in-memory history.
 
         Each message gets an ``rp_his_id`` field — current Unix timestamp
@@ -94,11 +96,11 @@ class SessionManager:
         ``_history_enabled`` is ``True``.
         """
         his_id = int(_time.time())
-        msg = {"role": role, "content": content, "rp_his_id": his_id}
+        msg = Message(role, content, his_id)
         self._history.append(msg)
         if not self._history_enabled:
             return
-        record = json.dumps(msg, ensure_ascii=False)
+        record = json.dumps(msg.to_dict(), ensure_ascii=False)
         # Primary
         path = self._history_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +139,7 @@ class SessionManager:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("w", encoding="utf-8") as f:
                 for msg in self._history:
-                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                    f.write(json.dumps(msg.to_dict(), ensure_ascii=False) + "\n")
 
         logger.debug(
             _TAG + " truncated: removed {} msgs, {} remaining",
@@ -188,6 +190,25 @@ class SessionManager:
         current = self._meta.get(_META_COMPACTED_ROUNDS, 0) + count
         self._update_meta(**{_META_COMPACTED_ROUNDS: current})
 
+    # ── Story memory progress tracking ──────────────────────────────────
+
+    @property
+    def last_story_rp_his_id(self) -> int:
+        """rp_his_id of the last user message processed by story extraction."""
+        return self._meta.get(_META_LAST_STORY_RP_HIS_ID, 0)
+
+    def set_last_story_rp_his_id(self, idx: int) -> None:
+        """Persist the last extracted message rp_his_id."""
+        self._update_meta(**{_META_LAST_STORY_RP_HIS_ID: idx})
+
+    def count_new_user_rounds_since_story(self) -> int:
+        """Count user messages with rp_his_id > last_story_rp_his_id."""
+        last = self.last_story_rp_his_id
+        return sum(
+            1 for m in self._history
+            if m.is_user() and m.rp_his_id > last
+        )
+
     # ── History-enabled flag ───────────────────────────────────────────
 
     @property
@@ -232,6 +253,7 @@ class SessionManager:
             _META_UPDATED_AT: now,
             _META_MESSAGE_COUNT: 0,
             _META_COMPACTED_ROUNDS: 0,
+            _META_LAST_STORY_RP_HIS_ID: 0,
         }
 
     def _update_meta(self, **kwargs: Any) -> None:

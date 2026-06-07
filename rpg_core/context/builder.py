@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from jinja2 import Environment, FileSystemLoader
 
 from rpg_world.rpg_core.context.config import RPGContextConfig
-from rpg_world.rpg_core.context.rpg_context import RPGContext
+from rpg_world.rpg_core.context.rpg_context import Message, Role, RPGContext
 from rpg_world.rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -37,10 +37,10 @@ def render_jinja_template(template_name: str, **context: Any) -> str:
     return tpl.render(**context).strip()
 
 
-def _count_rounds(messages: list[dict]) -> int:
+def _count_rounds(messages: list[Message]) -> int:
     """Count user messages in the history portion (exclude last user message)."""
     history = messages[:-1]
-    return sum(1 for m in history if m.get("role") == "user")
+    return sum(1 for m in history if m.is_user())
 
 
 def _flatten_status_tables(
@@ -136,7 +136,7 @@ class RPGContextBuilder:
     def build(
         self,
         system_prompt: str = "",
-        messages: list[dict] | None = None,
+        messages: list[Message] | None = None,
         character_mgr: Any = None,
         lorebook_mgr: Any = None,
         status_mgr: Any = None,
@@ -157,8 +157,8 @@ class RPGContextBuilder:
         # ── 1. Parse sources ────────────────────────────────────────
         total_rounds = _count_rounds(messages)
 
-        current_user_msg = messages[-1] if messages and messages[-1].get("role") == "user" else None
-        user_text = current_user_msg.get("content", "") if current_user_msg else ""
+        current_user_msg = messages[-1] if messages and messages[-1].is_user() else None
+        user_text = current_user_msg.content if current_user_msg else ""
 
         # ── 2. Build Fixed Layer ────────────────────────────────────
         lorebook_entries: list[dict] = []
@@ -320,12 +320,12 @@ class RPGContextBuilder:
 # ── module-level helpers ─────────────────────────────────────────────
 
 
-def _slice_hot_history(history: list[dict], hot_rounds: int) -> list[dict]:
+def _slice_hot_history(history: list[Message], hot_rounds: int) -> list[Message]:
     """Keep only the last *hot_rounds* user-message rounds from *history*."""
     if hot_rounds <= 0:
         return []
 
-    user_indices = [i for i, m in enumerate(history) if m.get("role") == "user"]
+    user_indices = [i for i, m in enumerate(history) if m.is_user()]
     if len(user_indices) <= hot_rounds:
         return history
 

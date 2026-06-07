@@ -135,8 +135,13 @@ class Settings:
 
     @property
     def memory_story_config(self) -> dict[str, Any]:
-        """story 管线配置：max_details。"""
+        """story 管线配置：trigger_rounds。"""
         return self.memory_sub_agent_config.get("story", {})
+
+    @property
+    def memory_story_trigger_rounds(self) -> int:
+        """N 轮新对话后自动触发剧情记忆提取，0 表示关闭。"""
+        return self.memory_story_config.get("trigger_rounds", 0)
 
     @property
     def memory_compress_rounds(self) -> int:

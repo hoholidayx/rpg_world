@@ -25,11 +25,12 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.base_provider import LLMProvider
-from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, ToolProvider
-from rpg_world.rpg_core.agent.tools.base import BaseTool
-from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
 from rpg_world.rpg_core.agent.agent_types import CallRecord, TurnStats
+from rpg_world.rpg_core.agent.base_provider import LLMProvider
+from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
+from rpg_world.rpg_core.agent.tools import BaseTool
+from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
+from rpg_world.rpg_core.context.rpg_context import Message, Role
 from rpg_world.rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -146,7 +147,7 @@ class StatusSubAgent(BaseSubAgent):
 
     async def update(
         self,
-        history: list[dict],
+        history: list[Message],
         state_context: str,
         user_input: str,
         max_history_rounds: int = 5,
@@ -280,13 +281,13 @@ class StatusSubAgent(BaseSubAgent):
 
     def _build_messages(
         self,
-        history: list[dict],
+        history: list[Message],
         state_context: str,
         user_input: str,
         max_rounds: int,
     ) -> list[dict]:
         """组装子 Agent 消息：系统上下文（含世界书/角色卡） + 历史窗口 + 场景 + 用户输入。"""
-        total_user_rounds = sum(1 for m in history if m.get("role") == "user")
+        total_user_rounds = sum(1 for m in history if m.is_user())
         recent = self._format_history_window(history, max_rounds)
         if settings.verbose_logging:
             kept = min(total_user_rounds, max_rounds)
@@ -296,38 +297,38 @@ class StatusSubAgent(BaseSubAgent):
             )
         system_content = self._build_system_context()
         return [
-            {"role": "system", "content": system_content},
-            {
-                "role": "user",
-                "content": (
+            Message(role=Role.SYSTEM, content=system_content).to_dict(),
+            Message(
+                role=Role.USER,
+                content=(
                     f"## Current State\n\n{state_context}\n\n"
                     f"## Recent Conversation\n\n{recent}\n\n"
                     f"## User action\n{user_input}\n\n"
                     f"Update the state tables if the user's action changes "
                     f"any tracked state. If nothing changes, call no tools."
                 ),
-            },
+            ).to_dict(),
         ]
 
     @staticmethod
     def _format_history_window(
-        history: list[dict],
+        history: list[Message],
         max_rounds: int,
     ) -> str:
         """提取最近 N 轮对话，格式化为 ``Role: text`` 行。"""
         user_indices = [
-            i for i, m in enumerate(history) if m.get("role") == "user"
+            i for i, m in enumerate(history) if m.is_user()
         ]
         if len(user_indices) > max_rounds:
             history = history[user_indices[-max_rounds]:]
 
         lines: list[str] = []
         for msg in history:
-            role = msg.get("role", "")
-            content = (msg.get("content") or "").strip()
-            if not content or role == "system":
+            role = msg.role
+            content = (msg.content or "").strip()
+            if not content or msg.is_system():
                 continue
-            label = {"user": "User", "assistant": "Assistant"}.get(
+            label = {Role.USER.value: "User", Role.ASSISTANT.value: "Assistant"}.get(
                 role, role.capitalize()
             )
             lines.append(f"{label}: {content[:500]}")

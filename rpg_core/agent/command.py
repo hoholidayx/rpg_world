@@ -75,11 +75,15 @@ class CommandDispatcher:
 
     def list_commands(self) -> list[CommandDef]:
         """返回所有可用的命令定义（用于前端渲染）。"""
-        defs = [cmd_def for cmd_def, _ in self._builtins.values()]
+        defs: list[CommandDef] = [cmd_def for cmd_def, _ in self._builtins.values()]
         for sa in self._sub_agents:
-            cmd = sa.get_command_def()
-            if cmd is not None:
-                defs.append(cmd)
+            result = sa.get_command_def()
+            if result is None:
+                continue
+            if isinstance(result, list):
+                defs.extend(result)
+            else:
+                defs.append(result)
         return defs
 
     def is_command(self, text: str) -> bool:

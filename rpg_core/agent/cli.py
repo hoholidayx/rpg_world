@@ -25,7 +25,7 @@ import sys
 
 from rpg_world.rpg_core.agent import RPGGameAgent
 from rpg_world.rpg_core.agent.agent_types import StreamEventKind, TurnStats
-from rpg_world.rpg_core.agent.stats_formatter import format_event_stats, format_turn_stats
+from rpg_world.rpg_core.agent.stats_formatter import format_event_stats
 
 
 def _parse_args() -> argparse.Namespace:
@@ -74,8 +74,8 @@ async def _repl(agent: RPGGameAgent, stream: bool = True) -> None:
             continue
         if text == "/history":
             for i, msg in enumerate(agent.history):
-                role = msg["role"]
-                preview = (msg.get("content") or "")[:80]
+                role = msg.role.value
+                preview = (msg.content or "")[:80]
                 print(f"  [{i}] {role}: {preview}...")
             print()
             continue
