@@ -88,11 +88,6 @@ class Settings:
         return self._resolve("lorebook_path", "lorebook")
 
     @property
-    def pm_details_path(self) -> str:
-        """路径：PM 可展开条目的详情文件（JSON，预留）。"""
-        return self._resolve("pm_details_path", "pm_details.json")
-
-    @property
     def jinja_dir(self) -> Path:
         """Path to the Jinja template directory (rpg_core/jinja/)."""
         return _RPG_CORE_DIR / "jinja"
@@ -100,21 +95,6 @@ class Settings:
     @property
     def verbose_logging(self) -> bool:
         return self._raw.get("agent_config", {}).get("verbose_logging", False)
-
-    @property
-    def log_llm_calls(self) -> bool:
-        """每轮记录每个 LLM 的 usage（token、计时、模型）。"""
-        return self._raw.get("agent_config", {}).get("log_llm_calls", self.verbose_logging)
-
-    @property
-    def log_reasoning(self) -> bool:
-        """在日志输出中包含推理/思考内容（可能很长）。"""
-        return self._raw.get("agent_config", {}).get("log_reasoning", False)
-
-    @property
-    def log_tool_timing(self) -> bool:
-        """记录每次工具执行的时间。"""
-        return self._raw.get("agent_config", {}).get("log_tool_timing", self.verbose_logging)
 
     @property
     def memory_sub_agent_config(self) -> dict[str, object]:
@@ -125,7 +105,7 @@ class Settings:
 
     @property
     def memory_summary_config(self) -> dict[str, object]:
-        """summary 管线配置：compress_rounds / keep_rounds / trigger_rounds。"""
+        """summary 管线配置：compress_rounds / keep_rounds。"""
         return self.memory_sub_agent_config.get("summary", {})
 
     @property

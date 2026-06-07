@@ -13,8 +13,7 @@
       "model": null,
       "summary": {
         "compress_rounds": 10,
-        "keep_rounds": 5,
-        "trigger_rounds": 20
+        "keep_rounds": 5
       },
       "recall": {
         "max_items": 5
@@ -31,6 +30,5 @@
     }
   },
   "character_path": "character",
-  "lorebook_path": "lorebook",
-  "pm_details_path": "pm_details.json"
+  "lorebook_path": "lorebook"
 }
