@@ -53,7 +53,7 @@ class ToolCallRecord:
         self,
         assistant_message: dict[str, Any],
         tool_results: list[dict[str, Any]],
-        usage: Any = None,
+        usage: LLMUsage | None = None,
         model: str | None = None,
         duration_ms: float = 0.0,
         reasoning_content: str | None = None,

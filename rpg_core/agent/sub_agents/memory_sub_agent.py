@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -35,6 +35,14 @@ from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
 from rpg_world.rpg_core.agent.command import CommandDef
 from rpg_world.rpg_core.context.rpg_context import Message, Role
+
+if TYPE_CHECKING:
+    from rpg_world.rpg_core.agent.agent import RPGGameAgent
+    from rpg_world.rpg_core.agent.base_provider import LLMProvider
+    from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
+    from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
+    from rpg_world.rpg_core.summary.store import SummaryStore
+    from rpg_world.rpg_core.session.manager import SessionManager
 
 # ── constants ──────────────────────────────────────────────────────────
 
@@ -45,7 +53,7 @@ COMMAND_NAME_STORY = "/story_memory"
 
 # ── function schemas (one per pipeline) ───────────────────────────────
 
-RECALL_SCHEMA: dict[str, Any] = {
+RECALL_SCHEMA: dict[str, object] = {
     "type": "function",
     "function": {
         "name": "extract_recalls",
@@ -64,7 +72,7 @@ RECALL_SCHEMA: dict[str, Any] = {
     },
 }
 
-STORY_DETAIL_SCHEMA: dict[str, Any] = {
+STORY_DETAIL_SCHEMA: dict[str, object] = {
     "type": "function",
     "function": {
         "name": "extract_story_details",
@@ -83,7 +91,7 @@ STORY_DETAIL_SCHEMA: dict[str, Any] = {
     },
 }
 
-SUMMARY_SCHEMA: dict[str, Any] = {
+SUMMARY_SCHEMA: dict[str, object] = {
     "type": "function",
     "function": {
         "name": "generate_summary",
@@ -203,10 +211,10 @@ class MemorySubAgent(BaseSubAgent):
     def __init__(
         self,
         *,
-        recalled_store: Any = None,
-        story_store: Any = None,
-        summary_store: Any = None,
-        provider: Any = None,
+        recalled_store: RecalledMemoryStore | None = None,
+        story_store: StoryMemoryStore | None = None,
+        summary_store: SummaryStore | None = None,
+        provider: LLMProvider | None = None,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -224,7 +232,7 @@ class MemorySubAgent(BaseSubAgent):
 
         # MemorySubAgent 不使用独立的 _own_provider（通过基类 _get_provider 获取）
         # 但保留旧的 _provider 属性用于兼容（如果有外部代码直接访问）
-        self._provider: Any = provider
+        self._provider: LLMProvider | None = provider
 
         self._recalled_store = recalled_store
         self._story_store = story_store
@@ -261,73 +269,139 @@ class MemorySubAgent(BaseSubAgent):
     def accept_command(self, command: str) -> bool:
         return command in (COMMAND_NAME_COMPACT, COMMAND_NAME_STORY)
 
-    async def execute_command(self, command: str, args: list[str], agent: Any = None) -> dict | None:
+    async def execute_command(self, command: str, args: list[str], agent: RPGGameAgent | None = None) -> dict | None:
         if command == COMMAND_NAME_STORY:
-            if agent is None or not hasattr(agent, "_session"):
-                return {"reply": "未绑定主 Agent，无法执行 story_memory"}
-            conv = agent._session.history
-            last_idx = agent._session.last_story_rp_his_id
-            new_msgs = [m for m in conv if m.rp_his_id > last_idx]
-            if not new_msgs:
-                logger.info(_TAG + " story_memory skipped: no new messages since rp_his_id={}", last_idx)
-                return {"reply": "剧情记忆提取跳过：没有新消息需要处理。", "stats": None}
-            logger.info(
-                _TAG + " story_memory processing {} new messages (rp_his_id > {})",
-                len(new_msgs), last_idx,
-            )
-            result = await self.process({"story": new_msgs})
-            added = result.story_details_added
-            if added > 0:
-                last_user = next(
-                    (m for m in reversed(new_msgs) if m.is_user()),
-                    None,
-                )
-                if last_user:
-                    agent._session.set_last_story_rp_his_id(last_user.rp_his_id)
-            stats = None
-            if result.call_stats:
-                cr = result.call_stats[0]
-                stats = {
-                    "total_duration_ms": cr.duration_ms,
-                    "model": cr.model,
-                    "prompt_tokens": cr.usage.prompt_tokens if cr.usage else 0,
-                    "completion_tokens": cr.usage.completion_tokens if cr.usage else 0,
-                    "total_tokens": cr.usage.total_tokens if cr.usage else 0,
-                    "cached_tokens": cr.usage.cached_tokens if cr.usage else 0,
-                }
-                logger.info(
-                    _TAG + " story_memory done: added={}, tokens={}, duration={:.0f}ms",
-                    added, stats["total_tokens"], cr.duration_ms,
-                )
-            else:
-                logger.info(_TAG + " story_memory done: added={}, no LLM call", added)
+            return await self._execute_story_memory(agent)
+        if command == COMMAND_NAME_COMPACT:
+            return await self._execute_compact(agent, args)
+        return None
 
-            return {"reply": f"已提取 {added} 条剧情记忆。", "stats": stats}
-        if command != COMMAND_NAME_COMPACT:
-            return None
-        compress_rounds: int | None = None
-        keep_rounds: int | None = None
-        if len(args) >= 1:
-            try:
-                compress_rounds = int(args[0])
-            except ValueError:
-                return {"reply": f"compress_rounds 必须是整数，收到: {args[0]}"}
-        if len(args) >= 2:
-            try:
-                keep_rounds = int(args[1])
-            except ValueError:
-                return {"reply": f"keep_rounds 必须是整数，收到: {args[1]}"}
-        if agent is None or not hasattr(agent, "compact_history"):
+    async def _execute_story_memory(self, agent: RPGGameAgent | None) -> dict:
+        """处理 /story_memory 命令：提取剧情记忆。"""
+        if agent is None or not hasattr(agent, "_session"):
+            return {"reply": "未绑定主 Agent，无法执行 story_memory"}
+
+        conv = agent._session.history
+        last_idx = agent._session.last_story_rp_his_id
+        new_msgs = [m for m in conv if m.rp_his_id > last_idx]
+        if not new_msgs:
+            logger.info(_TAG + " story_memory skipped: no new messages since rp_his_id={}", last_idx)
+            return {"reply": "剧情记忆提取跳过：没有新消息需要处理。", "stats": None}
+
+        logger.info(
+            _TAG + " story_memory processing {} new messages (rp_his_id > {})",
+            len(new_msgs), last_idx,
+        )
+        result = await self.process({"story": new_msgs})
+        added = result.story_details_added
+        if added > 0:
+            last_user = next(
+                (m for m in reversed(new_msgs) if m.is_user()),
+                None,
+            )
+            if last_user:
+                agent._session.set_last_story_rp_his_id(last_user.rp_his_id)
+
+        stats = _build_call_stats(result)
+        if stats:
+            logger.info(
+                _TAG + " story_memory done: added={}, tokens={}, duration={:.0f}ms",
+                added, stats["total_tokens"], stats["total_duration_ms"],
+            )
+        else:
+            logger.info(_TAG + " story_memory done: added={}, no LLM call", added)
+
+        return {"reply": f"已提取 {added} 条剧情记忆。", "stats": stats}
+
+    async def _execute_compact(self, agent: RPGGameAgent | None, args: list[str]) -> dict:
+        """处理 /compact 命令：压缩对话历史。"""
+        if agent is None:
             return {"reply": f"未绑定主 Agent，无法执行 {COMMAND_NAME_COMPACT}"}
-        result = await agent.compact_history(compress_rounds, keep_rounds)
+
+        compress_rounds, err = _parse_int_arg(args, 0)
+        if err:
+            return {"reply": f"compress_rounds 必须是整数，收到: {args[0]}"}
+        keep_rounds, err = _parse_int_arg(args, 1)
+        if err:
+            return {"reply": f"keep_rounds 必须是整数，收到: {args[1]}"}
+
+        result = await self.compact_history(agent, compress_rounds, keep_rounds)
         if result.get("skipped"):
             return {"reply": f"压缩跳过：{result['reason']}"}
+
         summary_text = result.get("summary_text", "")
         msg = f"已压缩 {result['compress_rounds']} 轮对话。"
         if summary_text:
             msg += f"\n\n摘要：{summary_text[:500]}"
         msg += f"\n\n历史消息：{result['previous_history_msgs']} → {result['history_after_msgs']}"
         return {"reply": msg, "stats": None}
+
+    async def compact_history(
+        self,
+        agent: RPGGameAgent,
+        compress_rounds: int | None = None,
+        keep_rounds: int | None = None,
+    ) -> dict[str, int | str | bool]:
+        """压缩最老的对话轮次为摘要。
+
+        从最早的 user 轮次开始，压缩 *compress_rounds* 轮，保留最近
+        *keep_rounds* 轮不动。压缩完成后从会话历史中移除已压缩的消息。
+
+        Returns:
+            包含 ``summary_text``、``compress_rounds``、``kept_rounds``、
+            ``previous_history_msgs``、``history_after_msgs`` 的 dict。
+        """
+        from rpg_world.rpg_core.settings import settings
+
+        compress_rounds = compress_rounds or settings.memory_compress_rounds
+        keep_rounds = keep_rounds or settings.memory_keep_rounds
+
+        user_indices = [i for i, m in enumerate(agent._session.history) if m.is_user()]
+        total = len(user_indices)
+        available = total - keep_rounds
+        if available <= 0:
+            logger.info(
+                _TAG + " compact skipped: history too short ({} user rounds <= {} keep)",
+                total, keep_rounds,
+            )
+            return {"skipped": True, "reason": f"history too short ({total} <= {keep_rounds})"}
+
+        actual = min(compress_rounds, available)
+        compress_end = user_indices[actual] if actual < len(user_indices) else len(agent._session.history)
+
+        logger.info(
+            _TAG + " compact: total={} user rounds, compress={}, keep={}",
+            total, actual, keep_rounds,
+        )
+
+        compress_window = agent._session.history[:compress_end]
+        result = await self.process({"summary": compress_window})
+        summary_text = ""
+        if result.summary_generated and self._summary_store is not None:
+            summaries = self._summary_store.get_all_summaries()
+            summary_text = summaries[-1] if summaries else ""
+            logger.info(
+                _TAG + " summary generated: {} chars", len(summary_text),
+            )
+
+        # 截断
+        before_len = len(agent._session.history)
+        agent._session.truncate(compress_end)
+        after_len = len(agent._session.history)
+        agent._session.increment_compacted_rounds(actual)
+
+        logger.info(
+            _TAG + " compact: deleted {} msgs, history now {} msgs",
+            before_len - after_len, after_len,
+        )
+
+        return {
+            "summary_text": summary_text,
+            "compress_rounds": actual,
+            "kept_rounds": keep_rounds,
+            "previous_history_msgs": before_len,
+            "history_after_msgs": after_len,
+        }
 
     async def process(self, context: dict) -> MemoryAgentResult:
         """处理 *context* 中的内容，更新对应记忆存储。
@@ -379,7 +453,7 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── 自动触发剧情记忆提取 ──────────────────────────────────────────
 
-    async def maybe_auto_extract(self, session: Any) -> None:
+    async def maybe_auto_extract(self, session: SessionManager) -> None:
         """检查自动触发条件，满足时同步提取剧情记忆。
 
         由主 Agent 在每轮对话结束后编排调用（await 等待完成）。
@@ -407,9 +481,9 @@ class MemorySubAgent(BaseSubAgent):
 
     def update_store_refs(
         self,
-        recalled_store: Any = None,
-        story_store: Any = None,
-        summary_store: Any = None,
+        recalled_store: RecalledMemoryStore | None = None,
+        story_store: StoryMemoryStore | None = None,
+        summary_store: SummaryStore | None = None,
     ) -> None:
         """更新 store 引用（RPG context reload 后调用）。"""
         if recalled_store is not None:
@@ -545,8 +619,8 @@ class MemorySubAgent(BaseSubAgent):
     async def _call_llm(
         self,
         messages: list[dict],
-        schema: dict[str, Any],
-    ) -> tuple[dict[str, Any], CallRecord | None]:
+        schema: dict[str, object],
+    ) -> tuple[dict[str, object], CallRecord | None]:
         """Call provider with *messages* and *schema*, return parsed arguments.
 
         Returns
@@ -622,10 +696,39 @@ class MemorySubAgent(BaseSubAgent):
 # ── helpers ───────────────────────────────────────────────────────────
 
 
+def _build_call_stats(result: MemoryAgentResult) -> dict[str, float | str | int] | None:
+    """从 ``MemoryAgentResult`` 提取 LLM 调用统计 dict。"""
+    if not result.call_stats:
+        return None
+    cr = result.call_stats[0]
+    return {
+        "total_duration_ms": cr.duration_ms,
+        "model": cr.model,
+        "prompt_tokens": cr.usage.prompt_tokens if cr.usage else 0,
+        "completion_tokens": cr.usage.completion_tokens if cr.usage else 0,
+        "total_tokens": cr.usage.total_tokens if cr.usage else 0,
+        "cached_tokens": cr.usage.cached_tokens if cr.usage else 0,
+    }
+
+
+def _parse_int_arg(args: list[str], index: int) -> tuple[int | None, str | None]:
+    """从命令参数列表中安全解析 ``int`` 值。
+
+    Returns:
+        ``(value, error)`` — 成功时 error 为 ``None``，失败时 value 为 ``None``。
+    """
+    if index >= len(args):
+        return None, None  # 参数不存在不算错误
+    try:
+        return int(args[index]), None
+    except ValueError:
+        return None, args[index]
+
+
 def _format_store_items(
-    items: list[Any],
+    items: list[dict],
     *,
-    key: Any = str,
+    key: type = str,
     max_items: int | None = None,
 ) -> str:
     """Format store items as a bullet list string."""

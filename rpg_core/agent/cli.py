@@ -8,13 +8,17 @@ Usage:
     # Single-turn mode — send one message and exit
     uv run python -m rpg_world.agent.cli --single-turn "look around the room"
 
-Interactive commands:
+Interactive commands (routed through shared CommandDispatcher):
   /clear         — reset conversation history
   /reload        — reload RPG context from disk
   /history       — print raw history
   /context       — show current context structure and token usage
   /compact [N] [K] — compress oldest N user rounds into summary, keep K rounds
-  /quit          — exit
+  /story_memory  — extract plot memory (character/plot details)
+  /sessions      — list all sessions
+  /session-create <id> — create a new session
+  /session-switch <id> — switch to a different session
+  /quit          — exit (CLI only)
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ import sys
 
 from rpg_world.rpg_core.agent import RPGGameAgent
 from rpg_world.rpg_core.agent.agent_types import StreamEventKind, TurnStats
-from rpg_world.rpg_core.agent.stats_formatter import format_event_stats
+from rpg_world.rpg_core.agent.stats_formatter import format_event_stats, format_turn_stats
 
 
 def _parse_args() -> argparse.Namespace:
@@ -61,103 +65,18 @@ async def _repl(agent: RPGGameAgent, stream: bool = True) -> None:
         if not text:
             continue
 
-        # ── built-in commands ──────────────────────────────────────
+        # ── CLI-only: quit ──────────────────────────────────────────
         if text == "/quit":
             break
-        if text == "/clear":
-            agent.clear_history()
-            print("[history cleared]\n")
-            continue
-        if text == "/reload":
-            await agent.reload_rpg_context()
-            print("[RPG context reloaded]\n")
-            continue
-        if text == "/history":
-            for i, msg in enumerate(agent.history):
-                role = msg.role.value
-                preview = (msg.content or "")[:80]
-                print(f"  [{i}] {role}: {preview}...")
-            print()
-            continue
-        if text == "/context":
-            md = await agent.get_context_markdown()
-            print()
-            print(md)
-            print()
-            continue
-        if text == "/sessions":
-            from rpg_world.rpg_core.settings import settings
 
-            sessions = settings.list_sessions()
-            current = agent._session_id  # type: ignore[attr-defined]
-            print(f"Sessions ({len(sessions)}):")
-            for s in sessions:
-                marker = "  *" if s == current else ""
-                print(f"  - {s}{marker}")
-            print()
-            continue
-        if text.startswith("/session-create "):
-            parts = text.split(maxsplit=1)
-            sid = parts[1].strip()
-            if not sid:
-                print("[error] session id is required\n")
-                continue
-            from rpg_world.rpg_core.settings import settings
-
-            try:
-                settings.create_session(sid)
-                print(f"[session created: {sid}]\n")
-            except FileExistsError:
-                print(f"[session already exists: {sid}]\n")
-            continue
-        if text.startswith("/session-switch "):
-            parts = text.split(maxsplit=1)
-            sid = parts[1].strip()
-            if not sid:
-                print("[error] session id is required\n")
-                continue
-            from rpg_world.rpg_core.settings import settings
-
-            if sid not in settings.list_sessions():
-                print(f"[session not found: {sid}]\n")
-                continue
-            await agent.switch_session(sid)
-            print(f"[switched to session: {sid}]\n")
-            continue
-
-        # ── /compact ──────────────────────────────────────────────────
-        if text == "/compact" or text.startswith("/compact "):
-            parts = text.split()
-            compress_rounds: int | None = None
-            keep_rounds: int | None = None
-            if len(parts) >= 2:
-                try:
-                    compress_rounds = int(parts[1])
-                except ValueError:
-                    print("[error] compress_rounds must be an integer\n")
-                    continue
-            if len(parts) >= 3:
-                try:
-                    keep_rounds = int(parts[2])
-                except ValueError:
-                    print("[error] keep_rounds must be an integer\n")
-                    continue
-            result = await agent.compact_history(compress_rounds, keep_rounds)
-            if result.get("skipped"):
-                print(f"[compact skipped] {result['reason']}\n")
-            else:
-                summary_text = result.get("summary_text", "")
-                if summary_text:
-                    print(f"  ── Summary ({result['compress_rounds']} rounds compressed) ──\n")
-                    print(f"  {summary_text[:500]}")
-                    if len(summary_text) > 500:
-                        print("  ...")
-                else:
-                    print(f"  ── Summary ({result['compress_rounds']} rounds compressed, empty) ──")
+        # ── slash commands (dispatched via shared CommandDispatcher) ──
+        # 命令直接走 dispatcher，不经过 agent.send()，不会写入对话历史
+        if agent._cmd_dispatcher and agent._cmd_dispatcher.is_command(text):
+            result = await agent._cmd_dispatcher.dispatch(text)
+            if result.handled:
+                print(result.reply)
                 print()
-                print(f"  History: {result['previous_history_msgs']} → {result['history_after_msgs']} msgs")
-            print()
-            continue
+                continue
 
         if stream:
             # ── streaming chat ─────────────────────────────────────

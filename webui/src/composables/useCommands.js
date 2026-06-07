@@ -2,17 +2,19 @@
  * useCommands — 斜杠命令业务逻辑。
  *
  * 维护命令白名单，提供命令检测、过滤、发送等功能。
+ * 命令定义优先从后端动态加载（GET /chat/commands），失败时使用内置回退列表。
  * 与 ChatView 解耦，集中管理前端侧的命令相关状态。
  */
 
 import { ref, computed } from 'vue'
 import api from '@/api/index'
+import { fetchCommands as fetchRemoteCommands } from '@/api/chat'
 
 /**
- * 命令定义列表。
- * 新增 / 修改命令时只需编辑此数组，前端自动适配。
+ * 内置命令回退列表（后端不可用时使用）。
+ * 正式命令定义以后端 GET /chat/commands 返回为准。
  */
-const COMMAND_DEFS = [
+const FALLBACK_COMMAND_DEFS = [
   {
     command: '/clear',
     description: '清空当前会话的对话历史',
@@ -61,11 +63,28 @@ export function sendCommand(command, sessionId = 'default') {
 }
 
 /**
+ * 从后端加载命令定义列表。
+ * 优先返回后端数据，失败时返回内置回退列表。
+ *
+ * @param {string} sessionId
+ * @returns {Promise<Array<{command: string, description: string, detail: string}>>}
+ */
+export async function loadCommands(sessionId = 'default') {
+  try {
+    const commands = await fetchRemoteCommands(sessionId)
+    if (commands && commands.length > 0) return commands
+  } catch {
+    // 后端不可用，返回回退列表
+  }
+  return FALLBACK_COMMAND_DEFS
+}
+
+/**
  * useCommands — Vue composable。
  *
  * 用法：:
  *
- *     const cmd = useCommands(inputText)
+ *     const cmd = useCommands(inputText, commandsList)
  *     cmd.showPopup  // ref<boolean>
  *     cmd.filtered   // computed<CommandDef[]>
  *     cmd.highlightIndex  // ref<number>
@@ -74,27 +93,28 @@ export function sendCommand(command, sessionId = 'default') {
  *     cmd.close()         // 关闭弹窗
  *
  * @param {import('vue').Ref<string>} inputText - 绑定到输入框的 ref
+ * @param {Array<{command: string, description: string, detail: string}>} commands - 命令定义列表
  */
-export function useCommands(inputText) {
+export function useCommands(inputText, commands = FALLBACK_COMMAND_DEFS) {
   const showPopup = ref(false)
   const highlightIndex = ref(0)
 
   /** 根据输入前缀过滤命令列表 */
   const filtered = computed(() => {
     const text = inputText.value
-    if (!text || !text.startsWith('/')) return COMMAND_DEFS
+    if (!text || !text.startsWith('/')) return commands
     const parts = text.split(/\s+/)
-    if (parts.length <= 1) return COMMAND_DEFS
+    if (parts.length <= 1) return commands
     const typed = parts[0].toLowerCase()
-    if (COMMAND_DEFS.some((c) => c.command === typed)) return []
-    return COMMAND_DEFS.filter((c) => c.command.startsWith(typed))
+    if (commands.some((c) => c.command === typed)) return []
+    return commands.filter((c) => c.command.startsWith(typed))
   })
 
   /** 判断一段文本是否为前端已知的斜杠命令 */
   function isCommand(text) {
     if (!text || !text.startsWith('/')) return false
     const name = text.split(/\s+/)[0].toLowerCase()
-    return COMMAND_DEFS.some((c) => c.command === name)
+    return commands.some((c) => c.command === name)
   }
 
   /** 选中一个命令，填入输入框 */
@@ -120,7 +140,7 @@ export function useCommands(inputText) {
       const typed = parts[0].toLowerCase()
       if (typed === '/') {
         showPopup.value = true
-      } else if (COMMAND_DEFS.some((c) => c.command.startsWith(typed))) {
+      } else if (commands.some((c) => c.command.startsWith(typed))) {
         showPopup.value = true
         highlightIndex.value = 0
       } else {

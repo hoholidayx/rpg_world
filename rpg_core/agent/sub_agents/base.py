@@ -25,6 +25,7 @@ from loguru import logger
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 
 if TYPE_CHECKING:
+    from rpg_world.rpg_core.agent.agent import RPGGameAgent
     from rpg_world.rpg_core.agent.base_provider import LLMProvider
     from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
 
@@ -106,7 +107,7 @@ class BaseSubAgent:
         """判断此子 Agent 是否处理指定斜杠命令。"""
         return False
 
-    async def execute_command(self, command: str, args: list[str], agent: Any = None) -> dict | None:
+    async def execute_command(self, command: str, args: list[str], agent: RPGGameAgent | None = None) -> dict | None:
         """执行命令，返回 ``{"reply": str, "stats": dict | None}`` 或 ``None``。
 
         Parameters

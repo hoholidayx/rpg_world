@@ -239,7 +239,7 @@ import { message } from 'ant-design-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import { getHistory, streamMessage } from '@/api/chat'
-import { useCommands, sendCommand } from '@/composables/useCommands'
+import { useCommands, sendCommand, loadCommands } from '@/composables/useCommands'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
 const router = useRouter()
@@ -249,6 +249,7 @@ const sessionStore = useSessionStore()
 // ── State ─────────────────────────────────────────────────
 const messages = ref([])
 const inputText = ref('')
+const commandsList = ref([])
 const sending = ref(false)
 const abortStream = ref(null)
 const messageContainer = ref(null)
@@ -291,15 +292,17 @@ const sessionOptions = computed(() =>
 onMounted(async () => {
   await Promise.all([workspaceStore.load(), sessionStore.load()])
   await loadHistory()
+  commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
 })
 
 // ── Watch session changes ────────────────────────────────
 
 watch(
   () => sessionStore.activeSession,
-  () => {
+  async () => {
     messages.value = []
     loadHistory()
+    commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
   },
 )
 
@@ -313,7 +316,7 @@ const {
   select: selectCommand,
   close: closeCommandPopup,
   onInputChange,
-} = useCommands(inputText)
+} = useCommands(inputText, commandsList)
 
 const inputRef = ref(null)
 const commandPopupRef = ref(null)

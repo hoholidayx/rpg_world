@@ -6,9 +6,15 @@ now-removed ``RpgWorldHook`` nanobot integration.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from rpg_world.rpg_core.character.manager import CharacterManager
+    from rpg_world.rpg_core.lorebook.manager import LorebookManager
+    from rpg_world.rpg_core.scene.tracker import SceneTracker
+    from rpg_world.rpg_core.status.manager import StatusManager
 
 
 def build_rpg_context(
@@ -52,9 +58,9 @@ def build_rpg_context(
     )
 
     # ── Cross-session Managers (unchanged paths) ──────────────────────
-    character_mgr: Any = None
-    lorebook_mgr: Any = None
-    status_mgr: Any = None
+    character_mgr: CharacterManager | None = None
+    lorebook_mgr: LorebookManager | None = None
+    status_mgr: StatusManager | None = None
 
     try:
         from rpg_world.rpg_core.character import CharacterManager
@@ -79,7 +85,7 @@ def build_rpg_context(
         logger.debug("[RPG World] StatusManager init skipped: {}", exc)
 
     # ── SceneTracker (binds to status_mgr, both session-scoped) ────────
-    scene_tracker: Any = None
+    scene_tracker: SceneTracker | None = None
     if status_mgr is not None:
         try:
             from rpg_world.rpg_core.scene import SceneTracker

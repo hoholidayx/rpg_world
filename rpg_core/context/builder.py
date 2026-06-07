@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -11,9 +11,13 @@ from rpg_world.rpg_core.context.rpg_context import Message, Role, RPGContext
 from rpg_world.rpg_core.settings import settings
 
 if TYPE_CHECKING:
+    from rpg_world.rpg_core.character.manager import CharacterManager
+    from rpg_world.rpg_core.lorebook.manager import LorebookManager
     from rpg_world.rpg_core.memory.persist_memory import PersistentMemoryStore
     from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
     from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
+    from rpg_world.rpg_core.scene.tracker import SceneTracker
+    from rpg_world.rpg_core.status.manager import StatusManager
     from rpg_world.rpg_core.summary.store import SummaryStore
 
 
@@ -44,7 +48,7 @@ def _count_rounds(messages: list[Message]) -> int:
 
 
 def _flatten_status_tables(
-    status_mgr: Any,
+    status_mgr: StatusManager | None,
     exclude_tables: set[tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Flatten StatusManager data into a list of ``{name, headers, rows}``.
@@ -137,10 +141,10 @@ class RPGContextBuilder:
         self,
         system_prompt: str = "",
         messages: list[Message] | None = None,
-        character_mgr: Any = None,
-        lorebook_mgr: Any = None,
-        status_mgr: Any = None,
-        scene_tracker: Any = None,
+        character_mgr: CharacterManager | None = None,
+        lorebook_mgr: LorebookManager | None = None,
+        status_mgr: StatusManager | None = None,
+        scene_tracker: SceneTracker | None = None,
     ) -> RPGContext:
         """构建 5 层 RPGContext。
 

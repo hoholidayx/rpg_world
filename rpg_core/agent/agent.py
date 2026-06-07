@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time as _time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -34,6 +34,11 @@ from rpg_world.rpg_core.scene import SceneTracker
 from rpg_world.rpg_core.session import SessionManager
 from rpg_world.rpg_core.settings import settings
 from rpg_world.rpg_core.utils.watcher import get_watcher
+
+if TYPE_CHECKING:
+    from rpg_world.rpg_core.character.manager import CharacterManager
+    from rpg_world.rpg_core.lorebook.manager import LorebookManager
+    from rpg_world.rpg_core.status.manager import StatusManager
 
 _TAG = "[MainAgent]"
 
@@ -80,9 +85,9 @@ class RPGGameAgent:
         # Lazy-init
         self._initialized: bool = False
         self._builder: RPGContextBuilder | None = None
-        self._character_mgr: Any = None
-        self._lorebook_mgr: Any = None
-        self._status_mgr: Any = None
+        self._character_mgr: CharacterManager | None = None
+        self._lorebook_mgr: LorebookManager | None = None
+        self._status_mgr: StatusManager | None = None
         self._scene_tracker: SceneTracker | None = None
         self._provider: LLMProvider | None = None
         self._system_prompt: str = ""
@@ -468,81 +473,6 @@ class RPGGameAgent:
         ctx._hot_history_rounds = self._builder.config.hot_history_rounds  # type: ignore[attr-defined]
         return ctx
 
-    # ── compact history (manual summary trigger) ──────────────────────
-
-    async def compact_history(
-            self,
-            compress_rounds: int | None = None,
-            keep_rounds: int | None = None,
-    ) -> dict[str, Any]:
-        """压缩最老的对话轮次为摘要。
-
-        从最早的 user 轮次开始，压缩 ``compress_rounds`` 轮，保留最近
-        ``keep_rounds`` 轮不动。压缩完成后从 ``_history`` 中移除已压缩
-        的消息，并重写 JSONL 文件。
-
-        Args:
-            compress_rounds:
-                从最早的用户轮次开始压缩 N 轮。默认从 settings 读取。
-            keep_rounds:
-                保留最近 N 轮不压缩。默认从 settings 读取。
-
-        Returns:
-            包含 ``summary_text``、``compress_rounds``、``kept_rounds``、
-            ``previous_history_msgs``、``history_after_msgs`` 的 dict。
-        """
-        await self._ensure_initialized()
-
-        compress_rounds = compress_rounds or settings.memory_compress_rounds
-        keep_rounds = keep_rounds or settings.memory_keep_rounds
-
-        user_indices = [i for i, m in enumerate(self._session.history) if m.is_user()]
-        total = len(user_indices)
-        available = total - keep_rounds
-        if available <= 0:
-            logger.info(
-                _TAG + " compact skipped: history too short ({} user rounds <= {} keep)",
-                total, keep_rounds,
-            )
-            return {"skipped": True, "reason": f"history too short ({total} <= {keep_rounds})"}
-
-        actual = min(compress_rounds, available)
-        compress_end = user_indices[actual] if actual < len(user_indices) else len(self._session.history)
-
-        logger.info(
-            _TAG + " compact: total={} user rounds, compress={}, keep={}",
-            total, actual, keep_rounds,
-        )
-
-        compress_window = self._session.history[:compress_end]
-        result = await self._memory_sub_agent.process({"summary": compress_window})
-        summary_text = ""
-        if result.summary_generated:
-            summaries = self._builder._summary_store.get_all_summaries()
-            summary_text = summaries[-1] if summaries else ""
-            logger.info(
-                _TAG + " summary generated: {} chars", len(summary_text),
-            )
-
-        # 截断（委派 SessionManager）
-        before_len = len(self._session.history)
-        self._session.truncate(compress_end)
-        after_len = len(self._session.history)
-        self._session.increment_compacted_rounds(actual)
-
-        logger.info(
-            _TAG + " compact: deleted {} msgs, history now {} msgs",
-            before_len - after_len, after_len,
-        )
-
-        return {
-            "summary_text": summary_text,
-            "compress_rounds": actual,
-            "kept_rounds": keep_rounds,
-            "previous_history_msgs": before_len,
-            "history_after_msgs": after_len,
-        }
-
     # ── internals — context & tools ────────────────────────────────────
 
     def _refresh_rpg_context(self) -> None:
@@ -647,31 +577,8 @@ class RPGGameAgent:
 
         # ── CommandDispatcher ─────────────────────────────────────────
         self._cmd_dispatcher = CommandDispatcher(agent=self)
+        self._cmd_dispatcher.register_default_builtins()
 
-        # 内置命令
-        async def _cmd_clear(agent, args):
-            agent.clear_history()
-            return "对话历史已清空。"
-
-        async def _cmd_reload(agent, args):
-            await agent.reload_rpg_context()
-            return "RPG 数据已重新加载。"
-
-        async def _cmd_context(agent, args):
-            return await agent.get_context_markdown()
-
-        self._cmd_dispatcher.register_builtin(
-            "/clear", "清空当前会话的对话历史",
-            "重置对话上下文，清除所有已发送的消息记录。", _cmd_clear,
-        )
-        self._cmd_dispatcher.register_builtin(
-            "/reload", "重新加载 RPG 数据（角色卡、世界书）",
-            "从磁盘重新读取角色卡和世界书文件变更。", _cmd_reload,
-        )
-        self._cmd_dispatcher.register_builtin(
-            "/context", "查看当前上下文结构和 token 用量",
-            "显示 5 层 RPG 上下文的每层信息。", _cmd_context,
-        )
         # 子 Agent 命令
         if self._status_sub_agent is not None:
             self._cmd_dispatcher.register_sub_agent(self._status_sub_agent)
@@ -694,8 +601,8 @@ def _build_rpg_context(world_name: str, session_id: str) -> dict[str, Any]:
 
 
 def _build_sub_agent_context(
-        character_mgr: Any,
-        lorebook_mgr: Any,
+        character_mgr: CharacterManager | None,
+        lorebook_mgr: LorebookManager | None,
 ) -> SubAgentContext:
     """从 Manager 读取已启用条目，构造 SubAgentContext。
 

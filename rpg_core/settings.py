@@ -247,7 +247,7 @@ class Settings:
     def get_history_path(self, session_id: str) -> Path:
         """Return the ``history.jsonl`` file path for the given session.
 
-        主历史文件，用于构建上下文和压缩。``compact_history()`` 会截断此文件。
+        主历史文件，用于构建上下文和压缩。``MemorySubAgent.compact_history()`` 会截断此文件。
         """
         return self.session_dir(session_id) / "history.jsonl"
 

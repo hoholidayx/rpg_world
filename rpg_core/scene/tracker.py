@@ -11,7 +11,10 @@ MemorySubAgent 过滤 system 角色消息，场景信息必须在 user 消息中
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rpg_world.rpg_core.status.manager import StatusManager
 
 
 class SceneTracker:
@@ -58,7 +61,7 @@ class SceneTracker:
         self._attrs: dict[str, str] = dict(self.DEFAULT_ATTRS)
 
         # StatusManager 引用（None = 不持久化）
-        self._status_mgr: Any = None
+        self._status_mgr: StatusManager | None = None
 
     # ── 常量访问 ─────────────────────────────────────────────────────
 
@@ -69,7 +72,7 @@ class SceneTracker:
 
     # ── 持久化绑定 ──────────────────────────────────────────────────
 
-    def bind_status_manager(self, mgr: Any) -> None:
+    def bind_status_manager(self, mgr: StatusManager | None) -> None:
         """绑定 StatusManager 引用，用于读写 ``当前场景`` 状态表。"""
         self._status_mgr = mgr
 

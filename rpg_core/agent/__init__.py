@@ -6,6 +6,7 @@ Old import paths still work — see ``sub_agents/`` for new exports.
 """
 
 from rpg_world.rpg_core.agent.agent import RPGGameAgent
+from rpg_world.rpg_core.agent.command import CommandDef, CommandDispatcher, CommandResult
 from rpg_world.rpg_core.agent.prompt import PromptManager
 from rpg_world.rpg_core.agent.sub_agents import (
     MemoryAgentResult,
@@ -14,6 +15,9 @@ from rpg_world.rpg_core.agent.sub_agents import (
 )
 
 __all__ = [
+    "CommandDef",
+    "CommandDispatcher",
+    "CommandResult",
     "RPGGameAgent",
     "MemoryAgentResult",
     "MemorySubAgent",

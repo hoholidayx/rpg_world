@@ -177,6 +177,29 @@ async def chat_command(
     raise HTTPException(status_code=400, detail=f"未知命令: {command.split()[0] if command.strip() else '(empty)'}")
 
 
+@router.get("/chat/commands")
+async def list_commands(
+    session_id: str = "default",
+    x_openai_api_key: str | None = Header(None),
+) -> dict:
+    """返回所有可用的斜杠命令定义（供前端动态渲染命令弹窗）。"""
+    agent = _get_agent(session_id, api_key=x_openai_api_key)
+    try:
+        await agent._ensure_initialized()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent initialization failed: {exc}",
+        )
+    commands = agent._cmd_dispatcher.list_commands()
+    return {
+        "commands": [
+            {"command": c.name, "description": c.description, "detail": c.detail}
+            for c in commands
+        ],
+    }
+
+
 @router.post("/chat/stream")
 async def chat_stream(
     body: dict,

@@ -25,6 +25,22 @@ export function sendCommand(command, sessionId = 'default') {
   return api.post('/chat/command', { command, session_id: sessionId }, { headers })
 }
 
+/**
+ * 从后端获取所有可用斜杠命令的定义。
+ * @param {string} sessionId
+ * @returns {Promise<Array<{command: string, description: string, detail: string}>>}
+ */
+export async function fetchCommands(sessionId = 'default') {
+  const headers = {}
+  const key = getApiKey()
+  if (key) headers['X-OpenAI-Api-Key'] = key
+  const res = await api.get('/chat/commands', {
+    params: { session_id: sessionId },
+    headers,
+  })
+  return res.data.commands
+}
+
 export function sendMessage(message, sessionId = 'default') {
   const headers = {}
   const key = getApiKey()
