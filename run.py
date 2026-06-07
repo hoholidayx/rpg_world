@@ -1,6 +1,6 @@
 """rpg_world 统一启动入口。
 
-按 ``channels/channels.json`` 配置，在单一进程中启动指定的模块。
+按 ``channels.json`` 配置，在单一进程中启动指定的模块。
 所有模块共享同一 ``AgentManager`` 实例池，避免多进程文件冲突。
 
 用法::
@@ -16,14 +16,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import os
 import signal
 
 from rpg_world.channels.config import settings as channels_settings
 from rpg_world.rpg_core.agent.manager import AgentManager
-
-logger = logging.getLogger("rpg_world.launcher")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -37,19 +34,16 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def main() -> None:
-    args = _parse_args()
-
-    # 确定要启动的模块列表
+def _resolve_modules(args: argparse.Namespace) -> list[str]:
+    """确定要启动的模块列表：命令行 > 环境变量 > channels.json 配置。"""
     modules_str = args.modules or os.environ.get("MODULES", "")
     if modules_str:
-        enabled_modules = [m.strip() for m in modules_str.split(",") if m.strip()]
-    else:
-        cfg = channels_settings
-        enabled_modules = [
-            name for name in ("api", "telegram", "cli")
-            if cfg.is_module_enabled(name)
-        ]
+        return [m.strip() for m in modules_str.split(",") if m.strip()]
+    return channels_settings.enabled_module_names
+
+
+async def main() -> None:
+    enabled_modules = _resolve_modules(_parse_args())
 
     if not enabled_modules:
         print("未启用任何模块（在 channels.json 中设置 modules.{name}.enabled=true）")
@@ -58,32 +52,17 @@ async def main() -> None:
 
     print(f"启动模块: {', '.join(enabled_modules)}")
 
-    # 初始化 agent（触发 FileWatcher、BaseManager 等全局资源）
-    # 根据启动模块确定初始 session_id，避免无效加载
-    init_session = "cli:direct" if "cli" in enabled_modules and "api" not in enabled_modules else "default"
-    await AgentManager.ensure_initialized(session_id=init_session)
-
     tasks: list[asyncio.Task] = []
 
     # ── 启动 API ───────────────────────────────────────────────────────
-    if "api" in enabled_modules:
-        cfg = channels_settings.get_module_config("api")
+    if "api" in enabled_modules and channels_settings.api_enabled:
         import uvicorn
 
-        api_host = cfg.get("host", "127.0.0.1")
-        api_port = cfg.get("port", 8000)
-        api_reload = cfg.get("reload", False)
-
-        # 标记 lifespan 中不需要再启动渠道（由 launcher 统一管理）
-        from rpg_world.api import main as api_main
-        api_main._launcher_managed = True
-
-        if api_reload:
-            # reload 模式用 uvicorn.run（内部创建 reload 进程）
+        if channels_settings.api_reload:
             uvicorn.run(
                 "rpg_world.api.main:app",
-                host=api_host,
-                port=api_port,
+                host=channels_settings.api_host,
+                port=channels_settings.api_port,
                 reload=True,
                 reload_dirs=["rpg_world"],
                 reload_excludes=["*/node_modules/*"],
@@ -91,32 +70,29 @@ async def main() -> None:
         else:
             config = uvicorn.Config(
                 "rpg_world.api.main:app",
-                host=api_host,
-                port=api_port,
+                host=channels_settings.api_host,
+                port=channels_settings.api_port,
                 log_level="info",
             )
             server = uvicorn.Server(config)
             tasks.append(asyncio.create_task(server.serve(), name="api"))
 
     # ── 启动 Telegram ──────────────────────────────────────────────────
-    if "telegram" in enabled_modules:
-        cfg = channels_settings.get_module_config("telegram")
+    if "telegram" in enabled_modules and channels_settings.telegram_enabled:
         from rpg_world.channels.telegram import TelegramAdapter
 
-        agent = AgentManager.get_or_create()
         adapter = TelegramAdapter(
-            token=cfg["bot_token"],
-            streaming=cfg.get("streaming", True),
-            agent=agent,
+            token=channels_settings.telegram_token,
+            streaming=channels_settings.telegram_streaming,
+            agent=AgentManager.get_or_create(),
         )
         tasks.append(asyncio.create_task(adapter.start(), name="telegram"))
 
     # ── 启动 CLI ───────────────────────────────────────────────────────
-    if "cli" in enabled_modules:
+    if "cli" in enabled_modules and channels_settings.cli_enabled:
         from rpg_world.channels.cli import CLIAdapter
 
-        agent = AgentManager.get_or_create(session_id="cli:direct")
-        adapter = CLIAdapter(agent=agent)
+        adapter = CLIAdapter(agent=AgentManager.get_or_create())
         tasks.append(asyncio.create_task(adapter.start(), name="cli"))
 
     # ── 等待退出信号 ──────────────────────────────────────────────────

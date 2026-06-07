@@ -2,6 +2,8 @@
 
 与 ``rpg_world/settings.json``（agent 配置/工作区/数据路径）分离，
 ``channels.json`` 统一存放各模块（api / telegram / cli 等）的开关和参数。
+
+所有模块名和配置字段名封装为属性，外部调用不做字符串拼接。
 """
 
 from __future__ import annotations
@@ -15,12 +17,8 @@ _CONFIG_PATH = Path(__file__).resolve().parent.parent / "channels.json"
 class ChannelsSettings:
     """模块配置加载器。
 
-    读取 ``channels.json`` 的 ``modules.{name}`` 结构，提供以下能力：
-    - ``is_module_enabled(name)`` — 判断模块是否启用
-    - ``get_module_config(name)`` — 获取模块的完整配置 dict
-    - 向下兼容：仍可通过 ``is_enabled(name)`` 直接读取顶层 key（旧格式）
-
-    文件不存在或格式异常时返回空配置，不抛异常。
+    读取 ``channels.json`` 的 ``modules.{name}`` 结构，提供类型化属性。
+    文件不存在或格式异常时返回空配置/默认值，不抛异常。
     """
 
     def __init__(self) -> None:
@@ -38,38 +36,66 @@ class ChannelsSettings:
             return {}
 
     def _modules(self) -> dict:
-        """获取 ``modules`` 段（不存在时返回空 dict）。"""
         raw = self._data.get("modules", {})
         return raw if isinstance(raw, dict) else {}
 
-    # ── 新格式：modules.{name}.enabled ──────────────────────────────────
-
-    def is_module_enabled(self, name: str) -> bool:
-        """指定模块是否启用（从 ``modules.{name}.enabled`` 读取）。"""
-        mod = self._modules().get(name, {})
-        return bool(mod.get("enabled", False) if isinstance(mod, dict) else False)
-
-    def get_module_config(self, name: str) -> dict:
-        """获取指定模块的完整配置 dict。"""
+    def _mod_cfg(self, name: str) -> dict:
         mod = self._modules().get(name, {})
         return mod if isinstance(mod, dict) else {}
 
-    # ── 旧格式兼容：直接读取顶层 key ──────────────────────────────────
+    # ── 模块列表 ──────────────────────────────────────────────────────────
 
-    def is_enabled(self, name: str) -> bool:
-        """旧格式兼容：从顶层 ``{name}.enabled`` 读取。"""
-        val = self._data.get(name, {})
-        return bool(val.get("enabled", False) if isinstance(val, dict) else False)
+    @property
+    def enabled_module_names(self) -> list[str]:
+        """返回所有已启用的模块名列表。"""
+        return [
+            name for name in ("api", "telegram", "cli")
+            if self._mod_cfg(name).get("enabled", False)
+        ]
+
+    # ── API 模块配置 ─────────────────────────────────────────────────────
+
+    @property
+    def api_enabled(self) -> bool:
+        return bool(self._mod_cfg("api").get("enabled", False))
+
+    @property
+    def api_host(self) -> str:
+        return str(self._mod_cfg("api").get("host", "127.0.0.1"))
+
+    @property
+    def api_port(self) -> int:
+        return int(self._mod_cfg("api").get("port", 8000))
+
+    @property
+    def api_reload(self) -> bool:
+        return bool(self._mod_cfg("api").get("reload", False))
+
+    # ── Telegram 模块配置 ────────────────────────────────────────────────
+
+    @property
+    def telegram_enabled(self) -> bool:
+        return bool(self._mod_cfg("telegram").get("enabled", False))
+
+    @property
+    def telegram_token(self) -> str:
+        return str(self._mod_cfg("telegram").get("bot_token", ""))
+
+    @property
+    def telegram_streaming(self) -> bool:
+        return bool(self._mod_cfg("telegram").get("streaming", True))
+
+    # ── CLI 模块配置 ─────────────────────────────────────────────────────
+
+    @property
+    def cli_enabled(self) -> bool:
+        return bool(self._mod_cfg("cli").get("enabled", False))
+
+    # ── 旧格式兼容（废弃，暂保留） ─────────────────────────────────────
 
     def get_channel_config(self, name: str) -> dict:
-        """旧格式兼容：从顶层 ``{name}`` 读取。"""
         val = self._data.get(name, {})
         return val if isinstance(val, dict) else {}
-
-    def get(self, name: str, key: str, default: object = None) -> object:
-        """旧格式兼容：从顶层 ``{name}.{key}`` 读取。"""
-        val = self._data.get(name, {})
-        return val.get(key, default) if isinstance(val, dict) else default
 
 
 settings = ChannelsSettings()

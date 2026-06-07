@@ -14,6 +14,37 @@ from rpg_world.rpg_core.agent.agent_types import AgentStreamEvent, TurnStats
 # ---------------------------------------------------------------------------
 
 
+def _get_cache_hit(usage) -> int:
+    """从 LLMUsage 中提取缓存命中 token 数，多来源兜底。"""
+    if not usage:
+        return 0
+    # 1. 标准字段 prompt_cache_hit_tokens
+    if usage.prompt_cache_hit_tokens:
+        return usage.prompt_cache_hit_tokens
+    # 2. prompt_tokens_details.cached_tokens
+    if usage.prompt_tokens_details:
+        val = usage.prompt_tokens_details.get("cached_tokens", 0)
+        if val:
+            return int(val)
+    # 3. raw_usage（如果有的话）
+    if usage.raw_usage:
+        val = usage.raw_usage.get("prompt_cache_hit_tokens", 0) or 0
+        if val:
+            return int(val)
+    return 0
+
+
+def _get_missed_tokens(usage) -> int:
+    """Extract prompt cache miss tokens from an LLMUsage object."""
+    if not usage:
+        return 0
+    if usage.prompt_cache_miss_tokens:
+        return usage.prompt_cache_miss_tokens
+    if usage.raw_usage:
+        return int(usage.raw_usage.get("prompt_cache_miss_tokens", 0) or 0)
+    return 0
+
+
 def _format_cache_info(prompt: int, cached: int, missed: int) -> str:
     """Return a compact cache hit/miss summary string."""
     parts: list[str] = []
@@ -25,11 +56,6 @@ def _format_cache_info(prompt: int, cached: int, missed: int) -> str:
     if parts:
         return "  [" + ", ".join(parts) + "]"
     return ""
-
-
-def _get_missed_tokens(usage) -> int:
-    """Extract prompt cache miss tokens from an LLMUsage object."""
-    return usage.prompt_cache_miss_tokens if usage else 0
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +79,7 @@ def format_turn_stats(stats: TurnStats) -> str:
     if chat_calls:
         chat_prompt = sum(c.usage.prompt_tokens for c in chat_calls if c.usage)
         chat_comp = sum(c.usage.completion_tokens for c in chat_calls if c.usage)
-        chat_cached = sum(c.usage.cached_tokens for c in chat_calls if c.usage)
+        chat_cached = sum(_get_cache_hit(c.usage) for c in chat_calls if c.usage)
         chat_missed = sum(_get_missed_tokens(c.usage) for c in chat_calls)
         chat_total = chat_prompt + chat_comp
         chat_dur = sum(c.duration_ms for c in chat_calls)
@@ -69,7 +95,7 @@ def format_turn_stats(stats: TurnStats) -> str:
                 continue
             prompt_n = u.prompt_tokens
             comp_n = u.completion_tokens
-            cached_n = u.cached_tokens
+            cached_n = _get_cache_hit(u)
             missed_n = _get_missed_tokens(u)
             lines.append(
                 f"      [{i+1}] prompt {prompt_n:,} + completion {comp_n:,} = {prompt_n + comp_n:,} tokens"
@@ -80,7 +106,7 @@ def format_turn_stats(stats: TurnStats) -> str:
     if sub_calls:
         sub_prompt = sum(c.usage.prompt_tokens for c in sub_calls if c.usage)
         sub_comp = sum(c.usage.completion_tokens for c in sub_calls if c.usage)
-        sub_cached = sum(c.usage.cached_tokens for c in sub_calls if c.usage)
+        sub_cached = sum(_get_cache_hit(c.usage) for c in sub_calls if c.usage)
         sub_missed = sum(_get_missed_tokens(c.usage) for c in sub_calls)
         sub_total = sub_prompt + sub_comp
         sub_dur = sum(c.duration_ms for c in sub_calls)
@@ -96,7 +122,7 @@ def format_turn_stats(stats: TurnStats) -> str:
                 continue
             prompt_n = u.prompt_tokens
             comp_n = u.completion_tokens
-            cached_n = u.cached_tokens
+            cached_n = _get_cache_hit(u)
             missed_n = _get_missed_tokens(u)
             lines.append(
                 f"      [{c.source}] prompt {prompt_n:,} + completion {comp_n:,} = {prompt_n + comp_n:,} tokens"
@@ -143,7 +169,7 @@ def format_event_stats(event: AgentStreamEvent) -> str:
         if chat_calls:
             chat_prompt = sum(c.usage.prompt_tokens for c in chat_calls if c.usage)
             chat_comp = sum(c.usage.completion_tokens for c in chat_calls if c.usage)
-            chat_cached = sum(c.usage.cached_tokens for c in chat_calls if c.usage)
+            chat_cached = sum(_get_cache_hit(c.usage) for c in chat_calls if c.usage)
             chat_missed = sum(_get_missed_tokens(c.usage) for c in chat_calls)
             chat_total = chat_prompt + chat_comp
             chat_dur = sum(c.duration_ms for c in chat_calls)
@@ -159,7 +185,7 @@ def format_event_stats(event: AgentStreamEvent) -> str:
                     continue
                 p = u.prompt_tokens
                 co = u.completion_tokens
-                cached = u.cached_tokens
+                cached = _get_cache_hit(u)
                 missed = _get_missed_tokens(u)
                 lines.append(
                     f"    [{i+1}] prompt {p:,} + completion {co:,} = {p+co:,} tokens"
@@ -170,7 +196,7 @@ def format_event_stats(event: AgentStreamEvent) -> str:
         if sub_calls:
             sub_prompt = sum(c.usage.prompt_tokens for c in sub_calls if c.usage)
             sub_comp = sum(c.usage.completion_tokens for c in sub_calls if c.usage)
-            sub_cached = sum(c.usage.cached_tokens for c in sub_calls if c.usage)
+            sub_cached = sum(_get_cache_hit(c.usage) for c in sub_calls if c.usage)
             sub_missed = sum(_get_missed_tokens(c.usage) for c in sub_calls)
             sub_total = sub_prompt + sub_comp
             sub_dur = sum(c.duration_ms for c in sub_calls)
@@ -186,7 +212,7 @@ def format_event_stats(event: AgentStreamEvent) -> str:
                     continue
                 p = u.prompt_tokens
                 co = u.completion_tokens
-                cached = u.cached_tokens
+                cached = _get_cache_hit(u)
                 missed = _get_missed_tokens(u)
                 lines.append(
                     f"    [{c.source}] prompt {p:,} + completion {co:,} = {p+co:,} tokens"
@@ -196,7 +222,7 @@ def format_event_stats(event: AgentStreamEvent) -> str:
     else:
         # Fallback: just show aggregate usage
         u = event.usage
-        cached = u.cached_tokens
+        cached = _get_cache_hit(u)
         rate = (cached / u.prompt_tokens * 100) if u.prompt_tokens else 0
         cache_str = f", cache: {cached:,} ({rate:.0f}%)" if cached else ""
         lines.append(f"    prompt: {u.prompt_tokens:,}{cache_str}")
