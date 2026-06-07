@@ -1,9 +1,20 @@
 {
-  "telegram": {
-    "enabled": true,
-    "token": "YOUR_BOT_TOKEN",
-    "streaming": true,
-    "allow_from": ["*"],
-    "proxy": null
+  "modules": {
+    "api": {
+      "enabled": true,
+      "port": 8000,
+      "host": "127.0.0.1",
+      "reload": false
+    },
+    "telegram": {
+      "enabled": true,
+      "bot_token": "YOUR_BOT_TOKEN",
+      "streaming": true,
+      "allow_from": ["*"],
+      "proxy": null
+    },
+    "cli": {
+      "enabled": false
+    }
   }
 }

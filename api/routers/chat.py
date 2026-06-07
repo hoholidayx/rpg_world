@@ -7,9 +7,8 @@ import json
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
-from rpg_world.rpg_core.agent import RPGGameAgent
 from rpg_world.rpg_core.agent.agent_types import StreamEventKind
-from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.agent.manager import AgentManager
 
 from rpg_world.api.logger import chat_logger
 from rpg_world.api.settings import api_settings
@@ -17,45 +16,21 @@ from rpg_world.rpg_core.agent.stats_formatter import format_event_stats, format_
 
 router = APIRouter(tags=["chat"])
 
-# ── Agent instance cache (per-session + per-api-key) ─────────────────────
-
-_agent_instances: dict[str, RPGGameAgent] = {}
-
-
-def _cache_key(session_id: str, api_key: str | None) -> str:
-    """Build a cache key from session_id and api_key.
-
-    Including api_key in the key ensures that if a user changes their
-    key, a new agent is created rather than reusing one with the old key.
-    """
-    return f"{session_id}::{api_key or ''}"
-
 
 def _get_agent(
     session_id: str = "default",
     api_key: str | None = None,
-) -> RPGGameAgent:
-    """Get or create an RPGGameAgent for the given session.
+) -> "RPGGameAgent":
+    """Get or create an RPGGameAgent via the shared AgentManager.
 
-    Agent instances are cached by session_id (+ api_key) to preserve
-    in-memory conversation history and avoid re-initialization on each
-    request.
+    Agent instances are managed by ``AgentManager`` (process-wide singleton),
+    ensuring all modules (API / Telegram / CLI) share the same cache and
+    FileWatcher.
 
     When *api_key* is provided it takes precedence over the environment
     variable ``OPENAI_API_KEY`` (the RPGGameAgent default fallback).
     """
-    key = _cache_key(session_id, api_key)
-    if key not in _agent_instances:
-        agent = RPGGameAgent(
-            session_id=session_id,
-            model=settings.agent_model,
-            api_key=api_key,
-            base_url=settings.agent_base_url or None,
-            max_tokens=settings.agent_max_tokens,
-            temperature=settings.agent_temperature,
-        )
-        _agent_instances[key] = agent
-    return _agent_instances[key]
+    return AgentManager.get_or_create(session_id=session_id, api_key=api_key)
 
 
 # ── Routes ──────────────────────────────────────────────────────────────
