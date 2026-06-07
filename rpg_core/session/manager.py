@@ -25,16 +25,24 @@ from rpg_world.rpg_core.settings import settings
 
 _TAG = "[SessionManager]"
 
+# Module-level constants — avoid magic strings scattered throughout
+_DEFAULT_SESSION_ID = "default"
+_META_TMP_SUFFIX = ".json.tmp"
+_META_CREATED_AT = "created_at"
+_META_UPDATED_AT = "updated_at"
+_META_MESSAGE_COUNT = "message_count"
+_META_COMPACTED_ROUNDS = "compacted_rounds"
+
 
 class SessionManager:
     """Owns conversation history and session metadata for one session."""
 
     def __init__(
         self,
-        session_id: str = "default",
+        session_id: str = None,  # type: ignore[assignment]
         history_enabled: bool = True,
     ) -> None:
-        self._session_id = session_id
+        self._session_id = session_id if session_id is not None else _DEFAULT_SESSION_ID
         self._history_enabled = history_enabled
         self._history: list[dict] = []
         self._meta: dict[str, Any] = {}
@@ -173,12 +181,12 @@ class SessionManager:
 
     @property
     def compacted_rounds(self) -> int:
-        return self._meta.get("compacted_rounds", 0)
+        return self._meta.get(_META_COMPACTED_ROUNDS, 0)
 
     def increment_compacted_rounds(self, count: int = 1) -> None:
         """Bump the compacted_rounds counter and persist metadata."""
-        current = self._meta.get("compacted_rounds", 0) + count
-        self._update_meta(compacted_rounds=current)
+        current = self._meta.get(_META_COMPACTED_ROUNDS, 0) + count
+        self._update_meta(**{_META_COMPACTED_ROUNDS: current})
 
     # ── History-enabled flag ───────────────────────────────────────────
 
@@ -220,16 +228,16 @@ class SessionManager:
     def _default_meta(self) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         return {
-            "created_at": now,
-            "updated_at": now,
-            "message_count": 0,
-            "compacted_rounds": 0,
+            _META_CREATED_AT: now,
+            _META_UPDATED_AT: now,
+            _META_MESSAGE_COUNT: 0,
+            _META_COMPACTED_ROUNDS: 0,
         }
 
     def _update_meta(self, **kwargs: Any) -> None:
         """Update metadata fields and persist to disk atomically."""
         self._meta.update(kwargs)
-        self._meta["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._meta[_META_UPDATED_AT] = datetime.now(timezone.utc).isoformat()
         self._write_meta()
 
     def _write_meta(self) -> None:
@@ -238,13 +246,13 @@ class SessionManager:
             return
         path = self._meta_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
+        tmp = path.with_suffix(_META_TMP_SUFFIX)
         with tmp.open("w", encoding="utf-8", newline="\n") as f:
             json.dump(self._meta, f, ensure_ascii=False, indent=2)
             f.write("\n")
         tmp.replace(path)
         logger.debug(
             _TAG + " wrote session.json: msg_count={}, compacted={}",
-            self._meta.get("message_count", 0),
-            self._meta.get("compacted_rounds", 0),
+            self._meta.get(_META_MESSAGE_COUNT, 0),
+            self._meta.get(_META_COMPACTED_ROUNDS, 0),
         )
