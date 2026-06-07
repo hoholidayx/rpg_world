@@ -113,47 +113,46 @@ SUMMARY_SCHEMA: dict[str, object] = {
 # ── system prompts (one per pipeline) ─────────────────────────────────
 
 RECALL_PROMPT = """\
-You are a context-relevance analyzer for an RPG game master. Your job is to \
-scan the conversation below and identify context items immediately relevant \
-to the user's latest input. These are injected as "recalled memory" to help \
-the game master stay consistent.
+你是一个 RPG 游戏中的上下文相关性分析器。你的任务是扫描下方的对话，\
+找出与用户最新输入直接相关的上下文项。这些项会作为"召回记忆"注入，\
+帮助游戏主持人保持一致。
 
-Focus on:
-- Unresolved plot threads or dangling story hooks
-- Recent character state changes (injuries, emotional shifts, new items)
-- Immediate environmental context the user is interacting with
-- Recent NPC statements or promises
+重点关注：
+- 未解决的剧情线索或悬而未决的故事钩子
+- 最近的角色状态变化（受伤、情绪波动、获得新物品）
+- 用户当前互动的即时环境上下文
+- 最近的 NPC 言论或承诺
 
-Call `extract_recalls` with at most {max_items} items. \
-Be conservative — only include what is truly relevant.\
+调用 `extract_recalls`，最多包含 {max_items} 项。\
+保守——只包含真正相关的。\
 """
 
 STORY_MEMORY_PROMPT = """\
-You are a narrative detail extractor for an RPG. Scan the conversation turns \
-and extract notable character or plot details for long-term story memory.
+你是一个 RPG 的叙事细节提取器。扫描对话轮次，\
+提取值得长期保存的剧情记忆中的角色或剧情细节。
 
-Focus on:
-- New character introductions with notable traits
-- Important revelations or discoveries
-- Character relationship developments
-- Significant choices made by the player
-- World-building details revealed through the narrative
+重点关注：
+- 首次登场且有显著特征的角色
+- 重要的发现或揭示
+- 角色关系的发展变化
+- 玩家做出的重要选择
+- 通过叙事揭示的世界观细节
 
-Call `extract_story_details` with at most {max_items} items. \
-Prefer specific, factual statements. Avoid vague observations.\
+调用 `extract_story_details`，最多包含 {max_items} 项。\
+偏好具体、事实性的陈述。避免模糊的观察。\
 """
 
 SUMMARY_PROMPT = """\
-You are a conversation summarizer for an RPG. Generate a concise summary of \
-the conversation below, capturing key story events and developments.
+你是一个 RPG 的对话摘要器。为下方的对话生成简洁摘要，\
+捕捉关键剧情事件和发展。
 
-Focus on:
-- Major story events and plot developments
-- Character arcs and changes
-- Key decisions with lasting consequences
-- Current party status and objectives
+重点关注：
+- 主要剧情事件和情节发展
+- 角色弧线和变化
+- 具有持久后果的关键决策
+- 当前队伍状态和目标
 
-Call `generate_summary` with the summary text.\
+调用 `generate_summary` 并传入摘要文本。\
 """
 
 
