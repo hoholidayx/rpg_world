@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-_CONFIG_PATH = Path(__file__).resolve().parent / "channels.json"
+_CONFIG_PATH = Path(__file__).resolve().parent.parent / "channels.json"
 
 
 class ChannelsSettings:

@@ -115,6 +115,9 @@ class ChannelAdapter(ABC):
 
         遍历 ``agent.send_stream()`` 的事件流，通过 ``send_delta``
         实时推送给用户。子类可覆写此方法以实现更精细的流控。
+
+        命令通过 ``send_stream()`` 会直接返回 ``DONE`` 事件（无 ``TEXT``
+        事件），此时从 ``DONE.content`` 读取回复内容。
         """
         if not self._agent:
             return AgentReply(text="")
@@ -125,8 +128,10 @@ class ChannelAdapter(ABC):
                 full_text += event.content
                 await self.send_delta(chat_id, event.content, final=False)
             elif event.kind == StreamEventKind.DONE:
-                if full_text:
-                    await self.send_delta(chat_id, full_text, final=True)
+                # 命令回复直接带在 DONE.content 中（无 TEXT 事件）
+                if not full_text:
+                    full_text = event.content
+                await self.send_delta(chat_id, full_text, final=True)
                 return AgentReply(text=full_text)
             elif event.kind == StreamEventKind.ERROR:
                 await self.send_text(chat_id, f"错误: {event.content}")

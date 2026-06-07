@@ -72,19 +72,29 @@ async def main() -> None:
         api_port = cfg.get("port", 8000)
         api_reload = cfg.get("reload", False)
 
-        # 标记 lifespan 中不需要再启动 Telegram（由 launcher 统一管理）
+        # 标记 lifespan 中不需要再启动渠道（由 launcher 统一管理）
         from rpg_world.api import main as api_main
         api_main._launcher_managed = True
 
-        config = uvicorn.Config(
-            "rpg_world.api.main:app",
-            host=api_host,
-            port=api_port,
-            reload=api_reload,
-            log_level="info",
-        )
-        server = uvicorn.Server(config)
-        tasks.append(asyncio.create_task(server.serve(), name="api"))
+        if api_reload:
+            # reload 模式用 uvicorn.run（内部创建 reload 进程）
+            uvicorn.run(
+                "rpg_world.api.main:app",
+                host=api_host,
+                port=api_port,
+                reload=True,
+                reload_dirs=["rpg_world"],
+                reload_excludes=["*/node_modules/*"],
+            )
+        else:
+            config = uvicorn.Config(
+                "rpg_world.api.main:app",
+                host=api_host,
+                port=api_port,
+                log_level="info",
+            )
+            server = uvicorn.Server(config)
+            tasks.append(asyncio.create_task(server.serve(), name="api"))
 
     # ── 启动 Telegram ──────────────────────────────────────────────────
     if "telegram" in enabled_modules:
@@ -98,6 +108,13 @@ async def main() -> None:
             agent=agent,
         )
         tasks.append(asyncio.create_task(adapter.start(), name="telegram"))
+
+    # ── 启动 CLI ───────────────────────────────────────────────────────
+    if "cli" in enabled_modules:
+        from rpg_world.channels.cli import CLIAdapter
+
+        adapter = CLIAdapter(agent=AgentManager.get_or_create())
+        tasks.append(asyncio.create_task(adapter.start(), name="cli"))
 
     # ── 等待退出信号 ──────────────────────────────────────────────────
     stop_event = asyncio.Event()
