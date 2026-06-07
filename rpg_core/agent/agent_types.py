@@ -57,7 +57,12 @@ class LLMUsage:
     @property
     def cached_tokens(self) -> int:
         """取缓存命中 token 数（兼容旧代码）。"""
-        return self.prompt_cache_hit_tokens
+        if self.prompt_cache_hit_tokens:
+            return self.prompt_cache_hit_tokens
+        # fallback: prompt_tokens_details.cached_tokens
+        if self.prompt_tokens_details:
+            return self.prompt_tokens_details.get("cached_tokens", 0) or 0
+        return 0
 
     @property
     def has_usage(self) -> bool:

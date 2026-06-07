@@ -418,11 +418,16 @@ class RPGGameAgent:
         total_pt = turn_stats.total_prompt_tokens
         total_ct = turn_stats.total_completion_tokens
         total_cached = turn_stats.total_cached_tokens
+        total_missed = sum(
+            c.usage.prompt_cache_miss_tokens for c in turn_stats.calls if c.usage
+        )
         aggregate_usage = LLMUsage(
             prompt_tokens=total_pt,
             completion_tokens=total_ct,
             total_tokens=total_pt + total_ct,
             prompt_tokens_details={"cached_tokens": total_cached} if total_cached else None,
+            prompt_cache_hit_tokens=total_cached,
+            prompt_cache_miss_tokens=total_missed,
         )
 
         if final_event is not None:
@@ -580,6 +585,11 @@ class RPGGameAgent:
         if self._status_sub_agent is not None:
             _sub_ctx_status = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
             self._status_sub_agent.bind_context(_sub_ctx_status)
+            # 刷新 StatusSubAgent 的 SceneTracker 工具引用，确保切换 session 后
+            # 场景状态写入正确的 session 目录
+            if self._scene_tracker is not None:
+                self._status_sub_agent._tool_providers.clear()
+                self._status_sub_agent.add_tool_provider(self._scene_tracker)
         if self._memory_sub_agent is not None:
             _sub_ctx_memory = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
             self._memory_sub_agent.bind_context(_sub_ctx_memory)

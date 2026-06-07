@@ -59,7 +59,9 @@ async def main() -> None:
     print(f"启动模块: {', '.join(enabled_modules)}")
 
     # 初始化 agent（触发 FileWatcher、BaseManager 等全局资源）
-    await AgentManager.ensure_initialized()
+    # 根据启动模块确定初始 session_id，避免无效加载
+    init_session = "cli:direct" if "cli" in enabled_modules and "api" not in enabled_modules else "default"
+    await AgentManager.ensure_initialized(session_id=init_session)
 
     tasks: list[asyncio.Task] = []
 
@@ -113,7 +115,8 @@ async def main() -> None:
     if "cli" in enabled_modules:
         from rpg_world.channels.cli import CLIAdapter
 
-        adapter = CLIAdapter(agent=AgentManager.get_or_create())
+        agent = AgentManager.get_or_create(session_id="cli:direct")
+        adapter = CLIAdapter(agent=agent)
         tasks.append(asyncio.create_task(adapter.start(), name="cli"))
 
     # ── 等待退出信号 ──────────────────────────────────────────────────

@@ -66,14 +66,20 @@ class AgentManager:
         return cls._instances[key]
 
     @classmethod
-    async def ensure_initialized(cls) -> None:
+    async def ensure_initialized(cls, session_id: str = "default") -> None:
         """确保至少有一个 agent 完成初始化。
 
         触发 ``FileWatcher`` 的启动和 ``BaseManager`` 缓存加载。
         在所有模块启动前调用一次即可。
+
+        Parameters
+        ----------
+        session_id:
+            初始化时使用的 session ID。默认为 ``"default"``，
+            调用方应根据实际使用的 session 传入（如 ``"cli:direct"``）。
         """
         if not cls._initialized:
-            agent = cls.get_or_create()
+            agent = cls.get_or_create(session_id=session_id)
             await agent._ensure_initialized()
             cls._initialized = True
 
