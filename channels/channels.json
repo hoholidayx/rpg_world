@@ -1,0 +1,9 @@
+{
+  "telegram": {
+    "enabled": true,
+    "token": "YOUR_BOT_TOKEN",
+    "streaming": true,
+    "allow_from": ["*"],
+    "proxy": null
+  }
+}
