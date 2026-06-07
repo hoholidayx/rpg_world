@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 
 _TAG = "[MemorySubAgent]"
 COMMAND_NAME_COMPACT = "/compact"
-COMMAND_NAME_STORY = "/story_memory"
+COMMAND_NAME_EXTRACT_STORY = "/extract_story_memory"
 """此子 Agent 注册到 CommandDispatcher 的斜杠命令名。"""
 
 # ── function schemas (one per pipeline) ───────────────────────────────
@@ -260,17 +260,17 @@ class MemorySubAgent(BaseSubAgent):
         ]
         if self._story_store:
             defs.append(CommandDef(
-                name=COMMAND_NAME_STORY,
+                name=COMMAND_NAME_EXTRACT_STORY,
                 description="手动提取剧情记忆",
                 detail="扫描对话历史，提取 notable 角色/剧情细节并持久化到剧情记忆。",
             ))
         return defs if defs else None
 
     def accept_command(self, command: str) -> bool:
-        return command in (COMMAND_NAME_COMPACT, COMMAND_NAME_STORY)
+        return command in (COMMAND_NAME_COMPACT, COMMAND_NAME_EXTRACT_STORY)
 
     async def execute_command(self, command: str, args: list[str], agent: RPGGameAgent | None = None) -> dict | None:
-        if command == COMMAND_NAME_STORY:
+        if command == COMMAND_NAME_EXTRACT_STORY:
             return await self._execute_story_memory(agent)
         if command == COMMAND_NAME_COMPACT:
             return await self._execute_compact(agent, args)

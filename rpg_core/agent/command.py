@@ -40,18 +40,6 @@ async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
     return await agent.get_context_markdown()
 
 
-async def _cmd_history(agent: RPGGameAgent, args: list[str]) -> str:
-    """查看对话历史摘要。"""
-    if not agent.history:
-        return "(无对话历史)"
-    lines: list[str] = []
-    for i, msg in enumerate(agent.history):
-        role = msg.role.value
-        preview = (msg.content or "")[:80]
-        lines.append(f"  [{i}] {role}: {preview}")
-    return "\n".join(lines)
-
-
 async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
     """列出所有会话。"""
     from rpg_world.rpg_core.settings import settings
@@ -113,7 +101,7 @@ class CommandResult:
 
     reply: str = ""
     """文本回复。"""
-    stats: dict[str, Any] | None = None
+    stats: dict[str, object] | None = None
     """可选的统计信息。"""
     handled: bool = False
     """是否被某个处理器消费。"""
@@ -123,7 +111,7 @@ class CommandDispatcher:
     """命令分发器。
 
     维护内置命令和子 Agent 命令两道注册表。dispatch() 按优先级：
-    1. 内置命令（clear / reload / context / history / sessions / session-create / session-switch）
+    1. 内置命令（clear / reload / context / sessions / session-create / session-switch）
     2. 子 Agent 的 accept_command（如 MemorySubAgent 的 /compact）
     3. 未命中 → handed=False，调用方走 LLM 兜底
     """
@@ -155,8 +143,8 @@ class CommandDispatcher:
     def register_default_builtins(self) -> None:
         """注册所有默认内置命令。
 
-        包括 7 个标准管理命令：/clear /reload /context /history
-        /sessions /session-create /session-switch。
+        包括 6 个标准管理命令：/clear /reload /context /sessions
+        /session-create /session-switch。
         子 Agent 命令（如 /compact /story_memory）由 agent 层另行注册。
         """
         self.register_builtin(
@@ -170,10 +158,6 @@ class CommandDispatcher:
         self.register_builtin(
             "/context", "查看当前上下文结构和 token 用量",
             "显示 5 层 RPG 上下文的每层信息。", _cmd_context,
-        )
-        self.register_builtin(
-            "/history", "查看对话历史摘要",
-            "逐条显示当前会话的对话历史记录（索引、角色、内容预览）。", _cmd_history,
         )
         self.register_builtin(
             "/sessions", "列出当前工作区所有会话",

@@ -140,6 +140,7 @@ class Message:
             d["tool_calls"] = self._tool_calls
         return d
 
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Message:
         return cls(

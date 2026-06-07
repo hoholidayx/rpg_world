@@ -79,7 +79,7 @@ async def get_chat_history(
             status_code=400,
             detail=f"Agent initialization failed (api_key missing or invalid?): {exc}",
         )
-    return {"history": agent.history}
+    return {"history": [m.to_dict() for m in agent.history]}
 
 
 @router.post("/chat/send")

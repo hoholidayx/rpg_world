@@ -139,6 +139,7 @@
             placeholder="输入消息... (/ 查看命令, Enter 发送, Shift+Enter 换行)"
             :rows="2"
             :disabled="sending"
+            @input="onInputChange"
             @keydown.enter.prevent="onSendKeydown"
             @keydown.escape="closeCommandPopup"
             @keydown.up.prevent="onCommandArrowUp"
@@ -301,7 +302,7 @@ watch(
   () => sessionStore.activeSession,
   async () => {
     messages.value = []
-    loadHistory()
+    await loadHistory()
     commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
   },
 )

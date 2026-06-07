@@ -11,10 +11,9 @@ Usage:
 Interactive commands (routed through shared CommandDispatcher):
   /clear         — reset conversation history
   /reload        — reload RPG context from disk
-  /history       — print raw history
   /context       — show current context structure and token usage
   /compact [N] [K] — compress oldest N user rounds into summary, keep K rounds
-  /story_memory  — extract plot memory (character/plot details)
+  /extract_story_memory  — extract plot memory (character/plot details)
   /sessions      — list all sessions
   /session-create <id> — create a new session
   /session-switch <id> — switch to a different session

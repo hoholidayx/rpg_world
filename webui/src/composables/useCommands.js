@@ -1,46 +1,13 @@
 /**
  * useCommands — 斜杠命令业务逻辑。
  *
- * 维护命令白名单，提供命令检测、过滤、发送等功能。
- * 命令定义优先从后端动态加载（GET /chat/commands），失败时使用内置回退列表。
+ * 命令定义完全以后端 GET /chat/commands 为准，前端不做硬编码。
  * 与 ChatView 解耦，集中管理前端侧的命令相关状态。
  */
 
-import { ref, computed } from 'vue'
+import { ref, computed, unref } from 'vue'
 import api from '@/api/index'
 import { fetchCommands as fetchRemoteCommands } from '@/api/chat'
-
-/**
- * 内置命令回退列表（后端不可用时使用）。
- * 正式命令定义以后端 GET /chat/commands 返回为准。
- */
-const FALLBACK_COMMAND_DEFS = [
-  {
-    command: '/clear',
-    description: '清空当前会话的对话历史',
-    detail: '重置对话上下文，清除所有已发送的消息记录。',
-  },
-  {
-    command: '/compact',
-    description: '压缩最老的对话轮次为摘要',
-    detail: '可传参：/compact [压缩轮数] [保留轮数]，如 /compact 10 5',
-  },
-  {
-    command: '/story_memory',
-    description: '提取剧情记忆（角色/剧情细节）',
-    detail: '自上次提取以来有新对话时，提取 notable 角色/剧情细节持久化到剧情记忆。',
-  },
-  {
-    command: '/reload',
-    description: '重新加载 RPG 数据（角色卡、世界书）',
-    detail: '从磁盘重新读取角色卡和世界书文件变更。',
-  },
-  {
-    command: '/context',
-    description: '查看当前上下文结构和 token 用量',
-    detail: '显示 5 层 RPG 上下文的每层信息。',
-  },
-]
 
 /**
  * 获取 API key（与 chat.js 保持一致）。
@@ -63,8 +30,7 @@ export function sendCommand(command, sessionId = 'default') {
 }
 
 /**
- * 从后端加载命令定义列表。
- * 优先返回后端数据，失败时返回内置回退列表。
+ * 从后端加载命令定义列表。后端不可用时返回空列表。
  *
  * @param {string} sessionId
  * @returns {Promise<Array<{command: string, description: string, detail: string}>>}
@@ -74,9 +40,9 @@ export async function loadCommands(sessionId = 'default') {
     const commands = await fetchRemoteCommands(sessionId)
     if (commands && commands.length > 0) return commands
   } catch {
-    // 后端不可用，返回回退列表
+    // 后端不可用
   }
-  return FALLBACK_COMMAND_DEFS
+  return []
 }
 
 /**
@@ -93,28 +59,31 @@ export async function loadCommands(sessionId = 'default') {
  *     cmd.close()         // 关闭弹窗
  *
  * @param {import('vue').Ref<string>} inputText - 绑定到输入框的 ref
- * @param {Array<{command: string, description: string, detail: string}>} commands - 命令定义列表
+ * @param {import('vue').Ref<Array> | Array} commands - 命令定义列表（Ref 或普通数组）
  */
-export function useCommands(inputText, commands = FALLBACK_COMMAND_DEFS) {
+export function useCommands(inputText, commands = []) {
+  // 兼容 ref([]) 和普通数组两种传参方式
+  const cmds = computed(() => unref(commands))
   const showPopup = ref(false)
   const highlightIndex = ref(0)
 
   /** 根据输入前缀过滤命令列表 */
   const filtered = computed(() => {
     const text = inputText.value
-    if (!text || !text.startsWith('/')) return commands
+    const list = cmds.value
+    if (!text || !text.startsWith('/')) return list
     const parts = text.split(/\s+/)
-    if (parts.length <= 1) return commands
+    if (parts.length <= 1) return list
     const typed = parts[0].toLowerCase()
-    if (commands.some((c) => c.command === typed)) return []
-    return commands.filter((c) => c.command.startsWith(typed))
+    if (list.some((c) => c.command === typed)) return []
+    return list.filter((c) => c.command.startsWith(typed))
   })
 
   /** 判断一段文本是否为前端已知的斜杠命令 */
   function isCommand(text) {
     if (!text || !text.startsWith('/')) return false
     const name = text.split(/\s+/)[0].toLowerCase()
-    return commands.some((c) => c.command === name)
+    return cmds.value.some((c) => c.command === name)
   }
 
   /** 选中一个命令，填入输入框 */
@@ -140,7 +109,7 @@ export function useCommands(inputText, commands = FALLBACK_COMMAND_DEFS) {
       const typed = parts[0].toLowerCase()
       if (typed === '/') {
         showPopup.value = true
-      } else if (commands.some((c) => c.command.startsWith(typed))) {
+      } else if (cmds.value.some((c) => c.command.startsWith(typed))) {
         showPopup.value = true
         highlightIndex.value = 0
       } else {
