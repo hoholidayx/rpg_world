@@ -1,0 +1,19 @@
+---
+type: overall
+created_at: {{ created_at }}
+updated_at: {{ updated_at }}
+total_compressed_rounds: {{ total_compressed_rounds }}
+last_batch_id: {{ last_batch_id }}
+---
+
+{% if title %}# {{ title }}{% endif %}
+
+{{ summary_text }}
+
+{% if key_events %}
+## 关键事件
+
+{% for event in key_events %}
+- {{ event }}
+{% endfor %}
+{% endif %}

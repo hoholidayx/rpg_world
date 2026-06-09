@@ -124,14 +124,19 @@ class Settings:
         return self.memory_story_config.get("trigger_rounds", 0)
 
     @property
-    def memory_compress_rounds(self) -> int:
-        """从最老的对话轮次开始压缩的默认轮数。"""
-        return self.memory_summary_config.get("compress_rounds", 10)
+    def memory_compress_batch_size(self) -> int:
+        """每批压缩的用户轮次数。"""
+        return self.memory_summary_config.get("compress_batch_size", 10)
 
     @property
     def memory_keep_rounds(self) -> int:
         """压缩后保留的最近对话轮数。"""
         return self.memory_summary_config.get("keep_rounds", 5)
+
+    @property
+    def memory_compression_enabled(self) -> bool:
+        """是否启用自动压缩。"""
+        return self.memory_summary_config.get("compression_enabled", True)
 
     @property
     def status_sub_agent_config(self) -> dict[str, object]:

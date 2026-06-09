@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
     from rpg_world.rpg_core.scene.tracker import SceneTracker
     from rpg_world.rpg_core.status.manager import StatusManager
+    from rpg_world.rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_world.rpg_core.summary.store import SummaryStore
 
 
@@ -120,6 +121,7 @@ class RPGContextBuilder:
         self._persist_memory: PersistentMemoryStore | None = None
         self._story_memory: StoryMemoryStore | None = None
         self._recalled_memory: RecalledMemoryStore | None = None
+        self._batch_summary_store: BatchSummaryStore | None = None
 
     # ── store injection (set by hook after construction) ─────────────
 
@@ -134,6 +136,9 @@ class RPGContextBuilder:
 
     def set_persistent_memory_store(self, store: PersistentMemoryStore) -> None:
         self._persist_memory = store
+
+    def set_batch_summary_store(self, store: BatchSummaryStore) -> None:
+        self._batch_summary_store = store
 
     # ── main entry ──────────────────────────────────────────────────
 
@@ -200,20 +205,21 @@ class RPGContextBuilder:
             except Exception:
                 pass
 
-        # ── 4. Build Summary Layer (conditional) ────────────────────
+        # ── 4. Build Summary Layer (overall.md only) ──────────────────
         summary_content: str | None = None
         if (
             self.config.enable_summaries
             and total_rounds > self.config.hot_history_rounds
-            and self._summary_store
+            and self._batch_summary_store
         ):
-            summaries = self._summary_store.get_all_summaries()
-
-            summary_content = self._render_layer("layers/summary_layer.jinja", {
-                "summaries": summaries,
-            })
-            if not summary_content or not summary_content.strip():
-                summary_content = None
+            try:
+                overall, _ = self._batch_summary_store.load_overall()
+                if overall:
+                    summary_content = self._render_layer("modules/overall_summary.jinja", {
+                        "text": overall,
+                    })
+            except Exception:
+                pass
 
         # ── 5. Extract Hot History ──────────────────────────────────
         history_messages = messages[:-1]  # exclude current user message

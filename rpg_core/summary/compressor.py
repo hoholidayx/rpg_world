@@ -3,7 +3,7 @@
 职责：
 1. 当历史对话超出保留窗口时触发压缩
 2. 选择需要压缩的历史段（保留窗口之前的旧内容）
-3. 委托 MemorySubAgent 生成摘要并写入 SummaryStore
+3. 委托 MemorySubAgent 按批次生成摘要并写入 BatchSummaryStore
 4. 从历史中移除已压缩的轮次
 
 Architecture::
@@ -14,19 +14,16 @@ Architecture::
     SummaryCompressor           ── 控制层（压缩策略）
         │                          ├─ 保留策略：保留最近 N 轮保持连贯性
         │                          ├─ 触发策略：超出阈值时执行
-        │                          └─ 批量策略：单次压缩量
+        │                          └─ 批量策略：每批 compress_batch_size 轮
         │
-        ├─▶ SummaryStore        ── 持久层（已存在）
-        └─▶ MemorySubAgent      ── 执行层（已存在，仅用 summary pipeline）
+        ├─▶ BatchSummaryStore   ── 持久层（批次 md 文件 + overall.md）
+        └─▶ MemorySubAgent      ── 执行层（batch pipeline + overall pipeline）
 
 触发规则（纯实时判断，不维护轮次状态）:
 
     总用户轮次 > keep_recent_rounds + compression_threshold  → 触发
     压缩段     = history 中保留窗口之前的部分
-    压缩后     = 原地截断 history，摘要写入 SummaryStore
-
-压缩段在被压缩前已被 builder 排除在 LLM 上下文之外（超出 hot history 窗口），
-因此压缩不丢失 LLM 可见信息 —— 摘要是对已排除内容的补偿。
+    压缩后     = 原地截断 history，批次摘要写入 BatchSummaryStore
 """
 
 from __future__ import annotations
@@ -49,8 +46,14 @@ class CompressResult:
     user_rounds_compressed: int = 0
     """被压缩并移除的用户轮次数。"""
 
+    batch_files: list[str] | None = None
+    """生成的批次摘要文件名列表。"""
+
+    overall_file: str | None = None
+    """生成/更新的整体归纳文件名。"""
+
     summary_generated: bool = False
-    """是否成功生成了摘要并写入 SummaryStore。"""
+    """是否成功生成了摘要并写入 BatchSummaryStore。"""
 
 
 class SummaryCompressor:
@@ -87,24 +90,24 @@ class SummaryCompressor:
 
     def __init__(
         self,
-        summary_store: SummaryStore | None = None,
+        batch_store: "BatchSummaryStore | None" = None,
         memory_sub_agent: MemorySubAgent | None = None,
         enabled: bool = True,
         keep_recent_rounds: int = 20,
         compression_threshold: int = 10,
-        min_rounds_per_compress: int = 5,
+        compress_batch_size: int = 10,
     ) -> None:
-        self._summary_store = summary_store
+        self._batch_store = batch_store
         self._memory_sub_agent = memory_sub_agent
         self._enabled = enabled
         self._keep_recent_rounds = keep_recent_rounds
         self._compression_threshold = compression_threshold
-        self._min_rounds_per_compress = min_rounds_per_compress
+        self._compress_batch_size = compress_batch_size
 
     # ── public API ─────────────────────────────────────────────────────
 
     async def maybe_compress(self, history: list[Message]) -> CompressResult:
-        """检查是否需要压缩，是则执行。
+        """检查是否需要压缩，是则执行分批压缩。
 
         当压缩触发时，*history* 会被**原地修改**：已压缩的旧消息被移除，
         只保留最近 ``keep_recent_rounds`` 轮的内容。
@@ -112,6 +115,9 @@ class SummaryCompressor:
         多次调用是安全的 —— 如果历史不够长，直接返回 ``triggered=False``。
         """
         if not self._enabled:
+            return CompressResult()
+
+        if self._memory_sub_agent is None or self._batch_store is None:
             return CompressResult()
 
         # 1. 统计用户消息数
@@ -128,11 +134,8 @@ class SummaryCompressor:
             return CompressResult()
 
         # 3. 确定压缩范围
-        #    保留窗口起始 = 倒数 keep_recent_rounds 条用户消息的位置
         keep_from = user_indices[-self._keep_recent_rounds]
-
-        # 跳过 system prompt（history[0] 永远是 system）
-        compress_start = 1
+        compress_start = 1  # 跳过 system prompt
         compress_end = keep_from
 
         if compress_end <= compress_start:
@@ -143,46 +146,89 @@ class SummaryCompressor:
             1 for m in compress_portion if m.is_user()
         )
 
-        if user_rounds_in_compress < self._min_rounds_per_compress:
-            logger.debug(
-                "[Compressor] skipped: only {} user rounds to compress "
-                "(min {})",
-                user_rounds_in_compress,
-                self._min_rounds_per_compress,
-            )
+        if user_rounds_in_compress == 0:
             return CompressResult()
-        if self._memory_sub_agent is not None and self._summary_store is not None:
+
+        # 4. 分批处理
+        batches = self._memory_sub_agent._split_into_batches(
+            compress_portion, self._compress_batch_size
+        )
+
+        batch_files: list[str] = []
+        for batch_id, batch_messages, batch_user_rounds in batches:
             try:
-                sub_result = await self._memory_sub_agent.process(
-                    {"summary": compress_portion}
+                result = await self._memory_sub_agent._pipeline_batch_summary(
+                    conv=batch_messages, batch_id=batch_id, user_rounds=batch_user_rounds
                 )
-                summary_generated = sub_result.summary_generated
-                if summary_generated:
-                    logger.info(
-                        "[Compressor] summarized {} user rounds -> summary store",
-                        user_rounds_in_compress,
+                if result:
+                    path = self._batch_store.save_batch_summary(
+                        batch_id=batch_id,
+                        title=result.get("title", ""),
+                        user_rounds=batch_user_rounds,
+                        summary_text=result.get("summary_text", ""),
+                        time=result.get("time", ""),
+                        location=result.get("location", ""),
+                        characters=result.get("characters", []),
                     )
-                else:
-                    logger.warning(
-                        "[Compressor] summarization returned no output; "
-                        "compression proceeds without summary"
+                    batch_files.append(path.name)
+                    logger.info(
+                        "[Compressor] batch #{}: {} user rounds -> {}",
+                        batch_id, batch_user_rounds, path.name,
                     )
             except Exception as exc:
-                logger.warning("[Compressor] summarization failed: {}", exc)
+                logger.warning(
+                    "[Compressor] batch #{} failed: {}", batch_id, exc
+                )
 
-        # 5. 移除已压缩的消息
-        #    无论摘要是否成功都截断 —— 已窗口外的内容下次触发会重新摘要
+        # 5. 整体归纳（增量更新 overall.md）
+        overall_file: str | None = None
+        if not batch_files:
+            logger.warning(
+                "[Compressor] all batches failed; history will still be truncated"
+            )
+        else:
+            try:
+                existing_overall, last_batch_id = self._batch_store.load_overall()
+                new_batches = self._batch_store.get_new_content(last_batch_id)
+                if not new_batches:
+                    logger.info(
+                        "[Compressor] overall skipped: no new batches since last_batch_id={}",
+                        last_batch_id,
+                    )
+                else:
+                    overall_result = await self._memory_sub_agent._pipeline_overall_summary(
+                        new_batches, existing_overall
+                    )
+                    if overall_result:
+                        max_batch_id = self._batch_store._next_batch_id() - 1
+                        overall_path = self._batch_store.save_overall(
+                            content=overall_result.get("summary_text", ""),
+                            title=overall_result.get("title", ""),
+                            key_events=overall_result.get("key_events", []),
+                            last_batch_id=max_batch_id,
+                        )
+                        overall_file = overall_path.name
+                        logger.info(
+                            "[Compressor] overall.md updated (last_batch_id={})",
+                            max_batch_id,
+                        )
+            except Exception as exc:
+                logger.warning("[Compressor] overall summary failed: {}", exc)
+
+        # 6. 一次性截断历史
         del history[compress_start:compress_end]
 
         logger.info(
-            "[Compressor] trimmed {} user rounds from history "
-            "({} remaining)",
+            "[Compressor] compressed {} user rounds ({} remaining), {} batch files",
             user_rounds_in_compress,
             total_user_rounds - user_rounds_in_compress,
+            len(batch_files),
         )
 
         return CompressResult(
             triggered=True,
             user_rounds_compressed=user_rounds_in_compress,
-            summary_generated=summary_generated,
+            batch_files=batch_files or None,
+            overall_file=overall_file,
+            summary_generated=len(batch_files) > 0,
         )

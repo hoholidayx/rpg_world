@@ -12,8 +12,9 @@
       "enabled": true,
       "model": null,
       "summary": {
-        "compress_rounds": 10,
-        "keep_rounds": 5
+        "compress_batch_size": 10,
+        "keep_rounds": 5,
+        "compression_enabled": true
       },
       "recall": {
         "max_items": 5

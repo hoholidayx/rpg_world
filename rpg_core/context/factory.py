@@ -37,6 +37,7 @@ def build_rpg_context(
     from rpg_world.rpg_core.memory.persist_memory import PersistentMemoryStore
     from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
     from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
+    from rpg_world.rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_world.rpg_core.summary.store import SummaryStore
 
     config = RPGContextConfig()
@@ -48,6 +49,9 @@ def build_rpg_context(
     # ── Session-scoped Stores ─────────────────────────────────────────
     builder.set_summary_store(
         SummaryStore(rpg_settings.get_summary_path(session_id))
+    )
+    builder.set_batch_summary_store(
+        BatchSummaryStore(session_id)
     )
     builder.set_story_memory_store(
         StoryMemoryStore(rpg_settings.get_story_memory_path(session_id))

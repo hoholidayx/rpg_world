@@ -109,6 +109,7 @@ class RPGGameAgent:
         self._last_tool_records: list[ToolCallRecord] | None = None
         self._status_sub_agent: StatusSubAgent | None = None
         self._memory_sub_agent: MemorySubAgent | None = None
+        self._compressor: SummaryCompressor | None = None
         self._rpg_ctx: dict[str, object] = {}
         self._cmd_dispatcher: CommandDispatcher | None = None
 
@@ -241,6 +242,21 @@ class RPGGameAgent:
         if self._memory_sub_agent:
             await self._memory_sub_agent.maybe_auto_extract(self._session)
 
+        # ── 自动压缩 ──────────────────────────────────────────────────
+        if self._compressor:
+            try:
+                compress_result = await self._compressor.maybe_compress(
+                    self._session.history
+                )
+                if compress_result.triggered:
+                    logger.info(
+                        _TAG + " auto-compressed: {} rounds, {} batches",
+                        compress_result.user_rounds_compressed,
+                        len(compress_result.batch_files or []),
+                    )
+            except Exception as exc:
+                logger.warning(_TAG + " auto-compress failed: {}", exc)
+
         messages = self._build_transformed_context()
         if settings.verbose_logging:
             sys_msgs = sum(1 for m in messages if m.is_system())
@@ -368,6 +384,21 @@ class RPGGameAgent:
         # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
         if self._memory_sub_agent:
             await self._memory_sub_agent.maybe_auto_extract(self._session)
+
+        # ── 自动压缩 ──────────────────────────────────────────────────
+        if self._compressor:
+            try:
+                compress_result = await self._compressor.maybe_compress(
+                    self._session.history
+                )
+                if compress_result.triggered:
+                    logger.info(
+                        _TAG + " auto-compressed: {} rounds, {} batches",
+                        compress_result.user_rounds_compressed,
+                        len(compress_result.batch_files or []),
+                    )
+            except Exception as exc:
+                logger.warning(_TAG + " auto-compress failed: {}", exc)
 
         messages = self._build_transformed_context()
         schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
@@ -665,10 +696,22 @@ class RPGGameAgent:
             enabled=memory_cfg.get("enabled", True),
             summary_store=self._builder._summary_store if self._builder else None,
             story_store=self._builder._story_memory if self._builder else None,
+            batch_store=self._builder._batch_summary_store if self._builder else None,
             max_window_rounds=settings.memory_keep_rounds,
         )
         _memory_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
         self._memory_sub_agent.bind_context(_memory_ctx)
+
+        # ── SummaryCompressor ─────────────────────────────────────────
+        from rpg_world.rpg_core.summary.compressor import SummaryCompressor
+        self._compressor = SummaryCompressor(
+            batch_store=self._builder._batch_summary_store if self._builder else None,
+            memory_sub_agent=self._memory_sub_agent,
+            enabled=settings.memory_compression_enabled,
+            keep_recent_rounds=settings.memory_keep_rounds,
+            compression_threshold=settings.memory_keep_rounds,
+            compress_batch_size=settings.memory_compress_batch_size,
+        )
 
         # ── CommandDispatcher ─────────────────────────────────────────
         self._cmd_dispatcher = CommandDispatcher(agent=self)
