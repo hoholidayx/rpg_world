@@ -3,14 +3,9 @@ batch_id: {{ batch_id }}
 title: "{{ title | e }}"
 time: "{{ time | default('', true) | e }}"
 location: "{{ location | default('', true) | e }}"
-characters:
-{% for char in characters | default([], true) %}
-  - "{{ char | e }}"
-{% else %}
-  - "未知"
-{% endfor %}
-user_rounds: {{ user_rounds }}
-created_at: "{{ created_at }}"
+characters:{% for char in characters | default([], true) %}
+  - "{{ char | e }}"{% else %}
+  - "未知"{% endfor %}
 ---
 
 {% if summary_text %}{{ summary_text }}{% else %}{# 等待 LLM 填充摘要内容 #}{% endif %}

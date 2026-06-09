@@ -12,7 +12,7 @@
       "enabled": true,
       "model": null,
       "summary": {
-        "compress_batch_size": 10,
+        "compress_batch_size": 5,
         "keep_rounds": 5,
         "compression_enabled": true
       },

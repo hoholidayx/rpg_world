@@ -19,6 +19,14 @@ import asyncio
 import os
 import signal
 from collections.abc import Awaitable, Callable
+from pathlib import Path
+
+# tiktoken 首次加载需要从网络下载编码文件。
+# 设置缓存目录为项目 data/，避免因 /tmp 被清理导致启动卡死。
+os.environ.setdefault(
+    "TIKTOKEN_CACHE_DIR",
+    str(Path(__file__).resolve().parent / "data"),
+)
 
 from rpg_world.channels.config import settings as channels_settings
 from rpg_world.rpg_core.agent.manager import AgentManager

@@ -136,6 +136,8 @@ class CLIAdapter(ChannelAdapter):
                             f"\n[yellow]── round {event.round_index} ──[/yellow]",
                         )
                 elif event.kind == StreamEventKind.DONE:
+                    if event.content:
+                        self._console.print(event.content)
                     self._console.print("")
                     if event.usage:
                         self._console.print(format_event_stats(event))

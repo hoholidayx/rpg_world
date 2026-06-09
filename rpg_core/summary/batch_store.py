@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -51,7 +50,6 @@ class BatchSummaryStore:
         slug = self._slugify_title(title)
         file_name = f"{batch_id:03d}-{slug}.md"
         file_path = self._dir / file_name
-        created_at = datetime.now(timezone.utc).isoformat()
 
         from rpg_world.rpg_core.context.builder import render_jinja_template
 
@@ -62,8 +60,6 @@ class BatchSummaryStore:
             time=time,
             location=location,
             characters=characters or [],
-            user_rounds=user_rounds,
-            created_at=created_at,
             summary_text=summary_text,
         )
 
@@ -113,31 +109,11 @@ class BatchSummaryStore:
         last_batch_id: int = 0,
     ) -> Path:
         """覆盖写入 overall.md（含 front matter）。返回文件路径。"""
-        now = datetime.now(timezone.utc).isoformat()
-        created_at = now
-        existing_path = self.get_overall_path()
-        if existing_path.exists():
-            try:
-                existing_text = existing_path.read_text(encoding="utf-8")
-                existing_fm = self._parse_front_matter_dict(existing_text)
-                created_at = existing_fm.get("created_at", now)
-            except Exception:
-                pass
-
-        # 计算总压缩轮次
-        total_rounds = 0
-        for entry in self._index:
-            if entry.get("batch_id", 0) <= last_batch_id:
-                total_rounds += entry.get("user_rounds", 0)
-
         from rpg_world.rpg_core.context.builder import render_jinja_template
 
         body = render_jinja_template(
             "summary/overall.md.jinja",
             type="overall",
-            created_at=created_at,
-            updated_at=now,
-            total_compressed_rounds=total_rounds,
             last_batch_id=last_batch_id,
             title=title,
             summary_text=content,
@@ -235,8 +211,6 @@ class BatchSummaryStore:
                         "title": fm.get("title", ""),
                         "time": fm.get("time", ""),
                         "location": fm.get("location", ""),
-                        "user_rounds": int(fm.get("user_rounds", 0)),
-                        "created_at": fm.get("created_at", ""),
                         "body": body.strip(),
                         "file_path": path,
                     }
