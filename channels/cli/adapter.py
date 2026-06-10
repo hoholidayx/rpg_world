@@ -140,7 +140,7 @@ class CLIAdapter(ChannelAdapter):
                         self._console.print(event.content)
                     self._console.print("")
                     if event.usage:
-                        self._console.print(format_event_stats(event))
+                        self._console.print(format_event_stats(event), markup=False)
                 elif event.kind == StreamEventKind.ERROR:
                     self._console.print(
                         f"\n[red][stream error] {event.content}[/red]",
@@ -194,7 +194,7 @@ class CLIAdapter(ChannelAdapter):
 
         # ── LLM stats ───────────────────────────────────────
         if reply.stats:
-            self._console.print(format_turn_stats(reply.stats))
+            self._console.print(format_turn_stats(reply.stats), markup=False)
 
         # ── Reply text ──────────────────────────────────────
         self._console.print(f"\n{reply.text}\n")

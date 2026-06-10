@@ -126,7 +126,8 @@ async def run_chat_loop(
     while tool_call_count < max_calls:
         # ── LLM call with timing (convert Message → dict at provider boundary) ──
         t0 = time.monotonic()
-        result = await provider.chat([m.to_dict() for m in messages], tools=schemas)
+        msgs_dict = [m.to_dict() for m in messages]
+        result = await provider.chat(msgs_dict, tools=schemas)
         duration_ms = (time.monotonic() - t0) * 1000
 
         # Ensure result is an LLMResponse
@@ -249,8 +250,9 @@ async def run_chat_loop_stream(
 
         t0 = time.monotonic()
 
+        msgs_dict = [m.to_dict() for m in messages]
         try:
-            async for chunk in provider.chat_stream([m.to_dict() for m in messages], tools=schemas):
+            async for chunk in provider.chat_stream(msgs_dict, tools=schemas):
                 # ── text ────────────────────────────────────────────
                 if chunk.content:
                     yield AgentStreamEvent(

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,6 +42,32 @@ def _load() -> dict[str, object]:
         with _SETTINGS_PATH.open(encoding="utf-8") as f:
             return json.load(f)
     return {}
+
+
+@dataclass
+class MemorySettings:
+    """记忆系统配置（对应 settings.json 中 ``memory`` 节）。"""
+
+    enabled: bool = False
+    """是否启用向量记忆索引与检索。"""
+
+    embedding_model_path: str = ""
+    """嵌入模型 GGUF 文件路径（相对于工作区根目录），为空时禁用。"""
+
+    n_ctx: int = 32768
+    """嵌入模型的上下文窗口大小（token），默认 32K 与模型对齐。"""
+
+    n_gpu_layers: int = 0
+    """GPU 加速层数（0=纯 CPU，-1=全部 GPU）。"""
+
+    top_k: int = 5
+    """向量检索返回的最大结果数。"""
+
+    chunk_size: int = 2000
+    """单文件超过此字符数时分块。"""
+
+    chunk_overlap: int = 64
+    """分块重叠字符数。"""
 
 
 class Settings:
@@ -220,6 +247,36 @@ class Settings:
         sub-paths; avoid joining *session_dir* by hand.
         """
         return self.sessions_base_dir() / session_id
+
+    # ── 记忆配置 ────────────────────────────────────────────────
+
+    @property
+    def memory_settings(self) -> MemorySettings:
+        """记忆系统配置对象（向量检索等）。"""
+        raw = self._raw.get("memory", {})
+        embed_raw = raw.get("embedding_model_path", "")
+        if embed_raw:
+            p = Path(embed_raw)
+            if p.is_absolute():
+                embed_resolved = str(p)
+            else:
+                # 模型路径相对于包根（rpg_world/）解析，不经过 workspace
+                embed_resolved = str((_PACKAGE_ROOT / p).resolve())
+        else:
+            embed_resolved = embed_raw
+        return MemorySettings(
+            enabled=raw.get("enabled", False),
+            embedding_model_path=embed_resolved,
+            n_ctx=raw.get("n_ctx", 32768),
+            n_gpu_layers=raw.get("n_gpu_layers", 0),
+            top_k=raw.get("top_k", 5),
+            chunk_size=raw.get("chunk_size", 2000),
+            chunk_overlap=raw.get("chunk_overlap", 64),
+        )
+
+    def get_vector_db_path(self, session_id: str) -> Path:
+        """Return the ``memory_vectors.db`` path for the given session."""
+        return self.session_dir(session_id) / "memory_vectors.db"
 
     # ── Session-scoped directory getters ──────────────────────────────
 

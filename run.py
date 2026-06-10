@@ -28,8 +28,20 @@ os.environ.setdefault(
     str(Path(__file__).resolve().parent / "data"),
 )
 
+from loguru import logger as _loguru_logger
+
 from rpg_world.channels.config import settings as channels_settings
 from rpg_world.rpg_core.agent.manager import AgentManager
+
+
+# ── 日志配置（所有模块 INFO+ 输出到 stderr） ─────────────────────────
+_loguru_logger.remove()
+_loguru_logger.add(
+    sink=lambda msg: __import__("sys").stderr.write(msg),
+    format="{time:HH:mm:ss} | {level:<7} | {name}:{line} - {message}",
+    level="INFO",
+    colorize=False,
+)
 
 
 # ── 模块启动处理器注册表 ──────────────────────────────────────────────────

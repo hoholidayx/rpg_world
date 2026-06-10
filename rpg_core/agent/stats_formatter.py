@@ -46,9 +46,9 @@ def _get_missed_tokens(usage) -> int:
 
 
 def _format_cache_info(prompt: int, cached: int, missed: int) -> str:
-    """Return a compact cache hit/miss summary string."""
+    """Return a compact cache hit/miss summary string — always shown."""
     parts: list[str] = []
-    if cached:
+    if prompt:
         rate = cached / prompt * 100
         parts.append(f"cache: {cached:,} ({rate:.0f}%)")
     if missed:
@@ -63,12 +63,43 @@ def _format_cache_info(prompt: int, cached: int, missed: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def format_turn_stats(stats: TurnStats) -> str:
-    """Format a ``TurnStats`` object into a human-readable string.
+def _build_block(
+    title: str, calls: list, indent: int = 2,
+) -> list[str]:
+    """Build a formatted block (main loop or sub-agent) — shared by both formatters."""
+    lines: list[str] = []
+    prompt = sum(c.usage.prompt_tokens for c in calls if c.usage)
+    comp = sum(c.usage.completion_tokens for c in calls if c.usage)
+    cached = sum(_get_cache_hit(c.usage) for c in calls if c.usage)
+    missed = sum(_get_missed_tokens(c.usage) for c in calls)
+    total = prompt + comp
+    dur = sum(c.duration_ms for c in calls)
+    pad = " " * indent
+    lines.append(
+        f"{pad}{title} ({len(calls)} call(s)): "
+        f"prompt {prompt:,} + completion {comp:,} = {total:,} tokens"
+        f"{_format_cache_info(prompt, cached, missed)}"
+        f"  |  {dur:.0f}ms"
+    )
+    for i, c in enumerate(calls):
+        u = c.usage
+        if not u:
+            continue
+        p = u.prompt_tokens
+        co = u.completion_tokens
+        ch = _get_cache_hit(u)
+        mi = _get_missed_tokens(u)
+        label = c.source if c.source != "chat_loop" else str(i + 1)
+        lines.append(
+            f"{pad}  [{label}] prompt {p:,} + completion {co:,} = {p + co:,} tokens"
+            f"{_format_cache_info(p, ch, mi)}"
+            f"  |  {c.duration_ms:.0f}ms  {c.model}"
+        )
+    return lines
 
-    Replaces ``_print_stats()`` in ``cli.py``.  Returns a multi-line string
-    with the LLM stats panel (same structure as the CLI output).
-    """
+
+def format_turn_stats(stats: TurnStats) -> str:
+    """Format a ``TurnStats`` into a readable multi-line string."""
     lines: list[str] = []
     lines.append("  " + "─" * 50)
     lines.append("  LLM Stats")
@@ -77,58 +108,9 @@ def format_turn_stats(stats: TurnStats) -> str:
     sub_calls = stats.sub_agent_calls
 
     if chat_calls:
-        chat_prompt = sum(c.usage.prompt_tokens for c in chat_calls if c.usage)
-        chat_comp = sum(c.usage.completion_tokens for c in chat_calls if c.usage)
-        chat_cached = sum(_get_cache_hit(c.usage) for c in chat_calls if c.usage)
-        chat_missed = sum(_get_missed_tokens(c.usage) for c in chat_calls)
-        chat_total = chat_prompt + chat_comp
-        chat_dur = sum(c.duration_ms for c in chat_calls)
-        lines.append(
-            f"    Main loop ({len(chat_calls)} call(s)): "
-            f"prompt {chat_prompt:,} + completion {chat_comp:,} = total {chat_total:,} tokens"
-            f"{_format_cache_info(chat_prompt, chat_cached, chat_missed)}"
-            f"  |  {chat_dur:.0f}ms"
-        )
-        for i, c in enumerate(chat_calls):
-            u = c.usage
-            if not u:
-                continue
-            prompt_n = u.prompt_tokens
-            comp_n = u.completion_tokens
-            cached_n = _get_cache_hit(u)
-            missed_n = _get_missed_tokens(u)
-            lines.append(
-                f"      [{i+1}] prompt {prompt_n:,} + completion {comp_n:,} = {prompt_n + comp_n:,} tokens"
-                f"{_format_cache_info(prompt_n, cached_n, missed_n)}"
-                f"  |  {c.duration_ms:.0f}ms  [model: {c.model}]"
-            )
-
+        lines.extend(_build_block("Main loop", chat_calls))
     if sub_calls:
-        sub_prompt = sum(c.usage.prompt_tokens for c in sub_calls if c.usage)
-        sub_comp = sum(c.usage.completion_tokens for c in sub_calls if c.usage)
-        sub_cached = sum(_get_cache_hit(c.usage) for c in sub_calls if c.usage)
-        sub_missed = sum(_get_missed_tokens(c.usage) for c in sub_calls)
-        sub_total = sub_prompt + sub_comp
-        sub_dur = sum(c.duration_ms for c in sub_calls)
-        lines.append(
-            f"    Sub-agent ({len(sub_calls)} call(s)): "
-            f"prompt {sub_prompt:,} + completion {sub_comp:,} = total {sub_total:,} tokens"
-            f"{_format_cache_info(sub_prompt, sub_cached, sub_missed)}"
-            f"  |  {sub_dur:.0f}ms"
-        )
-        for c in sub_calls:
-            u = c.usage
-            if not u:
-                continue
-            prompt_n = u.prompt_tokens
-            comp_n = u.completion_tokens
-            cached_n = _get_cache_hit(u)
-            missed_n = _get_missed_tokens(u)
-            lines.append(
-                f"      [{c.source}] prompt {prompt_n:,} + completion {comp_n:,} = {prompt_n + comp_n:,} tokens"
-                f"{_format_cache_info(prompt_n, cached_n, missed_n)}"
-                f"  |  {c.duration_ms:.0f}ms  [model: {c.model}]"
-            )
+        lines.extend(_build_block("Sub-agent", sub_calls))
 
     # 合计
     lines.append("  " + "─" * 50)
@@ -141,19 +123,15 @@ def format_turn_stats(stats: TurnStats) -> str:
         f"{_format_cache_info(total_pt, total_cached, total_missed)}"
         f"  |  {stats.total_duration_ms:.0f}ms"
     )
+    first_call = next((c for c in stats.calls if c.model), None)
+    if first_call:
+        lines.append(f"  Session model: {first_call.model}")
     lines.append("")
-
     return "\n".join(lines)
 
 
 def format_event_stats(event: AgentStreamEvent) -> str:
-    """Format LLM usage from a DONE ``AgentStreamEvent`` into a human-readable string.
-
-    Groups calls by source (chat_loop vs sub-agents), shows per-call
-    detail, and computes cache hit rate percentage.
-
-    Replaces ``_print_event_stats()`` in ``cli.py``.
-    """
+    """Format LLM usage from a DONE ``AgentStreamEvent`` — identical structure to ``format_turn_stats``."""
     if not event.usage:
         return ""
 
@@ -165,85 +143,38 @@ def format_event_stats(event: AgentStreamEvent) -> str:
     if stats:
         chat_calls = stats.chat_loop_calls
         sub_calls = stats.sub_agent_calls
-
         if chat_calls:
-            chat_prompt = sum(c.usage.prompt_tokens for c in chat_calls if c.usage)
-            chat_comp = sum(c.usage.completion_tokens for c in chat_calls if c.usage)
-            chat_cached = sum(_get_cache_hit(c.usage) for c in chat_calls if c.usage)
-            chat_missed = sum(_get_missed_tokens(c.usage) for c in chat_calls)
-            chat_total = chat_prompt + chat_comp
-            chat_dur = sum(c.duration_ms for c in chat_calls)
-            lines.append(
-                f"  Main loop ({len(chat_calls)} call(s)): "
-                f"prompt {chat_prompt:,} + completion {chat_comp:,} = {chat_total:,} tokens"
-                f"{_format_cache_info(chat_prompt, chat_cached, chat_missed)}"
-                f"  |  {chat_dur:.0f}ms"
-            )
-            for i, c in enumerate(chat_calls):
-                u = c.usage
-                if not u:
-                    continue
-                p = u.prompt_tokens
-                co = u.completion_tokens
-                cached = _get_cache_hit(u)
-                missed = _get_missed_tokens(u)
-                lines.append(
-                    f"    [{i+1}] prompt {p:,} + completion {co:,} = {p+co:,} tokens"
-                    f"{_format_cache_info(p, cached, missed)}"
-                    f"  |  {c.duration_ms:.0f}ms  {c.model}"
-                )
-
+            lines.extend(_build_block("Main loop", chat_calls))
         if sub_calls:
-            sub_prompt = sum(c.usage.prompt_tokens for c in sub_calls if c.usage)
-            sub_comp = sum(c.usage.completion_tokens for c in sub_calls if c.usage)
-            sub_cached = sum(_get_cache_hit(c.usage) for c in sub_calls if c.usage)
-            sub_missed = sum(_get_missed_tokens(c.usage) for c in sub_calls)
-            sub_total = sub_prompt + sub_comp
-            sub_dur = sum(c.duration_ms for c in sub_calls)
-            lines.append(
-                f"  Sub-agent ({len(sub_calls)} call(s)): "
-                f"prompt {sub_prompt:,} + completion {sub_comp:,} = {sub_total:,} tokens"
-                f"{_format_cache_info(sub_prompt, sub_cached, sub_missed)}"
-                f"  |  {sub_dur:.0f}ms"
-            )
-            for c in sub_calls:
-                u = c.usage
-                if not u:
-                    continue
-                p = u.prompt_tokens
-                co = u.completion_tokens
-                cached = _get_cache_hit(u)
-                missed = _get_missed_tokens(u)
-                lines.append(
-                    f"    [{c.source}] prompt {p:,} + completion {co:,} = {p+co:,} tokens"
-                    f"{_format_cache_info(p, cached, missed)}"
-                    f"  |  {c.duration_ms:.0f}ms  {c.model}"
-                )
+            lines.extend(_build_block("Sub-agent", sub_calls))
     else:
-        # Fallback: just show aggregate usage
         u = event.usage
         cached = _get_cache_hit(u)
-        rate = (cached / u.prompt_tokens * 100) if u.prompt_tokens else 0
-        cache_str = f", cache: {cached:,} ({rate:.0f}%)" if cached else ""
-        lines.append(f"    prompt: {u.prompt_tokens:,}{cache_str}")
-        lines.append(f"    completion: {u.completion_tokens:,}")
-        lines.append(f"    total: {u.total_tokens:,}")
+        missed = _get_missed_tokens(u)
+        lines.append(
+            f"    prompt {u.prompt_tokens:,} + completion {u.completion_tokens:,}"
+            f" = {u.total_tokens:,}{_format_cache_info(u.prompt_tokens, cached, missed)}"
+        )
 
-    # ── Total summary with cache rate ──────────────────────────────
+    # 合计
     lines.append("  " + "─" * 50)
-    u = event.usage
-    total_cached = u.cached_tokens if u else 0
-    total_prompt = u.prompt_tokens if u else 0
-    total_comp = u.completion_tokens if u else 0
-    total_tokens = u.total_tokens if u else 0
-    cache_rate = (total_cached / total_prompt * 100) if total_prompt else 0
-    cache_str = f"  |  cache: {total_cached:,} ({cache_rate:.0f}%)" if total_cached else ""
+    if stats:
+        total_pt = stats.total_prompt_tokens
+        total_ct = stats.total_completion_tokens
+        total_cached = stats.total_cached_tokens
+        total_missed = sum(_get_missed_tokens(c.usage) for c in stats.calls)
+    else:
+        u = event.usage
+        total_pt = u.prompt_tokens if u else 0
+        total_ct = u.completion_tokens if u else 0
+        total_cached = u.cached_tokens if u else 0
+        total_missed = total_pt - total_cached if total_pt else 0
     lines.append(
-        f"  Total: prompt {total_prompt:,} + completion {total_comp:,} = {total_tokens:,} tokens"
-        f"{cache_str}  |  {event.duration_ms:.0f}ms"
+        f"  Total: prompt {total_pt:,} + completion {total_ct:,} = {total_pt + total_ct:,} tokens"
+        f"{_format_cache_info(total_pt, total_cached, total_missed)}"
+        f"  |  {event.duration_ms:.0f}ms"
     )
     if event.model:
         lines.append(f"  Session model: {event.model}")
     lines.append("")
-
     return "\n".join(lines)

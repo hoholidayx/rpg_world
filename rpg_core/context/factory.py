@@ -56,10 +56,26 @@ def build_rpg_context(
     builder.set_story_memory_store(
         StoryMemoryStore(rpg_settings.get_story_memory_path(session_id))
     )
-    builder.set_recalled_memory_store(RecalledMemoryStore())
+    recalled_store = RecalledMemoryStore()
+    builder.set_recalled_memory_store(recalled_store)
     builder.set_persistent_memory_store(
         PersistentMemoryStore(rpg_settings.get_persistent_memory_path(session_id))
     )
+
+    # ── MemoryManager（封装向量记忆检索） ─────────────────────────
+    memory_manager: object | None = None
+
+    try:
+        from rpg_world.rpg_core.memory.memory_manager import MemoryManager
+
+        memory_manager = MemoryManager.create(
+            recalled_store=recalled_store,  # type: ignore[arg-type]
+            session_dir=rpg_settings.session_dir(session_id),
+            get_vector_db_path=rpg_settings.get_vector_db_path(session_id),
+            mem_cfg=rpg_settings.memory_settings,
+        )
+    except Exception as exc:
+        logger.warning("[RPG World] MemoryManager creation failed: {}", exc)
 
     # ── Cross-session Managers (unchanged paths) ──────────────────────
     character_mgr: CharacterManager | None = None
@@ -106,4 +122,5 @@ def build_rpg_context(
         "lorebook_mgr": lorebook_mgr,
         "status_mgr": status_mgr,
         "scene_tracker": scene_tracker,
+        "memory_manager": memory_manager,
     }

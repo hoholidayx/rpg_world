@@ -31,5 +31,14 @@
     }
   },
   "character_path": "character",
-  "lorebook_path": "lorebook"
+  "lorebook_path": "lorebook",
+  "memory": {
+    "enabled": true,
+    "embedding_model_path": "data/models/Qwen3-Embedding-0.6B-f16.gguf",
+    "n_ctx": 32768,
+    "n_gpu_layers": 0,
+    "top_k": 2,
+    "chunk_size": 2000,
+    "chunk_overlap": 64
+  }
 }

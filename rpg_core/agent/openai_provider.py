@@ -45,8 +45,8 @@ def _build_usage(raw, raw_dict: dict[str, object] | None) -> LLMUsage | None:
             hit = getattr(raw.prompt_tokens_details, "cached_tokens", 0) or 0
         miss = 0
 
-    if settings.verbose_logging and raw_dict:
-        logger.debug("[OpenAIProvider] raw usage: {}", raw_dict)
+    if raw_dict:
+        logger.info("[OpenAIProvider] raw usage: {}", raw_dict)
 
     return LLMUsage(
         prompt_tokens=raw.prompt_tokens or 0,

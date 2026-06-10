@@ -44,10 +44,12 @@ from rpg_world.rpg_core.scene import SceneTracker
 from rpg_world.rpg_core.session import SessionManager
 from rpg_world.rpg_core.settings import settings
 from rpg_world.rpg_core.utils.watcher import get_watcher
+from rpg_world.rpg_core.summary.compressor import SummaryCompressor
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.character.manager import CharacterManager
     from rpg_world.rpg_core.lorebook.manager import LorebookManager
+    from rpg_world.rpg_core.memory.memory_manager import MemoryManager
     from rpg_world.rpg_core.status.manager import StatusManager
 
 _TAG = "[MainAgent]"
@@ -92,7 +94,6 @@ class RPGGameAgent:
         self._extra_tools = tools or []
         self._token_counter = token_counter or TiktokenTokenCounter()
 
-        # Lazy-init
         self._initialized: bool = False
         self._builder: RPGContextBuilder | None = None
         self._character_mgr: CharacterManager | None = None
@@ -110,8 +111,12 @@ class RPGGameAgent:
         self._status_sub_agent: StatusSubAgent | None = None
         self._memory_sub_agent: MemorySubAgent | None = None
         self._compressor: SummaryCompressor | None = None
-        self._rpg_ctx: dict[str, object] = {}
         self._cmd_dispatcher: CommandDispatcher | None = None
+        self._memory_manager: MemoryManager | None = None
+        self._rpg_ctx: dict[str, object] = {}
+
+        # 会话确定后立即初始化 RPG context managers/stores（同步，不等第一句消息）
+        self._refresh_rpg_context()
 
         # 消息队列（初始化时创建，_ensure_initialized 末尾启动消费者）
         self._queue: asyncio.Queue[QueueItem] = asyncio.Queue()
@@ -238,6 +243,13 @@ class RPGGameAgent:
 
         self._session.append(Role.USER, stored_input)
 
+        # ── 记忆检索 ────────────────────────────────────────────────
+        if self._memory_manager:
+            try:
+                self._memory_manager.recall(user_input)
+            except Exception as exc:
+                logger.warning(_TAG + " memory recall failed: {}", exc)
+
         # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
         if self._memory_sub_agent:
             await self._memory_sub_agent.maybe_auto_extract(self._session)
@@ -282,7 +294,7 @@ class RPGGameAgent:
         turn_stats.finished_at = _time.monotonic()
 
         # ── 日志摘要 ────────────────────────────────────────────────
-        if settings.verbose_logging and turn_stats.calls:
+        if turn_stats.calls:
             logger.info(
                 _TAG + " turn stats: {}",
                 turn_stats.summary(),
@@ -371,6 +383,20 @@ class RPGGameAgent:
                     [r["tool_name"] for r in sub_result.records],
                 )
                 status_records = sub_result.records
+                # 将 sub-agent 工具调用作为流事件发射，让 CLI 实时显示
+                for r in status_records:
+                    await event_queue.put(AgentStreamEvent(
+                        kind=StreamEventKind.TOOL_CALL,
+                        tool_name=r["tool_name"],
+                        tool_arguments=str(r.get("arguments", "")),
+                        content="",
+                    ))
+                    await event_queue.put(AgentStreamEvent(
+                        kind=StreamEventKind.TOOL_RESULT,
+                        tool_name=r["tool_name"],
+                        tool_result=str(r.get("result", "")),
+                        tool_result_preview=str(r.get("result", ""))[:200],
+                    ))
 
         # ── Build scene context and embed into stored user message ──
         scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
@@ -380,6 +406,13 @@ class RPGGameAgent:
             stored_input = user_input
 
         self._session.append(Role.USER, stored_input)
+
+        # ── 记忆检索 ────────────────────────────────────────────────
+        if self._memory_manager:
+            try:
+                self._memory_manager.recall(user_input)
+            except Exception as exc:
+                logger.warning(_TAG + " memory recall failed: {}", exc)
 
         # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
         if self._memory_sub_agent:
@@ -531,6 +564,8 @@ class RPGGameAgent:
         """
         self._session_id = session_id
         self._refresh_rpg_context()
+        if self._memory_manager:
+            self._memory_manager.init()
         self._session.switch_to(session_id)
         self._setup_tool_registry()
         logger.info("[MainAgent] switched to session: {}", session_id)
@@ -611,6 +646,7 @@ class RPGGameAgent:
         self._lorebook_mgr = self._rpg_ctx["lorebook_mgr"]
         self._status_mgr = self._rpg_ctx["status_mgr"]
         self._scene_tracker = self._rpg_ctx.get("scene_tracker")
+        self._memory_manager = self._rpg_ctx.get("memory_manager")
 
         # 刷新 SubAgentContext——每个子 Agent 独立实例避免系统提示互相覆盖
         if self._status_sub_agent is not None:
@@ -656,11 +692,12 @@ class RPGGameAgent:
         if self._initialized:
             return
 
-        # 构建 RPG context 管理器（与 reload 共用同一套逻辑）
-        self._refresh_rpg_context()
-
         self._system_prompt = PromptManager(self._world_name).system_prompt
         self._session.load()
+
+        # ── MemoryManager 异步初始化（索引 + FileWatcher） ─────────
+        if self._memory_manager:
+            self._memory_manager.init()
 
         self._provider = OpenAIProvider(
             model=self._model,
@@ -703,7 +740,6 @@ class RPGGameAgent:
         self._memory_sub_agent.bind_context(_memory_ctx)
 
         # ── SummaryCompressor ─────────────────────────────────────────
-        from rpg_world.rpg_core.summary.compressor import SummaryCompressor
         self._compressor = SummaryCompressor(
             batch_store=self._builder._batch_summary_store if self._builder else None,
             memory_sub_agent=self._memory_sub_agent,

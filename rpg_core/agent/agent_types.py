@@ -184,13 +184,13 @@ class TurnStats:
 
     def summary(self) -> str:
         """返回一行摘要文本。"""
+        cached = self.total_cached_tokens
+        missed = self.total_prompt_tokens - cached
+        cache_str = f" | cache: {cached:,} hit / {missed:,} miss ({cached/(cached+missed)*100:.0f}%)" if (cached + missed) else ""
         parts = [
             f"{len(self.calls)} LLM call(s)",
-            f"{self.total_prompt_tokens}p + {self.total_completion_tokens}c = {self.total_tokens}t",
+            f"{self.total_prompt_tokens}p + {self.total_completion_tokens}c = {self.total_tokens}t{cache_str}",
         ]
-        cached = self.total_cached_tokens
-        if cached:
-            parts.append(f"cache: {cached} hit")
         parts.append(f"{self.total_duration_ms:.0f}ms")
         return " | ".join(parts)
 
