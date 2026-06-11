@@ -98,6 +98,11 @@ cfg.enabled_module_names  # 所有已启用的模块名列表
 }
 ```
 
+## Session ID 规则
+
+`session_id` 只能包含英文字母、数字和下划线，规则为 `^[A-Za-z0-9_]+$`。
+它会直接映射到 `sessions/{session_id}/` 目录，因此默认渠道会话名使用下划线格式，例如 `cli_direct`、`telegram_12345`。
+
 ## 测试
 
 所有测试 mock LLM 调用，无需 API key：

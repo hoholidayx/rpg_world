@@ -106,7 +106,7 @@ class TelegramAdapter(ChannelAdapter):
         """Telegram 流式增量发送。
 
         第 1 条 delta 发新消息，后续 delta 通过 ``edit_message_text``
-        增量更新，参考 nanobot telegram channel 的 \_StreamBuf 模式。
+        增量更新，参考 nanobot telegram channel 的 StreamBuf 模式。
 
         Parameters
         ----------

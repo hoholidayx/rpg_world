@@ -16,7 +16,6 @@ Session-scoped data paths are deterministic (not user-configurable):
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -325,30 +324,6 @@ class Settings:
         if not sdir.is_dir():
             return []
         return sorted(sdir.iterdir())
-
-    # ── Session lifecycle ─────────────────────────────────────────────
-
-    def list_sessions(self) -> list[str]:
-        """Discover available session IDs under the active workspace."""
-        sdir = self.sessions_base_dir()
-        if not sdir.is_dir():
-            return []
-        return sorted(
-            d.name for d in sdir.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
-        )
-
-    def create_session(self, session_id: str) -> None:
-        """Create a new session directory. Raises ``FileExistsError`` if exists."""
-        sdir = self.session_dir(session_id)
-        sdir.mkdir(parents=True, exist_ok=False)
-
-    def delete_session(self, session_id: str) -> None:
-        """Delete a session directory and all its contents."""
-        sdir = self.session_dir(session_id)
-        if sdir.exists():
-            shutil.rmtree(sdir)
-
 
 # Singleton
 settings = Settings()

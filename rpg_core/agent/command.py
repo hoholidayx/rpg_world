@@ -42,9 +42,9 @@ async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
 
 async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
     """列出所有会话。"""
-    from rpg_world.rpg_core.settings import settings
+    from rpg_world.rpg_core.session import SessionManager
 
-    sessions = settings.list_sessions()
+    sessions = SessionManager.list_sessions()
     current = agent._session_id
     lines = [f"会话列表 ({len(sessions)}):"]
     for s in sessions:
@@ -55,26 +55,32 @@ async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
 
 async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
     """创建新会话。"""
-    from rpg_world.rpg_core.settings import settings
+    from rpg_world.rpg_core.session import SessionManager
 
     if not args:
         return "[错误] 需要提供 session-id: /session-create <id>"
     sid = args[0]
     try:
-        settings.create_session(sid)
-        return f"[会话已创建: {sid}]"
+        SessionManager.create(sid)
+    except ValueError as exc:
+        return f"[错误] {exc}"
     except FileExistsError:
         return f"[会话已存在: {sid}]"
+    return f"[会话已创建: {sid}]"
 
 
 async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
     """切换到指定会话。"""
-    from rpg_world.rpg_core.settings import settings
+    from rpg_world.rpg_core.session import SessionManager
 
     if not args:
         return "[错误] 需要提供 session-id: /session-switch <id>"
     sid = args[0]
-    if sid not in settings.list_sessions():
+    try:
+        SessionManager.validate_session_id(sid)
+    except ValueError as exc:
+        return f"[错误] {exc}"
+    if sid not in SessionManager.list_sessions():
         return f"[会话不存在: {sid}]"
     await agent.switch_session(sid)
     return f"[已切换到会话: {sid}]"

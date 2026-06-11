@@ -4,15 +4,24 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.session import SessionManager
 
 router = APIRouter(tags=["session"])
+
+
+def _require_valid_session_id(session_id: str, field_name: str = "session_id") -> str:
+    if not session_id:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    try:
+        return SessionManager.validate_session_id(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/workspaces/active/sessions")
 def list_sessions() -> dict:
     """Return all session IDs for the active workspace."""
-    return {"sessions": settings.list_sessions()}
+    return {"sessions": SessionManager.list_sessions()}
 
 
 @router.post("/workspaces/active/sessions")
@@ -22,14 +31,10 @@ def create_session(body: dict) -> dict:
     The session directory is created under ``sessions/{session_id}/``.
     No data is populated — the session starts empty.
     """
-    session_id = body.get("session_id", "").strip()
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id is required")
-    if "/" in session_id or "\\" in session_id or ".." in session_id:
-        raise HTTPException(status_code=400, detail="Invalid session_id")
+    session_id = _require_valid_session_id(body.get("session_id", "").strip())
 
     try:
-        settings.create_session(session_id)
+        SessionManager.create(session_id)
     except FileExistsError:
         raise HTTPException(
             status_code=409,
@@ -42,11 +47,12 @@ def create_session(body: dict) -> dict:
 @router.delete("/workspaces/active/sessions/{session_id}")
 def delete_session(session_id: str) -> dict:
     """Delete a session and all its data."""
-    available = set(settings.list_sessions())
+    session_id = _require_valid_session_id(session_id)
+    available = set(SessionManager.list_sessions())
     if session_id not in available:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
 
-    settings.delete_session(session_id)
+    SessionManager.delete(session_id)
     # Clear cached manager if any
     from rpg_world.api.deps import _session_managers
 
@@ -58,11 +64,11 @@ def delete_session(session_id: str) -> dict:
 @router.post("/workspaces/active/sessions/{session_id}/clone")
 def clone_session(session_id: str, body: dict) -> dict:
     """Clone a session's data to a new session ID."""
-    import shutil
-
-    target_id = body.get("target_session_id", "").strip()
-    if not target_id:
-        raise HTTPException(status_code=400, detail="target_session_id is required")
+    session_id = _require_valid_session_id(session_id)
+    target_id = _require_valid_session_id(
+        body.get("target_session_id", "").strip(),
+        field_name="target_session_id",
+    )
 
     src_dir = settings.session_dir(session_id)
     dst_dir = settings.session_dir(target_id)
@@ -78,7 +84,12 @@ def clone_session(session_id: str, body: dict) -> dict:
             detail=f"Target session {target_id!r} already exists",
         )
 
-    dst_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src_dir, dst_dir)
+    try:
+        SessionManager.clone(session_id, target_id)
+    except FileExistsError:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Target session {target_id!r} already exists",
+        )
 
     return {"status": "cloned", "source": session_id, "target": target_id}

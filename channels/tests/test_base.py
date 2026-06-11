@@ -49,8 +49,8 @@ class TestChannelAdapter:
 
     async def test_get_session_id(self):
         adapter = RecordingAdapter()
-        assert adapter.get_session_id("12345") == "recording:12345"
-        assert adapter.get_session_id("abc") == "recording:abc"
+        assert adapter.get_session_id("12345") == "recording_12345"
+        assert adapter.get_session_id("abc") == "recording_abc"
 
     async def test_start_stop_lifecycle(self):
         adapter = RecordingAdapter()
@@ -103,7 +103,7 @@ class TestChannelAdapter:
         adapter.bind_agent(agent)
 
         await adapter._handle_message("chat999", "user1", "hi")
-        assert agent.current_session == "recording:chat999"
+        assert agent.current_session == "recording_chat999"
 
     async def test_stream_multiple_deltas(self):
         """多段流式内容应该逐段通过 send_delta 推送。"""

@@ -76,7 +76,7 @@ class AgentManager:
         ----------
         session_id:
             初始化时使用的 session ID。默认为 ``"default"``，
-            调用方应根据实际使用的 session 传入（如 ``"cli:direct"``）。
+            调用方应根据实际使用的 session 传入（如 ``"cli_direct"``）。
         """
         if not cls._initialized:
             agent = cls.get_or_create(session_id=session_id)

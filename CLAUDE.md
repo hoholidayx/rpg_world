@@ -18,7 +18,7 @@ uv run uvicorn rpg_world.api.main:app --reload --reload-dir rpg_world --host 127
 cd rpg_world/webui && npx vite
 
 # 独立 CLI（无 API / Telegram，直接 LLM 对话）
-uv run python -m rpg_world.channels.cli.repl [--model gpt-4o] [--session-id mygame]
+uv run python -m rpg_world.channels.cli.repl [--model gpt-4o] [--session-id mygame_01]
 
 # 验证导入
 uv run python3 -c "from rpg_world.rpg_core.status import StatusManager; print('ok')"
@@ -152,7 +152,7 @@ channels_settings.enabled_module_names  # 所有已启用模块列表
 ```python
 from rpg_world.rpg_core.agent.manager import AgentManager
 
-agent = AgentManager.get_or_create(session_id="mygame")
+agent = AgentManager.get_or_create(session_id="mygame_01")
 ```
 
 所有模块通过同一个 `AgentManager` 获取 agent，确保 FileWatcher 只初始化一次、
@@ -277,6 +277,8 @@ POST   /api/v1/chat/command          — 执行斜杠命令
 - `rpg_summaries.json` — 对话摘要（FileWatcher）
 
 所有会话数据文件集中在 `{workspace_root}/sessions/{session_id}/` 下。
+
+`session_id` 只能使用英文字母、数字和下划线，规则为 `^[A-Za-z0-9_]+$`。默认渠道映射示例：`cli_direct`、`telegram_12345`。
 
 ### Loader + Manager + BaseManager 模式
 

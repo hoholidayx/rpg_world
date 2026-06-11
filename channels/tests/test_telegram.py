@@ -35,8 +35,8 @@ class TestTelegramAdapter:
     """TelegramAdapter 核心功能测试。"""
 
     async def test_get_session_id(self, adapter: TelegramAdapter):
-        assert adapter.get_session_id("12345") == "telegram:12345"
-        assert adapter.get_session_id("abc") == "telegram:abc"
+        assert adapter.get_session_id("12345") == "telegram_12345"
+        assert adapter.get_session_id("abc") == "telegram_abc"
 
     async def test_default_streaming_flag(self):
         a = TelegramAdapter(token="fake:token")

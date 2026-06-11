@@ -1,6 +1,8 @@
-"""SessionManager — owns conversation history and session metadata for one session.
+"""SessionManager — session lifecycle + conversation history for one session.
 
 Responsibilities:
+  - Session ID validation
+  - Session lifecycle: create / delete / list / clone
   - In-memory ``_history`` list
   - Persistence to ``history.jsonl`` and ``history_cold.jsonl``
   - ``session.json`` metadata file read/write (lazy-created)
@@ -14,6 +16,8 @@ In-memory ``_history`` is always updated regardless of the flag.
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,10 +37,25 @@ _META_UPDATED_AT = "updated_at"
 _META_MESSAGE_COUNT = "message_count"
 _META_COMPACTED_ROUNDS = "compacted_rounds"
 _META_LAST_STORY_RP_HIS_ID = "last_story_rp_his_id"
+_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 class SessionManager:
     """Owns conversation history and session metadata for one session."""
+
+    # ── Session ID validation (static) ─────────────────────────────────
+
+    @staticmethod
+    def is_valid_session_id(session_id: str) -> bool:
+        """Return whether *session_id* matches the repository naming rule."""
+        return bool(_SESSION_ID_PATTERN.fullmatch(session_id))
+
+    @staticmethod
+    def validate_session_id(session_id: str) -> str:
+        """Validate *session_id* and return it unchanged on success."""
+        if not SessionManager.is_valid_session_id(session_id):
+            raise ValueError("session_id must match ^[A-Za-z0-9_]+$")
+        return session_id
 
     def __init__(
         self,
@@ -146,6 +165,51 @@ class SessionManager:
         )
         self._update_meta(message_count=len(self._history))
         return removed
+
+    # ── Session lifecycle (class methods) ──────────────────────────────
+
+    @classmethod
+    def create(cls, session_id: str) -> None:
+        """Create a new session directory. Raises ``FileExistsError`` if exists."""
+        cls.validate_session_id(session_id)
+        sdir = settings.session_dir(session_id)
+        sdir.mkdir(parents=True, exist_ok=False)
+
+    @classmethod
+    def delete(cls, session_id: str) -> None:
+        """Delete a session directory and all its contents."""
+        sdir = settings.session_dir(session_id)
+        if sdir.exists():
+            shutil.rmtree(sdir)
+
+    @classmethod
+    def list_sessions(cls) -> list[str]:
+        """Discover available session IDs under the active workspace."""
+        sdir = settings.sessions_base_dir()
+        if not sdir.is_dir():
+            return []
+        return sorted(
+            d.name for d in sdir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        )
+
+    @classmethod
+    def clone(cls, source_id: str, target_id: str) -> None:
+        """Clone a session's data to a new session ID.
+
+        Raises ``FileNotFoundError`` if source does not exist,
+        ``FileExistsError`` if target already exists.
+        """
+        cls.validate_session_id(source_id)
+        cls.validate_session_id(target_id)
+        src_dir = settings.session_dir(source_id)
+        dst_dir = settings.session_dir(target_id)
+        if not src_dir.exists():
+            raise FileNotFoundError(f"Source session {source_id!r} not found")
+        if dst_dir.exists():
+            raise FileExistsError(f"Target session {target_id!r} already exists")
+        dst_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src_dir, dst_dir)
 
     # ── Checkpoint / rollback (for single_turn) ────────────────────────
 

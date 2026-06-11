@@ -77,9 +77,9 @@ class ChannelAdapter(ABC):
     def get_session_id(self, chat_id: str) -> str:
         """将渠道 chat_id 映射为 agent session_id。
 
-        默认格式 ``"{channel_name}:{chat_id}"``，子类可覆盖。
+        默认格式 ``"{channel_name}_{chat_id}"``，子类可覆盖。
         """
-        return f"{self.name}:{chat_id}"
+        return f"{self.name}_{chat_id}"
 
     # ── 消息处理管线 ────────────────────────────────────────────────────
 
