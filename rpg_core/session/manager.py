@@ -34,8 +34,6 @@ _DEFAULT_SESSION_ID = "default"
 _META_TMP_SUFFIX = ".json.tmp"
 _META_CREATED_AT = "created_at"
 _META_UPDATED_AT = "updated_at"
-_META_MESSAGE_COUNT = "message_count"
-_META_COMPACTED_ROUNDS = "compacted_rounds"
 _META_LAST_STORY_RP_HIS_ID = "last_story_rp_his_id"
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 
@@ -73,10 +71,6 @@ class SessionManager:
     def history(self) -> list[Message]:
         """Read-only snapshot of in-memory history."""
         return list(self._history)
-
-    @property
-    def message_count(self) -> int:
-        return len(self._history)
 
     def load(self) -> None:
         """Load history from ``history.jsonl`` into ``_history``.
@@ -129,8 +123,6 @@ class SessionManager:
         cold_path.parent.mkdir(parents=True, exist_ok=True)
         with cold_path.open("a", encoding="utf-8") as f:
             f.write(record + "\n")
-        # Update metadata
-        self._update_meta(message_count=len(self._history))
 
     def clear(self) -> None:
         """Clear in-memory history and truncate ``history.jsonl``."""
@@ -139,7 +131,6 @@ class SessionManager:
             path = self._history_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("")
-        self._update_meta(message_count=0)
         logger.debug(_TAG + " cleared history for session '{}'", self._session_id)
 
     def truncate(self, keep_from_index: int) -> int:
@@ -163,7 +154,6 @@ class SessionManager:
             _TAG + " truncated: removed {} msgs, {} remaining",
             removed, len(self._history),
         )
-        self._update_meta(message_count=len(self._history))
         return removed
 
     # ── Session lifecycle (class methods) ──────────────────────────────
@@ -244,15 +234,6 @@ class SessionManager:
     def meta(self) -> dict[str, object]:
         return dict(self._meta)
 
-    @property
-    def compacted_rounds(self) -> int:
-        return self._meta.get(_META_COMPACTED_ROUNDS, 0)
-
-    def increment_compacted_rounds(self, count: int = 1) -> None:
-        """Bump the compacted_rounds counter and persist metadata."""
-        current = self._meta.get(_META_COMPACTED_ROUNDS, 0) + count
-        self._update_meta(**{_META_COMPACTED_ROUNDS: current})
-
     # ── Story memory progress tracking ──────────────────────────────────
 
     @property
@@ -314,8 +295,6 @@ class SessionManager:
         return {
             _META_CREATED_AT: now,
             _META_UPDATED_AT: now,
-            _META_MESSAGE_COUNT: 0,
-            _META_COMPACTED_ROUNDS: 0,
             _META_LAST_STORY_RP_HIS_ID: 0,
         }
 
@@ -336,8 +315,3 @@ class SessionManager:
             json.dump(self._meta, f, ensure_ascii=False, indent=2)
             f.write("\n")
         tmp.replace(path)
-        logger.debug(
-            _TAG + " wrote session.json: msg_count={}, compacted={}",
-            self._meta.get(_META_MESSAGE_COUNT, 0),
-            self._meta.get(_META_COMPACTED_ROUNDS, 0),
-        )

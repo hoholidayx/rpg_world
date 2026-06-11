@@ -553,7 +553,6 @@ class MemorySubAgent(BaseSubAgent):
         before_len = len(agent._session.history)
         agent._session.truncate(keep_from)
         after_len = len(agent._session.history)
-        agent._session.increment_compacted_rounds(total_compressed)
 
         logger.info(
             _TAG + " compact: {} msgs deleted, history now {} msgs",
