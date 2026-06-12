@@ -13,6 +13,33 @@ const api = axios.create({
   timeout: 10000,
 })
 
+// ── Workspace auto-injection ────────────────────────────────────────
+// Extracts the current workspace from the URL hash (e.g.
+// /#/overview?workspace=data/非公开行程) and injects it into every
+// request.  This avoids per-file plumbing and circular import issues
+// with the router / Pinia stores.
+
+function _getCurrentWorkspace() {
+  const hash = window.location.hash
+  const qsIdx = hash.indexOf('?')
+  if (qsIdx === -1) return ''
+  const qs = hash.slice(qsIdx + 1)
+  const params = new URLSearchParams(qs)
+  return params.get('workspace') || ''
+}
+
+api.interceptors.request.use((config) => {
+  const workspace = _getCurrentWorkspace()
+  if (workspace) {
+    if (config.method === 'get') {
+      config.params = { workspace, ...config.params }
+    } else {
+      config.data = { workspace, ...(config.data || {}) }
+    }
+  }
+  return config
+})
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {

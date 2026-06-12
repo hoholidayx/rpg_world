@@ -58,9 +58,11 @@ class SessionManager:
     def __init__(
         self,
         session_id: str = None,  # type: ignore[assignment]
+        workspace: str = "",
         history_enabled: bool = True,
     ) -> None:
         self._session_id = session_id if session_id is not None else _DEFAULT_SESSION_ID
+        self._workspace = workspace
         self._history_enabled = history_enabled
         self._history: list[Message] = []
         self._meta: dict[str, str | int | float] = {}
@@ -159,23 +161,23 @@ class SessionManager:
     # ── Session lifecycle (class methods) ──────────────────────────────
 
     @classmethod
-    def create(cls, session_id: str) -> None:
+    def create(cls, workspace: str, session_id: str) -> None:
         """Create a new session directory. Raises ``FileExistsError`` if exists."""
         cls.validate_session_id(session_id)
-        sdir = settings.session_dir(session_id)
+        sdir = settings.session_dir(workspace, session_id)
         sdir.mkdir(parents=True, exist_ok=False)
 
     @classmethod
-    def delete(cls, session_id: str) -> None:
+    def delete(cls, workspace: str, session_id: str) -> None:
         """Delete a session directory and all its contents."""
-        sdir = settings.session_dir(session_id)
+        sdir = settings.session_dir(workspace, session_id)
         if sdir.exists():
             shutil.rmtree(sdir)
 
     @classmethod
-    def list_sessions(cls) -> list[str]:
-        """Discover available session IDs under the active workspace."""
-        sdir = settings.sessions_base_dir()
+    def list_sessions(cls, workspace: str) -> list[str]:
+        """Discover available session IDs under the given workspace."""
+        sdir = settings.sessions_base_dir(workspace)
         if not sdir.is_dir():
             return []
         return sorted(
@@ -184,7 +186,7 @@ class SessionManager:
         )
 
     @classmethod
-    def clone(cls, source_id: str, target_id: str) -> None:
+    def clone(cls, workspace: str, source_id: str, target_id: str) -> None:
         """Clone a session's data to a new session ID.
 
         Raises ``FileNotFoundError`` if source does not exist,
@@ -192,8 +194,8 @@ class SessionManager:
         """
         cls.validate_session_id(source_id)
         cls.validate_session_id(target_id)
-        src_dir = settings.session_dir(source_id)
-        dst_dir = settings.session_dir(target_id)
+        src_dir = settings.session_dir(workspace, source_id)
+        dst_dir = settings.session_dir(workspace, target_id)
         if not src_dir.exists():
             raise FileNotFoundError(f"Source session {source_id!r} not found")
         if dst_dir.exists():
@@ -265,13 +267,13 @@ class SessionManager:
     # ── Internals — paths ──────────────────────────────────────────────
 
     def _history_path(self) -> Path:
-        return settings.get_history_path(self._session_id)
+        return settings.get_history_path(self._workspace, self._session_id)
 
     def _cold_history_path(self) -> Path:
-        return settings.get_cold_history_path(self._session_id)
+        return settings.get_cold_history_path(self._workspace, self._session_id)
 
     def _meta_path(self) -> Path:
-        return settings.get_session_meta_path(self._session_id)
+        return settings.get_session_meta_path(self._workspace, self._session_id)
 
     # ── Internals — metadata persistence ───────────────────────────────
 

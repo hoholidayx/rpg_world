@@ -6,15 +6,18 @@ import {
   deleteSession,
   cloneSession,
 } from '@/api/session'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 export const useSessionStore = defineStore('session', () => {
+  const workspaceStore = useWorkspaceStore()
+
   const sessions = ref([])
   const activeSession = ref('default')
   const loaded = ref(false)
   const switching = ref(false)
 
   async function load() {
-    const data = await listSessions()
+    const data = await listSessions(workspaceStore.current)
     sessions.value = data
     loaded.value = true
   }
@@ -28,14 +31,14 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function createNewSession(id) {
-    const result = await createSession(id)
+    const result = await createSession(workspaceStore.current, id)
     await load()
     return result
   }
 
   async function removeSession(id) {
     const wasActive = id === activeSession.value
-    await deleteSession(id)
+    await deleteSession(workspaceStore.current, id)
     if (wasActive) {
       activeSession.value = 'default'
     }
@@ -43,7 +46,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function duplicateSession(sourceId, targetId) {
-    await cloneSession(sourceId, targetId)
+    await cloneSession(workspaceStore.current, sourceId, targetId)
     await load()
   }
 

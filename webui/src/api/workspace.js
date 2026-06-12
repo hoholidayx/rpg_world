@@ -1,13 +1,17 @@
 import api from './index'
 
 export function listWorkspaces() {
-  return api.get('/workspaces').then((r) => r.data.workspaces)
+  return api.get('/workspaces').then((r) => r.data)
 }
 
-export function getActiveWorkspace() {
-  return api.get('/workspaces/active').then((r) => r.data)
+export function createWorkspace(name) {
+  return api.post('/workspaces', { name }).then((r) => r.data)
 }
 
-export function setActiveWorkspace(name) {
-  return api.put('/workspaces/active', { workspace: name }).then((r) => r.data)
+export function renameWorkspace(workspace, newName) {
+  return api.put(`/workspaces/${encodeURIComponent(workspace)}`, { name: newName }).then((r) => r.data)
+}
+
+export function deleteWorkspace(workspace) {
+  return api.delete(`/workspaces/${encodeURIComponent(workspace)}`).then((r) => r.data)
 }

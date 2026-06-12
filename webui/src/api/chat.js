@@ -65,12 +65,21 @@ export function streamMessage(message, sessionId = 'default', onEvent) {
 
   // Dynamic base URL — supports both Vite proxy (dev) and production
   const base = import.meta.env.DEV ? '' : `${import.meta.env.VITE_API_BASE || ''}`
+
+  // Extract workspace from URL hash (mirrors api/index.js interceptor logic)
+  const hash = window.location.hash
+  const qsIdx = hash.indexOf('?')
+  const workspace = qsIdx >= 0 ? new URLSearchParams(hash.slice(qsIdx + 1)).get('workspace') || '' : ''
+
+  const body = { message, session_id: sessionId }
+  if (workspace) body.workspace = workspace
+
   const url = `${base}/api/v1/chat/stream`
 
   fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify(body),
     signal: controller.signal,
   })
     .then(async (response) => {

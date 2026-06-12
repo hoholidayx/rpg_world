@@ -13,11 +13,13 @@
       "bot_token": "YOUR_BOT_TOKEN",
       "streaming": true,
       "allow_from": ["*"],
-      "proxy": null
+      "proxy": null,
+      "workspace": "data/非公开行程"
     },
     "cli": {
       "$description": "交互式命令行 REPL。用于开发调试",
-      "enabled": true
+      "enabled": true,
+      "workspace": "data/非公开行程"
     }
   }
 }

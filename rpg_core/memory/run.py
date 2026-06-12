@@ -52,7 +52,7 @@ def test_config() -> None:
     print(f"  top_k:                {mem.top_k}")
     print(f"  chunk_size:           {mem.chunk_size}")
     print(f"  chunk_overlap:        {mem.chunk_overlap}")
-    print(f"  DB path:              {settings.get_vector_db_path('test_mm')}")
+    print(f"  DB path:              {settings.get_vector_db_path('', 'test_mm')}")
 
 
 def test_create() -> MemoryManager | None:
@@ -62,8 +62,8 @@ def test_create() -> MemoryManager | None:
     recalled = RecalledMemoryStore()
     mm = MemoryManager.create(
         recalled_store=recalled,
-        session_dir=str(settings.session_dir("test_mm")),
-        get_vector_db_path=str(settings.get_vector_db_path("test_mm")),
+        session_dir=str(settings.session_dir("", "test_mm")),
+        get_vector_db_path=str(settings.get_vector_db_path("", "test_mm")),
         mem_cfg=settings.memory_settings,
     )
 
@@ -75,8 +75,8 @@ def test_create() -> MemoryManager | None:
     print(f"  类型: {type(mm).__name__}")
     print(f"  index_manager: {mm._index_manager is not None}")
     print(f"  retriever: {mm._retriever is not None}")
-    print(f"  DB 文件: {settings.get_vector_db_path('test_mm')}")
-    print(f"  DB 存在: {settings.get_vector_db_path('test_mm').exists()}")
+    print(f"  DB 文件: {settings.get_vector_db_path('', 'test_mm')}")
+    print(f"  DB 存在: {settings.get_vector_db_path('', 'test_mm').exists()}")
     return mm
 
 
@@ -117,7 +117,7 @@ def test_vector_store(session: str) -> None:
     from rpg_world.rpg_core.memory.vector_store import VectorStore
 
     mem = settings.memory_settings
-    db_path = settings.get_vector_db_path(session)
+    db_path = settings.get_vector_db_path("", session)
 
     if not db_path.exists():
         print("  ⚠️  DB 不存在，跳过")
@@ -160,7 +160,7 @@ def test_cleanup() -> None:
 
     import shutil
 
-    db = settings.get_vector_db_path("test_mm")
+    db = settings.get_vector_db_path("", "test_mm")
     if db.exists():
         db.unlink()
         print(f"  🗑️  删除 DB: {db}")
@@ -209,8 +209,8 @@ def _loop(mm: MemoryManager, session: str) -> None:
         elif cmd == "info":
             _print_separator("MemoryManager 状态")
             print(f"  session:           {session}")
-            print(f"  DB:                {settings.get_vector_db_path(session)}")
-            print(f"  DB 存在:            {settings.get_vector_db_path(session).exists()}")
+            print(f"  DB:                {settings.get_vector_db_path('', session)}")
+            print(f"  DB 存在:            {settings.get_vector_db_path('', session).exists()}")
             print(f"  inited:              {mm._inited}")
             print(f"  index_manager:      {mm._index_manager is not None}")
             print(f"  retriever:          {mm._retriever is not None}")

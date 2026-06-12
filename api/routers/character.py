@@ -13,6 +13,7 @@ router = APIRouter(tags=["character"])
 
 @router.get("/characters")
 def list_characters(
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Return all character cards (summary)."""
@@ -22,6 +23,7 @@ def list_characters(
 @router.get("/characters/{name}")
 def get_character(
     name: str,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Return a single character card by name."""
@@ -34,6 +36,7 @@ def get_character(
 @router.post("/characters")
 def create_character(
     body: CharacterData,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Create a new character card."""
@@ -48,6 +51,7 @@ def create_character(
 def update_character(
     name: str,
     body: CharacterData,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Update an existing character card."""
@@ -63,6 +67,7 @@ def update_character(
 @router.delete("/characters/{name}")
 def delete_character(
     name: str,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Delete a character card."""
@@ -79,6 +84,7 @@ def delete_character(
 @router.get("/characters/{name}/details")
 def list_details(
     name: str,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Return all L2 details for a character."""
@@ -92,6 +98,7 @@ def list_details(
 def get_detail(
     name: str,
     detail_name: str,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Return a single L2 detail by name."""
@@ -105,6 +112,7 @@ def get_detail(
 def create_detail(
     name: str,
     body: CharacterDetail,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Create a new L2 detail for a character."""
@@ -122,6 +130,7 @@ def update_detail(
     name: str,
     detail_name: str,
     body: CharacterDetail,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Update an existing L2 detail."""
@@ -136,6 +145,7 @@ def update_detail(
 def delete_detail(
     name: str,
     detail_name: str,
+    workspace: str = "",
     manager: CharacterManager = Depends(get_character_manager),
 ) -> dict:
     """Delete an L2 detail."""

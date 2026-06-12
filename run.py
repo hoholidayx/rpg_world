@@ -89,7 +89,7 @@ async def _start_telegram(tasks: list[asyncio.Task]) -> None:
     adapter = TelegramAdapter(
         token=channels_settings.telegram_token,
         streaming=channels_settings.telegram_streaming,
-        agent=AgentManager.get_or_create(),
+        agent=AgentManager.get_or_create(workspace=channels_settings.telegram_workspace),
     )
     tasks.append(asyncio.create_task(adapter.start(), name="telegram"))
 
@@ -98,7 +98,7 @@ async def _start_telegram(tasks: list[asyncio.Task]) -> None:
 async def _start_cli(tasks: list[asyncio.Task]) -> None:
     from rpg_world.channels.cli import CLIAdapter
 
-    adapter = CLIAdapter(agent=AgentManager.get_or_create())
+    adapter = CLIAdapter(agent=AgentManager.get_or_create(workspace=channels_settings.cli_workspace))
     tasks.append(asyncio.create_task(adapter.start(), name="cli"))
 
 

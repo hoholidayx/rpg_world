@@ -73,6 +73,7 @@ class RPGGameAgent:
     def __init__(
             self,
             session_id: str = "default",
+            workspace: str = "",
             world_name: str = "Nanobot Realm",
             model: str = "gpt-4o",
             api_key: str | None = None,
@@ -84,6 +85,7 @@ class RPGGameAgent:
             token_counter: TokenCounter | None = None,
     ) -> None:
         self._session_id = session_id
+        self._workspace = workspace
         self._world_name = world_name
         self._model = model
         self._api_key = api_key
@@ -104,6 +106,7 @@ class RPGGameAgent:
         self._system_prompt: str = ""
         self._session = SessionManager(
             session_id=self._session_id,
+            workspace=self._workspace,
             history_enabled=self._history_enabled,
         )
         self._tool_registry: ToolRegistry | None = None
@@ -639,6 +642,7 @@ class RPGGameAgent:
         """
         self._rpg_ctx = _build_rpg_context(
             world_name=self._world_name,
+            workspace=self._workspace,
             session_id=self._session_id,
         )
         self._builder = self._rpg_ctx["builder"]
@@ -675,7 +679,9 @@ class RPGGameAgent:
 
     def _setup_tool_registry(self) -> None:
         """Create and populate the ToolRegistry with built-in file tools."""
-        ws_root = settings.workspace_root
+        from rpg_world.rpg_core.utils.path_utils import resolve_workspace_root, PACKAGE_ROOT
+
+        ws_root = resolve_workspace_root(PACKAGE_ROOT, self._workspace)
         self._tool_registry = ToolRegistry()
         self._tool_registry.register_all([
             ListFilesTool(ws_root),
@@ -770,11 +776,11 @@ class RPGGameAgent:
         self._initialized = True
 
 
-def _build_rpg_context(world_name: str, session_id: str) -> dict[str, object]:
+def _build_rpg_context(world_name: str, workspace: str, session_id: str) -> dict[str, object]:
     """Inline import of the factory to keep the top level free of side effects."""
     from rpg_world.rpg_core.context.factory import build_rpg_context
 
-    return build_rpg_context(world_name=world_name, session_id=session_id)
+    return build_rpg_context(world_name=world_name, workspace=workspace, session_id=session_id)
 
 
 def _build_sub_agent_context(

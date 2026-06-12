@@ -1,5 +1,4 @@
 {
-  "active_workspace": "data/非公开行程",
   "agent_config": {
     "model": "deepseek-v4-flash",
     "base_url": "https://api.deepseek.com",

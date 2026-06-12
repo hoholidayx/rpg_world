@@ -13,6 +13,7 @@ router = APIRouter(tags=["lorebook"])
 
 @router.get("/lorebook/entries")
 def list_entries(
+    workspace: str = "",
     manager: LorebookManager = Depends(get_lorebook_manager),
 ) -> dict:
     """Return all lorebook entries."""
@@ -22,6 +23,7 @@ def list_entries(
 @router.get("/lorebook/entries/{name}")
 def get_entry(
     name: str,
+    workspace: str = "",
     manager: LorebookManager = Depends(get_lorebook_manager),
 ) -> dict:
     """Return a single lorebook entry by name."""
@@ -34,6 +36,7 @@ def get_entry(
 @router.post("/lorebook/entries")
 def create_entry(
     body: LorebookEntry,
+    workspace: str = "",
     manager: LorebookManager = Depends(get_lorebook_manager),
 ) -> dict:
     """Create a new lorebook entry."""
@@ -48,6 +51,7 @@ def create_entry(
 def update_entry(
     name: str,
     body: LorebookEntry,
+    workspace: str = "",
     manager: LorebookManager = Depends(get_lorebook_manager),
 ) -> dict:
     """Update an existing lorebook entry."""
@@ -63,6 +67,7 @@ def update_entry(
 @router.delete("/lorebook/entries/{name}")
 def delete_entry(
     name: str,
+    workspace: str = "",
     manager: LorebookManager = Depends(get_lorebook_manager),
 ) -> dict:
     """Delete a lorebook entry."""

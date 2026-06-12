@@ -9,6 +9,11 @@ from fastapi.responses import StreamingResponse
 
 from rpg_world.rpg_core.agent.agent_types import StreamEventKind
 from rpg_world.rpg_core.agent.manager import AgentManager
+from rpg_world.rpg_core.utils.path_utils import (
+    ensure_workspace_dir,
+    resolve_api_workspace,
+)
+from rpg_world.rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
 
 from rpg_world.api.logger import chat_logger
 from rpg_world.api.settings import api_settings
@@ -18,6 +23,7 @@ router = APIRouter(tags=["chat"])
 
 
 def _get_agent(
+    workspace: str = "",
     session_id: str = "default",
     api_key: str | None = None,
 ) -> "RPGGameAgent":
@@ -27,10 +33,20 @@ def _get_agent(
     ensuring all modules (API / Telegram / CLI) share the same cache and
     FileWatcher.
 
+    The cache key includes *workspace* so that the same session_id under
+    different workspaces gets distinct agent instances.
+
     When *api_key* is provided it takes precedence over the environment
     variable ``OPENAI_API_KEY`` (the RPGGameAgent default fallback).
+
+    When *workspace* is empty it defaults to ``"data/api_default_workspace"``,
+    and the workspace directory is created automatically if missing.
     """
-    return AgentManager.get_or_create(session_id=session_id, api_key=api_key)
+    workspace = resolve_api_workspace(workspace)
+    ensure_workspace_dir(_PACKAGE_ROOT, workspace)
+    return AgentManager.get_or_create(
+        workspace=workspace, session_id=session_id, api_key=api_key
+    )
 
 
 # ── Routes ──────────────────────────────────────────────────────────────
@@ -38,6 +54,7 @@ def _get_agent(
 
 @router.get("/chat/history")
 async def get_chat_history(
+    workspace: str = "",
     session_id: str = "default",
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
@@ -46,7 +63,7 @@ async def get_chat_history(
     The agent maintains history in-memory and persists to a JSONL file
     under the session's data directory.
     """
-    agent = _get_agent(session_id, api_key=x_openai_api_key)
+    agent = _get_agent(workspace, session_id, api_key=x_openai_api_key)
     try:
         await agent._ensure_initialized()
     except Exception as exc:
@@ -62,21 +79,15 @@ async def chat_send(
     body: dict,
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
-    """Send a message and receive the full buffered reply.
-
-    This is a thin wrapper around ``RPGGameAgent.send()``.  The primary
-    WebUI uses the streaming endpoint instead; this endpoint exists for
-    external integrations (Telegram bots, etc.) where streaming may not
-    be convenient.
-    """
+    """Send a message and receive the full buffered reply."""
+    workspace = body.get("workspace", "")
     session_id = body.get("session_id", "default")
     message = body.get("message", "")
 
-    # Log raw user input
     if api_settings.log_chat_messages:
-        chat_logger.info("USER [%s]: %s", session_id, message)
+        chat_logger.info("USER [%s][%s]: %s", workspace, session_id, message)
 
-    agent = _get_agent(session_id, api_key=x_openai_api_key)
+    agent = _get_agent(workspace, session_id, api_key=x_openai_api_key)
     try:
         reply = await agent.send(message)
     except Exception as exc:
@@ -119,21 +130,15 @@ async def chat_command(
     body: dict,
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
-    """Execute a slash command on the agent (not sent to LLM).
-
-    Supported commands:
-      - ``/clear`` — clear conversation history
-      - ``/compact`` — compress old conversation rounds into summary
-      - ``/reload`` — reload RPG context from disk
-      - ``/context`` — show current context structure and token usage
-    """
+    """Execute a slash command on the agent (not sent to LLM)."""
+    workspace = body.get("workspace", "")
     session_id = body.get("session_id", "default")
     command: str = body.get("command", "").strip()
 
     if api_settings.log_chat_messages:
-        chat_logger.info("CMD [%s]: %s", session_id, command)
+        chat_logger.info("CMD [%s][%s]: %s", workspace, session_id, command)
 
-    agent = _get_agent(session_id, api_key=x_openai_api_key)
+    agent = _get_agent(workspace, session_id, api_key=x_openai_api_key)
 
     try:
         await agent._ensure_initialized()
@@ -154,11 +159,12 @@ async def chat_command(
 
 @router.get("/chat/commands")
 async def list_commands(
+    workspace: str = "",
     session_id: str = "default",
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
     """返回所有可用的斜杠命令定义（供前端动态渲染命令弹窗）。"""
-    agent = _get_agent(session_id, api_key=x_openai_api_key)
+    agent = _get_agent(workspace, session_id, api_key=x_openai_api_key)
     try:
         await agent._ensure_initialized()
     except Exception as exc:
@@ -180,23 +186,11 @@ async def chat_stream(
     body: dict,
     x_openai_api_key: str | None = Header(None),
 ) -> StreamingResponse:
-    """Send a message and stream the response via Server-Sent Events.
-
-    Each event is a ``data: {json}\n\n`` line.  See ``AgentStreamEvent.to_dict()``
-    for the event payload structure.
-
-    Event types:
-      * ``text`` — incremental text content
-      * ``thinking`` — reasoning/thinking content
-      * ``tool_call`` — model initiated a tool call
-      * ``tool_result`` — a tool execution completed
-      * ``round_start`` — a new LLM round begins
-      * ``done`` — stream complete, carries aggregated usage/duration/metadata
-      * ``error`` — an error occurred during streaming
-    """
+    """Send a message and stream the response via Server-Sent Events."""
+    workspace = body.get("workspace", "")
     session_id = body.get("session_id", "default")
     message = body.get("message", "")
-    agent = _get_agent(session_id, api_key=x_openai_api_key)
+    agent = _get_agent(workspace, session_id, api_key=x_openai_api_key)
 
     async def event_generator():
         # Log raw user input

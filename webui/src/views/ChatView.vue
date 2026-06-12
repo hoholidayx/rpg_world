@@ -13,7 +13,7 @@
       <div class="header-right">
         <!-- Workspace selector -->
         <a-select
-          v-model:value="workspaceStore.activeWorkspace"
+          v-model:value="workspaceStore.current"
           :options="workspaceOptions"
           style="width: 140px;"
           size="small"
@@ -296,6 +296,18 @@ onMounted(async () => {
   commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
 })
 
+// ── Watch workspace changes ──────────────────────────────
+
+watch(
+  () => workspaceStore.current,
+  async () => {
+    await sessionStore.load()
+    messages.value = []
+    await loadHistory()
+    commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
+  },
+)
+
 // ── Watch session changes ────────────────────────────────
 
 watch(
@@ -542,7 +554,7 @@ async function scrollToBottom() {
 // ── Workspace ─────────────────────────────────────────────
 
 function onWorkspaceChange(value) {
-  if (value !== workspaceStore.activeWorkspace) {
+  if (value !== workspaceStore.current) {
     workspaceStore.switchWorkspace(value)
   }
 }

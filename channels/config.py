@@ -85,11 +85,35 @@ class ChannelsSettings:
     def telegram_streaming(self) -> bool:
         return bool(self._mod_cfg("telegram").get("streaming", True))
 
+    @property
+    def telegram_workspace(self) -> str:
+        """Telegram 渠道绑定的 workspace 标识。
+
+        若 ``channels.json`` 中未配置则返回渠道默认值
+        ``"data/telegram_default_workspace"``。
+        """
+        from rpg_world.rpg_core.utils.path_utils import default_workspace_name
+
+        configured = str(self._mod_cfg("telegram").get("workspace", ""))
+        return configured if configured else default_workspace_name("telegram")
+
     # ── CLI 模块配置 ─────────────────────────────────────────────────────
 
     @property
     def cli_enabled(self) -> bool:
         return bool(self._mod_cfg("cli").get("enabled", False))
+
+    @property
+    def cli_workspace(self) -> str:
+        """CLI 渠道绑定的 workspace 标识。
+
+        若 ``channels.json`` 中未配置则返回渠道默认值
+        ``"data/cli_default_workspace"``。
+        """
+        from rpg_world.rpg_core.utils.path_utils import default_workspace_name
+
+        configured = str(self._mod_cfg("cli").get("workspace", ""))
+        return configured if configured else default_workspace_name("cli")
 
     # ── 旧格式兼容（废弃，暂保留） ─────────────────────────────────────
 

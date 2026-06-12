@@ -17,6 +17,7 @@ router = APIRouter(tags=["status"])
 
 @router.get("/status/types")
 def list_types(
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -27,6 +28,7 @@ def list_types(
 @router.post("/status/types")
 def create_type(
     body: dict,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -45,6 +47,7 @@ def create_type(
 def rename_type(
     type_name: str,
     body: dict,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -64,6 +67,7 @@ def rename_type(
 @router.delete("/status/types/{type_name}")
 def delete_type(
     type_name: str,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -83,6 +87,7 @@ def delete_type(
 @router.get("/status/types/{type_name}/tables")
 def list_tables(
     type_name: str,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -98,6 +103,7 @@ def list_tables(
 def create_table(
     type_name: str,
     body: dict,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -120,6 +126,7 @@ def create_table(
 def get_table(
     type_name: str,
     table_name: str,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -135,6 +142,7 @@ def save_table(
     type_name: str,
     table_name: str,
     body: dict,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -153,6 +161,7 @@ def rename_table(
     type_name: str,
     table_name: str,
     body: dict,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
@@ -173,6 +182,7 @@ def rename_table(
 def delete_table(
     type_name: str,
     table_name: str,
+    workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:

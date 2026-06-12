@@ -81,6 +81,17 @@ class ChannelAdapter(ABC):
         """
         return f"{self.name}_{chat_id}"
 
+    def get_workspace(self) -> str:
+        """返回渠道的默认 workspace 名称。
+
+        默认格式 ``"data/{channel_name}_default_workspace"``，
+        与 :meth:`get_session_id` 的 ``{channel_name}_{chat_id}`` 模式对应。
+        子类可覆盖以绑定不同的 workspace。
+        """
+        from rpg_world.rpg_core.utils.path_utils import default_workspace_name
+
+        return default_workspace_name(self.name)
+
     # ── 消息处理管线 ────────────────────────────────────────────────────
 
     async def _handle_message(self, chat_id: str, user_id: str, text: str) -> str | None:

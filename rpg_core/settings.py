@@ -1,13 +1,20 @@
 """RPG World settings — shared by core and API layers.
 
-Settings are read from ``rpg_world/settings.json``.  Path resolution:
+Settings are read from ``rpg_world/settings.json`` once at startup and are
+**read-only** thereafter.  Modifying ``settings.json`` requires a process
+restart to take effect.
 
-- Absolute path (starts with ``/``) — returned as-is.
-- Relative path — resolved relative to ``rpg_world/``.  If
-  ``active_workspace`` is set (e.g. ``"data/非公开行程"``), it is used
-  as the base directory; otherwise ``data/`` is used as the default base.
+Path resolution
+---------------
+Workspace is an explicit parameter in every path method.  The caller always
+passes a workspace identifier:
 
-See :func:`rpg_world.rpg_core.utils.path_utils.resolve_rpg_path` for details.
+- ``""`` − the default/root workspace (maps to ``rpg_world/data/``)
+- ``"data/<name>"`` − a named workspace under ``rpg_world/data/<name>/``
+
+Relative path values (``character_path``, ``lorebook_path`` from
+settings.json) are resolved against the workspace root via
+:func:`rpg_world.rpg_core.utils.path_utils.resolve_rpg_path`.
 
 Session-scoped data paths are deterministic (not user-configurable):
 ``{workspace_root}/sessions/{session_id}/{filename}``.
@@ -20,19 +27,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rpg_world.rpg_core.utils.path_utils import resolve_rpg_path, resolve_workspace_root
+from rpg_world.rpg_core.utils.path_utils import (
+    resolve_rpg_path,
+    resolve_workspace_root,
+    PACKAGE_ROOT as _PACKAGE_ROOT,
+)
 
 # Location of settings.json relative to this module
 _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
-# Package roots used to resolve relative paths
-_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _RPG_CORE_DIR = Path(__file__).resolve().parent
 
 # Known data-type subdirectories inside data/ — these are excluded from
-# workspace discovery in list_workspaces().
+# workspace discovery in path_utils.list_workspaces().
 _KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "memory_sub_agent", "sessions"})
 
-# Session data directory name and filenames — deterministic, not configurable.
+# Session data directory name — deterministic, not configurable.
 _SESSION_DIR_NAME = "sessions"
 
 
@@ -76,42 +85,22 @@ class Settings:
         self._raw = _load()
 
     # ------------------------------------------------------------------
-    # Internal helper
+    # Workspace-scoped path methods
+    #
+    # Every method that returns a data path receives an explicit
+    # *workspace* parameter.  There is NO implicit "active workspace" —
+    # callers always specify which workspace they operate on.
     # ------------------------------------------------------------------
 
-    def _resolve(self, key: str, default: str) -> str:
-        """Resolve a settings value, delegating to :func:`resolve_rpg_path`."""
-        value = self._raw.get(key, default)
-        return str(resolve_rpg_path(
-            value=value,
-            rpg_root=_PACKAGE_ROOT,
-            rpg_workspace=self.active_workspace,
-        ))
+    def character_path(self, workspace: str) -> str:
+        """Resolve the character data directory for *workspace*."""
+        value = self._raw.get("character_path", "character")
+        return str(resolve_rpg_path(value, _PACKAGE_ROOT, workspace))
 
-    # ------------------------------------------------------------------
-    # Public properties
-    # ------------------------------------------------------------------
-
-    @property
-    def active_workspace(self) -> str:
-        return self._raw.get("active_workspace", "")
-
-    @property
-    def workspace_root(self) -> Path:
-        """Resolved absolute path to the active workspace root.
-
-        Cross-session data (character, lorebook) lives directly under this.
-        Session-scoped data lives under ``workspace_root / "sessions" / {session_id}``.
-        """
-        return resolve_workspace_root(_PACKAGE_ROOT, self.active_workspace)
-
-    @property
-    def character_path(self) -> str:
-        return self._resolve("character_path", "character")
-
-    @property
-    def lorebook_path(self) -> str:
-        return self._resolve("lorebook_path", "lorebook")
+    def lorebook_path(self, workspace: str) -> str:
+        """Resolve the lorebook data directory for *workspace*."""
+        value = self._raw.get("lorebook_path", "lorebook")
+        return str(resolve_rpg_path(value, _PACKAGE_ROOT, workspace))
 
     @property
     def jinja_dir(self) -> Path:
@@ -198,46 +187,27 @@ class Settings:
     # Workspace operations
     # ------------------------------------------------------------------
 
-    def list_workspaces(self) -> list[dict[str, str]]:
-        """Discover available workspaces.
+    # list_workspaces() has moved to rpg_world.rpg_core.utils.path_utils
+    # as a pure function.  Workspace discovery is not a settings concern.
 
-        Returns a list of ``{"name": …, "label": …}`` dicts.  The first
-        entry is always the default workspace (``name=""``, ``label="默认"``).
-        Named workspaces are subdirectories of ``data/`` that are not
-        known data-type directories.  Their ``name`` is ``"data/<dir>"`` so
-        that ``resolve_rpg_path`` resolves paths under the workspace.
-        """
-        workspaces: list[dict[str, str]] = [
-            {"name": "", "label": "默认（根工作区）"},
-        ]
-        data_dir = _PACKAGE_ROOT / "data"
-        if data_dir.is_dir():
-            for entry in sorted(data_dir.iterdir()):
-                if entry.is_dir() and entry.name not in _KNOWN_DATA_DIRS:
-                    workspaces.append({"name": f"data/{entry.name}", "label": entry.name})
-        return workspaces
-
-    def set_active_workspace(self, name: str) -> None:
-        """Switch the active workspace and persist to disk."""
-        self._raw["active_workspace"] = name
-        _SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _SETTINGS_PATH.open("w", encoding="utf-8", newline="\n") as f:
-            json.dump(self._raw, f, ensure_ascii=False, indent=2)
-            f.write("\n")
+    # set_active_workspace() has been removed.  Workspace is no longer
+    # a mutable server-wide state — every API call / agent instance
+    # explicitly passes the workspace it operates on.
 
     # ------------------------------------------------------------------
     # Session operations (deterministic paths, not from settings.json)
     #
+    # Every method receives an explicit *workspace* parameter.
     # Core principle: every session-scoped data domain has a dedicated
     # getter method.  Do NOT join "sessions" / filenames outside this
     # class — call the method instead.
     # ------------------------------------------------------------------
 
-    def sessions_base_dir(self) -> Path:
-        """Return the ``sessions/`` base directory under the active workspace."""
-        return self.workspace_root / _SESSION_DIR_NAME
+    def sessions_base_dir(self, workspace: str) -> Path:
+        """Return the ``sessions/`` base directory under *workspace*."""
+        return resolve_workspace_root(_PACKAGE_ROOT, workspace) / _SESSION_DIR_NAME
 
-    def session_dir(self, session_id: str) -> Path:
+    def session_dir(self, workspace: str, session_id: str) -> Path:
         """Return the per-session directory for *session_id*.
 
         All session-scoped data (status, history, summary, memory) lives
@@ -245,7 +215,7 @@ class Settings:
         (``get_status_dir``, ``get_history_path``, …) to access specific
         sub-paths; avoid joining *session_dir* by hand.
         """
-        return self.sessions_base_dir() / session_id
+        return self.sessions_base_dir(workspace) / session_id
 
     # ── 记忆配置 ────────────────────────────────────────────────
 
@@ -273,54 +243,54 @@ class Settings:
             chunk_overlap=raw.get("chunk_overlap", 64),
         )
 
-    def get_vector_db_path(self, session_id: str) -> Path:
+    def get_vector_db_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``memory_vectors.db`` path for the given session."""
-        return self.session_dir(session_id) / "memory_vectors.db"
+        return self.session_dir(workspace, session_id) / "memory_vectors.db"
 
     # ── Session-scoped directory getters ──────────────────────────────
 
-    def get_status_dir(self, session_id: str) -> Path:
+    def get_status_dir(self, workspace: str, session_id: str) -> Path:
         """Return the ``status/`` directory for the given session."""
-        return self.session_dir(session_id) / "status"
+        return self.session_dir(workspace, session_id) / "status"
 
     # ── Session-scoped file path getters ──────────────────────────────
 
-    def get_history_path(self, session_id: str) -> Path:
+    def get_history_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``history.jsonl`` file path for the given session.
 
         主历史文件，用于构建上下文和压缩。``MemorySubAgent.compact_history()`` 会截断此文件。
         """
-        return self.session_dir(session_id) / "history.jsonl"
+        return self.session_dir(workspace, session_id) / "history.jsonl"
 
-    def get_cold_history_path(self, session_id: str) -> Path:
+    def get_cold_history_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``history_cold.jsonl`` file path for the given session.
 
         冷备份历史文件，只追加写入，永不截断。与主 history.jsonl 同步写入，
         用于后续的记忆搜寻和数据恢复。
         """
-        return self.session_dir(session_id) / "history_cold.jsonl"
+        return self.session_dir(workspace, session_id) / "history_cold.jsonl"
 
-    def get_summary_path(self, session_id: str) -> Path:
+    def get_summary_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``rpg_summaries.json`` file path for the given session."""
-        return self.session_dir(session_id) / "rpg_summaries.json"
+        return self.session_dir(workspace, session_id) / "rpg_summaries.json"
 
-    def get_story_memory_path(self, session_id: str) -> Path:
+    def get_story_memory_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``story_memory.json`` file path for the given session."""
-        return self.session_dir(session_id) / "story_memory.json"
+        return self.session_dir(workspace, session_id) / "story_memory.json"
 
-    def get_persistent_memory_path(self, session_id: str) -> Path:
+    def get_persistent_memory_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``persistent_memory.json`` file path for the given session."""
-        return self.session_dir(session_id) / "persistent_memory.json"
+        return self.session_dir(workspace, session_id) / "persistent_memory.json"
 
-    def get_session_meta_path(self, session_id: str) -> Path:
+    def get_session_meta_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``session.json`` metadata file path for the given session."""
-        return self.session_dir(session_id) / "session.json"
+        return self.session_dir(workspace, session_id) / "session.json"
 
     # ── Session file listing ──────────────────────────────────────────
 
-    def list_session_files(self, session_id: str) -> list[Path]:
+    def list_session_files(self, workspace: str, session_id: str) -> list[Path]:
         """List all files and directories inside a session's data dir."""
-        sdir = self.session_dir(session_id)
+        sdir = self.session_dir(workspace, session_id)
         if not sdir.is_dir():
             return []
         return sorted(sdir.iterdir())

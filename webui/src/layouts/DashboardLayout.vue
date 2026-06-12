@@ -26,43 +26,34 @@
 
       <!-- Workspace selector -->
       <div v-if="!collapsed" class="workspace-section">
-        <a-dropdown :trigger="['click']" placement="bottomLeft">
-          <div class="workspace-trigger">
-            <FolderOutlined />
-            <span class="ws-label">{{ activeWorkspaceLabel }}</span>
-            <DownOutlined class="ws-arrow" />
-          </div>
-          <template #overlay>
-            <a-menu @click="onWorkspaceChange" :selectedKeys="[workspaceStore.activeWorkspace]">
-              <a-menu-item v-for="ws in workspaceStore.workspaces" :key="ws.name">
-                {{ ws.label }}
-              </a-menu-item>
-            </a-menu>
+        <div class="workspace-row">
+          <a-select
+            v-model:value="workspaceStore.current"
+            :options="workspaceOptions"
+            size="small"
+            style="flex: 1;"
+            @change="onWorkspaceChange"
+          />
+          <a-tooltip title="新建工作区">
+            <a-button size="small" type="text" @click="showWorkspaceModal('create')" class="ws-action-btn">
+              <PlusOutlined />
+            </a-button>
+          </a-tooltip>
+          <template v-if="workspaceStore.current">
+            <a-tooltip title="重命名">
+              <a-button size="small" type="text" @click="showWorkspaceModal('rename', workspaceStore.current)" class="ws-action-btn">
+                <EditOutlined />
+              </a-button>
+            </a-tooltip>
+            <a-tooltip title="删除">
+              <a-button size="small" type="text" @click="showWorkspaceModal('delete', workspaceStore.current)" class="ws-action-btn">
+                <DeleteOutlined />
+              </a-button>
+            </a-tooltip>
           </template>
-        </a-dropdown>
+        </div>
       </div>
 
-      <!-- Session selector (desktop) -->
-      <div v-if="!collapsed" class="session-section">
-        <a-dropdown :trigger="['click']" placement="bottomLeft">
-          <div class="session-trigger">
-            <FileTextOutlined />
-            <span class="session-label">{{ activeSessionLabel }}</span>
-            <DownOutlined class="session-arrow" />
-          </div>
-          <template #overlay>
-            <a-menu @click="onSessionMenuClick" :selectedKeys="[sessionStore.activeSession]">
-              <a-menu-item v-for="s in sessionStore.sessions" :key="s.session_id || s">
-                {{ s.session_id || s }}
-              </a-menu-item>
-              <a-menu-divider />
-              <a-menu-item key="__create__">
-                <PlusOutlined /> 新建会话
-              </a-menu-item>
-            </a-menu>
-          </template>
-        </a-dropdown>
-      </div>
 
       <a-menu
         v-model:selectedKeys="selectedKeys"
@@ -121,27 +112,12 @@
       <div class="drawer-workspace">
         <span class="drawer-ws-label"><FolderOutlined /> 工作区</span>
         <a-select
-          v-model:value="workspaceStore.activeWorkspace"
+          v-model:value="workspaceStore.current"
           :options="workspaceOptions"
           size="small"
           style="width: 100%; margin-top: 8px;"
           @change="onWorkspaceChange"
         />
-      </div>
-
-      <!-- Session selector (mobile) -->
-      <div class="drawer-session">
-        <span class="drawer-session-label"><FileTextOutlined /> 会话</span>
-        <a-select
-          v-model:value="sessionStore.activeSession"
-          :options="sessionOptions"
-          size="small"
-          style="width: 100%; margin-top: 8px;"
-          @change="onSessionChange"
-        />
-        <a-button size="small" type="dashed" block style="margin-top: 6px;" @click="openCreateSession">
-          <PlusOutlined /> 新建会话
-        </a-button>
       </div>
 
       <a-menu
@@ -178,34 +154,37 @@
     <!-- Content -->
     <a-layout>
       <a-layout-content class="content-area">
-        <router-view />
+        <router-view :key="workspaceStore.current" />
       </a-layout-content>
     </a-layout>
 
-    <!-- Create session modal -->
+    <!-- Workspace management modal -->
     <a-modal
-      v-model:open="createSessionVisible"
-      title="新建会话"
-      :confirm-loading="createSessionSaving"
-      @ok="handleCreateSession"
-      @cancel="resetCreateSessionForm"
+      v-model:open="wsModalVisible"
+      :title="wsModalTitle"
+      :confirm-loading="wsModalSaving"
+      @ok="handleWsModalOk"
+      @cancel="resetWsModal"
       :destroy-on-close="true"
-      :width="420"
+      :width="400"
+      :ok-button-props="wsModalMode === 'delete' ? { danger: true } : undefined"
+      :ok-text="wsModalMode === 'delete' ? '确认删除' : undefined"
     >
       <a-form layout="vertical">
-        <a-form-item label="会话 ID" :required="true">
-          <a-input v-model:value="newSessionId" placeholder="如：campaign-2" />
-        </a-form-item>
-        <a-form-item label="从现有会话克隆（可选）">
-          <a-checkbox v-model:checked="cloneEnabled">从已有会话克隆</a-checkbox>
-          <a-select
-            v-if="cloneEnabled"
-            v-model:value="cloneSourceId"
-            :options="sessionOptions"
-            style="width: 100%; margin-top: 8px;"
-            placeholder="选择源会话"
-          />
-        </a-form-item>
+        <template v-if="wsModalMode === 'delete'">
+          <p>确定要删除工作区 <strong>{{ wsFormTarget }}</strong> 吗？</p>
+          <p style="color: var(--text-secondary); font-size: 13px;">
+            此操作不可恢复，工作区内的所有数据（角色卡、世界书、会话等）将被永久删除。
+          </p>
+        </template>
+        <template v-else>
+          <a-form-item label="工作区名称" :required="true">
+            <a-input
+              v-model:value="wsFormName"
+              :placeholder="wsModalMode === 'create' ? '如：我的世界' : ''"
+            />
+          </a-form-item>
+        </template>
       </a-form>
     </a-modal>
   </a-layout>
@@ -224,33 +203,32 @@ import {
   BookOutlined,
   ProfileOutlined,
   FolderOutlined,
-  DownOutlined,
-  FileTextOutlined,
   PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useThemeStore } from '@/stores/theme'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useSessionStore } from '@/stores/session'
 
 const router = useRouter()
 const route = useRoute()
 const themeStore = useThemeStore()
 const workspaceStore = useWorkspaceStore()
-const sessionStore = useSessionStore()
 
 const collapsed = ref(false)
 const drawerVisible = ref(false)
 const selectedKeys = ref([route.path])
 const isMobile = ref(false)
 
-// ── Create session modal state ─────────────────────────────────────────
-const createSessionVisible = ref(false)
-const createSessionSaving = ref(false)
-const newSessionId = ref('')
-const cloneEnabled = ref(false)
-const cloneSourceId = ref(null)
+// ── Workspace management modal state ──────────────────────────────────
+
+const wsModalVisible = ref(false)
+const wsModalMode = ref('create') // 'create' | 'rename' | 'delete'
+const wsModalSaving = ref(false)
+const wsFormName = ref('')
+const wsFormTarget = ref('') // current workspace name for rename/delete
 
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
@@ -260,7 +238,6 @@ onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
   workspaceStore.load()
-  sessionStore.load()
 })
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
@@ -270,13 +247,6 @@ const siderTheme = computed(() =>
   themeStore.effective === 'dark' ? 'dark' : 'light',
 )
 
-const activeWorkspaceLabel = computed(() => {
-  const found = workspaceStore.workspaces.find(
-    (w) => w.name === workspaceStore.activeWorkspace,
-  )
-  return found ? found.label : '默认工作区'
-})
-
 const workspaceOptions = computed(() =>
   workspaceStore.workspaces.map((w) => ({
     value: w.name,
@@ -284,14 +254,14 @@ const workspaceOptions = computed(() =>
   })),
 )
 
-const activeSessionLabel = computed(() => sessionStore.activeSession)
-
-const sessionOptions = computed(() =>
-  sessionStore.sessions.map((s) => ({
-    value: s.session_id || s,
-    label: s.session_id || s,
-  })),
-)
+const wsModalTitle = computed(() => {
+  switch (wsModalMode.value) {
+    case 'create': return '新建工作区'
+    case 'rename': return '重命名工作区'
+    case 'delete': return '删除工作区'
+    default: return ''
+  }
+})
 
 watch(
   () => route.path,
@@ -301,64 +271,62 @@ watch(
 )
 
 function onMenuClick({ key }) {
-  router.push(key)
+  router.push({ path: key, query: route.query })
   drawerVisible.value = false
 }
 
 function onWorkspaceChange(value) {
   const name = typeof value === 'object' ? value.key : value
-  if (name !== workspaceStore.activeWorkspace) {
+  if (name !== workspaceStore.current) {
     workspaceStore.switchWorkspace(name)
   }
 }
 
-// ── Session handlers ───────────────────────────────────────────────────
+// ── Workspace CRUD handlers ───────────────────────────────────────────
 
-function onSessionMenuClick({ key }) {
-  if (key === '__create__') {
-    openCreateSession()
+function showWorkspaceModal(mode, workspaceName) {
+  wsModalMode.value = mode
+  wsFormName.value = ''
+  wsFormTarget.value = workspaceName || ''
+  if (mode === 'rename') {
+    wsFormName.value = (workspaceName || '').replace(/^data\//, '')
+  }
+  if (mode === 'create') {
+    wsFormTarget.value = ''
+  }
+  wsModalVisible.value = true
+}
+
+function resetWsModal() {
+  wsModalVisible.value = false
+  wsFormName.value = ''
+  wsFormTarget.value = ''
+}
+
+async function handleWsModalOk() {
+  const name = wsFormName.value.trim()
+  if (!name && wsModalMode.value !== 'delete') {
+    message.warning('请输入工作区名称')
     return
   }
-  if (key !== sessionStore.activeSession) {
-    sessionStore.switchSession(key)
-  }
-}
-
-function onSessionChange(value) {
-  if (value !== sessionStore.activeSession) {
-    sessionStore.switchSession(value)
-  }
-}
-
-function openCreateSession() {
-  newSessionId.value = ''
-  cloneEnabled.value = false
-  cloneSourceId.value = null
-  createSessionVisible.value = true
-}
-
-function resetCreateSessionForm() {
-  createSessionVisible.value = false
-  newSessionId.value = ''
-  cloneEnabled.value = false
-  cloneSourceId.value = null
-}
-
-async function handleCreateSession() {
-  if (!newSessionId.value.trim()) return
-  createSessionSaving.value = true
+  wsModalSaving.value = true
   try {
-    if (cloneEnabled.value && cloneSourceId.value) {
-      await sessionStore.duplicateSession(cloneSourceId.value, newSessionId.value)
-    } else {
-      await sessionStore.createNewSession(newSessionId.value)
+    if (wsModalMode.value === 'create') {
+      await workspaceStore.createWorkspace(name)
+      message.success('工作区已创建')
+    } else if (wsModalMode.value === 'rename') {
+      await workspaceStore.renameWorkspace(wsFormTarget.value, name)
+      message.success('工作区已重命名')
+    } else if (wsModalMode.value === 'delete') {
+      await workspaceStore.deleteWorkspace(wsFormTarget.value)
+      message.success('工作区已删除')
     }
-    createSessionVisible.value = false
-    sessionStore.switchSession(newSessionId.value)
+    wsModalVisible.value = false
+    await workspaceStore.load()
   } catch (e) {
-    message.error('创建会话失败: ' + (e.response?.data?.detail || e.message))
+    message.error(e.message || '操作失败')
   } finally {
-    createSessionSaving.value = false
+    wsModalSaving.value = false
   }
 }
 </script>
@@ -443,76 +411,24 @@ async function handleCreateSession() {
   min-height: calc(100vh - 32px);
 }
 
-/* ---- Session Selector ---- */
-.session-section {
-  padding: 4px 12px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  margin-bottom: 4px;
-}
-.session-trigger {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: rgba(255, 255, 255, 0.75);
-  font-size: 13px;
-  transition: background 0.2s, color 0.2s;
-}
-.session-trigger:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-}
-.session-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.session-arrow {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.45);
-}
-.drawer-session {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color);
-}
-.drawer-session-label {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
 /* ---- Workspace Selector ---- */
 .workspace-section {
-  padding: 4px 12px 8px;
+  padding: 8px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   margin-bottom: 4px;
 }
-.workspace-trigger {
+.workspace-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: rgba(255, 255, 255, 0.75);
+  gap: 4px;
+}
+.ws-action-btn {
+  color: rgba(255, 255, 255, 0.55);
   font-size: 13px;
-  transition: background 0.2s, color 0.2s;
+  flex-shrink: 0;
 }
-.workspace-trigger:hover {
-  background: rgba(255, 255, 255, 0.08);
+.ws-action-btn:hover {
   color: #fff;
-}
-.ws-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ws-arrow {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.45);
 }
 .drawer-workspace {
   padding: 12px 16px;
