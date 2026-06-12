@@ -222,6 +222,7 @@ class SessionManager:
 
     def switch_to(self, session_id: str) -> None:
         """Switch to a different session: reload path, metadata, and history."""
+        self.validate_session_id(session_id)
         self._session_id = session_id
         self._meta = {}
         self._history = []

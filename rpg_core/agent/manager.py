@@ -21,6 +21,7 @@ from rpg_world.rpg_core.utils.path_utils import (
     require_workspace,
 )
 from rpg_world.rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
+from rpg_world.rpg_core.utils.path_utils import resolve_api_workspace
 
 if TYPE_CHECKING:
     pass
@@ -86,12 +87,14 @@ class AgentManager:
         Parameters
         ----------
         workspace:
-            工作区标识（必填）。
+            工作区标识。空值时自动回退到 ``data/api_default_workspace``，
+            与 ``resolve_api_workspace`` 行为保持一致。
         session_id:
             初始化时使用的 session ID。默认为 ``"default"``，
             调用方应根据实际使用的 session 传入（如 ``"cli_direct"``）。
         """
         if not cls._initialized:
+            workspace = resolve_api_workspace(workspace)
             agent = cls.get_or_create(workspace=workspace, session_id=session_id)
             await agent._ensure_initialized()
             cls._initialized = True

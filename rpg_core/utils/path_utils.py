@@ -18,7 +18,12 @@ read module-level or process-global state.
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
+
+
+_VALID_NAME_RE = re.compile(r"^[A-Za-z0-9_\u4e00-\u9fff-]+$")
 
 __all__ = [
     "resolve_rpg_path",
@@ -140,16 +145,31 @@ def list_workspaces(rpg_root: Path) -> list[dict[str, str]]:
     return workspaces
 
 
-def default_workspace_name(channel_name: str) -> str:
+def _sanitize_name(name: str | None) -> str | None:
+    """Return *name* if it is safe for use as a directory name component, or ``None``."""
+    if name and _VALID_NAME_RE.match(name):
+        return name
+    return None
+
+
+def default_workspace_name(channel_name: str | None) -> str:
     """Return the default workspace name for a channel.
 
     Follows the same ``{channel}_{suffix}`` convention as
     :meth:`ChannelAdapter.get_session_id` uses for sessions.
 
+    Falls back to ``"unknown"`` prefix when *channel_name* is
+    ``None``, empty, or contains characters unsafe for directory names.
+
     >>> default_workspace_name("cli")
     'data/cli_default_workspace'
+    >>> default_workspace_name("")           # doctest: +ELLIPSIS
+    'data/unknown...'
+    >>> default_workspace_name(None)          # doctest: +ELLIPSIS
+    'data/unknown...'
     """
-    return f"{_DATA_DIR}/{channel_name}{_DEFAULT_WORKSPACE_SUFFIX}"
+    safe = _sanitize_name(channel_name) or "unknown"
+    return f"{_DATA_DIR}/{safe}{_DEFAULT_WORKSPACE_SUFFIX}"
 
 
 def ensure_workspace_dir(rpg_root: Path, workspace: str) -> None:
