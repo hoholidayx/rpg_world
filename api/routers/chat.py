@@ -77,10 +77,10 @@ async def get_chat_history(
 @router.post("/chat/send")
 async def chat_send(
     body: dict,
+    workspace: str = "",
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
     """Send a message and receive the full buffered reply."""
-    workspace = body.get("workspace", "")
     session_id = body.get("session_id", "default")
     message = body.get("message", "")
 
@@ -128,10 +128,10 @@ async def chat_send(
 @router.post("/chat/command")
 async def chat_command(
     body: dict,
+    workspace: str = "",
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
     """Execute a slash command on the agent (not sent to LLM)."""
-    workspace = body.get("workspace", "")
     session_id = body.get("session_id", "default")
     command: str = body.get("command", "").strip()
 
@@ -184,10 +184,10 @@ async def list_commands(
 @router.post("/chat/stream")
 async def chat_stream(
     body: dict,
+    workspace: str = "",
     x_openai_api_key: str | None = Header(None),
 ) -> StreamingResponse:
     """Send a message and stream the response via Server-Sent Events."""
-    workspace = body.get("workspace", "")
     session_id = body.get("session_id", "default")
     message = body.get("message", "")
     agent = _get_agent(workspace, session_id, api_key=x_openai_api_key)

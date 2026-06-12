@@ -72,9 +72,10 @@ export function streamMessage(message, sessionId = 'default', onEvent) {
   const workspace = qsIdx >= 0 ? new URLSearchParams(hash.slice(qsIdx + 1)).get('workspace') || '' : ''
 
   const body = { message, session_id: sessionId }
-  if (workspace) body.workspace = workspace
 
-  const url = `${base}/api/v1/chat/stream`
+  const url = workspace
+    ? `${base}/api/v1/chat/stream?workspace=${encodeURIComponent(workspace)}`
+    : `${base}/api/v1/chat/stream`
 
   fetch(url, {
     method: 'POST',

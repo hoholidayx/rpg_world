@@ -31,11 +31,7 @@ function _getCurrentWorkspace() {
 api.interceptors.request.use((config) => {
   const workspace = _getCurrentWorkspace()
   if (workspace) {
-    if (config.method === 'get') {
-      config.params = { workspace, ...config.params }
-    } else {
-      config.data = { workspace, ...(config.data || {}) }
-    }
+    config.params = { workspace, ...config.params }
   }
   return config
 })

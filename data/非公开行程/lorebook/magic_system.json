@@ -1,8 +1,9 @@
 {
   "name": "Magic System",
-  "content": "Flows through all.",
+  "content": "Flows through all..",
   "tags": [
     "magic"
   ],
-  "enable": false
+  "enable": false,
+  "description": ""
 }
