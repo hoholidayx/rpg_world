@@ -41,10 +41,10 @@ async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
 
 
 async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
-    """列出所有会话。"""
+    """列出当前工作区所有会话。"""
     from rpg_world.rpg_core.session import SessionManager
 
-    sessions = SessionManager.list_sessions()
+    sessions = SessionManager.list_sessions(agent._workspace)
     current = agent._session_id
     lines = [f"会话列表 ({len(sessions)}):"]
     for s in sessions:
@@ -61,7 +61,7 @@ async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
         return "[错误] 需要提供 session-id: /session-create <id>"
     sid = args[0]
     try:
-        SessionManager.create(sid)
+        SessionManager.create(agent._workspace, sid)
     except ValueError as exc:
         return f"[错误] {exc}"
     except FileExistsError:
@@ -80,7 +80,7 @@ async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
         SessionManager.validate_session_id(sid)
     except ValueError as exc:
         return f"[错误] {exc}"
-    if sid not in SessionManager.list_sessions():
+    if sid not in SessionManager.list_sessions(agent._workspace):
         return f"[会话不存在: {sid}]"
     await agent.switch_session(sid)
     return f"[已切换到会话: {sid}]"

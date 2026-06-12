@@ -22,16 +22,17 @@ class TokenCounter(ABC):
         """Count tokens in a single text string."""
         pass
 
-    def count_messages(self, messages: list[dict[str, object]]) -> int:
-        """Count tokens in a list of message dicts."""
+    def count_messages(self, messages: list) -> int:
+        """Count tokens in a list of messages (dicts or Message objects)."""
         total = 0
         for msg in messages:
+            d = msg if isinstance(msg, dict) else msg.to_dict()
             for key in ("content", "name", "tool_call_id"):
-                val = msg.get(key)
+                val = d.get(key)
                 if isinstance(val, str):
                     total += self.count(val)
-            if msg.get("tool_calls"):
-                total += self.count(json.dumps(msg["tool_calls"], ensure_ascii=False))
+            if d.get("tool_calls"):
+                total += self.count(json.dumps(d["tool_calls"], ensure_ascii=False))
         return total
 
     def count_text_blocks(self, texts: list[str]) -> int:
