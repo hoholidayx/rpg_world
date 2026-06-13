@@ -293,7 +293,7 @@ const sessionOptions = computed(() =>
 onMounted(async () => {
   await Promise.all([workspaceStore.load(), sessionStore.load()])
   await loadHistory()
-  commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
+  await refreshCommands()
 })
 
 // ── Watch workspace changes ──────────────────────────────
@@ -304,7 +304,7 @@ watch(
     await sessionStore.load()
     messages.value = []
     await loadHistory()
-    commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
+    await refreshCommands()
   },
 )
 
@@ -315,7 +315,7 @@ watch(
   async () => {
     messages.value = []
     await loadHistory()
-    commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
+    await refreshCommands()
   },
 )
 
@@ -333,6 +333,16 @@ const {
 
 const inputRef = ref(null)
 const commandPopupRef = ref(null)
+
+async function refreshCommands() {
+  commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
+}
+
+watch(showCommandPopup, async (visible) => {
+  if (visible) {
+    await refreshCommands()
+  }
+})
 
 function onCommandArrowUp() {
   if (!showCommandPopup.value) return

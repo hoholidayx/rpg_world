@@ -25,12 +25,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from rpg_world.rpg_core.utils.path_utils import (
+    PACKAGE_ROOT as _PACKAGE_ROOT,
+)
 from rpg_world.rpg_core.utils.path_utils import (
     resolve_rpg_path,
     resolve_workspace_root,
-    PACKAGE_ROOT as _PACKAGE_ROOT,
 )
 
 # Location of settings.json relative to this module
@@ -70,6 +71,30 @@ class MemorySettings:
 
     top_k: int = 5
     """向量检索返回的最大结果数。"""
+
+    hybrid_enabled: bool = True
+    """是否启用向量 + FTS 混合检索。"""
+
+    vector_k: int = 50
+    """混合检索中向量召回候选数。"""
+
+    keyword_k: int = 50
+    """混合检索中关键词召回候选数。"""
+
+    rerank_enabled: bool = False
+    """是否启用本地 llama.cpp 重排。"""
+
+    rerank_model_path: str = ""
+    """重排模型 GGUF 路径，为空或不存在时自动回退。"""
+
+    rerank_max_candidates: int = 10
+    """送入本地重排模型的最大候选数。"""
+
+    rerank_n_ctx: int = 4096
+    """本地重排模型上下文窗口。"""
+
+    rerank_temperature: float = 0.0
+    """本地重排模型采样温度。"""
 
     chunk_size: int = 2000
     """单文件超过此字符数时分块。"""
@@ -233,12 +258,26 @@ class Settings:
                 embed_resolved = str((_PACKAGE_ROOT / p).resolve())
         else:
             embed_resolved = embed_raw
+        rerank_raw = raw.get("rerank_model_path", "")
+        if rerank_raw:
+            p = Path(rerank_raw)
+            rerank_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
+        else:
+            rerank_resolved = rerank_raw
         return MemorySettings(
             enabled=raw.get("enabled", False),
             embedding_model_path=embed_resolved,
             n_ctx=raw.get("n_ctx", 32768),
             n_gpu_layers=raw.get("n_gpu_layers", 0),
             top_k=raw.get("top_k", 5),
+            hybrid_enabled=raw.get("hybrid_enabled", True),
+            vector_k=raw.get("vector_k", 50),
+            keyword_k=raw.get("keyword_k", 50),
+            rerank_enabled=raw.get("rerank_enabled", False),
+            rerank_model_path=rerank_resolved,
+            rerank_max_candidates=raw.get("rerank_max_candidates", 10),
+            rerank_n_ctx=raw.get("rerank_n_ctx", 4096),
+            rerank_temperature=raw.get("rerank_temperature", 0.0),
             chunk_size=raw.get("chunk_size", 2000),
             chunk_overlap=raw.get("chunk_overlap", 64),
         )

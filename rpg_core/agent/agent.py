@@ -701,7 +701,7 @@ class RPGGameAgent:
         self._system_prompt = PromptManager(self._world_name).system_prompt
         self._session.load()
 
-        # ── MemoryManager 异步初始化（索引 + FileWatcher） ─────────
+        # ── MemoryManager 初始化（仅注册 FileWatcher） ─────────
         if self._memory_manager:
             self._memory_manager.init()
 

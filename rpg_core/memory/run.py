@@ -7,12 +7,17 @@
     uv run python -m rpg_world.rpg_core.memory.test_run --query "森林"
 """
 
+# ruff: noqa: E402, I001
+
 __test__ = False  # 阻止 pytest 自动收集（本文件为独立 CLI，非 pytest 用例）
 
 
 import sys
+import shutil
 import time
+import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # ── 确保可以在项目外直接运行 ──────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
@@ -28,9 +33,19 @@ logger.add(
     colorize=True,
 )
 
-from rpg_world.rpg_core.settings import settings, MemorySettings
+from rpg_world.rpg_core.session.manager import SessionManager
+from rpg_world.rpg_core.settings import settings
 from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
 from rpg_world.rpg_core.memory.memory_manager import MemoryManager, format_recall_item
+from rpg_world.rpg_core.utils.path_utils import (
+    PACKAGE_ROOT,
+    ensure_workspace_dir,
+    list_workspaces,
+    resolve_workspace_root,
+)
+
+if TYPE_CHECKING:
+    from rpg_world.rpg_core.memory.memory_manager import RecallItem
 
 
 def _print_separator(title: str) -> None:
@@ -39,11 +54,41 @@ def _print_separator(title: str) -> None:
     print(f"{'=' * 60}")
 
 
-def test_config() -> None:
+def _format_workspace_name(workspace: str) -> str:
+    return workspace or "默认（根工作区）"
+
+
+def _print_available_workspaces() -> None:
+    workspaces = list_workspaces(PACKAGE_ROOT)
+    print("  可用 workspaces:")
+    for item in workspaces:
+        name = item["name"] or ""
+        label = item["label"]
+        print(f"    - {label}: {_format_workspace_name(name)}")
+
+
+def _create_temp_workspace() -> str:
+    workspace = f"data/memory_cli_{uuid.uuid4().hex[:8]}"
+    ensure_workspace_dir(PACKAGE_ROOT, workspace)
+    return workspace
+
+
+def _ensure_session(workspace: str, session: str) -> bool:
+    sessions = SessionManager.list_sessions(workspace)
+    if session in sessions:
+        return False
+    SessionManager.create(workspace, session)
+    return True
+
+
+def show_config(workspace: str, session: str) -> None:
     """1. 检查配置是否正确加载。"""
     _print_separator("1. MemorySettings 配置检查")
 
     mem = settings.memory_settings
+    _print_available_workspaces()
+    print(f"  选中 workspace:     {workspace}")
+    print(f"  选中 session:       {session}")
     print(f"  enabled:              {mem.enabled}")
     print(f"  embedding_model_path: {mem.embedding_model_path}")
     print(f"  exists:               {Path(mem.embedding_model_path).exists()}")
@@ -52,18 +97,19 @@ def test_config() -> None:
     print(f"  top_k:                {mem.top_k}")
     print(f"  chunk_size:           {mem.chunk_size}")
     print(f"  chunk_overlap:        {mem.chunk_overlap}")
-    print(f"  DB path:              {settings.get_vector_db_path('', 'test_mm')}")
+    print(f"  DB path:              {settings.get_vector_db_path(workspace, session)}")
+    print(f"  session dir:          {settings.session_dir(workspace, session)}")
 
 
-def test_create() -> MemoryManager | None:
+def create_manager(workspace: str, session: str) -> MemoryManager | None:
     """2. 同步创建 MemoryManager（加载模型 + 建 DB）。"""
     _print_separator("2. MemoryManager.create() 同步创建")
 
     recalled = RecalledMemoryStore()
     mm = MemoryManager.create(
         recalled_store=recalled,
-        session_dir=str(settings.session_dir("", "test_mm")),
-        get_vector_db_path=str(settings.get_vector_db_path("", "test_mm")),
+        session_dir=str(settings.session_dir(workspace, session)),
+        get_vector_db_path=str(settings.get_vector_db_path(workspace, session)),
         mem_cfg=settings.memory_settings,
     )
 
@@ -75,21 +121,21 @@ def test_create() -> MemoryManager | None:
     print(f"  类型: {type(mm).__name__}")
     print(f"  index_manager: {mm._index_manager is not None}")
     print(f"  retriever: {mm._retriever is not None}")
-    print(f"  DB 文件: {settings.get_vector_db_path('', 'test_mm')}")
-    print(f"  DB 存在: {settings.get_vector_db_path('', 'test_mm').exists()}")
+    print(f"  DB 文件: {settings.get_vector_db_path(workspace, session)}")
+    print(f"  DB 存在: {settings.get_vector_db_path(workspace, session).exists()}")
     return mm
 
 
-async def test_async_init(mm: MemoryManager, session: str) -> None:
-    """3. 异步初始化（全量索引 + FileWatcher 注册）。"""
-    _print_separator(f"3. async_init() 异步索引（session={session}）")
+def initialize_manager(mm: MemoryManager, session: str) -> None:
+    """3. 初始化（仅注册 FileWatcher，不执行全量重建）。"""
+    _print_separator(f"3. init() 初始化（session={session}）")
 
     t0 = time.monotonic()
-    await mm.async_init()
+    mm.init()
     elapsed = time.monotonic() - t0
 
     print(f"  耗时: {elapsed:.2f}s")
-    print(f"  async_inited: {mm._async_inited}")
+    print(f"  inited: {mm._inited}")
 
 
 def _print_recall_item(idx: int, item: "RecallItem") -> None:
@@ -98,7 +144,7 @@ def _print_recall_item(idx: int, item: "RecallItem") -> None:
     print()
 
 
-def test_recall(mm: MemoryManager, query: str) -> None:
+def preview_recall(mm: MemoryManager, query: str) -> None:
     """4. 执行召回测试。"""
     _print_separator(f"4. recall(query='{query}')")
 
@@ -110,39 +156,33 @@ def test_recall(mm: MemoryManager, query: str) -> None:
     print(f"  RecalledMemoryStore: {len(mm._recalled_store.get_items())} 条")
 
 
-def test_vector_store(session: str) -> None:
+def inspect_vector_store(workspace: str, session: str) -> None:
     """5. 直接检查 VectorStore 中的数据。"""
     _print_separator("5. VectorStore 内容检查")
 
-    from rpg_world.rpg_core.memory.vector_store import VectorStore
-
-    mem = settings.memory_settings
-    db_path = settings.get_vector_db_path("", session)
+    db_path = settings.get_vector_db_path(workspace, session)
 
     if not db_path.exists():
         print("  ⚠️  DB 不存在，跳过")
         return
 
-    # 需要 embedding provider 来获取 dimension
-    from rpg_world.rpg_core.memory.embedding_provider import LlamaCppEmbeddingProvider
-
-    try:
-        embed = LlamaCppEmbeddingProvider(
-            gguf_model_path=mem.embedding_model_path,
-            n_ctx=mem.n_ctx,
-            n_gpu_layers=mem.n_gpu_layers,
-        )
-        store = VectorStore(db_path=db_path, dimension=embed.dimension())
-        embed.close()
-    except Exception as exc:
-        print(f"  ❌ 无法打开 VectorStore: {exc}")
-        return
-
     # 检查 chunk 数量
     import sqlite3
+
     conn = sqlite3.connect(str(db_path))
     count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     print(f"  总 chunk 数: {count}")
+    try:
+        fts_count = conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()[0]
+        print(f"  FTS row 数: {fts_count}")
+    except Exception as exc:
+        print(f"  ⚠️  FTS 不可用: {exc}")
+
+    try:
+        vec_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
+        print(f"  向量 row 数: {vec_count}")
+    except Exception as exc:
+        print(f"  ⚠️  向量表不可用: {exc}")
 
     if count > 0:
         # 显示前 3 条
@@ -154,19 +194,29 @@ def test_vector_store(session: str) -> None:
     conn.close()
 
 
-def test_cleanup() -> None:
+def cleanup_workspace(workspace: str, session: str, remove_workspace: bool = False) -> None:
     """6. 清理测试数据。"""
     _print_separator("6. 清理")
 
-    import shutil
+    try:
+        SessionManager.delete(workspace, session)
+        print(f"  🗑️  删除 session: {session}")
+    except Exception as exc:
+        print(f"  ⚠️  删除 session 失败: {exc}")
 
-    db = settings.get_vector_db_path("", "test_mm")
+    db = settings.get_vector_db_path(workspace, session)
     if db.exists():
         db.unlink()
         print(f"  🗑️  删除 DB: {db}")
 
+    if remove_workspace:
+        ws_root = resolve_workspace_root(PACKAGE_ROOT, workspace)
+        if ws_root.exists():
+            shutil.rmtree(ws_root, ignore_errors=True)
+            print(f"  🗑️  删除 workspace: {ws_root}")
 
-def _loop(mm: MemoryManager, session: str) -> None:
+
+def _loop(mm: MemoryManager, workspace: str, session: str) -> None:
     """交互式命令循环（全部同步，无事件循环依赖）。"""
 
     commands = {
@@ -208,22 +258,22 @@ def _loop(mm: MemoryManager, session: str) -> None:
 
         elif cmd == "info":
             _print_separator("MemoryManager 状态")
+            print(f"  workspace:          {workspace}")
             print(f"  session:           {session}")
-            print(f"  DB:                {settings.get_vector_db_path('', session)}")
-            print(f"  DB 存在:            {settings.get_vector_db_path('', session).exists()}")
-            print(f"  inited:              {mm._inited}")
+            print(f"  DB:                {settings.get_vector_db_path(workspace, session)}")
+            print(f"  DB 存在:            {settings.get_vector_db_path(workspace, session).exists()}")
+            print(f"  inited:             {mm._inited}")
             print(f"  index_manager:      {mm._index_manager is not None}")
             print(f"  retriever:          {mm._retriever is not None}")
             print(f"  top_k:              {mm._top_k}")
             print(f"  RecalledStore 条数: {len(mm._recalled_store.get_items())}")
 
         elif cmd == "db":
-            test_vector_store(session)
+            inspect_vector_store(workspace, session)
 
         elif cmd == "reindex":
             _print_separator("重索引")
-            if mm._index_manager:
-                mm._index_manager.reindex_all()
+            mm.reindex()
             print("  ✅ 重索引完成")
 
         elif cmd == "recall":
@@ -243,36 +293,46 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="MemoryManager CLI 测试")
+    parser.add_argument("--workspace", default="", help="测试用 workspace（默认: 自动创建临时 workspace）")
     parser.add_argument("--session", default="test_mm", help="测试用的 session ID（默认: test_mm）")
     parser.add_argument("--query", default="记忆", help="启动后首次 recall 的查询文本（默认: 记忆）")
     parser.add_argument("--skip-cleanup", action="store_true", help="保留测试数据不清理")
+    parser.add_argument("--list-workspaces", action="store_true", help="仅打印可用 workspaces 并退出")
     args = parser.parse_args()
 
-    print(f"\n🔧 MemoryManager 测试 — session={args.session!r}\n")
+    if args.list_workspaces:
+        _print_available_workspaces()
+        return
+
+    workspace = args.workspace.strip() or _create_temp_workspace()
+    temporary_workspace = not bool(args.workspace.strip())
+
+    print(f"\n🔧 MemoryManager 测试 — workspace={workspace!r} session={args.session!r}\n")
 
     # 前置检查
-    test_config()
-    if not settings.memory_settings.enabled:
-        print("\n  ⚠️  memory 未启用（settings.json memory.enabled = false）")
-        return
+    show_config(workspace, args.session)
+    try:
+        if not settings.memory_settings.enabled:
+            print("\n  ⚠️  memory 未启用（settings.json memory.enabled = false）")
+            return
 
-    # 创建
-    mm = test_create()
-    if mm is None:
-        return
+        _ensure_session(workspace, args.session)
+        mm = create_manager(workspace, args.session)
+        if mm is not None:
+            # 同步初始化（仅注册 FileWatcher）
+            initialize_manager(mm, args.session)
 
-    # 同步初始化（DB 有数据则跳过索引，否则全量索引 → FileWatcher 启动）
-    mm.init()
+            # 启动前的自动 recall
+            preview_recall(mm, args.query)
 
-    # 启动前的自动 recall
-    test_recall(mm, args.query)
-
-    # 进入交互循环
-    _loop(mm, args.session)
-
-    # 清理
-    if not args.skip_cleanup:
-        test_cleanup()
+            # 进入交互循环
+            _loop(mm, workspace, args.session)
+    finally:
+        # 清理
+        if not args.skip_cleanup and temporary_workspace:
+            cleanup_workspace(workspace, args.session, remove_workspace=temporary_workspace)
+        elif args.skip_cleanup and temporary_workspace:
+            print("  ℹ️  保留临时 workspace（skip-cleanup）")
     print("👋 再见")
 
 

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -33,6 +33,14 @@ async def _cmd_reload(agent: RPGGameAgent, args: list[str]) -> str:
     """重新加载 RPG 数据（角色卡、世界书）。"""
     await agent.reload_rpg_context()
     return "RPG 数据已重新加载。"
+
+
+async def _cmd_memory_reindex(agent: RPGGameAgent, args: list[str]) -> str:
+    """手动触发 memory 全量重建。"""
+    if agent._memory_manager is None:
+        return "memory 未启用或未初始化，无法重建索引。"
+    agent._memory_manager.reindex()
+    return "memory 全量重建已触发。"
 
 
 async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
@@ -117,7 +125,7 @@ class CommandDispatcher:
     """命令分发器。
 
     维护内置命令和子 Agent 命令两道注册表。dispatch() 按优先级：
-    1. 内置命令（clear / reload / context / sessions / session-create / session-switch）
+    1. 内置命令（clear / reload / context / sessions / session-create / session-switch / memory-reindex）
     2. 子 Agent 的 accept_command（如 MemorySubAgent 的 /compact）
     3. 未命中 → handed=False，调用方走 LLM 兜底
     """
@@ -176,6 +184,10 @@ class CommandDispatcher:
         self.register_builtin(
             "/session-switch", "切换到指定会话",
             "用法：/session-switch <id>。切换后对话历史、上下文等全部指向新会话。", _cmd_session_switch,
+        )
+        self.register_builtin(
+            "/memory-reindex", "手动触发 memory 全量重建",
+            "用法：/memory-reindex。会重建 memory 的 FTS/向量索引，不会自动在启动时执行。", _cmd_memory_reindex,
         )
 
     # ── 查询 ──────────────────────────────────────────────────────────

@@ -4,22 +4,23 @@
 
 初始化策略：
   1. ``create()`` — 加载模型 + 建 DB
-  2. ``init()`` — 如果 DB 无数据则全量索引，已有数据则跳过（FileWatcher 负责增量更新）
+  2. ``init()`` — 注册 FileWatcher，避免启动时执行全量重建
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from loguru import logger
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
     from rpg_world.rpg_core.memory.retriever import BaseRetriever
     from rpg_world.rpg_core.memory.vector_index_manager import VectorIndexManager
+    from rpg_world.rpg_core.memory.vector_store import VectorStore
     from rpg_world.rpg_core.settings import MemorySettings
-
-from loguru import logger
-
-from dataclasses import dataclass, field
 
 
 @dataclass
@@ -57,7 +58,7 @@ def format_recall_item(idx: int, item: RecallItem) -> str:
     extra = {k: v for k, v in item.metadata.items() if k not in non_text_keys}
     if extra:
         lines.append(f"       meta: {extra}")
-    lines.append(f"       ---")
+    lines.append("       ---")
     for line in item.text.splitlines():
         lines.append(f"       {line}")
     return "\n".join(lines)
@@ -76,25 +77,108 @@ class MemoryManager:
         get_vector_db_path: str,
         mem_cfg: MemorySettings,
     ) -> MemoryManager | None:
-        """构造 MemoryManager（同步：加载模型 + 建 DB）。"""
+        """构造 MemoryManager（同步：尽力加载模型并建立检索链路）。"""
         if not mem_cfg.enabled:
             logger.info("[MemoryManager] disabled by config")
             return None
+        logger.info(
+            "[MemoryManager] create start — session_dir={} db_path={} hybrid={} top_k={}",
+            session_dir,
+            get_vector_db_path,
+            mem_cfg.hybrid_enabled,
+            mem_cfg.top_k,
+        )
 
+        sources = cls._build_sources(session_dir)
+        fallback_search = cls._build_raw_md_search(sources)
+        embedding = cls._build_embedding(mem_cfg)
+        store = cls._build_store(get_vector_db_path, embedding)
+        chunker = cls._build_chunker(mem_cfg)
+        index_mgr = cls._build_index_manager(store, embedding, sources, chunker)
+        retriever = cls._build_retriever(store, embedding, mem_cfg, fallback_search)
+
+        mm = cls(
+            recalled_store=recalled_store,
+            index_manager=index_mgr,
+            retriever=retriever,
+            top_k=mem_cfg.top_k,
+            store=store,
+        )
+        mm._db_path = get_vector_db_path
+        logger.info(
+            "[MemoryManager] create done — retriever={} store={} index={} embedding={}",
+            type(retriever).__name__ if retriever is not None else "None",
+            "ready" if store is not None else "none",
+            "ready" if index_mgr is not None else "none",
+            "ready" if embedding is not None else "none",
+        )
+        if embedding is None:
+            logger.warning("[MemoryManager] embedding unavailable — keyword/raw markdown fallback mode")
+        return mm
+
+    # ── 实例初始化 ─────────────────────────────────────────────────────
+
+    def __init__(
+        self,
+        recalled_store: RecalledMemoryStore,
+        index_manager: VectorIndexManager | None = None,
+        retriever: BaseRetriever | None = None,
+        top_k: int = 5,
+        store: VectorStore | None = None,
+    ) -> None:
+        self._recalled_store = recalled_store
+        self._index_manager = index_manager
+        self._retriever = retriever
+        self._top_k = top_k
+        self._store = store
+        self._inited = False
+        self._db_path: str | None = None
+
+    def init(self) -> None:
+        """同步初始化：仅注册 watcher，不执行全量重建。"""
+        logger.info("[MemoryManager] init() called — _inited={} index_manager={}", self._inited, self._index_manager is not None)
+        if self._inited:
+            return
+        if self._index_manager is None:
+            logger.info("[MemoryManager] init skipped — index manager unavailable")
+            self._inited = True
+            return
+
+        self._index_manager.start()
+        self._inited = True
+        logger.info("[MemoryManager] init done")
+
+    @staticmethod
+    def _build_sources(session_dir: str):
+        from rpg_world.rpg_core.memory.vector_index_manager import WatchSource
+
+        sources = [
+            WatchSource(
+                path=Path(session_dir) / "summaries",
+                source_id="summaries",
+                file_filter=lambda p: p.suffix in (".md", ".json"),
+            ),
+        ]
+        logger.info("[MemoryManager] watch sources ready — count={} root={}", len(sources), sources[0].path)
+        return sources
+
+    @staticmethod
+    def _build_raw_md_search(sources):
+        from rpg_world.rpg_core.memory.raw_md_grep_search import RawMarkdownGrepSearch
+
+        logger.info("[MemoryManager] raw markdown fallback roots={}", len(sources))
+        return RawMarkdownGrepSearch(source_paths=[src.path for src in sources])
+
+    @staticmethod
+    def _build_embedding(mem_cfg: MemorySettings):
         embed_path = mem_cfg.embedding_model_path
         if not embed_path:
-            logger.warning("[MemoryManager] embedding_model_path not configured — disabled")
-            return None
-
-        try:
-            import llama_cpp  # noqa: F401
-            import sqlite_vec  # noqa: F401
-        except ImportError as exc:
-            logger.warning("[MemoryManager] missing dependency ({})", exc)
+            logger.warning("[MemoryManager] embedding_model_path not configured")
             return None
 
         try:
             from rpg_world.rpg_core.memory.embedding_provider import LlamaCppEmbeddingProvider
+
             logger.info(
                 "[MemoryManager] loading embedding model: {} (n_ctx={}, n_gpu_layers={})",
                 embed_path, mem_cfg.n_ctx, mem_cfg.n_gpu_layers,
@@ -105,82 +189,141 @@ class MemoryManager:
                 n_gpu_layers=mem_cfg.n_gpu_layers,
             )
             logger.info("[MemoryManager] model loaded — dim={}", embedding.dimension())
-
-            from rpg_world.rpg_core.memory.vector_store import VectorStore
-            store = VectorStore(db_path=get_vector_db_path, dimension=embedding.dimension())
-            logger.info("[MemoryManager] vector store ready: {}", get_vector_db_path)
-
-            from rpg_world.rpg_core.memory.chunker import Chunker
-            chunker = Chunker(
-                max_file_chars=mem_cfg.chunk_size,
-                overlap=mem_cfg.chunk_overlap,
-            )
-
-            from rpg_world.rpg_core.memory.vector_index_manager import (
-                VectorIndexManager, WatchSource,
-            )
-            from pathlib import Path
-            sources = [
-                WatchSource(
-                    path=Path(session_dir) / "summaries",
-                    source_id="summaries",
-                    file_filter=lambda p: p.suffix in (".md", ".json"),
-                ),
-            ]
-            logger.info("[MemoryManager] watch sources: {}", sources[0].path)
-
-            index_mgr = VectorIndexManager(
-                store=store, embedding=embedding, sources=sources, chunker=chunker,
-            )
-
-            from rpg_world.rpg_core.memory.retriever import DenseRetriever
-            retriever = DenseRetriever(store=store, embedding=embedding)
-
-            logger.info("[MemoryManager] components ready — top_k={}", mem_cfg.top_k)
-            mm = cls(
-                recalled_store=recalled_store,
-                index_manager=index_mgr,
-                retriever=retriever,
-                top_k=mem_cfg.top_k,
-            )
-            mm._db_path = get_vector_db_path
-            return mm
-
+            return embedding
         except Exception as exc:
-            logger.warning("[MemoryManager] init failed: {}", exc)
+            logger.warning("[MemoryManager] embedding init failed: {}", exc)
             return None
 
-    # ── 实例初始化 ─────────────────────────────────────────────────────
+    @staticmethod
+    def _build_store(
+        get_vector_db_path: str,
+        embedding: object | None,
+    ):
+        from rpg_world.rpg_core.memory.vector_store import VectorStore, VectorStoreError
 
-    def __init__(
-        self,
-        recalled_store: RecalledMemoryStore,
-        index_manager: VectorIndexManager | None = None,
-        retriever: BaseRetriever | None = None,
-        top_k: int = 5,
-    ) -> None:
-        self._recalled_store = recalled_store
-        self._index_manager = index_manager
-        self._retriever = retriever
-        self._top_k = top_k
-        self._inited = False
-        self._db_path: str | None = None
+        dimension = None
+        if embedding is not None:
+            dimension = embedding.dimension()  # type: ignore[union-attr]
 
-    def init(self) -> None:
-        """同步初始化：DB 无数据则全量索引，已有数据则跳过。"""
-        logger.info("[MemoryManager] init() called — _inited={}", self._inited)
-        if self._inited:
-            return
+        try:
+            store = VectorStore(db_path=get_vector_db_path, dimension=dimension)
+            logger.info(
+                "[MemoryManager] vector store ready: {} (vector_mode={})",
+                get_vector_db_path,
+                dimension is not None,
+            )
+            return store
+        except VectorStoreError as exc:
+            if dimension is None:
+                logger.warning("[MemoryManager] keyword store init failed: {}", exc)
+                return None
+            logger.warning("[MemoryManager] vector store init failed, retry keyword-only: {}", exc)
+            try:
+                store = VectorStore(db_path=get_vector_db_path, dimension=None)
+                logger.info(
+                    "[MemoryManager] keyword-only store ready: {}",
+                    get_vector_db_path,
+                )
+                return store
+            except Exception as retry_exc:
+                logger.warning("[MemoryManager] keyword store retry failed: {}", retry_exc)
+                return None
+        except Exception as exc:
+            logger.warning("[MemoryManager] store init failed: {}", exc)
+            return None
+
+    @staticmethod
+    def _build_chunker(mem_cfg: MemorySettings):
+        from rpg_world.rpg_core.memory.chunker import Chunker
+
+        return Chunker(
+            max_file_chars=mem_cfg.chunk_size,
+            overlap=mem_cfg.chunk_overlap,
+        )
+
+    @classmethod
+    def _build_index_manager(
+        cls,
+        store,
+        embedding,
+        sources,
+        chunker,
+    ):
+        if store is None:
+            logger.warning("[MemoryManager] index manager skipped — store unavailable")
+            return None
+        if embedding is None:
+            logger.info("[MemoryManager] index manager will operate in keyword-only mode")
+
+        try:
+            from rpg_world.rpg_core.memory.vector_index_manager import VectorIndexManager
+
+            index_manager = VectorIndexManager(
+                store=store,
+                embedding=embedding,
+                sources=sources,
+                chunker=chunker,
+            )
+            logger.info("[MemoryManager] index manager ready")
+            return index_manager
+        except Exception as exc:
+            logger.warning("[MemoryManager] index manager init failed: {}", exc)
+            return None
+
+    @staticmethod
+    def _build_retriever(store, embedding, mem_cfg: MemorySettings, fallback_search):
+        from rpg_world.rpg_core.memory.hybrid_retriever import HybridRetriever
+        from rpg_world.rpg_core.memory.llama_reranker import (
+            LlamaRerankConfig,
+            LlamaReranker,
+        )
+        from rpg_world.rpg_core.memory.raw_md_retriever import RawMarkdownRetriever
+        from rpg_world.rpg_core.memory.retriever import DenseRetriever
+
+        if store is None:
+            logger.info("[MemoryManager] retriever fallback — raw markdown only")
+            return RawMarkdownRetriever(fallback_search)
+
+        if mem_cfg.hybrid_enabled or embedding is None:
+            logger.info(
+                "[MemoryManager] retriever mode — hybrid (vector={} keyword={} rerank={})",
+                embedding is not None,
+                True,
+                mem_cfg.rerank_enabled,
+            )
+            reranker = LlamaReranker(
+                LlamaRerankConfig(
+                    enabled=mem_cfg.rerank_enabled,
+                    model_path=mem_cfg.rerank_model_path,
+                    max_candidates=mem_cfg.rerank_max_candidates,
+                    n_ctx=mem_cfg.rerank_n_ctx,
+                    temperature=mem_cfg.rerank_temperature,
+                )
+            )
+            return HybridRetriever(
+                store=store,
+                embedding=embedding,
+                vector_k=mem_cfg.vector_k,
+                keyword_k=mem_cfg.keyword_k,
+                reranker=reranker,
+                fallback_search=fallback_search,
+            )
+
+        logger.info("[MemoryManager] retriever mode — dense vector")
+        return DenseRetriever(store=store, embedding=embedding)
+
+    def reindex(self) -> None:
+        """手动触发一次全量重建。"""
         if self._index_manager is None:
-            self._inited = True
+            logger.warning("[MemoryManager] reindex skipped: index manager unavailable")
             return
 
-        # 跳过 DB 预检，直接全量索引（避免 vec_chunks 虚拟表查询可能导致的死锁）
-        logger.info("[MemoryManager] DB empty — full reindex ...")
+        logger.info("[MemoryManager] manual reindex start ...")
         self._index_manager.reindex_all()
-        self._index_manager.start()
-        self._inited = True
-        logger.info("[MemoryManager] init done")
+        if not self._inited:
+            self._index_manager.start()
+            self._inited = True
+        logger.info("[MemoryManager] manual reindex done")
 
     def _get_db_path(self) -> Path | None:
         """返回 create() 时保存的 DB 路径，用于 init() 检查。"""
@@ -205,6 +348,7 @@ class MemoryManager:
             self._recalled_store.set_items([])
             return []
 
+        logger.info("[MemoryManager] recall start — query={!r} top_k={}", query, self._top_k)
         raw = self._retriever.retrieve_sync(query, self._top_k)
         items: list[RecallItem] = []
         for text, score, meta in raw:
@@ -218,10 +362,52 @@ class MemoryManager:
             ))
 
         self._recalled_store.set_items([i.text for i in items])
-        logger.info(
-            "[MemoryManager] recall({}) → {} items", query, len(items),
-        )
+        logger.info("[MemoryManager] recall done — query={!r} items={}", query, len(items))
         for i, it in enumerate(items):
             for line in format_recall_item(i, it).splitlines():
                 logger.info("[MemoryManager] {}", line)
         return items
+
+    def hybrid_search(self, query: str, top_k: int = 20) -> list[RecallItem]:
+        """Run structured hybrid search when the active retriever supports it."""
+        if self._retriever is None:
+            return []
+        logger.info("[MemoryManager] hybrid_search start — query={!r} top_k={}", query, top_k)
+        search = getattr(self._retriever, "hybrid_search", None)
+        if search is None:
+            raw = self._retriever.retrieve_sync(query, top_k)
+        else:
+            candidates = search(query, top_k)
+            raw = []
+            for candidate in candidates:
+                metadata = dict(candidate.metadata)
+                metadata.update(
+                    {
+                        "memory_id": candidate.memory_id,
+                        "vector_score": candidate.vector_score,
+                        "keyword_score": candidate.keyword_score,
+                        "exact_score": candidate.exact_score,
+                        "fuzzy_score": candidate.fuzzy_score,
+                        "recency_score": candidate.recency_score,
+                        "hybrid_score": candidate.hybrid_score,
+                        "rerank_score": candidate.rerank_score,
+                        "debug": candidate.debug,
+                    }
+                )
+                raw.append((candidate.content, candidate.final_score, metadata))
+        return [
+            RecallItem(
+                text=text,
+                score=score,
+                source=str(meta.get("source", "")),
+                file_path=str(meta.get("file", "")),
+                chunk_idx=int(meta.get("chunk_idx", 0)),
+                metadata=meta,
+            )
+            for text, score, meta in raw
+        ]
+
+    def rebuild_fts_index(self) -> None:
+        """Rebuild the keyword FTS index from stored chunks."""
+        if self._store is not None:
+            self._store.rebuild_fts_index()
