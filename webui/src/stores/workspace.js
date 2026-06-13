@@ -3,9 +3,9 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   listWorkspaces,
-  createWorkspace,
-  renameWorkspace,
-  deleteWorkspace,
+  createWorkspace as apiCreateWorkspace,
+  renameWorkspace as apiRenameWorkspace,
+  deleteWorkspace as apiDeleteWorkspace,
 } from '@/api/workspace'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -29,12 +29,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function createWorkspace(name) {
-    await createWorkspace(name)
+    await apiCreateWorkspace(name)
     await load()
   }
 
   async function renameWorkspace(oldName, newName) {
-    await renameWorkspace(oldName, newName)
+    await apiRenameWorkspace(oldName, newName)
     // If currently viewing the renamed workspace, switch to new name
     if (current.value === oldName) {
       switchWorkspace(`data/${newName}`)
@@ -43,7 +43,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function deleteWorkspace(name) {
-    await deleteWorkspace(name)
+    await apiDeleteWorkspace(name)
     // If currently viewing the deleted workspace, switch to root
     if (current.value === name) {
       switchWorkspace('')
