@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from loguru import logger
 from jinja2 import Environment, FileSystemLoader
 
 from rpg_world.rpg_core.context.config import RPGContextConfig
@@ -67,10 +68,11 @@ def _flatten_status_tables(
                 try:
                     tbl = status_mgr.get_table(type_name, table_name)
                     tables.append(tbl)
-                except Exception:
+                except Exception as exc:
+                    logger.debug("[RPGContextBuilder] skip status table {}/{}: {}", type_name, table_name, exc)
                     continue
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("[RPGContextBuilder] flatten status tables failed: {}", exc)
     return tables
 
 
@@ -174,15 +176,15 @@ class RPGContextBuilder:
         if lorebook_mgr and self.config.enable_lorebook:
             try:
                 lorebook_entries = lorebook_mgr.list_enabled_entries()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[RPGContextBuilder] lorebook layer skipped: {}", exc)
 
         characters: list[dict] = []
         if character_mgr and self.config.enable_character:
             try:
                 characters = character_mgr.list_enabled_characters()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[RPGContextBuilder] character layer skipped: {}", exc)
 
         fixed_content = self._render_layer("layers/fixed_layer.jinja", {
             "system_prompt": system_prompt,
@@ -202,8 +204,8 @@ class RPGContextBuilder:
                     })
                     if not persistent_content.strip():
                         persistent_content = None
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[RPGContextBuilder] persistent memory layer skipped: {}", exc)
 
         # ── 4. Build Summary Layer (overall.md only) ──────────────────
         summary_content: str | None = None
@@ -218,8 +220,8 @@ class RPGContextBuilder:
                     summary_content = self._render_layer("modules/overall_summary.jinja", {
                         "text": overall,
                     })
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[RPGContextBuilder] summary layer skipped: {}", exc)
 
         # ── 5. Extract Hot History ──────────────────────────────────
         history_messages = messages[:-1]  # exclude current user message
@@ -234,8 +236,8 @@ class RPGContextBuilder:
         if self._story_memory and self.config.enable_story_memory:
             try:
                 story_details = self._story_memory.get_all()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[RPGContextBuilder] story memory layer skipped: {}", exc)
         sm = self._render_layer("modules/story_memory.jinja", {
             "story_details": story_details,
         })
@@ -246,8 +248,8 @@ class RPGContextBuilder:
         if self._recalled_memory and self.config.enable_recalled_memory:
             try:
                 recalled_items = self._recalled_memory.get_items()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[RPGContextBuilder] recalled memory layer skipped: {}", exc)
         rm = self._render_layer("modules/recalled_memory.jinja", {
             "recalled_items": recalled_items,
         })
@@ -261,8 +263,8 @@ class RPGContextBuilder:
             if scene_tracker:
                 try:
                     exclude = {scene_tracker.table_key}
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("[RPGContextBuilder] scene table key unavailable: {}", exc)
             status_tables = _flatten_status_tables(status_mgr, exclude_tables=exclude)
         st = self._render_layer("modules/status_tables.jinja", {
             "status_tables": status_tables,
@@ -286,8 +288,6 @@ class RPGContextBuilder:
             parts.append(user_text)
         if user_after:
             parts.append(user_after)
-        user_content = "\n\n".join(parts)
-
         # ── 8. Assemble into RPGContext (stable-first for prefix cache) ─
         return RPGContext(
             fixed_layer=fixed_content,
@@ -322,8 +322,8 @@ class RPGContextBuilder:
                 rendered = render_jinja_template(mod.template, **default_data)
                 if rendered:
                     blocks.append(rendered)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[RPGContextBuilder] extension module skipped {}: {}", getattr(mod, "name", "?"), exc)
         return "\n\n".join(blocks)
 
 

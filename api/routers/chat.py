@@ -17,7 +17,7 @@ from rpg_world.rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
 
 from rpg_world.api.logger import chat_logger
 from rpg_world.api.settings import api_settings
-from rpg_world.rpg_core.agent.stats_formatter import format_event_stats, format_turn_stats
+from rpg_world.rpg_core.utils.stats_formatter import format_event_stats, format_turn_stats
 
 router = APIRouter(tags=["chat"])
 

@@ -48,12 +48,24 @@ class TiktokenTokenCounter(TokenCounter):
     """
 
     def __init__(self) -> None:
-        import tiktoken
+        self._enc = None
 
-        self._enc = tiktoken.get_encoding("cl100k_base")
+    def _ensure_encoding(self):
+        if self._enc is not None:
+            return self._enc
+        try:
+            import tiktoken
+
+            self._enc = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            self._enc = None
+        return self._enc
 
     def count(self, text: str) -> int:
-        return len(self._enc.encode(text))
+        enc = self._ensure_encoding()
+        if enc is not None:
+            return len(enc.encode(text))
+        return len(text) // 4
 
 
 class DeepSeekTokenCounter(TokenCounter):

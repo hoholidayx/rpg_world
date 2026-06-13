@@ -29,7 +29,7 @@ from rpg_world.rpg_core.agent.sub_agents import (
     StatusSubAgent,
     SubAgentContext,
 )
-from rpg_world.rpg_core.agent.tokenizer import TiktokenTokenCounter, TokenCounter
+from rpg_world.rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 from rpg_world.rpg_core.agent.tools import (
     BaseTool,
     GrepTool,

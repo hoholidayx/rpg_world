@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.agent.tokenizer import TokenCounter
+    from rpg_world.rpg_core.utils.tokenizer import TokenCounter
 
 
 class Role(StrEnum):

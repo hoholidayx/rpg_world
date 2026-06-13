@@ -38,6 +38,7 @@ class AgentManager:
 
     _instances: dict[str, RPGGameAgent] = {}
     _initialized: bool = False
+    _initialized_targets: set[tuple[str, str]] = set()
 
     @classmethod
     def _cache_key(cls, workspace: str, session_id: str, api_key: str | None) -> str:
@@ -93,14 +94,18 @@ class AgentManager:
             初始化时使用的 session ID。默认为 ``"default"``，
             调用方应根据实际使用的 session 传入（如 ``"cli_direct"``）。
         """
-        if not cls._initialized:
-            workspace = resolve_api_workspace(workspace)
-            agent = cls.get_or_create(workspace=workspace, session_id=session_id)
-            await agent._ensure_initialized()
-            cls._initialized = True
+        workspace = resolve_api_workspace(workspace)
+        target = (workspace, session_id)
+        if target in cls._initialized_targets:
+            return
+        agent = cls.get_or_create(workspace=workspace, session_id=session_id)
+        await agent._ensure_initialized()
+        cls._initialized_targets.add(target)
+        cls._initialized = True
 
     @classmethod
     def reset(cls) -> None:
         """重置所有 agent 实例和初始化状态（主要用于测试）。"""
         cls._instances.clear()
         cls._initialized = False
+        cls._initialized_targets.clear()

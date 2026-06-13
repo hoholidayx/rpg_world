@@ -109,7 +109,7 @@ class SessionManager:
         Writes to ``history.jsonl`` and ``history_cold.jsonl`` only when
         ``_history_enabled`` is ``True``.
         """
-        his_id = int(_time.time())
+        his_id = int(_time.time() * 1000)
         msg = Message(role, content, his_id)
         self._history.append(msg)
         if not self._history_enabled:

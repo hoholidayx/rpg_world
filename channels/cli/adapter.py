@@ -23,7 +23,7 @@ from rich.panel import Panel
 
 from rpg_world.channels.base import ChannelAdapter
 from rpg_world.rpg_core.agent.agent_types import StreamEventKind
-from rpg_world.rpg_core.agent.stats_formatter import format_event_stats, format_turn_stats
+from rpg_world.rpg_core.utils.stats_formatter import format_event_stats, format_turn_stats
 
 _HISTORY_PATH = Path.home() / ".rpg_world_cli_history"
 
