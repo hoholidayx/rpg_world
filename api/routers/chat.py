@@ -7,6 +7,7 @@ import json
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
+from rpg_world.api.schemas import ChatCommandBody, ChatMessageBody
 from rpg_world.rpg_core.agent.agent_types import StreamEventKind
 from rpg_world.rpg_core.agent.manager import AgentManager
 from rpg_world.rpg_core.utils.path_utils import (
@@ -76,13 +77,13 @@ async def get_chat_history(
 
 @router.post("/chat/send")
 async def chat_send(
-    body: dict,
+    body: ChatMessageBody,
     workspace: str = "",
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
     """Send a message and receive the full buffered reply."""
-    session_id = body.get("session_id", "default")
-    message = body.get("message", "")
+    session_id = body.session_id
+    message = body.message
 
     if api_settings.log_chat_messages:
         chat_logger.info("USER [%s][%s]: %s", workspace, session_id, message)
@@ -127,13 +128,13 @@ async def chat_send(
 
 @router.post("/chat/command")
 async def chat_command(
-    body: dict,
+    body: ChatCommandBody,
     workspace: str = "",
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
     """Execute a slash command on the agent (not sent to LLM)."""
-    session_id = body.get("session_id", "default")
-    command: str = body.get("command", "").strip()
+    session_id = body.session_id
+    command: str = body.command.strip()
 
     if api_settings.log_chat_messages:
         chat_logger.info("CMD [%s][%s]: %s", workspace, session_id, command)
@@ -183,13 +184,13 @@ async def list_commands(
 
 @router.post("/chat/stream")
 async def chat_stream(
-    body: dict,
+    body: ChatMessageBody,
     workspace: str = "",
     x_openai_api_key: str | None = Header(None),
 ) -> StreamingResponse:
     """Send a message and stream the response via Server-Sent Events."""
-    session_id = body.get("session_id", "default")
-    message = body.get("message", "")
+    session_id = body.session_id
+    message = body.message
     agent = _get_agent(workspace, session_id, api_key=x_openai_api_key)
 
     async def event_generator():

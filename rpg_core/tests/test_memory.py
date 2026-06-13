@@ -99,3 +99,53 @@ def test_memory_manager_recall_without_retriever(fake_recalled_store):
     manager = MemoryManager(recalled_store=fake_recalled_store, retriever=None)
     assert manager.recall("anything") == []
     assert fake_recalled_store.get_items() == []
+
+
+def test_memory_manager_recall_gracefully_handles_planner_or_retriever_failure(fake_recalled_store):
+    planner = SimpleNamespace(plan=lambda _query: (_ for _ in ()).throw(RuntimeError("planner boom")))
+    retriever = FakeRetriever([("不会返回", 0.5, {"source": "summaries"})])
+    manager = MemoryManager(
+        recalled_store=fake_recalled_store,
+        retriever=retriever,
+        top_k=2,
+        query_planner=planner,
+    )
+
+    assert manager.recall("查找线索") == []
+    assert fake_recalled_store.get_items() == []
+
+    planner_ok = RuleBasedQueryPlanner()
+    failing_retriever = SimpleNamespace(
+        retrieve_sync=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("retriever boom")),
+    )
+    manager = MemoryManager(
+        recalled_store=fake_recalled_store,
+        retriever=failing_retriever,
+        top_k=2,
+        query_planner=planner_ok,
+    )
+
+    assert manager.recall("查找线索") == []
+    assert fake_recalled_store.get_items() == []
+
+
+def test_hybrid_retriever_planner_failure_returns_empty(monkeypatch):
+    store = FakeStore()
+    retriever = HybridRetriever(
+        store=store,
+        embedding=None,
+        vector_k=2,
+        keyword_k=2,
+        reranker=None,
+        fallback_search=RawMarkdownGrepSearch([]),
+    )
+
+    def boom(_self, _query):
+        raise RuntimeError("planner boom")
+
+    monkeypatch.setattr(
+        "rpg_world.rpg_core.memory.retrieval.hybrid_retriever.RuleBasedQueryPlanner.plan",
+        boom,
+    )
+
+    assert retriever.hybrid_search("查找线索") == []

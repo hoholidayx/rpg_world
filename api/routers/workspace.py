@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+from rpg_world.api.schemas import WorkspaceNameBody
 from rpg_world.rpg_core.utils.path_utils import (
     list_workspaces,
     resolve_workspace_root,
@@ -71,9 +72,6 @@ def _resolve_existing_workspace(workspace: str) -> tuple[str, Path]:
     Raises ``HTTPException(404)`` if the workspace directory does not exist.
     """
     plain = workspace.removeprefix(f"{_DATA_DIR}/")
-    if plain == workspace:
-        # No prefix — the caller already sent a plain name
-        pass
     plain = plain.strip()
     if not plain:
         raise HTTPException(status_code=400, detail="cannot operate on root workspace")
@@ -92,7 +90,7 @@ def list_all_workspaces() -> dict:
 
 
 @router.post("/workspaces")
-def create_workspace(body: dict) -> dict:
+def create_workspace(body: WorkspaceNameBody) -> dict:
     """Create a new workspace directory under ``data/``.
 
     Body: ``{"name": "my-world"}``
@@ -100,7 +98,7 @@ def create_workspace(body: dict) -> dict:
     The workspace name becomes the directory name.  The full workspace
     identifier will be ``data/my-world``.
     """
-    name = _validate_workspace_name(body.get("name", ""))
+    name = _validate_workspace_name(body.name)
     ws_path = _workspace_path(name)
     if ws_path.exists():
         raise HTTPException(status_code=409, detail=f"Workspace '{name}' already exists")
@@ -109,12 +107,12 @@ def create_workspace(body: dict) -> dict:
 
 
 @router.put("/workspaces/{workspace:path}")
-def rename_workspace(workspace: str, body: dict) -> dict:
+def rename_workspace(workspace: str, body: WorkspaceNameBody) -> dict:
     """Rename an existing workspace.
 
     Body: ``{"name": "new-name"}``
     """
-    new_name = _validate_workspace_name(body.get("name", ""))
+    new_name = _validate_workspace_name(body.name)
     old_plain, old_path = _resolve_existing_workspace(workspace)
     new_path = _workspace_path(new_name)
     _ensure_within_data_dir(new_path)

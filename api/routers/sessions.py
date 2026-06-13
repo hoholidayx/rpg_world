@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from rpg_world.api.schemas import SessionCloneBody, SessionIdBody
 from rpg_world.rpg_core.session import SessionManager
 from rpg_world.rpg_core.utils.path_utils import resolve_api_workspace
 
@@ -31,10 +32,10 @@ def list_sessions(workspace: str) -> dict:
 
 
 @router.post("/workspaces/{workspace:path}/sessions")
-def create_session(workspace: str, body: dict) -> dict:
+def create_session(workspace: str, body: SessionIdBody) -> dict:
     """Create a new session under the given workspace."""
     ws = _resolve_ws(workspace)
-    session_id = _require_valid_session_id(body.get("session_id", "").strip())
+    session_id = _require_valid_session_id(body.session_id.strip())
 
     try:
         SessionManager.create(ws, session_id)
@@ -65,14 +66,11 @@ def delete_session(workspace: str, session_id: str) -> dict:
 
 
 @router.post("/workspaces/{workspace:path}/sessions/{session_id}/clone")
-def clone_session(workspace: str, session_id: str, body: dict) -> dict:
+def clone_session(workspace: str, session_id: str, body: SessionCloneBody) -> dict:
     """Clone a session's data to a new session ID."""
     ws = _resolve_ws(workspace)
     session_id = _require_valid_session_id(session_id)
-    target_id = _require_valid_session_id(
-        body.get("target_session_id", "").strip(),
-        field_name="target_session_id",
-    )
+    target_id = _require_valid_session_id(body.target_session_id.strip(), field_name="target_session_id")
 
     try:
         SessionManager.clone(ws, session_id, target_id)

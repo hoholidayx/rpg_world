@@ -40,24 +40,40 @@ class HybridRetriever(BaseRetriever):
     async def retrieve(
         self, query: str, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
-        plan = RuleBasedQueryPlanner().plan(query)
+        try:
+            plan = RuleBasedQueryPlanner().plan(query)
+        except Exception as exc:
+            self._log_stage_error("plan", exc)
+            return []
         return self._format(await self._search_plan_candidates_async(plan, top_k))
 
     def retrieve_sync(
         self, query: str, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
-        return self._format(self._search_candidates_sync(query, top_k))
+        try:
+            return self._format(self._search_candidates_sync(query, top_k))
+        except Exception as exc:
+            self._log_stage_error("retrieve", exc)
+            return []
 
     def retrieve_plan_sync(
         self, plan: QueryPlan, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
-        return self._format(self._search_plan_candidates_sync(plan, top_k))
+        try:
+            return self._format(self._search_plan_candidates_sync(plan, top_k))
+        except Exception as exc:
+            self._log_stage_error("retrieve_plan", exc)
+            return []
 
     def hybrid_search(self, query: str | QueryPlan, top_k: int = 20) -> list[MemoryCandidate]:
         """Public sync API returning structured hybrid candidates."""
         from loguru import logger
 
-        plan = query if isinstance(query, QueryPlan) else RuleBasedQueryPlanner().plan(query)
+        try:
+            plan = query if isinstance(query, QueryPlan) else RuleBasedQueryPlanner().plan(query)
+        except Exception as exc:
+            self._log_stage_error("plan", exc)
+            return []
         logger.info(
             "[HybridRetriever] search start — query={!r} planner={} top_k={} vector_k={} keyword_k={}",
             plan.normalized_query,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from rpg_world.api.schemas import StatusNameBody, StatusTableCreateBody, StatusTableSaveBody
 from rpg_world.api.deps import get_session_status_manager
 from rpg_world.rpg_core.status import StatusManager
 
@@ -27,13 +28,13 @@ def list_types(
 
 @router.post("/status/types")
 def create_type(
-    body: dict,
+    body: StatusNameBody,
     workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Create a new status type (directory)."""
-    name = body.get("name", "").strip()
+    name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Type name is required")
     try:
@@ -46,13 +47,13 @@ def create_type(
 @router.put("/status/types/{type_name}")
 def rename_type(
     type_name: str,
-    body: dict,
+    body: StatusNameBody,
     workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Rename a status type."""
-    new_name = body.get("name", "").strip()
+    new_name = body.name.strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="New type name is required")
     try:
@@ -102,17 +103,17 @@ def list_tables(
 @router.post("/status/types/{type_name}/tables")
 def create_table(
     type_name: str,
-    body: dict,
+    body: StatusTableCreateBody,
     workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Create a new table in a type."""
-    table_name = body.get("name", "").strip()
+    table_name = body.name.strip()
     if not table_name:
         raise HTTPException(status_code=400, detail="Table name is required")
-    headers = body.get("headers", [])
-    rows = body.get("rows", [])
+    headers = body.headers
+    rows = body.rows
     try:
         data = manager.create_table(type_name, table_name, headers, rows)
     except FileNotFoundError as exc:
@@ -141,14 +142,14 @@ def get_table(
 def save_table(
     type_name: str,
     table_name: str,
-    body: dict,
+    body: StatusTableSaveBody,
     workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Save (overwrite) a table's CSV data."""
-    headers = body.get("headers", [])
-    rows = body.get("rows", [])
+    headers = body.headers
+    rows = body.rows
     try:
         data = manager.save_table(type_name, table_name, headers, rows)
     except FileNotFoundError as exc:
@@ -160,13 +161,13 @@ def save_table(
 def rename_table(
     type_name: str,
     table_name: str,
-    body: dict,
+    body: StatusNameBody,
     workspace: str = "",
     session_id: str = "default",
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Rename a table."""
-    new_name = body.get("name", "").strip()
+    new_name = body.name.strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="New table name is required")
     try:

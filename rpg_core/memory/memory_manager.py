@@ -386,12 +386,24 @@ class MemoryManager:
             return []
 
         logger.info("[MemoryManager] recall start — query={!r} top_k={}", query, self._top_k)
-        plan = self._query_planner.plan(query)
-        retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
-        if retrieve_plan is None:
-            raw = self._retriever.retrieve_sync(plan.normalized_query or query, self._top_k)
-        else:
-            raw = retrieve_plan(plan, self._top_k)
+        try:
+            plan = self._query_planner.plan(query)
+        except Exception as exc:
+            logger.warning("[MemoryManager] recall planner failed: {}", exc)
+            self._recalled_store.set_items([])
+            return []
+
+        try:
+            retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
+            if retrieve_plan is None:
+                raw = self._retriever.retrieve_sync(plan.normalized_query or query, self._top_k)
+            else:
+                raw = retrieve_plan(plan, self._top_k)
+        except Exception as exc:
+            logger.warning("[MemoryManager] recall retriever failed: {}", exc)
+            self._recalled_store.set_items([])
+            return []
+
         items: list[RecallItem] = []
         for text, score, meta in raw:
             items.append(RecallItem(
@@ -415,33 +427,43 @@ class MemoryManager:
         if self._retriever is None:
             return []
         logger.info("[MemoryManager] hybrid_search start — query={!r} top_k={}", query, top_k)
-        plan = self._query_planner.plan(query)
-        search = getattr(self._retriever, "hybrid_search", None)
-        if search is None:
-            retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
-            if retrieve_plan is None:
-                raw = self._retriever.retrieve_sync(plan.normalized_query or query, top_k)
+        try:
+            plan = self._query_planner.plan(query)
+        except Exception as exc:
+            logger.warning("[MemoryManager] hybrid_search planner failed: {}", exc)
+            return []
+
+        try:
+            search = getattr(self._retriever, "hybrid_search", None)
+            if search is None:
+                retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
+                if retrieve_plan is None:
+                    raw = self._retriever.retrieve_sync(plan.normalized_query or query, top_k)
+                else:
+                    raw = retrieve_plan(plan, top_k)
             else:
-                raw = retrieve_plan(plan, top_k)
-        else:
-            candidates = search(plan, top_k)
-            raw = []
-            for candidate in candidates:
-                metadata = dict(candidate.metadata)
-                metadata.update(
-                    {
-                        "memory_id": candidate.memory_id,
-                        "vector_score": candidate.vector_score,
-                        "keyword_score": candidate.keyword_score,
-                        "exact_score": candidate.exact_score,
-                        "fuzzy_score": candidate.fuzzy_score,
-                        "recency_score": candidate.recency_score,
-                        "hybrid_score": candidate.hybrid_score,
-                        "rerank_score": candidate.rerank_score,
-                        "debug": candidate.debug,
-                    }
-                )
-                raw.append((candidate.content, candidate.final_score, metadata))
+                candidates = search(plan, top_k)
+                raw = []
+                for candidate in candidates:
+                    metadata = dict(candidate.metadata)
+                    metadata.update(
+                        {
+                            "memory_id": candidate.memory_id,
+                            "vector_score": candidate.vector_score,
+                            "keyword_score": candidate.keyword_score,
+                            "exact_score": candidate.exact_score,
+                            "fuzzy_score": candidate.fuzzy_score,
+                            "recency_score": candidate.recency_score,
+                            "hybrid_score": candidate.hybrid_score,
+                            "rerank_score": candidate.rerank_score,
+                            "debug": candidate.debug,
+                        }
+                    )
+                    raw.append((candidate.content, candidate.final_score, metadata))
+        except Exception as exc:
+            logger.warning("[MemoryManager] hybrid_search retriever failed: {}", exc)
+            return []
+
         return [
             RecallItem(
                 text=text,

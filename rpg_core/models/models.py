@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CharacterData(BaseModel):
@@ -26,7 +26,7 @@ class CharacterDetail(BaseModel):
     name: str
     enable: bool = True
     content: str = ""
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
 
 
 class LorebookEntry(BaseModel):
@@ -38,5 +38,4 @@ class LorebookEntry(BaseModel):
     enable: bool = True
     content: str = ""
     description: str = ""
-
 
