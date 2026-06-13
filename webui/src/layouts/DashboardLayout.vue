@@ -28,7 +28,7 @@
       <div v-if="!collapsed" class="workspace-section">
         <div class="workspace-row">
           <a-select
-            v-model:value="workspaceStore.current"
+            :value="workspaceStore.current"
             :options="workspaceOptions"
             size="small"
             style="flex: 1;"
@@ -112,7 +112,7 @@
       <div class="drawer-workspace">
         <span class="drawer-ws-label"><FolderOutlined /> 工作区</span>
         <a-select
-          v-model:value="workspaceStore.current"
+          :value="workspaceStore.current"
           :options="workspaceOptions"
           size="small"
           style="width: 100%; margin-top: 8px;"
