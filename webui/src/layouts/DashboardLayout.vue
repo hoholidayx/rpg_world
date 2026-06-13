@@ -32,6 +32,8 @@
             :options="workspaceOptions"
             size="small"
             style="flex: 1;"
+            :loading="workspaceStore.loading || workspaceStore.switching"
+            :disabled="workspaceStore.loading || workspaceStore.switching"
             @change="onWorkspaceChange"
           />
           <a-tooltip title="新建工作区">
@@ -116,6 +118,8 @@
           :options="workspaceOptions"
           size="small"
           style="width: 100%; margin-top: 8px;"
+          :loading="workspaceStore.loading || workspaceStore.switching"
+          :disabled="workspaceStore.loading || workspaceStore.switching"
           @change="onWorkspaceChange"
         />
       </div>
@@ -209,6 +213,7 @@ import {
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import { extractApiError } from '@/api/index'
 import { useThemeStore } from '@/stores/theme'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -237,7 +242,9 @@ function checkMobile() {
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
-  workspaceStore.load()
+  workspaceStore.load().catch((err) => {
+    message.error(extractApiError(err, '工作区加载失败'))
+  })
 })
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
@@ -278,7 +285,9 @@ function onMenuClick({ key }) {
 function onWorkspaceChange(value) {
   const name = typeof value === 'object' ? value.key : value
   if (name !== workspaceStore.current) {
-    workspaceStore.switchWorkspace(name)
+    workspaceStore.switchWorkspace(name).catch((err) => {
+      message.error(extractApiError(err, '切换工作区失败'))
+    })
   }
 }
 
@@ -324,7 +333,7 @@ async function handleWsModalOk() {
     wsModalVisible.value = false
     await workspaceStore.load()
   } catch (e) {
-    message.error(e.message || '操作失败')
+    message.error(extractApiError(e, '操作失败'))
   } finally {
     wsModalSaving.value = false
   }

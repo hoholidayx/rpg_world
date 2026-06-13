@@ -14,20 +14,37 @@ export const useSessionStore = defineStore('session', () => {
   const sessions = ref([])
   const activeSession = ref('default')
   const loaded = ref(false)
+  const loading = ref(false)
   const switching = ref(false)
+  const error = ref('')
 
   async function load() {
-    const data = await listSessions(workspaceStore.current)
-    sessions.value = data
-    loaded.value = true
+    loading.value = true
+    error.value = ''
+    try {
+      const data = await listSessions(workspaceStore.current)
+      sessions.value = data
+      loaded.value = true
+    } catch (err) {
+      error.value = err?.message || '会话加载失败'
+      throw err
+    } finally {
+      loading.value = false
+    }
   }
 
   async function switchSession(id) {
     if (id === activeSession.value) return
     switching.value = true
-    activeSession.value = id
-    switching.value = false
-    // Views reactively watch activeSession and reload their data
+    error.value = ''
+    try {
+      activeSession.value = id
+    } catch (err) {
+      error.value = err?.message || '会话切换失败'
+      throw err
+    } finally {
+      switching.value = false
+    }
   }
 
   async function createNewSession(id) {
@@ -54,7 +71,9 @@ export const useSessionStore = defineStore('session', () => {
     sessions,
     activeSession,
     loaded,
+    loading,
     switching,
+    error,
     load,
     switchSession,
     createNewSession,

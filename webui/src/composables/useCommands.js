@@ -30,19 +30,14 @@ export function sendCommand(command, sessionId = 'default') {
 }
 
 /**
- * 从后端加载命令定义列表。后端不可用时返回空列表。
+ * 从后端加载命令定义列表。
  *
  * @param {string} sessionId
  * @returns {Promise<Array<{command: string, description: string, detail: string}>>}
  */
 export async function loadCommands(sessionId = 'default') {
-  try {
-    const commands = await fetchRemoteCommands(sessionId)
-    if (commands && commands.length > 0) return commands
-  } catch {
-    // 后端不可用
-  }
-  return []
+  const commands = await fetchRemoteCommands(sessionId)
+  return Array.isArray(commands) ? commands : []
 }
 
 /**

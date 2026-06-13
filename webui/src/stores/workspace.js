@@ -14,18 +14,40 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const workspaces = ref([])
   const loaded = ref(false)
+  const loading = ref(false)
+  const switching = ref(false)
+  const error = ref('')
 
   // Current workspace is derived from the route query, not from server state
   const current = computed(() => route.query.workspace || '')
 
   async function load() {
-    const res = await listWorkspaces()
-    workspaces.value = res.workspaces
-    loaded.value = true
+    loading.value = true
+    error.value = ''
+    try {
+      const res = await listWorkspaces()
+      workspaces.value = res.workspaces
+      loaded.value = true
+    } catch (err) {
+      error.value = err?.message || '工作区加载失败'
+      throw err
+    } finally {
+      loading.value = false
+    }
   }
 
-  function switchWorkspace(name) {
-    router.push({ query: { ...route.query, workspace: name || undefined } })
+  async function switchWorkspace(name) {
+    if (name === current.value) return
+    switching.value = true
+    error.value = ''
+    try {
+      await router.push({ query: { ...route.query, workspace: name || undefined } })
+    } catch (err) {
+      error.value = err?.message || '工作区切换失败'
+      throw err
+    } finally {
+      switching.value = false
+    }
   }
 
   async function createWorkspace(name) {
@@ -54,6 +76,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   return {
     workspaces,
     loaded,
+    loading,
+    switching,
+    error,
     current,
     load,
     switchWorkspace,

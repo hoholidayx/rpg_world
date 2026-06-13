@@ -12,22 +12,25 @@
       </div>
       <div class="header-right">
         <!-- Workspace selector -->
-        <a-select
-          v-model:value="workspaceStore.current"
-          :options="workspaceOptions"
-          style="width: 140px;"
-          size="small"
-          @change="onWorkspaceChange"
-          :loading="workspaceStore.switching"
-        />
+          <a-select
+            v-model:value="workspaceStore.current"
+            :options="workspaceOptions"
+            style="width: 140px;"
+            size="small"
+            @change="onWorkspaceChange"
+            :loading="workspaceStore.loading || workspaceStore.switching"
+            :disabled="workspaceStore.switching || workspaceStore.loading"
+          />
         <!-- Session selector -->
-        <a-select
-          v-model:value="sessionStore.activeSession"
-          :options="sessionOptions"
-          style="width: 140px;"
-          size="small"
-          @change="onSessionChange"
-        />
+          <a-select
+            v-model:value="sessionStore.activeSession"
+            :options="sessionOptions"
+            style="width: 140px;"
+            size="small"
+            @change="onSessionChange"
+            :loading="sessionStore.loading || sessionStore.switching"
+            :disabled="sessionStore.loading || sessionStore.switching"
+          />
         <a-button size="small" type="dashed" @click="openCreateSession">
           <PlusOutlined />
         </a-button>
@@ -50,9 +53,48 @@
       </div>
     </header>
 
+    <div class="status-area">
+      <a-alert
+        v-if="workspaceStore.error"
+        type="error"
+        show-icon
+        :message="`工作区加载失败：${workspaceStore.error}`"
+        class="status-alert"
+      />
+      <a-alert
+        v-if="sessionStore.error"
+        type="error"
+        show-icon
+        :message="`会话加载失败：${sessionStore.error}`"
+        class="status-alert"
+      />
+      <a-alert
+        v-if="historyError"
+        type="error"
+        show-icon
+        :message="`历史消息加载失败：${historyError}`"
+        class="status-alert"
+      >
+        <template #action>
+          <a-button size="small" @click="loadHistory">重试</a-button>
+        </template>
+      </a-alert>
+      <a-alert
+        v-if="commandsError"
+        type="warning"
+        show-icon
+        :message="`命令列表加载失败：${commandsError}`"
+        class="status-alert"
+      >
+        <template #action>
+          <a-button size="small" @click="refreshCommands">重试</a-button>
+        </template>
+      </a-alert>
+    </div>
+
     <!-- ── Message list ──────────────────────────────────── -->
     <div class="message-container" ref="messageContainer">
-      <div v-if="messages.length === 0 && !loadingHistory" class="empty-state">
+      <div v-if="messages.length === 0 && !loadingHistory && !historyError" class="empty-state">
         <a-empty description="开始一段新的冒险吧">
           <template #image>
             <MessageOutlined style="font-size: 48px; color: var(--text-secondary);" />
@@ -134,11 +176,11 @@
               <span class="cmd-desc">{{ cmd.description }}</span>
             </div>
           </div>
-          <a-textarea
+            <a-textarea
             v-model:value="inputText"
             placeholder="输入消息... (/ 查看命令, Enter 发送, Shift+Enter 换行)"
             :rows="2"
-            :disabled="sending"
+            :disabled="isBusy"
             @input="onInputChange"
             @keydown.enter.prevent="onSendKeydown"
             @keydown.escape="closeCommandPopup"
@@ -163,7 +205,7 @@
               v-else
               type="primary"
               @click="handleSend"
-              :disabled="!inputText.trim()"
+              :disabled="!inputText.trim() || isBusy"
             >
               <SendOutlined /> 发送
             </a-button>
@@ -242,6 +284,7 @@ import { useSessionStore } from '@/stores/session'
 import { getHistory, streamMessage } from '@/api/chat'
 import { useCommands, sendCommand, loadCommands } from '@/composables/useCommands'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import { extractApiError } from '@/api/index'
 
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
@@ -255,6 +298,8 @@ const sending = ref(false)
 const abortStream = ref(null)
 const messageContainer = ref(null)
 const loadingHistory = ref(false)
+const historyError = ref('')
+const commandsError = ref('')
 
 // Create session modal
 const createSessionVisible = ref(false)
@@ -271,6 +316,15 @@ const apiKeyError = ref('')
 // ── Computed ──────────────────────────────────────────────
 
 const isDefaultSession = computed(() => sessionStore.activeSession === 'default')
+const isBusy = computed(
+  () =>
+    sending.value ||
+    loadingHistory.value ||
+    workspaceStore.loading ||
+    workspaceStore.switching ||
+    sessionStore.loading ||
+    sessionStore.switching,
+)
 
 const hasApiKey = computed(() => !!localStorage.getItem('rpg_openai_api_key'))
 
@@ -291,7 +345,11 @@ const sessionOptions = computed(() =>
 // ── Lifecycle ─────────────────────────────────────────────
 
 onMounted(async () => {
-  await Promise.all([workspaceStore.load(), sessionStore.load()])
+  try {
+    await Promise.all([workspaceStore.load(), sessionStore.load()])
+  } catch {
+    // Errors are shown through store state.
+  }
   await loadHistory()
   await refreshCommands()
 })
@@ -301,7 +359,11 @@ onMounted(async () => {
 watch(
   () => workspaceStore.current,
   async () => {
-    await sessionStore.load()
+    try {
+      await sessionStore.load()
+    } catch {
+      // error state is visible in the status area
+    }
     messages.value = []
     await loadHistory()
     await refreshCommands()
@@ -335,7 +397,13 @@ const inputRef = ref(null)
 const commandPopupRef = ref(null)
 
 async function refreshCommands() {
-  commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
+  commandsError.value = ''
+  try {
+    commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
+  } catch (err) {
+    commandsList.value = []
+    commandsError.value = err?.message || '无法加载命令'
+  }
 }
 
 watch(showCommandPopup, async (visible) => {
@@ -374,6 +442,7 @@ function goBack() {
 
 async function loadHistory() {
   loadingHistory.value = true
+  historyError.value = ''
   try {
     const res = await getHistory(sessionStore.activeSession)
     const history = res.data.history || []
@@ -390,7 +459,8 @@ async function loadHistory() {
       }))
     await scrollToBottom()
   } catch (e) {
-    // Silent — empty history is fine
+    messages.value = []
+    historyError.value = extractApiError(e, '无法加载历史消息')
   } finally {
     loadingHistory.value = false
   }
@@ -399,6 +469,10 @@ async function loadHistory() {
 async function handleSend() {
   const text = inputText.value.trim()
   if (!text || sending.value) return
+  if (isBusy.value) {
+    message.warning('当前正在切换或加载数据，请稍后再试')
+    return
+  }
 
   inputText.value = ''
 
@@ -450,7 +524,7 @@ async function handleSend() {
       asstMsg.content = data.reply || ''
       asstMsg.stats = data.stats || null
     } catch (e) {
-      asstMsg.content = `命令执行失败: ${e.response?.data?.detail || e.message}`
+      asstMsg.content = `命令执行失败: ${extractApiError(e)}`
     } finally {
       asstMsg.streaming = false
       sending.value = false
@@ -565,7 +639,9 @@ async function scrollToBottom() {
 
 function onWorkspaceChange(value) {
   if (value !== workspaceStore.current) {
-    workspaceStore.switchWorkspace(value)
+    workspaceStore.switchWorkspace(value).catch((err) => {
+      message.error(extractApiError(err, '切换工作区失败'))
+    })
   }
 }
 
@@ -573,7 +649,9 @@ function onWorkspaceChange(value) {
 
 function onSessionChange(value) {
   if (value !== sessionStore.activeSession) {
-    sessionStore.switchSession(value)
+    sessionStore.switchSession(value).catch((err) => {
+      message.error(extractApiError(err, '切换会话失败'))
+    })
   }
 }
 
@@ -601,9 +679,9 @@ async function handleCreateSession() {
       await sessionStore.createNewSession(newSessionId.value)
     }
     createSessionVisible.value = false
-    sessionStore.switchSession(newSessionId.value)
+    await sessionStore.switchSession(newSessionId.value)
   } catch (e) {
-    message.error('创建会话失败: ' + (e.response?.data?.detail || e.message))
+    message.error('创建会话失败: ' + extractApiError(e))
   } finally {
     createSessionSaving.value = false
   }
@@ -614,7 +692,7 @@ async function handleDeleteSession() {
     await sessionStore.removeSession(sessionStore.activeSession)
     message.success('会话已删除')
   } catch (e) {
-    message.error('删除会话失败: ' + (e.response?.data?.detail || e.message))
+    message.error('删除会话失败: ' + extractApiError(e))
   }
 }
 
@@ -681,6 +759,17 @@ function handleSaveSettings() {
 }
 .back-btn {
   color: var(--text-color);
+}
+
+.status-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+
+.status-alert {
+  margin-bottom: 0;
 }
 
 /* ── Message container ─────────────────────────────────── */

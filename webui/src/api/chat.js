@@ -1,4 +1,4 @@
-import api from './index'
+import api, { extractApiError } from './index'
 
 /**
  * Read the saved OpenAI API key from localStorage.
@@ -86,7 +86,17 @@ export function streamMessage(message, sessionId = 'default', onEvent) {
     .then(async (response) => {
       if (!response.ok) {
         const text = await response.text().catch(() => '')
-        onEvent({ kind: 'error', content: `HTTP ${response.status}: ${text}` })
+        let detail = text.trim()
+        if (detail) {
+          try {
+            const parsed = JSON.parse(detail)
+            detail = extractApiError({ response: { data: parsed } }, '')
+          } catch {
+            // keep raw text
+          }
+        }
+        const content = detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}`
+        onEvent({ kind: 'error', content })
         return
       }
       const reader = response.body.getReader()
@@ -112,7 +122,7 @@ export function streamMessage(message, sessionId = 'default', onEvent) {
     })
     .catch((err) => {
       if (err.name !== 'AbortError') {
-        onEvent({ kind: 'error', content: err.message })
+        onEvent({ kind: 'error', content: extractApiError(err) })
       }
     })
 

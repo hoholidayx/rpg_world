@@ -13,6 +13,17 @@ const api = axios.create({
   timeout: 10000,
 })
 
+export function extractApiError(error, fallback = '请求失败') {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail.map((item) => item?.msg || item?.message || String(item)).join('; ')
+  }
+  const msg = error?.message
+  if (typeof msg === 'string' && msg.trim()) return msg
+  return fallback
+}
+
 // ── Workspace auto-injection ────────────────────────────────────────
 // Extracts the current workspace from the URL hash (e.g.
 // /#/overview?workspace=data/非公开行程) and injects it into every
@@ -39,7 +50,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    const msg = err.response?.data?.detail || err.message
+    const msg = extractApiError(err)
     return Promise.reject(new Error(msg))
   },
 )
