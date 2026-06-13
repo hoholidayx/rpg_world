@@ -16,10 +16,11 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
+    from rpg_world.rpg_core.memory.planning.planner import BaseQueryPlanner
     from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
-    from rpg_world.rpg_core.memory.retriever import BaseRetriever
+    from rpg_world.rpg_core.memory.retrieval.retriever import BaseRetriever
+    from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
     from rpg_world.rpg_core.memory.vector_index_manager import VectorIndexManager
-    from rpg_world.rpg_core.memory.vector_store import VectorStore
     from rpg_world.rpg_core.settings import MemorySettings
 
 
@@ -96,6 +97,7 @@ class MemoryManager:
         chunker = cls._build_chunker(mem_cfg)
         index_mgr = cls._build_index_manager(store, embedding, sources, chunker)
         retriever = cls._build_retriever(store, embedding, mem_cfg, fallback_search)
+        query_planner = cls._build_query_planner(mem_cfg)
 
         mm = cls(
             recalled_store=recalled_store,
@@ -103,6 +105,7 @@ class MemoryManager:
             retriever=retriever,
             top_k=mem_cfg.top_k,
             store=store,
+            query_planner=query_planner,
         )
         mm._db_path = get_vector_db_path
         logger.info(
@@ -125,12 +128,16 @@ class MemoryManager:
         retriever: BaseRetriever | None = None,
         top_k: int = 5,
         store: VectorStore | None = None,
+        query_planner: BaseQueryPlanner | None = None,
     ) -> None:
+        from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
+
         self._recalled_store = recalled_store
         self._index_manager = index_manager
         self._retriever = retriever
         self._top_k = top_k
         self._store = store
+        self._query_planner = query_planner or RuleBasedQueryPlanner()
         self._inited = False
         self._db_path: str | None = None
 
@@ -164,7 +171,7 @@ class MemoryManager:
 
     @staticmethod
     def _build_raw_md_search(sources):
-        from rpg_world.rpg_core.memory.raw_md_grep_search import RawMarkdownGrepSearch
+        from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
 
         logger.info("[MemoryManager] raw markdown fallback roots={}", len(sources))
         return RawMarkdownGrepSearch(source_paths=[src.path for src in sources])
@@ -199,7 +206,8 @@ class MemoryManager:
         get_vector_db_path: str,
         embedding: object | None,
     ):
-        from rpg_world.rpg_core.memory.vector_store import VectorStore, VectorStoreError
+        from rpg_world.rpg_core.memory.storage.types import VectorStoreError
+        from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
 
         dimension = None
         if embedding is not None:
@@ -272,13 +280,13 @@ class MemoryManager:
 
     @staticmethod
     def _build_retriever(store, embedding, mem_cfg: MemorySettings, fallback_search):
-        from rpg_world.rpg_core.memory.hybrid_retriever import HybridRetriever
-        from rpg_world.rpg_core.memory.llama_reranker import (
+        from rpg_world.rpg_core.memory.rerank.llama_reranker import (
             LlamaRerankConfig,
             LlamaReranker,
         )
-        from rpg_world.rpg_core.memory.raw_md_retriever import RawMarkdownRetriever
-        from rpg_world.rpg_core.memory.retriever import DenseRetriever
+        from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import HybridRetriever
+        from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
+        from rpg_world.rpg_core.memory.retrieval.retriever import DenseRetriever
 
         if store is None:
             logger.info("[MemoryManager] retriever fallback — raw markdown only")
@@ -311,6 +319,35 @@ class MemoryManager:
 
         logger.info("[MemoryManager] retriever mode — dense vector")
         return DenseRetriever(store=store, embedding=embedding)
+
+    @staticmethod
+    def _build_query_planner(mem_cfg: MemorySettings):
+        from rpg_world.rpg_core.memory.planning.planner import (
+            FallbackQueryPlanner,
+            LlamaQueryPlanner,
+            RuleBasedQueryPlanner,
+        )
+
+        fallback = RuleBasedQueryPlanner()
+        if not mem_cfg.query_planner_enabled:
+            logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
+            return fallback
+        if not mem_cfg.query_planner_model_path:
+            logger.warning("[MemoryManager] query planner model_path not configured — rule-based fallback")
+            return fallback
+        try:
+            planner = LlamaQueryPlanner(
+                model_path=mem_cfg.query_planner_model_path,
+                n_ctx=mem_cfg.query_planner_n_ctx,
+                n_gpu_layers=mem_cfg.query_planner_n_gpu_layers,
+                temperature=mem_cfg.query_planner_temperature,
+                max_tokens=mem_cfg.query_planner_max_tokens,
+            )
+            logger.info("[MemoryManager] query planner mode — llama")
+            return FallbackQueryPlanner(planner, fallback)
+        except Exception as exc:
+            logger.warning("[MemoryManager] query planner init failed — rule-based fallback: {}", exc)
+            return fallback
 
     def reindex(self) -> None:
         """手动触发一次全量重建。"""
@@ -349,7 +386,12 @@ class MemoryManager:
             return []
 
         logger.info("[MemoryManager] recall start — query={!r} top_k={}", query, self._top_k)
-        raw = self._retriever.retrieve_sync(query, self._top_k)
+        plan = self._query_planner.plan(query)
+        retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
+        if retrieve_plan is None:
+            raw = self._retriever.retrieve_sync(plan.normalized_query or query, self._top_k)
+        else:
+            raw = retrieve_plan(plan, self._top_k)
         items: list[RecallItem] = []
         for text, score, meta in raw:
             items.append(RecallItem(
@@ -373,11 +415,16 @@ class MemoryManager:
         if self._retriever is None:
             return []
         logger.info("[MemoryManager] hybrid_search start — query={!r} top_k={}", query, top_k)
+        plan = self._query_planner.plan(query)
         search = getattr(self._retriever, "hybrid_search", None)
         if search is None:
-            raw = self._retriever.retrieve_sync(query, top_k)
+            retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
+            if retrieve_plan is None:
+                raw = self._retriever.retrieve_sync(plan.normalized_query or query, top_k)
+            else:
+                raw = retrieve_plan(plan, top_k)
         else:
-            candidates = search(query, top_k)
+            candidates = search(plan, top_k)
             raw = []
             for candidate in candidates:
                 metadata = dict(candidate.metadata)

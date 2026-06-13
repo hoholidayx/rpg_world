@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
-from rpg_world.rpg_core.memory.scoring import normalize_values
+from rpg_world.rpg_core.memory.retrieval.scoring import normalize_values
 
 
 @dataclass

@@ -96,6 +96,24 @@ class MemorySettings:
     rerank_temperature: float = 0.0
     """本地重排模型采样温度。"""
 
+    query_planner_enabled: bool = False
+    """是否启用本地 llama.cpp 查询规划器。"""
+
+    query_planner_model_path: str = ""
+    """查询规划模型 GGUF 路径，为空或不存在时回退到规则规划器。"""
+
+    query_planner_n_ctx: int = 2048
+    """查询规划模型上下文窗口。"""
+
+    query_planner_n_gpu_layers: int = 0
+    """查询规划模型 GPU 加速层数。"""
+
+    query_planner_temperature: float = 0.0
+    """查询规划模型采样温度。"""
+
+    query_planner_max_tokens: int = 512
+    """查询规划模型最大输出 token 数。"""
+
     chunk_size: int = 2000
     """单文件超过此字符数时分块。"""
 
@@ -264,6 +282,12 @@ class Settings:
             rerank_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
         else:
             rerank_resolved = rerank_raw
+        planner_raw = raw.get("query_planner_model_path", "")
+        if planner_raw:
+            p = Path(planner_raw)
+            planner_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
+        else:
+            planner_resolved = planner_raw
         return MemorySettings(
             enabled=raw.get("enabled", False),
             embedding_model_path=embed_resolved,
@@ -278,6 +302,12 @@ class Settings:
             rerank_max_candidates=raw.get("rerank_max_candidates", 10),
             rerank_n_ctx=raw.get("rerank_n_ctx", 4096),
             rerank_temperature=raw.get("rerank_temperature", 0.0),
+            query_planner_enabled=raw.get("query_planner_enabled", False),
+            query_planner_model_path=planner_resolved,
+            query_planner_n_ctx=raw.get("query_planner_n_ctx", 2048),
+            query_planner_n_gpu_layers=raw.get("query_planner_n_gpu_layers", 0),
+            query_planner_temperature=raw.get("query_planner_temperature", 0.0),
+            query_planner_max_tokens=raw.get("query_planner_max_tokens", 512),
             chunk_size=raw.get("chunk_size", 2000),
             chunk_overlap=raw.get("chunk_overlap", 64),
         )

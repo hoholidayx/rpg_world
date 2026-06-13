@@ -26,6 +26,9 @@ def tokenize_bigram(text: str) -> list[str]:
 
     while index < len(text):
         char = text[index]
+        if char.isspace():
+            index += 1
+            continue
         if _is_cjk(char):
             chinese_run.append(char)
             index += 1

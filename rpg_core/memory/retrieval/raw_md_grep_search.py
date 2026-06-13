@@ -16,6 +16,8 @@ from pathlib import Path
 from loguru import logger
 
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
+from rpg_world.rpg_core.memory.planning.plan import QueryPlan
+from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
 
 
 @dataclass
@@ -39,17 +41,34 @@ class RawMarkdownGrepSearch:
                 len(self.source_paths),
                 limit or self.limit,
             )
-            return self._search(query, limit=limit or self.limit)
+            plan = RuleBasedQueryPlanner().plan(query)
+            return self._search_plan(plan, limit=limit or self.limit)
         except Exception as exc:
             logger.warning("[RawMarkdownGrepSearch] fallback search failed: {}", exc)
             return []
 
-    def _search(self, query: str, limit: int) -> list[MemoryCandidate]:
-        normalized = " ".join((query or "").split())
+    def search_plan(self, plan: QueryPlan, limit: int | None = None) -> list[MemoryCandidate]:
+        """Return candidates matched by a structured query plan."""
+        try:
+            logger.info(
+                "[RawMarkdownGrepSearch] search_plan start — query={!r} terms={} roots={} limit={}",
+                plan.normalized_query,
+                len(plan.raw_md_terms),
+                len(self.source_paths),
+                limit or self.limit,
+            )
+            return self._search_plan(plan, limit=limit or self.limit)
+        except Exception as exc:
+            logger.warning("[RawMarkdownGrepSearch] fallback search_plan failed: {}", exc)
+            return []
+
+    def _search_plan(self, plan: QueryPlan, limit: int) -> list[MemoryCandidate]:
+        normalized = plan.normalized_query
         if not normalized:
             return []
 
-        terms = [term for term in normalized.split(" ") if term]
+        terms = list(plan.raw_md_terms)
+        expanded_queries = list(plan.expanded_queries)
         candidates: list[MemoryCandidate] = []
         for file_path in self._iter_md_files():
             try:
@@ -57,16 +76,18 @@ class RawMarkdownGrepSearch:
             except OSError:
                 continue
 
-            match_score = _score_text(normalized, raw_text)
+            match_score = _score_text(normalized, raw_text, terms, expanded_queries)
             if match_score <= 0.0:
                 continue
 
+            exact_score = 1.0 if normalized in raw_text or _compact(normalized) in _compact(raw_text) else 0.0
             metadata = {
                 "source": file_path.parent.name or file_path.stem,
                 "file": str(file_path),
                 "chunk_idx": 0,
                 "created_at": float(file_path.stat().st_mtime),
                 "grep_terms": terms,
+                "grep_expanded_queries": expanded_queries,
             }
             candidates.append(
                 MemoryCandidate(
@@ -74,10 +95,10 @@ class RawMarkdownGrepSearch:
                     content=raw_text,
                     metadata=metadata,
                     keyword_score=match_score,
-                    exact_score=1.0 if normalized in raw_text else 0.0,
+                    exact_score=exact_score,
                     fuzzy_score=match_score,
                     hybrid_score=match_score,
-                    debug={"grep_source": str(file_path)},
+                    debug={"grep_source": str(file_path), "grep_terms": terms},
                 )
             )
 
@@ -121,7 +142,12 @@ def _stable_memory_id(file_path: Path) -> int:
     return int(uid, 16) % (2**63)
 
 
-def _score_text(query: str, text: str) -> float:
+def _score_text(
+    query: str,
+    text: str,
+    terms: list[str] | None = None,
+    expanded_queries: list[str] | None = None,
+) -> float:
     if not query or not text:
         return 0.0
     if query in text:
@@ -132,11 +158,24 @@ def _score_text(query: str, text: str) -> float:
     if compact_query and compact_query in compact_text:
         return 1.0
 
-    terms = [term for term in query.split(" ") if term]
-    if not terms:
-        return 0.0
-    matched = sum(1 for term in terms if term in text or term in compact_text)
-    return matched / len(terms)
+    best = 0.0
+    for expanded in expanded_queries or []:
+        normalized = " ".join(expanded.split())
+        if not normalized:
+            continue
+        compact_expanded = _compact(normalized)
+        if normalized in text or compact_expanded in compact_text:
+            best = max(best, 0.9)
+
+    meaningful_terms = [term for term in (terms or []) if term]
+    if meaningful_terms:
+        matched = sum(
+            1
+            for term in meaningful_terms
+            if term in text or _compact(term) in compact_text
+        )
+        best = max(best, matched / len(meaningful_terms))
+    return best
 
 
 def _compact(text: str) -> str:

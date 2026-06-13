@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from rpg_world.rpg_core.memory.raw_md_grep_search import RawMarkdownGrepSearch
-from rpg_world.rpg_core.memory.retriever import BaseRetriever
+from rpg_world.rpg_core.memory.planning.plan import QueryPlan
+from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
+from rpg_world.rpg_core.memory.retrieval.retriever import BaseRetriever
 
 
 class RawMarkdownRetriever(BaseRetriever):
@@ -23,6 +24,15 @@ class RawMarkdownRetriever(BaseRetriever):
         self, query: str, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
         candidates = self._searcher.search(query, limit=top_k)
+        return self._format(candidates)
+
+    def retrieve_plan_sync(
+        self, plan: QueryPlan, top_k: int = 5
+    ) -> list[tuple[str, float, dict]]:
+        candidates = self._searcher.search_plan(plan, limit=top_k)
+        return self._format(candidates)
+
+    def _format(self, candidates):
         return [
             (
                 candidate.content,

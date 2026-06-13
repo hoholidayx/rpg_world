@@ -20,7 +20,7 @@ from rpg_world.rpg_core.memory.embedding_provider import (
     EmbeddingProvider,
     EmbeddingProviderError,
 )
-from rpg_world.rpg_core.memory.vector_store import ChunkRecord, VectorStore
+from rpg_world.rpg_core.memory.storage.vector_store import ChunkRecord, VectorStore
 
 logger = logging.getLogger(__name__)
 

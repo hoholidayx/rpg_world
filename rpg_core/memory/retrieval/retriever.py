@@ -1,7 +1,7 @@
 """Retriever abstraction for vector memory recall.
 
 ``BaseRetriever`` is the stable interface consumed by ``MemoryManager``.
-``DenseRetriever`` is the Phase‑1 implementation (pure dense vector search).
+``DenseRetriever`` is the Phase-1 implementation (pure dense vector search).
 
 Both sync and async paths are provided.
 """
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.memory.embedding_provider import EmbeddingProvider
-    from rpg_world.rpg_core.memory.vector_store import VectorStore
+    from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
 
 
 class BaseRetriever(ABC):
@@ -23,13 +23,13 @@ class BaseRetriever(ABC):
     async def retrieve(
         self, query: str, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
-        """Async — returns ``(text, score, metadata)`` tuples."""
+        """Async - returns ``(text, score, metadata)`` tuples."""
 
     @abstractmethod
     def retrieve_sync(
         self, query: str, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
-        """Sync — no event loop needed."""
+        """Sync - no event loop needed."""
 
 
 class DenseRetriever(BaseRetriever):

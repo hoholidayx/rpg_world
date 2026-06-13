@@ -36,6 +36,12 @@
     "embedding_model_path": "data/models/Qwen3-Embedding-0.6B-f16.gguf",
     "n_ctx": 32768,
     "n_gpu_layers": 0,
+    "query_planner_enabled": false,
+    "query_planner_model_path": "",
+    "query_planner_n_ctx": 2048,
+    "query_planner_n_gpu_layers": 0,
+    "query_planner_temperature": 0.0,
+    "query_planner_max_tokens": 512,
     "top_k": 2,
     "chunk_size": 2000,
     "chunk_overlap": 64

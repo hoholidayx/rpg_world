@@ -69,8 +69,93 @@ cfg.enabled_module_names  # 所有已启用的模块名列表
 | `character/` | 角色卡 CRUD |
 | `lorebook/` | 世界书 CRUD |
 | `status/` | 状态表（CSV 表格） |
-| `memory/` | 记忆存储（故事记忆、常驻记忆） |
+| `memory/` | 记忆系统（检索、索引、规划、召回） |
 | `summary/` | 对话摘要压缩 |
+
+## 记忆系统
+
+`memory/` 是一个独立的检索子系统，不再把向量、关键词、原始 markdown 扫描和 query 规划混在一个类里。当前结构按职责拆分为三层：
+
+```text
+memory/
+├── planning/    QueryPlan 生成与 query rewrite
+├── retrieval/   Dense / hybrid / raw markdown recall
+├── rerank/      可选的 llama 本地重排
+└── storage/     SQLite repository、vector index、text index
+```
+
+### 运行链路
+
+```text
+用户 query
+  -> MemoryManager
+  -> QueryPlanner
+     - 优先使用本地 gguf + llama-cpp-python
+     - 配置缺失或加载失败时降级到 rule-based planner
+  -> Retrieval
+     - vector: 向量相似度召回
+     - keyword: bigram FTS 关键词召回
+     - raw md: jieba/term coverage fallback
+  -> scoring / fusion
+  -> RecallItem 列表
+```
+
+### 子包职责
+
+#### `planning/`
+
+负责把用户 query 变成结构化 `QueryPlan`。
+
+- `RuleBasedQueryPlanner`：无模型兜底，负责归一化、关键词抽取、jieba 切词
+- `LlamaQueryPlanner`：可选，本地 gguf query planner
+- `FallbackQueryPlanner`：运行时异常兜底，保证 recall 不被 planner 中断
+
+#### `retrieval/`
+
+负责实际召回，不负责 query 解析。
+
+- `DenseRetriever`：纯向量召回
+- `HybridRetriever`：向量 + bigram keyword + raw md 的融合召回
+- `RawMarkdownGrepSearch`：直接扫描 markdown 文件，作为最后兜底
+- `RawMarkdownRetriever`：只走 raw md 的 retriever 适配器
+
+#### `rerank/`
+
+负责可选的最终重排，不参与召回和 query 解析。
+
+- `LlamaRerankConfig`：重排配置
+- `LlamaReranker`：本地 gguf + llama-cpp-python 重排器
+
+#### `storage/`
+
+负责持久化和底层索引。
+
+- `MemoryRepository`：SQLite chunk 存取
+- `VectorIndex`：向量索引实现
+- `TextIndex`：FTS5 / keyword 索引实现
+- `VectorStore`：存储门面，封装 repository + vector index + text index
+
+### 配置
+
+记忆系统的主要配置来自 `settings.json` 对应的 `MemorySettings`：
+
+- 向量模型路径与 embedding 参数
+- `query_planner_enabled`
+- `query_planner_model_path`
+- `query_planner_n_ctx`
+- `query_planner_n_gpu_layers`
+- `query_planner_temperature`
+- `query_planner_max_tokens`
+- `hybrid_enabled`
+- `rerank_enabled`
+
+### 设计原则
+
+- `MemoryManager` 负责组装，不负责检索细节
+- `QueryPlanner` 是增强能力，不是主链路硬依赖
+- bigram 查询格式始终由 tokenizer 保证
+- raw md 兜底优先保证可用性，再逐步提升召回质量
+- 检索层优先保持可解释的分数融合，避免把排序黑箱化
 
 ## 配置
 

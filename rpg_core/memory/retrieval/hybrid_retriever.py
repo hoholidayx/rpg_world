@@ -6,15 +6,16 @@ import time
 from typing import TYPE_CHECKING
 
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
-from rpg_world.rpg_core.memory.llama_reranker import LlamaReranker
-from rpg_world.rpg_core.memory.raw_md_grep_search import RawMarkdownGrepSearch
-from rpg_world.rpg_core.memory.retriever import BaseRetriever, _similarity
-from rpg_world.rpg_core.memory.scoring import apply_hybrid_scores
-from rpg_world.rpg_core.memory.string_boost import exact_and_fuzzy_scores
+from rpg_world.rpg_core.memory.planning.plan import QueryPlan
+from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
+from rpg_world.rpg_core.memory.rerank.llama_reranker import LlamaReranker
+from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
+from rpg_world.rpg_core.memory.retrieval.retriever import BaseRetriever, _similarity
+from rpg_world.rpg_core.memory.retrieval.scoring import apply_hybrid_scores, exact_and_fuzzy_scores
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.memory.embedding_provider import EmbeddingProvider
-    from rpg_world.rpg_core.memory.vector_store import VectorStore
+    from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
 
 
 class HybridRetriever(BaseRetriever):
@@ -39,45 +40,61 @@ class HybridRetriever(BaseRetriever):
     async def retrieve(
         self, query: str, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
-        return self._format(await self._search_candidates_async(query, top_k))
+        plan = RuleBasedQueryPlanner().plan(query)
+        return self._format(await self._search_plan_candidates_async(plan, top_k))
 
     def retrieve_sync(
         self, query: str, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
         return self._format(self._search_candidates_sync(query, top_k))
 
-    def hybrid_search(self, query: str, top_k: int = 20) -> list[MemoryCandidate]:
+    def retrieve_plan_sync(
+        self, plan: QueryPlan, top_k: int = 5
+    ) -> list[tuple[str, float, dict]]:
+        return self._format(self._search_plan_candidates_sync(plan, top_k))
+
+    def hybrid_search(self, query: str | QueryPlan, top_k: int = 20) -> list[MemoryCandidate]:
         """Public sync API returning structured hybrid candidates."""
         from loguru import logger
 
+        plan = query if isinstance(query, QueryPlan) else RuleBasedQueryPlanner().plan(query)
         logger.info(
-            "[HybridRetriever] search start — query={!r} top_k={} vector_k={} keyword_k={}",
-            query,
+            "[HybridRetriever] search start — query={!r} planner={} top_k={} vector_k={} keyword_k={}",
+            plan.normalized_query,
+            plan.planner_source,
             top_k,
             self._vector_k,
             self._keyword_k,
         )
-        return self._search_candidates_sync(query, top_k)
+        return self._search_plan_candidates_sync(plan, top_k)
 
     async def _search_candidates_async(self, query: str, top_k: int) -> list[MemoryCandidate]:
-        query_vector = await self._safe_embed_async(query)
-        return self._merge_sources(query, query_vector, top_k)
+        plan = RuleBasedQueryPlanner().plan(query)
+        return await self._search_plan_candidates_async(plan, top_k)
 
     def _search_candidates_sync(self, query: str, top_k: int) -> list[MemoryCandidate]:
-        query_vector = self._safe_embed_sync(query)
-        return self._merge_sources(query, query_vector, top_k)
+        plan = RuleBasedQueryPlanner().plan(query)
+        return self._search_plan_candidates_sync(plan, top_k)
+
+    async def _search_plan_candidates_async(self, plan: QueryPlan, top_k: int) -> list[MemoryCandidate]:
+        query_vector = await self._safe_embed_async(plan.normalized_query)
+        return self._merge_sources(plan, query_vector, top_k)
+
+    def _search_plan_candidates_sync(self, plan: QueryPlan, top_k: int) -> list[MemoryCandidate]:
+        query_vector = self._safe_embed_sync(plan.normalized_query)
+        return self._merge_sources(plan, query_vector, top_k)
 
     def _merge_sources(
         self,
-        query: str,
+        plan: QueryPlan,
         query_vector: list[float] | None,
         top_k: int,
     ) -> list[MemoryCandidate]:
         merged: dict[int, MemoryCandidate] = {}
 
         vector_candidates = self._safe_vector_candidates(query_vector)
-        keyword_candidates = self._safe_keyword_candidates(query)
-        fallback_candidates = self._safe_fallback_candidates(query)
+        keyword_candidates = self._safe_keyword_candidates(plan)
+        fallback_candidates = self._safe_fallback_candidates(plan)
 
         for candidate in vector_candidates:
             merged[candidate.memory_id] = candidate
@@ -87,7 +104,7 @@ class HybridRetriever(BaseRetriever):
             if existing is None:
                 merged[candidate.memory_id] = candidate
             else:
-                existing.keyword_score = candidate.keyword_score
+                existing.keyword_score = max(existing.keyword_score, candidate.keyword_score)
                 existing.debug.update(candidate.debug)
 
         for candidate in fallback_candidates:
@@ -102,13 +119,14 @@ class HybridRetriever(BaseRetriever):
         from loguru import logger
 
         logger.info(
-            "[HybridRetriever] candidate merge done — vector={} keyword={} fallback={} merged={}",
+            "[HybridRetriever] candidate merge done — vector={} keyword={} fallback={} merged={} planner={}",
             len(vector_candidates),
             len(keyword_candidates),
             len(fallback_candidates),
             len(candidates),
+            plan.planner_source,
         )
-        return self._finalize(query, candidates, top_k)
+        return self._finalize(plan.normalized_query, candidates, top_k)
 
     def _safe_embed_sync(self, query: str) -> list[float] | None:
         if self._embedding is None:
@@ -155,16 +173,28 @@ class HybridRetriever(BaseRetriever):
             )
         return candidates
 
-    def _safe_keyword_candidates(self, query: str) -> list[MemoryCandidate]:
-        try:
-            return self._store.keyword_search(query, limit=self._keyword_k)
-        except Exception as exc:
-            self._log_stage_error("keyword search", exc)
-            return []
+    def _safe_keyword_candidates(self, plan: QueryPlan) -> list[MemoryCandidate]:
+        candidates: dict[int, MemoryCandidate] = {}
+        queries = _dedupe_queries([*plan.keyword_queries, *plan.expanded_queries])
+        for query in queries:
+            try:
+                rows = self._store.keyword_search(query, limit=self._keyword_k)
+            except Exception as exc:
+                self._log_stage_error("keyword search", exc)
+                continue
+            for candidate in rows:
+                candidate.debug.setdefault("keyword_queries", []).append(query)
+                existing = candidates.get(candidate.memory_id)
+                if existing is None or candidate.keyword_score > existing.keyword_score:
+                    candidates[candidate.memory_id] = candidate
+        return list(candidates.values())
 
-    def _safe_fallback_candidates(self, query: str) -> list[MemoryCandidate]:
+    def _safe_fallback_candidates(self, plan: QueryPlan) -> list[MemoryCandidate]:
         try:
-            return self._fallback_search.search(query, limit=self._keyword_k)
+            search_plan = getattr(self._fallback_search, "search_plan", None)
+            if search_plan is not None:
+                return search_plan(plan, limit=self._keyword_k)
+            return self._fallback_search.search(plan.normalized_query, limit=self._keyword_k)
         except Exception as exc:
             self._log_stage_error("string fallback", exc)
             return []
@@ -238,3 +268,15 @@ def _as_float(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _dedupe_queries(queries: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for query in queries:
+        normalized = " ".join((query or "").split())
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
