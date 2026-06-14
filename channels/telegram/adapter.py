@@ -22,13 +22,14 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from telegram import BotCommand, Update
 from telegram.error import BadRequest, RetryAfter
-from telegram.ext import Application, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
 from rpg_world.channels.base import ChannelAdapter
 from rpg_world.channels.telegram.render import (
     chunk_rendered_text,
     render_markdown_to_telegram_html,
 )
+from rpg_world.channels.telegram.session_flow import TelegramSessionFlow
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.agent import RPGGameAgent
@@ -98,8 +99,7 @@ class TelegramAdapter(ChannelAdapter):
         self._app: Application | None = None
         # chat_id → {msg_id, text}, 用于流式增量编辑
         self._stream_buf: dict[str, dict] = {}
-        # chat_id → pinned session_id，允许 /session_switch 后持续使用目标会话
-        self._session_overrides: dict[str, str] = {}
+        self._session_flow = TelegramSessionFlow()
         if agent:
             self.bind_agent(agent)
 
@@ -124,6 +124,7 @@ class TelegramAdapter(ChannelAdapter):
             filters.TEXT & ~filters.COMMAND, self._on_message,
         ))
         self._app.add_handler(MessageHandler(filters.COMMAND, self._on_command))
+        self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
         logger.info("telegram: initializing application")
         await self._app.initialize()
         await self._configure_bot_commands()
@@ -163,10 +164,7 @@ class TelegramAdapter(ChannelAdapter):
 
     def get_session_id(self, chat_id: str) -> str:
         """优先返回 Telegram chat 绑定的显式 session，否则使用默认映射。"""
-        pinned = self._session_overrides.get(chat_id)
-        if pinned:
-            return pinned
-        return super().get_session_id(chat_id)
+        return self._session_flow.get_session_id(chat_id, super().get_session_id(chat_id))
 
     async def send_text(self, chat_id: str, text: str) -> None:
         """发送完整文本消息。超出 4096 字符自动分块。"""
@@ -346,6 +344,29 @@ class TelegramAdapter(ChannelAdapter):
         except Exception:
             logger.exception("telegram: failed to configure bot commands")
 
+    async def _send_session_picker(self, chat_id: str) -> None:
+        """发送会话选择菜单。"""
+        if not self._app or not self._agent:
+            await self.send_text(chat_id, "会话菜单暂不可用。")
+            return
+
+        from rpg_world.rpg_core.session import SessionManager
+
+        sessions = SessionManager.list_sessions(self._agent._workspace)
+        current = self._agent._session_id
+        text = self._session_flow.render_session_picker_text(sessions, current)
+
+        await self._request_with_timeout(
+            chat_id,
+            "send_message",
+            self._app.bot.send_message(
+                chat_id=int(chat_id),
+                text=text,
+                parse_mode=_TELEGRAM_PARSE_MODE,
+                reply_markup=self._session_flow.build_session_picker(sessions, current),
+            ),
+        )
+
     # ── 事件处理 ────────────────────────────────────────────────────────
 
     async def _on_message(self, update: Update, _context: object) -> None:
@@ -361,6 +382,27 @@ class TelegramAdapter(ChannelAdapter):
             user_id,
             _preview_text(text),
         )
+        try:
+            if await self._session_flow.handle_plain_text(
+                chat_id,
+                text,
+                agent=self._agent,
+                send_text=lambda reply: self.send_text(chat_id, reply),
+            ):
+                logger.info(
+                    "telegram: message consumed by session-create flow chat_id={} user_id={}",
+                    chat_id,
+                    user_id,
+                )
+                return
+        except Exception:
+            logger.exception(
+                "telegram: session-create flow failed chat_id={} user_id={} text={}",
+                chat_id,
+                user_id,
+                _preview_text(text),
+            )
+            raise
         try:
             reply = await self._handle_message(chat_id, user_id, text)
         except Exception:
@@ -398,6 +440,14 @@ class TelegramAdapter(ChannelAdapter):
             await self._on_start(update, _context)
             return
 
+        if await self._session_flow.handle_command(
+            chat_id,
+            command,
+            send_text=lambda reply: self.send_text(chat_id, reply),
+            send_session_picker=lambda: self._send_session_picker(chat_id),
+        ):
+            return
+
         if not self._agent:
             logger.warning(
                 "telegram: command ignored because agent is missing chat_id={} user_id={} command={}",
@@ -431,10 +481,31 @@ class TelegramAdapter(ChannelAdapter):
             return
 
         if command.startswith("/session_switch ") and result.reply.startswith("[已切换到会话: "):
-            self._session_overrides[chat_id] = command.split(maxsplit=1)[1]
+            self._session_flow.pin_session(chat_id, command.split(maxsplit=1)[1])
 
         if result.reply:
             await self.send_text(chat_id, result.reply)
+
+    async def _on_callback_query(self, update: Update, _context: object) -> None:
+        """处理会话菜单的 callback 按钮。"""
+        query = update.callback_query
+        if query is None:
+            return
+        chat_id = str(query.message.chat.id) if query.message and query.message.chat else "0"
+        await query.answer()
+        if await self._session_flow.handle_callback_query(
+            chat_id,
+            str(query.data or ""),
+            send_text=lambda reply: self.send_text(chat_id, reply),
+            switch_session=lambda session_id: self._switch_chat_session(chat_id, session_id),
+        ):
+            return
+
+    async def _switch_chat_session(self, chat_id: str, session_id: str) -> None:
+        if not self._agent:
+            return
+        await self._agent.switch_session(session_id)
+        self._session_flow.pin_session(chat_id, session_id)
 
     async def _on_start(self, update: Update, _context: object) -> None:
         """处理 /start 命令。"""

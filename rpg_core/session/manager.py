@@ -36,6 +36,7 @@ _META_CREATED_AT = "created_at"
 _META_UPDATED_AT = "updated_at"
 _META_LAST_STORY_RP_HIS_ID = "last_story_rp_his_id"
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
+_SESSION_ID_MAX_LENGTH = 64
 
 
 class SessionManager:
@@ -46,11 +47,13 @@ class SessionManager:
     @staticmethod
     def is_valid_session_id(session_id: str) -> bool:
         """Return whether *session_id* matches the repository naming rule."""
-        return bool(_SESSION_ID_PATTERN.fullmatch(session_id))
+        return len(session_id) <= _SESSION_ID_MAX_LENGTH and bool(_SESSION_ID_PATTERN.fullmatch(session_id))
 
     @staticmethod
     def validate_session_id(session_id: str) -> str:
         """Validate *session_id* and return it unchanged on success."""
+        if len(session_id) > _SESSION_ID_MAX_LENGTH:
+            raise ValueError(f"session_id must be at most {_SESSION_ID_MAX_LENGTH} characters long")
         if not SessionManager.is_valid_session_id(session_id):
             raise ValueError("session_id must match ^[A-Za-z0-9_]+$")
         return session_id

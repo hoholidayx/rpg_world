@@ -35,6 +35,18 @@ class TestCommandDispatcher:
         text = format_command_help([])
         assert text == "当前没有可用命令。"
 
+    def test_session_id_validation_has_length_limit(self):
+        from rpg_world.rpg_core.session import SessionManager
+
+        assert SessionManager.is_valid_session_id("a" * 64)
+        assert not SessionManager.is_valid_session_id("a" * 65)
+        try:
+            SessionManager.validate_session_id("a" * 65)
+        except ValueError as exc:
+            assert "at most 64 characters" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
     async def test_sessions_command_marks_current_session(self, monkeypatch):
         from rpg_world.rpg_core.session import SessionManager
 
