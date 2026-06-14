@@ -152,7 +152,9 @@ def test_context_to_markdown_and_empty_layers(fake_token_counter):
     ctx = RPGContext(fixed_layer="fixed", user_input="hi")
     md = ctx.to_markdown(fake_token_counter)
 
-    assert "| Layer | Status | Tokens | Description |" in md
+    assert "## 上下文概览" in md
+    assert "## 分层明细" in md
     assert "Fixed Layer" in md
     assert "User Message" in md
-    assert "**TOTAL**" in md
+    assert "总 token" in md
+    assert "| Layer | Status | Tokens | Description |" not in md

@@ -43,6 +43,13 @@ async def _cmd_memory_reindex(agent: RPGGameAgent, args: list[str]) -> str:
     return "memory 全量重建已触发。"
 
 
+async def _cmd_help(agent: RPGGameAgent, args: list[str]) -> str:
+    """列出所有可用命令。"""
+    if agent is None:
+        return "命令帮助不可用。"
+    return format_command_help(agent.list_commands())
+
+
 async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
     """查看当前上下文结构和 token 用量。"""
     return await agent.get_context_markdown()
@@ -54,10 +61,10 @@ async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
 
     sessions = SessionManager.list_sessions(agent._workspace)
     current = agent._session_id
-    lines = [f"会话列表 ({len(sessions)}):"]
+    lines = [f"会话列表 ({len(sessions)}):", f"当前会话: {current}"]
     for s in sessions:
-        marker = "  *" if s == current else ""
-        lines.append(f"  - {s}{marker}")
+        marker = " （当前）" if s == current else ""
+        lines.append(f"- {s}{marker}")
     return "\n".join(lines)
 
 
@@ -66,7 +73,7 @@ async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
     from rpg_world.rpg_core.session import SessionManager
 
     if not args:
-        return "[错误] 需要提供 session-id: /session-create <id>"
+        return "[错误] 需要提供 session_id: /session_create <id>"
     sid = args[0]
     try:
         SessionManager.create(agent._workspace, sid)
@@ -82,7 +89,7 @@ async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
     from rpg_world.rpg_core.session import SessionManager
 
     if not args:
-        return "[错误] 需要提供 session-id: /session-switch <id>"
+        return "[错误] 需要提供 session_id: /session_switch <id>"
     sid = args[0]
     try:
         SessionManager.validate_session_id(sid)
@@ -121,11 +128,22 @@ class CommandResult:
     """是否被某个处理器消费。"""
 
 
+def format_command_help(commands: list[CommandDef]) -> str:
+    """将命令定义渲染为可发送给聊天渠道的帮助文本。"""
+    if not commands:
+        return "当前没有可用命令。"
+
+    lines = ["可用命令:"]
+    for cmd in commands:
+        lines.append(f"- {cmd.name}: {cmd.description}")
+    return "\n".join(lines)
+
+
 class CommandDispatcher:
     """命令分发器。
 
     维护内置命令和子 Agent 命令两道注册表。dispatch() 按优先级：
-    1. 内置命令（clear / reload / context / sessions / session-create / session-switch / memory-reindex）
+    1. 内置命令（help / clear / reload / context / sessions / session_create / session_switch / memory_reindex）
     2. 子 Agent 的 accept_command（如 MemorySubAgent 的 /compact）
     3. 未命中 → handed=False，调用方走 LLM 兜底
     """
@@ -157,10 +175,14 @@ class CommandDispatcher:
     def register_default_builtins(self) -> None:
         """注册所有默认内置命令。
 
-        包括 6 个标准管理命令：/clear /reload /context /sessions
-        /session-create /session-switch。
+        包括 8 个标准管理命令：/help /clear /reload /context /sessions
+        /session_create /session_switch /memory_reindex。
         子 Agent 命令（如 /compact /story_memory）由 agent 层另行注册。
         """
+        self.register_builtin(
+            "/help", "列出所有可用命令",
+            "用法：/help。输出当前 agent 支持的全部斜杠命令。", _cmd_help,
+        )
         self.register_builtin(
             "/clear", "清空当前会话的对话历史",
             "重置对话上下文，清除所有已发送的消息记录。", _cmd_clear,
@@ -178,16 +200,16 @@ class CommandDispatcher:
             "显示所有会话 ID，* 标记当前活跃会话。", _cmd_sessions,
         )
         self.register_builtin(
-            "/session-create", "创建新会话",
-            "用法：/session-create <id>。在新会话目录下初始化数据文件。", _cmd_session_create,
+            "/session_create", "创建新会话",
+            "用法：/session_create <id>。在新会话目录下初始化数据文件。", _cmd_session_create,
         )
         self.register_builtin(
-            "/session-switch", "切换到指定会话",
-            "用法：/session-switch <id>。切换后对话历史、上下文等全部指向新会话。", _cmd_session_switch,
+            "/session_switch", "切换到指定会话",
+            "用法：/session_switch <id>。切换后对话历史、上下文等全部指向新会话。", _cmd_session_switch,
         )
         self.register_builtin(
-            "/memory-reindex", "手动触发 memory 全量重建",
-            "用法：/memory-reindex。会重建 memory 的 FTS/向量索引，不会自动在启动时执行。", _cmd_memory_reindex,
+            "/memory_reindex", "手动触发 memory 全量重建",
+            "用法：/memory_reindex。会重建 memory 的 FTS/向量索引，不会自动在启动时执行。", _cmd_memory_reindex,
         )
 
     # ── 查询 ──────────────────────────────────────────────────────────

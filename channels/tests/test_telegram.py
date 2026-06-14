@@ -9,13 +9,15 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from telegram import BotCommand
 
 from rpg_world.channels.telegram.adapter import TelegramAdapter
 from rpg_world.channels.telegram.render import (
     chunk_rendered_text,
     render_markdown_to_telegram_html,
 )
-from rpg_world.channels.tests.conftest import FakeAgent, FakeBot
+from rpg_world.channels.tests.conftest import FakeAgent
+from rpg_world.rpg_core.agent.command import CommandDef, CommandResult
 
 
 @pytest.fixture
@@ -25,7 +27,10 @@ def mock_app() -> MagicMock:
     builder.token.return_value = builder
     builder.proxy.return_value = builder
     builder.get_updates_proxy.return_value = builder
-    builder.build.return_value = MagicMock()
+    app = MagicMock()
+    app.bot = MagicMock()
+    app.bot.set_my_commands = AsyncMock()
+    builder.build.return_value = app
     return builder.build.return_value
 
 
@@ -43,6 +48,10 @@ class TestTelegramAdapter:
     async def test_get_session_id(self, adapter: TelegramAdapter):
         assert adapter.get_session_id("12345") == "telegram_12345"
         assert adapter.get_session_id("abc") == "telegram_abc"
+
+    async def test_get_session_id_respects_pinned_session(self, adapter: TelegramAdapter):
+        adapter._session_overrides["12345"] = "my_tel"
+        assert adapter.get_session_id("12345") == "my_tel"
 
     async def test_default_streaming_flag(self):
         a = TelegramAdapter(token="fake:token")
@@ -73,12 +82,130 @@ class TestTelegramAdapter:
 
         adapter._handle_message.assert_awaited_once_with("123", "456", "hello")
 
+    async def test_on_command_routes_to_agent(self, adapter: TelegramAdapter):
+        agent = FakeAgent()
+        agent.execute_command = AsyncMock(
+            return_value=CommandResult(reply="done", handled=True),
+        )
+        adapter.bind_agent(agent)
+        adapter.send_text = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "/clear  "
+        update.effective_chat.id = 123
+        update.effective_user.id = 456
+
+        await adapter._on_command(update, object())
+
+        agent.execute_command.assert_awaited_once_with("/clear")
+        adapter.send_text.assert_awaited_once_with("123", "done")
+
+    async def test_on_command_normalizes_bot_mention(self, adapter: TelegramAdapter):
+        agent = FakeAgent()
+        agent.execute_command = AsyncMock(
+            return_value=CommandResult(reply="done", handled=True),
+        )
+        adapter.bind_agent(agent)
+        adapter.send_text = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "/compact@nanobot 10 5"
+        update.effective_chat.id = 123
+        update.effective_user.id = 456
+
+        await adapter._on_command(update, object())
+
+        agent.execute_command.assert_awaited_once_with("/compact 10 5")
+        adapter.send_text.assert_awaited_once_with("123", "done")
+
+    async def test_on_command_normalizes_menu_alias(self, adapter: TelegramAdapter):
+        agent = FakeAgent()
+        agent.execute_command = AsyncMock(
+            return_value=CommandResult(reply="done", handled=True),
+        )
+        adapter.bind_agent(agent)
+        adapter.send_text = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "/session_create abc"
+        update.effective_chat.id = 123
+        update.effective_user.id = 456
+
+        await adapter._on_command(update, object())
+
+        agent.execute_command.assert_awaited_once_with("/session_create abc")
+        adapter.send_text.assert_awaited_once_with("123", "done")
+
+    async def test_on_command_unknown(self, adapter: TelegramAdapter):
+        agent = FakeAgent()
+        agent.execute_command = AsyncMock(return_value=CommandResult(reply="", handled=False))
+        adapter.bind_agent(agent)
+        adapter.send_text = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "/nope"
+        update.effective_chat.id = 123
+        update.effective_user.id = 456
+
+        await adapter._on_command(update, object())
+
+        adapter.send_text.assert_awaited_once_with("123", "未知命令: /nope")
+
+    async def test_on_command_start(self, adapter: TelegramAdapter):
+        adapter.send_text = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "/start"
+        update.effective_chat.id = 123
+        update.effective_user.id = 456
+
+        await adapter._on_command(update, object())
+
+        adapter.send_text.assert_awaited_once()
+        assert "欢迎使用 RPG World" in adapter.send_text.call_args.args[1]
+
+    async def test_on_command_session_switch_pins_chat_session(self, adapter: TelegramAdapter):
+        agent = FakeAgent()
+        agent.execute_command = AsyncMock(
+            return_value=CommandResult(reply="[已切换到会话: my_tel]", handled=True),
+        )
+        adapter.bind_agent(agent)
+        adapter.send_text = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "/session_switch my_tel"
+        update.effective_chat.id = 123
+        update.effective_user.id = 456
+
+        await adapter._on_command(update, object())
+
+        assert adapter.get_session_id("123") == "my_tel"
+        adapter.send_text.assert_awaited_once_with("123", "[已切换到会话: my_tel]")
+
+    async def test_pinned_session_is_used_for_followup_messages(self, adapter: TelegramAdapter):
+        agent = FakeAgent()
+        adapter.bind_agent(agent)
+        adapter._session_overrides["123"] = "my_tel"
+        adapter._app.bot.send_message = AsyncMock()
+        adapter._app.bot.edit_message_text = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "hello"
+        update.effective_chat.id = 123
+        update.effective_user.id = 456
+
+        await adapter._on_message(update, object())
+
+        assert agent.current_session == "my_tel"
+
     async def test_start_configures_proxy_and_handlers(self, monkeypatch):
         builder = MagicMock()
         builder.token.return_value = builder
         builder.proxy.return_value = builder
         builder.get_updates_proxy.return_value = builder
         app = MagicMock()
+        app.bot = MagicMock()
+        app.bot.set_my_commands = AsyncMock()
         app.initialize = AsyncMock()
         app.start = AsyncMock()
         app.shutdown = AsyncMock()
@@ -95,6 +222,15 @@ class TestTelegramAdapter:
         )
 
         adapter = TelegramAdapter(token="fake:token", proxy="http://127.0.0.1:7890")
+        agent = FakeAgent()
+        agent._commands = [
+            *agent._commands,
+            CommandDef(name="/session_create", description="create", detail="create session"),
+            CommandDef(name="/session_switch", description="switch", detail="switch session"),
+            CommandDef(name="/memory_reindex", description="reindex", detail="reindex memory"),
+        ]
+        agent._ensure_initialized = AsyncMock()
+        adapter.bind_agent(agent)
         await adapter.start()
 
         builder.token.assert_called_once_with("fake:token")
@@ -102,6 +238,16 @@ class TestTelegramAdapter:
         builder.get_updates_proxy.assert_called_once_with("http://127.0.0.1:7890")
         app.add_error_handler.assert_called_once()
         assert app.add_handler.call_count == 2
+        agent._ensure_initialized.assert_awaited_once()
+        app.bot.set_my_commands.assert_awaited_once()
+        commands = app.bot.set_my_commands.call_args.args[0]
+        assert isinstance(commands[0], BotCommand)
+        assert commands[0].command == "start"
+        assert any(cmd.command == "help" for cmd in commands)
+        assert any(cmd.command == "clear" for cmd in commands)
+        assert any(cmd.command == "session_create" for cmd in commands)
+        assert any(cmd.command == "session_switch" for cmd in commands)
+        assert any(cmd.command == "memory_reindex" for cmd in commands)
         app.initialize.assert_awaited_once()
         app.start.assert_awaited_once()
         app.updater.start_polling.assert_awaited_once()
@@ -156,8 +302,8 @@ class TestTelegramAdapter:
         rendered = render_markdown_to_telegram_html(text)
 
         assert "• 主线任务" in rendered
-        assert "&nbsp;&nbsp;• 找到祭坛" in rendered
-        assert "&nbsp;&nbsp;• 解开封印" in rendered
+        assert "\u00a0\u00a0• 找到祭坛" in rendered
+        assert "\u00a0\u00a0• 解开封印" in rendered
         assert "1. 先侦察" in rendered
         assert "2. 再推进" in rendered
 

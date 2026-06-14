@@ -158,6 +158,7 @@ def test_chat_contracts(client):
     )
     assert res.status_code == 200
     assert res.json()["commands"][0]["command"] == "/clear"
+    assert any(cmd["command"] == "/help" for cmd in res.json()["commands"])
 
     res = http.post(
         "/api/v1/chat/stream",

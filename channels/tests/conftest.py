@@ -13,6 +13,7 @@ from rpg_world.rpg_core.agent.agent_types import (
     StreamEventKind,
     TurnStats,
 )
+from rpg_world.rpg_core.agent.command import CommandDef, CommandResult
 from rpg_world.rpg_core.agent.loop import AgentReply
 
 
@@ -26,6 +27,14 @@ class FakeAgent:
         self.current_session: str | None = None
         self.history: list[dict] = []
         self._initialized = True
+        self._commands = [
+            CommandDef(name="/help", description="help", detail="list commands"),
+            CommandDef(name="/clear", description="clear", detail="clear history"),
+            CommandDef(name="/compact", description="compact", detail="compact history"),
+            CommandDef(name="/session_create", description="session create", detail="create session"),
+            CommandDef(name="/session_switch", description="session switch", detail="switch session"),
+            CommandDef(name="/memory_reindex", description="memory reindex", detail="reindex memory"),
+        ]
 
     async def _ensure_initialized(self) -> None:
         pass
@@ -49,6 +58,12 @@ class FakeAgent:
             kind=StreamEventKind.DONE,
             content=f"[mock] reply to: {text}",
         )
+
+    def list_commands(self) -> list[CommandDef]:
+        return list(self._commands)
+
+    async def execute_command(self, command: str) -> CommandResult:
+        return CommandResult(reply=f"[mock cmd] {command}", handled=True)
 
 
 class FakeStreamAgent(FakeAgent):

@@ -205,6 +205,10 @@ class FakeAgent:
         self._cmd_dispatcher = SimpleNamespace(
             list_commands=lambda: [
                 CommandDef(name="/clear", description="clear", detail="clear history"),
+                CommandDef(name="/help", description="help", detail="list commands"),
+                CommandDef(name="/session_create", description="session create", detail="create session"),
+                CommandDef(name="/session_switch", description="session switch", detail="switch session"),
+                CommandDef(name="/memory_reindex", description="memory reindex", detail="reindex memory"),
             ],
         )
 
@@ -219,6 +223,9 @@ class FakeAgent:
 
         yield AgentStreamEvent(kind=StreamEventKind.TEXT, content=f"stream:{message}")
         yield AgentStreamEvent(kind=StreamEventKind.DONE, content=f"stream:{message}")
+
+    def list_commands(self):
+        return self._cmd_dispatcher.list_commands()
 
     async def execute_command(self, command: str) -> CommandResult:
         return CommandResult(reply=f"cmd:{command}", handled=True, stats={"ok": True})

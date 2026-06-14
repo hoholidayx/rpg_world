@@ -63,8 +63,9 @@ class CLIAdapter(ChannelAdapter):
         self._running = True
         self._console.print(
             "[bold green]RPG World CLI[/bold green]\n"
-            "  命令: /clear  /reload  /context  /compact  /extract_story_memory\n"
-            "  /sessions  /session-create  /session-switch  /quit",
+            "  命令: /help  /clear  /reload  /context  /compact  /extract_story_memory\n"
+            "  /sessions  /session_create  /session_switch  /memory_reindex  /quit\n"
+            "  输入 /help 查看完整命令列表",
         )
         if self._streaming:
             self._console.print("流式模式：文本将逐段输出")

@@ -351,11 +351,11 @@ class RPGContext:
 
         # [1] Persistent Memory
         _add(LayerType.PERSISTENT_MEMORY, Role.SYSTEM, self.persistent_memory,
-             _truncate_text(self.persistent_memory or "", 50))
+             _preview_text(self.persistent_memory or "", 50))
 
         # [2] Summary
         _add(LayerType.SUMMARY, Role.SYSTEM, self.summary,
-             _truncate_text(self.summary or "", 50))
+             _preview_text(self.summary or "", 50))
 
         # [3..N] Hot History
         if self.hot_history:
@@ -381,7 +381,7 @@ class RPGContext:
 
         # [N+3] Recalled Memory
         _add(LayerType.RECALLED_MEMORY, Role.SYSTEM, self.recalled_memory,
-             _truncate_text(self.recalled_memory or "", 50))
+             _preview_text(self.recalled_memory or "", 50))
 
         # [N+4] Status Tables
         _add(LayerType.STATUS_TABLES, Role.SYSTEM, self.status_tables,
@@ -402,7 +402,7 @@ class RPGContext:
                 status="active",
                 char_count=len(user_content),
                 token_count=token_counter.count(user_content),
-                description=_truncate_text(user_content, 50),
+                description=_preview_text(user_content, 50),
             ))
         else:
             layers.append(LayerInfo(
@@ -414,39 +414,31 @@ class RPGContext:
         return layers
 
     def to_markdown(self, token_counter: TokenCounter) -> str:
-        """Render context structure as a Markdown table.
-
-        Example output::
-
-            | Layer | Status | Tokens | Description |
-            |---|---|---|---|
-            | Fixed Layer | active | 1,234 | system prompt + 3 entries |
-            | ... | ... | ... | ... |
-            | **TOTAL** | | **7,414** | |
-        """
+        """Render context structure as a chat-friendly Markdown summary."""
         layers = self.layer_summary(token_counter)
         total_tokens = sum(l.token_count for l in layers)
+        active_layers = sum(1 for l in layers if l.status == "active")
 
         lines = [
-            "| Layer | Status | Tokens | Description |",
-            "|---|---|---:|---|",
+            "## 上下文概览",
+            f"- 总 token: **{total_tokens:,}**",
+            f"- 活跃层: **{active_layers} / {len(layers)}**",
         ]
-        for info in layers:
-            tokens_str = f"{info.token_count:,}" if info.token_count > 0 else "-"
-            lines.append(
-                f"| {_layer_display_name(info.type)} | {info.status} "
-                f"| {tokens_str} | {info.description} |"
-            )
 
-        lines.append(
-            f"| **TOTAL** | | **{total_tokens:,}** | |"
-        )
-        lines.append("")
-
-        # Extract hot_history_rounds from config if available
         hot_rounds = getattr(self, "_hot_history_rounds", None)
         if hot_rounds is not None:
-            lines.append(f"**配置:** history_rounds={hot_rounds}")
+            lines.append(f"- 历史窗口: **{hot_rounds}** 轮")
+
+        lines.append("")
+        lines.append("## 分层明细")
+        for index, info in enumerate(layers):
+            tokens_str = f"{info.token_count:,}" if info.token_count > 0 else "-"
+            lines.append(
+                f"- [{index}] **{_layer_display_name(info.type)}**"
+                f" ({info.role}, {info.status}, {tokens_str} tokens)"
+            )
+            if info.description and info.description != "-":
+                lines.append(f"  - {info.description}")
 
         return "\n".join(lines)
 
@@ -496,11 +488,12 @@ def _layer_display_name(type_: str) -> str:
     return names.get(type_, type_)
 
 
-def _truncate_text(text: str, max_chars: int = 50) -> str:
-    """Truncate text with ellipsis if longer than *max_chars*."""
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "..."
+def _preview_text(text: str, max_chars: int = 50) -> str:
+    """Collapse multiline text into a compact single-line preview."""
+    compact = " ".join(text.split())
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars] + "..."
 
 
 def _build_fixed_desc(lore_count: int, char_count: int) -> str:
@@ -520,7 +513,7 @@ def _build_story_memory_desc(content: str | None) -> str:
     count = content.count("\n- ")  # each item is a bullet
     if count > 0:
         return f"{count} 条剧情细节"
-    return _truncate_text(content, 50)
+    return _preview_text(content, 50)
 
 
 def _build_status_desc(content: str | None) -> str:
@@ -530,4 +523,4 @@ def _build_status_desc(content: str | None) -> str:
     count = content.count("\n### ")  # each table has a ### header
     extra = 1 if content.startswith("### ") else 0
     total = count + extra
-    return f"{total} 张状态表" if total > 0 else _truncate_text(content, 50)
+    return f"{total} 张状态表" if total > 0 else _preview_text(content, 50)

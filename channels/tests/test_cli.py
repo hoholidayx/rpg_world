@@ -71,11 +71,14 @@ class TestCLIAdapter:
     async def test_start_exits_on_quit(self):
         """输入 /quit 应退出循环。"""
         adapter = CLIAdapter(agent=FakeAgent())
+        adapter._console.print = MagicMock()
         adapter._session.prompt_async = AsyncMock(side_effect=["/quit"])
 
         await adapter.start()
         assert adapter._running is False
         adapter._session.prompt_async.assert_called_once()
+        banner = adapter._console.print.call_args_list[0][0][0]
+        assert "/help" in banner
 
     async def test_handle_message_command(self):
         """命令通过 agent.send() 统一处理（由 agent 内部 dispatch）。"""

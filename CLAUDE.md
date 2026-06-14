@@ -240,8 +240,9 @@ agent.send(user_input)
 | `/context` | 内置 | 查看上下文结构和 token 用量 |
 | `/compact [N] [K]` | MemorySubAgent | 压缩最老的 N 轮对话为摘要 |
 | `/sessions` | 内置 | 列出所有会话 |
-| `/session-create <id>` | 内置 | 创建新会话 |
-| `/session-switch <id>` | 内置 | 切换到指定会话 |
+| `/session_create <id>` | 内置 | 创建新会话 |
+| `/session_switch <id>` | 内置 | 切换到指定会话 |
+| `/memory_reindex` | 内置 | 手动重建 memory 索引 |
 
 命令统一由 agent 内部的 `CommandDispatcher` 处理，不经过 LLM，不入对话历史。
 所有渠道（CLI / API / Telegram）共享同一逻辑。

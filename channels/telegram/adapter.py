@@ -20,9 +20,9 @@ import time
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.error import BadRequest, RetryAfter
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, MessageHandler, filters
 
 from rpg_world.channels.base import ChannelAdapter
 from rpg_world.channels.telegram.render import (
@@ -41,6 +41,22 @@ def _preview_text(text: str, limit: int = 120) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit]}..."
+
+
+def _normalize_telegram_command(text: str) -> str:
+    """把 Telegram command 文本规范化为 agent 可识别的格式。"""
+    if not text.startswith("/"):
+        return text
+    parts = text.split(maxsplit=1)
+    command = parts[0].split("@", maxsplit=1)[0].lower()
+    if len(parts) == 1:
+        return command
+    return f"{command} {parts[1]}"
+
+
+def _telegram_menu_command_name(command: str) -> str:
+    """把后端命令名转换成 Telegram 菜单里允许的命令名。"""
+    return command.lstrip("/")
 
 
 class TelegramAdapter(ChannelAdapter):
@@ -82,6 +98,8 @@ class TelegramAdapter(ChannelAdapter):
         self._app: Application | None = None
         # chat_id → {msg_id, text}, 用于流式增量编辑
         self._stream_buf: dict[str, dict] = {}
+        # chat_id → pinned session_id，允许 /session_switch 后持续使用目标会话
+        self._session_overrides: dict[str, str] = {}
         if agent:
             self.bind_agent(agent)
 
@@ -105,9 +123,10 @@ class TelegramAdapter(ChannelAdapter):
         self._app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND, self._on_message,
         ))
-        self._app.add_handler(CommandHandler("start", self._on_start))
+        self._app.add_handler(MessageHandler(filters.COMMAND, self._on_command))
         logger.info("telegram: initializing application")
         await self._app.initialize()
+        await self._configure_bot_commands()
         logger.info("telegram: starting application")
         await self._app.start()
         logger.info("telegram: starting long polling")
@@ -141,6 +160,13 @@ class TelegramAdapter(ChannelAdapter):
                 int(self._request_timeout * 1000),
             )
             return None
+
+    def get_session_id(self, chat_id: str) -> str:
+        """优先返回 Telegram chat 绑定的显式 session，否则使用默认映射。"""
+        pinned = self._session_overrides.get(chat_id)
+        if pinned:
+            return pinned
+        return super().get_session_id(chat_id)
 
     async def send_text(self, chat_id: str, text: str) -> None:
         """发送完整文本消息。超出 4096 字符自动分块。"""
@@ -294,6 +320,32 @@ class TelegramAdapter(ChannelAdapter):
                 )
                 await self.send_text(chat_id, delta)
 
+    async def _configure_bot_commands(self) -> None:
+        """把 agent 的命令列表同步到 Telegram bot 菜单。"""
+        if not self._app or not self._agent:
+            return
+
+        await self._agent._ensure_initialized()
+
+        commands = [
+            BotCommand(command="start", description="开始对话"),
+        ]
+        for cmd in self._agent.list_commands():
+            command_name = _telegram_menu_command_name(cmd.name)
+            if not command_name:
+                continue
+            commands.append(BotCommand(command=command_name, description=cmd.description))
+
+        try:
+            await self._request_with_timeout(
+                "bot",
+                "set_my_commands",
+                self._app.bot.set_my_commands(commands),
+            )
+            logger.info("telegram: bot commands configured count={}", len(commands))
+        except Exception:
+            logger.exception("telegram: failed to configure bot commands")
+
     # ── 事件处理 ────────────────────────────────────────────────────────
 
     async def _on_message(self, update: Update, _context: object) -> None:
@@ -332,6 +384,57 @@ class TelegramAdapter(ChannelAdapter):
                 user_id,
                 _preview_text(reply),
             )
+
+    async def _on_command(self, update: Update, _context: object) -> None:
+        """处理 Telegram 斜杠命令。"""
+        if not update.message or not update.message.text:
+            return
+        chat_id = str(update.effective_chat.id)
+        user_id = str(update.effective_user.id) if update.effective_user else "0"
+        raw_command = update.message.text.strip()
+        command = _normalize_telegram_command(raw_command)
+
+        if command == "/start":
+            await self._on_start(update, _context)
+            return
+
+        if not self._agent:
+            logger.warning(
+                "telegram: command ignored because agent is missing chat_id={} user_id={} command={}",
+                chat_id,
+                user_id,
+                _preview_text(command),
+            )
+            await self.send_text(chat_id, "命令暂不可用。")
+            return
+
+        logger.info(
+            "telegram: received command chat_id={} user_id={} command={}",
+            chat_id,
+            user_id,
+            _preview_text(command),
+        )
+        try:
+            result = await self._agent.execute_command(command)
+        except Exception:
+            logger.exception(
+                "telegram: command handler failed chat_id={} user_id={} command={}",
+                chat_id,
+                user_id,
+                _preview_text(command),
+            )
+            await self.send_text(chat_id, f"命令执行失败: {command.split()[0]}")
+            return
+
+        if not result.handled:
+            await self.send_text(chat_id, f"未知命令: {command.split()[0]}")
+            return
+
+        if command.startswith("/session_switch ") and result.reply.startswith("[已切换到会话: "):
+            self._session_overrides[chat_id] = command.split(maxsplit=1)[1]
+
+        if result.reply:
+            await self.send_text(chat_id, result.reply)
 
     async def _on_start(self, update: Update, _context: object) -> None:
         """处理 /start 命令。"""

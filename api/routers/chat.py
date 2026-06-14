@@ -173,7 +173,7 @@ async def list_commands(
             status_code=400,
             detail=f"Agent initialization failed: {exc}",
         )
-    commands = agent._cmd_dispatcher.list_commands()
+    commands = agent.list_commands()
     return {
         "commands": [
             {"command": c.name, "description": c.description, "detail": c.detail}

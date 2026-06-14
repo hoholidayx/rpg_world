@@ -71,7 +71,7 @@ def _list_to_html(lines: list[str]) -> str:
     规则：
     - 无序列表统一使用 `•`
     - 有序列表保留数字序号
-    - 缩进层级使用 `&nbsp;` 表示，尽量保留嵌套结构
+    - 缩进层级使用不间断空格字符，尽量保留嵌套结构
     """
     rendered: list[str] = []
     for line in lines:
@@ -81,7 +81,7 @@ def _list_to_html(lines: list[str]) -> str:
             level = len(indent) // 2
             state = task_match.group("state").lower()
             body = _format_inline_markup(task_match.group("body"))
-            prefix = "&nbsp;" * (level * 2)
+            prefix = "\u00a0" * (level * 2)
             checkbox = "☑" if state == "x" else "☐"
             rendered.append(f"{prefix}{checkbox} {body}")
             continue
@@ -95,7 +95,7 @@ def _list_to_html(lines: list[str]) -> str:
         level = len(indent) // 2
         marker = match.group("marker")
         body = _format_inline_markup(match.group("body"))
-        prefix = "&nbsp;" * (level * 2)
+        prefix = "\u00a0" * (level * 2)
         bullet = marker if marker.endswith(".") else "•"
         rendered.append(f"{prefix}{bullet} {body}")
     return "\n".join(rendered)

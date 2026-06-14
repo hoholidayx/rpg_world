@@ -111,7 +111,11 @@ async def _start_telegram(tasks: list[asyncio.Task]) -> None:
         stream_edit_interval_ms=channels_settings.telegram_stream_edit_interval_ms,
         stream_edit_min_chars=channels_settings.telegram_stream_edit_min_chars,
         request_timeout_ms=channels_settings.telegram_request_timeout_ms,
-        agent=AgentManager.get_or_create(workspace=channels_settings.telegram_workspace),
+        # Telegram 启动时先用固定 bootstrap session 预热，真实聊天仍按 chat_id 分流。
+        agent=AgentManager.get_or_create(
+            workspace=channels_settings.telegram_workspace,
+            session_id="telegram_default",
+        ),
     )
     task = asyncio.create_task(adapter.start(), name="telegram")
     _track_task(task)

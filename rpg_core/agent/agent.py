@@ -48,6 +48,7 @@ from rpg_world.rpg_core.summary.compressor import SummaryCompressor
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.character.manager import CharacterManager
+    from rpg_world.rpg_core.agent.command import CommandDef
     from rpg_world.rpg_core.lorebook.manager import LorebookManager
     from rpg_world.rpg_core.memory.memory_manager import MemoryManager
     from rpg_world.rpg_core.status.manager import StatusManager
@@ -523,6 +524,12 @@ class RPGGameAgent:
         await self._queue.put(QueueItem(kind=QueueKind.COMMAND, user_input=command, future=future))
         logger.debug(_TAG + " execute_command() enqueued: cmd={!r:.60}", command)
         return await future
+
+    def list_commands(self) -> list["CommandDef"]:
+        """返回当前 agent 可用的全部斜杠命令定义。"""
+        if self._cmd_dispatcher is None:
+            return []
+        return self._cmd_dispatcher.list_commands()
 
     @property
     def history(self) -> list[Message]:
