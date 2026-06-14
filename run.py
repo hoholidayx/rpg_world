@@ -50,6 +50,22 @@ _loguru_logger.add(
 _handlers: dict[str, Callable[[list[asyncio.Task]], Awaitable[None]]] = {}
 
 
+def _track_task(task: asyncio.Task) -> None:
+    """在后台任务完成时记录异常，避免静默失败。"""
+    def _done(done_task: asyncio.Task) -> None:
+        try:
+            exc = done_task.exception()
+        except asyncio.CancelledError:
+            _loguru_logger.info("任务已取消: {}", done_task.get_name())
+            return
+        if exc is not None:
+            _loguru_logger.opt(exception=exc).error("任务异常退出: {}", done_task.get_name())
+        else:
+            _loguru_logger.info("任务正常结束: {}", done_task.get_name())
+
+    task.add_done_callback(_done)
+
+
 def _register(name: str):
     """装饰器：注册模块启动处理器。"""
     def wrapper(fn: Callable[[list[asyncio.Task]], Awaitable[None]]):
@@ -79,7 +95,9 @@ async def _start_api(tasks: list[asyncio.Task]) -> None:
             log_level="info",
         )
         server = uvicorn.Server(config)
-        tasks.append(asyncio.create_task(server.serve(), name="api"))
+        task = asyncio.create_task(server.serve(), name="api")
+        _track_task(task)
+        tasks.append(task)
 
 
 @_register("telegram")
@@ -89,9 +107,15 @@ async def _start_telegram(tasks: list[asyncio.Task]) -> None:
     adapter = TelegramAdapter(
         token=channels_settings.telegram_token,
         streaming=channels_settings.telegram_streaming,
+        proxy=channels_settings.telegram_proxy,
+        stream_edit_interval_ms=channels_settings.telegram_stream_edit_interval_ms,
+        stream_edit_min_chars=channels_settings.telegram_stream_edit_min_chars,
+        request_timeout_ms=channels_settings.telegram_request_timeout_ms,
         agent=AgentManager.get_or_create(workspace=channels_settings.telegram_workspace),
     )
-    tasks.append(asyncio.create_task(adapter.start(), name="telegram"))
+    task = asyncio.create_task(adapter.start(), name="telegram")
+    _track_task(task)
+    tasks.append(task)
 
 
 @_register("cli")
@@ -99,7 +123,9 @@ async def _start_cli(tasks: list[asyncio.Task]) -> None:
     from rpg_world.channels.cli import CLIAdapter
 
     adapter = CLIAdapter(agent=AgentManager.get_or_create(workspace=channels_settings.cli_workspace))
-    tasks.append(asyncio.create_task(adapter.start(), name="cli"))
+    task = asyncio.create_task(adapter.start(), name="cli")
+    _track_task(task)
+    tasks.append(task)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -125,19 +151,20 @@ async def main() -> None:
     enabled_modules = _resolve_modules(_parse_args())
 
     if not enabled_modules:
-        print("未启用任何模块（在 channels.json 中设置 modules.{name}.enabled=true）")
-        print("或通过 MODULES=api,telegram uv run python -m rpg_world.run 指定")
+        _loguru_logger.warning("未启用任何模块（在 channels.json 中设置 modules.{name}.enabled=true）")
+        _loguru_logger.warning("或通过 MODULES=api,telegram uv run python -m rpg_world.run 指定")
         return
 
-    print(f"启动模块: {', '.join(enabled_modules)}")
+    _loguru_logger.info("启动模块: {}", ", ".join(enabled_modules))
 
     tasks: list[asyncio.Task] = []
 
     for module in enabled_modules:
         handler = _handlers.get(module)
         if handler is None:
-            print(f"  [警告] 未知模块: {module}，跳过")
+            _loguru_logger.warning("未知模块，跳过: {}", module)
             continue
+        _loguru_logger.info("启动模块处理器: {}", module)
         await handler(tasks)
 
     # ── 等待退出信号 ──────────────────────────────────────────────────
@@ -149,15 +176,15 @@ async def main() -> None:
         except NotImplementedError:
             pass
 
-    print(f"已启动 {len(tasks)} 个模块，按 Ctrl+C 停止")
+    _loguru_logger.info("已启动 {} 个模块，按 Ctrl+C 停止", len(tasks))
     await stop_event.wait()
 
     # ── 优雅关闭 ──────────────────────────────────────────────────────
-    print("\n正在关闭...")
+    _loguru_logger.info("正在关闭...")
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
-    print("已关闭。")
+    _loguru_logger.info("已关闭。")
 
 
 if __name__ == "__main__":

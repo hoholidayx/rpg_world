@@ -2,7 +2,7 @@
   "modules": {
     "api": {
       "$description": "FastAPI HTTP 服务。关闭后 API/WebUI 无法访问，仅 Telegram/CLI 可用",
-      "enabled": true,
+      "enabled": false,
       "port": 8000,
       "host": "127.0.0.1",
       "reload": false
@@ -13,12 +13,15 @@
       "bot_token": "YOUR_BOT_TOKEN",
       "streaming": true,
       "allow_from": ["*"],
-      "proxy": null,
+      "proxy": "http://127.0.0.1:7890",
+      "stream_edit_interval_ms": 2500,
+      "stream_edit_min_chars": 64,
+      "request_timeout_ms": 5000,
       "workspace": "data/非公开行程"
     },
     "cli": {
       "$description": "交互式命令行 REPL。用于开发调试",
-      "enabled": true,
+      "enabled": false,
       "workspace": "data/非公开行程"
     }
   }

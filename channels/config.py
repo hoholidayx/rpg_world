@@ -86,6 +86,29 @@ class ChannelsSettings:
         return bool(self._mod_cfg("telegram").get("streaming", True))
 
     @property
+    def telegram_proxy(self) -> str:
+        """Telegram 请求代理地址。
+
+        为空字符串或未配置时表示不启用代理。
+        """
+        return str(self._mod_cfg("telegram").get("proxy", ""))
+
+    @property
+    def telegram_stream_edit_interval_ms(self) -> int:
+        """Telegram 流式编辑的最小间隔，单位毫秒。"""
+        return int(self._mod_cfg("telegram").get("stream_edit_interval_ms", 800))
+
+    @property
+    def telegram_stream_edit_min_chars(self) -> int:
+        """Telegram 流式编辑的最小增量字符数。"""
+        return int(self._mod_cfg("telegram").get("stream_edit_min_chars", 24))
+
+    @property
+    def telegram_request_timeout_ms(self) -> int:
+        """Telegram 单次请求超时，单位毫秒。"""
+        return int(self._mod_cfg("telegram").get("request_timeout_ms", 5000))
+
+    @property
     def telegram_workspace(self) -> str:
         """Telegram 渠道绑定的 workspace 标识。
 
