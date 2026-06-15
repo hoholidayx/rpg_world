@@ -14,12 +14,18 @@ uv run python -m rpg_world.run
 # 仅启动 API
 MODULES=api uv run python -m rpg_world.run
 
+# 仅启动 Telegram（需先在 channels.json 配置 bot_token / workspace）
+MODULES=telegram uv run python -m rpg_world.run
+
 # 独立 CLI（无需 API / Telegram，直接 LLM 对话）
 uv run python -m rpg_world.channels.cli.repl
 
 # 启动 WebUI（另一个终端）
 cd rpg_world/webui && npx vite
 ```
+
+`channels.json` 当前默认关闭所有模块。开发时可通过 `MODULES=api`、
+`MODULES=telegram`、`MODULES=api,telegram` 临时覆盖启用模块。
 
 ## 架构
 
@@ -58,6 +64,21 @@ cfg.enabled_module_names  # 所有已启用的模块名列表
 | CLI | `channels/cli/adapter.py` | Rich + prompt_toolkit |
 | Telegram | `channels/telegram/adapter.py` | python-telegram-bot |
 | 未来 | 只需继承 ChannelAdapter | 实现 start/stop/send_text 即可 |
+
+当前实现优先保障 Telegram 作为主要对话入口。WebUI 定位为个人数据管理后台，
+Chat 页面保留基础调试能力，完整聊天体验放在 Telegram 稳定后再完善。
+
+### Telegram 渠道
+
+Telegram 渠道当前支持：
+
+- 长轮询启动与优雅关闭。
+- `streaming=true` 时通过编辑消息实现流式输出。
+- Markdown 到 Telegram HTML 的渲染与 4096 字符分块发送。
+- `/start`、后端斜杠命令透传，以及 Telegram 菜单命令规范化。
+- `/sessions` 会话菜单、按钮切换会话、`/session_create` 二段式创建、`/cancel` 取消。
+- `chat_id` 默认映射为 `telegram_<chat_id>`，显式切换后会在当前 chat 内钉住 session。
+- `proxy`、流式编辑间隔、最小编辑字符数、请求超时等参数由 `channels.json` 控制。
 
 ### 核心引擎
 
@@ -146,8 +167,13 @@ memory/
 - `query_planner_n_gpu_layers`
 - `query_planner_temperature`
 - `query_planner_max_tokens`
-- `hybrid_enabled`
-- `rerank_enabled`
+- `top_k`
+- `chunk_size`
+- `chunk_overlap`
+
+代码中已有 hybrid retrieval 和可选 rerank 结构，但当前 `settings.json`
+默认配置尚未暴露完整的 hybrid/rerank 开关。新增配置前应同步更新
+`rpg_core/settings.py`、README 和测试。
 
 ### 设计原则
 
@@ -164,9 +190,23 @@ memory/
 ```json
 {
   "modules": {
-    "api": { "enabled": true, "port": 8000, "reload": false },
-    "telegram": { "enabled": true, "bot_token": "xxx", "streaming": true },
-    "cli": { "enabled": false }
+    "api": {
+      "enabled": false,
+      "host": "127.0.0.1",
+      "port": 8000,
+      "reload": false
+    },
+    "telegram": {
+      "enabled": false,
+      "bot_token": "xxx",
+      "streaming": true,
+      "proxy": "http://127.0.0.1:7890",
+      "workspace": "data/工作区名"
+    },
+    "cli": {
+      "enabled": false,
+      "workspace": "data/工作区名"
+    }
   }
 }
 ```
@@ -175,13 +215,17 @@ memory/
 
 ```json
 {
-  "active_workspace": "data/工作区名",
   "agent_config": {
     "model": "deepseek-v4-flash",
     "base_url": "https://api.deepseek.com"
-  }
+  },
+  "character_path": "character",
+  "lorebook_path": "lorebook"
 }
 ```
+
+工作区不再放在 `settings.json` 的 `active_workspace` 中。API/WebUI 通过请求参数选择
+workspace；Telegram/CLI 通过 `channels.json` 中各自的 `workspace` 绑定。
 
 ## Session ID 规则
 
@@ -193,15 +237,27 @@ memory/
 所有测试 mock LLM 调用，无需 API key：
 
 ```bash
-uv run python -m pytest rpg_world/channels/tests/ -v
+uv run python -m pytest channels/tests rpg_core/tests api/tests -q
 ```
 
-| 文件 | 测试数 | 说明 |
-|---|---|---|
-| `test_base.py` | 12 | 基类功能 |
-| `test_cli.py` | 11 | CLI 渠道 |
-| `test_manager.py` | 9 | AgentManager 单例 |
-| `test_telegram.py` | 16 | Telegram 渠道 |
+当前基线：`110 passed, 1 warning`。覆盖范围包括：
+
+- `channels/tests/`：ChannelAdapter、CLI、AgentManager、Telegram 渠道。
+- `rpg_core/tests/`：命令分发、上下文、memory、scene、session、summary、AgentManager。
+- `api/tests/`：workspace/session/character/lorebook/status/chat 契约。
+
+Telegram 测试已覆盖会话菜单、命令规范化、二段式创建、流式编辑节流、
+Markdown 渲染和长文本分块。后续修改 Telegram 行为必须补对应测试。
+
+## 当前实现优先级
+
+1. **P0：Telegram 渠道稳定性**。优先保障真实 Telegram 长轮询、会话管理、
+   stream/non-stream、异常回复、命令菜单和运行配置可靠。
+2. **P1：核心数据与记忆链路**。确保角色卡、世界书、状态表、summary、memory
+   在 Telegram 主入口下稳定可用。
+3. **P2：WebUI 数据管理后台**。优先完善角色、世界书、状态、workspace、session
+   管理能力，方便人工维护数据。
+4. **P3：WebUI Chat 体验**。最后再完善 SSE、tool records、stats、聊天 UX 和前端分包。
 
 ## 相关文档
 

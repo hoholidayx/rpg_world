@@ -17,6 +17,9 @@ uv run uvicorn rpg_world.api.main:app --reload --reload-dir rpg_world --host 127
 # WebUI 开发服务器（端口 5173，代理 /api → 后端）
 cd rpg_world/webui && npx vite
 
+# 仅启动 Telegram（需先配置 channels.json）
+MODULES=telegram uv run python -m rpg_world.run
+
 # 独立 CLI（无 API / Telegram，直接 LLM 对话）
 uv run python -m rpg_world.channels.cli.repl [--model gpt-4o] [--session-id mygame_01]
 
@@ -40,12 +43,12 @@ rpg_world/
 │   ├── telegram/                 #   Telegram 渠道（python-telegram-bot）
 │   │   ├── __init__.py
 │   │   └── adapter.py            #     TelegramAdapter（支持 stream/non-stream）
-│   └── tests/                    #   渠道测试（mock LLM，无需 API key）
+│   └── tests/                    #   渠道测试（mock LLM / Telegram SDK）
 │       ├── conftest.py           #    共享 fixture（FakeAgent, FakeBot）
-│       ├── test_base.py          #    基类测试 12 项
-│       ├── test_cli.py           #    CLIAdapter 测试 11 项
-│       ├── test_manager.py       #    AgentManager 测试 9 项
-│       └── test_telegram.py      #    Telegram 测试 16 项
+│       ├── test_base.py          #    ChannelAdapter 基类
+│       ├── test_cli.py           #    CLIAdapter
+│       ├── test_manager.py       #    AgentManager
+│       └── test_telegram.py      #    Telegram 会话/命令/渲染/流式发送
 ├── rpg_core/                     # 核心逻辑（无框架依赖）
 │   ├── agent/                    #   LLM Agent 引擎
 │   │   ├── agent.py              #     RPGGameAgent — 主入口（send/send_stream/single_turn）
@@ -75,7 +78,7 @@ rpg_world/
 │       ├── watcher.py            #   FileWatcher（watchdog 文件监控）
 │       └── path_utils.py         #   路径解析
 ├── api/                          # FastAPI 应用
-│   ├── main.py                   #   入口 + CORS + lifespan（条件启动渠道）
+│   ├── main.py                   #   入口 + CORS + lifespan（不启动渠道）
 │   ├── deps.py                   #   管理器单例
 │   ├── logger.py                 #   API 日志配置
 │   ├── settings.json             #   API 级配置
@@ -86,8 +89,8 @@ rpg_world/
 │       ├── status.py             #   CRUD /api/v1/status
 │       ├── chat.py               #   send/stream(SSE)/command/history
 │       ├── sessions.py           #   list/create/delete/clone
-│       └── workspace.py          #   list/get_active/switch
-├── webui/                        # Vue 3 SPA（Ant Design Vue + Pinia）
+│       └── workspace.py          #   list/create/rename/delete
+├── webui/                        # Vue 3 SPA（Ant Design Vue + Pinia，优先数据管理）
 │   ├── settings.json
 │   ├── vite.config.js            # 代理 /api → 后端
 │   ├── run_dev.sh
@@ -108,7 +111,9 @@ rpg_world/
             ├── history.jsonl
             ├── history_cold.jsonl
             ├── story_memory.json
-            └── rpg_summaries.json
+            ├── rpg_summaries.json
+            ├── summaries/
+            └── memory_vectors.db
 ```
 
 ## 统一进程架构
@@ -141,7 +146,13 @@ channels_settings.api_port          # modules.api.port
 channels_settings.api_reload        # modules.api.reload
 channels_settings.telegram_enabled  # modules.telegram.enabled
 channels_settings.telegram_token    # modules.telegram.bot_token
+channels_settings.telegram_workspace  # modules.telegram.workspace
+channels_settings.telegram_proxy    # modules.telegram.proxy
+channels_settings.telegram_stream_edit_interval_ms
+channels_settings.telegram_stream_edit_min_chars
+channels_settings.telegram_request_timeout_ms
 channels_settings.cli_enabled       # modules.cli.enabled
+channels_settings.cli_workspace     # modules.cli.workspace
 channels_settings.enabled_module_names  # 所有已启用模块列表
 ```
 
@@ -158,6 +169,11 @@ agent = AgentManager.get_or_create(session_id="mygame_01")
 所有模块通过同一个 `AgentManager` 获取 agent，确保 FileWatcher 只初始化一次、
 BaseManager 缓存一致。
 
+`AgentManager` 的缓存键包含 `workspace`、`session_id`、`api_key`。同名 session
+在不同 workspace 下会得到不同 agent，避免跨工作区污染。所有入口必须提供有效
+workspace；API 空 workspace 会解析为 `data/api_default_workspace`，Telegram/CLI
+从 `channels.json` 读取 workspace，缺省时分别使用渠道默认 workspace。
+
 ### ChannelAdapter 基类（`channels/base.py`）
 
 多渠道抽象基类，所有渠道（CLI / Telegram / Future）遵循同一接口：
@@ -172,6 +188,30 @@ BaseManager 缓存一致。
 
 命令分发统一由 agent 的 `_send_impl()` / `_send_stream_impl()` 处理，
 不放在渠道层，确保所有渠道行为一致。
+
+Telegram 例外：`/sessions`、无参数 `/session_switch`、无参数 `/session_create`
+和 `/cancel` 的菜单/二段输入属于渠道交互状态，由
+`channels/telegram/session_flow.py` 消费；真正带参数的 session 命令仍交回
+agent 的 `CommandDispatcher` 执行。
+
+### Telegram 渠道当前能力
+
+Telegram 是当前优先保障的主对话入口，WebUI Chat 不是当前优先级最高的聊天入口。
+
+| 能力 | 当前实现 |
+|---|---|
+| 启动方式 | `MODULES=telegram uv run python -m rpg_world.run` 或 `channels.json` 启用 |
+| 长轮询 | `python-telegram-bot` `Application` + `updater.start_polling()` |
+| 流式输出 | `send_delta()` 首条发送、后续编辑消息，支持间隔和最小字符数节流 |
+| 非流式输出 | `send_text()` 完整发送，自动分块 |
+| 渲染 | Markdown 转 Telegram HTML，长文本按 Telegram 限制分块 |
+| 命令 | `/start`、后端斜杠命令、Telegram 菜单命令规范化 |
+| 会话 | 默认 `telegram_<chat_id>`，支持 `/sessions` 菜单、按钮切换、二段式创建 |
+| 取消流程 | `/cancel` 取消 Telegram 专属二段式创建 |
+| 网络参数 | `proxy`、请求超时、流式编辑节流参数来自 `channels.json` |
+
+后续涉及 Telegram 的修改应优先补 `channels/tests/test_telegram.py`，尤其是：
+会话菜单、命令规范化、stream 编辑节流、请求失败/超时、Markdown 渲染、长文本分块。
 
 ### 消息队列（`agent.py` 内部）
 
@@ -264,6 +304,20 @@ GET    /api/v1/chat/history          — 获取历史会话
 POST   /api/v1/chat/send             — 发送消息（缓冲回复）
 POST   /api/v1/chat/stream           — 发送消息（SSE 流式回复）
 POST   /api/v1/chat/command          — 执行斜杠命令
+GET    /api/v1/chat/commands         — 获取可用斜杠命令
+```
+
+Workspace / Session API：
+
+```
+GET    /api/v1/workspaces                         — 列出工作区
+POST   /api/v1/workspaces                         — 创建工作区
+PUT    /api/v1/workspaces/{workspace}             — 重命名工作区
+DELETE /api/v1/workspaces/{workspace}             — 删除工作区
+GET    /api/v1/workspaces/{workspace}/sessions    — 列出会话
+POST   /api/v1/workspaces/{workspace}/sessions    — 创建会话
+DELETE /api/v1/workspaces/{workspace}/sessions/{session_id}
+POST   /api/v1/workspaces/{workspace}/sessions/{session_id}/clone
 ```
 
 - Agent 实例通过 `AgentManager` 统一管理
@@ -276,6 +330,8 @@ POST   /api/v1/chat/command          — 执行斜杠命令
 - `history_cold.jsonl` — 冷备份，只追加永不截断
 - `story_memory.json` — 剧情记忆（FileWatcher）
 - `rpg_summaries.json` — 对话摘要（FileWatcher）
+- `summaries/` — 批次摘要文件
+- `memory_vectors.db*` — memory SQLite / WAL / SHM 索引文件
 
 所有会话数据文件集中在 `{workspace_root}/sessions/{session_id}/` 下。
 
@@ -306,10 +362,12 @@ POST   /api/v1/chat/command          — 执行斜杠命令
 
 - **DashboardLayout** 侧边栏含工作区选择器 + 会话选择器
 - `useCRUD` composable 适用于 character/lorebook CRUD 页面
-- `ChatView` 使用 SSE 流式渲染（`streamMessage()` 基于 fetch + ReadableStream）
+- 当前 WebUI 优先作为个人数据管理后台：角色卡、世界书、状态表、workspace、session 管理优先
+- `ChatView` 使用 SSE 流式渲染（`streamMessage()` 基于 fetch + ReadableStream），但完整 Chat UX 排在 Telegram 稳定之后
 - 中文路径在前端 axios 层用 `encodeURIComponent()` 编码
 - 暗色模式：`data-theme` 属性控制，Pinia store 持久化
 - Vite 开发代理：`/api` → `http://127.0.0.1:8000`
+- `session_id` 输入必须与后端一致，只允许字母、数字、下划线，不允许连字符
 
 ### 数据格式
 
@@ -318,3 +376,31 @@ POST   /api/v1/chat/command          — 执行斜杠命令
 - **会话历史**: JSONL（每行一个 message 对象）
 - **摘要**: JSON 数组
 - **剧情记忆**: JSON 数组（含 metadata）
+
+## 测试基线
+
+当前自动化测试基线：
+
+```bash
+uv run python -m pytest channels/tests rpg_core/tests api/tests -q
+```
+
+截至最近一次检查：`110 passed, 1 warning`。这些测试 mock 外部 LLM、Telegram SDK
+和网络调用，不需要真实 API key。
+
+覆盖范围：
+
+- `channels/tests/`：ChannelAdapter、CLI、AgentManager、Telegram 渠道。
+- `rpg_core/tests/`：命令分发、上下文、memory、scene、session、summary、AgentManager。
+- `api/tests/`：workspace/session/character/lorebook/status/chat 契约。
+
+## 当前实现优先级
+
+1. **P0：Telegram 渠道完善**。保障 Telegram 作为主要对话入口，包括真实运行、
+   会话管理、stream/non-stream、异常回复、命令菜单、配置和日志。
+2. **P1：核心数据与记忆链路**。确保角色卡、世界书、状态表、summary、memory
+   在 Telegram 使用路径下稳定可用。
+3. **P2：WebUI 数据管理后台**。优先完善数据维护能力，方便人工管理工作区、
+   角色、世界书、状态表和会话。
+4. **P3：WebUI Chat**。最后再完善 SSE 体验、tool records、stats、多会话聊天 UX
+   和前端分包。
