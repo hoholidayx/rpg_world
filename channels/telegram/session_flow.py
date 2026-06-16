@@ -22,6 +22,7 @@ from rpg_world.rpg_core.session import SessionManager
 
 _SESSION_PICKER_TOKEN_PREFIX = "tg_sess"
 _SESSION_CREATE_TTL_SECONDS = 300
+_MAX_SESSION_PICKER_ROWS = 20
 
 
 @dataclass
@@ -54,6 +55,16 @@ class TelegramSessionFlow:
         """把当前 chat 固定到指定会话。"""
         self._session_overrides[chat_id] = session_id
 
+    def maybe_pin_created_session(self, chat_id: str, session_id: str, *, auto_pin: bool = False) -> None:
+        """按产品开关决定是否把新建会话立即固定到当前 chat。
+
+        当前产品要求：新建会话后不立即 pin。这里保留一个集中入口，
+        若后续需求改为“创建后自动切换”，只需打开调用方的
+        ``auto_pin_created_session`` 配置并复用该方法。
+        """
+        if auto_pin:
+            self.pin_session(chat_id, session_id)
+
     def clear_pinned_session(self, chat_id: str) -> None:
         """清除当前 chat 的显式会话绑定。"""
         self._session_overrides.pop(chat_id, None)
@@ -71,7 +82,8 @@ class TelegramSessionFlow:
     def build_session_picker(self, sessions: list[str], current: str) -> InlineKeyboardMarkup:
         """构造可点击的会话选择菜单。"""
         rows: list[list[InlineKeyboardButton]] = []
-        for sid in sessions:
+        visible_sessions = sessions[:_MAX_SESSION_PICKER_ROWS]
+        for sid in visible_sessions:
             label = f"{sid} （当前）" if sid == current else sid
             token = self._register_picker_action(_PickerAction(kind="switch", session_id=sid))
             rows.append(
@@ -100,9 +112,12 @@ class TelegramSessionFlow:
             f"当前会话: {current}",
             "点击下方按钮切换会话，或点“新建会话”创建新的会话。",
         ]
-        for sid in sessions:
+        visible_sessions = sessions[:_MAX_SESSION_PICKER_ROWS]
+        for sid in visible_sessions:
             marker = " （当前）" if sid == current else ""
             lines.append(f"- {sid}{marker}")
+        if len(sessions) > len(visible_sessions):
+            lines.append(f"... 还有 {len(sessions) - len(visible_sessions)} 个会话未展示，请使用命令直接切换。")
         return "\n".join(lines)
 
     def start_session_create_flow(self, chat_id: str) -> None:
@@ -121,6 +136,16 @@ class TelegramSessionFlow:
             return False
         return True
 
+    def expire_session_create_flow(self, chat_id: str) -> bool:
+        """若二段创建已超时则清理并返回 True。"""
+        pending = self._pending_session_create.get(chat_id)
+        if pending is None:
+            return False
+        if time.monotonic() - pending.started_at <= _SESSION_CREATE_TTL_SECONDS:
+            return False
+        self._pending_session_create.pop(chat_id, None)
+        return True
+
     async def handle_plain_text(
         self,
         chat_id: str,
@@ -128,8 +153,12 @@ class TelegramSessionFlow:
         *,
         agent: RPGGameAgent | None,
         send_text: Callable[[str], Awaitable[None]],
+        auto_pin_created_session: bool = False,
     ) -> bool:
         """消费 session_create 的二段输入。"""
+        if self.expire_session_create_flow(chat_id):
+            await send_text("会话创建已超时，请重新发送 /session_create。")
+            return True
         if not self._is_session_create_flow_active(chat_id):
             return False
 
@@ -152,6 +181,11 @@ class TelegramSessionFlow:
         result = await agent.execute_command(f"/session_create {candidate}")
         if result.reply.startswith("[会话已创建: "):
             self.cancel_session_create_flow(chat_id)
+            self.maybe_pin_created_session(
+                chat_id,
+                candidate,
+                auto_pin=auto_pin_created_session,
+            )
         await send_text(result.reply or "会话创建完成。")
         return True
 

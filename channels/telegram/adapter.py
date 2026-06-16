@@ -16,12 +16,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import TYPE_CHECKING
 
 from loguru import logger
 from telegram import BotCommand, Update
-from telegram.error import BadRequest, RetryAfter
+from telegram.error import BadRequest, RetryAfter, TelegramError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
 from rpg_world.channels.base import ChannelAdapter
@@ -35,6 +36,8 @@ if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.agent import RPGGameAgent
 
 _TELEGRAM_PARSE_MODE = "HTML"
+_TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+_TELEGRAM_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
 
 
 def _preview_text(text: str, limit: int = 120) -> str:
@@ -57,7 +60,18 @@ def _normalize_telegram_command(text: str) -> str:
 
 def _telegram_menu_command_name(command: str) -> str:
     """把后端命令名转换成 Telegram 菜单里允许的命令名。"""
-    return command.lstrip("/")
+    name = command.strip().split(maxsplit=1)[0].lstrip("/").split("@", maxsplit=1)[0].lower()
+    if not _TELEGRAM_COMMAND_RE.fullmatch(name):
+        return ""
+    return name
+
+
+def _telegram_command_description(description: str, limit: int = 256) -> str:
+    """返回 Telegram 菜单允许的命令描述。"""
+    clean = " ".join(str(description or "").split())
+    if len(clean) <= limit:
+        return clean
+    return f"{clean[: limit - 1]}…"
 
 
 class TelegramAdapter(ChannelAdapter):
@@ -87,6 +101,7 @@ class TelegramAdapter(ChannelAdapter):
         stream_edit_interval_ms: int = 800,
         stream_edit_min_chars: int = 24,
         request_timeout_ms: int = 5000,
+        auto_pin_created_session: bool = False,
         agent: RPGGameAgent | None = None,
     ) -> None:
         super().__init__()
@@ -96,6 +111,7 @@ class TelegramAdapter(ChannelAdapter):
         self._stream_edit_interval = max(0, stream_edit_interval_ms) / 1000.0
         self._stream_edit_min_chars = max(1, stream_edit_min_chars)
         self._request_timeout = max(0, request_timeout_ms) / 1000.0
+        self._auto_pin_created_session = auto_pin_created_session
         self._app: Application | None = None
         # chat_id → {msg_id, text}, 用于流式增量编辑
         self._stream_buf: dict[str, dict] = {}
@@ -115,6 +131,9 @@ class TelegramAdapter(ChannelAdapter):
             self._stream_edit_min_chars,
             int(self._request_timeout * 1000),
         )
+        if not self._is_valid_token(self._token):
+            raise ValueError("telegram: bot_token is empty or still set to YOUR_BOT_TOKEN")
+
         builder = Application.builder().token(self._token)
         if self._proxy:
             builder = builder.proxy(self._proxy).get_updates_proxy(self._proxy)
@@ -147,11 +166,15 @@ class TelegramAdapter(ChannelAdapter):
 
     # ── 消息发送 ────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _is_valid_token(token: str) -> bool:
+        return bool(str(token).strip()) and str(token).strip() != "YOUR_BOT_TOKEN"
+
     async def _request_with_timeout(self, chat_id: str, action: str, awaitable):
         """对 Telegram 请求加超时，避免单次 API 调用长时间阻塞。"""
-        if self._request_timeout <= 0:
-            return await awaitable
         try:
+            if self._request_timeout <= 0:
+                return await awaitable
             return await asyncio.wait_for(awaitable, timeout=self._request_timeout)
         except TimeoutError:
             logger.warning(
@@ -160,6 +183,30 @@ class TelegramAdapter(ChannelAdapter):
                 chat_id,
                 int(self._request_timeout * 1000),
             )
+            return None
+        except RetryAfter as exc:
+            logger.warning(
+                "telegram: {} rate limited chat_id={} retry_after={}s",
+                action,
+                chat_id,
+                exc.retry_after,
+            )
+            return None
+        except BadRequest as exc:
+            if "Message is not modified" in str(exc):
+                logger.debug(
+                    "telegram: {} ignored unchanged message chat_id={}",
+                    action,
+                    chat_id,
+                )
+                return None
+            logger.warning("telegram: {} bad request chat_id={} error={}", action, chat_id, exc)
+            return None
+        except (TimedOut, TelegramError, OSError) as exc:
+            logger.warning("telegram: {} failed chat_id={} error={}", action, chat_id, exc)
+            return None
+        except Exception:
+            logger.exception("telegram: {} unexpected failure chat_id={}", action, chat_id)
             return None
 
     def get_session_id(self, chat_id: str) -> str:
@@ -248,23 +295,24 @@ class TelegramAdapter(ChannelAdapter):
                     _preview_text(buf["text"]),
                 )
                 rendered_text = render_markdown_to_telegram_html(buf["text"])
-                try:
-                    await self._request_with_timeout(
-                        chat_id,
-                        "edit_message_text",
-                        self._app.bot.edit_message_text(
-                            chat_id=int(chat_id),
-                            message_id=buf["msg_id"],
-                            text=rendered_text,
-                            parse_mode=_TELEGRAM_PARSE_MODE,
-                        ),
-                    )
-                except RetryAfter as exc:
+                if len(rendered_text) > _TELEGRAM_MAX_MESSAGE_LENGTH:
                     logger.warning(
-                        "telegram: rate limited on delta edit chat_id={} retry_after={}s",
+                        "telegram: streaming edit exceeded limit chat_id={} length={}, defer to final",
                         chat_id,
-                        exc.retry_after,
+                        len(rendered_text),
                     )
+                    return
+                edited = await self._request_with_timeout(
+                    chat_id,
+                    "edit_message_text",
+                    self._app.bot.edit_message_text(
+                        chat_id=int(chat_id),
+                        message_id=buf["msg_id"],
+                        text=rendered_text,
+                        parse_mode=_TELEGRAM_PARSE_MODE,
+                    ),
+                )
+                if edited is None:
                     return
                 buf["sent_text"] = buf["text"]
                 buf["last_edit_at"] = time.monotonic()
@@ -284,32 +332,24 @@ class TelegramAdapter(ChannelAdapter):
                     _preview_text(delta),
                 )
                 rendered_delta = render_markdown_to_telegram_html(delta)
-                try:
-                    await self._request_with_timeout(
-                        chat_id,
-                        "edit_message_text",
-                        self._app.bot.edit_message_text(
-                            chat_id=int(chat_id),
-                            message_id=buf["msg_id"],
-                            text=rendered_delta,
-                            parse_mode=_TELEGRAM_PARSE_MODE,
-                        ),
-                    )
-                except RetryAfter as exc:
+                if len(rendered_delta) > _TELEGRAM_MAX_MESSAGE_LENGTH:
                     logger.warning(
-                        "telegram: rate limited on final edit chat_id={} retry_after={}s",
+                        "telegram: streaming final exceeded edit limit chat_id={} length={}, fallback to chunks",
                         chat_id,
-                        exc.retry_after,
+                        len(rendered_delta),
                     )
+                    await self.send_text(chat_id, delta)
                     return
-                except BadRequest as exc:
-                    if "Message is not modified" in str(exc):
-                        logger.debug(
-                            "telegram: final edit ignored because message was unchanged chat_id={}",
-                            chat_id,
-                        )
-                        return
-                    raise
+                await self._request_with_timeout(
+                    chat_id,
+                    "edit_message_text",
+                    self._app.bot.edit_message_text(
+                        chat_id=int(chat_id),
+                        message_id=buf["msg_id"],
+                        text=rendered_delta,
+                        parse_mode=_TELEGRAM_PARSE_MODE,
+                    ),
+                )
             else:
                 logger.debug(
                     "telegram: streaming final fallback to send_text chat_id={} preview={}",
@@ -332,7 +372,12 @@ class TelegramAdapter(ChannelAdapter):
             command_name = _telegram_menu_command_name(cmd.name)
             if not command_name:
                 continue
-            commands.append(BotCommand(command=command_name, description=cmd.description))
+            commands.append(
+                BotCommand(
+                    command=command_name,
+                    description=_telegram_command_description(cmd.description),
+                )
+            )
 
         try:
             await self._request_with_timeout(
@@ -388,6 +433,7 @@ class TelegramAdapter(ChannelAdapter):
                 text,
                 agent=self._agent,
                 send_text=lambda reply: self.send_text(chat_id, reply),
+                auto_pin_created_session=self._auto_pin_created_session,
             ):
                 logger.info(
                     "telegram: message consumed by session-create flow chat_id={} user_id={}",
@@ -402,7 +448,8 @@ class TelegramAdapter(ChannelAdapter):
                 user_id,
                 _preview_text(text),
             )
-            raise
+            await self.send_text(chat_id, "会话操作失败，请重试或发送 /cancel。")
+            return
         try:
             reply = await self._handle_message(chat_id, user_id, text)
         except Exception:
@@ -412,7 +459,8 @@ class TelegramAdapter(ChannelAdapter):
                 user_id,
                 _preview_text(text),
             )
-            raise
+            await self.send_text(chat_id, "处理消息失败，请稍后重试。")
+            return
         if reply is None:
             logger.warning(
                 "telegram: message ignored chat_id={} user_id={} (agent missing or rejected)",
