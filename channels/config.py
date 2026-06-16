@@ -1,46 +1,27 @@
-"""ChannelsSettings — 渠道独立配置加载器。
+"""ChannelsSettings — unified module configuration accessors.
 
-与 ``rpg_world/settings.json``（agent 配置/工作区/数据路径）分离，
-``channels.json`` 统一存放各模块（api / telegram / cli 等）的开关和参数。
-
-所有模块名和配置字段名封装为属性，外部调用不做字符串拼接。
+Module configuration is read from the merged ``settings.yaml`` via the core
+``Settings`` singleton.  This module only keeps the channel-facing typed
+properties so callers do not do string lookups directly.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from typing import Any
 
 from loguru import logger
+from rpg_world.rpg_core.settings import TelegramBotSettings
 from rpg_world.rpg_core.settings import settings as core_settings
-
-_CONFIG_PATH = Path(__file__).resolve().parent.parent / "channels.json"
 
 
 class ChannelsSettings:
-    """模块配置加载器。
-
-    读取 ``channels.json`` 的 ``modules.{name}`` 结构，提供类型化属性。
-    文件不存在或格式异常时返回空配置/默认值，不抛异常。
-    """
+    """模块配置访问器。"""
 
     def __init__(self) -> None:
-        self._data: dict = self._load()
-
-    def _load(self) -> dict:
-        if not _CONFIG_PATH.exists():
-            return {}
-        try:
-            raw = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                return {}
-            return raw
-        except (json.JSONDecodeError, OSError):
-            return {}
+        self._data: dict[str, Any] = core_settings.module_settings
 
     def _modules(self) -> dict:
-        raw = self._data.get("modules", {})
-        return raw if isinstance(raw, dict) else {}
+        return self._data if isinstance(self._data, dict) else {}
 
     def _mod_cfg(self, name: str) -> dict:
         mod = self._modules().get(name, {})
@@ -84,10 +65,14 @@ class ChannelsSettings:
     @property
     def enabled_module_names(self) -> list[str]:
         """返回所有已启用的模块名列表。"""
-        return [
-            name for name in ("api", "telegram", "cli")
-            if self._bool(name, "enabled", False)
-        ]
+        enabled = []
+        if self.api_enabled:
+            enabled.append("api")
+        if self.telegram_enabled:
+            enabled.append("telegram")
+        if self.cli_enabled:
+            enabled.append("cli")
+        return enabled
 
     # ── API 模块配置 ─────────────────────────────────────────────────────
 
@@ -111,54 +96,13 @@ class ChannelsSettings:
 
     @property
     def telegram_enabled(self) -> bool:
-        return self._bool("telegram", "enabled", False)
+        return self._bool("telegram", "enabled", False) and any(
+            bot.enabled for bot in self.telegram_bots
+        )
 
     @property
-    def telegram_token(self) -> str:
-        configured = str(self._mod_cfg("telegram").get("bot_token", ""))
-        normalized = configured.strip()
-        if normalized and normalized != "YOUR_BOT_TOKEN":
-            return configured
-        return core_settings.get_telegram_bot_token() or configured
-
-    @property
-    def telegram_streaming(self) -> bool:
-        return self._bool("telegram", "streaming", True)
-
-    @property
-    def telegram_proxy(self) -> str:
-        """Telegram 请求代理地址。
-
-        为空字符串或未配置时表示不启用代理。
-        """
-        return str(self._mod_cfg("telegram").get("proxy", ""))
-
-    @property
-    def telegram_stream_edit_interval_ms(self) -> int:
-        """Telegram 流式编辑的最小间隔，单位毫秒。"""
-        return self._int("telegram", "stream_edit_interval_ms", 800)
-
-    @property
-    def telegram_stream_edit_min_chars(self) -> int:
-        """Telegram 流式编辑的最小增量字符数。"""
-        return self._int("telegram", "stream_edit_min_chars", 24)
-
-    @property
-    def telegram_request_timeout_ms(self) -> int:
-        """Telegram 单次请求超时，单位毫秒。"""
-        return self._int("telegram", "request_timeout_ms", 5000)
-
-    @property
-    def telegram_workspace(self) -> str:
-        """Telegram 渠道绑定的 workspace 标识。
-
-        若 ``channels.json`` 中未配置则返回渠道默认值
-        ``"data/telegram_default_workspace"``。
-        """
-        from rpg_world.rpg_core.utils.path_utils import default_workspace_name
-
-        configured = str(self._mod_cfg("telegram").get("workspace", ""))
-        return configured if configured else default_workspace_name("telegram")
+    def telegram_bots(self) -> list[TelegramBotSettings]:
+        return core_settings.telegram_bots
 
     # ── CLI 模块配置 ─────────────────────────────────────────────────────
 
@@ -170,19 +114,13 @@ class ChannelsSettings:
     def cli_workspace(self) -> str:
         """CLI 渠道绑定的 workspace 标识。
 
-        若 ``channels.json`` 中未配置则返回渠道默认值
+        若 ``settings.yaml`` 中未配置则返回渠道默认值
         ``"data/cli_default_workspace"``。
         """
         from rpg_world.rpg_core.utils.path_utils import default_workspace_name
 
         configured = str(self._mod_cfg("cli").get("workspace", ""))
         return configured if configured else default_workspace_name("cli")
-
-    # ── 旧格式兼容（废弃，暂保留） ─────────────────────────────────────
-
-    def get_channel_config(self, name: str) -> dict:
-        val = self._data.get(name, {})
-        return val if isinstance(val, dict) else {}
 
 
 settings = ChannelsSettings()

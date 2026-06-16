@@ -1,7 +1,7 @@
 """API-level settings loaded from api/settings.json.
 
 These are distinct from the rpg_core Settings singleton which reads
-``rpg_world/settings.json``.  API settings control server-level concerns:
+``rpg_world/settings.yaml``.  API settings control server-level concerns:
 port, log level, log file path, etc.
 """
 

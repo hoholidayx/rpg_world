@@ -1,0 +1,13 @@
+agent:
+  # Prefer setting api_key_env in committed config and exporting the secret.
+  # Use api_key only in ignored local files.
+  api_key: "sk-your-openai-compatible-api-key"
+
+modules:
+  telegram:
+    enabled: true
+    bots:
+      - name: main
+        enabled: true
+        bot_token: "1234567890:your-telegram-bot-token"
+        workspace: data/your_workspace

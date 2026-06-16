@@ -1,11 +1,11 @@
 """rpg_world 统一启动入口。
 
-按 ``channels.json`` 配置，在单一进程中启动指定的模块。
+按 ``settings.yaml`` 配置，在单一进程中启动指定的模块。
 所有模块共享同一 ``AgentManager`` 实例池，避免多进程文件冲突。
 
 用法::
 
-    # 读取 channels.json 按配置启动
+    # 读取 settings.yaml 按配置启动
     uv run python -m rpg_world.run
 
     # 仅启动 API
@@ -104,30 +104,34 @@ async def _start_api(tasks: list[asyncio.Task]) -> None:
 async def _start_telegram(tasks: list[asyncio.Task]) -> None:
     from rpg_world.channels.telegram import TelegramAdapter
 
-    if not TelegramAdapter._is_valid_token(channels_settings.telegram_token):
-        _loguru_logger.error(
-            "Telegram bot_token 未配置或仍为 YOUR_BOT_TOKEN，跳过 Telegram 启动。"
-            "请优先在 rpg_world/env.local 的 TELEGRAM_BOT_TOKEN 中配置，"
-            "或在环境变量中 export TELEGRAM_BOT_TOKEN。"
-        )
+    enabled_bots = [bot for bot in channels_settings.telegram_bots if bot.enabled]
+    if not enabled_bots:
+        _loguru_logger.warning("Telegram 模块已请求启动，但没有 enabled=true 的 bot")
         return
 
-    adapter = TelegramAdapter(
-        token=channels_settings.telegram_token,
-        streaming=channels_settings.telegram_streaming,
-        proxy=channels_settings.telegram_proxy,
-        stream_edit_interval_ms=channels_settings.telegram_stream_edit_interval_ms,
-        stream_edit_min_chars=channels_settings.telegram_stream_edit_min_chars,
-        request_timeout_ms=channels_settings.telegram_request_timeout_ms,
-        # Telegram 启动时先用固定 bootstrap session 预热，真实聊天仍按 chat_id 分流。
-        agent=AgentManager.get_or_create(
-            workspace=channels_settings.telegram_workspace,
-            session_id="telegram_default",
-        ),
-    )
-    task = asyncio.create_task(adapter.start(), name="telegram")
-    _track_task(task)
-    tasks.append(task)
+    for bot in enabled_bots:
+        adapter = TelegramAdapter(
+            bot_name=bot.name,
+            token=bot.token,
+            streaming=bot.streaming,
+            proxy=bot.proxy,
+            stream_edit_interval_ms=bot.stream_edit_interval_ms,
+            stream_edit_min_chars=bot.stream_edit_min_chars,
+            request_timeout_ms=bot.request_timeout_ms,
+            # Telegram 启动时先用固定 bootstrap session 预热，真实聊天仍按 chat_id 分流。
+            agent=AgentManager.get_or_create(
+                workspace=bot.workspace,
+                session_id=f"telegram_{bot.name}_default",
+            ),
+        )
+        task = asyncio.create_task(adapter.start(), name=f"telegram:{bot.name}")
+        _track_task(task)
+        tasks.append(task)
+        _loguru_logger.info(
+            "Telegram bot started task registered bot={} workspace={}",
+            bot.name,
+            bot.workspace,
+        )
 
 
 @_register("cli")
@@ -146,13 +150,13 @@ def _parse_args() -> argparse.Namespace:
         "--modules",
         default=None,
         help="要启动的模块列表，逗号分隔，如 'api,telegram'。"
-             "默认从 channels.json 读取",
+             "默认从 settings.yaml 读取",
     )
     return parser.parse_args()
 
 
 def _resolve_modules(args: argparse.Namespace) -> list[str]:
-    """确定要启动的模块列表：命令行 > 环境变量 > channels.json 配置。"""
+    """确定要启动的模块列表：命令行 > 环境变量 > settings.yaml 配置。"""
     modules_str = args.modules or os.environ.get("MODULES", "")
     if modules_str:
         return [m.strip() for m in modules_str.split(",") if m.strip()]
@@ -163,7 +167,7 @@ async def main() -> None:
     enabled_modules = _resolve_modules(_parse_args())
 
     if not enabled_modules:
-        _loguru_logger.warning("未启用任何模块（在 channels.json 中设置 modules.{name}.enabled=true）")
+        _loguru_logger.warning("未启用任何模块（在 settings.yaml 中设置 modules.{name}.enabled=true）")
         _loguru_logger.warning("或通过 MODULES=api,telegram uv run python -m rpg_world.run 指定")
         return
 

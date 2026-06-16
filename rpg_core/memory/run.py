@@ -313,7 +313,7 @@ def main() -> None:
     show_config(workspace, args.session)
     try:
         if not settings.memory_settings.enabled:
-            print("\n  ⚠️  memory 未启用（settings.json memory.enabled = false）")
+            print("\n  ⚠️  memory 未启用（settings.yaml memory.enabled = false）")
             return
 
         _ensure_session(workspace, args.session)

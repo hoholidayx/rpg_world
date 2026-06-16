@@ -47,8 +47,8 @@ class TestTelegramAdapter:
     """TelegramAdapter 核心功能测试。"""
 
     async def test_get_session_id(self, adapter: TelegramAdapter):
-        assert adapter.get_session_id("12345") == "telegram_12345"
-        assert adapter.get_session_id("abc") == "telegram_abc"
+        assert adapter.get_session_id("12345") == "telegram_default_12345"
+        assert adapter.get_session_id("abc") == "telegram_default_abc"
 
     async def test_get_session_id_respects_pinned_session(self, adapter: TelegramAdapter):
         adapter._session_flow.pin_session("12345", "my_tel")
@@ -288,7 +288,7 @@ class TestTelegramAdapter:
 
         await adapter._on_message(update, object())
 
-        assert adapter.get_session_id("123") == "telegram_123"
+        assert adapter.get_session_id("123") == "telegram_default_123"
 
     async def test_pending_session_create_can_pin_new_session_when_enabled(self, mock_app: MagicMock):
         adapter = TelegramAdapter(
@@ -483,8 +483,8 @@ class TestTelegramAdapter:
         app.start.assert_awaited_once()
         app.updater.start_polling.assert_awaited_once()
 
-    async def test_start_rejects_placeholder_token(self):
-        adapter = TelegramAdapter(token="YOUR_BOT_TOKEN")
+    async def test_start_rejects_empty_token(self):
+        adapter = TelegramAdapter(token="")
 
         with pytest.raises(ValueError):
             await adapter.start()
@@ -739,8 +739,9 @@ class TestTelegramAdapter:
         adapter._app.bot.edit_message_text.assert_not_called()
         assert adapter._app.bot.send_message.call_count == 2
 
-    async def test_name_constant(self):
-        assert TelegramAdapter.name == "telegram"
+    async def test_name_is_instance_specific(self):
+        assert TelegramAdapter(token="fake:token").name == "telegram_default"
+        assert TelegramAdapter(token="fake:token", bot_name="main").name == "telegram_main"
 
     async def test_bind_agent(self, adapter: TelegramAdapter):
         agent = FakeAgent()

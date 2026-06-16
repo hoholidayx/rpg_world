@@ -67,7 +67,7 @@ def require_workspace(workspace: str) -> str:
         raise ValueError(
             "workspace is required (e.g. \"data/非公开行程\"). "
             "Empty string / root workspace is not accepted as a fallback. "
-            "Configure the workspace in channels.json or pass it explicitly."
+            "Configure the workspace in settings.yaml or pass it explicitly."
         )
     return workspace.strip()
 

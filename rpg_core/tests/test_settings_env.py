@@ -2,76 +2,94 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rpg_world.channels.config import ChannelsSettings
+import pytest
+
 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 from rpg_world.rpg_core import settings as settings_module
 
 
-def test_settings_reads_env_local_and_legacy_aliases(tmp_path: Path, monkeypatch) -> None:
-    env_path = tmp_path / "env.local"
-    env_path.write_text(
-        "\n".join(
-            [
-                "# comment",
-                "export OPENAI_API_KEY='primary-key'",
-                "telegram_bot_token=legacy-telegram-token",
-            ]
-        ),
+def _write_settings(path: Path, *, agent_extra: str = "", profiles: str = "  local: {}\n") -> None:
+    path.write_text(
+        f"""
+base:
+  agent:
+    model: test-model
+    api_key: null
+    api_key_env: TEST_OPENAI_KEY
+{agent_extra}
+  data:
+    character_path: character
+    lorebook_path: lorebook
+  memory:
+    enabled: false
+  modules:
+    telegram:
+      enabled: false
+      bots: []
+profiles:
+{profiles}
+""",
         encoding="utf-8",
     )
-    monkeypatch.setattr(settings_module, "_ENV_LOCAL_PATH", env_path)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+
+def test_get_openai_api_key_priority(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg, agent_extra="    api_key: yaml-key\n")
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+    monkeypatch.setenv("TEST_OPENAI_KEY", "env-key")
 
     local_settings = settings_module.Settings()
 
-    assert local_settings.get_openai_api_key() == "primary-key"
-    assert local_settings.get_telegram_bot_token() == "legacy-telegram-token"
-
-
-def test_settings_exported_env_overrides_env_local(tmp_path: Path, monkeypatch) -> None:
-    env_path = tmp_path / "env.local"
-    env_path.write_text(
-        "\n".join(
-            [
-                "OPENAI_API_KEY=file-key",
-                "TELEGRAM_BOT_TOKEN=file-telegram-token",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(settings_module, "_ENV_LOCAL_PATH", env_path)
-    monkeypatch.setenv("OPENAI_API_KEY", "exported-key")
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "exported-telegram-token")
-
-    local_settings = settings_module.Settings()
-
-    assert local_settings.get_openai_api_key() == "exported-key"
-    assert local_settings.get_telegram_bot_token() == "exported-telegram-token"
     assert local_settings.get_openai_api_key("explicit-key") == "explicit-key"
-    assert local_settings.get_openai_api_key(None) == "exported-key"
+    assert local_settings.get_openai_api_key(None) == "yaml-key"
 
 
-def test_channels_settings_prefers_configured_token(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "rpg_world.channels.config.core_settings.get_telegram_bot_token",
-        lambda: "env-token",
+def test_get_openai_api_key_reads_configured_env(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+    monkeypatch.setenv("TEST_OPENAI_KEY", "env-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "ignored-key")
+
+    local_settings = settings_module.Settings()
+
+    assert local_settings.get_openai_api_key(None) == "env-key"
+
+
+def test_profile_must_be_set_before_settings_construction(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(
+        cfg,
+        profiles="""
+  local:
+    agent:
+      model: local-model
+  prod:
+    agent:
+      model: prod-model
+""",
     )
-    cfg = ChannelsSettings()
-    cfg._data = {"modules": {"telegram": {"bot_token": "config-token"}}}
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+    local_settings = settings_module.Settings()
 
-    assert cfg.telegram_token == "config-token"
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "prod")
+
+    assert local_settings.agent_model == "local-model"
+    assert settings_module.Settings().agent_model == "prod-model"
 
 
-def test_channels_settings_falls_back_to_env_for_placeholder_token(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "rpg_world.channels.config.core_settings.get_telegram_bot_token",
-        lambda: "env-token",
-    )
-    cfg = ChannelsSettings()
-    cfg._data = {"modules": {"telegram": {"bot_token": "YOUR_BOT_TOKEN"}}}
+def test_missing_profile_raises_value_error(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "missing")
 
-    assert cfg.telegram_token == "env-token"
+    with pytest.raises(ValueError, match="missing"):
+        settings_module.Settings()
 
 
 def test_openai_provider_uses_settings_api_key(monkeypatch) -> None:

@@ -3,13 +3,13 @@
 ## 项目结构与模块组织
 本仓库采用单进程统一启动架构，入口是 `run.py`。核心业务逻辑位于 `rpg_core/`，其中 `agent/` 负责 LLM Agent 与命令分发，`context/` 负责上下文构建，`character/`、`lorebook/`、`status/`、`memory/`、`summary/` 分别处理领域数据。API 放在 `api/`，多渠道适配器与测试位于 `channels/` 和 `channels/tests/`。前端 WebUI 在 `webui/`，运行数据在 `data/`。
 
-修改启动流程、渠道生命周期或共享状态前，先阅读 `CLAUDE.md`。不要绕过 `run.py` 自行拼装多模块启动，也不要破坏 `AgentManager` 单例和 `channels.json` 的配置边界。
+修改启动流程、渠道生命周期或共享状态前，先阅读 `CLAUDE.md`。不要绕过 `run.py` 自行拼装多模块启动，也不要破坏 `AgentManager` 单例和 `settings.yaml` 的配置边界。
 
 当前产品优先级是 Telegram 渠道优先、核心数据链路其次、WebUI 数据管理后台再次、WebUI Chat 最后。涉及聊天体验的改动默认先保障 Telegram，不要为了 WebUI Chat 破坏 Telegram 的 session、stream 或命令行为。
 
 ## 构建、测试与开发命令
 - `uv sync`：安装后端依赖。
-- `uv run python -m rpg_world.run`：按 `channels.json` 启动全部启用模块。
+- `uv run python -m rpg_world.run`：按 `settings.yaml` 启动全部启用模块。
 - `MODULES=api uv run python -m rpg_world.run`：仅启动 API，适合后端开发。
 - `MODULES=telegram uv run python -m rpg_world.run`：仅启动 Telegram，适合验证主聊天入口。
 - `MODULES=api,telegram uv run python -m rpg_world.run`：同时启动 API 与 Telegram，共享同一 `AgentManager`。
@@ -35,11 +35,11 @@ API/WebUI 管理能力应补 `api/tests/` 的契约测试；核心上下文、me
 ## 提交与合并请求规范
 提交信息遵循现有历史风格：`feat:`、`fix:`、`refactor:`、`chore:` 等前缀，后接简洁中文说明，例如 `feat: 实现向量记忆系统`。一次提交只处理一个逻辑主题。
 
-PR 说明应写清影响模块、行为变化、配置变更（如 `channels.json`、`settings.json`）、测试结果，以及是否影响现有工作区数据结构。涉及 `webui/` 可见改动时，附上界面截图。
+PR 说明应写清影响模块、行为变化、配置变更（如 `settings.yaml`）、测试结果，以及是否影响现有工作区数据结构。涉及 `webui/` 可见改动时，附上界面截图。
 
 ## 配置与架构注意事项
-`channels.json` 用于模块启停与渠道参数，`settings.json` 用于 agent 配置和数据路径，二者不要混用。所有模块必须通过共享的 `AgentManager` 获取 agent，避免重复初始化 `FileWatcher`、缓存不一致或多进程式文件冲突。
+`settings.yaml` 是根配置唯一入口，用于模块启停、渠道参数、agent 配置和数据路径。profile 可通过 `file: settings.local.yaml` 读取被 git ignore 的覆盖文件。`api/settings.json` 仅保留 API 服务级配置。所有模块必须通过共享的 `AgentManager` 获取 agent，避免重复初始化 `FileWatcher`、缓存不一致或多进程式文件冲突。
 
 `session_id` 只能由英文字母、数字、下划线组成，规则为 `^[A-Za-z0-9_]+$`，并会直接映射到 `sessions/{session_id}/` 目录。默认渠道会话名使用下划线格式，例如 `cli_direct`、`telegram_12345`。
 
-工作区选择不要写回 `settings.json`。Telegram/CLI 的默认工作区来自 `channels.json` 的 `workspace` 字段，API/WebUI 通过请求参数传入 workspace，空 workspace 会解析为 API 默认工作区。运行数据、会话历史、摘要、向量索引和 SQLite WAL/SHM 文件都属于 `data/` 下的工作区数据，除非明确要求，不要把这些文件纳入提交。
+工作区选择不要写回运行时状态。Telegram/CLI 的默认工作区来自 `settings.yaml` 的 `workspace` 字段，API/WebUI 通过请求参数传入 workspace，空 workspace 会解析为 API 默认工作区。运行数据、会话历史、摘要、向量索引和 SQLite WAL/SHM 文件都属于 `data/` 下的工作区数据，除非明确要求，不要把这些文件纳入提交。

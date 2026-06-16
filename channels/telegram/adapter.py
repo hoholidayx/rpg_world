@@ -8,7 +8,7 @@
 
     from rpg_world.channels import TelegramAdapter
 
-    adapter = TelegramAdapter(token="YOUR_BOT_TOKEN", streaming=True)
+    adapter = TelegramAdapter(token="env:TELEGRAM_BOT_TOKEN", streaming=True)
     adapter.bind_agent(agent)
     await adapter.start()
 """
@@ -90,12 +90,11 @@ class TelegramAdapter(ChannelAdapter):
         可选的 RPGGameAgent 实例。
     """
 
-    name = "telegram"
-
     def __init__(
         self,
         token: str,
         *,
+        bot_name: str = "default",
         streaming: bool = True,
         proxy: str = "",
         stream_edit_interval_ms: int = 800,
@@ -105,6 +104,7 @@ class TelegramAdapter(ChannelAdapter):
         agent: RPGGameAgent | None = None,
     ) -> None:
         super().__init__()
+        self._bot_name = bot_name
         self._token = token
         self._streaming = streaming
         self._proxy = proxy
@@ -119,12 +119,17 @@ class TelegramAdapter(ChannelAdapter):
         if agent:
             self.bind_agent(agent)
 
+    @property
+    def name(self) -> str:
+        return f"telegram_{self._bot_name}"
+
     # ── 生命周期 ────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         """启动 Telegram 长轮询。"""
         logger.info(
-            "telegram: preparing adapter (streaming={}, proxy={}, interval_ms={}, min_chars={}, request_timeout_ms={})",
+            "telegram: preparing adapter bot={} (streaming={}, proxy={}, interval_ms={}, min_chars={}, request_timeout_ms={})",
+            self._bot_name,
             self._streaming,
             self._proxy or "<disabled>",
             int(self._stream_edit_interval * 1000),
@@ -132,7 +137,7 @@ class TelegramAdapter(ChannelAdapter):
             int(self._request_timeout * 1000),
         )
         if not self._is_valid_token(self._token):
-            raise ValueError("telegram: bot_token is empty or still set to YOUR_BOT_TOKEN")
+            raise ValueError("telegram: bot_token is empty")
 
         builder = Application.builder().token(self._token)
         if self._proxy:
@@ -157,18 +162,18 @@ class TelegramAdapter(ChannelAdapter):
         """优雅关闭 Telegram 连接。"""
         if not self._app:
             return
-        logger.info("telegram: stopping adapter")
+        logger.info("telegram: stopping adapter bot={}", self._bot_name)
         await self._app.updater.stop()
         await self._app.stop()
         await self._app.shutdown()
         self._app = None
-        logger.info("telegram: adapter stopped")
+        logger.info("telegram: adapter stopped bot={}", self._bot_name)
 
     # ── 消息发送 ────────────────────────────────────────────────────────
 
     @staticmethod
     def _is_valid_token(token: str) -> bool:
-        return bool(str(token).strip()) and str(token).strip() != "YOUR_BOT_TOKEN"
+        return bool(str(token).strip())
 
     async def _request_with_timeout(self, chat_id: str, action: str, awaitable):
         """对 Telegram 请求加超时，避免单次 API 调用长时间阻塞。"""
@@ -178,16 +183,18 @@ class TelegramAdapter(ChannelAdapter):
             return await asyncio.wait_for(awaitable, timeout=self._request_timeout)
         except TimeoutError:
             logger.warning(
-                "telegram: {} timed out chat_id={} timeout_ms={}",
+                "telegram: {} timed out bot={} chat_id={} timeout_ms={}",
                 action,
+                self._bot_name,
                 chat_id,
                 int(self._request_timeout * 1000),
             )
             return None
         except RetryAfter as exc:
             logger.warning(
-                "telegram: {} rate limited chat_id={} retry_after={}s",
+                "telegram: {} rate limited bot={} chat_id={} retry_after={}s",
                 action,
+                self._bot_name,
                 chat_id,
                 exc.retry_after,
             )
@@ -195,18 +202,19 @@ class TelegramAdapter(ChannelAdapter):
         except BadRequest as exc:
             if "Message is not modified" in str(exc):
                 logger.debug(
-                    "telegram: {} ignored unchanged message chat_id={}",
+                    "telegram: {} ignored unchanged message bot={} chat_id={}",
                     action,
+                    self._bot_name,
                     chat_id,
                 )
                 return None
-            logger.warning("telegram: {} bad request chat_id={} error={}", action, chat_id, exc)
+            logger.warning("telegram: {} bad request bot={} chat_id={} error={}", action, self._bot_name, chat_id, exc)
             return None
         except (TimedOut, TelegramError, OSError) as exc:
-            logger.warning("telegram: {} failed chat_id={} error={}", action, chat_id, exc)
+            logger.warning("telegram: {} failed bot={} chat_id={} error={}", action, self._bot_name, chat_id, exc)
             return None
         except Exception:
-            logger.exception("telegram: {} unexpected failure chat_id={}", action, chat_id)
+            logger.exception("telegram: {} unexpected failure bot={} chat_id={}", action, self._bot_name, chat_id)
             return None
 
     def get_session_id(self, chat_id: str) -> str:
@@ -220,7 +228,8 @@ class TelegramAdapter(ChannelAdapter):
             return
         rendered = render_markdown_to_telegram_html(text)
         logger.debug(
-            "telegram: sending text chat_id={} chunks={} preview={}",
+            "telegram: sending text bot={} chat_id={} chunks={} preview={}",
+            self._bot_name,
             chat_id,
             len(chunk_rendered_text(rendered)),
             _preview_text(text),
@@ -422,7 +431,8 @@ class TelegramAdapter(ChannelAdapter):
         user_id = str(update.effective_user.id) if update.effective_user else "0"
         text = update.message.text
         logger.info(
-            "telegram: received message chat_id={} user_id={} text={}",
+            "telegram: received message bot={} chat_id={} user_id={} text={}",
+            self._bot_name,
             chat_id,
             user_id,
             _preview_text(text),
@@ -436,14 +446,16 @@ class TelegramAdapter(ChannelAdapter):
                 auto_pin_created_session=self._auto_pin_created_session,
             ):
                 logger.info(
-                    "telegram: message consumed by session-create flow chat_id={} user_id={}",
+                    "telegram: message consumed by session-create flow bot={} chat_id={} user_id={}",
+                    self._bot_name,
                     chat_id,
                     user_id,
                 )
                 return
         except Exception:
             logger.exception(
-                "telegram: session-create flow failed chat_id={} user_id={} text={}",
+                "telegram: session-create flow failed bot={} chat_id={} user_id={} text={}",
+                self._bot_name,
                 chat_id,
                 user_id,
                 _preview_text(text),
@@ -454,7 +466,8 @@ class TelegramAdapter(ChannelAdapter):
             reply = await self._handle_message(chat_id, user_id, text)
         except Exception:
             logger.exception(
-                "telegram: handler failed chat_id={} user_id={} text={}",
+                "telegram: handler failed bot={} chat_id={} user_id={} text={}",
+                self._bot_name,
                 chat_id,
                 user_id,
                 _preview_text(text),
@@ -463,13 +476,15 @@ class TelegramAdapter(ChannelAdapter):
             return
         if reply is None:
             logger.warning(
-                "telegram: message ignored chat_id={} user_id={} (agent missing or rejected)",
+                "telegram: message ignored bot={} chat_id={} user_id={} (agent missing or rejected)",
+                self._bot_name,
                 chat_id,
                 user_id,
             )
         else:
             logger.info(
-                "telegram: replied chat_id={} user_id={} preview={}",
+                "telegram: replied bot={} chat_id={} user_id={} preview={}",
+                self._bot_name,
                 chat_id,
                 user_id,
                 _preview_text(reply),

@@ -1,0 +1,165 @@
+# ── RPG World 统一配置文件 ──────────────────────────────────────────────
+# 通过环境变量 RPG_WORLD_PROFILE 选择环境（默认 local）。
+# 支持 base + profiles 合并：profiles.{env} 递归覆盖 base。
+# 敏感字段可通过 api_key_env / token_env 从环境变量读取，优先级：
+#   显式参数 > YAML 直接值 > YAML env 引用（os.environ）
+# ─────────────────────────────────────────────────────────────────────────
+
+# ── Base 层：所有环境共享的默认配置 ────────────────────────────────────
+base:
+
+  # ── Agent 配置：LLM 调用参数 ────────────────────────────────────────
+  agent:
+    # 使用的模型名称
+    model: "deepseek-v4-flash"
+    # API 端点地址（留空则使用 SDK 默认值）
+    base_url: "https://api.deepseek.com"
+    # 直接写入 API key（优先级高于 api_key_env，不推荐明文存放）
+    api_key: null
+    # 指定读取哪个环境变量作为 API key（推荐方式）
+    api_key_env: "OPENAI_API_KEY_LOCAL"
+    # 单次响应的最大 token 数（null 表示使用模型默认值）
+    max_tokens: null
+    # 采样温度（null 表示使用模型默认值）
+    temperature: null
+    # 单轮对话中最大工具调用次数
+    max_tool_call_limit: 10
+    # 是否在回复中包含工具调用记录
+    include_tool_records: true
+    # 是否输出详细日志（开发调试建议开启）
+    verbose_logging: true
+
+    # ── 记忆子 Agent 配置 ────────────────────────────────────────────
+    memory_sub_agent:
+      # 是否启用记忆子 Agent
+      enabled: true
+      # 覆盖主模型（null 表示复用主模型）
+      model: null
+
+      # 对话摘要压缩管线
+      summary:
+        # 每次压缩处理的对话轮数
+        compress_batch_size: 5
+        # 压缩后保留的最近对话轮数
+        keep_rounds: 5
+        # 是否启用自动压缩
+        compression_enabled: true
+
+      # 记忆召回管线
+      recall:
+        # 每次召回的最大条目数
+        max_items: 5
+
+      # 剧情记忆持久化管线
+      story:
+        # 积累多少轮新对话后自动提取剧情记忆（0 表示关闭）
+        trigger_rounds: 0
+
+    # ── 状态表子 Agent 配置 ──────────────────────────────────────────
+    status_sub_agent:
+      # 是否启用状态表预更新子 Agent
+      enabled: true
+      # 覆盖主模型（null 表示复用主模型）
+      model: null
+      # 子 Agent 专用 API key（null 表示复用主 key）
+      api_key: null
+      # 子 Agent 专用 base_url（null 表示复用主配置）
+      base_url: null
+
+  # ── 数据路径配置（相对于 workspace 根目录） ──────────────────────────
+  data:
+    # 角色卡 JSON 文件所在子目录
+    character_path: "character"
+    # 世界书 JSON 文件所在子目录
+    lorebook_path: "lorebook"
+
+  # ── 向量记忆配置 ──────────────────────────────────────────────────────
+  memory:
+    # 是否启用向量记忆索引与检索
+    enabled: true
+    # 嵌入模型 GGUF 文件路径（相对于包根目录 rpg_world/）
+    embedding_model_path: "data/models/Qwen3-Embedding-0.6B-f16.gguf"
+    # 嵌入模型的上下文窗口大小（token）
+    n_ctx: 32768
+    # GPU 加速层数（0 = 纯 CPU，-1 = 全部 GPU）
+    n_gpu_layers: 0
+    # 查询规划器：是否启用
+    query_planner_enabled: false
+    # 查询规划器模型路径（留空则使用规则规划器）
+    query_planner_model_path: ""
+    # 查询规划器上下文窗口
+    query_planner_n_ctx: 2048
+    # 查询规划器 GPU 层数
+    query_planner_n_gpu_layers: 0
+    # 查询规划器采样温度
+    query_planner_temperature: 0.0
+    # 查询规划器最大输出 token 数
+    query_planner_max_tokens: 512
+    # 向量检索返回的最大结果数
+    top_k: 2
+    # 单文件超过此字符数时进行分块
+    chunk_size: 2000
+    # 分块重叠字符数（保证上下文连续性）
+    chunk_overlap: 64
+
+  # ── 模块配置：控制各子系统的启停和参数 ──────────────────────────────
+  modules:
+
+    # ── API 模块（FastAPI + WebUI） ───────────────────────────────────
+    api:
+      # 是否启用 API 服务
+      enabled: false
+      # 监听地址
+      host: "127.0.0.1"
+      # 监听端口
+      port: 8000
+      # 是否开启热重载（开发时建议开启）
+      reload: false
+
+    # ── Telegram 模块 ────────────────────────────────────────────────
+    telegram:
+      # 是否启用 Telegram bot（设为 true 才会启动下方启用的 bot）
+      enabled: true
+      # 全局访问控制列表（留空或 ["*"] 表示不限制）
+      allow_from: ["*"]
+
+      # 多 bot 列表：每个 bot 独立运行、独立 workspace、独立会话
+      bots:
+        - name: main                          # bot 唯一标识（字母数字下划线）
+          enabled: false                      # 是否启用此 bot
+          bot_token: null                     # 直接写入 token（不推荐明文存放）
+          token_env: "TELEGRAM_BOT_TOKEN_MAIN" # 从环境变量读取 token（推荐）
+          workspace: "data/非公开行程"          # 绑定的 workspace 路径
+          allow_from: ["*"]                   # 此 bot 的访问控制
+          streaming: true                     # 是否启用流式输出（增量编辑消息）
+          proxy: "http://127.0.0.1:7890"      # HTTP 代理地址（留空表示不启用）
+          stream_edit_interval_ms: 2500        # 流式编辑的最小间隔（毫秒）
+          stream_edit_min_chars: 64           # 触发编辑的最小新增字符数
+          request_timeout_ms: 5000            # 单次 Telegram API 请求超时（毫秒）
+
+    # ── CLI 模块（交互式命令行 REPL） ─────────────────────────────────
+    cli:
+      # 是否启用 CLI 入口
+      enabled: true
+      # 绑定的 workspace 路径（留空则使用默认值 data/cli_default_workspace）
+      workspace: "data/非公开行程"
+
+# ── 默认环境名（可通过 RPG_WORLD_PROFILE 环境变量覆盖） ────────────────
+default_profile: "local"
+
+# ── Profiles：各环境的增量配置 ──────────────────────────────────────────
+# 支持三种形式：
+#   1. inline:  local: { modules: { api: { port: 9000 } } }
+#   2. file:    local: settings.local.yaml
+#   3. 混合:   local: { file: settings.local.yaml, modules: { api: { port: 9000 } } }
+# file 模式适合存放本地 secrets（settings.local.yaml 应加入 .gitignore）。
+# required: true 时文件不存在会抛异常（默认 false 表示文件可缺失）。
+profiles:
+  local:
+    file: "settings.local.yaml"
+
+  test:
+    file: "settings.test.yaml"
+
+  prod:
+    file: "settings.prod.yaml"
