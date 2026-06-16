@@ -5,8 +5,6 @@ Implements the ``LLMProvider`` ABC.
 """
 
 from __future__ import annotations
-
-import os
 from collections.abc import AsyncIterator
 
 import httpx
@@ -88,7 +86,7 @@ class OpenAIProvider(LLMProvider):
         self._max_tokens = max_tokens
         self._temperature = temperature
 
-        resolved_key = api_key or os.environ.get("OPENAI_API_KEY")
+        resolved_key = settings.get_openai_api_key(api_key)
         self._client = AsyncOpenAI(
             api_key=resolved_key,
             base_url=base_url,

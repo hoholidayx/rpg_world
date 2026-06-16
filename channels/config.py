@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 from loguru import logger
+from rpg_world.rpg_core.settings import settings as core_settings
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "channels.json"
 
@@ -114,7 +115,11 @@ class ChannelsSettings:
 
     @property
     def telegram_token(self) -> str:
-        return str(self._mod_cfg("telegram").get("bot_token", ""))
+        configured = str(self._mod_cfg("telegram").get("bot_token", ""))
+        normalized = configured.strip()
+        if normalized and normalized != "YOUR_BOT_TOKEN":
+            return configured
+        return core_settings.get_telegram_bot_token() or configured
 
     @property
     def telegram_streaming(self) -> bool:

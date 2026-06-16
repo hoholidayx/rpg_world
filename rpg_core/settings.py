@@ -23,6 +23,7 @@ Session-scoped data paths are deterministic (not user-configurable):
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from rpg_world.rpg_core.utils.path_utils import (
 
 # Location of settings.json relative to this module
 _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.json"
+_ENV_LOCAL_PATH = Path(__file__).resolve().parent.parent / "env.local"
 _RPG_CORE_DIR = Path(__file__).resolve().parent
 
 # Known data-type subdirectories inside data/ — these are excluded from
@@ -51,6 +53,35 @@ def _load() -> dict[str, object]:
         with _SETTINGS_PATH.open(encoding="utf-8") as f:
             return json.load(f)
     return {}
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    """Parse a simple .env-style file.
+
+    Supports blank lines, ``#`` comments, optional ``export`` prefix, and
+    single/double-quoted values. Invalid lines are ignored.
+    """
+    result: dict[str, str] = {}
+    if not path.is_file():
+        return result
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        result[key] = value
+    return result
 
 
 @dataclass
@@ -126,6 +157,53 @@ class Settings:
 
     def __init__(self) -> None:
         self._raw = _load()
+        self._env_file = _parse_env_file(_ENV_LOCAL_PATH)
+
+    @staticmethod
+    def _first_non_empty(*values: str | None) -> str | None:
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
+
+    def _get_env_value(
+        self,
+        name: str,
+        *,
+        aliases: tuple[str, ...] = (),
+    ) -> str | None:
+        """Read an env var with ``os.environ`` taking precedence over ``env.local``.
+
+        Lookup order:
+        1. ``os.environ[name]``
+        2. ``os.environ[alias]`` for each alias
+        3. ``env.local`` entry with ``name``
+        4. ``env.local`` entry for each alias
+        """
+        candidates = (name, *aliases)
+        return self._first_non_empty(
+            *(os.environ.get(key) for key in candidates),
+            *(self._env_file.get(key) for key in candidates),
+        )
+
+    def get_openai_api_key(self, explicit: str | None = None) -> str | None:
+        """Return the API key with priority: explicit -> env -> env.local."""
+        return self._first_non_empty(
+            explicit,
+            self._get_env_value(
+                "OPENAI_API_KEY",
+                aliases=("DEEPSEEK_API_KEY", "DEEPSEEK_API_TOKEN", "deepseek_api_token"),
+            ),
+        )
+
+    def get_telegram_bot_token(self) -> str | None:
+        return self._get_env_value(
+            "TELEGRAM_BOT_TOKEN",
+            aliases=("telegram_bot_token",),
+        )
 
     # ------------------------------------------------------------------
     # Workspace-scoped path methods
