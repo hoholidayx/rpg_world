@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from loguru import logger
+
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "channels.json"
 
 
@@ -43,6 +45,39 @@ class ChannelsSettings:
         mod = self._modules().get(name, {})
         return mod if isinstance(mod, dict) else {}
 
+    def _bool(self, module: str, key: str, default: bool) -> bool:
+        value = self._mod_cfg(module).get(key, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        logger.warning(
+            "channels config: invalid bool modules.{}.{}={!r}, fallback={}",
+            module,
+            key,
+            value,
+            default,
+        )
+        return default
+
+    def _int(self, module: str, key: str, default: int) -> int:
+        value = self._mod_cfg(module).get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "channels config: invalid int modules.{}.{}={!r}, fallback={}",
+                module,
+                key,
+                value,
+                default,
+            )
+            return default
+
     # ── 模块列表 ──────────────────────────────────────────────────────────
 
     @property
@@ -50,14 +85,14 @@ class ChannelsSettings:
         """返回所有已启用的模块名列表。"""
         return [
             name for name in ("api", "telegram", "cli")
-            if self._mod_cfg(name).get("enabled", False)
+            if self._bool(name, "enabled", False)
         ]
 
     # ── API 模块配置 ─────────────────────────────────────────────────────
 
     @property
     def api_enabled(self) -> bool:
-        return bool(self._mod_cfg("api").get("enabled", False))
+        return self._bool("api", "enabled", False)
 
     @property
     def api_host(self) -> str:
@@ -65,17 +100,17 @@ class ChannelsSettings:
 
     @property
     def api_port(self) -> int:
-        return int(self._mod_cfg("api").get("port", 8000))
+        return self._int("api", "port", 8000)
 
     @property
     def api_reload(self) -> bool:
-        return bool(self._mod_cfg("api").get("reload", False))
+        return self._bool("api", "reload", False)
 
     # ── Telegram 模块配置 ────────────────────────────────────────────────
 
     @property
     def telegram_enabled(self) -> bool:
-        return bool(self._mod_cfg("telegram").get("enabled", False))
+        return self._bool("telegram", "enabled", False)
 
     @property
     def telegram_token(self) -> str:
@@ -83,7 +118,7 @@ class ChannelsSettings:
 
     @property
     def telegram_streaming(self) -> bool:
-        return bool(self._mod_cfg("telegram").get("streaming", True))
+        return self._bool("telegram", "streaming", True)
 
     @property
     def telegram_proxy(self) -> str:
@@ -96,17 +131,17 @@ class ChannelsSettings:
     @property
     def telegram_stream_edit_interval_ms(self) -> int:
         """Telegram 流式编辑的最小间隔，单位毫秒。"""
-        return int(self._mod_cfg("telegram").get("stream_edit_interval_ms", 800))
+        return self._int("telegram", "stream_edit_interval_ms", 800)
 
     @property
     def telegram_stream_edit_min_chars(self) -> int:
         """Telegram 流式编辑的最小增量字符数。"""
-        return int(self._mod_cfg("telegram").get("stream_edit_min_chars", 24))
+        return self._int("telegram", "stream_edit_min_chars", 24)
 
     @property
     def telegram_request_timeout_ms(self) -> int:
         """Telegram 单次请求超时，单位毫秒。"""
-        return int(self._mod_cfg("telegram").get("request_timeout_ms", 5000))
+        return self._int("telegram", "request_timeout_ms", 5000)
 
     @property
     def telegram_workspace(self) -> str:
@@ -124,7 +159,7 @@ class ChannelsSettings:
 
     @property
     def cli_enabled(self) -> bool:
-        return bool(self._mod_cfg("cli").get("enabled", False))
+        return self._bool("cli", "enabled", False)
 
     @property
     def cli_workspace(self) -> str:

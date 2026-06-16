@@ -104,6 +104,13 @@ async def _start_api(tasks: list[asyncio.Task]) -> None:
 async def _start_telegram(tasks: list[asyncio.Task]) -> None:
     from rpg_world.channels.telegram import TelegramAdapter
 
+    if not TelegramAdapter._is_valid_token(channels_settings.telegram_token):
+        _loguru_logger.error(
+            "Telegram bot_token 未配置或仍为 YOUR_BOT_TOKEN，跳过 Telegram 启动。"
+            "请在 rpg_world/channels.json 的 modules.telegram.bot_token 中配置真实 token。"
+        )
+        return
+
     adapter = TelegramAdapter(
         token=channels_settings.telegram_token,
         streaming=channels_settings.telegram_streaming,
