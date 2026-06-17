@@ -228,6 +228,9 @@ class FakeAgent:
         return self._cmd_dispatcher.list_commands()
 
     async def execute_command(self, command: str) -> CommandResult:
+        parts = command.split()
+        if parts[:1] == ["/session_switch"] and len(parts) > 1:
+            self._session_id = parts[1]
         return CommandResult(reply=f"cmd:{command}", handled=True, stats={"ok": True})
 
 

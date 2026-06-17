@@ -151,6 +151,15 @@ def test_chat_contracts(client):
     )
     assert res.status_code == 200
     assert res.json()["reply"] == "cmd:/clear"
+    assert res.json()["active_session"] == "s1"
+
+    res = http.post(
+        "/api/v1/chat/command",
+        params={"workspace": "data/demo"},
+        json={"session_id": "s1", "command": "/session_switch s2"},
+    )
+    assert res.status_code == 200
+    assert res.json()["active_session"] == "s2"
 
     res = http.get(
         "/api/v1/chat/commands",

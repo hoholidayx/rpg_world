@@ -5,7 +5,7 @@
  * 与 ChatView 解耦，集中管理前端侧的命令相关状态。
  */
 
-import { ref, computed, unref } from 'vue'
+import { ref, computed, unref, watch } from 'vue'
 import api from '@/api/index'
 import { fetchCommands as fetchRemoteCommands } from '@/api/chat'
 
@@ -64,15 +64,50 @@ export function useCommands(inputText, commands = []) {
 
   /** 根据输入前缀过滤命令列表 */
   const filtered = computed(() => {
-    const text = inputText.value
+    const text = inputText.value.trimStart()
     const list = cmds.value
-    if (!text || !text.startsWith('/')) return list
-    const parts = text.split(/\s+/)
-    if (parts.length <= 1) return list
-    const typed = parts[0].toLowerCase()
-    if (list.some((c) => c.command === typed)) return []
+    if (!text || !text.startsWith('/')) return []
+    const typed = text.split(/\s+/)[0].toLowerCase()
+    if (typed === '/') return list
+    const exact = list.find((c) => c.command === typed)
+    if (text.includes(' ') && exact) return []
+    if (exact) return [exact]
     return list.filter((c) => c.command.startsWith(typed))
   })
+
+  watch(filtered, (list) => {
+    if (highlightIndex.value >= list.length) {
+      highlightIndex.value = Math.max(0, list.length - 1)
+    }
+    if (list.length === 0) {
+      showPopup.value = false
+    }
+  })
+
+  watch(inputText, () => {
+    syncPopup()
+  })
+
+  watch(cmds, () => {
+    syncPopup()
+  })
+
+  function syncPopup() {
+    const text = inputText.value.trimStart()
+    if (!text.startsWith('/')) {
+      showPopup.value = false
+      highlightIndex.value = 0
+      return
+    }
+    const typed = text.split(/\s+/)[0].toLowerCase()
+    if (text.includes(' ') && cmds.value.some((c) => c.command === typed)) {
+      showPopup.value = false
+      highlightIndex.value = 0
+      return
+    }
+    showPopup.value = filtered.value.length > 0
+    highlightIndex.value = 0
+  }
 
   /** 判断一段文本是否为前端已知的斜杠命令 */
   function isCommand(text) {
@@ -93,24 +128,7 @@ export function useCommands(inputText, commands = []) {
 
   /** 监听输入变化，控制弹窗显隐 */
   function onInputChange() {
-    const text = inputText.value
-    if (text === '/') {
-      showPopup.value = true
-      highlightIndex.value = 0
-    } else if (!text.startsWith('/')) {
-      showPopup.value = false
-    } else {
-      const parts = text.split(/\s+/)
-      const typed = parts[0].toLowerCase()
-      if (typed === '/') {
-        showPopup.value = true
-      } else if (cmds.value.some((c) => c.command.startsWith(typed))) {
-        showPopup.value = true
-        highlightIndex.value = 0
-      } else {
-        showPopup.value = false
-      }
-    }
+    syncPopup()
   }
 
   return {

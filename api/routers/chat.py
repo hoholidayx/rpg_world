@@ -154,7 +154,11 @@ async def chat_command(
     if cmd_result.handled:
         if api_settings.log_chat_messages:
             chat_logger.info("CMD REPLY [%s]: %s", session_id, cmd_result.reply)
-        return {"reply": cmd_result.reply, "stats": cmd_result.stats}
+        return {
+            "reply": cmd_result.reply,
+            "stats": cmd_result.stats,
+            "active_session": getattr(agent, "_session_id", session_id),
+        }
     raise HTTPException(status_code=400, detail=f"未知命令: {command.split()[0] if command.strip() else '(empty)'}")
 
 

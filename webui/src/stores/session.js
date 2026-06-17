@@ -18,12 +18,27 @@ export const useSessionStore = defineStore('session', () => {
   const switching = ref(false)
   const error = ref('')
 
-  async function load() {
+  function sessionIdOf(item) {
+    return item?.session_id || item
+  }
+
+  function normalizeActiveSession(preferredSession) {
+    const ids = sessions.value.map(sessionIdOf).filter(Boolean)
+    if (preferredSession && ids.includes(preferredSession)) {
+      activeSession.value = preferredSession
+      return
+    }
+    if (ids.includes(activeSession.value)) return
+    activeSession.value = ids.includes('default') ? 'default' : (ids[0] || 'default')
+  }
+
+  async function load(preferredSession = null) {
     loading.value = true
     error.value = ''
     try {
       const data = await listSessions(workspaceStore.current)
       sessions.value = data
+      normalizeActiveSession(preferredSession)
       loaded.value = true
     } catch (err) {
       error.value = err?.message || '会话加载失败'
@@ -62,6 +77,13 @@ export const useSessionStore = defineStore('session', () => {
     await load()
   }
 
+  async function syncActiveSession(id) {
+    if (id) {
+      activeSession.value = id
+    }
+    await load(id || activeSession.value)
+  }
+
   async function duplicateSession(sourceId, targetId) {
     await cloneSession(workspaceStore.current, sourceId, targetId)
     await load()
@@ -76,6 +98,7 @@ export const useSessionStore = defineStore('session', () => {
     error,
     load,
     switchSession,
+    syncActiveSession,
     createNewSession,
     removeSession,
     duplicateSession,

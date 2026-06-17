@@ -13,7 +13,7 @@
       <div class="header-right">
         <!-- Workspace selector -->
           <a-select
-            v-model:value="workspaceStore.current"
+            :value="workspaceStore.current"
             :options="workspaceOptions"
             style="width: 140px;"
             size="small"
@@ -23,7 +23,7 @@
           />
         <!-- Session selector -->
           <a-select
-            v-model:value="sessionStore.activeSession"
+            :value="sessionStore.activeSession"
             :options="sessionOptions"
             style="width: 140px;"
             size="small"
@@ -182,7 +182,7 @@
             :rows="2"
             :disabled="isBusy"
             @input="onInputChange"
-            @keydown.enter.prevent="onSendKeydown"
+            @keydown.enter="onSendKeydown"
             @keydown.escape="closeCommandPopup"
             @keydown.up.prevent="onCommandArrowUp"
             @keydown.down.prevent="onCommandArrowDown"
@@ -300,6 +300,8 @@ const messageContainer = ref(null)
 const loadingHistory = ref(false)
 const historyError = ref('')
 const commandsError = ref('')
+let historyRequestSeq = 0
+let commandsRequestSeq = 0
 
 // Create session modal
 const createSessionVisible = ref(false)
@@ -335,12 +337,16 @@ const workspaceOptions = computed(() =>
   })),
 )
 
-const sessionOptions = computed(() =>
-  sessionStore.sessions.map((s) => ({
-    value: s.session_id || s,
-    label: s.session_id || s,
-  })),
-)
+const sessionOptions = computed(() => {
+  const ids = sessionStore.sessions.map((s) => s.session_id || s).filter(Boolean)
+  if (sessionStore.activeSession && !ids.includes(sessionStore.activeSession)) {
+    ids.push(sessionStore.activeSession)
+  }
+  return ids.map((id) => ({
+    value: id,
+    label: id,
+  }))
+})
 
 // ── Lifecycle ─────────────────────────────────────────────
 
@@ -350,8 +356,7 @@ onMounted(async () => {
   } catch {
     // Errors are shown through store state.
   }
-  await loadHistory()
-  await refreshCommands()
+  await reloadChatData()
 })
 
 // ── Watch workspace changes ──────────────────────────────
@@ -364,9 +369,7 @@ watch(
     } catch {
       // error state is visible in the status area
     }
-    messages.value = []
-    await loadHistory()
-    await refreshCommands()
+    await reloadChatData()
   },
 )
 
@@ -375,9 +378,7 @@ watch(
 watch(
   () => sessionStore.activeSession,
   async () => {
-    messages.value = []
-    await loadHistory()
-    await refreshCommands()
+    await reloadChatData()
   },
 )
 
@@ -388,7 +389,7 @@ const {
   highlightIndex: commandHighlightIndex,
   filtered: filteredCommands,
   isCommand: isKnownCommand,
-  select: selectCommand,
+  select: applyCommandSelection,
   close: closeCommandPopup,
   onInputChange,
 } = useCommands(inputText, commandsList)
@@ -397,10 +398,15 @@ const inputRef = ref(null)
 const commandPopupRef = ref(null)
 
 async function refreshCommands() {
+  const requestId = ++commandsRequestSeq
+  const sessionId = sessionStore.activeSession || 'default'
   commandsError.value = ''
   try {
-    commandsList.value = await loadCommands(sessionStore.activeSession || 'default')
+    const commands = await loadCommands(sessionId)
+    if (requestId !== commandsRequestSeq || sessionId !== (sessionStore.activeSession || 'default')) return
+    commandsList.value = commands
   } catch (err) {
+    if (requestId !== commandsRequestSeq) return
     commandsList.value = []
     commandsError.value = err?.message || '无法加载命令'
   }
@@ -409,7 +415,16 @@ async function refreshCommands() {
 watch(showCommandPopup, async (visible) => {
   if (visible) {
     await refreshCommands()
+    await scrollActiveCommandIntoView()
   }
+})
+
+watch(commandHighlightIndex, () => {
+  scrollActiveCommandIntoView()
+})
+
+watch(filteredCommands, () => {
+  scrollActiveCommandIntoView()
 })
 
 function onCommandArrowUp() {
@@ -434,6 +449,22 @@ function onCommandTab() {
   selectCommand(cmds[idx])
 }
 
+function selectCommand(cmd) {
+  applyCommandSelection(cmd)
+  focusInput()
+}
+
+async function focusInput() {
+  await nextTick()
+  inputRef.value?.focus?.()
+}
+
+async function scrollActiveCommandIntoView() {
+  await nextTick()
+  const active = commandPopupRef.value?.querySelector?.('.command-item.active')
+  active?.scrollIntoView?.({ block: 'nearest' })
+}
+
 // ── Methods ───────────────────────────────────────────────
 
 function goBack() {
@@ -441,10 +472,13 @@ function goBack() {
 }
 
 async function loadHistory() {
+  const requestId = ++historyRequestSeq
+  const sessionId = sessionStore.activeSession || 'default'
   loadingHistory.value = true
   historyError.value = ''
   try {
-    const res = await getHistory(sessionStore.activeSession)
+    const res = await getHistory(sessionId)
+    if (requestId !== historyRequestSeq || sessionId !== (sessionStore.activeSession || 'default')) return
     const history = res.data.history || []
     // Filter out system messages, keep user/assistant pairs
     messages.value = history
@@ -459,11 +493,19 @@ async function loadHistory() {
       }))
     await scrollToBottom()
   } catch (e) {
+    if (requestId !== historyRequestSeq) return
     messages.value = []
     historyError.value = extractApiError(e, '无法加载历史消息')
   } finally {
-    loadingHistory.value = false
+    if (requestId === historyRequestSeq) {
+      loadingHistory.value = false
+    }
   }
+}
+
+async function reloadChatData() {
+  messages.value = []
+  await Promise.all([loadHistory(), refreshCommands()])
 }
 
 async function handleSend() {
@@ -478,7 +520,7 @@ async function handleSend() {
 
   // ── Command handling（斜杠命令由后端直接执行，不经过 LLM） ──
   if (text.startsWith('/')) {
-    const cmdName = text.split(/\s+/)[0].toLowerCase()
+    const commandName = text.split(/\s+/)[0].toLowerCase()
     if (!isKnownCommand(text)) {
       messages.value.push({
         role: 'user',
@@ -523,6 +565,12 @@ async function handleSend() {
       const data = res.data
       asstMsg.content = data.reply || ''
       asstMsg.stats = data.stats || null
+      if (data.active_session && data.active_session !== sessionStore.activeSession) {
+        await sessionStore.syncActiveSession(data.active_session)
+        await reloadChatData()
+      } else if (commandName === '/session_create') {
+        await sessionStore.load(sessionStore.activeSession)
+      }
     } catch (e) {
       asstMsg.content = `命令执行失败: ${extractApiError(e)}`
     } finally {
@@ -624,6 +672,12 @@ function handleStop() {
 
 function onSendKeydown(e) {
   if (e.shiftKey) return // Shift+Enter = newline
+  e.preventDefault()
+  if (showCommandPopup.value && filteredCommands.value.length > 0) {
+    const idx = Math.min(commandHighlightIndex.value, filteredCommands.value.length - 1)
+    selectCommand(filteredCommands.value[idx])
+    return
+  }
   handleSend()
 }
 
@@ -638,21 +692,17 @@ async function scrollToBottom() {
 // ── Workspace ─────────────────────────────────────────────
 
 function onWorkspaceChange(value) {
-  if (value !== workspaceStore.current) {
-    workspaceStore.switchWorkspace(value).catch((err) => {
-      message.error(extractApiError(err, '切换工作区失败'))
-    })
-  }
+  workspaceStore.switchWorkspace(value).catch((err) => {
+    message.error(extractApiError(err, '切换工作区失败'))
+  })
 }
 
 // ── Session handlers ──────────────────────────────────────
 
 function onSessionChange(value) {
-  if (value !== sessionStore.activeSession) {
-    sessionStore.switchSession(value).catch((err) => {
-      message.error(extractApiError(err, '切换会话失败'))
-    })
-  }
+  sessionStore.switchSession(value).catch((err) => {
+    message.error(extractApiError(err, '切换会话失败'))
+  })
 }
 
 function openCreateSession() {
