@@ -451,7 +451,7 @@ class MemorySubAgent(BaseSubAgent):
     async def compact_history(
         self,
         agent: RPGGameAgent,
-        compress_rounds: int | None = None,
+        compress_batch_size: int | None = None,
         keep_rounds: int | None = None,
     ) -> dict[str, int | str | bool]:
         """压缩最老的对话轮次为批次摘要 + 整体归纳。
@@ -468,7 +468,7 @@ class MemorySubAgent(BaseSubAgent):
         """
         from rpg_world.rpg_core.settings import settings
 
-        compress_rounds = compress_rounds or settings.memory_compress_batch_size
+        compress_batch_size = compress_batch_size or settings.memory_compress_batch_size
         keep_rounds = keep_rounds or settings.memory_keep_rounds
 
         if self._batch_store is None:
@@ -489,7 +489,7 @@ class MemorySubAgent(BaseSubAgent):
         old_slice = agent._session.history[:keep_from]
 
         # 拆分为批次
-        batches = _split_into_batches(old_slice, compress_rounds)
+        batches = _split_into_batches(old_slice, compress_batch_size)
         if not batches:
             return {"skipped": True, "reason": "no batches to compress"}
 

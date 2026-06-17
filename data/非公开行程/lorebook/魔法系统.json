@@ -4,5 +4,6 @@
   "tags": [
     "magic"
   ],
-  "enable": false
+  "enable": true,
+  "description": ""
 }

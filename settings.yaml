@@ -38,7 +38,7 @@ base:
 
       # 对话摘要压缩管线
       summary:
-        # 每次压缩处理的对话轮数
+        # 每批压缩的用户轮数
         compress_batch_size: 5
         # 压缩后保留的最近对话轮数
         keep_rounds: 5
@@ -57,7 +57,7 @@ base:
 
     # ── 状态表子 Agent 配置 ──────────────────────────────────────────
     status_sub_agent:
-      # 是否启用状态表预更新子 Agent
+      # 是否启用状态表更新子 Agent
       enabled: true
       # 覆盖主模型（null 表示复用主模型）
       model: null
@@ -108,7 +108,7 @@ base:
     # ── API 模块（FastAPI + WebUI） ───────────────────────────────────
     api:
       # 是否启用 API 服务
-      enabled: false
+      enabled: true
       # 监听地址
       host: "127.0.0.1"
       # 监听端口
@@ -141,7 +141,7 @@ base:
     cli:
       # 是否启用 CLI 入口
       enabled: true
-      # 绑定的 workspace 路径（留空则使用默认值 data/cli_default_workspace）
+      # 绑定的 workspace 路径（留空则使用 CLI 默认 workspace：data/cli_default_workspace）
       workspace: "data/非公开行程"
 
 # ── 默认环境名（可通过 RPG_WORLD_PROFILE 环境变量覆盖） ────────────────
