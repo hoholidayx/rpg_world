@@ -455,7 +455,11 @@ class Settings:
 
     @property
     def memory_sub_agent_config(self) -> dict[str, object]:
-        """memory_sub_agent 完整配置 dict（保持向后兼容）。"""
+        """memory_sub_agent 完整配置 dict。
+
+        ``llm_provider`` 与 ``shared/openai/llama`` 控制子 Agent LLM 来源；
+        ``summary/recall/story`` 是记忆管线配置，不属于 provider 配置。
+        """
         return self.agent_settings.get("memory_sub_agent", {})
 
     # ── memory_sub_agent 管线级配置 ────────────────────────────────
@@ -497,6 +501,7 @@ class Settings:
 
     @property
     def status_sub_agent_config(self) -> dict[str, object]:
+        """status_sub_agent 完整配置 dict，包含显式 LLM provider 选择。"""
         return self.agent_settings.get("status_sub_agent", {})
 
     @property

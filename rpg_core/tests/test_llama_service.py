@@ -20,6 +20,8 @@ from rpg_world.rpg_core.llama_service.server import LlamaServiceServer
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.planning.planner import FallbackQueryPlanner, LlamaQueryPlanner
 from rpg_world.rpg_core.memory.rerank.llama_reranker import LlamaRerankConfig, LlamaReranker
+from rpg_world.rpg_core.agent.sub_agents import llama_provider as llama_provider_module
+from rpg_world.rpg_core.agent.sub_agents.llama_provider import LlamaCompletionProvider
 
 
 class _FakeProcess:
@@ -229,3 +231,200 @@ def test_planner_and_reranker_fallback_when_client_fails(tmp_path):
         assert reranker.rerank("寻找北境线索", candidates) == candidates
     finally:
         set_llama_client(None)
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_uses_to_thread_and_extracts_dict(monkeypatch):
+    calls: list[dict[str, object]] = []
+    to_thread_calls: list[str] = []
+
+    class FakeCompletionModel:
+        def __init__(self, model_path, **kwargs) -> None:  # noqa: ANN001
+            calls.append({"model_path": str(model_path), **kwargs})
+
+        def complete(self, prompt, **kwargs):  # noqa: ANN001
+            calls.append({"prompt": prompt, **kwargs})
+            return {"choices": [{"text": "hello from llama"}]}
+
+    async def fake_to_thread(func, *args, **kwargs):  # noqa: ANN001
+        to_thread_calls.append(func.__name__)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+    monkeypatch.setattr(llama_provider_module.asyncio, "to_thread", fake_to_thread)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf", max_tokens=11, temperature=0.3)
+    result = await provider.chat([{"role": "user", "content": "Hi"}])
+
+    assert to_thread_calls == ["complete"]
+    assert result.content == "hello from llama"
+    assert result.tool_calls is None
+    assert calls[1]["max_tokens"] == 11
+    assert calls[1]["temperature"] == 0.3
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_extracts_plain_string(monkeypatch):
+    class FakeCompletionModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete(self, *_args, **_kwargs):
+            return "plain text"
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf")
+    result = await provider.chat([{"role": "user", "content": "Hi"}])
+
+    assert result.content == "plain text"
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_builds_openai_tool_call(monkeypatch):
+    class FakeCompletionModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete(self, prompt, **_kwargs):  # noqa: ANN001
+            assert "TOOLS:" in prompt
+            return '{"tool":"set_state","arguments":{"key":"地点","value":"大厅"}}'
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf")
+    result = await provider.chat(
+        [{"role": "user", "content": "change state"}],
+        tools=[_tool_schema("set_state")],
+    )
+
+    assert result.finish_reason == "tool_calls"
+    assert result.tool_calls
+    call = result.tool_calls[0]
+    assert call["type"] == "function"
+    assert call["function"]["name"] == "set_state"
+    assert '"key": "地点"' in call["function"]["arguments"]
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_uses_first_tool_when_name_missing(monkeypatch):
+    class FakeCompletionModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete(self, *_args, **_kwargs):
+            return '{"arguments":{"summary_text":"done"}}'
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf")
+    result = await provider.chat(
+        [{"role": "user", "content": "summarize"}],
+        tools=[_tool_schema("generate_summary")],
+    )
+
+    assert result.tool_calls
+    assert result.tool_calls[0]["function"]["name"] == "generate_summary"
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_keeps_unknown_tool_name(monkeypatch):
+    class FakeCompletionModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete(self, *_args, **_kwargs):
+            return '{"tool":"unknown_tool","arguments":{"x":1}}'
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf")
+    result = await provider.chat(
+        [{"role": "user", "content": "call"}],
+        tools=[_tool_schema("known_tool")],
+    )
+
+    assert result.tool_calls
+    assert result.tool_calls[0]["function"]["name"] == "unknown_tool"
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_invalid_json_returns_raw_content(monkeypatch):
+    class FakeCompletionModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete(self, *_args, **_kwargs):
+            return "not json"
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf")
+    result = await provider.chat(
+        [{"role": "user", "content": "call"}],
+        tools=[_tool_schema("known_tool")],
+    )
+
+    assert result.content == "not json"
+    assert result.tool_calls is None
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_empty_output_has_no_tool_call(monkeypatch):
+    class FakeCompletionModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete(self, *_args, **_kwargs):
+            return ""
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf")
+    result = await provider.chat(
+        [{"role": "user", "content": "call"}],
+        tools=[_tool_schema("known_tool")],
+    )
+
+    assert result.tool_calls is None
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_chat_stream_yields_final_chunk(monkeypatch):
+    class FakeCompletionModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete(self, *_args, **_kwargs):
+            return '{"tool":"known_tool","arguments":{"x":1}}'
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf")
+    chunks = [
+        chunk
+        async for chunk in provider.chat_stream(
+            [{"role": "user", "content": "call"}],
+            tools=[_tool_schema("known_tool")],
+        )
+    ]
+
+    assert len(chunks) == 1
+    assert chunks[0].content
+    assert chunks[0].tool_calls
+    assert chunks[0].finish_reason == "tool_calls"
+    assert chunks[0].model == "/tmp/fake.gguf"
+    assert chunks[0].usage is None
+
+
+def _tool_schema(name: str) -> dict[str, object]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    }

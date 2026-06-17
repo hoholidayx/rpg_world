@@ -2,7 +2,7 @@
 
 提供子 Agent 共用的基础设施：
 
-- LLM Provider 管理（共享主 Agent 的 provider 或自建独立 LLM）
+- LLM Provider 管理（通过显式 provider_config 选择 shared/openai/llama）
 - 重入守卫（防止并发执行）
 - ``SubAgentContext`` 绑定（世界书 + 角色卡 + 子 Agent 系统提示）
 - ``ToolProvider`` 接口 + 工具提供者管理（注册、去重、刷新）
@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from loguru import logger
 
@@ -29,6 +30,18 @@ if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.base_provider import LLMProvider
     from rpg_world.rpg_core.agent.command import CommandDef
     from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
+
+
+SubAgentProviderMode = Literal["shared", "openai", "llama"]
+
+
+@dataclass(frozen=True)
+class SubAgentProviderConfig:
+    """Resolved provider configuration for a sub-agent."""
+
+    mode: SubAgentProviderMode = "shared"
+    openai: dict[str, Any] = field(default_factory=dict)
+    llama: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -55,13 +68,9 @@ class BaseSubAgent:
     Parameters
     ----------
     provider:
-        共享主 Agent 的 LLM provider。传 ``None`` 时使用 *model* / *api_key* / *base_url* 自建。
-    model:
-        独立 LLM 模型名（仅 *provider* 为 None 时生效）。
-    api_key:
-        独立 LLM API key。
-    base_url:
-        独立 LLM base URL。
+        共享主 Agent 的 LLM provider，仅 ``provider_config.mode == "shared"`` 时传入。
+    provider_config:
+        解析后的 provider 配置，显式选择 ``shared``、``openai`` 或 ``llama``。
     enabled:
         总开关。
     """
@@ -70,12 +79,22 @@ class BaseSubAgent:
         self,
         *,
         provider: LLMProvider | None = None,
+        provider_config: SubAgentProviderConfig | None = None,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         enabled: bool = True,
     ) -> None:
+        if provider_config is None:
+            if provider is None:
+                raise ValueError("sub-agent provider_config is required when no shared provider is supplied")
+            provider_config = SubAgentProviderConfig(mode="shared")
+        if provider is not None and provider_config.mode != "shared":
+            raise ValueError("sub-agent independent provider mode must not receive a shared provider")
+        if provider_config.mode == "shared" and provider is None and enabled:
+            raise ValueError("sub-agent shared provider mode requires a shared provider")
         self._shared_provider = provider
+        self._provider_config = provider_config
         self._model = model
         self._api_key = api_key
         self._base_url = base_url
@@ -130,17 +149,37 @@ class BaseSubAgent:
         子类应通过此方法获取 provider，而非直接访问 ``_shared_provider``
         或 ``_own_provider``。
         """
-        if self._shared_provider is not None:
+        if self._provider_config.mode == "shared":
+            if self._shared_provider is None:
+                raise RuntimeError("shared provider is not configured")
             return self._shared_provider
 
         if self._own_provider is None:
-            from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
+            if self._provider_config.mode == "openai":
+                from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 
-            self._own_provider = OpenAIProvider(
-                model=self._model or "gpt-4o",
-                api_key=self._api_key,
-                base_url=self._base_url,
-            )
+                cfg = self._provider_config.openai
+                self._own_provider = OpenAIProvider(
+                    model=str(cfg.get("model") or self._model or "gpt-4o"),
+                    api_key=cfg.get("api_key") or self._api_key,
+                    base_url=cfg.get("base_url") or self._base_url,
+                    max_tokens=cfg.get("max_tokens"),
+                    temperature=cfg.get("temperature"),
+                )
+            elif self._provider_config.mode == "llama":
+                from rpg_world.rpg_core.agent.sub_agents.llama_provider import LlamaCompletionProvider
+
+                cfg = self._provider_config.llama
+                self._own_provider = LlamaCompletionProvider(
+                    model_path=str(cfg["model_path"]),
+                    n_ctx=int(cfg.get("n_ctx", 2048)),
+                    n_gpu_layers=int(cfg.get("n_gpu_layers", 0)),
+                    request_timeout_ms=int(cfg.get("request_timeout_ms", 60000)),
+                    max_tokens=int(cfg.get("max_tokens", 512)),
+                    temperature=float(cfg.get("temperature", 0.0)),
+                )
+            else:
+                raise RuntimeError(f"unsupported sub-agent provider mode: {self._provider_config.mode}")
         return self._own_provider
 
     # ── Context 绑定 ─────────────────────────────────────────────────

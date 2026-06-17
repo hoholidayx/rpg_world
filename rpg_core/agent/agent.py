@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time as _time
 from asyncio import Future
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -29,6 +31,7 @@ from rpg_world.rpg_core.agent.sub_agents import (
     StatusSubAgent,
     SubAgentContext,
 )
+from rpg_world.rpg_core.agent.sub_agents.base import SubAgentProviderConfig
 from rpg_world.rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 from rpg_world.rpg_core.agent.tools import (
     BaseTool,
@@ -43,6 +46,7 @@ from rpg_world.rpg_core.context.rpg_context import Role, Message
 from rpg_world.rpg_core.scene import SceneTracker
 from rpg_world.rpg_core.session import SessionManager
 from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.utils.path_utils import PACKAGE_ROOT
 from rpg_world.rpg_core.utils.watcher import get_watcher
 from rpg_world.rpg_core.summary.compressor import SummaryCompressor
 
@@ -722,12 +726,18 @@ class RPGGameAgent:
 
         # ── StatusSubAgent ────────────────────────────────────────────
         status_cfg = settings.status_sub_agent_config
-        status_model = status_cfg.get("model")
+        status_provider, status_provider_config = _resolve_sub_agent_provider(
+            name="status_sub_agent",
+            cfg=status_cfg,
+            shared_provider=self._provider,
+            main_api_key=self._api_key,
+            main_base_url=self._base_url,
+            main_max_tokens=self._max_tokens,
+            main_temperature=self._temperature,
+        )
         self._status_sub_agent = StatusSubAgent(
-            provider=None if status_model else self._provider,
-            model=status_model or self._model,
-            api_key=status_cfg.get("api_key") or self._api_key,
-            base_url=status_cfg.get("base_url") or self._base_url,
+            provider=status_provider,
+            provider_config=status_provider_config,
             enabled=status_cfg.get("enabled", True),
         )
         if self._scene_tracker:
@@ -737,12 +747,18 @@ class RPGGameAgent:
 
         # ── MemorySubAgent ────────────────────────────────────────────
         memory_cfg = settings.memory_sub_agent_config
-        memory_model = memory_cfg.get("model")
+        memory_provider, memory_provider_config = _resolve_sub_agent_provider(
+            name="memory_sub_agent",
+            cfg=memory_cfg,
+            shared_provider=self._provider,
+            main_api_key=self._api_key,
+            main_base_url=self._base_url,
+            main_max_tokens=self._max_tokens,
+            main_temperature=self._temperature,
+        )
         self._memory_sub_agent = MemorySubAgent(
-            provider=None if memory_model else self._provider,
-            model=memory_model or self._model,
-            api_key=memory_cfg.get("api_key") or self._api_key,
-            base_url=memory_cfg.get("base_url") or self._base_url,
+            provider=memory_provider,
+            provider_config=memory_provider_config,
             enabled=memory_cfg.get("enabled", True),
             summary_store=self._builder._summary_store if self._builder else None,
             story_store=self._builder._story_memory if self._builder else None,
@@ -788,6 +804,106 @@ def _build_rpg_context(world_name: str, workspace: str, session_id: str) -> dict
     from rpg_world.rpg_core.context.factory import build_rpg_context
 
     return build_rpg_context(world_name=world_name, workspace=workspace, session_id=session_id)
+
+
+_SUB_AGENT_PROVIDER_MODES = frozenset({"shared", "openai", "llama"})
+
+
+def _resolve_sub_agent_provider(
+    *,
+    name: str,
+    cfg: dict[str, Any],
+    shared_provider: LLMProvider | None,
+    main_api_key: str | None,
+    main_base_url: str | None,
+    main_max_tokens: int | None,
+    main_temperature: float | None,
+) -> tuple[LLMProvider | None, SubAgentProviderConfig]:
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    enabled = settings._as_bool(cfg.get("enabled", True), True)
+    if not enabled:
+        return None, SubAgentProviderConfig(mode="openai", openai={"model": "disabled"})
+
+    mode = str(cfg.get("llm_provider") or "shared").strip()
+    if mode not in _SUB_AGENT_PROVIDER_MODES:
+        raise ValueError(
+            f"{name} config invalid: llm_provider must be one of shared, openai, llama; got {mode!r}"
+        )
+
+    if mode == "shared":
+        if shared_provider is None:
+            raise ValueError(f"{name} config invalid: llm_provider=shared requires main Agent provider")
+        return shared_provider, SubAgentProviderConfig(mode="shared")
+
+    if mode == "openai":
+        openai_cfg = _as_mapping(cfg.get("openai"), f"{name}.openai")
+        model = _non_empty(openai_cfg.get("model"))
+        if not model:
+            raise ValueError(f"{name} config invalid: openai.model is required when llm_provider=openai")
+        api_key = _non_empty(openai_cfg.get("api_key"))
+        if not api_key:
+            api_key_env = _non_empty(openai_cfg.get("api_key_env"))
+            if api_key_env:
+                api_key = _non_empty(os.environ.get(api_key_env))
+        return None, SubAgentProviderConfig(
+            mode="openai",
+            openai={
+                "model": model,
+                "api_key": api_key or main_api_key,
+                "base_url": openai_cfg.get("base_url") or main_base_url,
+                "max_tokens": openai_cfg.get("max_tokens")
+                if openai_cfg.get("max_tokens") is not None else main_max_tokens,
+                "temperature": openai_cfg.get("temperature")
+                if openai_cfg.get("temperature") is not None else main_temperature,
+            },
+        )
+
+    if not settings.memory_settings.llama_process_enabled:
+        raise ValueError(
+            f"{name} config invalid: llm_provider=llama requires memory.llama_process_enabled=true"
+        )
+    llama_cfg = _as_mapping(cfg.get("llama"), f"{name}.llama")
+    raw_model_path = _non_empty(llama_cfg.get("model_path"))
+    if not raw_model_path:
+        raise ValueError(f"{name} config invalid: llama.model_path is required when llm_provider=llama")
+    model_path = _resolve_llama_model_path(raw_model_path)
+    if not model_path.is_file():
+        raise ValueError(f"{name} config invalid: GGUF model not found: {model_path}")
+    return None, SubAgentProviderConfig(
+        mode="llama",
+        llama={
+            "model_path": str(model_path),
+            "n_ctx": llama_cfg.get("n_ctx", 2048),
+            "n_gpu_layers": llama_cfg.get("n_gpu_layers", 0),
+            "request_timeout_ms": llama_cfg.get("request_timeout_ms", 60000),
+            "max_tokens": llama_cfg.get("max_tokens", 512),
+            "temperature": llama_cfg.get("temperature", 0.0),
+        },
+    )
+
+
+def _as_mapping(value: Any, label: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} config invalid: must be a mapping")
+    return value
+
+
+def _non_empty(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _resolve_llama_model_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (PACKAGE_ROOT / path).resolve()
 
 
 def _build_sub_agent_context(

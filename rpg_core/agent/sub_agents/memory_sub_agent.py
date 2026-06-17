@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
+from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProviderConfig
 from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
 from rpg_world.rpg_core.agent.command import CommandDef
 from rpg_world.rpg_core.context.rpg_context import Message, Role
@@ -309,6 +309,7 @@ class MemorySubAgent(BaseSubAgent):
         story_store: StoryMemoryStore | None = None,
         summary_store: SummaryStore | None = None,
         provider: LLMProvider | None = None,
+        provider_config: SubAgentProviderConfig | None = None,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -319,6 +320,7 @@ class MemorySubAgent(BaseSubAgent):
     ) -> None:
         super().__init__(
             provider=provider,
+            provider_config=provider_config,
             model=model,
             api_key=api_key,
             base_url=base_url,
@@ -335,6 +337,11 @@ class MemorySubAgent(BaseSubAgent):
         self._batch_store = batch_store
         self._max_recall_items = max_recall_items
         self._max_window_rounds = max_window_rounds
+
+    def _get_provider(self) -> LLMProvider:
+        provider = super()._get_provider()
+        self._provider = provider
+        return provider
 
     # ── public API ─────────────────────────────────────────────────────
 

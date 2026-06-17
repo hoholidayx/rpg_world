@@ -10,8 +10,8 @@
 Usage::
 
     agent = StatusSubAgent(
-        provider=main_provider,          # 共享主 LLM
-        # provider=None, model="gpt-4o-mini",  # 或独立 LLM
+        provider=main_provider,          # shared 模式复用主 LLM
+        provider_config=provider_config, # 或显式 openai/llama 配置
     )
     agent.register_scene_tools(scene_tracker)
     agent.bind_context(sub_agent_context)
@@ -27,7 +27,7 @@ from loguru import logger
 
 from rpg_world.rpg_core.agent.agent_types import CallRecord, TurnStats
 from rpg_world.rpg_core.agent.base_provider import LLMProvider
-from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
+from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProviderConfig
 from rpg_world.rpg_core.agent.tools import BaseTool
 from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
 from rpg_world.rpg_core.context.rpg_context import Message, Role
@@ -84,13 +84,9 @@ class StatusSubAgent(BaseSubAgent):
     Parameters
     ----------
     provider:
-        共享主 Agent 的 LLM provider。传 ``None`` 时使用 *model* / *api_key* / *base_url* 自建。
-    model:
-        独立 LLM 模型名（仅 *provider* 为 None 时生效）。
-    api_key:
-        独立 LLM API key。
-    base_url:
-        独立 LLM base URL。
+        共享主 Agent 的 LLM provider，仅 shared 模式传入。
+    provider_config:
+        解析后的 provider 配置，显式选择 shared/openai/llama。
     enabled:
         总开关。
     """
@@ -99,6 +95,7 @@ class StatusSubAgent(BaseSubAgent):
         self,
         *,
         provider: LLMProvider | None = None,
+        provider_config: SubAgentProviderConfig | None = None,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -106,6 +103,7 @@ class StatusSubAgent(BaseSubAgent):
     ) -> None:
         super().__init__(
             provider=provider,
+            provider_config=provider_config,
             model=model,
             api_key=api_key,
             base_url=base_url,

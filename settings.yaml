@@ -33,8 +33,27 @@ base:
     memory_sub_agent:
       # 是否启用记忆子 Agent
       enabled: true
-      # 覆盖主模型（null 表示复用主模型）
-      model: null
+      # LLM provider 选择：shared 复用主 Agent；openai 使用兼容 OpenAI API；llama 使用本地 llama.cpp completion
+      llm_provider: shared
+
+      # shared/openai/llama 是 LLM provider 配置；summary/recall/story 是记忆管线配置
+      shared: {}
+
+      openai:
+        model: null
+        api_key: null
+        api_key_env: null
+        base_url: null
+        max_tokens: null
+        temperature: null
+
+      llama:
+        model_path: null
+        n_ctx: 2048
+        n_gpu_layers: 0
+        request_timeout_ms: 60000
+        max_tokens: 512
+        temperature: 0.0
 
       # 对话摘要压缩管线
       summary:
@@ -59,12 +78,26 @@ base:
     status_sub_agent:
       # 是否启用状态表更新子 Agent
       enabled: true
-      # 覆盖主模型（null 表示复用主模型）
-      model: null
-      # 子 Agent 专用 API key（null 表示复用主 key）
-      api_key: null
-      # 子 Agent 专用 base_url（null 表示复用主配置）
-      base_url: null
+      # LLM provider 选择：shared 复用主 Agent；openai 使用兼容 OpenAI API；llama 使用本地 llama.cpp completion
+      llm_provider: shared
+
+      shared: {}
+
+      openai:
+        model: null
+        api_key: null
+        api_key_env: null
+        base_url: null
+        max_tokens: null
+        temperature: null
+
+      llama:
+        model_path: null
+        n_ctx: 2048
+        n_gpu_layers: 0
+        request_timeout_ms: 60000
+        max_tokens: 512
+        temperature: 0.0
 
   # ── 数据路径配置（相对于 workspace 根目录） ──────────────────────────
   data:
