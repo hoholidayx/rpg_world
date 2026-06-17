@@ -182,6 +182,12 @@ class MemorySettings:
     n_gpu_layers: int = 0
     """GPU 加速层数（0=纯 CPU，-1=全部 GPU）。"""
 
+    embedding_n_threads: int = 4
+    """嵌入模型 CPU 线程数。"""
+
+    embedding_verbose: bool = False
+    """是否输出嵌入模型 llama.cpp verbose 日志。"""
+
     top_k: int = 5
     """向量检索返回的最大结果数。"""
 
@@ -206,6 +212,9 @@ class MemorySettings:
     rerank_n_ctx: int = 4096
     """本地重排模型上下文窗口。"""
 
+    rerank_n_gpu_layers: int = 0
+    """本地重排模型 GPU 加速层数。"""
+
     rerank_temperature: float = 0.0
     """本地重排模型采样温度。"""
 
@@ -226,6 +235,18 @@ class MemorySettings:
 
     query_planner_max_tokens: int = 512
     """查询规划模型最大输出 token 数。"""
+
+    llama_process_enabled: bool = True
+    """是否将 llama.cpp 推理隔离到托管子进程。"""
+
+    llama_request_timeout_ms: int = 60000
+    """主进程等待 llama 子进程单次请求响应的超时时间。"""
+
+    llama_startup_timeout_ms: int = 120000
+    """llama 子进程启动超时时间。"""
+
+    llama_max_parallel_models: int = 2
+    """llama 子进程中允许并行调度的最大模型实例数。"""
 
     chunk_size: int = 2000
     """单文件超过此字符数时分块。"""
@@ -544,6 +565,8 @@ class Settings:
     def memory_settings(self) -> MemorySettings:
         """记忆系统配置对象（向量检索等）。"""
         raw = self._raw.get("memory", {})
+        if not isinstance(raw, dict):
+            raw = {}
         embed_raw = raw.get("embedding_model_path", "")
         if embed_raw:
             p = Path(embed_raw)
@@ -571,6 +594,8 @@ class Settings:
             embedding_model_path=embed_resolved,
             n_ctx=raw.get("n_ctx", 32768),
             n_gpu_layers=raw.get("n_gpu_layers", 0),
+            embedding_n_threads=self._as_int(raw.get("embedding_n_threads", 4), 4),
+            embedding_verbose=self._as_bool(raw.get("embedding_verbose", False), False),
             top_k=raw.get("top_k", 5),
             hybrid_enabled=raw.get("hybrid_enabled", True),
             vector_k=raw.get("vector_k", 50),
@@ -579,6 +604,7 @@ class Settings:
             rerank_model_path=rerank_resolved,
             rerank_max_candidates=raw.get("rerank_max_candidates", 10),
             rerank_n_ctx=raw.get("rerank_n_ctx", 4096),
+            rerank_n_gpu_layers=self._as_int(raw.get("rerank_n_gpu_layers", 0), 0),
             rerank_temperature=raw.get("rerank_temperature", 0.0),
             query_planner_enabled=raw.get("query_planner_enabled", False),
             query_planner_model_path=planner_resolved,
@@ -586,6 +612,10 @@ class Settings:
             query_planner_n_gpu_layers=raw.get("query_planner_n_gpu_layers", 0),
             query_planner_temperature=raw.get("query_planner_temperature", 0.0),
             query_planner_max_tokens=raw.get("query_planner_max_tokens", 512),
+            llama_process_enabled=self._as_bool(raw.get("llama_process_enabled", True), True),
+            llama_request_timeout_ms=self._as_int(raw.get("llama_request_timeout_ms", 60000), 60000),
+            llama_startup_timeout_ms=self._as_int(raw.get("llama_startup_timeout_ms", 120000), 120000),
+            llama_max_parallel_models=self._as_int(raw.get("llama_max_parallel_models", 2), 2),
             chunk_size=raw.get("chunk_size", 2000),
             chunk_overlap=raw.get("chunk_overlap", 64),
         )

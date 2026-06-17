@@ -182,18 +182,24 @@ class MemoryManager:
         if not embed_path:
             logger.warning("[MemoryManager] embedding_model_path not configured")
             return None
+        if not mem_cfg.llama_process_enabled:
+            logger.warning("[MemoryManager] embedding disabled — llama_process_enabled=false")
+            return None
 
         try:
-            from rpg_world.rpg_core.memory.embedding_provider import LlamaCppEmbeddingProvider
+            from rpg_world.rpg_core.memory.embedding_provider import LlamaClientEmbeddingProvider
 
             logger.info(
                 "[MemoryManager] loading embedding model: {} (n_ctx={}, n_gpu_layers={})",
                 embed_path, mem_cfg.n_ctx, mem_cfg.n_gpu_layers,
             )
-            embedding = LlamaCppEmbeddingProvider(
+            embedding = LlamaClientEmbeddingProvider(
                 gguf_model_path=embed_path,
                 n_ctx=mem_cfg.n_ctx,
                 n_gpu_layers=mem_cfg.n_gpu_layers,
+                n_threads=mem_cfg.embedding_n_threads,
+                verbose=mem_cfg.embedding_verbose,
+                request_timeout_ms=mem_cfg.llama_request_timeout_ms,
             )
             logger.info("[MemoryManager] model loaded — dim={}", embedding.dimension())
             return embedding
@@ -301,11 +307,13 @@ class MemoryManager:
             )
             reranker = LlamaReranker(
                 LlamaRerankConfig(
-                    enabled=mem_cfg.rerank_enabled,
+                    enabled=mem_cfg.rerank_enabled and mem_cfg.llama_process_enabled,
                     model_path=mem_cfg.rerank_model_path,
                     max_candidates=mem_cfg.rerank_max_candidates,
                     n_ctx=mem_cfg.rerank_n_ctx,
+                    n_gpu_layers=mem_cfg.rerank_n_gpu_layers,
                     temperature=mem_cfg.rerank_temperature,
+                    request_timeout_ms=mem_cfg.llama_request_timeout_ms,
                 )
             )
             return HybridRetriever(
@@ -332,6 +340,9 @@ class MemoryManager:
         if not mem_cfg.query_planner_enabled:
             logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
             return fallback
+        if not mem_cfg.llama_process_enabled:
+            logger.info("[MemoryManager] query planner mode — rule-based (llama_process_enabled=false)")
+            return fallback
         if not mem_cfg.query_planner_model_path:
             logger.warning("[MemoryManager] query planner model_path not configured — rule-based fallback")
             return fallback
@@ -342,6 +353,7 @@ class MemoryManager:
                 n_gpu_layers=mem_cfg.query_planner_n_gpu_layers,
                 temperature=mem_cfg.query_planner_temperature,
                 max_tokens=mem_cfg.query_planner_max_tokens,
+                request_timeout_ms=mem_cfg.llama_request_timeout_ms,
             )
             logger.info("[MemoryManager] query planner mode — llama")
             return FallbackQueryPlanner(planner, fallback)

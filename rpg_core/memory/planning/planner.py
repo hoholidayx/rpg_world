@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -79,7 +78,7 @@ class RuleBasedQueryPlanner(BaseQueryPlanner):
 
 
 class LlamaQueryPlanner(BaseQueryPlanner):
-    """Local llama.cpp query planner backed by a GGUF model."""
+    """Process-isolated llama.cpp query planner backed by a GGUF model."""
 
     def __init__(
         self,
@@ -88,29 +87,27 @@ class LlamaQueryPlanner(BaseQueryPlanner):
         n_gpu_layers: int = 0,
         temperature: float = 0.0,
         max_tokens: int = 512,
+        request_timeout_ms: int = 60000,
     ) -> None:
-        path = Path(model_path)
-        if not path.is_file():
-            raise QueryPlanError(f"query planner model_path missing: {path}")
-        from llama_cpp import Llama
+        from rpg_world.rpg_core.llama_service import LlamaCompletionModel
 
-        logger.info("[LlamaQueryPlanner] loading model: {} (n_ctx={})", path, n_ctx)
-        self._llama = Llama(
-            model_path=str(path),
+        self._model = LlamaCompletionModel(
+            model_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
-            verbose=False,
+            request_timeout_ms=request_timeout_ms,
         )
         self._temperature = temperature
         self._max_tokens = max_tokens
-        logger.info("[LlamaQueryPlanner] model loaded")
+        logger.info("[LlamaQueryPlanner] process client ready: {} (n_ctx={})", model_path, n_ctx)
 
     def plan(self, query: str) -> QueryPlan:
         normalized = _normalize(query)
         if not normalized:
             return make_empty_plan(query, planner_source="llama")
-        output = self._llama(
-            _build_prompt(normalized),
+        prompt = _build_prompt(normalized)
+        output = self._model.complete(
+            prompt,
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             stop=[],

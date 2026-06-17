@@ -32,6 +32,8 @@ from loguru import logger as _loguru_logger
 
 from rpg_world.channels.config import settings as channels_settings
 from rpg_world.rpg_core.agent.manager import AgentManager
+from rpg_world.rpg_core.llama_service.client import get_llama_client
+from rpg_world.rpg_core.settings import settings as core_settings
 
 
 # ── 日志配置（所有模块 INFO+ 输出到 stderr） ─────────────────────────
@@ -171,36 +173,46 @@ async def main() -> None:
         _loguru_logger.warning("或通过 MODULES=api,telegram uv run python -m rpg_world.run 指定")
         return
 
+    mem_cfg = core_settings.memory_settings
+    llama_client = get_llama_client()
+    llama_client.configure(
+        enabled=mem_cfg.llama_process_enabled,
+        request_timeout_ms=mem_cfg.llama_request_timeout_ms,
+        startup_timeout_ms=mem_cfg.llama_startup_timeout_ms,
+        max_parallel_models=mem_cfg.llama_max_parallel_models,
+    )
+
     _loguru_logger.info("启动模块: {}", ", ".join(enabled_modules))
 
     tasks: list[asyncio.Task] = []
+    try:
+        for module in enabled_modules:
+            handler = _handlers.get(module)
+            if handler is None:
+                _loguru_logger.warning("未知模块，跳过: {}", module)
+                continue
+            _loguru_logger.info("启动模块处理器: {}", module)
+            await handler(tasks)
 
-    for module in enabled_modules:
-        handler = _handlers.get(module)
-        if handler is None:
-            _loguru_logger.warning("未知模块，跳过: {}", module)
-            continue
-        _loguru_logger.info("启动模块处理器: {}", module)
-        await handler(tasks)
+        # ── 等待退出信号 ──────────────────────────────────────────────────
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, stop_event.set)
+            except NotImplementedError:
+                pass
 
-    # ── 等待退出信号 ──────────────────────────────────────────────────
-    stop_event = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, stop_event.set)
-        except NotImplementedError:
-            pass
-
-    _loguru_logger.info("已启动 {} 个模块，按 Ctrl+C 停止", len(tasks))
-    await stop_event.wait()
-
-    # ── 优雅关闭 ──────────────────────────────────────────────────────
-    _loguru_logger.info("正在关闭...")
-    for t in tasks:
-        t.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
-    _loguru_logger.info("已关闭。")
+        _loguru_logger.info("已启动 {} 个模块，按 Ctrl+C 停止", len(tasks))
+        await stop_event.wait()
+    finally:
+        # ── 优雅关闭 ──────────────────────────────────────────────────────
+        _loguru_logger.info("正在关闭...")
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        llama_client.shutdown()
+        _loguru_logger.info("已关闭。")
 
 
 if __name__ == "__main__":

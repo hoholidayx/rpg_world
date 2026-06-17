@@ -30,6 +30,37 @@ def test_memory_manager_create_disabled(fake_recalled_store):
     assert manager is None
 
 
+def test_llama_process_disabled_degrades_without_provider():
+    mem_cfg = SimpleNamespace(
+        embedding_model_path="/tmp/nonexistent-model.gguf",
+        llama_process_enabled=False,
+        query_planner_enabled=True,
+        query_planner_model_path="/tmp/nonexistent-planner.gguf",
+        rerank_enabled=True,
+        rerank_model_path="/tmp/nonexistent-reranker.gguf",
+        rerank_max_candidates=10,
+        rerank_n_ctx=4096,
+        rerank_n_gpu_layers=7,
+        rerank_temperature=0.0,
+        llama_request_timeout_ms=60000,
+        hybrid_enabled=True,
+        vector_k=50,
+        keyword_k=50,
+    )
+
+    assert MemoryManager._build_embedding(mem_cfg) is None
+    assert MemoryManager._build_query_planner(mem_cfg).plan("查找").planner_source == "rule_based"
+
+    retriever = MemoryManager._build_retriever(
+        FakeStore(),
+        None,
+        mem_cfg,
+        FakeFallbackSearch(),
+    )
+    assert isinstance(retriever, HybridRetriever)
+    assert retriever._reranker._config.enabled is False
+
+
 def test_hybrid_retriever_merges_sources_and_falls_back():
     store = FakeStore()
     store.vector_rows = [

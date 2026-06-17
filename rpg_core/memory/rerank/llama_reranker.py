@@ -19,16 +19,17 @@ class LlamaRerankConfig:
     model_path: str = ""
     max_candidates: int = 10
     n_ctx: int = 4096
+    n_gpu_layers: int = 0
     temperature: float = 0.0
+    request_timeout_ms: int = 60000
 
 
 class LlamaReranker:
-    """Rerank candidates with a local llama-cpp-python model."""
+    """Rerank candidates with a process-isolated llama.cpp model."""
 
     def __init__(self, config: LlamaRerankConfig) -> None:
         self._config = config
-        self._llama: Any | None = None
-        self._load_attempted = False
+        self._model: Any | None = None
 
     def rerank(self, query: str, candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
         """Return reranked candidates, falling back to hybrid scores on failure."""
@@ -43,8 +44,8 @@ class LlamaReranker:
             logger.warning("[LlamaReranker] skipped — model_path missing: {}", model_path)
             return candidates
 
-        llama = self._get_llama(model_path)
-        if llama is None:
+        runner = self._get_runner(model_path)
+        if runner is None:
             logger.warning("[LlamaReranker] skipped — model unavailable")
             return candidates
 
@@ -58,12 +59,7 @@ class LlamaReranker:
         )
         prompt = _build_prompt(query, head)
         try:
-            output = llama(
-                prompt,
-                max_tokens=1024,
-                temperature=self._config.temperature,
-                stop=[],
-            )
+            output = runner(prompt)
             text = _extract_text(output)
             parsed = _parse_json_array(text)
         except Exception as exc:
@@ -99,26 +95,30 @@ class LlamaReranker:
         logger.info("[LlamaReranker] rerank done — scored={} total={}", len(scores), len(candidates))
         return sorted(head, key=lambda item: item.final_score, reverse=True) + tail
 
-    def _get_llama(self, model_path: Path) -> Any | None:
-        if self._llama is not None:
-            return self._llama
-        if self._load_attempted:
-            return None
-        self._load_attempted = True
-        try:
-            from llama_cpp import Llama
+    def _get_runner(self, model_path: Path):
+        if self._model is None:
+            try:
+                from rpg_world.rpg_core.llama_service import LlamaCompletionModel
 
-            logger.info("[LlamaReranker] loading model: {} (n_ctx={})", model_path, self._config.n_ctx)
-            self._llama = Llama(
-                model_path=str(model_path),
-                n_ctx=self._config.n_ctx,
-                verbose=False,
+                self._model = LlamaCompletionModel(
+                    model_path,
+                    n_ctx=self._config.n_ctx,
+                    n_gpu_layers=self._config.n_gpu_layers,
+                    request_timeout_ms=self._config.request_timeout_ms,
+                )
+            except Exception as exc:
+                logger.warning("[LlamaReranker] client init failed, fallback: {}", exc)
+                return None
+
+        def run(prompt: str) -> Any:
+            return self._model.complete(
+                prompt,
+                max_tokens=1024,
+                temperature=self._config.temperature,
+                stop=[],
             )
-            logger.info("[LlamaReranker] model loaded")
-            return self._llama
-        except Exception as exc:
-            logger.warning("[LlamaReranker] load failed, fallback: {}", exc)
-            return None
+
+        return run
 
 
 def _build_prompt(query: str, candidates: list[MemoryCandidate]) -> str:
