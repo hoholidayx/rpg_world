@@ -29,6 +29,10 @@ class HybridRetriever(BaseRetriever):
         keyword_k: int = 50,
         reranker: LlamaReranker | None = None,
         fallback_search: RawMarkdownGrepSearch | None = None,
+        hybrid_vector_weight: float = 0.60,
+        hybrid_keyword_weight: float = 0.25,
+        hybrid_exact_weight: float = 0.10,
+        hybrid_recency_weight: float = 0.05,
     ) -> None:
         self._store = store
         self._embedding = embedding
@@ -36,6 +40,10 @@ class HybridRetriever(BaseRetriever):
         self._keyword_k = keyword_k
         self._reranker = reranker
         self._fallback_search = fallback_search or RawMarkdownGrepSearch([])
+        self._hybrid_vector_weight = hybrid_vector_weight
+        self._hybrid_keyword_weight = hybrid_keyword_weight
+        self._hybrid_exact_weight = hybrid_exact_weight
+        self._hybrid_recency_weight = hybrid_recency_weight
 
     async def retrieve(
         self, query: str, top_k: int = 5
@@ -229,7 +237,13 @@ class HybridRetriever(BaseRetriever):
             created_at = _as_float(candidate.metadata.get("created_at"))
             candidate.recency_score = 1.0 / (1.0 + max(0.0, (now - created_at) / 86400.0)) if created_at else 0.0
 
-        apply_hybrid_scores(candidates)
+        apply_hybrid_scores(
+            candidates,
+            vector_weight=self._hybrid_vector_weight,
+            keyword_weight=self._hybrid_keyword_weight,
+            exact_weight=self._hybrid_exact_weight,
+            recency_weight=self._hybrid_recency_weight,
+        )
         candidates = sorted(candidates, key=lambda item: item.hybrid_score, reverse=True)
         candidates = candidates[: max(top_k, 1)]
         if not candidates:

@@ -783,9 +783,9 @@ class RPGGameAgent:
         self._cmd_dispatcher.register_default_builtins()
 
         # 子 Agent 命令
-        if self._status_sub_agent is not None:
+        if self._status_sub_agent is not None and self._status_sub_agent.enabled:
             self._cmd_dispatcher.register_sub_agent(self._status_sub_agent)
-        if self._memory_sub_agent is not None:
+        if self._memory_sub_agent is not None and self._memory_sub_agent.enabled:
             self._cmd_dispatcher.register_sub_agent(self._memory_sub_agent)
 
         self._setup_tool_registry()
@@ -824,7 +824,7 @@ def _resolve_sub_agent_provider(
 
     enabled = settings._as_bool(cfg.get("enabled", True), True)
     if not enabled:
-        return None, SubAgentProviderConfig(mode="openai", openai={"model": "disabled"})
+        return None, SubAgentProviderConfig(mode="shared")
 
     mode = str(cfg.get("llm_provider") or "shared").strip()
     if mode not in _SUB_AGENT_PROVIDER_MODES:

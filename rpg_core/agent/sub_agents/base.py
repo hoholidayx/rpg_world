@@ -182,6 +182,11 @@ class BaseSubAgent:
                 raise RuntimeError(f"unsupported sub-agent provider mode: {self._provider_config.mode}")
         return self._own_provider
 
+    @property
+    def enabled(self) -> bool:
+        """Whether this sub-agent is active for provider calls and commands."""
+        return self._enabled
+
     # ── Context 绑定 ─────────────────────────────────────────────────
 
     def bind_context(self, context: SubAgentContext) -> None:

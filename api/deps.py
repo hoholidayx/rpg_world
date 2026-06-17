@@ -12,8 +12,9 @@ from fastapi import HTTPException
 
 from rpg_world.rpg_core.character import CharacterManager
 from rpg_world.rpg_core.lorebook import LorebookManager
-from rpg_world.rpg_core.status import StatusManager
+from rpg_world.rpg_core.session.manager import DEFAULT_SESSION_ID
 from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.status import StatusManager
 from rpg_world.rpg_core.utils.path_utils import (
     ensure_workspace_dir,
     resolve_api_workspace,
@@ -60,7 +61,7 @@ def get_lorebook_manager(workspace: str = "") -> LorebookManager:
 _session_managers: dict[tuple[str, str], StatusManager] = {}
 
 
-def get_session_status_manager(workspace: str = "", session_id: str = "default") -> StatusManager:
+def get_session_status_manager(workspace: str = "", session_id: str = DEFAULT_SESSION_ID) -> StatusManager:
     """Get or create a StatusManager for the given workspace + session.
 
     Per-session caching ensures FileWatcher callbacks don't accumulate

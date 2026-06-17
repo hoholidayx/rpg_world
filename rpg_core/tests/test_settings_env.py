@@ -92,6 +92,34 @@ def test_missing_profile_raises_value_error(tmp_path: Path, monkeypatch) -> None
         settings_module.Settings()
 
 
+def test_agent_model_is_required(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    cfg.write_text(
+        """
+base:
+  agent:
+    api_key_env: TEST_OPENAI_KEY
+  data:
+    character_path: character
+    lorebook_path: lorebook
+  memory:
+    enabled: false
+  modules:
+    telegram:
+      enabled: false
+      bots: []
+profiles:
+  local: {}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    with pytest.raises(ValueError, match="agent.model is required"):
+        settings_module.Settings()
+
+
 def test_openai_provider_uses_settings_api_key(monkeypatch) -> None:
     captured: dict[str, str | None] = {}
 

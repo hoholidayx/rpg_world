@@ -44,8 +44,18 @@ def normalize_values(
     }
 
 
-def apply_hybrid_scores(candidates: list[MemoryCandidate]) -> None:
-    """Apply the default weighted hybrid scoring formula in-place."""
+def apply_hybrid_scores(
+    candidates: list[MemoryCandidate],
+    vector_weight: float = 0.60,
+    keyword_weight: float = 0.25,
+    exact_weight: float = 0.10,
+    recency_weight: float = 0.05,
+) -> None:
+    """Apply weighted hybrid scoring formula in-place.
+
+    Weights default to the historical hardcoded values and can be
+    overridden via ``memory.hybrid_*_weight`` in settings.yaml.
+    """
     vector_norm = normalize_values(candidates, lambda item: item.vector_score)
     keyword_norm = normalize_values(candidates, lambda item: item.keyword_score)
     recency_norm = normalize_values(candidates, lambda item: item.recency_score)
@@ -61,10 +71,10 @@ def apply_hybrid_scores(candidates: list[MemoryCandidate]) -> None:
             }
         )
         candidate.hybrid_score = (
-            0.60 * vector_norm[candidate.memory_id]
-            + 0.25 * keyword_norm[candidate.memory_id]
-            + 0.10 * exact_or_fuzzy
-            + 0.05 * recency_norm[candidate.memory_id]
+            vector_weight * vector_norm[candidate.memory_id]
+            + keyword_weight * keyword_norm[candidate.memory_id]
+            + exact_weight * exact_or_fuzzy
+            + recency_weight * recency_norm[candidate.memory_id]
         )
 
 

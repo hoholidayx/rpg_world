@@ -13,14 +13,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from rpg_world.api.settings import api_settings
+from rpg_world.api.routers import character, chat, lorebook, sessions, status, workspace
+
 # Enable rpg_core logging (add handlers so logs appear regardless of uvicorn config)
 for _name in ("rpg_core.watcher", "rpg_core.manager"):
     _log = logging.getLogger(_name)
     _log.setLevel(logging.INFO)
     if not _log.handlers:
         _log.addHandler(logging.StreamHandler(sys.stderr))
-
-from rpg_world.api.routers import character, chat, lorebook, sessions, status, workspace
 
 
 @asynccontextmanager
@@ -41,9 +42,10 @@ app.add_middleware(
 )
 
 # Routers — each delegates to the corresponding rpg_core module
-app.include_router(character.router, prefix="/api/v1")
-app.include_router(chat.router, prefix="/api/v1")
-app.include_router(lorebook.router, prefix="/api/v1")
-app.include_router(sessions.router, prefix="/api/v1")
-app.include_router(status.router, prefix="/api/v1")
-app.include_router(workspace.router, prefix="/api/v1")
+_API_PREFIX = api_settings.api_prefix
+app.include_router(character.router, prefix=_API_PREFIX)
+app.include_router(chat.router, prefix=_API_PREFIX)
+app.include_router(lorebook.router, prefix=_API_PREFIX)
+app.include_router(sessions.router, prefix=_API_PREFIX)
+app.include_router(status.router, prefix=_API_PREFIX)
+app.include_router(workspace.router, prefix=_API_PREFIX)

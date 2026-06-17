@@ -200,7 +200,12 @@ def test_disabled_sub_agent_does_not_validate_unused_provider_blocks(monkeypatch
     )
 
     assert provider is None
-    assert provider_config.openai["model"] == "disabled"
+    assert provider_config.mode == "shared"
+
+    memory = MemorySubAgent(provider_config=provider_config, enabled=False)
+    assert memory.get_command_def() is None
+    assert memory.accept_command("/compact") is False
+    assert memory.accept_command("/extract_story_memory") is False
 
 
 def test_llama_provider_requires_enabled_llama_process(monkeypatch, tmp_path):

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from rpg_world.api.deps import DEFAULT_SESSION_ID, get_session_status_manager
 from rpg_world.api.schemas import StatusNameBody, StatusTableCreateBody, StatusTableSaveBody
-from rpg_world.api.deps import get_session_status_manager
 from rpg_world.rpg_core.status import StatusManager
 
 router = APIRouter(tags=["status"])
@@ -19,7 +19,7 @@ router = APIRouter(tags=["status"])
 @router.get("/status/types")
 def list_types(
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Return all status type names."""
@@ -30,7 +30,7 @@ def list_types(
 def create_type(
     body: StatusNameBody,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Create a new status type (directory)."""
@@ -49,7 +49,7 @@ def rename_type(
     type_name: str,
     body: StatusNameBody,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Rename a status type."""
@@ -69,7 +69,7 @@ def rename_type(
 def delete_type(
     type_name: str,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Delete a status type and all its tables."""
@@ -89,7 +89,7 @@ def delete_type(
 def list_tables(
     type_name: str,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Return all table names for a type."""
@@ -105,7 +105,7 @@ def create_table(
     type_name: str,
     body: StatusTableCreateBody,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Create a new table in a type."""
@@ -128,7 +128,7 @@ def get_table(
     type_name: str,
     table_name: str,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Return a single table's CSV data (headers + rows)."""
@@ -144,7 +144,7 @@ def save_table(
     table_name: str,
     body: StatusTableSaveBody,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Save (overwrite) a table's CSV data."""
@@ -163,7 +163,7 @@ def rename_table(
     table_name: str,
     body: StatusNameBody,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Rename a table."""
@@ -184,7 +184,7 @@ def delete_table(
     type_name: str,
     table_name: str,
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     manager: StatusManager = Depends(get_session_status_manager),
 ) -> dict:
     """Delete a table."""

@@ -354,6 +354,8 @@ class MemorySubAgent(BaseSubAgent):
 
     def get_command_def(self) -> list[CommandDef] | None:
         """返回此子 Agent 注册的所有斜杠命令。"""
+        if not self.enabled:
+            return None
         defs: list[CommandDef] = [
             CommandDef(
                 name=COMMAND_NAME_COMPACT,
@@ -370,9 +372,13 @@ class MemorySubAgent(BaseSubAgent):
         return defs if defs else None
 
     def accept_command(self, command: str) -> bool:
+        if not self.enabled:
+            return False
         return command in (COMMAND_NAME_COMPACT, COMMAND_NAME_EXTRACT_STORY)
 
     async def execute_command(self, command: str, args: list[str], agent: RPGGameAgent | None = None) -> dict | None:
+        if not self.enabled:
+            return None
         if command == COMMAND_NAME_EXTRACT_STORY:
             return await self._execute_story_memory(agent)
         if command == COMMAND_NAME_COMPACT:

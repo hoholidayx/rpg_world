@@ -32,8 +32,7 @@ import yaml
 
 from rpg_world.rpg_core.utils.path_utils import (
     PACKAGE_ROOT as _PACKAGE_ROOT,
-)
-from rpg_world.rpg_core.utils.path_utils import (
+    _KNOWN_DATA_DIRS,
     resolve_rpg_path,
     resolve_workspace_root,
 )
@@ -43,10 +42,6 @@ _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.yaml"
 _RPG_CORE_DIR = Path(__file__).resolve().parent
 _PROFILE_ENV = "RPG_WORLD_PROFILE"
 _TELEGRAM_BOT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9_]+$")
-
-# Known data-type subdirectories inside data/ — these are excluded from
-# workspace discovery in path_utils.list_workspaces().
-_KNOWN_DATA_DIRS = frozenset({"character", "lorebook", "memory_sub_agent", "sessions"})
 
 # Session data directory name — deterministic, not configurable.
 _SESSION_DIR_NAME = "sessions"
@@ -199,6 +194,21 @@ class MemorySettings:
 
     keyword_k: int = 50
     """混合检索中关键词召回候选数。"""
+
+    hybrid_vector_weight: float = 0.60
+    """混合评分中向量相似度归一化分数的权重。"""
+
+    hybrid_keyword_weight: float = 0.25
+    """混合评分中关键词匹配归一化分数的权重。"""
+
+    hybrid_exact_weight: float = 0.10
+    """混合评分中精确/模糊匹配分数的权重。"""
+
+    hybrid_recency_weight: float = 0.05
+    """混合评分中时间衰减归一化分数的权重。"""
+
+    rerank_llama_weight: float = 0.70
+    """Reranker 融合评分中 LLM 重排分的权重（剩余为混合分数权重）。"""
 
     rerank_enabled: bool = False
     """是否启用本地 llama.cpp 重排。"""
@@ -376,6 +386,11 @@ class Settings:
             return default
 
     def _validate_settings(self) -> None:
+        agent = self.agent_settings
+        model = self._first_non_empty(agent.get("model"))
+        if not model:
+            raise ValueError("agent config invalid: agent.model is required")
+
         modules = self.module_settings
         telegram = modules.get("telegram", {})
         if not isinstance(telegram, dict):
@@ -514,8 +529,11 @@ class Settings:
 
     @property
     def agent_model(self) -> str:
-        """用于 API 层创建 RPGGameAgent 的默认模型名。"""
-        return self.agent_settings.get("model", "deepseek-v4-flash")
+        """用于 API 层创建 RPGGameAgent 的默认模型名。
+
+        由 ``_validate_settings()`` 保证非空。
+        """
+        return self.agent_settings.get("model", "")
 
     @property
     def agent_base_url(self) -> str | None:
@@ -605,12 +623,17 @@ class Settings:
             hybrid_enabled=raw.get("hybrid_enabled", True),
             vector_k=raw.get("vector_k", 50),
             keyword_k=raw.get("keyword_k", 50),
+            hybrid_vector_weight=raw.get("hybrid_vector_weight", 0.60),
+            hybrid_keyword_weight=raw.get("hybrid_keyword_weight", 0.25),
+            hybrid_exact_weight=raw.get("hybrid_exact_weight", 0.10),
+            hybrid_recency_weight=raw.get("hybrid_recency_weight", 0.05),
             rerank_enabled=raw.get("rerank_enabled", False),
             rerank_model_path=rerank_resolved,
             rerank_max_candidates=raw.get("rerank_max_candidates", 10),
             rerank_n_ctx=raw.get("rerank_n_ctx", 4096),
             rerank_n_gpu_layers=self._as_int(raw.get("rerank_n_gpu_layers", 0), 0),
             rerank_temperature=raw.get("rerank_temperature", 0.0),
+            rerank_llama_weight=raw.get("rerank_llama_weight", 0.70),
             query_planner_enabled=raw.get("query_planner_enabled", False),
             query_planner_model_path=planner_resolved,
             query_planner_n_ctx=raw.get("query_planner_n_ctx", 2048),

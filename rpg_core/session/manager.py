@@ -31,6 +31,9 @@ _TAG = "[SessionManager]"
 
 # Module-level constants — avoid magic strings scattered throughout
 _DEFAULT_SESSION_ID = "default"
+
+# Public constant for use by API and other layers.
+DEFAULT_SESSION_ID = _DEFAULT_SESSION_ID
 _META_TMP_SUFFIX = ".json.tmp"
 _META_CREATED_AT = "created_at"
 _META_UPDATED_AT = "updated_at"

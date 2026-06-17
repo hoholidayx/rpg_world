@@ -72,6 +72,11 @@ class ApiSettings:
         """Optional file path for chat logs.  ``None`` → stderr only."""
         return self._raw.get("log_path")
 
+    @property
+    def api_prefix(self) -> str:
+        """API 路由前缀（含版本号，如 ``/api/v1``）。"""
+        return self._raw.get("api_prefix", "/api/v1")
+
 
 # Singleton
 api_settings = ApiSettings()

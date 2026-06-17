@@ -134,6 +134,11 @@ base:
     vector_k: 50
     # 混合检索中关键词召回候选数
     keyword_k: 50
+    # 混合评分权重（可调优检索排序）
+    hybrid_vector_weight: 0.60
+    hybrid_keyword_weight: 0.25
+    hybrid_exact_weight: 0.10
+    hybrid_recency_weight: 0.05
     # 查询规划器：是否启用
     query_planner_enabled: false
     # 查询规划器模型路径（留空则使用规则规划器）
@@ -158,6 +163,8 @@ base:
     rerank_n_gpu_layers: 0
     # 重排模型采样温度
     rerank_temperature: 0.0
+    # Reranker 融合权重（llama 分占比，剩余为混合分）
+    rerank_llama_weight: 0.70
     # 向量检索返回的最大结果数
     top_k: 2
     # 单文件超过此字符数时进行分块

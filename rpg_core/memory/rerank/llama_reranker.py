@@ -22,6 +22,8 @@ class LlamaRerankConfig:
     n_gpu_layers: int = 0
     temperature: float = 0.0
     request_timeout_ms: int = 60000
+    llama_weight: float = 0.70
+    """Reranker 融合评分中 LLM 分的权重（剩余 ``1 - llama_weight`` 为混合分权重）。"""
 
 
 class LlamaReranker:
@@ -85,8 +87,8 @@ class LlamaReranker:
             key = str(candidate.memory_id)
             llama_score_norm = max(0.0, min(1.0, scores.get(key, 0.0) / 100.0))
             candidate.rerank_score = (
-                0.7 * llama_score_norm
-                + 0.3 * hybrid_norm[candidate.memory_id]
+                self._config.llama_weight * llama_score_norm
+                + (1.0 - self._config.llama_weight) * hybrid_norm[candidate.memory_id]
             )
             if key in reasons:
                 candidate.debug["llama_reason"] = reasons[key]

@@ -314,6 +314,7 @@ class MemoryManager:
                     n_gpu_layers=mem_cfg.rerank_n_gpu_layers,
                     temperature=mem_cfg.rerank_temperature,
                     request_timeout_ms=mem_cfg.llama_request_timeout_ms,
+                    llama_weight=mem_cfg.rerank_llama_weight,
                 )
             )
             return HybridRetriever(
@@ -323,6 +324,10 @@ class MemoryManager:
                 keyword_k=mem_cfg.keyword_k,
                 reranker=reranker,
                 fallback_search=fallback_search,
+                hybrid_vector_weight=mem_cfg.hybrid_vector_weight,
+                hybrid_keyword_weight=mem_cfg.hybrid_keyword_weight,
+                hybrid_exact_weight=mem_cfg.hybrid_exact_weight,
+                hybrid_recency_weight=mem_cfg.hybrid_recency_weight,
             )
 
         logger.info("[MemoryManager] retriever mode — dense vector")

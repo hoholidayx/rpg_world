@@ -42,10 +42,15 @@ def test_llama_process_disabled_degrades_without_provider():
         rerank_n_ctx=4096,
         rerank_n_gpu_layers=7,
         rerank_temperature=0.0,
+        rerank_llama_weight=0.70,
         llama_request_timeout_ms=60000,
         hybrid_enabled=True,
         vector_k=50,
         keyword_k=50,
+        hybrid_vector_weight=0.60,
+        hybrid_keyword_weight=0.25,
+        hybrid_exact_weight=0.10,
+        hybrid_recency_weight=0.05,
     )
 
     assert MemoryManager._build_embedding(mem_cfg) is None

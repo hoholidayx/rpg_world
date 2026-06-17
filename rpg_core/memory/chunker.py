@@ -23,6 +23,14 @@ class Chunk:
 _FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 _LIST_ITEM_RE = re.compile(r"^\s+-\s+(.+)")
 
+# Supported file extensions for text extraction — used consistently
+# by FileTextExtractor and Chunker.
+_EXT_MARKDOWN = ".md"
+_EXT_JSON = ".json"
+_EXT_JSONL = ".jsonl"
+_EXT_CSV = ".csv"
+_KNOWN_TEXT_EXTS = frozenset({_EXT_MARKDOWN, _EXT_JSON, _EXT_JSONL, _EXT_CSV})
+
 
 def _parse_front_matter(text: str) -> tuple[dict[str, str], str]:
     """Extract YAML-ish front matter from markdown (handles ``key: value`` and
@@ -55,13 +63,13 @@ class FileTextExtractor:
     @staticmethod
     def extract(path: Path) -> tuple[str, dict[str, str]]:
         ext = path.suffix.lower()
-        if ext == ".md":
+        if ext == _EXT_MARKDOWN:
             return FileTextExtractor._md(path)
-        if ext == ".json":
+        if ext == _EXT_JSON:
             return FileTextExtractor._json(path)
-        if ext == ".jsonl":
+        if ext == _EXT_JSONL:
             return FileTextExtractor._jsonl(path)
-        if ext == ".csv":
+        if ext == _EXT_CSV:
             return FileTextExtractor._csv(path)
         return FileTextExtractor._raw(path)
 

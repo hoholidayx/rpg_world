@@ -16,6 +16,7 @@ from rpg_world.rpg_core.utils.path_utils import (
 )
 from rpg_world.rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
 
+from rpg_world.api.deps import DEFAULT_SESSION_ID
 from rpg_world.api.logger import chat_logger
 from rpg_world.api.settings import api_settings
 from rpg_world.rpg_core.utils.stats_formatter import format_event_stats, format_turn_stats
@@ -25,7 +26,7 @@ router = APIRouter(tags=["chat"])
 
 def _get_agent(
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     api_key: str | None = None,
 ) -> "RPGGameAgent":
     """Get or create an RPGGameAgent via the shared AgentManager.
@@ -56,7 +57,7 @@ def _get_agent(
 @router.get("/chat/history")
 async def get_chat_history(
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
     """Return the conversation history for the given session.
@@ -165,7 +166,7 @@ async def chat_command(
 @router.get("/chat/commands")
 async def list_commands(
     workspace: str = "",
-    session_id: str = "default",
+    session_id: str = DEFAULT_SESSION_ID,
     x_openai_api_key: str | None = Header(None),
 ) -> dict:
     """返回所有可用的斜杠命令定义（供前端动态渲染命令弹窗）。"""

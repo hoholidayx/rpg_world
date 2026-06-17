@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from rpg_world.rpg_core.session.manager import DEFAULT_SESSION_ID
+
 
 class _BaseSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -22,12 +24,12 @@ class SessionCloneBody(_BaseSchema):
 
 
 class ChatMessageBody(_BaseSchema):
-    session_id: str = "default"
+    session_id: str = DEFAULT_SESSION_ID
     message: str
 
 
 class ChatCommandBody(_BaseSchema):
-    session_id: str = "default"
+    session_id: str = DEFAULT_SESSION_ID
     command: str
 
 
