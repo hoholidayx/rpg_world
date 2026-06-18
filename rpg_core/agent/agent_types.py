@@ -20,6 +20,26 @@ from asyncio import Queue as AsyncQueue
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
+from typing import Literal
+
+
+# ── LLM provider 常量 ──────────────────────────────────────────────────
+
+LLM_PROVIDER_SHARED = "shared"
+LLM_PROVIDER_OPENAI = "openai"
+LLM_PROVIDER_LLAMA = "llama"
+
+LLM_PROVIDER_MODES = (
+    LLM_PROVIDER_SHARED,
+    LLM_PROVIDER_OPENAI,
+    LLM_PROVIDER_LLAMA,
+)
+
+SubAgentProviderMode = Literal[
+    LLM_PROVIDER_SHARED,
+    LLM_PROVIDER_OPENAI,
+    LLM_PROVIDER_LLAMA,
+]
 
 
 # ── shared JSON type aliases ──────────────────────────────────────────

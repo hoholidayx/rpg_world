@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from rpg_world.rpg_core.constants import (
+from rpg_world.rpg_core.agent.agent_types import (
     LLM_PROVIDER_LLAMA,
     LLM_PROVIDER_MODES,
     LLM_PROVIDER_OPENAI,
