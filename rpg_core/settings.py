@@ -24,9 +24,9 @@ Session-scoped data paths are deterministic (not user-configurable):
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -161,12 +161,37 @@ def _load_profile_file(profile_name: str, file_value: str, *, required: bool) ->
     return _load_yaml_mapping(path, f"settings profile file: {profile_name}")
 
 
+def _as_mapping(value: Any, label: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a mapping")
+    return value
+
+
 @dataclass
 class MemorySettings:
     """记忆系统配置（对应 settings.yaml 中 ``memory`` 节）。"""
 
+    @dataclass(frozen=True)
+    class Provider:
+        """单个 memory provider 的配置块。"""
+
+        provider: Literal["shared", "openai", "llama"] = "llama"
+        openai: dict[str, Any] = field(default_factory=dict)
+        llama: dict[str, Any] = field(default_factory=dict)
+
     enabled: bool = False
     """是否启用向量记忆索引与检索。"""
+
+    embedding_provider: Provider = field(default_factory=Provider)
+    """Embedding provider 配置。"""
+
+    query_planner_provider: Provider = field(default_factory=Provider)
+    """Query planner provider 配置。"""
+
+    rerank_provider: Provider = field(default_factory=Provider)
+    """Reranker provider 配置。"""
 
     embedding_model_path: str = ""
     """嵌入模型 GGUF 文件路径（相对于工作区根目录），为空时禁用。"""
@@ -312,12 +337,28 @@ class Settings:
 
     def get_openai_api_key(self, explicit: str | None = None) -> str | None:
         """Return API key with priority: explicit -> YAML api_key -> env(api_key_env)."""
+        return self.resolve_openai_api_key(explicit=explicit)
+
+    def resolve_openai_api_key(
+        self,
+        *,
+        explicit: str | None = None,
+        explicit_env: str | None = None,
+        fallback_to_agent: bool = True,
+    ) -> str | None:
+        """Resolve an OpenAI API key from explicit values and optional agent fallback."""
         agent = self.agent_settings
-        api_key_env = self._first_non_empty(agent.get("api_key_env"))
+        if not fallback_to_agent:
+            return self._first_non_empty(
+                explicit,
+                os.environ.get(explicit_env) if explicit_env else None,
+            )
+        agent_env = self._first_non_empty(agent.get("api_key_env"))
         return self._first_non_empty(
             explicit,
+            os.environ.get(explicit_env) if explicit_env else None,
             agent.get("api_key"),
-            os.environ.get(api_key_env) if api_key_env else None,
+            os.environ.get(agent_env) if agent_env else None,
         )
 
     @property
@@ -590,6 +631,55 @@ class Settings:
         raw = self._raw.get("memory", {})
         if not isinstance(raw, dict):
             raw = {}
+
+        shared_openai = _as_mapping(raw.get("openai"), "memory.openai")
+        embedding_provider = self._resolve_memory_provider(
+            raw,
+            key="embedding",
+            provider_key="embedding_provider",
+            legacy_provider="llama",
+            legacy_openai=shared_openai,
+            legacy_llama={
+                "model_path": raw.get("embedding_model_path", ""),
+                "n_ctx": raw.get("n_ctx", 32768),
+                "n_gpu_layers": raw.get("n_gpu_layers", 0),
+                "n_threads": raw.get("embedding_n_threads", 4),
+                "verbose": raw.get("embedding_verbose", False),
+                "request_timeout_ms": raw.get("llama_request_timeout_ms", 60000),
+            },
+        )
+        query_planner_provider = self._resolve_memory_provider(
+            raw,
+            key="query_planner",
+            provider_key="query_planner_provider",
+            legacy_provider="llama" if raw.get("query_planner_enabled", False) else "llama",
+            legacy_openai=shared_openai,
+            legacy_llama={
+                "model_path": raw.get("query_planner_model_path", ""),
+                "n_ctx": raw.get("query_planner_n_ctx", 2048),
+                "n_gpu_layers": raw.get("query_planner_n_gpu_layers", 0),
+                "temperature": raw.get("query_planner_temperature", 0.0),
+                "max_tokens": raw.get("query_planner_max_tokens", 512),
+                "request_timeout_ms": raw.get("llama_request_timeout_ms", 60000),
+            },
+        )
+        rerank_provider = self._resolve_memory_provider(
+            raw,
+            key="rerank",
+            provider_key="rerank_provider",
+            legacy_provider="llama" if raw.get("rerank_enabled", False) else "llama",
+            legacy_openai=shared_openai,
+            legacy_llama={
+                "model_path": raw.get("rerank_model_path", ""),
+                "max_candidates": raw.get("rerank_max_candidates", 10),
+                "n_ctx": raw.get("rerank_n_ctx", 4096),
+                "n_gpu_layers": raw.get("rerank_n_gpu_layers", 0),
+                "temperature": raw.get("rerank_temperature", 0.0),
+                "llama_weight": raw.get("rerank_llama_weight", 0.70),
+                "request_timeout_ms": raw.get("llama_request_timeout_ms", 60000),
+            },
+        )
+
         embed_raw = raw.get("embedding_model_path", "")
         if embed_raw:
             p = Path(embed_raw)
@@ -614,6 +704,9 @@ class Settings:
             planner_resolved = planner_raw
         return MemorySettings(
             enabled=raw.get("enabled", False),
+            embedding_provider=embedding_provider,
+            query_planner_provider=query_planner_provider,
+            rerank_provider=rerank_provider,
             embedding_model_path=embed_resolved,
             n_ctx=raw.get("n_ctx", 32768),
             n_gpu_layers=raw.get("n_gpu_layers", 0),
@@ -647,6 +740,55 @@ class Settings:
             chunk_size=raw.get("chunk_size", 2000),
             chunk_overlap=raw.get("chunk_overlap", 64),
         )
+
+    @staticmethod
+    def _resolve_memory_provider(
+        raw: dict[str, Any],
+        *,
+        key: str,
+        provider_key: str,
+        legacy_provider: str,
+        legacy_openai: dict[str, Any],
+        legacy_llama: dict[str, Any],
+    ) -> MemorySettings.Provider:
+        block = raw.get(key, {})
+        if block is None:
+            block = {}
+        if not isinstance(block, dict):
+            raise ValueError(f"memory.{key} must be a mapping")
+
+        provider = str(
+            block.get("provider")
+            if block.get("provider") is not None
+            else raw.get(provider_key, legacy_provider)
+        ).strip() or legacy_provider
+        openai_cfg = _as_mapping(block.get("openai"), f"memory.{key}.openai")
+        openai_cfg = {
+            **dict(legacy_openai),
+            **openai_cfg,
+        }
+        llama_cfg = _as_mapping(block.get("llama"), f"memory.{key}.llama")
+        llama_cfg = {
+            **dict(legacy_llama),
+            **llama_cfg,
+        }
+        if llama_cfg.get("model_path"):
+            llama_cfg["model_path"] = Settings._resolve_package_model_path(llama_cfg.get("model_path"))
+        return MemorySettings.Provider(
+            provider=provider,
+            openai=openai_cfg,
+            llama=llama_cfg,
+        )
+
+    @staticmethod
+    def _resolve_package_model_path(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        path = Path(text)
+        if path.is_absolute():
+            return str(path)
+        return str((_PACKAGE_ROOT / path).resolve())
 
     def get_vector_db_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``memory_vectors.db`` path for the given session."""

@@ -8,11 +8,13 @@ from rpg_world.rpg_core.memory.planning.planner import (
     QueryPlanError,
     RuleBasedQueryPlanner,
 )
+from rpg_world.rpg_core.memory.planning.openai_planner import OpenAIQueryPlanner
 
 __all__ = [
     "BaseQueryPlanner",
     "FallbackQueryPlanner",
     "LlamaQueryPlanner",
+    "OpenAIQueryPlanner",
     "QueryPlan",
     "QueryPlanError",
     "RuleBasedQueryPlanner",

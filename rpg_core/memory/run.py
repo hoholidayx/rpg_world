@@ -58,6 +58,42 @@ def _format_workspace_name(workspace: str) -> str:
     return workspace or "默认（根工作区）"
 
 
+def _format_secret(value: str | None) -> str:
+    return "set" if value else "unset"
+
+
+def _print_line(label: str, value: object, indent: str = "  ") -> None:
+    print(f"{indent}{label:<24} {value}")
+
+
+def _print_provider_config(title: str, provider_cfg) -> None:  # noqa: ANN001
+    print(f"  {title}:")
+    _print_line("provider:", provider_cfg.provider, "    ")
+    openai = provider_cfg.openai or {}
+    llama = provider_cfg.llama or {}
+    _print_line("openai.model:", openai.get("model") or "unset", "    ")
+    _print_line("openai.api_key:", _format_secret(openai.get("api_key")), "    ")
+    _print_line("openai.api_key_env:", openai.get("api_key_env") or "unset", "    ")
+    _print_line("openai.base_url:", openai.get("base_url") or "unset", "    ")
+    _print_line("openai.max_tokens:", openai.get("max_tokens") if openai.get("max_tokens") is not None else "unset", "    ")
+    _print_line("openai.temperature:", openai.get("temperature") if openai.get("temperature") is not None else "unset", "    ")
+    if llama:
+        for key, label in [
+            ("model_path", "llama.model_path"),
+            ("n_ctx", "llama.n_ctx"),
+            ("n_gpu_layers", "llama.n_gpu_layers"),
+            ("n_threads", "llama.n_threads"),
+            ("verbose", "llama.verbose"),
+            ("request_timeout_ms", "llama.request_timeout_ms"),
+            ("max_candidates", "llama.max_candidates"),
+            ("max_tokens", "llama.max_tokens"),
+            ("temperature", "llama.temperature"),
+            ("llama_weight", "llama.llama_weight"),
+        ]:
+            if key in llama:
+                _print_line(f"{label}:", llama.get(key), "    ")
+
+
 def _print_available_workspaces() -> None:
     workspaces = list_workspaces(PACKAGE_ROOT)
     print("  可用 workspaces:")
@@ -87,18 +123,30 @@ def show_config(workspace: str, session: str) -> None:
 
     mem = settings.memory_settings
     _print_available_workspaces()
-    print(f"  选中 workspace:     {workspace}")
-    print(f"  选中 session:       {session}")
-    print(f"  enabled:              {mem.enabled}")
-    print(f"  embedding_model_path: {mem.embedding_model_path}")
-    print(f"  exists:               {Path(mem.embedding_model_path).exists()}")
-    print(f"  n_ctx:                {mem.n_ctx}")
-    print(f"  n_gpu_layers:         {mem.n_gpu_layers}")
-    print(f"  top_k:                {mem.top_k}")
-    print(f"  chunk_size:           {mem.chunk_size}")
-    print(f"  chunk_overlap:        {mem.chunk_overlap}")
-    print(f"  DB path:              {settings.get_vector_db_path(workspace, session)}")
-    print(f"  session dir:          {settings.session_dir(workspace, session)}")
+    _print_line("选中 workspace:", workspace)
+    _print_line("选中 session:", session)
+    _print_line("enabled:", mem.enabled)
+    _print_provider_config("embedding", mem.embedding_provider)
+    _print_line("hybrid_enabled:", mem.hybrid_enabled)
+    _print_line("vector_k:", mem.vector_k)
+    _print_line("keyword_k:", mem.keyword_k)
+    _print_line("hybrid_vector_weight:", mem.hybrid_vector_weight)
+    _print_line("hybrid_keyword_weight:", mem.hybrid_keyword_weight)
+    _print_line("hybrid_exact_weight:", mem.hybrid_exact_weight)
+    _print_line("hybrid_recency_weight:", mem.hybrid_recency_weight)
+    _print_line("top_k:", mem.top_k)
+    _print_line("chunk_size:", mem.chunk_size)
+    _print_line("chunk_overlap:", mem.chunk_overlap)
+    _print_line("llama_process_enabled:", mem.llama_process_enabled)
+    _print_line("llama_request_timeout_ms:", mem.llama_request_timeout_ms)
+    _print_line("llama_startup_timeout_ms:", mem.llama_startup_timeout_ms)
+    _print_line("llama_max_parallel_models:", mem.llama_max_parallel_models)
+    _print_line("query_planner_enabled:", mem.query_planner_enabled)
+    _print_provider_config("query_planner", mem.query_planner_provider)
+    _print_line("rerank_enabled:", mem.rerank_enabled)
+    _print_provider_config("rerank", mem.rerank_provider)
+    _print_line("DB path:", settings.get_vector_db_path(workspace, session))
+    _print_line("session dir:", settings.session_dir(workspace, session))
 
 
 def create_manager(workspace: str, session: str) -> MemoryManager | None:

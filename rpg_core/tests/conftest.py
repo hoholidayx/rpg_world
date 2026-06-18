@@ -249,6 +249,9 @@ def temp_settings(tmp_path, monkeypatch):
 def fake_memory_cfg():
     return SimpleNamespace(
         enabled=True,
+        embedding_provider=SimpleNamespace(provider="llama", openai={}, llama={}),
+        query_planner_provider=SimpleNamespace(provider="llama", openai={}, llama={}),
+        rerank_provider=SimpleNamespace(provider="llama", openai={}, llama={}),
         embedding_model_path="",
         n_ctx=32768,
         n_gpu_layers=0,

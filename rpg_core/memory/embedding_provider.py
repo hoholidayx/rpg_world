@@ -11,6 +11,10 @@ import asyncio
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from openai import AsyncOpenAI
+
+from rpg_world.rpg_core.memory.asyncio_utils import run_awaitable_sync
+
 
 class EmbeddingProviderError(Exception):
     """Raised when the embedding provider cannot fulfil a request."""
@@ -73,3 +77,45 @@ class LlamaClientEmbeddingProvider(EmbeddingProvider):
 
     def dimension(self) -> int:
         return self._dim
+
+
+class OpenAIEmbeddingProvider(EmbeddingProvider):
+    """OpenAI-compatible embedding provider."""
+
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout_ms: int | None = None,
+    ) -> None:
+        self._model = model
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
+        self._timeout_ms = timeout_ms
+        self._dimension: int | None = None
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        response = await self._client.embeddings.create(
+            model=self._model,
+            input=texts,
+        )
+        vectors = [list(item.embedding) for item in response.data]
+        if vectors and self._dimension is None:
+            self._dimension = len(vectors[0])
+        return vectors
+
+    def embed_sync(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return run_awaitable_sync(self.embed(texts))
+
+    def dimension(self) -> int:
+        if self._dimension is not None:
+            return self._dimension
+        vectors = self.embed_sync(["dimension probe"])
+        return len(vectors[0]) if vectors else 0

@@ -19,10 +19,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from loguru import logger
 
+from rpg_world.rpg_core.constants import (
+    LLM_PROVIDER_LLAMA,
+    LLM_PROVIDER_OPENAI,
+    LLM_PROVIDER_SHARED,
+    SubAgentProviderMode,
+)
 from rpg_world.rpg_core.agent.tools.base import BaseTool
 
 if TYPE_CHECKING:
@@ -32,14 +38,11 @@ if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
 
 
-SubAgentProviderMode = Literal["shared", "openai", "llama"]
-
-
 @dataclass(frozen=True)
 class SubAgentProviderConfig:
     """Resolved provider configuration for a sub-agent."""
 
-    mode: SubAgentProviderMode = "shared"
+    mode: SubAgentProviderMode = LLM_PROVIDER_SHARED
     openai: dict[str, Any] = field(default_factory=dict)
     llama: dict[str, Any] = field(default_factory=dict)
 
@@ -88,10 +91,10 @@ class BaseSubAgent:
         if provider_config is None:
             if provider is None:
                 raise ValueError("sub-agent provider_config is required when no shared provider is supplied")
-            provider_config = SubAgentProviderConfig(mode="shared")
-        if provider is not None and provider_config.mode != "shared":
+            provider_config = SubAgentProviderConfig(mode=LLM_PROVIDER_SHARED)
+        if provider is not None and provider_config.mode != LLM_PROVIDER_SHARED:
             raise ValueError("sub-agent independent provider mode must not receive a shared provider")
-        if provider_config.mode == "shared" and provider is None and enabled:
+        if provider_config.mode == LLM_PROVIDER_SHARED and provider is None and enabled:
             raise ValueError("sub-agent shared provider mode requires a shared provider")
         self._shared_provider = provider
         self._provider_config = provider_config
@@ -149,13 +152,13 @@ class BaseSubAgent:
         子类应通过此方法获取 provider，而非直接访问 ``_shared_provider``
         或 ``_own_provider``。
         """
-        if self._provider_config.mode == "shared":
+        if self._provider_config.mode == LLM_PROVIDER_SHARED:
             if self._shared_provider is None:
                 raise RuntimeError("shared provider is not configured")
             return self._shared_provider
 
         if self._own_provider is None:
-            if self._provider_config.mode == "openai":
+            if self._provider_config.mode == LLM_PROVIDER_OPENAI:
                 from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
 
                 cfg = self._provider_config.openai
@@ -166,7 +169,7 @@ class BaseSubAgent:
                     max_tokens=cfg.get("max_tokens"),
                     temperature=cfg.get("temperature"),
                 )
-            elif self._provider_config.mode == "llama":
+            elif self._provider_config.mode == LLM_PROVIDER_LLAMA:
                 from rpg_world.rpg_core.agent.sub_agents.llama_provider import LlamaCompletionProvider
 
                 cfg = self._provider_config.llama

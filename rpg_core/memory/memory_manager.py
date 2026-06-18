@@ -11,9 +11,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+from rpg_world.rpg_core.constants import (
+    LLM_PROVIDER_LLAMA,
+    LLM_PROVIDER_MODES,
+    LLM_PROVIDER_OPENAI,
+    LLM_PROVIDER_SHARED,
+)
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.memory.planning.planner import BaseQueryPlanner
@@ -178,10 +185,68 @@ class MemoryManager:
 
     @staticmethod
     def _build_embedding(mem_cfg: MemorySettings):
-        embed_path = mem_cfg.embedding_model_path
+        if not hasattr(mem_cfg, "embedding_provider"):
+            embed_path = mem_cfg.embedding_model_path
+            if not embed_path:
+                logger.warning("[MemoryManager] embedding_model_path not configured")
+                return None
+            if not mem_cfg.llama_process_enabled:
+                logger.warning("[MemoryManager] embedding disabled — llama_process_enabled=false")
+                return None
+            try:
+                from rpg_world.rpg_core.memory.embedding_provider import LlamaClientEmbeddingProvider
+
+                logger.info(
+                    "[MemoryManager] loading embedding model: {} (n_ctx={}, n_gpu_layers={})",
+                    embed_path, mem_cfg.n_ctx, mem_cfg.n_gpu_layers,
+                )
+                embedding = LlamaClientEmbeddingProvider(
+                    gguf_model_path=embed_path,
+                    n_ctx=mem_cfg.n_ctx,
+                    n_gpu_layers=mem_cfg.n_gpu_layers,
+                    n_threads=mem_cfg.embedding_n_threads,
+                    verbose=mem_cfg.embedding_verbose,
+                    request_timeout_ms=mem_cfg.llama_request_timeout_ms,
+                )
+                logger.info("[MemoryManager] model loaded — dim={}", embedding.dimension())
+                return embedding
+            except Exception as exc:
+                logger.warning("[MemoryManager] embedding init failed: {}", exc)
+                return None
+
+        provider_cfg = mem_cfg.embedding_provider
+        mode = MemoryManager._provider_mode(provider_cfg, "embedding")
+        if mode == LLM_PROVIDER_SHARED:
+            raise ValueError("memory.embedding_provider=shared is not supported")
+
+        if mode == LLM_PROVIDER_OPENAI:
+            openai_cfg = provider_cfg.openai
+            model = MemoryManager._require_non_empty(openai_cfg.get("model"), "memory.embedding_provider.openai.model")
+            if not model:
+                raise ValueError("memory.embedding_provider.openai.model is required")
+            try:
+                from rpg_world.rpg_core.memory.embedding_provider import OpenAIEmbeddingProvider
+
+                embedding = OpenAIEmbeddingProvider(
+                    model=model,
+                    api_key=MemoryManager._resolve_memory_openai_api_key(openai_cfg),
+                    base_url=MemoryManager._optional_str(openai_cfg.get("base_url")),
+                    timeout_ms=MemoryManager._optional_int(openai_cfg.get("timeout_ms"), None),
+                )
+                try:
+                    logger.info("[MemoryManager] loading openai embedding model: {}", model)
+                    logger.info("[MemoryManager] openai embedding dim={}", embedding.dimension())
+                except Exception as exc:
+                    logger.warning("[MemoryManager] openai embedding probe failed: {}", exc)
+                    return None
+                return embedding
+            except Exception as exc:
+                logger.warning("[MemoryManager] openai embedding init failed: {}", exc)
+                return None
+
+        embed_path = MemoryManager._optional_str(provider_cfg.llama.get("model_path")) or mem_cfg.embedding_model_path
         if not embed_path:
-            logger.warning("[MemoryManager] embedding_model_path not configured")
-            return None
+            raise ValueError("memory.embedding_provider.llama.model_path is required")
         if not mem_cfg.llama_process_enabled:
             logger.warning("[MemoryManager] embedding disabled — llama_process_enabled=false")
             return None
@@ -191,15 +256,17 @@ class MemoryManager:
 
             logger.info(
                 "[MemoryManager] loading embedding model: {} (n_ctx={}, n_gpu_layers={})",
-                embed_path, mem_cfg.n_ctx, mem_cfg.n_gpu_layers,
+                embed_path,
+                MemoryManager._optional_int(provider_cfg.llama.get("n_ctx"), mem_cfg.n_ctx),
+                MemoryManager._optional_int(provider_cfg.llama.get("n_gpu_layers"), mem_cfg.n_gpu_layers),
             )
             embedding = LlamaClientEmbeddingProvider(
                 gguf_model_path=embed_path,
-                n_ctx=mem_cfg.n_ctx,
-                n_gpu_layers=mem_cfg.n_gpu_layers,
-                n_threads=mem_cfg.embedding_n_threads,
-                verbose=mem_cfg.embedding_verbose,
-                request_timeout_ms=mem_cfg.llama_request_timeout_ms,
+                n_ctx=MemoryManager._optional_int(provider_cfg.llama.get("n_ctx"), mem_cfg.n_ctx) or mem_cfg.n_ctx,
+                n_gpu_layers=MemoryManager._optional_int(provider_cfg.llama.get("n_gpu_layers"), mem_cfg.n_gpu_layers) or mem_cfg.n_gpu_layers,
+                n_threads=MemoryManager._optional_int(provider_cfg.llama.get("n_threads"), mem_cfg.embedding_n_threads) or mem_cfg.embedding_n_threads,
+                verbose=provider_cfg.llama.get("verbose") if provider_cfg.llama.get("verbose") is not None else mem_cfg.embedding_verbose,
+                request_timeout_ms=MemoryManager._optional_int(provider_cfg.llama.get("request_timeout_ms"), mem_cfg.llama_request_timeout_ms) or mem_cfg.llama_request_timeout_ms,
             )
             logger.info("[MemoryManager] model loaded — dim={}", embedding.dimension())
             return embedding
@@ -286,10 +353,7 @@ class MemoryManager:
 
     @staticmethod
     def _build_retriever(store, embedding, mem_cfg: MemorySettings, fallback_search):
-        from rpg_world.rpg_core.memory.rerank.llama_reranker import (
-            LlamaRerankConfig,
-            LlamaReranker,
-        )
+        from rpg_world.rpg_core.memory.rerank import LlamaRerankConfig, LlamaReranker, OpenAIReranker
         from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import HybridRetriever
         from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
         from rpg_world.rpg_core.memory.retrieval.retriever import DenseRetriever
@@ -305,18 +369,7 @@ class MemoryManager:
                 True,
                 mem_cfg.rerank_enabled,
             )
-            reranker = LlamaReranker(
-                LlamaRerankConfig(
-                    enabled=mem_cfg.rerank_enabled and mem_cfg.llama_process_enabled,
-                    model_path=mem_cfg.rerank_model_path,
-                    max_candidates=mem_cfg.rerank_max_candidates,
-                    n_ctx=mem_cfg.rerank_n_ctx,
-                    n_gpu_layers=mem_cfg.rerank_n_gpu_layers,
-                    temperature=mem_cfg.rerank_temperature,
-                    request_timeout_ms=mem_cfg.llama_request_timeout_ms,
-                    llama_weight=mem_cfg.rerank_llama_weight,
-                )
-            )
+            reranker = MemoryManager._build_reranker(mem_cfg)
             return HybridRetriever(
                 store=store,
                 embedding=embedding,
@@ -335,9 +388,42 @@ class MemoryManager:
 
     @staticmethod
     def _build_query_planner(mem_cfg: MemorySettings):
-        from rpg_world.rpg_core.memory.planning.planner import (
+        if not hasattr(mem_cfg, "query_planner_provider"):
+            from rpg_world.rpg_core.memory.planning.planner import (
+                FallbackQueryPlanner,
+                LlamaQueryPlanner,
+                RuleBasedQueryPlanner,
+            )
+
+            fallback = RuleBasedQueryPlanner()
+            if not mem_cfg.query_planner_enabled:
+                logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
+                return fallback
+            if not mem_cfg.llama_process_enabled:
+                logger.info("[MemoryManager] query planner mode — rule-based (llama_process_enabled=false)")
+                return fallback
+            if not mem_cfg.query_planner_model_path:
+                logger.warning("[MemoryManager] query planner model_path not configured — rule-based fallback")
+                return fallback
+            try:
+                planner = LlamaQueryPlanner(
+                    model_path=mem_cfg.query_planner_model_path,
+                    n_ctx=mem_cfg.query_planner_n_ctx,
+                    n_gpu_layers=mem_cfg.query_planner_n_gpu_layers,
+                    temperature=mem_cfg.query_planner_temperature,
+                    max_tokens=mem_cfg.query_planner_max_tokens,
+                    request_timeout_ms=mem_cfg.llama_request_timeout_ms,
+                )
+                logger.info("[MemoryManager] query planner mode — llama")
+                return FallbackQueryPlanner(planner, fallback)
+            except Exception as exc:
+                logger.warning("[MemoryManager] query planner init failed — rule-based fallback: {}", exc)
+                return fallback
+
+        from rpg_world.rpg_core.memory.planning import (
             FallbackQueryPlanner,
             LlamaQueryPlanner,
+            OpenAIQueryPlanner,
             RuleBasedQueryPlanner,
         )
 
@@ -345,26 +431,172 @@ class MemoryManager:
         if not mem_cfg.query_planner_enabled:
             logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
             return fallback
-        if not mem_cfg.llama_process_enabled:
-            logger.info("[MemoryManager] query planner mode — rule-based (llama_process_enabled=false)")
-            return fallback
-        if not mem_cfg.query_planner_model_path:
-            logger.warning("[MemoryManager] query planner model_path not configured — rule-based fallback")
-            return fallback
+        provider_cfg = mem_cfg.query_planner_provider
+        mode = MemoryManager._provider_mode(provider_cfg, "query_planner")
+        if mode == LLM_PROVIDER_SHARED:
+            raise ValueError("memory.query_planner_provider=shared is not supported")
+
+        openai_model = None
+        if mode == LLM_PROVIDER_OPENAI:
+            openai_cfg = provider_cfg.openai
+            openai_model = MemoryManager._require_non_empty(openai_cfg.get("model"), "memory.query_planner_provider.openai.model")
+
         try:
+            if mode == LLM_PROVIDER_OPENAI:
+                openai_cfg = provider_cfg.openai
+                planner = OpenAIQueryPlanner(
+                    model=openai_model or "",
+                    api_key=MemoryManager._resolve_memory_openai_api_key(openai_cfg),
+                    base_url=MemoryManager._optional_str(openai_cfg.get("base_url")),
+                    max_tokens=MemoryManager._optional_int(openai_cfg.get("max_tokens"), mem_cfg.query_planner_max_tokens) or mem_cfg.query_planner_max_tokens,
+                    temperature=MemoryManager._optional_float(openai_cfg.get("temperature"), mem_cfg.query_planner_temperature) or mem_cfg.query_planner_temperature,
+                )
+                logger.info("[MemoryManager] query planner mode — openai")
+                return FallbackQueryPlanner(planner, fallback)
+
+            if not mem_cfg.llama_process_enabled:
+                logger.info("[MemoryManager] query planner mode — rule-based (llama_process_enabled=false)")
+                return fallback
+
+            model_path = MemoryManager._optional_str(provider_cfg.llama.get("model_path")) or mem_cfg.query_planner_model_path
+            if not model_path:
+                raise ValueError("memory.query_planner_provider.llama.model_path is required")
             planner = LlamaQueryPlanner(
-                model_path=mem_cfg.query_planner_model_path,
-                n_ctx=mem_cfg.query_planner_n_ctx,
-                n_gpu_layers=mem_cfg.query_planner_n_gpu_layers,
-                temperature=mem_cfg.query_planner_temperature,
-                max_tokens=mem_cfg.query_planner_max_tokens,
-                request_timeout_ms=mem_cfg.llama_request_timeout_ms,
+                model_path=model_path,
+                n_ctx=MemoryManager._optional_int(provider_cfg.llama.get("n_ctx"), mem_cfg.query_planner_n_ctx) or mem_cfg.query_planner_n_ctx,
+                n_gpu_layers=MemoryManager._optional_int(provider_cfg.llama.get("n_gpu_layers"), mem_cfg.query_planner_n_gpu_layers) or mem_cfg.query_planner_n_gpu_layers,
+                temperature=MemoryManager._optional_float(provider_cfg.llama.get("temperature"), mem_cfg.query_planner_temperature) or mem_cfg.query_planner_temperature,
+                max_tokens=MemoryManager._optional_int(provider_cfg.llama.get("max_tokens"), mem_cfg.query_planner_max_tokens) or mem_cfg.query_planner_max_tokens,
+                request_timeout_ms=MemoryManager._optional_int(provider_cfg.llama.get("request_timeout_ms"), mem_cfg.llama_request_timeout_ms) or mem_cfg.llama_request_timeout_ms,
             )
             logger.info("[MemoryManager] query planner mode — llama")
             return FallbackQueryPlanner(planner, fallback)
         except Exception as exc:
             logger.warning("[MemoryManager] query planner init failed — rule-based fallback: {}", exc)
             return fallback
+
+    @staticmethod
+    def _build_reranker(mem_cfg: MemorySettings):
+        if not hasattr(mem_cfg, "rerank_provider"):
+            if not mem_cfg.rerank_enabled:
+                logger.info("[MemoryManager] reranker mode — disabled")
+                return None
+            if not mem_cfg.llama_process_enabled:
+                logger.info("[MemoryManager] reranker mode — disabled (llama_process_enabled=false)")
+                return None
+            from rpg_world.rpg_core.memory.rerank.llama_reranker import (
+                LlamaRerankConfig,
+                LlamaReranker,
+            )
+
+            return LlamaReranker(
+                LlamaRerankConfig(
+                    enabled=True,
+                    model_path=mem_cfg.rerank_model_path,
+                    max_candidates=mem_cfg.rerank_max_candidates,
+                    n_ctx=mem_cfg.rerank_n_ctx,
+                    n_gpu_layers=mem_cfg.rerank_n_gpu_layers,
+                    temperature=mem_cfg.rerank_temperature,
+                    request_timeout_ms=mem_cfg.llama_request_timeout_ms,
+                    llama_weight=mem_cfg.rerank_llama_weight,
+                )
+            )
+
+        from rpg_world.rpg_core.memory.rerank import LlamaRerankConfig, LlamaReranker, OpenAIReranker
+
+        if not mem_cfg.rerank_enabled:
+            logger.info("[MemoryManager] reranker mode — disabled")
+            return None
+
+        provider_cfg = mem_cfg.rerank_provider
+        mode = MemoryManager._provider_mode(provider_cfg, "rerank")
+        if mode == LLM_PROVIDER_SHARED:
+            raise ValueError("memory.rerank_provider=shared is not supported")
+
+        openai_model = None
+        if mode == LLM_PROVIDER_OPENAI:
+            openai_cfg = provider_cfg.openai
+            openai_model = MemoryManager._require_non_empty(openai_cfg.get("model"), "memory.rerank_provider.openai.model")
+
+        try:
+            if mode == LLM_PROVIDER_OPENAI:
+                openai_cfg = provider_cfg.openai
+                logger.info("[MemoryManager] reranker mode — openai")
+                return OpenAIReranker(
+                    model=openai_model or "",
+                    api_key=MemoryManager._resolve_memory_openai_api_key(openai_cfg),
+                    base_url=MemoryManager._optional_str(openai_cfg.get("base_url")),
+                    max_candidates=MemoryManager._optional_int(openai_cfg.get("max_candidates"), mem_cfg.rerank_max_candidates) or mem_cfg.rerank_max_candidates,
+                    max_tokens=MemoryManager._optional_int(openai_cfg.get("max_tokens"), 1024) or 1024,
+                    temperature=MemoryManager._optional_float(openai_cfg.get("temperature"), mem_cfg.rerank_temperature) or mem_cfg.rerank_temperature,
+                    rerank_weight=MemoryManager._optional_float(openai_cfg.get("rerank_weight"), mem_cfg.rerank_llama_weight) or mem_cfg.rerank_llama_weight,
+                )
+
+            model_path = MemoryManager._optional_str(provider_cfg.llama.get("model_path")) or mem_cfg.rerank_model_path
+            logger.info(
+                "[MemoryManager] reranker mode — llama (enabled={} model_path={})",
+                mem_cfg.rerank_enabled and mem_cfg.llama_process_enabled,
+                model_path,
+            )
+            return LlamaReranker(
+                LlamaRerankConfig(
+                    enabled=mem_cfg.rerank_enabled and mem_cfg.llama_process_enabled,
+                    model_path=model_path,
+                    max_candidates=MemoryManager._optional_int(provider_cfg.llama.get("max_candidates"), mem_cfg.rerank_max_candidates) or mem_cfg.rerank_max_candidates,
+                    n_ctx=MemoryManager._optional_int(provider_cfg.llama.get("n_ctx"), mem_cfg.rerank_n_ctx) or mem_cfg.rerank_n_ctx,
+                    n_gpu_layers=MemoryManager._optional_int(provider_cfg.llama.get("n_gpu_layers"), mem_cfg.rerank_n_gpu_layers) or mem_cfg.rerank_n_gpu_layers,
+                    temperature=MemoryManager._optional_float(provider_cfg.llama.get("temperature"), mem_cfg.rerank_temperature) or mem_cfg.rerank_temperature,
+                    request_timeout_ms=MemoryManager._optional_int(provider_cfg.llama.get("request_timeout_ms"), mem_cfg.llama_request_timeout_ms) or mem_cfg.llama_request_timeout_ms,
+                    llama_weight=MemoryManager._optional_float(provider_cfg.llama.get("llama_weight"), mem_cfg.rerank_llama_weight) or mem_cfg.rerank_llama_weight,
+                )
+            )
+        except Exception as exc:
+            logger.warning("[MemoryManager] reranker init failed — disable rerank: {}", exc)
+            return None
+
+    @staticmethod
+    def _provider_mode(provider_cfg: Any, label: str) -> str:
+        mode = str(getattr(provider_cfg, "provider", "") or LLM_PROVIDER_LLAMA).strip()
+        if not mode:
+            mode = LLM_PROVIDER_LLAMA
+        if mode not in LLM_PROVIDER_MODES:
+            raise ValueError(f"memory.{label}_provider must be one of {', '.join(LLM_PROVIDER_MODES)}; got {mode!r}")
+        return mode
+
+    @staticmethod
+    def _require_non_empty(value: Any, label: str) -> str:
+        text = MemoryManager._optional_str(value)
+        if not text:
+            raise ValueError(f"{label} is required")
+        return text
+
+    @staticmethod
+    def _optional_str(value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @staticmethod
+    def _optional_int(value: Any, default: int | None) -> int | None:
+        if value is None or value == "":
+            return default
+        return int(value)
+
+    @staticmethod
+    def _optional_float(value: Any, default: float | None) -> float | None:
+        if value is None or value == "":
+            return default
+        return float(value)
+
+    @staticmethod
+    def _resolve_memory_openai_api_key(openai_cfg: dict[str, Any]) -> str | None:
+        from rpg_world.rpg_core.settings import settings
+
+        return settings.resolve_openai_api_key(
+            explicit=MemoryManager._optional_str(openai_cfg.get("api_key")) or None,
+            explicit_env=MemoryManager._optional_str(openai_cfg.get("api_key_env")) or None,
+            fallback_to_agent=False,
+        )
 
     def reindex(self) -> None:
         """手动触发一次全量重建。"""

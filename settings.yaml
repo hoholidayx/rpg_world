@@ -110,16 +110,39 @@ base:
   memory:
     # 是否启用向量记忆索引与检索
     enabled: true
-    # 嵌入模型 GGUF 文件路径（相对于包根目录 rpg_world/）
-    embedding_model_path: "data/models/Qwen3-Embedding-0.6B-f16.gguf"
-    # 嵌入模型的上下文窗口大小（token）
-    n_ctx: 32768
-    # GPU 加速层数（0 = 纯 CPU，-1 = 全部 GPU）
-    n_gpu_layers: 0
-    # 嵌入模型 CPU 线程数
-    embedding_n_threads: 4
-    # 是否输出嵌入模型 llama.cpp verbose 日志
-    embedding_verbose: false
+    # memory 侧 OpenAI 连接参数。不会继承主 Agent 的同名字段，未使用时保持 null。
+    openai:
+      model: null
+      api_key: null
+      api_key_env: null
+      base_url: null
+      max_tokens: null
+      temperature: null
+
+    # embedding provider：仅支持 llama / openai，shared 不支持。
+    embedding:
+      provider: llama
+      openai:
+        model: null
+        api_key: null
+        api_key_env: null
+        base_url: null
+        max_tokens: null
+        temperature: null
+      llama:
+        # llama embedding 模型 GGUF 文件路径（相对于包根目录 rpg_world/）
+        model_path: "data/models/Qwen3-Embedding-0.6B-f16.gguf"
+        # llama embedding 上下文窗口大小（token）
+        n_ctx: 32768
+        # llama embedding GPU 加速层数（0 = 纯 CPU，-1 = 全部 GPU）
+        n_gpu_layers: 0
+        # llama embedding CPU 线程数
+        n_threads: 4
+        # llama embedding verbose 日志开关
+        verbose: false
+        # llama embedding 子进程单次请求超时（毫秒）
+        request_timeout_ms: 60000
+
     # 是否将 llama.cpp 推理隔离到托管子进程
     llama_process_enabled: true
     # llama 子进程单次请求超时（毫秒）
@@ -139,32 +162,61 @@ base:
     hybrid_keyword_weight: 0.25
     hybrid_exact_weight: 0.10
     hybrid_recency_weight: 0.05
-    # 查询规划器：是否启用
+
+    # query planner：仅支持 llama / openai，shared 不支持。
     query_planner_enabled: false
-    # 查询规划器模型路径（留空则使用规则规划器）
-    query_planner_model_path: ""
-    # 查询规划器上下文窗口
-    query_planner_n_ctx: 2048
-    # 查询规划器 GPU 层数
-    query_planner_n_gpu_layers: 0
-    # 查询规划器采样温度
-    query_planner_temperature: 0.0
-    # 查询规划器最大输出 token 数
-    query_planner_max_tokens: 512
-    # 本地 llama 重排：是否启用
+    query_planner:
+      provider: llama
+      openai:
+        model: null
+        api_key: null
+        api_key_env: null
+        base_url: null
+        max_tokens: 512
+        temperature: 0.0
+      llama:
+        # llama query planner 模型路径（留空则使用规则规划器）
+        model_path: ""
+        # llama query planner 上下文窗口
+        n_ctx: 2048
+        # llama query planner GPU 层数
+        n_gpu_layers: 0
+        # llama query planner 采样温度
+        temperature: 0.0
+        # llama query planner 最大输出 token 数
+        max_tokens: 512
+        # llama query planner 子进程单次请求超时（毫秒）
+        request_timeout_ms: 60000
+
+    # rerank：仅支持 llama / openai，shared 不支持。
     rerank_enabled: false
-    # 本地 llama 重排模型路径（留空则回退）
-    rerank_model_path: ""
-    # 送入重排模型的最大候选数
-    rerank_max_candidates: 10
-    # 重排模型上下文窗口
-    rerank_n_ctx: 4096
-    # 重排模型 GPU 层数
-    rerank_n_gpu_layers: 0
-    # 重排模型采样温度
-    rerank_temperature: 0.0
-    # Reranker 融合权重（llama 分占比，剩余为混合分）
-    rerank_llama_weight: 0.70
+    rerank:
+      provider: llama
+      openai:
+        model: null
+        api_key: null
+        api_key_env: null
+        base_url: null
+        max_candidates: 10
+        max_tokens: 1024
+        temperature: 0.0
+        rerank_weight: 0.70
+      llama:
+        # llama rerank 模型路径（留空则回退）
+        model_path: ""
+        # llama rerank 输入的最大候选数
+        max_candidates: 10
+        # llama rerank 上下文窗口
+        n_ctx: 4096
+        # llama rerank GPU 层数
+        n_gpu_layers: 0
+        # llama rerank 采样温度
+        temperature: 0.0
+        # llama 子进程单次请求超时（毫秒）
+        request_timeout_ms: 60000
+        # llama rerank 融合权重（llama 分占比，剩余为混合分）
+        llama_weight: 0.70
+
     # 向量检索返回的最大结果数
     top_k: 2
     # 单文件超过此字符数时进行分块

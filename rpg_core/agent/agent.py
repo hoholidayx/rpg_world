@@ -12,6 +12,12 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from rpg_world.rpg_core.constants import (
+    LLM_PROVIDER_LLAMA,
+    LLM_PROVIDER_MODES,
+    LLM_PROVIDER_OPENAI,
+    LLM_PROVIDER_SHARED,
+)
 from rpg_world.rpg_core.agent.agent_types import (
     AgentStreamEvent,
     QueueItem,
@@ -806,7 +812,7 @@ def _build_rpg_context(world_name: str, workspace: str, session_id: str) -> dict
     return build_rpg_context(world_name=world_name, workspace=workspace, session_id=session_id)
 
 
-_SUB_AGENT_PROVIDER_MODES = frozenset({"shared", "openai", "llama"})
+_SUB_AGENT_PROVIDER_MODES = frozenset(LLM_PROVIDER_MODES)
 
 
 def _resolve_sub_agent_provider(
@@ -824,31 +830,31 @@ def _resolve_sub_agent_provider(
 
     enabled = settings._as_bool(cfg.get("enabled", True), True)
     if not enabled:
-        return None, SubAgentProviderConfig(mode="shared")
+        return None, SubAgentProviderConfig(mode=LLM_PROVIDER_SHARED)
 
-    mode = str(cfg.get("llm_provider") or "shared").strip()
+    mode = str(cfg.get("llm_provider") or LLM_PROVIDER_SHARED).strip()
     if mode not in _SUB_AGENT_PROVIDER_MODES:
         raise ValueError(
-            f"{name} config invalid: llm_provider must be one of shared, openai, llama; got {mode!r}"
+            f"{name} config invalid: llm_provider must be one of {', '.join(LLM_PROVIDER_MODES)}; got {mode!r}"
         )
 
-    if mode == "shared":
+    if mode == LLM_PROVIDER_SHARED:
         if shared_provider is None:
-            raise ValueError(f"{name} config invalid: llm_provider=shared requires main Agent provider")
-        return shared_provider, SubAgentProviderConfig(mode="shared")
+            raise ValueError(f"{name} config invalid: llm_provider={LLM_PROVIDER_SHARED} requires main Agent provider")
+        return shared_provider, SubAgentProviderConfig(mode=LLM_PROVIDER_SHARED)
 
-    if mode == "openai":
+    if mode == LLM_PROVIDER_OPENAI:
         openai_cfg = _as_mapping(cfg.get("openai"), f"{name}.openai")
         model = _non_empty(openai_cfg.get("model"))
         if not model:
-            raise ValueError(f"{name} config invalid: openai.model is required when llm_provider=openai")
+            raise ValueError(f"{name} config invalid: openai.model is required when llm_provider={LLM_PROVIDER_OPENAI}")
         api_key = _non_empty(openai_cfg.get("api_key"))
         if not api_key:
             api_key_env = _non_empty(openai_cfg.get("api_key_env"))
             if api_key_env:
                 api_key = _non_empty(os.environ.get(api_key_env))
         return None, SubAgentProviderConfig(
-            mode="openai",
+            mode=LLM_PROVIDER_OPENAI,
             openai={
                 "model": model,
                 "api_key": api_key or main_api_key,
@@ -862,17 +868,17 @@ def _resolve_sub_agent_provider(
 
     if not settings.memory_settings.llama_process_enabled:
         raise ValueError(
-            f"{name} config invalid: llm_provider=llama requires memory.llama_process_enabled=true"
+            f"{name} config invalid: llm_provider={LLM_PROVIDER_LLAMA} requires memory.llama_process_enabled=true"
         )
     llama_cfg = _as_mapping(cfg.get("llama"), f"{name}.llama")
     raw_model_path = _non_empty(llama_cfg.get("model_path"))
     if not raw_model_path:
-        raise ValueError(f"{name} config invalid: llama.model_path is required when llm_provider=llama")
+        raise ValueError(f"{name} config invalid: llama.model_path is required when llm_provider={LLM_PROVIDER_LLAMA}")
     model_path = _resolve_llama_model_path(raw_model_path)
     if not model_path.is_file():
         raise ValueError(f"{name} config invalid: GGUF model not found: {model_path}")
     return None, SubAgentProviderConfig(
-        mode="llama",
+        mode=LLM_PROVIDER_LLAMA,
         llama={
             "model_path": str(model_path),
             "n_ctx": llama_cfg.get("n_ctx", 2048),
