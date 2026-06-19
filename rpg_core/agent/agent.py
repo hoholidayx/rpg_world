@@ -128,6 +128,7 @@ class RPGGameAgent:
         self._cmd_dispatcher: CommandDispatcher | None = None
         self._memory_manager: MemoryManager | None = None
         self._rpg_ctx: dict[str, object] = {}
+        self._init_lock: asyncio.Lock | None = None
 
         # 会话确定后立即初始化 RPG context managers/stores（同步，不等第一句消息）
         self._refresh_rpg_context()
@@ -135,6 +136,21 @@ class RPGGameAgent:
         # 消息队列（初始化时创建，_ensure_initialized 末尾启动消费者）
         self._queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         self._consumer_task: asyncio.Task | None = None
+
+    def _create_future(self) -> asyncio.Future:
+        """在当前运行中的事件循环里创建 Future。
+
+        统一收口，避免多个入口各自使用过时的 ``get_event_loop()``。
+        """
+        return asyncio.get_running_loop().create_future()
+
+    async def _emit_stream_error(self, event_queue: asyncio.Queue, error: BaseException) -> None:
+        """把流式失败转换成可消费的 ERROR 事件并结束队列。"""
+        await event_queue.put(AgentStreamEvent(
+            kind=StreamEventKind.ERROR,
+            content=str(error),
+        ))
+        await event_queue.put(_StreamSentinel())
 
     # ── 消息队列消费者 ─────────────────────────────────────────────────
 
@@ -161,7 +177,11 @@ class RPGGameAgent:
                         item.future.set_result(cmd_result)
             except Exception as e:
                 logger.warning(_TAG + " consumer error on kind={}: {}", item.kind, e)
-                if not item.future.done():
+                if item.kind == QueueKind.SEND_STREAM and item.event_queue is not None:
+                    await self._emit_stream_error(item.event_queue, e)
+                    if not item.future.done():
+                        item.future.set_result(None)
+                elif not item.future.done():
                     item.future.set_exception(e)
             finally:
                 self._queue.task_done()
@@ -200,7 +220,7 @@ class RPGGameAgent:
         Usage is identical to the old ``send()`` — no caller changes needed.
         """
         await self._ensure_initialized()
-        future: Future[AgentReply] = asyncio.get_event_loop().create_future()
+        future: Future[AgentReply] = self._create_future()
         await self._queue.put(QueueItem(kind=QueueKind.SEND, user_input=user_input, future=future))
         logger.debug(_TAG + " send() enqueued: input={!r:.60}", user_input)
         return await future
@@ -342,7 +362,7 @@ class RPGGameAgent:
         """
         await self._ensure_initialized()
         event_queue: asyncio.Queue[AgentStreamEvent | BaseException | _StreamSentinel] = asyncio.Queue()
-        future: Future[None] = asyncio.get_event_loop().create_future()
+        future: Future[None] = self._create_future()
         await self._queue.put(QueueItem(
             kind=QueueKind.SEND_STREAM, user_input=user_input, future=future, event_queue=event_queue,
         ))
@@ -530,7 +550,7 @@ class RPGGameAgent:
         供 ``/chat/command`` API 端点使用。
         """
         await self._ensure_initialized()
-        future: Future[CommandResult] = asyncio.get_event_loop().create_future()
+        future: Future[CommandResult] = self._create_future()
         await self._queue.put(QueueItem(kind=QueueKind.COMMAND, user_input=command, future=future))
         logger.debug(_TAG + " execute_command() enqueued: cmd={!r:.60}", command)
         return await future
@@ -715,94 +735,101 @@ class RPGGameAgent:
         if self._initialized:
             return
 
-        self._system_prompt = PromptManager(self._world_name).system_prompt
-        self._session.load()
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
 
-        # ── MemoryManager 初始化（仅注册 FileWatcher） ─────────
-        if self._memory_manager:
-            self._memory_manager.init()
+        async with self._init_lock:
+            if self._initialized:
+                return
 
-        self._provider = OpenAIProvider(
-            model=self._model,
-            api_key=self._api_key,
-            base_url=self._base_url,
-            max_tokens=self._max_tokens,
-            temperature=self._temperature,
-        )
+            self._system_prompt = PromptManager(self._world_name).system_prompt
+            self._session.load()
 
-        # ── StatusSubAgent ────────────────────────────────────────────
-        status_cfg = settings.status_sub_agent_config
-        status_provider, status_provider_config = _resolve_sub_agent_provider(
-            name="status_sub_agent",
-            cfg=status_cfg,
-            shared_provider=self._provider,
-            main_api_key=self._api_key,
-            main_base_url=self._base_url,
-            main_max_tokens=self._max_tokens,
-            main_temperature=self._temperature,
-        )
-        self._status_sub_agent = StatusSubAgent(
-            provider=status_provider,
-            provider_config=status_provider_config,
-            enabled=status_cfg.get("enabled", True),
-        )
-        if self._scene_tracker:
-            self._status_sub_agent.add_tool_provider(self._scene_tracker)
-        _status_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
-        self._status_sub_agent.bind_context(_status_ctx)
+            # ── MemoryManager 初始化（仅注册 FileWatcher） ─────────
+            if self._memory_manager:
+                self._memory_manager.init()
 
-        # ── MemorySubAgent ────────────────────────────────────────────
-        memory_cfg = settings.memory_sub_agent_config
-        memory_provider, memory_provider_config = _resolve_sub_agent_provider(
-            name="memory_sub_agent",
-            cfg=memory_cfg,
-            shared_provider=self._provider,
-            main_api_key=self._api_key,
-            main_base_url=self._base_url,
-            main_max_tokens=self._max_tokens,
-            main_temperature=self._temperature,
-        )
-        self._memory_sub_agent = MemorySubAgent(
-            provider=memory_provider,
-            provider_config=memory_provider_config,
-            enabled=memory_cfg.get("enabled", True),
-            summary_store=self._builder._summary_store if self._builder else None,
-            story_store=self._builder._story_memory if self._builder else None,
-            batch_store=self._builder._batch_summary_store if self._builder else None,
-            max_window_rounds=settings.memory_keep_rounds,
-        )
-        _memory_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
-        self._memory_sub_agent.bind_context(_memory_ctx)
+            self._provider = OpenAIProvider(
+                model=self._model,
+                api_key=self._api_key,
+                base_url=self._base_url,
+                max_tokens=self._max_tokens,
+                temperature=self._temperature,
+            )
 
-        # ── SummaryCompressor ─────────────────────────────────────────
-        self._compressor = SummaryCompressor(
-            batch_store=self._builder._batch_summary_store if self._builder else None,
-            memory_sub_agent=self._memory_sub_agent,
-            enabled=settings.memory_compression_enabled,
-            keep_recent_rounds=settings.memory_keep_rounds,
-            compression_threshold=settings.memory_keep_rounds,
-            compress_batch_size=settings.memory_compress_batch_size,
-        )
+            # ── StatusSubAgent ────────────────────────────────────────────
+            status_cfg = settings.status_sub_agent_config
+            status_provider, status_provider_config = _resolve_sub_agent_provider(
+                name="status_sub_agent",
+                cfg=status_cfg,
+                shared_provider=self._provider,
+                main_api_key=self._api_key,
+                main_base_url=self._base_url,
+                main_max_tokens=self._max_tokens,
+                main_temperature=self._temperature,
+            )
+            self._status_sub_agent = StatusSubAgent(
+                provider=status_provider,
+                provider_config=status_provider_config,
+                enabled=status_cfg.get("enabled", True),
+            )
+            if self._scene_tracker:
+                self._status_sub_agent.add_tool_provider(self._scene_tracker)
+            _status_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
+            self._status_sub_agent.bind_context(_status_ctx)
 
-        # ── CommandDispatcher ─────────────────────────────────────────
-        self._cmd_dispatcher = CommandDispatcher(agent=self)
-        self._cmd_dispatcher.register_default_builtins()
+            # ── MemorySubAgent ────────────────────────────────────────────
+            memory_cfg = settings.memory_sub_agent_config
+            memory_provider, memory_provider_config = _resolve_sub_agent_provider(
+                name="memory_sub_agent",
+                cfg=memory_cfg,
+                shared_provider=self._provider,
+                main_api_key=self._api_key,
+                main_base_url=self._base_url,
+                main_max_tokens=self._max_tokens,
+                main_temperature=self._temperature,
+            )
+            self._memory_sub_agent = MemorySubAgent(
+                provider=memory_provider,
+                provider_config=memory_provider_config,
+                enabled=memory_cfg.get("enabled", True),
+                summary_store=self._builder._summary_store if self._builder else None,
+                story_store=self._builder._story_memory if self._builder else None,
+                batch_store=self._builder._batch_summary_store if self._builder else None,
+                max_window_rounds=settings.memory_keep_rounds,
+            )
+            _memory_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
+            self._memory_sub_agent.bind_context(_memory_ctx)
 
-        # 子 Agent 命令
-        if self._status_sub_agent is not None and self._status_sub_agent.enabled:
-            self._cmd_dispatcher.register_sub_agent(self._status_sub_agent)
-        if self._memory_sub_agent is not None and self._memory_sub_agent.enabled:
-            self._cmd_dispatcher.register_sub_agent(self._memory_sub_agent)
+            # ── SummaryCompressor ─────────────────────────────────────────
+            self._compressor = SummaryCompressor(
+                batch_store=self._builder._batch_summary_store if self._builder else None,
+                memory_sub_agent=self._memory_sub_agent,
+                enabled=settings.memory_compression_enabled,
+                keep_recent_rounds=settings.memory_keep_rounds,
+                compression_threshold=settings.memory_keep_rounds,
+                compress_batch_size=settings.memory_compress_batch_size,
+            )
 
-        self._setup_tool_registry()
+            # ── CommandDispatcher ─────────────────────────────────────────
+            self._cmd_dispatcher = CommandDispatcher(agent=self)
+            self._cmd_dispatcher.register_default_builtins()
 
-        # 启动文件监听（管理器已在 BaseManager.__init__ 中注册路径）
-        get_watcher().start()
+            # 子 Agent 命令
+            if self._status_sub_agent is not None and self._status_sub_agent.enabled:
+                self._cmd_dispatcher.register_sub_agent(self._status_sub_agent)
+            if self._memory_sub_agent is not None and self._memory_sub_agent.enabled:
+                self._cmd_dispatcher.register_sub_agent(self._memory_sub_agent)
 
-        # 启动消息队列消费者
-        self._consumer_task = asyncio.create_task(self._queue_consumer())
+            self._setup_tool_registry()
 
-        self._initialized = True
+            # 启动文件监听（管理器已在 BaseManager.__init__ 中注册路径）
+            get_watcher().start()
+
+            # 启动消息队列消费者
+            self._consumer_task = asyncio.create_task(self._queue_consumer())
+
+            self._initialized = True
 
 
 def _build_rpg_context(world_name: str, workspace: str, session_id: str) -> dict[str, object]:
