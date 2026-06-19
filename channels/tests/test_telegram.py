@@ -12,12 +12,12 @@ import pytest
 from telegram import BotCommand, InlineKeyboardMarkup
 from telegram.error import BadRequest
 
-from rpg_world.channels.telegram.adapter import TelegramAdapter
+from rpg_world.channels.telegram.adapter import TelegramAdapter, _StreamBuf
 from rpg_world.channels.telegram.render import (
     chunk_rendered_text,
     render_markdown_to_telegram_html,
 )
-from rpg_world.channels.tests.conftest import FakeAgent
+from rpg_world.channels.tests.conftest import FakeAgent, FakeErrorAgent
 from rpg_world.rpg_core.agent.command import CommandDef, CommandResult
 
 
@@ -614,17 +614,17 @@ class TestTelegramAdapter:
             chat_id=123, text="Hello ", parse_mode="HTML",
         )
         assert "123" in adapter._stream_buf
-        assert adapter._stream_buf["123"]["msg_id"] == 42
-        assert adapter._stream_buf["123"]["text"] == "Hello "
+        assert adapter._stream_buf["123"].msg_id == 42
+        assert adapter._stream_buf["123"].text == "Hello "
 
     async def test_send_delta_subsequent(self, adapter: TelegramAdapter):
         """后续 delta 应编辑已有消息。"""
-        adapter._stream_buf["123"] = {
-            "msg_id": 42,
-            "text": "Hello ",
-            "sent_text": "Hello ",
-            "last_edit_at": 0.0,
-        }
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="Hello ",
+            sent_text="Hello ",
+            last_edit_at=0.0,
+        )
         adapter._app.bot.edit_message_text = AsyncMock()
 
         await adapter.send_delta("123", "World", final=False)
@@ -635,16 +635,50 @@ class TestTelegramAdapter:
             text="Hello World",
             parse_mode="HTML",
         )
-        assert adapter._stream_buf["123"]["text"] == "Hello World"
+        assert adapter._stream_buf["123"].text == "Hello World"
+
+    async def test_send_delta_subsequent_edit_failure_updates_sent_text(self, adapter: TelegramAdapter):
+        """中间编辑失败后应同步 sent_text，避免 pending 计算长期失真。"""
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="Hello ",
+            sent_text="Hello ",
+            last_edit_at=0.0,
+        )
+        adapter._app.bot.edit_message_text = AsyncMock(return_value=None)
+
+        await adapter.send_delta("123", "World", final=False)
+
+        assert adapter._stream_buf["123"].text == "Hello World"
+        assert adapter._stream_buf["123"].sent_text == "Hello World"
+        assert adapter._stream_buf["123"].last_edit_at > 0.0
+
+    async def test_stream_error_clears_buffer_and_notifies_user(self, adapter: TelegramAdapter):
+        """流式 ERROR 后应清理 buffer，避免下一条消息复用失效状态。"""
+        agent = FakeErrorAgent()
+        adapter.bind_agent(agent)
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="stale",
+            sent_text="stale",
+            last_edit_at=0.0,
+        )
+        adapter.send_text = AsyncMock()
+
+        result = await adapter._stream_and_send("123", "hi")
+
+        assert result.text == ""
+        assert "123" not in adapter._stream_buf
+        adapter.send_text.assert_awaited_once_with("123", "错误: 模拟错误")
 
     async def test_send_delta_subsequent_throttled(self, adapter: TelegramAdapter):
         """未到节流阈值时不应立即编辑消息。"""
-        adapter._stream_buf["123"] = {
-            "msg_id": 42,
-            "text": "Hello ",
-            "sent_text": "Hello ",
-            "last_edit_at": 1000.0,
-        }
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="Hello ",
+            sent_text="Hello ",
+            last_edit_at=1000.0,
+        )
         adapter._app.bot.edit_message_text = AsyncMock()
 
         import rpg_world.channels.telegram.adapter as telegram_adapter_module
@@ -657,16 +691,16 @@ class TestTelegramAdapter:
             telegram_adapter_module.time.monotonic = original_monotonic
 
         adapter._app.bot.edit_message_text.assert_not_called()
-        assert adapter._stream_buf["123"]["text"] == "Hello World"
+        assert adapter._stream_buf["123"].text == "Hello World"
 
     async def test_send_delta_final_with_buffer(self, adapter: TelegramAdapter):
         """final delta 应编辑最终文本并清理 buffer。"""
-        adapter._stream_buf["123"] = {
-            "msg_id": 42,
-            "text": "Hello ",
-            "sent_text": "Hello ",
-            "last_edit_at": 0.0,
-        }
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="Hello ",
+            sent_text="Hello ",
+            last_edit_at=0.0,
+        )
         adapter._app.bot.edit_message_text = AsyncMock()
 
         await adapter.send_delta("123", "Hello World!", final=True)
@@ -679,14 +713,33 @@ class TestTelegramAdapter:
         )
         assert "123" not in adapter._stream_buf  # buffer 已清理
 
+    async def test_send_delta_final_edit_failure_falls_back_to_send_text(self, adapter: TelegramAdapter):
+        """final 编辑失败时应回退为 send_text，避免用户收不到回复。"""
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="Hello ",
+            sent_text="Hello ",
+            last_edit_at=0.0,
+        )
+        adapter._app.bot.edit_message_text = AsyncMock(return_value=None)
+        adapter._app.bot.send_message = AsyncMock()
+
+        await adapter.send_delta("123", "Hello World!", final=True)
+
+        adapter._app.bot.edit_message_text.assert_called_once()
+        adapter._app.bot.send_message.assert_called_once_with(
+            chat_id=123, text="Hello World!", parse_mode="HTML",
+        )
+        assert "123" not in adapter._stream_buf
+
     async def test_send_delta_final_unchanged_is_noop(self, adapter: TelegramAdapter):
         """final delta 与当前缓冲内容完全一致时应直接跳过。"""
-        adapter._stream_buf["123"] = {
-            "msg_id": 42,
-            "text": "Hello World!",
-            "sent_text": "Hello World!",
-            "last_edit_at": 0.0,
-        }
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="Hello World!",
+            sent_text="Hello World!",
+            last_edit_at=0.0,
+        )
         adapter._app.bot.edit_message_text = AsyncMock()
 
         await adapter.send_delta("123", "Hello World!", final=True)
@@ -696,12 +749,12 @@ class TestTelegramAdapter:
 
     async def test_send_delta_final_flushes_deferred_updates(self, adapter: TelegramAdapter):
         """前面的流式更新都被节流时，final 仍应补发最终内容。"""
-        adapter._stream_buf["123"] = {
-            "msg_id": 42,
-            "text": "Hello World!",
-            "sent_text": "Hello ",
-            "last_edit_at": 1000.0,
-        }
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="Hello World!",
+            sent_text="Hello ",
+            last_edit_at=1000.0,
+        )
         adapter._app.bot.edit_message_text = AsyncMock()
 
         await adapter.send_delta("123", "Hello World!", final=True)
@@ -725,12 +778,12 @@ class TestTelegramAdapter:
         )
 
     async def test_send_delta_final_long_text_falls_back_to_chunks(self, adapter: TelegramAdapter):
-        adapter._stream_buf["123"] = {
-            "msg_id": 42,
-            "text": "x",
-            "sent_text": "x",
-            "last_edit_at": 0.0,
-        }
+        adapter._stream_buf["123"] = _StreamBuf(
+            msg_id=42,
+            text="x",
+            sent_text="x",
+            last_edit_at=0.0,
+        )
         adapter._app.bot.edit_message_text = AsyncMock()
         adapter._app.bot.send_message = AsyncMock()
 

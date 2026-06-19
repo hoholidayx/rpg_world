@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -38,6 +39,16 @@ if TYPE_CHECKING:
 _TELEGRAM_PARSE_MODE = "HTML"
 _TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 _TELEGRAM_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
+
+
+@dataclass
+class _StreamBuf:
+    """单条流式消息的发送状态。"""
+
+    msg_id: int
+    text: str
+    sent_text: str
+    last_edit_at: float
 
 
 def _preview_text(text: str, limit: int = 120) -> str:
@@ -113,8 +124,8 @@ class TelegramAdapter(ChannelAdapter):
         self._request_timeout = max(0, request_timeout_ms) / 1000.0
         self._auto_pin_created_session = auto_pin_created_session
         self._app: Application | None = None
-        # chat_id → {msg_id, text}, 用于流式增量编辑
-        self._stream_buf: dict[str, dict] = {}
+        # chat_id → _StreamBuf, 用于流式增量编辑
+        self._stream_buf: dict[str, _StreamBuf] = {}
         self._session_flow = TelegramSessionFlow()
         if agent:
             self.bind_agent(agent)
@@ -283,27 +294,32 @@ class TelegramAdapter(ChannelAdapter):
                 )
                 if msg is None:
                     return
-                self._stream_buf[chat_id] = {"msg_id": msg.message_id, "text": delta}
+                self._stream_buf[chat_id] = _StreamBuf(
+                    msg_id=msg.message_id,
+                    text=delta,
+                    sent_text=delta,
+                    last_edit_at=time.monotonic(),
+                )
             else:
                 buf = self._stream_buf[chat_id]
-                buf["text"] += delta
-                elapsed = time.monotonic() - float(buf.get("last_edit_at", 0.0))
-                pending_chars = len(buf["text"]) - len(str(buf.get("sent_text", "")))
+                buf.text += delta
+                elapsed = time.monotonic() - buf.last_edit_at
+                pending_chars = len(buf.text) - len(buf.sent_text)
                 if elapsed < self._stream_edit_interval and pending_chars < self._stream_edit_min_chars:
                     logger.debug(
                         "telegram: streaming update deferred chat_id={} elapsed_ms={} pending_chars={} preview={}",
                         chat_id,
                         int(elapsed * 1000),
                         pending_chars,
-                        _preview_text(buf["text"]),
+                        _preview_text(buf.text),
                     )
                     return
                 logger.debug(
                     "telegram: streaming delta update chat_id={} preview={}",
                     chat_id,
-                    _preview_text(buf["text"]),
+                    _preview_text(buf.text),
                 )
-                rendered_text = render_markdown_to_telegram_html(buf["text"])
+                rendered_text = render_markdown_to_telegram_html(buf.text)
                 if len(rendered_text) > _TELEGRAM_MAX_MESSAGE_LENGTH:
                     logger.warning(
                         "telegram: streaming edit exceeded limit chat_id={} length={}, defer to final",
@@ -316,19 +332,21 @@ class TelegramAdapter(ChannelAdapter):
                     "edit_message_text",
                     self._app.bot.edit_message_text(
                         chat_id=int(chat_id),
-                        message_id=buf["msg_id"],
+                        message_id=buf.msg_id,
                         text=rendered_text,
                         parse_mode=_TELEGRAM_PARSE_MODE,
                     ),
                 )
                 if edited is None:
+                    buf.sent_text = buf.text
+                    buf.last_edit_at = time.monotonic()
                     return
-                buf["sent_text"] = buf["text"]
-                buf["last_edit_at"] = time.monotonic()
+                buf.sent_text = buf.text
+                buf.last_edit_at = time.monotonic()
         else:
             buf = self._stream_buf.pop(chat_id, None)
             if buf:
-                if buf.get("sent_text") == delta:
+                if buf.sent_text == delta:
                     logger.debug(
                         "telegram: streaming final update skipped (unchanged) chat_id={} preview={}",
                         chat_id,
@@ -349,16 +367,23 @@ class TelegramAdapter(ChannelAdapter):
                     )
                     await self.send_text(chat_id, delta)
                     return
-                await self._request_with_timeout(
+                edited = await self._request_with_timeout(
                     chat_id,
                     "edit_message_text",
                     self._app.bot.edit_message_text(
                         chat_id=int(chat_id),
-                        message_id=buf["msg_id"],
+                        message_id=buf.msg_id,
                         text=rendered_delta,
                         parse_mode=_TELEGRAM_PARSE_MODE,
                     ),
                 )
+                if edited is None:
+                    logger.warning(
+                        "telegram: streaming final edit failed, fallback to send_text chat_id={} preview={}",
+                        chat_id,
+                        _preview_text(delta),
+                    )
+                    await self.send_text(chat_id, delta)
             else:
                 logger.debug(
                     "telegram: streaming final fallback to send_text chat_id={} preview={}",
@@ -366,6 +391,10 @@ class TelegramAdapter(ChannelAdapter):
                     _preview_text(delta),
                 )
                 await self.send_text(chat_id, delta)
+
+    async def _clear_stream_state(self, chat_id: str) -> None:
+        """清理 Telegram 流式 buffer，避免错误后复用失效消息。"""
+        self._stream_buf.pop(chat_id, None)
 
     async def _configure_bot_commands(self) -> None:
         """把 agent 的命令列表同步到 Telegram bot 菜单。"""

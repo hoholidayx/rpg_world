@@ -68,6 +68,14 @@ class ChannelAdapter(ABC):
         if final:
             await self.send_text(chat_id, delta)
 
+    async def _clear_stream_state(self, chat_id: str) -> None:
+        """清理渠道侧的流式状态。
+
+        子类可覆写以释放消息 buffer、编辑句柄等临时状态。
+        """
+        # 默认无状态可清理。
+        return None
+
     # ── Agent 绑定与 Session 映射 ──────────────────────────────────────
 
     def bind_agent(self, agent: RPGGameAgent) -> None:
@@ -145,6 +153,7 @@ class ChannelAdapter(ABC):
                 await self.send_delta(chat_id, full_text, final=True)
                 return AgentReply(text=full_text)
             elif event.kind == StreamEventKind.ERROR:
+                await self._clear_stream_state(chat_id)
                 await self.send_text(chat_id, f"错误: {event.content}")
                 return AgentReply(text="")
         return AgentReply(text=full_text)
