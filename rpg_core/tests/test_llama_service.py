@@ -12,6 +12,8 @@ from rpg_world.rpg_core.llama_service.client import (
     LlamaClient,
     LlamaClientRemoteError,
     LlamaClientTimeout,
+    configure_llama_client_from_memory_settings,
+    get_llama_client,
     set_llama_client,
 )
 from rpg_world.rpg_core.llama_service.models import LlamaModelCache, model_cache_key
@@ -229,6 +231,26 @@ def test_planner_and_reranker_fallback_when_client_fails(tmp_path):
             )
         )
         assert reranker.rerank("寻找北境线索", candidates) == candidates
+    finally:
+        set_llama_client(None)
+
+
+def test_configure_llama_client_from_memory_settings_updates_process_config():
+    set_llama_client(None)
+    try:
+        client = configure_llama_client_from_memory_settings(
+            SimpleNamespace(
+                llama_process_enabled=False,
+                llama_request_timeout_ms=1234,
+                llama_startup_timeout_ms=5678,
+                llama_max_parallel_models=9,
+            )
+        )
+        assert client is get_llama_client()
+        assert client.enabled is False
+        assert client.request_timeout_ms == 1234
+        assert client.startup_timeout_ms == 5678
+        assert client.max_parallel_models == 9
     finally:
         set_llama_client(None)
 

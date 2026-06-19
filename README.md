@@ -11,6 +11,12 @@ uv sync
 # 启动所有模块（读取 settings.yaml，按配置启动 API / Telegram / CLI）
 uv run python -m rpg_world.run
 
+# 同级快捷入口，便于查找和调试
+uv run python -m rpg_world.run_all
+uv run python -m rpg_world.run_api
+uv run python -m rpg_world.run_telegram
+uv run python -m rpg_world.run_cli
+
 # 仅启动 API
 MODULES=api uv run python -m rpg_world.run
 
@@ -19,6 +25,9 @@ MODULES=telegram uv run python -m rpg_world.run
 
 # 独立 CLI（无需 API / Telegram，直接 LLM 对话）
 uv run python -m rpg_world.channels.cli.repl
+
+# 直接启动 API
+uv run python -m rpg_world.api.main
 
 # 启动 WebUI（另一个终端）
 cd rpg_world/webui && npx vite
@@ -29,19 +38,25 @@ cd rpg_world/webui && npx vite
 
 ## 架构
 
-### 统一进程 CS 架构
+### 进程隔离架构
 
-所有模块由 `run.py`（Launcher）在单一进程中统一启动，共享 `AgentManager` 单例：
+`run.py` 是 supervisor，只负责按配置拉起子进程、转发信号和回收退出。API、
+Telegram、CLI 都是独立进程，各自维护自己的 `AgentManager` 单例和运行时状态。
 
 ```
-进程 (run.py)
-├── AgentManager 单例
-│   ├── RPGGameAgent 实例池（按 session_id + api_key 缓存）
-│   ├── FileWatcher（watchdog 文件监听）
-│   └── BaseManager 缓存（角色/世界书/状态）
-├── FastAPI（REST + SSE）
-├── Telegram 长轮询（可选）
-└── CLI REPL（可选）
+supervisor: rpg_world.run
+├── api 子进程      -> uvicorn rpg_world.api.main:app
+├── telegram 子进程 -> rpg_world.channels.telegram.runner
+└── cli 子进程      -> rpg_world.channels.cli.repl
+```
+
+根目录还提供同级快捷入口，便于调试和查找：
+
+```
+run_all.py      -> rpg_world.run
+run_api.py      -> rpg_world.api.main
+run_telegram.py -> rpg_world.channels.telegram.runner
+run_cli.py      -> rpg_world.channels.cli.repl
 ```
 
 模块启停通过 `settings.yaml` 的 `modules` 配置，所有配置字段封装为类型化属性：

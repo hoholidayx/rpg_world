@@ -8,7 +8,7 @@ reloads from atomic-save strategies (DELETE + CREATE, etc.).
 from __future__ import annotations
 
 import logging
-import time
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -24,7 +24,7 @@ except ImportError:
 
 logger = logging.getLogger("rpg_core.watcher")
 
-_DEBOUNCE_SEC = 0.5  # suppress duplicate events within this window
+_DEBOUNCE_SEC = 1.0  # coalesce bursty editor saves and fire on the trailing edge
 
 
 class _Handler(FileSystemEventHandler if _WATCHDOG_AVAILABLE else object):
@@ -79,7 +79,9 @@ class FileWatcher:
 
     def _init(self) -> None:
         self._callbacks: dict[Path, Callable[[], None]] = {}
-        self._debounce_until: dict[Path, float] = {}
+        self._debounce_seq: dict[Path, int] = {}
+        self._debounce_timers: dict[Path, threading.Timer] = {}
+        self._lock = threading.RLock()
         self._observer: Observer | None = None
         self._started = False
 
@@ -145,8 +147,12 @@ class FileWatcher:
         Call before re-registering paths (e.g. after a workspace switch).
         Does **not** stop the observer — use :meth:`stop` first if needed.
         """
-        self._callbacks.clear()
-        self._debounce_until.clear()
+        with self._lock:
+            for timer in self._debounce_timers.values():
+                timer.cancel()
+            self._callbacks.clear()
+            self._debounce_seq.clear()
+            self._debounce_timers.clear()
         logger.info("FileWatcher — all callbacks cleared")
 
     def stop(self) -> None:
@@ -164,18 +170,30 @@ class FileWatcher:
 
     def _on_change(self, path: Path) -> None:
         """Called by watchdog (possibly multiple times in quick succession)."""
+        with self._lock:
+            seq = self._debounce_seq.get(path, 0) + 1
+            self._debounce_seq[path] = seq
+            old_timer = self._debounce_timers.pop(path, None)
+            if old_timer is not None:
+                old_timer.cancel()
 
-        # Per-path debounce within the configured window
-        now = time.monotonic()
-        deadline = self._debounce_until.get(path, 0.0)
-        if now < deadline:
-            logger.info("_on_change %s -> debounced", path)
-            return
-        self._debounce_until[path] = now + _DEBOUNCE_SEC
+            timer = threading.Timer(_DEBOUNCE_SEC, self._emit_change, args=(path, seq))
+            timer.daemon = True
+            self._debounce_timers[path] = timer
+            logger.info("_on_change %s -> scheduled reload in %.2fs (seq=%s)", path, _DEBOUNCE_SEC, seq)
+            timer.start()
 
-        logger.info("_on_change %s -> trigger reload", path)
-        callback = self._callbacks.get(path)
+    def _emit_change(self, path: Path, seq: int) -> None:
+        with self._lock:
+            current_seq = self._debounce_seq.get(path)
+            if current_seq != seq:
+                logger.info("_emit_change %s -> stale timer ignored (seq=%s current=%s)", path, seq, current_seq)
+                return
+            self._debounce_timers.pop(path, None)
+            callback = self._callbacks.get(path)
+
         if callback:
+            logger.info("_emit_change %s -> trigger reload (seq=%s)", path, seq)
             callback()
         else:
             logger.warning("  -> no callback registered for %s", path)

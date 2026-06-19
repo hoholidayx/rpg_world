@@ -211,6 +211,76 @@ def test_telegram_enabled_requires_module_and_enabled_bot(monkeypatch, tmp_path)
     assert channels.telegram_enabled is False
     assert channels.enabled_module_names == []
 
+
+def test_disabled_telegram_bot_can_omit_token_and_workspace(monkeypatch, tmp_path):
+    settings, channels = _load(
+        tmp_path,
+        monkeypatch,
+        profile_override="""
+    modules:
+      telegram:
+        bots:
+          - name: disabled
+            enabled: false
+""",
+    )
+
+    bots = {bot.name: bot for bot in settings.telegram_bots}
+    assert bots["disabled"].enabled is False
+    assert bots["disabled"].token == ""
+    assert bots["disabled"].workspace == ""
+    assert channels.telegram_enabled is True
+
+
+def test_enabled_telegram_bots_reject_token_reuse_across_workspaces(monkeypatch, tmp_path):
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(
+        cfg,
+        profile_override="""
+    modules:
+      telegram:
+        bots:
+          - name: main
+            enabled: true
+            bot_token: shared-token
+            workspace: data/first
+          - name: alt
+            enabled: true
+            bot_token: shared-token
+            workspace: data/second
+""",
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
+
+    with pytest.raises(ValueError, match="token reused across workspaces"):
+        settings_module.Settings()
+
+
+def test_enabled_telegram_bots_reject_workspace_reuse_across_tokens(monkeypatch, tmp_path):
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(
+        cfg,
+        profile_override="""
+    modules:
+      telegram:
+        bots:
+          - name: main
+            enabled: true
+            bot_token: token-a
+            workspace: data/shared
+          - name: alt
+            enabled: true
+            bot_token: token-b
+            workspace: data/shared
+""",
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
+
+    with pytest.raises(ValueError, match="workspace reused by multiple tokens"):
+        settings_module.Settings()
+
     _settings, channels = _load(
         tmp_path,
         monkeypatch,
@@ -223,4 +293,3 @@ def test_telegram_enabled_requires_module_and_enabled_bot(monkeypatch, tmp_path)
 """,
     )
     assert channels.telegram_enabled is False
-

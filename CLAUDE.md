@@ -5,8 +5,14 @@ RPG 世界管理子系统——故事数据管理、场景上下文构建、LLM 
 ## 启动
 
 ```bash
-# 统一启动（读取 settings.yaml，按配置启动模块）
+# 统一启动（读取 settings.yaml，按配置启动模块，supervisor 会拉起子进程）
 uv run python -m rpg_world.run
+
+# 同级快捷入口，便于查找和单独调试
+uv run python -m rpg_world.run_all
+uv run python -m rpg_world.run_api
+uv run python -m rpg_world.run_telegram
+uv run python -m rpg_world.run_cli
 
 # 仅启动 API（开发，自动重载）
 MODULES=api uv run python -m rpg_world.run
@@ -31,7 +37,7 @@ uv run python3 -c "from rpg_world.rpg_core.status import StatusManager; print('o
 
 ```
 rpg_world/
-├── run.py                        # 统一启动入口（Launcher）
+├── run.py                        # supervisor（批量拉起子进程）
 ├── settings.yaml                  # 唯一根配置（base + profiles）
 ├── channels/                     # 多渠道适配器
 │   ├── base.py                   #   ChannelAdapter 抽象基类
@@ -116,21 +122,38 @@ rpg_world/
             └── memory_vectors.db
 ```
 
-## 统一进程架构
+## 进程隔离架构
 
-rpg_world 采用 **单进程 CS 架构**：所有模块（API / Telegram / CLI）运行在同一个
-进程中，由 `run.py`（Launcher）统一管理。共享同一 `AgentManager` 实例池，
-避免多进程文件冲突。`api/main.py` 的 lifespan 不做任何渠道初始化。
+rpg_world 采用 **supervisor + 子进程** 模式：`run.py` 只负责按配置拉起 API、
+Telegram、CLI 子进程，转发停止信号并回收退出。每个模块都有自己的进程和
+自己的 `AgentManager` 单例，模块间不共享运行时状态。`api/main.py` 的 lifespan
+不做任何渠道初始化。
 
 ```
-进程 (run.py)
+supervisor (rpg_world.run)
+├── api 子进程      -> uvicorn rpg_world.api.main:app
+├── telegram 子进程 -> rpg_world.channels.telegram.runner
+└── cli 子进程      -> rpg_world.channels.cli.repl
+```
+
+根目录还提供同级快捷入口，便于单独调试和查找：
+
+```
+run_all.py      -> rpg_world.run
+run_api.py      -> rpg_world.api.main
+run_telegram.py -> rpg_world.channels.telegram.runner
+run_cli.py      -> rpg_world.channels.cli.repl
+```
+
+每个子进程内部仍然保留进程内单例与缓存：
+
+```
+单个子进程
 ├── AgentManager 单例
 │   ├── RPGGameAgent 实例池（按 session_id + api_key 缓存）
 │   ├── FileWatcher（watchdog 文件监听）
 │   └── BaseManager 缓存（character/lorebook/status）
-├── FastAPI 路由（webui + REST API）
-├── Telegram 长轮询（channels/telegram/）
-└── CLI REPL（channels/cli/）— 可选
+└── 本模块运行态（API / Telegram / CLI 之一）
 ```
 
 ### 配置（`settings.yaml`）
@@ -156,7 +179,8 @@ channels_settings.enabled_module_names  # 所有已启用模块列表
 
 ### AgentManager（`rpg_core/agent/manager.py`）
 
-进程内单例，统一管理 `RPGGameAgent` 的创建与缓存：
+进程内单例，统一管理 `RPGGameAgent` 的创建与缓存。每个子进程各自持有一个
+独立实例池：
 
 ```python
 from rpg_world.rpg_core.agent.manager import AgentManager
@@ -164,8 +188,8 @@ from rpg_world.rpg_core.agent.manager import AgentManager
 agent = AgentManager.get_or_create(session_id="mygame_01")
 ```
 
-所有模块通过同一个 `AgentManager` 获取 agent，确保 FileWatcher 只初始化一次、
-BaseManager 缓存一致。
+单个进程内，所有模块通过同一个 `AgentManager` 获取 agent，确保 FileWatcher
+只初始化一次、BaseManager 缓存一致。跨进程不共享这些对象。
 
 `AgentManager` 的缓存键包含 `workspace`、`session_id`、`api_key`。同名 session
 在不同 workspace 下会得到不同 agent，避免跨工作区污染。所有入口必须提供有效

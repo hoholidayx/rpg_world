@@ -1,7 +1,7 @@
-"""FastAPI application for RPG World.
+"""API 应用定义模块。
 
-入口只有 ``rpg_world/run.py``（Launcher），FastAPI lifespan 不做任何
-渠道初始化。所有渠道（Telegram / CLI）由 Launcher 统一管理。
+FastAPI lifespan 不做任何渠道初始化。API 的独立启动仍由外层入口
+或 Uvicorn 负责，Telegram / CLI 由 launcher 统一管理。
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from rpg_world.api.settings import api_settings
 from rpg_world.api.routers import character, chat, lorebook, sessions, status, workspace
+from rpg_world.rpg_core.llama_service.client import configure_llama_client_from_memory_settings
+from rpg_world.rpg_core.settings import settings as core_settings
 
 # Enable rpg_core logging (add handlers so logs appear regardless of uvicorn config)
 for _name in ("rpg_core.watcher", "rpg_core.manager"):
@@ -28,6 +30,9 @@ for _name in ("rpg_core.watcher", "rpg_core.manager"):
 async def lifespan(app: FastAPI):
     """FastAPI 生命周期——仅处理 API 自身生命周期，不涉及渠道。"""
     yield
+
+
+configure_llama_client_from_memory_settings(core_settings.memory_settings)
 
 
 app = FastAPI(title="RPG World API", lifespan=lifespan)

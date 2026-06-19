@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## 项目结构与模块组织
-本仓库采用单进程统一启动架构，入口是 `run.py`。核心业务逻辑位于 `rpg_core/`，其中 `agent/` 负责 LLM Agent 与命令分发，`context/` 负责上下文构建，`character/`、`lorebook/`、`status/`、`memory/`、`summary/` 分别处理领域数据。API 放在 `api/`，多渠道适配器与测试位于 `channels/` 和 `channels/tests/`。前端 WebUI 在 `webui/`，运行数据在 `data/`。
+本仓库采用 supervisor + 子进程的启动架构，统一批量启动入口是 `run.py`，同级提供 `run_all.py`、`run_api.py`、`run_telegram.py`、`run_cli.py` 作为快捷入口。核心业务逻辑位于 `rpg_core/`，其中 `agent/` 负责 LLM Agent 与命令分发，`context/` 负责上下文构建，`character/`、`lorebook/`、`status/`、`memory/`、`summary/` 分别处理领域数据。API 放在 `api/`，多渠道适配器与测试位于 `channels/` 和 `channels/tests/`。前端 WebUI 在 `webui/`，运行数据在 `data/`。
 
 修改启动流程、渠道生命周期或共享状态前，先阅读 `CLAUDE.md`。不要绕过 `run.py` 自行拼装多模块启动，也不要破坏 `AgentManager` 单例和 `settings.yaml` 的配置边界。
 
@@ -9,7 +9,11 @@
 
 ## 构建、测试与开发命令
 - `uv sync`：安装后端依赖。
-- `uv run python -m rpg_world.run`：按 `settings.yaml` 启动全部启用模块。
+- `uv run python -m rpg_world.run`：按 `settings.yaml` 启动全部启用模块，supervisor 拉起子进程。
+- `uv run python -m rpg_world.run_all`：`run.py` 的同级快捷入口。
+- `uv run python -m rpg_world.run_api`：API 快捷入口。
+- `uv run python -m rpg_world.run_telegram`：Telegram 快捷入口。
+- `uv run python -m rpg_world.run_cli`：CLI 快捷入口。
 - `MODULES=api uv run python -m rpg_world.run`：仅启动 API，适合后端开发。
 - `MODULES=telegram uv run python -m rpg_world.run`：仅启动 Telegram，适合验证主聊天入口。
 - `MODULES=api,telegram uv run python -m rpg_world.run`：同时启动 API 与 Telegram，共享同一 `AgentManager`。
@@ -38,7 +42,7 @@ API/WebUI 管理能力应补 `api/tests/` 的契约测试；核心上下文、me
 PR 说明应写清影响模块、行为变化、配置变更（如 `settings.yaml`）、测试结果，以及是否影响现有工作区数据结构。涉及 `webui/` 可见改动时，附上界面截图。
 
 ## 配置与架构注意事项
-`settings.yaml` 是根配置唯一入口，用于模块启停、渠道参数、agent 配置和数据路径。profile 可通过 `file: settings.local.yaml` 读取被 git ignore 的覆盖文件。`api/settings.json` 仅保留 API 服务级配置。所有模块必须通过共享的 `AgentManager` 获取 agent，避免重复初始化 `FileWatcher`、缓存不一致或多进程式文件冲突。
+`settings.yaml` 是根配置唯一入口，用于模块启停、渠道参数、agent 配置和数据路径。profile 可通过 `file: settings.local.yaml` 读取被 git ignore 的覆盖文件。`api/settings.json` 仅保留 API 服务级配置。每个子进程内部必须通过共享的 `AgentManager` 获取 agent，避免重复初始化 `FileWatcher`、缓存不一致或单进程内状态漂移。
 
 `session_id` 只能由英文字母、数字、下划线组成，规则为 `^[A-Za-z0-9_]+$`，并会直接映射到 `sessions/{session_id}/` 目录。默认渠道会话名使用下划线格式，例如 `cli_direct`、`telegram_12345`。
 

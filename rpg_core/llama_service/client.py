@@ -332,6 +332,18 @@ def get_llama_client() -> LlamaClient:
     return _CLIENT
 
 
+def configure_llama_client_from_memory_settings(memory_settings: Any) -> LlamaClient:
+    """Configure the process-wide llama client from ``MemorySettings``."""
+    client = get_llama_client()
+    client.configure(
+        enabled=bool(getattr(memory_settings, "llama_process_enabled", True)),
+        request_timeout_ms=int(getattr(memory_settings, "llama_request_timeout_ms", 60000)),
+        startup_timeout_ms=int(getattr(memory_settings, "llama_startup_timeout_ms", 120000)),
+        max_parallel_models=int(getattr(memory_settings, "llama_max_parallel_models", 2)),
+    )
+    return client
+
+
 def set_llama_client(client: LlamaClient | None) -> None:
     global _CLIENT
     _CLIENT = client
