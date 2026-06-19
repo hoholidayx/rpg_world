@@ -29,11 +29,17 @@ Architecture::
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from rpg_world.rpg_core.context.rpg_context import Message
+from rpg_world.rpg_core.session.turns import count_turns, iter_turn_groups, split_into_turn_batches
 
 from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
+
+if TYPE_CHECKING:
+    from rpg_world.rpg_core.summary.batch_store import BatchSummaryStore
+    from rpg_world.rpg_core.session.manager import SessionManager
 
 
 @dataclass
@@ -59,7 +65,7 @@ class CompressResult:
 class SummaryCompressor:
     """对话压缩控制器 —— 纯函数式、无状态设计。
 
-    每次调用 ``maybe_compress(history)`` 都基于当前 history 的实时长度
+    每次调用 ``maybe_compress(session)`` 都基于当前 session 的实时历史
     做判断，不维护内部轮次计数器。可安全地重复调用。
 
     压缩策略由三个独立维度组成：
@@ -75,7 +81,7 @@ class SummaryCompressor:
     Parameters
     ----------
     summary_store:
-        SummaryStore 实例。为 None 时压缩仅截断历史，不生成摘要。
+        BatchSummaryStore 实例。为 None 时压缩仅回写历史，不生成摘要。
     memory_sub_agent:
         MemorySubAgent 实例。为 None 时跳过摘要生成。
     enabled:
@@ -106,11 +112,11 @@ class SummaryCompressor:
 
     # ── public API ─────────────────────────────────────────────────────
 
-    async def maybe_compress(self, history: list[Message]) -> CompressResult:
+    async def maybe_compress(self, session: "SessionManager") -> CompressResult:
         """检查是否需要压缩，是则执行分批压缩。
 
-        当压缩触发时，*history* 会被**原地修改**：已压缩的旧消息被移除，
-        只保留最近 ``keep_recent_rounds`` 轮的内容。
+        当压缩触发时，session 的历史会通过 ``replace_history()`` 回写，
+        已压缩的旧消息被移除，只保留最近 ``keep_recent_rounds`` 轮的内容。
 
         多次调用是安全的 —— 如果历史不够长，直接返回 ``triggered=False``。
         """
@@ -120,39 +126,40 @@ class SummaryCompressor:
         if self._memory_sub_agent is None or self._batch_store is None:
             return CompressResult()
 
-        # 1. 统计用户消息数
-        user_indices = [
-            i for i, m in enumerate(history) if m.is_user()
-        ]
-        total_user_rounds = len(user_indices)
+        history = session.history
+
+        # Keep leading system messages untouched.
+        prefix_end = 0
+        while prefix_end < len(history) and history[prefix_end].is_system():
+            prefix_end += 1
+        prefix = history[:prefix_end]
+        working_history = history[prefix_end:]
+
+        # 1. 统计 turn 数
+        total_turns = count_turns(working_history)
 
         # 2. 判断触发条件
         if (
-            total_user_rounds
+            total_turns
             <= self._keep_recent_rounds + self._compression_threshold
         ):
             return CompressResult()
 
         # 3. 确定压缩范围
-        keep_from = user_indices[-self._keep_recent_rounds]
-        compress_start = 1  # 跳过 system prompt
-        compress_end = keep_from
-
-        if compress_end <= compress_start:
+        groups = iter_turn_groups(working_history)
+        if len(groups) <= self._keep_recent_rounds:
             return CompressResult()
 
-        compress_portion = history[compress_start:compress_end]
-        user_rounds_in_compress = sum(
-            1 for m in compress_portion if m.is_user()
-        )
+        compress_groups = groups[:-self._keep_recent_rounds]
+        keep_groups = groups[-self._keep_recent_rounds:]
+        compress_portion = [msg for group in compress_groups for msg in group]
+        user_rounds_in_compress = len(compress_groups)
 
         if user_rounds_in_compress == 0:
             return CompressResult()
 
         # 4. 分批处理
-        batches = self._memory_sub_agent._split_into_batches(
-            compress_portion, self._compress_batch_size
-        )
+        batches = split_into_turn_batches(compress_portion, self._compress_batch_size)
 
         batch_files: list[str] = []
         for batch_id, batch_messages, batch_user_rounds in batches:
@@ -172,7 +179,7 @@ class SummaryCompressor:
                     )
                     batch_files.append(path.name)
                     logger.info(
-                        "[Compressor] batch #{}: {} user rounds -> {}",
+                        "[Compressor] batch #{}: {} turns -> {}",
                         batch_id, batch_user_rounds, path.name,
                     )
             except Exception as exc:
@@ -216,12 +223,15 @@ class SummaryCompressor:
                 logger.warning("[Compressor] overall summary failed: {}", exc)
 
         # 6. 一次性截断历史
-        del history[compress_start:compress_end]
+        session.replace_history(
+            prefix + [msg for group in keep_groups for msg in group],
+            persist=session.history_enabled,
+        )
 
         logger.info(
-            "[Compressor] compressed {} user rounds ({} remaining), {} batch files",
+            "[Compressor] compressed {} turns ({} remaining), {} batch files",
             user_rounds_in_compress,
-            total_user_rounds - user_rounds_in_compress,
+            total_turns - user_rounds_in_compress,
             len(batch_files),
         )
 

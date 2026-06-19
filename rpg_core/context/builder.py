@@ -10,6 +10,7 @@ from jinja2 import Environment, FileSystemLoader
 from rpg_world.rpg_core.context.config import RPGContextConfig
 from rpg_world.rpg_core.context.rpg_context import Message, Role, RPGContext
 from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.session.turns import count_turns, slice_recent_turns
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.character.manager import CharacterManager
@@ -41,12 +42,6 @@ def render_jinja_template(template_name: str, **context: object) -> str:
         )
     tpl = _JINJA_ENV.get_template(template_name)
     return tpl.render(**context).strip()
-
-
-def _count_rounds(messages: list[Message]) -> int:
-    """Count user messages in the history portion (exclude last user message)."""
-    history = messages[:-1]
-    return sum(1 for m in history if m.is_user())
 
 
 def _flatten_status_tables(
@@ -166,7 +161,8 @@ class RPGContextBuilder:
             messages = []
 
         # ── 1. Parse sources ────────────────────────────────────────
-        total_rounds = _count_rounds(messages)
+        history_messages = messages[:-1]  # exclude current user message
+        total_rounds = count_turns(history_messages)
 
         current_user_msg = messages[-1] if messages and messages[-1].is_user() else None
         user_text = current_user_msg.content if current_user_msg else ""
@@ -224,9 +220,8 @@ class RPGContextBuilder:
                 logger.debug("[RPGContextBuilder] summary layer skipped: {}", exc)
 
         # ── 5. Extract Hot History ──────────────────────────────────
-        history_messages = messages[:-1]  # exclude current user message
-        # Filter to keep only rounds >= total_rounds - hot_history_rounds
-        hot_history = _slice_hot_history(history_messages, self.config.hot_history_rounds)
+        # Filter to keep only the most recent turns.
+        hot_history = slice_recent_turns(history_messages, self.config.hot_history_rounds)
 
         # ── 6. Build Dynamic Layer modules ──────────────────────────
         # Ordered by change frequency (low → high) for prefix cache efficiency:
@@ -325,19 +320,3 @@ class RPGContextBuilder:
             except Exception as exc:
                 logger.debug("[RPGContextBuilder] extension module skipped {}: {}", getattr(mod, "name", "?"), exc)
         return "\n\n".join(blocks)
-
-
-# ── module-level helpers ─────────────────────────────────────────────
-
-
-def _slice_hot_history(history: list[Message], hot_rounds: int) -> list[Message]:
-    """Keep only the last *hot_rounds* user-message rounds from *history*."""
-    if hot_rounds <= 0:
-        return []
-
-    user_indices = [i for i, m in enumerate(history) if m.is_user()]
-    if len(user_indices) <= hot_rounds:
-        return history
-
-    cutoff = user_indices[-hot_rounds]
-    return history[cutoff:]

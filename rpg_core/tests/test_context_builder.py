@@ -145,7 +145,7 @@ def test_build_context_layers_and_user_extensions(fake_token_counter):
     assert summary[-1].type == LayerType.USER_MESSAGE
     assert summary[-1].status == "active"
     assert summary[0].description.startswith("system prompt")
-    assert summary[3].description == "1 轮对话 (user/assistant)"
+    assert summary[3].description == "1 轮 / 2 条 (user=1, assistant=1, tool=0, system=0)"
 
 
 def test_context_to_markdown_and_empty_layers(fake_token_counter):
@@ -158,3 +158,36 @@ def test_context_to_markdown_and_empty_layers(fake_token_counter):
     assert "User Message" in md
     assert "总 token" in md
     assert "| Layer | Status | Tokens | Description |" not in md
+
+
+def test_context_markdown_includes_history_stats(fake_token_counter):
+    ctx = RPGContext(
+        fixed_layer="fixed",
+        hot_history=[
+            Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
+            Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
+            Message(Role.USER, "u2", turn_id=2, seq_in_turn=1),
+        ],
+    )
+
+    md = ctx.to_markdown(fake_token_counter)
+
+    assert "历史消息: **3** 条" in md
+    assert "历史轮数: **2** 轮" in md
+    assert "user 2, assistant 1, tool 0, system 0" in md
+
+
+def test_context_hot_history_falls_back_without_user_anchor(fake_token_counter):
+    ctx = RPGContext(
+        fixed_layer="fixed",
+        hot_history=[
+            Message(Role.ASSISTANT, "a1"),
+            Message(Role.TOOL, "tool1"),
+            Message(Role.SYSTEM, "sys1"),
+        ],
+    )
+
+    summary = ctx.layer_summary(fake_token_counter)
+
+    assert [m.content for m in ctx.hot_history] == ["a1", "tool1", "sys1"]
+    assert summary[3].description == "3 轮 / 3 条 (user=0, assistant=1, tool=1, system=1)"

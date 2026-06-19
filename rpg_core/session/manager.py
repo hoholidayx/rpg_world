@@ -26,6 +26,7 @@ from loguru import logger
 
 from rpg_world.rpg_core.settings import settings
 from rpg_world.rpg_core.context.rpg_context import Message, Role
+from rpg_world.rpg_core.session.turns import count_turns, has_trustworthy_turn_ids, latest_turn_id
 
 _TAG = "[SessionManager]"
 
@@ -38,6 +39,8 @@ _META_TMP_SUFFIX = ".json.tmp"
 _META_CREATED_AT = "created_at"
 _META_UPDATED_AT = "updated_at"
 _META_LAST_STORY_RP_HIS_ID = "last_story_rp_his_id"
+_META_LAST_STORY_TURN_ID = "last_story_turn_id"
+_META_NEXT_TURN_ID = "next_turn_id"
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 _SESSION_ID_MAX_LENGTH = 64
 
@@ -70,15 +73,25 @@ class SessionManager:
         self._session_id = session_id if session_id is not None else _DEFAULT_SESSION_ID
         self._workspace = workspace
         self._history_enabled = history_enabled
-        self._history: list[Message] = []
+        self.__history: list[Message] = []
         self._meta: dict[str, str | int | float] = {}
+        self._active_turn_id: int | None = None
+        self._turn_seq_by_turn: dict[int, int] = {}
 
     # ── Public API — history ───────────────────────────────────────────
 
     @property
     def history(self) -> list[Message]:
         """Read-only snapshot of in-memory history."""
-        return list(self._history)
+        return list(self.__history)
+
+    @property
+    def _history(self) -> list[Message]:
+        """Compatibility snapshot for legacy internal access.
+
+        Returns a copy so callers cannot mutate internal state by accident.
+        """
+        return list(self.__history)
 
     def load(self) -> None:
         """Load history from ``history.jsonl`` into ``_history``.
@@ -91,22 +104,43 @@ class SessionManager:
         if not path.exists():
             logger.debug(_TAG + " no history file for session '{}'", self._session_id)
             return
-        self._history = []
+        self.__history = []
         with path.open("r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    self._history.append(Message.from_dict(json.loads(line)))
+                    self.__history.append(Message.from_dict(json.loads(line)))
                 except (json.JSONDecodeError, Exception):
                     continue
+        self._rebuild_turn_state()
         logger.debug(
             _TAG + " loaded {} message(s) from {}",
-            len(self._history), path,
+            len(self.__history), path,
         )
 
-    def append(self, role: Role | str, content: str) -> None:
+    def begin_turn(self) -> int:
+        """Allocate and activate the next turn id."""
+        turn_id = int(self._meta.get(_META_NEXT_TURN_ID, 1))
+        self._meta[_META_NEXT_TURN_ID] = turn_id + 1
+        self._active_turn_id = turn_id
+        self._turn_seq_by_turn[turn_id] = 1
+        self._write_meta()
+        return turn_id
+
+    def end_turn(self, turn_id: int | None = None) -> None:
+        """Clear the active turn marker if it matches *turn_id*."""
+        if turn_id is None or self._active_turn_id == turn_id:
+            self._active_turn_id = None
+
+    def append(
+        self,
+        role: Role | str,
+        content: str,
+        turn_id: int | None = None,
+        seq_in_turn: int | None = None,
+    ) -> None:
         """Append a message to in-memory history.
 
         Each message gets an ``rp_his_id`` field — current Unix timestamp
@@ -116,8 +150,13 @@ class SessionManager:
         ``_history_enabled`` is ``True``.
         """
         his_id = int(_time.time() * 1000)
-        msg = Message(role, content, his_id)
-        self._history.append(msg)
+        if turn_id is None:
+            turn_id = self._active_turn_id or self.begin_turn()
+        if seq_in_turn is None:
+            seq_in_turn = self._turn_seq_by_turn.get(turn_id, 1)
+        self._turn_seq_by_turn[turn_id] = seq_in_turn + 1
+        msg = Message(role, content, his_id, turn_id=turn_id, seq_in_turn=seq_in_turn)
+        self.__history.append(msg)
         if not self._history_enabled:
             return
         record = json.dumps(msg.to_dict(), ensure_ascii=False)
@@ -134,11 +173,7 @@ class SessionManager:
 
     def clear(self) -> None:
         """Clear in-memory history and truncate ``history.jsonl``."""
-        self._history = []
-        if self._history_enabled:
-            path = self._history_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("")
+        self.replace_history([], persist=self._history_enabled)
         logger.debug(_TAG + " cleared history for session '{}'", self._session_id)
 
     def truncate(self, keep_from_index: int) -> int:
@@ -147,20 +182,13 @@ class SessionManager:
         Returns the number of messages removed.  Does **not** generate a
         summary — that is the caller's (agent's) responsibility.
         """
-        before = len(self._history)
-        del self._history[:keep_from_index]
-        removed = before - len(self._history)
-
-        if self._history_enabled:
-            path = self._history_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("w", encoding="utf-8") as f:
-                for msg in self._history:
-                    f.write(json.dumps(msg.to_dict(), ensure_ascii=False) + "\n")
+        before = len(self.__history)
+        self.replace_history(self.__history[keep_from_index:], persist=self._history_enabled)
+        removed = before - len(self.__history)
 
         logger.debug(
             _TAG + " truncated: removed {} msgs, {} remaining",
-            removed, len(self._history),
+            removed, len(self.__history),
         )
         return removed
 
@@ -213,7 +241,7 @@ class SessionManager:
 
     def checkpoint(self) -> int:
         """Return current history length as a rollback checkpoint."""
-        return len(self._history)
+        return len(self.__history)
 
     def rollback(self, checkpoint: int) -> None:
         """Remove all messages appended since *checkpoint*.
@@ -222,7 +250,7 @@ class SessionManager:
         ``single_turn()`` pattern with ``record_history=False`` does not
         write to disk, so the in-memory rollback is sufficient.
         """
-        del self._history[checkpoint:]
+        self.replace_history(self.__history[:checkpoint], persist=False)
 
     # ── Session switch ─────────────────────────────────────────────────
 
@@ -231,7 +259,7 @@ class SessionManager:
         self.validate_session_id(session_id)
         self._session_id = session_id
         self._meta = {}
-        self._history = []
+        self.replace_history([], persist=False)
         self._load_meta()
         if self._history_enabled:
             self.load()
@@ -258,9 +286,42 @@ class SessionManager:
         """Count user messages with rp_his_id > last_story_rp_his_id."""
         last = self.last_story_rp_his_id
         return sum(
-            1 for m in self._history
+            1 for m in self.__history
             if m.is_user() and m.rp_his_id > last
         )
+
+    @property
+    def last_story_turn_id(self) -> int:
+        """turn_id of the last turn processed by story extraction."""
+        return int(self._meta.get(_META_LAST_STORY_TURN_ID, 0))
+
+    def set_last_story_turn_id(self, turn_id: int) -> None:
+        """Persist the last extracted turn id."""
+        self._update_meta(**{_META_LAST_STORY_TURN_ID: turn_id})
+
+    def count_new_turns_since_story(self) -> int:
+        """Count new conversation units since the last story extraction.
+
+        When turn ids are trustworthy we count logical turns. Otherwise we
+        degrade to user-anchor turns first, then message count if the history
+        has no user anchors.
+        """
+        new_history = self.__history
+        if has_trustworthy_turn_ids(self.__history):
+            if self.last_story_turn_id > 0:
+                return len({
+                    m.turn_id
+                    for m in self.__history
+                    if m.turn_id > self.last_story_turn_id
+                })
+            if self.last_story_rp_his_id > 0:
+                new_history = [m for m in self.__history if m.rp_his_id > self.last_story_rp_his_id]
+                return count_turns(new_history)
+            return count_turns(self.__history)
+
+        if self.last_story_rp_his_id > 0:
+            new_history = [m for m in self.__history if m.rp_his_id > self.last_story_rp_his_id]
+        return count_turns(new_history)
 
     # ── History-enabled flag ───────────────────────────────────────────
 
@@ -305,6 +366,8 @@ class SessionManager:
             _META_CREATED_AT: now,
             _META_UPDATED_AT: now,
             _META_LAST_STORY_RP_HIS_ID: 0,
+            _META_LAST_STORY_TURN_ID: 0,
+            _META_NEXT_TURN_ID: 1,
         }
 
     def _update_meta(self, **kwargs: object) -> None:
@@ -324,3 +387,44 @@ class SessionManager:
             json.dump(self._meta, f, ensure_ascii=False, indent=2)
             f.write("\n")
         tmp.replace(path)
+
+    def replace_history(self, history: list[Message], *, persist: bool | None = None) -> None:
+        """Replace the in-memory history and rebuild turn bookkeeping.
+
+        Use this instead of mutating ``_history`` directly so turn counters and
+        ``next_turn_id`` stay in sync after compression, truncation, or other
+        bulk edits. When *persist* is ``None``, it defaults to the session's
+        ``_history_enabled`` flag.
+        """
+        self.__history = list(history)
+        self._rebuild_turn_state()
+        if persist is None:
+            persist = self._history_enabled
+        if not persist:
+            return
+        path = self._history_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            for msg in self.__history:
+                f.write(json.dumps(msg.to_dict(), ensure_ascii=False) + "\n")
+
+    def _rebuild_turn_state(self) -> None:
+        """Reconstruct turn counters from the current in-memory history."""
+        max_turn_id = latest_turn_id(self.__history)
+        if max_turn_id > 0:
+            if int(self._meta.get(_META_NEXT_TURN_ID, 1)) <= max_turn_id:
+                self._meta[_META_NEXT_TURN_ID] = max_turn_id + 1
+                self._write_meta()
+        else:
+            inferred = count_turns(self.__history) + 1 if self.__history else 1
+            if int(self._meta.get(_META_NEXT_TURN_ID, 1)) < inferred:
+                self._meta[_META_NEXT_TURN_ID] = inferred
+                self._write_meta()
+
+        seq_by_turn: dict[int, int] = {}
+        for msg in self.__history:
+            if msg.turn_id <= 0:
+                continue
+            seq_by_turn[msg.turn_id] = max(seq_by_turn.get(msg.turn_id, 0), msg.seq_in_turn)
+        self._turn_seq_by_turn = {turn_id: seq + 1 for turn_id, seq in seq_by_turn.items()}
+        self._active_turn_id = None

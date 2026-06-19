@@ -250,107 +250,111 @@ class RPGGameAgent:
 
         # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
         turn_stats = TurnStats(started_at=_time.monotonic())
+        turn_id = self._session.begin_turn()
 
-        # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ──────
-        status_records = None
-        if self._status_sub_agent and self._scene_tracker:
-            scene_ctx_before = self._scene_tracker.get_context()
-            sub_result = await self._status_sub_agent.update(
-                history=self._session.history,
-                state_context=scene_ctx_before,
-                user_input=user_input,
+        try:
+            # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ──────
+            status_records = None
+            if self._status_sub_agent and self._scene_tracker:
+                scene_ctx_before = self._scene_tracker.get_context()
+                sub_result = await self._status_sub_agent.update(
+                    history=self._session.history,
+                    state_context=scene_ctx_before,
+                    user_input=user_input,
+                    turn_stats=turn_stats,
+                )
+                if sub_result.updated:
+                    logger.info(
+                        _TAG + " StatusSubAgent updated scene via {}",
+                        [r["tool_name"] for r in sub_result.records],
+                    )
+                    status_records = sub_result.records
+
+            # Build scene context and embed into stored user message
+            scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
+            if scene_ctx:
+                stored_input = f"{scene_ctx}\n\n{user_input}"
+            else:
+                stored_input = user_input
+
+            self._session.append(Role.USER, stored_input, turn_id=turn_id)
+
+            # ── 记忆检索 ────────────────────────────────────────────────
+            if self._memory_manager:
+                try:
+                    self._memory_manager.recall(user_input)
+                except Exception as exc:
+                    logger.warning(_TAG + " memory recall failed: {}", exc)
+
+            # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
+            if self._memory_sub_agent:
+                await self._memory_sub_agent.maybe_auto_extract(self._session)
+
+            # ── 自动压缩 ──────────────────────────────────────────────────
+            if self._compressor:
+                try:
+                    compress_result = await self._compressor.maybe_compress(
+                        self._session
+                    )
+                    if compress_result.triggered:
+                        logger.info(
+                            _TAG + " auto-compressed: {} turns, {} batches",
+                            compress_result.user_rounds_compressed,
+                            len(compress_result.batch_files or []),
+                        )
+                except Exception as exc:
+                    logger.warning(_TAG + " auto-compress failed: {}", exc)
+
+            messages = self._build_transformed_context()
+            if settings.verbose_logging:
+                sys_msgs = sum(1 for m in messages if m.is_system())
+                user_msgs = sum(1 for m in messages if m.is_user())
+                asst_msgs = sum(1 for m in messages if m.is_assistant())
+                total_chars = sum(len(m.content) for m in messages)
+                logger.debug(
+                    _TAG + " context messages: {} total (sys={}, user={}, asst={}) chars={}",
+                    len(messages), sys_msgs, user_msgs, asst_msgs, total_chars,
+                )
+
+            schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
+
+            reply_text, records = await run_chat_loop(
+                provider=self._provider,
+                tool_registry=self._tool_registry,
+                messages=messages,
+                schemas=schemas,
                 turn_stats=turn_stats,
             )
-            if sub_result.updated:
+            self._last_tool_records = records
+
+            turn_stats.finished_at = _time.monotonic()
+
+            # ── 日志摘要 ────────────────────────────────────────────────
+            if turn_stats.calls:
                 logger.info(
-                    _TAG + " StatusSubAgent updated scene via {}",
-                    [r["tool_name"] for r in sub_result.records],
+                    _TAG + " turn stats: {}",
+                    turn_stats.summary(),
                 )
-                status_records = sub_result.records
 
-        # Build scene context and embed into stored user message
-        scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
-        if scene_ctx:
-            stored_input = f"{scene_ctx}\n\n{user_input}"
-        else:
-            stored_input = user_input
-
-        self._session.append(Role.USER, stored_input)
-
-        # ── 记忆检索 ────────────────────────────────────────────────
-        if self._memory_manager:
-            try:
-                self._memory_manager.recall(user_input)
-            except Exception as exc:
-                logger.warning(_TAG + " memory recall failed: {}", exc)
-
-        # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
-        if self._memory_sub_agent:
-            await self._memory_sub_agent.maybe_auto_extract(self._session)
-
-        # ── 自动压缩 ──────────────────────────────────────────────────
-        if self._compressor:
-            try:
-                compress_result = await self._compressor.maybe_compress(
-                    self._session.history
+            # ── 构建 AgentReply ──────────────────────────────────────────
+            if settings.include_tool_records:
+                result = AgentReply(
+                    text=reply_text,
+                    tool_records=records or None,
+                    status_sub_agent_records=status_records,
+                    stats=turn_stats,
                 )
-                if compress_result.triggered:
-                    logger.info(
-                        _TAG + " auto-compressed: {} rounds, {} batches",
-                        compress_result.user_rounds_compressed,
-                        len(compress_result.batch_files or []),
-                    )
-            except Exception as exc:
-                logger.warning(_TAG + " auto-compress failed: {}", exc)
+            else:
+                result = AgentReply(
+                    text=reply_text,
+                    status_sub_agent_records=status_records,
+                    stats=turn_stats,
+                )
 
-        messages = self._build_transformed_context()
-        if settings.verbose_logging:
-            sys_msgs = sum(1 for m in messages if m.is_system())
-            user_msgs = sum(1 for m in messages if m.is_user())
-            asst_msgs = sum(1 for m in messages if m.is_assistant())
-            total_chars = sum(len(m.content) for m in messages)
-            logger.debug(
-                _TAG + " context messages: {} total (sys={}, user={}, asst={}) chars={}",
-                len(messages), sys_msgs, user_msgs, asst_msgs, total_chars,
-            )
-
-        schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
-
-        reply_text, records = await run_chat_loop(
-            provider=self._provider,
-            tool_registry=self._tool_registry,
-            messages=messages,
-            schemas=schemas,
-            turn_stats=turn_stats,
-        )
-        self._last_tool_records = records
-
-        turn_stats.finished_at = _time.monotonic()
-
-        # ── 日志摘要 ────────────────────────────────────────────────
-        if turn_stats.calls:
-            logger.info(
-                _TAG + " turn stats: {}",
-                turn_stats.summary(),
-            )
-
-        # ── 构建 AgentReply ──────────────────────────────────────────
-        if settings.include_tool_records:
-            result = AgentReply(
-                text=reply_text,
-                tool_records=records or None,
-                status_sub_agent_records=status_records,
-                stats=turn_stats,
-            )
-        else:
-            result = AgentReply(
-                text=reply_text,
-                status_sub_agent_records=status_records,
-                stats=turn_stats,
-            )
-
-        self._session.append(Role.ASSISTANT, reply_text)
-        return result
+            self._session.append(Role.ASSISTANT, reply_text, turn_id=turn_id)
+            return result
+        finally:
+            self._session.end_turn(turn_id)
 
     async def send_stream(self, user_input: str) -> AsyncIterator[AgentStreamEvent]:
         """Streaming variant of ``send()``, goes through the message queue.
@@ -400,148 +404,152 @@ class RPGGameAgent:
 
         # ── TurnStats 聚合器 ───────────────────────────────────────
         turn_stats = TurnStats(started_at=_time.monotonic())
-
-        # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ────
-        status_records = None
-        if self._status_sub_agent and self._scene_tracker:
-            scene_ctx_before = self._scene_tracker.get_context()
-            sub_result = await self._status_sub_agent.update(
-                history=self._session.history,
-                state_context=scene_ctx_before,
-                user_input=user_input,
-                turn_stats=turn_stats,
-            )
-            if sub_result.updated:
-                logger.info(
-                    _TAG + " StatusSubAgent updated scene via {}",
-                    [r["tool_name"] for r in sub_result.records],
-                )
-                status_records = sub_result.records
-                # 将 sub-agent 工具调用作为流事件发射，让 CLI 实时显示
-                for r in status_records:
-                    await event_queue.put(AgentStreamEvent(
-                        kind=StreamEventKind.TOOL_CALL,
-                        tool_name=r["tool_name"],
-                        tool_arguments=str(r.get("arguments", "")),
-                        content="",
-                    ))
-                    await event_queue.put(AgentStreamEvent(
-                        kind=StreamEventKind.TOOL_RESULT,
-                        tool_name=r["tool_name"],
-                        tool_result=str(r.get("result", "")),
-                        tool_result_preview=str(r.get("result", ""))[:200],
-                    ))
-
-        # ── Build scene context and embed into stored user message ──
-        scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
-        if scene_ctx:
-            stored_input = f"{scene_ctx}\n\n{user_input}"
-        else:
-            stored_input = user_input
-
-        self._session.append(Role.USER, stored_input)
-
-        # ── 记忆检索 ────────────────────────────────────────────────
-        if self._memory_manager:
-            try:
-                self._memory_manager.recall(user_input)
-            except Exception as exc:
-                logger.warning(_TAG + " memory recall failed: {}", exc)
-
-        # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
-        if self._memory_sub_agent:
-            await self._memory_sub_agent.maybe_auto_extract(self._session)
-
-        # ── 自动压缩 ──────────────────────────────────────────────────
-        if self._compressor:
-            try:
-                compress_result = await self._compressor.maybe_compress(
-                    self._session.history
-                )
-                if compress_result.triggered:
-                    logger.info(
-                        _TAG + " auto-compressed: {} rounds, {} batches",
-                        compress_result.user_rounds_compressed,
-                        len(compress_result.batch_files or []),
-                    )
-            except Exception as exc:
-                logger.warning(_TAG + " auto-compress failed: {}", exc)
-
-        messages = self._build_transformed_context()
-        schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
-
-        # ── Stream loop ────────────────────────────────────────────
-        final_content = ""
-        final_event: AgentStreamEvent | None = None
+        turn_id = self._session.begin_turn()
 
         try:
-            async for event in run_chat_loop_stream(
-                    provider=self._provider,
-                    tool_registry=self._tool_registry,
-                    messages=messages,
-                    schemas=schemas,
+            # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ────
+            status_records = None
+            if self._status_sub_agent and self._scene_tracker:
+                scene_ctx_before = self._scene_tracker.get_context()
+                sub_result = await self._status_sub_agent.update(
+                    history=self._session.history,
+                    state_context=scene_ctx_before,
+                    user_input=user_input,
                     turn_stats=turn_stats,
-            ):
-                if event.kind == StreamEventKind.DONE:
-                    final_content = event.content
-                    final_event = event
-                else:
-                    await event_queue.put(event)
-        except Exception as exc:
-            logger.error("{} send_stream error: {}", _TAG, exc)
-            await event_queue.put(AgentStreamEvent(
-                kind=StreamEventKind.ERROR,
-                content=str(exc),
-            ))
-            await event_queue.put(_StreamSentinel())
-            return
+                )
+                if sub_result.updated:
+                    logger.info(
+                        _TAG + " StatusSubAgent updated scene via {}",
+                        [r["tool_name"] for r in sub_result.records],
+                    )
+                    status_records = sub_result.records
+                    # 将 sub-agent 工具调用作为流事件发射，让 CLI 实时显示
+                    for r in status_records:
+                        await event_queue.put(AgentStreamEvent(
+                            kind=StreamEventKind.TOOL_CALL,
+                            tool_name=r["tool_name"],
+                            tool_arguments=str(r.get("arguments", "")),
+                            content="",
+                        ))
+                        await event_queue.put(AgentStreamEvent(
+                            kind=StreamEventKind.TOOL_RESULT,
+                            tool_name=r["tool_name"],
+                            tool_result=str(r.get("result", "")),
+                            tool_result_preview=str(r.get("result", ""))[:200],
+                        ))
 
-        # ── Agent-level cleanup（流结束后执行） ────────────────────
-        turn_stats.finished_at = _time.monotonic()
+            # ── Build scene context and embed into stored user message ──
+            scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
+            if scene_ctx:
+                stored_input = f"{scene_ctx}\n\n{user_input}"
+            else:
+                stored_input = user_input
 
-        if settings.verbose_logging and turn_stats.calls:
-            logger.info(
-                _TAG + " turn stats: {}",
-                turn_stats.summary(),
+            self._session.append(Role.USER, stored_input, turn_id=turn_id)
+
+            # ── 记忆检索 ────────────────────────────────────────────────
+            if self._memory_manager:
+                try:
+                    self._memory_manager.recall(user_input)
+                except Exception as exc:
+                    logger.warning(_TAG + " memory recall failed: {}", exc)
+
+            # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
+            if self._memory_sub_agent:
+                await self._memory_sub_agent.maybe_auto_extract(self._session)
+
+            # ── 自动压缩 ──────────────────────────────────────────────────
+            if self._compressor:
+                try:
+                    compress_result = await self._compressor.maybe_compress(
+                        self._session
+                    )
+                    if compress_result.triggered:
+                        logger.info(
+                            _TAG + " auto-compressed: {} turns, {} batches",
+                            compress_result.user_rounds_compressed,
+                            len(compress_result.batch_files or []),
+                        )
+                except Exception as exc:
+                    logger.warning(_TAG + " auto-compress failed: {}", exc)
+
+            messages = self._build_transformed_context()
+            schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
+
+            # ── Stream loop ────────────────────────────────────────────
+            final_content = ""
+            final_event: AgentStreamEvent | None = None
+
+            try:
+                async for event in run_chat_loop_stream(
+                        provider=self._provider,
+                        tool_registry=self._tool_registry,
+                        messages=messages,
+                        schemas=schemas,
+                        turn_stats=turn_stats,
+                ):
+                    if event.kind == StreamEventKind.DONE:
+                        final_content = event.content
+                        final_event = event
+                    else:
+                        await event_queue.put(event)
+            except Exception as exc:
+                logger.error("{} send_stream error: {}", _TAG, exc)
+                await event_queue.put(AgentStreamEvent(
+                    kind=StreamEventKind.ERROR,
+                    content=str(exc),
+                ))
+                await event_queue.put(_StreamSentinel())
+                return
+
+            # ── Agent-level cleanup（流结束后执行） ────────────────────
+            turn_stats.finished_at = _time.monotonic()
+
+            if settings.verbose_logging and turn_stats.calls:
+                logger.info(
+                    _TAG + " turn stats: {}",
+                    turn_stats.summary(),
+                )
+
+            # Only persist to history if we got valid content
+            if final_content:
+                self._session.append(Role.ASSISTANT, final_content, turn_id=turn_id)
+
+            # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
+            # Compute aggregate usage across all LLM calls (main loop + sub-agents)
+            from rpg_world.rpg_core.agent.agent_types import LLMUsage
+
+            total_pt = turn_stats.total_prompt_tokens
+            total_ct = turn_stats.total_completion_tokens
+            total_cached = turn_stats.total_cached_tokens
+            total_missed = sum(
+                c.usage.prompt_cache_miss_tokens for c in turn_stats.calls if c.usage
+            )
+            aggregate_usage = LLMUsage(
+                prompt_tokens=total_pt,
+                completion_tokens=total_ct,
+                total_tokens=total_pt + total_ct,
+                prompt_tokens_details={"cached_tokens": total_cached} if total_cached else None,
+                prompt_cache_hit_tokens=total_cached,
+                prompt_cache_miss_tokens=total_missed,
             )
 
-        # Only persist to history if we got valid content
-        if final_content:
-            self._session.append(Role.ASSISTANT, final_content)
-
-        # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
-        # Compute aggregate usage across all LLM calls (main loop + sub-agents)
-        from rpg_world.rpg_core.agent.agent_types import LLMUsage
-
-        total_pt = turn_stats.total_prompt_tokens
-        total_ct = turn_stats.total_completion_tokens
-        total_cached = turn_stats.total_cached_tokens
-        total_missed = sum(
-            c.usage.prompt_cache_miss_tokens for c in turn_stats.calls if c.usage
-        )
-        aggregate_usage = LLMUsage(
-            prompt_tokens=total_pt,
-            completion_tokens=total_ct,
-            total_tokens=total_pt + total_ct,
-            prompt_tokens_details={"cached_tokens": total_cached} if total_cached else None,
-            prompt_cache_hit_tokens=total_cached,
-            prompt_cache_miss_tokens=total_missed,
-        )
-
-        if final_event is not None:
-            final_event.duration_ms = turn_stats.total_duration_ms
-            final_event.usage = aggregate_usage
-            final_event.stats = turn_stats
-            await event_queue.put(final_event)
-        else:
-            await event_queue.put(AgentStreamEvent(
-                kind=StreamEventKind.DONE,
-                content=final_content,
-                usage=aggregate_usage,
-                duration_ms=turn_stats.total_duration_ms,
-                model=self._model,
-            ))
-        await event_queue.put(_StreamSentinel())
+            if final_event is not None:
+                final_event.duration_ms = turn_stats.total_duration_ms
+                final_event.usage = aggregate_usage
+                final_event.stats = turn_stats
+                await event_queue.put(final_event)
+            else:
+                await event_queue.put(AgentStreamEvent(
+                    kind=StreamEventKind.DONE,
+                    content=final_content,
+                    usage=aggregate_usage,
+                    duration_ms=turn_stats.total_duration_ms,
+                    model=self._model,
+                ))
+            await event_queue.put(_StreamSentinel())
+        finally:
+            self._session.end_turn(turn_id)
 
     async def execute_command(self, command: str) -> CommandResult:
         """将斜杠命令入队执行，返回执行结果。

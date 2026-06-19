@@ -1,5 +1,11 @@
 from __future__ import annotations
 
-from rpg_world.rpg_core.session.manager import SessionManager
-
 __all__ = ["SessionManager"]
+
+
+def __getattr__(name: str):
+    if name == "SessionManager":
+        from rpg_world.rpg_core.session.manager import SessionManager
+
+        return SessionManager
+    raise AttributeError(name)

@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rpg_world.rpg_core.utils.tokenizer import TokenCounter
 
+from rpg_world.rpg_core.session.turns import count_roles, count_turns
+
 
 class Role(StrEnum):
     """Message role constants — eliminates hardcoded role strings."""
@@ -58,6 +60,8 @@ class MsgKey:
     ROLE = "role"
     CONTENT = "content"
     RP_HIS_ID = "rp_his_id"
+    TURN_ID = "turn_id"
+    SEQ_IN_TURN = "seq_in_turn"
 
 
 class Message:
@@ -67,19 +71,23 @@ class Message:
     Convert to dict only at the LLM boundary via ``to_dict()``.
     """
 
-    __slots__ = ("_role", "_content", "_rp_his_id", "_tool_call_id", "_tool_calls")
+    __slots__ = ("_role", "_content", "_rp_his_id", "_turn_id", "_seq_in_turn", "_tool_call_id", "_tool_calls")
 
     def __init__(
         self,
         role: Role | str,
         content: str,
         rp_his_id: int = 0,
+        turn_id: int = 0,
+        seq_in_turn: int = 0,
         tool_call_id: str = "",
         tool_calls: list[dict] | None = None,
     ) -> None:
         self._role = Role(role) if isinstance(role, str) else role
         self._content = content
-        self._rp_his_id = rp_his_id
+        self._rp_his_id = int(rp_his_id)
+        self._turn_id = int(turn_id)
+        self._seq_in_turn = int(seq_in_turn)
         self._tool_call_id = tool_call_id
         self._tool_calls = tool_calls or None
 
@@ -95,6 +103,14 @@ class Message:
     @property
     def rp_his_id(self) -> int:
         return self._rp_his_id
+
+    @property
+    def turn_id(self) -> int:
+        return self._turn_id
+
+    @property
+    def seq_in_turn(self) -> int:
+        return self._seq_in_turn
 
     @property
     def tool_call_id(self) -> str:
@@ -134,6 +150,10 @@ class Message:
         d: dict[str, object] = {MsgKey.ROLE: self._role.value, MsgKey.CONTENT: self._content}
         if self._rp_his_id:
             d[MsgKey.RP_HIS_ID] = self._rp_his_id
+        if self._turn_id:
+            d[MsgKey.TURN_ID] = self._turn_id
+        if self._seq_in_turn:
+            d[MsgKey.SEQ_IN_TURN] = self._seq_in_turn
         if self._tool_call_id:
             d["tool_call_id"] = self._tool_call_id
         if self._tool_calls:
@@ -146,7 +166,9 @@ class Message:
         return cls(
             role=d[MsgKey.ROLE],
             content=d.get(MsgKey.CONTENT, ""),
-            rp_his_id=d.get(MsgKey.RP_HIS_ID, 0),
+            rp_his_id=int(d.get(MsgKey.RP_HIS_ID, 0) or 0),
+            turn_id=int(d.get(MsgKey.TURN_ID, 0) or 0),
+            seq_in_turn=int(d.get(MsgKey.SEQ_IN_TURN, 0) or 0),
             tool_call_id=d.get("tool_call_id", ""),
             tool_calls=d.get("tool_calls"),
         )
@@ -360,13 +382,18 @@ class RPGContext:
         # [3..N] Hot History
         if self.hot_history:
             tokens = token_counter.count_messages(self.hot_history)
-            user_rounds = sum(1 for m in self.hot_history if m.is_user())
+            role_counts = count_roles(self.hot_history)
+            turn_count = count_turns(self.hot_history)
             layers.append(LayerInfo(
                 type=LayerType.HOT_HISTORY, role="mixed",
                 status="active",
                 char_count=sum(len(m.content) for m in self.hot_history),
                 token_count=tokens,
-                description=f"{user_rounds} 轮对话 (user/assistant)",
+                description=(
+                    f"{turn_count} 轮 / {len(self.hot_history)} 条 "
+                    f"(user={role_counts['user']}, assistant={role_counts['assistant']}, "
+                    f"tool={role_counts['tool']}, system={role_counts['system']})"
+                ),
             ))
         else:
             layers.append(LayerInfo(
@@ -424,6 +451,16 @@ class RPGContext:
             f"- 总 token: **{total_tokens:,}**",
             f"- 活跃层: **{active_layers} / {len(layers)}**",
         ]
+
+        if self.hot_history:
+            role_counts = count_roles(self.hot_history)
+            lines.append(f"- 历史消息: **{len(self.hot_history)}** 条")
+            lines.append(f"- 历史轮数: **{count_turns(self.hot_history)}** 轮")
+            lines.append(
+                "- 角色分布: "
+                f"user {role_counts['user']}, assistant {role_counts['assistant']}, "
+                f"tool {role_counts['tool']}, system {role_counts['system']}"
+            )
 
         hot_rounds = getattr(self, "_hot_history_rounds", None)
         if hot_rounds is not None:

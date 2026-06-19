@@ -35,6 +35,7 @@ from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProvi
 from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
 from rpg_world.rpg_core.agent.command import CommandDef
 from rpg_world.rpg_core.context.rpg_context import Message, Role
+from rpg_world.rpg_core.session.turns import has_trustworthy_turn_ids, iter_turn_groups, slice_recent_turns
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.agent import RPGGameAgent
@@ -404,12 +405,7 @@ class MemorySubAgent(BaseSubAgent):
         result = await self.process({"story": new_msgs})
         added = result.story_details_added
         if added > 0:
-            last_user = next(
-                (m for m in reversed(new_msgs) if m.is_user()),
-                None,
-            )
-            if last_user:
-                agent._session.set_last_story_rp_his_id(last_user.rp_his_id)
+            agent._session.set_last_story_rp_his_id(max(m.rp_his_id for m in new_msgs))
 
         stats = _build_call_stats(result)
         if stats:
@@ -487,19 +483,25 @@ class MemorySubAgent(BaseSubAgent):
         if self._batch_store is None:
             return {"skipped": True, "reason": "no batch_store configured"}
 
-        user_indices = [i for i, m in enumerate(agent._session.history) if m.is_user()]
-        total = len(user_indices)
+        history = agent._session.history
+        prefix_end = 0
+        while prefix_end < len(history) and history[prefix_end].is_system():
+            prefix_end += 1
+        prefix = history[:prefix_end]
+        working_history = history[prefix_end:]
+        groups = iter_turn_groups(working_history)
+        total = len(groups)
         available = total - keep_rounds
         if available <= 0:
             logger.info(
-                _TAG + " compact skipped: history too short ({} user rounds <= {} keep)",
+                _TAG + " compact skipped: history too short ({} turns <= {} keep)",
                 total, keep_rounds,
             )
             return {"skipped": True, "reason": f"history too short ({total} <= {keep_rounds})"}
 
-        # 保留窗口起始位置
-        keep_from = user_indices[-keep_rounds] if keep_rounds > 0 else len(agent._session.history)
-        old_slice = agent._session.history[:keep_from]
+        keep_groups = groups[-keep_rounds:] if keep_rounds > 0 else []
+        old_groups = groups[:-keep_rounds] if keep_rounds > 0 else groups
+        old_slice = [msg for group in old_groups for msg in group]
 
         # 拆分为批次
         batches = _split_into_batches(old_slice, compress_batch_size)
@@ -507,7 +509,7 @@ class MemorySubAgent(BaseSubAgent):
             return {"skipped": True, "reason": "no batches to compress"}
 
         logger.info(
-            _TAG + " compact: total={} user rounds, keep={}, batches={}",
+            _TAG + " compact: total={} turns, keep={}, batches={}",
             total, keep_rounds, len(batches),
         )
 
@@ -564,7 +566,10 @@ class MemorySubAgent(BaseSubAgent):
 
         # 一次性截断历史
         before_len = len(agent._session.history)
-        agent._session.truncate(keep_from)
+        agent._session.replace_history(
+            prefix + [msg for group in keep_groups for msg in group],
+            persist=agent._session.history_enabled,
+        )
         after_len = len(agent._session.history)
 
         logger.info(
@@ -645,19 +650,30 @@ class MemorySubAgent(BaseSubAgent):
         if trigger <= 0:
             return
 
-        new_rounds = session.count_new_user_rounds_since_story()
-        if new_rounds < trigger:
+        new_turns = session.count_new_turns_since_story()
+        if new_turns < trigger:
             return
         logger.info(
-            _TAG + " auto story extraction: {} new rounds >= trigger {}",
-            new_rounds, trigger,
+            _TAG + " auto story extraction: {} new turns >= trigger {}",
+            new_turns, trigger,
         )
-        last_idx = session.last_story_rp_his_id
-        new_msgs = [m for m in session.history if m.rp_his_id > last_idx]
+        if has_trustworthy_turn_ids(session.history) and session.last_story_turn_id > 0:
+            last_turn_id = session.last_story_turn_id
+            new_msgs = [m for m in session.history if m.turn_id > last_turn_id]
+        elif session.last_story_rp_his_id > 0:
+            last_idx = session.last_story_rp_his_id
+            new_msgs = [m for m in session.history if m.rp_his_id > last_idx]
+        else:
+            # First extraction after a migration should see the full history.
+            new_msgs = list(session.history)
         if not new_msgs:
             return
 
         await self.process({"story": new_msgs})
+        if has_trustworthy_turn_ids(new_msgs):
+            session.set_last_story_turn_id(max(m.turn_id for m in new_msgs))
+        else:
+            session.set_last_story_rp_his_id(max(m.rp_his_id for m in new_msgs))
 
     def update_store_refs(
         self,
@@ -970,11 +986,7 @@ class MemorySubAgent(BaseSubAgent):
     ) -> str:
         """Format conversation as readable ``Role: text`` lines, windowed."""
         if max_rounds is not None:
-            user_indices = [
-                i for i, m in enumerate(history) if m.is_user()
-            ]
-            if len(user_indices) > max_rounds:
-                history = history[user_indices[-max_rounds]:]
+            history = slice_recent_turns(history, max_rounds)
 
         lines: list[str] = []
         for msg in history:
@@ -1040,30 +1052,24 @@ def _split_into_batches(
     messages: list[Message],
     batch_size: int,
 ) -> list[tuple[int, list[Message], int]]:
-    """将消息列表按用户轮次拆分。
+    """将消息列表按 turn 拆分。
 
     Returns:
-        ``[(batch_id, batch_messages, 批内用户轮次数), ...]``。
+        ``[(batch_id, batch_messages, 批内 turn 数), ...]``。
         batch_id 从 0 开始递增。最后一批可能小于 batch_size。
     """
-    user_indices = [i for i, m in enumerate(messages) if m.is_user()]
-    total = len(user_indices)
-    if total == 0:
+    groups = iter_turn_groups(messages)
+    if not groups:
         return []
 
     batches: list[tuple[int, list[Message], int]] = []
     start = 0
     batch_id = 0
-    while start < total:
-        end = min(start + batch_size, total)
-        last_user_idx = user_indices[end - 1]
-        first_user_idx = user_indices[start]
-        # 包含第一条用户消息之前的所有消息（system/assistant/tool）
-        batch_start = first_user_idx
-        batch_end = last_user_idx + 1
-        batch_messages = messages[batch_start:batch_end]
-        user_rounds_in_batch = end - start
-        batches.append((batch_id, batch_messages, user_rounds_in_batch))
+    while start < len(groups):
+        end = min(start + batch_size, len(groups))
+        batch_groups = groups[start:end]
+        batch_messages = [msg for group in batch_groups for msg in group]
+        batches.append((batch_id, batch_messages, end - start))
         batch_id += 1
         start = end
 
