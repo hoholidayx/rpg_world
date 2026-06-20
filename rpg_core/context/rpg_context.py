@@ -59,7 +59,7 @@ class MsgKey:
 
     ROLE = "role"
     CONTENT = "content"
-    RP_HIS_ID = "rp_his_id"
+    HID = "hid"
     TURN_ID = "turn_id"
     SEQ_IN_TURN = "seq_in_turn"
 
@@ -71,13 +71,13 @@ class Message:
     Convert to dict only at the LLM boundary via ``to_dict()``.
     """
 
-    __slots__ = ("_role", "_content", "_rp_his_id", "_turn_id", "_seq_in_turn", "_tool_call_id", "_tool_calls")
+    __slots__ = ("_role", "_content", "_hid", "_turn_id", "_seq_in_turn", "_tool_call_id", "_tool_calls")
 
     def __init__(
         self,
         role: Role | str,
         content: str,
-        rp_his_id: int = 0,
+        hid: int = 0,
         turn_id: int = 0,
         seq_in_turn: int = 0,
         tool_call_id: str = "",
@@ -85,7 +85,7 @@ class Message:
     ) -> None:
         self._role = Role(role) if isinstance(role, str) else role
         self._content = content
-        self._rp_his_id = int(rp_his_id)
+        self._hid = int(hid)
         self._turn_id = int(turn_id)
         self._seq_in_turn = int(seq_in_turn)
         self._tool_call_id = tool_call_id
@@ -101,8 +101,8 @@ class Message:
         return self._content
 
     @property
-    def rp_his_id(self) -> int:
-        return self._rp_his_id
+    def hid(self) -> int:
+        return self._hid
 
     @property
     def turn_id(self) -> int:
@@ -148,8 +148,8 @@ class Message:
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {MsgKey.ROLE: self._role.value, MsgKey.CONTENT: self._content}
-        if self._rp_his_id:
-            d[MsgKey.RP_HIS_ID] = self._rp_his_id
+        if self._hid:
+            d[MsgKey.HID] = self._hid
         if self._turn_id:
             d[MsgKey.TURN_ID] = self._turn_id
         if self._seq_in_turn:
@@ -166,7 +166,7 @@ class Message:
         return cls(
             role=d[MsgKey.ROLE],
             content=d.get(MsgKey.CONTENT, ""),
-            rp_his_id=int(d.get(MsgKey.RP_HIS_ID, 0) or 0),
+            hid=int(d.get(MsgKey.HID, 0) or 0),
             turn_id=int(d.get(MsgKey.TURN_ID, 0) or 0),
             seq_in_turn=int(d.get(MsgKey.SEQ_IN_TURN, 0) or 0),
             tool_call_id=d.get("tool_call_id", ""),

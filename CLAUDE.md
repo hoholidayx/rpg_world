@@ -349,7 +349,7 @@ POST   /api/v1/workspaces/{workspace}/sessions/{session_id}/clone
 
 ### 对话历史持久化
 
-- `history.jsonl` — 主文件，compact 时截断
+- `history.jsonl` — 主文件，消息记录使用 `hid` 作为标识，消息的系统时间
 - `history_cold.jsonl` — 冷备份，只追加永不截断
 - `story_memory.json` — 剧情记忆（FileWatcher）
 - `rpg_summaries.json` — 对话摘要（FileWatcher）

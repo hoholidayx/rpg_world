@@ -50,11 +50,10 @@ def test_append_persists_history_and_unique_ids(temp_settings, workspace):
 
     assert len(history_rows) == 2
     assert len(cold_rows) == 2
-    assert json.loads(history_rows[0])["rp_his_id"] != json.loads(history_rows[1])["rp_his_id"]
+    assert json.loads(history_rows[0])["hid"] != json.loads(history_rows[1])["hid"]
     assert json.loads(history_rows[0])["turn_id"] == json.loads(history_rows[1])["turn_id"] == turn_id
     assert json.loads(history_rows[0])["seq_in_turn"] == 1
     assert json.loads(history_rows[1])["seq_in_turn"] == 2
-    assert meta["last_story_rp_his_id"] == 0
     assert meta["next_turn_id"] == turn_id + 1
     assert mgr.history[0].content == "hello"
     assert mgr.count_new_turns_since_story() == 1
@@ -80,25 +79,20 @@ def test_count_new_turns_falls_back_to_messages_without_user_anchor(temp_setting
     mgr.load()
 
     mgr.replace_history([
-        Message(Role.ASSISTANT, "a1", rp_his_id=1, turn_id=0, seq_in_turn=0),
-        Message(Role.TOOL, "tool1", rp_his_id=2, turn_id=0, seq_in_turn=0),
-        Message(Role.SYSTEM, "sys1", rp_his_id=3, turn_id=0, seq_in_turn=0),
+        Message(Role.ASSISTANT, "a1", hid=1, turn_id=0, seq_in_turn=0),
+        Message(Role.TOOL, "tool1", hid=2, turn_id=0, seq_in_turn=0),
+        Message(Role.SYSTEM, "sys1", hid=3, turn_id=0, seq_in_turn=0),
     ], persist=False)
 
     assert mgr.count_new_turns_since_story() == 3
 
 
-def test_count_new_turns_falls_back_to_messages_for_invalid_turn_ids(temp_settings, workspace):
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
-    mgr.load()
+def test_message_from_dict_ignores_legacy_rp_his_key():
+    legacy_key = "rp_" + "his_id"
+    msg = Message.from_dict({"role": "user", "content": "hello", legacy_key: 123})
 
-    mgr.replace_history([
-        Message(Role.USER, "u1", rp_his_id=1, turn_id=1, seq_in_turn=1),
-        Message(Role.ASSISTANT, "a1", rp_his_id=2, turn_id=2, seq_in_turn=1),
-        Message(Role.USER, "u2", rp_his_id=3, turn_id=1, seq_in_turn=1),
-    ], persist=False)
-
-    assert mgr.count_new_turns_since_story() == 2
+    assert msg.hid == 0
+    assert msg.to_dict() == {"role": "user", "content": "hello"}
 
 
 def test_rebuild_turn_state_after_history_compaction(temp_settings, workspace):
@@ -116,7 +110,7 @@ def test_rebuild_turn_state_after_history_compaction(temp_settings, workspace):
     mgr.end_turn(t2)
 
     mgr.replace_history([
-        Message(Role.USER, "u2", rp_his_id=3, turn_id=t2, seq_in_turn=1),
+        Message(Role.USER, "u2", hid=3, turn_id=t2, seq_in_turn=1),
     ], persist=False)
 
     mgr.append(Role.ASSISTANT, "a2", turn_id=t2)

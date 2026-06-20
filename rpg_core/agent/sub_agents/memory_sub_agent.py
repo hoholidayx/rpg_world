@@ -35,7 +35,7 @@ from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProvi
 from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
 from rpg_world.rpg_core.agent.command import CommandDef
 from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.turns import has_trustworthy_turn_ids, iter_turn_groups, slice_recent_turns
+from rpg_world.rpg_core.session.turns import iter_turn_groups, slice_recent_turns
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.agent import RPGGameAgent
@@ -391,21 +391,18 @@ class MemorySubAgent(BaseSubAgent):
         if agent is None or not hasattr(agent, "_session"):
             return {"reply": "未绑定主 Agent，无法执行 story_memory"}
 
-        conv = agent._session.history
-        last_idx = agent._session.last_story_rp_his_id
-        new_msgs = [m for m in conv if m.rp_his_id > last_idx]
+        new_msgs = agent._session.story_messages_since_last_extraction()
         if not new_msgs:
-            logger.info(_TAG + " story_memory skipped: no new messages since rp_his_id={}", last_idx)
+            logger.info(_TAG + " story_memory skipped: no new messages since last extraction")
             return {"reply": "剧情记忆提取跳过：没有新消息需要处理。", "stats": None}
 
         logger.info(
-            _TAG + " story_memory processing {} new messages (rp_his_id > {})",
-            len(new_msgs), last_idx,
+            _TAG + " story_memory processing {} new messages (turn-aware)",
+            len(new_msgs),
         )
         result = await self.process({"story": new_msgs})
         added = result.story_details_added
-        if added > 0:
-            agent._session.set_last_story_rp_his_id(max(m.rp_his_id for m in new_msgs))
+        agent._session.mark_story_messages_processed(new_msgs)
 
         stats = _build_call_stats(result)
         if stats:
@@ -657,23 +654,12 @@ class MemorySubAgent(BaseSubAgent):
             _TAG + " auto story extraction: {} new turns >= trigger {}",
             new_turns, trigger,
         )
-        if has_trustworthy_turn_ids(session.history) and session.last_story_turn_id > 0:
-            last_turn_id = session.last_story_turn_id
-            new_msgs = [m for m in session.history if m.turn_id > last_turn_id]
-        elif session.last_story_rp_his_id > 0:
-            last_idx = session.last_story_rp_his_id
-            new_msgs = [m for m in session.history if m.rp_his_id > last_idx]
-        else:
-            # First extraction after a migration should see the full history.
-            new_msgs = list(session.history)
+        new_msgs = session.story_messages_since_last_extraction()
         if not new_msgs:
             return
 
         await self.process({"story": new_msgs})
-        if has_trustworthy_turn_ids(new_msgs):
-            session.set_last_story_turn_id(max(m.turn_id for m in new_msgs))
-        else:
-            session.set_last_story_rp_his_id(max(m.rp_his_id for m in new_msgs))
+        session.mark_story_messages_processed(new_msgs)
 
     def update_store_refs(
         self,

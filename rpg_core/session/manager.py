@@ -38,7 +38,6 @@ DEFAULT_SESSION_ID = _DEFAULT_SESSION_ID
 _META_TMP_SUFFIX = ".json.tmp"
 _META_CREATED_AT = "created_at"
 _META_UPDATED_AT = "updated_at"
-_META_LAST_STORY_RP_HIS_ID = "last_story_rp_his_id"
 _META_LAST_STORY_TURN_ID = "last_story_turn_id"
 _META_NEXT_TURN_ID = "next_turn_id"
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
@@ -143,19 +142,19 @@ class SessionManager:
     ) -> None:
         """Append a message to in-memory history.
 
-        Each message gets an ``rp_his_id`` field — current Unix timestamp
-        (seconds) used as a unique index for tracking.
+        Each message gets a ``hid`` field — current Unix timestamp
+        (milliseconds) used as a unique record identifier.
 
         Writes to ``history.jsonl`` and ``history_cold.jsonl`` only when
         ``_history_enabled`` is ``True``.
         """
-        his_id = int(_time.time() * 1000)
+        hid = int(_time.time() * 1000)
         if turn_id is None:
             turn_id = self._active_turn_id or self.begin_turn()
         if seq_in_turn is None:
             seq_in_turn = self._turn_seq_by_turn.get(turn_id, 1)
         self._turn_seq_by_turn[turn_id] = seq_in_turn + 1
-        msg = Message(role, content, his_id, turn_id=turn_id, seq_in_turn=seq_in_turn)
+        msg = Message(role, content, hid, turn_id=turn_id, seq_in_turn=seq_in_turn)
         self.__history.append(msg)
         if not self._history_enabled:
             return
@@ -274,23 +273,6 @@ class SessionManager:
     # ── Story memory progress tracking ──────────────────────────────────
 
     @property
-    def last_story_rp_his_id(self) -> int:
-        """rp_his_id of the last user message processed by story extraction."""
-        return self._meta.get(_META_LAST_STORY_RP_HIS_ID, 0)
-
-    def set_last_story_rp_his_id(self, idx: int) -> None:
-        """Persist the last extracted message rp_his_id."""
-        self._update_meta(**{_META_LAST_STORY_RP_HIS_ID: idx})
-
-    def count_new_user_rounds_since_story(self) -> int:
-        """Count user messages with rp_his_id > last_story_rp_his_id."""
-        last = self.last_story_rp_his_id
-        return sum(
-            1 for m in self.__history
-            if m.is_user() and m.rp_his_id > last
-        )
-
-    @property
     def last_story_turn_id(self) -> int:
         """turn_id of the last turn processed by story extraction."""
         return int(self._meta.get(_META_LAST_STORY_TURN_ID, 0))
@@ -299,29 +281,30 @@ class SessionManager:
         """Persist the last extracted turn id."""
         self._update_meta(**{_META_LAST_STORY_TURN_ID: turn_id})
 
-    def count_new_turns_since_story(self) -> int:
-        """Count new conversation units since the last story extraction.
+    def story_messages_since_last_extraction(self) -> list[Message]:
+        """Return messages that have not yet been processed for story memory.
 
-        When turn ids are trustworthy we count logical turns. Otherwise we
-        degrade to user-anchor turns first, then message count if the history
-        has no user anchors.
+        Story extraction now follows turn ids only. If the history does not yet
+        contain trustworthy turn ids, we intentionally return the full history
+        and let the caller decide whether to process it.
         """
-        new_history = self.__history
-        if has_trustworthy_turn_ids(self.__history):
-            if self.last_story_turn_id > 0:
-                return len({
-                    m.turn_id
-                    for m in self.__history
-                    if m.turn_id > self.last_story_turn_id
-                })
-            if self.last_story_rp_his_id > 0:
-                new_history = [m for m in self.__history if m.rp_his_id > self.last_story_rp_his_id]
-                return count_turns(new_history)
-            return count_turns(self.__history)
+        if has_trustworthy_turn_ids(self.__history) and self.last_story_turn_id > 0:
+            return [m for m in self.__history if m.turn_id > self.last_story_turn_id]
+        return list(self.__history)
 
-        if self.last_story_rp_his_id > 0:
-            new_history = [m for m in self.__history if m.rp_his_id > self.last_story_rp_his_id]
-        return count_turns(new_history)
+    def mark_story_messages_processed(self, messages: list[Message]) -> None:
+        """Advance the story-memory cursor after processing *messages*.
+
+        Only trustworthy turn ids advance the cursor. Legacy or malformed
+        histories are treated as read-only records and do not update progress.
+        """
+        if not messages or not has_trustworthy_turn_ids(messages):
+            return
+        self.set_last_story_turn_id(max(m.turn_id for m in messages))
+
+    def count_new_turns_since_story(self) -> int:
+        """Count new conversation units since the last story extraction."""
+        return count_turns(self.story_messages_since_last_extraction())
 
     # ── History-enabled flag ───────────────────────────────────────────
 
@@ -365,7 +348,6 @@ class SessionManager:
         return {
             _META_CREATED_AT: now,
             _META_UPDATED_AT: now,
-            _META_LAST_STORY_RP_HIS_ID: 0,
             _META_LAST_STORY_TURN_ID: 0,
             _META_NEXT_TURN_ID: 1,
         }

@@ -241,6 +241,11 @@ Telegram/CLI 通过 `settings.yaml` 中各自的 `workspace` 绑定。
 `session_id` 只能包含英文字母、数字和下划线，规则为 `^[A-Za-z0-9_]+$`。
 它会直接映射到 `sessions/{session_id}/` 目录，因此默认渠道会话名使用下划线格式，例如 `cli_direct`、`telegram_main_12345`。
 
+### 会话历史字段
+
+`history.jsonl` 中每条消息会持久化 `hid`、`turn_id`、`seq_in_turn` 等字段。`hid` 只是记录用的消息标识，
+故事记忆和压缩等逻辑统一按 `turn_id` 计数。
+
 ## 测试
 
 所有测试 mock LLM 调用，无需 API key：
