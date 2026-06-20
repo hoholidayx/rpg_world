@@ -253,6 +253,9 @@ class MemorySettings:
     rerank_temperature: float = 0.0
     """本地重排模型采样温度。"""
 
+    rerank_verbose: bool = False
+    """重排模型 llama.cpp verbose 日志开关。"""
+
     query_planner_enabled: bool = False
     """是否启用本地 llama.cpp 查询规划器。"""
 
@@ -736,6 +739,7 @@ class Settings:
             rerank_n_gpu_layers=self._as_int(raw.get("rerank_n_gpu_layers", 0), 0),
             rerank_temperature=raw.get("rerank_temperature", 0.0),
             rerank_llama_weight=raw.get("rerank_llama_weight", 0.70),
+            rerank_verbose=self._as_bool(raw.get("rerank_verbose", False), False),
             query_planner_enabled=raw.get("query_planner_enabled", False),
             query_planner_model_path=planner_resolved,
             query_planner_n_ctx=raw.get("query_planner_n_ctx", 2048),

@@ -171,6 +171,50 @@ memory/
 - `TextIndex`：FTS5 / bigram 索引实现
 - `VectorStore`：存储门面，封装 repository + vector index + text index
 
+### 召回 `meta` 字段说明
+
+最终返回的 `meta` 不是单一数据库字段，而是由原始 `candidate.metadata`、各路检索分数，
+以及 rerank 调试信息合并而成。`HybridRetriever` 和 `MemoryManager.hybrid_search()` 会在
+最终输出前补齐这些字段。
+
+| 字段 | 来源 | 作用 |
+|---|---|---|
+| `type` | `summary/overall.md` 等摘要 front matter，写入时由 `BatchSummaryStore.save_overall()` 提供 | 标识摘要类型，常见值是 `overall` |
+| `last_batch_id` | `summary/overall.md` front matter | 标识 overall 追踪到的最新批次，便于增量归纳 |
+| `memory_id` | SQL chunk 的 `chunks.id`，或 raw md 的稳定哈希 ID | 召回项唯一标识，也是各路分数归并键 |
+| `source` | 原始文件元信息或 raw md 目录名 | 标识来源类型，如 `summaries` |
+| `file` | 原始文件路径 | 定位到具体源文件 |
+| `chunk_idx` | 分块索引 | 同一文件内的第几个 chunk |
+| `created_at` | SQL chunk 侧通常是写入时间；raw md 侧通常是源文件 mtime | 供 `recency_score` 计算 |
+| `vector_score` | `SqlVecRetriever` / `VectorIndex` | 向量相似度分数 |
+| `bigram_score` | `BigramRetriever` / FTS | bigram / BM25 相关性分数 |
+| `exact_score` | `exact_and_fuzzy_scores()` | query 完全命中时为 1.0 |
+| `fuzzy_score` | `exact_and_fuzzy_scores()` | query 的模糊匹配分数 |
+| `recency_score` | `HybridRetriever._finalize()` | 时间衰减分数，越新越高 |
+| `hybrid_score` | `apply_hybrid_scores()` | 向量、bigram、exact、recency 的融合分 |
+| `rerank_score` | `LlamaReranker` / `OpenAIReranker` | 最终重排分数；有 rerank 时优先参与排序 |
+| `debug` | 各检索/重排阶段逐步写入 | 调试信息，例如 `bigram_bm25`、`raw_md_source`、`llama_reason` |
+
+常见 `debug` 键：
+
+| debug 键 | 来源 | 说明 |
+|---|---|---|
+| `bigram_bm25` | `BigramRetriever` | bigram FTS 的原始 BM25 分数 |
+| `bigram_queries` | `BigramRetriever` | 实际参与 bigram 搜索的 query 列表 |
+| `raw_md_source` | `RawMarkdownGrepSearch` | raw markdown 的源文件路径 |
+| `raw_md_terms` | `RawMarkdownGrepSearch` | raw markdown 实际使用的 term 列表 |
+| `vector_score_norm` | `apply_hybrid_scores()` | 向量分数归一化后结果 |
+| `bigram_score_norm` | `apply_hybrid_scores()` | bigram 分数归一化后结果 |
+| `recency_score_norm` | `apply_hybrid_scores()` | 时间分数归一化后结果 |
+| `exact_or_fuzzy_score` | `apply_hybrid_scores()` | exact / fuzzy 的合并分 |
+| `llama_score_norm` | `LlamaReranker` | 本地 rerank 打分归一化后结果 |
+| `llama_reason` | `LlamaReranker` | 本地 rerank 给出的简短原因 |
+| `openai_score_norm` | `OpenAIReranker` | OpenAI rerank 打分归一化后结果 |
+| `openai_reason` | `OpenAIReranker` | OpenAI rerank 给出的简短原因 |
+
+注意：不同候选不一定都有全部字段，这是正常的。比如 raw md 候选通常会有
+`raw_md_*`，而 SQL 向量候选更偏向 `vector_score` / `bigram_score` / `recency_score`。
+
 ### 配置
 
 记忆系统的主要配置来自 `settings.yaml` 对应的 `MemorySettings`：

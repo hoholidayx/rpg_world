@@ -216,6 +216,8 @@ base:
         request_timeout_ms: 60000
         # llama rerank 融合权重（llama 分占比，剩余为混合分）
         llama_weight: 0.70
+        # llama rerank verbose 日志（打印 GPU 层加载、KV cache 等信息）
+        verbose: false
 
     # 向量检索返回的最大结果数
     top_k: 2

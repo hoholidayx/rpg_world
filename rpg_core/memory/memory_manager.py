@@ -539,6 +539,7 @@ class MemoryManager:
                     temperature=mem_cfg.rerank_temperature,
                     request_timeout_ms=mem_cfg.llama_request_timeout_ms,
                     llama_weight=mem_cfg.rerank_llama_weight,
+                    verbose=mem_cfg.rerank_verbose,
                 )
             )
 
@@ -588,6 +589,7 @@ class MemoryManager:
                     temperature=MemoryManager._optional_float(provider_cfg.llama.get("temperature"), mem_cfg.rerank_temperature) or mem_cfg.rerank_temperature,
                     request_timeout_ms=MemoryManager._optional_int(provider_cfg.llama.get("request_timeout_ms"), mem_cfg.llama_request_timeout_ms) or mem_cfg.llama_request_timeout_ms,
                     llama_weight=MemoryManager._optional_float(provider_cfg.llama.get("llama_weight"), mem_cfg.rerank_llama_weight) or mem_cfg.rerank_llama_weight,
+                    verbose=provider_cfg.llama.get("verbose") if provider_cfg.llama.get("verbose") is not None else mem_cfg.rerank_verbose,
                 )
             )
         except Exception as exc:
@@ -627,6 +629,14 @@ class MemoryManager:
         if value is None or value == "":
             return default
         return float(value)
+
+    @staticmethod
+    def _optional_bool(value: Any, default: bool) -> bool:
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).lower() not in ("false", "0", "no", "off")
 
     @staticmethod
     def _resolve_memory_openai_api_key(openai_cfg: dict[str, Any]) -> str | None:

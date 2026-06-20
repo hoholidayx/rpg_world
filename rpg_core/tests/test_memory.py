@@ -21,6 +21,7 @@ from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGr
 from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
 from rpg_world.rpg_core.memory.retrieval.sqlvec_retriever import SqlVecRetriever
 from rpg_world.rpg_core.memory.rerank.openai_reranker import OpenAIReranker
+from rpg_world.rpg_core.memory.rerank import llama_reranker as llama_reranker_module
 from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
 from rpg_world.rpg_core.tests.conftest import FakeEmbedding, FakeFallbackSearch, FakeRetriever, FakeStore
 
@@ -493,6 +494,52 @@ def test_vector_store_logs_backend(tmp_path, monkeypatch):
     assert any('backend=' in msg for msg in messages)
     assert any('[VectorStore] ready:' in msg for msg in messages)
 
+def test_llama_reranker_logs_failed_preview(tmp_path, monkeypatch):
+    model_path = tmp_path / 'rerank.gguf'
+    model_path.write_bytes(b'x')
+
+    messages: list[str] = []
+
+    def capture(message, *args, **kwargs):  # noqa: ANN001
+        messages.append(message.format(*args))
+
+    monkeypatch.setattr(llama_reranker_module.logger, 'warning', capture)
+    monkeypatch.setattr(llama_reranker_module.LlamaReranker, '_get_runner', lambda self, _model_path: (lambda _prompt: 'plain text output'))
+
+    reranker = llama_reranker_module.LlamaReranker(
+        llama_reranker_module.LlamaRerankConfig(enabled=True, model_path=str(model_path))
+    )
+    result = reranker.rerank('怪兽', [MemoryCandidate(memory_id=1, content='a')])
+
+    assert [item.memory_id for item in result] == [1]
+    assert any('pointwise score failed' in msg for msg in messages)
+    assert any('preview=' in msg for msg in messages)
+
+
+def test_llama_reranker_accepts_pointwise_output(tmp_path, monkeypatch):
+    model_path = tmp_path / 'rerank.gguf'
+    model_path.write_bytes(b'x')
+
+    outputs = iter(['90\tstrong match', '10\tweak match'])
+    monkeypatch.setattr(
+        llama_reranker_module.LlamaReranker,
+        '_get_runner',
+        lambda self, _model_path: (lambda _prompt: next(outputs)),
+    )
+
+    reranker = llama_reranker_module.LlamaReranker(
+        llama_reranker_module.LlamaRerankConfig(enabled=True, model_path=str(model_path))
+    )
+    result = reranker.rerank(
+        '怪兽',
+        [
+            MemoryCandidate(memory_id=1, content='a', hybrid_score=0.2),
+            MemoryCandidate(memory_id=2, content='b', hybrid_score=0.8),
+        ],
+    )
+
+    assert [item.memory_id for item in result] == [1, 2]
+    assert result[0].rerank_score > result[1].rerank_score
 
 def test_memory_manager_recall_and_hybrid_search(fake_recalled_store):
     retriever = FakeRetriever([

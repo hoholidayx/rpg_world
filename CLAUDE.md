@@ -252,6 +252,47 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 
 ## 关键设计
 
+### 记忆 `meta` 字段
+
+最终返回的记忆 `meta` 是由 `candidate.metadata`、检索分数和 rerank 调试信息合并而成。
+`HybridRetriever` 负责把 `sqlvec / bigram / raw_md` 三路结果合并，`MemoryManager.hybrid_search()`
+会再把候选转成对外返回的 `metadata`。
+
+| 字段 | 来源 | 作用 |
+|---|---|---|
+| `type` | `summary/overall.md` front matter，来自 `BatchSummaryStore.save_overall()` | 摘要类型，通常是 `overall` |
+| `last_batch_id` | `summary/overall.md` front matter | overall 记录追踪到的最新批次 |
+| `memory_id` | SQL chunk 的 `chunks.id` 或 raw md 的稳定哈希 ID | 召回项唯一标识，也是分数合并键 |
+| `source` | 原始文件元信息或 raw md 目录名 | 例如 `summaries` |
+| `file` | 原始文件路径 | 定位到源文件 |
+| `chunk_idx` | 分块索引 | 同一文件内的 chunk 序号 |
+| `created_at` | SQL chunk 的写入时间；raw md 的文件 mtime | 用于 `recency_score` |
+| `vector_score` | `SqlVecRetriever` / `VectorIndex` | 向量相似度分数 |
+| `bigram_score` | `BigramRetriever` / FTS | bigram / BM25 分数 |
+| `exact_score` | `exact_and_fuzzy_scores()` | query 完全命中时为 1.0 |
+| `fuzzy_score` | `exact_and_fuzzy_scores()` | query 模糊匹配分数 |
+| `recency_score` | `HybridRetriever._finalize()` | 时间越近分数越高 |
+| `hybrid_score` | `apply_hybrid_scores()` | 召回融合分 |
+| `rerank_score` | `LlamaReranker` / `OpenAIReranker` | 最终重排分 |
+| `debug` | 各检索 / 重排阶段逐步写入 | 调试信息，通常包含 `*_norm`、`*_reason`、`raw_md_*` |
+
+常见 `debug` 键：
+
+| debug 键 | 来源 | 说明 |
+|---|---|---|
+| `bigram_bm25` | `BigramRetriever` | bigram FTS 的原始 BM25 分数 |
+| `bigram_queries` | `BigramRetriever` | 参与 bigram 搜索的 query 列表 |
+| `raw_md_source` | `RawMarkdownGrepSearch` | raw markdown 源文件路径 |
+| `raw_md_terms` | `RawMarkdownGrepSearch` | raw markdown 计算命中的 term |
+| `vector_score_norm` | `apply_hybrid_scores()` | 向量分归一化结果 |
+| `bigram_score_norm` | `apply_hybrid_scores()` | bigram 分归一化结果 |
+| `recency_score_norm` | `apply_hybrid_scores()` | 时间分归一化结果 |
+| `exact_or_fuzzy_score` | `apply_hybrid_scores()` | exact / fuzzy 的合并分 |
+| `llama_score_norm` | `LlamaReranker` | 本地 rerank 归一化分 |
+| `llama_reason` | `LlamaReranker` | 本地 rerank 给出的原因 |
+| `openai_score_norm` | `OpenAIReranker` | OpenAI rerank 归一化分 |
+| `openai_reason` | `OpenAIReranker` | OpenAI rerank 给出的原因 |
+
 ### 5 层 RPG 上下文（`context/builder.py` → `rpg_context.py`）
 
 LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache：
