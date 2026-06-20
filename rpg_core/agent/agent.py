@@ -609,7 +609,11 @@ class RPGGameAgent:
         2. 重建所有 manager/store（build_rpg_context 接收新 session_id）
         3. 清空并重载历史
         4. 重建工具注册表
+
+        session 未变时直接返回，避免每轮消息都重建 MemoryManager。
         """
+        if self._session_id == session_id:
+            return
         self._session_id = session_id
         self._refresh_rpg_context()
         if self._memory_manager:
