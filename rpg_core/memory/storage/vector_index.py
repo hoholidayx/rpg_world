@@ -26,6 +26,10 @@ class VectorIndex:
     def enabled(self) -> bool:
         return self._enabled
 
+    @property
+    def backend(self) -> str:
+        return self._backend
+
     def insert(self, rowid: int, embedding: list[float]) -> None:
         if not self._enabled:
             raise VectorStoreError("vector index unavailable without embedding dimension")
@@ -139,6 +143,7 @@ class VectorIndex:
                 """
             )
             logger.info("[VectorIndex] fallback to python backend (vec_embeddings table created)")
+            logger.info("[VectorIndex] backend ready: {}", self._backend)
             return
 
         try:
@@ -151,6 +156,7 @@ class VectorIndex:
                 f"USING vec0(embedding float[{self._dim}] distance_metric=cosine);"
             )
             logger.info("[VectorIndex] vec_chunks virtual table created (backend=sqlite_vec)")
+            logger.info("[VectorIndex] backend ready: {}", self._backend)
         except Exception as exc:
             logger.error("[VectorIndex] vec_chunks creation failed: {} (type={})", exc, type(exc).__name__)
             self._backend = "python"
@@ -163,6 +169,7 @@ class VectorIndex:
                 """
             )
             logger.info("[VectorIndex] fallback to python backend after vec_chunks failure")
+            logger.info("[VectorIndex] backend ready: {}", self._backend)
 
     def _search_python(
         self,

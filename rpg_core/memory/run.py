@@ -218,6 +218,7 @@ def inspect_vector_store(workspace: str, session: str) -> None:
     import sqlite3
 
     conn = sqlite3.connect(str(db_path))
+    backend = "unknown"
     count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     print(f"  总 chunk 数: {count}")
     try:
@@ -227,8 +228,30 @@ def inspect_vector_store(workspace: str, session: str) -> None:
         print(f"  ⚠️  FTS 不可用: {exc}")
 
     try:
-        vec_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
-        print(f"  向量 row 数: {vec_count}")
+        has_vec0 = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vec_chunks'"
+        ).fetchone() is not None
+        if has_vec0:
+            try:
+                import sqlite_vec
+
+                sqlite_vec.load(conn)
+                backend = "sqlite_vec"
+                vec_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
+                print(f"  向量 row 数: {vec_count}")
+            except Exception as exc:
+                print(f"  ⚠️  向量虚表加载失败: {exc}")
+        if backend != "sqlite_vec":
+            has_python_vec = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vec_embeddings'"
+            ).fetchone() is not None
+            if has_python_vec:
+                backend = "python"
+                vec_count = conn.execute("SELECT COUNT(*) FROM vec_embeddings").fetchone()[0]
+                print(f"  向量 row 数: {vec_count}")
+            elif not has_vec0:
+                print("  ⚠️  向量表不可用: vec_chunks / vec_embeddings 均不存在")
+        print(f"  向量后端: {backend}")
     except Exception as exc:
         print(f"  ⚠️  向量表不可用: {exc}")
 

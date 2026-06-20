@@ -10,6 +10,10 @@ import pytest
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.embedding_provider import OpenAIEmbeddingProvider
 from rpg_world.rpg_core.memory.memory_manager import MemoryManager, RecallItem
+from rpg_world.rpg_core.memory import run as memory_run
+from rpg_world.rpg_core.memory.storage.types import ChunkRecord
+from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
+from rpg_world.rpg_core.memory.storage import vector_store as vector_store_module
 from rpg_world.rpg_core.memory.planning.openai_planner import OpenAIQueryPlanner
 from rpg_world.rpg_core.memory.retrieval.bigram_retriever import BigramRetriever
 from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import HybridRetriever
@@ -458,6 +462,36 @@ def test_sqlvec_retriever_sync(fake_token_counter):
     result = retriever.retrieve_sync("query", top_k=1)
     assert result[0][0] == "dense-one"
     assert result[0][1] == 1.0
+
+
+def test_inspect_vector_store_loads_sqlite_vec_backend(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / 'memory_vectors.db'
+    store = VectorStore(db_path=db_path, dimension=3)
+    store.upsert([ChunkRecord(id=1, text='vector chunk', metadata={'source': 'vec', 'file': 'a.md', 'chunk_idx': 0})], [[0.1, 0.2, 0.3]])
+    store.close()
+
+    monkeypatch.setattr(memory_run.settings, 'get_vector_db_path', lambda workspace, session: db_path)
+
+    memory_run.inspect_vector_store('ws', 'sess')
+
+    out = capsys.readouterr().out
+    assert '向量后端: sqlite_vec' in out
+    assert '向量 row 数: 1' in out
+
+
+def test_vector_store_logs_backend(tmp_path, monkeypatch):
+    messages: list[str] = []
+
+    def capture(message, *args, **kwargs):  # noqa: ANN001
+        messages.append(message.format(*args))
+
+    monkeypatch.setattr(vector_store_module.logger, 'info', capture)
+
+    store = VectorStore(db_path=tmp_path / 'vectors.db', dimension=3)
+    store.close()
+
+    assert any('backend=' in msg for msg in messages)
+    assert any('[VectorStore] ready:' in msg for msg in messages)
 
 
 def test_memory_manager_recall_and_hybrid_search(fake_recalled_store):

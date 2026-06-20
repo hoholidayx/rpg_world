@@ -38,10 +38,12 @@ class VectorStore:
                 logger.warning("[VectorStore] vector index init failed, retry text-index-only: {}", exc)
                 self._vector_index = None
                 self._dim = None
+        backend = self._vector_index.backend if self._vector_index is not None else "none"
         logger.info(
-            "[VectorStore] ready: {} (vector_mode={})",
+            "[VectorStore] ready: {} (vector_mode={} backend={})",
             self._path,
             self._vector_index is not None and self._vector_index.enabled,
+            backend,
         )
 
     def upsert(
