@@ -33,7 +33,7 @@ class TextIndex:
             tuple(rowids),
         )
 
-    def search(self, query: str, limit: int = 50) -> list[MemoryCandidate]:
+    def bigram_search(self, query: str, limit: int = 50) -> list[MemoryCandidate]:
         grams = _fts_query(tokenize_bigram(query))
         if not grams:
             return []
@@ -63,8 +63,8 @@ class TextIndex:
                     memory_id=int(row[0]),
                     content=str(row[1]),
                     metadata=meta,
-                    keyword_score=1.0 / (1.0 + max(bm25_score, 0.0)),
-                    debug={"keyword_bm25": bm25_score},
+                    bigram_score=1.0 / (1.0 + max(bm25_score, 0.0)),
+                    debug={"bigram_bm25": bm25_score},
                 )
             )
         return result
@@ -110,7 +110,7 @@ class TextIndex:
                     memory_id=int(row[0]),
                     content=normalized_text,
                     metadata=meta,
-                    keyword_score=match_score,
+                    bigram_score=match_score,
                     debug={"substring_query": normalized},
                 )
             )

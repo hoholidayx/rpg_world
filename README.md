@@ -110,12 +110,12 @@ Telegram 渠道当前支持：
 
 ## 记忆系统
 
-`memory/` 是一个独立的检索子系统，不再把向量、关键词、原始 markdown 扫描和 query 规划混在一个类里。当前结构按职责拆分为三层：
+`memory/` 是一个独立的检索子系统，不再把向量、bigram FTS、原始 markdown 扫描和 query 规划混在一个类里。当前结构按职责拆分为三层：
 
 ```text
 memory/
 ├── planning/    QueryPlan 生成与 query rewrite
-├── retrieval/   Dense / hybrid / raw markdown recall
+├── retrieval/   SqlVec / bigram / raw markdown recall
 ├── rerank/      可选的 llama 本地重排
 └── storage/     SQLite repository、vector index、text index
 ```
@@ -130,7 +130,7 @@ memory/
      - 配置缺失或加载失败时降级到 rule-based planner
   -> Retrieval
      - vector: 向量相似度召回
-     - keyword: bigram FTS 关键词召回
+     - bigram: bigram FTS 召回
      - raw md: jieba/term coverage fallback
   -> scoring / fusion
   -> RecallItem 列表
@@ -142,7 +142,7 @@ memory/
 
 负责把用户 query 变成结构化 `QueryPlan`。
 
-- `RuleBasedQueryPlanner`：无模型兜底，负责归一化、关键词抽取、jieba 切词
+- `RuleBasedQueryPlanner`：无模型兜底，负责归一化、term extraction、jieba 切词
 - `LlamaQueryPlanner`：可选，本地 gguf query planner
 - `FallbackQueryPlanner`：运行时异常兜底，保证 recall 不被 planner 中断
 
@@ -150,8 +150,8 @@ memory/
 
 负责实际召回，不负责 query 解析。
 
-- `DenseRetriever`：纯向量召回
-- `HybridRetriever`：向量 + bigram keyword + raw md 的融合召回
+- `SqlVecRetriever`：纯向量召回
+- `HybridRetriever`：组装 sqlvec + bigram + raw md 的融合召回
 - `RawMarkdownGrepSearch`：直接扫描 markdown 文件，作为最后兜底
 - `RawMarkdownRetriever`：只走 raw md 的 retriever 适配器
 
@@ -168,7 +168,7 @@ memory/
 
 - `MemoryRepository`：SQLite chunk 存取
 - `VectorIndex`：向量索引实现
-- `TextIndex`：FTS5 / keyword 索引实现
+- `TextIndex`：FTS5 / bigram 索引实现
 - `VectorStore`：存储门面，封装 repository + vector index + text index
 
 ### 配置
@@ -186,8 +186,8 @@ memory/
 - `chunk_size`
 - `chunk_overlap`
 
-代码中已有 hybrid retrieval 和可选 rerank 结构，但当前 `settings.yaml`
-默认配置尚未暴露完整的 hybrid/rerank 开关。新增配置前应同步更新
+代码中已有 sqlvec + bigram + raw md 三路独立 retriever，`HybridRetriever` 只负责组装与融合。
+当前 `settings.yaml` 默认配置尚未暴露完整的 hybrid/rerank 开关。新增配置前应同步更新
 `rpg_core/settings.py`、README 和测试。
 
 ### 设计原则

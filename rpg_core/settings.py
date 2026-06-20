@@ -217,14 +217,14 @@ class MemorySettings:
     vector_k: int = 50
     """混合检索中向量召回候选数。"""
 
-    keyword_k: int = 50
-    """混合检索中关键词召回候选数。"""
+    bigram_k: int = 50
+    """混合检索中 bigram 召回候选数。"""
 
     hybrid_vector_weight: float = 0.60
     """混合评分中向量相似度归一化分数的权重。"""
 
-    hybrid_keyword_weight: float = 0.25
-    """混合评分中关键词匹配归一化分数的权重。"""
+    hybrid_bigram_weight: float = 0.25
+    """混合评分中 bigram 匹配归一化分数的权重。"""
 
     hybrid_exact_weight: float = 0.10
     """混合评分中精确/模糊匹配分数的权重。"""
@@ -270,6 +270,9 @@ class MemorySettings:
 
     query_planner_max_tokens: int = 512
     """查询规划模型最大输出 token 数。"""
+
+    jieba_dict: str = ""
+    """jieba 用户词典路径（相对于包根 rpg_world/），留空使用默认词典。"""
 
     llama_process_enabled: bool = True
     """是否将 llama.cpp 推理隔离到托管子进程。"""
@@ -702,6 +705,12 @@ class Settings:
             planner_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
         else:
             planner_resolved = planner_raw
+        jieba_dict_raw = raw.get("jieba_dict", "")
+        if jieba_dict_raw:
+            p = Path(jieba_dict_raw)
+            jieba_dict_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
+        else:
+            jieba_dict_resolved = jieba_dict_raw
         return MemorySettings(
             enabled=raw.get("enabled", False),
             embedding_provider=embedding_provider,
@@ -715,9 +724,9 @@ class Settings:
             top_k=raw.get("top_k", 5),
             hybrid_enabled=raw.get("hybrid_enabled", True),
             vector_k=raw.get("vector_k", 50),
-            keyword_k=raw.get("keyword_k", 50),
+            bigram_k=raw.get("bigram_k", 50),
             hybrid_vector_weight=raw.get("hybrid_vector_weight", 0.60),
-            hybrid_keyword_weight=raw.get("hybrid_keyword_weight", 0.25),
+            hybrid_bigram_weight=raw.get("hybrid_bigram_weight", 0.25),
             hybrid_exact_weight=raw.get("hybrid_exact_weight", 0.10),
             hybrid_recency_weight=raw.get("hybrid_recency_weight", 0.05),
             rerank_enabled=raw.get("rerank_enabled", False),
@@ -733,6 +742,7 @@ class Settings:
             query_planner_n_gpu_layers=raw.get("query_planner_n_gpu_layers", 0),
             query_planner_temperature=raw.get("query_planner_temperature", 0.0),
             query_planner_max_tokens=raw.get("query_planner_max_tokens", 512),
+            jieba_dict=jieba_dict_resolved,
             llama_process_enabled=self._as_bool(raw.get("llama_process_enabled", True), True),
             llama_request_timeout_ms=self._as_int(raw.get("llama_request_timeout_ms", 60000), 60000),
             llama_startup_timeout_ms=self._as_int(raw.get("llama_startup_timeout_ms", 120000), 120000),

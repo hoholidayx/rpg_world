@@ -57,7 +57,7 @@ class ToolRegistry:
 
         Args:
             name: Tool name (must be registered).
-            arguments_json: JSON-encoded keyword arguments.
+            arguments_json: JSON-encoded named arguments.
 
         Returns:
             Text result suitable for the LLM to read.

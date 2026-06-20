@@ -65,17 +65,17 @@ class FakeEmbedding:
 class FakeStore:
     def __init__(self) -> None:
         self.vector_rows: list[tuple[MemoryCandidate, float]] = []
-        self.keyword_rows: dict[str, list[MemoryCandidate]] = {}
+        self.bigram_rows: dict[str, list[MemoryCandidate]] = {}
         self.search_calls: list[tuple[list[float], int]] = []
-        self.keyword_calls: list[tuple[str, int]] = []
+        self.bigram_calls: list[tuple[str, int]] = []
 
     def search(self, query: list[float], top_k: int = 5, filters=None):  # noqa: ANN001
         self.search_calls.append((list(query), top_k))
         return self.vector_rows[:top_k]
 
-    def keyword_search(self, query: str, limit: int = 50):
-        self.keyword_calls.append((query, limit))
-        return self.keyword_rows.get(query, [])[:limit]
+    def bigram_search(self, query: str, limit: int = 50):
+        self.bigram_calls.append((query, limit))
+        return self.bigram_rows.get(query, [])[:limit]
 
 
 class FakeFallbackSearch:
@@ -260,7 +260,7 @@ def fake_memory_cfg():
         top_k=3,
         hybrid_enabled=True,
         vector_k=10,
-        keyword_k=10,
+        bigram_k=10,
         rerank_enabled=False,
         rerank_model_path="",
         rerank_max_candidates=5,
@@ -282,7 +282,7 @@ def query_plan():
     return QueryPlan(
         original_query="查找线索",
         normalized_query="查找线索",
-        keyword_queries=("查找线索",),
+        bigram_queries=("查找线索",),
         expanded_queries=("查找线索",),
         raw_md_terms=("查找", "线索"),
     )

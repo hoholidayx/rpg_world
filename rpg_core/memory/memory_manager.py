@@ -98,13 +98,14 @@ class MemoryManager:
         )
 
         sources = cls._build_sources(session_dir)
-        fallback_search = cls._build_raw_md_search(sources)
+        rule_based_planner = cls._build_rule_based_query_planner(mem_cfg)
+        fallback_search = cls._build_raw_md_search(sources, rule_based_planner)
         embedding = cls._build_embedding(mem_cfg)
         store = cls._build_store(get_vector_db_path, embedding)
         chunker = cls._build_chunker(mem_cfg)
         index_mgr = cls._build_index_manager(store, embedding, sources, chunker)
-        retriever = cls._build_retriever(store, embedding, mem_cfg, fallback_search)
-        query_planner = cls._build_query_planner(mem_cfg)
+        retriever = cls._build_retriever(store, embedding, mem_cfg, fallback_search, rule_based_planner)
+        query_planner = cls._build_query_planner(mem_cfg, rule_based_planner)
 
         mm = cls(
             recalled_store=recalled_store,
@@ -123,7 +124,7 @@ class MemoryManager:
             "ready" if embedding is not None else "none",
         )
         if embedding is None:
-            logger.warning("[MemoryManager] embedding unavailable — keyword/raw markdown fallback mode")
+            logger.warning("[MemoryManager] embedding unavailable — bigram/raw markdown fallback mode")
         return mm
 
     # ── 实例初始化 ─────────────────────────────────────────────────────
@@ -177,11 +178,14 @@ class MemoryManager:
         return sources
 
     @staticmethod
-    def _build_raw_md_search(sources):
+    def _build_raw_md_search(sources, rule_based_planner=None):
         from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
 
         logger.info("[MemoryManager] raw markdown fallback roots={}", len(sources))
-        return RawMarkdownGrepSearch(source_paths=[src.path for src in sources])
+        return RawMarkdownGrepSearch(
+            source_paths=[src.path for src in sources],
+            rule_based_planner=rule_based_planner,
+        )
 
     @staticmethod
     def _build_embedding(mem_cfg: MemorySettings):
@@ -296,18 +300,18 @@ class MemoryManager:
             return store
         except VectorStoreError as exc:
             if dimension is None:
-                logger.warning("[MemoryManager] keyword store init failed: {}", exc)
+                logger.warning("[MemoryManager] text index init failed: {}", exc)
                 return None
-            logger.warning("[MemoryManager] vector store init failed, retry keyword-only: {}", exc)
+            logger.warning("[MemoryManager] vector store init failed, retry text-index-only: {}", exc)
             try:
                 store = VectorStore(db_path=get_vector_db_path, dimension=None)
                 logger.info(
-                    "[MemoryManager] keyword-only store ready: {}",
+                    "[MemoryManager] text-index-only store ready: {}",
                     get_vector_db_path,
                 )
                 return store
             except Exception as retry_exc:
-                logger.warning("[MemoryManager] keyword store retry failed: {}", retry_exc)
+                logger.warning("[MemoryManager] text index retry failed: {}", retry_exc)
                 return None
         except Exception as exc:
             logger.warning("[MemoryManager] store init failed: {}", exc)
@@ -334,7 +338,7 @@ class MemoryManager:
             logger.warning("[MemoryManager] index manager skipped — store unavailable")
             return None
         if embedding is None:
-            logger.info("[MemoryManager] index manager will operate in keyword-only mode")
+            logger.info("[MemoryManager] index manager will operate in text-index-only mode")
 
         try:
             from rpg_world.rpg_core.memory.vector_index_manager import VectorIndexManager
@@ -352,42 +356,76 @@ class MemoryManager:
             return None
 
     @staticmethod
-    def _build_retriever(store, embedding, mem_cfg: MemorySettings, fallback_search):
+    def _build_sqlvec_retriever(store, embedding):
+        if store is None or embedding is None:
+            return None
+        from rpg_world.rpg_core.memory.retrieval.sqlvec_retriever import SqlVecRetriever
+
+        return SqlVecRetriever(store=store, embedding=embedding)
+
+    @staticmethod
+    def _build_bigram_retriever(store, bigram_limit: int):
+        if store is None:
+            return None
+        from rpg_world.rpg_core.memory.retrieval.bigram_retriever import BigramRetriever
+
+        return BigramRetriever(store=store, limit=bigram_limit)
+
+    @staticmethod
+    def _build_raw_md_retriever(fallback_search):
+        from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
+
+        return RawMarkdownRetriever(fallback_search)
+
+    @staticmethod
+    def _build_retriever(store, embedding, mem_cfg: MemorySettings, fallback_search, rule_based_planner=None):
         from rpg_world.rpg_core.memory.rerank import LlamaRerankConfig, LlamaReranker, OpenAIReranker
         from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import HybridRetriever
         from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
-        from rpg_world.rpg_core.memory.retrieval.retriever import DenseRetriever
 
+        raw_md_retriever = MemoryManager._build_raw_md_retriever(fallback_search)
         if store is None:
             logger.info("[MemoryManager] retriever fallback — raw markdown only")
-            return RawMarkdownRetriever(fallback_search)
+            return raw_md_retriever
+
+        bigram_k = mem_cfg.bigram_k
+        hybrid_bigram_weight = mem_cfg.hybrid_bigram_weight
+        sqlvec_retriever = MemoryManager._build_sqlvec_retriever(store, embedding)
+        bigram_retriever = MemoryManager._build_bigram_retriever(store, bigram_k)
 
         if mem_cfg.hybrid_enabled or embedding is None:
             logger.info(
-                "[MemoryManager] retriever mode — hybrid (vector={} keyword={} rerank={})",
-                embedding is not None,
-                True,
+                "[MemoryManager] retriever mode — hybrid (sqlvec={} bigram={} rerank={})",
+                sqlvec_retriever is not None,
+                bigram_retriever is not None,
                 mem_cfg.rerank_enabled,
             )
             reranker = MemoryManager._build_reranker(mem_cfg)
             return HybridRetriever(
-                store=store,
-                embedding=embedding,
-                vector_k=mem_cfg.vector_k,
-                keyword_k=mem_cfg.keyword_k,
+                sqlvec_retriever=sqlvec_retriever,
+                bigram_retriever=bigram_retriever,
+                raw_md_retriever=raw_md_retriever,
+                query_planner=rule_based_planner,
                 reranker=reranker,
-                fallback_search=fallback_search,
                 hybrid_vector_weight=mem_cfg.hybrid_vector_weight,
-                hybrid_keyword_weight=mem_cfg.hybrid_keyword_weight,
+                hybrid_bigram_weight=hybrid_bigram_weight,
                 hybrid_exact_weight=mem_cfg.hybrid_exact_weight,
                 hybrid_recency_weight=mem_cfg.hybrid_recency_weight,
             )
 
-        logger.info("[MemoryManager] retriever mode — dense vector")
-        return DenseRetriever(store=store, embedding=embedding)
+        logger.info("[MemoryManager] retriever mode — sqlvec")
+        return sqlvec_retriever
 
     @staticmethod
-    def _build_query_planner(mem_cfg: MemorySettings):
+    def _build_rule_based_query_planner(mem_cfg: MemorySettings):
+        from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
+
+        return RuleBasedQueryPlanner(jieba_dict=getattr(mem_cfg, "jieba_dict", "") or None)
+
+    @staticmethod
+    def _build_query_planner(mem_cfg: MemorySettings, rule_based_planner=None):
+        if rule_based_planner is None:
+            rule_based_planner = MemoryManager._build_rule_based_query_planner(mem_cfg)
         if not hasattr(mem_cfg, "query_planner_provider"):
             from rpg_world.rpg_core.memory.planning.planner import (
                 FallbackQueryPlanner,
@@ -395,7 +433,7 @@ class MemoryManager:
                 RuleBasedQueryPlanner,
             )
 
-            fallback = RuleBasedQueryPlanner()
+            fallback = rule_based_planner
             if not mem_cfg.query_planner_enabled:
                 logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
                 return fallback
@@ -427,7 +465,7 @@ class MemoryManager:
             RuleBasedQueryPlanner,
         )
 
-        fallback = RuleBasedQueryPlanner()
+        fallback = rule_based_planner
         if not mem_cfg.query_planner_enabled:
             logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
             return fallback
@@ -450,6 +488,7 @@ class MemoryManager:
                     base_url=MemoryManager._optional_str(openai_cfg.get("base_url")),
                     max_tokens=MemoryManager._optional_int(openai_cfg.get("max_tokens"), mem_cfg.query_planner_max_tokens) or mem_cfg.query_planner_max_tokens,
                     temperature=MemoryManager._optional_float(openai_cfg.get("temperature"), mem_cfg.query_planner_temperature) or mem_cfg.query_planner_temperature,
+                    fallback_planner=rule_based_planner,
                 )
                 logger.info("[MemoryManager] query planner mode — openai")
                 return FallbackQueryPlanner(planner, fallback)
@@ -468,6 +507,7 @@ class MemoryManager:
                 temperature=MemoryManager._optional_float(provider_cfg.llama.get("temperature"), mem_cfg.query_planner_temperature) or mem_cfg.query_planner_temperature,
                 max_tokens=MemoryManager._optional_int(provider_cfg.llama.get("max_tokens"), mem_cfg.query_planner_max_tokens) or mem_cfg.query_planner_max_tokens,
                 request_timeout_ms=MemoryManager._optional_int(provider_cfg.llama.get("request_timeout_ms"), mem_cfg.llama_request_timeout_ms) or mem_cfg.llama_request_timeout_ms,
+                fallback_planner=rule_based_planner,
             )
             logger.info("[MemoryManager] query planner mode — llama")
             return FallbackQueryPlanner(planner, fallback)
@@ -699,7 +739,7 @@ class MemoryManager:
                         {
                             "memory_id": candidate.memory_id,
                             "vector_score": candidate.vector_score,
-                            "keyword_score": candidate.keyword_score,
+                            "bigram_score": candidate.bigram_score,
                             "exact_score": candidate.exact_score,
                             "fuzzy_score": candidate.fuzzy_score,
                             "recency_score": candidate.recency_score,
@@ -726,6 +766,6 @@ class MemoryManager:
         ]
 
     def rebuild_fts_index(self) -> None:
-        """Rebuild the keyword FTS index from stored chunks."""
+        """Rebuild the bigram FTS index from stored chunks."""
         if self._store is not None:
             self._store.rebuild_fts_index()

@@ -1,7 +1,7 @@
 """Retriever abstraction for vector memory recall.
 
 ``BaseRetriever`` is the stable interface consumed by ``MemoryManager``.
-``DenseRetriever`` is the Phase-1 implementation (pure dense vector search).
+``SqlVecRetriever`` is the vector retrieval implementation.
 
 Both sync and async paths are provided.
 """
@@ -32,39 +32,6 @@ class BaseRetriever(ABC):
         """Sync - no event loop needed."""
 
 
-class DenseRetriever(BaseRetriever):
-    """Pure dense vector retrieval via embedding + VectorStore search."""
-
-    def __init__(
-        self, store: VectorStore, embedding: EmbeddingProvider
-    ) -> None:
-        self._store = store
-        self._embedding = embedding
-
-    async def retrieve(
-        self, query: str, top_k: int = 5
-    ) -> list[tuple[str, float, dict]]:
-        vecs = await self._embedding.embed([query])
-        if not vecs:
-            return []
-        raw = self._store.search(vecs[0], top_k=top_k)
-        return [
-            (rec.text, _similarity(dist), dict(rec.metadata))
-            for rec, dist in raw
-        ]
-
-    def retrieve_sync(
-        self, query: str, top_k: int = 5
-    ) -> list[tuple[str, float, dict]]:
-        vecs = self._embedding.embed_sync([query])
-        if not vecs:
-            return []
-        raw = self._store.search(vecs[0], top_k=top_k)
-        return [
-            (rec.text, _similarity(dist), dict(rec.metadata))
-            for rec, dist in raw
-        ]
-
-
 def _similarity(l2_distance: float) -> float:
     return 1.0 / (1.0 + l2_distance)
+

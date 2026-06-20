@@ -1,6 +1,7 @@
 # rpg_world
 
 RPG 世界管理子系统——故事数据管理、场景上下文构建、LLM Agent 交互。
+记忆检索已经拆成 `SqlVecRetriever`、`BigramRetriever`、`RawMarkdownRetriever` 三个独立 retriever；`HybridRetriever` 只负责组装与融合，不承载底层检索实现。
 
 ## 启动
 

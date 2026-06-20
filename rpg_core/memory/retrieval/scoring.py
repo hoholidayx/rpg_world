@@ -47,7 +47,7 @@ def normalize_values(
 def apply_hybrid_scores(
     candidates: list[MemoryCandidate],
     vector_weight: float = 0.60,
-    keyword_weight: float = 0.25,
+    bigram_weight: float = 0.25,
     exact_weight: float = 0.10,
     recency_weight: float = 0.05,
 ) -> None:
@@ -57,7 +57,7 @@ def apply_hybrid_scores(
     overridden via ``memory.hybrid_*_weight`` in settings.yaml.
     """
     vector_norm = normalize_values(candidates, lambda item: item.vector_score)
-    keyword_norm = normalize_values(candidates, lambda item: item.keyword_score)
+    bigram_norm = normalize_values(candidates, lambda item: item.bigram_score)
     recency_norm = normalize_values(candidates, lambda item: item.recency_score)
 
     for candidate in candidates:
@@ -65,14 +65,14 @@ def apply_hybrid_scores(
         candidate.debug.update(
             {
                 "vector_score_norm": vector_norm[candidate.memory_id],
-                "keyword_score_norm": keyword_norm[candidate.memory_id],
+                "bigram_score_norm": bigram_norm[candidate.memory_id],
                 "recency_score_norm": recency_norm[candidate.memory_id],
                 "exact_or_fuzzy_score": exact_or_fuzzy,
             }
         )
         candidate.hybrid_score = (
             vector_weight * vector_norm[candidate.memory_id]
-            + keyword_weight * keyword_norm[candidate.memory_id]
+            + bigram_weight * bigram_norm[candidate.memory_id]
             + exact_weight * exact_or_fuzzy
             + recency_weight * recency_norm[candidate.memory_id]
         )

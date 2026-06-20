@@ -172,7 +172,7 @@ class VectorIndexManager:
                 logger.warning("[VectorIndex]   {} — embed error: {}", file_path.name, exc)
                 return
         else:
-            logger.info("[VectorIndex] indexing file={} mode=keyword-only chars={} chunks={}", file_path.name, len(text), len(records))
+            logger.info("[VectorIndex] indexing file={} mode=text-index-only chars={} chunks={}", file_path.name, len(text), len(records))
 
         # 5. upsert（先删除本文件旧 chunks，再插入新的）
         try:

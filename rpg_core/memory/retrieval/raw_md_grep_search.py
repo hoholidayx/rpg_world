@@ -1,6 +1,6 @@
 """Raw markdown grep fallback for memory retrieval.
 
-This is the final retrieval stage when vector and bigram keyword search
+This is the final retrieval stage when vector and bigram search
 produce no useful candidates or fail independently.
 It scans the raw markdown files under the watched memory source paths
 instead of depending on the SQLite database.
@@ -17,7 +17,7 @@ from loguru import logger
 
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan
-from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
+from rpg_world.rpg_core.memory.planning.planner import BaseQueryPlanner, RuleBasedQueryPlanner
 
 
 @dataclass
@@ -26,6 +26,7 @@ class RawMarkdownGrepSearch:
 
     source_paths: list[Path]
     limit: int = 50
+    rule_based_planner: BaseQueryPlanner | None = None
 
     def search(self, query: str, limit: int | None = None) -> list[MemoryCandidate]:
         """Return candidates matched by scanning raw markdown files.
@@ -41,7 +42,7 @@ class RawMarkdownGrepSearch:
                 len(self.source_paths),
                 limit or self.limit,
             )
-            plan = RuleBasedQueryPlanner().plan(query)
+            plan = self._plan_query(query)
             return self._search_plan(plan, limit=limit or self.limit)
         except Exception as exc:
             logger.warning("[RawMarkdownGrepSearch] fallback search failed: {}", exc)
@@ -61,6 +62,10 @@ class RawMarkdownGrepSearch:
         except Exception as exc:
             logger.warning("[RawMarkdownGrepSearch] fallback search_plan failed: {}", exc)
             return []
+
+    def _plan_query(self, query: str) -> QueryPlan:
+        planner = self.rule_based_planner or RuleBasedQueryPlanner()
+        return planner.plan(query)
 
     def _search_plan(self, plan: QueryPlan, limit: int) -> list[MemoryCandidate]:
         normalized = plan.normalized_query
@@ -86,26 +91,26 @@ class RawMarkdownGrepSearch:
                 "file": str(file_path),
                 "chunk_idx": 0,
                 "created_at": float(file_path.stat().st_mtime),
-                "grep_terms": terms,
-                "grep_expanded_queries": expanded_queries,
+                "raw_md_terms": terms,
+                "raw_md_expanded_queries": expanded_queries,
             }
             candidates.append(
                 MemoryCandidate(
                     memory_id=_stable_memory_id(file_path),
                     content=raw_text,
                     metadata=metadata,
-                    keyword_score=match_score,
+                    bigram_score=match_score,
                     exact_score=exact_score,
                     fuzzy_score=match_score,
                     hybrid_score=match_score,
-                    debug={"grep_source": str(file_path), "grep_terms": terms},
+                    debug={"raw_md_source": str(file_path), "raw_md_terms": terms},
                 )
             )
 
         candidates.sort(
             key=lambda item: (
                 item.exact_score,
-                item.keyword_score,
+                item.bigram_score,
                 float(item.metadata.get("created_at") or 0.0),
             ),
             reverse=True,

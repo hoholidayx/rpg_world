@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import re
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import Any
 
 from loguru import logger
 
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan, make_empty_plan
+
 
 _MAX_QUERY_VARIANTS = 5
 _MAX_RAW_MD_TERMS = 12
@@ -62,19 +64,41 @@ class BaseQueryPlanner(ABC):
 class RuleBasedQueryPlanner(BaseQueryPlanner):
     """Deterministic fallback planner based on normalization and jieba terms."""
 
+    def __init__(self, jieba_dict: str | None = None) -> None:
+        self._jieba_dict = jieba_dict or None
+        self._tokenizer = _get_jieba_tokenizer(self._jieba_dict)
+
     def plan(self, query: str) -> QueryPlan:
         normalized = _normalize(query)
         if not normalized:
             return make_empty_plan(query)
-        raw_md_terms = tuple(_extract_terms(normalized))
+        raw_md_terms = tuple(self._extract_terms(normalized))
         return QueryPlan(
             original_query=query,
             normalized_query=normalized,
-            keyword_queries=tuple(_dedupe([normalized, _compact(normalized)])),
+            bigram_queries=tuple(_dedupe([normalized, _compact(normalized)])),
             expanded_queries=(),
             raw_md_terms=raw_md_terms,
             planner_source="rule_based",
         )
+
+    def _extract_terms(self, text: str) -> list[str]:
+        try:
+            if self._tokenizer is None:
+                raise RuntimeError("jieba tokenizer unavailable")
+            parts = self._tokenizer.lcut(text)
+        except Exception as exc:
+            logger.warning("[RuleBasedQueryPlanner] jieba unavailable, regex fallback: {}", exc)
+            parts = re.findall(r"[A-Za-z0-9_]+(?:[.\-+][A-Za-z0-9_]+)*|[\u4e00-\u9fff]+", text)
+        terms: list[str] = []
+        for part in parts:
+            term = part.strip()
+            if not term or term in _STOPWORDS:
+                continue
+            if len(term) == 1 and _is_cjk(term):
+                continue
+            terms.append(term)
+        return _dedupe(terms)[:_MAX_RAW_MD_TERMS]
 
 
 class LlamaQueryPlanner(BaseQueryPlanner):
@@ -88,6 +112,7 @@ class LlamaQueryPlanner(BaseQueryPlanner):
         temperature: float = 0.0,
         max_tokens: int = 512,
         request_timeout_ms: int = 60000,
+        fallback_planner: BaseQueryPlanner | None = None,
     ) -> None:
         from rpg_world.rpg_core.llama_service import LlamaCompletionModel
 
@@ -99,6 +124,7 @@ class LlamaQueryPlanner(BaseQueryPlanner):
         )
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._fallback_planner = fallback_planner
         logger.info("[LlamaQueryPlanner] process client ready: {} (n_ctx={})", model_path, n_ctx)
 
     def plan(self, query: str) -> QueryPlan:
@@ -113,7 +139,13 @@ class LlamaQueryPlanner(BaseQueryPlanner):
             stop=[],
         )
         data = _parse_json_object(_extract_text(output))
-        return _plan_from_mapping(query, normalized, data, planner_source="llama")
+        return _plan_from_mapping(
+            query,
+            normalized,
+            data,
+            planner_source="llama",
+            fallback_planner=self._fallback_planner,
+        )
 
 
 class FallbackQueryPlanner(BaseQueryPlanner):
@@ -123,9 +155,10 @@ class FallbackQueryPlanner(BaseQueryPlanner):
         self,
         primary: BaseQueryPlanner,
         fallback: RuleBasedQueryPlanner | None = None,
+        jieba_dict: str | None = None,
     ) -> None:
         self._primary = primary
-        self._fallback = fallback or RuleBasedQueryPlanner()
+        self._fallback = fallback or RuleBasedQueryPlanner(jieba_dict=jieba_dict)
 
     def plan(self, query: str) -> QueryPlan:
         try:
@@ -139,8 +172,8 @@ def _build_prompt(query: str) -> str:
     return (
         "你是本地记忆检索查询规划器。请把用户查询改写为结构化 JSON。\n"
         "只输出 JSON 对象，不要输出解释。\n"
-        "字段：keyword_queries、expanded_queries、raw_md_terms、query_type。\n"
-        "keyword_queries 用于 bigram FTS，应是短查询短语，不要预分词。\n"
+        "字段：bigram_queries、expanded_queries、raw_md_terms、query_type。\n"
+        "bigram_queries 用于 bigram FTS，应是短查询短语，不要预分词。\n"
         "raw_md_terms 用于 markdown 字符串召回，应是有意义的中文词或英文术语。\n"
         f"用户查询：{query}"
     )
@@ -151,17 +184,21 @@ def _plan_from_mapping(
     normalized_query: str,
     data: dict[str, Any],
     planner_source: str,
+    fallback_planner: BaseQueryPlanner | None = None,
 ) -> QueryPlan:
-    keyword_queries = _dedupe(
-        [normalized_query, *_as_strings(data.get("keyword_queries")), _compact(normalized_query)]
+    bigram_queries = _dedupe(
+        [normalized_query, *_as_strings(data.get("bigram_queries")), _compact(normalized_query)]
     )
     expanded_queries = _dedupe(_as_strings(data.get("expanded_queries")))
-    raw_md_terms = _dedupe([*_as_strings(data.get("raw_md_terms")), *_extract_terms(normalized_query)])
+    raw_md_terms = _dedupe([
+        *_as_strings(data.get("raw_md_terms")),
+        *(_plan_terms_from_fallback(fallback_planner, normalized_query)),
+    ])
     query_type = str(data.get("query_type") or "general")[:40]
     return QueryPlan(
         original_query=original_query,
         normalized_query=normalized_query,
-        keyword_queries=tuple(keyword_queries[:_MAX_QUERY_VARIANTS]),
+        bigram_queries=tuple(bigram_queries[:_MAX_QUERY_VARIANTS]),
         expanded_queries=tuple(expanded_queries[:_MAX_QUERY_VARIANTS]),
         raw_md_terms=tuple(raw_md_terms[:_MAX_RAW_MD_TERMS]),
         query_type=query_type,
@@ -169,11 +206,24 @@ def _plan_from_mapping(
     )
 
 
-def _extract_terms(text: str) -> list[str]:
-    try:
-        import jieba
 
-        parts = jieba.lcut(text)
+
+def _plan_terms_from_fallback(fallback_planner: BaseQueryPlanner | None, query: str) -> list[str]:
+    if fallback_planner is not None:
+        try:
+            plan = fallback_planner.plan(query)
+            return list(plan.raw_md_terms)
+        except Exception as exc:
+            logger.warning("[QueryPlanner] fallback planner failed while extracting terms: {}", exc)
+    return _extract_terms(query)
+
+
+def _extract_terms(text: str) -> list[str]:
+    tokenizer = _get_jieba_tokenizer(None)
+    try:
+        if tokenizer is None:
+            raise RuntimeError("jieba tokenizer unavailable")
+        parts = tokenizer.lcut(text)
     except Exception as exc:
         logger.warning("[RuleBasedQueryPlanner] jieba unavailable, regex fallback: {}", exc)
         parts = re.findall(r"[A-Za-z0-9_]+(?:[.\-+][A-Za-z0-9_]+)*|[\u4e00-\u9fff]+", text)
@@ -186,6 +236,21 @@ def _extract_terms(text: str) -> list[str]:
             continue
         terms.append(term)
     return _dedupe(terms)[:_MAX_RAW_MD_TERMS]
+
+
+@lru_cache(maxsize=8)
+def _get_jieba_tokenizer(dictionary_path: str | None):
+    try:
+        import jieba
+
+        if dictionary_path:
+            tokenizer = jieba.Tokenizer(dictionary=dictionary_path)
+        else:
+            tokenizer = jieba.Tokenizer()
+        return tokenizer
+    except Exception as exc:
+        logger.warning("[RuleBasedQueryPlanner] jieba tokenizer init failed, regex fallback: {}", exc)
+        return None
 
 
 def _normalize(text: str) -> str:

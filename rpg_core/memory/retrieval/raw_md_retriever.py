@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan
 from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
 from rpg_world.rpg_core.memory.retrieval.retriever import BaseRetriever
@@ -23,20 +24,26 @@ class RawMarkdownRetriever(BaseRetriever):
     def retrieve_sync(
         self, query: str, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
-        candidates = self._searcher.search(query, limit=top_k)
+        candidates = self.search(query, top_k=top_k)
         return self._format(candidates)
 
     def retrieve_plan_sync(
         self, plan: QueryPlan, top_k: int = 5
     ) -> list[tuple[str, float, dict]]:
-        candidates = self._searcher.search_plan(plan, limit=top_k)
+        candidates = self.search_plan(plan, top_k=top_k)
         return self._format(candidates)
 
-    def _format(self, candidates):
+    def search(self, query: str, top_k: int = 5) -> list[MemoryCandidate]:
+        return self._searcher.search(query, limit=top_k)
+
+    def search_plan(self, plan: QueryPlan, top_k: int = 5) -> list[MemoryCandidate]:
+        return self._searcher.search_plan(plan, limit=top_k)
+
+    def _format(self, candidates: list[MemoryCandidate]):
         return [
             (
                 candidate.content,
-                candidate.final_score or candidate.keyword_score or candidate.exact_score,
+                candidate.final_score or candidate.bigram_score or candidate.exact_score,
                 dict(candidate.metadata),
             )
             for candidate in candidates

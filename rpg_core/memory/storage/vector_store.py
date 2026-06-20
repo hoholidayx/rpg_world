@@ -35,7 +35,7 @@ class VectorStore:
             try:
                 self._vector_index = VectorIndex(self._repo, dimension)
             except VectorStoreError as exc:
-                logger.warning("[VectorStore] vector index init failed, retry keyword-only: {}", exc)
+                logger.warning("[VectorStore] vector index init failed, retry text-index-only: {}", exc)
                 self._vector_index = None
                 self._dim = None
         logger.info(
@@ -108,8 +108,8 @@ class VectorStore:
             raise VectorStoreError("vector search unavailable without embedding dimension")
         return self._vector_index.search(query, top_k=top_k, filters=filters)
 
-    def keyword_search(self, query: str, limit: int = 50):
-        return self._text_index.search(query, limit=limit)
+    def bigram_search(self, query: str, limit: int = 50):
+        return self._text_index.bigram_search(query, limit=limit)
 
     def substring_search(self, query: str, limit: int = 50):
         return self._text_index.substring_search(query, limit=limit)

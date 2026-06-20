@@ -11,9 +11,11 @@ from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.embedding_provider import OpenAIEmbeddingProvider
 from rpg_world.rpg_core.memory.memory_manager import MemoryManager, RecallItem
 from rpg_world.rpg_core.memory.planning.openai_planner import OpenAIQueryPlanner
+from rpg_world.rpg_core.memory.retrieval.bigram_retriever import BigramRetriever
 from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import HybridRetriever
 from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
-from rpg_world.rpg_core.memory.retrieval.retriever import DenseRetriever
+from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
+from rpg_world.rpg_core.memory.retrieval.sqlvec_retriever import SqlVecRetriever
 from rpg_world.rpg_core.memory.rerank.openai_reranker import OpenAIReranker
 from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
 from rpg_world.rpg_core.tests.conftest import FakeEmbedding, FakeFallbackSearch, FakeRetriever, FakeStore
@@ -80,9 +82,9 @@ def test_llama_process_disabled_degrades_without_provider():
         llama_request_timeout_ms=60000,
         hybrid_enabled=True,
         vector_k=50,
-        keyword_k=50,
+        bigram_k=50,
         hybrid_vector_weight=0.60,
-        hybrid_keyword_weight=0.25,
+        hybrid_bigram_weight=0.25,
         hybrid_exact_weight=0.10,
         hybrid_recency_weight=0.05,
     )
@@ -165,7 +167,7 @@ def test_openai_memory_sync_apis_work_inside_running_loop(monkeypatch):
         reranker = OpenAIReranker(model="rerank-model", api_key="rerank-key", max_candidates=2)
         DummyAsyncOpenAI.chat_content = json.dumps(
             {
-                "keyword_queries": ["查找线索"],
+                "bigram_queries": ["查找线索"],
                 "expanded_queries": [],
                 "raw_md_terms": ["线索"],
                 "query_type": "general",
@@ -215,7 +217,7 @@ def test_openai_query_planner_path(monkeypatch):
     DummyAsyncOpenAI.instances = []
     DummyAsyncOpenAI.chat_content = json.dumps(
         {
-            "keyword_queries": ["查找线索"],
+            "bigram_queries": ["查找线索"],
             "expanded_queries": ["查找 线索"],
             "raw_md_terms": ["线索"],
             "query_type": "general",
@@ -252,7 +254,7 @@ def test_openai_query_planner_path(monkeypatch):
     plan = planner.plan("查找线索")
 
     assert plan.planner_source == "openai"
-    assert plan.keyword_queries[0] == "查找线索"
+    assert plan.bigram_queries[0] == "查找线索"
     assert DummyAsyncOpenAI.instances[0].kwargs == {
         "api_key": "planner-key",
         "base_url": "https://planner.example",
@@ -404,40 +406,54 @@ def test_build_embedding_resolves_memory_openai_api_key_env(monkeypatch):
 def test_hybrid_retriever_merges_sources_and_falls_back():
     store = FakeStore()
     store.vector_rows = [
-        (FakeChunkRecord(1, "vector-one", {"source": "vec"}), 0.2),
-        (FakeChunkRecord(2, "vector-two", {"source": "vec"}), 0.5),
+        (FakeChunkRecord(1, "vector-one", {"source": "vec"}), 0.0),
+        (FakeChunkRecord(2, "vector-two", {"source": "vec"}), 0.1),
     ]
-    store.keyword_rows = {
+    store.bigram_rows = {
         "寻找 线索": [
-            MemoryCandidate(memory_id=2, content="vector-two", metadata={"source": "kw"}, keyword_score=0.9),
-            MemoryCandidate(memory_id=3, content="keyword-three", metadata={"source": "kw"}, keyword_score=0.8),
+            MemoryCandidate(memory_id=2, content="vector-two", metadata={"source": "bg"}, bigram_score=0.1),
+            MemoryCandidate(memory_id=3, content="bigram-three", metadata={"source": "bg"}, bigram_score=0.05),
         ]
     }
-    fallback = FakeFallbackSearch([
-        MemoryCandidate(memory_id=3, content="keyword-three", metadata={"source": "fb"}, keyword_score=0.7),
-    ])
+
+    class FakeRawSearch:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, int]] = []
+
+        def search(self, query: str, limit: int = 50):
+            self.calls.append((query, limit))
+            return [
+                MemoryCandidate(memory_id=4, content="raw-four", metadata={"source": "md"}, bigram_score=0.01),
+            ][:limit]
+
+        def search_plan(self, plan, limit: int = 50):  # noqa: ANN001
+            self.calls.append((plan.normalized_query, limit))
+            return [
+                MemoryCandidate(memory_id=4, content="raw-four", metadata={"source": "md"}, bigram_score=0.01),
+            ][:limit]
+
+    raw_search = FakeRawSearch()
     retriever = HybridRetriever(
-        store=store,
-        embedding=FakeEmbedding([[0.1, 0.2, 0.3]]),
-        vector_k=2,
-        keyword_k=2,
+        sqlvec_retriever=SqlVecRetriever(store=store, embedding=FakeEmbedding([[0.1, 0.2, 0.3]])),
+        bigram_retriever=BigramRetriever(store=store, limit=2),
+        raw_md_retriever=RawMarkdownRetriever(raw_search),
         reranker=None,
-        fallback_search=fallback,
     )
 
     result = retriever.hybrid_search("寻找 线索", top_k=2)
 
     assert [item.content for item in result] == ["vector-one", "vector-two"]
     assert store.search_calls
-    assert "寻找 线索" in fallback.calls[0]
+    assert store.bigram_calls
+    assert raw_search.calls
 
 
-def test_dense_retriever_sync(fake_token_counter):
+def test_sqlvec_retriever_sync(fake_token_counter):
     store = FakeStore()
     store.vector_rows = [
         (FakeChunkRecord(1, "dense-one", {"source": "vec"}), 0.0),
     ]
-    retriever = DenseRetriever(store=store, embedding=FakeEmbedding([[1.0, 0.0, 0.0]]))
+    retriever = SqlVecRetriever(store=store, embedding=FakeEmbedding([[1.0, 0.0, 0.0]]))
 
     result = retriever.retrieve_sync("query", top_k=1)
     assert result[0][0] == "dense-one"
@@ -503,12 +519,9 @@ def test_memory_manager_recall_gracefully_handles_planner_or_retriever_failure(f
 def test_hybrid_retriever_planner_failure_returns_empty(monkeypatch):
     store = FakeStore()
     retriever = HybridRetriever(
-        store=store,
-        embedding=None,
-        vector_k=2,
-        keyword_k=2,
+        bigram_retriever=BigramRetriever(store=store, limit=2),
+        raw_md_retriever=RawMarkdownRetriever(RawMarkdownGrepSearch([])),
         reranker=None,
-        fallback_search=RawMarkdownGrepSearch([]),
     )
 
     def boom(_self, _query):
