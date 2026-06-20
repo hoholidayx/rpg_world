@@ -5,6 +5,8 @@ from __future__ import annotations
 import json as _json
 import math
 
+from loguru import logger
+
 from rpg_world.rpg_core.memory.storage.repository import MemoryRepository
 from rpg_world.rpg_core.memory.storage.types import ChunkRecord, VectorStoreError
 
@@ -120,20 +122,13 @@ class VectorIndex:
             self._repository.conn.execute(f"DELETE FROM {table}")
 
     def _open_vector_table(self) -> None:
-        try:
-            import sqlite_vec
+        import sqlite_vec
 
+        try:
             sqlite_vec.load(self._repository.conn)
-            self._backend = "sqlite_vec"
-            self._repository.conn.executescript(
-                "DROP TABLE IF EXISTS vec_embeddings;"
-            )
-            self._repository.conn.executescript(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks "
-                f"USING vec0(embedding float[{self._dim}] distance_metric=cosine);"
-            )
-            return
-        except Exception:
+            logger.info("[VectorIndex] sqlite_vec extension loaded")
+        except Exception as exc:
+            logger.warning("[VectorIndex] sqlite_vec.load() failed: {} (type={})", exc, type(exc).__name__)
             self._backend = "python"
             self._repository.conn.executescript(
                 """
@@ -143,8 +138,31 @@ class VectorIndex:
                 );
                 """
             )
-            self._repository.conn.execute("DROP TABLE IF EXISTS vec_chunks")
+            logger.info("[VectorIndex] fallback to python backend (vec_embeddings table created)")
             return
+
+        try:
+            self._backend = "sqlite_vec"
+            self._repository.conn.executescript(
+                "DROP TABLE IF EXISTS vec_embeddings;"
+            )
+            self._repository.conn.executescript(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks "
+                f"USING vec0(embedding float[{self._dim}] distance_metric=cosine);"
+            )
+            logger.info("[VectorIndex] vec_chunks virtual table created (backend=sqlite_vec)")
+        except Exception as exc:
+            logger.error("[VectorIndex] vec_chunks creation failed: {} (type={})", exc, type(exc).__name__)
+            self._backend = "python"
+            self._repository.conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS vec_embeddings (
+                    rowid INTEGER PRIMARY KEY,
+                    embedding BLOB NOT NULL
+                );
+                """
+            )
+            logger.info("[VectorIndex] fallback to python backend after vec_chunks failure")
 
     def _search_python(
         self,
