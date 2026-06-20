@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from rpg_world.rpg_core.context.rpg_context import Message
-from rpg_world.rpg_core.session.turns import count_turns, iter_turn_groups, split_into_turn_batches
+from rpg_world.rpg_core.session.manager import SessionManager
 
 from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
 
@@ -136,7 +136,7 @@ class SummaryCompressor:
         working_history = history[prefix_end:]
 
         # 1. 统计 turn 数
-        total_turns = count_turns(working_history)
+        total_turns = SessionManager.count_turns(working_history)
 
         # 2. 判断触发条件
         if (
@@ -146,7 +146,7 @@ class SummaryCompressor:
             return CompressResult()
 
         # 3. 确定压缩范围
-        groups = iter_turn_groups(working_history)
+        groups = SessionManager.iter_turn_groups(working_history)
         if len(groups) <= self._keep_recent_rounds:
             return CompressResult()
 
@@ -159,7 +159,7 @@ class SummaryCompressor:
             return CompressResult()
 
         # 4. 分批处理
-        batches = split_into_turn_batches(compress_portion, self._compress_batch_size)
+        batches = SessionManager.split_into_turn_batches(compress_portion, self._compress_batch_size)
 
         batch_files: list[str] = []
         for batch_id, batch_messages, batch_user_rounds in batches:

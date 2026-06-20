@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rpg_world.rpg_core.utils.tokenizer import TokenCounter
 
-from rpg_world.rpg_core.session.turns import count_roles, count_turns
+from rpg_world.rpg_core.session.turns import count_roles
 
 
 class Role(StrEnum):
@@ -381,9 +381,11 @@ class RPGContext:
 
         # [3..N] Hot History
         if self.hot_history:
+            from rpg_world.rpg_core.session.manager import SessionManager
+
             tokens = token_counter.count_messages(self.hot_history)
             role_counts = count_roles(self.hot_history)
-            turn_count = count_turns(self.hot_history)
+            turn_count = SessionManager.count_turns(self.hot_history)
             layers.append(LayerInfo(
                 type=LayerType.HOT_HISTORY, role="mixed",
                 status="active",
@@ -453,9 +455,11 @@ class RPGContext:
         ]
 
         if self.hot_history:
+            from rpg_world.rpg_core.session.manager import SessionManager
+
             role_counts = count_roles(self.hot_history)
             lines.append(f"- 历史消息: **{len(self.hot_history)}** 条")
-            lines.append(f"- 历史轮数: **{count_turns(self.hot_history)}** 轮")
+            lines.append(f"- 历史轮数: **{SessionManager.count_turns(self.hot_history)}** 轮")
             lines.append(
                 "- 角色分布: "
                 f"user {role_counts['user']}, assistant {role_counts['assistant']}, "

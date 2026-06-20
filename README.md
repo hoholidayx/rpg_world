@@ -243,8 +243,8 @@ Telegram/CLI 通过 `settings.yaml` 中各自的 `workspace` 绑定。
 
 ### 会话历史字段
 
-`history.jsonl` 中每条消息会持久化 `hid`、`turn_id`、`seq_in_turn` 等字段。`hid` 只是记录用的消息标识，
-故事记忆和压缩等逻辑统一按 `turn_id` 计数。
+`history.jsonl` 中每条消息会持久化 `hid`、`turn_id`、`seq_in_turn` 等字段。`hid` 只是记录用的消息标识，不参与逻辑计算。
+turn / rounds / 历史切片等逻辑统一由 `SessionManager` 提供，降级顺序为 `turn_id -> user anchor -> 2 messages -> 1 message`。故事记忆续提游标按逻辑 turn 索引持久化，因此重启后也能沿同一规则继续提取。
 
 ## 测试
 

@@ -26,7 +26,6 @@ from loguru import logger
 
 from rpg_world.rpg_core.settings import settings
 from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.turns import count_turns, has_trustworthy_turn_ids, latest_turn_id
 
 _TAG = "[SessionManager]"
 
@@ -38,7 +37,7 @@ DEFAULT_SESSION_ID = _DEFAULT_SESSION_ID
 _META_TMP_SUFFIX = ".json.tmp"
 _META_CREATED_AT = "created_at"
 _META_UPDATED_AT = "updated_at"
-_META_LAST_STORY_TURN_ID = "last_story_turn_id"
+_META_LAST_STORY_TURN_INDEX = "last_story_turn_index"
 _META_NEXT_TURN_ID = "next_turn_id"
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 _SESSION_ID_MAX_LENGTH = 64
@@ -76,6 +75,7 @@ class SessionManager:
         self._meta: dict[str, str | int | float] = {}
         self._active_turn_id: int | None = None
         self._turn_seq_by_turn: dict[int, int] = {}
+        self._last_hid: int = 0
 
     # ── Public API — history ───────────────────────────────────────────
 
@@ -132,6 +132,97 @@ class SessionManager:
         """Clear the active turn marker if it matches *turn_id*."""
         if turn_id is None or self._active_turn_id == turn_id:
             self._active_turn_id = None
+        self._last_hid = max((msg.hid for msg in self.__history), default=0)
+
+    # ── turn helpers ────────────────────────────────────────────────
+
+    @staticmethod
+    def has_explicit_turn_ids(messages: list[Message]) -> bool:
+        """Return whether any message carries a positive ``turn_id``."""
+        return any(msg.turn_id > 0 for msg in messages)
+
+    @staticmethod
+    def has_trustworthy_turn_ids(messages: list[Message]) -> bool:
+        """Return whether explicit turn ids can be used safely."""
+        if not messages:
+            return False
+        if any(msg.turn_id <= 0 or msg.seq_in_turn <= 0 for msg in messages):
+            return False
+
+        last_turn_id = 0
+        for msg in messages:
+            if msg.turn_id < last_turn_id:
+                return False
+            last_turn_id = msg.turn_id
+        return True
+
+    @classmethod
+    def iter_turn_groups(cls, messages: list[Message]) -> list[list[Message]]:
+        """Group messages into logical turns.
+
+        Priority is explicit ``turn_id`` first. If no trustworthy explicit ids
+        exist, fall back to ``user`` anchors. If no user anchor is present,
+        fall back to 2-message windows, with a single trailing message kept as
+        its own turn.
+        """
+        if not messages:
+            return []
+
+        first_explicit = next(
+            (i for i, msg in enumerate(messages) if msg.turn_id > 0 and msg.seq_in_turn > 0),
+            len(messages),
+        )
+        if first_explicit < len(messages):
+            suffix = messages[first_explicit:]
+            if cls.has_trustworthy_turn_ids(suffix):
+                return cls._iter_legacy_groups(messages[:first_explicit]) + cls._iter_explicit_turn_groups(suffix)
+
+        return cls._iter_legacy_groups(messages)
+
+    @classmethod
+    def count_turns(cls, messages: list[Message]) -> int:
+        return len(cls.iter_turn_groups(messages))
+
+    @classmethod
+    def slice_recent_turns(cls, messages: list[Message], keep_turns: int) -> list[Message]:
+        if keep_turns <= 0:
+            return []
+
+        groups = cls.iter_turn_groups(messages)
+        if len(groups) <= keep_turns:
+            return list(messages)
+
+        return [msg for group in groups[-keep_turns:] for msg in group]
+
+    @classmethod
+    def split_into_turn_batches(
+        cls,
+        messages: list[Message],
+        batch_turn_size: int,
+    ) -> list[tuple[int, list[Message], int]]:
+        if batch_turn_size <= 0:
+            raise ValueError("batch_turn_size must be positive")
+
+        groups = cls.iter_turn_groups(messages)
+        if not groups:
+            return []
+
+        batches: list[tuple[int, list[Message], int]] = []
+        batch_id = 0
+        start = 0
+        while start < len(groups):
+            end = min(start + batch_turn_size, len(groups))
+            batch_groups = groups[start:end]
+            batch_messages = [msg for group in batch_groups for msg in group]
+            batches.append((batch_id, batch_messages, end - start))
+            batch_id += 1
+            start = end
+        return batches
+
+    @staticmethod
+    def latest_turn_id(messages: list[Message]) -> int:
+        turn_ids = [msg.turn_id for msg in messages if msg.turn_id > 0]
+        return max(turn_ids, default=0)
 
     def append(
         self,
@@ -148,7 +239,8 @@ class SessionManager:
         Writes to ``history.jsonl`` and ``history_cold.jsonl`` only when
         ``_history_enabled`` is ``True``.
         """
-        hid = int(_time.time() * 1000)
+        hid = max(int(_time.time() * 1000), self._last_hid + 1)
+        self._last_hid = hid
         if turn_id is None:
             turn_id = self._active_turn_id or self.begin_turn()
         if seq_in_turn is None:
@@ -273,38 +365,60 @@ class SessionManager:
     # ── Story memory progress tracking ──────────────────────────────────
 
     @property
-    def last_story_turn_id(self) -> int:
-        """turn_id of the last turn processed by story extraction."""
-        return int(self._meta.get(_META_LAST_STORY_TURN_ID, 0))
+    def last_story_turn_index(self) -> int:
+        """Index of the last processed logical turn group."""
+        return int(self._meta.get(_META_LAST_STORY_TURN_INDEX, 0))
 
-    def set_last_story_turn_id(self, turn_id: int) -> None:
-        """Persist the last extracted turn id."""
-        self._update_meta(**{_META_LAST_STORY_TURN_ID: turn_id})
+    def set_last_story_turn_index(self, turn_index: int) -> None:
+        """Persist the last processed logical turn index."""
+        self._update_meta(**{_META_LAST_STORY_TURN_INDEX: turn_index})
+
+    def story_turn_groups_since_last_extraction(self) -> list[list[Message]]:
+        """Return logical turn groups that have not yet been processed."""
+        groups = self.iter_turn_groups(self.__history)
+        cursor = self.last_story_turn_index
+        if cursor <= 0:
+            return groups
+        if cursor >= len(groups):
+            return []
+        return groups[cursor:]
 
     def story_messages_since_last_extraction(self) -> list[Message]:
         """Return messages that have not yet been processed for story memory.
 
-        Story extraction now follows turn ids only. If the history does not yet
-        contain trustworthy turn ids, we intentionally return the full history
-        and let the caller decide whether to process it.
+        The cursor is persisted as a logical turn index, so the same
+        turn-grouping rules are applied after process restarts even when the
+        history does not have trustworthy explicit ``turn_id`` values.
         """
-        if has_trustworthy_turn_ids(self.__history) and self.last_story_turn_id > 0:
-            return [m for m in self.__history if m.turn_id > self.last_story_turn_id]
-        return list(self.__history)
+        groups = self.story_turn_groups_since_last_extraction()
+        return [msg for group in groups for msg in group]
 
     def mark_story_messages_processed(self, messages: list[Message]) -> None:
         """Advance the story-memory cursor after processing *messages*.
 
-        Only trustworthy turn ids advance the cursor. Legacy or malformed
-        histories are treated as read-only records and do not update progress.
+        The cursor advances by logical turn groups, using the same grouping
+        rules as story extraction. If *messages* do not line up with the
+        current unprocessed suffix, the cursor is left unchanged.
         """
-        if not messages or not has_trustworthy_turn_ids(messages):
+        processed_groups = self.iter_turn_groups(messages)
+        if not processed_groups:
             return
-        self.set_last_story_turn_id(max(m.turn_id for m in messages))
+
+        all_groups = self.iter_turn_groups(self.__history)
+        cursor = self.last_story_turn_index
+        if cursor < 0:
+            cursor = 0
+
+        if all_groups[cursor:cursor + len(processed_groups)] == processed_groups:
+            self.set_last_story_turn_index(cursor + len(processed_groups))
+            return
+
+        if len(processed_groups) <= len(all_groups) and all_groups[-len(processed_groups):] == processed_groups:
+            self.set_last_story_turn_index(len(all_groups))
 
     def count_new_turns_since_story(self) -> int:
         """Count new conversation units since the last story extraction."""
-        return count_turns(self.story_messages_since_last_extraction())
+        return len(self.story_turn_groups_since_last_extraction())
 
     # ── History-enabled flag ───────────────────────────────────────────
 
@@ -335,6 +449,7 @@ class SessionManager:
             try:
                 with path.open("r", encoding="utf-8") as f:
                     self._meta = json.load(f)
+                self._meta.pop("last_story_turn_id", None)
                 return
             except (json.JSONDecodeError, OSError) as exc:
                 logger.warning(
@@ -348,7 +463,7 @@ class SessionManager:
         return {
             _META_CREATED_AT: now,
             _META_UPDATED_AT: now,
-            _META_LAST_STORY_TURN_ID: 0,
+            _META_LAST_STORY_TURN_INDEX: 0,
             _META_NEXT_TURN_ID: 1,
         }
 
@@ -392,13 +507,13 @@ class SessionManager:
 
     def _rebuild_turn_state(self) -> None:
         """Reconstruct turn counters from the current in-memory history."""
-        max_turn_id = latest_turn_id(self.__history)
+        max_turn_id = self.latest_turn_id(self.__history)
         if max_turn_id > 0:
             if int(self._meta.get(_META_NEXT_TURN_ID, 1)) <= max_turn_id:
                 self._meta[_META_NEXT_TURN_ID] = max_turn_id + 1
                 self._write_meta()
         else:
-            inferred = count_turns(self.__history) + 1 if self.__history else 1
+            inferred = self.count_turns(self.__history) + 1 if self.__history else 1
             if int(self._meta.get(_META_NEXT_TURN_ID, 1)) < inferred:
                 self._meta[_META_NEXT_TURN_ID] = inferred
                 self._write_meta()
@@ -409,4 +524,59 @@ class SessionManager:
                 continue
             seq_by_turn[msg.turn_id] = max(seq_by_turn.get(msg.turn_id, 0), msg.seq_in_turn)
         self._turn_seq_by_turn = {turn_id: seq + 1 for turn_id, seq in seq_by_turn.items()}
+        self._last_hid = max((msg.hid for msg in self.__history), default=0)
         self._active_turn_id = None
+
+    @staticmethod
+    def _iter_legacy_groups(messages: list[Message]) -> list[list[Message]]:
+        if any(msg.is_user() for msg in messages):
+            return SessionManager._iter_user_anchor_groups(messages)
+        return SessionManager._iter_pairs(messages)
+
+    @staticmethod
+    def _iter_user_anchor_groups(messages: list[Message]) -> list[list[Message]]:
+        user_indices = [i for i, msg in enumerate(messages) if msg.is_user()]
+        if not user_indices:
+            return SessionManager._iter_pairs(messages)
+
+        groups: list[list[Message]] = []
+        for idx, user_idx in enumerate(user_indices):
+            start = 0 if idx == 0 else user_idx
+            end = user_indices[idx + 1] if idx + 1 < len(user_indices) else len(messages)
+            groups.append(messages[start:end])
+        return groups
+
+    @staticmethod
+    def _iter_pairs(messages: list[Message]) -> list[list[Message]]:
+        if not messages:
+            return []
+        groups: list[list[Message]] = []
+        idx = 0
+        while idx < len(messages):
+            groups.append(messages[idx:idx + 2])
+            idx += 2
+        return groups
+
+    @staticmethod
+    def _iter_explicit_turn_groups(messages: list[Message]) -> list[list[Message]]:
+        if not messages:
+            return []
+
+        groups: list[list[Message]] = []
+        current_turn_id = messages[0].turn_id
+        current_group: list[Message] = []
+        for msg in messages:
+            if msg.turn_id <= 0 or msg.seq_in_turn <= 0:
+                if current_group:
+                    groups.append(current_group)
+                    current_group = []
+                groups.append([msg])
+                continue
+            if msg.turn_id != current_turn_id and current_group:
+                groups.append(current_group)
+                current_group = []
+            current_turn_id = msg.turn_id
+            current_group.append(msg)
+        if current_group:
+            groups.append(current_group)
+        return groups

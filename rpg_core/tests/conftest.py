@@ -12,7 +12,7 @@ import pytest
 from rpg_world.rpg_core.context.rpg_context import Message, Role
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan
-from rpg_world.rpg_core.session.turns import iter_turn_groups
+from rpg_world.rpg_core.session.manager import SessionManager
 from rpg_world.rpg_core.settings import settings
 
 
@@ -145,7 +145,7 @@ class FakeMemorySubAgent:
         self.overall_calls: list[dict[str, object]] = []
 
     def _split_into_batches(self, conv, batch_size):  # noqa: ANN001
-        groups = iter_turn_groups(list(conv))
+        groups = SessionManager.iter_turn_groups(list(conv))
         return [(1, list(conv), len(groups))] if conv else []
 
     async def _pipeline_batch_summary(self, conv, batch_id, user_rounds):  # noqa: ANN001

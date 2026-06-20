@@ -91,5 +91,5 @@ async def test_summary_compressor_falls_back_to_message_windows_without_user_anc
     result = await compressor.maybe_compress(session)
 
     assert result.triggered is True
-    assert result.batch_files == ["batch_0.md", "batch_1.md"]
-    assert [m.content for m in session.history] == ["system", "t2"]
+    assert result.batch_files == ["batch_0.md"]
+    assert [m.content for m in session.history] == ["system", "a2", "t2"]

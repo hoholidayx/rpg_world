@@ -74,7 +74,7 @@ def test_count_new_turns_uses_user_anchor_when_turn_ids_missing(temp_settings, w
     assert mgr.count_new_turns_since_story() == 1
 
 
-def test_count_new_turns_falls_back_to_messages_without_user_anchor(temp_settings, workspace):
+def test_count_new_turns_uses_two_message_fallback_without_user_anchor(temp_settings, workspace):
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
 
@@ -84,7 +84,18 @@ def test_count_new_turns_falls_back_to_messages_without_user_anchor(temp_setting
         Message(Role.SYSTEM, "sys1", hid=3, turn_id=0, seq_in_turn=0),
     ], persist=False)
 
-    assert mgr.count_new_turns_since_story() == 3
+    assert mgr.count_new_turns_since_story() == 2
+
+
+def test_count_new_turns_uses_single_message_fallback_without_user_anchor(temp_settings, workspace):
+    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr.load()
+
+    mgr.replace_history([
+        Message(Role.ASSISTANT, "a1", hid=1, turn_id=0, seq_in_turn=0),
+    ], persist=False)
+
+    assert mgr.count_new_turns_since_story() == 1
 
 
 def test_message_from_dict_ignores_legacy_rp_his_key():
@@ -93,6 +104,26 @@ def test_message_from_dict_ignores_legacy_rp_his_key():
 
     assert msg.hid == 0
     assert msg.to_dict() == {"role": "user", "content": "hello"}
+
+
+def test_story_turn_cursor_uses_logical_groups_without_turn_ids(temp_settings, workspace):
+    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr.load()
+    mgr.replace_history([
+        Message(Role.ASSISTANT, "a1", hid=1, turn_id=0, seq_in_turn=0),
+        Message(Role.TOOL, "t1", hid=2, turn_id=0, seq_in_turn=0),
+        Message(Role.SYSTEM, "s1", hid=3, turn_id=0, seq_in_turn=0),
+    ], persist=True)
+    mgr.set_last_story_turn_index(1)
+
+    reloaded = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    reloaded.load()
+
+    assert [m.content for m in reloaded.story_messages_since_last_extraction()] == ["s1"]
+    assert reloaded.count_new_turns_since_story() == 1
+
+    reloaded.mark_story_messages_processed(reloaded.story_messages_since_last_extraction())
+    assert reloaded.last_story_turn_index == 2
 
 
 def test_rebuild_turn_state_after_history_compaction(temp_settings, workspace):

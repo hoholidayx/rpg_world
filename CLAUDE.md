@@ -349,12 +349,14 @@ POST   /api/v1/workspaces/{workspace}/sessions/{session_id}/clone
 
 ### 对话历史持久化
 
-- `history.jsonl` — 主文件，消息记录使用 `hid` 作为标识，消息的系统时间
+- `history.jsonl` — 主文件，消息记录使用 `hid` 作为标识，`hid` 只用于记录，不参与 turn 逻辑
 - `history_cold.jsonl` — 冷备份，只追加永不截断
 - `story_memory.json` — 剧情记忆（FileWatcher）
 - `rpg_summaries.json` — 对话摘要（FileWatcher）
 - `summaries/` — 批次摘要文件
 - `memory_vectors.db*` — memory SQLite / WAL / SHM 索引文件
+
+会话层的 turn / rounds 统一由 `SessionManager` 负责，降级顺序固定为：`turn_id -> user anchor -> 2 messages -> 1 message`。故事记忆续提游标按逻辑 turn 索引持久化，进程重启后继续沿同一套 turn 分组规则提取。
 
 所有会话数据文件集中在 `{workspace_root}/sessions/{session_id}/` 下。
 

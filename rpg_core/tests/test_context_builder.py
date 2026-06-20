@@ -190,4 +190,4 @@ def test_context_hot_history_falls_back_without_user_anchor(fake_token_counter):
     summary = ctx.layer_summary(fake_token_counter)
 
     assert [m.content for m in ctx.hot_history] == ["a1", "tool1", "sys1"]
-    assert summary[3].description == "3 轮 / 3 条 (user=0, assistant=1, tool=1, system=1)"
+    assert summary[3].description == "2 轮 / 3 条 (user=0, assistant=1, tool=1, system=1)"

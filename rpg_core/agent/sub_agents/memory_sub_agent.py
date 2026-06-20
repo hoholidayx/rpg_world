@@ -35,7 +35,7 @@ from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProvi
 from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
 from rpg_world.rpg_core.agent.command import CommandDef
 from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.turns import iter_turn_groups, slice_recent_turns
+from rpg_world.rpg_core.session.manager import SessionManager
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.agent import RPGGameAgent
@@ -486,7 +486,7 @@ class MemorySubAgent(BaseSubAgent):
             prefix_end += 1
         prefix = history[:prefix_end]
         working_history = history[prefix_end:]
-        groups = iter_turn_groups(working_history)
+        groups = SessionManager.iter_turn_groups(working_history)
         total = len(groups)
         available = total - keep_rounds
         if available <= 0:
@@ -501,7 +501,7 @@ class MemorySubAgent(BaseSubAgent):
         old_slice = [msg for group in old_groups for msg in group]
 
         # 拆分为批次
-        batches = _split_into_batches(old_slice, compress_batch_size)
+        batches = SessionManager.split_into_turn_batches(old_slice, compress_batch_size)
         if not batches:
             return {"skipped": True, "reason": "no batches to compress"}
 
@@ -972,7 +972,7 @@ class MemorySubAgent(BaseSubAgent):
     ) -> str:
         """Format conversation as readable ``Role: text`` lines, windowed."""
         if max_rounds is not None:
-            history = slice_recent_turns(history, max_rounds)
+            history = SessionManager.slice_recent_turns(history, max_rounds)
 
         lines: list[str] = []
         for msg in history:
@@ -1032,31 +1032,3 @@ def _format_store_items(
     if not items:
         return "(empty)"
     return "\n".join(f"- {key(item)}" for item in items)
-
-
-def _split_into_batches(
-    messages: list[Message],
-    batch_size: int,
-) -> list[tuple[int, list[Message], int]]:
-    """将消息列表按 turn 拆分。
-
-    Returns:
-        ``[(batch_id, batch_messages, 批内 turn 数), ...]``。
-        batch_id 从 0 开始递增。最后一批可能小于 batch_size。
-    """
-    groups = iter_turn_groups(messages)
-    if not groups:
-        return []
-
-    batches: list[tuple[int, list[Message], int]] = []
-    start = 0
-    batch_id = 0
-    while start < len(groups):
-        end = min(start + batch_size, len(groups))
-        batch_groups = groups[start:end]
-        batch_messages = [msg for group in batch_groups for msg in group]
-        batches.append((batch_id, batch_messages, end - start))
-        batch_id += 1
-        start = end
-
-    return batches

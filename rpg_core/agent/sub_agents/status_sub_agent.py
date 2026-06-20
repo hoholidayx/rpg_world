@@ -31,7 +31,7 @@ from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProvi
 from rpg_world.rpg_core.agent.tools import BaseTool
 from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
 from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.turns import count_turns, slice_recent_turns
+from rpg_world.rpg_core.session.manager import SessionManager
 from rpg_world.rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -284,7 +284,7 @@ class StatusSubAgent(BaseSubAgent):
         max_rounds: int,
     ) -> list[dict]:
         """组装子 Agent 消息：系统上下文（含世界书/角色卡） + 历史窗口 + 场景 + 用户输入。"""
-        total_turns = count_turns(history)
+        total_turns = SessionManager.count_turns(history)
         recent = self._format_history_window(history, max_rounds)
         if settings.verbose_logging:
             kept = min(total_turns, max_rounds)
@@ -313,7 +313,7 @@ class StatusSubAgent(BaseSubAgent):
         max_rounds: int,
     ) -> str:
         """提取最近 N 轮对话，格式化为 ``Role: text`` 行。"""
-        history = slice_recent_turns(history, max_rounds)
+        history = SessionManager.slice_recent_turns(history, max_rounds)
 
         lines: list[str] = []
         for msg in history:
