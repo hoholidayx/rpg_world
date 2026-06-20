@@ -281,7 +281,7 @@ profiles:
     file: "settings.local.yaml"
 
   test:
-    file: "settings.test.yaml"
+    file: "rpg_core/tests/integration/settings.test.yaml"
 
   prod:
     file: "settings.prod.yaml"

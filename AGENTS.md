@@ -36,6 +36,8 @@ Telegram 是当前主聊天入口。修改 `channels/telegram/adapter.py`、`cha
 
 API/WebUI 管理能力应补 `api/tests/` 的契约测试；核心上下文、memory、summary、session 行为应补 `rpg_core/tests/`。
 
+修改主 agent 相关路径时，默认还要跑 `rpg_core/tests/integration/` 的真实集成验证，重点覆盖 `rpg_core/agent/agent.py`、`rpg_core/agent/command.py`、`rpg_core/agent/openai_provider.py`、`rpg_core/session/manager.py`、`rpg_core/context/` 以及会影响这些路径的配置变更。若改动会触发真实 LLM 调用，先用 `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q` 做门禁验证，再考虑提交。
+
 ## 提交与合并请求规范
 提交信息遵循现有历史风格：`feat:`、`fix:`、`refactor:`、`chore:` 等前缀，后接简洁中文说明，例如 `feat: 实现向量记忆系统`。一次提交只处理一个逻辑主题。
 
