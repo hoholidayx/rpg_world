@@ -732,14 +732,20 @@ class RPGGameAgent:
     def _setup_tool_registry(self) -> None:
         """Create and populate the ToolRegistry with built-in file tools."""
         from rpg_world.rpg_core.utils.path_utils import resolve_workspace_root, PACKAGE_ROOT
+        from rpg_world.rpg_core.settings import settings
+        from rpg_world.rpg_core.agent.tools.file_tools import FileToolSandbox
 
         ws_root = resolve_workspace_root(PACKAGE_ROOT, self._workspace)
+        sandbox = FileToolSandbox(
+            workspace_root=ws_root,
+            session_root=settings.session_dir(self._workspace, self._session_id),
+        )
         self._tool_registry = ToolRegistry()
         self._tool_registry.register_all([
-            ListFilesTool(ws_root),
-            ReadFileTool(ws_root),
-            WriteFileTool(ws_root),
-            GrepTool(ws_root),
+            ListFilesTool(sandbox),
+            ReadFileTool(sandbox),
+            WriteFileTool(sandbox),
+            GrepTool(sandbox),
         ])
         if self._scene_tracker:
             self._tool_registry.register_all(self._scene_tracker.get_tools())
