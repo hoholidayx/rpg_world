@@ -153,6 +153,32 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
     assert agent._initialized is True
 
 
+@pytest.mark.asyncio
+async def test_switch_session_reinitializes_memory_and_starts_watcher(monkeypatch):
+    class FakeWatcher:
+        def __init__(self) -> None:
+            self.start = MagicMock()
+
+    fake_watcher = FakeWatcher()
+    monkeypatch.setattr(agent_module, "get_watcher", lambda: fake_watcher)
+
+    agent = object.__new__(RPGGameAgent)
+    agent._initialized = True
+    agent._session_id = "old"
+    agent._refresh_rpg_context = MagicMock()
+    agent._memory_manager = SimpleNamespace(init=MagicMock())
+    agent._session = SimpleNamespace(switch_to=MagicMock())
+    agent._setup_tool_registry = MagicMock()
+
+    await agent.switch_session("new")
+
+    agent._refresh_rpg_context.assert_called_once()
+    agent._memory_manager.init.assert_called_once()
+    fake_watcher.start.assert_called_once()
+    agent._session.switch_to.assert_called_once_with("new")
+    agent._setup_tool_registry.assert_called_once()
+
+
 def test_rpg_game_agent_default_model_no_longer_forces_gpt4o(monkeypatch):
     monkeypatch.setattr(agent_module.RPGGameAgent, "_refresh_rpg_context", lambda self: None)
 

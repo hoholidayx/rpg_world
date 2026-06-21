@@ -621,6 +621,7 @@ class RPGGameAgent:
         self._refresh_rpg_context()
         if self._memory_manager:
             self._memory_manager.init()
+        get_watcher().start()
         self._session.switch_to(session_id)
         self._setup_tool_registry()
         logger.info("[MainAgent] switched to session: {}", session_id)

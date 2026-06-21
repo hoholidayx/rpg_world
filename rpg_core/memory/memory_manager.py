@@ -4,7 +4,7 @@
 
 初始化策略：
   1. ``create()`` — 加载模型 + 建 DB
-  2. ``init()`` — 注册 FileWatcher，避免启动时执行全量重建
+  2. ``init()`` — 增量同步索引并注册 FileWatcher
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ class MemoryManager:
         self._db_path: str | None = None
 
     def init(self) -> None:
-        """同步初始化：仅注册 watcher，不执行全量重建。"""
+        """同步初始化：增量补偿离线文件变化并注册 watcher。"""
         logger.info("[MemoryManager] init() called — _inited={} index_manager={}", self._inited, self._index_manager is not None)
         if self._inited:
             return
@@ -152,6 +152,7 @@ class MemoryManager:
             self._inited = True
             return
 
+        self._index_manager.sync_all(force=False)
         self._index_manager.start()
         self._inited = True
         logger.info("[MemoryManager] init done")
@@ -427,7 +428,7 @@ class MemoryManager:
             return
 
         logger.info("[MemoryManager] manual reindex start ...")
-        self._index_manager.reindex_all()
+        self._index_manager.sync_all(force=True)
         if not self._inited:
             self._index_manager.start()
             self._inited = True

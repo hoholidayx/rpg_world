@@ -112,6 +112,7 @@ class TestTelegramAdapter:
         await adapter._on_command(update, object())
 
         agent.execute_command.assert_awaited_once_with("/clear")
+        assert agent.current_session == "telegram_default_123"
         adapter.send_text.assert_awaited_once_with("123", "done")
 
     async def test_on_command_sessions_shows_picker(self, adapter: TelegramAdapter, monkeypatch):
@@ -196,6 +197,7 @@ class TestTelegramAdapter:
         await adapter._on_command(update, object())
 
         agent.execute_command.assert_awaited_once_with("/compact 10 5")
+        assert agent.current_session == "telegram_default_123"
         adapter.send_text.assert_awaited_once_with("123", "done")
 
     async def test_on_command_normalizes_menu_alias(self, adapter: TelegramAdapter):
@@ -214,6 +216,7 @@ class TestTelegramAdapter:
         await adapter._on_command(update, object())
 
         agent.execute_command.assert_awaited_once_with("/session_create abc")
+        assert agent.current_session == "telegram_default_123"
         adapter.send_text.assert_awaited_once_with("123", "done")
 
     async def test_on_command_session_create_starts_two_step_flow(self, adapter: TelegramAdapter):

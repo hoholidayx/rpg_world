@@ -24,6 +24,15 @@ class TestCLIAdapter:
         adapter = CLIAdapter()
         assert adapter.get_session_id("direct") == "cli_direct"
 
+    async def test_get_initial_session_id_uses_adapter_chat_mapping(self):
+        adapter = CLIAdapter()
+        assert adapter.get_initial_session_id() == "cli_direct"
+
+    async def test_get_session_id_uses_override(self):
+        adapter = CLIAdapter(session_id="custom_session")
+        assert adapter.get_session_id("direct") == "custom_session"
+        assert adapter.get_initial_session_id() == "custom_session"
+
     async def test_name_constant(self):
         assert CLIAdapter.name == "cli"
 

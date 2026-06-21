@@ -12,7 +12,7 @@ from loguru import logger
 
 from rpg_world.rpg_core.memory.storage.repository import MemoryRepository
 from rpg_world.rpg_core.memory.storage.text_index import TextIndex
-from rpg_world.rpg_core.memory.storage.types import ChunkRecord, VectorStoreError
+from rpg_world.rpg_core.memory.storage.types import ChunkRecord, IndexedFileState, VectorStoreError
 from rpg_world.rpg_core.memory.storage.vector_index import VectorIndex
 
 
@@ -86,6 +86,63 @@ class VectorStore:
 
                 if (i + 1) % self.BATCH_SIZE == 0:
                     conn.commit()
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def replace_file(
+        self,
+        file_path: str,
+        records: list[ChunkRecord],
+        embeddings: list[list[float]] | None,
+        file_state: IndexedFileState,
+    ) -> None:
+        if self._has_vector_index() and records and (
+            embeddings is None or len(embeddings) != len(records)
+        ):
+            raise VectorStoreError("embedding count does not match record count")
+
+        conn = self._repo.conn
+        try:
+            stale_ids = self._repo.delete_chunk_by_file(file_path)
+            self._delete_secondary_rows(stale_ids)
+
+            for i, rec in enumerate(records):
+                emb = embeddings[i] if embeddings is not None and i < len(embeddings) else None
+                rowid = self._repo.upsert_chunk(rec)
+                if self._vector_index is not None:
+                    if emb is None:
+                        raise VectorStoreError("missing embedding for vector insert")
+                    self._vector_index.insert(rowid, emb)
+                self._text_index.upsert(rowid, rec.text)
+
+            self._repo.upsert_indexed_file(file_state)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def list_indexed_files(self, source_id: str) -> dict[str, IndexedFileState]:
+        return self._repo.list_indexed_files(source_id)
+
+    def mark_file_error(self, file_state: IndexedFileState, error: str) -> None:
+        file_state.status = "error"
+        file_state.last_error = error
+        file_state.chunk_count = 0
+        try:
+            self._repo.upsert_indexed_file(file_state)
+            self._repo.conn.commit()
+        except Exception:
+            self._repo.conn.rollback()
+            raise
+
+    def delete_file_index(self, file_path: str) -> None:
+        conn = self._repo.conn
+        try:
+            stale_ids = self._repo.delete_chunk_by_file(file_path)
+            self._delete_secondary_rows(stale_ids)
+            self._repo.delete_indexed_file(file_path)
             conn.commit()
         except Exception:
             conn.rollback()

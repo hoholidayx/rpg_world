@@ -532,6 +532,9 @@ class TelegramAdapter(ChannelAdapter):
             await self._on_start(update, _context)
             return
 
+        if self._agent:
+            await self._agent.switch_session(self.get_session_id(chat_id))
+
         if await self._session_flow.handle_command(
             chat_id,
             command,

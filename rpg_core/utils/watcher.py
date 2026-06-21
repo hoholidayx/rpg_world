@@ -116,13 +116,27 @@ class FileWatcher:
                 )
                 logger.info("  -> scheduled with running observer")
 
-    def start(self) -> None:
-        """Start the watchdog observer (no-op if already running)."""
+    @property
+    def is_available(self) -> bool:
+        """Whether the optional watchdog dependency is installed."""
+        return _WATCHDOG_AVAILABLE
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the underlying observer is currently running."""
+        return self._started
+
+    def start(self) -> bool:
+        """Start the watchdog observer.
+
+        Returns ``True`` when file watching is active after the call. The
+        method is idempotent and returns ``False`` when watchdog is unavailable.
+        """
         if not _WATCHDOG_AVAILABLE:
             logger.warning("watchdog not available — file watching disabled")
-            return
+            return False
         if self._started:
-            return
+            return True
 
         logger.info("starting FileWatcher — %d paths to watch", len(self._callbacks))
         self._observer = Observer()
@@ -140,6 +154,7 @@ class FileWatcher:
         self._observer.start()
         self._started = True
         logger.info("FileWatcher started")
+        return True
 
     def clear_all(self) -> None:
         """Clear all registered callbacks and debounce state.

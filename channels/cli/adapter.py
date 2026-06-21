@@ -43,10 +43,18 @@ class CLIAdapter(ChannelAdapter):
     """
 
     name = "cli"
+    direct_chat_id = "direct"
 
-    def __init__(self, agent: Any | None = None, *, streaming: bool = True) -> None:
+    def __init__(
+        self,
+        agent: Any | None = None,
+        *,
+        streaming: bool = True,
+        session_id: str | None = None,
+    ) -> None:
         super().__init__()
         self._streaming = streaming
+        self._session_id_override = (session_id or "").strip() or None
         self._session = PromptSession(
             history=FileHistory(str(_HISTORY_PATH)),
             enable_history_search=True,
@@ -55,6 +63,15 @@ class CLIAdapter(ChannelAdapter):
         self._running = False
         if agent:
             self.bind_agent(agent)
+
+    def get_session_id(self, chat_id: str) -> str:
+        if self._session_id_override is not None:
+            return self._session_id_override
+        return super().get_session_id(chat_id)
+
+    def get_initial_session_id(self) -> str:
+        """Return the session used by this single-chat CLI adapter."""
+        return self.get_session_id(self.direct_chat_id)
 
     # ── 生命周期 ────────────────────────────────────────────────────────
 
@@ -84,7 +101,7 @@ class CLIAdapter(ChannelAdapter):
                 await self.stop()
                 break
 
-            await self._handle_message("direct", "user", text)
+            await self._handle_message(self.direct_chat_id, "user", text)
 
     async def stop(self) -> None:
         """停止 CLI 交互循环。"""

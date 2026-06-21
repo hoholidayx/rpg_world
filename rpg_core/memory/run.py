@@ -45,6 +45,7 @@ from rpg_world.rpg_core.utils.path_utils import (
     list_workspaces,
     resolve_workspace_root,
 )
+from rpg_world.rpg_core.utils.watcher import get_watcher
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.memory.memory_manager import RecallItem
@@ -188,15 +189,25 @@ def create_manager(workspace: str, session: str) -> MemoryManager | None:
 
 
 def initialize_manager(mm: MemoryManager, session: str) -> None:
-    """3. 初始化（仅注册 FileWatcher，不执行全量重建）。"""
+    """3. 初始化并启动 FileWatcher。"""
     _print_separator(f"3. init() 初始化（session={session}）")
 
     t0 = time.monotonic()
     mm.init()
+    watcher_started = get_watcher().start()
     elapsed = time.monotonic() - t0
 
     print(f"  耗时: {elapsed:.2f}s")
     print(f"  inited: {mm._inited}")
+    print(f"  FileWatcher: {'running' if watcher_started else 'disabled'}")
+
+
+def stop_file_watcher() -> None:
+    """Stop and clear FileWatcher callbacks for this standalone CLI."""
+    watcher = get_watcher()
+    watcher.stop()
+    watcher.clear_all()
+    print("  FileWatcher: stopped")
 
 
 def _print_recall_item(idx: int, item: "RecallItem") -> None:
@@ -403,7 +414,7 @@ def main() -> None:
         _ensure_session(workspace, args.session)
         mm = create_manager(workspace, args.session)
         if mm is not None:
-            # 同步初始化（仅注册 FileWatcher）
+            # 同步初始化并启动 FileWatcher
             initialize_manager(mm, args.session)
 
             # 启动前的自动 recall
@@ -412,6 +423,8 @@ def main() -> None:
             # 进入交互循环
             _loop(mm, workspace, args.session)
     finally:
+        if "mm" in locals() and mm is not None:
+            stop_file_watcher()
         # 清理
         if not args.skip_cleanup and temporary_workspace:
             cleanup_workspace(workspace, args.session, remove_workspace=temporary_workspace)

@@ -17,7 +17,7 @@ from rpg_world.rpg_core.llm.keys import (
 from rpg_world.rpg_core.llm.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.memory.memory_manager import MemoryManager, RecallItem
 from rpg_world.rpg_core.memory import run as memory_run
-from rpg_world.rpg_core.memory.storage.types import ChunkRecord
+from rpg_world.rpg_core.memory.storage.types import ChunkRecord, IndexedFileState
 from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
 from rpg_world.rpg_core.memory.storage import vector_store as vector_store_module
 from rpg_world.rpg_core.memory.keyword_tokenizer import (
@@ -46,6 +46,7 @@ from rpg_world.rpg_core.memory.rerank.common import build_pointwise_prompt, blen
 from rpg_world.rpg_core.memory.rerank import service as rerank_service_module
 from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
 from rpg_world.rpg_core.memory.storage.text_index import _keyword_relevance
+from rpg_world.rpg_core.memory.vector_index_manager import VectorIndexManager, WatchSource
 from rpg_world.rpg_core.tests.conftest import FakeEmbedding, FakeFallbackSearch, FakeRetriever, FakeStore
 
 
@@ -609,6 +610,29 @@ def test_inspect_vector_store_loads_sqlite_vec_backend(tmp_path, monkeypatch, ca
     assert '向量 row 数: 1' in out
 
 
+def test_memory_run_initialize_manager_starts_file_watcher(monkeypatch, capsys):
+    calls: list[str] = []
+
+    class DummyManager:
+        _inited = False
+
+        def init(self):
+            calls.append("init")
+            self._inited = True
+
+    class DummyWatcher:
+        def start(self):
+            calls.append("start")
+            return True
+
+    monkeypatch.setattr(memory_run, "get_watcher", lambda: DummyWatcher())
+
+    memory_run.initialize_manager(DummyManager(), "sess")
+
+    assert calls == ["init", "start"]
+    assert "FileWatcher: running" in capsys.readouterr().out
+
+
 def test_vector_store_logs_backend(tmp_path, monkeypatch):
     messages: list[str] = []
 
@@ -656,6 +680,313 @@ def test_keyword_relevance_is_bounded_for_sqlite_rank_signs():
     assert _keyword_relevance(-2.0) == pytest.approx(2.0 / 3.0)
     assert _keyword_relevance(3.0) == pytest.approx(0.25)
     assert _keyword_relevance(0.0) == 1.0
+
+
+def _chunk_rows(store: VectorStore):
+    return store._repo.conn.execute(  # noqa: SLF001
+        "SELECT text, source, file, chunk_idx FROM chunks ORDER BY file, chunk_idx"
+    ).fetchall()
+
+
+def _manifest_rows(store: VectorStore):
+    return store._repo.conn.execute(  # noqa: SLF001
+        "SELECT file, source_id, status, chunk_count, last_error FROM indexed_files ORDER BY file"
+    ).fetchall()
+
+
+def test_vector_index_manager_incremental_sync_skips_unchanged_files(tmp_path):
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    first = source_dir / "a.md"
+    second = source_dir / "b.md"
+    first.write_text("alpha memory", encoding="utf-8")
+    second.write_text("beta memory", encoding="utf-8")
+    embedding = FakeEmbedding([[0.1, 0.2, 0.3]])
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=3)
+    manager = VectorIndexManager(
+        store=store,
+        embedding=embedding,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+
+    manager.sync_all()
+    manager.sync_all()
+
+    assert len(embedding.calls) == 2
+    assert [row[0] for row in _chunk_rows(store)] == ["alpha memory", "beta memory"]
+    assert [row[2] for row in _manifest_rows(store)] == ["indexed", "indexed"]
+    store.close()
+
+
+def test_vector_index_manager_skips_hash_read_for_stat_unchanged_files(tmp_path, monkeypatch):
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    file_path = source_dir / "a.md"
+    file_path.write_text("alpha memory", encoding="utf-8")
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None)
+    manager = VectorIndexManager(
+        store=store,
+        embedding=None,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+    path_cls = type(file_path)
+    original_read_bytes = path_cls.read_bytes
+    read_count = 0
+
+    def counting_read_bytes(self):  # noqa: ANN001
+        nonlocal read_count
+        read_count += 1
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(path_cls, "read_bytes", counting_read_bytes)
+
+    manager.sync_all()
+    manager.sync_all()
+
+    assert read_count == 1
+    store.close()
+
+
+def test_vector_index_manager_incremental_sync_reindexes_only_changed_file(tmp_path):
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    first = source_dir / "a.md"
+    second = source_dir / "b.md"
+    first.write_text("alpha memory", encoding="utf-8")
+    second.write_text("beta memory", encoding="utf-8")
+    embedding = FakeEmbedding([[0.1, 0.2, 0.3]])
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=3)
+    manager = VectorIndexManager(
+        store=store,
+        embedding=embedding,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+    manager.sync_all()
+
+    first.write_text("alpha memory changed", encoding="utf-8")
+    manager.sync_all()
+
+    assert len(embedding.calls) == 3
+    assert embedding.calls[-1] == ["alpha memory changed"]
+    assert [row[0] for row in _chunk_rows(store)] == ["alpha memory changed", "beta memory"]
+    store.close()
+
+
+def test_vector_index_manager_incremental_sync_deletes_removed_file(tmp_path):
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    first = source_dir / "a.md"
+    second = source_dir / "b.md"
+    first.write_text("alpha memory", encoding="utf-8")
+    second.write_text("beta memory", encoding="utf-8")
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None)
+    manager = VectorIndexManager(
+        store=store,
+        embedding=None,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+    manager.sync_all()
+
+    second.unlink()
+    manager.sync_all()
+
+    rows = _chunk_rows(store)
+    assert len(rows) == 1
+    assert rows[0][0] == "alpha memory"
+    assert _manifest_rows(store)[0][0] == str(first.resolve())
+    store.close()
+
+
+def test_vector_index_manager_sync_cleans_legacy_chunks_without_manifest(tmp_path):
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    current = source_dir / "a.md"
+    removed = source_dir / "b.md"
+    current.write_text("alpha memory", encoding="utf-8")
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None)
+    store.upsert([
+        ChunkRecord(
+            id=1,
+            text="stale beta memory",
+            metadata={"source": "summaries", "file": str(removed.resolve()), "chunk_idx": 0},
+        )
+    ])
+    manager = VectorIndexManager(
+        store=store,
+        embedding=None,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+
+    manager.sync_all()
+
+    assert [row[0] for row in _chunk_rows(store)] == ["alpha memory"]
+    assert [row[0] for row in _manifest_rows(store)] == [str(current.resolve())]
+    store.close()
+
+
+def test_vector_index_manager_empty_file_clears_old_index(tmp_path):
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    file_path = source_dir / "a.md"
+    file_path.write_text("alpha memory", encoding="utf-8")
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None)
+    manager = VectorIndexManager(
+        store=store,
+        embedding=None,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+    manager.sync_all()
+
+    file_path.write_text("", encoding="utf-8")
+    manager.sync_all()
+
+    assert _chunk_rows(store) == []
+    assert _manifest_rows(store)[0][2:4] == ("empty", 0)
+    store.close()
+
+
+def test_vector_index_manager_embedding_failure_keeps_old_index(tmp_path):
+    class FailingEmbedding(FakeEmbedding):
+        def __init__(self) -> None:
+            super().__init__([[0.1, 0.2, 0.3]])
+            self.fail = False
+
+        def embed_sync(self, queries: list[str]) -> list[list[float]]:
+            if self.fail:
+                raise RuntimeError("embed down")
+            return super().embed_sync(queries)
+
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    file_path = source_dir / "a.md"
+    file_path.write_text("alpha memory", encoding="utf-8")
+    embedding = FailingEmbedding()
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=3)
+    manager = VectorIndexManager(
+        store=store,
+        embedding=embedding,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+    manager.sync_all()
+
+    embedding.fail = True
+    file_path.write_text("alpha memory changed", encoding="utf-8")
+    manager.sync_all()
+
+    assert [row[0] for row in _chunk_rows(store)] == ["alpha memory"]
+    manifest = _manifest_rows(store)
+    assert manifest[0][2] == "error"
+    assert "embed down" in manifest[0][4]
+    store.close()
+
+
+def test_vector_index_manager_sync_source_warns_when_missing(tmp_path, caplog):
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None)
+    manager = VectorIndexManager(store=store, embedding=None, sources=[])
+
+    manager.sync_source("missing")
+
+    assert "source not found: missing" in caplog.text
+    store.close()
+
+
+def test_vector_index_manager_sync_source_force_reindexes_unchanged_file(tmp_path):
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    file_path = source_dir / "a.md"
+    file_path.write_text("alpha memory", encoding="utf-8")
+    embedding = FakeEmbedding([[0.1, 0.2, 0.3]])
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=3)
+    manager = VectorIndexManager(
+        store=store,
+        embedding=embedding,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+
+    manager.sync_source("summaries")
+    manager.sync_source("summaries", force=True)
+
+    assert len(embedding.calls) == 2
+    assert embedding.calls[-1] == ["alpha memory"]
+    store.close()
+
+
+def test_vector_store_replace_file_is_atomic_for_text_index(tmp_path):
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None, keyword_tokenizer="bigram")
+    state = IndexedFileState(
+        file="a.md",
+        source_id="summaries",
+        mtime_ns=1,
+        size=5,
+        content_hash="old",
+        chunk_count=1,
+    )
+    store.replace_file(
+        "a.md",
+        [ChunkRecord(id=1, text="猎人的尸体在旧井旁发现", metadata={"source": "summaries", "file": "a.md", "chunk_idx": 0})],
+        None,
+        state,
+    )
+    state.content_hash = "new"
+    store.replace_file(
+        "a.md",
+        [ChunkRecord(id=2, text="酒馆线索在桌上", metadata={"source": "summaries", "file": "a.md", "chunk_idx": 0})],
+        None,
+        state,
+    )
+
+    assert [row[0] for row in _chunk_rows(store)] == ["酒馆线索在桌上"]
+    assert store.keyword_search("尸体", limit=5) == []
+    assert store.keyword_search("酒馆", limit=5)
+    store.close()
+
+
+def test_vector_store_replace_file_rolls_back_vector_insert_failure(tmp_path, monkeypatch):
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=3)
+    old_state = IndexedFileState(
+        file="a.md",
+        source_id="summaries",
+        mtime_ns=1,
+        size=5,
+        content_hash="old",
+        chunk_count=1,
+    )
+    store.replace_file(
+        "a.md",
+        [ChunkRecord(id=1, text="old chunk", metadata={"source": "summaries", "file": "a.md", "chunk_idx": 0})],
+        [[0.1, 0.2, 0.3]],
+        old_state,
+    )
+    vector_index = store._vector_index  # noqa: SLF001
+    assert vector_index is not None
+    table = "vec_chunks" if vector_index.backend == "sqlite_vec" else "vec_embeddings"
+    old_vector_count = store._repo.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # noqa: SLF001
+
+    def fail_insert(rowid, embedding):  # noqa: ANN001
+        raise RuntimeError("vector boom")
+
+    monkeypatch.setattr(vector_index, "insert", fail_insert)
+    new_state = IndexedFileState(
+        file="a.md",
+        source_id="summaries",
+        mtime_ns=2,
+        size=9,
+        content_hash="new",
+        chunk_count=1,
+    )
+
+    with pytest.raises(RuntimeError, match="vector boom"):
+        store.replace_file(
+            "a.md",
+            [ChunkRecord(id=2, text="new chunk", metadata={"source": "summaries", "file": "a.md", "chunk_idx": 0})],
+            [[0.4, 0.5, 0.6]],
+            new_state,
+        )
+
+    assert [row[0] for row in _chunk_rows(store)] == ["old chunk"]
+    assert store._repo.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == old_vector_count  # noqa: SLF001
+    assert _manifest_rows(store)[0][4] == ""
+    store.close()
 
 
 def test_keyword_retriever_weights_query_sources():
