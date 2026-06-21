@@ -130,6 +130,49 @@ class LlamaCompletionModel:
         )
 
 
+class LlamaRerankModel:
+    """High-level rerank model handle for Qwen-style yes/no logit scoring."""
+
+    def __init__(
+        self,
+        model_path: str | Path,
+        *,
+        n_ctx: int = 4096,
+        n_gpu_layers: int = 0,
+        verbose: bool = False,
+        request_timeout_ms: int = 60000,
+        client: LlamaClient | None = None,
+    ) -> None:
+        path = Path(model_path)
+        if not path.is_file():
+            raise LlamaClientError(f"GGUF model not found: {path}")
+        self._client = client or get_llama_client()
+        self._request_timeout_ms = request_timeout_ms
+        self._model = {
+            "model_path": str(path),
+            "n_ctx": n_ctx,
+            "n_gpu_layers": n_gpu_layers,
+            "verbose": verbose,
+        }
+
+    def rerank(
+        self,
+        query: str,
+        documents: list[str],
+        *,
+        instruction: str,
+        max_length: int,
+    ) -> list[dict[str, float]]:
+        return self._client.rerank(
+            self._model,
+            query,
+            documents,
+            instruction=instruction,
+            max_length=max_length,
+            timeout_ms=self._request_timeout_ms,
+        )
+
+
 ProcessFactory = Callable[[MPQueue, MPQueue, int], mp.Process]
 
 
@@ -231,6 +274,29 @@ class LlamaClient:
             result = response.get("result")
             if result is not None:
                 yield str(result)
+
+    def rerank(
+        self,
+        model: dict[str, Any],
+        query: str,
+        documents: list[str],
+        *,
+        instruction: str,
+        max_length: int,
+        timeout_ms: int | None = None,
+    ) -> list[dict[str, float]]:
+        result = self.request(
+            "rerank",
+            model=model,
+            params={
+                "query": query,
+                "documents": documents,
+                "instruction": instruction,
+                "max_length": max_length,
+            },
+            timeout_ms=timeout_ms,
+        )
+        return list(result or [])
 
     def request(
         self,

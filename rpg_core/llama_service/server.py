@@ -136,6 +136,17 @@ def _handle_model_request(cache: LlamaModelCache, request: LlamaRequest) -> Any:
             temperature=float(params.get("temperature", 0.0)),
             stop=list(params.get("stop") or []),
         )
+    if op == "rerank":
+        documents = params.get("documents", [])
+        if not isinstance(documents, list):
+            raise ValueError("rerank params.documents must be a list")
+        return cache.rerank(
+            model,
+            str(params.get("query") or ""),
+            [str(document) for document in documents],
+            instruction=str(params.get("instruction") or ""),
+            max_length=int(params.get("max_length", 4096)),
+        )
     raise ValueError(f"unsupported op: {op}")
 
 

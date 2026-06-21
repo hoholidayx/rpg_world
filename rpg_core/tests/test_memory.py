@@ -9,6 +9,11 @@ import pytest
 
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.llm.manager import LLMManager
+from rpg_world.rpg_core.llm.keys import (
+    MEMORY_RERANK_BIZ_KEY,
+    RERANK_MODEL_TYPE_CHAT_POINTWISE,
+    RERANK_MODEL_TYPE_QWEN3_LOGIT,
+)
 from rpg_world.rpg_core.llm.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.memory.memory_manager import MemoryManager, RecallItem
 from rpg_world.rpg_core.memory import run as memory_run
@@ -16,13 +21,21 @@ from rpg_world.rpg_core.memory.storage.types import ChunkRecord
 from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
 from rpg_world.rpg_core.memory.storage import vector_store as vector_store_module
 from rpg_world.rpg_core.memory.planning.openai_planner import OpenAIQueryPlanner
+from rpg_world.rpg_core.memory.planning.plan import QueryPlan
 from rpg_world.rpg_core.memory.retrieval.bigram_retriever import BigramRetriever
 from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import HybridRetriever
 from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
 from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
 from rpg_world.rpg_core.memory.retrieval.sqlvec_retriever import SqlVecRetriever
-from rpg_world.rpg_core.memory.rerank import MemoryReranker, PointwiseMemoryReranker
-from rpg_world.rpg_core.memory.rerank.common import blend_pointwise_scores, parse_pointwise_output
+from rpg_world.rpg_core.memory.rerank import (
+    ChatPointwiseScoreProvider,
+    LogitRerankProvider,
+    MemoryReranker,
+    MemoryScore,
+    MemoryScoreProvider,
+    PointwiseMemoryReranker,
+)
+from rpg_world.rpg_core.memory.rerank.common import build_pointwise_prompt, blend_pointwise_scores, parse_pointwise_output
 from rpg_world.rpg_core.memory.rerank import service as rerank_service_module
 from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
 from rpg_world.rpg_core.tests.conftest import FakeEmbedding, FakeFallbackSearch, FakeRetriever, FakeStore
@@ -315,6 +328,71 @@ def test_memory_manager_reranker_uses_settings_rerank_score_weight(monkeypatch):
     assert reranker._rerank_weight == 0.42
 
 
+def test_llm_manager_builds_logit_provider_for_llama_rerank(monkeypatch):
+    class FakeCfg:
+        provider = "llama"
+        kind = "rerank"
+        rerank_model_type = RERANK_MODEL_TYPE_QWEN3_LOGIT
+        shared_from = ""
+        llama_model_path = "/tmp/qwen-rerank.gguf"
+        llama_n_ctx = 512
+        llama_n_gpu_layers = 0
+        llama_verbose = False
+        llama_request_timeout_ms = 1234
+
+    class FakeRerankModel:
+        def __init__(self, model_path, **kwargs):  # noqa: ANN001
+            self.model_path = model_path
+            self.kwargs = kwargs
+
+        def rerank(self, query, documents, *, instruction, max_length):  # noqa: ANN001
+            return [{"score": 0.9, "yes_logit": 2.0, "no_logit": 0.0} for _ in documents]
+
+    monkeypatch.setattr("rpg_world.rpg_core.llm.manager.resolve_biz_config", lambda _key: FakeCfg())
+    monkeypatch.setattr("rpg_world.rpg_core.llm.manager.LlamaRerankModel", FakeRerankModel)
+
+    provider = LLMManager().get_provider(MEMORY_RERANK_BIZ_KEY)
+
+    assert isinstance(provider, LogitRerankProvider)
+    assert provider.get_default_model() == "/tmp/qwen-rerank.gguf"
+
+
+def test_llm_manager_builds_chat_score_provider_for_openai_rerank(monkeypatch):
+    class FakeCfg:
+        provider = "openai"
+        kind = "rerank"
+        rerank_model_type = RERANK_MODEL_TYPE_CHAT_POINTWISE
+        shared_from = ""
+        openai_model = "rerank-model"
+        openai_api_key = "rerank-key"
+        openai_base_url = "https://rerank.example"
+        openai_max_tokens = 8
+        openai_temperature = 0.0
+
+    class FakeManager(LLMManager):
+        def _build_openai_client(self, **_kwargs):  # noqa: ANN003
+            return SimpleNamespace()
+
+    monkeypatch.setattr("rpg_world.rpg_core.llm.manager.resolve_biz_config", lambda _key: FakeCfg())
+
+    provider = FakeManager().get_provider(MEMORY_RERANK_BIZ_KEY)
+
+    assert isinstance(provider, ChatPointwiseScoreProvider)
+
+
+def test_llm_manager_rejects_rerank_model_type_backend_mismatch(monkeypatch):
+    class FakeCfg:
+        provider = "openai"
+        kind = "rerank"
+        rerank_model_type = RERANK_MODEL_TYPE_QWEN3_LOGIT
+        shared_from = ""
+
+    monkeypatch.setattr("rpg_world.rpg_core.llm.manager.resolve_biz_config", lambda _key: FakeCfg())
+
+    with pytest.raises(ValueError, match="rerank_model_type"):
+        LLMManager().get_provider(MEMORY_RERANK_BIZ_KEY)
+
+
 def test_pointwise_rerank_core_parses_and_blends_scores():
     score, reason = parse_pointwise_output("90 | strong match")
     assert score == 90.0
@@ -336,6 +414,104 @@ def test_pointwise_rerank_core_parses_and_blends_scores():
     assert [item.memory_id for item in result] == [2, 1]
     assert result[0].debug["rerank_score_norm"] == 0.95
     assert result[0].debug["rerank_reason"] == "strong"
+
+
+def test_pointwise_reranker_uses_score_provider_and_writes_logit_debug():
+    class FakeScoreProvider(MemoryScoreProvider):
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, list[int]]] = []
+
+        async def score(self, query, candidates):  # noqa: ANN001
+            self.calls.append((query, [candidate.memory_id for candidate in candidates]))
+            return [
+                MemoryScore(
+                    score=0.9,
+                    reason="yes/no logits",
+                    debug={"source": "logits", "yes_logit": 3.0, "no_logit": 1.0},
+                ),
+                MemoryScore(
+                    score=0.1,
+                    reason="yes/no logits",
+                    debug={"source": "logits", "yes_logit": 0.0, "no_logit": 4.0},
+                ),
+            ]
+
+    provider = FakeScoreProvider()
+    reranker = PointwiseMemoryReranker(provider, provider_label="qwen_rerank")
+    candidates = [
+        MemoryCandidate(memory_id=1, content="wolf", hybrid_score=0.2),
+        MemoryCandidate(memory_id=2, content="tavern", hybrid_score=0.8),
+    ]
+
+    result = reranker.rerank("monster", candidates)
+
+    assert provider.calls == [("monster", [1, 2])]
+    assert [item.memory_id for item in result] == [1, 2]
+    assert result[0].debug["qwen_rerank_score_norm"] == 0.9
+    assert result[0].debug["qwen_rerank_source"] == "logits"
+    assert result[0].debug["qwen_rerank_yes_logit"] == 3.0
+    assert result[0].debug["qwen_rerank_no_logit"] == 1.0
+
+
+def test_qwen_reranker_provider_scores_without_chat():
+    class FakeRerankModel:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def rerank(self, query, documents, *, instruction, max_length):  # noqa: ANN001
+            self.calls.append(
+                {
+                    "query": query,
+                    "documents": documents,
+                    "instruction": instruction,
+                    "max_length": max_length,
+                }
+            )
+            return [
+                {"score": 0.9, "yes_logit": 2.0, "no_logit": 0.0},
+                {"score": 0.1, "yes_logit": -1.0, "no_logit": 1.0},
+            ]
+
+    model = FakeRerankModel()
+    provider = LogitRerankProvider(
+        model_path="/tmp/qwen-rerank.gguf",
+        n_ctx=256,
+        instruction="match memories",
+        model=model,
+    )
+
+    scores = asyncio.run(
+        provider.score(
+            "query",
+            [
+                MemoryCandidate(memory_id=1, content="one"),
+                MemoryCandidate(memory_id=2, content="two"),
+            ],
+        )
+    )
+
+    assert [score.score for score in scores] == [0.9, 0.1]
+    assert scores[0].debug == {"source": "logits", "yes_logit": 2.0, "no_logit": 0.0}
+    assert model.calls == [
+        {
+            "query": "query",
+            "documents": ["one", "two"],
+            "instruction": "match memories",
+            "max_length": 256,
+        }
+    ]
+
+
+def test_pointwise_rerank_prompt_is_short_and_strict():
+    prompt = build_pointwise_prompt(
+        "查找酒馆老板",
+        MemoryCandidate(memory_id=1, content="酒馆老板格里姆给了Bob一袋烈酒。"),
+    )
+
+    assert "输出格式" in prompt
+    assert "评分：" in prompt
+    assert "候选：" in prompt
+    assert len(prompt) < 180
 
 
 def test_rerank_package_exports_unified_interface_only():
@@ -468,6 +644,58 @@ def test_pointwise_reranker_accepts_pointwise_output(monkeypatch):
     assert [item.memory_id for item in result] == [1, 2]
     assert result[0].rerank_score > result[1].rerank_score
 
+
+def test_pointwise_reranker_skips_llm_for_exact_hits():
+    class FailingProvider:
+        async def chat(self, messages, tools=None):  # noqa: ANN001
+            raise AssertionError("provider should not be called for exact matches")
+
+    reranker = PointwiseMemoryReranker(FailingProvider(), provider_label='llama')
+    result = reranker.rerank(
+        '酒馆老板',
+        [
+            MemoryCandidate(
+                memory_id=1,
+                content='Bob遇到酒馆老板格里姆。',
+                exact_score=1.0,
+                hybrid_score=0.4,
+            )
+        ],
+    )
+
+    assert [item.memory_id for item in result] == [1]
+    assert result[0].debug['llama_score_norm'] == 1.0
+    assert result[0].debug['llama_reason'] == 'deterministic exact/term match'
+
+
+def test_pointwise_reranker_uses_llm_for_raw_md_terms_only():
+    calls: list[list[dict]] = []
+
+    class FakeProvider:
+        async def chat(self, messages, tools=None):  # noqa: ANN001
+            calls.append(messages)
+            return SimpleNamespace(content='30\tterms are broad')
+
+    reranker = PointwiseMemoryReranker(FakeProvider(), provider_label='llama')
+    result = reranker.rerank(
+        '酒馆老板',
+        [
+            MemoryCandidate(
+                memory_id=1,
+                content='酒馆里有很多客人，老板娘正在擦杯子。',
+                metadata={'raw_md_terms': ['酒馆', '老板']},
+                debug={'raw_md_terms': ['酒馆', '老板']},
+                hybrid_score=0.4,
+            )
+        ],
+    )
+
+    assert len(calls) == 1
+    assert result[0].debug['llama_score_norm'] == 0.3
+    assert result[0].debug['llama_reason'] == 'terms are broad'
+    assert result[0].debug['llama_raw'] == '30 terms are broad'
+
+
 def test_memory_manager_recall_and_hybrid_search(fake_recalled_store):
     retriever = FakeRetriever([
         ("记忆一", 0.9, {"source": "summaries", "file": "a.md", "chunk_idx": 1}),
@@ -488,6 +716,53 @@ def test_memory_manager_recall_and_hybrid_search(fake_recalled_store):
 
     hybrid = manager.hybrid_search("查找线索", top_k=1)
     assert [item.text for item in hybrid] == ["记忆一"]
+
+
+def test_memory_manager_recall_logs_raw_md_plan_terms(monkeypatch, fake_recalled_store):
+    messages: list[str] = []
+
+    def capture(message, *args, **kwargs):  # noqa: ANN001
+        messages.append(message.format(*args))
+
+    class FakePlanner:
+        def plan(self, query):  # noqa: ANN001
+            return QueryPlan(
+                original_query=query,
+                normalized_query=query,
+                bigram_queries=(query,),
+                expanded_queries=(),
+                raw_md_terms=("酒馆", "老板"),
+                planner_source="test",
+            )
+
+    monkeypatch.setattr(
+        "rpg_world.rpg_core.memory.memory_manager.logger.info",
+        capture,
+    )
+    manager = MemoryManager(
+        recalled_store=fake_recalled_store,
+        retriever=FakeRetriever([
+            ("记忆一", 0.9, {"source": "summaries", "file": "a.md", "chunk_idx": 1}),
+        ]),
+        top_k=1,
+        query_planner=FakePlanner(),
+    )
+
+    manager.recall("酒馆老板")
+
+    assert any("recall plan" in msg and "raw_md_terms=['酒馆', '老板']" in msg for msg in messages)
+    assert all("bigram_queries" not in msg for msg in messages)
+
+
+def test_rule_based_query_planner_filters_punctuation_terms():
+    plan = RuleBasedQueryPlanner().plan(
+        "发现自己身处北境森林外围村庄。他前往小酒馆准备出发，遇到酒馆老板格里姆。"
+    )
+
+    assert "。" not in plan.raw_md_terms
+    assert "，" not in plan.raw_md_terms
+    assert "北境" in plan.raw_md_terms
+    assert "酒馆" in plan.raw_md_terms
 
 
 def test_memory_manager_recall_without_retriever(fake_recalled_store):

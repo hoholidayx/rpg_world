@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-LlamaOperation = Literal["embedding_dimension", "embed", "complete", "complete_stream", "shutdown"]
+LlamaOperation = Literal["embedding_dimension", "embed", "complete", "complete_stream", "rerank", "shutdown"]
 
 
 class LlamaRequest(TypedDict, total=False):

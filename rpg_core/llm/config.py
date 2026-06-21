@@ -14,7 +14,17 @@ from pathlib import Path
 from typing import Any
 
 from rpg_world.rpg_core.utils.profile_loader import load_profiled_yaml
-from rpg_world.rpg_core.llm.keys import PROVIDER_KINDS, PROVIDER_OPENAI, PROVIDER_SHARED
+from rpg_world.rpg_core.llm.keys import (
+    LLM_KIND_CHAT,
+    LLM_KIND_RERANK,
+    LLM_KINDS,
+    PROVIDER_DEFAULT,
+    PROVIDER_KINDS,
+    PROVIDER_LLAMA,
+    PROVIDER_OPENAI,
+    PROVIDER_SHARED,
+    RERANK_MODEL_TYPES,
+)
 from rpg_world.rpg_core.utils.config_values import optional_bool, optional_float, optional_int
 
 _LLM_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "llm.yaml"
@@ -24,7 +34,6 @@ _PROFILE_ENV = "RPG_WORLD_PROFILE"
 
 _raw_settings: dict[str, Any] | None = None
 _cache_key: tuple[str, str] | None = None  # (resolved_path, profile)
-_BIZ_KINDS = {"chat", "embedding", "planner", "rerank"}
 
 
 @dataclass(frozen=True)
@@ -185,7 +194,7 @@ class BizConfig:
     @property
     def provider(self) -> str:
         """``"openai"`` / ``"llama"`` / ``"shared"``."""
-        raw_value = self._raw.get("provider", "openai")
+        raw_value = self._raw.get("provider", PROVIDER_DEFAULT)
         value = str(raw_value).strip()
         provider = value.lower()
         if provider not in PROVIDER_KINDS:
@@ -197,12 +206,12 @@ class BizConfig:
     @property
     def kind(self) -> str:
         """``"chat"`` / ``"embedding"`` / ``"planner"`` / ``"rerank"``."""
-        raw_value = self._raw.get("kind", "chat")
+        raw_value = self._raw.get("kind", LLM_KIND_CHAT)
         value = str(raw_value).strip()
         kind = value.lower()
-        if kind not in _BIZ_KINDS:
+        if kind not in LLM_KINDS:
             raise ValueError(
-                f"{self._key}.kind must be one of {', '.join(sorted(_BIZ_KINDS))}; got {kind!r}"
+                f"{self._key}.kind must be one of {', '.join(sorted(LLM_KINDS))}; got {kind!r}"
             )
         return kind
 
@@ -210,6 +219,20 @@ class BizConfig:
     def shared_from(self) -> str:
         """Biz key to delegate to when ``provider == "shared"``."""
         return str(self._raw.get("shared_from") or "").strip()
+
+    @property
+    def rerank_model_type(self) -> str:
+        """Explicit rerank scoring protocol for ``kind: rerank`` configs."""
+        label = f"{self._key}.rerank_model_type"
+        raw_value = self._raw.get("rerank_model_type")
+        if self.kind != LLM_KIND_RERANK:
+            return self._optional_str(raw_value)
+        value = self._require_non_empty(raw_value, label).lower()
+        if value not in RERANK_MODEL_TYPES:
+            raise ValueError(
+                f"{label} must be one of {', '.join(sorted(RERANK_MODEL_TYPES))}; got {value!r}"
+            )
+        return value
 
     # -- openai ----------------------------------------------------------
 
@@ -237,11 +260,11 @@ class BizConfig:
 
     @property
     def openai_temperature(self) -> float | None:
-        return optional_float(self._openai_sub.get("temperature"), None)
+        return self._optional_float(self._openai_sub.get("temperature"), f"{self._key}.openai.temperature")
 
     @property
     def _openai_sub(self) -> dict[str, Any]:
-        value = self._raw.get("openai")
+        value = self._raw.get(PROVIDER_OPENAI)
         if value is None:
             return {}
         if not isinstance(value, dict):
@@ -263,6 +286,10 @@ class BizConfig:
     @property
     def llama_n_ctx(self) -> int:
         return optional_int(self._llama_sub.get("n_ctx"), 2048) or 2048
+
+    @property
+    def llama_max_length(self) -> int:
+        return optional_int(self._llama_sub.get("max_length"), self.llama_n_ctx) or self.llama_n_ctx
 
     @property
     def llama_n_gpu_layers(self) -> int:
@@ -290,7 +317,7 @@ class BizConfig:
 
     @property
     def _llama_sub(self) -> dict[str, Any]:
-        value = self._raw.get("llama")
+        value = self._raw.get(PROVIDER_LLAMA)
         if value is None:
             return {}
         if not isinstance(value, dict):
@@ -316,6 +343,17 @@ class BizConfig:
         if not text:
             raise ValueError(f"{label} is required")
         return text
+
+    @staticmethod
+    def _optional_float(value: Any, label: str) -> float | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError(f"{label} must be a number")
+        try:
+            return float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be a number") from exc
 
     @staticmethod
     def _resolve_api_key(openai_cfg: dict[str, Any]) -> str | None:
@@ -382,7 +420,7 @@ def _resolve_shared_chain(
 
     parent_raw = _resolve_shared_chain(shared_from, seen=(*seen, biz_key))
     merged = _deep_merge_dicts(parent_raw, cfg.raw)
-    merged["provider"] = str(parent_raw.get("provider") or PROVIDER_OPENAI).strip().lower() or PROVIDER_OPENAI
+    merged["provider"] = str(parent_raw.get("provider") or PROVIDER_DEFAULT).strip().lower() or PROVIDER_DEFAULT
     return merged
 
 

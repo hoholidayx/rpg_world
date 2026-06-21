@@ -377,10 +377,16 @@ class MemoryManager:
             from rpg_world.rpg_core.llm.manager import LLMManager
             from rpg_world.rpg_core.memory.rerank.service import PointwiseMemoryReranker
             from rpg_world.rpg_core.llm.keys import PROVIDER_OPENAI, PROVIDER_LLAMA
+            from rpg_world.rpg_core.memory.rerank.providers import ChatPointwiseScoreProvider, LogitRerankProvider
 
             provider = LLMManager.get().get_provider(MEMORY_RERANK_BIZ_KEY)
             rerank_weight = mem_cfg.rerank_score_weight
-            provider_label = PROVIDER_OPENAI if mem_cfg.rerank_provider.provider == PROVIDER_OPENAI else PROVIDER_LLAMA
+            if isinstance(provider, ChatPointwiseScoreProvider):
+                provider_label = PROVIDER_OPENAI
+            elif isinstance(provider, LogitRerankProvider):
+                provider_label = PROVIDER_LLAMA
+            else:
+                provider_label = PROVIDER_OPENAI if mem_cfg.rerank_provider.provider == PROVIDER_OPENAI else PROVIDER_LLAMA
             reranker = PointwiseMemoryReranker(
                 provider,
                 rerank_weight=rerank_weight,
@@ -437,6 +443,7 @@ class MemoryManager:
             logger.warning("[MemoryManager] recall planner failed: {}", exc)
             self._recalled_store.set_items([])
             return []
+        _log_query_plan("recall", plan)
 
         try:
             retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
@@ -477,6 +484,7 @@ class MemoryManager:
         except Exception as exc:
             logger.warning("[MemoryManager] hybrid_search planner failed: {}", exc)
             return []
+        _log_query_plan("hybrid_search", plan)
 
         try:
             search = getattr(self._retriever, "hybrid_search", None)
@@ -525,3 +533,14 @@ class MemoryManager:
         """Rebuild the bigram FTS index from stored chunks."""
         if self._store is not None:
             self._store.rebuild_fts_index()
+
+
+def _log_query_plan(stage: str, plan) -> None:  # noqa: ANN001
+    logger.info(
+        "[MemoryManager] {} plan — planner={} normalized={!r} raw_md_terms={} expanded_queries={}",
+        stage,
+        plan.planner_source,
+        plan.normalized_query,
+        list(plan.raw_md_terms),
+        list(plan.expanded_queries),
+    )

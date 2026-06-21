@@ -54,8 +54,8 @@ base:
 
     # 向量检索返回的最大结果数
     top_k: 2
-    # jieba 用户词典路径（相对于包根 rpg_world/），留空使用默认词典
-    jieba_dict: "data/jieba_dict.txt"
+    # jieba 用户词典路径（相对于包根 rpg_world/data/jieba_dict.tx），留空使用默认词典
+    jieba_dict: ""
     # 单文件超过此字符数时进行分块
     chunk_size: 2000
     # 分块重叠字符数（保证上下文连续性）

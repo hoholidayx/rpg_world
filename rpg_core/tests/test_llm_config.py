@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from rpg_world.rpg_core.llm.config import reload_llm_settings, resolve_biz_config
-from rpg_world.rpg_core.llm.keys import AGENT_MAIN_BIZ_KEY
+from rpg_world.rpg_core.llm.keys import (
+    AGENT_MAIN_BIZ_KEY,
+    MEMORY_RERANK_BIZ_KEY,
+    RERANK_MODEL_TYPE_QWEN3_LOGIT,
+)
 
 
 def _write_llm_config(path: Path, body: str) -> None:
@@ -188,3 +192,55 @@ def test_resolve_biz_config_rejects_invalid_float_value(tmp_path: Path, monkeypa
 
     with pytest.raises(ValueError):
         resolve_biz_config(AGENT_MAIN_BIZ_KEY).openai_temperature
+
+
+def test_resolve_biz_config_requires_rerank_model_type(tmp_path: Path, monkeypatch) -> None:
+    _write_llm_config(
+        tmp_path / "llm.yaml",
+        """
+    memory.rerank:
+      kind: rerank
+      provider: llama
+      llama:
+        model_path: data/models/rerank.gguf
+""",
+    )
+    _use_llm(tmp_path / "llm.yaml", monkeypatch)
+
+    with pytest.raises(ValueError, match="memory.rerank.rerank_model_type"):
+        resolve_biz_config(MEMORY_RERANK_BIZ_KEY).rerank_model_type
+
+
+def test_resolve_biz_config_accepts_explicit_rerank_model_type(tmp_path: Path, monkeypatch) -> None:
+    _write_llm_config(
+        tmp_path / "llm.yaml",
+        """
+    memory.rerank:
+      kind: rerank
+      provider: llama
+      rerank_model_type: qwen3_logit
+      llama:
+        model_path: data/models/rerank.gguf
+""",
+    )
+    _use_llm(tmp_path / "llm.yaml", monkeypatch)
+
+    assert resolve_biz_config(MEMORY_RERANK_BIZ_KEY).rerank_model_type == RERANK_MODEL_TYPE_QWEN3_LOGIT
+
+
+def test_resolve_biz_config_rejects_unknown_rerank_model_type(tmp_path: Path, monkeypatch) -> None:
+    _write_llm_config(
+        tmp_path / "llm.yaml",
+        """
+    memory.rerank:
+      kind: rerank
+      provider: llama
+      rerank_model_type: unknown
+      llama:
+        model_path: data/models/rerank.gguf
+""",
+    )
+    _use_llm(tmp_path / "llm.yaml", monkeypatch)
+
+    with pytest.raises(ValueError, match="memory.rerank.rerank_model_type"):
+        resolve_biz_config(MEMORY_RERANK_BIZ_KEY).rerank_model_type

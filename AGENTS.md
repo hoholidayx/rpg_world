@@ -34,6 +34,10 @@ Vue 代码沿用现有模式：组件文件使用 `PascalCase.vue`，store 与 c
 ## 测试约定
 测试框架为 `pytest`，所有外部调用都应使用 mock，避免真实 LLM、Telegram 或网络依赖。新增测试文件命名为 `test_<feature>.py`。涉及渠道适配、命令分发、会话切换、管理器生命周期时，必须补对应测试。
 
+本目录的 `pytest.ini` 必须保留 `asyncio_mode = auto`，否则 `channels/tests/` 中未显式标记的 `async def` 用例会报 `async def functions are not natively supported`。当前测试依赖来自上层项目 extras；如果 API 测试报 `ModuleNotFoundError: fastapi`，先在项目根运行 `uv sync --extra dev --extra api`（或安装等价 extras）后再跑测试。
+
+pytest 启动时会通过根目录 `conftest.py` 清理 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 及小写同名环境变量，避免本机 `ALL_PROXY=socks://127.0.0.1:7890` 这类 httpx 不支持的代理格式导致 `AsyncOpenAI`/httpx 初始化失败。需要刻意在测试中保留代理时，显式设置 `PYTEST_KEEP_PROXY=1`。
+
 Telegram 是当前主聊天入口。修改 `channels/telegram/adapter.py`、`channels/telegram/session_flow.py` 或 Telegram 渲染逻辑时，必须补 `channels/tests/test_telegram.py`，覆盖普通消息、斜杠命令、会话菜单、二段式创建、stream 编辑节流、异常分支或 Markdown 分块中的相关行为。
 
 API/WebUI 管理能力应补 `api/tests/` 的契约测试；核心上下文、memory、summary、session 行为应补 `rpg_core/tests/`。
@@ -49,6 +53,8 @@ PR 说明应写清影响模块、行为变化、配置变更（如 `settings.yam
 `settings.yaml` 用于业务配置、模块启停、渠道参数和数据路径；`llm.yaml` 用于 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。二者都支持 `base + profiles`，profile 可通过 `file: *.local.yaml` 读取被 git ignore 的覆盖文件。`api/settings.json` 仅保留 API 服务级配置。每个子进程内部必须通过共享的 `AgentManager` 获取 agent，避免重复初始化 `FileWatcher`、缓存不一致或单进程内状态漂移。
 
 配置访问必须走封装方法：`settings.memory_settings`、`settings.agent_model`、`channels.config.settings`、`resolve_biz_config()`、`get_runtime_config()` 或 `LLMManager`。不要在业务模块中手写 YAML key 路径或绕过 `Settings`/`llm.config` 直接解析配置。排序、检索、chunk 等业务参数保留在 `settings.yaml`，不要塞进 `llm.yaml` 的 provider block；例如 rerank 融合权重使用 `memory.rerank_score_weight`。
+
+`llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`。当前允许值为 `qwen3_logit`（本地 llama/Qwen3 reranker yes/no logits 打分）和 `chat_pointwise`（OpenAI chat 模型按 prompt 输出数字的兼容路径），并且 `LLMManager` 会校验 model type 与 provider 是否匹配。
 
 `session_id` 只能由英文字母、数字、下划线组成，规则为 `^[A-Za-z0-9_]+$`，并会直接映射到 `sessions/{session_id}/` 目录。默认渠道会话名使用下划线格式，例如 `cli_direct`、`telegram_12345`。
 

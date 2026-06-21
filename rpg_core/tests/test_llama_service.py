@@ -16,7 +16,7 @@ from rpg_world.rpg_core.llama_service.client import (
     get_llama_client,
     set_llama_client,
 )
-from rpg_world.rpg_core.llama_service.models import LlamaModelCache, model_cache_key
+from rpg_world.rpg_core.llama_service.models import LlamaModelCache, build_qwen_rerank_prompt, model_cache_key
 from rpg_world.rpg_core.llama_service.protocol import error_response, ok_response
 from rpg_world.rpg_core.llama_service.server import LlamaServiceServer
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
@@ -127,6 +127,78 @@ def test_model_cache_reuses_same_key_and_splits_different_keys(tmp_path, monkeyp
 
     assert created == [str(model_a), str(model_b)]
     assert cache.load_counts[model_cache_key("embed", model)] == 1
+
+
+def test_model_cache_rerank_uses_yes_no_logits_in_order(tmp_path, monkeypatch):
+    model_path = tmp_path / "rerank.gguf"
+    model_path.write_text("fake", encoding="utf-8")
+    created_kwargs: list[dict[str, object]] = []
+
+    class FakeLlama:
+        def __init__(self, model_path: str, **kwargs) -> None:
+            self.model_path = model_path
+            self.kwargs = kwargs
+            self.tokenized_texts: list[str] = []
+            self.eval_count = 0
+            self.scores: list[list[float]] = []
+            created_kwargs.append(kwargs)
+
+        def tokenize(self, raw, add_bos=False, special=False):  # noqa: ANN001
+            text = raw.decode("utf-8")
+            self.tokenized_texts.append(text)
+            if text == "yes":
+                return [1]
+            if text == "no":
+                return [2]
+            return ([7] if add_bos else []) + [3] * max(1, len(text))
+
+        def reset(self):
+            pass
+
+        def eval(self, tokens):  # noqa: ANN001
+            self.eval_count += 1
+            yes_logit, no_logit = ((3.0, 1.0) if self.eval_count == 1 else (0.0, 4.0))
+            self.scores = [[0.0] * 8 for _ in tokens]
+            self.scores[-1][1] = yes_logit
+            self.scores[-1][2] = no_logit
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
+    cache = LlamaModelCache()
+    model = {"model_path": str(model_path), "n_ctx": 128, "n_gpu_layers": 0}
+
+    result = cache.rerank(
+        model,
+        "wolf query",
+        ["wolf document", "tavern document"],
+        instruction="match memories",
+        max_length=128,
+    )
+
+    assert result[0]["score"] == pytest.approx(0.880797, rel=1e-5)
+    assert result[1]["score"] == pytest.approx(0.017986, rel=1e-4)
+    assert result[0]["yes_logit"] == 3.0
+    assert result[1]["no_logit"] == 4.0
+    assert created_kwargs[0]["logits_all"] is True
+    assert cache.load_counts[model_cache_key("rerank", model)] == 1
+    llama = next(iter(cache._models.values()))
+    prompt_text = "\n".join(llama.tokenized_texts)
+    assert "<Instruct>: match memories" in prompt_text
+    assert "<Query>: wolf query" in prompt_text
+    assert "wolf document" in prompt_text
+    assert "<think>\n\n</think>" in prompt_text
+
+
+def test_build_qwen_rerank_prompt_uses_official_sections():
+    prompt = build_qwen_rerank_prompt(
+        instruction="match memories",
+        query="wolf query",
+        document="wolf document",
+    )
+
+    assert "<Instruct>: match memories" in prompt
+    assert "<Query>: wolf query" in prompt
+    assert "<Document>: wolf document" in prompt
+    assert "<think>\n\n</think>" in prompt
 
 
 def test_server_serializes_same_model_and_parallelizes_different_models():

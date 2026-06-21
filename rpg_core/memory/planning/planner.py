@@ -95,7 +95,7 @@ class RuleBasedQueryPlanner(BaseQueryPlanner):
         terms: list[str] = []
         for part in parts:
             term = part.strip()
-            if not term or term in _STOPWORDS:
+            if not _is_meaningful_term(term):
                 continue
             if len(term) == 1 and _is_cjk(term):
                 continue
@@ -183,10 +183,10 @@ def _plan_from_mapping(
         [normalized_query, *_as_strings(data.get("bigram_queries")), _compact(normalized_query)]
     )
     expanded_queries = _dedupe(_as_strings(data.get("expanded_queries")))
-    raw_md_terms = _dedupe([
+    raw_md_terms = _filter_meaningful_terms(_dedupe([
         *_as_strings(data.get("raw_md_terms")),
         *(_plan_terms_from_fallback(fallback_planner, normalized_query)),
-    ])
+    ]))
     query_type = str(data.get("query_type") or "general")[:40]
     return QueryPlan(
         original_query=original_query,
@@ -223,7 +223,7 @@ def _extract_terms(text: str) -> list[str]:
     terms: list[str] = []
     for part in parts:
         term = part.strip()
-        if not term or term in _STOPWORDS:
+        if not _is_meaningful_term(term):
             continue
         if len(term) == 1 and _is_cjk(term):
             continue
@@ -266,6 +266,10 @@ def _dedupe(items: list[str]) -> list[str]:
     return result
 
 
+def _filter_meaningful_terms(items: list[str]) -> list[str]:
+    return [item for item in items if _is_meaningful_term(item)]
+
+
 def _as_strings(value: object) -> list[str]:
     if isinstance(value, str):
         return [value]
@@ -276,6 +280,12 @@ def _as_strings(value: object) -> list[str]:
 
 def _is_cjk(text: str) -> bool:
     return all("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _is_meaningful_term(term: str) -> bool:
+    if not term or term in _STOPWORDS:
+        return False
+    return bool(re.search(r"[A-Za-z0-9_\u4e00-\u9fff]", term))
 
 
 def _run_llm_chat_sync(provider: LLMProvider, messages: list[dict]):

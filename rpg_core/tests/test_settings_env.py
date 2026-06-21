@@ -81,6 +81,7 @@ base:
     memory.rerank:
       kind: rerank
       provider: llama
+      rerank_model_type: qwen3_logit
       llama:
         model_path: data/models/rerank.gguf
         n_ctx: 4096

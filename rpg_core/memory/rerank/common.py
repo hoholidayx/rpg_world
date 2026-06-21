@@ -8,27 +8,22 @@ from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.retrieval.scoring import normalize_values
 
 
-MEMORY_RERANK_SYSTEM_PROMPT = "你是一个本地记忆检索重排器。"
+MEMORY_RERANK_SYSTEM_PROMPT = "你是记忆检索重排器。只输出评分行。"
 MEMORY_RERANK_POINTWISE_INSTRUCTIONS = (
-    "请只根据用户查询和单条候选记忆判断相关性。\n"
-    "只根据候选内容本身打分，不要编造。\n"
-    "评分：\n"
-    "0 = 完全无关\n"
-    "30 = 弱相关\n"
-    "60 = 有一定相关\n"
-    "80 = 强相关\n"
-    "100 = 精确命中\n"
-    "只输出一行，格式严格为：<0-100整数分数>\\t<简短原因>\n"
-    "不要输出 JSON，不要代码块，不要解释。"
+    "任务：判断候选记忆是否能回答用户查询。\n"
+    "分数：0无关，30弱相关，60相关，80强相关，100精确命中。\n"
+    "输出格式：<0-100整数>\\t<8字内原因>\n"
+    "禁止输出其他内容。"
 )
 
 
-def build_pointwise_prompt(query: str, candidate: MemoryCandidate) -> str:
+def build_pointwise_prompt(query: str, candidate: MemoryCandidate, *, max_candidate_chars: int = 2400) -> str:
+    content = _truncate_candidate_content(candidate.content, max_candidate_chars)
     return (
-        f"{MEMORY_RERANK_SYSTEM_PROMPT}\n"
         f"{MEMORY_RERANK_POINTWISE_INSTRUCTIONS}\n\n"
-        f"用户查询：{query}\n\n"
-        f"候选记忆：{candidate.content}"
+        f"查询：{query}\n"
+        f"候选：{content}\n"
+        "评分："
     )
 
 
@@ -45,7 +40,7 @@ def extract_text(output: Any) -> str:
 
 
 def parse_pointwise_output(text: str) -> tuple[float, str]:
-    cleaned = short_preview(text, limit=4000)
+    cleaned = (text or "").strip()[:4000]
     if not cleaned:
         raise ValueError("empty rerank output")
     first_line = cleaned.splitlines()[0].strip()
@@ -74,6 +69,12 @@ def parse_pointwise_output(text: str) -> tuple[float, str]:
 
 def short_preview(text: str, limit: int = 800) -> str:
     return " ".join((text or "").split())[:limit]
+
+
+def _truncate_candidate_content(content: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(content) <= max_chars:
+        return content
+    return f"{content[:max_chars]}\n...[候选记忆已截断，仅用于重排]"
 
 
 def blend_pointwise_scores(

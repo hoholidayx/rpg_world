@@ -2,8 +2,8 @@
 
 The manager owns raw client/model caching plus provider routing.
 Business code only names a ``biz_key`` and receives a fully constructed
-``LLMProvider`` — no raw clients, no config reading, no special-casing
-of embedding / rerank / planner.
+business provider — no raw clients, no config reading, no special-casing
+of embedding / rerank / planner outside this module.
 """
 
 from __future__ import annotations
@@ -11,24 +11,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 from threading import RLock
 from typing import ClassVar
+from typing import TypeAlias
 
 from openai import AsyncOpenAI
 
-from rpg_world.rpg_core.llama_service import LlamaEmbeddingModel
+from rpg_world.rpg_core.llama_service import LlamaEmbeddingModel, LlamaRerankModel
 from rpg_world.rpg_core.llama_service.client import LlamaCompletionModel
 from rpg_world.rpg_core.llm.base_provider import LLMProvider
 from rpg_world.rpg_core.llm.config import BizConfig, resolve_biz_config
 from rpg_world.rpg_core.llm.keys import (
+    LLM_KIND_EMBEDDING,
+    LLM_KIND_RERANK,
     PROVIDER_LLAMA,
     PROVIDER_OPENAI,
     PROVIDER_SHARED,
     PROVIDER_KINDS,
+    RERANK_MODEL_TYPE_CHAT_POINTWISE,
+    RERANK_MODEL_TYPE_QWEN3_LOGIT,
 )
 from rpg_world.rpg_core.llm.llama_provider import (
     LlamaCompletionProvider,
     LlamaEmbeddingProvider,
 )
 from rpg_world.rpg_core.llm.openai_provider import OpenAIProvider
+from rpg_world.rpg_core.memory.rerank.providers import MemoryScoreProvider
+
+
+ManagedProvider: TypeAlias = LLMProvider | MemoryScoreProvider
 
 
 @dataclass(frozen=True)
@@ -55,6 +64,16 @@ class LlamaEmbeddingModelCacheKey:
     n_ctx: int
     n_gpu_layers: int
     n_threads: int
+    verbose: bool
+    request_timeout_ms: int
+
+
+@dataclass(frozen=True)
+class LlamaRerankModelCacheKey:
+    scope: str
+    model_path: str
+    n_ctx: int
+    n_gpu_layers: int
     verbose: bool
     request_timeout_ms: int
 
@@ -97,7 +116,8 @@ class LLMManager:
         self._openai_client_cache: dict[OpenAIClientCacheKey, AsyncOpenAI] = {}
         self._llama_completion_model_cache: dict[LlamaCompletionModelCacheKey, LlamaCompletionModel] = {}
         self._llama_embedding_model_cache: dict[LlamaEmbeddingModelCacheKey, LlamaEmbeddingModel] = {}
-        self._provider_cache: dict[tuple[str, ProviderOverrides | None], LLMProvider] = {}
+        self._llama_rerank_model_cache: dict[LlamaRerankModelCacheKey, LlamaRerankModel] = {}
+        self._provider_cache: dict[tuple[str, ProviderOverrides | None], ManagedProvider] = {}
         self._lock = RLock()
 
     @classmethod
@@ -208,6 +228,38 @@ class LLMManager:
             self._llama_embedding_model_cache[key] = model
             return model
 
+    def _build_llama_rerank_model(
+        self,
+        *,
+        scope: str,
+        model_path: str,
+        n_ctx: int = 4096,
+        n_gpu_layers: int = 0,
+        verbose: bool = False,
+        request_timeout_ms: int = 60000,
+    ) -> LlamaRerankModel:
+        key = LlamaRerankModelCacheKey(
+            scope=scope,
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            verbose=verbose,
+            request_timeout_ms=request_timeout_ms,
+        )
+        with self._lock:
+            cached = self._llama_rerank_model_cache.get(key)
+            if cached is not None:
+                return cached
+            model = LlamaRerankModel(
+                model_path,
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                verbose=verbose,
+                request_timeout_ms=request_timeout_ms,
+            )
+            self._llama_rerank_model_cache[key] = model
+            return model
+
     # ------------------------------------------------------------------
     # Provider builder helpers (private)
     # ------------------------------------------------------------------
@@ -290,6 +342,37 @@ class LLMManager:
             model=model,
         )
 
+    def _build_llama_logit_rerank_provider(
+        self,
+        *,
+        scope: str,
+        model_path: str,
+        n_ctx: int = 4096,
+        n_gpu_layers: int = 0,
+        verbose: bool = False,
+        request_timeout_ms: int = 60000,
+        max_length: int | None = None,
+    ):
+        from rpg_world.rpg_core.memory.rerank.providers import LogitRerankProvider
+
+        model = self._build_llama_rerank_model(
+            scope=scope,
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            verbose=verbose,
+            request_timeout_ms=request_timeout_ms,
+        )
+        return LogitRerankProvider(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            verbose=verbose,
+            request_timeout_ms=request_timeout_ms,
+            max_length=max_length,
+            model=model,
+        )
+
     # ------------------------------------------------------------------
     # Public — single entry point
     # ------------------------------------------------------------------
@@ -298,12 +381,12 @@ class LLMManager:
         self,
         biz_key: str,
         overrides: ProviderOverrides | None = None,
-    ) -> LLMProvider:
-        """Return a fully constructed ``LLMProvider`` for *biz_key*.
+    ) -> ManagedProvider:
+        """Return a fully constructed provider for *biz_key*.
 
         This is the **only** public method business code should call.
         Config lives in ``llm.yaml``; provider differences (OpenAI /
-        llama / chat / embedding) are handled internally.
+        llama / chat / embedding / rerank) are handled internally.
         """
         with self._lock:
             cache_key = (biz_key, self._effective_overrides(overrides))
@@ -323,7 +406,7 @@ class LLMManager:
         biz_key: str,
         *,
         overrides: ProviderOverrides | None = None,
-    ) -> LLMProvider:
+    ) -> ManagedProvider:
         cfg = self._resolve_cfg(biz_key)
         backend = cfg.provider
 
@@ -337,8 +420,10 @@ class LLMManager:
                 f"{sorted(PROVIDER_KINDS)}, got {backend!r}"
             )
 
-        if cfg.kind == "embedding":
+        if cfg.kind == LLM_KIND_EMBEDDING:
             return self._build_embedding_provider(cfg, biz_key, backend, overrides=overrides)
+        if cfg.kind == LLM_KIND_RERANK:
+            return self._build_rerank_provider(cfg, biz_key, backend, overrides=overrides)
 
         # chat / rerank / planner — all go through the same chat construction
         return self._build_chat_provider_inner(cfg, biz_key, backend, overrides=overrides)
@@ -398,6 +483,47 @@ class LLMManager:
                 request_timeout_ms=cfg.llama_request_timeout_ms,
             )
         raise ValueError(f"{biz_key} config invalid: unsupported backend {backend!r}")
+
+    def _build_rerank_provider(
+        self,
+        cfg: BizConfig,
+        biz_key: str,
+        backend: str,
+        *,
+        overrides: ProviderOverrides | None = None,
+    ) -> ManagedProvider:
+        rerank_model_type = cfg.rerank_model_type
+        if rerank_model_type == RERANK_MODEL_TYPE_CHAT_POINTWISE:
+            from rpg_world.rpg_core.memory.rerank.providers import ChatPointwiseScoreProvider
+
+            if backend != PROVIDER_OPENAI:
+                raise ValueError(
+                    f"{biz_key} config invalid: rerank_model_type={rerank_model_type!r} requires provider={PROVIDER_OPENAI!r}"
+                )
+            chat_provider = self._build_openai_provider(
+                scope=biz_key,
+                model=self._openai_model(cfg, overrides),
+                api_key=self._openai_api_key(cfg, overrides),
+                base_url=self._openai_base_url(cfg, overrides),
+                max_tokens=self._openai_max_tokens(cfg, overrides),
+                temperature=self._openai_temperature(cfg, overrides),
+            )
+            return ChatPointwiseScoreProvider(chat_provider)
+        if rerank_model_type == RERANK_MODEL_TYPE_QWEN3_LOGIT:
+            if backend != PROVIDER_LLAMA:
+                raise ValueError(
+                    f"{biz_key} config invalid: rerank_model_type={rerank_model_type!r} requires provider={PROVIDER_LLAMA!r}"
+                )
+            return self._build_llama_logit_rerank_provider(
+                scope=biz_key,
+                model_path=cfg.llama_model_path,
+                n_ctx=cfg.llama_n_ctx,
+                n_gpu_layers=cfg.llama_n_gpu_layers,
+                verbose=cfg.llama_verbose,
+                request_timeout_ms=cfg.llama_request_timeout_ms,
+                max_length=cfg.llama_max_length,
+            )
+        raise ValueError(f"{biz_key} config invalid: unsupported rerank_model_type {rerank_model_type!r}")
 
     @staticmethod
     def _resolve_cfg(biz_key: str) -> BizConfig:
