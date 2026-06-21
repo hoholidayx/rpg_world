@@ -42,13 +42,26 @@ base:
     hybrid_enabled: true
     # 混合检索中向量召回候选数
     vector_k: 50
-    # 混合检索中bigram 召回候选数
-    bigram_k: 50
+    # 关键词检索 tokenizer：jieba / bigram / both
+    keyword_tokenizer: jieba
+    # 混合检索中 keyword 召回候选数
+    keyword_k: 50
+    # raw markdown 召回模式：fallback_only / always / disabled
+    raw_md_mode: fallback_only
+    # fallback_only 模式下主候选不足触发阈值，0 表示使用当前召回池目标（有 rerank 时为 rerank_candidate_k，否则为 top_k）
+    raw_md_min_results: 0
     # 混合评分权重（可调优检索排序）
-    hybrid_vector_weight: 0.60
-    hybrid_bigram_weight: 0.25
+    # vector: 向量相似度；keyword: 关键词/FTS；raw_md: 原文词项覆盖；exact: 原始查询精确/模糊命中
+    # expanded: query planner 扩展查询命中；recency: 时间新近度；granularity: 记忆粒度优先级
+    hybrid_vector_weight: 0.47
+    hybrid_keyword_weight: 0.18
+    hybrid_raw_md_weight: 0.05
     hybrid_exact_weight: 0.10
+    hybrid_expanded_weight: 0.10
     hybrid_recency_weight: 0.05
+    hybrid_granularity_weight: 0.05
+    # 进入 reranker 的混合检索候选数，最终仍只返回 top_k
+    rerank_candidate_k: 8
     # LLM 重排分在最终融合分中的权重（剩余权重给混合检索分）
     rerank_score_weight: 0.70
 

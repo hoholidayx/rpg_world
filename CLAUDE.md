@@ -1,7 +1,7 @@
 # rpg_world
 
 RPG 世界管理子系统——故事数据管理、场景上下文构建、LLM Agent 交互。
-记忆检索已经拆成 `SqlVecRetriever`、`BigramRetriever`、`RawMarkdownRetriever` 三个独立 retriever；`HybridRetriever` 只负责组装与融合，不承载底层检索实现。
+记忆检索已经拆成 `SqlVecRetriever`、`KeywordRetriever`、`RawMarkdownRetriever` 三个独立 retriever；`HybridRetriever` 只负责组装与融合，不承载底层检索实现。关键词检索通过 `memory.keyword_tokenizer` 选择 `jieba`、`bigram` 或 `both`，配置使用 `keyword_k` / `hybrid_keyword_weight`。raw markdown 由 `memory.raw_md_mode` 控制，`always` 是主召回策略，`fallback_only` 是补候选触发策略。
 
 ## 启动
 
@@ -180,7 +180,9 @@ channels_settings.enabled_module_names  # 所有已启用模块列表
 - 业务代码读取业务配置走 `rpg_core.settings.settings` 的属性或方法，例如 `settings.memory_settings`。
 - LLM provider 创建走 `LLMManager.get().get_provider(biz_key)`，不要在业务模块中直接 new OpenAI/llama client。
 - LLM 配置解析只通过 `rpg_core.llm.config.resolve_biz_config()`、`get_runtime_config()` 等封装方法。
-- `rerank_score_weight` 是 memory 排序业务参数，属于 `settings.yaml`；`llm.yaml` 的 `memory.rerank` 只放 provider/model/model_path/n_ctx/temperature/request_timeout_ms 等 LLM 参数。
+- memory 检索、融合、chunk 和 rerank pool 参数都属于 `settings.yaml`，包括 `keyword_tokenizer`、`keyword_k`、`raw_md_mode`、`raw_md_min_results`、`hybrid_*_weight`、`rerank_candidate_k`、`rerank_score_weight`。
+- `keyword_k` / `hybrid_keyword_weight` 是当前 keyword 架构配置；不要恢复旧 `bigram_k` / `hybrid_bigram_weight`。
+- `llm.yaml` 的 `memory.rerank` 只放 provider/model/model_path/n_ctx/temperature/request_timeout_ms 等 LLM 参数，并且 `kind: rerank` 必须显式声明 `rerank_model_type`。
 
 ### AgentManager（`rpg_core/agent/manager.py`）
 
@@ -259,8 +261,16 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 ### 记忆 `meta` 字段
 
 最终返回的记忆 `meta` 是由 `candidate.metadata`、检索分数和 rerank 调试信息合并而成。
-`HybridRetriever` 负责把 `sqlvec / bigram / raw_md` 三路结果合并，`MemoryManager.hybrid_search()`
+`HybridRetriever` 负责把 `sqlvec / keyword / raw_md` 三路结果合并，`MemoryManager.hybrid_search()`
 会再把候选转成对外返回的 `metadata`。
+
+召回主流程：
+
+- sqlvec 可用时执行向量召回。
+- keyword 可用时执行 tokenizer 可插拔的 FTS 召回。
+- `raw_md_mode=always` 时 raw md 每次作为主召回一路参与 merge / scoring / rerank。
+- `raw_md_mode=fallback_only` 时，主候选数低于阈值或主检索失败才执行 raw md。`raw_md_min_results > 0` 使用显式阈值；否则有 reranker 时使用 `rerank_candidate_k`，无 reranker 时使用 `top_k`。
+- rerank 取最多 `rerank_candidate_k` 个 hybrid 候选，最终仍只返回 `top_k`。
 
 | 字段 | 来源 | 作用 |
 |---|---|---|
@@ -272,11 +282,14 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 | `chunk_idx` | 分块索引 | 同一文件内的 chunk 序号 |
 | `created_at` | SQL chunk 的写入时间；raw md 的文件 mtime | 用于 `recency_score` |
 | `vector_score` | `SqlVecRetriever` / `VectorIndex` | 向量相似度分数 |
-| `bigram_score` | `BigramRetriever` / FTS | bigram / BM25 分数 |
+| `keyword_score` | `KeywordRetriever` / FTS | keyword / BM25 分数 |
+| `raw_md_score` | `RawMarkdownGrepSearch` | raw markdown 原文 query / term 覆盖分 |
 | `exact_score` | `exact_and_fuzzy_scores()` | query 完全命中时为 1.0 |
 | `fuzzy_score` | `exact_and_fuzzy_scores()` | query 模糊匹配分数 |
+| `expanded_score` | `RawMarkdownGrepSearch` / `HybridRetriever._finalize()` | query planner 扩展查询或扩展分词命中分 |
 | `recency_score` | `HybridRetriever._finalize()` | 时间越近分数越高 |
-| `hybrid_score` | `apply_hybrid_scores()` | 召回融合分 |
+| `granularity_score` | `HybridRetriever._finalize()` | 记忆粒度优先级分，front matter 中的 `batch_id`、`type: overall` 等会参与解析 |
+| `hybrid_score` | `apply_hybrid_scores()` | 向量、keyword、raw md、exact、expanded、recency、granularity 的融合分 |
 | `rerank_score` | `PointwiseMemoryReranker` | 最终重排分 |
 | `debug` | 各检索 / 重排阶段逐步写入 | 调试信息，通常包含 `*_norm`、`*_reason`、`raw_md_*` |
 
@@ -284,14 +297,23 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 
 | debug 键 | 来源 | 说明 |
 |---|---|---|
-| `bigram_bm25` | `BigramRetriever` | bigram FTS 的原始 BM25 分数 |
-| `bigram_queries` | `BigramRetriever` | 参与 bigram 搜索的 query 列表 |
+| `keyword_bm25` | `KeywordRetriever` | keyword FTS 的原始 BM25 分数 |
+| `keyword_relevance` | `KeywordRetriever` | BM25 转换后的有界 keyword 相关性分 |
+| `keyword_tokenizer` | `TextIndex` | 当前 keyword FTS 使用的 tokenizer：`jieba` / `bigram` / `both` |
+| `keyword_query_hits` | `KeywordRetriever` | 多 query 命中明细，包含 query、来源权重、原始分和加权分 |
+| `keyword_queries` | `KeywordRetriever` | 参与 keyword 搜索的 query 列表 |
 | `raw_md_source` | `RawMarkdownGrepSearch` | raw markdown 源文件路径 |
 | `raw_md_terms` | `RawMarkdownGrepSearch` | raw markdown 计算命中的 term |
+| `raw_md_expanded_queries` | `RawMarkdownGrepSearch` | raw markdown 使用的扩展查询 |
+| `raw_md_expanded_terms` | `RawMarkdownGrepSearch` | 扩展查询再次分词得到的 raw md term |
+| `raw_md_match_score` | `RawMarkdownGrepSearch` | raw md 阶段 exact、raw_md、expanded 三者的最大命中分 |
 | `vector_score_norm` | `apply_hybrid_scores()` | 向量分归一化结果 |
-| `bigram_score_norm` | `apply_hybrid_scores()` | bigram 分归一化结果 |
+| `keyword_score_norm` | `apply_hybrid_scores()` | keyword 分归一化结果 |
 | `recency_score_norm` | `apply_hybrid_scores()` | 时间分归一化结果 |
 | `exact_or_fuzzy_score` | `apply_hybrid_scores()` | exact / fuzzy 的合并分 |
+| `expanded_score` | `apply_hybrid_scores()` | 参与 hybrid scoring 的扩展查询命中分 |
+| `granularity_score` | `apply_hybrid_scores()` | 参与 hybrid scoring 的记忆粒度分 |
+| `memory_granularity` | `HybridRetriever._finalize()` | 解析出的记忆粒度，如 `batch`、`event`、`global`、`unknown` |
 | `llama_score_norm` | `PointwiseMemoryReranker` | llama provider rerank 归一化分 |
 | `llama_reason` | `PointwiseMemoryReranker` | llama provider rerank 给出的原因 |
 | `openai_score_norm` | `PointwiseMemoryReranker` | OpenAI-compatible provider rerank 归一化分 |

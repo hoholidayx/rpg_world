@@ -11,7 +11,7 @@ class QueryPlan:
 
     original_query: str
     normalized_query: str
-    bigram_queries: tuple[str, ...]
+    keyword_queries: tuple[str, ...]
     expanded_queries: tuple[str, ...]
     raw_md_terms: tuple[str, ...]
     query_type: str = "general"
@@ -23,7 +23,7 @@ def make_empty_plan(query: str, planner_source: str = "rule_based") -> QueryPlan
     return QueryPlan(
         original_query=query,
         normalized_query="",
-        bigram_queries=(),
+        keyword_queries=(),
         expanded_queries=(),
         raw_md_terms=(),
         planner_source=planner_source,

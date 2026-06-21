@@ -110,12 +110,12 @@ Telegram 渠道当前支持：
 
 ## 记忆系统
 
-`memory/` 是一个独立的检索子系统，不再把向量、bigram FTS、原始 markdown 扫描和 query 规划混在一个类里。当前结构按职责拆分为三层：
+`memory/` 是一个独立的检索子系统，不再把向量、keyword FTS、原始 markdown 扫描和 query 规划混在一个类里。当前结构按职责拆分为四个职责层：
 
 ```text
 memory/
 ├── planning/    QueryPlan 生成与 query rewrite
-├── retrieval/   SqlVec / bigram / raw markdown recall
+├── retrieval/   SqlVec / keyword / raw markdown recall
 ├── rerank/      基于 LLMProvider 的可选最终重排
 └── storage/     SQLite repository、vector index、text index
 ```
@@ -130,9 +130,10 @@ memory/
      - 配置缺失或加载失败时降级到 rule-based planner
   -> Retrieval
      - vector: 向量相似度召回
-     - bigram: bigram FTS 召回
-     - raw md: jieba/term coverage fallback
+     - keyword: tokenizer 可插拔的 keyword FTS 召回
+     - raw md: 直接扫描 markdown，按 raw_md_mode 决定是否作为主召回或 fallback
   -> scoring / fusion
+  -> optional pointwise rerank
   -> RecallItem 列表
 ```
 
@@ -151,9 +152,16 @@ memory/
 负责实际召回，不负责 query 解析。
 
 - `SqlVecRetriever`：纯向量召回
-- `HybridRetriever`：组装 sqlvec + bigram + raw md 的融合召回
-- `RawMarkdownGrepSearch`：直接扫描 markdown 文件，作为最后兜底
+- `KeywordRetriever`：基于 `TextIndex.keyword_search()` 的关键词召回，query 来源权重为 normalized 1.0、planner 0.85、compact 0.70
+- `HybridRetriever`：组装 sqlvec + keyword + raw md 的融合召回，统一执行 exact / fuzzy、expanded、recency、granularity 和 hybrid scoring
+- `RawMarkdownGrepSearch`：直接扫描 markdown 文件，保留 query planner 的 `raw_md_terms`、`expanded_queries` 和扩展查询分词；会解析 markdown front matter 中的简单标量字段用于 granularity
 - `RawMarkdownRetriever`：只走 raw md 的 retriever 适配器
+
+`memory.raw_md_mode` 控制 raw md 的参与方式：
+
+- `disabled`：raw md 完全不参与召回。
+- `always`：raw md 每次运行，作为主召回一路参与 merge、hybrid scoring 和 rerank。
+- `fallback_only`：主召回只运行 sqlvec + keyword；当主候选不足或 sqlvec / keyword / store 阶段失败时才运行 raw md 补候选。`raw_md_min_results > 0` 时使用该显式阈值；否则阈值为当前召回池目标，有 reranker 时是 `rerank_candidate_k`，无 reranker 时是 `top_k`。
 
 #### `rerank/`
 
@@ -168,7 +176,7 @@ memory/
 
 - `MemoryRepository`：SQLite chunk 存取
 - `VectorIndex`：向量索引实现
-- `TextIndex`：FTS5 / bigram 索引实现
+- `TextIndex`：FTS5 / keyword 索引实现，写入和查询都使用 `memory.keyword_tokenizer` 选择的 tokenizer
 - `VectorStore`：存储门面，封装 repository + vector index + text index
 
 ### 召回 `meta` 字段说明
@@ -187,33 +195,45 @@ memory/
 | `chunk_idx` | 分块索引 | 同一文件内的第几个 chunk |
 | `created_at` | SQL chunk 侧通常是写入时间；raw md 侧通常是源文件 mtime | 供 `recency_score` 计算 |
 | `vector_score` | `SqlVecRetriever` / `VectorIndex` | 向量相似度分数 |
-| `bigram_score` | `BigramRetriever` / FTS | bigram / BM25 相关性分数 |
+| `keyword_score` | `KeywordRetriever` / FTS | keyword / BM25 相关性分数 |
+| `raw_md_score` | `RawMarkdownGrepSearch` | raw markdown 原文 query / term 覆盖分 |
 | `exact_score` | `exact_and_fuzzy_scores()` | query 完全命中时为 1.0 |
 | `fuzzy_score` | `exact_and_fuzzy_scores()` | query 的模糊匹配分数 |
+| `expanded_score` | `RawMarkdownGrepSearch` / `HybridRetriever._finalize()` | query planner 扩展查询或扩展分词命中分 |
 | `recency_score` | `HybridRetriever._finalize()` | 时间衰减分数，越新越高 |
-| `hybrid_score` | `apply_hybrid_scores()` | 向量、bigram、exact、recency 的融合分 |
+| `granularity_score` | `HybridRetriever._finalize()` | 记忆粒度优先级分，来自 `batch` / `event` / `session` / `global` / `unknown` 等元信息 |
+| `hybrid_score` | `apply_hybrid_scores()` | 向量、keyword、raw md、exact、expanded、recency、granularity 的融合分 |
 | `rerank_score` | `PointwiseMemoryReranker` | 最终重排分数；有 rerank 时优先参与排序 |
-| `debug` | 各检索/重排阶段逐步写入 | 调试信息，例如 `bigram_bm25`、`raw_md_source`、`llama_reason` |
+| `debug` | 各检索/重排阶段逐步写入 | 调试信息，例如 `keyword_bm25`、`raw_md_source`、`llama_reason` |
 
 常见 `debug` 键：
 
 | debug 键 | 来源 | 说明 |
 |---|---|---|
-| `bigram_bm25` | `BigramRetriever` | bigram FTS 的原始 BM25 分数 |
-| `bigram_queries` | `BigramRetriever` | 实际参与 bigram 搜索的 query 列表 |
+| `keyword_bm25` | `KeywordRetriever` | keyword FTS 的原始 BM25 分数 |
+| `keyword_relevance` | `KeywordRetriever` | BM25 转换后的有界 keyword 相关性分 |
+| `keyword_tokenizer` | `TextIndex` | 当前 keyword FTS 使用的 tokenizer：`jieba` / `bigram` / `both` |
+| `keyword_query_hits` | `KeywordRetriever` | 多 query 命中明细，包含 query、来源权重、原始分和加权分 |
+| `keyword_queries` | `KeywordRetriever` | 实际参与 keyword 搜索的 query 列表 |
 | `raw_md_source` | `RawMarkdownGrepSearch` | raw markdown 的源文件路径 |
 | `raw_md_terms` | `RawMarkdownGrepSearch` | raw markdown 实际使用的 term 列表 |
+| `raw_md_expanded_queries` | `RawMarkdownGrepSearch` | raw markdown 使用的扩展查询 |
+| `raw_md_expanded_terms` | `RawMarkdownGrepSearch` | 扩展查询再次分词得到的 raw md term |
+| `raw_md_match_score` | `RawMarkdownGrepSearch` | raw md 阶段 exact、raw_md、expanded 三者的最大命中分 |
 | `vector_score_norm` | `apply_hybrid_scores()` | 向量分数归一化后结果 |
-| `bigram_score_norm` | `apply_hybrid_scores()` | bigram 分数归一化后结果 |
+| `keyword_score_norm` | `apply_hybrid_scores()` | keyword 分数归一化后结果 |
 | `recency_score_norm` | `apply_hybrid_scores()` | 时间分数归一化后结果 |
 | `exact_or_fuzzy_score` | `apply_hybrid_scores()` | exact / fuzzy 的合并分 |
+| `expanded_score` | `apply_hybrid_scores()` | 参与 hybrid scoring 的扩展查询命中分 |
+| `granularity_score` | `apply_hybrid_scores()` | 参与 hybrid scoring 的记忆粒度分 |
+| `memory_granularity` | `HybridRetriever._finalize()` | 解析出的记忆粒度，如 `batch`、`event`、`global`、`unknown` |
 | `llama_score_norm` | `PointwiseMemoryReranker` | llama provider rerank 打分归一化后结果 |
 | `llama_reason` | `PointwiseMemoryReranker` | llama provider rerank 给出的简短原因 |
 | `openai_score_norm` | `PointwiseMemoryReranker` | OpenAI-compatible provider rerank 打分归一化后结果 |
 | `openai_reason` | `PointwiseMemoryReranker` | OpenAI-compatible provider rerank 给出的简短原因 |
 
 注意：不同候选不一定都有全部字段，这是正常的。比如 raw md 候选通常会有
-`raw_md_*`，而 SQL 向量候选更偏向 `vector_score` / `bigram_score` / `recency_score`。
+`raw_md_*`，而 SQL 向量候选更偏向 `vector_score` / `keyword_score` / `recency_score`。
 
 ### 配置
 
@@ -229,23 +249,39 @@ memory/
 - `top_k`
 - `hybrid_enabled`
 - `hybrid_vector_weight`
-- `hybrid_bigram_weight`
+- `keyword_tokenizer`
+- `keyword_k`
+- `raw_md_mode`
+- `raw_md_min_results`
+- `hybrid_keyword_weight`
+- `hybrid_raw_md_weight`
 - `hybrid_exact_weight`
+- `hybrid_expanded_weight`
 - `hybrid_recency_weight`
+- `hybrid_granularity_weight`
 - `rerank_enabled`
+- `rerank_candidate_k`
 - `rerank_score_weight`
 - `chunk_size`
 - `chunk_overlap`
 
-代码中已有 sqlvec + bigram + raw md 三路独立 retriever，`HybridRetriever` 只负责组装与融合。
+关键语义：
+
+- `keyword_tokenizer` 支持 `jieba`、`bigram`、`both`，默认 `jieba`；`bigram` 只是 tokenizer 选项，不再是检索架构命名。
+- `keyword_k` 控制关键词召回候选数；不再读取旧的 `bigram_k`。
+- `hybrid_keyword_weight` 控制 keyword 归一化分权重；不再读取旧的 `hybrid_bigram_weight`。
+- `raw_md_mode=fallback_only` 且 `raw_md_min_results=0` 时，主候选不足阈值使用当前召回池目标：有 reranker 时为 `rerank_candidate_k`，无 reranker 时为 `top_k`。
+- `rerank_candidate_k` 控制进入 reranker 的最大候选池，最终仍只返回 `top_k`。
+
+代码中已有 sqlvec + keyword + raw md 三路独立 retriever，`HybridRetriever` 只负责组装与融合。
 新增配置前应同步更新 `rpg_core/settings.py`、README、`AGENTS.md` / `CLAUDE.md` 和测试。
 
 ### 设计原则
 
 - `MemoryManager` 负责组装，不负责检索细节
 - `QueryPlanner` 是增强能力，不是主链路硬依赖
-- bigram 查询格式始终由 tokenizer 保证
-- raw md 兜底优先保证可用性，再逐步提升召回质量
+- keyword 查询格式始终由 tokenizer 保证
+- raw md 的 `always` 是主召回策略，`fallback_only` 是触发策略；一旦进入候选池，raw md 候选与其他候选同样参与 merge、hybrid scoring 和 rerank
 - 检索层优先保持可解释的分数融合，避免把排序黑箱化
 
 ## 配置
@@ -296,6 +332,7 @@ base:
     memory.rerank:
       kind: rerank
       provider: llama
+      rerank_model_type: qwen3_logit
       llama:
         model_path: ""
         n_ctx: 4096

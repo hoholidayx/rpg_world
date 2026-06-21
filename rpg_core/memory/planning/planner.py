@@ -78,7 +78,7 @@ class RuleBasedQueryPlanner(BaseQueryPlanner):
         return QueryPlan(
             original_query=query,
             normalized_query=normalized,
-            bigram_queries=tuple(_dedupe([normalized, _compact(normalized)])),
+            keyword_queries=tuple(_dedupe([normalized, _compact(normalized)])),
             expanded_queries=(),
             raw_md_terms=raw_md_terms,
             planner_source="rule_based",
@@ -165,8 +165,8 @@ def _build_prompt(query: str) -> str:
     return (
         "你是本地记忆检索查询规划器。请把用户查询改写为结构化 JSON。\n"
         "只输出 JSON 对象，不要输出解释。\n"
-        "字段：bigram_queries、expanded_queries、raw_md_terms、query_type。\n"
-        "bigram_queries 用于 bigram FTS，应是短查询短语，不要预分词。\n"
+        "字段：keyword_queries、expanded_queries、raw_md_terms、query_type。\n"
+        "keyword_queries 用于 keyword FTS，应是短查询短语，不要预分词。\n"
         "raw_md_terms 用于 markdown 字符串召回，应是有意义的中文词或英文术语。\n"
         f"用户查询：{query}"
     )
@@ -179,8 +179,8 @@ def _plan_from_mapping(
     planner_source: str,
     fallback_planner: BaseQueryPlanner | None = None,
 ) -> QueryPlan:
-    bigram_queries = _dedupe(
-        [normalized_query, *_as_strings(data.get("bigram_queries")), _compact(normalized_query)]
+    keyword_queries = _dedupe(
+        [normalized_query, *_as_strings(data.get("keyword_queries")), _compact(normalized_query)]
     )
     expanded_queries = _dedupe(_as_strings(data.get("expanded_queries")))
     raw_md_terms = _filter_meaningful_terms(_dedupe([
@@ -191,7 +191,7 @@ def _plan_from_mapping(
     return QueryPlan(
         original_query=original_query,
         normalized_query=normalized_query,
-        bigram_queries=tuple(bigram_queries[:_MAX_QUERY_VARIANTS]),
+        keyword_queries=tuple(keyword_queries[:_MAX_QUERY_VARIANTS]),
         expanded_queries=tuple(expanded_queries[:_MAX_QUERY_VARIANTS]),
         raw_md_terms=tuple(raw_md_terms[:_MAX_RAW_MD_TERMS]),
         query_type=query_type,

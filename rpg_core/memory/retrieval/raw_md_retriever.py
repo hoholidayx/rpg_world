@@ -43,7 +43,7 @@ class RawMarkdownRetriever(BaseRetriever):
         return [
             (
                 candidate.content,
-                candidate.final_score or candidate.bigram_score or candidate.exact_score,
+                candidate.final_score or candidate.raw_md_score or candidate.exact_score,
                 dict(candidate.metadata),
             )
             for candidate in candidates

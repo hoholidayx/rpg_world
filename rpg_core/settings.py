@@ -154,20 +154,41 @@ class MemorySettings:
     vector_k: int = 50
     """混合检索中向量召回候选数。"""
 
-    bigram_k: int = 50
-    """混合检索中 bigram 召回候选数。"""
+    keyword_tokenizer: str = "jieba"
+    """关键词检索 tokenizer：jieba / bigram / both。"""
 
-    hybrid_vector_weight: float = 0.60
+    keyword_k: int = 50
+    """混合检索中 keyword 召回候选数。"""
+
+    hybrid_vector_weight: float = 0.47
     """混合评分中向量相似度归一化分数的权重。"""
 
-    hybrid_bigram_weight: float = 0.25
-    """混合评分中 bigram 匹配归一化分数的权重。"""
+    hybrid_keyword_weight: float = 0.18
+    """混合评分中 keyword 匹配归一化分数的权重。"""
+
+    hybrid_raw_md_weight: float = 0.05
+    """混合评分中 raw markdown 原文词项覆盖分数的权重。"""
 
     hybrid_exact_weight: float = 0.10
     """混合评分中精确/模糊匹配分数的权重。"""
 
+    hybrid_expanded_weight: float = 0.10
+    """混合评分中 query planner 扩展查询匹配分数的权重。"""
+
     hybrid_recency_weight: float = 0.05
     """混合评分中时间衰减归一化分数的权重。"""
+
+    hybrid_granularity_weight: float = 0.05
+    """混合评分中记忆粒度优先级分数的权重。"""
+
+    raw_md_mode: str = "fallback_only"
+    """Raw markdown 召回模式：fallback_only / always / disabled。"""
+
+    raw_md_min_results: int = 0
+    """Raw markdown fallback 触发阈值，0 表示当前召回池目标。"""
+
+    rerank_candidate_k: int = 8
+    """进入 reranker 的混合检索候选数，最终仍返回 top_k。"""
 
     rerank_score_weight: float = 0.70
     """Reranker 融合评分中 LLM 重排分的权重（剩余为混合分数权重）。"""
@@ -613,11 +634,18 @@ class Settings:
             top_k=raw.get("top_k", 5),
             hybrid_enabled=raw.get("hybrid_enabled", True),
             vector_k=raw.get("vector_k", 50),
-            bigram_k=raw.get("bigram_k", 50),
-            hybrid_vector_weight=raw.get("hybrid_vector_weight", 0.60),
-            hybrid_bigram_weight=raw.get("hybrid_bigram_weight", 0.25),
+            keyword_tokenizer=raw.get("keyword_tokenizer", "jieba"),
+            keyword_k=raw.get("keyword_k", 50),
+            hybrid_vector_weight=raw.get("hybrid_vector_weight", 0.47),
+            hybrid_keyword_weight=raw.get("hybrid_keyword_weight", 0.18),
+            hybrid_raw_md_weight=raw.get("hybrid_raw_md_weight", 0.05),
             hybrid_exact_weight=raw.get("hybrid_exact_weight", 0.10),
+            hybrid_expanded_weight=raw.get("hybrid_expanded_weight", 0.10),
             hybrid_recency_weight=raw.get("hybrid_recency_weight", 0.05),
+            hybrid_granularity_weight=raw.get("hybrid_granularity_weight", 0.05),
+            raw_md_mode=raw.get("raw_md_mode", "fallback_only"),
+            raw_md_min_results=raw.get("raw_md_min_results", 0),
+            rerank_candidate_k=raw.get("rerank_candidate_k", 8),
             rerank_enabled=raw.get("rerank_enabled", False),
             rerank_model_path=self._memory_llama_model_path(MEMORY_RERANK_BIZ_KEY),
             rerank_n_ctx=4096,

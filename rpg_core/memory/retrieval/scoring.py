@@ -47,17 +47,23 @@ def normalize_values(
 def apply_hybrid_scores(
     candidates: list[MemoryCandidate],
     vector_weight: float = 0.60,
-    bigram_weight: float = 0.25,
+    keyword_weight: float = 0.25,
+    raw_md_weight: float = 0.05,
     exact_weight: float = 0.10,
+    expanded_weight: float = 0.10,
     recency_weight: float = 0.05,
+    granularity_weight: float = 0.05,
 ) -> None:
     """Apply weighted hybrid scoring formula in-place.
 
     Weights default to the historical hardcoded values and can be
-    overridden via ``memory.hybrid_*_weight`` in settings.yaml.
+    overridden via ``memory.hybrid_*_weight`` in settings.yaml. Vector,
+    keyword, and recency values are candidate-set normalized; raw md,
+    exact, expanded, and granularity scores are already bounded semantic
+    scores.
     """
     vector_norm = normalize_values(candidates, lambda item: item.vector_score)
-    bigram_norm = normalize_values(candidates, lambda item: item.bigram_score)
+    keyword_norm = normalize_values(candidates, lambda item: item.keyword_score)
     recency_norm = normalize_values(candidates, lambda item: item.recency_score)
 
     for candidate in candidates:
@@ -65,16 +71,22 @@ def apply_hybrid_scores(
         candidate.debug.update(
             {
                 "vector_score_norm": vector_norm[candidate.memory_id],
-                "bigram_score_norm": bigram_norm[candidate.memory_id],
+                "keyword_score_norm": keyword_norm[candidate.memory_id],
+                "raw_md_score": candidate.raw_md_score,
                 "recency_score_norm": recency_norm[candidate.memory_id],
                 "exact_or_fuzzy_score": exact_or_fuzzy,
+                "expanded_score": candidate.expanded_score,
+                "granularity_score": candidate.granularity_score,
             }
         )
         candidate.hybrid_score = (
             vector_weight * vector_norm[candidate.memory_id]
-            + bigram_weight * bigram_norm[candidate.memory_id]
+            + keyword_weight * keyword_norm[candidate.memory_id]
+            + raw_md_weight * candidate.raw_md_score
             + exact_weight * exact_or_fuzzy
+            + expanded_weight * candidate.expanded_score
             + recency_weight * recency_norm[candidate.memory_id]
+            + granularity_weight * candidate.granularity_score
         )
 
 

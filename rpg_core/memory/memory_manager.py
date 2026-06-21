@@ -94,7 +94,7 @@ class MemoryManager:
         rule_based_planner = cls._build_rule_based_query_planner(mem_cfg)
         fallback_search = cls._build_raw_md_search(sources, rule_based_planner)
         embedding = cls._build_embedding(mem_cfg)
-        store = cls._build_store(get_vector_db_path, embedding)
+        store = cls._build_store(get_vector_db_path, embedding, mem_cfg)
         chunker = cls._build_chunker(mem_cfg)
         index_mgr = cls._build_index_manager(store, embedding, sources, chunker)
         retriever = cls._build_retriever(store, embedding, mem_cfg, fallback_search, rule_based_planner)
@@ -117,7 +117,7 @@ class MemoryManager:
             "ready" if embedding is not None else "none",
         )
         if embedding is None:
-            logger.warning("[MemoryManager] embedding unavailable — bigram/raw markdown fallback mode")
+            logger.warning("[MemoryManager] embedding unavailable — keyword/raw markdown fallback mode")
         return mm
 
     # ── 实例初始化 ─────────────────────────────────────────────────────
@@ -199,6 +199,7 @@ class MemoryManager:
     def _build_store(
         get_vector_db_path: str,
         embedding: object | None,
+        mem_cfg: MemorySettings,
     ):
         from rpg_world.rpg_core.memory.storage.types import VectorStoreError
         from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
@@ -211,7 +212,12 @@ class MemoryManager:
                 dimension = None
 
         try:
-            store = VectorStore(db_path=get_vector_db_path, dimension=dimension)
+            store = VectorStore(
+                db_path=get_vector_db_path,
+                dimension=dimension,
+                keyword_tokenizer=mem_cfg.keyword_tokenizer,
+                jieba_dict=mem_cfg.jieba_dict,
+            )
             logger.info(
                 "[MemoryManager] vector store ready: {} (vector_mode={})",
                 get_vector_db_path,
@@ -224,7 +230,12 @@ class MemoryManager:
                 return None
             logger.warning("[MemoryManager] vector store init failed, retry text-index-only: {}", exc)
             try:
-                store = VectorStore(db_path=get_vector_db_path, dimension=None)
+                store = VectorStore(
+                    db_path=get_vector_db_path,
+                    dimension=None,
+                    keyword_tokenizer=mem_cfg.keyword_tokenizer,
+                    jieba_dict=mem_cfg.jieba_dict,
+                )
                 logger.info(
                     "[MemoryManager] text-index-only store ready: {}",
                     get_vector_db_path,
@@ -284,12 +295,12 @@ class MemoryManager:
         return SqlVecRetriever(store=store, embedding=embedding)
 
     @staticmethod
-    def _build_bigram_retriever(store, bigram_limit: int):
+    def _build_keyword_retriever(store, keyword_limit: int):
         if store is None:
             return None
-        from rpg_world.rpg_core.memory.retrieval.bigram_retriever import BigramRetriever
+        from rpg_world.rpg_core.memory.retrieval.keyword_retriever import KeywordRetriever
 
-        return BigramRetriever(store=store, limit=bigram_limit)
+        return KeywordRetriever(store=store, limit=keyword_limit)
 
     @staticmethod
     def _build_raw_md_retriever(fallback_search):
@@ -304,32 +315,41 @@ class MemoryManager:
 
         raw_md_retriever = MemoryManager._build_raw_md_retriever(fallback_search)
         if store is None:
+            if mem_cfg.raw_md_mode == "disabled":
+                logger.info("[MemoryManager] retriever disabled — store unavailable and raw_md_mode=disabled")
+                return None
             logger.info("[MemoryManager] retriever fallback — raw markdown only")
             return raw_md_retriever
 
-        bigram_k = mem_cfg.bigram_k
-        hybrid_bigram_weight = mem_cfg.hybrid_bigram_weight
         sqlvec_retriever = MemoryManager._build_sqlvec_retriever(store, embedding)
-        bigram_retriever = MemoryManager._build_bigram_retriever(store, bigram_k)
+        keyword_retriever = MemoryManager._build_keyword_retriever(store, mem_cfg.keyword_k)
 
         if mem_cfg.hybrid_enabled or embedding is None:
             logger.info(
-                "[MemoryManager] retriever mode — hybrid (sqlvec={} bigram={} rerank={})",
+                "[MemoryManager] retriever mode — hybrid (sqlvec={} keyword={} rerank={} raw_md_mode={})",
                 sqlvec_retriever is not None,
-                bigram_retriever is not None,
+                keyword_retriever is not None,
                 mem_cfg.rerank_enabled,
+                mem_cfg.raw_md_mode,
             )
             reranker = MemoryManager._build_reranker(mem_cfg)
             return HybridRetriever(
                 sqlvec_retriever=sqlvec_retriever,
-                bigram_retriever=bigram_retriever,
+                keyword_retriever=keyword_retriever,
                 raw_md_retriever=raw_md_retriever,
                 query_planner=rule_based_planner,
                 reranker=reranker,
                 hybrid_vector_weight=mem_cfg.hybrid_vector_weight,
-                hybrid_bigram_weight=hybrid_bigram_weight,
+                hybrid_keyword_weight=mem_cfg.hybrid_keyword_weight,
+                hybrid_raw_md_weight=mem_cfg.hybrid_raw_md_weight,
                 hybrid_exact_weight=mem_cfg.hybrid_exact_weight,
+                hybrid_expanded_weight=mem_cfg.hybrid_expanded_weight,
                 hybrid_recency_weight=mem_cfg.hybrid_recency_weight,
+                hybrid_granularity_weight=mem_cfg.hybrid_granularity_weight,
+                raw_md_mode=mem_cfg.raw_md_mode,
+                raw_md_min_results=mem_cfg.raw_md_min_results,
+                keyword_tokenizer=mem_cfg.keyword_tokenizer,
+                rerank_candidate_k=mem_cfg.rerank_candidate_k,
             )
 
         logger.info("[MemoryManager] retriever mode — sqlvec")
@@ -503,9 +523,12 @@ class MemoryManager:
                         {
                             "memory_id": candidate.memory_id,
                             "vector_score": candidate.vector_score,
-                            "bigram_score": candidate.bigram_score,
+                            "keyword_score": candidate.keyword_score,
+                            "raw_md_score": candidate.raw_md_score,
                             "exact_score": candidate.exact_score,
                             "fuzzy_score": candidate.fuzzy_score,
+                            "expanded_score": candidate.expanded_score,
+                            "granularity_score": candidate.granularity_score,
                             "recency_score": candidate.recency_score,
                             "hybrid_score": candidate.hybrid_score,
                             "rerank_score": candidate.rerank_score,
@@ -530,17 +553,19 @@ class MemoryManager:
         ]
 
     def rebuild_fts_index(self) -> None:
-        """Rebuild the bigram FTS index from stored chunks."""
+        """Rebuild the keyword FTS index from stored chunks."""
         if self._store is not None:
             self._store.rebuild_fts_index()
 
 
 def _log_query_plan(stage: str, plan) -> None:  # noqa: ANN001
     logger.info(
-        "[MemoryManager] {} plan — planner={} normalized={!r} raw_md_terms={} expanded_queries={}",
+        "[MemoryManager] {} plan — planner={} type={} normalized={!r} keyword_queries={} raw_md_terms={} expanded_queries={}",
         stage,
         plan.planner_source,
+        plan.query_type,
         plan.normalized_query,
+        list(plan.keyword_queries),
         list(plan.raw_md_terms),
         list(plan.expanded_queries),
     )

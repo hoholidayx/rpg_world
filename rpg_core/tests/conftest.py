@@ -56,17 +56,17 @@ class FakeEmbedding:
 class FakeStore:
     def __init__(self) -> None:
         self.vector_rows: list[tuple[MemoryCandidate, float]] = []
-        self.bigram_rows: dict[str, list[MemoryCandidate]] = {}
+        self.keyword_rows: dict[str, list[MemoryCandidate]] = {}
         self.search_calls: list[tuple[list[float], int]] = []
-        self.bigram_calls: list[tuple[str, int]] = []
+        self.keyword_calls: list[tuple[str, int]] = []
 
     def search(self, query: list[float], top_k: int = 5, filters=None):  # noqa: ANN001
         self.search_calls.append((list(query), top_k))
         return self.vector_rows[:top_k]
 
-    def bigram_search(self, query: str, limit: int = 50):
-        self.bigram_calls.append((query, limit))
-        return self.bigram_rows.get(query, [])[:limit]
+    def keyword_search(self, query: str, limit: int = 50):
+        self.keyword_calls.append((query, limit))
+        return self.keyword_rows.get(query, [])[:limit]
 
 
 class FakeFallbackSearch:
@@ -258,7 +258,18 @@ def fake_memory_cfg():
         top_k=3,
         hybrid_enabled=True,
         vector_k=10,
-        bigram_k=10,
+        keyword_tokenizer="jieba",
+        keyword_k=10,
+        hybrid_vector_weight=0.47,
+        hybrid_keyword_weight=0.18,
+        hybrid_raw_md_weight=0.05,
+        hybrid_exact_weight=0.10,
+        hybrid_expanded_weight=0.10,
+        hybrid_recency_weight=0.05,
+        hybrid_granularity_weight=0.05,
+        raw_md_mode="fallback_only",
+        raw_md_min_results=0,
+        rerank_candidate_k=8,
         rerank_enabled=False,
         rerank_score_weight=0.70,
         rerank_model_path="",
@@ -280,7 +291,7 @@ def query_plan():
     return QueryPlan(
         original_query="查找线索",
         normalized_query="查找线索",
-        bigram_queries=("查找线索",),
+        keyword_queries=("查找线索",),
         expanded_queries=("查找线索",),
         raw_md_terms=("查找", "线索"),
     )

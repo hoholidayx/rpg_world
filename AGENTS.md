@@ -2,7 +2,7 @@
 
 ## 项目结构与模块组织
 本仓库采用 supervisor + 子进程的启动架构，统一批量启动入口是 `run.py`，同级提供 `run_all.py`、`run_api.py`、`run_telegram.py`、`run_cli.py` 作为快捷入口。核心业务逻辑位于 `rpg_core/`，其中 `agent/` 负责 LLM Agent 与命令分发，`context/` 负责上下文构建，`character/`、`lorebook/`、`status/`、`memory/`、`summary/` 分别处理领域数据。API 放在 `api/`，多渠道适配器与测试位于 `channels/` 和 `channels/tests/`。前端 WebUI 在 `webui/`，运行数据在 `data/`。
-记忆检索拆成 `SqlVecRetriever`、`BigramRetriever`、`RawMarkdownRetriever` 三个独立 retriever；`HybridRetriever` 只负责组装与融合，不承载底层检索实现。
+记忆检索拆成 `SqlVecRetriever`、`KeywordRetriever`、`RawMarkdownRetriever` 三个独立 retriever；`HybridRetriever` 只负责组装与融合，不承载底层检索实现。关键词检索通过 `memory.keyword_tokenizer` 选择 `jieba`、`bigram` 或 `both`，新增调参使用 `keyword_k` / `hybrid_keyword_weight`，不要恢复 `bigram_k` 或 `hybrid_bigram_weight`。raw markdown 由 `memory.raw_md_mode` 控制：`disabled` 完全关闭，`always` 作为主召回一路参与融合，`fallback_only` 仅在主召回不足或主检索失败时补候选；`raw_md_min_results=0` 时阈值为当前召回池目标（有 rerank 时是 `rerank_candidate_k`，否则是 `top_k`）。
 LLM provider 统一位于 `rpg_core/llm/`，业务代码通过 `LLMManager.get().get_provider(biz_key)` 获取 provider，不直接 new OpenAI/llama 客户端，也不直接读取 `llm.yaml` 字符串 key。memory rerank 使用统一的 `PointwiseMemoryReranker`，不要恢复旧的 provider-specific reranker/factory。
 
 修改启动流程、渠道生命周期或共享状态前，先阅读 `CLAUDE.md`。不要绕过 `run.py` 自行拼装多模块启动，也不要破坏 `AgentManager` 单例和配置边界。

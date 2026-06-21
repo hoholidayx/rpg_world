@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import json as _json
 
-from rpg_world.rpg_core.memory.bigram_tokenizer import tokenize_bigram
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
+from rpg_world.rpg_core.memory.keyword_tokenizer import KeywordTokenizer, build_keyword_tokenizer
 from rpg_world.rpg_core.memory.storage.repository import MemoryRepository
 
 
 class TextIndex:
     """SQLite FTS5 + substring fallback index."""
 
-    def __init__(self, repository: MemoryRepository) -> None:
+    def __init__(
+        self,
+        repository: MemoryRepository,
+        *,
+        tokenizer: KeywordTokenizer | None = None,
+        keyword_tokenizer: str = "jieba",
+        jieba_dict: str = "",
+    ) -> None:
         self._repository = repository
+        self._tokenizer = tokenizer or build_keyword_tokenizer(keyword_tokenizer, jieba_dict)
         self._repository.conn.executescript(
             """
             CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts
@@ -33,9 +41,10 @@ class TextIndex:
             tuple(rowids),
         )
 
-    def bigram_search(self, query: str, limit: int = 50) -> list[MemoryCandidate]:
-        grams = _fts_query(tokenize_bigram(query))
-        if not grams:
+    def keyword_search(self, query: str, limit: int = 50) -> list[MemoryCandidate]:
+        tokens = self._tokenizer.tokenize(query)
+        fts_query = _fts_query(tokens)
+        if not fts_query:
             return []
 
         rows = self._repository.conn.execute(
@@ -47,7 +56,7 @@ class TextIndex:
             ORDER BY rank
             LIMIT ?
             """,
-            (grams, limit),
+            (fts_query, limit),
         ).fetchall()
 
         result: list[MemoryCandidate] = []
@@ -58,13 +67,19 @@ class TextIndex:
                 meta = {}
             meta["created_at"] = row[3]
             bm25_score = float(row[4])
+            relevance = _keyword_relevance(bm25_score)
             result.append(
                 MemoryCandidate(
                     memory_id=int(row[0]),
                     content=str(row[1]),
                     metadata=meta,
-                    bigram_score=1.0 / (1.0 + max(bm25_score, 0.0)),
-                    debug={"bigram_bm25": bm25_score},
+                    keyword_score=relevance,
+                    debug={
+                        "keyword_bm25": bm25_score,
+                        "keyword_relevance": relevance,
+                        "keyword_tokenizer": self._tokenizer.name,
+                        "keyword_tokens": tokens,
+                    },
                 )
             )
         return result
@@ -110,7 +125,7 @@ class TextIndex:
                     memory_id=int(row[0]),
                     content=normalized_text,
                     metadata=meta,
-                    bigram_score=match_score,
+                    keyword_score=match_score,
                     debug={"substring_query": normalized},
                 )
             )
@@ -126,12 +141,12 @@ class TextIndex:
         self._repository.conn.execute("DELETE FROM memory_fts")
 
     def _upsert(self, memory_id: int, content: str) -> None:
-        grams = " ".join(tokenize_bigram(content))
+        tokens = " ".join(self._tokenizer.tokenize(content))
         self._repository.conn.execute("DELETE FROM memory_fts WHERE rowid = ?", (memory_id,))
-        if grams:
+        if tokens:
             self._repository.conn.execute(
                 "INSERT INTO memory_fts(rowid, grams) VALUES (?, ?)",
-                (memory_id, grams),
+                (memory_id, tokens),
             )
 
 
@@ -141,6 +156,20 @@ def _fts_query(tokens: list[str]) -> str:
         escaped = token.replace('"', '""')
         quoted.append(f'"{escaped}"')
     return " OR ".join(quoted)
+
+
+def _keyword_relevance(bm25_score: float) -> float:
+    """Convert SQLite FTS rank to a bounded relevance score.
+
+    SQLite FTS5's bm25() normally returns negative values where lower is
+    better. Keep the score in 0..1 and tolerate positive-rank variants.
+    """
+    if bm25_score < 0.0:
+        relevance = -bm25_score
+        return relevance / (1.0 + relevance)
+    if bm25_score > 0.0:
+        return 1.0 / (1.0 + bm25_score)
+    return 1.0
 
 
 def _escape_like(text: str) -> str:

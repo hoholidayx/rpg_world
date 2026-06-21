@@ -25,11 +25,22 @@ class VectorStore:
 
     BATCH_SIZE = 100
 
-    def __init__(self, db_path: str | Path, dimension: int | None) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        dimension: int | None,
+        *,
+        keyword_tokenizer: str = "jieba",
+        jieba_dict: str = "",
+    ) -> None:
         self._path = str(db_path)
         self._dim = dimension
         self._repo = MemoryRepository(db_path)
-        self._text_index = TextIndex(self._repo)
+        self._text_index = TextIndex(
+            self._repo,
+            keyword_tokenizer=keyword_tokenizer,
+            jieba_dict=jieba_dict,
+        )
         self._vector_index: VectorIndex | None = None
         if dimension is not None:
             try:
@@ -110,8 +121,8 @@ class VectorStore:
             raise VectorStoreError("vector search unavailable without embedding dimension")
         return self._vector_index.search(query, top_k=top_k, filters=filters)
 
-    def bigram_search(self, query: str, limit: int = 50):
-        return self._text_index.bigram_search(query, limit=limit)
+    def keyword_search(self, query: str, limit: int = 50):
+        return self._text_index.keyword_search(query, limit=limit)
 
     def substring_search(self, query: str, limit: int = 50):
         return self._text_index.substring_search(query, limit=limit)

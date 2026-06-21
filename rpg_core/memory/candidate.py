@@ -14,9 +14,12 @@ class MemoryCandidate:
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
     vector_score: float = 0.0
-    bigram_score: float = 0.0
+    keyword_score: float = 0.0
+    raw_md_score: float = 0.0
     exact_score: float = 0.0
     fuzzy_score: float = 0.0
+    expanded_score: float = 0.0
+    granularity_score: float = 0.0
     recency_score: float = 0.0
     hybrid_score: float = 0.0
     rerank_score: float = 0.0

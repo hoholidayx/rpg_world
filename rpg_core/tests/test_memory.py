@@ -20,11 +20,18 @@ from rpg_world.rpg_core.memory import run as memory_run
 from rpg_world.rpg_core.memory.storage.types import ChunkRecord
 from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
 from rpg_world.rpg_core.memory.storage import vector_store as vector_store_module
+from rpg_world.rpg_core.memory.keyword_tokenizer import (
+    BigramKeywordTokenizer,
+    CombinedKeywordTokenizer,
+    JiebaKeywordTokenizer,
+)
 from rpg_world.rpg_core.memory.planning.openai_planner import OpenAIQueryPlanner
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan
-from rpg_world.rpg_core.memory.retrieval.bigram_retriever import BigramRetriever
+from rpg_world.rpg_core.memory.retrieval.keyword_retriever import KeywordRetriever
 from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import HybridRetriever
-from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
+from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import _build_rerank_query
+from rpg_world.rpg_core.memory.retrieval.priority import granularity_score, resolve_memory_granularity
+from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch, _frontmatter_metadata
 from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
 from rpg_world.rpg_core.memory.retrieval.sqlvec_retriever import SqlVecRetriever
 from rpg_world.rpg_core.memory.rerank import (
@@ -38,6 +45,7 @@ from rpg_world.rpg_core.memory.rerank import (
 from rpg_world.rpg_core.memory.rerank.common import build_pointwise_prompt, blend_pointwise_scores, parse_pointwise_output
 from rpg_world.rpg_core.memory.rerank import service as rerank_service_module
 from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
+from rpg_world.rpg_core.memory.storage.text_index import _keyword_relevance
 from rpg_world.rpg_core.tests.conftest import FakeEmbedding, FakeFallbackSearch, FakeRetriever, FakeStore
 
 
@@ -108,11 +116,18 @@ def test_memory_manager_falls_back_when_llm_manager_fails(monkeypatch):
         hybrid_enabled=True,
         rerank_enabled=False,
         top_k=5,
-        bigram_k=50,
-        hybrid_vector_weight=0.60,
-        hybrid_bigram_weight=0.25,
+        keyword_tokenizer="jieba",
+        keyword_k=50,
+        hybrid_vector_weight=0.47,
+        hybrid_keyword_weight=0.18,
+        hybrid_raw_md_weight=0.05,
         hybrid_exact_weight=0.10,
+        hybrid_expanded_weight=0.10,
         hybrid_recency_weight=0.05,
+        hybrid_granularity_weight=0.05,
+        raw_md_mode="fallback_only",
+        raw_md_min_results=0,
+        rerank_candidate_k=8,
     )
 
     assert MemoryManager._build_embedding(mem_cfg) is None
@@ -151,7 +166,7 @@ def test_openai_memory_sync_apis_work_inside_running_loop(monkeypatch):
     DummyAsyncOpenAI.chat_contents = [
         json.dumps(
             {
-                "bigram_queries": ["查找线索"],
+                "keyword_queries": ["查找线索"],
                 "expanded_queries": [],
                 "raw_md_terms": ["线索"],
                 "query_type": "general",
@@ -197,7 +212,7 @@ def test_memory_manager_uses_llm_manager_for_query_planner(monkeypatch):
     class FakeLLMProvider:
         async def chat(self, messages, tools=None):  # noqa: ANN001
             return SimpleNamespace(
-                content='{"bigram_queries":["查找线索"],"expanded_queries":[],"raw_md_terms":["线索"],"query_type":"general"}',
+                content='{"keyword_queries":["查找线索"],"expanded_queries":[],"raw_md_terms":["线索"],"query_type":"general"}',
             )
 
         def get_default_model(self):  # noqa: ANN001
@@ -336,6 +351,7 @@ def test_llm_manager_builds_logit_provider_for_llama_rerank(monkeypatch):
         shared_from = ""
         llama_model_path = "/tmp/qwen-rerank.gguf"
         llama_n_ctx = 512
+        llama_max_length = 256
         llama_n_gpu_layers = 0
         llama_verbose = False
         llama_request_timeout_ms = 1234
@@ -525,10 +541,10 @@ def test_hybrid_retriever_merges_sources_and_falls_back():
         (FakeChunkRecord(1, "vector-one", {"source": "vec"}), 0.0),
         (FakeChunkRecord(2, "vector-two", {"source": "vec"}), 0.1),
     ]
-    store.bigram_rows = {
+    store.keyword_rows = {
         "寻找 线索": [
-            MemoryCandidate(memory_id=2, content="vector-two", metadata={"source": "bg"}, bigram_score=0.1),
-            MemoryCandidate(memory_id=3, content="bigram-three", metadata={"source": "bg"}, bigram_score=0.05),
+            MemoryCandidate(memory_id=2, content="vector-two", metadata={"source": "kw"}, keyword_score=0.1),
+            MemoryCandidate(memory_id=3, content="keyword-three", metadata={"source": "kw"}, keyword_score=0.05),
         ]
     }
 
@@ -539,28 +555,30 @@ def test_hybrid_retriever_merges_sources_and_falls_back():
         def search(self, query: str, limit: int = 50):
             self.calls.append((query, limit))
             return [
-                MemoryCandidate(memory_id=4, content="raw-four", metadata={"source": "md"}, bigram_score=0.01),
+                MemoryCandidate(memory_id=4, content="raw-four", metadata={"source": "md"}, raw_md_score=0.5),
             ][:limit]
 
         def search_plan(self, plan, limit: int = 50):  # noqa: ANN001
             self.calls.append((plan.normalized_query, limit))
             return [
-                MemoryCandidate(memory_id=4, content="raw-four", metadata={"source": "md"}, bigram_score=0.01),
+                MemoryCandidate(memory_id=4, content="raw-four", metadata={"source": "md"}, raw_md_score=0.5),
             ][:limit]
 
     raw_search = FakeRawSearch()
     retriever = HybridRetriever(
         sqlvec_retriever=SqlVecRetriever(store=store, embedding=FakeEmbedding([[0.1, 0.2, 0.3]])),
-        bigram_retriever=BigramRetriever(store=store, limit=2),
+        keyword_retriever=KeywordRetriever(store=store, limit=2),
         raw_md_retriever=RawMarkdownRetriever(raw_search),
         reranker=None,
+        raw_md_mode="fallback_only",
+        raw_md_min_results=4,
     )
 
     result = retriever.hybrid_search("寻找 线索", top_k=2)
 
     assert [item.content for item in result] == ["vector-one", "vector-two"]
     assert store.search_calls
-    assert store.bigram_calls
+    assert store.keyword_calls
     assert raw_search.calls
 
 
@@ -604,6 +622,351 @@ def test_vector_store_logs_backend(tmp_path, monkeypatch):
 
     assert any('backend=' in msg for msg in messages)
     assert any('[VectorStore] ready:' in msg for msg in messages)
+
+
+def test_keyword_tokenizers_support_jieba_bigram_and_both():
+    jieba_tokens = JiebaKeywordTokenizer().tokenize("猎人的尸体在哪发现")
+    bigram_tokens = BigramKeywordTokenizer().tokenize("猎人的尸体")
+    both_tokens = CombinedKeywordTokenizer().tokenize("猎人的尸体")
+
+    assert "猎人" in jieba_tokens
+    assert "猎人" in bigram_tokens
+    assert "尸体" in both_tokens
+    assert both_tokens.count("猎人") == 1
+
+
+def test_vector_store_keyword_search_uses_configured_tokenizer(tmp_path):
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None, keyword_tokenizer="bigram")
+    store.upsert([
+        ChunkRecord(id=1, text="猎人的尸体在旧井旁发现", metadata={"source": "vec", "file": "a.md", "chunk_idx": 0})
+    ])
+
+    result = store.keyword_search("猎人的尸体", limit=5)
+
+    assert result
+    assert result[0].keyword_score > 0
+    assert result[0].keyword_score <= 1.0
+    assert result[0].debug["keyword_tokenizer"] == "bigram"
+    assert "keyword_bm25" in result[0].debug
+    assert "keyword_relevance" in result[0].debug
+    store.close()
+
+
+def test_keyword_relevance_is_bounded_for_sqlite_rank_signs():
+    assert _keyword_relevance(-2.0) == pytest.approx(2.0 / 3.0)
+    assert _keyword_relevance(3.0) == pytest.approx(0.25)
+    assert _keyword_relevance(0.0) == 1.0
+
+
+def test_keyword_retriever_weights_query_sources():
+    store = FakeStore()
+    store.keyword_rows = {
+        "寻找 线索": [
+            MemoryCandidate(
+                memory_id=1,
+                content="normalized",
+                keyword_score=1.0,
+                debug={"keyword_bm25": -2.0, "keyword_relevance": 0.66, "keyword_tokenizer": "jieba", "keyword_tokens": ["寻找", "线索"]},
+            )
+        ],
+        "线索": [
+            MemoryCandidate(
+                memory_id=1,
+                content="normalized",
+                keyword_score=1.0,
+                debug={"keyword_bm25": -1.0, "keyword_relevance": 0.50, "keyword_tokenizer": "jieba", "keyword_tokens": ["线索"]},
+            )
+        ],
+        "寻找线索": [MemoryCandidate(memory_id=2, content="compact", keyword_score=1.0)],
+    }
+    plan = QueryPlan(
+        original_query="寻找 线索",
+        normalized_query="寻找 线索",
+        keyword_queries=("寻找 线索", "线索", "寻找线索"),
+        expanded_queries=(),
+        raw_md_terms=(),
+    )
+
+    candidates = KeywordRetriever(store=store, limit=10).search_plan(plan, top_k=10)
+    by_id = {candidate.memory_id: candidate for candidate in candidates}
+
+    assert by_id[1].keyword_score == 1.0
+    assert by_id[2].keyword_score == 0.70
+    assert by_id[1].debug["keyword_best_query"] == "寻找 线索"
+    assert by_id[1].debug["keyword_query_hits"]
+    assert by_id[1].debug["keyword_query_hits"][0]["keyword_bm25"] == -2.0
+
+
+def test_hybrid_retriever_raw_md_disabled_skips_raw_search():
+    class FakeRawSearch:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def search_plan(self, plan, limit: int = 50):  # noqa: ANN001
+            self.calls.append(plan.normalized_query)
+            return [MemoryCandidate(memory_id=10, content="raw", raw_md_score=1.0)]
+
+    raw_search = FakeRawSearch()
+    retriever = HybridRetriever(
+        raw_md_retriever=RawMarkdownRetriever(raw_search),
+        raw_md_mode="disabled",
+        reranker=None,
+    )
+
+    assert retriever.hybrid_search("寻找线索", top_k=2) == []
+    assert raw_search.calls == []
+
+
+def test_hybrid_retriever_raw_md_always_participates_in_scoring():
+    class FakeRawSearch:
+        def search_plan(self, plan, limit: int = 50):  # noqa: ANN001
+            return [MemoryCandidate(memory_id=10, content="猎人的尸体在旧井旁发现", raw_md_score=1.0)]
+
+    retriever = HybridRetriever(
+        raw_md_retriever=RawMarkdownRetriever(FakeRawSearch()),
+        raw_md_mode="always",
+        hybrid_vector_weight=0.0,
+        hybrid_keyword_weight=0.0,
+        hybrid_raw_md_weight=1.0,
+        hybrid_exact_weight=0.0,
+        hybrid_expanded_weight=0.0,
+        hybrid_recency_weight=0.0,
+        hybrid_granularity_weight=0.0,
+        reranker=None,
+    )
+
+    result = retriever.hybrid_search("猎人的尸体", top_k=1)
+
+    assert result[0].content == "猎人的尸体在旧井旁发现"
+    assert result[0].hybrid_score == 1.0
+
+
+def test_hybrid_retriever_raw_md_fallback_triggers_on_failure_and_uses_expanded_terms():
+    class FailingKeywordRetriever:
+        def search_plan(self, plan, top_k: int = 5):  # noqa: ANN001
+            raise RuntimeError("keyword down")
+
+    class FakeRawSearch:
+        def __init__(self) -> None:
+            self.plan: QueryPlan | None = None
+
+        def search_plan(self, plan, limit: int = 50):  # noqa: ANN001
+            self.plan = plan
+            return [
+                MemoryCandidate(
+                    memory_id=10,
+                    content="猎人的尸体在旧井旁发现",
+                    raw_md_score=0.5,
+                    expanded_score=1.0,
+                    debug={"raw_md_expanded_terms": ["旧井"]},
+                )
+            ]
+
+    raw_search = FakeRawSearch()
+    retriever = HybridRetriever(
+        keyword_retriever=FailingKeywordRetriever(),
+        raw_md_retriever=RawMarkdownRetriever(raw_search),
+        raw_md_mode="fallback_only",
+        reranker=None,
+    )
+    plan = QueryPlan(
+        original_query="猎人尸体",
+        normalized_query="猎人尸体",
+        keyword_queries=("猎人尸体",),
+        expanded_queries=("旧井",),
+        raw_md_terms=("猎人", "尸体"),
+    )
+
+    result = retriever.hybrid_search(plan, top_k=1)
+
+    assert raw_search.plan is plan
+    assert result[0].expanded_score == 1.0
+
+
+def test_hybrid_retriever_uses_rerank_candidate_k_for_raw_md_limit():
+    class RecordingRawSearch:
+        def __init__(self) -> None:
+            self.limits: list[int] = []
+
+        def search_plan(self, plan, limit: int = 50):  # noqa: ANN001
+            self.limits.append(limit)
+            return [
+                MemoryCandidate(memory_id=idx, content=f"raw-{idx}", raw_md_score=1.0)
+                for idx in range(limit)
+            ]
+
+    class PassThroughReranker(MemoryReranker):
+        def __init__(self) -> None:
+            self.candidate_count = 0
+
+        def rerank(self, query: str, candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
+            self.candidate_count = len(candidates)
+            for candidate in candidates:
+                candidate.final_score = candidate.hybrid_score
+            return candidates
+
+    raw_search = RecordingRawSearch()
+    reranker = PassThroughReranker()
+    retriever = HybridRetriever(
+        raw_md_retriever=RawMarkdownRetriever(raw_search),
+        raw_md_mode="always",
+        reranker=reranker,
+        rerank_candidate_k=5,
+    )
+
+    retriever.hybrid_search("寻找线索", top_k=2)
+
+    assert raw_search.limits == [5]
+    assert reranker.candidate_count == 5
+
+
+def test_hybrid_retriever_fallback_raw_md_fills_rerank_pool():
+    class FixedKeywordRetriever:
+        def search_plan(self, plan, top_k: int = 5):  # noqa: ANN001
+            return [
+                MemoryCandidate(memory_id=idx, content=f"keyword-{idx}", keyword_score=1.0)
+                for idx in range(4)
+            ]
+
+    class RecordingRawSearch:
+        def __init__(self) -> None:
+            self.limits: list[int] = []
+
+        def search_plan(self, plan, limit: int = 50):  # noqa: ANN001
+            self.limits.append(limit)
+            return [MemoryCandidate(memory_id=10, content="raw-fill", raw_md_score=1.0)]
+
+    class PassThroughReranker(MemoryReranker):
+        def rerank(self, query: str, candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
+            for candidate in candidates:
+                candidate.final_score = candidate.hybrid_score
+            return candidates
+
+    raw_search = RecordingRawSearch()
+    retriever = HybridRetriever(
+        keyword_retriever=FixedKeywordRetriever(),
+        raw_md_retriever=RawMarkdownRetriever(raw_search),
+        raw_md_mode="fallback_only",
+        reranker=PassThroughReranker(),
+        rerank_candidate_k=8,
+    )
+
+    retriever.hybrid_search("猎人尸体", top_k=2)
+
+    assert raw_search.limits == [8]
+
+
+def test_raw_md_expanded_terms_fallback_planner_uses_jieba_dict(monkeypatch):
+    seen: list[str | None] = []
+
+    class CapturingPlanner:
+        def __init__(self, jieba_dict: str | None = None) -> None:
+            seen.append(jieba_dict)
+
+        def plan(self, query: str) -> QueryPlan:
+            return QueryPlan(
+                original_query=query,
+                normalized_query=query,
+                keyword_queries=(query,),
+                expanded_queries=(),
+                raw_md_terms=(f"dict:{seen[-1]}", query),
+            )
+
+    monkeypatch.setattr(
+        "rpg_world.rpg_core.memory.retrieval.raw_md_grep_search.RuleBasedQueryPlanner",
+        CapturingPlanner,
+    )
+
+    search = RawMarkdownGrepSearch([], jieba_dict="/tmp/custom_jieba.txt")
+
+    assert search._expanded_terms(["旧井"]) == ["dict:/tmp/custom_jieba.txt", "旧井"]
+
+
+def test_raw_md_frontmatter_metadata_supports_granularity():
+    text = '''---
+batch_id: 2
+type: overall
+title: "北境森林追踪爪印"
+active: true
+score: 1.5
+---
+正文'''
+
+    metadata = _frontmatter_metadata(text)
+
+    assert metadata["batch_id"] == 2
+    assert metadata["type"] == "overall"
+    assert metadata["title"] == "北境森林追踪爪印"
+    assert metadata["active"] is True
+    assert metadata["score"] == 1.5
+    assert resolve_memory_granularity(metadata) == "global"
+
+
+def test_raw_md_search_uses_frontmatter_for_granularity(tmp_path):
+    source = tmp_path / "summaries"
+    source.mkdir()
+    (source / "001.md").write_text(
+        '''---
+batch_id: 2
+title: "遇害猎人"
+---
+猎人的尸体在森林深处被发现。''',
+        encoding="utf-8",
+    )
+
+    plan = QueryPlan(
+        original_query="猎人尸体",
+        normalized_query="猎人尸体",
+        keyword_queries=("猎人尸体",),
+        expanded_queries=(),
+        raw_md_terms=("猎人", "尸体"),
+    )
+
+    candidates = RawMarkdownGrepSearch([source]).search_plan(plan, limit=2)
+
+    assert candidates
+    assert candidates[0].metadata["batch_id"] == 2
+    assert granularity_score(candidates[0].metadata) == ("batch", 1.0)
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected_granularity", "expected_score"),
+    [
+        ({"memory_granularity": "event"}, "event", 0.95),
+        ({"granularity": "overall"}, "global", 0.55),
+        ({"type": "summary"}, "batch", 1.00),
+        ({"batch_id": "b1"}, "batch", 1.00),
+        ({}, "unknown", 0.80),
+        ({"type": "custom"}, "custom", 0.80),
+    ],
+)
+def test_memory_granularity_resolution(metadata, expected_granularity, expected_score):  # noqa: ANN001
+    assert resolve_memory_granularity(metadata) == expected_granularity
+    assert granularity_score(metadata) == (expected_granularity, expected_score)
+
+
+def test_build_rerank_query_includes_unique_expanded_queries():
+    plan = QueryPlan(
+        original_query="猎人尸体",
+        normalized_query="猎人尸体",
+        keyword_queries=("猎人尸体",),
+        expanded_queries=("猎人尸体", "旧井", ""),
+        raw_md_terms=("猎人", "尸体"),
+    )
+
+    assert _build_rerank_query(plan) == "猎人尸体\n扩展查询：旧井"
+
+
+def test_build_rerank_query_uses_base_query_without_expansions():
+    plan = QueryPlan(
+        original_query="猎人尸体",
+        normalized_query="",
+        keyword_queries=(),
+        expanded_queries=(),
+        raw_md_terms=(),
+    )
+
+    assert _build_rerank_query(plan) == "猎人尸体"
 
 def test_pointwise_reranker_logs_failed_preview(monkeypatch):
     messages: list[str] = []
@@ -729,7 +1092,7 @@ def test_memory_manager_recall_logs_raw_md_plan_terms(monkeypatch, fake_recalled
             return QueryPlan(
                 original_query=query,
                 normalized_query=query,
-                bigram_queries=(query,),
+                keyword_queries=(query,),
                 expanded_queries=(),
                 raw_md_terms=("酒馆", "老板"),
                 planner_source="test",
@@ -752,6 +1115,7 @@ def test_memory_manager_recall_logs_raw_md_plan_terms(monkeypatch, fake_recalled
 
     assert any("recall plan" in msg and "raw_md_terms=['酒馆', '老板']" in msg for msg in messages)
     assert all("bigram_queries" not in msg for msg in messages)
+    assert any("keyword_queries" in msg for msg in messages)
 
 
 def test_rule_based_query_planner_filters_punctuation_terms():
@@ -802,7 +1166,7 @@ def test_memory_manager_recall_gracefully_handles_planner_or_retriever_failure(f
 def test_hybrid_retriever_planner_failure_returns_empty(monkeypatch):
     store = FakeStore()
     retriever = HybridRetriever(
-        bigram_retriever=BigramRetriever(store=store, limit=2),
+        keyword_retriever=KeywordRetriever(store=store, limit=2),
         raw_md_retriever=RawMarkdownRetriever(RawMarkdownGrepSearch([])),
         reranker=None,
     )
