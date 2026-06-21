@@ -28,14 +28,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
-
+from rpg_world.rpg_core.llm.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
+from rpg_world.rpg_core.llm.keys import (
+    AGENT_MAIN_BIZ_KEY,
+    MEMORY_EMBED_BIZ_KEY,
+    MEMORY_QUERY_PLANNER_BIZ_KEY,
+    MEMORY_RERANK_BIZ_KEY,
+)
+from rpg_world.rpg_core.utils.config_values import forgiving_float, forgiving_int, optional_bool
 from rpg_world.rpg_core.utils.path_utils import (
     PACKAGE_ROOT as _PACKAGE_ROOT,
     _KNOWN_DATA_DIRS,
     resolve_rpg_path,
     resolve_workspace_root,
 )
+from rpg_world.rpg_core.utils.profile_loader import load_profiled_yaml
 
 # Location of settings.yaml relative to this module
 _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.yaml"
@@ -97,89 +104,19 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
     return merge_dict(base, override, ())
 
-
-def _load() -> dict[str, object]:
-    if _SETTINGS_PATH.is_file():
-        return _load_yaml_mapping(_SETTINGS_PATH, "settings.yaml")
-    return {}
-
-
-def _load_yaml_mapping(path: Path, label: str) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as f:
-        loaded = yaml.safe_load(f) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"{label} must be a mapping")
-    return loaded
-
-
-def _resolve_profile_override(profile_name: str, profile: Any) -> dict[str, Any]:
-    """Return the override dict for a profile.
-
-    Supported forms:
-
-    ``local: {}``
-        Inline override, unchanged from the original YAML format.
-
-    ``local: settings.local.yaml``
-        Load a profile override file relative to ``settings.yaml``.
-
-    ``local: {file: settings.local.yaml, required: true, ...}``
-        Merge inline keys first, then the file override. Missing files are
-        allowed unless ``required`` is truthy, which is convenient for
-        gitignored local profile files.
-    """
-    if profile is None:
-        return {}
-    if isinstance(profile, str):
-        return _load_profile_file(profile_name, profile, required=False)
-    if not isinstance(profile, dict):
-        raise ValueError(f"settings profile must be a mapping or file path: {profile_name}")
-
-    file_value = profile.get("file")
-    required = Settings._as_bool(profile.get("required", False), False)
-    inline = {
-        key: value
-        for key, value in profile.items()
-        if key not in {"file", "required"}
-    }
-    if file_value is None:
-        return inline
-    if not isinstance(file_value, str) or not file_value.strip():
-        raise ValueError(f"settings profile file must be a non-empty string: {profile_name}")
-    file_override = _load_profile_file(profile_name, file_value, required=required)
-    return _deep_merge(inline, file_override)
-
-
-def _load_profile_file(profile_name: str, file_value: str, *, required: bool) -> dict[str, Any]:
-    path = Path(file_value).expanduser()
-    if not path.is_absolute():
-        path = _SETTINGS_PATH.parent / path
-    if not path.is_file():
-        if required:
-            raise ValueError(f"settings profile file not found: profile={profile_name} file={path}")
-        return {}
-    return _load_yaml_mapping(path, f"settings profile file: {profile_name}")
-
-
-def _as_mapping(value: Any, label: str) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a mapping")
-    return value
-
-
 @dataclass
 class MemorySettings:
     """记忆系统配置（对应 settings.yaml 中 ``memory`` 节）。"""
 
     @dataclass(frozen=True)
     class Provider:
-        """单个 memory provider 的配置块。"""
+        """单个 memory LLM 后端选择。
+
+        具体 OpenAI / llama 参数由 ``llm.yaml`` 和 ``LLMManager`` 负责解析，
+        memory 设置只保留业务开关与 provider kind。
+        """
 
         provider: Literal["shared", "openai", "llama"] = "llama"
-        openai: dict[str, Any] = field(default_factory=dict)
-        llama: dict[str, Any] = field(default_factory=dict)
 
     enabled: bool = False
     """是否启用向量记忆索引与检索。"""
@@ -232,7 +169,7 @@ class MemorySettings:
     hybrid_recency_weight: float = 0.05
     """混合评分中时间衰减归一化分数的权重。"""
 
-    rerank_llama_weight: float = 0.70
+    rerank_score_weight: float = 0.70
     """Reranker 融合评分中 LLM 重排分的权重（剩余为混合分数权重）。"""
 
     rerank_enabled: bool = False
@@ -240,9 +177,6 @@ class MemorySettings:
 
     rerank_model_path: str = ""
     """重排模型 GGUF 路径，为空或不存在时自动回退。"""
-
-    rerank_max_candidates: int = 10
-    """送入本地重排模型的最大候选数。"""
 
     rerank_n_ctx: int = 4096
     """本地重排模型上下文窗口。"""
@@ -316,19 +250,9 @@ class Settings:
     """Read-only settings proxy. Attributes mirror merged ``settings.yaml``."""
 
     def __init__(self) -> None:
-        loaded = _load()
         profile_name = os.environ.get(_PROFILE_ENV, "local").strip() or "local"
-        profiles = loaded.get("profiles", {})
-        if not isinstance(profiles, dict):
-            raise ValueError("settings.yaml profiles must be a mapping")
-        if profile_name not in profiles:
-            raise ValueError(f"settings profile not found: {profile_name}")
-        base = loaded.get("base", {})
-        profile = _resolve_profile_override(profile_name, profiles.get(profile_name))
-        if not isinstance(base, dict):
-            raise ValueError("settings.yaml base must be a mapping")
         self.profile = profile_name
-        self._raw = _deep_merge(base, profile)
+        self._raw = load_profiled_yaml(_SETTINGS_PATH, profile_name, label="settings.yaml", merge_fn=_deep_merge)
         self._validate_settings()
 
     @staticmethod
@@ -352,18 +276,22 @@ class Settings:
         explicit_env: str | None = None,
         fallback_to_agent: bool = True,
     ) -> str | None:
-        """Resolve an OpenAI API key from explicit values and optional agent fallback."""
-        agent = self.agent_settings
+        """Resolve an OpenAI API key from explicit values and config fallbacks."""
         if not fallback_to_agent:
             return self._first_non_empty(
                 explicit,
                 os.environ.get(explicit_env) if explicit_env else None,
             )
+        llm_agent = self._llm_agent_openai_settings()
+        agent = self.agent_settings
+        llm_env = self._first_non_empty(llm_agent.get("api_key_env"))
         agent_env = self._first_non_empty(agent.get("api_key_env"))
         return self._first_non_empty(
             explicit,
             os.environ.get(explicit_env) if explicit_env else None,
+            llm_agent.get("api_key"),
             agent.get("api_key"),
+            os.environ.get(llm_env) if llm_env else None,
             os.environ.get(agent_env) if agent_env else None,
         )
 
@@ -375,6 +303,14 @@ class Settings:
     def agent_settings(self) -> dict[str, Any]:
         raw = self._raw.get("agent", {})
         return raw if isinstance(raw, dict) else {}
+
+    @staticmethod
+    def _llm_agent_openai_settings() -> dict[str, Any]:
+        try:
+            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
+        except ValueError:
+            return {}
+        return cfg.openai if isinstance(cfg.openai, dict) else {}
 
     @property
     def module_settings(self) -> dict[str, Any]:
@@ -402,41 +338,19 @@ class Settings:
             allow_from = ["*"]
         return TelegramBotSettings(
             name=str(bot.get("name", "")),
-            enabled=self._as_bool(bot.get("enabled", False), False),
+            enabled=optional_bool(bot.get("enabled", False), False),
             token=token,
             workspace=str(bot.get("workspace", "") or ""),
             allow_from=[str(item) for item in allow_from],
-            streaming=self._as_bool(bot.get("streaming", True), True),
+            streaming=optional_bool(bot.get("streaming", True), True),
             proxy=str(bot.get("proxy", "") or ""),
-            stream_edit_interval_ms=self._as_int(bot.get("stream_edit_interval_ms", 800), 800),
-            stream_edit_min_chars=self._as_int(bot.get("stream_edit_min_chars", 24), 24),
-            request_timeout_ms=self._as_int(bot.get("request_timeout_ms", 5000), 5000),
+            stream_edit_interval_ms=forgiving_int(bot.get("stream_edit_interval_ms", 800), 800),
+            stream_edit_min_chars=forgiving_int(bot.get("stream_edit_min_chars", 24), 24),
+            request_timeout_ms=forgiving_int(bot.get("request_timeout_ms", 5000), 5000),
         )
 
-    @staticmethod
-    def _as_bool(value: Any, default: bool) -> bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"true", "1", "yes", "on"}:
-                return True
-            if normalized in {"false", "0", "no", "off"}:
-                return False
-        return default
-
-    @staticmethod
-    def _as_int(value: Any, default: int) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
-
     def _validate_settings(self) -> None:
-        agent = self.agent_settings
-        model = self._first_non_empty(agent.get("model"))
-        if not model:
-            raise ValueError("agent config invalid: agent.model is required")
+        self._validate_agent_llm_settings()
 
         modules = self.module_settings
         telegram = modules.get("telegram", {})
@@ -449,7 +363,7 @@ class Settings:
         seen_names: set[str] = set()
         token_to_workspace: dict[str, tuple[str, str]] = {}
         workspace_to_token: dict[str, tuple[str, str]] = {}
-        telegram_enabled = self._as_bool(telegram.get("enabled", False), False)
+        telegram_enabled = optional_bool(telegram.get("enabled", False), False)
         for raw_bot in bots:
             if not isinstance(raw_bot, dict):
                 raise ValueError("telegram bot config invalid: bot entry must be a mapping")
@@ -485,6 +399,21 @@ class Settings:
                         f"bot={name} conflicts_with={other_name} workspace={bot.workspace}"
                     )
             workspace_to_token[bot.workspace] = (name, bot.token)
+
+    def _validate_agent_llm_settings(self) -> None:
+        legacy_model = self._first_non_empty(self.agent_settings.get("model"))
+        try:
+            agent = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
+        except ValueError:
+            if not legacy_model:
+                raise
+            return
+
+        if agent.model:
+            return
+        if legacy_model:
+            return
+        raise ValueError(f"llm biz config invalid: {AGENT_MAIN_BIZ_KEY}.model is required")
 
     # ------------------------------------------------------------------
     # Workspace-scoped path methods
@@ -577,23 +506,49 @@ class Settings:
     @property
     def agent_model(self) -> str:
         """用于 API 层创建 RPGGameAgent 的默认模型名。
-
-        由 ``_validate_settings()`` 保证非空。
         """
-        return self.agent_settings.get("model", "")
+        try:
+            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
+        except ValueError:
+            return self._first_non_empty(self.agent_settings.get("model")) or ""
+
+        value = self._first_non_empty(cfg.model)
+        if value:
+            return value
+        return self._first_non_empty(self.agent_settings.get("model")) or ""
 
     @property
     def agent_base_url(self) -> str | None:
         """用于 API 层创建 RPGGameAgent 的 base URL。None 表示使用 SDK 默认值。"""
-        return self.agent_settings.get("base_url")
+        try:
+            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
+            return cfg.base_url
+        except ValueError:
+            pass
+        value = self.agent_settings.get("base_url")
+        return str(value) if value is not None else None
 
     @property
     def agent_max_tokens(self) -> int | None:
-        return self.agent_settings.get("max_tokens")
+        try:
+            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
+            if cfg.max_tokens is not None:
+                return cfg.max_tokens
+        except ValueError:
+            pass
+        value = self.agent_settings.get("max_tokens")
+        return int(value) if value is not None else None
 
     @property
     def agent_temperature(self) -> float | None:
-        return self.agent_settings.get("temperature")
+        try:
+            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
+            if cfg.temperature is not None:
+                return cfg.temperature
+        except ValueError:
+            pass
+        value = self.agent_settings.get("temperature")
+        return float(value) if value is not None else None
 
     # ------------------------------------------------------------------
     # Workspace operations
@@ -638,92 +593,23 @@ class Settings:
         if not isinstance(raw, dict):
             raw = {}
 
-        shared_openai = _as_mapping(raw.get("openai"), "memory.openai")
-        embedding_provider = self._resolve_memory_provider(
-            raw,
-            key="embedding",
-            provider_key="embedding_provider",
-            legacy_provider="llama",
-            legacy_openai=shared_openai,
-            legacy_llama={
-                "model_path": raw.get("embedding_model_path", ""),
-                "n_ctx": raw.get("n_ctx", 32768),
-                "n_gpu_layers": raw.get("n_gpu_layers", 0),
-                "n_threads": raw.get("embedding_n_threads", 4),
-                "verbose": raw.get("embedding_verbose", False),
-                "request_timeout_ms": raw.get("llama_request_timeout_ms", 60000),
-            },
-        )
-        query_planner_provider = self._resolve_memory_provider(
-            raw,
-            key="query_planner",
-            provider_key="query_planner_provider",
-            legacy_provider="llama" if raw.get("query_planner_enabled", False) else "llama",
-            legacy_openai=shared_openai,
-            legacy_llama={
-                "model_path": raw.get("query_planner_model_path", ""),
-                "n_ctx": raw.get("query_planner_n_ctx", 2048),
-                "n_gpu_layers": raw.get("query_planner_n_gpu_layers", 0),
-                "temperature": raw.get("query_planner_temperature", 0.0),
-                "max_tokens": raw.get("query_planner_max_tokens", 512),
-                "request_timeout_ms": raw.get("llama_request_timeout_ms", 60000),
-            },
-        )
-        rerank_provider = self._resolve_memory_provider(
-            raw,
-            key="rerank",
-            provider_key="rerank_provider",
-            legacy_provider="llama" if raw.get("rerank_enabled", False) else "llama",
-            legacy_openai=shared_openai,
-            legacy_llama={
-                "model_path": raw.get("rerank_model_path", ""),
-                "max_candidates": raw.get("rerank_max_candidates", 10),
-                "n_ctx": raw.get("rerank_n_ctx", 4096),
-                "n_gpu_layers": raw.get("rerank_n_gpu_layers", 0),
-                "temperature": raw.get("rerank_temperature", 0.0),
-                "llama_weight": raw.get("rerank_llama_weight", 0.70),
-                "request_timeout_ms": raw.get("llama_request_timeout_ms", 60000),
-            },
-        )
-
-        embed_raw = raw.get("embedding_model_path", "")
-        if embed_raw:
-            p = Path(embed_raw)
-            if p.is_absolute():
-                embed_resolved = str(p)
-            else:
-                # 模型路径相对于包根（rpg_world/）解析，不经过 workspace
-                embed_resolved = str((_PACKAGE_ROOT / p).resolve())
-        else:
-            embed_resolved = embed_raw
-        rerank_raw = raw.get("rerank_model_path", "")
-        if rerank_raw:
-            p = Path(rerank_raw)
-            rerank_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
-        else:
-            rerank_resolved = rerank_raw
-        planner_raw = raw.get("query_planner_model_path", "")
-        if planner_raw:
-            p = Path(planner_raw)
-            planner_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
-        else:
-            planner_resolved = planner_raw
-        jieba_dict_raw = raw.get("jieba_dict", "")
+        jieba_dict_raw = str(raw.get("jieba_dict", "") or "").strip()
         if jieba_dict_raw:
             p = Path(jieba_dict_raw)
             jieba_dict_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
         else:
-            jieba_dict_resolved = jieba_dict_raw
+            jieba_dict_resolved = ""
+        llm_runtime = get_runtime_config()
         return MemorySettings(
             enabled=raw.get("enabled", False),
-            embedding_provider=embedding_provider,
-            query_planner_provider=query_planner_provider,
-            rerank_provider=rerank_provider,
-            embedding_model_path=embed_resolved,
-            n_ctx=raw.get("n_ctx", 32768),
-            n_gpu_layers=raw.get("n_gpu_layers", 0),
-            embedding_n_threads=self._as_int(raw.get("embedding_n_threads", 4), 4),
-            embedding_verbose=self._as_bool(raw.get("embedding_verbose", False), False),
+            embedding_provider=self._memory_llm_provider(MEMORY_EMBED_BIZ_KEY),
+            query_planner_provider=self._memory_llm_provider(MEMORY_QUERY_PLANNER_BIZ_KEY),
+            rerank_provider=self._memory_llm_provider(MEMORY_RERANK_BIZ_KEY),
+            embedding_model_path=self._memory_llama_model_path(MEMORY_EMBED_BIZ_KEY),
+            n_ctx=32768,
+            n_gpu_layers=0,
+            embedding_n_threads=4,
+            embedding_verbose=False,
             top_k=raw.get("top_k", 5),
             hybrid_enabled=raw.get("hybrid_enabled", True),
             vector_k=raw.get("vector_k", 50),
@@ -733,69 +619,29 @@ class Settings:
             hybrid_exact_weight=raw.get("hybrid_exact_weight", 0.10),
             hybrid_recency_weight=raw.get("hybrid_recency_weight", 0.05),
             rerank_enabled=raw.get("rerank_enabled", False),
-            rerank_model_path=rerank_resolved,
-            rerank_max_candidates=raw.get("rerank_max_candidates", 10),
-            rerank_n_ctx=raw.get("rerank_n_ctx", 4096),
-            rerank_n_gpu_layers=self._as_int(raw.get("rerank_n_gpu_layers", 0), 0),
-            rerank_temperature=raw.get("rerank_temperature", 0.0),
-            rerank_llama_weight=raw.get("rerank_llama_weight", 0.70),
-            rerank_verbose=self._as_bool(raw.get("rerank_verbose", False), False),
+            rerank_model_path=self._memory_llama_model_path(MEMORY_RERANK_BIZ_KEY),
+            rerank_n_ctx=4096,
+            rerank_n_gpu_layers=0,
+            rerank_temperature=0.0,
+            rerank_score_weight=forgiving_float(raw.get("rerank_score_weight", 0.70), 0.70),
+            rerank_verbose=False,
             query_planner_enabled=raw.get("query_planner_enabled", False),
-            query_planner_model_path=planner_resolved,
-            query_planner_n_ctx=raw.get("query_planner_n_ctx", 2048),
-            query_planner_n_gpu_layers=raw.get("query_planner_n_gpu_layers", 0),
-            query_planner_temperature=raw.get("query_planner_temperature", 0.0),
-            query_planner_max_tokens=raw.get("query_planner_max_tokens", 512),
+            query_planner_model_path=self._memory_llama_model_path(MEMORY_QUERY_PLANNER_BIZ_KEY),
+            query_planner_n_ctx=2048,
+            query_planner_n_gpu_layers=0,
+            query_planner_temperature=0.0,
+            query_planner_max_tokens=512,
             jieba_dict=jieba_dict_resolved,
-            llama_process_enabled=self._as_bool(raw.get("llama_process_enabled", True), True),
-            llama_request_timeout_ms=self._as_int(raw.get("llama_request_timeout_ms", 60000), 60000),
-            llama_startup_timeout_ms=self._as_int(raw.get("llama_startup_timeout_ms", 120000), 120000),
-            llama_max_parallel_models=self._as_int(raw.get("llama_max_parallel_models", 2), 2),
+            llama_process_enabled=llm_runtime.llama_process_enabled,
+            llama_request_timeout_ms=llm_runtime.llama_request_timeout_ms,
+            llama_startup_timeout_ms=llm_runtime.llama_startup_timeout_ms,
+            llama_max_parallel_models=llm_runtime.llama_max_parallel_models,
             chunk_size=raw.get("chunk_size", 2000),
             chunk_overlap=raw.get("chunk_overlap", 64),
         )
 
     @staticmethod
-    def _resolve_memory_provider(
-        raw: dict[str, Any],
-        *,
-        key: str,
-        provider_key: str,
-        legacy_provider: str,
-        legacy_openai: dict[str, Any],
-        legacy_llama: dict[str, Any],
-    ) -> MemorySettings.Provider:
-        block = raw.get(key, {})
-        if block is None:
-            block = {}
-        if not isinstance(block, dict):
-            raise ValueError(f"memory.{key} must be a mapping")
-
-        provider = str(
-            block.get("provider")
-            if block.get("provider") is not None
-            else raw.get(provider_key, legacy_provider)
-        ).strip() or legacy_provider
-        openai_cfg = _as_mapping(block.get("openai"), f"memory.{key}.openai")
-        openai_cfg = {
-            **dict(legacy_openai),
-            **openai_cfg,
-        }
-        llama_cfg = _as_mapping(block.get("llama"), f"memory.{key}.llama")
-        llama_cfg = {
-            **dict(legacy_llama),
-            **llama_cfg,
-        }
-        if llama_cfg.get("model_path"):
-            llama_cfg["model_path"] = Settings._resolve_package_model_path(llama_cfg.get("model_path"))
-        return MemorySettings.Provider(
-            provider=provider,
-            openai=openai_cfg,
-            llama=llama_cfg,
-        )
-
-    @staticmethod
-    def _resolve_package_model_path(value: Any) -> str:
+    def _resolve_package_path(value: Any) -> str:
         text = str(value or "").strip()
         if not text:
             return ""
@@ -803,6 +649,23 @@ class Settings:
         if path.is_absolute():
             return str(path)
         return str((_PACKAGE_ROOT / path).resolve())
+
+    @staticmethod
+    def _memory_llm_provider(biz_key: str) -> MemorySettings.Provider:
+        try:
+            cfg = resolve_llm_config(biz_key)
+        except ValueError:
+            return MemorySettings.Provider()
+        provider = cfg.provider if cfg.provider in {"shared", "openai", "llama"} else "llama"
+        return MemorySettings.Provider(provider=provider)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _memory_llama_model_path(biz_key: str) -> str:
+        try:
+            cfg = resolve_llm_config(biz_key)
+        except ValueError:
+            return ""
+        return Settings._resolve_package_path(cfg.llama.get("model_path"))
 
     def get_vector_db_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``memory_vectors.db`` path for the given session."""

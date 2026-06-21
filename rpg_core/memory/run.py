@@ -35,6 +35,8 @@ logger.add(
 
 from rpg_world.rpg_core.session.manager import SessionManager
 from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.llm.config import resolve_llm_config
+from rpg_world.rpg_core.llm.keys import MEMORY_EMBED_BIZ_KEY, MEMORY_QUERY_PLANNER_BIZ_KEY, MEMORY_RERANK_BIZ_KEY
 from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
 from rpg_world.rpg_core.memory.memory_manager import MemoryManager, format_recall_item
 from rpg_world.rpg_core.utils.path_utils import (
@@ -66,11 +68,16 @@ def _print_line(label: str, value: object, indent: str = "  ") -> None:
     print(f"{indent}{label:<24} {value}")
 
 
-def _print_provider_config(title: str, provider_cfg) -> None:  # noqa: ANN001
+def _print_provider_config(title: str, provider_cfg, biz_key: str) -> None:  # noqa: ANN001
     print(f"  {title}:")
     _print_line("provider:", provider_cfg.provider, "    ")
-    openai = provider_cfg.openai or {}
-    llama = provider_cfg.llama or {}
+    try:
+        llm_cfg = resolve_llm_config(biz_key)
+    except ValueError as exc:
+        _print_line("llm.yaml:", f"invalid ({exc})", "    ")
+        return
+    openai = llm_cfg.openai
+    llama = llm_cfg.llama
     _print_line("openai.model:", openai.get("model") or "unset", "    ")
     _print_line("openai.api_key:", _format_secret(openai.get("api_key")), "    ")
     _print_line("openai.api_key_env:", openai.get("api_key_env") or "unset", "    ")
@@ -85,10 +92,8 @@ def _print_provider_config(title: str, provider_cfg) -> None:  # noqa: ANN001
             ("n_threads", "llama.n_threads"),
             ("verbose", "llama.verbose"),
             ("request_timeout_ms", "llama.request_timeout_ms"),
-            ("max_candidates", "llama.max_candidates"),
             ("max_tokens", "llama.max_tokens"),
             ("temperature", "llama.temperature"),
-            ("llama_weight", "llama.llama_weight"),
         ]:
             if key in llama:
                 _print_line(f"{label}:", llama.get(key), "    ")
@@ -126,7 +131,7 @@ def show_config(workspace: str, session: str) -> None:
     _print_line("选中 workspace:", workspace)
     _print_line("选中 session:", session)
     _print_line("enabled:", mem.enabled)
-    _print_provider_config("embedding", mem.embedding_provider)
+    _print_provider_config("embedding", mem.embedding_provider, MEMORY_EMBED_BIZ_KEY)
     _print_line("hybrid_enabled:", mem.hybrid_enabled)
     _print_line("vector_k:", mem.vector_k)
     _print_line("bigram_k:", mem.bigram_k)
@@ -142,9 +147,10 @@ def show_config(workspace: str, session: str) -> None:
     _print_line("llama_startup_timeout_ms:", mem.llama_startup_timeout_ms)
     _print_line("llama_max_parallel_models:", mem.llama_max_parallel_models)
     _print_line("query_planner_enabled:", mem.query_planner_enabled)
-    _print_provider_config("query_planner", mem.query_planner_provider)
+    _print_provider_config("query_planner", mem.query_planner_provider, MEMORY_QUERY_PLANNER_BIZ_KEY)
     _print_line("rerank_enabled:", mem.rerank_enabled)
-    _print_provider_config("rerank", mem.rerank_provider)
+    _print_line("rerank_score_weight:", mem.rerank_score_weight)
+    _print_provider_config("rerank", mem.rerank_provider, MEMORY_RERANK_BIZ_KEY)
     _print_line("DB path:", settings.get_vector_db_path(workspace, session))
     _print_line("session dir:", settings.session_dir(workspace, session))
 

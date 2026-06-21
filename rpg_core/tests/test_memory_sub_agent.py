@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from rpg_world.rpg_core.agent.agent_types import LLM_PROVIDER_SHARED
-from rpg_world.rpg_core.agent.sub_agents.base import SubAgentProviderConfig
 from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import MemoryAgentResult, MemorySubAgent
 from rpg_world.rpg_core.context.rpg_context import Message, Role
 from rpg_world.rpg_core.session.manager import SessionManager
@@ -29,7 +27,7 @@ async def _run_execute_story_memory(workspace: str) -> int:
 
     sub_agent = MemorySubAgent(
         story_store=DummyStoryStore(),
-        provider_config=SubAgentProviderConfig(mode=LLM_PROVIDER_SHARED),
+        provider_biz_key="agent.memory_sub_agent",
         enabled=False,
     )
 

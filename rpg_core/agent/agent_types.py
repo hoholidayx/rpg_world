@@ -20,101 +20,14 @@ from asyncio import Queue as AsyncQueue
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
-from typing import Literal
 
-
-# ── LLM provider 常量 ──────────────────────────────────────────────────
-
-LLM_PROVIDER_SHARED = "shared"
-LLM_PROVIDER_OPENAI = "openai"
-LLM_PROVIDER_LLAMA = "llama"
-
-LLM_PROVIDER_MODES = (
-    LLM_PROVIDER_SHARED,
-    LLM_PROVIDER_OPENAI,
-    LLM_PROVIDER_LLAMA,
-)
-
-SubAgentProviderMode = Literal[
-    LLM_PROVIDER_SHARED,
-    LLM_PROVIDER_OPENAI,
-    LLM_PROVIDER_LLAMA,
-]
+from rpg_world.rpg_core.llm.types import LLMResponse, LLMUsage, ProviderChunk
 
 
 # ── shared JSON type aliases ──────────────────────────────────────────
 
 JsonDict = dict[str, object]
 JsonValue = object
-
-
-# ── LLM 调用 usage 数据 ──────────────────────────────────────────────
-
-
-@dataclass
-class LLMUsage:
-    """一次 LLM API 调用的 token 消耗。
-
-    字段对应 OpenAI / DeepSeek ``response.usage`` 结构。
-    prompt_cache_hit / miss 为通用字段，不依赖特定厂商字段名。
-    """
-
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-    prompt_tokens_details: dict[str, object] | None = None
-    completion_tokens_details: dict[str, object] | None = None
-
-    # ── 缓存统计（通用字段，provider 层从原始 usage 中提取） ────────
-    prompt_cache_hit_tokens: int = 0
-    """本次 prompt 中命中缓存的 token 数。"""
-    prompt_cache_miss_tokens: int = 0
-    """本次 prompt 中未命中缓存、需实际计算的 token 数。"""
-
-    raw_usage: dict[str, object] | None = None
-    """API 原始 ``response.usage`` 全量字段快照，用于调试。"""
-
-    @property
-    def cached_tokens(self) -> int:
-        """取缓存命中 token 数（兼容旧代码）。"""
-        if self.prompt_cache_hit_tokens:
-            return self.prompt_cache_hit_tokens
-        # fallback: prompt_tokens_details.cached_tokens
-        if self.prompt_tokens_details:
-            return self.prompt_tokens_details.get("cached_tokens", 0) or 0
-        return 0
-
-    @property
-    def has_usage(self) -> bool:
-        """API 是否返回了 usage 数据。"""
-        return self.total_tokens > 0 or self.prompt_tokens_details is not None
-
-    def __str__(self) -> str:
-        parts = [f"{self.prompt_tokens}p + {self.completion_tokens}c = {self.total_tokens}t"]
-        cached = self.cached_tokens
-        if cached:
-            parts.append(f" [cache: {cached} hit]")
-        return "".join(parts)
-
-
-# ── LLM 响应封装 ──────────────────────────────────────────────────────
-
-
-@dataclass
-class LLMResponse:
-    """替换 ``dict[str, object]`` 作为 ``LLMProvider.chat()`` 的返回类型。
-
-    包含 content/tool_calls 以及 usage/model/reasoning 等元数据。
-    """
-
-    content: str
-    tool_calls: list[dict[str, object]] | None
-    finish_reason: str | None
-    usage: LLMUsage | None = None
-    model: str | None = None
-    request_id: str | None = None
-    created: int | None = None
-    reasoning_content: str | None = None
 
 
 # ── 一次 LLM 调用的记录 ──────────────────────────────────────────────
@@ -213,29 +126,6 @@ class TurnStats:
         ]
         parts.append(f"{self.total_duration_ms:.0f}ms")
         return " | ".join(parts)
-
-
-# ── 流式输出类型 ──────────────────────────────────────────────────────
-
-
-@dataclass
-class ProviderChunk:
-    """Provider 层原始 streaming delta chunk。
-
-    由 ``LLMProvider.chat_stream()`` 产出，每对应一次 API chunk。
-    ``tool_calls`` / ``usage`` / ``model`` / ``finish_reason`` 仅在末 chunk 非空。
-    """
-
-    content: str = ""
-    reasoning_content: str | None = None
-
-    # 以下只在末 chunk 非空：
-    tool_calls: list[dict] | None = None
-    finish_reason: str | None = None
-    usage: LLMUsage | None = None
-    model: str | None = None
-    request_id: str | None = None
-    created: int | None = None
 
 
 class StreamEventKind(str, Enum):

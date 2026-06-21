@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.memory.embedding_provider import EmbeddingProvider
+    from rpg_world.rpg_core.llm.base_provider import LLMProvider as EmbeddingProvider
     from rpg_world.rpg_core.memory.storage.vector_store import VectorStore
 
 

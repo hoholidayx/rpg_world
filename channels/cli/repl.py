@@ -16,6 +16,8 @@ from rpg_world.channels.cli import CLIAdapter
 from rpg_world.channels.config import settings as channels_settings
 from rpg_world.rpg_core.agent.agent import RPGGameAgent
 from rpg_world.rpg_core.llama_service.client import configure_llama_client_from_memory_settings
+from rpg_world.rpg_core.llm.keys import AGENT_MAIN_BIZ_KEY
+from rpg_world.rpg_core.llm.manager import LLMManager, ProviderOverrides
 from rpg_world.rpg_core.settings import settings
 
 
@@ -34,10 +36,15 @@ async def main() -> int:
     args = _parse_args()
     configure_llama_client_from_memory_settings(settings.memory_settings)
 
+    model = args.model or settings.agent_model
+    if not model:
+        overrides = ProviderOverrides(openai_model=args.model or None) if args.model else None
+        model = LLMManager.get().get_provider(AGENT_MAIN_BIZ_KEY, overrides=overrides).get_default_model()
+
     agent = RPGGameAgent(
         session_id=args.session_id,
         workspace=args.workspace or channels_settings.cli_workspace,
-        model=args.model or settings.agent_model,
+        model=model,
         api_key=args.api_key,
         base_url=args.base_url or settings.agent_base_url or None,
         max_tokens=settings.agent_max_tokens,

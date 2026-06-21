@@ -10,6 +10,8 @@ from typing import Any
 
 from loguru import logger
 
+from rpg_world.rpg_core.llm.base_provider import LLMProvider
+from rpg_world.rpg_core.memory.asyncio_utils import run_awaitable_sync
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan, make_empty_plan
 
 
@@ -102,43 +104,34 @@ class RuleBasedQueryPlanner(BaseQueryPlanner):
 
 
 class LlamaQueryPlanner(BaseQueryPlanner):
-    """Process-isolated llama.cpp query planner backed by a GGUF model."""
+    """Query planner backed by a llama.cpp model via ``LLMProvider``."""
 
     def __init__(
         self,
-        model_path: str,
-        n_ctx: int = 2048,
-        n_gpu_layers: int = 0,
-        temperature: float = 0.0,
-        max_tokens: int = 512,
-        request_timeout_ms: int = 60000,
+        provider: LLMProvider,
+        *,
         fallback_planner: BaseQueryPlanner | None = None,
     ) -> None:
-        from rpg_world.rpg_core.llama_service import LlamaCompletionModel
-
-        self._model = LlamaCompletionModel(
-            model_path,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            request_timeout_ms=request_timeout_ms,
-        )
-        self._temperature = temperature
-        self._max_tokens = max_tokens
+        self._provider = provider
         self._fallback_planner = fallback_planner
-        logger.info("[LlamaQueryPlanner] process client ready: {} (n_ctx={})", model_path, n_ctx)
+        logger.info(
+            "[LlamaQueryPlanner] ready: {}",
+            provider.get_default_model(),
+        )
 
     def plan(self, query: str) -> QueryPlan:
         normalized = _normalize(query)
         if not normalized:
             return make_empty_plan(query, planner_source="llama")
         prompt = _build_prompt(normalized)
-        output = self._model.complete(
-            prompt,
-            max_tokens=self._max_tokens,
-            temperature=self._temperature,
-            stop=[],
+        response = _run_llm_chat_sync(
+            self._provider,
+            [
+                {"role": "system", "content": "You are a memory query planner."},
+                {"role": "user", "content": prompt},
+            ],
         )
-        data = _parse_json_object(_extract_text(output))
+        data = _parse_json_object(response.content)
         return _plan_from_mapping(
             query,
             normalized,
@@ -285,16 +278,9 @@ def _is_cjk(text: str) -> bool:
     return all("\u4e00" <= char <= "\u9fff" for char in text)
 
 
-def _extract_text(output: Any) -> str:
-    if isinstance(output, str):
-        return output
-    if isinstance(output, dict):
-        choices = output.get("choices")
-        if isinstance(choices, list) and choices:
-            first = choices[0]
-            if isinstance(first, dict):
-                return str(first.get("text") or first.get("message", {}).get("content") or "")
-    return str(output)
+def _run_llm_chat_sync(provider: LLMProvider, messages: list[dict]):
+    """Run ``provider.chat()`` synchronously, safe for any event-loop state."""
+    return run_awaitable_sync(provider.chat(messages))
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:

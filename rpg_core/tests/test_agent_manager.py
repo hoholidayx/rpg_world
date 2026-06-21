@@ -4,6 +4,7 @@ import pytest
 
 import rpg_world.rpg_core.agent.manager as agent_manager_module
 from rpg_world.rpg_core.agent.manager import AgentManager
+from rpg_world.rpg_core.llm.manager import ProviderOverrides
 
 
 class FakeAgent:
@@ -36,7 +37,6 @@ def test_get_or_create_reuses_same_key():
     assert first is second
     assert first.kwargs["workspace"] == "data/test"
     assert first.kwargs["session_id"] == "s1"
-    assert first.kwargs["api_key"] == "k1"
 
 
 def test_get_or_create_separates_by_api_key_and_session():
@@ -47,6 +47,32 @@ def test_get_or_create_separates_by_api_key_and_session():
     assert first is not second
     assert first is not third
     assert len(AgentManager._instances) == 3
+
+
+def test_get_or_create_passes_api_key_override_to_llm_manager(monkeypatch):
+    calls: list[tuple[str, ProviderOverrides | None]] = []
+
+    class FakeProvider:
+        def get_default_model(self) -> str:
+            return "override-model"
+
+    class FakeLLMManager:
+        def get_provider(self, biz_key, overrides=None):  # noqa: ANN001
+            calls.append((biz_key, overrides))
+            return FakeProvider()
+
+    monkeypatch.setattr(
+        agent_manager_module.LLMManager,
+        "get",
+        classmethod(lambda cls: FakeLLMManager()),
+    )
+
+    agent = AgentManager.get_or_create(workspace="data/test", session_id="s1", api_key="header-key")
+
+    assert agent.kwargs["api_key"] == "header-key"
+    assert agent.kwargs["model"] == "override-model"
+    assert calls[0][0] == "agent.main"
+    assert calls[0][1] == ProviderOverrides(openai_api_key="header-key")
 
 
 @pytest.mark.asyncio

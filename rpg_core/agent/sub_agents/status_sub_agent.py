@@ -10,8 +10,7 @@
 Usage::
 
     agent = StatusSubAgent(
-        provider=main_provider,          # shared 模式复用主 LLM
-        provider_config=provider_config, # 或显式 openai/llama 配置
+        provider_biz_key="agent.status_sub_agent",
     )
     agent.register_scene_tools(scene_tracker)
     agent.bind_context(sub_agent_context)
@@ -26,8 +25,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from rpg_world.rpg_core.agent.agent_types import CallRecord, TurnStats
-from rpg_world.rpg_core.agent.base_provider import LLMProvider
-from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProviderConfig
+from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_world.rpg_core.agent.tools import BaseTool
 from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
 from rpg_world.rpg_core.context.rpg_context import Message, Role
@@ -35,6 +33,8 @@ from rpg_world.rpg_core.session.manager import SessionManager
 from rpg_world.rpg_core.settings import settings
 
 if TYPE_CHECKING:
+    from rpg_world.rpg_core.llm.manager import ProviderOverrides
+
     from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
 
 # ── constants ──────────────────────────────────────────────────────────
@@ -84,10 +84,8 @@ class StatusSubAgent(BaseSubAgent):
 
     Parameters
     ----------
-    provider:
-        共享主 Agent 的 LLM provider，仅 shared 模式传入。
-    provider_config:
-        解析后的 provider 配置，显式选择 shared/openai/llama。
+    provider_biz_key:
+        交给 ``LLMManager`` 路由的业务键，例如 ``agent.status_sub_agent``。
     enabled:
         总开关。
     """
@@ -95,19 +93,13 @@ class StatusSubAgent(BaseSubAgent):
     def __init__(
         self,
         *,
-        provider: LLMProvider | None = None,
-        provider_config: SubAgentProviderConfig | None = None,
-        model: str | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
+        provider_biz_key: str,
+        provider_overrides: ProviderOverrides | None = None,
         enabled: bool = True,
     ) -> None:
         super().__init__(
-            provider=provider,
-            provider_config=provider_config,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
+            provider_biz_key=provider_biz_key,
+            provider_overrides=provider_overrides,
             enabled=enabled,
         )
 

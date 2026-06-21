@@ -14,6 +14,7 @@ from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan
 from rpg_world.rpg_core.session.manager import SessionManager
 from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.llm.manager import LLMManager
 
 
 class FakeTokenCounter:
@@ -33,16 +34,6 @@ class FakeTemplateModule:
     position: str = "before"
     enabled: bool = True
 
-
-class FakeLLMProvider:
-    """Minimal LLM provider stand-in."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    async def chat(self, messages: list[dict[str, object]], tools=None):  # noqa: ANN001
-        self.calls.append({"messages": messages, "tools": tools})
-        return {"content": "mock reply", "tool_calls": []}
 
 
 class FakeEmbedding:
@@ -137,6 +128,13 @@ class FakeBatchStore:
 
     def _next_batch_id(self):
         return 2
+
+
+@pytest.fixture(autouse=True)
+def reset_llm_manager():
+    LLMManager.reset()
+    yield
+    LLMManager.reset()
 
 
 class FakeMemorySubAgent:
@@ -262,8 +260,8 @@ def fake_memory_cfg():
         vector_k=10,
         bigram_k=10,
         rerank_enabled=False,
+        rerank_score_weight=0.70,
         rerank_model_path="",
-        rerank_max_candidates=5,
         rerank_n_ctx=4096,
         rerank_temperature=0.0,
         query_planner_enabled=False,

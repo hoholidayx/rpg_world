@@ -1,0 +1,78 @@
+# ── RPG World LLM 统一配置文件 ─────────────────────────────────────────
+# 业务代码只认 biz_key，不再直接知道底层是 OpenAI 还是 llama.cpp。
+# 通过环境变量 RPG_WORLD_PROFILE 选择环境（优先于 default_profile）。
+# ─────────────────────────────────────────────────────────────────────────
+
+default_profile: "local"
+
+base:
+  runtime:
+    llama_process_enabled: true
+    llama_request_timeout_ms: 60000
+    llama_startup_timeout_ms: 120000
+    llama_max_parallel_models: 2
+
+  biz:
+    agent.main:
+      kind: chat
+      provider: openai
+      openai:
+        model: deepseek-v4-flash
+        api_key: null
+        api_key_env: OPENAI_API_KEY_LOCAL
+        base_url: https://api.deepseek.com
+        max_tokens: null
+        temperature: null
+
+    agent.status_sub_agent:
+      kind: chat
+      provider: shared
+      shared_from: agent.main
+
+    agent.memory_sub_agent:
+      kind: chat
+      provider: shared
+      shared_from: agent.main
+
+    memory.embed:
+      kind: embedding
+      provider: llama
+      llama:
+        model_path: data/models/Qwen3-Embedding-0.6B-f16.gguf
+        n_ctx: 32768
+        n_gpu_layers: 0
+        n_threads: 4
+        verbose: false
+        request_timeout_ms: 60000
+
+    memory.query_planner:
+      kind: planner
+      provider: llama
+      llama:
+        model_path: ""
+        n_ctx: 2048
+        n_gpu_layers: 0
+        temperature: 0.0
+        max_tokens: 512
+        request_timeout_ms: 60000
+
+    memory.rerank:
+      kind: rerank
+      provider: llama
+      llama:
+        model_path: ""
+        n_ctx: 4096
+        n_gpu_layers: 0
+        temperature: 0.0
+        request_timeout_ms: 60000
+        verbose: false
+
+profiles:
+  local:
+    file: "llm.local.yaml"
+
+  test:
+    file: "llm.test.yaml"
+
+  prod:
+    file: "llm.prod.yaml"

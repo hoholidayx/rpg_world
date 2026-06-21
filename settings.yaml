@@ -7,97 +7,25 @@
 
 # ── Base 层：所有环境共享的默认配置 ────────────────────────────────────
 base:
-
-  # ── Agent 配置：LLM 调用参数 ────────────────────────────────────────
+  # ── Agent 业务配置（非 LLM 选型） ──────────────────────────────────
   agent:
-    # 使用的模型名称
-    model: "deepseek-v4-flash"
-    # API 端点地址（留空则使用 SDK 默认值）
-    base_url: "https://api.deepseek.com"
-    # 直接写入 API key（优先级高于 api_key_env，不推荐明文存放）
-    api_key: null
-    # 指定读取哪个环境变量作为 API key（推荐方式）
-    api_key_env: "OPENAI_API_KEY_LOCAL"
-    # 单次响应的最大 token 数（null 表示使用模型默认值）
-    max_tokens: null
-    # 采样温度（null 表示使用模型默认值）
-    temperature: null
-    # 单轮对话中最大工具调用次数
     max_tool_call_limit: 10
-    # 是否在回复中包含工具调用记录
     include_tool_records: true
-    # 是否输出详细日志（开发调试建议开启）
     verbose_logging: true
 
-    # ── 记忆子 Agent 配置 ────────────────────────────────────────────
     memory_sub_agent:
-      # 是否启用记忆子 Agent
       enabled: true
-      # LLM provider 选择：shared 复用主 Agent；openai 使用兼容 OpenAI API；llama 使用本地 llama.cpp completion
-      llm_provider: shared
-
-      # shared/openai/llama 是 LLM provider 配置；summary/recall/story 是记忆管线配置
-      shared: {}
-
-      openai:
-        model: null
-        api_key: null
-        api_key_env: null
-        base_url: null
-        max_tokens: null
-        temperature: null
-
-      llama:
-        model_path: null
-        n_ctx: 2048
-        n_gpu_layers: 0
-        request_timeout_ms: 60000
-        max_tokens: 512
-        temperature: 0.0
-
-      # 对话摘要压缩管线
       summary:
-        # 每批压缩的用户轮数
         compress_batch_size: 5
-        # 压缩后保留的最近对话轮数
         keep_rounds: 5
-        # 是否启用自动压缩
         compression_enabled: true
-
-      # 记忆召回管线
       recall:
-        # 每次召回的最大条目数
         max_items: 5
-
-      # 剧情记忆持久化管线
       story:
-        # 积累多少轮新对话后自动提取剧情记忆（0 表示关闭）
         trigger_rounds: 0
 
-    # ── 状态表子 Agent 配置 ──────────────────────────────────────────
     status_sub_agent:
-      # 是否启用状态表更新子 Agent
       enabled: true
-      # LLM provider 选择：shared 复用主 Agent；openai 使用兼容 OpenAI API；llama 使用本地 llama.cpp completion
-      llm_provider: shared
-
-      shared: {}
-
-      openai:
-        model: null
-        api_key: null
-        api_key_env: null
-        base_url: null
-        max_tokens: null
-        temperature: null
-
-      llama:
-        model_path: null
-        n_ctx: 2048
-        n_gpu_layers: 0
-        request_timeout_ms: 60000
-        max_tokens: 512
-        temperature: 0.0
 
   # ── 数据路径配置（相对于 workspace 根目录） ──────────────────────────
   data:
@@ -110,47 +38,6 @@ base:
   memory:
     # 是否启用向量记忆索引与检索
     enabled: true
-    # memory 侧 OpenAI 连接参数。不会继承主 Agent 的同名字段，未使用时保持 null。
-    openai:
-      model: null
-      api_key: null
-      api_key_env: null
-      base_url: null
-      max_tokens: null
-      temperature: null
-
-    # embedding provider：仅支持 llama / openai，shared 不支持。
-    embedding:
-      provider: llama
-      openai:
-        model: null
-        api_key: null
-        api_key_env: null
-        base_url: null
-        max_tokens: null
-        temperature: null
-      llama:
-        # llama embedding 模型 GGUF 文件路径（相对于包根目录 rpg_world/）
-        model_path: "data/models/Qwen3-Embedding-0.6B-f16.gguf"
-        # llama embedding 上下文窗口大小（token）
-        n_ctx: 32768
-        # llama embedding GPU 加速层数（0 = 纯 CPU，-1 = 全部 GPU）
-        n_gpu_layers: 0
-        # llama embedding CPU 线程数
-        n_threads: 4
-        # llama embedding verbose 日志开关
-        verbose: false
-        # llama embedding 子进程单次请求超时（毫秒）
-        request_timeout_ms: 60000
-
-    # 是否将 llama.cpp 推理隔离到托管子进程
-    llama_process_enabled: true
-    # llama 子进程单次请求超时（毫秒）
-    llama_request_timeout_ms: 60000
-    # llama 子进程启动超时（毫秒）
-    llama_startup_timeout_ms: 120000
-    # llama 子进程内最多并行调度的模型实例数
-    llama_max_parallel_models: 2
     # 是否启用向量 + 关键词混合检索
     hybrid_enabled: true
     # 混合检索中向量召回候选数
@@ -162,62 +49,8 @@ base:
     hybrid_bigram_weight: 0.25
     hybrid_exact_weight: 0.10
     hybrid_recency_weight: 0.05
-
-    # query planner：仅支持 llama / openai，shared 不支持。
-    query_planner_enabled: false
-    query_planner:
-      provider: llama
-      openai:
-        model: null
-        api_key: null
-        api_key_env: null
-        base_url: null
-        max_tokens: 512
-        temperature: 0.0
-      llama:
-        # llama query planner 模型路径（留空则使用规则规划器）
-        model_path: ""
-        # llama query planner 上下文窗口
-        n_ctx: 2048
-        # llama query planner GPU 层数
-        n_gpu_layers: 0
-        # llama query planner 采样温度
-        temperature: 0.0
-        # llama query planner 最大输出 token 数
-        max_tokens: 512
-        # llama query planner 子进程单次请求超时（毫秒）
-        request_timeout_ms: 60000
-
-    # rerank：仅支持 llama / openai，shared 不支持。
-    rerank_enabled: false
-    rerank:
-      provider: llama
-      openai:
-        model: null
-        api_key: null
-        api_key_env: null
-        base_url: null
-        max_candidates: 10
-        max_tokens: 1024
-        temperature: 0.0
-        rerank_weight: 0.70
-      llama:
-        # llama rerank 模型路径（留空则回退）
-        model_path: ""
-        # llama rerank 输入的最大候选数
-        max_candidates: 10
-        # llama rerank 上下文窗口
-        n_ctx: 4096
-        # llama rerank GPU 层数
-        n_gpu_layers: 0
-        # llama rerank 采样温度
-        temperature: 0.0
-        # llama 子进程单次请求超时（毫秒）
-        request_timeout_ms: 60000
-        # llama rerank 融合权重（llama 分占比，剩余为混合分）
-        llama_weight: 0.70
-        # llama rerank verbose 日志（打印 GPU 层加载、KV cache 等信息）
-        verbose: false
+    # LLM 重排分在最终融合分中的权重（剩余权重给混合检索分）
+    rerank_score_weight: 0.70
 
     # 向量检索返回的最大结果数
     top_k: 2

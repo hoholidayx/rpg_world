@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from rpg_world.channels import config as channels_config
+from rpg_world.rpg_core.llm import config as llm_config_module
 from rpg_world.rpg_core import settings as settings_module
 
 
@@ -51,10 +52,44 @@ profiles:
     )
 
 
-def _load(tmp_path, monkeypatch, *, profile: str = "test", profile_override: str = ""):
+def _write_llm(path, *, profile_override: str = "") -> None:
+    path.write_text(
+        f"""
+base:
+  biz:
+    agent.main:
+      kind: chat
+      provider: openai
+      openai:
+        model: base-model
+        api_key: null
+        api_key_env: TEST_OPENAI_KEY
+        base_url: null
+        max_tokens: null
+        temperature: null
+profiles:
+  local: {{}}
+  test:
+{profile_override or "    {}"}
+""",
+        encoding="utf-8",
+    )
+
+
+def _load(
+    tmp_path,
+    monkeypatch,
+    *,
+    profile: str = "test",
+    profile_override: str = "",
+    llm_profile_override: str = "",
+):
     cfg = tmp_path / "settings.yaml"
+    llm_cfg = tmp_path / "llm.yaml"
     _write_settings(cfg, profile_override=profile_override)
+    _write_llm(llm_cfg, profile_override=llm_profile_override)
     monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", llm_cfg)
     monkeypatch.setenv("RPG_WORLD_PROFILE", profile)
     loaded = settings_module.Settings()
     monkeypatch.setattr(channels_config, "core_settings", loaded)
@@ -66,11 +101,15 @@ def test_yaml_profile_selection(monkeypatch, tmp_path):
         tmp_path,
         monkeypatch,
         profile_override="""
-    agent:
-      model: profile-model
     modules:
       api:
         enabled: true
+""",
+        llm_profile_override="""
+    biz:
+      agent.main:
+        openai:
+          model: profile-model
 """,
     )
 
@@ -84,8 +123,6 @@ def test_profile_file_override(monkeypatch, tmp_path):
     profile_path = tmp_path / "settings.test.yaml"
     profile_path.write_text(
         """
-agent:
-  model: file-model
 modules:
   api:
     enabled: true
@@ -104,6 +141,12 @@ modules:
     file: settings.test.yaml
     agent:
       model: inline-model
+""",
+        llm_profile_override="""
+    biz:
+      agent.main:
+        openai:
+          model: file-model
 """,
     )
 
@@ -126,6 +169,7 @@ def test_missing_optional_profile_file_is_empty_override(monkeypatch, tmp_path):
 
 def test_missing_required_profile_file_raises(monkeypatch, tmp_path):
     cfg = tmp_path / "settings.yaml"
+    llm_cfg = tmp_path / "llm.yaml"
     _write_settings(
         cfg,
         profile_override="""
@@ -133,7 +177,9 @@ def test_missing_required_profile_file_raises(monkeypatch, tmp_path):
     required: true
 """,
     )
+    _write_llm(llm_cfg)
     monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", llm_cfg)
     monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
 
     with pytest.raises(ValueError, match="profile=test"):

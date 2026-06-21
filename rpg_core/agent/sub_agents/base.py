@@ -2,7 +2,7 @@
 
 提供子 Agent 共用的基础设施：
 
-- LLM Provider 管理（通过显式 provider_config 选择 shared/openai/llama）
+- LLM Provider 管理（通过统一 ``provider_biz_key`` 走 ``LLMManager``）
 - 重入守卫（防止并发执行）
 - ``SubAgentContext`` 绑定（世界书 + 角色卡 + 子 Agent 系统提示）
 - ``ToolProvider`` 接口 + 工具提供者管理（注册、去重、刷新）
@@ -18,35 +18,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.agent_types import (
-    LLM_PROVIDER_LLAMA,
-    LLM_PROVIDER_OPENAI,
-    LLM_PROVIDER_SHARED,
-    SubAgentProviderMode,
-)
 from rpg_world.rpg_core.agent.tools.base import BaseTool
+from rpg_world.rpg_core.llm.base_provider import LLMProvider
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.agent import RPGGameAgent
-    from rpg_world.rpg_core.agent.base_provider import LLMProvider
     from rpg_world.rpg_core.agent.command import CommandDef
     from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
-
-
-@dataclass(frozen=True)
-class SubAgentProviderConfig:
-    """Resolved provider configuration for a sub-agent."""
-
-    mode: SubAgentProviderMode = LLM_PROVIDER_SHARED
-    openai: dict[str, Any] = field(default_factory=dict)
-    llama: dict[str, Any] = field(default_factory=dict)
-
-
+    from rpg_world.rpg_core.llm.manager import ProviderOverrides
 @runtime_checkable
 class ToolProvider(Protocol):
     """工具提供者接口。
@@ -70,10 +53,8 @@ class BaseSubAgent:
 
     Parameters
     ----------
-    provider:
-        共享主 Agent 的 LLM provider，仅 ``provider_config.mode == "shared"`` 时传入。
-    provider_config:
-        解析后的 provider 配置，显式选择 ``shared``、``openai`` 或 ``llama``。
+    provider_biz_key:
+        由 ``LLMManager`` 路由的业务键。外部不直接构造 provider。
     enabled:
         总开关。
     """
@@ -81,26 +62,14 @@ class BaseSubAgent:
     def __init__(
         self,
         *,
-        provider: LLMProvider | None = None,
-        provider_config: SubAgentProviderConfig | None = None,
-        model: str | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
+        provider_biz_key: str,
+        provider_overrides: ProviderOverrides | None = None,
         enabled: bool = True,
     ) -> None:
-        if provider_config is None:
-            if provider is None:
-                raise ValueError("sub-agent provider_config is required when no shared provider is supplied")
-            provider_config = SubAgentProviderConfig(mode=LLM_PROVIDER_SHARED)
-        if provider is not None and provider_config.mode != LLM_PROVIDER_SHARED:
-            raise ValueError("sub-agent independent provider mode must not receive a shared provider")
-        if provider_config.mode == LLM_PROVIDER_SHARED and provider is None and enabled:
-            raise ValueError("sub-agent shared provider mode requires a shared provider")
-        self._shared_provider = provider
-        self._provider_config = provider_config
-        self._model = model
-        self._api_key = api_key
-        self._base_url = base_url
+        if not provider_biz_key.strip():
+            raise ValueError("sub-agent provider_biz_key is required")
+        self._provider_biz_key = provider_biz_key.strip()
+        self._provider_overrides = provider_overrides
         self._own_provider: LLMProvider | None = None
         self._enabled = enabled
         self._busy: bool = False
@@ -147,42 +116,18 @@ class BaseSubAgent:
     # ── Provider ─────────────────────────────────────────────────────
 
     def _get_provider(self) -> LLMProvider:
-        """获取有效 LLM provider——共享或自建。
-
-        子类应通过此方法获取 provider，而非直接访问 ``_shared_provider``
-        或 ``_own_provider``。
-        """
-        if self._provider_config.mode == LLM_PROVIDER_SHARED:
-            if self._shared_provider is None:
-                raise RuntimeError("shared provider is not configured")
-            return self._shared_provider
-
+        """通过 ``LLMManager`` 获取该子 Agent 对应的 provider。"""
         if self._own_provider is None:
-            if self._provider_config.mode == LLM_PROVIDER_OPENAI:
-                from rpg_world.rpg_core.agent.openai_provider import OpenAIProvider
+            from rpg_world.rpg_core.llm.manager import LLMManager
 
-                cfg = self._provider_config.openai
-                self._own_provider = OpenAIProvider(
-                    model=str(cfg.get("model") or self._model or "gpt-4o"),
-                    api_key=cfg.get("api_key") or self._api_key,
-                    base_url=cfg.get("base_url") or self._base_url,
-                    max_tokens=cfg.get("max_tokens"),
-                    temperature=cfg.get("temperature"),
-                )
-            elif self._provider_config.mode == LLM_PROVIDER_LLAMA:
-                from rpg_world.rpg_core.agent.sub_agents.llama_provider import LlamaCompletionProvider
-
-                cfg = self._provider_config.llama
-                self._own_provider = LlamaCompletionProvider(
-                    model_path=str(cfg["model_path"]),
-                    n_ctx=int(cfg.get("n_ctx", 2048)),
-                    n_gpu_layers=int(cfg.get("n_gpu_layers", 0)),
-                    request_timeout_ms=int(cfg.get("request_timeout_ms", 60000)),
-                    max_tokens=int(cfg.get("max_tokens", 512)),
-                    temperature=float(cfg.get("temperature", 0.0)),
-                )
+            manager = LLMManager.get()
+            if self._provider_overrides is None:
+                self._own_provider = manager.get_provider(self._provider_biz_key)
             else:
-                raise RuntimeError(f"unsupported sub-agent provider mode: {self._provider_config.mode}")
+                self._own_provider = manager.get_provider(
+                    self._provider_biz_key,
+                    overrides=self._provider_overrides,
+                )
         return self._own_provider
 
     @property

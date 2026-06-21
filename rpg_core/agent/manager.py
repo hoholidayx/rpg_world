@@ -15,7 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rpg_world.rpg_core.agent.agent import RPGGameAgent
-from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.llm.manager import LLMManager, ProviderOverrides
+from rpg_world.rpg_core.llm.keys import AGENT_MAIN_BIZ_KEY
 from rpg_world.rpg_core.utils.path_utils import (
     ensure_workspace_dir,
     require_workspace,
@@ -67,14 +68,17 @@ class AgentManager:
         if key not in cls._instances:
             workspace = require_workspace(workspace)
             ensure_workspace_dir(_PACKAGE_ROOT, workspace)
+            overrides = ProviderOverrides(openai_api_key=api_key) if api_key else None
+            manager = LLMManager.get()
+            if overrides is None:
+                provider = manager.get_provider(AGENT_MAIN_BIZ_KEY)
+            else:
+                provider = manager.get_provider(AGENT_MAIN_BIZ_KEY, overrides=overrides)
             cls._instances[key] = RPGGameAgent(
                 workspace=workspace,
                 session_id=session_id,
-                model=settings.agent_model,
+                model=provider.get_default_model(),
                 api_key=api_key,
-                base_url=settings.agent_base_url or None,
-                max_tokens=settings.agent_max_tokens,
-                temperature=settings.agent_temperature,
             )
         return cls._instances[key]
 

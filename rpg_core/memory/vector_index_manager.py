@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Callable
 
 from rpg_world.rpg_core.memory.chunker import Chunker, FileTextExtractor
-from rpg_world.rpg_core.memory.embedding_provider import (
-    EmbeddingProvider,
+from rpg_world.rpg_core.llm.base_provider import (
     EmbeddingProviderError,
+    LLMProvider as EmbeddingProvider,
 )
 from rpg_world.rpg_core.memory.storage.vector_store import ChunkRecord, VectorStore
 

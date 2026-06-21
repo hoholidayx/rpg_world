@@ -37,7 +37,8 @@ def _patch_loaded_settings_refs(integration_settings) -> dict[str, object]:
         "rpg_world.rpg_core.settings",
         "rpg_world.rpg_core.agent.agent",
         "rpg_world.rpg_core.agent.manager",
-        "rpg_world.rpg_core.agent.openai_provider",
+        "rpg_world.rpg_core.llm.manager",
+        "rpg_world.rpg_core.llm.openai_provider",
         "rpg_world.rpg_core.session.manager",
     )
     previous: dict[str, object] = {}

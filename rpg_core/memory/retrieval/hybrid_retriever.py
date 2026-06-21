@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan
 from rpg_world.rpg_core.memory.planning.planner import BaseQueryPlanner, RuleBasedQueryPlanner
-from rpg_world.rpg_core.memory.rerank.llama_reranker import LlamaReranker
+from rpg_world.rpg_core.memory.rerank.base import MemoryReranker
 from rpg_world.rpg_core.memory.retrieval.bigram_retriever import BigramRetriever
 from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
 from rpg_world.rpg_core.memory.retrieval.retriever import BaseRetriever
@@ -29,7 +29,7 @@ class HybridRetriever(BaseRetriever):
         bigram_retriever: BigramRetriever | None = None,
         raw_md_retriever: RawMarkdownRetriever | None = None,
         query_planner: BaseQueryPlanner | None = None,
-        reranker: LlamaReranker | None = None,
+        reranker: MemoryReranker | None = None,
         hybrid_vector_weight: float = 0.60,
         hybrid_bigram_weight: float = 0.25,
         hybrid_exact_weight: float = 0.10,

@@ -21,9 +21,9 @@ from rpg_world.rpg_core.llama_service.protocol import error_response, ok_respons
 from rpg_world.rpg_core.llama_service.server import LlamaServiceServer
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.planning.planner import FallbackQueryPlanner, LlamaQueryPlanner
-from rpg_world.rpg_core.memory.rerank.llama_reranker import LlamaRerankConfig, LlamaReranker
-from rpg_world.rpg_core.agent.sub_agents import llama_provider as llama_provider_module
-from rpg_world.rpg_core.agent.sub_agents.llama_provider import LlamaCompletionProvider
+from rpg_world.rpg_core.memory.rerank.service import PointwiseMemoryReranker
+from rpg_world.rpg_core.llm import llama_provider as llama_provider_module
+from rpg_world.rpg_core.llm.llama_provider import LlamaCompletionProvider
 
 
 class _FakeProcess:
@@ -206,33 +206,52 @@ def test_server_serializes_same_model_and_parallelizes_different_models():
     thread.join(timeout=1)
 
 
-def test_planner_and_reranker_fallback_when_client_fails(tmp_path):
-    model = tmp_path / "planner.gguf"
-    model.write_text("fake", encoding="utf-8")
+def test_llama_client_complete_stream_consumes_multiple_worker_responses():
+    def factory(request_queue, response_queue, _max_parallel_models):  # noqa: ANN001
+        def run() -> None:
+            request = request_queue.get()
+            request_id = request["request_id"]
+            response_queue.put(ok_response(request_id, "he") | {"stream_done": False})
+            response_queue.put(ok_response(request_id, "llo") | {"stream_done": False})
+            response_queue.put(ok_response(request_id, None) | {"stream_done": True})
+            shutdown = request_queue.get()
+            response_queue.put(ok_response(shutdown["request_id"], {"shutdown": True}))
 
-    class FailingClient:
-        def complete(self, *_args, **_kwargs):  # noqa: ANN002
+        return _FakeProcess(run)
+
+    client = LlamaClient(request_timeout_ms=1000, process_factory=factory)
+
+    assert list(
+        client.complete_stream(
+            {"model_path": "fake.gguf"},
+            "prompt",
+            max_tokens=8,
+            temperature=0.0,
+        )
+    ) == ["he", "llo"]
+    client.shutdown()
+
+
+def test_planner_and_reranker_fallback_when_client_fails(tmp_path):
+
+    class FailingChatProvider:
+        async def chat(self, messages, tools=None):  # noqa: ANN001
             raise RuntimeError("client boom")
 
-    set_llama_client(FailingClient())  # type: ignore[arg-type]
-    try:
-        planner = FallbackQueryPlanner(
-            LlamaQueryPlanner(model_path=str(model)),
-        )
-        assert planner.plan("寻找北境线索").planner_source == "rule_based"
+        def get_default_model(self) -> str:
+            return "failing-model"
 
-        candidates = [
-            MemoryCandidate(memory_id=1, content="北境森林脚印", metadata={}, hybrid_score=0.8),
-        ]
-        reranker = LlamaReranker(
-            LlamaRerankConfig(
-                enabled=True,
-                model_path=str(model),
-            )
-        )
-        assert reranker.rerank("寻找北境线索", candidates) == candidates
-    finally:
-        set_llama_client(None)
+    planner = FallbackQueryPlanner(
+        LlamaQueryPlanner(FailingChatProvider()),
+    )
+    assert planner.plan("寻找北境线索").planner_source == "rule_based"
+
+    candidates = [
+        MemoryCandidate(memory_id=1, content="北境森林脚印", metadata={}, hybrid_score=0.8),
+    ]
+
+    reranker = PointwiseMemoryReranker(FailingChatProvider(), provider_label="llama")
+    assert reranker.rerank("寻找北境线索", candidates) == candidates
 
 
 def test_configure_llama_client_from_memory_settings_updates_process_config():
@@ -437,6 +456,33 @@ async def test_llama_completion_provider_chat_stream_yields_final_chunk(monkeypa
     assert chunks[0].finish_reason == "tool_calls"
     assert chunks[0].model == "/tmp/fake.gguf"
     assert chunks[0].usage is None
+
+
+@pytest.mark.asyncio
+async def test_llama_completion_provider_chat_stream_yields_incremental_chunks(monkeypatch):
+    class FakeCompletionModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def complete_stream(self, prompt, **kwargs):  # noqa: ANN001
+            assert "ASSISTANT:" in prompt
+            assert kwargs["max_tokens"] == 7
+            yield "he"
+            yield "llo"
+
+    monkeypatch.setattr(llama_provider_module, "LlamaCompletionModel", FakeCompletionModel)
+
+    provider = LlamaCompletionProvider(model_path="/tmp/fake.gguf", max_tokens=7)
+    chunks = [
+        chunk
+        async for chunk in provider.chat_stream(
+            [{"role": "user", "content": "Hi"}],
+        )
+    ]
+
+    assert [chunk.content for chunk in chunks] == ["he", "llo", ""]
+    assert chunks[-1].finish_reason == "stop"
+    assert all(chunk.model == "/tmp/fake.gguf" for chunk in chunks)
 
 
 def _tool_schema(name: str) -> dict[str, object]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,6 +10,7 @@ from rpg_world.rpg_core.agent.command import CommandDispatcher, format_command_h
 
 
 class TestCommandDispatcher:
+    @pytest.mark.asyncio
     async def test_help_command_lists_all_commands(self):
         fake_agent = SimpleNamespace(
             clear_history=lambda: None,
@@ -47,6 +49,7 @@ class TestCommandDispatcher:
         else:
             raise AssertionError("expected ValueError")
 
+    @pytest.mark.asyncio
     async def test_sessions_command_marks_current_session(self, monkeypatch):
         from rpg_world.rpg_core.session import SessionManager
 

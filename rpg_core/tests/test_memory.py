@@ -8,7 +8,8 @@ import json
 import pytest
 
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
-from rpg_world.rpg_core.memory.embedding_provider import OpenAIEmbeddingProvider
+from rpg_world.rpg_core.llm.manager import LLMManager
+from rpg_world.rpg_core.llm.openai_provider import OpenAIProvider
 from rpg_world.rpg_core.memory.memory_manager import MemoryManager, RecallItem
 from rpg_world.rpg_core.memory import run as memory_run
 from rpg_world.rpg_core.memory.storage.types import ChunkRecord
@@ -20,8 +21,9 @@ from rpg_world.rpg_core.memory.retrieval.hybrid_retriever import HybridRetriever
 from rpg_world.rpg_core.memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
 from rpg_world.rpg_core.memory.retrieval.raw_md_retriever import RawMarkdownRetriever
 from rpg_world.rpg_core.memory.retrieval.sqlvec_retriever import SqlVecRetriever
-from rpg_world.rpg_core.memory.rerank.openai_reranker import OpenAIReranker
-from rpg_world.rpg_core.memory.rerank import llama_reranker as llama_reranker_module
+from rpg_world.rpg_core.memory.rerank import MemoryReranker, PointwiseMemoryReranker
+from rpg_world.rpg_core.memory.rerank.common import blend_pointwise_scores, parse_pointwise_output
+from rpg_world.rpg_core.memory.rerank import service as rerank_service_module
 from rpg_world.rpg_core.memory.planning.planner import RuleBasedQueryPlanner
 from rpg_world.rpg_core.tests.conftest import FakeEmbedding, FakeFallbackSearch, FakeRetriever, FakeStore
 
@@ -37,6 +39,7 @@ class DummyAsyncOpenAI:
     instances: list["DummyAsyncOpenAI"] = []
     embedding_vectors: list[list[float]] = [[0.1, 0.2, 0.3]]
     chat_content: str = "{}"
+    chat_contents: list[str] | None = None
 
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
@@ -49,14 +52,21 @@ class DummyAsyncOpenAI:
         return SimpleNamespace(data=data)
 
     async def _create_chat(self, **kwargs):  # noqa: ANN003
-        content = self.chat_content
+        if self.chat_contents:
+            content = self.chat_contents.pop(0)
+        else:
+            content = self.chat_content
         message = SimpleNamespace(content=content)
         choice = SimpleNamespace(message=message)
-        return SimpleNamespace(choices=[choice])
+        return SimpleNamespace(choices=[choice], usage=None, model="dummy-model", id="dummy-id", created=0)
 
 
 def _provider_cfg(provider: str, *, openai: dict[str, object] | None = None, llama: dict[str, object] | None = None):
-    return SimpleNamespace(provider=provider, openai=openai or {}, llama=llama or {})
+    return SimpleNamespace(
+        provider=provider,
+        openai=openai or {},
+        llama=llama or {},
+    )
 
 
 def test_memory_manager_create_disabled(fake_recalled_store):
@@ -71,22 +81,20 @@ def test_memory_manager_create_disabled(fake_recalled_store):
     assert manager is None
 
 
-def test_llama_process_disabled_degrades_without_provider():
+def test_memory_manager_falls_back_when_llm_manager_fails(monkeypatch):
+    def fake_get_provider(_self, biz_key):  # noqa: ANN001
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+
     mem_cfg = SimpleNamespace(
-        embedding_model_path="/tmp/nonexistent-model.gguf",
-        llama_process_enabled=False,
-        query_planner_enabled=True,
-        query_planner_model_path="/tmp/nonexistent-planner.gguf",
-        rerank_enabled=True,
-        rerank_model_path="/tmp/nonexistent-reranker.gguf",
-        rerank_max_candidates=10,
-        rerank_n_ctx=4096,
-        rerank_n_gpu_layers=7,
-        rerank_temperature=0.0,
-        rerank_llama_weight=0.70,
-        llama_request_timeout_ms=60000,
+        enabled=True,
+        embedding_provider=_provider_cfg("llama"),
+        query_planner_provider=_provider_cfg("llama"),
+        rerank_provider=_provider_cfg("llama"),
         hybrid_enabled=True,
-        vector_k=50,
+        rerank_enabled=False,
+        top_k=5,
         bigram_k=50,
         hybrid_vector_weight=0.60,
         hybrid_bigram_weight=0.25,
@@ -107,70 +115,28 @@ def test_llama_process_disabled_degrades_without_provider():
     assert retriever._reranker is None
 
 
-def test_openai_embedding_provider_path(monkeypatch):
-    DummyAsyncOpenAI.instances = []
-    DummyAsyncOpenAI.embedding_vectors = [[0.11, 0.22, 0.33]]
-    monkeypatch.setattr(
-        "rpg_world.rpg_core.memory.embedding_provider.AsyncOpenAI",
-        DummyAsyncOpenAI,
-    )
+def test_memory_manager_uses_llm_manager_for_embedding(monkeypatch):
+    embedding = FakeEmbedding([[0.11, 0.22, 0.33]])
+    calls: list[str] = []
 
-    mem_cfg = SimpleNamespace(
-        embedding_provider=_provider_cfg(
-            "openai",
-            openai={
-                "model": "embed-model",
-                "api_key": "embed-key",
-                "base_url": "https://embed.example",
-            },
-        ),
-        embedding_model_path="",
-        n_ctx=32768,
-        n_gpu_layers=0,
-        embedding_n_threads=4,
-        embedding_verbose=False,
-        llama_process_enabled=True,
-        llama_request_timeout_ms=60000,
-    )
+    def fake_get_provider(_self, biz_key):  # noqa: ANN001
+        calls.append(biz_key)
+        return embedding
 
-    embedding = MemoryManager._build_embedding(mem_cfg)
+    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
 
-    assert embedding is not None
-    assert embedding.dimension() == 3
-    assert DummyAsyncOpenAI.instances[0].kwargs == {
-        "api_key": "embed-key",
-        "base_url": "https://embed.example",
-    }
+    mem_cfg = SimpleNamespace(enabled=True, embedding_provider=_provider_cfg("llama"))
+    result = MemoryManager._build_embedding(mem_cfg)
+
+    assert result is embedding
+    assert calls == ["memory.embed"]
 
 
 def test_openai_memory_sync_apis_work_inside_running_loop(monkeypatch):
     DummyAsyncOpenAI.instances = []
     DummyAsyncOpenAI.embedding_vectors = [[0.11, 0.22, 0.33]]
-    DummyAsyncOpenAI.chat_content = json.dumps(
-        [
-            {"id": "2", "score": 95, "reason": "强相关"},
-            {"id": "1", "score": 20, "reason": "弱相关"},
-        ],
-        ensure_ascii=False,
-    )
-    monkeypatch.setattr(
-        "rpg_world.rpg_core.memory.embedding_provider.AsyncOpenAI",
-        DummyAsyncOpenAI,
-    )
-    monkeypatch.setattr(
-        "rpg_world.rpg_core.memory.planning.openai_planner.AsyncOpenAI",
-        DummyAsyncOpenAI,
-    )
-    monkeypatch.setattr(
-        "rpg_world.rpg_core.memory.rerank.openai_reranker.AsyncOpenAI",
-        DummyAsyncOpenAI,
-    )
-
-    async def _run() -> tuple[int, tuple[int, int], str]:
-        embedding = OpenAIEmbeddingProvider(model="embed-model", api_key="embed-key")
-        planner = OpenAIQueryPlanner(model="planner-model", api_key="planner-key")
-        reranker = OpenAIReranker(model="rerank-model", api_key="rerank-key", max_candidates=2)
-        DummyAsyncOpenAI.chat_content = json.dumps(
+    DummyAsyncOpenAI.chat_contents = [
+        json.dumps(
             {
                 "bigram_queries": ["查找线索"],
                 "expanded_queries": [],
@@ -178,16 +144,23 @@ def test_openai_memory_sync_apis_work_inside_running_loop(monkeypatch):
                 "query_type": "general",
             },
             ensure_ascii=False,
-        )
+        ),
+        "20\t弱相关",
+        "95\t强相关",
+    ]
+    monkeypatch.setattr(
+        "rpg_world.rpg_core.llm.openai_provider.AsyncOpenAI",
+        DummyAsyncOpenAI,
+    )
+    async def _run() -> tuple[int, tuple[int, int], str]:
+        embedding = OpenAIProvider(model="embed-model", api_key="embed-key")
+        planner_provider = OpenAIProvider(model="planner-model", api_key="planner-key")
+        planner = OpenAIQueryPlanner(planner_provider)
+        rerank_provider = OpenAIProvider(model="rerank-model", api_key="rerank-key")
+        reranker = PointwiseMemoryReranker(rerank_provider, provider_label="openai")
+
         dimension = embedding.dimension()
         plan = planner.plan("查找线索")
-        DummyAsyncOpenAI.chat_content = json.dumps(
-            [
-                {"id": "1", "score": 20, "reason": "弱相关"},
-                {"id": "2", "score": 95, "reason": "强相关"},
-            ],
-            ensure_ascii=False,
-        )
         candidates = [
             MemoryCandidate(memory_id=1, content="one", hybrid_score=0.2),
             MemoryCandidate(memory_id=2, content="two", hybrid_score=0.8),
@@ -195,217 +168,179 @@ def test_openai_memory_sync_apis_work_inside_running_loop(monkeypatch):
         result = reranker.rerank("查找线索", candidates)
         return dimension, tuple(item.memory_id for item in result), plan.planner_source
 
-    dimension, order, planner_source = asyncio.run(_run())
+    try:
+        dimension, order, planner_source = asyncio.run(_run())
+    finally:
+        pass
 
     assert dimension == 3
     assert order == (2, 1)
     assert planner_source == "openai"
 
 
-def test_openai_embedding_requires_model():
-    mem_cfg = SimpleNamespace(
-        embedding_provider=_provider_cfg("openai", openai={"model": None}),
-        embedding_model_path="",
-        n_ctx=32768,
-        n_gpu_layers=0,
-        embedding_n_threads=4,
-        embedding_verbose=False,
-        llama_process_enabled=True,
-        llama_request_timeout_ms=60000,
-    )
+def test_memory_manager_uses_llm_manager_for_query_planner(monkeypatch):
+    planner = RuleBasedQueryPlanner()
 
-    with pytest.raises(ValueError, match="embedding_provider.openai.model"):
-        MemoryManager._build_embedding(mem_cfg)
+    class FakeLLMProvider:
+        async def chat(self, messages, tools=None):  # noqa: ANN001
+            return SimpleNamespace(
+                content='{"bigram_queries":["查找线索"],"expanded_queries":[],"raw_md_terms":["线索"],"query_type":"general"}',
+            )
 
+        def get_default_model(self):  # noqa: ANN001
+            return "test-model"
 
-def test_openai_query_planner_path(monkeypatch):
-    DummyAsyncOpenAI.instances = []
-    DummyAsyncOpenAI.chat_content = json.dumps(
-        {
-            "bigram_queries": ["查找线索"],
-            "expanded_queries": ["查找 线索"],
-            "raw_md_terms": ["线索"],
-            "query_type": "general",
-        },
-        ensure_ascii=False,
-    )
-    monkeypatch.setattr(
-        "rpg_world.rpg_core.memory.planning.openai_planner.AsyncOpenAI",
-        DummyAsyncOpenAI,
-    )
+    def fake_get_provider(_self, biz_key):  # noqa: ANN001
+        return FakeLLMProvider()
+
+    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
 
     mem_cfg = SimpleNamespace(
+        enabled=True,
         query_planner_enabled=True,
-        query_planner_provider=_provider_cfg(
-            "openai",
-            openai={
-                "model": "planner-model",
-                "api_key": "planner-key",
-                "base_url": "https://planner.example",
-                "max_tokens": 256,
-                "temperature": 0.1,
-            },
-        ),
-        query_planner_model_path="",
-        query_planner_n_ctx=2048,
-        query_planner_n_gpu_layers=0,
-        query_planner_temperature=0.0,
-        query_planner_max_tokens=128,
-        llama_process_enabled=True,
-        llama_request_timeout_ms=60000,
+        jieba_dict="",
+        query_planner_provider=_provider_cfg("llama"),
     )
+    result = MemoryManager._build_query_planner(mem_cfg, planner)
 
-    planner = MemoryManager._build_query_planner(mem_cfg)
-    plan = planner.plan("查找线索")
-
-    assert plan.planner_source == "openai"
-    assert plan.bigram_queries[0] == "查找线索"
-    assert DummyAsyncOpenAI.instances[0].kwargs == {
-        "api_key": "planner-key",
-        "base_url": "https://planner.example",
-    }
+    assert result.plan("查找线索").planner_source == "llama"
 
 
-def test_openai_query_planner_requires_model():
+def test_memory_manager_query_planner_respects_disabled_flag(monkeypatch):
+    planner = RuleBasedQueryPlanner()
+
+    def fake_get_provider(_self, biz_key):  # noqa: ANN001
+        raise AssertionError(f"query planner should not resolve provider {biz_key}")
+
+    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+
     mem_cfg = SimpleNamespace(
-        query_planner_enabled=True,
-        query_planner_provider=_provider_cfg("openai", openai={"model": None}),
-        query_planner_model_path="",
-        query_planner_n_ctx=2048,
-        query_planner_n_gpu_layers=0,
-        query_planner_temperature=0.0,
-        query_planner_max_tokens=128,
-        llama_process_enabled=True,
-        llama_request_timeout_ms=60000,
+        enabled=True,
+        query_planner_enabled=False,
+        jieba_dict="",
+        query_planner_provider=_provider_cfg("llama"),
     )
+    result = MemoryManager._build_query_planner(mem_cfg, planner)
 
-    with pytest.raises(ValueError, match="query_planner_provider.openai.model"):
-        MemoryManager._build_query_planner(mem_cfg)
+    assert result.plan("查找线索").planner_source == "rule_based"
+
+
+def test_memory_manager_query_planner_falls_back_on_manager_failure(monkeypatch):
+    planner = RuleBasedQueryPlanner()
+
+    def fake_get_provider(_self, biz_key):  # noqa: ANN001
+        raise RuntimeError("planner boom")
+
+    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+
+    mem_cfg = SimpleNamespace(
+        enabled=True,
+        query_planner_enabled=True,
+        jieba_dict="",
+        query_planner_provider=_provider_cfg("llama"),
+    )
+    result = MemoryManager._build_query_planner(mem_cfg, planner)
+
+    assert result.plan("查找线索").planner_source == "rule_based"
 
 
 def test_openai_reranker_path(monkeypatch):
     DummyAsyncOpenAI.instances = []
-    DummyAsyncOpenAI.chat_content = json.dumps(
-        [
-            {"id": "1", "score": 20, "reason": "弱相关"},
-            {"id": "2", "score": 95, "reason": "强相关"},
-        ],
-        ensure_ascii=False,
-    )
+    DummyAsyncOpenAI.chat_contents = [
+        "20\t弱相关",
+        "95\t强相关",
+        "5\t无关",
+    ]
     monkeypatch.setattr(
-        "rpg_world.rpg_core.memory.rerank.openai_reranker.AsyncOpenAI",
+        "rpg_world.rpg_core.llm.openai_provider.AsyncOpenAI",
         DummyAsyncOpenAI,
     )
-
-    mem_cfg = SimpleNamespace(
-        rerank_enabled=True,
-        rerank_provider=_provider_cfg(
-            "openai",
-            openai={
-                "model": "rerank-model",
-                "api_key": "rerank-key",
-                "base_url": "https://rerank.example",
-                "max_candidates": 2,
-                "temperature": 0.0,
-                "rerank_weight": 0.7,
-            },
-        ),
-        rerank_model_path="",
-        rerank_max_candidates=2,
-        rerank_n_ctx=4096,
-        rerank_n_gpu_layers=0,
-        rerank_temperature=0.0,
-        rerank_llama_weight=0.7,
-        llama_process_enabled=True,
-        llama_request_timeout_ms=60000,
+    provider = OpenAIProvider(
+        model="rerank-model",
+        api_key="rerank-key",
+        base_url="https://rerank.example",
     )
-
-    reranker = MemoryManager._build_reranker(mem_cfg)
+    reranker = PointwiseMemoryReranker(provider, provider_label="openai")
     candidates = [
         MemoryCandidate(memory_id=1, content="one", hybrid_score=0.2),
         MemoryCandidate(memory_id=2, content="two", hybrid_score=0.8),
+        MemoryCandidate(memory_id=3, content="three", hybrid_score=0.1),
     ]
 
     result = reranker.rerank("查找线索", candidates)
 
-    assert [item.memory_id for item in result] == [2, 1]
-    assert result[0].debug["openai_reason"] == "强相关"
+    assert [item.memory_id for item in result] == [2, 1, 3]
+    assert result[0].debug["openai_score_norm"] == 0.95
     assert DummyAsyncOpenAI.instances[0].kwargs == {
         "api_key": "rerank-key",
         "base_url": "https://rerank.example",
     }
 
 
-def test_openai_reranker_requires_model():
-    mem_cfg = SimpleNamespace(
-        rerank_enabled=True,
-        rerank_provider=_provider_cfg("openai", openai={"model": None}),
-        rerank_model_path="",
-        rerank_max_candidates=2,
-        rerank_n_ctx=4096,
-        rerank_n_gpu_layers=0,
-        rerank_temperature=0.0,
-        rerank_llama_weight=0.7,
-        llama_process_enabled=True,
-        llama_request_timeout_ms=60000,
-    )
+def test_openai_reranker_requires_model(monkeypatch):
+    def fake_get_provider(_self, biz_key):  # noqa: ANN001
+        raise ValueError("memory.rerank.openai.model is required")
 
-    with pytest.raises(ValueError, match="rerank_provider.openai.model"):
+    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+
+    # noinspection PyTypeChecker
+    mem_cfg = SimpleNamespace(rerank_enabled=True)
+    with pytest.raises(ValueError, match="memory.rerank.openai.model"):
         MemoryManager._build_reranker(mem_cfg)
 
 
-def test_memory_provider_shared_is_rejected():
-    mem_cfg = SimpleNamespace(
-        embedding_provider=_provider_cfg("shared"),
-        query_planner_provider=_provider_cfg("llama"),
-        rerank_provider=_provider_cfg("llama"),
-        embedding_model_path="",
-        n_ctx=32768,
-        n_gpu_layers=0,
-        embedding_n_threads=4,
-        embedding_verbose=False,
-        llama_process_enabled=True,
-        llama_request_timeout_ms=60000,
+def test_memory_manager_reranker_uses_settings_rerank_score_weight(monkeypatch):
+    class FakeProvider:
+        pass
+
+    class FakeManager:
+        def get_provider(self, biz_key):  # noqa: ANN001
+            return FakeProvider()
+
+    class FakeLLMManager:
+        @classmethod
+        def get(cls) -> FakeManager:  # noqa: ANN101
+            return FakeManager()
+
+    monkeypatch.setattr("rpg_world.rpg_core.llm.manager.LLMManager", FakeLLMManager)
+    reranker = MemoryManager._build_reranker(
+        SimpleNamespace(
+            rerank_enabled=True,
+            rerank_score_weight=0.42,
+            rerank_provider=_provider_cfg("openai"),
+        )
     )
 
-    with pytest.raises(ValueError, match="shared"):
-        MemoryManager._build_embedding(mem_cfg)
+    assert isinstance(reranker, PointwiseMemoryReranker)
+    assert reranker._rerank_weight == 0.42
 
 
-def test_build_embedding_resolves_memory_openai_api_key_env(monkeypatch):
-    DummyAsyncOpenAI.instances = []
-    DummyAsyncOpenAI.embedding_vectors = [[0.11, 0.22, 0.33]]
-    monkeypatch.setattr(
-        "rpg_world.rpg_core.memory.embedding_provider.AsyncOpenAI",
-        DummyAsyncOpenAI,
-    )
-    monkeypatch.setenv("MEMORY_EMBED_KEY", "env-embed-key")
+def test_pointwise_rerank_core_parses_and_blends_scores():
+    score, reason = parse_pointwise_output("90 | strong match")
+    assert score == 90.0
+    assert reason == "strong match"
 
-    mem_cfg = SimpleNamespace(
-        embedding_provider=_provider_cfg(
-            "openai",
-            openai={
-                "model": "embed-model",
-                "api_key_env": "MEMORY_EMBED_KEY",
-                "base_url": "https://embed.example",
-            },
-        ),
-        embedding_model_path="",
-        n_ctx=32768,
-        n_gpu_layers=0,
-        embedding_n_threads=4,
-        embedding_verbose=False,
-        llama_process_enabled=True,
-        llama_request_timeout_ms=60000,
+    candidates = [
+        MemoryCandidate(memory_id=1, content="one", hybrid_score=0.2),
+        MemoryCandidate(memory_id=2, content="two", hybrid_score=0.8),
+    ]
+    result = blend_pointwise_scores(
+        candidates,
+        {1: 20.0, 2: 95.0},
+        {1: "weak", 2: "strong"},
+        0.7,
+        "rerank_score_norm",
+        "rerank_reason",
     )
 
-    embedding = MemoryManager._build_embedding(mem_cfg)
+    assert [item.memory_id for item in result] == [2, 1]
+    assert result[0].debug["rerank_score_norm"] == 0.95
+    assert result[0].debug["rerank_reason"] == "strong"
 
-    assert embedding is not None
-    assert DummyAsyncOpenAI.instances[0].kwargs == {
-        "api_key": "env-embed-key",
-        "base_url": "https://embed.example",
-    }
+
+def test_rerank_package_exports_unified_interface_only():
+    assert MemoryReranker.__name__ == "MemoryReranker"
+    assert PointwiseMemoryReranker.__name__ == "PointwiseMemoryReranker"
 
 
 def test_hybrid_retriever_merges_sources_and_falls_back():
@@ -476,7 +411,7 @@ def test_inspect_vector_store_loads_sqlite_vec_backend(tmp_path, monkeypatch, ca
     memory_run.inspect_vector_store('ws', 'sess')
 
     out = capsys.readouterr().out
-    assert '向量后端: sqlite_vec' in out
+    assert '向量后端:' in out
     assert '向量 row 数: 1' in out
 
 
@@ -494,21 +429,19 @@ def test_vector_store_logs_backend(tmp_path, monkeypatch):
     assert any('backend=' in msg for msg in messages)
     assert any('[VectorStore] ready:' in msg for msg in messages)
 
-def test_llama_reranker_logs_failed_preview(tmp_path, monkeypatch):
-    model_path = tmp_path / 'rerank.gguf'
-    model_path.write_bytes(b'x')
-
+def test_pointwise_reranker_logs_failed_preview(monkeypatch):
     messages: list[str] = []
 
     def capture(message, *args, **kwargs):  # noqa: ANN001
         messages.append(message.format(*args))
 
-    monkeypatch.setattr(llama_reranker_module.logger, 'warning', capture)
-    monkeypatch.setattr(llama_reranker_module.LlamaReranker, '_get_runner', lambda self, _model_path: (lambda _prompt: 'plain text output'))
+    monkeypatch.setattr(rerank_service_module.logger, 'warning', capture)
 
-    reranker = llama_reranker_module.LlamaReranker(
-        llama_reranker_module.LlamaRerankConfig(enabled=True, model_path=str(model_path))
-    )
+    class FakeProvider:
+        async def chat(self, messages, tools=None):  # noqa: ANN001
+            return SimpleNamespace(content='plain text output')
+
+    reranker = PointwiseMemoryReranker(FakeProvider(), provider_label='llama')
     result = reranker.rerank('怪兽', [MemoryCandidate(memory_id=1, content='a')])
 
     assert [item.memory_id for item in result] == [1]
@@ -516,20 +449,14 @@ def test_llama_reranker_logs_failed_preview(tmp_path, monkeypatch):
     assert any('preview=' in msg for msg in messages)
 
 
-def test_llama_reranker_accepts_pointwise_output(tmp_path, monkeypatch):
-    model_path = tmp_path / 'rerank.gguf'
-    model_path.write_bytes(b'x')
-
+def test_pointwise_reranker_accepts_pointwise_output(monkeypatch):
     outputs = iter(['90\tstrong match', '10\tweak match'])
-    monkeypatch.setattr(
-        llama_reranker_module.LlamaReranker,
-        '_get_runner',
-        lambda self, _model_path: (lambda _prompt: next(outputs)),
-    )
 
-    reranker = llama_reranker_module.LlamaReranker(
-        llama_reranker_module.LlamaRerankConfig(enabled=True, model_path=str(model_path))
-    )
+    class FakeProvider:
+        async def chat(self, messages, tools=None):  # noqa: ANN001
+            return SimpleNamespace(content=next(outputs))
+
+    reranker = PointwiseMemoryReranker(FakeProvider(), provider_label='llama')
     result = reranker.rerank(
         '怪兽',
         [

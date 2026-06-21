@@ -42,8 +42,11 @@ class _Actor:
                 return
             request_id = str(request.get("request_id", ""))
             try:
-                result = _handle_model_request(self._cache, request)
-                self._response_queue.put(ok_response(request_id, result))
+                if request.get("op") == "complete_stream":
+                    _handle_stream_request(self._response_queue, self._cache, request)
+                else:
+                    result = _handle_model_request(self._cache, request)
+                    self._response_queue.put(ok_response(request_id, result))
             except Exception as exc:
                 self._response_queue.put(error_response(request_id, exc))
 
@@ -134,3 +137,21 @@ def _handle_model_request(cache: LlamaModelCache, request: LlamaRequest) -> Any:
             stop=list(params.get("stop") or []),
         )
     raise ValueError(f"unsupported op: {op}")
+
+
+def _handle_stream_request(response_queue: MPQueue, cache: LlamaModelCache, request: LlamaRequest) -> None:
+    request_id = str(request.get("request_id", ""))
+    params = dict(request.get("params") or {})
+    for chunk in cache.complete_stream(
+        dict(request.get("model") or {}),
+        str(params.get("prompt") or ""),
+        max_tokens=int(params.get("max_tokens", 512)),
+        temperature=float(params.get("temperature", 0.0)),
+        stop=list(params.get("stop") or []),
+    ):
+        response = ok_response(request_id, chunk)
+        response["stream_done"] = False
+        response_queue.put(response)
+    response = ok_response(request_id, None)
+    response["stream_done"] = True
+    response_queue.put(response)

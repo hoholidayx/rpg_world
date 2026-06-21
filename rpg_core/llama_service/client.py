@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import multiprocessing as mp
 import queue
 import threading
@@ -111,6 +112,23 @@ class LlamaCompletionModel:
             timeout_ms=self._request_timeout_ms,
         )
 
+    def complete_stream(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int,
+        temperature: float,
+        stop: list[str] | None = None,
+    ) -> Iterator[str]:
+        return self._client.complete_stream(
+            self._model,
+            prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop=stop or [],
+            timeout_ms=self._request_timeout_ms,
+        )
+
 
 ProcessFactory = Callable[[MPQueue, MPQueue, int], mp.Process]
 
@@ -138,7 +156,7 @@ class LlamaClient:
         self._reader: threading.Thread | None = None
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
-        self._responses: dict[str, LlamaResponse] = {}
+        self._responses: dict[str, list[LlamaResponse]] = {}
         self._closed = False
 
     def configure(
@@ -189,6 +207,31 @@ class LlamaClient:
             timeout_ms=timeout_ms,
         )
 
+    def complete_stream(
+        self,
+        model: dict[str, Any],
+        prompt: str,
+        *,
+        max_tokens: int,
+        temperature: float,
+        stop: list[str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> Iterator[str]:
+        for response in self.stream_request(
+            "complete_stream",
+            model=model,
+            params={
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stop": stop or [],
+            },
+            timeout_ms=timeout_ms,
+        ):
+            result = response.get("result")
+            if result is not None:
+                yield str(result)
+
     def request(
         self,
         op: LlamaOperation,
@@ -214,18 +257,72 @@ class LlamaClient:
                 )
             )
             deadline = time.monotonic() + max(1, timeout) / 1000.0
-            while request_id not in self._responses:
+            while not self._responses.get(request_id):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     self._responses.pop(request_id, None)
                     raise LlamaClientTimeout(f"llama request timed out: op={op}")
                 self._condition.wait(timeout=min(remaining, 0.25))
                 self._raise_if_process_dead_locked()
-            response = self._responses.pop(request_id)
+            pending = self._responses.get(request_id) or []
+            response = pending.pop(0)
+            if pending:
+                self._responses[request_id] = pending
+            else:
+                self._responses.pop(request_id, None)
         if response.get("ok"):
             return response.get("result")
         error = response.get("error") or {}
         raise LlamaClientRemoteError(f"{error.get('type', 'RemoteError')}: {error.get('message', '')}")
+
+    def stream_request(
+        self,
+        op: LlamaOperation,
+        *,
+        model: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        timeout_ms: int | None = None,
+    ) -> Iterator[LlamaResponse]:
+        if not self.enabled:
+            raise LlamaClientError("llama process client disabled")
+        request_id = uuid.uuid4().hex
+        timeout = timeout_ms if timeout_ms is not None else self.request_timeout_ms
+        with self._condition:
+            self._ensure_started_locked()
+            assert self._request_queue is not None
+            self._request_queue.put(
+                make_request(
+                    request_id,
+                    op,
+                    model=model,
+                    params=params,
+                    timeout_ms=timeout,
+                )
+            )
+
+        deadline = time.monotonic() + max(1, timeout) / 1000.0
+        while True:
+            with self._condition:
+                while not self._responses.get(request_id):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self._responses.pop(request_id, None)
+                        raise LlamaClientTimeout(f"llama stream request timed out: op={op}")
+                    self._condition.wait(timeout=min(remaining, 0.25))
+                    self._raise_if_process_dead_locked()
+                pending = self._responses.get(request_id) or []
+                response = pending.pop(0)
+                if pending:
+                    self._responses[request_id] = pending
+                else:
+                    self._responses.pop(request_id, None)
+
+            if not response.get("ok"):
+                error = response.get("error") or {}
+                raise LlamaClientRemoteError(f"{error.get('type', 'RemoteError')}: {error.get('message', '')}")
+            yield response
+            if response.get("stream_done"):
+                return
 
     def shutdown(self, timeout_ms: int | None = None) -> None:
         timeout = timeout_ms if timeout_ms is not None else min(self.request_timeout_ms, 10000)
@@ -289,7 +386,7 @@ class LlamaClient:
                 continue
             request_id = str(response.get("request_id", ""))
             with self._condition:
-                self._responses[request_id] = response
+                self._responses.setdefault(request_id, []).append(response)
                 self._condition.notify_all()
 
     def _raise_if_process_dead_locked(self) -> None:

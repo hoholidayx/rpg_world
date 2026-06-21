@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-LlamaOperation = Literal["embedding_dimension", "embed", "complete", "shutdown"]
+LlamaOperation = Literal["embedding_dimension", "embed", "complete", "complete_stream", "shutdown"]
 
 
 class LlamaRequest(TypedDict, total=False):
@@ -25,6 +25,7 @@ class LlamaResponse(TypedDict, total=False):
     ok: bool
     result: Any
     error: LlamaError
+    stream_done: bool
 
 
 def make_request(

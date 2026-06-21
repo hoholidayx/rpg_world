@@ -20,7 +20,7 @@ def model_cache_key(op: str, model: dict[str, Any]) -> tuple[Any, ...]:
             int(model.get("n_gpu_layers", 0)),
             int(model.get("n_threads", 4)),
         )
-    if op == "complete":
+    if op in {"complete", "complete_stream"}:
         return (
             "completion",
             model_path,
@@ -71,6 +71,28 @@ class LlamaModelCache:
             stop=stop or [],
         )
 
+    def complete_stream(
+        self,
+        model: dict[str, Any],
+        prompt: str,
+        *,
+        max_tokens: int,
+        temperature: float,
+        stop: list[str] | None = None,
+    ):
+        llama = self._get_model("complete_stream", model)
+        chunks = llama(
+            prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop=stop or [],
+            stream=True,
+        )
+        for chunk in chunks:
+            text = _extract_stream_text(chunk)
+            if text:
+                yield text
+
     def _get_model(self, op: str, model: dict[str, Any]) -> Any:
         key = model_cache_key(op, model)
         cached = self._models.get(key)
@@ -105,3 +127,27 @@ class LlamaModelCache:
         self._models[key] = llama
         self.load_counts[key] = self.load_counts.get(key, 0) + 1
         return llama
+
+
+def _extract_stream_text(chunk: Any) -> str:
+    if chunk is None:
+        return ""
+    if isinstance(chunk, str):
+        return chunk
+    if not isinstance(chunk, dict):
+        return str(chunk)
+    choices = chunk.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict):
+            text = first.get("text")
+            if isinstance(text, str):
+                return text
+            delta = first.get("delta")
+            if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+                return delta["content"]
+    for key in ("content", "text"):
+        value = chunk.get(key)
+        if isinstance(value, str):
+            return value
+    return ""

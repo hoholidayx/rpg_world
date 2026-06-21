@@ -6,7 +6,7 @@
 所有子 Agent 都可以通过 ``SubAgentContext`` 获取世界书 + 角色卡上下文，避免 OOC 判断。
 """
 
-from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProviderConfig
+from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
 from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import (
     MemoryAgentResult,
@@ -16,7 +16,6 @@ from rpg_world.rpg_core.agent.sub_agents.status_sub_agent import StatusSubAgent
 
 __all__ = [
     "BaseSubAgent",
-    "SubAgentProviderConfig",
     "SubAgentContext",
     "MemoryAgentResult",
     "MemorySubAgent",

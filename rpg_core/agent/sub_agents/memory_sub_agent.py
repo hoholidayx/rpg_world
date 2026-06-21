@@ -11,6 +11,7 @@ Usage::
     from rpg_world.rpg_core.agent.sub_agents import MemorySubAgent, SubAgentContext
 
     agent = MemorySubAgent(
+        provider_biz_key="agent.memory_sub_agent",
         recalled_store=recalled_store,
         story_store=story_store,
         summary_store=summary_store,
@@ -31,7 +32,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent, SubAgentProviderConfig
+from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
 from rpg_world.rpg_core.agent.command import CommandDef
 from rpg_world.rpg_core.context.rpg_context import Message, Role
@@ -39,7 +40,8 @@ from rpg_world.rpg_core.session.manager import SessionManager
 
 if TYPE_CHECKING:
     from rpg_world.rpg_core.agent.agent import RPGGameAgent
-    from rpg_world.rpg_core.agent.base_provider import LLMProvider
+    from rpg_world.rpg_core.llm.base_provider import LLMProvider
+    from rpg_world.rpg_core.llm.manager import ProviderOverrides
     from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
     from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
     from rpg_world.rpg_core.summary.store import SummaryStore
@@ -287,14 +289,8 @@ class MemorySubAgent(BaseSubAgent):
         剧情记忆存储。
     summary_store:
         摘要存储。
-    provider:
-        可选独立 LLM provider。未提供时内部按 *model* / *api_key* / *base_url* 创建。
-    model:
-        LLM 模型名（provider 为 None 时生效）。
-    api_key:
-        LLM API key（provider 为 None 时生效）。
-    base_url:
-        LLM base URL（provider 为 None 时生效）。
+    provider_biz_key:
+        交给 ``LLMManager`` 路由的业务键，例如 ``agent.memory_sub_agent``。
     enabled:
         总开关。
     max_recall_items:
@@ -309,28 +305,21 @@ class MemorySubAgent(BaseSubAgent):
         recalled_store: RecalledMemoryStore | None = None,
         story_store: StoryMemoryStore | None = None,
         summary_store: SummaryStore | None = None,
-        provider: LLMProvider | None = None,
-        provider_config: SubAgentProviderConfig | None = None,
-        model: str | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
+        provider_biz_key: str,
+        provider_overrides: ProviderOverrides | None = None,
         enabled: bool = True,
         max_recall_items: int = 5,
         max_window_rounds: int = 10,
         batch_store: "BatchSummaryStore | None" = None,
     ) -> None:
         super().__init__(
-            provider=provider,
-            provider_config=provider_config,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
+            provider_biz_key=provider_biz_key,
+            provider_overrides=provider_overrides,
             enabled=enabled,
         )
 
-        # MemorySubAgent 不使用独立的 _own_provider（通过基类 _get_provider 获取）
-        # 但保留旧的 _provider 属性用于兼容（如果有外部代码直接访问）
-        self._provider: LLMProvider | None = provider
+        # 通过基类 _get_provider() 延迟解析，不在构造期绑定具体实现。
+        self._provider: LLMProvider | None = None
 
         self._recalled_store = recalled_store
         self._story_store = story_store

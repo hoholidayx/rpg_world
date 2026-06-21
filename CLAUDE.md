@@ -39,7 +39,8 @@ uv run python3 -c "from rpg_world.rpg_core.status import StatusManager; print('o
 ```
 rpg_world/
 ├── run.py                        # supervisor（批量拉起子进程）
-├── settings.yaml                  # 唯一根配置（base + profiles）
+├── settings.yaml                  # 业务/渠道/模块配置（base + profiles）
+├── llm.yaml                       # LLM provider / 模型配置（base + profiles）
 ├── channels/                     # 多渠道适配器
 │   ├── base.py                   #   ChannelAdapter 抽象基类
 │   ├── config.py                 #   ChannelsSettings 配置加载
@@ -61,15 +62,14 @@ rpg_world/
 │   │   ├── agent.py              #     RPGGameAgent — 主入口（send/send_stream/single_turn）
 │   │   ├── agent_types.py        #     结构化类型 + QueueItem 队列类型
 │   │   ├── manager.py            #     AgentManager 单例（统一 agent 缓存）
-│   │   ├── base_provider.py      #     LLMProvider 抽象基类
 │   │   ├── command.py            #     CommandDispatcher — 斜杠命令分发器
 │   │   ├── loop.py               #     chat loop（LLM 往返 + tool calling）
-│   │   ├── openai_provider.py    #     OpenAI/DeepSeek LLM 调用封装
 │   │   ├── prompt.py             #     PromptManager — 系统提示词
 │   │   ├── stats_formatter.py    #     LLM 统计格式化
 │   │   ├── tokenizer.py          #     TokenCounter 抽象
 │   │   ├── sub_agents/           #     子 Agent 系统
 │   │   └── tools/                #     工具系统
+│   ├── llm/                      #   LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析
 │   ├── scene/                    # 场景状态（时间/地点/属性）
 │   ├── context/                  # 5 层 RPG 上下文构建
 │   ├── jinja/                    # Jinja2 模板
@@ -157,14 +157,11 @@ run_cli.py      -> rpg_world.channels.cli.repl
 └── 本模块运行态（API / Telegram / CLI 之一）
 ```
 
-### 配置（`settings.yaml`）
+### 配置（`settings.yaml` / `llm.yaml`）
 
-根配置统一在 `settings.yaml`，采用 `base + profiles`，通过 `RPG_WORLD_PROFILE`
-选择 profile，默认 `local`。profile 可通过 `file: settings.local.yaml` 读取被
-git ignore 的覆盖文件；缺失文件默认按空覆盖处理，`required: true` 时缺失会报错。
+`settings.yaml` 负责业务配置、模块启停、渠道参数和数据路径；`llm.yaml` 负责 LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置。二者都采用 `base + profiles`，通过 `RPG_WORLD_PROFILE` 选择 profile，默认 `local`。profile 可通过 `file: *.local.yaml` 读取被 git ignore 的覆盖文件；缺失文件默认按空覆盖处理，`required: true` 时缺失会报错。
 `api/settings.json` 仍只用于 API 服务级日志等配置。
-所有配置通过 `ChannelsSettings` 的类型化属性访问（`channels/config.py`），
-外部调用不做字符串拼接：
+模块启停通过 `ChannelsSettings` 的类型化属性访问（`channels/config.py`），外部调用不做字符串拼接：
 
 ```python
 channels_settings.api_enabled      # modules.api.enabled
@@ -177,6 +174,13 @@ channels_settings.cli_enabled       # modules.cli.enabled
 channels_settings.cli_workspace     # modules.cli.workspace
 channels_settings.enabled_module_names  # 所有已启用模块列表
 ```
+
+核心配置访问规则：
+
+- 业务代码读取业务配置走 `rpg_core.settings.settings` 的属性或方法，例如 `settings.memory_settings`。
+- LLM provider 创建走 `LLMManager.get().get_provider(biz_key)`，不要在业务模块中直接 new OpenAI/llama client。
+- LLM 配置解析只通过 `rpg_core.llm.config.resolve_biz_config()`、`get_runtime_config()` 等封装方法。
+- `rerank_score_weight` 是 memory 排序业务参数，属于 `settings.yaml`；`llm.yaml` 的 `memory.rerank` 只放 provider/model/model_path/n_ctx/temperature/request_timeout_ms 等 LLM 参数。
 
 ### AgentManager（`rpg_core/agent/manager.py`）
 
@@ -273,7 +277,7 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 | `fuzzy_score` | `exact_and_fuzzy_scores()` | query 模糊匹配分数 |
 | `recency_score` | `HybridRetriever._finalize()` | 时间越近分数越高 |
 | `hybrid_score` | `apply_hybrid_scores()` | 召回融合分 |
-| `rerank_score` | `LlamaReranker` / `OpenAIReranker` | 最终重排分 |
+| `rerank_score` | `PointwiseMemoryReranker` | 最终重排分 |
 | `debug` | 各检索 / 重排阶段逐步写入 | 调试信息，通常包含 `*_norm`、`*_reason`、`raw_md_*` |
 
 常见 `debug` 键：
@@ -288,10 +292,10 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 | `bigram_score_norm` | `apply_hybrid_scores()` | bigram 分归一化结果 |
 | `recency_score_norm` | `apply_hybrid_scores()` | 时间分归一化结果 |
 | `exact_or_fuzzy_score` | `apply_hybrid_scores()` | exact / fuzzy 的合并分 |
-| `llama_score_norm` | `LlamaReranker` | 本地 rerank 归一化分 |
-| `llama_reason` | `LlamaReranker` | 本地 rerank 给出的原因 |
-| `openai_score_norm` | `OpenAIReranker` | OpenAI rerank 归一化分 |
-| `openai_reason` | `OpenAIReranker` | OpenAI rerank 给出的原因 |
+| `llama_score_norm` | `PointwiseMemoryReranker` | llama provider rerank 归一化分 |
+| `llama_reason` | `PointwiseMemoryReranker` | llama provider rerank 给出的原因 |
+| `openai_score_norm` | `PointwiseMemoryReranker` | OpenAI-compatible provider rerank 归一化分 |
+| `openai_reason` | `PointwiseMemoryReranker` | OpenAI-compatible provider rerank 给出的原因 |
 
 ### 5 层 RPG 上下文（`context/builder.py` → `rpg_context.py`）
 
@@ -333,7 +337,7 @@ agent.send(user_input)
 | **StatusSubAgent** | 状态表预更新 | 主 LLM 调用之前，避免 tool calling round-trip |
 | **MemorySubAgent** | 记忆总结/召回/剧情持久化 | `process()` 由 CommandDispatcher 或自动触发 |
 
-支持独立 LLM 模型（如 gpt-4o-mini 处理状态表），通过 `SubAgentContext` 获取世界书 + 角色卡上下文。
+支持独立 LLM provider 配置，通过 `llm.yaml` 的 `agent.status_sub_agent` / `agent.memory_sub_agent` biz key 选择 `shared`、`openai` 或 `llama`，通过 `SubAgentContext` 获取世界书 + 角色卡上下文。
 
 ### 斜杠命令系统（`agent/command.py`）
 
@@ -451,8 +455,7 @@ POST   /api/v1/workspaces/{workspace}/sessions/{session_id}/clone
 uv run python -m pytest channels/tests rpg_core/tests api/tests -q
 ```
 
-截至最近一次检查：`110 passed, 1 warning`。这些测试 mock 外部 LLM、Telegram SDK
-和网络调用，不需要真实 API key。
+这些测试 mock 外部 LLM、Telegram SDK 和网络调用，不需要真实 API key。若本地缺少 `pytest-asyncio`，`rpg_core/tests/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。
 
 覆盖范围：
 

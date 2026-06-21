@@ -3,8 +3,9 @@
 ## 项目结构与模块组织
 本仓库采用 supervisor + 子进程的启动架构，统一批量启动入口是 `run.py`，同级提供 `run_all.py`、`run_api.py`、`run_telegram.py`、`run_cli.py` 作为快捷入口。核心业务逻辑位于 `rpg_core/`，其中 `agent/` 负责 LLM Agent 与命令分发，`context/` 负责上下文构建，`character/`、`lorebook/`、`status/`、`memory/`、`summary/` 分别处理领域数据。API 放在 `api/`，多渠道适配器与测试位于 `channels/` 和 `channels/tests/`。前端 WebUI 在 `webui/`，运行数据在 `data/`。
 记忆检索拆成 `SqlVecRetriever`、`BigramRetriever`、`RawMarkdownRetriever` 三个独立 retriever；`HybridRetriever` 只负责组装与融合，不承载底层检索实现。
+LLM provider 统一位于 `rpg_core/llm/`，业务代码通过 `LLMManager.get().get_provider(biz_key)` 获取 provider，不直接 new OpenAI/llama 客户端，也不直接读取 `llm.yaml` 字符串 key。memory rerank 使用统一的 `PointwiseMemoryReranker`，不要恢复旧的 provider-specific reranker/factory。
 
-修改启动流程、渠道生命周期或共享状态前，先阅读 `CLAUDE.md`。不要绕过 `run.py` 自行拼装多模块启动，也不要破坏 `AgentManager` 单例和 `settings.yaml` 的配置边界。
+修改启动流程、渠道生命周期或共享状态前，先阅读 `CLAUDE.md`。不要绕过 `run.py` 自行拼装多模块启动，也不要破坏 `AgentManager` 单例和配置边界。
 
 当前产品优先级是 Telegram 渠道优先、核心数据链路其次、WebUI 数据管理后台再次、WebUI Chat 最后。涉及聊天体验的改动默认先保障 Telegram，不要为了 WebUI Chat 破坏 Telegram 的 session、stream 或命令行为。
 
@@ -37,7 +38,7 @@ Telegram 是当前主聊天入口。修改 `channels/telegram/adapter.py`、`cha
 
 API/WebUI 管理能力应补 `api/tests/` 的契约测试；核心上下文、memory、summary、session 行为应补 `rpg_core/tests/`。
 
-修改主 agent 相关路径时，默认还要跑 `rpg_core/tests/integration/` 的真实集成验证，重点覆盖 `rpg_core/agent/agent.py`、`rpg_core/agent/command.py`、`rpg_core/agent/openai_provider.py`、`rpg_core/session/manager.py`、`rpg_core/context/` 以及会影响这些路径的配置变更。若改动会触发真实 LLM 调用，先用 `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q` 做门禁验证，再考虑提交。
+修改主 agent 或 LLM provider 相关路径时，默认还要跑 `rpg_core/tests/integration/` 的真实集成验证，重点覆盖 `rpg_core/agent/agent.py`、`rpg_core/agent/command.py`、`rpg_core/llm/`、`rpg_core/session/manager.py`、`rpg_core/context/` 以及会影响这些路径的配置变更。若改动会触发真实 LLM 调用，先用 `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q` 做门禁验证，再考虑提交。
 
 ## 提交与合并请求规范
 提交信息遵循现有历史风格：`feat:`、`fix:`、`refactor:`、`chore:` 等前缀，后接简洁中文说明，例如 `feat: 实现向量记忆系统`。一次提交只处理一个逻辑主题。
@@ -45,7 +46,9 @@ API/WebUI 管理能力应补 `api/tests/` 的契约测试；核心上下文、me
 PR 说明应写清影响模块、行为变化、配置变更（如 `settings.yaml`）、测试结果，以及是否影响现有工作区数据结构。涉及 `webui/` 可见改动时，附上界面截图。
 
 ## 配置与架构注意事项
-`settings.yaml` 是根配置唯一入口，用于模块启停、渠道参数、agent 配置和数据路径。profile 可通过 `file: settings.local.yaml` 读取被 git ignore 的覆盖文件。`api/settings.json` 仅保留 API 服务级配置。每个子进程内部必须通过共享的 `AgentManager` 获取 agent，避免重复初始化 `FileWatcher`、缓存不一致或单进程内状态漂移。
+`settings.yaml` 用于业务配置、模块启停、渠道参数和数据路径；`llm.yaml` 用于 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。二者都支持 `base + profiles`，profile 可通过 `file: *.local.yaml` 读取被 git ignore 的覆盖文件。`api/settings.json` 仅保留 API 服务级配置。每个子进程内部必须通过共享的 `AgentManager` 获取 agent，避免重复初始化 `FileWatcher`、缓存不一致或单进程内状态漂移。
+
+配置访问必须走封装方法：`settings.memory_settings`、`settings.agent_model`、`channels.config.settings`、`resolve_biz_config()`、`get_runtime_config()` 或 `LLMManager`。不要在业务模块中手写 YAML key 路径或绕过 `Settings`/`llm.config` 直接解析配置。排序、检索、chunk 等业务参数保留在 `settings.yaml`，不要塞进 `llm.yaml` 的 provider block；例如 rerank 融合权重使用 `memory.rerank_score_weight`。
 
 `session_id` 只能由英文字母、数字、下划线组成，规则为 `^[A-Za-z0-9_]+$`，并会直接映射到 `sessions/{session_id}/` 目录。默认渠道会话名使用下划线格式，例如 `cli_direct`、`telegram_12345`。
 
