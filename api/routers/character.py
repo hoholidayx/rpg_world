@@ -5,8 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from rpg_world.api.deps import get_character_manager
-from rpg_world.rpg_core.character import CharacterManager
-from rpg_world.rpg_core.models.models import CharacterData, CharacterDetail
+from rpg_world.rpg_core.character import CharacterData, CharacterDetail, CharacterManager
 
 router = APIRouter(tags=["character"])
 

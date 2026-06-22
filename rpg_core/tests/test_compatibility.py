@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from rpg_world.rpg_core.models.models import CharacterDetail
+from rpg_world.rpg_core.character.models import CharacterDetail
 from rpg_world.rpg_core.summary.store import SummaryStore
 
 

@@ -5,8 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from rpg_world.api.deps import get_lorebook_manager
-from rpg_world.rpg_core.models.models import LorebookEntry
-from rpg_world.rpg_core.lorebook import LorebookManager
+from rpg_world.rpg_core.lorebook import LorebookEntry, LorebookManager
 
 router = APIRouter(tags=["lorebook"])
 
