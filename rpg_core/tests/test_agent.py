@@ -56,9 +56,9 @@ async def test_queue_consumer_surfaces_stream_errors(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ensure_initialized_is_idempotent(monkeypatch):
-    class FakePromptManager:
+    class FakeFixedLayerComposer:
         def __init__(self, _world_name: str) -> None:
-            self.system_prompt = "system"
+            self.sections = []
 
     class FakeSubAgent:
         def __init__(self, *args, **kwargs) -> None:
@@ -90,7 +90,7 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
         def get_provider(self, biz_key):  # noqa: ANN001
             return object()
 
-    monkeypatch.setattr(agent_module, "PromptManager", FakePromptManager)
+    monkeypatch.setattr(agent_module, "FixedLayerComposer", FakeFixedLayerComposer)
     monkeypatch.setattr(agent_module, "StatusSubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "MemorySubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "SummaryCompressor", FakeCompressor)
@@ -194,9 +194,9 @@ def test_rpg_game_agent_default_model_no_longer_forces_gpt4o(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ensure_initialized_populates_model_from_provider(monkeypatch):
-    class FakePromptManager:
+    class FakeFixedLayerComposer:
         def __init__(self, _world_name: str) -> None:
-            self.system_prompt = "system"
+            self.sections = []
 
     class FakeSubAgent:
         def __init__(self, *args, **kwargs) -> None:
@@ -230,7 +230,7 @@ async def test_ensure_initialized_populates_model_from_provider(monkeypatch):
         coro.close()
         return MagicMock()
 
-    monkeypatch.setattr(agent_module, "PromptManager", FakePromptManager)
+    monkeypatch.setattr(agent_module, "FixedLayerComposer", FakeFixedLayerComposer)
     monkeypatch.setattr(agent_module, "StatusSubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "MemorySubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "SummaryCompressor", FakeCompressor)

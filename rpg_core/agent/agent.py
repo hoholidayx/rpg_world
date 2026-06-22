@@ -21,7 +21,6 @@ from rpg_world.rpg_core.agent.agent_types import (
 from rpg_world.rpg_core.agent.command import CommandResult
 from rpg_world.rpg_core.agent.command import CommandDispatcher
 from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
-from rpg_world.rpg_core.agent.prompt import PromptManager
 from rpg_world.rpg_core.agent.sub_agents import (
     MemorySubAgent,
     StatusSubAgent,
@@ -37,6 +36,8 @@ from rpg_world.rpg_core.agent.tools import (
     WriteFileTool,
 )
 from rpg_world.rpg_core.context import RPGContextBuilder
+from rpg_world.rpg_core.context.fixed_layer import FixedLayerComposer
+from rpg_world.rpg_core.context.inspector import ContextInspector
 from rpg_world.rpg_core.context.rpg_context import Role, Message
 from rpg_world.rpg_core.llm.base_provider import LLMProvider
 from rpg_world.rpg_core.llm.keys import (
@@ -117,7 +118,7 @@ class RPGGameAgent:
         self._status_mgr: StatusManager | None = None
         self._scene_tracker: SceneTracker | None = None
         self._provider: LLMProvider | None = None
-        self._system_prompt: str = ""
+        self._fixed_sections = []
         self._session = SessionManager(
             session_id=self._session_id,
             workspace=self._workspace,
@@ -641,7 +642,11 @@ class RPGGameAgent:
 
         await self._ensure_initialized()
         ctx = self._build_ctx_for_inspection(user_input)
-        return ctx.layer_summary(self._token_counter)
+        return ContextInspector(
+            ctx,
+            self._token_counter,
+            hot_history_rounds=self._builder.config.hot_history_rounds,
+        ).layer_summary()
 
     async def get_context_markdown(self, user_input: str = "") -> str:
         """Build the full 5-layer context and return a Markdown-formatted table.
@@ -652,7 +657,11 @@ class RPGGameAgent:
         """
         await self._ensure_initialized()
         ctx = self._build_ctx_for_inspection(user_input)
-        return ctx.to_markdown(self._token_counter)
+        return ContextInspector(
+            ctx,
+            self._token_counter,
+            hot_history_rounds=self._builder.config.hot_history_rounds,
+        ).to_markdown()
 
     def _build_ctx_for_inspection(self, user_input: str = "") -> "RPGContext":
         """Build context for inspection (no _history mutation, no LLM call)."""
@@ -674,15 +683,13 @@ class RPGGameAgent:
             test_messages.append(Message(role=Role.USER, content="(no input)"))
 
         ctx: RPGContext = self._builder.build(
-            system_prompt=self._system_prompt,
+            fixed_sections=self._fixed_sections,
             messages=test_messages,
             character_mgr=self._character_mgr,
             lorebook_mgr=self._lorebook_mgr,
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
         )
-        # Wire the hot_history_rounds config for to_markdown()
-        ctx._hot_history_rounds = self._builder.config.hot_history_rounds  # type: ignore[attr-defined]
         return ctx
 
     # ── internals — context & tools ────────────────────────────────────
@@ -721,7 +728,7 @@ class RPGGameAgent:
     def _build_transformed_context(self) -> list[Message]:
         """Build the 5-layer RPG context as Message objects."""
         ctx = self._builder.build(
-            system_prompt=self._system_prompt,
+            fixed_sections=self._fixed_sections,
             messages=self._session.history,
             character_mgr=self._character_mgr,
             lorebook_mgr=self._lorebook_mgr,
@@ -764,7 +771,7 @@ class RPGGameAgent:
             if self._initialized:
                 return
 
-            self._system_prompt = PromptManager(self._world_name).system_prompt
+            self._fixed_sections = FixedLayerComposer(self._world_name).sections
             self._session.load()
 
             # ── MemoryManager 初始化（仅注册 FileWatcher） ─────────

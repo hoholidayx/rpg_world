@@ -14,7 +14,7 @@ Usage::
 
 from __future__ import annotations
 
-from rpg_world.rpg_core.context.builder import render_jinja_template
+from rpg_world.rpg_core.context.rendering import render_jinja_template
 
 
 class SubAgentContext:

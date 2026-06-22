@@ -4,11 +4,21 @@ from types import SimpleNamespace
 
 import pytest
 
-import rpg_world.rpg_core.context.builder as builder_module
+import rpg_world.rpg_core.context.renderer as renderer_module
 from rpg_world.rpg_core.context.builder import RPGContextBuilder
 from rpg_world.rpg_core.context.config import ExtensionModuleDef, RPGContextConfig
-from rpg_world.rpg_core.context.rpg_context import Message, Role, RPGContext, LayerType
-from rpg_world.rpg_core.tests.conftest import FakeTokenCounter
+from rpg_world.rpg_core.context.fixed_layer import FixedLayerSection
+from rpg_world.rpg_core.context.rpg_context import (
+    FixedLayerData,
+    Message,
+    RPGContext,
+    RPModuleRuntimeSection,
+    RPModulesLayer,
+    Role,
+    StatusTablesLayer,
+    UserMessageLayer,
+    LayerType,
+)
 
 
 class FakeManager:
@@ -60,9 +70,10 @@ class FakeStatusTracker:
 
 def _fake_render(template_name: str, **context: object) -> str:
     if template_name == "layers/fixed_layer.jinja":
-        return f"fixed|{context['system_prompt']}|{len(context['lorebook_entries'])}|{len(context['characters'])}"
+        section_ids = ",".join(section.id for section in context["fixed_sections"])
+        return f"fixed|{section_ids}|{len(context['lorebook_entries'])}|{len(context['characters'])}"
     if template_name == "modules/persistent_memory.jinja":
-        return "pm|" + ",".join(context["persistent_memory"])
+        return "pm|" + ",".join(section["content"] for section in context["persistent_memory"])
     if template_name == "modules/overall_summary.jinja":
         return f"summary|{context['text']}"
     if template_name == "modules/story_memory.jinja":
@@ -75,15 +86,26 @@ def _fake_render(template_name: str, **context: object) -> str:
         return "prefix"
     if template_name == "modules/user_reply_suffix.jinja":
         return "suffix"
+    if template_name in {"modules/fixed_layer_sections.jinja", "modules/rp_modules.jinja"}:
+        return "\n".join(f"[{section.id}]\n{section.content}\n[/{section.id}]" for section in context["sections"])
+    if template_name == "layers/user_message.jinja":
+        parts = []
+        if context["user_before"]:
+            parts.append("[user_prefix]" + "\n\n".join(context["user_before"]) + "[/user_prefix]")
+        if context["user_input"]:
+            parts.append(context["user_input"])
+        if context["user_after"]:
+            parts.append("[user_suffix]" + "\n\n".join(context["user_after"]) + "[/user_suffix]")
+        return "\n\n".join(parts)
     return template_name
 
 
 @pytest.fixture(autouse=True)
 def _patch_renderer(monkeypatch):
-    monkeypatch.setattr(builder_module, "render_jinja_template", _fake_render)
+    monkeypatch.setattr(renderer_module, "render_jinja_template", _fake_render)
 
 
-def test_build_context_layers_and_user_extensions(fake_token_counter):
+def test_build_context_layers_and_user_extensions():
     config = RPGContextConfig(
         hot_history_rounds=1,
         user_extension=[
@@ -93,7 +115,10 @@ def test_build_context_layers_and_user_extensions(fake_token_counter):
     )
     builder = RPGContextBuilder(config=config, world_name="Test World")
     builder.set_summary_store(FakeSummaryStore(("overall summary", 1)))
-    builder.set_persistent_memory_store(FakePersistentStore(["p1", "p2"]))
+    builder.set_persistent_memory_store(FakePersistentStore([
+        {"title": "一", "content": "p1"},
+        {"title": "二", "content": "p2"},
+    ]))
     builder.set_story_memory_store(FakeStoryStore([{"text": "story 1"}]))
     builder.set_recalled_memory_store(FakeRecalledStore(["recall 1"]))
     builder.set_batch_summary_store(FakeSummaryStore(("overall summary", 1)))
@@ -108,7 +133,7 @@ def test_build_context_layers_and_user_extensions(fake_token_counter):
     ]
 
     ctx = builder.build(
-        system_prompt="prompt",
+        fixed_sections=[FixedLayerSection(id="core", title="核心", content="prompt", priority=0)],
         messages=messages,
         character_mgr=FakeManager([{"name": "Alice"}]),
         lorebook_mgr=FakeManager([{"name": "Lore"}]),
@@ -125,15 +150,19 @@ def test_build_context_layers_and_user_extensions(fake_token_counter):
     )
 
     assert isinstance(ctx, RPGContext)
-    assert ctx.fixed_layer.startswith("fixed|prompt|1|1")
-    assert ctx.persistent_memory == "pm|p1,p2"
-    assert ctx.summary == "summary|overall summary"
-    assert [m.content for m in ctx.hot_history] == ["u2", "a2"]
-    assert ctx.story_memory == "story|story 1"
-    assert ctx.recalled_memory == "recalled|recall 1"
-    assert ctx.status_tables == "tables|世界状态"
-    assert ctx.user_before == "prefix"
-    assert ctx.user_after == "suffix"
+    assert isinstance(ctx.get_layer(LayerType.FIXED), FixedLayerData)
+    assert ctx.fixed_layer.sections[0].id == "core"
+    assert [section["content"] for section in ctx.persistent_memory.sections] == ["p1", "p2"]
+    assert ctx.summary.text == "overall summary"
+    assert [m.content for m in ctx.hot_history.messages] == ["u2", "a2"]
+    assert ctx.story_memory.details == [{"text": "story 1"}]
+    assert ctx.recalled_memory.items == ["recall 1"]
+    assert [table["name"] for table in ctx.status_tables.tables] == ["世界状态"]
+    assert ctx.user_message.before[0].template == "modules/user_reply_prefix.jinja"
+    assert ctx.user_message.after[0].template == "modules/user_reply_suffix.jinja"
+    assert ctx.render_layer(LayerType.FIXED) == "fixed|core|1|1"
+    assert ctx.render_layer(LayerType.PERSISTENT_MEMORY) == "pm|p1,p2"
+    assert ctx.render_layer(LayerType.STATUS_TABLES) == "tables|世界状态"
 
     rendered = ctx.to_message_objects()
     assert rendered[-1].role is Role.USER
@@ -141,53 +170,30 @@ def test_build_context_layers_and_user_extensions(fake_token_counter):
     assert "current" in rendered[-1].content
     assert "suffix" in rendered[-1].content
 
-    summary = ctx.layer_summary(fake_token_counter)
-    assert summary[-1].type == LayerType.USER_MESSAGE
-    assert summary[-1].status == "active"
-    assert summary[0].description.startswith("system prompt")
-    assert summary[3].description == "1 轮 / 2 条 (user=1, assistant=1, tool=0, system=0)"
-
-
-def test_context_to_markdown_and_empty_layers(fake_token_counter):
-    ctx = RPGContext(fixed_layer="fixed", user_input="hi")
-    md = ctx.to_markdown(fake_token_counter)
-
-    assert "## 上下文概览" in md
-    assert "## 分层明细" in md
-    assert "Fixed Layer" in md
-    assert "User Message" in md
-    assert "总 token" in md
-    assert "| Layer | Status | Tokens | Description |" not in md
-
-
-def test_context_markdown_includes_history_stats(fake_token_counter):
+def test_context_to_message_objects_renders_required_layers():
     ctx = RPGContext(
-        fixed_layer="fixed",
-        hot_history=[
-            Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
-            Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
-            Message(Role.USER, "u2", turn_id=2, seq_in_turn=1),
-        ],
+        fixed_layer=FixedLayerData(sections=[FixedLayerSection(id="core", title="核心", content="fixed")]),
+        user_message=UserMessageLayer(user_input="hi"),
+    )
+    rendered = ctx.to_message_objects()
+
+    assert [m.role for m in rendered] == [Role.SYSTEM, Role.USER]
+    assert rendered[0].content == "fixed|core|0|0"
+    assert rendered[1].content == "hi"
+
+
+def test_context_includes_dynamic_rp_modules_before_user():
+    ctx = RPGContext(
+        fixed_layer=FixedLayerData(sections=[FixedLayerSection(id="core", title="核心", content="fixed")]),
+        status_tables=StatusTablesLayer(tables=[{"name": "状态", "headers": ["k"], "rows": [["v"]]}]),
+        rp_modules=RPModulesLayer(sections=[
+            RPModuleRuntimeSection(id="combat", title="战斗", content="combat turn"),
+        ]),
+        user_message=UserMessageLayer(user_input="hi"),
     )
 
-    md = ctx.to_markdown(fake_token_counter)
+    rendered = ctx.to_message_objects()
 
-    assert "历史消息: **3** 条" in md
-    assert "历史轮数: **2** 轮" in md
-    assert "user 2, assistant 1, tool 0, system 0" in md
-
-
-def test_context_hot_history_falls_back_without_user_anchor(fake_token_counter):
-    ctx = RPGContext(
-        fixed_layer="fixed",
-        hot_history=[
-            Message(Role.ASSISTANT, "a1"),
-            Message(Role.TOOL, "tool1"),
-            Message(Role.SYSTEM, "sys1"),
-        ],
-    )
-
-    summary = ctx.layer_summary(fake_token_counter)
-
-    assert [m.content for m in ctx.hot_history] == ["a1", "tool1", "sys1"]
-    assert summary[3].description == "2 轮 / 3 条 (user=0, assistant=1, tool=1, system=1)"
+    assert [m.role for m in rendered] == [Role.SYSTEM, Role.SYSTEM, Role.SYSTEM, Role.USER]
+    assert rendered[-2].content.startswith("[combat]")
+    assert rendered[-1].content == "hi"

@@ -1,0 +1,9 @@
+{% for section in sections %}
+[{{ section.id }}]
+# {{ section.title }}
+{{ section.content.strip() }}
+[/{{ section.id }}]
+{% if not loop.last %}
+
+{% endif %}
+{% endfor %}

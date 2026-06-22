@@ -5,11 +5,24 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from jinja2 import Environment, FileSystemLoader
 
 from rpg_world.rpg_core.context.config import RPGContextConfig
-from rpg_world.rpg_core.context.rpg_context import Message, Role, RPGContext
-from rpg_world.rpg_core.settings import settings
+from rpg_world.rpg_core.context.fixed_layer import FixedLayerSection
+from rpg_world.rpg_core.context.rpg_context import (
+    FixedLayerData,
+    HotHistoryLayer,
+    Message,
+    PersistentMemoryLayer,
+    RecalledMemoryLayer,
+    RPGContext,
+    RPModuleRuntimeSection,
+    RPModulesLayer,
+    StatusTablesLayer,
+    StoryMemoryLayer,
+    SummaryLayer,
+    UserExtensionBlock,
+    UserMessageLayer,
+)
 from rpg_world.rpg_core.session.turns import count_turns, slice_recent_turns
 
 if TYPE_CHECKING:
@@ -22,26 +35,6 @@ if TYPE_CHECKING:
     from rpg_world.rpg_core.status.manager import StatusManager
     from rpg_world.rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_world.rpg_core.summary.store import SummaryStore
-
-
-# ── shared Jinja environment ──────────────────────────────────────────
-
-_JINJA_ENV: Environment | None = None
-
-
-def render_jinja_template(template_name: str, **context: object) -> str:
-    """Render a Jinja template from the ``rpg_core/jinja/`` directory.
-
-    Uses a module-level cached Environment to avoid repeated setup cost.
-    """
-    global _JINJA_ENV
-    if _JINJA_ENV is None:
-        _JINJA_ENV = Environment(
-            loader=FileSystemLoader(str(settings.jinja_dir)),
-            autoescape=False,
-        )
-    tpl = _JINJA_ENV.get_template(template_name)
-    return tpl.render(**context).strip()
 
 
 def _flatten_status_tables(
@@ -89,7 +82,8 @@ class RPGContextBuilder:
         [N+2]  system     Story Memory (剧情记忆)          ★★☆ accumulated details
         [N+3]  system     Recalled Memory (召回)            ★★★ dynamically injected
         [N+4]  system     Status Tables                    ★★★★ most volatile
-        [N+5]  user       User Message                     always new
+        [N+5]  system     RP Modules (optional)            ★★★★ dynamic module state
+        [N+6]  user       User Message                     always new
 
     Prefix cache rule: content after the first changed position is a miss.
     Persistent Memory is split out of Fixed Layer as its own [1] because
@@ -141,21 +135,23 @@ class RPGContextBuilder:
 
     def build(
         self,
-        system_prompt: str = "",
+        fixed_sections: list[FixedLayerSection] | None = None,
         messages: list[Message] | None = None,
         character_mgr: CharacterManager | None = None,
         lorebook_mgr: LorebookManager | None = None,
         status_mgr: StatusManager | None = None,
         scene_tracker: SceneTracker | None = None,
+        rp_module_sections: list[RPModuleRuntimeSection] | None = None,
     ) -> RPGContext:
         """构建 5 层 RPGContext。
 
         Args:
-            system_prompt: 系统提示词。
+            fixed_sections: 固定层稳定片段，由 FixedLayerComposer/RP modules 提供。
             messages: 原始消息列表。仅用于提取历史记录和当前用户输入。
             character_mgr: 角色卡管理器，为 None 时固定层跳过角色卡模块。
             lorebook_mgr: 世界书管理器，为 None 时固定层跳过世界书模块。
             status_mgr: 状态管理器，为 None 时动态层跳过状态表格模块。
+            rp_module_sections: 可选 RP module 运行态；静态契约应放在 fixed_sections。
         """
         if not messages:
             messages = []
@@ -182,29 +178,16 @@ class RPGContextBuilder:
             except Exception as exc:
                 logger.debug("[RPGContextBuilder] character layer skipped: {}", exc)
 
-        fixed_content = self._render_layer("layers/fixed_layer.jinja", {
-            "system_prompt": system_prompt,
-            "world_name": self.world_name,
-            "lorebook_entries": lorebook_entries,
-            "characters": characters,
-        })
-
         # ── 3. Build Persistent Memory Layer ─────────────────────────
-        persistent_content: str | None = None
+        persistent_sections: list[dict[str, str]] = []
         if self._persist_memory and self.config.enable_persistent_memory:
             try:
-                pm = self._persist_memory.get_sections()
-                if pm:
-                    persistent_content = self._render_layer("modules/persistent_memory.jinja", {
-                        "persistent_memory": pm,
-                    })
-                    if not persistent_content.strip():
-                        persistent_content = None
+                persistent_sections = self._persist_memory.get_sections()
             except Exception as exc:
                 logger.debug("[RPGContextBuilder] persistent memory layer skipped: {}", exc)
 
         # ── 4. Build Summary Layer (overall.md only) ──────────────────
-        summary_content: str | None = None
+        summary_text: str | None = None
         if (
             self.config.enable_summaries
             and total_rounds > self.config.hot_history_rounds
@@ -213,9 +196,7 @@ class RPGContextBuilder:
             try:
                 overall, _ = self._batch_summary_store.load_overall()
                 if overall:
-                    summary_content = self._render_layer("modules/overall_summary.jinja", {
-                        "text": overall,
-                    })
+                    summary_text = overall
             except Exception as exc:
                 logger.debug("[RPGContextBuilder] summary layer skipped: {}", exc)
 
@@ -226,31 +207,20 @@ class RPGContextBuilder:
         # ── 6. Build Dynamic Layer modules ──────────────────────────
         # Ordered by change frequency (low → high) for prefix cache efficiency:
         #   story memory → recalled memory → status tables (most volatile)
-        story_memory_content: str | None = None
         story_details: list[dict] = []
         if self._story_memory and self.config.enable_story_memory:
             try:
                 story_details = self._story_memory.get_all()
             except Exception as exc:
                 logger.debug("[RPGContextBuilder] story memory layer skipped: {}", exc)
-        sm = self._render_layer("modules/story_memory.jinja", {
-            "story_details": story_details,
-        })
-        story_memory_content = sm if sm.strip() else None
 
-        recalled_memory_content: str | None = None
         recalled_items: list[str] = []
         if self._recalled_memory and self.config.enable_recalled_memory:
             try:
                 recalled_items = self._recalled_memory.get_items()
             except Exception as exc:
                 logger.debug("[RPGContextBuilder] recalled memory layer skipped: {}", exc)
-        rm = self._render_layer("modules/recalled_memory.jinja", {
-            "recalled_items": recalled_items,
-        })
-        recalled_memory_content = rm if rm.strip() else None
 
-        status_tables_content: str | None = None
         status_tables: list[dict] = []
         if status_mgr and self.config.enable_status_tables:
             # 排除 SceneTracker 持有的场景表，避免重复
@@ -261,62 +231,50 @@ class RPGContextBuilder:
                 except Exception as exc:
                     logger.debug("[RPGContextBuilder] scene table key unavailable: {}", exc)
             status_tables = _flatten_status_tables(status_mgr, exclude_tables=exclude)
-        st = self._render_layer("modules/status_tables.jinja", {
-            "status_tables": status_tables,
-        })
-        status_tables_content = st if st.strip() else None
 
         # ── 7. Build user message with User Extension Layer ─────────
-        user_before = self._build_extension_content(
+        user_before = self._build_extension_blocks(
             [m for m in self.config.user_extension if m.position == "before"],
             {"user_reply_prefix": "接下来是用户的输入："},
         )
-        user_after = self._build_extension_content(
+        user_after = self._build_extension_blocks(
             [m for m in self.config.user_extension if m.position == "after"],
             {"user_reply_suffix": "请用中文回复，保持角色设定。"},
         )
 
-        parts = []
-        if user_before:
-            parts.append(user_before)
-        if user_text:
-            parts.append(user_text)
-        if user_after:
-            parts.append(user_after)
         # ── 8. Assemble into RPGContext (stable-first for prefix cache) ─
         return RPGContext(
-            fixed_layer=fixed_content,
-            persistent_memory=persistent_content,
-            summary=summary_content,
-            hot_history=hot_history,
-            story_memory=story_memory_content,
-            recalled_memory=recalled_memory_content,
-            status_tables=status_tables_content,
-            user_before=user_before or None,
-            user_input=user_text,
-            user_after=user_after or None,
+            fixed_layer=FixedLayerData(
+                world_name=self.world_name,
+                sections=list(fixed_sections or []),
+                lorebook_entries=lorebook_entries,
+                characters=characters,
+            ),
+            persistent_memory=PersistentMemoryLayer(sections=persistent_sections),
+            summary=SummaryLayer(text=summary_text),
+            hot_history=HotHistoryLayer(messages=hot_history),
+            story_memory=StoryMemoryLayer(details=story_details),
+            recalled_memory=RecalledMemoryLayer(items=recalled_items),
+            status_tables=StatusTablesLayer(tables=status_tables),
+            rp_modules=RPModulesLayer(sections=list(rp_module_sections or [])),
+            user_message=UserMessageLayer(
+                before=user_before,
+                user_input=user_text,
+                after=user_after,
+            ),
         )
 
     # ── internal helpers ─────────────────────────────────────────────
 
-    def _render_layer(self, template_name: str, context: dict[str, object]) -> str:
-        """Render a layer Jinja template with *context* vars."""
-        return render_jinja_template(template_name, **context)
-
-    def _build_extension_content(
+    def _build_extension_blocks(
         self,
         modules: list[object],
         default_data: dict[str, str],
-    ) -> str:
-        """Render enabled extension modules and concatenate."""
-        blocks: list[str] = []
+    ) -> list[UserExtensionBlock]:
+        """Collect enabled user extension templates without rendering."""
+        blocks: list[UserExtensionBlock] = []
         for mod in modules:
             if not mod.enabled:
                 continue
-            try:
-                rendered = render_jinja_template(mod.template, **default_data)
-                if rendered:
-                    blocks.append(rendered)
-            except Exception as exc:
-                logger.debug("[RPGContextBuilder] extension module skipped {}: {}", getattr(mod, "name", "?"), exc)
-        return "\n\n".join(blocks)
+            blocks.append(UserExtensionBlock.from_def(mod, default_data))
+        return blocks

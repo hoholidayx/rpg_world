@@ -1,0 +1,23 @@
+{% if user_before %}
+[user_prefix]
+{% for block in user_before %}
+{{ block }}
+{% if not loop.last %}
+
+{% endif %}
+{% endfor %}
+[/user_prefix]
+{% endif %}
+{% if user_input %}
+{{ user_input }}
+{% endif %}
+{% if user_after %}
+[user_suffix]
+{% for block in user_after %}
+{{ block }}
+{% if not loop.last %}
+
+{% endif %}
+{% endfor %}
+[/user_suffix]
+{% endif %}

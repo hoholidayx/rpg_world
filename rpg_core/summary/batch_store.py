@@ -51,7 +51,7 @@ class BatchSummaryStore:
         file_name = f"{batch_id:03d}-{slug}.md"
         file_path = self._dir / file_name
 
-        from rpg_world.rpg_core.context.builder import render_jinja_template
+        from rpg_world.rpg_core.context.rendering import render_jinja_template
 
         body = render_jinja_template(
             "summary/batch_summary.md.jinja",
@@ -109,7 +109,7 @@ class BatchSummaryStore:
         last_batch_id: int = 0,
     ) -> Path:
         """覆盖写入 overall.md（含 front matter）。返回文件路径。"""
-        from rpg_world.rpg_core.context.builder import render_jinja_template
+        from rpg_world.rpg_core.context.rendering import render_jinja_template
 
         body = render_jinja_template(
             "summary/overall.md.jinja",
