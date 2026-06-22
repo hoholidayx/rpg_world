@@ -1,7 +1,7 @@
 """CommandDispatcher — 斜杠命令分发器。
 
 在 agent.send() 进入 LLM 之前拦截 / 开头的输入，由注册的命令处理器
-或子 Agent 消费，避免命令误入主 LLM 流程。
+或子 Agent 消费。未知斜杠命令也会返回错误，避免命令误入主 LLM 流程。
 """
 
 from __future__ import annotations
@@ -145,7 +145,7 @@ class CommandDispatcher:
     维护内置命令和子 Agent 命令两道注册表。dispatch() 按优先级：
     1. 内置命令（help / clear / reload / context / sessions / session_create / session_switch / memory_reindex）
     2. 子 Agent 的 accept_command（如 MemorySubAgent 的 /compact）
-    3. 未命中 → handed=False，调用方走 LLM 兜底
+    3. 未知斜杠命令 → handled=True，返回错误提示
     """
 
     def __init__(self, agent: RPGGameAgent | None = None) -> None:
@@ -228,16 +228,12 @@ class CommandDispatcher:
         return defs
 
     def is_command(self, text: str) -> bool:
-        """判断文本是否可能是已知命令。"""
-        if not text.startswith("/"):
-            return False
-        name = text.split()[0].lower()
-        if name in self._builtins:
-            return True
-        for sa in self._sub_agents:
-            if sa.accept_command(name):
-                return True
-        return False
+        """判断文本是否应按命令处理。
+
+        只要首个非空字符是 ``/`` 就视为命令输入。未知命令也必须由
+        ``dispatch()`` 消费并返回错误，不能落入主 LLM 推理流程。
+        """
+        return text.lstrip().startswith("/")
 
     # ── 执行 ──────────────────────────────────────────────────────────
 
@@ -245,12 +241,13 @@ class CommandDispatcher:
         """分发命令，返回执行结果。
 
         优先级：内置命令 > 子 Agent 命令。
-        如果都不处理，返回 ``CommandResult(handled=False)``。
+        如果是未知斜杠命令，返回 ``CommandResult(handled=True)`` 和错误提示。
         """
-        if not text.startswith("/"):
+        command_text = text.lstrip()
+        if not command_text.startswith("/"):
             return CommandResult()
 
-        parts = text.split()
+        parts = command_text.split()
         name = parts[0].lower()
         args = parts[1:]
 
@@ -279,4 +276,7 @@ class CommandDispatcher:
                         reply=f"子 Agent 执行 {name} 失败: {e}", handled=True,
                     )
 
-        return CommandResult()
+        return CommandResult(
+            reply=f"未知命令: {name}\n输入 /help 查看可用命令。",
+            handled=True,
+        )

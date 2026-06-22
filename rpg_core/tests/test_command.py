@@ -33,6 +33,38 @@ class TestCommandDispatcher:
         assert "/help" in result.reply
         assert "/clear" in result.reply
 
+    @pytest.mark.asyncio
+    async def test_unknown_slash_command_is_handled_as_error(self):
+        dispatcher = CommandDispatcher(agent=SimpleNamespace())
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/cleer")
+
+        assert result.handled is True
+        assert "未知命令: /cleer" in result.reply
+        assert "/help" in result.reply
+
+    def test_any_leading_slash_input_is_command(self):
+        dispatcher = CommandDispatcher(agent=SimpleNamespace())
+
+        assert dispatcher.is_command("/not_registered") is True
+        assert dispatcher.is_command("  /not_registered") is True
+        assert dispatcher.is_command("not a command") is False
+
+    @pytest.mark.asyncio
+    async def test_dispatch_command_edge_cases(self):
+        dispatcher = CommandDispatcher(agent=SimpleNamespace())
+        dispatcher.register_default_builtins()
+
+        empty = await dispatcher.dispatch("")
+        whitespace = await dispatcher.dispatch("   ")
+        slash_only = await dispatcher.dispatch("/")
+
+        assert empty.handled is False
+        assert whitespace.handled is False
+        assert slash_only.handled is True
+        assert "未知命令: /" in slash_only.reply
+
     def test_format_command_help(self):
         text = format_command_help([])
         assert text == "当前没有可用命令。"
