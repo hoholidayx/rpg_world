@@ -64,14 +64,13 @@ rpg_world/
 │   │   ├── manager.py            #     AgentManager 单例（统一 agent 缓存）
 │   │   ├── command.py            #     CommandDispatcher — 斜杠命令分发器
 │   │   ├── loop.py               #     chat loop（LLM 往返 + tool calling）
-│   │   ├── prompt.py             #     PromptManager — 系统提示词
 │   │   ├── stats_formatter.py    #     LLM 统计格式化
 │   │   ├── tokenizer.py          #     TokenCounter 抽象
 │   │   ├── sub_agents/           #     子 Agent 系统
 │   │   └── tools/                #     工具系统
 │   ├── llm/                      #   LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析
 │   ├── scene/                    # 场景状态（时间/地点/属性）
-│   ├── context/                  # 5 层 RPG 上下文构建
+│   ├── context/                  # 结构化 RPG 上下文、固定层、渲染边界和诊断
 │   ├── jinja/                    # Jinja2 模板
 │   ├── character/                # 角色卡（JSON）
 │   ├── lorebook/                 # 世界书（JSON）
@@ -319,7 +318,18 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 | `openai_score_norm` | `PointwiseMemoryReranker` | OpenAI-compatible provider rerank 归一化分 |
 | `openai_reason` | `PointwiseMemoryReranker` | OpenAI-compatible provider rerank 给出的原因 |
 
-### 5 层 RPG 上下文（`context/builder.py` → `rpg_context.py`）
+### 结构化 RPG 上下文（`context/`）
+
+上下文主流程保持结构化数据，直到发送给 LLM 前才统一渲染。核心分工：
+
+| 模块 | 职责 |
+|---|---|
+| `fixed_layer.py` | `FixedLayerComposer` 与 `FixedLayerSection`，维护稳定固定层 |
+| `builder.py` | 读取世界书、角色卡、摘要、记忆、状态表、用户扩展块，构建结构化 `RPGContext` |
+| `rpg_context.py` | 只保留上下文层数据结构和薄委托方法 |
+| `renderer.py` | LLM 请求边界渲染，将结构化层转成 OpenAI-compatible messages |
+| `inspector.py` | `/context`、日志和调试用 markdown / token 诊断 |
+| `rendering.py` | 共享 Jinja2 环境和模板渲染工具 |
 
 LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache：
 
@@ -331,11 +341,21 @@ LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache
 | [3..N] Hot History | mixed | 最近 N 轮对话 | ★★☆ 每轮追加 |
 | [N+1] Story Memory | system | 剧情细节 | ★★☆ 累积 |
 | [N+2] Recalled Memory | system | 动态召回 | ★★★ 动态注入 |
-| [N+3] Status Tables | system | 游戏状态 CSV 表 | ★★★★ 高频变化 |
-| [N+4] User Message | user | `[scene]` + 用户输入 + 前后缀 | 总是新的 |
+| [N+3] Status Tables | system | 普通状态 CSV 表，不包含 `当前场景.csv` | ★★★★ 高频变化 |
+| [N+4] RP Modules | system | RP 模块运行态，如骰子、战斗、物品等后续模块 | ★★★★ 动态 |
+| [N+5] User Message | user | `[scene]` + 用户输入 + 前后缀 | 总是新的 |
 
-上下文基于 Jinja2 模板（`rpg_core/jinja/`），通过 `RPGContext.to_messages()`
-展平为 OpenAI-compatible 消息列表。
+`当前场景.csv` 是特殊状态表，不走普通 `STATUS_TABLES` 层。`SceneTracker.get_context()`
+会将它作为 user prefix 注入最终用户消息：一方面提高模型对当前时空、地点、场景属性的注意力，
+另一方面让场景状态随 user message 进入历史，便于后续摘要和记忆按时间顺序归纳。
+
+上下文基于 Jinja2 模板（`rpg_core/jinja/`），通过 `RPGContext.to_message_objects()`
+展平为 OpenAI-compatible 消息列表。不要在 builder 或 dataclass 中提前拼接最终 prompt，
+也不要把 markdown 诊断输出放回主业务数据模型。
+
+RP Modules 不是通用 skill 体系。后续骰子、战斗、物品、关系等能力应定义为围绕 RP 语义的模块：
+模块可以注册工具、暴露运行态 section、读写受控状态，但固定 instruction 层和不可变模块描述应保持稳定，
+避免频繁变化破坏 prefix cache。
 
 ### Agent 数据流
 
@@ -344,7 +364,7 @@ agent.send(user_input)
   → CommandDispatcher 拦截斜杠命令（是则旁路 LLM，不入历史）
   → StatusSubAgent.update() 预更新状态表（~1-2K tokens 避免主 loop round-trip）
   → SceneTracker.get_context() → [scene] 嵌入 user message
-  → _build_transformed_context() → builder.build() → RPGContext.to_messages()
+  → _build_transformed_context() → builder.build() → RPGContext.to_message_objects()
   → run_chat_loop(provider, tool_registry, messages)
     → LLM 可能调工具（scene.set_time / set_attr / file tools）
     → 每轮记录 TurnStats + CallRecord
