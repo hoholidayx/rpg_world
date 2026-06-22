@@ -6,10 +6,10 @@ import json
 import re
 from abc import ABC, abstractmethod
 from functools import lru_cache
-from typing import Any
 
 from loguru import logger
 
+from rpg_world.rpg_core.common_types import JsonObject, JsonValue
 from rpg_world.rpg_core.llm.base_provider import LLMProvider
 from rpg_world.rpg_core.memory.asyncio_utils import run_awaitable_sync
 from rpg_world.rpg_core.memory.planning.plan import QueryPlan, make_empty_plan
@@ -175,7 +175,7 @@ def _build_prompt(query: str) -> str:
 def _plan_from_mapping(
     original_query: str,
     normalized_query: str,
-    data: dict[str, Any],
+    data: JsonObject,
     planner_source: str,
     fallback_planner: BaseQueryPlanner | None = None,
 ) -> QueryPlan:
@@ -197,8 +197,6 @@ def _plan_from_mapping(
         query_type=query_type,
         planner_source=planner_source,
     )
-
-
 
 
 def _plan_terms_from_fallback(fallback_planner: BaseQueryPlanner | None, query: str) -> list[str]:
@@ -270,7 +268,7 @@ def _filter_meaningful_terms(items: list[str]) -> list[str]:
     return [item for item in items if _is_meaningful_term(item)]
 
 
-def _as_strings(value: object) -> list[str]:
+def _as_strings(value: JsonValue) -> list[str]:
     if isinstance(value, str):
         return [value]
     if not isinstance(value, list | tuple):
@@ -293,7 +291,7 @@ def _run_llm_chat_sync(provider: LLMProvider, messages: list[dict]):
     return run_awaitable_sync(provider.chat(messages))
 
 
-def _parse_json_object(text: str) -> dict[str, Any]:
+def _parse_json_object(text: str) -> JsonObject:
     start = text.find("{")
     end = text.rfind("}")
     if start < 0 or end < start:

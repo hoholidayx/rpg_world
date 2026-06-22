@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+
 
 import pytest
 
@@ -33,7 +33,6 @@ class FakeTemplateModule:
     template: str
     position: str = "before"
     enabled: bool = True
-
 
 
 class FakeEmbedding:

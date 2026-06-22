@@ -6,7 +6,9 @@ import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+
+from rpg_world.rpg_core.common_types import DebugInfo
+
 
 from rpg_world.rpg_core.llama_service.client import LlamaRerankModel
 from rpg_world.rpg_core.llm.base_provider import LLMProvider
@@ -31,7 +33,7 @@ class MemoryScore:
 
     score: float
     reason: str = ""
-    debug: dict[str, Any] = field(default_factory=dict)
+    debug: DebugInfo = field(default_factory=dict)
 
     @property
     def clamped_score(self) -> float:
@@ -155,7 +157,7 @@ class _RerankParseError(Exception):
         self.preview = preview
 
 
-def _extract_response_text(response: object) -> str:
+def _extract_response_text(response: LLMResponse) -> str:
     if hasattr(response, "content"):
         return str(getattr(response, "content") or "")
     if isinstance(response, dict):

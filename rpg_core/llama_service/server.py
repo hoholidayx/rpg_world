@@ -5,8 +5,8 @@ from __future__ import annotations
 import queue
 import threading
 from multiprocessing.queues import Queue as MPQueue
-from typing import Any
 
+from rpg_world.rpg_core.common_types import LlamaCacheKey, LlamaResponsePayload
 from rpg_world.rpg_core.llama_service.models import LlamaModelCache, model_cache_key
 from rpg_world.rpg_core.llama_service.protocol import (
     LlamaRequest,
@@ -66,7 +66,7 @@ class LlamaServiceServer:
         self._response_queue = response_queue
         self._max_parallel_models = max(1, int(max_parallel_models))
         self._cache = cache or LlamaModelCache()
-        self._actors: dict[tuple[Any, ...], _Actor] = {}
+        self._actors: dict[LlamaCacheKey, _Actor] = {}
 
     def serve_forever(self) -> None:
         while True:
@@ -93,7 +93,7 @@ class LlamaServiceServer:
             actor.join()
         self._actors.clear()
 
-    def _actor_for_key(self, key: tuple[Any, ...]) -> _Actor:
+    def _actor_for_key(self, key: LlamaCacheKey) -> _Actor:
         actor = self._actors.get(key)
         if actor is not None:
             return actor
@@ -117,7 +117,7 @@ def serve(
     ).serve_forever()
 
 
-def _handle_model_request(cache: LlamaModelCache, request: LlamaRequest) -> Any:
+def _handle_model_request(cache: LlamaModelCache, request: LlamaRequest) -> LlamaResponsePayload:
     op = str(request.get("op"))
     model = dict(request.get("model") or {})
     params = dict(request.get("params") or {})

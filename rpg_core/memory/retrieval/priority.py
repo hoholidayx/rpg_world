@@ -7,7 +7,7 @@ retrieval orchestration code.
 
 from __future__ import annotations
 
-from typing import Any
+from rpg_world.rpg_core.common_types import JsonValue, Metadata
 
 DEFAULT_GRANULARITY_SCORES: dict[str, float] = {
     "batch": 1.00,
@@ -27,7 +27,7 @@ _ALIASES: dict[str, str] = {
 }
 
 
-def resolve_memory_granularity(metadata: dict[str, Any]) -> str:
+def resolve_memory_granularity(metadata: Metadata) -> str:
     explicit = _normalize(metadata.get("memory_granularity") or metadata.get("granularity"))
     if explicit:
         return explicit
@@ -41,13 +41,13 @@ def resolve_memory_granularity(metadata: dict[str, Any]) -> str:
     return "unknown"
 
 
-def granularity_score(metadata: dict[str, Any], scores: dict[str, float] | None = None) -> tuple[str, float]:
+def granularity_score(metadata: Metadata, scores: dict[str, float] | None = None) -> tuple[str, float]:
     granularity = resolve_memory_granularity(metadata)
     score_map = scores or DEFAULT_GRANULARITY_SCORES
     return granularity, float(score_map.get(granularity, score_map["unknown"]))
 
 
-def _normalize(value: object) -> str:
+def _normalize(value: JsonValue) -> str:
     text = str(value or "").strip().lower()
     if not text:
         return ""

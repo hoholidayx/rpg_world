@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from rpg_world.rpg_core.memory.candidate import MemoryCandidate
 from rpg_world.rpg_core.memory.retrieval.scoring import normalize_values
 
@@ -27,7 +25,7 @@ def build_pointwise_prompt(query: str, candidate: MemoryCandidate, *, max_candid
     )
 
 
-def extract_text(output: Any) -> str:
+def extract_text(output: object) -> str:
     if isinstance(output, str):
         return output
     if isinstance(output, dict):

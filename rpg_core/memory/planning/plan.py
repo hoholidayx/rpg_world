@@ -18,7 +18,6 @@ class QueryPlan:
     planner_source: str = "rule_based"
 
 
-
 def make_empty_plan(query: str, planner_source: str = "rule_based") -> QueryPlan:
     return QueryPlan(
         original_query=query,

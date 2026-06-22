@@ -10,11 +10,15 @@ import time
 import uuid
 from multiprocessing.queues import Queue as MPQueue
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 from loguru import logger
 
+from rpg_world.rpg_core.common_types import LlamaModelConfig, LlamaRequestParams, LlamaResponsePayload
 from rpg_world.rpg_core.llama_service.protocol import LlamaOperation, LlamaResponse, make_request
+
+if TYPE_CHECKING:
+    from rpg_world.rpg_core.settings import MemorySettings
 
 
 class LlamaClientError(Exception):
@@ -102,7 +106,7 @@ class LlamaCompletionModel:
         max_tokens: int,
         temperature: float,
         stop: list[str] | None = None,
-    ) -> Any:
+    ) -> LlamaResponsePayload:
         return self._client.complete(
             self._model,
             prompt,
@@ -216,12 +220,12 @@ class LlamaClient:
             self.startup_timeout_ms = startup_timeout_ms
             self.max_parallel_models = max_parallel_models
 
-    def embedding_dimension(self, model: dict[str, Any], timeout_ms: int | None = None) -> int:
+    def embedding_dimension(self, model: LlamaModelConfig, timeout_ms: int | None = None) -> int:
         return int(self.request("embedding_dimension", model=model, timeout_ms=timeout_ms))
 
     def embed(
         self,
-        model: dict[str, Any],
+        model: LlamaModelConfig,
         texts: list[str],
         timeout_ms: int | None = None,
     ) -> list[list[float]]:
@@ -230,14 +234,14 @@ class LlamaClient:
 
     def complete(
         self,
-        model: dict[str, Any],
+        model: LlamaModelConfig,
         prompt: str,
         *,
         max_tokens: int,
         temperature: float,
         stop: list[str] | None = None,
         timeout_ms: int | None = None,
-    ) -> Any:
+    ) -> LlamaResponsePayload:
         return self.request(
             "complete",
             model=model,
@@ -252,7 +256,7 @@ class LlamaClient:
 
     def complete_stream(
         self,
-        model: dict[str, Any],
+        model: LlamaModelConfig,
         prompt: str,
         *,
         max_tokens: int,
@@ -277,7 +281,7 @@ class LlamaClient:
 
     def rerank(
         self,
-        model: dict[str, Any],
+        model: LlamaModelConfig,
         query: str,
         documents: list[str],
         *,
@@ -302,10 +306,10 @@ class LlamaClient:
         self,
         op: LlamaOperation,
         *,
-        model: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
+        model: LlamaModelConfig | None = None,
+        params: LlamaRequestParams | None = None,
         timeout_ms: int | None = None,
-    ) -> Any:
+    ) -> LlamaResponsePayload:
         if not self.enabled:
             raise LlamaClientError("llama process client disabled")
         request_id = uuid.uuid4().hex
@@ -345,8 +349,8 @@ class LlamaClient:
         self,
         op: LlamaOperation,
         *,
-        model: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
+        model: LlamaModelConfig | None = None,
+        params: LlamaRequestParams | None = None,
         timeout_ms: int | None = None,
     ) -> Iterator[LlamaResponse]:
         if not self.enabled:
@@ -495,7 +499,7 @@ def get_llama_client() -> LlamaClient:
     return _CLIENT
 
 
-def configure_llama_client_from_memory_settings(memory_settings: Any) -> LlamaClient:
+def configure_llama_client_from_memory_settings(memory_settings: MemorySettings) -> LlamaClient:
     """Configure the process-wide llama client from ``MemorySettings``."""
     client = get_llama_client()
     client.configure(
