@@ -26,8 +26,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
+from rpg_world.rpg_core.common_types import ConfigDict, ConfigValue
 from rpg_world.rpg_core.llm.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
 from rpg_world.rpg_core.llm.keys import (
     AGENT_MAIN_BIZ_KEY,
@@ -54,14 +55,14 @@ _TELEGRAM_BOT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9_]+$")
 _SESSION_DIR_NAME = "sessions"
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+def _deep_merge(base: ConfigDict, override: ConfigDict) -> ConfigDict:
     """Recursively merge settings dicts.
 
     Lists are replaced, except ``modules.telegram.bots`` which is merged by
     bot ``name`` so profiles can override individual bots.
     """
 
-    def merge_value(left: Any, right: Any, path: tuple[str, ...]) -> Any:
+    def merge_value(left: ConfigValue, right: ConfigValue, path: tuple[str, ...]) -> ConfigValue:
         if (
             path == ("modules", "telegram", "bots")
             and isinstance(left, list)
@@ -72,7 +73,7 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
             return merge_dict(left, right, path)
         return right
 
-    def merge_dict(left: dict[str, Any], right: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
+    def merge_dict(left: ConfigDict, right: ConfigDict, path: tuple[str, ...]) -> ConfigDict:
         merged = dict(left)
         for key, value in right.items():
             key_path = (*path, str(key))
@@ -82,7 +83,7 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
                 merged[key] = value
         return merged
 
-    def _merge_bots(left: list[Any], right: list[Any]) -> list[Any]:
+    def _merge_bots(left: list[ConfigValue], right: list[ConfigValue]) -> list[ConfigValue]:
         merged = [dict(item) if isinstance(item, dict) else item for item in left]
         index_by_name = {
             item.get("name"): idx
@@ -317,16 +318,16 @@ class Settings:
         )
 
     @property
-    def raw(self) -> dict[str, Any]:
+    def raw(self) -> ConfigDict:
         return self._raw
 
     @property
-    def agent_settings(self) -> dict[str, Any]:
+    def agent_settings(self) -> ConfigDict:
         raw = self._raw.get("agent", {})
         return raw if isinstance(raw, dict) else {}
 
     @staticmethod
-    def _llm_agent_openai_settings() -> dict[str, Any]:
+    def _llm_agent_openai_settings() -> ConfigDict:
         try:
             cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
         except ValueError:
@@ -334,7 +335,7 @@ class Settings:
         return cfg.openai if isinstance(cfg.openai, dict) else {}
 
     @property
-    def module_settings(self) -> dict[str, Any]:
+    def module_settings(self) -> ConfigDict:
         raw = self._raw.get("modules", {})
         return raw if isinstance(raw, dict) else {}
 
@@ -348,7 +349,7 @@ class Settings:
             return []
         return [self._build_telegram_bot(bot) for bot in bots if isinstance(bot, dict)]
 
-    def _build_telegram_bot(self, bot: dict[str, Any]) -> TelegramBotSettings:
+    def _build_telegram_bot(self, bot: ConfigDict) -> TelegramBotSettings:
         token_env = self._first_non_empty(bot.get("token_env"))
         token = self._first_non_empty(
             bot.get("bot_token"),
@@ -466,7 +467,7 @@ class Settings:
         return self.agent_settings.get("verbose_logging", False)
 
     @property
-    def memory_sub_agent_config(self) -> dict[str, object]:
+    def memory_sub_agent_config(self) -> ConfigDict:
         """memory_sub_agent 完整配置 dict。
 
         ``llm_provider`` 与 ``shared/openai/llama`` 控制子 Agent LLM 来源；
@@ -477,17 +478,17 @@ class Settings:
     # ── memory_sub_agent 管线级配置 ────────────────────────────────
 
     @property
-    def memory_summary_config(self) -> dict[str, object]:
+    def memory_summary_config(self) -> ConfigDict:
         """summary 管线配置：compress_rounds / keep_rounds。"""
         return self.memory_sub_agent_config.get("summary", {})
 
     @property
-    def memory_recall_config(self) -> dict[str, object]:
+    def memory_recall_config(self) -> ConfigDict:
         """recall 管线配置：max_items。"""
         return self.memory_sub_agent_config.get("recall", {})
 
     @property
-    def memory_story_config(self) -> dict[str, object]:
+    def memory_story_config(self) -> ConfigDict:
         """story 管线配置：trigger_rounds。"""
         return self.memory_sub_agent_config.get("story", {})
 
@@ -512,7 +513,7 @@ class Settings:
         return self.memory_summary_config.get("compression_enabled", True)
 
     @property
-    def status_sub_agent_config(self) -> dict[str, object]:
+    def status_sub_agent_config(self) -> ConfigDict:
         """status_sub_agent 完整配置 dict，包含显式 LLM provider 选择。"""
         return self.agent_settings.get("status_sub_agent", {})
 
@@ -669,7 +670,7 @@ class Settings:
         )
 
     @staticmethod
-    def _resolve_package_path(value: Any) -> str:
+    def _resolve_package_path(value: ConfigValue) -> str:
         text = str(value or "").strip()
         if not text:
             return ""

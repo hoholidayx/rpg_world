@@ -11,11 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from rpg_world.rpg_core.common_types import Metadata
 
 from loguru import logger
 
 if TYPE_CHECKING:
+    from rpg_world.rpg_core.llm.base_provider import LLMProvider
     from rpg_world.rpg_core.memory.planning.planner import BaseQueryPlanner
     from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
     from rpg_world.rpg_core.memory.retrieval.retriever import BaseRetriever
@@ -43,7 +46,7 @@ class RecallItem:
     chunk_idx: int = 0
     """在文件内的分块索引。"""
 
-    metadata: dict[str, object] = field(default_factory=dict)
+    metadata: Metadata = field(default_factory=dict)
     """扩展元信息。"""
 
 
@@ -199,7 +202,7 @@ class MemoryManager:
     @staticmethod
     def _build_store(
         get_vector_db_path: str,
-        embedding: object | None,
+        embedding: LLMProvider | None,
         mem_cfg: MemorySettings,
     ):
         from rpg_world.rpg_core.memory.storage.types import VectorStoreError

@@ -1,6 +1,6 @@
 """FileWatcher — detect file changes and trigger Manager reload.
 
-Any file change in a watched path triggers a reload (no distinction between
+Every file change in a watched path triggers a reload (no distinction between
 internal WebUI saves and external edits).  A debounce prevents rapid-fire
 reloads from atomic-save strategies (DELETE + CREATE, etc.).
 """

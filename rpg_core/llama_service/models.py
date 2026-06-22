@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any
+
+from rpg_world.rpg_core.common_types import (
+    LlamaCacheKey,
+    LlamaLogits,
+    JsonValue,
+    LlamaModelConfig,
+    LlamaModelHandle,
+    LlamaResponsePayload,
+)
 
 
 class LlamaModelError(Exception):
     """Raised when a llama model cannot be loaded or called."""
 
 
-def model_cache_key(op: str, model: dict[str, Any]) -> tuple[Any, ...]:
+def model_cache_key(op: str, model: LlamaModelConfig) -> LlamaCacheKey:
     model_path = str(model.get("model_path") or "")
     if op in {"embed", "embedding_dimension"}:
         return (
@@ -42,18 +50,18 @@ class LlamaModelCache:
     """Lazily load and cache llama.cpp model instances by immutable key."""
 
     def __init__(self) -> None:
-        self._models: dict[tuple[Any, ...], Any] = {}
-        self.load_counts: dict[tuple[Any, ...], int] = {}
-        self.dimension_cache: dict[tuple[Any, ...], int] = {}
+        self._models: dict[LlamaCacheKey, LlamaModelHandle] = {}
+        self.load_counts: dict[LlamaCacheKey, int] = {}
+        self.dimension_cache: dict[LlamaCacheKey, int] = {}
 
-    def embedding_dimension(self, model: dict[str, Any]) -> int:
+    def embedding_dimension(self, model: LlamaModelConfig) -> int:
         key = model_cache_key("embedding_dimension", model)
         if key not in self.dimension_cache:
             vectors = self.embed(model, ["dimension probe"])
             self.dimension_cache[key] = len(vectors[0]) if vectors else 0
         return self.dimension_cache[key]
 
-    def embed(self, model: dict[str, Any], texts: list[str]) -> list[list[float]]:
+    def embed(self, model: LlamaModelConfig, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         llama = self._get_model("embed", model)
@@ -64,13 +72,13 @@ class LlamaModelCache:
 
     def complete(
         self,
-        model: dict[str, Any],
+        model: LlamaModelConfig,
         prompt: str,
         *,
         max_tokens: int,
         temperature: float,
         stop: list[str] | None = None,
-    ) -> Any:
+    ) -> LlamaResponsePayload:
         llama = self._get_model("complete", model)
         return llama(
             prompt,
@@ -81,7 +89,7 @@ class LlamaModelCache:
 
     def complete_stream(
         self,
-        model: dict[str, Any],
+        model: LlamaModelConfig,
         prompt: str,
         *,
         max_tokens: int,
@@ -103,7 +111,7 @@ class LlamaModelCache:
 
     def rerank(
         self,
-        model: dict[str, Any],
+        model: LlamaModelConfig,
         query: str,
         documents: list[str],
         *,
@@ -141,7 +149,7 @@ class LlamaModelCache:
             )
         return results
 
-    def _get_model(self, op: str, model: dict[str, Any]) -> Any:
+    def _get_model(self, op: str, model: LlamaModelConfig) -> LlamaModelHandle:
         key = model_cache_key(op, model)
         cached = self._models.get(key)
         if cached is not None:
@@ -204,7 +212,7 @@ def build_qwen_rerank_prompt(*, instruction: str, query: str, document: str) -> 
 
 
 def _build_qwen_rerank_tokens(
-    llama: Any,
+    llama: LlamaModelHandle,
     *,
     instruction: str,
     query: str,
@@ -229,7 +237,7 @@ def _build_qwen_rerank_tokens(
     return prefix_tokens + document_tokens[:budget] + suffix_tokens
 
 
-def _tokenize(llama: Any, text: str, *, add_bos: bool) -> list[int]:
+def _tokenize(llama: LlamaModelHandle, text: str, *, add_bos: bool) -> list[int]:
     raw = text.encode("utf-8")
     try:
         return list(llama.tokenize(raw, add_bos=add_bos, special=True))
@@ -237,20 +245,20 @@ def _tokenize(llama: Any, text: str, *, add_bos: bool) -> list[int]:
         return list(llama.tokenize(raw, add_bos=add_bos))
 
 
-def _first_token_id(llama: Any, text: str) -> int:
+def _first_token_id(llama: LlamaModelHandle, text: str) -> int:
     tokens = _tokenize(llama, text, add_bos=False)
     if not tokens:
         raise LlamaModelError(f"tokenizer returned no token for label {text!r}")
     return int(tokens[0])
 
 
-def _reset_llama(llama: Any) -> None:
+def _reset_llama(llama: LlamaModelHandle) -> None:
     reset = getattr(llama, "reset", None)
     if callable(reset):
         reset()
 
 
-def _last_logits(llama: Any, token_count: int) -> Any:
+def _last_logits(llama: LlamaModelHandle, token_count: int) -> LlamaResponsePayload:
     scores = getattr(llama, "scores", None)
     if scores is None:
         raise LlamaModelError("llama model did not expose scores; load rerank model with logits_all=True")
@@ -271,7 +279,7 @@ def _last_logits(llama: Any, token_count: int) -> Any:
         raise LlamaModelError(f"llama scores index out of range: token_count={token_count} scores={score_count}") from exc
 
 
-def _logit_at(logits: Any, token_id: int) -> float:
+def _logit_at(logits: LlamaLogits, token_id: int) -> float:
     try:
         return float(logits[token_id])
     except Exception as exc:
@@ -288,7 +296,7 @@ def _yes_probability(yes_logit: float, no_logit: float) -> float:
     return max(0.0, min(1.0, yes_exp / denom))
 
 
-def _extract_stream_text(chunk: Any) -> str:
+def _extract_stream_text(chunk: JsonValue) -> str:
     if chunk is None:
         return ""
     if isinstance(chunk, str):

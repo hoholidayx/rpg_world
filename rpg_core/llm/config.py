@@ -11,9 +11,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from rpg_world.rpg_core.utils.profile_loader import load_profiled_yaml
+from rpg_world.rpg_core.common_types import ConfigDict, ConfigValue
 from rpg_world.rpg_core.llm.keys import (
     LLM_KIND_CHAT,
     LLM_KIND_RERANK,
@@ -26,13 +25,14 @@ from rpg_world.rpg_core.llm.keys import (
     RERANK_MODEL_TYPES,
 )
 from rpg_world.rpg_core.utils.config_values import optional_bool, optional_float, optional_int
+from rpg_world.rpg_core.utils.profile_loader import load_profiled_yaml
 
 _LLM_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "llm.yaml"
 _PROFILE_ENV = "RPG_WORLD_PROFILE"
 
 # ── cached raw config ──────────────────────────────────────────────────
 
-_raw_settings: dict[str, Any] | None = None
+_raw_settings: ConfigDict | None = None
 _cache_key: tuple[str, str] | None = None  # (resolved_path, profile)
 
 
@@ -48,8 +48,8 @@ class LLMRuntimeConfig:
 class ResolvedLLMConfig:
     provider: str
     kind: str
-    openai: dict[str, Any]
-    llama: dict[str, Any]
+    openai: ConfigDict
+    llama: ConfigDict
     shared_from: str = ""
 
 
@@ -57,8 +57,8 @@ class ResolvedLLMConfig:
 class AgentLLMDefaults:
     provider: str
     model: str
-    openai: dict[str, Any]
-    llama: dict[str, Any]
+    openai: ConfigDict
+    llama: ConfigDict
     base_url: str | None = None
     max_tokens: int | None = None
     temperature: float | None = None
@@ -79,7 +79,7 @@ def _resolve_profile_name() -> str:
     return profile_name
 
 
-def _load_raw() -> dict[str, Any]:
+def _load_raw() -> ConfigDict:
     """Lazy-load and cache the merged raw ``llm.yaml`` dict.
 
     The cache is keyed by (resolved_path, profile) so switching
@@ -111,7 +111,7 @@ def reload_llm_settings() -> None:
     _cache_key = None
 
 
-def load_llm_settings() -> dict[str, Any]:
+def load_llm_settings() -> ConfigDict:
     """Return the merged raw LLM config for the active profile."""
     return _load_raw()
 
@@ -181,7 +181,7 @@ class BizConfig:
 
     __slots__ = ("_key", "_raw")
 
-    def __init__(self, biz_key: str, raw: dict[str, Any]) -> None:
+    def __init__(self, biz_key: str, raw: ConfigDict) -> None:
         self._key = biz_key
         self._raw = raw
 
@@ -243,7 +243,7 @@ class BizConfig:
         )
 
     @property
-    def openai_cfg(self) -> dict[str, Any]:
+    def openai_cfg(self) -> ConfigDict:
         return self._openai_sub
 
     @property
@@ -263,7 +263,7 @@ class BizConfig:
         return self._optional_float(self._openai_sub.get("temperature"), f"{self._key}.openai.temperature")
 
     @property
-    def _openai_sub(self) -> dict[str, Any]:
+    def _openai_sub(self) -> ConfigDict:
         value = self._raw.get(PROVIDER_OPENAI)
         if value is None:
             return {}
@@ -280,7 +280,7 @@ class BizConfig:
         )
 
     @property
-    def llama_cfg(self) -> dict[str, Any]:
+    def llama_cfg(self) -> ConfigDict:
         return self._llama_sub
 
     @property
@@ -316,7 +316,7 @@ class BizConfig:
         return optional_float(self._llama_sub.get("temperature"), 0.0) or 0.0
 
     @property
-    def _llama_sub(self) -> dict[str, Any]:
+    def _llama_sub(self) -> ConfigDict:
         value = self._raw.get(PROVIDER_LLAMA)
         if value is None:
             return {}
@@ -327,25 +327,25 @@ class BizConfig:
     # -- helpers ---------------------------------------------------------
 
     @property
-    def raw(self) -> dict[str, Any]:
+    def raw(self) -> ConfigDict:
         """Raw merged config dict (escape hatch for legacy consumers)."""
         return self._raw
 
     @staticmethod
-    def _optional_str(value: Any) -> str:
+    def _optional_str(value: ConfigValue) -> str:
         if value is None:
             return ""
         return str(value).strip()
 
     @staticmethod
-    def _require_non_empty(value: Any, label: str) -> str:
+    def _require_non_empty(value: ConfigValue, label: str) -> str:
         text = BizConfig._optional_str(value)
         if not text:
             raise ValueError(f"{label} is required")
         return text
 
     @staticmethod
-    def _optional_float(value: Any, label: str) -> float | None:
+    def _optional_float(value: ConfigValue, label: str) -> float | None:
         if value is None or value == "":
             return None
         if isinstance(value, bool):
@@ -356,7 +356,7 @@ class BizConfig:
             raise ValueError(f"{label} must be a number") from exc
 
     @staticmethod
-    def _resolve_api_key(openai_cfg: dict[str, Any]) -> str | None:
+    def _resolve_api_key(openai_cfg: ConfigDict) -> str | None:
         api_key = BizConfig._optional_str(openai_cfg.get("api_key"))
         if api_key:
             return api_key
@@ -383,7 +383,7 @@ def get_biz_config(biz_key: str) -> BizConfig | None:
     return BizConfig(biz_key, cfg)
 
 
-def _deep_merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+def _deep_merge_dicts(left: ConfigDict, right: ConfigDict) -> ConfigDict:
     """Deep-merge dictionaries used by shared config inheritance."""
     merged = dict(left)
     for key, value in right.items():
@@ -399,7 +399,7 @@ def _resolve_shared_chain(
     biz_key: str,
     *,
     seen: tuple[str, ...],
-) -> dict[str, Any]:
+) -> ConfigDict:
     """Resolve one shared chain branch with loop prevention."""
     cfg = get_biz_config(biz_key)
     if cfg is None:

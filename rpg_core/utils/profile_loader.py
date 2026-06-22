@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 import yaml
 
+from rpg_world.rpg_core.common_types import ConfigDict, ConfigValue
 from rpg_world.rpg_core.utils.config_values import optional_bool
 
-YamlMergeFn = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
+YamlMergeFn = Callable[[ConfigDict, ConfigDict], ConfigDict]
 
 
-def load_yaml_mapping(path: Path, label: str) -> dict[str, Any]:
+def load_yaml_mapping(path: Path, label: str) -> ConfigDict:
     with path.open(encoding="utf-8") as f:
         loaded = yaml.safe_load(f) or {}
     if not isinstance(loaded, dict):
@@ -20,7 +21,7 @@ def load_yaml_mapping(path: Path, label: str) -> dict[str, Any]:
     return loaded
 
 
-def deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+def deep_merge_dicts(base: ConfigDict, override: ConfigDict) -> ConfigDict:
     merged = dict(base)
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
@@ -33,11 +34,11 @@ def deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str
 def resolve_profile_override(
     base_path: Path,
     profile_name: str,
-    profile: Any,
+    profile: ConfigValue,
     *,
     label: str,
     merge_fn: YamlMergeFn = deep_merge_dicts,
-) -> dict[str, Any]:
+) -> ConfigDict:
     """Resolve a profile definition into a merged override mapping."""
     if profile is None:
         return {}
@@ -68,7 +69,7 @@ def load_profile_file(
     *,
     required: bool,
     label: str,
-) -> dict[str, Any]:
+) -> ConfigDict:
     path = Path(file_value).expanduser()
     if not path.is_absolute():
         path = base_path.parent / path
@@ -85,7 +86,7 @@ def load_profiled_yaml(
     *,
     label: str,
     merge_fn: YamlMergeFn = deep_merge_dicts,
-) -> dict[str, Any]:
+) -> ConfigDict:
     """Load and merge a base/profile YAML config file."""
     loaded = load_yaml_mapping(path, label)
     base = loaded.get("base", {})

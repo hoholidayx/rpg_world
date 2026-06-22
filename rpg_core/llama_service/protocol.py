@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Literal, TypedDict
+
+from rpg_world.rpg_core.common_types import LlamaModelConfig, LlamaRequestParams, LlamaResponsePayload
 
 LlamaOperation = Literal["embedding_dimension", "embed", "complete", "complete_stream", "rerank", "shutdown"]
 
@@ -10,8 +12,8 @@ LlamaOperation = Literal["embedding_dimension", "embed", "complete", "complete_s
 class LlamaRequest(TypedDict, total=False):
     request_id: str
     op: LlamaOperation
-    model: dict[str, Any]
-    params: dict[str, Any]
+    model: LlamaModelConfig
+    params: LlamaRequestParams
     timeout_ms: int
 
 
@@ -23,7 +25,7 @@ class LlamaError(TypedDict):
 class LlamaResponse(TypedDict, total=False):
     request_id: str
     ok: bool
-    result: Any
+    result: LlamaResponsePayload
     error: LlamaError
     stream_done: bool
 
@@ -32,8 +34,8 @@ def make_request(
     request_id: str,
     op: LlamaOperation,
     *,
-    model: dict[str, Any] | None = None,
-    params: dict[str, Any] | None = None,
+    model: LlamaModelConfig | None = None,
+    params: LlamaRequestParams | None = None,
     timeout_ms: int = 60000,
 ) -> LlamaRequest:
     return {
@@ -45,7 +47,7 @@ def make_request(
     }
 
 
-def ok_response(request_id: str, result: Any = None) -> LlamaResponse:
+def ok_response(request_id: str, result: LlamaResponsePayload = None) -> LlamaResponse:
     return {"request_id": request_id, "ok": True, "result": result}
 
 

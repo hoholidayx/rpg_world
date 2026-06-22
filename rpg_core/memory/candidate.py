@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+
+from rpg_world.rpg_core.common_types import DebugInfo, Metadata
 
 
 @dataclass
@@ -12,7 +13,7 @@ class MemoryCandidate:
 
     memory_id: int
     content: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Metadata = field(default_factory=dict)
     vector_score: float = 0.0
     keyword_score: float = 0.0
     raw_md_score: float = 0.0
@@ -23,7 +24,7 @@ class MemoryCandidate:
     recency_score: float = 0.0
     hybrid_score: float = 0.0
     rerank_score: float = 0.0
-    debug: dict[str, Any] = field(default_factory=dict)
+    debug: DebugInfo = field(default_factory=dict)
 
     @property
     def final_score(self) -> float:

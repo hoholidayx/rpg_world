@@ -8,7 +8,7 @@ import threading
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+
 
 from loguru import logger
 
@@ -152,7 +152,7 @@ def _build_prompt(messages: list[dict], tools: list[dict] | None) -> str:
     return "\n\n".join(parts)
 
 
-def _extract_completion_text(raw: Any) -> str:
+def _extract_completion_text(raw: object) -> str:
     if raw is None:
         return ""
     if isinstance(raw, str):

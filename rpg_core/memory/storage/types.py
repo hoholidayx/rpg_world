@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+
+from rpg_world.rpg_core.common_types import Metadata
 
 
 @dataclass
@@ -12,7 +13,7 @@ class ChunkRecord:
 
     id: int
     text: str
-    metadata: dict[str, Any]
+    metadata: Metadata
 
 
 @dataclass
