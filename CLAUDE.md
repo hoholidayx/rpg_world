@@ -3,6 +3,17 @@
 RPG 世界管理子系统——故事数据管理、场景上下文构建、LLM Agent 交互。
 记忆检索已经拆成 `SqlVecRetriever`、`KeywordRetriever`、`RawMarkdownRetriever` 三个独立 retriever；`HybridRetriever` 只负责组装与融合，不承载底层检索实现。关键词检索通过 `memory.keyword_tokenizer` 选择 `jieba`、`bigram` 或 `both`，配置使用 `keyword_k` / `hybrid_keyword_weight`。raw markdown 由 `memory.raw_md_mode` 控制，`always` 是主召回策略，`fallback_only` 是补候选触发策略。
 
+
+## 产品路线
+
+RPG World 的产品定位从“Telegram 优先的 RP 聊天入口”升级为“WebUI 主体验 + Telegram 辅助触达”的 AI RPG World 平台：
+
+- **Play WebUI**：前台游玩端，面向玩家，提供沉浸式 RP 聊天、场景 HUD、角色/NPC 信息、剧情日志、快捷行动和玩法模块交互。
+- **Dashboard WebUI**：后台管理端，面向创作者/管理员，维护 workspace、session、角色卡、世界书、状态表、记忆、摘要、配置和上下文诊断。
+- **Telegram**：保留为轻量入口、推送通知、快速回复和 WebUI 不可用时的兜底交互，不承载复杂沉浸式 UI。
+
+两个 WebUI 项目应作为独立前端应用演进，但共享同一套 FastAPI / `rpg_core` 后端能力。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。
+
 ## 启动
 
 ```bash
@@ -21,8 +32,10 @@ MODULES=api uv run python -m rpg_world.run
 # 或直接 uvicorn
 uv run uvicorn rpg_world.api.main:app --reload --reload-dir rpg_world --host 127.0.0.1 --port 8000
 
-# WebUI 开发服务器（端口 5173，代理 /api → 后端）
+# Dashboard WebUI 开发服务器（端口 5173，代理 /api → 后端）
 cd rpg_world/webui && npx vite
+
+# Play WebUI 是后续独立前台项目；产品需求见 todos/webui_product_requirements.md
 
 # 仅启动 Telegram（需先配置 settings.yaml modules.telegram.bots）
 MODULES=telegram uv run python -m rpg_world.run
@@ -96,7 +109,7 @@ rpg_world/
 │       ├── chat.py               #   send/stream(SSE)/command/history
 │       ├── sessions.py           #   list/create/delete/clone
 │       └── workspace.py          #   list/create/rename/delete
-├── webui/                        # Vue 3 SPA（Ant Design Vue + Pinia，优先数据管理）
+├── webui/                        # Dashboard WebUI：Vue 3 SPA（Ant Design Vue + Pinia，数据/配置管理）
 │   ├── settings.json
 │   ├── vite.config.js            # 代理 /api → 后端
 │   ├── run_dev.sh
@@ -108,7 +121,8 @@ rpg_world/
 │       ├── stores/               # session / theme / workspace
 │       ├── composables/          # useCRUD / useCommands
 │       ├── api/                  # Axios 客户端
-│       └── views/                # Chat, Character, Lorebook, Status, Overview
+│       └── views/                # Dashboard views: Character, Lorebook, Status, Sessions, Overview, diagnostics
+├── play_webui/                    # 规划中：Play WebUI 前台游玩端（独立 Web 项目，详见 todos/webui_product_requirements.md）
 └── data/                         # 数据文件
     └── {workspace}/
         ├── character/

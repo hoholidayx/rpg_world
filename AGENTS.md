@@ -1,7 +1,8 @@
 # Repository Guidelines
 
 ## 工作边界
-- 当前产品优先级：Telegram 渠道优先，核心数据链路其次，WebUI 数据管理后台再次，WebUI Chat 最后。
+- 当前产品路线：WebUI 是沉浸式 RP 主体验，Telegram 是轻量入口、推送通知与兜底交互；短期仍保持 Telegram 稳定性，但新增体验型能力优先沉淀到 WebUI。
+- WebUI 拆分为两个独立前端项目：面向数据/配置维护的 Dashboard WebUI，以及面向玩家沉浸式聊天和游玩的 Play WebUI。二者共享 FastAPI/rpg_core 后端能力，不在前端复制业务规则。
 - 修改启动流程、渠道生命周期、共享状态或 `AgentManager` 前，先阅读 `CLAUDE.md`。
 - 不要绕过 `run.py` 自行拼装多模块启动；`run.py` 是 supervisor，`run_all.py`、`run_api.py`、`run_telegram.py`、`run_cli.py` 只是快捷入口。
 - 保持 `api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
