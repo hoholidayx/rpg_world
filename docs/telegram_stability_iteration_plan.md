@@ -4,7 +4,7 @@
 
 ## 目标与优先级
 
-本轮迭代优先保障真实 Telegram 长轮询入口稳定可用，确保 Telegram 作为主聊天入口时不会因会话、流式输出、异常分支或配置问题中断核心体验。
+本轮迭代优先保障真实 Telegram 长轮询入口稳定可用。产品路线已调整为 WebUI 承载沉浸式 RP 主体验，Telegram 承载轻量入口、App 推送、快速回复和兜底交互；因此 Telegram 稳定性建设的目标是不因会话、流式输出、异常分支或配置问题中断辅助触达体验。
 
 优先级从高到低如下：
 
@@ -167,4 +167,5 @@ MODULES=telegram uv run python -m rpg_world.run
 - 不引入真实 Telegram 网络依赖到自动化测试；所有外部调用继续使用 mock。
 - 不改动 `data/` 下运行数据，不把会话历史、向量库、WAL/SHM 纳入提交。
 - 不破坏 `run.py` 统一启动和 `AgentManager` 单例边界。
-- Telegram 是聊天体验优先入口；WebUI Chat 的体验优化不应抢占本轮稳定性工作。
+- Telegram 是轻量触达和兜底入口；沉浸式聊天与复杂 RP UI 优先进入 Play WebUI。
+- 本方案只保障 Telegram 作为可靠渠道，不把复杂 dashboard、状态编辑、战斗面板、地图/时间线等能力塞入 Telegram。

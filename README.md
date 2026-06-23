@@ -2,6 +2,18 @@
 
 RPG World 是 nanobot 项目的一个子系统，专注于故事驱动的 RPG 数据管理和 LLM Agent 交互。提供角色卡管理、世界书管理、状态表管理、场景上下文构建、记忆召回与 RP 模块运行态等功能。
 
+
+## 产品路线与定位
+
+RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平台**，而不是单一聊天机器人。后续体验重心调整为：
+
+- **Play WebUI（前台游玩端）**：主客户端，承载沉浸式 RP 聊天、场景状态、角色/NPC 面板、剧情日志、行动输入、骰子/战斗/物品等玩法机制。
+- **Dashboard WebUI（后台管理端）**：创作与管理工具，承载 workspace、session、角色卡、世界书、状态表、记忆、摘要、配置和诊断能力。
+- **Telegram**：轻量入口、App 推送、快速回复和兜底交互；不再作为复杂沉浸式 UI 的主要承载面。
+- **CLI**：开发调试和最小交互入口。
+
+设计原则：WebUI 负责体验上限，Telegram 负责触达效率；二者必须共享同一套 workspace/session 语义，避免同一个故事在不同渠道分裂。Dashboard 与 Play 两个 Web 项目共享 FastAPI/rpg_core 后端，不在前端复制角色、世界书、状态或 RP 规则。
+
 ## 快速起步
 
 ```bash
@@ -29,8 +41,10 @@ uv run python -m rpg_world.channels.cli.repl
 # 直接启动 API
 uv run python -m rpg_world.api.main
 
-# 启动 WebUI（另一个终端）
+# 启动 Dashboard WebUI（另一个终端；当前 rpg_world/webui 为管理端原型）
 cd rpg_world/webui && npm run dev
+
+# Play WebUI 为后续独立前台项目，详见 todos/webui_product_requirements.md
 ```
 
 模块启停由 `settings.yaml` 的 `modules` 配置和当前 profile 决定。开发时可通过
@@ -78,10 +92,10 @@ cfg.enabled_module_names  # 所有已启用的模块名列表
 |---|---|---|
 | CLI | `channels/cli/adapter.py` | Rich + prompt_toolkit |
 | Telegram | `channels/telegram/adapter.py` | python-telegram-bot |
+| WebUI Play | API/SSE/WebSocket 前端 | 沉浸式主客户端 |
 | 未来 | 只需继承 ChannelAdapter | 实现 start/stop/send_text 即可 |
 
-当前实现优先保障 Telegram 作为主要对话入口。WebUI 定位为个人数据管理后台，
-Chat 页面保留基础调试能力，完整聊天体验放在 Telegram 稳定后再完善。
+当前路线调整为 WebUI 主体验、Telegram 辅助触达：Dashboard WebUI 负责数据管理后台，Play WebUI 负责沉浸式 RP 前台聊天和游玩体验。Telegram 继续保持稳定可用，作为轻量入口、推送通知、快速回复与兜底渠道。
 
 ### Telegram 渠道
 
