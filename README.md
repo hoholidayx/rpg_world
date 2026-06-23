@@ -38,11 +38,11 @@ MODULES=telegram uv run python -m rpg_world.run
 # 独立 CLI（无需 API / Telegram，直接 LLM 对话）
 uv run python -m rpg_world.channels.cli.repl
 
-# 直接启动 API
-uv run python -m rpg_world.api.main
+# 直接调试 API（自动重载）
+uv run uvicorn rpg_world.api.main:app --reload --reload-dir api --reload-dir channels --reload-dir rpg_core --host 127.0.0.1 --port 8000
 
-# 启动 Dashboard WebUI（另一个终端；当前 rpg_world/webui 为管理端原型）
-cd rpg_world/webui && npm run dev
+# 启动 Dashboard WebUI（另一个终端；当前 dashboard_webui 为管理端原型）
+cd dashboard_webui && npm run dev
 
 # Play WebUI 为后续独立前台项目，详见 todos/webui_product_requirements.md
 ```

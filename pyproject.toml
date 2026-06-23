@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rpg-world"
+version = "0.1.0"
+description = "RPG World backend, channels, and agent runtime."
+readme = "AGENTS.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "httpx>=0.27",
+    "jieba>=0.42.1",
+    "jinja2>=3.1",
+    "loguru>=0.7",
+    "openai>=1.0",
+    "prompt-toolkit>=3.0",
+    "pydantic>=2.0",
+    "python-telegram-bot>=21.0",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    "sqlite-vec>=0.1.6",
+    "tiktoken>=0.7",
+    "uvicorn[standard]>=0.27",
+    "watchdog>=4.0",
+]
+
+[project.optional-dependencies]
+llama = [
+    "llama-cpp-python>=0.2.90",
+]
+all = [
+    "rpg-world[llama]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+rpg-world = "rpg_world.run:cli"
+rpg-world-api = "rpg_world.run_api:main"
+rpg-world-cli = "rpg_world.run_cli:cli"
+rpg-world-telegram = "rpg_world.run_telegram:cli"
+
+[tool.setuptools]
+package-dir = { "rpg_world" = "." }
+packages = [
+    "rpg_world",
+    "rpg_world.api",
+    "rpg_world.api.routers",
+    "rpg_world.api.tests",
+    "rpg_world.channels",
+    "rpg_world.channels.cli",
+    "rpg_world.channels.telegram",
+    "rpg_world.channels.tests",
+    "rpg_world.rpg_core",
+    "rpg_world.rpg_core.agent",
+    "rpg_world.rpg_core.agent.sub_agents",
+    "rpg_world.rpg_core.agent.tools",
+    "rpg_world.rpg_core.character",
+    "rpg_world.rpg_core.context",
+    "rpg_world.rpg_core.jinja",
+    "rpg_world.rpg_core.llama_service",
+    "rpg_world.rpg_core.llm",
+    "rpg_world.rpg_core.lorebook",
+    "rpg_world.rpg_core.memory",
+    "rpg_world.rpg_core.memory.planning",
+    "rpg_world.rpg_core.memory.rerank",
+    "rpg_world.rpg_core.memory.retrieval",
+    "rpg_world.rpg_core.memory.storage",
+    "rpg_world.rpg_core.scene",
+    "rpg_world.rpg_core.session",
+    "rpg_world.rpg_core.status",
+    "rpg_world.rpg_core.summary",
+    "rpg_world.rpg_core.tests",
+    "rpg_world.rpg_core.tests.integration",
+    "rpg_world.rpg_core.utils",
+]
+
+[tool.setuptools.package-data]
+rpg_world = [
+    "api/*.json",
+    "data/jieba_dict.txt",
+    "rpg_core/jinja/**/*.jinja",
+    "*.yaml",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "integration: tests that require INTEGRATION_TEST=1 and may call real LLM APIs",
+]

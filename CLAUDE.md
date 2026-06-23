@@ -30,10 +30,10 @@ uv run python -m rpg_world.run_cli
 MODULES=api uv run python -m rpg_world.run
 
 # 或直接 uvicorn
-uv run uvicorn rpg_world.api.main:app --reload --reload-dir rpg_world --host 127.0.0.1 --port 8000
+uv run uvicorn rpg_world.api.main:app --reload --reload-dir api --reload-dir channels --reload-dir rpg_core --host 127.0.0.1 --port 8000
 
 # Dashboard WebUI 开发服务器（端口 5173，代理 /api → 后端）
-cd rpg_world/webui && npx vite
+cd dashboard_webui && npx vite
 
 # Play WebUI 是后续独立前台项目；产品需求见 todos/webui_product_requirements.md
 
@@ -77,8 +77,6 @@ rpg_world/
 │   │   ├── manager.py            #     AgentManager 单例（统一 agent 缓存）
 │   │   ├── command.py            #     CommandDispatcher — 斜杠命令分发器
 │   │   ├── loop.py               #     chat loop（LLM 往返 + tool calling）
-│   │   ├── stats_formatter.py    #     LLM 统计格式化
-│   │   ├── tokenizer.py          #     TokenCounter 抽象
 │   │   ├── sub_agents/           #     子 Agent 系统
 │   │   └── tools/                #     工具系统
 │   ├── llm/                      #   LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析
@@ -89,11 +87,17 @@ rpg_world/
 │   ├── lorebook/                 # 世界书（JSON）
 │   ├── status/                   # 状态表（CSV）
 │   ├── memory/                   # 记忆存储
+│   │   ├── planning/             #   QueryPlan / planner
+│   │   ├── retrieval/            #   sqlvec / keyword / raw md retrievers
+│   │   ├── rerank/               #   pointwise rerank
+│   │   └── storage/              #   SQLite repository / vector / text index
 │   ├── summary/                  # 对话摘要
-│   ├── models/                   # Pydantic 数据模型
+│   ├── common_types.py           # 共享类型别名
 │   ├── settings.py               # Settings 单例
 │   └── utils/
 │       ├── manager_base.py       #   BaseManager（注册 FileWatcher）
+│       ├── stats_formatter.py    #   LLM 统计格式化
+│       ├── tokenizer.py          #   TokenCounter 抽象
 │       ├── watcher.py            #   FileWatcher（watchdog 文件监控）
 │       └── path_utils.py         #   路径解析
 ├── api/                          # FastAPI 应用
@@ -109,7 +113,7 @@ rpg_world/
 │       ├── chat.py               #   send/stream(SSE)/command/history
 │       ├── sessions.py           #   list/create/delete/clone
 │       └── workspace.py          #   list/create/rename/delete
-├── webui/                        # Dashboard WebUI：Vue 3 SPA（Ant Design Vue + Pinia，数据/配置管理）
+├── dashboard_webui/              # Dashboard WebUI：Vue 3 SPA（Ant Design Vue + Pinia，数据/配置管理）
 │   ├── settings.json
 │   ├── vite.config.js            # 代理 /api → 后端
 │   ├── run_dev.sh
@@ -122,7 +126,6 @@ rpg_world/
 │       ├── composables/          # useCRUD / useCommands
 │       ├── api/                  # Axios 客户端
 │       └── views/                # Dashboard views: Character, Lorebook, Status, Sessions, Overview, diagnostics
-├── play_webui/                    # 规划中：Play WebUI 前台游玩端（独立 Web 项目，详见 todos/webui_product_requirements.md）
 └── data/                         # 数据文件
     └── {workspace}/
         ├── character/

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from rpg_world.rpg_core.common_types import (
+from ..common_types import (
     LlamaCacheKey,
     LlamaLogits,
     JsonValue,
@@ -258,7 +258,7 @@ def _reset_llama(llama: LlamaModelHandle) -> None:
         reset()
 
 
-def _last_logits(llama: LlamaModelHandle, token_count: int) -> LlamaResponsePayload:
+def _last_logits(llama: LlamaModelHandle, token_count: int) -> LlamaLogits:
     scores = getattr(llama, "scores", None)
     if scores is None:
         raise LlamaModelError("llama model did not expose scores; load rerank model with logits_all=True")

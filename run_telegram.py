@@ -15,5 +15,10 @@ async def main() -> int:
     return await _telegram_main()
 
 
+def cli() -> int:
+    """Console script wrapper for the async Telegram entrypoint."""
+    return asyncio.run(main())
+
+
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(cli())

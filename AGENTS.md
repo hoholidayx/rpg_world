@@ -13,12 +13,12 @@
 - `uv run python -m rpg_world.run`：按 `settings.yaml` 启动已启用模块。
 - `MODULES=api uv run python -m rpg_world.run`：仅启动 API。
 - `MODULES=telegram uv run python -m rpg_world.run`：仅启动 Telegram。
-- `uv run uvicorn rpg_world.api.main:app --reload --reload-dir rpg_world --host 127.0.0.1 --port 8000`：直接调试 FastAPI。
+- `uv run uvicorn rpg_world.api.main:app --reload --reload-dir api --reload-dir channels --reload-dir rpg_core --host 127.0.0.1 --port 8000`：直接调试 FastAPI。
 - `uv run python -m rpg_world.channels.cli.repl`：启动独立 CLI。
 - `uv run python -m pytest channels/tests rpg_core/tests api/tests -q`：运行 Python 测试基线。
 - `uv run python -m pytest channels/tests/test_telegram.py -q`：专项验证 Telegram。
-- `cd webui && npm run dev`：启动前端开发服务器。
-- `cd webui && npm run build`：构建前端产物。
+- `cd dashboard_webui && npm run dev`：启动 Dashboard 前端开发服务器。
+- `cd dashboard_webui && npm run build`：构建 Dashboard 前端产物。
 
 ## 代码规范
 - Python 使用 4 空格缩进，模块/函数用 `snake_case`，类用 `PascalCase`。
@@ -40,7 +40,7 @@
 - 所有外部调用使用 mock，避免真实 LLM、Telegram 或网络依赖。
 - 新增测试文件命名为 `test_<feature>.py`。
 - 修改 Telegram 适配、会话流程或渲染逻辑时，必须补 `channels/tests/test_telegram.py`。
-- 修改 API/WebUI 管理能力时，补 `api/tests/` 契约测试。
+- 修改 API/Dashboard WebUI 管理能力时，补 `api/tests/` 契约测试。
 - 修改核心上下文、memory、summary、session 行为时，补 `rpg_core/tests/`。
 - 修改主 agent、LLM provider、session manager、context 或相关配置时，默认跑：
   `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q`。

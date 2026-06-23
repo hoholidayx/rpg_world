@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+
+# Build and coverage
+build/
+dist/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Frontend
+dashboard_webui/node_modules/
+dashboard_webui/dist/
+dashboard_webui/coverage/
+dashboard_webui/.vite/
+*.tsbuildinfo
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+settings.*.yaml
+!settings.local.example.yaml
+llm.*.yaml
+
+# Runtime data
+data/models/
+data/**/sessions/
+
+# Logs and temp files
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

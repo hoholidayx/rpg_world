@@ -203,5 +203,10 @@ async def main() -> int:
         _loguru_logger.info("已关闭。")
 
 
+def cli() -> int:
+    """Console script wrapper for the async supervisor entrypoint."""
+    return asyncio.run(main())
+
+
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(cli())

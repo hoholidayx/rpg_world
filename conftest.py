@@ -21,3 +21,5 @@ def pytest_configure() -> None:
         return
     for name in _PROXY_ENV_VARS:
         os.environ.pop(name, None)
+    if os.environ.get("INTEGRATION_TEST") != "1":
+        os.environ.setdefault("OPENAI_API_KEY", "test")

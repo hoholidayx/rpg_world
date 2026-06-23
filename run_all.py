@@ -15,5 +15,10 @@ async def main() -> int:
     return await _supervisor_main()
 
 
+def cli() -> int:
+    """Console script wrapper for the async batch entrypoint."""
+    return asyncio.run(main())
+
+
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(cli())
