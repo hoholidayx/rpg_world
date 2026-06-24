@@ -8,6 +8,7 @@ export type SessionSummary = {
   id: string
   workspace: string
   title?: string | null
+  description?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }

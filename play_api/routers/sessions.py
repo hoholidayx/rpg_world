@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from play_api import agent_client
+from play_api.backend import get_play_backend
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
 
@@ -18,6 +18,7 @@ class PlaySessionSummary(BaseModel):
     id: str
     workspace: str
     title: str | None = None
+    description: str | None = None
     created_at: str | None = Field(default=None, alias="createdAt")
     updated_at: str | None = Field(default=None, alias="updatedAt")
 
@@ -35,17 +36,16 @@ class PlayTurn(BaseModel):
 @router.get("", response_model=list[PlaySessionSummary])
 async def list_sessions(workspace: str = Query(default="default")) -> list[PlaySessionSummary]:
     now = datetime.now(UTC).isoformat()
-    result = await agent_client.get_agent_client().list_sessions(workspace, "demo_session")
-    sessions = [str(item) for item in result.get("sessions", [])]
     return [
         PlaySessionSummary(
-            id=session_id,
-            workspace=workspace,
-            title=session_id,
+            id=str(session["id"]),
+            workspace=str(session.get("workspace", workspace)),
+            title=str(session["title"]) if session.get("title") is not None else None,
+            description=str(session["description"]) if session.get("description") is not None else None,
             created_at=now,
             updated_at=now,
         )
-        for session_id in sessions
+        for session in await get_play_backend().list_sessions(workspace)
     ]
 
 
@@ -55,11 +55,10 @@ async def get_session_history(
     workspace: str = Query(default="default"),
 ) -> list[PlayTurn]:
     now = datetime.now(UTC).isoformat()
-    result = await agent_client.get_agent_client().get_history(workspace, session_id)
     turns: list[PlayTurn] = []
     pending_user: str | None = None
     turn_id = 1
-    for message in result.get("history", []):
+    for message in await get_play_backend().get_history(workspace, session_id):
         role = message.get("role")
         content = str(message.get("content", ""))
         if role == "user":

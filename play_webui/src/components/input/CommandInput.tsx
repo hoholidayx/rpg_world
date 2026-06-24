@@ -2,12 +2,13 @@
 
 import { FormEvent, useState } from 'react'
 import { Button } from '@/components/common/Button'
-import type { InputMode } from '@/types/command'
+import type { InputMode, PlayCommand } from '@/types/command'
 import { InputModeToggle } from './InputModeToggle'
 
-export function CommandInput({ mode, disabled, onModeChange, onSend, onStop }: {
+export function CommandInput({ mode, disabled, commands, onModeChange, onSend, onStop }: {
   mode: InputMode
   disabled: boolean
+  commands?: PlayCommand[]
   onModeChange: (mode: InputMode) => void
   onSend: (text: string) => void
   onStop: () => void
@@ -25,6 +26,21 @@ export function CommandInput({ mode, disabled, onModeChange, onSend, onStop }: {
         <InputModeToggle value={mode} onChange={onModeChange} />
         {disabled ? <Button type="button" onClick={onStop}>停止</Button> : <Button type="submit">发送</Button>}
       </div>
+      {commands?.length ? (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {commands.map((command) => (
+            <button
+              key={command.name}
+              type="button"
+              onClick={() => setText(command.name)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-muted transition hover:border-accent/60 hover:text-white"
+              title={command.description}
+            >
+              {command.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <textarea
         value={text}
         onChange={(event) => setText(event.target.value)}

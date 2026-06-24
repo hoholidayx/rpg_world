@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from play_api.backend import get_play_backend
+
 
 router = APIRouter(prefix="/workspaces", tags=["play-workspaces"])
 
@@ -17,5 +19,5 @@ class PlayWorkspace(BaseModel):
 
 @router.get("", response_model=list[PlayWorkspace])
 async def list_workspaces() -> list[PlayWorkspace]:
-    """Return mock workspaces until Play API is wired to runtime data."""
-    return [PlayWorkspace(id="default", name="默认工作区", description="Play API mock workspace")]
+    """Return workspaces from the configured Play backend."""
+    return [PlayWorkspace(**item) for item in await get_play_backend().list_workspaces()]

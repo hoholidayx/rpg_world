@@ -23,6 +23,12 @@ class PlayApiLoggingSettings:
     log_level: str = "DEBUG"
 
 
+@dataclass(frozen=True)
+class PlayApiBackendSettings:
+    mode: str = "agent"
+    mock_stream_delay_ms: int = 180
+
+
 class PlayApiSettings(ProfiledYamlSettings):
     """Typed accessor for Play API process configuration."""
 
@@ -46,6 +52,17 @@ class PlayApiSettings(ProfiledYamlSettings):
         raw = self._mapping("logging")
         return PlayApiLoggingSettings(
             log_level=str(raw.get("log_level", "DEBUG") or "DEBUG"),
+        )
+
+    @property
+    def backend(self) -> PlayApiBackendSettings:
+        raw = self._mapping("backend")
+        mode = str(raw.get("mode", "agent") or "agent").lower()
+        if mode not in {"agent", "mock"}:
+            raise ValueError("play_api backend.mode must be 'agent' or 'mock'")
+        return PlayApiBackendSettings(
+            mode=mode,
+            mock_stream_delay_ms=forgiving_int(raw.get("mock_stream_delay_ms", 180), 180),
         )
 
 

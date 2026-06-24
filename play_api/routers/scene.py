@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from play_api.backend import get_play_backend
+
 
 router = APIRouter(prefix="/scene", tags=["play-scene"])
 
@@ -24,10 +26,11 @@ async def get_current_scene(
     workspace: str = Query(default="default"),
     session_id: str = Query(default="demo_session", alias="sessionId"),
 ) -> PlayScene:
+    scene = await get_play_backend().get_scene(workspace, session_id)
     return PlayScene(
-        attrs={"状态": "mock", "workspace": workspace, "session_id": session_id},
-        time="未知时间",
-        location="未设定地点",
-        present_characters=[],
-        mood="待展开",
+        attrs=dict(scene.get("attrs", {})),
+        time=str(scene["time"]) if scene.get("time") is not None else None,
+        location=str(scene["location"]) if scene.get("location") is not None else None,
+        present_characters=list(scene.get("presentCharacters", [])),
+        mood=str(scene["mood"]) if scene.get("mood") is not None else None,
     )

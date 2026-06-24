@@ -10,7 +10,7 @@ function now() {
   return new Date().toISOString()
 }
 
-function appendAssistantText(items: TimelineItem[], content: string) {
+function appendAssistantText(items: TimelineItem[], content: string): TimelineItem[] {
   const last = items.at(-1)
   if (last?.type === 'assistant') {
     return [...items.slice(0, -1), { ...last, content: `${last.content}${content}` }]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from play_api import agent_client
+from play_api.backend import get_play_backend
 
 router = APIRouter(prefix="/commands", tags=["play-commands"])
 
@@ -18,14 +18,14 @@ class PlayCommand(BaseModel):
 
 @router.get("", response_model=list[PlayCommand])
 async def list_commands(
-    workspace: str = Query(...),
+    workspace: str = Query(default="default"),
     session_id: str = Query(default="demo_session"),
 ) -> list[PlayCommand]:
-    result = await agent_client.get_agent_client().list_commands(workspace, session_id)
     return [
         PlayCommand(
-            name=str(item.get("command", "")),
+            name=str(item.get("name", "")),
             description=str(item.get("description", "")),
+            mode=str(item.get("mode", "slash")),
         )
-        for item in result.get("commands", [])
+        for item in await get_play_backend().list_commands(workspace, session_id)
     ]

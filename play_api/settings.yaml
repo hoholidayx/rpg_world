@@ -14,7 +14,7 @@ base:
     # 监听地址。
     host: 127.0.0.1
     # 监听端口。
-    port: 8001
+    port: 8012
     # API 路由前缀。
     api_prefix: /play-api/v1
     # 是否启用 uvicorn reload。
@@ -24,6 +24,13 @@ base:
   logging:
     # uvicorn 日志级别。当前阶段默认 DEBUG，便于排查 Play API 请求。
     log_level: DEBUG
+
+  # ── Play API 后端实现 ────────────────────────────────────────────
+  backend:
+    # agent: 通过 AgentClient 调用 Agent 服务；mock: 使用 Play API 内置演示数据。
+    mode: mock
+    # mock SSE 每个事件之间的延迟，便于验证流式 UI 状态。
+    mock_stream_delay_ms: 180
 
 # 固定 profile 名称；覆盖文件无需在这里声明 file。
 profiles:
