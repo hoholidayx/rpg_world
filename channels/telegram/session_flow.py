@@ -16,9 +16,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from rpg_world.rpg_core.agent.agent import RPGGameAgent
+    from rpg_core.agent.agent import RPGGameAgent
 
-from rpg_world.rpg_core.session import SessionManager
+from rpg_core.session import SessionManager
 
 _SESSION_PICKER_TOKEN_PREFIX = "tg_sess"
 _SESSION_CREATE_TTL_SECONDS = 300

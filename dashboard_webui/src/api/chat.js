@@ -74,8 +74,8 @@ export function streamMessage(message, sessionId = 'default', onEvent) {
   const body = { message, session_id: sessionId }
 
   const url = workspace
-    ? `${base}/api/v1/chat/stream?workspace=${encodeURIComponent(workspace)}`
-    : `${base}/api/v1/chat/stream`
+    ? `${base}/dashboard_api/v1/chat/stream?workspace=${encodeURIComponent(workspace)}`
+    : `${base}/dashboard_api/v1/chat/stream`
 
   fetch(url, {
     method: 'POST',

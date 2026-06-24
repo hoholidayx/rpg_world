@@ -9,12 +9,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.memory.candidate import MemoryCandidate
-from rpg_world.rpg_core.memory.planning.plan import QueryPlan
-from rpg_world.rpg_core.session.manager import SessionManager
-from rpg_world.rpg_core.settings import settings
-from rpg_world.rpg_core.llm.manager import LLMManager
+from rpg_core.context.rpg_context import Message, Role
+from rp_memory.candidate import MemoryCandidate
+from rp_memory.planning.plan import QueryPlan
+from rpg_core.session.manager import SessionManager
+from rpg_core.settings import settings
+from rpg_core.llm.manager import LLMManager
 
 
 class FakeTokenCounter:

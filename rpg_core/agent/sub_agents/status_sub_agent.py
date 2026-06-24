@@ -24,18 +24,18 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.agent_types import CallRecord, TurnStats
-from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
-from rpg_world.rpg_core.agent.tools import BaseTool
-from rpg_world.rpg_core.agent.tools.registry import ToolRegistry
-from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.manager import SessionManager
-from rpg_world.rpg_core.settings import settings
+from rpg_core.agent.agent_types import CallRecord, TurnStats
+from rpg_core.agent.sub_agents.base import BaseSubAgent
+from rpg_core.agent.tools import BaseTool
+from rpg_core.agent.tools.registry import ToolRegistry
+from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.manager import SessionManager
+from rpg_core.settings import settings
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.llm.manager import ProviderOverrides
+    from rpg_core.llm.manager import ProviderOverrides
 
-    from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
+    from rpg_core.agent.sub_agents.context import SubAgentContext
 
 # ── constants ──────────────────────────────────────────────────────────
 
@@ -191,7 +191,7 @@ class StatusSubAgent(BaseSubAgent):
             duration_ms = (time.monotonic() - t0) * 1000
 
             # 捕获 CallRecord
-            from rpg_world.rpg_core.agent.agent_types import LLMResponse
+            from rpg_core.agent.agent_types import LLMResponse
 
             if isinstance(llm_result, LLMResponse):
                 call_rec = CallRecord(

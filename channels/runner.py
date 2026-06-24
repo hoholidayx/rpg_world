@@ -6,7 +6,7 @@
 
 用法::
 
-    from rpg_world.channels import ChannelRunner, TelegramAdapter
+    from channels import ChannelRunner, TelegramAdapter
 
     runner = ChannelRunner()
     runner.register(TelegramAdapter(token="xxx"))
@@ -20,7 +20,7 @@ import signal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from rpg_world.channels.base import ChannelAdapter
+    from channels.base import ChannelAdapter
 
 
 class ChannelRunner:

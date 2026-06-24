@@ -22,14 +22,14 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.tools.base import BaseTool
-from rpg_world.rpg_core.llm.base_provider import LLMProvider
+from rpg_core.agent.tools.base import BaseTool
+from rpg_core.llm.base_provider import LLMProvider
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.agent.agent import RPGGameAgent
-    from rpg_world.rpg_core.agent.command import CommandDef
-    from rpg_world.rpg_core.agent.sub_agents.context import SubAgentContext
-    from rpg_world.rpg_core.llm.manager import ProviderOverrides
+    from rpg_core.agent.agent import RPGGameAgent
+    from rpg_core.agent.command import CommandDef
+    from rpg_core.agent.sub_agents.context import SubAgentContext
+    from rpg_core.llm.manager import ProviderOverrides
 @runtime_checkable
 class ToolProvider(Protocol):
     """工具提供者接口。
@@ -118,7 +118,7 @@ class BaseSubAgent:
     def _get_provider(self) -> LLMProvider:
         """通过 ``LLMManager`` 获取该子 Agent 对应的 provider。"""
         if self._own_provider is None:
-            from rpg_world.rpg_core.llm.manager import LLMManager
+            from rpg_core.llm.manager import LLMManager
 
             manager = LLMManager.get()
             if self._provider_overrides is None:

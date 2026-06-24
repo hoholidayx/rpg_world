@@ -1,8 +1,4 @@
-"""Factory — wire up RPGContextBuilder, managers and stores.
-
-The standalone ``rpg_world/agent`` package uses this directly instead of the
-now-removed ``RpgWorldHook`` nanobot integration.
-"""
+"""Factory — wire up RPGContextBuilder, managers and stores."""
 
 from __future__ import annotations
 
@@ -11,10 +7,10 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.character.manager import CharacterManager
-    from rpg_world.rpg_core.lorebook.manager import LorebookManager
-    from rpg_world.rpg_core.scene.tracker import SceneTracker
-    from rpg_world.rpg_core.status.manager import StatusManager
+    from rpg_core.character.manager import CharacterManager
+    from rpg_core.lorebook.manager import LorebookManager
+    from rpg_core.scene.tracker import SceneTracker
+    from rpg_core.status.manager import StatusManager
 
 
 def build_rpg_context(
@@ -32,14 +28,14 @@ def build_rpg_context(
     Session-scoped data (status, summary, memory, history) is loaded from
     ``sessions/{session_id}/`` under *workspace*.
     """
-    from rpg_world.rpg_core.settings import settings as rpg_settings
-    from rpg_world.rpg_core.context.builder import RPGContextBuilder
-    from rpg_world.rpg_core.context.config import RPGContextConfig
-    from rpg_world.rpg_core.memory.persist_memory import PersistentMemoryStore
-    from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
-    from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
-    from rpg_world.rpg_core.summary.batch_store import BatchSummaryStore
-    from rpg_world.rpg_core.summary.store import SummaryStore
+    from rpg_core.settings import settings as rpg_settings
+    from rpg_core.context.builder import RPGContextBuilder
+    from rpg_core.context.config import RPGContextConfig
+    from rp_memory.persist_memory import PersistentMemoryStore
+    from rp_memory.recalled_memory import RecalledMemoryStore
+    from rp_memory.story_memory import StoryMemoryStore
+    from rpg_core.summary.batch_store import BatchSummaryStore
+    from rpg_core.summary.store import SummaryStore
 
     config = RPGContextConfig()
     builder = RPGContextBuilder(
@@ -67,7 +63,7 @@ def build_rpg_context(
     memory_manager: object | None = None
 
     try:
-        from rpg_world.rpg_core.memory.memory_manager import MemoryManager
+        from rp_memory.memory_manager import MemoryManager
 
         memory_manager = MemoryManager.create(
             recalled_store=recalled_store,  # type: ignore[arg-type]
@@ -84,14 +80,14 @@ def build_rpg_context(
     status_mgr: StatusManager | None = None
 
     try:
-        from rpg_world.rpg_core.character import CharacterManager
+        from rpg_core.character import CharacterManager
 
         character_mgr = CharacterManager(rpg_settings.character_path(workspace))
     except Exception as exc:
         logger.debug("[RPG World] CharacterManager init skipped: {}", exc)
 
     try:
-        from rpg_world.rpg_core.lorebook import LorebookManager
+        from rpg_core.lorebook import LorebookManager
 
         lorebook_mgr = LorebookManager(rpg_settings.lorebook_path(workspace))
     except Exception as exc:
@@ -99,7 +95,7 @@ def build_rpg_context(
 
     # ── Session-scoped Manager ────────────────────────────────────────
     try:
-        from rpg_world.rpg_core.status import StatusManager
+        from rpg_core.status import StatusManager
 
         status_mgr = StatusManager(str(rpg_settings.get_status_dir(workspace, session_id)))
     except Exception as exc:
@@ -109,7 +105,7 @@ def build_rpg_context(
     scene_tracker: SceneTracker | None = None
     if status_mgr is not None:
         try:
-            from rpg_world.rpg_core.scene import SceneTracker
+            from rpg_core.scene import SceneTracker
 
             scene_tracker = SceneTracker()
             scene_tracker.bind_status_manager(status_mgr)

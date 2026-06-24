@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from rpg_world.channels.cli.repl import main as _cli_main
+from channels.cli.repl import main as _cli_main
 
 
 async def main() -> int:

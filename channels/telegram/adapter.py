@@ -6,7 +6,7 @@
 
 用法::
 
-    from rpg_world.channels import TelegramAdapter
+    from channels import TelegramAdapter
 
     adapter = TelegramAdapter(token="env:TELEGRAM_BOT_TOKEN", streaming=True)
     adapter.bind_agent(agent)
@@ -26,15 +26,15 @@ from telegram import BotCommand, Update
 from telegram.error import BadRequest, RetryAfter, TelegramError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
-from rpg_world.channels.base import ChannelAdapter
-from rpg_world.channels.telegram.render import (
+from channels.base import ChannelAdapter
+from channels.telegram.render import (
     chunk_rendered_text,
     render_markdown_to_telegram_html,
 )
-from rpg_world.channels.telegram.session_flow import TelegramSessionFlow
+from channels.telegram.session_flow import TelegramSessionFlow
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.agent.agent import RPGGameAgent
+    from rpg_core.agent.agent import RPGGameAgent
 
 _TELEGRAM_PARSE_MODE = "HTML"
 _TELEGRAM_MAX_MESSAGE_LENGTH = 4096
@@ -433,7 +433,7 @@ class TelegramAdapter(ChannelAdapter):
             await self.send_text(chat_id, "会话菜单暂不可用。")
             return
 
-        from rpg_world.rpg_core.session import SessionManager
+        from rpg_core.session import SessionManager
 
         sessions = SessionManager.list_sessions(self._agent._workspace)
         current = self._agent._session_id

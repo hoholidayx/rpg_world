@@ -1,12 +1,12 @@
 import axios from 'axios'
 
 // Injected at build time by vite.config.js ← webui/settings.json
-// `__API_HOST__` and `__API_PORT__` are replaced at compile time.
-// During dev, the Vite proxy handles /api → backend, so we use `/api/v1`.
+// `__DASHBOARD_API_HOST__` and `__DASHBOARD_API_PORT__` are replaced at compile time.
+// During dev, the Vite proxy handles /dashboard_api → backend, so we use `/dashboard_api/v1`.
 // For production builds, we construct the full URL.
 const baseURL = import.meta.env.DEV
-  ? '/api/v1'
-  : `http://${__API_HOST__}:${__API_PORT__}/api/v1`
+  ? '/dashboard_api/v1'
+  : `http://${__DASHBOARD_API_HOST__}:${__DASHBOARD_API_PORT__}/dashboard_api/v1`
 
 const api = axios.create({
   baseURL,

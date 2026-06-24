@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.manager import SessionManager
+from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.manager import SessionManager
 
 
 @pytest.fixture

@@ -6,7 +6,7 @@ consistent display/logging of LLM usage statistics.
 
 from __future__ import annotations
 
-from rpg_world.rpg_core.agent.agent_types import AgentStreamEvent, TurnStats
+from rpg_core.agent.agent_types import AgentStreamEvent, TurnStats
 
 
 # ---------------------------------------------------------------------------

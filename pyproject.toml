@@ -41,56 +41,43 @@ dev = [
 ]
 
 [project.scripts]
-rpg-world = "rpg_world.run:cli"
-rpg-world-api = "rpg_world.run_api:main"
-rpg-world-cli = "rpg_world.run_cli:cli"
-rpg-world-telegram = "rpg_world.run_telegram:cli"
+rpg-world = "run:cli"
+rpg-world-dashboard-api = "run_dashboard_api:main"
+rpg-world-play-api = "run_play_api:main"
+rpg-world-cli = "run_cli:cli"
+rpg-world-telegram = "run_telegram:cli"
 
 [tool.setuptools]
-package-dir = { "rpg_world" = "." }
-packages = [
-    "rpg_world",
-    "rpg_world.api",
-    "rpg_world.api.routers",
-    "rpg_world.api.tests",
-    "rpg_world.channels",
-    "rpg_world.channels.cli",
-    "rpg_world.channels.telegram",
-    "rpg_world.channels.tests",
-    "rpg_world.play_api",
-    "rpg_world.play_api.routers",
-    "rpg_world.play_api.tests",
-    "rpg_world.rpg_core",
-    "rpg_world.rpg_core.agent",
-    "rpg_world.rpg_core.agent.sub_agents",
-    "rpg_world.rpg_core.agent.tools",
-    "rpg_world.rpg_core.character",
-    "rpg_world.rpg_core.context",
-    "rpg_world.rpg_core.jinja",
-    "rpg_world.rpg_core.llama_service",
-    "rpg_world.rpg_core.llm",
-    "rpg_world.rpg_core.lorebook",
-    "rpg_world.rpg_core.memory",
-    "rpg_world.rpg_core.memory.planning",
-    "rpg_world.rpg_core.memory.rerank",
-    "rpg_world.rpg_core.memory.retrieval",
-    "rpg_world.rpg_core.memory.storage",
-    "rpg_world.rpg_core.scene",
-    "rpg_world.rpg_core.session",
-    "rpg_world.rpg_core.status",
-    "rpg_world.rpg_core.summary",
-    "rpg_world.rpg_core.tests",
-    "rpg_world.rpg_core.tests.integration",
-    "rpg_world.rpg_core.utils",
+py-modules = [
+    "launcher",
+    "run",
+    "run_all",
+    "run_dashboard_api",
+    "run_cli",
+    "run_play_api",
+    "run_telegram",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "dashboard_api*",
+    "channels*",
+    "play_api*",
+    "rpg_core*",
+    "rp_memory*",
+    "llama_service*",
+]
+exclude = [
+    "data*",
+    "dashboard_webui*",
+    "play_webui*",
+    "todos*",
 ]
 
 [tool.setuptools.package-data]
-rpg_world = [
-    "api/*.json",
-    "data/jieba_dict.txt",
-    "rpg_core/jinja/**/*.jinja",
-    "*.yaml",
-]
+dashboard_api = ["*.json"]
+rpg_core = ["jinja/**/*.jinja"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

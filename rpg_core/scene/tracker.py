@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.status.manager import StatusManager
+    from rpg_core.status.manager import StatusManager
 
 
 class SceneTracker:
@@ -225,7 +225,7 @@ class SceneTracker:
 
     def get_tools(self) -> list:
         """返回绑定了此实例的 LLM 工具列表。"""
-        from rpg_world.rpg_core.scene.tools import (
+        from rpg_core.scene.tools import (
             DeleteAttrTool,
             SetAttrTool,
             SetTimeTool,

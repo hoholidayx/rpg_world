@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_world.rpg_core.settings import TelegramBotSettings
+from rpg_core.settings import TelegramBotSettings
 
 
 def _make_bot(name: str, enabled: bool = True) -> TelegramBotSettings:
@@ -26,7 +26,7 @@ def _make_bot(name: str, enabled: bool = True) -> TelegramBotSettings:
 
 @pytest.mark.asyncio
 async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
-    import rpg_world.channels.telegram.runner as runner_module
+    import channels.telegram.runner as runner_module
 
     created_adapters = []
     agent_calls = []
@@ -72,7 +72,7 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_main_stops_adapters_on_shutdown(monkeypatch):
-    import rpg_world.channels.telegram.runner as runner_module
+    import channels.telegram.runner as runner_module
 
     class FakeAdapter:
         def __init__(self):
@@ -101,7 +101,7 @@ async def test_main_stops_adapters_on_shutdown(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_main_returns_nonzero_on_startup_failure(monkeypatch):
-    import rpg_world.channels.telegram.runner as runner_module
+    import channels.telegram.runner as runner_module
 
     class FakeAdapter:
         def __init__(self):

@@ -9,9 +9,9 @@ import httpx
 from loguru import logger
 from openai import AsyncOpenAI
 
-from rpg_world.rpg_core.llm.base_provider import LLMProvider
-from rpg_world.rpg_core.llm.types import LLMResponse, LLMUsage, ProviderChunk
-from rpg_world.rpg_core.settings import settings
+from rpg_core.llm.base_provider import LLMProvider
+from rpg_core.llm.types import LLMResponse, LLMUsage, ProviderChunk
+from rpg_core.settings import settings
 
 
 def _build_usage(raw, raw_dict: dict[str, object] | None) -> LLMUsage | None:

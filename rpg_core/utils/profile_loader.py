@@ -7,8 +7,8 @@ from typing import Callable
 
 import yaml
 
-from rpg_world.rpg_core.common_types import ConfigDict, ConfigValue
-from rpg_world.rpg_core.utils.config_values import optional_bool
+from rpg_core.common_types import ConfigDict, ConfigValue
+from rpg_core.utils.config_values import optional_bool
 
 YamlMergeFn = Callable[[ConfigDict, ConfigDict], ConfigDict]
 

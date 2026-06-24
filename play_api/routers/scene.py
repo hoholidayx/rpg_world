@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 router = APIRouter(prefix="/scene", tags=["play-scene"])
 
 
 class PlayScene(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     attrs: dict[str, str] = Field(default_factory=dict)
     time: str | None = None
     location: str | None = None
@@ -22,11 +24,10 @@ async def get_current_scene(
     workspace: str = Query(default="default"),
     session_id: str = Query(default="demo_session", alias="sessionId"),
 ) -> PlayScene:
-    _ = (workspace, session_id)
     return PlayScene(
-        attrs={"状态": "mock"},
+        attrs={"状态": "mock", "workspace": workspace, "session_id": session_id},
         time="未知时间",
         location="未设定地点",
-        presentCharacters=[],
+        present_characters=[],
         mood="待展开",
     )

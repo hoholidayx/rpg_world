@@ -10,10 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
-from rpg_world.rpg_core.agent.manager import AgentManager
+from rpg_core.agent.manager import AgentManager
 
 # mock agent._ensure_initialized 为 no-op，避免创建真实的 OpenAI provider
-_AGENT_PATCH_PATH = "rpg_world.rpg_core.agent.agent.RPGGameAgent._ensure_initialized"
+_AGENT_PATCH_PATH = "rpg_core.agent.agent.RPGGameAgent._ensure_initialized"
 
 
 class TestAgentManager:

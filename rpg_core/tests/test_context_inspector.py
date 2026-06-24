@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-import rpg_world.rpg_core.context.renderer as renderer_module
-from rpg_world.rpg_core.context.fixed_layer import FixedLayerComposer, FixedLayerSection
-from rpg_world.rpg_core.context.inspector import ContextInspector
-from rpg_world.rpg_core.context.rpg_context import (
+import rpg_core.context.renderer as renderer_module
+from rpg_core.context.fixed_layer import FixedLayerComposer, FixedLayerSection
+from rpg_core.context.inspector import ContextInspector
+from rpg_core.context.rpg_context import (
     FixedLayerData,
     HotHistoryLayer,
     Message,

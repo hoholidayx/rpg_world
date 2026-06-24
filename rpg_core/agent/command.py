@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.agent.agent import RPGGameAgent
-    from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
+    from rpg_core.agent.agent import RPGGameAgent
+    from rpg_core.agent.sub_agents.base import BaseSubAgent
 
 # 命令处理器签名：async (agent, args) -> str
 HandlerFunc = Callable[["RPGGameAgent", list[str]], Awaitable[str]]
@@ -57,7 +57,7 @@ async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
 
 async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
     """列出当前工作区所有会话。"""
-    from rpg_world.rpg_core.session import SessionManager
+    from rpg_core.session import SessionManager
 
     sessions = SessionManager.list_sessions(agent._workspace)
     current = agent._session_id
@@ -70,7 +70,7 @@ async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
 
 async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
     """创建新会话。"""
-    from rpg_world.rpg_core.session import SessionManager
+    from rpg_core.session import SessionManager
 
     if not args:
         return "[错误] 需要提供 session_id: /session_create <id>"
@@ -86,7 +86,7 @@ async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
 
 async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
     """切换到指定会话。"""
-    from rpg_world.rpg_core.session import SessionManager
+    from rpg_core.session import SessionManager
 
     if not args:
         return "[错误] 需要提供 session_id: /session_switch <id>"

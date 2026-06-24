@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.manager import SessionManager
+from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.manager import SessionManager
 
 
 def test_iter_turn_groups_uses_two_message_fallback_without_user_anchor():

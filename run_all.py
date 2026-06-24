@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from rpg_world.run import main as _supervisor_main
+from run import main as _supervisor_main
 
 
 async def main() -> int:

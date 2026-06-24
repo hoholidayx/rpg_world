@@ -1,8 +1,0 @@
-{
-  "port": 8000,
-  "log_level": "INFO",
-  "log_chat_messages": true,
-  "log_llm_stats": true,
-  "log_path": null,
-  "api_prefix": "/api/v1"
-}

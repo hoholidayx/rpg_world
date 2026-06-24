@@ -11,17 +11,17 @@ from collections.abc import AsyncIterator
 
 from loguru import logger
 
-from rpg_world.rpg_core.llm.base_provider import LLMProvider
-from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.agent.tools import ToolRegistry
-from rpg_world.rpg_core.agent.agent_types import (
+from rpg_core.llm.base_provider import LLMProvider
+from rpg_core.context.rpg_context import Message, Role
+from rpg_core.agent.tools import ToolRegistry
+from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     CallRecord,
     LLMResponse,
     StreamEventKind,
     TurnStats, LLMUsage,
 )
-from rpg_world.rpg_core.settings import settings
+from rpg_core.settings import settings
 
 _TAG = "[MainAgent]"
 

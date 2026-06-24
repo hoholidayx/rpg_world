@@ -1,6 +1,6 @@
 import api from './index'
 
-const DEFAULT_WORKSPACE = 'data/api_default_workspace'
+const DEFAULT_WORKSPACE = 'data/dashboard_api_default_workspace'
 
 function _ws(workspace) {
   return encodeURIComponent(workspace || DEFAULT_WORKSPACE)

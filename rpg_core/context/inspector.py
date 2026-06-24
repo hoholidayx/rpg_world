@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rpg_world.rpg_core.context.rpg_context import LayerType, RPGContext, Role
-from rpg_world.rpg_core.session.turns import count_roles
-from rpg_world.rpg_core.utils.tokenizer import TokenCounter
+from rpg_core.context.rpg_context import LayerType, RPGContext, Role
+from rpg_core.session.turns import count_roles
+from rpg_core.utils.tokenizer import TokenCounter
 
 
 @dataclass
@@ -106,7 +106,7 @@ class ContextInspector:
         ]
 
         if self._ctx.hot_history.messages:
-            from rpg_world.rpg_core.session.manager import SessionManager
+            from rpg_core.session.manager import SessionManager
 
             role_counts = count_roles(self._ctx.hot_history.messages)
             lines.append(f"- 历史消息: **{len(self._ctx.hot_history.messages)}** 条")
@@ -181,7 +181,7 @@ class ContextInspector:
             ))
             return
 
-        from rpg_world.rpg_core.session.manager import SessionManager
+        from rpg_core.session.manager import SessionManager
 
         role_counts = count_roles(self._ctx.hot_history.messages)
         turn_count = SessionManager.count_turns(self._ctx.hot_history.messages)

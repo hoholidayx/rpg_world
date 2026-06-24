@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from rpg_world.rpg_core.character.models import CharacterDetail
-from rpg_world.rpg_core.summary.store import SummaryStore
+from rpg_core.character.models import CharacterDetail
+from rpg_core.summary.store import SummaryStore
 
 
 def test_character_detail_tags_use_independent_list():

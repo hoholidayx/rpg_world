@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_world.rpg_core.summary.compressor import SummaryCompressor
-from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.manager import SessionManager
-from rpg_world.rpg_core.tests.conftest import FakeBatchStore, FakeMemorySubAgent
+from rpg_core.summary.compressor import SummaryCompressor
+from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.manager import SessionManager
+from rpg_core.tests.conftest import FakeBatchStore, FakeMemorySubAgent
 
 
 @pytest.mark.asyncio

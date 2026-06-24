@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from rpg_world.rpg_core.utils.manager_base import BaseManager
-from rpg_world.rpg_core.lorebook.loader import LorebookLoader
+from rpg_core.utils.manager_base import BaseManager
+from rpg_core.lorebook.loader import LorebookLoader
 
 
 class LorebookManager(BaseManager):

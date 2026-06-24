@@ -1,16 +1,16 @@
-"""rpg_world supervisor 入口。
+"""RPG World supervisor 入口。
 
 按 ``settings.yaml`` 配置，在独立子进程中启动指定模块。
 父进程只负责 supervisor、信号转发和子进程回收，不再直接承载
-API / Telegram / CLI 的运行时状态。
+Dashboard API / Telegram / CLI 的运行时状态。
 
 用法::
 
     # 读取 settings.yaml 按配置启动
-    uv run python -m rpg_world.run
+    uv run python -m run
 
-    # 仅启动 API
-    MODULES=api uv run python -m rpg_world.run
+    # 仅启动 Dashboard API
+    MODULES=dashboard_api uv run python -m run
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ os.environ.setdefault(
 
 from loguru import logger as _loguru_logger
 
-from rpg_world.launcher import ProcessSpec, build_process_spec, resolve_modules
+from launcher import ProcessSpec, build_process_spec, resolve_modules
 
 
 # ── 日志配置（supervisor 自身 INFO+ 输出到 stderr） ───────────────────
@@ -149,7 +149,7 @@ async def main() -> int:
 
     if not enabled_modules:
         _loguru_logger.warning("未启用任何模块（在 settings.yaml 中设置 modules.{name}.enabled=true）")
-        _loguru_logger.warning("或通过 MODULES=api,telegram uv run python -m rpg_world.run 指定")
+        _loguru_logger.warning("或通过 MODULES=dashboard_api,telegram uv run python -m run 指定")
         return 0
 
     _loguru_logger.info("启动模块: {}", ", ".join(enabled_modules))

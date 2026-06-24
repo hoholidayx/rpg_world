@@ -2,20 +2,20 @@
 
 ## 工作边界
 - 当前产品路线：WebUI 是沉浸式 RP 主体验，Telegram 是轻量入口、推送通知与兜底交互；短期仍保持 Telegram 稳定性，但新增体验型能力优先沉淀到 WebUI。
-- WebUI 拆分为两个独立前端项目：面向数据/配置维护的 Dashboard WebUI，以及面向玩家沉浸式聊天和游玩的 Play WebUI。二者共享 FastAPI/rpg_core 后端能力，不在前端复制业务规则。
+- WebUI 拆分为两个独立前端项目：面向数据/配置维护的 Dashboard WebUI，以及面向玩家沉浸式聊天和游玩的 Play WebUI。二者共享 FastAPI/rpg_core/rp_memory 后端能力，不在前端复制业务规则。
 - 修改启动流程、渠道生命周期、共享状态或 `AgentManager` 前，先阅读 `CLAUDE.md`。
-- 不要绕过 `run.py` 自行拼装多模块启动；`run.py` 是 supervisor，`run_all.py`、`run_api.py`、`run_telegram.py`、`run_cli.py` 只是快捷入口。
-- 保持 `api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
+- 不要绕过 `run.py` 自行拼装多模块启动；`run.py` 是 supervisor，`run_all.py`、`run_dashboard_api.py`、`run_telegram.py`、`run_cli.py` 只是快捷入口。
+- 保持 `dashboard_api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
 - `data/` 是运行数据目录。会话历史、摘要、向量索引、SQLite WAL/SHM 等文件默认不纳入提交。
 
 ## 常用命令
 - `uv sync`：安装后端依赖。
-- `uv run python -m rpg_world.run`：按 `settings.yaml` 启动已启用模块。
-- `MODULES=api uv run python -m rpg_world.run`：仅启动 API。
-- `MODULES=telegram uv run python -m rpg_world.run`：仅启动 Telegram。
-- `uv run uvicorn rpg_world.api.main:app --reload --reload-dir api --reload-dir channels --reload-dir rpg_core --host 127.0.0.1 --port 8000`：直接调试 FastAPI。
-- `uv run python -m rpg_world.channels.cli.repl`：启动独立 CLI。
-- `uv run python -m pytest channels/tests rpg_core/tests api/tests -q`：运行 Python 测试基线。
+- `uv run python -m run`：按 `settings.yaml` 启动已启用模块。
+- `MODULES=dashboard_api uv run python -m run`：仅启动 Dashboard API。
+- `MODULES=telegram uv run python -m run`：仅启动 Telegram。
+- `uv run uvicorn dashboard_api.main:app --reload --reload-dir dashboard_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llama_service --host 127.0.0.1 --port 8000`：直接调试 FastAPI。
+- `uv run python -m channels.cli.repl`：启动独立 CLI。
+- `uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llama_service/tests dashboard_api/tests play_api/tests -q`：运行 Python 测试基线。
 - `uv run python -m pytest channels/tests/test_telegram.py -q`：专项验证 Telegram。
 - `cd dashboard_webui && npm run dev`：启动 Dashboard 前端开发服务器。
 - `cd dashboard_webui && npm run build`：构建 Dashboard 前端产物。
@@ -40,8 +40,8 @@
 - 所有外部调用使用 mock，避免真实 LLM、Telegram 或网络依赖。
 - 新增测试文件命名为 `test_<feature>.py`。
 - 修改 Telegram 适配、会话流程或渲染逻辑时，必须补 `channels/tests/test_telegram.py`。
-- 修改 API/Dashboard WebUI 管理能力时，补 `api/tests/` 契约测试。
-- 修改核心上下文、memory、summary、session 行为时，补 `rpg_core/tests/`。
+- 修改 API/Dashboard WebUI 管理能力时，补 `dashboard_api/tests/` 契约测试。
+- 修改核心上下文、summary、session 行为时，补 `rpg_core/tests/`；修改 memory 行为时，补 `rp_memory/tests/`。
 - 修改主 agent、LLM provider、session manager、context 或相关配置时，默认跑：
   `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q`。
 - 保留 `pytest.ini` 中的 `asyncio_mode = auto`。
@@ -51,7 +51,7 @@
 - `settings.yaml` 管业务配置、模块启停、渠道参数和数据路径。
 - `llm.yaml` 管 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。
 - 二者都支持 `base + profiles`；profile 可通过被 git ignore 的 `*.local.yaml` 覆盖。
-- `api/settings.json` 只保留 API 服务级配置。
+- `dashboard_api/settings.json` 只保留 API 服务级配置。
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。
 - `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。
 - 工作区选择不要写回运行时状态。Telegram/CLI 默认工作区来自 `settings.yaml`，API/WebUI 通过请求参数传入。

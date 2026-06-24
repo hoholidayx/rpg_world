@@ -15,9 +15,9 @@ from contextlib import suppress
 import pytest
 import pytest_asyncio
 
-from rpg_world.rpg_core import settings as settings_module
-from rpg_world.rpg_core.agent.agent import RPGGameAgent
-from rpg_world.rpg_core.utils.watcher import get_watcher
+from rpg_core import settings as settings_module
+from rpg_core.agent.agent import RPGGameAgent
+from rpg_core.utils.watcher import get_watcher
 
 _INTEGRATION_MARKER = "integration"
 
@@ -34,12 +34,12 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
 
 def _patch_loaded_settings_refs(integration_settings) -> dict[str, object]:
     module_names = (
-        "rpg_world.rpg_core.settings",
-        "rpg_world.rpg_core.agent.agent",
-        "rpg_world.rpg_core.agent.manager",
-        "rpg_world.rpg_core.llm.manager",
-        "rpg_world.rpg_core.llm.openai_provider",
-        "rpg_world.rpg_core.session.manager",
+        "rpg_core.settings",
+        "rpg_core.agent.agent",
+        "rpg_core.agent.manager",
+        "rpg_core.llm.manager",
+        "rpg_core.llm.openai_provider",
+        "rpg_core.session.manager",
     )
     previous: dict[str, object] = {}
     for module_name in module_names:

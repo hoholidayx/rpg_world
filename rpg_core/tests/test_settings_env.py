@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from rpg_world.rpg_core.llm.openai_provider import OpenAIProvider
-from rpg_world.rpg_core import settings as settings_module
-from rpg_world.rpg_core.llm import config as llm_config_module
+from rpg_core.llm.openai_provider import OpenAIProvider
+from rpg_core import settings as settings_module
+from rpg_core.llm import config as llm_config_module
 
 
 def _write_settings(
@@ -513,9 +513,9 @@ def test_openai_provider_uses_settings_api_key(monkeypatch) -> None:
             captured["base_url"] = base_url
             captured["http_client"] = http_client
 
-    monkeypatch.setattr("rpg_world.rpg_core.llm.openai_provider.AsyncOpenAI", DummyClient)
+    monkeypatch.setattr("rpg_core.llm.openai_provider.AsyncOpenAI", DummyClient)
     monkeypatch.setattr(
-        "rpg_world.rpg_core.llm.openai_provider.settings.get_openai_api_key",
+        "rpg_core.llm.openai_provider.settings.get_openai_api_key",
         lambda explicit=None: explicit or "resolved-from-settings",
     )
 
@@ -529,7 +529,7 @@ def test_openai_provider_uses_settings_api_key(monkeypatch) -> None:
 def test_openai_provider_stores_resolved_settings_when_client_injected(monkeypatch) -> None:
     dummy_client = object()
     monkeypatch.setattr(
-        "rpg_world.rpg_core.llm.openai_provider.settings.get_openai_api_key",
+        "rpg_core.llm.openai_provider.settings.get_openai_api_key",
         lambda explicit=None: explicit or "resolved-from-settings",
     )
 

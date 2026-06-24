@@ -61,7 +61,7 @@ base:
       kind: embedding
       provider: llama
       llama:
-        # GGUF 模型路径，相对 rpg_world 包根目录解析
+        # GGUF 模型路径，相对项目根目录解析
         model_path: data/models/Qwen3-Embedding-0.6B-f16.gguf
         # llama.cpp 上下文窗口
         n_ctx: 32768

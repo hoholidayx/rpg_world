@@ -12,8 +12,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from rpg_world.rpg_core.common_types import ConfigDict, ConfigValue
-from rpg_world.rpg_core.llm.keys import (
+from rpg_core.common_types import ConfigDict, ConfigValue
+from rpg_core.llm.keys import (
     LLM_KIND_CHAT,
     LLM_KIND_RERANK,
     LLM_KINDS,
@@ -24,8 +24,8 @@ from rpg_world.rpg_core.llm.keys import (
     PROVIDER_SHARED,
     RERANK_MODEL_TYPES,
 )
-from rpg_world.rpg_core.utils.config_values import optional_bool, optional_float, optional_int
-from rpg_world.rpg_core.utils.profile_loader import load_profiled_yaml
+from rpg_core.utils.config_values import optional_bool, optional_float, optional_int
+from rpg_core.utils.profile_loader import load_profiled_yaml
 
 _LLM_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "llm.yaml"
 _PROFILE_ENV = "RPG_WORLD_PROFILE"

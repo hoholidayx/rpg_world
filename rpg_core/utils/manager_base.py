@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from pathlib import Path
 
-from rpg_world.rpg_core.utils.watcher import get_watcher
+from rpg_core.utils.watcher import get_watcher
 
 
 class BaseManager:

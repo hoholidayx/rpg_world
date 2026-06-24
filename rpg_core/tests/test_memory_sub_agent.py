@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import MemoryAgentResult, MemorySubAgent
-from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.manager import SessionManager
+from rpg_core.agent.sub_agents.memory_sub_agent import MemoryAgentResult, MemorySubAgent
+from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.manager import SessionManager
 
 
 class DummyStoryStore:

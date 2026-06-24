@@ -2,25 +2,28 @@ from __future__ import annotations
 
 import asyncio
 
-from rpg_world import run_all, run_api, run_cli, run_telegram
+import run_all
+import run_dashboard_api
+import run_cli
+import run_telegram
 
 
-def test_run_api_main_invokes_uvicorn(monkeypatch):
+def test_run_dashboard_api_main_invokes_uvicorn(monkeypatch):
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _fake_run(*args, **kwargs):
         calls.append((args, kwargs))
 
-    monkeypatch.setattr(run_api.uvicorn, "run", _fake_run)
+    monkeypatch.setattr(run_dashboard_api.uvicorn, "run", _fake_run)
 
-    assert run_api.main() is None
+    assert run_dashboard_api.main() is None
     assert len(calls) == 1
     args, kwargs = calls[0]
-    assert args == ("rpg_world.api.main:app",)
-    assert kwargs["host"] == run_api.channels_settings.api_host
-    assert kwargs["port"] == run_api.channels_settings.api_port
-    assert kwargs["reload"] == run_api.channels_settings.api_reload
-    assert kwargs["log_level"] == run_api.api_settings.log_level.lower()
+    assert args == ("dashboard_api.main:app",)
+    assert kwargs["host"] == run_dashboard_api.channels_settings.dashboard_api_host
+    assert kwargs["port"] == run_dashboard_api.channels_settings.dashboard_api_port
+    assert kwargs["reload"] == run_dashboard_api.channels_settings.dashboard_api_reload
+    assert kwargs["log_level"] == run_dashboard_api.api_settings.log_level.lower()
 
 
 def test_run_telegram_main_forwards(monkeypatch):

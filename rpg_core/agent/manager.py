@@ -4,7 +4,7 @@
 
 用法::
 
-    from rpg_world.rpg_core.agent.manager import AgentManager
+    from rpg_core.agent.manager import AgentManager
 
     agent = AgentManager.get_or_create(session_id="mygame")
     await AgentManager.ensure_initialized()
@@ -14,15 +14,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rpg_world.rpg_core.agent.agent import RPGGameAgent
-from rpg_world.rpg_core.llm.manager import LLMManager, ProviderOverrides
-from rpg_world.rpg_core.llm.keys import AGENT_MAIN_BIZ_KEY
-from rpg_world.rpg_core.utils.path_utils import (
+from rpg_core.agent.agent import RPGGameAgent
+from rpg_core.llm.manager import LLMManager, ProviderOverrides
+from rpg_core.llm.keys import AGENT_MAIN_BIZ_KEY
+from rpg_core.utils.path_utils import (
     ensure_workspace_dir,
     require_workspace,
 )
-from rpg_world.rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
-from rpg_world.rpg_core.utils.path_utils import resolve_api_workspace
+from rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
+from rpg_core.utils.path_utils import resolve_api_workspace
 
 if TYPE_CHECKING:
     pass
@@ -92,7 +92,7 @@ class AgentManager:
         Parameters
         ----------
         workspace:
-            工作区标识。空值时自动回退到 ``data/api_default_workspace``，
+            工作区标识。空值时自动回退到 ``data/dashboard_api_default_workspace``，
             与 ``resolve_api_workspace`` 行为保持一致。
         session_id:
             初始化时使用的 session ID。默认为 ``"default"``，

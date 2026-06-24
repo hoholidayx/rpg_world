@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
-from rpg_world.rpg_core.llm.types import LLMResponse, ProviderChunk
+from rpg_core.llm.types import LLMResponse, ProviderChunk
 
 
 class EmbeddingProviderError(Exception):

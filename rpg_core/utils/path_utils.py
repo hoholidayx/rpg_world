@@ -3,14 +3,13 @@
 Resolution rules (applied in order):
 
 1. Absolute path (starts with ``/``) — returned as-is.
-2. Relative path — resolved relative to the **RPG world package root**
-   (``rpg_world/``).
+2. Relative path — resolved relative to the **RPG World project root**.
 
    * If *workspace* is set (e.g. ``"data/非公开行程"``), the
      workspace path is used as the base: ``character`` →
-     ``rpg_world/data/非公开行程/character``.
+     ``data/非公开行程/character``.
    * If *workspace* is empty, ``data/`` is used as the base: ``character`` →
-     ``rpg_world/data/character``.
+     ``data/character``.
 
 All functions are pure — they receive all inputs explicitly and never
 read module-level or process-global state.
@@ -40,10 +39,8 @@ __all__ = [
 _DEFAULT_WORKSPACE_SUFFIX = "_default_workspace"
 _DATA_DIR = "data"
 
-# Re-exported from rpg_world package root for convenience.
-# Modules that need the package root should import from here or from
-# ``rpg_world import PACKAGE_ROOT`` directly.
-from rpg_world import PACKAGE_ROOT  # noqa: F401
+# Project root used for resolving settings-relative paths.
+PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 
 # Known data-type subdirectories inside data/ — these are excluded from
 # workspace discovery.
@@ -81,7 +78,7 @@ def resolve_rpg_path(
 
     Args:
         value: Raw path string from settings.
-        rpg_root: RPG world package root directory (``rpg_world/``).
+        rpg_root: RPG World project root directory.
         rpg_workspace: Workspace identifier (e.g. ``""`` or ``"data/非公开行程"``).
 
     Returns:
@@ -188,7 +185,7 @@ def resolve_api_workspace(workspace: str) -> str:
     """Resolve workspace for API/WebUI requests.
 
     When *workspace* is empty (not selected in the frontend),
-    defaults to ``"data/api_default_workspace"`` so the API
+    defaults to ``"data/dashboard_api_default_workspace"`` so the API
     always has a valid workspace directory.
     """
     if workspace and workspace.strip():

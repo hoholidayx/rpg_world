@@ -15,11 +15,11 @@ from typing import TypeAlias
 
 from openai import AsyncOpenAI
 
-from rpg_world.rpg_core.llama_service import LlamaEmbeddingModel, LlamaRerankModel
-from rpg_world.rpg_core.llama_service.client import LlamaCompletionModel
-from rpg_world.rpg_core.llm.base_provider import LLMProvider
-from rpg_world.rpg_core.llm.config import BizConfig, resolve_biz_config
-from rpg_world.rpg_core.llm.keys import (
+from llama_service import LlamaEmbeddingModel, LlamaRerankModel
+from llama_service.client import LlamaCompletionModel
+from rpg_core.llm.base_provider import LLMProvider
+from rpg_core.llm.config import BizConfig, resolve_biz_config
+from rpg_core.llm.keys import (
     LLM_KIND_EMBEDDING,
     LLM_KIND_RERANK,
     PROVIDER_LLAMA,
@@ -29,12 +29,12 @@ from rpg_world.rpg_core.llm.keys import (
     RERANK_MODEL_TYPE_CHAT_POINTWISE,
     RERANK_MODEL_TYPE_QWEN3_LOGIT,
 )
-from rpg_world.rpg_core.llm.llama_provider import (
+from rpg_core.llm.llama_provider import (
     LlamaCompletionProvider,
     LlamaEmbeddingProvider,
 )
-from rpg_world.rpg_core.llm.openai_provider import OpenAIProvider
-from rpg_world.rpg_core.memory.rerank.providers import MemoryScoreProvider
+from rpg_core.llm.openai_provider import OpenAIProvider
+from rp_memory.rerank.providers import MemoryScoreProvider
 
 
 ManagedProvider: TypeAlias = LLMProvider | MemoryScoreProvider
@@ -353,7 +353,7 @@ class LLMManager:
         request_timeout_ms: int = 60000,
         max_length: int | None = None,
     ):
-        from rpg_world.rpg_core.memory.rerank.providers import LogitRerankProvider
+        from rp_memory.rerank.providers import LogitRerankProvider
 
         model = self._build_llama_rerank_model(
             scope=scope,
@@ -494,7 +494,7 @@ class LLMManager:
     ) -> ManagedProvider:
         rerank_model_type = cfg.rerank_model_type
         if rerank_model_type == RERANK_MODEL_TYPE_CHAT_POINTWISE:
-            from rpg_world.rpg_core.memory.rerank.providers import ChatPointwiseScoreProvider
+            from rp_memory.rerank.providers import ChatPointwiseScoreProvider
 
             if backend != PROVIDER_OPENAI:
                 raise ValueError(

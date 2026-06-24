@@ -4,7 +4,7 @@
 
 用法::
 
-    from rpg_world.channels.cli import CLIAdapter
+    from channels.cli import CLIAdapter
 
     adapter = CLIAdapter()
     adapter.bind_agent(agent)
@@ -21,9 +21,9 @@ from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.panel import Panel
 
-from rpg_world.channels.base import ChannelAdapter
-from rpg_world.rpg_core.agent.agent_types import StreamEventKind
-from rpg_world.rpg_core.utils.stats_formatter import format_event_stats, format_turn_stats
+from channels.base import ChannelAdapter
+from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.utils.stats_formatter import format_event_stats, format_turn_stats
 
 _HISTORY_PATH = Path.home() / ".rpg_world_cli_history"
 

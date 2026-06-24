@@ -8,13 +8,13 @@ from typing import Any
 
 import pytest
 
-from rpg_world.rpg_core.agent.agent_types import (
+from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     StreamEventKind,
     TurnStats,
 )
-from rpg_world.rpg_core.agent.command import CommandDef, CommandResult
-from rpg_world.rpg_core.agent.loop import AgentReply
+from rpg_core.agent.command import CommandDef, CommandResult
+from rpg_core.agent.loop import AgentReply
 
 
 class FakeAgent:

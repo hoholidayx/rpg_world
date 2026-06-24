@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from rpg_world.rpg_core.agent.tools.base import BaseTool
+from rpg_core.agent.tools.base import BaseTool
 
 
 class ToolRegistry:

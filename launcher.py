@@ -1,4 +1,4 @@
-"""Process launcher helpers for rpg_world supervisor entrypoints."""
+"""Process launcher helpers for RPG World supervisor entrypoints."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from rpg_world.channels.config import settings as channels_settings
+from channels.config import settings as channels_settings
 
 
 @dataclass(frozen=True)
@@ -35,21 +35,21 @@ def python_module_command(module: str, *args: str) -> tuple[str, ...]:
 
 def build_process_spec(module: str) -> ProcessSpec | None:
     """Build the subprocess launch spec for a logical module name."""
-    if module == "api":
-        if channels_settings.api_reload:
+    if module == "dashboard_api":
+        if channels_settings.dashboard_api_reload:
             raise ValueError(
-                "supervisor 模式不支持 modules.api.reload=true；"
-                "请改用直接 uvicorn 调试命令启动 API。",
+                "supervisor 模式不支持 modules.dashboard_api.reload=true；"
+                "请改用直接 uvicorn 调试命令启动 Dashboard API。",
             )
         return ProcessSpec(
-            name="api",
+            name="dashboard_api",
             argv=python_module_command(
                 "uvicorn",
-                "rpg_world.api.main:app",
+                "dashboard_api.main:app",
                 "--host",
-                channels_settings.api_host,
+                channels_settings.dashboard_api_host,
                 "--port",
-                str(channels_settings.api_port),
+                str(channels_settings.dashboard_api_port),
                 "--log-level",
                 "info",
             ),
@@ -62,7 +62,7 @@ def build_process_spec(module: str) -> ProcessSpec | None:
             return None
         return ProcessSpec(
             name="telegram",
-            argv=python_module_command("rpg_world.channels.telegram.runner"),
+            argv=python_module_command("channels.telegram.runner"),
         )
 
     if module == "cli":
@@ -71,7 +71,7 @@ def build_process_spec(module: str) -> ProcessSpec | None:
             return None
         return ProcessSpec(
             name="cli",
-            argv=python_module_command("rpg_world.channels.cli.repl"),
+            argv=python_module_command("channels.cli.repl"),
         )
 
     logger.warning("未知模块，跳过: {}", module)

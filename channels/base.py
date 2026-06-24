@@ -12,11 +12,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from rpg_world.rpg_core.agent.agent_types import StreamEventKind
-from rpg_world.rpg_core.agent.loop import AgentReply
+from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.agent.loop import AgentReply
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.agent.agent import RPGGameAgent
+    from rpg_core.agent.agent import RPGGameAgent
 
 
 class ChannelAdapter(ABC):
@@ -96,7 +96,7 @@ class ChannelAdapter(ABC):
         与 :meth:`get_session_id` 的 ``{channel_name}_{chat_id}`` 模式对应。
         子类可覆盖以绑定不同的 workspace。
         """
-        from rpg_world.rpg_core.utils.path_utils import default_workspace_name
+        from rpg_core.utils.path_utils import default_workspace_name
 
         return default_workspace_name(self.name)
 

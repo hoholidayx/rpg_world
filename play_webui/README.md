@@ -23,6 +23,5 @@ npm run build
 Play API mock 服务可通过以下命令单独启动：
 
 ```bash
-uv run uvicorn rpg_world.play_api.main:app --reload --host 127.0.0.1 --port 8000
+uv run python -m run_play_api
 ```
-

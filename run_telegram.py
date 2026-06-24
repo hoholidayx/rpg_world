@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from rpg_world.channels.telegram.runner import main as _telegram_main
+from channels.telegram.runner import main as _telegram_main
 
 
 async def main() -> int:

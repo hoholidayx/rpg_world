@@ -21,11 +21,16 @@ class PlayChatRequest(BaseModel):
 
 
 async def _mock_stream(payload: PlayChatRequest) -> AsyncIterator[str]:
-    _ = payload
     events = [
-        {"kind": "round_start", "round_index": 1},
+        {
+            "kind": "round_start",
+            "round_index": 1,
+            "workspace": payload.workspace,
+            "session_id": payload.session_id,
+            "mode": payload.mode,
+        },
         {"kind": "thinking", "content": "Play API mock 正在构思..."},
-        {"kind": "text", "content": "这是一段来自 Play API mock 的流式剧情。"},
+        {"kind": "text", "content": f"这是一段来自 Play API mock 的流式剧情：{payload.text}"},
         {"kind": "done", "finish_reason": "mock"},
     ]
     for event in events:
@@ -34,8 +39,12 @@ async def _mock_stream(payload: PlayChatRequest) -> AsyncIterator[str]:
 
 @router.post("/turn")
 async def create_turn(payload: PlayChatRequest) -> dict[str, str]:
-    _ = payload
-    return {"turnId": "mock_turn", "status": "accepted"}
+    return {
+        "turnId": f"mock_turn_{payload.session_id}",
+        "status": "accepted",
+        "workspace": payload.workspace,
+        "mode": payload.mode,
+    }
 
 
 @router.post("/stream")

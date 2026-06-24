@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_world.channels.base import ChannelAdapter
-from rpg_world.channels.tests.conftest import FakeAgent, FakeStreamAgent, FakeErrorAgent
+from channels.base import ChannelAdapter
+from channels.tests.conftest import FakeAgent, FakeStreamAgent, FakeErrorAgent
 
 
 class RecordingAdapter(ChannelAdapter):

@@ -1,7 +1,7 @@
 """Telegram 独立入口。
 
 在独立进程中启动所有 enabled=true 的 Telegram bot。
-该入口由 ``rpg_world.run`` 的 supervisor 模式拉起，也可单独调试。
+该入口由 ``run`` 的 supervisor 模式拉起，也可单独调试。
 """
 
 from __future__ import annotations
@@ -11,11 +11,11 @@ import signal
 
 from loguru import logger
 
-from rpg_world.channels.config import settings as channels_settings
-from rpg_world.channels.telegram.adapter import TelegramAdapter
-from rpg_world.rpg_core.agent.manager import AgentManager
-from rpg_world.rpg_core.llama_service.client import configure_llama_client_from_memory_settings
-from rpg_world.rpg_core.settings import settings as core_settings
+from channels.config import settings as channels_settings
+from channels.telegram.adapter import TelegramAdapter
+from rpg_core.agent.manager import AgentManager
+from llama_service.client import configure_llama_client_from_memory_settings
+from rpg_core.settings import settings as core_settings
 
 
 class _BotRuntime:

@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import rpg_world.rpg_core.context.renderer as renderer_module
-from rpg_world.rpg_core.context.builder import RPGContextBuilder
-from rpg_world.rpg_core.context.config import ExtensionModuleDef, RPGContextConfig
-from rpg_world.rpg_core.context.fixed_layer import FixedLayerSection
-from rpg_world.rpg_core.context.rpg_context import (
+import rpg_core.context.renderer as renderer_module
+from rpg_core.context.builder import RPGContextBuilder
+from rpg_core.context.config import ExtensionModuleDef, RPGContextConfig
+from rpg_core.context.fixed_layer import FixedLayerSection
+from rpg_core.context.rpg_context import (
     FixedLayerData,
     Message,
     RPGContext,

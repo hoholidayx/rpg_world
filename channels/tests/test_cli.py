@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rpg_world.channels.cli import CLIAdapter
-from rpg_world.channels.tests.conftest import FakeAgent
+from channels.cli import CLIAdapter
+from channels.tests.conftest import FakeAgent
 
 
 # 给 FakeAgent 补充命令用到的 clear_history

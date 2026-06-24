@@ -8,7 +8,7 @@
 
 Usage::
 
-    from rpg_world.rpg_core.agent.sub_agents import MemorySubAgent, SubAgentContext
+    from rpg_core.agent.sub_agents import MemorySubAgent, SubAgentContext
 
     agent = MemorySubAgent(
         provider_biz_key="agent.memory_sub_agent",
@@ -32,20 +32,20 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.sub_agents.base import BaseSubAgent
-from rpg_world.rpg_core.agent.agent_types import CallRecord, LLMResponse
-from rpg_world.rpg_core.agent.command import CommandDef
-from rpg_world.rpg_core.context.rpg_context import Message, Role
-from rpg_world.rpg_core.session.manager import SessionManager
+from rpg_core.agent.sub_agents.base import BaseSubAgent
+from rpg_core.agent.agent_types import CallRecord, LLMResponse
+from rpg_core.agent.command import CommandDef
+from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.manager import SessionManager
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.agent.agent import RPGGameAgent
-    from rpg_world.rpg_core.llm.base_provider import LLMProvider
-    from rpg_world.rpg_core.llm.manager import ProviderOverrides
-    from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
-    from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
-    from rpg_world.rpg_core.summary.store import SummaryStore
-    from rpg_world.rpg_core.session.manager import SessionManager
+    from rpg_core.agent.agent import RPGGameAgent
+    from rpg_core.llm.base_provider import LLMProvider
+    from rpg_core.llm.manager import ProviderOverrides
+    from rp_memory.recalled_memory import RecalledMemoryStore
+    from rp_memory.story_memory import StoryMemoryStore
+    from rpg_core.summary.store import SummaryStore
+    from rpg_core.session.manager import SessionManager
 
 # ── constants ──────────────────────────────────────────────────────────
 
@@ -461,7 +461,7 @@ class MemorySubAgent(BaseSubAgent):
             ``batches``、``overall_file``、``previous_history_msgs``、
             ``history_after_msgs`` 的 dict。
         """
-        from rpg_world.rpg_core.settings import settings
+        from rpg_core.settings import settings
 
         compress_batch_size = compress_batch_size or settings.memory_compress_batch_size
         keep_rounds = keep_rounds or settings.memory_keep_rounds
@@ -631,7 +631,7 @@ class MemorySubAgent(BaseSubAgent):
         """
         if not self._enabled or not self._story_store:
             return
-        from rpg_world.rpg_core.settings import settings as _s
+        from rpg_core.settings import settings as _s
         trigger = _s.memory_story_trigger_rounds
         if trigger <= 0:
             return

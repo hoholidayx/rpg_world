@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from rpg_world.rpg_core.context.rendering import render_jinja_template
-from rpg_world.rpg_core.context.rpg_context import LayerType, Message, Role, RPGContext, UserExtensionBlock
+from rpg_core.context.rendering import render_jinja_template
+from rpg_core.context.rpg_context import LayerType, Message, Role, RPGContext, UserExtensionBlock
 
 
 class ContextRenderer:

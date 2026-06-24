@@ -32,14 +32,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from rpg_world.rpg_core.context.rpg_context import Message
-from rpg_world.rpg_core.session.manager import SessionManager
+from rpg_core.context.rpg_context import Message
+from rpg_core.session.manager import SessionManager
 
-from rpg_world.rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
+from rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.summary.batch_store import BatchSummaryStore
-    from rpg_world.rpg_core.session.manager import SessionManager
+    from rpg_core.summary.batch_store import BatchSummaryStore
+    from rpg_core.session.manager import SessionManager
 
 
 @dataclass

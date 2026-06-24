@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from rpg_world.rpg_core.llm.config import reload_llm_settings, resolve_biz_config
-from rpg_world.rpg_core.llm.keys import (
+from rpg_core.llm.config import reload_llm_settings, resolve_biz_config
+from rpg_core.llm.keys import (
     AGENT_MAIN_BIZ_KEY,
     MEMORY_RERANK_BIZ_KEY,
     RERANK_MODEL_TYPE_QWEN3_LOGIT,
@@ -32,7 +32,7 @@ profiles:
 
 def _use_llm(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "rpg_world.rpg_core.llm.config._LLM_SETTINGS_PATH",
+        "rpg_core.llm.config._LLM_SETTINGS_PATH",
         path,
     )
     monkeypatch.setenv("RPG_WORLD_PROFILE", "local")

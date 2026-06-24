@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-import rpg_world.rpg_core.agent.manager as agent_manager_module
-from rpg_world.rpg_core.agent.manager import AgentManager
-from rpg_world.rpg_core.llm.manager import ProviderOverrides
+import rpg_core.agent.manager as agent_manager_module
+from rpg_core.agent.manager import AgentManager
+from rpg_core.llm.manager import ProviderOverrides
 
 
 class FakeAgent:

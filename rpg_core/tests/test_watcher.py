@@ -30,7 +30,7 @@ class _FakeTimer:
 
 @pytest.fixture
 def watcher_module():
-    import rpg_world.rpg_core.utils.watcher as watcher_module
+    import rpg_core.utils.watcher as watcher_module
 
     watcher_module._watcher = None
     watcher_module.FileWatcher._instance = None

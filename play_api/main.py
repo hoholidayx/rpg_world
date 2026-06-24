@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from rpg_world.play_api.routers import chat, commands, scene, sessions, workspace
+from play_api.routers import chat, commands, scene, sessions, workspace
 
 
 app = FastAPI(title="RPG World Play API")

@@ -24,8 +24,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from rpg_world.rpg_core.settings import settings
-from rpg_world.rpg_core.context.rpg_context import Message, Role
+from rpg_core.settings import settings
+from rpg_core.context.rpg_context import Message, Role
 
 _TAG = "[SessionManager]"
 

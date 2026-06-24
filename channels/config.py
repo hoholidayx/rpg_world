@@ -10,8 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
-from rpg_world.rpg_core.settings import TelegramBotSettings
-from rpg_world.rpg_core.settings import settings as core_settings
+from rpg_core.settings import TelegramBotSettings
+from rpg_core.settings import settings as core_settings
 
 
 class ChannelsSettings:
@@ -66,31 +66,31 @@ class ChannelsSettings:
     def enabled_module_names(self) -> list[str]:
         """返回所有已启用的模块名列表。"""
         enabled = []
-        if self.api_enabled:
-            enabled.append("api")
+        if self.dashboard_api_enabled:
+            enabled.append("dashboard_api")
         if self.telegram_enabled:
             enabled.append("telegram")
         if self.cli_enabled:
             enabled.append("cli")
         return enabled
 
-    # ── API 模块配置 ─────────────────────────────────────────────────────
+    # ── Dashboard API 模块配置 ──────────────────────────────────────────
 
     @property
-    def api_enabled(self) -> bool:
-        return self._bool("api", "enabled", False)
+    def dashboard_api_enabled(self) -> bool:
+        return self._bool("dashboard_api", "enabled", False)
 
     @property
-    def api_host(self) -> str:
-        return str(self._mod_cfg("api").get("host", "127.0.0.1"))
+    def dashboard_api_host(self) -> str:
+        return str(self._mod_cfg("dashboard_api").get("host", "127.0.0.1"))
 
     @property
-    def api_port(self) -> int:
-        return self._int("api", "port", 8000)
+    def dashboard_api_port(self) -> int:
+        return self._int("dashboard_api", "port", 8000)
 
     @property
-    def api_reload(self) -> bool:
-        return self._bool("api", "reload", False)
+    def dashboard_api_reload(self) -> bool:
+        return self._bool("dashboard_api", "reload", False)
 
     # ── Telegram 模块配置 ────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ class ChannelsSettings:
         若 ``settings.yaml`` 中未配置则返回渠道默认值
         ``"data/cli_default_workspace"``。
         """
-        from rpg_world.rpg_core.utils.path_utils import default_workspace_name
+        from rpg_core.utils.path_utils import default_workspace_name
 
         configured = str(self._mod_cfg("cli").get("workspace", ""))
         return configured if configured else default_workspace_name("cli")

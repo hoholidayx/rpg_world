@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_world.rpg_core.context.config import RPGContextConfig
-from rpg_world.rpg_core.context.fixed_layer import FixedLayerSection
-from rpg_world.rpg_core.context.rpg_context import (
+from rpg_core.context.config import RPGContextConfig
+from rpg_core.context.fixed_layer import FixedLayerSection
+from rpg_core.context.rpg_context import (
     FixedLayerData,
     HotHistoryLayer,
     Message,
@@ -23,18 +23,18 @@ from rpg_world.rpg_core.context.rpg_context import (
     UserExtensionBlock,
     UserMessageLayer,
 )
-from rpg_world.rpg_core.session.turns import count_turns, slice_recent_turns
+from rpg_core.session.turns import count_turns, slice_recent_turns
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.character.manager import CharacterManager
-    from rpg_world.rpg_core.lorebook.manager import LorebookManager
-    from rpg_world.rpg_core.memory.persist_memory import PersistentMemoryStore
-    from rpg_world.rpg_core.memory.recalled_memory import RecalledMemoryStore
-    from rpg_world.rpg_core.memory.story_memory import StoryMemoryStore
-    from rpg_world.rpg_core.scene.tracker import SceneTracker
-    from rpg_world.rpg_core.status.manager import StatusManager
-    from rpg_world.rpg_core.summary.batch_store import BatchSummaryStore
-    from rpg_world.rpg_core.summary.store import SummaryStore
+    from rpg_core.character.manager import CharacterManager
+    from rpg_core.lorebook.manager import LorebookManager
+    from rp_memory.persist_memory import PersistentMemoryStore
+    from rp_memory.recalled_memory import RecalledMemoryStore
+    from rp_memory.story_memory import StoryMemoryStore
+    from rpg_core.scene.tracker import SceneTracker
+    from rpg_core.status.manager import StatusManager
+    from rpg_core.summary.batch_store import BatchSummaryStore
+    from rpg_core.summary.store import SummaryStore
 
 
 def _flatten_status_tables(

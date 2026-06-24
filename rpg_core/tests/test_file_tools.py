@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_world.rpg_core.agent.tools.file_tools import (
+from rpg_core.agent.tools.file_tools import (
     FileToolSandbox,
     GrepTool,
     ListFilesTool,

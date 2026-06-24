@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_world.rpg_core.scene.tracker import SceneTracker
-from rpg_world.rpg_core.tests.conftest import FakeStatusManager
+from rpg_core.scene.tracker import SceneTracker
+from rpg_core.tests.conftest import FakeStatusManager
 
 
 def test_scene_tracker_loads_and_saves_status_table():

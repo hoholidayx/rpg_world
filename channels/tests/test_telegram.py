@@ -12,13 +12,13 @@ import pytest
 from telegram import BotCommand, InlineKeyboardMarkup
 from telegram.error import BadRequest
 
-from rpg_world.channels.telegram.adapter import TelegramAdapter, _StreamBuf
-from rpg_world.channels.telegram.render import (
+from channels.telegram.adapter import TelegramAdapter, _StreamBuf
+from channels.telegram.render import (
     chunk_rendered_text,
     render_markdown_to_telegram_html,
 )
-from rpg_world.channels.tests.conftest import FakeAgent, FakeErrorAgent
-from rpg_world.rpg_core.agent.command import CommandDef, CommandResult
+from channels.tests.conftest import FakeAgent, FakeErrorAgent
+from rpg_core.agent.command import CommandDef, CommandResult
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ class TestTelegramAdapter:
         agent._session_id = "session_b"
         adapter.bind_agent(agent)
         adapter._app.bot.send_message = AsyncMock()
-        from rpg_world.rpg_core.session import SessionManager
+        from rpg_core.session import SessionManager
 
         monkeypatch.setattr(
             SessionManager,
@@ -161,7 +161,7 @@ class TestTelegramAdapter:
         agent._session_id = "session_b"
         adapter.bind_agent(agent)
         adapter._app.bot.send_message = AsyncMock()
-        from rpg_world.rpg_core.session import SessionManager
+        from rpg_core.session import SessionManager
 
         monkeypatch.setattr(
             SessionManager,
@@ -256,8 +256,8 @@ class TestTelegramAdapter:
             return_value=CommandResult(reply="[会话已创建: my_tel]", handled=True),
         )
         adapter.bind_agent(agent)
-        from rpg_world.channels.telegram.session_flow import _PendingSessionCreate
-        import rpg_world.channels.telegram.session_flow as telegram_session_flow_module
+        from channels.telegram.session_flow import _PendingSessionCreate
+        import channels.telegram.session_flow as telegram_session_flow_module
 
         adapter._session_flow._pending_session_create["123"] = _PendingSessionCreate(
             started_at=telegram_session_flow_module.time.monotonic(),
@@ -318,8 +318,8 @@ class TestTelegramAdapter:
         assert adapter.get_session_id("123") == "my_tel"
 
     async def test_pending_session_create_timeout_consumes_once(self, adapter: TelegramAdapter):
-        from rpg_world.channels.telegram.session_flow import _PendingSessionCreate
-        import rpg_world.channels.telegram.session_flow as telegram_session_flow_module
+        from channels.telegram.session_flow import _PendingSessionCreate
+        import channels.telegram.session_flow as telegram_session_flow_module
 
         adapter._session_flow._pending_session_create["123"] = _PendingSessionCreate(  # noqa: SLF001
             started_at=telegram_session_flow_module.time.monotonic() - 301,
@@ -341,8 +341,8 @@ class TestTelegramAdapter:
     async def test_pending_session_create_rejects_invalid_input(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         adapter.bind_agent(agent)
-        from rpg_world.channels.telegram.session_flow import _PendingSessionCreate
-        import rpg_world.channels.telegram.session_flow as telegram_session_flow_module
+        from channels.telegram.session_flow import _PendingSessionCreate
+        import channels.telegram.session_flow as telegram_session_flow_module
 
         adapter._session_flow._pending_session_create["123"] = _PendingSessionCreate(
             started_at=telegram_session_flow_module.time.monotonic(),
@@ -408,7 +408,7 @@ class TestTelegramAdapter:
         adapter.send_text.assert_awaited_once_with("123", "[已切换到会话: my_tel]")
 
     async def test_session_id_validation_has_length_limit(self):
-        from rpg_world.rpg_core.session import SessionManager
+        from rpg_core.session import SessionManager
 
         assert SessionManager.is_valid_session_id("a" * 64)
         assert not SessionManager.is_valid_session_id("a" * 65)
@@ -451,7 +451,7 @@ class TestTelegramAdapter:
         builder.build.return_value = app
 
         monkeypatch.setattr(
-            "rpg_world.channels.telegram.adapter.Application.builder",
+            "channels.telegram.adapter.Application.builder",
             MagicMock(return_value=builder),
         )
 
@@ -684,7 +684,7 @@ class TestTelegramAdapter:
         )
         adapter._app.bot.edit_message_text = AsyncMock()
 
-        import rpg_world.channels.telegram.adapter as telegram_adapter_module
+        import channels.telegram.adapter as telegram_adapter_module
 
         original_monotonic = telegram_adapter_module.time.monotonic
         telegram_adapter_module.time.monotonic = lambda: 1000.1

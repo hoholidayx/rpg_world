@@ -67,7 +67,7 @@ base:
 
     # 向量检索返回的最大结果数
     top_k: 2
-    # jieba 用户词典路径（相对于包根 rpg_world/data/jieba_dict.tx），留空使用默认词典
+    # jieba 用户词典路径（相对于项目根目录 data/jieba_dict.txt），留空使用默认词典
     jieba_dict: ""
     # 单文件超过此字符数时进行分块
     chunk_size: 2000
@@ -77,8 +77,8 @@ base:
   # ── 模块配置：控制各子系统的启停和参数 ──────────────────────────────
   modules:
 
-    # ── API 模块（FastAPI + WebUI） ───────────────────────────────────
-    api:
+    # ── Dashboard API 模块（FastAPI + WebUI） ────────────────────────────
+    dashboard_api:
       # 是否启用 API 服务
       enabled: true
       # 监听地址
@@ -121,9 +121,9 @@ default_profile: "local"
 
 # ── Profiles：各环境的增量配置 ──────────────────────────────────────────
 # 支持三种形式：
-#   1. inline:  local: { modules: { api: { port: 9000 } } }
+#   1. inline:  local: { modules: { dashboard_api: { port: 9000 } } }
 #   2. file:    local: settings.local.yaml
-#   3. 混合:   local: { file: settings.local.yaml, modules: { api: { port: 9000 } } }
+#   3. 混合:   local: { file: settings.local.yaml, modules: { dashboard_api: { port: 9000 } } }
 # file 模式适合存放本地 secrets（settings.local.yaml 应加入 .gitignore）。
 # required: true 时文件不存在会抛异常（默认 false 表示文件可缺失）。
 profiles:

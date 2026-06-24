@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import rpg_world.rpg_core.agent.agent as agent_module
-from rpg_world.rpg_core.agent.agent import RPGGameAgent
-from rpg_world.rpg_core.llm.manager import ProviderOverrides
-from rpg_world.rpg_core.agent.agent_types import (
+import rpg_core.agent.agent as agent_module
+from rpg_core.agent.agent import RPGGameAgent
+from rpg_core.llm.manager import ProviderOverrides
+from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     QueueItem,
     QueueKind,

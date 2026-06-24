@@ -4,8 +4,8 @@
 通过 StatusManager 持久化到 ``status/全局状态/当前场景.csv``。
 """
 
-from rpg_world.rpg_core.scene.tracker import SceneTracker
-from rpg_world.rpg_core.scene.tools import (
+from rpg_core.scene.tracker import SceneTracker
+from rpg_core.scene.tools import (
     DeleteAttrTool,
     SetAttrTool,
     SetTimeTool,

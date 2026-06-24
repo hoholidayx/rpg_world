@@ -12,10 +12,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from rpg_world.rpg_core.llama_service import LlamaEmbeddingModel
-from rpg_world.rpg_core.llama_service.client import LlamaCompletionModel
-from rpg_world.rpg_core.llm.base_provider import LLMProvider
-from rpg_world.rpg_core.llm.types import LLMResponse, ProviderChunk
+from llama_service import LlamaEmbeddingModel
+from llama_service.client import LlamaCompletionModel
+from rpg_core.llm.base_provider import LLMProvider
+from rpg_core.llm.types import LLMResponse, ProviderChunk
 
 _TAG = "[LlamaCompletionProvider]"
 

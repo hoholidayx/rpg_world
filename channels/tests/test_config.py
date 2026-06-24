@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_world.channels import config as channels_config
-from rpg_world.rpg_core.llm import config as llm_config_module
-from rpg_world.rpg_core import settings as settings_module
+from channels import config as channels_config
+from rpg_core.llm import config as llm_config_module
+from rpg_core import settings as settings_module
 
 
 def _write_settings(path, *, profile_override: str = "") -> None:
@@ -20,7 +20,7 @@ base:
     character_path: character
     lorebook_path: lorebook
   modules:
-    api:
+    dashboard_api:
       enabled: false
       host: 127.0.0.1
       port: 8000
@@ -102,7 +102,7 @@ def test_yaml_profile_selection(monkeypatch, tmp_path):
         monkeypatch,
         profile_override="""
     modules:
-      api:
+      dashboard_api:
         enabled: true
 """,
         llm_profile_override="""
@@ -115,8 +115,8 @@ def test_yaml_profile_selection(monkeypatch, tmp_path):
 
     assert settings.profile == "test"
     assert settings.agent_model == "profile-model"
-    assert channels.api_enabled is True
-    assert channels.enabled_module_names == ["api", "telegram"]
+    assert channels.dashboard_api_enabled is True
+    assert channels.enabled_module_names == ["dashboard_api", "telegram"]
 
 
 def test_profile_file_override(monkeypatch, tmp_path):
@@ -124,7 +124,7 @@ def test_profile_file_override(monkeypatch, tmp_path):
     profile_path.write_text(
         """
 modules:
-  api:
+  dashboard_api:
     enabled: true
   telegram:
     bots:
@@ -151,7 +151,7 @@ modules:
     )
 
     assert settings.agent_model == "file-model"
-    assert channels.api_enabled is True
+    assert channels.dashboard_api_enabled is True
     assert settings.telegram_bots[0].workspace == "data/from-file"
 
 
@@ -192,13 +192,13 @@ def test_dict_deep_merge_keeps_base_values(monkeypatch, tmp_path):
         monkeypatch,
         profile_override="""
     modules:
-      api:
+      dashboard_api:
         port: 9000
 """,
     )
 
-    assert channels.api_host == "127.0.0.1"
-    assert channels.api_port == 9000
+    assert channels.dashboard_api_host == "127.0.0.1"
+    assert channels.dashboard_api_port == 9000
     assert settings.agent_model == "base-model"
 
 

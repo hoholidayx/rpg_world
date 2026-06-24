@@ -1,4 +1,4 @@
-# rpg_world
+# RPG World
 
 RPG 世界管理子系统——故事数据管理、场景上下文构建、LLM Agent 交互。
 记忆检索已经拆成 `SqlVecRetriever`、`KeywordRetriever`、`RawMarkdownRetriever` 三个独立 retriever；`HybridRetriever` 只负责组装与融合，不承载底层检索实现。关键词检索通过 `memory.keyword_tokenizer` 选择 `jieba`、`bigram` 或 `both`，配置使用 `keyword_k` / `hybrid_keyword_weight`。raw markdown 由 `memory.raw_md_mode` 控制，`always` 是主召回策略，`fallback_only` 是补候选触发策略。
@@ -12,39 +12,39 @@ RPG World 的产品定位从“Telegram 优先的 RP 聊天入口”升级为“
 - **Dashboard WebUI**：后台管理端，面向创作者/管理员，维护 workspace、session、角色卡、世界书、状态表、记忆、摘要、配置和上下文诊断。
 - **Telegram**：保留为轻量入口、推送通知、快速回复和 WebUI 不可用时的兜底交互，不承载复杂沉浸式 UI。
 
-两个 WebUI 项目应作为独立前端应用演进，但共享同一套 FastAPI / `rpg_core` 后端能力。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。
+两个 WebUI 项目应作为独立前端应用演进，但共享同一套 FastAPI / `rpg_core` / `rp_memory` 后端能力。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。
 
 ## 启动
 
 ```bash
 # 统一启动（读取 settings.yaml，按配置启动模块，supervisor 会拉起子进程）
-uv run python -m rpg_world.run
+uv run python -m run
 
 # 同级快捷入口，便于查找和单独调试
-uv run python -m rpg_world.run_all
-uv run python -m rpg_world.run_api
-uv run python -m rpg_world.run_telegram
-uv run python -m rpg_world.run_cli
+uv run python -m run_all
+uv run python -m run_dashboard_api
+uv run python -m run_telegram
+uv run python -m run_cli
 
-# 仅启动 API（开发，自动重载）
-MODULES=api uv run python -m rpg_world.run
+# 仅启动 Dashboard API（开发，自动重载）
+MODULES=dashboard_api uv run python -m run
 
 # 或直接 uvicorn
-uv run uvicorn rpg_world.api.main:app --reload --reload-dir api --reload-dir channels --reload-dir rpg_core --host 127.0.0.1 --port 8000
+uv run uvicorn dashboard_api.main:app --reload --reload-dir dashboard_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llama_service --host 127.0.0.1 --port 8000
 
-# Dashboard WebUI 开发服务器（端口 5173，代理 /api → 后端）
+# Dashboard WebUI 开发服务器（端口 5173，代理 /dashboard_api → 后端）
 cd dashboard_webui && npx vite
 
 # Play WebUI 是后续独立前台项目；产品需求见 todos/webui_product_requirements.md
 
 # 仅启动 Telegram（需先配置 settings.yaml modules.telegram.bots）
-MODULES=telegram uv run python -m rpg_world.run
+MODULES=telegram uv run python -m run
 
 # 独立 CLI（无 API / Telegram，直接 LLM 对话）
-uv run python -m rpg_world.channels.cli.repl [--model gpt-4o] [--session-id mygame_01]
+uv run python -m channels.cli.repl [--model gpt-4o] [--session-id mygame_01]
 
 # 验证导入
-uv run python3 -c "from rpg_world.rpg_core.status import StatusManager; print('ok')"
+uv run python3 -c "from rpg_core.status import StatusManager; print('ok')"
 ```
 
 ## 架构总览
@@ -86,11 +86,6 @@ rpg_world/
 │   ├── character/                # 角色卡（JSON）
 │   ├── lorebook/                 # 世界书（JSON）
 │   ├── status/                   # 状态表（CSV）
-│   ├── memory/                   # 记忆存储
-│   │   ├── planning/             #   QueryPlan / planner
-│   │   ├── retrieval/            #   sqlvec / keyword / raw md retrievers
-│   │   ├── rerank/               #   pointwise rerank
-│   │   └── storage/              #   SQLite repository / vector / text index
 │   ├── summary/                  # 对话摘要
 │   ├── common_types.py           # 共享类型别名
 │   ├── settings.py               # Settings 单例
@@ -100,22 +95,28 @@ rpg_world/
 │       ├── tokenizer.py          #   TokenCounter 抽象
 │       ├── watcher.py            #   FileWatcher（watchdog 文件监控）
 │       └── path_utils.py         #   路径解析
-├── api/                          # FastAPI 应用
+├── rp_memory/                    # 记忆系统（检索、索引、规划、召回、rerank）
+│   ├── planning/                 #   QueryPlan / planner
+│   ├── retrieval/                #   sqlvec / keyword / raw md retrievers
+│   ├── rerank/                   #   pointwise rerank
+│   └── storage/                  #   SQLite repository / vector / text index
+├── llama_service/                # llama.cpp 本地模型服务客户端/服务端
+├──  api/                          # FastAPI 应用
 │   ├── main.py                   #   入口 + CORS + lifespan（不启动渠道）
 │   ├── deps.py                   #   管理器单例
 │   ├── logger.py                 #   API 日志配置
 │   ├── settings.json             #   API 级配置
 │   ├── settings.py               #   ApiSettings 单例
 │   └── routers/
-│       ├── character.py          #   CRUD /api/v1/characters
-│       ├── lorebook.py           #   CRUD /api/v1/lorebook
-│       ├── status.py             #   CRUD /api/v1/status
+│       ├── character.py          #   CRUD /dashboard_api/v1/characters
+│       ├── lorebook.py           #   CRUD /dashboard_api/v1/lorebook
+│       ├── status.py             #   CRUD /dashboard_api/v1/status
 │       ├── chat.py               #   send/stream(SSE)/command/history
 │       ├── sessions.py           #   list/create/delete/clone
 │       └── workspace.py          #   list/create/rename/delete
 ├── dashboard_webui/              # Dashboard WebUI：Vue 3 SPA（Ant Design Vue + Pinia，数据/配置管理）
 │   ├── settings.json
-│   ├── vite.config.js            # 代理 /api → 后端
+│   ├── vite.config.js            # 代理 /dashboard_api → 后端
 │   ├── run_dev.sh
 │   └── src/
 │       ├── main.js
@@ -124,7 +125,7 @@ rpg_world/
 │       ├── layouts/              # DashboardLayout（侧边栏 + 工作区选择器）
 │       ├── stores/               # session / theme / workspace
 │       ├── composables/          # useCRUD / useCommands
-│       ├── api/                  # Axios 客户端
+│       ├──  api/                  # Axios 客户端
 │       └── views/                # Dashboard views: Character, Lorebook, Status, Sessions, Overview, diagnostics
 └── data/                         # 数据文件
     └── {workspace}/
@@ -141,25 +142,25 @@ rpg_world/
 
 ## 进程隔离架构
 
-rpg_world 采用 **supervisor + 子进程** 模式：`run.py` 只负责按配置拉起 API、
+RPG World 采用 **supervisor + 子进程** 模式：`run.py` 只负责按配置拉起 API、
 Telegram、CLI 子进程，转发停止信号并回收退出。每个模块都有自己的进程和
-自己的 `AgentManager` 单例，模块间不共享运行时状态。`api/main.py` 的 lifespan
+自己的 `AgentManager` 单例，模块间不共享运行时状态。`dashboard_api/main.py` 的 lifespan
 不做任何渠道初始化。
 
 ```
-supervisor (rpg_world.run)
-├── api 子进程      -> uvicorn rpg_world.api.main:app
-├── telegram 子进程 -> rpg_world.channels.telegram.runner
-└── cli 子进程      -> rpg_world.channels.cli.repl
+supervisor (run)
+├── dashboard_api 子进程      -> uvicorn dashboard_api.main:app
+├── telegram 子进程 -> channels.telegram.runner
+└── cli 子进程      -> channels.cli.repl
 ```
 
 根目录还提供同级快捷入口，便于单独调试和查找：
 
 ```
-run_all.py      -> rpg_world.run
-run_api.py      -> rpg_world.api.main
-run_telegram.py -> rpg_world.channels.telegram.runner
-run_cli.py      -> rpg_world.channels.cli.repl
+run_all.py      -> run
+run_dashboard_api.py -> dashboard_api.main
+run_telegram.py -> channels.telegram.runner
+run_cli.py      -> channels.cli.repl
 ```
 
 每个子进程内部仍然保留进程内单例与缓存：
@@ -176,14 +177,14 @@ run_cli.py      -> rpg_world.channels.cli.repl
 ### 配置（`settings.yaml` / `llm.yaml`）
 
 `settings.yaml` 负责业务配置、模块启停、渠道参数和数据路径；`llm.yaml` 负责 LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置。二者都采用 `base + profiles`，通过 `RPG_WORLD_PROFILE` 选择 profile，默认 `local`。profile 可通过 `file: *.local.yaml` 读取被 git ignore 的覆盖文件；缺失文件默认按空覆盖处理，`required: true` 时缺失会报错。
-`api/settings.json` 仍只用于 API 服务级日志等配置。
+`dashboard_api/settings.json` 仍只用于 API 服务级日志等配置。
 模块启停通过 `ChannelsSettings` 的类型化属性访问（`channels/config.py`），外部调用不做字符串拼接：
 
 ```python
-channels_settings.api_enabled      # modules.api.enabled
-channels_settings.api_host          # modules.api.host
-channels_settings.api_port          # modules.api.port
-channels_settings.api_reload        # modules.api.reload
+channels_settings.dashboard_api_enabled      # modules.dashboard_api.enabled
+channels_settings.dashboard_api_host          # modules.dashboard_api.host
+channels_settings.dashboard_api_port          # modules.dashboard_api.port
+channels_settings.dashboard_api_reload        # modules.dashboard_api.reload
 channels_settings.telegram_enabled  # modules.telegram.enabled
 channels_settings.telegram_bots     # modules.telegram.bots
 channels_settings.cli_enabled       # modules.cli.enabled
@@ -206,7 +207,7 @@ channels_settings.enabled_module_names  # 所有已启用模块列表
 独立实例池：
 
 ```python
-from rpg_world.rpg_core.agent.manager import AgentManager
+from rpg_core.agent.manager import AgentManager
 
 agent = AgentManager.get_or_create(session_id="mygame_01")
 ```
@@ -216,7 +217,7 @@ agent = AgentManager.get_or_create(session_id="mygame_01")
 
 `AgentManager` 的缓存键包含 `workspace`、`session_id`、`api_key`。同名 session
 在不同 workspace 下会得到不同 agent，避免跨工作区污染。所有入口必须提供有效
-workspace；API 空 workspace 会解析为 `data/api_default_workspace`，Telegram/CLI
+workspace；Dashboard API 空 workspace 会解析为 `data/dashboard_api_default_workspace`，Telegram/CLI
 从 `settings.yaml` 读取 workspace，缺省时分别使用渠道默认 workspace。
 
 ### ChannelAdapter 基类（`channels/base.py`）
@@ -245,7 +246,7 @@ Telegram 是当前优先保障的主对话入口，WebUI Chat 不是当前优先
 
 | 能力 | 当前实现 |
 |---|---|
-| 启动方式 | `MODULES=telegram uv run python -m rpg_world.run` 或 `settings.yaml` 启用 |
+| 启动方式 | `MODULES=telegram uv run python -m run` 或 `settings.yaml` 启用 |
 | 长轮询 | `python-telegram-bot` `Application` + `updater.start_polling()` |
 | 流式输出 | `send_delta()` 首条发送、后续编辑消息，支持间隔和最小字符数节流 |
 | 非流式输出 | `send_text()` 完整发送，自动分块 |
@@ -417,34 +418,34 @@ agent.send(user_input)
 ### REST API
 
 ```
-GET    /api/v1/{resource}           — 列表
-POST   /api/v1/{resource}           — 创建
-GET    /api/v1/{resource}/{name}     — 详情
-PUT    /api/v1/{resource}/{name}     — 更新
-DELETE /api/v1/{resource}/{name}     — 删除
+GET    /dashboard_api/v1/{resource}           — 列表
+POST   /dashboard_api/v1/{resource}           — 创建
+GET    /dashboard_api/v1/{resource}/{name}     — 详情
+PUT    /dashboard_api/v1/{resource}/{name}     — 更新
+DELETE /dashboard_api/v1/{resource}/{name}     — 删除
 ```
 
 Chat API：
 
 ```
-GET    /api/v1/chat/history          — 获取历史会话
-POST   /api/v1/chat/send             — 发送消息（缓冲回复）
-POST   /api/v1/chat/stream           — 发送消息（SSE 流式回复）
-POST   /api/v1/chat/command          — 执行斜杠命令
-GET    /api/v1/chat/commands         — 获取可用斜杠命令
+GET    /dashboard_api/v1/chat/history          — 获取历史会话
+POST   /dashboard_api/v1/chat/send             — 发送消息（缓冲回复）
+POST   /dashboard_api/v1/chat/stream           — 发送消息（SSE 流式回复）
+POST   /dashboard_api/v1/chat/command          — 执行斜杠命令
+GET    /dashboard_api/v1/chat/commands         — 获取可用斜杠命令
 ```
 
 Workspace / Session API：
 
 ```
-GET    /api/v1/workspaces                         — 列出工作区
-POST   /api/v1/workspaces                         — 创建工作区
-PUT    /api/v1/workspaces/{workspace}             — 重命名工作区
-DELETE /api/v1/workspaces/{workspace}             — 删除工作区
-GET    /api/v1/workspaces/{workspace}/sessions    — 列出会话
-POST   /api/v1/workspaces/{workspace}/sessions    — 创建会话
-DELETE /api/v1/workspaces/{workspace}/sessions/{session_id}
-POST   /api/v1/workspaces/{workspace}/sessions/{session_id}/clone
+GET    /dashboard_api/v1/workspaces                         — 列出工作区
+POST   /dashboard_api/v1/workspaces                         — 创建工作区
+PUT    /dashboard_api/v1/workspaces/{workspace}             — 重命名工作区
+DELETE /dashboard_api/v1/workspaces/{workspace}             — 删除工作区
+GET    /dashboard_api/v1/workspaces/{workspace}/sessions    — 列出会话
+POST   /dashboard_api/v1/workspaces/{workspace}/sessions    — 创建会话
+DELETE /dashboard_api/v1/workspaces/{workspace}/sessions/{session_id}
+POST   /dashboard_api/v1/workspaces/{workspace}/sessions/{session_id}/clone
 ```
 
 - Agent 实例通过 `AgentManager` 统一管理
@@ -511,7 +512,7 @@ POST   /api/v1/workspaces/{workspace}/sessions/{session_id}/clone
 当前自动化测试基线：
 
 ```bash
-uv run python -m pytest channels/tests rpg_core/tests api/tests -q
+uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llama_service/tests dashboard_api/tests play_api/tests -q
 ```
 
 这些测试 mock 外部 LLM、Telegram SDK 和网络调用，不需要真实 API key。若本地缺少 `pytest-asyncio`，`rpg_core/tests/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。
@@ -519,8 +520,10 @@ uv run python -m pytest channels/tests rpg_core/tests api/tests -q
 覆盖范围：
 
 - `channels/tests/`：ChannelAdapter、CLI、AgentManager、Telegram 渠道。
-- `rpg_core/tests/`：命令分发、上下文、memory、scene、session、summary、AgentManager。
-- `api/tests/`：workspace/session/character/lorebook/status/chat 契约。
+- `rpg_core/tests/`：命令分发、上下文、scene、session、summary、AgentManager。
+- `rp_memory/tests/`：memory 检索、索引、规划、rerank。
+- `llama_service/tests/`：llama 本地服务客户端/服务端协议。
+- `dashboard_api/tests/`：workspace/session/character/lorebook/status/chat 契约。
 
 ## 当前实现优先级
 

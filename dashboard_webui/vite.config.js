@@ -18,14 +18,14 @@ export default defineConfig({
     },
   },
   define: {
-    __API_HOST__: JSON.stringify(settings.api_host ?? '127.0.0.1'),
-    __API_PORT__: JSON.stringify(settings.api_port ?? 8000),
+    __DASHBOARD_API_HOST__: JSON.stringify(settings.dashboard_api_host ?? '127.0.0.1'),
+    __DASHBOARD_API_PORT__: JSON.stringify(settings.dashboard_api_port ?? 8000),
   },
   server: {
     port: settings.port ?? 5173,
     proxy: {
-      '/api': {
-        target: `http://${settings.api_host}:${settings.api_port}`,
+      '/dashboard_api': {
+        target: `http://${settings.dashboard_api_host}:${settings.dashboard_api_port}`,
         changeOrigin: true,
       },
     },

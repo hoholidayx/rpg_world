@@ -4,7 +4,7 @@
 
 用法::
 
-    uv run python -m rpg_world.channels.cli.repl [--model gpt-4o]
+    uv run python -m channels.cli.repl [--model gpt-4o]
 """
 
 from __future__ import annotations
@@ -13,14 +13,14 @@ import argparse
 import asyncio
 import logging
 
-from rpg_world.channels.cli import CLIAdapter
-from rpg_world.channels.config import settings as channels_settings
-from rpg_world.rpg_core.agent.agent import RPGGameAgent
-from rpg_world.rpg_core.llama_service.client import configure_llama_client_from_memory_settings
-from rpg_world.rpg_core.llm.keys import AGENT_MAIN_BIZ_KEY
-from rpg_world.rpg_core.llm.manager import LLMManager, ProviderOverrides
-from rpg_world.rpg_core.settings import settings
-from rpg_world.rpg_core.utils.watcher import get_watcher
+from channels.cli import CLIAdapter
+from channels.config import settings as channels_settings
+from rpg_core.agent.agent import RPGGameAgent
+from llama_service.client import configure_llama_client_from_memory_settings
+from rpg_core.llm.keys import AGENT_MAIN_BIZ_KEY
+from rpg_core.llm.manager import LLMManager, ProviderOverrides
+from rpg_core.settings import settings
+from rpg_core.utils.watcher import get_watcher
 
 
 def _configure_standard_logging() -> None:
@@ -34,7 +34,7 @@ def _configure_standard_logging() -> None:
         )
     root.setLevel(min(root.level, logging.INFO) if root.level else logging.INFO)
     logging.getLogger("rpg_core.watcher").setLevel(logging.INFO)
-    logging.getLogger("rpg_world.rpg_core.memory.vector_index_manager").setLevel(logging.INFO)
+    logging.getLogger("rp_memory.vector_index_manager").setLevel(logging.INFO)
 
 
 def _parse_args() -> argparse.Namespace:

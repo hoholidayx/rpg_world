@@ -1,6 +1,6 @@
 """RPG World settings — shared by core, channel, and API layers.
 
-Settings are read from ``rpg_world/settings.yaml`` once at process startup and
+Settings are read from ``settings.yaml`` once at process startup and
 are **read-only** thereafter.  The active profile is selected through
 ``RPG_WORLD_PROFILE`` before the Python process starts; it defaults to
 ``local``.
@@ -10,12 +10,12 @@ Path resolution
 Workspace is an explicit parameter in every path method.  The caller always
 passes a workspace identifier:
 
-- ``""`` − the default/root workspace (maps to ``rpg_world/data/``)
-- ``"data/<name>"`` − a named workspace under ``rpg_world/data/<name>/``
+- ``""`` − the default/root workspace (maps to ``data/``)
+- ``"data/<name>"`` − a named workspace under ``data/<name>/``
 
 Relative path values (``data.character_path``, ``data.lorebook_path`` from
 settings.yaml) are resolved against the workspace root via
-:func:`rpg_world.rpg_core.utils.path_utils.resolve_rpg_path`.
+:func:`rpg_core.utils.path_utils.resolve_rpg_path`.
 
 Session-scoped data paths are deterministic (not user-configurable):
 ``{workspace_root}/sessions/{session_id}/{filename}``.
@@ -28,22 +28,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from rpg_world.rpg_core.common_types import ConfigDict, ConfigValue
-from rpg_world.rpg_core.llm.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
-from rpg_world.rpg_core.llm.keys import (
+from rpg_core.common_types import ConfigDict, ConfigValue
+from rpg_core.llm.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
+from rpg_core.llm.keys import (
     AGENT_MAIN_BIZ_KEY,
     MEMORY_EMBED_BIZ_KEY,
     MEMORY_QUERY_PLANNER_BIZ_KEY,
     MEMORY_RERANK_BIZ_KEY,
 )
-from rpg_world.rpg_core.utils.config_values import forgiving_float, forgiving_int, optional_bool
-from rpg_world.rpg_core.utils.path_utils import (
+from rpg_core.utils.config_values import forgiving_float, forgiving_int, optional_bool
+from rpg_core.utils.path_utils import (
     PACKAGE_ROOT as _PACKAGE_ROOT,
     _KNOWN_DATA_DIRS,
     resolve_rpg_path,
     resolve_workspace_root,
 )
-from rpg_world.rpg_core.utils.profile_loader import load_profiled_yaml
+from rpg_core.utils.profile_loader import load_profiled_yaml
 
 # Location of settings.yaml relative to this module
 _SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.yaml"
@@ -231,7 +231,7 @@ class MemorySettings:
     """查询规划模型最大输出 token 数。"""
 
     jieba_dict: str = ""
-    """jieba 用户词典路径（相对于包根 rpg_world/），留空使用默认词典。"""
+    """jieba 用户词典路径（相对于项目根目录），留空使用默认词典。"""
 
     llama_process_enabled: bool = True
     """是否将 llama.cpp 推理隔离到托管子进程。"""
@@ -576,7 +576,7 @@ class Settings:
     # Workspace operations
     # ------------------------------------------------------------------
 
-    # list_workspaces() has moved to rpg_world.rpg_core.utils.path_utils
+    # list_workspaces() has moved to rpg_core.utils.path_utils
     # as a pure function.  Workspace discovery is not a settings concern.
 
     # set_active_workspace() has been removed.  Workspace is no longer

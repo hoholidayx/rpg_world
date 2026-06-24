@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from rpg_world.play_api.main import app
+from play_api.main import app
 
 
 def test_play_api_mock_contracts() -> None:

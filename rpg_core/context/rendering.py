@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from jinja2 import Environment, FileSystemLoader
 
-from rpg_world.rpg_core.settings import settings
+from rpg_core.settings import settings
 
 
 _JINJA_ENV: Environment | None = None

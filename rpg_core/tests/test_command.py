@@ -6,7 +6,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from rpg_world.rpg_core.agent.command import CommandDispatcher, format_command_help
+from rpg_core.agent.command import CommandDispatcher, format_command_help
 
 
 class TestCommandDispatcher:
@@ -70,7 +70,7 @@ class TestCommandDispatcher:
         assert text == "当前没有可用命令。"
 
     def test_session_id_validation_has_length_limit(self):
-        from rpg_world.rpg_core.session import SessionManager
+        from rpg_core.session import SessionManager
 
         assert SessionManager.is_valid_session_id("a" * 64)
         assert not SessionManager.is_valid_session_id("a" * 65)
@@ -83,7 +83,7 @@ class TestCommandDispatcher:
 
     @pytest.mark.asyncio
     async def test_sessions_command_marks_current_session(self, monkeypatch):
-        from rpg_world.rpg_core.session import SessionManager
+        from rpg_core.session import SessionManager
 
         fake_agent = SimpleNamespace(
             clear_history=lambda: None,

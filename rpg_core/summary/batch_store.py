@@ -14,7 +14,7 @@ from loguru import logger
 
 def _register_watcher(file_path: Path, callback: Callable[[], None]) -> None:
     """向 FileWatcher 注册单个文件的变更回调。"""
-    from rpg_world.rpg_core.utils.watcher import get_watcher
+    from rpg_core.utils.watcher import get_watcher
 
     get_watcher().register(file_path.resolve(), callback)
 
@@ -26,7 +26,7 @@ class BatchSummaryStore:
     """管理 sessions/{session_id}/summaries/ 目录下的 markdown 摘要文件。"""
 
     def __init__(self, workspace: str, session_id: str) -> None:
-        from rpg_world.rpg_core.settings import settings
+        from rpg_core.settings import settings
 
         self._dir = settings.session_dir(workspace, session_id) / "summaries"
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -51,7 +51,7 @@ class BatchSummaryStore:
         file_name = f"{batch_id:03d}-{slug}.md"
         file_path = self._dir / file_name
 
-        from rpg_world.rpg_core.context.rendering import render_jinja_template
+        from rpg_core.context.rendering import render_jinja_template
 
         body = render_jinja_template(
             "summary/batch_summary.md.jinja",
@@ -109,7 +109,7 @@ class BatchSummaryStore:
         last_batch_id: int = 0,
     ) -> Path:
         """覆盖写入 overall.md（含 front matter）。返回文件路径。"""
-        from rpg_world.rpg_core.context.rendering import render_jinja_template
+        from rpg_core.context.rendering import render_jinja_template
 
         body = render_jinja_template(
             "summary/overall.md.jinja",
@@ -185,7 +185,7 @@ class BatchSummaryStore:
     def _register_watcher(self) -> None:
         """向 FileWatcher 注册 summaries 目录。"""
         try:
-            from rpg_world.rpg_core.utils.watcher import get_watcher
+            from rpg_core.utils.watcher import get_watcher
 
             get_watcher().register(self._dir.resolve(), self.reload)
         except Exception as exc:

@@ -13,7 +13,7 @@ def _register_watcher(file_path: Path, callback: Callable[[], None]) -> None:
     轻量工具函数，不引入 BaseManager 的完整开销。
     在 watcher start 之前或之后都可以注册。
     """
-    from rpg_world.rpg_core.utils.watcher import get_watcher
+    from rpg_core.utils.watcher import get_watcher
 
     get_watcher().register(file_path.resolve(), callback)
 

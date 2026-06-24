@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_world.rpg_core.agent import agent as agent_module
-from rpg_world.rpg_core.agent.sub_agents import MemorySubAgent, StatusSubAgent
+from rpg_core.agent import agent as agent_module
+from rpg_core.agent.sub_agents import MemorySubAgent, StatusSubAgent
 
 
 class DummyProvider:

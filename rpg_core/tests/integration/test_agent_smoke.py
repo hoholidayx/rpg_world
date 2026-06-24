@@ -5,9 +5,9 @@ import json
 
 import pytest
 
-from rpg_world.rpg_core.agent.agent_types import StreamEventKind
-from rpg_world.rpg_core.context.rpg_context import Role
-from rpg_world.rpg_core.session.manager import SessionManager
+from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.context.rpg_context import Role
+from rpg_core.session.manager import SessionManager
 
 pytestmark = pytest.mark.integration
 

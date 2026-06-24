@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_world.rpg_core.agent.agent_types import (
+from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     QueueItem,
     QueueKind,
@@ -18,16 +18,16 @@ from rpg_world.rpg_core.agent.agent_types import (
     TurnStats,
     _StreamSentinel,
 )
-from rpg_world.rpg_core.agent.command import CommandResult
-from rpg_world.rpg_core.agent.command import CommandDispatcher
-from rpg_world.rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
-from rpg_world.rpg_core.agent.sub_agents import (
+from rpg_core.agent.command import CommandResult
+from rpg_core.agent.command import CommandDispatcher
+from rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
+from rpg_core.agent.sub_agents import (
     MemorySubAgent,
     StatusSubAgent,
     SubAgentContext,
 )
-from rpg_world.rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
-from rpg_world.rpg_core.agent.tools import (
+from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
+from rpg_core.agent.tools import (
     BaseTool,
     GrepTool,
     ListFilesTool,
@@ -35,30 +35,30 @@ from rpg_world.rpg_core.agent.tools import (
     ToolRegistry,
     WriteFileTool,
 )
-from rpg_world.rpg_core.context import RPGContextBuilder
-from rpg_world.rpg_core.context.fixed_layer import FixedLayerComposer
-from rpg_world.rpg_core.context.inspector import ContextInspector
-from rpg_world.rpg_core.context.rpg_context import Role, Message
-from rpg_world.rpg_core.llm.base_provider import LLMProvider
-from rpg_world.rpg_core.llm.keys import (
+from rpg_core.context import RPGContextBuilder
+from rpg_core.context.fixed_layer import FixedLayerComposer
+from rpg_core.context.inspector import ContextInspector
+from rpg_core.context.rpg_context import Role, Message
+from rpg_core.llm.base_provider import LLMProvider
+from rpg_core.llm.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
 )
-from rpg_world.rpg_core.scene import SceneTracker
-from rpg_world.rpg_core.session import SessionManager
-from rpg_world.rpg_core.settings import settings
-from rpg_world.rpg_core.utils.path_utils import PACKAGE_ROOT
-from rpg_world.rpg_core.utils.watcher import get_watcher
-from rpg_world.rpg_core.summary.compressor import SummaryCompressor
-from rpg_world.rpg_core.llm.manager import LLMManager, ProviderOverrides
+from rpg_core.scene import SceneTracker
+from rpg_core.session import SessionManager
+from rpg_core.settings import settings
+from rpg_core.utils.path_utils import PACKAGE_ROOT
+from rpg_core.utils.watcher import get_watcher
+from rpg_core.summary.compressor import SummaryCompressor
+from rpg_core.llm.manager import LLMManager, ProviderOverrides
 
 if TYPE_CHECKING:
-    from rpg_world.rpg_core.character.manager import CharacterManager
-    from rpg_world.rpg_core.agent.command import CommandDef
-    from rpg_world.rpg_core.lorebook.manager import LorebookManager
-    from rpg_world.rpg_core.memory.memory_manager import MemoryManager
-    from rpg_world.rpg_core.status.manager import StatusManager
+    from rpg_core.character.manager import CharacterManager
+    from rpg_core.agent.command import CommandDef
+    from rpg_core.lorebook.manager import LorebookManager
+    from rp_memory.memory_manager import MemoryManager
+    from rpg_core.status.manager import StatusManager
 
 _TAG = "[MainAgent]"
 
@@ -521,7 +521,7 @@ class RPGGameAgent:
 
             # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
             # Compute aggregate usage across all LLM calls (main loop + sub-agents)
-            from rpg_world.rpg_core.agent.agent_types import LLMUsage
+            from rpg_core.agent.agent_types import LLMUsage
 
             total_pt = turn_stats.total_prompt_tokens
             total_ct = turn_stats.total_completion_tokens
@@ -665,7 +665,7 @@ class RPGGameAgent:
 
     def _build_ctx_for_inspection(self, user_input: str = "") -> "RPGContext":
         """Build context for inspection (no _history mutation, no LLM call)."""
-        from rpg_world.rpg_core.context.rpg_context import RPGContext
+        from rpg_core.context.rpg_context import RPGContext
 
         # Build scene context same way as send()
         scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
@@ -739,9 +739,9 @@ class RPGGameAgent:
 
     def _setup_tool_registry(self) -> None:
         """Create and populate the ToolRegistry with built-in file tools."""
-        from rpg_world.rpg_core.utils.path_utils import resolve_workspace_root, PACKAGE_ROOT
-        from rpg_world.rpg_core.settings import settings
-        from rpg_world.rpg_core.agent.tools.file_tools import FileToolSandbox
+        from rpg_core.utils.path_utils import resolve_workspace_root, PACKAGE_ROOT
+        from rpg_core.settings import settings
+        from rpg_core.agent.tools.file_tools import FileToolSandbox
 
         ws_root = resolve_workspace_root(PACKAGE_ROOT, self._workspace)
         sandbox = FileToolSandbox(
@@ -849,7 +849,7 @@ class RPGGameAgent:
 
 def _build_rpg_context(world_name: str, workspace: str, session_id: str) -> dict[str, object]:
     """Inline import of the factory to keep the top level free of side effects."""
-    from rpg_world.rpg_core.context.factory import build_rpg_context
+    from rpg_core.context.factory import build_rpg_context
 
     return build_rpg_context(world_name=world_name, workspace=workspace, session_id=session_id)
 def _build_sub_agent_context(

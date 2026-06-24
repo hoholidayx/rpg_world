@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from rpg_world.rpg_core.context.config import ExtensionModuleDef
-from rpg_world.rpg_core.context.fixed_layer import FixedLayerSection
+from rpg_core.context.config import ExtensionModuleDef
+from rpg_core.context.fixed_layer import FixedLayerSection
 
 
 class Role(StrEnum):
@@ -283,7 +283,7 @@ class RPGContext:
 
     def to_message_objects(self) -> list[Message]:
         """Render active structured layers into Message objects."""
-        from rpg_world.rpg_core.context.renderer import ContextRenderer
+        from rpg_core.context.renderer import ContextRenderer
 
         return ContextRenderer(self).to_message_objects()
 
@@ -304,6 +304,6 @@ class RPGContext:
 
     def render_layer(self, type_: str) -> str | None:
         """Render one structured layer explicitly."""
-        from rpg_world.rpg_core.context.renderer import ContextRenderer
+        from rpg_core.context.renderer import ContextRenderer
 
         return ContextRenderer(self).render_layer(type_)

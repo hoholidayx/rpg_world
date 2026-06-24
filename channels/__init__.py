@@ -2,11 +2,11 @@
 
 用法::
 
-    from rpg_world.channels import ChannelAdapter, TelegramAdapter, ChannelRunner
+    from channels import ChannelAdapter, TelegramAdapter, ChannelRunner
 """
 
-from rpg_world.channels.base import ChannelAdapter
-from rpg_world.channels.telegram import TelegramAdapter
-from rpg_world.channels.runner import ChannelRunner
+from channels.base import ChannelAdapter
+from channels.telegram import TelegramAdapter
+from channels.runner import ChannelRunner
 
 __all__ = ["ChannelAdapter", "TelegramAdapter", "ChannelRunner"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rpg_world.rpg_core.utils import delete_file, load_json, save_json
+from rpg_core.utils import delete_file, load_json, save_json
 
 
 def _slug(name: str) -> str:
