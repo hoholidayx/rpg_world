@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from play_api.backend import get_play_backend
+from play_api.backends import get_play_backend
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
 

@@ -25,7 +25,7 @@ class PlayApiLoggingSettings:
 
 @dataclass(frozen=True)
 class PlayApiBackendSettings:
-    mode: str = "agent"
+    use_mock: bool = False
     mock_stream_delay_ms: int = 180
 
 
@@ -61,9 +61,15 @@ class PlayApiSettings(ProfiledYamlSettings):
         if mode not in {"agent", "mock"}:
             raise ValueError("play_api backend.mode must be 'agent' or 'mock'")
         return PlayApiBackendSettings(
-            mode=mode,
+            use_mock=mode == "mock",
             mock_stream_delay_ms=forgiving_int(raw.get("mock_stream_delay_ms", 180), 180),
         )
+
+    def use_mock_backend(self) -> bool:
+        return self.backend.use_mock
+
+    def mock_stream_delay_ms(self) -> int:
+        return self.backend.mock_stream_delay_ms
 
 
 play_settings = PlayApiSettings()

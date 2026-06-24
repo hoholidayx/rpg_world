@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from play_api.backend import get_play_backend
+from play_api.backends import get_play_backend
 
 router = APIRouter(prefix="/commands", tags=["play-commands"])
 
