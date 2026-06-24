@@ -23,18 +23,18 @@ from typing import TYPE_CHECKING
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from loguru import logger
+from rpg_core.settings import settings
 
 # 配置控制台输出
 logger.remove()
 logger.add(
     sys.stderr,
-    level="DEBUG",
+    level=settings.logging.log_level,
     format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - {message}",
     colorize=True,
 )
 
 from rpg_core.session.manager import SessionManager
-from rpg_core.settings import settings
 from rpg_core.llm.config import resolve_llm_config
 from rpg_core.llm.keys import MEMORY_EMBED_BIZ_KEY, MEMORY_QUERY_PLANNER_BIZ_KEY, MEMORY_RERANK_BIZ_KEY
 from rp_memory.recalled_memory import RecalledMemoryStore

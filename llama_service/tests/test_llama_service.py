@@ -12,7 +12,7 @@ from llama_service.client import (
     LlamaClient,
     LlamaClientRemoteError,
     LlamaClientTimeout,
-    configure_llama_client_from_memory_settings,
+    configure_llama_client_from_runtime_config,
     get_llama_client,
     set_llama_client,
 )
@@ -326,17 +326,23 @@ def test_planner_and_reranker_fallback_when_client_fails(tmp_path):
     assert reranker.rerank("寻找北境线索", candidates) == candidates
 
 
-def test_configure_llama_client_from_memory_settings_updates_process_config():
+def test_configure_llama_client_from_runtime_config_updates_process_config(monkeypatch):
     set_llama_client(None)
+    monkeypatch.setattr(
+        "llama_service.client.get_runtime_config",
+        lambda: type(
+            "Runtime",
+            (),
+            {
+                "llama_process_enabled": False,
+                "llama_request_timeout_ms": 1234,
+                "llama_startup_timeout_ms": 5678,
+                "llama_max_parallel_models": 9,
+            },
+        )(),
+    )
     try:
-        client = configure_llama_client_from_memory_settings(
-            SimpleNamespace(
-                llama_process_enabled=False,
-                llama_request_timeout_ms=1234,
-                llama_startup_timeout_ms=5678,
-                llama_max_parallel_models=9,
-            )
-        )
+        client = configure_llama_client_from_runtime_config()
         assert client is get_llama_client()
         assert client.enabled is False
         assert client.request_timeout_ms == 1234

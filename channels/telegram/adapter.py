@@ -9,7 +9,7 @@
     from channels import TelegramAdapter
 
     adapter = TelegramAdapter(token="env:TELEGRAM_BOT_TOKEN", streaming=True)
-    adapter.bind_agent(agent)
+    adapter.bind_agent_client(client)
     await adapter.start()
 """
 
@@ -34,7 +34,7 @@ from channels.telegram.render import (
 from channels.telegram.session_flow import TelegramSessionFlow
 
 if TYPE_CHECKING:
-    from rpg_core.agent.agent import RPGGameAgent
+    from agent_service.client import AgentClient
 
 _TELEGRAM_PARSE_MODE = "HTML"
 _TELEGRAM_MAX_MESSAGE_LENGTH = 4096
@@ -97,8 +97,8 @@ class TelegramAdapter(ChannelAdapter):
     streaming:
         ``True`` 启用流式输出（逐段编辑消息），
         ``False`` 为一次性发送完整回复。
-    agent:
-        可选的 RPGGameAgent 实例。
+    agent_client:
+        Shared Agent service client.
     """
 
     def __init__(
@@ -112,7 +112,8 @@ class TelegramAdapter(ChannelAdapter):
         stream_edit_min_chars: int = 24,
         request_timeout_ms: int = 5000,
         auto_pin_created_session: bool = False,
-        agent: RPGGameAgent | None = None,
+        agent_client: AgentClient | None = None,
+        workspace: str | None = None,
     ) -> None:
         super().__init__()
         self._bot_name = bot_name
@@ -123,16 +124,22 @@ class TelegramAdapter(ChannelAdapter):
         self._stream_edit_min_chars = max(1, stream_edit_min_chars)
         self._request_timeout = max(0, request_timeout_ms) / 1000.0
         self._auto_pin_created_session = auto_pin_created_session
+        self._workspace_override = (workspace or "").strip() or None
         self._app: Application | None = None
         # chat_id → _StreamBuf, 用于流式增量编辑
         self._stream_buf: dict[str, _StreamBuf] = {}
         self._session_flow = TelegramSessionFlow()
-        if agent:
-            self.bind_agent(agent)
+        if agent_client:
+            self.bind_agent_client(agent_client)
 
     @property
     def name(self) -> str:
         return f"telegram_{self._bot_name}"
+
+    def get_workspace(self) -> str:
+        if self._workspace_override:
+            return self._workspace_override
+        return super().get_workspace()
 
     # ── 生命周期 ────────────────────────────────────────────────────────
 
@@ -293,6 +300,12 @@ class TelegramAdapter(ChannelAdapter):
                     ),
                 )
                 if msg is None:
+                    self._stream_buf[chat_id] = _StreamBuf(
+                        msg_id=0,
+                        text=delta,
+                        sent_text="",
+                        last_edit_at=time.monotonic(),
+                    )
                     return
                 self._stream_buf[chat_id] = _StreamBuf(
                     msg_id=msg.message_id,
@@ -303,6 +316,23 @@ class TelegramAdapter(ChannelAdapter):
             else:
                 buf = self._stream_buf[chat_id]
                 buf.text += delta
+                if buf.msg_id <= 0:
+                    rendered_text = render_markdown_to_telegram_html(buf.text)
+                    msg = await self._request_with_timeout(
+                        chat_id,
+                        "send_message",
+                        self._app.bot.send_message(
+                            chat_id=int(chat_id),
+                            text=rendered_text,
+                            parse_mode=_TELEGRAM_PARSE_MODE,
+                        ),
+                    )
+                    if msg is None:
+                        return
+                    buf.msg_id = msg.message_id
+                    buf.sent_text = buf.text
+                    buf.last_edit_at = time.monotonic()
+                    return
                 elapsed = time.monotonic() - buf.last_edit_at
                 pending_chars = len(buf.text) - len(buf.sent_text)
                 if elapsed < self._stream_edit_interval and pending_chars < self._stream_edit_min_chars:
@@ -338,7 +368,6 @@ class TelegramAdapter(ChannelAdapter):
                     ),
                 )
                 if edited is None:
-                    buf.sent_text = buf.text
                     buf.last_edit_at = time.monotonic()
                     return
                 buf.sent_text = buf.text
@@ -346,6 +375,14 @@ class TelegramAdapter(ChannelAdapter):
         else:
             buf = self._stream_buf.pop(chat_id, None)
             if buf:
+                if buf.msg_id <= 0:
+                    logger.debug(
+                        "telegram: streaming final sends pending buffer chat_id={} preview={}",
+                        chat_id,
+                        _preview_text(delta),
+                    )
+                    await self.send_text(chat_id, delta)
+                    return
                 if buf.sent_text == delta:
                     logger.debug(
                         "telegram: streaming final update skipped (unchanged) chat_id={} preview={}",
@@ -398,22 +435,25 @@ class TelegramAdapter(ChannelAdapter):
 
     async def _configure_bot_commands(self) -> None:
         """把 agent 的命令列表同步到 Telegram bot 菜单。"""
-        if not self._app or not self._agent:
+        if not self._app or not self._agent_client:
             return
-
-        await self._agent._ensure_initialized()
 
         commands = [
             BotCommand(command="start", description="开始对话"),
         ]
-        for cmd in self._agent.list_commands():
-            command_name = _telegram_menu_command_name(cmd.name)
+        command_payload = await self._agent_client.list_commands(
+            self.get_workspace(),
+            self.get_session_id("default"),
+        )
+        raw_commands = command_payload.get("commands", [])
+        for cmd in raw_commands:
+            command_name = _telegram_menu_command_name(str(cmd.get("command", "")))
             if not command_name:
                 continue
             commands.append(
                 BotCommand(
                     command=command_name,
-                    description=_telegram_command_description(cmd.description),
+                    description=_telegram_command_description(str(cmd.get("description", ""))),
                 )
             )
 
@@ -429,14 +469,12 @@ class TelegramAdapter(ChannelAdapter):
 
     async def _send_session_picker(self, chat_id: str) -> None:
         """发送会话选择菜单。"""
-        if not self._app or not self._agent:
+        if not self._app or not self._agent_client:
             await self.send_text(chat_id, "会话菜单暂不可用。")
             return
-
-        from rpg_core.session import SessionManager
-
-        sessions = SessionManager.list_sessions(self._agent._workspace)
-        current = self._agent._session_id
+        current = self.get_session_id(chat_id)
+        payload = await self._agent_client.list_sessions(self.get_workspace(), current)
+        sessions = [str(item) for item in payload.get("sessions", [])]
         text = self._session_flow.render_session_picker_text(sessions, current)
 
         await self._request_with_timeout(
@@ -470,7 +508,9 @@ class TelegramAdapter(ChannelAdapter):
             if await self._session_flow.handle_plain_text(
                 chat_id,
                 text,
-                agent=self._agent,
+                agent_client=self._agent_client,
+                workspace=self.get_workspace(),
+                session_id=self.get_session_id(chat_id),
                 send_text=lambda reply: self.send_text(chat_id, reply),
                 auto_pin_created_session=self._auto_pin_created_session,
             ):
@@ -532,9 +572,6 @@ class TelegramAdapter(ChannelAdapter):
             await self._on_start(update, _context)
             return
 
-        if self._agent:
-            await self._agent.switch_session(self.get_session_id(chat_id))
-
         if await self._session_flow.handle_command(
             chat_id,
             command,
@@ -543,7 +580,7 @@ class TelegramAdapter(ChannelAdapter):
         ):
             return
 
-        if not self._agent:
+        if not self._agent_client:
             logger.warning(
                 "telegram: command ignored because agent is missing chat_id={} user_id={} command={}",
                 chat_id,
@@ -560,7 +597,14 @@ class TelegramAdapter(ChannelAdapter):
             _preview_text(command),
         )
         try:
-            result = await self._agent.execute_command(command)
+            result = await self._agent_client.execute_command(
+                self.get_workspace(),
+                self.get_session_id(chat_id),
+                command,
+            )
+            handled = bool(result.get("handled", True))
+            reply = str(result.get("reply", ""))
+            active_session = str(result.get("active_session") or "")
         except Exception:
             logger.exception(
                 "telegram: command handler failed chat_id={} user_id={} command={}",
@@ -571,15 +615,16 @@ class TelegramAdapter(ChannelAdapter):
             await self.send_text(chat_id, f"命令执行失败: {command.split()[0]}")
             return
 
-        if not result.handled:
+        if not handled:
             await self.send_text(chat_id, f"未知命令: {command.split()[0]}")
             return
 
-        if command.startswith("/session_switch ") and result.reply.startswith("[已切换到会话: "):
-            self._session_flow.pin_session(chat_id, command.split(maxsplit=1)[1])
+        if command.startswith("/session_switch ") and reply.startswith("[已切换到会话: "):
+            active_session = active_session or command.split(maxsplit=1)[1]
+            self._session_flow.pin_session(chat_id, active_session)
 
-        if result.reply:
-            await self.send_text(chat_id, result.reply)
+        if reply:
+            await self.send_text(chat_id, reply)
 
     async def _on_callback_query(self, update: Update, _context: object) -> None:
         """处理会话菜单的 callback 按钮。"""
@@ -597,9 +642,13 @@ class TelegramAdapter(ChannelAdapter):
             return
 
     async def _switch_chat_session(self, chat_id: str, session_id: str) -> None:
-        if not self._agent:
+        if not self._agent_client:
             return
-        await self._agent.switch_session(session_id)
+        await self._agent_client.execute_command(
+            self.get_workspace(),
+            self.get_session_id(chat_id),
+            f"/session_switch {session_id}",
+        )
         self._session_flow.pin_session(chat_id, session_id)
 
     async def _on_start(self, update: Update, _context: object) -> None:

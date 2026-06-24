@@ -31,8 +31,11 @@ dashboard_webui/.vite/
 .env.*
 !.env.example
 settings.*.yaml
-!settings.local.example.yaml
+!settings.*.example.yaml
+!**/settings.*.example.yaml
 llm.*.yaml
+!llm.*.example.yaml
+!**/llm.*.example.yaml
 
 # Runtime data
 data/models/

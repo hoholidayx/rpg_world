@@ -1,7 +1,7 @@
 """Telegram 独立入口。
 
 在独立进程中启动所有 enabled=true 的 Telegram bot。
-该入口由 ``run`` 的 supervisor 模式拉起，也可单独调试。
+通过 ``AgentClient`` 访问独立 Agent 服务。
 """
 
 from __future__ import annotations
@@ -11,11 +11,9 @@ import signal
 
 from loguru import logger
 
+from agent_service.client import AgentClient
 from channels.config import settings as channels_settings
 from channels.telegram.adapter import TelegramAdapter
-from rpg_core.agent.manager import AgentManager
-from llama_service.client import configure_llama_client_from_memory_settings
-from rpg_core.settings import settings as core_settings
 
 
 class _BotRuntime:
@@ -55,10 +53,8 @@ async def _start_enabled_bots(
             stream_edit_interval_ms=bot.stream_edit_interval_ms,
             stream_edit_min_chars=bot.stream_edit_min_chars,
             request_timeout_ms=bot.request_timeout_ms,
-            agent=AgentManager.get_or_create(
-                workspace=bot.workspace,
-                session_id=f"telegram_{bot.name}_default",
-            ),
+            workspace=bot.workspace,
+            agent_client=AgentClient(),
         )
         start_task = asyncio.create_task(adapter.start(), name=f"telegram:{bot.name}")
         start_task.add_done_callback(_on_start_done)
@@ -82,7 +78,6 @@ async def main() -> int:
     fatal_error = asyncio.Event()
     runtimes: list[_BotRuntime] = []
     try:
-        configure_llama_client_from_memory_settings(core_settings.memory_settings)
         runtimes = await _start_enabled_bots(stop_event, fatal_error)
         if not runtimes:
             return 0

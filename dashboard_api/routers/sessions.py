@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from agent_service.client import AgentClientError
 from dashboard_api.schemas import SessionCloneBody, SessionIdBody
+from dashboard_api.routers import chat as chat_router
 from rpg_core.session import SessionManager
 from rpg_core.utils.path_utils import resolve_api_workspace
 
@@ -26,63 +28,43 @@ def _resolve_ws(workspace: str) -> str:
 
 
 @router.get("/workspaces/{workspace:path}/sessions")
-def list_sessions(workspace: str) -> dict:
+async def list_sessions(workspace: str) -> dict:
     """Return all session IDs for the given workspace."""
-    return {"sessions": SessionManager.list_sessions(_resolve_ws(workspace))}
+    try:
+        return await chat_router._get_agent_client().list_sessions(_resolve_ws(workspace), "default")
+    except AgentClientError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/workspaces/{workspace:path}/sessions")
-def create_session(workspace: str, body: SessionIdBody) -> dict:
+async def create_session(workspace: str, body: SessionIdBody) -> dict:
     """Create a new session under the given workspace."""
     ws = _resolve_ws(workspace)
     session_id = _require_valid_session_id(body.session_id.strip())
-
     try:
-        SessionManager.create(ws, session_id)
-    except FileExistsError:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Session {session_id!r} already exists",
-        )
-
-    return {"status": "created", "session_id": session_id}
+        return await chat_router._get_agent_client().create_session(ws, session_id)
+    except AgentClientError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/workspaces/{workspace:path}/sessions/{session_id}")
-def delete_session(workspace: str, session_id: str) -> dict:
+async def delete_session(workspace: str, session_id: str) -> dict:
     """Delete a session and all its data."""
     ws = _resolve_ws(workspace)
     session_id = _require_valid_session_id(session_id)
-    available = set(SessionManager.list_sessions(ws))
-    if session_id not in available:
-        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
-
-    SessionManager.delete(ws, session_id)
-    from dashboard_api.deps import _session_managers
-
-    _session_managers.pop((ws, session_id), None)
-
-    return {"status": "deleted", "session_id": session_id}
+    try:
+        return await chat_router._get_agent_client().delete_session(ws, session_id)
+    except AgentClientError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/workspaces/{workspace:path}/sessions/{session_id}/clone")
-def clone_session(workspace: str, session_id: str, body: SessionCloneBody) -> dict:
+async def clone_session(workspace: str, session_id: str, body: SessionCloneBody) -> dict:
     """Clone a session's data to a new session ID."""
     ws = _resolve_ws(workspace)
     session_id = _require_valid_session_id(session_id)
     target_id = _require_valid_session_id(body.target_session_id.strip(), field_name="target_session_id")
-
     try:
-        SessionManager.clone(ws, session_id, target_id)
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Source session {session_id!r} not found",
-        )
-    except FileExistsError:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Target session {target_id!r} already exists",
-        )
-
-    return {"status": "cloned", "source": session_id, "target": target_id}
+        return await chat_router._get_agent_client().clone_session(ws, session_id, target_id)
+    except AgentClientError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

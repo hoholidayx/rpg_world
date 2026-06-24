@@ -249,6 +249,56 @@ class FakeAgentManager:
         return cls.instances[key]
 
 
+class FakeAgentClient:
+    async def list_sessions(self, workspace: str, session_id: str, api_key: str | None = None):
+        return {"sessions": FakeSessionManager.list_sessions(workspace), "active_session": session_id}
+
+    async def create_session(self, workspace: str, session_id: str):
+        FakeSessionManager.create(workspace, session_id)
+        return {"status": "created", "session_id": session_id}
+
+    async def delete_session(self, workspace: str, session_id: str):
+        FakeSessionManager.delete(workspace, session_id)
+        return {"status": "deleted", "session_id": session_id}
+
+    async def clone_session(self, workspace: str, session_id: str, target_session_id: str):
+        FakeSessionManager.clone(workspace, session_id, target_session_id)
+        return {"status": "cloned", "source": session_id, "target": target_session_id}
+
+    async def get_history(self, workspace: str, session_id: str, api_key: str | None = None):
+        agent = FakeAgentManager.get_or_create(workspace=workspace, session_id=session_id, api_key=api_key)
+        return {"history": [m.to_dict() for m in agent.history]}
+
+    async def send(self, workspace: str, session_id: str, message: str, api_key: str | None = None):
+        agent = FakeAgentManager.get_or_create(workspace=workspace, session_id=session_id, api_key=api_key)
+        reply = await agent.send(message)
+        return {"reply": reply.text}
+
+    async def stream(self, workspace: str, session_id: str, message: str, api_key: str | None = None):
+        agent = FakeAgentManager.get_or_create(workspace=workspace, session_id=session_id, api_key=api_key)
+        async for event in agent.send_stream(message):
+            yield event
+
+    async def execute_command(self, workspace: str, session_id: str, command: str, api_key: str | None = None):
+        agent = FakeAgentManager.get_or_create(workspace=workspace, session_id=session_id, api_key=api_key)
+        result = await agent.execute_command(command)
+        return {
+            "reply": result.reply,
+            "handled": result.handled,
+            "stats": result.stats,
+            "active_session": agent._session_id,
+        }
+
+    async def list_commands(self, workspace: str, session_id: str, api_key: str | None = None):
+        agent = FakeAgentManager.get_or_create(workspace=workspace, session_id=session_id, api_key=api_key)
+        return {
+            "commands": [
+                {"command": c.name, "description": c.description, "detail": c.detail}
+                for c in agent.list_commands()
+            ],
+        }
+
+
 class FakeSessionManager:
     sessions: dict[str, set[str]] = {}
 
@@ -288,8 +338,9 @@ class FakeSessionManager:
 
 @pytest.fixture(autouse=True)
 def _disable_api_logging(monkeypatch):
-    monkeypatch.setitem(api_settings._raw, "log_chat_messages", False)
-    monkeypatch.setitem(api_settings._raw, "log_llm_stats", False)
+    logging_cfg = api_settings._raw.setdefault("logging", {})
+    monkeypatch.setitem(logging_cfg, "log_chat_messages", False)
+    monkeypatch.setitem(logging_cfg, "log_llm_stats", False)
     yield
 
 
@@ -300,7 +351,7 @@ def client(monkeypatch, tmp_path):
     FakeSessionManager.sessions.clear()
 
     monkeypatch.setattr(workspace_router, "PACKAGE_ROOT", tmp_path / "pkg")
-    monkeypatch.setattr(chat_router, "AgentManager", FakeAgentManager)
+    monkeypatch.setattr(chat_router, "_get_agent_client", lambda: FakeAgentClient())
     monkeypatch.setattr(chat_router, "ensure_workspace_dir", lambda *args, **kwargs: None)
     monkeypatch.setattr(sessions_router, "SessionManager", FakeSessionManager)
 

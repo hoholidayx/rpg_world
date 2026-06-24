@@ -1,6 +1,6 @@
-"""RPG World settings — shared by core, channel, and API layers.
+"""RPG World core business settings.
 
-Settings are read from ``settings.yaml`` once at process startup and
+Settings are read from ``rpg_core/settings.yaml`` once at process startup and
 are **read-only** thereafter.  The active profile is selected through
 ``RPG_WORLD_PROFILE`` before the Python process starts; it defaults to
 ``local``.
@@ -14,7 +14,7 @@ passes a workspace identifier:
 - ``"data/<name>"`` − a named workspace under ``data/<name>/``
 
 Relative path values (``data.character_path``, ``data.lorebook_path`` from
-settings.yaml) are resolved against the workspace root via
+``rpg_core/settings.yaml``) are resolved against the workspace root via
 :func:`rpg_core.utils.path_utils.resolve_rpg_path`.
 
 Session-scoped data paths are deterministic (not user-configurable):
@@ -28,6 +28,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from commons.settings import (
+    PROFILE_ENV,
+    ProfiledYamlSettings,
+    forgiving_float,
+)
 from rpg_core.common_types import ConfigDict, ConfigValue
 from rpg_core.llm.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
 from rpg_core.llm.keys import (
@@ -36,74 +41,20 @@ from rpg_core.llm.keys import (
     MEMORY_QUERY_PLANNER_BIZ_KEY,
     MEMORY_RERANK_BIZ_KEY,
 )
-from rpg_core.utils.config_values import forgiving_float, forgiving_int, optional_bool
 from rpg_core.utils.path_utils import (
     PACKAGE_ROOT as _PACKAGE_ROOT,
     _KNOWN_DATA_DIRS,
     resolve_rpg_path,
     resolve_workspace_root,
 )
-from rpg_core.utils.profile_loader import load_profiled_yaml
 
-# Location of settings.yaml relative to this module
-_SETTINGS_PATH = Path(__file__).resolve().parent.parent / "settings.yaml"
+# Location of rpg_core process/business settings.
+_SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 _RPG_CORE_DIR = Path(__file__).resolve().parent
-_PROFILE_ENV = "RPG_WORLD_PROFILE"
-_TELEGRAM_BOT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9_]+$")
+_PROFILE_ENV = PROFILE_ENV
 
 # Session data directory name — deterministic, not configurable.
 _SESSION_DIR_NAME = "sessions"
-
-
-def _deep_merge(base: ConfigDict, override: ConfigDict) -> ConfigDict:
-    """Recursively merge settings dicts.
-
-    Lists are replaced, except ``modules.telegram.bots`` which is merged by
-    bot ``name`` so profiles can override individual bots.
-    """
-
-    def merge_value(left: ConfigValue, right: ConfigValue, path: tuple[str, ...]) -> ConfigValue:
-        if (
-            path == ("modules", "telegram", "bots")
-            and isinstance(left, list)
-            and isinstance(right, list)
-        ):
-            return _merge_bots(left, right)
-        if isinstance(left, dict) and isinstance(right, dict):
-            return merge_dict(left, right, path)
-        return right
-
-    def merge_dict(left: ConfigDict, right: ConfigDict, path: tuple[str, ...]) -> ConfigDict:
-        merged = dict(left)
-        for key, value in right.items():
-            key_path = (*path, str(key))
-            if key in merged:
-                merged[key] = merge_value(merged[key], value, key_path)
-            else:
-                merged[key] = value
-        return merged
-
-    def _merge_bots(left: list[ConfigValue], right: list[ConfigValue]) -> list[ConfigValue]:
-        merged = [dict(item) if isinstance(item, dict) else item for item in left]
-        index_by_name = {
-            item.get("name"): idx
-            for idx, item in enumerate(merged)
-            if isinstance(item, dict) and item.get("name")
-        }
-        for bot in right:
-            if not isinstance(bot, dict) or not bot.get("name"):
-                merged.append(bot)
-                continue
-            name = bot["name"]
-            if name in index_by_name and isinstance(merged[index_by_name[name]], dict):
-                idx = index_by_name[name]
-                merged[idx] = merge_value(merged[idx], bot, ("modules", "telegram", "bots", str(name)))
-            else:
-                index_by_name[name] = len(merged)
-                merged.append(dict(bot))
-        return merged
-
-    return merge_dict(base, override, ())
 
 @dataclass
 class MemorySettings:
@@ -253,28 +204,20 @@ class MemorySettings:
 
 
 @dataclass(frozen=True)
-class TelegramBotSettings:
-    """Resolved Telegram bot configuration."""
+class CoreLoggingSettings:
+    """Core and memory-side logging settings."""
 
-    name: str
-    enabled: bool = False
-    token: str = ""
-    workspace: str = ""
-    allow_from: list[str] | None = None
-    streaming: bool = True
-    proxy: str = ""
-    stream_edit_interval_ms: int = 800
-    stream_edit_min_chars: int = 24
-    request_timeout_ms: int = 5000
+    log_level: str = "DEBUG"
 
 
-class Settings:
-    """Read-only settings proxy. Attributes mirror merged ``settings.yaml``."""
+class Settings(ProfiledYamlSettings):
+    """Read-only settings proxy. Attributes mirror merged core settings."""
 
     def __init__(self) -> None:
-        profile_name = os.environ.get(_PROFILE_ENV, "local").strip() or "local"
-        self.profile = profile_name
-        self._raw = load_profiled_yaml(_SETTINGS_PATH, profile_name, label="settings.yaml", merge_fn=_deep_merge)
+        self.settings_path = _SETTINGS_PATH
+        self.label = "rpg_core/settings.yaml"
+        self.env_var = _PROFILE_ENV
+        super().__init__()
         self._validate_settings()
 
     @staticmethod
@@ -318,10 +261,6 @@ class Settings:
         )
 
     @property
-    def raw(self) -> ConfigDict:
-        return self._raw
-
-    @property
     def agent_settings(self) -> ConfigDict:
         raw = self._raw.get("agent", {})
         return raw if isinstance(raw, dict) else {}
@@ -335,92 +274,14 @@ class Settings:
         return cfg.openai if isinstance(cfg.openai, dict) else {}
 
     @property
-    def module_settings(self) -> ConfigDict:
-        raw = self._raw.get("modules", {})
-        return raw if isinstance(raw, dict) else {}
-
-    @property
-    def telegram_bots(self) -> list[TelegramBotSettings]:
-        telegram = self.module_settings.get("telegram", {})
-        if not isinstance(telegram, dict):
-            return []
-        bots = telegram.get("bots", [])
-        if not isinstance(bots, list):
-            return []
-        return [self._build_telegram_bot(bot) for bot in bots if isinstance(bot, dict)]
-
-    def _build_telegram_bot(self, bot: ConfigDict) -> TelegramBotSettings:
-        token_env = self._first_non_empty(bot.get("token_env"))
-        token = self._first_non_empty(
-            bot.get("bot_token"),
-            os.environ.get(token_env) if token_env else None,
-        ) or ""
-        allow_from = bot.get("allow_from", ["*"])
-        if not isinstance(allow_from, list):
-            allow_from = ["*"]
-        return TelegramBotSettings(
-            name=str(bot.get("name", "")),
-            enabled=optional_bool(bot.get("enabled", False), False),
-            token=token,
-            workspace=str(bot.get("workspace", "") or ""),
-            allow_from=[str(item) for item in allow_from],
-            streaming=optional_bool(bot.get("streaming", True), True),
-            proxy=str(bot.get("proxy", "") or ""),
-            stream_edit_interval_ms=forgiving_int(bot.get("stream_edit_interval_ms", 800), 800),
-            stream_edit_min_chars=forgiving_int(bot.get("stream_edit_min_chars", 24), 24),
-            request_timeout_ms=forgiving_int(bot.get("request_timeout_ms", 5000), 5000),
+    def logging(self) -> CoreLoggingSettings:
+        raw = self._mapping("logging")
+        return CoreLoggingSettings(
+            log_level=str(raw.get("log_level", "DEBUG") or "DEBUG"),
         )
 
     def _validate_settings(self) -> None:
         self._validate_agent_llm_settings()
-
-        modules = self.module_settings
-        telegram = modules.get("telegram", {})
-        if not isinstance(telegram, dict):
-            return
-        bots = telegram.get("bots", [])
-        if not isinstance(bots, list):
-            raise ValueError("telegram bot config invalid: bots must be a list")
-
-        seen_names: set[str] = set()
-        token_to_workspace: dict[str, tuple[str, str]] = {}
-        workspace_to_token: dict[str, tuple[str, str]] = {}
-        telegram_enabled = optional_bool(telegram.get("enabled", False), False)
-        for raw_bot in bots:
-            if not isinstance(raw_bot, dict):
-                raise ValueError("telegram bot config invalid: bot entry must be a mapping")
-            name = str(raw_bot.get("name", "") or "")
-            if not name or not _TELEGRAM_BOT_NAME_RE.fullmatch(name):
-                raise ValueError(f"telegram bot config invalid: bot={name or '<missing>'} invalid name")
-            if name in seen_names:
-                raise ValueError(f"telegram bot config invalid: bot={name} duplicate name")
-            seen_names.add(name)
-            bot = self._build_telegram_bot(raw_bot)
-            if not bot.enabled:
-                continue
-            if not telegram_enabled:
-                continue
-            if not bot.token:
-                raise ValueError(f"telegram bot config invalid: bot={name} missing token")
-            if not bot.workspace.strip():
-                raise ValueError(f"telegram bot config invalid: bot={name} missing workspace")
-            if bot.token in token_to_workspace:
-                other_name, other_workspace = token_to_workspace[bot.token]
-                if other_workspace != bot.workspace:
-                    raise ValueError(
-                        "telegram bot config invalid: token reused across workspaces "
-                        f"bot={name} conflicts_with={other_name} "
-                        f"workspace={bot.workspace} other_workspace={other_workspace}"
-                    )
-            token_to_workspace[bot.token] = (name, bot.workspace)
-            if bot.workspace in workspace_to_token:
-                other_name, other_token = workspace_to_token[bot.workspace]
-                if other_token != bot.token:
-                    raise ValueError(
-                        "telegram bot config invalid: workspace reused by multiple tokens "
-                        f"bot={name} conflicts_with={other_name} workspace={bot.workspace}"
-                    )
-            workspace_to_token[bot.workspace] = (name, bot.token)
 
     def _validate_agent_llm_settings(self) -> None:
         legacy_model = self._first_non_empty(self.agent_settings.get("model"))

@@ -10,13 +10,9 @@ Stream 支持通过 ``send_delta`` 可选覆写：默认 fallback 只做一次
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
-
+from agent_service.client import AgentClient
 from rpg_core.agent.agent_types import StreamEventKind
 from rpg_core.agent.loop import AgentReply
-
-if TYPE_CHECKING:
-    from rpg_core.agent.agent import RPGGameAgent
 
 
 class ChannelAdapter(ABC):
@@ -31,7 +27,7 @@ class ChannelAdapter(ABC):
     name: str = "base"
 
     def __init__(self) -> None:
-        self._agent: RPGGameAgent | None = None
+        self._agent_client: AgentClient | None = None
         self._streaming: bool = False
 
     # ── 生命周期 ────────────────────────────────────────────────────────
@@ -78,9 +74,9 @@ class ChannelAdapter(ABC):
 
     # ── Agent 绑定与 Session 映射 ──────────────────────────────────────
 
-    def bind_agent(self, agent: RPGGameAgent) -> None:
-        """绑定共享的 RPGGameAgent 实例。"""
-        self._agent = agent
+    def bind_agent_client(self, client: AgentClient) -> None:
+        """Bind the shared Agent service client."""
+        self._agent_client = client
 
     def get_session_id(self, chat_id: str) -> str:
         """将渠道 chat_id 映射为 agent session_id。
@@ -116,17 +112,18 @@ class ChannelAdapter(ABC):
             回复文本，若被拒绝或无 agent 则返回 ``None``。
         """
         # pylint: disable=unused-argument
-        if not self._agent:
+        if not self._agent_client:
             return None
 
         session_id = self.get_session_id(chat_id)
-        await self._agent.switch_session(session_id)
-
+        workspace = self.get_workspace()
         if self._streaming:
             reply = await self._stream_and_send(chat_id, text)
         else:
-            reply = await self._agent.send(text)
-            await self.send_text(chat_id, reply.text)
+            result = await self._agent_client.send(workspace, session_id, text)
+            reply_text = str(result.get("reply", ""))
+            await self.send_text(chat_id, reply_text)
+            return reply_text
         return reply.text
 
     async def _stream_and_send(self, chat_id: str, text: str) -> AgentReply:
@@ -138,11 +135,12 @@ class ChannelAdapter(ABC):
         命令通过 ``send_stream()`` 会直接返回 ``DONE`` 事件（无 ``TEXT``
         事件），此时从 ``DONE.content`` 读取回复内容。
         """
-        if not self._agent:
+        if not self._agent_client:
             return AgentReply(text="")
 
         full_text = ""
-        async for event in self._agent.send_stream(text):
+        event_source = self._agent_client.stream(self.get_workspace(), self.get_session_id(chat_id), text)
+        async for event in event_source:
             if event.kind == StreamEventKind.TEXT:
                 full_text += event.content
                 await self.send_delta(chat_id, event.content, final=False)
@@ -154,6 +152,6 @@ class ChannelAdapter(ABC):
                 return AgentReply(text=full_text)
             elif event.kind == StreamEventKind.ERROR:
                 await self._clear_stream_state(chat_id)
-                await self.send_text(chat_id, f"错误: {event.content}")
+                await self.send_text(chat_id, "处理消息失败，请稍后重试。")
                 return AgentReply(text="")
         return AgentReply(text=full_text)

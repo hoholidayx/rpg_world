@@ -1,14 +1,12 @@
-"""Chat mock endpoints for Play WebUI."""
+"""Chat endpoints for Play WebUI."""
 
 from __future__ import annotations
-
-import json
-from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from play_api import agent_client
 
 router = APIRouter(prefix="/chat", tags=["play-chat"])
 
@@ -20,33 +18,25 @@ class PlayChatRequest(BaseModel):
     mode: str = "ic"
 
 
-async def _mock_stream(payload: PlayChatRequest) -> AsyncIterator[str]:
-    events = [
-        {
-            "kind": "round_start",
-            "round_index": 1,
-            "workspace": payload.workspace,
-            "session_id": payload.session_id,
-            "mode": payload.mode,
-        },
-        {"kind": "thinking", "content": "Play API mock 正在构思..."},
-        {"kind": "text", "content": f"这是一段来自 Play API mock 的流式剧情：{payload.text}"},
-        {"kind": "done", "finish_reason": "mock"},
-    ]
-    for event in events:
-        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-
 @router.post("/turn")
-async def create_turn(payload: PlayChatRequest) -> dict[str, str]:
+async def create_turn(payload: PlayChatRequest) -> dict[str, object]:
+    result = await agent_client.get_agent_client().send(payload.workspace, payload.session_id, payload.text)
     return {
-        "turnId": f"mock_turn_{payload.session_id}",
-        "status": "accepted",
+        "turnId": f"turn_{payload.session_id}",
+        "status": "completed",
         "workspace": payload.workspace,
         "mode": payload.mode,
+        "reply": result.get("reply", ""),
+        "agent": result,
     }
 
 
 @router.post("/stream")
 async def stream_turn(payload: PlayChatRequest) -> StreamingResponse:
-    return StreamingResponse(_mock_stream(payload), media_type="text/event-stream")
+    async def event_generator():
+        async for event in agent_client.get_agent_client().stream(payload.workspace, payload.session_id, payload.text):
+            import json
+
+            yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

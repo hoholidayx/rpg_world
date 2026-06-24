@@ -1,7 +1,4 @@
-"""Telegram 快捷入口。
-
-用于与 ``run.py`` 同级快速查找和单独调试 Telegram。
-"""
+"""Telegram 独立进程入口。"""
 
 from __future__ import annotations
 

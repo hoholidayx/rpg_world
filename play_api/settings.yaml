@@ -1,0 +1,32 @@
+# ── Play API 进程配置 ────────────────────────────────────────────────
+# Play API 面向玩家沉浸式游玩端，不持有 AgentManager，只通过 AgentClient
+# 调用 Agent 服务。这里仅放 Play API 自身监听参数。
+# local / test / prod 是固定 profile 名称；同级 settings.local.yaml、
+# settings.test.yaml、settings.prod.yaml 会按当前 profile 自动覆盖本文件。
+
+# 默认 profile。可通过环境变量 RPG_WORLD_PROFILE 覆盖。
+default_profile: local
+
+# 所有 profile 共享的默认值。
+base:
+  # ── Play API 监听配置 ────────────────────────────────────────────
+  service:
+    # 监听地址。
+    host: 127.0.0.1
+    # 监听端口。
+    port: 8001
+    # API 路由前缀。
+    api_prefix: /play-api/v1
+    # 是否启用 uvicorn reload。
+    reload: false
+
+  # ── Play API 日志配置 ────────────────────────────────────────────
+  logging:
+    # uvicorn 日志级别。当前阶段默认 DEBUG，便于排查 Play API 请求。
+    log_level: DEBUG
+
+# 固定 profile 名称；覆盖文件无需在这里声明 file。
+profiles:
+  local: {}
+  test: {}
+  prod: {}

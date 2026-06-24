@@ -49,7 +49,7 @@ class ChannelRunner:
     async def run(self) -> None:
         """启动所有渠道，等待退出信号，优雅关闭。
 
-        适用于独立使用（非 launcher 模式）。
+        适用于独立进程模式。
         """
         if not self._channels:
             print("没有注册任何渠道。")

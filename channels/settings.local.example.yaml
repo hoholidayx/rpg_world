@@ -1,0 +1,10 @@
+# ── Telegram 本地配置示例 ───────────────────────────────────────────
+# 复制为 channels/settings.local.yaml 后填写真实 token。
+
+channels:
+  telegram:
+    bots:
+      main:
+        enabled: true
+        bot_token: "1234567890:your-telegram-bot-token"
+        workspace: data/your_workspace

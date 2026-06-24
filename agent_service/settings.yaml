@@ -1,0 +1,41 @@
+# ── Agent 服务进程配置 ───────────────────────────────────────────────
+# Agent 服务是唯一持有 AgentManager / RPGGameAgent / rp_memory / llama worker
+# 的进程。这里只放 HTTP 监听和其它进程访问 Agent 服务的客户端默认值。
+# local / test / prod 是固定 profile 名称；同级 settings.local.yaml、
+# settings.test.yaml、settings.prod.yaml 会按当前 profile 自动覆盖本文件。
+
+# 默认 profile。可通过环境变量 RPG_WORLD_PROFILE 覆盖。
+default_profile: local
+
+# 所有 profile 共享的默认值。
+base:
+  # ── Agent 服务监听配置 ───────────────────────────────────────────
+  service:
+    # 监听地址。
+    host: 127.0.0.1
+    # 监听端口。
+    port: 8010
+    # API 路由前缀。
+    api_prefix: /agent/v1
+    # 是否启用 uvicorn reload。
+    reload: false
+
+  # ── 非 Agent 进程访问 Agent 服务的客户端默认值 ───────────────────
+  agent_client:
+    # Agent 服务基础 URL，必须包含 api_prefix。
+    base_url: http://127.0.0.1:8010/agent/v1
+    # 普通请求超时，单位毫秒。
+    request_timeout_ms: 60000
+    # SSE/流式请求超时，单位毫秒。
+    stream_timeout_ms: 300000
+
+  # ── Agent 服务日志配置 ───────────────────────────────────────────
+  logging:
+    # uvicorn 日志级别。当前阶段默认 DEBUG，便于排查 Agent 服务问题。
+    log_level: DEBUG
+
+# 固定 profile 名称；覆盖文件无需在这里声明 file。
+profiles:
+  local: {}
+  test: {}
+  prod: {}

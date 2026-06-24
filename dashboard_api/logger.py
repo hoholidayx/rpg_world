@@ -1,4 +1,4 @@
-"""API logging configuration — loaded from dashboard_api/settings.json.
+"""API logging configuration loaded from dashboard_api/settings.yaml.
 
 Usage::
 
@@ -19,7 +19,7 @@ from dashboard_api.settings import api_settings
 # ── Resolve config ──────────────────────────────────────────────────────
 
 _log_level_name = api_settings.log_level.upper()
-_log_level = getattr(logging, _log_level_name, logging.INFO)
+_log_level = getattr(logging, _log_level_name, logging.DEBUG)
 
 # ── Chat logger ─────────────────────────────────────────────────────────
 

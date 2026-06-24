@@ -1,34 +1,20 @@
-"""Unified settings.yaml channel configuration tests."""
+"""Channel process YAML configuration tests."""
 
 from __future__ import annotations
 
 import pytest
 
 from channels import config as channels_config
-from rpg_core.llm import config as llm_config_module
-from rpg_core import settings as settings_module
 
 
-def _write_settings(path, *, profile_override: str = "") -> None:
+def _write_channels(path, *, profile_override: str = "") -> None:
     path.write_text(
         f"""
 base:
-  agent:
-    model: base-model
-    api_key_env: TEST_OPENAI_KEY
-  data:
-    character_path: character
-    lorebook_path: lorebook
-  modules:
-    dashboard_api:
-      enabled: false
-      host: 127.0.0.1
-      port: 8000
-      reload: false
+  channels:
     telegram:
-      enabled: true
       bots:
-        - name: main
+        main:
           enabled: true
           bot_token: base-token
           workspace: data/base
@@ -39,197 +25,119 @@ base:
           stream_edit_min_chars: 24
           request_timeout_ms: 5000
     cli:
-      enabled: false
       workspace: data/base
-  memory:
-    enabled: false
+      session_id: cli_direct
+      streaming: true
+  logging:
+    log_level: DEBUG
 profiles:
   local: {{}}
   test:
 {profile_override or "    {}"}
+  prod: {{}}
 """,
         encoding="utf-8",
     )
 
 
-def _write_llm(path, *, profile_override: str = "") -> None:
-    path.write_text(
-        f"""
-base:
-  biz:
-    agent.main:
-      kind: chat
-      provider: openai
-      openai:
-        model: base-model
-        api_key: null
-        api_key_env: TEST_OPENAI_KEY
-        base_url: null
-        max_tokens: null
-        temperature: null
-profiles:
-  local: {{}}
-  test:
-{profile_override or "    {}"}
-""",
-        encoding="utf-8",
-    )
-
-
-def _load(
-    tmp_path,
-    monkeypatch,
-    *,
-    profile: str = "test",
-    profile_override: str = "",
-    llm_profile_override: str = "",
-):
+def _load(tmp_path, monkeypatch, *, profile_override: str = "", sibling_override: str = ""):
     cfg = tmp_path / "settings.yaml"
-    llm_cfg = tmp_path / "llm.yaml"
-    _write_settings(cfg, profile_override=profile_override)
-    _write_llm(llm_cfg, profile_override=llm_profile_override)
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", llm_cfg)
-    monkeypatch.setenv("RPG_WORLD_PROFILE", profile)
-    loaded = settings_module.Settings()
-    monkeypatch.setattr(channels_config, "core_settings", loaded)
-    return loaded, channels_config.ChannelsSettings()
+    _write_channels(cfg, profile_override=profile_override)
+    if sibling_override:
+        (tmp_path / "settings.test.yaml").write_text(sibling_override, encoding="utf-8")
+    monkeypatch.setattr(channels_config, "_SETTINGS_PATH", cfg)
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
+    return channels_config.ChannelsSettings()
 
 
 def test_yaml_profile_selection(monkeypatch, tmp_path):
-    settings, channels = _load(
+    settings = _load(
         tmp_path,
         monkeypatch,
         profile_override="""
-    modules:
-      dashboard_api:
-        enabled: true
-""",
-        llm_profile_override="""
-    biz:
-      agent.main:
-        openai:
-          model: profile-model
+    channels:
+      cli:
+        workspace: data/custom
+        session_id: custom_session
+        streaming: false
 """,
     )
 
     assert settings.profile == "test"
-    assert settings.agent_model == "profile-model"
-    assert channels.dashboard_api_enabled is True
-    assert channels.enabled_module_names == ["dashboard_api", "telegram"]
+    assert settings.cli_workspace == "data/custom"
+    assert settings.cli_session_id == "custom_session"
+    assert settings.cli_streaming is False
 
 
-def test_profile_file_override(monkeypatch, tmp_path):
-    profile_path = tmp_path / "settings.test.yaml"
-    profile_path.write_text(
-        """
-modules:
-  dashboard_api:
-    enabled: true
-  telegram:
-    bots:
-      - name: main
-        workspace: data/from-file
-""",
-        encoding="utf-8",
-    )
-
-    settings, channels = _load(
+def test_sibling_profile_file_override(monkeypatch, tmp_path):
+    settings = _load(
         tmp_path,
         monkeypatch,
         profile_override="""
-    file: settings.test.yaml
-    agent:
-      model: inline-model
+    channels:
+      cli:
+        session_id: inline_session
 """,
-        llm_profile_override="""
-    biz:
-      agent.main:
-        openai:
-          model: file-model
+        sibling_override="""
+channels:
+  telegram:
+    bots:
+      main:
+        workspace: data/from-file
+  cli:
+    session_id: file_session
 """,
     )
 
-    assert settings.agent_model == "file-model"
-    assert channels.dashboard_api_enabled is True
+    assert settings.cli_session_id == "file_session"
     assert settings.telegram_bots[0].workspace == "data/from-file"
 
 
-def test_missing_optional_profile_file_is_empty_override(monkeypatch, tmp_path):
-    settings, _channels = _load(
-        tmp_path,
-        monkeypatch,
-        profile_override="""
-    file: missing.yaml
-""",
-    )
-
-    assert settings.agent_model == "base-model"
-
-
-def test_missing_required_profile_file_raises(monkeypatch, tmp_path):
+def test_explicit_profile_file_is_rejected(monkeypatch, tmp_path):
     cfg = tmp_path / "settings.yaml"
-    llm_cfg = tmp_path / "llm.yaml"
-    _write_settings(
+    _write_channels(
         cfg,
         profile_override="""
-    file: missing.yaml
-    required: true
+    file: settings.test.yaml
 """,
     )
-    _write_llm(llm_cfg)
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", llm_cfg)
+    monkeypatch.setattr(channels_config, "_SETTINGS_PATH", cfg)
     monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
 
-    with pytest.raises(ValueError, match="profile=test"):
-        settings_module.Settings()
+    with pytest.raises(ValueError, match="must not declare file/required"):
+        channels_config.ChannelsSettings()
 
 
 def test_dict_deep_merge_keeps_base_values(monkeypatch, tmp_path):
-    settings, channels = _load(
+    settings = _load(
         tmp_path,
         monkeypatch,
         profile_override="""
-    modules:
-      dashboard_api:
-        port: 9000
+    channels:
+      telegram:
+        bots:
+          main:
+            workspace: data/override
 """,
     )
 
-    assert channels.dashboard_api_host == "127.0.0.1"
-    assert channels.dashboard_api_port == 9000
-    assert settings.agent_model == "base-model"
+    bot = settings.telegram_bots[0]
+    assert bot.token == "base-token"
+    assert bot.workspace == "data/override"
 
 
-def test_normal_lists_are_replaced(monkeypatch, tmp_path):
-    settings, _channels = _load(
+def test_telegram_bots_merge_by_mapping_key_and_append_new(monkeypatch, tmp_path):
+    settings = _load(
         tmp_path,
         monkeypatch,
         profile_override="""
-    modules:
+    channels:
       telegram:
         bots:
-          - name: main
-            allow_from: ["42"]
-""",
-    )
-
-    assert settings.telegram_bots[0].allow_from == ["42"]
-
-
-def test_telegram_bots_merge_by_name_and_append_new(monkeypatch, tmp_path):
-    settings, _channels = _load(
-        tmp_path,
-        monkeypatch,
-        profile_override="""
-    modules:
-      telegram:
-        bots:
-          - name: main
+          main:
             enabled: false
             workspace: data/override
-          - name: prod
+          prod:
             enabled: true
             bot_token: prod-token
             workspace: data/prod
@@ -244,29 +152,15 @@ def test_telegram_bots_merge_by_name_and_append_new(monkeypatch, tmp_path):
     assert bots["prod"].token == "prod-token"
 
 
-def test_telegram_enabled_requires_module_and_enabled_bot(monkeypatch, tmp_path):
-    _settings, channels = _load(
-        tmp_path,
-        monkeypatch,
-        profile_override="""
-    modules:
-      telegram:
-        enabled: false
-""",
-    )
-    assert channels.telegram_enabled is False
-    assert channels.enabled_module_names == []
-
-
 def test_disabled_telegram_bot_can_omit_token_and_workspace(monkeypatch, tmp_path):
-    settings, channels = _load(
+    settings = _load(
         tmp_path,
         monkeypatch,
         profile_override="""
-    modules:
+    channels:
       telegram:
         bots:
-          - name: disabled
+          disabled:
             enabled: false
 """,
     )
@@ -275,67 +169,53 @@ def test_disabled_telegram_bot_can_omit_token_and_workspace(monkeypatch, tmp_pat
     assert bots["disabled"].enabled is False
     assert bots["disabled"].token == ""
     assert bots["disabled"].workspace == ""
-    assert channels.telegram_enabled is True
 
 
 def test_enabled_telegram_bots_reject_token_reuse_across_workspaces(monkeypatch, tmp_path):
     cfg = tmp_path / "settings.yaml"
-    _write_settings(
+    _write_channels(
         cfg,
         profile_override="""
-    modules:
+    channels:
       telegram:
         bots:
-          - name: main
+          main:
             enabled: true
             bot_token: shared-token
             workspace: data/first
-          - name: alt
+          alt:
             enabled: true
             bot_token: shared-token
             workspace: data/second
 """,
     )
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(channels_config, "_SETTINGS_PATH", cfg)
     monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
 
     with pytest.raises(ValueError, match="token reused across workspaces"):
-        settings_module.Settings()
+        channels_config.ChannelsSettings()
 
 
 def test_enabled_telegram_bots_reject_workspace_reuse_across_tokens(monkeypatch, tmp_path):
     cfg = tmp_path / "settings.yaml"
-    _write_settings(
+    _write_channels(
         cfg,
         profile_override="""
-    modules:
+    channels:
       telegram:
         bots:
-          - name: main
+          main:
             enabled: true
             bot_token: token-a
             workspace: data/shared
-          - name: alt
+          alt:
             enabled: true
             bot_token: token-b
             workspace: data/shared
 """,
     )
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(channels_config, "_SETTINGS_PATH", cfg)
     monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
 
     with pytest.raises(ValueError, match="workspace reused by multiple tokens"):
-        settings_module.Settings()
-
-    _settings, channels = _load(
-        tmp_path,
-        monkeypatch,
-        profile_override="""
-    modules:
-      telegram:
-        bots:
-          - name: main
-            enabled: false
-""",
-    )
-    assert channels.telegram_enabled is False
+        channels_config.ChannelsSettings()

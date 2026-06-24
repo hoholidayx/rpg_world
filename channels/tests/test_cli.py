@@ -43,11 +43,11 @@ class TestCLIAdapter:
         adapter2 = CLIAdapter(streaming=False)
         assert adapter2._streaming is False
 
-    async def test_bind_agent(self):
+    async def test_bind_agent_client(self):
         adapter = CLIAdapter()
-        assert adapter._agent is None
-        adapter.bind_agent(FakeAgent())
-        assert adapter._agent is not None
+        assert adapter._agent_client is None
+        adapter.bind_agent_client(FakeAgent())
+        assert adapter._agent_client is not None
 
     async def test_send_text(self):
         """send_text 应输出 Panel 格式文本。"""
@@ -79,7 +79,7 @@ class TestCLIAdapter:
 
     async def test_start_exits_on_quit(self):
         """输入 /quit 应退出循环。"""
-        adapter = CLIAdapter(agent=FakeAgent())
+        adapter = CLIAdapter(agent_client=FakeAgent())
         adapter._console.print = MagicMock()
         adapter._session.prompt_async = AsyncMock(side_effect=["/quit"])
 
@@ -90,20 +90,20 @@ class TestCLIAdapter:
         assert "/help" in banner
 
     async def test_handle_message_command(self):
-        """命令通过 agent.send() 统一处理（由 agent 内部 dispatch）。"""
+        """命令通过 AgentClient send() 统一处理。"""
         agent = FakeAgent()
-        adapter = CLIAdapter(agent=agent, streaming=False)
+        adapter = CLIAdapter(agent_client=agent, streaming=False)
         adapter._console.print = MagicMock()
 
         reply = await adapter._handle_message("direct", "user", "/clear")
         # FakeAgent.send() 返回 "[mock] reply to: /clear"
         assert reply == "[mock] reply to: /clear"
-        assert agent.current_session == "cli_direct"
+        assert agent.calls[-1] == ("send", ("data/cli_default_workspace", "cli_direct", "/clear"))
 
     async def test_handle_message_command_streaming(self):
-        """命令通过 agent.send_stream() 统一处理（流式路径）。"""
+        """命令通过 AgentClient stream() 统一处理（流式路径）。"""
         agent = FakeAgent()
-        adapter = CLIAdapter(agent=agent, streaming=True)
+        adapter = CLIAdapter(agent_client=agent, streaming=True)
         adapter._console.print = MagicMock()
 
         reply = await adapter._handle_message("direct", "user", "/clear")
@@ -111,7 +111,7 @@ class TestCLIAdapter:
         assert reply is not None
         assert "[mock]" in reply
 
-    async def test_handle_message_no_agent(self):
+    async def test_handle_message_no_agent_client(self):
         adapter = CLIAdapter()
         reply = await adapter._handle_message("direct", "user", "hi")
         assert reply is None
@@ -124,9 +124,9 @@ class TestCLIAdapter:
         assert adapter._running is False
 
     async def test_stream_and_send_uses_send_stream(self):
-        """_stream_and_send 应调用 agent.send_stream。"""
+        """_stream_and_send 应调用 AgentClient stream。"""
         agent = FakeAgent()
-        adapter = CLIAdapter(agent=agent)
+        adapter = CLIAdapter(agent_client=agent)
         adapter._console.print = MagicMock()
 
         result = await adapter._stream_and_send("direct", "hi")

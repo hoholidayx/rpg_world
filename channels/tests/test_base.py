@@ -39,13 +39,13 @@ class RecordingAdapter(ChannelAdapter):
 class TestChannelAdapter:
     """ChannelAdapter 基类核心功能测试。"""
 
-    async def test_bind_agent(self):
+    async def test_bind_agent_client(self):
         adapter = RecordingAdapter()
-        assert adapter._agent is None
+        assert adapter._agent_client is None
 
         agent = FakeAgent()
-        adapter.bind_agent(agent)
-        assert adapter._agent is agent
+        adapter.bind_agent_client(agent)
+        assert adapter._agent_client is agent
 
     async def test_get_session_id(self):
         adapter = RecordingAdapter()
@@ -65,7 +65,7 @@ class TestChannelAdapter:
 
     async def test_send_text(self):
         adapter = RecordingAdapter()
-        adapter.bind_agent(FakeAgent())
+        adapter.bind_agent_client(FakeAgent())
 
         await adapter.send_text("chat1", "hello")
         assert adapter.sent == [("chat1", "hello")]
@@ -74,7 +74,7 @@ class TestChannelAdapter:
         """非流式模式下 _handle_message 应调 send() + send_text。"""
         adapter = RecordingAdapter()
         adapter._streaming = False
-        adapter.bind_agent(FakeAgent())
+        adapter.bind_agent_client(FakeAgent())
 
         reply = await adapter._handle_message("chat1", "user1", "hi")
         assert reply == "[mock] reply to: hi"
@@ -84,7 +84,7 @@ class TestChannelAdapter:
         """流式模式下 _handle_message 应调 send_stream() + send_delta。"""
         adapter = RecordingAdapter()
         adapter._streaming = True
-        adapter.bind_agent(FakeAgent())
+        adapter.bind_agent_client(FakeAgent())
 
         reply = await adapter._handle_message("chat1", "user1", "hi")
         assert reply == "[mock] reply to: hi"
@@ -92,24 +92,24 @@ class TestChannelAdapter:
         assert len(adapter.deltas) >= 1
         assert adapter.deltas[-1][2] is True  # last is final
 
-    async def test_handle_message_no_agent(self):
+    async def test_handle_message_no_agent_client(self):
         adapter = RecordingAdapter()
         reply = await adapter._handle_message("chat1", "user1", "hi")
         assert reply is None
 
-    async def test_handle_message_switches_session(self):
+    async def test_handle_message_passes_session(self):
         adapter = RecordingAdapter()
         agent = FakeAgent()
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
 
         await adapter._handle_message("chat999", "user1", "hi")
-        assert agent.current_session == "recording_chat999"
+        assert agent.calls[-1] == ("send", ("data/recording_default_workspace", "recording_chat999", "hi"))
 
     async def test_stream_multiple_deltas(self):
         """多段流式内容应该逐段通过 send_delta 推送。"""
         adapter = RecordingAdapter()
         adapter._streaming = True
-        adapter.bind_agent(FakeStreamAgent())
+        adapter.bind_agent_client(FakeStreamAgent())
 
         reply = await adapter._handle_message("chat1", "user1", "hi")
         assert reply == "Hello World!"
@@ -120,17 +120,17 @@ class TestChannelAdapter:
         """流式出错应发送错误消息。"""
         adapter = RecordingAdapter()
         adapter._streaming = True
-        adapter.bind_agent(FakeErrorAgent())
+        adapter.bind_agent_client(FakeErrorAgent())
 
         reply = await adapter._handle_message("chat1", "user1", "hi")
         assert reply == ""
         assert len(adapter.sent) == 1
-        assert "模拟错误" in adapter.sent[0][1]
+        assert adapter.sent[0][1] == "处理消息失败，请稍后重试。"
 
     async def test_send_delta_fallback(self):
         """基类 send_delta 默认行为：仅 final=True 时调 send_text。"""
         adapter = RecordingAdapter()
-        adapter.bind_agent(FakeAgent())
+        adapter.bind_agent_client(FakeAgent())
 
         # 非 final 不应调 send_text
         await adapter.send_delta("chat1", "partial", final=False)

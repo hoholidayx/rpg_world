@@ -1,24 +1,20 @@
-"""Play API 快捷入口。
-
-用于与 ``run.py`` 同级快速查找和单独调试 Play API。
-"""
+"""Play API 独立进程入口。"""
 
 from __future__ import annotations
 
 import uvicorn
 
-from dashboard_api.settings import api_settings
-from channels.config import settings as channels_settings
+from play_api.settings import play_settings
 
 
 def main() -> None:
     """启动独立 Play API 进程。"""
     uvicorn.run(
         "play_api.main:app",
-        host=channels_settings.dashboard_api_host,
-        port=channels_settings.dashboard_api_port,
-        log_level=api_settings.log_level.lower(),
-        reload=channels_settings.dashboard_api_reload,
+        host=play_settings.service.host,
+        port=play_settings.service.port,
+        log_level=play_settings.logging.log_level.lower(),
+        reload=play_settings.service.reload,
     )
 
 

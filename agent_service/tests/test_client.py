@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import pytest
+
+import agent_service.client as client_module
+from agent_service.client import AgentClient
+from rpg_core.agent.agent_types import StreamEventKind
+
+
+class FakeResponse:
+    def __init__(self, payload: dict | None = None) -> None:
+        self._payload = payload or {}
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class FakeStreamResponse:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class FakeAsyncClient:
+    calls: list[tuple[str, str, dict]] = []
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url: str, params=None):
+        self.calls.append(("GET", url, {"params": params}))
+        return FakeResponse({"ok": True, "commands": []})
+
+    async def post(self, url: str, json=None):
+        self.calls.append(("POST", url, {"json": json}))
+        return FakeResponse({"reply": "ok"})
+
+    async def delete(self, url: str, params=None):
+        self.calls.append(("DELETE", url, {"params": params}))
+        return FakeResponse({"status": "deleted"})
+
+    def stream(self, method: str, url: str, json=None):
+        self.calls.append((method, url, {"json": json}))
+        return FakeStreamResponse([
+            'data: {"kind": "text", "content": "hi"}',
+            'data: {"kind": "done", "content": "hi"}',
+        ])
+
+
+@pytest.fixture(autouse=True)
+def _patch_httpx(monkeypatch):
+    FakeAsyncClient.calls.clear()
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", FakeAsyncClient)
+
+
+async def test_client_send_uses_standard_payload() -> None:
+    result = await AgentClient(base_url="http://agent").send("data/ws", "s1", "hello", api_key="key")
+    assert result == {"reply": "ok"}
+    assert FakeAsyncClient.calls[-1] == (
+        "POST",
+        "http://agent/chat/send",
+        {"json": {"workspace": "data/ws", "session_id": "s1", "api_key": "key", "message": "hello"}},
+    )
+
+
+async def test_client_session_crud_uses_agent_service_contract() -> None:
+    client = AgentClient(base_url="http://agent")
+    await client.create_session("data/ws", "s2")
+    await client.clone_session("data/ws", "s2", "s3")
+    result = await client.delete_session("data/ws", "s2")
+
+    assert result == {"status": "deleted"}
+    assert FakeAsyncClient.calls[-3:] == [
+        ("POST", "http://agent/chat/sessions", {"json": {"workspace": "data/ws", "session_id": "s2"}}),
+        (
+            "POST",
+            "http://agent/chat/sessions/s2/clone",
+            {"json": {"workspace": "data/ws", "target_session_id": "s3"}},
+        ),
+        ("DELETE", "http://agent/chat/sessions/s2", {"params": {"workspace": "data/ws"}}),
+    ]
+
+
+async def test_client_stream_parses_sse_events() -> None:
+    events = [
+        event
+        async for event in AgentClient(base_url="http://agent").stream("data/ws", "s1", "hello")
+    ]
+    assert [event.kind for event in events] == [StreamEventKind.TEXT, StreamEventKind.DONE]
+    assert events[-1].content == "hi"

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_core.settings import TelegramBotSettings
+from channels.config import TelegramBotSettings
 
 
 def _make_bot(name: str, enabled: bool = True) -> TelegramBotSettings:
@@ -29,16 +29,14 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     import channels.telegram.runner as runner_module
 
     created_adapters = []
-    agent_calls = []
+    client_calls = []
 
     class FakeChannelsSettings:
         telegram_bots = [_make_bot("main"), _make_bot("prod"), _make_bot("off", enabled=False)]
 
-    class FakeAgentManager:
-        @staticmethod
-        def get_or_create(*, workspace, session_id):  # noqa: ANN001
-            agent_calls.append({"workspace": workspace, "session_id": session_id})
-            return object()
+    class FakeAgentClient:
+        def __init__(self):
+            client_calls.append("created")
 
     class FakeTelegramAdapter:
         def __init__(self, **kwargs):  # noqa: ANN003
@@ -51,7 +49,7 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
             return None
 
     monkeypatch.setattr(runner_module, "channels_settings", FakeChannelsSettings())
-    monkeypatch.setattr(runner_module, "AgentManager", FakeAgentManager)
+    monkeypatch.setattr(runner_module, "AgentClient", FakeAgentClient)
     monkeypatch.setattr(runner_module, "TelegramAdapter", FakeTelegramAdapter)
 
     stop_event = asyncio.Event()
@@ -59,15 +57,14 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     await asyncio.gather(*(runtime.start_task for runtime in runtimes))
 
     assert [runtime.bot_name for runtime in runtimes] == ["main", "prod"]
-    assert agent_calls == [
-        {"workspace": "data/main", "session_id": "telegram_main_default"},
-        {"workspace": "data/prod", "session_id": "telegram_prod_default"},
-    ]
+    assert client_calls == ["created", "created"]
     assert created_adapters[0]["bot_name"] == "main"
     assert created_adapters[0]["token"] == "token-main"
+    assert created_adapters[0]["workspace"] == "data/main"
     assert created_adapters[0]["streaming"] is True
     assert created_adapters[1]["bot_name"] == "prod"
     assert created_adapters[1]["token"] == "token-prod"
+    assert created_adapters[1]["workspace"] == "data/prod"
 
 
 @pytest.mark.asyncio

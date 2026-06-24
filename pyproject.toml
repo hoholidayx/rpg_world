@@ -41,7 +41,7 @@ dev = [
 ]
 
 [project.scripts]
-rpg-world = "run:cli"
+rpg-world-agent = "run_agent:main"
 rpg-world-dashboard-api = "run_dashboard_api:main"
 rpg-world-play-api = "run_play_api:main"
 rpg-world-cli = "run_cli:cli"
@@ -49,9 +49,7 @@ rpg-world-telegram = "run_telegram:cli"
 
 [tool.setuptools]
 py-modules = [
-    "launcher",
-    "run",
-    "run_all",
+    "run_agent",
     "run_dashboard_api",
     "run_cli",
     "run_play_api",
@@ -62,6 +60,7 @@ py-modules = [
 where = ["."]
 include = [
     "dashboard_api*",
+    "agent_service*",
     "channels*",
     "play_api*",
     "rpg_core*",

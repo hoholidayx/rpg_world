@@ -113,3 +113,12 @@ class AgentManager:
         cls._instances.clear()
         cls._initialized = False
         cls._initialized_targets.clear()
+
+    @classmethod
+    def drop_session(cls, workspace: str, session_id: str) -> None:
+        """Remove cached agent runtime for one workspace/session pair."""
+        prefix = f"{workspace}::{session_id}::"
+        for key in [key for key in cls._instances if key.startswith(prefix)]:
+            cls._instances.pop(key, None)
+        cls._initialized_targets.discard((workspace, session_id))
+        cls._initialized = bool(cls._initialized_targets)

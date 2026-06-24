@@ -53,7 +53,7 @@ class RecallItem:
 def format_recall_item(idx: int, item: RecallItem) -> str:
     """格式化一条 RecallItem 为完整可读文本（无截断）。
 
-    与 ``run.py`` 共享同一格式，确保 CLI / 日志输出一致。
+    与独立入口共享同一格式，确保 CLI / 日志输出一致。
     """
     lines: list[str] = []
     lines.append(f"  [{idx}] score={item.score:.4f}")

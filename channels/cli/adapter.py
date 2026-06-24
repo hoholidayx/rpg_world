@@ -6,16 +6,13 @@
 
     from channels.cli import CLIAdapter
 
-    adapter = CLIAdapter()
-    adapter.bind_agent(agent)
+    adapter = CLIAdapter(agent_client=client)
     await adapter.start()
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
@@ -23,7 +20,7 @@ from rich.panel import Panel
 
 from channels.base import ChannelAdapter
 from rpg_core.agent.agent_types import StreamEventKind
-from rpg_core.utils.stats_formatter import format_event_stats, format_turn_stats
+from rpg_core.utils.stats_formatter import format_event_stats
 
 _HISTORY_PATH = Path.home() / ".rpg_world_cli_history"
 
@@ -36,8 +33,8 @@ class CLIAdapter(ChannelAdapter):
 
     Parameters
     ----------
-    agent:
-        可选的 RPGGameAgent 实例。
+    agent_client:
+        Agent service client used by this channel.
     streaming:
         是否启用流式输出。
     """
@@ -47,27 +44,34 @@ class CLIAdapter(ChannelAdapter):
 
     def __init__(
         self,
-        agent: Any | None = None,
+        agent_client=None,
         *,
         streaming: bool = True,
         session_id: str | None = None,
+        workspace: str | None = None,
     ) -> None:
         super().__init__()
         self._streaming = streaming
         self._session_id_override = (session_id or "").strip() or None
+        self._workspace_override = (workspace or "").strip() or None
         self._session = PromptSession(
             history=FileHistory(str(_HISTORY_PATH)),
             enable_history_search=True,
         )
         self._console = Console()
         self._running = False
-        if agent:
-            self.bind_agent(agent)
+        if agent_client:
+            self.bind_agent_client(agent_client)
 
     def get_session_id(self, chat_id: str) -> str:
         if self._session_id_override is not None:
             return self._session_id_override
         return super().get_session_id(chat_id)
+
+    def get_workspace(self) -> str:
+        if self._workspace_override is not None:
+            return self._workspace_override
+        return super().get_workspace()
 
     def get_initial_session_id(self) -> str:
         """Return the session used by this single-chat CLI adapter."""
@@ -127,11 +131,12 @@ class CLIAdapter(ChannelAdapter):
 
         等效旧 ``cli.py`` 的 ``_handle_streaming_chat()``。
         """
-        if not self._agent:
+        if not self._agent_client:
             return ""
         full_text = ""
         try:
-            async for event in self._agent.send_stream(text):
+            event_source = self._agent_client.stream(self.get_workspace(), self.get_session_id(chat_id), text)
+            async for event in event_source:
                 if event.kind == StreamEventKind.TEXT:
                     full_text += event.content
                     await self.send_delta(chat_id, event.content, final=False)
@@ -172,51 +177,50 @@ class CLIAdapter(ChannelAdapter):
 
         等效旧 ``cli.py`` 的 ``_handle_buffered_chat()``。
         """
-        if not self._agent:
+        if not self._agent_client:
             return ""
         try:
-            reply = await self._agent.send(text)
+            reply = await self._agent_client.send(self.get_workspace(), self.get_session_id(chat_id), text)
         except Exception as exc:
             self._console.print(f"[red][error] {exc}[/red]")
             return ""
 
         # ── StatusSubAgent records ──────────────────────────
-        if reply.status_sub_agent_records:
+        status_records = reply.get("status_sub_agent_records") or []
+        if status_records:
             tools_str = ", ".join(
                 f"{r['tool_name']}({r['arguments']})"
-                for r in reply.status_sub_agent_records
+                for r in status_records
             )
             self._console.print(f"[cyan]  ── StatusSubAgent: {tools_str}[/cyan]")
-            for r in reply.status_sub_agent_records:
+            for r in status_records:
                 preview = r["result"][:120]
                 self._console.print(f"[green]     → {preview}[/green]")
             self._console.print("")
 
         # ── Tool call records ───────────────────────────────
-        if reply.tool_records:
-            for i, rec in enumerate(reply.tool_records):
+        tool_records = reply.get("tool_records") or []
+        if tool_records:
+            for i, rec in enumerate(tool_records):
                 tool_names = [
                     tc["function"]["name"]
-                    for tc in rec.assistant_message.get("tool_calls", [])
+                    for tc in rec.get("tool_calls", [])
                 ]
                 self._console.print(
                     f"[cyan]  ── tool call [{i + 1}]: {', '.join(tool_names)}[/cyan]",
                 )
-                if rec.reasoning_content:
+                if rec.get("reasoning_content"):
                     self._console.print(
-                        f"[dim]     [thinking] {rec.reasoning_content[:200]}[/dim]",
+                        f"[dim]     [thinking] {rec['reasoning_content'][:200]}[/dim]",
                     )
-                for tr in rec.tool_results:
+                for tr in rec.get("tool_results", []):
                     self._console.print(f"[green]     → {tr['content']}[/green]")
             self._console.print("")
 
-        # ── LLM stats ───────────────────────────────────────
-        if reply.stats:
-            self._console.print(format_turn_stats(reply.stats), markup=False)
-
         # ── Reply text ──────────────────────────────────────
-        self._console.print(f"\n{reply.text}\n")
-        return reply.text
+        reply_text = str(reply.get("reply", ""))
+        self._console.print(f"\n{reply_text}\n")
+        return reply_text
 
     async def _handle_message(
         self, chat_id: str, user_id: str, text: str,
@@ -226,11 +230,8 @@ class CLIAdapter(ChannelAdapter):
 
         命令分发由 agent 的 ``_send_impl()`` / ``_send_stream_impl()``
         统一处理，所有 channel 共享同一逻辑。"""
-        if not self._agent:
+        if not self._agent_client:
             return None
-
-        session_id = self.get_session_id(chat_id)
-        await self._agent.switch_session(session_id)
 
         if self._streaming:
             reply_text = await self._stream_and_send(chat_id, text)

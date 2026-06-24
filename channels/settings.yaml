@@ -1,0 +1,63 @@
+# ── 渠道进程配置 ─────────────────────────────────────────────────────
+# 只描述 CLI / Telegram 这类接入层行为；服务监听端口不放在这里。
+# local / test / prod 是固定 profile 名称；同级 settings.local.yaml、
+# settings.test.yaml、settings.prod.yaml 会按当前 profile 自动覆盖本文件。
+
+# 默认 profile。可通过环境变量 RPG_WORLD_PROFILE 覆盖。
+default_profile: local
+
+# 所有 profile 共享的默认值。
+base:
+  channels:
+    # ── Telegram 渠道配置 ──────────────────────────────────────────
+    telegram:
+      # 全局访问控制列表；["*"] 表示不限制。
+      allow_from: ["*"]
+      # 多 bot 字典。key 是 bot 唯一标识，只允许字母、数字、下划线。
+      # 每个 bot 独立绑定 workspace，独立运行。
+      bots:
+        main:
+          # 是否启用此 bot；默认关闭，避免无 token 时启动失败。
+          enabled: false
+          # 明文 token。不推荐提交真实值，优先使用 token_env。
+          bot_token: null
+          # 从环境变量读取 token。
+          token_env: TELEGRAM_BOT_TOKEN_MAIN
+          # 此 bot 绑定的 workspace。
+          workspace: data/非公开行程
+          # 单 bot 访问控制；["*"] 表示不限制。
+          allow_from: ["*"]
+          # 是否使用流式增量编辑回复。
+          streaming: true
+          # Telegram HTTP 代理；留空表示不启用代理。
+          proxy: http://127.0.0.1:7890
+          # 流式编辑消息的最小间隔，单位毫秒。
+          stream_edit_interval_ms: 2500
+          # 触发一次编辑的最少新增字符数。
+          stream_edit_min_chars: 64
+          # 单次 Telegram API 请求超时，单位毫秒。
+          request_timeout_ms: 5000
+
+    # ── CLI 渠道配置 ───────────────────────────────────────────────
+    cli:
+      # CLI 默认 workspace；留空时使用 data/cli_default_workspace。
+      workspace: data/非公开行程
+      # CLI 默认 session_id。
+      session_id: cli_direct
+      # 是否使用流式输出。
+      streaming: true
+
+  # ── 渠道进程日志配置 ─────────────────────────────────────────────
+  logging:
+    # CLI / Telegram 渠道进程的标准日志级别。当前阶段默认 DEBUG。
+    log_level: DEBUG
+    # FileWatcher 标准库 logger 级别。
+    watcher_log_level: DEBUG
+    # 记忆向量索引标准库 logger 级别。
+    vector_index_log_level: DEBUG
+
+# 固定 profile 名称；覆盖文件无需在这里声明 file。
+profiles:
+  local: {}
+  test: {}
+  prod: {}

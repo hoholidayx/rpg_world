@@ -385,7 +385,7 @@ class LLMManager:
         """Return a fully constructed provider for *biz_key*.
 
         This is the **only** public method business code should call.
-        Config lives in ``llm.yaml``; provider differences (OpenAI /
+        Config lives in ``llama_service/llm.yaml``; provider differences (OpenAI /
         llama / chat / embedding / rerank) are handled internally.
         """
         with self._lock:

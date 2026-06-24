@@ -16,7 +16,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from rpg_core.agent.agent import RPGGameAgent
+    from agent_service.client import AgentClient
 
 from rpg_core.session import SessionManager
 
@@ -151,7 +151,9 @@ class TelegramSessionFlow:
         chat_id: str,
         text: str,
         *,
-        agent: RPGGameAgent | None,
+        agent_client: AgentClient | None,
+        workspace: str,
+        session_id: str,
         send_text: Callable[[str], Awaitable[None]],
         auto_pin_created_session: bool = False,
     ) -> bool:
@@ -174,19 +176,24 @@ class TelegramSessionFlow:
             await send_text(f"[错误] 会话名无效：{exc}")
             return True
 
-        if not agent:
+        if agent_client is not None:
+            result = await agent_client.execute_command(
+                workspace,
+                session_id,
+                f"/session_create {candidate}",
+            )
+            reply = str(result.get("reply", ""))
+        else:
             await send_text("会话创建暂不可用。")
             return True
-
-        result = await agent.execute_command(f"/session_create {candidate}")
-        if result.reply.startswith("[会话已创建: "):
+        if reply.startswith("[会话已创建: "):
             self.cancel_session_create_flow(chat_id)
             self.maybe_pin_created_session(
                 chat_id,
                 candidate,
                 auto_pin=auto_pin_created_session,
             )
-        await send_text(result.reply or "会话创建完成。")
+        await send_text(reply or "会话创建完成。")
         return True
 
     async def handle_command(

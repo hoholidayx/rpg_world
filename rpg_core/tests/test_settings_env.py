@@ -15,7 +15,7 @@ def _write_settings(
     agent_extra: str = "",
     profiles: str = "  local: {}\n",
     llm_extra: str = "",
-    llm_profiles: str = """  local:\n    file: llm.local.yaml\n  test:\n    file: llm.test.yaml\n  prod:\n    file: llm.prod.yaml\n""",
+    llm_profiles: str = "  local: {}\n  test: {}\n  prod: {}\n",
 ) -> None:
     path.write_text(
         f"""
@@ -165,12 +165,9 @@ base:
         max_tokens: null
         temperature: null
 profiles:
-  local:
-    file: llm.local.yaml
-  test:
-    file: llm.test.yaml
-  prod:
-    file: llm.prod.yaml
+  local: {}
+  test: {}
+  prod: {}
 """,
         encoding="utf-8",
     )
@@ -246,8 +243,7 @@ base:
       enabled: false
       bots: []
 profiles:
-  local:
-    file: llm.local.yaml
+  local: {}
 """,
         encoding="utf-8",
     )
@@ -291,8 +287,7 @@ base:
         max_tokens: 512
         request_timeout_ms: 60000
 profiles:
-  local:
-    file: llm.local.yaml
+  local: {}
 """,
         encoding="utf-8",
     )

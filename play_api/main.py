@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from play_api.settings import play_settings
 from play_api.routers import chat, commands, scene, sessions, workspace
 
 
@@ -23,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_PLAY_API_PREFIX = "/play-api/v1"
+_PLAY_API_PREFIX = play_settings.service.api_prefix
 app.include_router(workspace.router, prefix=_PLAY_API_PREFIX)
 app.include_router(sessions.router, prefix=_PLAY_API_PREFIX)
 app.include_router(scene.router, prefix=_PLAY_API_PREFIX)

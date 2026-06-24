@@ -1,6 +1,6 @@
-"""LLM configuration — typed accessors for ``llm.yaml``.
+"""LLM configuration — typed accessors for ``llama_service/llm.yaml``.
 
-This module owns the standalone ``llm.yaml`` file.  Business code never
+This module owns the standalone LLM settings file.  Business code never
 touches raw YAML keys directly; it gets a ``BizConfig`` via
 ``get_biz_config(biz_key)`` or retrieves a fully-built ``LLMProvider``
 from ``LLMManager.get().get_provider(biz_key)``.
@@ -12,6 +12,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from commons.settings import PROFILE_ENV, load_profiled_yaml, load_yaml_mapping, resolve_profile_name
 from rpg_core.common_types import ConfigDict, ConfigValue
 from rpg_core.llm.keys import (
     LLM_KIND_CHAT,
@@ -24,11 +25,10 @@ from rpg_core.llm.keys import (
     PROVIDER_SHARED,
     RERANK_MODEL_TYPES,
 )
-from rpg_core.utils.config_values import optional_bool, optional_float, optional_int
-from rpg_core.utils.profile_loader import load_profiled_yaml
+from commons.settings import deep_merge_dicts, optional_bool, optional_float, optional_int
 
-_LLM_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "llm.yaml"
-_PROFILE_ENV = "RPG_WORLD_PROFILE"
+_LLM_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "llama_service" / "llm.yaml"
+_PROFILE_ENV = PROFILE_ENV
 
 # ── cached raw config ──────────────────────────────────────────────────
 
@@ -66,21 +66,13 @@ class AgentLLMDefaults:
 
 def _resolve_profile_name() -> str:
     """Determine the active profile name."""
-    profile_name = (os.environ.get(_PROFILE_ENV) or "").strip()
-    if not profile_name:
-        if _LLM_SETTINGS_PATH.is_file():
-            import yaml
-            with _LLM_SETTINGS_PATH.open(encoding="utf-8") as fh:
-                top = yaml.safe_load(fh) or {}
-            if isinstance(top, dict):
-                profile_name = str(top.get("default_profile") or "local").strip() or "local"
-        if not profile_name:
-            profile_name = "local"
-    return profile_name
+    if not _LLM_SETTINGS_PATH.is_file():
+        return (os.environ.get(_PROFILE_ENV) or "").strip() or "local"
+    return resolve_profile_name(load_yaml_mapping(_LLM_SETTINGS_PATH, "llama_service/llm.yaml"), env_var=_PROFILE_ENV)
 
 
 def _load_raw() -> ConfigDict:
-    """Lazy-load and cache the merged raw ``llm.yaml`` dict.
+    """Lazy-load and cache the merged raw LLM settings dict.
 
     The cache is keyed by (resolved_path, profile) so switching
     ``RPG_WORLD_PROFILE`` or ``_LLM_SETTINGS_PATH`` invalidates correctly.
@@ -100,12 +92,12 @@ def _load_raw() -> ConfigDict:
         return _raw_settings
 
     _cache_key = current_key
-    _raw_settings = load_profiled_yaml(_LLM_SETTINGS_PATH, profile_name, label="llm.yaml")
+    _raw_settings = load_profiled_yaml(_LLM_SETTINGS_PATH, profile_name, label="llama_service/llm.yaml")
     return _raw_settings
 
 
 def reload_llm_settings() -> None:
-    """Clear the cached config so the next read re-parses ``llm.yaml``."""
+    """Clear the cached config so the next read re-parses LLM settings."""
     global _raw_settings, _cache_key
     _raw_settings = None
     _cache_key = None
@@ -122,7 +114,7 @@ def get_active_profile() -> str:
 
 
 def get_runtime_config() -> LLMRuntimeConfig:
-    """Return typed runtime settings from ``llm.yaml``."""
+    """Return typed runtime settings from ``llama_service/llm.yaml``."""
     raw = load_llm_settings()
     runtime = raw.get("runtime", {})
     if not isinstance(runtime, dict):
@@ -173,7 +165,7 @@ def resolve_agent_defaults(biz_key: str) -> AgentLLMDefaults:
 
 
 class BizConfig:
-    """Typed view of a single ``biz`` entry in ``llm.yaml``.
+    """Typed view of a single ``biz`` entry in LLM settings.
 
     All YAML key access is encapsulated here so consumers never write
     hard-coded string keys.
@@ -383,18 +375,6 @@ def get_biz_config(biz_key: str) -> BizConfig | None:
     return BizConfig(biz_key, cfg)
 
 
-def _deep_merge_dicts(left: ConfigDict, right: ConfigDict) -> ConfigDict:
-    """Deep-merge dictionaries used by shared config inheritance."""
-    merged = dict(left)
-    for key, value in right.items():
-        current = merged.get(key)
-        if isinstance(current, dict) and isinstance(value, dict):
-            merged[key] = _deep_merge_dicts(current, value)
-        else:
-            merged[key] = value
-    return merged
-
-
 def _resolve_shared_chain(
     biz_key: str,
     *,
@@ -419,7 +399,7 @@ def _resolve_shared_chain(
         raise ValueError(f"llm biz shared_from cycle detected: {chain}")
 
     parent_raw = _resolve_shared_chain(shared_from, seen=(*seen, biz_key))
-    merged = _deep_merge_dicts(parent_raw, cfg.raw)
+    merged = deep_merge_dicts(parent_raw, cfg.raw)
     merged["provider"] = str(parent_raw.get("provider") or PROVIDER_DEFAULT).strip().lower() or PROVIDER_DEFAULT
     return merged
 

@@ -58,9 +58,6 @@ def get_lorebook_manager(workspace: str = "") -> LorebookManager:
 # Session-scoped managers — cached per (workspace, session_id)
 # ------------------------------------------------------------------
 
-_session_managers: dict[tuple[str, str], StatusManager] = {}
-
-
 def get_session_status_manager(workspace: str = "", session_id: str = DEFAULT_SESSION_ID) -> StatusManager:
     """Get or create a StatusManager for the given workspace + session.
 
@@ -69,12 +66,19 @@ def get_session_status_manager(workspace: str = "", session_id: str = DEFAULT_SE
     """
     workspace = resolve_api_workspace(workspace)
     ensure_workspace_dir(_PACKAGE_ROOT, workspace)
-    key = (workspace, session_id)
-    if key not in _session_managers:
-        mgr = StatusManager(str(settings.get_status_dir(workspace, session_id)))
-        _session_managers[key] = mgr
-        _try_start_watcher()
-    return _session_managers[key]
+    return _build_session_status_manager(workspace, session_id)
+
+
+@lru_cache
+def _build_session_status_manager(workspace: str, session_id: str) -> StatusManager:
+    mgr = StatusManager(str(settings.get_status_dir(workspace, session_id)))
+    _try_start_watcher()
+    return mgr
+
+
+def clear_session_status_manager_cache() -> None:
+    """Clear cached session-scoped status managers."""
+    _build_session_status_manager.cache_clear()
 
 
 # ------------------------------------------------------------------
@@ -90,10 +94,7 @@ def clear_all_caches() -> None:
     """
     get_character_manager.cache_clear()
     get_lorebook_manager.cache_clear()
-    _session_managers.clear()
-    from rpg_core.agent.manager import AgentManager
-
-    AgentManager.reset()
+    clear_session_status_manager_cache()
     watcher = get_watcher()
     watcher.stop()
     watcher.clear_all()

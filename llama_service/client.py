@@ -10,15 +10,13 @@ import time
 import uuid
 from multiprocessing.queues import Queue as MPQueue
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from loguru import logger
 
 from rpg_core.common_types import LlamaModelConfig, LlamaRequestParams, LlamaResponsePayload
+from rpg_core.llm.config import get_runtime_config
 from llama_service.protocol import LlamaOperation, LlamaResponse, make_request
-
-if TYPE_CHECKING:
-    from rpg_core.settings import MemorySettings
 
 
 class LlamaClientError(Exception):
@@ -499,14 +497,15 @@ def get_llama_client() -> LlamaClient:
     return _CLIENT
 
 
-def configure_llama_client_from_memory_settings(memory_settings: MemorySettings) -> LlamaClient:
-    """Configure the process-wide llama client from ``MemorySettings``."""
+def configure_llama_client_from_runtime_config() -> LlamaClient:
+    """Configure the process-wide llama client from ``llama_service/llm.yaml``."""
+    runtime = get_runtime_config()
     client = get_llama_client()
     client.configure(
-        enabled=bool(getattr(memory_settings, "llama_process_enabled", True)),
-        request_timeout_ms=int(getattr(memory_settings, "llama_request_timeout_ms", 60000)),
-        startup_timeout_ms=int(getattr(memory_settings, "llama_startup_timeout_ms", 120000)),
-        max_parallel_models=int(getattr(memory_settings, "llama_max_parallel_models", 2)),
+        enabled=runtime.llama_process_enabled,
+        request_timeout_ms=runtime.llama_request_timeout_ms,
+        startup_timeout_ms=runtime.llama_startup_timeout_ms,
+        max_parallel_models=runtime.llama_max_parallel_models,
     )
     return client
 

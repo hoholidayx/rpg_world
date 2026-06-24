@@ -1,8 +1,4 @@
-"""API 应用定义模块。
-
-FastAPI lifespan 不做任何渠道初始化。API 的独立启动仍由外层入口
-或 Uvicorn 负责，Telegram / CLI 由 launcher 统一管理。
-"""
+"""Dashboard API application."""
 
 from __future__ import annotations
 
@@ -15,24 +11,28 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from dashboard_api.settings import api_settings
 from dashboard_api.routers import character, chat, lorebook, sessions, status, workspace
-from llama_service.client import configure_llama_client_from_memory_settings
-from rpg_core.settings import settings as core_settings
+
+
+def _logging_level(name: str) -> int:
+    return getattr(logging, name.upper(), logging.DEBUG)
+
 
 # Enable rpg_core logging (add handlers so logs appear regardless of uvicorn config)
-for _name in ("rpg_core.watcher", "rpg_core.manager"):
+_LOG_LEVELS = {
+    "rpg_core.watcher": api_settings.logging.watcher_log_level,
+    "rpg_core.manager": api_settings.logging.manager_log_level,
+}
+for _name, _level_name in _LOG_LEVELS.items():
     _log = logging.getLogger(_name)
-    _log.setLevel(logging.INFO)
+    _log.setLevel(_logging_level(_level_name))
     if not _log.handlers:
         _log.addHandler(logging.StreamHandler(sys.stderr))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI 生命周期——仅处理 API 自身生命周期，不涉及渠道。"""
+    """FastAPI lifecycle for Dashboard API resources only."""
     yield
-
-
-configure_llama_client_from_memory_settings(core_settings.memory_settings)
 
 
 app = FastAPI(title="RPG World API", lifespan=lifespan)

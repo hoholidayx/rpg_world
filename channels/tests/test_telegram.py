@@ -18,7 +18,7 @@ from channels.telegram.render import (
     render_markdown_to_telegram_html,
 )
 from channels.tests.conftest import FakeAgent, FakeErrorAgent
-from rpg_core.agent.command import CommandDef, CommandResult
+from rpg_core.agent.command import CommandDef
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ class TestTelegramAdapter:
         a = TelegramAdapter(token="fake:token", proxy="http://127.0.0.1:7890")
         assert a._proxy == "http://127.0.0.1:7890"
 
-    async def test_on_message_routes_to_agent(self, adapter: TelegramAdapter):
+    async def test_on_message_routes_to_agent_client(self, adapter: TelegramAdapter):
         adapter._handle_message = AsyncMock(return_value="reply text")
         update = MagicMock()
         update.message = MagicMock()
@@ -96,12 +96,12 @@ class TestTelegramAdapter:
 
         adapter.send_text.assert_awaited_once_with("123", "处理消息失败，请稍后重试。")
 
-    async def test_on_command_routes_to_agent(self, adapter: TelegramAdapter):
+    async def test_on_command_routes_to_agent_client(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         agent.execute_command = AsyncMock(
-            return_value=CommandResult(reply="done", handled=True),
+            return_value={"reply": "done", "handled": True},
         )
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
@@ -111,23 +111,16 @@ class TestTelegramAdapter:
 
         await adapter._on_command(update, object())
 
-        agent.execute_command.assert_awaited_once_with("/clear")
-        assert agent.current_session == "telegram_default_123"
+        agent.execute_command.assert_awaited_once()
+        assert agent.execute_command.await_args.args[-1] == "/clear"
         adapter.send_text.assert_awaited_once_with("123", "done")
 
     async def test_on_command_sessions_shows_picker(self, adapter: TelegramAdapter, monkeypatch):
         agent = FakeAgent()
-        agent._workspace = "data/test"
-        agent._session_id = "session_b"
-        adapter.bind_agent(agent)
+        agent.list_sessions = AsyncMock(return_value={"sessions": ["session_a", "session_b"]})
+        adapter.bind_agent_client(agent)
         adapter._app.bot.send_message = AsyncMock()
-        from rpg_core.session import SessionManager
-
-        monkeypatch.setattr(
-            SessionManager,
-            "list_sessions",
-            classmethod(lambda cls, workspace: ["session_a", "session_b"]),
-        )
+        adapter._session_flow.pin_session("123", "session_b")
         update = MagicMock()
         update.message = MagicMock()
         update.message.text = "/sessions"
@@ -157,17 +150,10 @@ class TestTelegramAdapter:
 
     async def test_on_command_session_switch_without_args_shows_picker(self, adapter: TelegramAdapter, monkeypatch):
         agent = FakeAgent()
-        agent._workspace = "data/test"
-        agent._session_id = "session_b"
-        adapter.bind_agent(agent)
+        agent.list_sessions = AsyncMock(return_value={"sessions": ["session_a", "session_b"]})
+        adapter.bind_agent_client(agent)
         adapter._app.bot.send_message = AsyncMock()
-        from rpg_core.session import SessionManager
-
-        monkeypatch.setattr(
-            SessionManager,
-            "list_sessions",
-            classmethod(lambda cls, workspace: ["session_a", "session_b"]),
-        )
+        adapter._session_flow.pin_session("123", "session_b")
         update = MagicMock()
         update.message = MagicMock()
         update.message.text = "/session_switch"
@@ -184,9 +170,9 @@ class TestTelegramAdapter:
     async def test_on_command_normalizes_bot_mention(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         agent.execute_command = AsyncMock(
-            return_value=CommandResult(reply="done", handled=True),
+            return_value={"reply": "done", "handled": True},
         )
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
@@ -196,16 +182,16 @@ class TestTelegramAdapter:
 
         await adapter._on_command(update, object())
 
-        agent.execute_command.assert_awaited_once_with("/compact 10 5")
-        assert agent.current_session == "telegram_default_123"
+        agent.execute_command.assert_awaited_once()
+        assert agent.execute_command.await_args.args[-1] == "/compact 10 5"
         adapter.send_text.assert_awaited_once_with("123", "done")
 
     async def test_on_command_normalizes_menu_alias(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         agent.execute_command = AsyncMock(
-            return_value=CommandResult(reply="done", handled=True),
+            return_value={"reply": "done", "handled": True},
         )
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
@@ -215,13 +201,13 @@ class TestTelegramAdapter:
 
         await adapter._on_command(update, object())
 
-        agent.execute_command.assert_awaited_once_with("/session_create abc")
-        assert agent.current_session == "telegram_default_123"
+        agent.execute_command.assert_awaited_once()
+        assert agent.execute_command.await_args.args[-1] == "/session_create abc"
         adapter.send_text.assert_awaited_once_with("123", "done")
 
     async def test_on_command_session_create_starts_two_step_flow(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
@@ -237,8 +223,8 @@ class TestTelegramAdapter:
 
     async def test_on_command_unknown(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        agent.execute_command = AsyncMock(return_value=CommandResult(reply="", handled=False))
-        adapter.bind_agent(agent)
+        agent.execute_command = AsyncMock(return_value={"reply": "", "handled": False})
+        adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
@@ -253,9 +239,9 @@ class TestTelegramAdapter:
     async def test_pending_session_create_consumes_plain_text(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         agent.execute_command = AsyncMock(
-            return_value=CommandResult(reply="[会话已创建: my_tel]", handled=True),
+            return_value={"reply": "[会话已创建: my_tel]", "handled": True},
         )
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         from channels.telegram.session_flow import _PendingSessionCreate
         import channels.telegram.session_flow as telegram_session_flow_module
 
@@ -271,16 +257,17 @@ class TestTelegramAdapter:
 
         await adapter._on_message(update, object())
 
-        agent.execute_command.assert_awaited_once_with("/session_create my_tel")
+        agent.execute_command.assert_awaited_once()
+        assert agent.execute_command.await_args.args[-1] == "/session_create my_tel"
         assert "123" not in adapter._session_flow._pending_session_create  # noqa: SLF001
         adapter.send_text.assert_awaited_once_with("123", "[会话已创建: my_tel]")
 
     async def test_pending_session_create_does_not_pin_new_session_by_default(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         agent.execute_command = AsyncMock(
-            return_value=CommandResult(reply="[会话已创建: my_tel]", handled=True),
+            return_value={"reply": "[会话已创建: my_tel]", "handled": True},
         )
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter._session_flow.start_session_create_flow("123")
         adapter.send_text = AsyncMock()
         update = MagicMock()
@@ -302,9 +289,9 @@ class TestTelegramAdapter:
         adapter._app = mock_app
         agent = FakeAgent()
         agent.execute_command = AsyncMock(
-            return_value=CommandResult(reply="[会话已创建: my_tel]", handled=True),
+            return_value={"reply": "[会话已创建: my_tel]", "handled": True},
         )
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter._session_flow.start_session_create_flow("123")
         adapter.send_text = AsyncMock()
         update = MagicMock()
@@ -340,7 +327,7 @@ class TestTelegramAdapter:
 
     async def test_pending_session_create_rejects_invalid_input(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         from channels.telegram.session_flow import _PendingSessionCreate
         import channels.telegram.session_flow as telegram_session_flow_module
 
@@ -362,7 +349,7 @@ class TestTelegramAdapter:
 
     async def test_pending_session_create_canceled_by_temporary_command(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter._session_flow.start_session_create_flow("123")
         adapter.send_text = AsyncMock()
         update = MagicMock()
@@ -392,9 +379,9 @@ class TestTelegramAdapter:
     async def test_on_command_session_switch_pins_chat_session(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         agent.execute_command = AsyncMock(
-            return_value=CommandResult(reply="[已切换到会话: my_tel]", handled=True),
+            return_value={"reply": "[已切换到会话: my_tel]", "handled": True, "active_session": "my_tel"},
         )
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
@@ -418,7 +405,7 @@ class TestTelegramAdapter:
 
     async def test_pinned_session_is_used_for_followup_messages(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter._session_flow.pin_session("123", "my_tel")
         adapter._app.bot.send_message = AsyncMock()
         adapter._app.bot.edit_message_text = AsyncMock()
@@ -430,7 +417,10 @@ class TestTelegramAdapter:
 
         await adapter._on_message(update, object())
 
-        assert agent.current_session == "my_tel"
+        assert agent.calls[-1] == (
+            "stream",
+            ("data/telegram_default_default_workspace", "my_tel", "hello"),
+        )
 
     async def test_start_configures_proxy_and_handlers(self, monkeypatch):
         builder = MagicMock()
@@ -464,7 +454,7 @@ class TestTelegramAdapter:
             CommandDef(name="/memory_reindex", description="reindex", detail="reindex memory"),
         ]
         agent._ensure_initialized = AsyncMock()
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         await adapter.start()
 
         builder.token.assert_called_once_with("fake:token")
@@ -472,7 +462,6 @@ class TestTelegramAdapter:
         builder.get_updates_proxy.assert_called_once_with("http://127.0.0.1:7890")
         app.add_error_handler.assert_called_once()
         assert app.add_handler.call_count == 3
-        agent._ensure_initialized.assert_awaited_once()
         app.bot.set_my_commands.assert_awaited_once()
         commands = app.bot.set_my_commands.call_args.args[0]
         assert isinstance(commands[0], BotCommand)
@@ -498,7 +487,7 @@ class TestTelegramAdapter:
             CommandDef(name="/valid_cmd", description="x" * 300, detail=""),
             CommandDef(name="/bad-name", description="bad", detail=""),
         ]
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter._app.bot.set_my_commands = AsyncMock()
 
         await adapter._configure_bot_commands()
@@ -640,8 +629,8 @@ class TestTelegramAdapter:
         )
         assert adapter._stream_buf["123"].text == "Hello World"
 
-    async def test_send_delta_subsequent_edit_failure_updates_sent_text(self, adapter: TelegramAdapter):
-        """中间编辑失败后应同步 sent_text，避免 pending 计算长期失真。"""
+    async def test_send_delta_subsequent_edit_failure_keeps_pending_text(self, adapter: TelegramAdapter):
+        """中间编辑失败后不应把未发送文本标记为已发送。"""
         adapter._stream_buf["123"] = _StreamBuf(
             msg_id=42,
             text="Hello ",
@@ -653,13 +642,27 @@ class TestTelegramAdapter:
         await adapter.send_delta("123", "World", final=False)
 
         assert adapter._stream_buf["123"].text == "Hello World"
-        assert adapter._stream_buf["123"].sent_text == "Hello World"
+        assert adapter._stream_buf["123"].sent_text == "Hello "
         assert adapter._stream_buf["123"].last_edit_at > 0.0
+
+    async def test_send_delta_first_send_failure_keeps_single_pending_buffer(self, adapter: TelegramAdapter):
+        """首次发送失败后，后续 delta 应复用同一 pending buffer 再发送合并文本。"""
+        adapter._app.bot.send_message = AsyncMock(side_effect=[None, MagicMock(message_id=42)])
+
+        await adapter.send_delta("123", "Hello ", final=False)
+        await adapter.send_delta("123", "World", final=False)
+
+        assert adapter._app.bot.send_message.await_count == 2
+        second_call = adapter._app.bot.send_message.await_args_list[1]
+        assert second_call.kwargs["text"] == "Hello World"
+        assert adapter._stream_buf["123"].msg_id == 42
+        assert adapter._stream_buf["123"].text == "Hello World"
+        assert adapter._stream_buf["123"].sent_text == "Hello World"
 
     async def test_stream_error_clears_buffer_and_notifies_user(self, adapter: TelegramAdapter):
         """流式 ERROR 后应清理 buffer，避免下一条消息复用失效状态。"""
         agent = FakeErrorAgent()
-        adapter.bind_agent(agent)
+        adapter.bind_agent_client(agent)
         adapter._stream_buf["123"] = _StreamBuf(
             msg_id=42,
             text="stale",
@@ -672,7 +675,7 @@ class TestTelegramAdapter:
 
         assert result.text == ""
         assert "123" not in adapter._stream_buf
-        adapter.send_text.assert_awaited_once_with("123", "错误: 模拟错误")
+        adapter.send_text.assert_awaited_once_with("123", "处理消息失败，请稍后重试。")
 
     async def test_send_delta_subsequent_throttled(self, adapter: TelegramAdapter):
         """未到节流阈值时不应立即编辑消息。"""
@@ -799,10 +802,10 @@ class TestTelegramAdapter:
         assert TelegramAdapter(token="fake:token").name == "telegram_default"
         assert TelegramAdapter(token="fake:token", bot_name="main").name == "telegram_main"
 
-    async def test_bind_agent(self, adapter: TelegramAdapter):
+    async def test_bind_agent_client_client(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        adapter.bind_agent(agent)
-        assert adapter._agent is agent
+        adapter.bind_agent_client(agent)
+        assert adapter._agent_client is agent
 
     async def test_no_app_send_text_noop(self):
         """_app 为 None 时 send_text 应静默跳过。"""

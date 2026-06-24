@@ -1,0 +1,100 @@
+# ── RPG Core 业务配置 ─────────────────────────────────────────────────
+# 只保留无框架核心层需要的业务参数：Agent 行为、数据目录、记忆检索等。
+# local / test / prod 是固定 profile 名称；同级 settings.local.yaml、
+# settings.test.yaml、settings.prod.yaml 会按当前 profile 自动覆盖本文件。
+
+# 默认 profile。可通过环境变量 RPG_WORLD_PROFILE 覆盖。
+default_profile: local
+
+# 所有 profile 共享的默认值。
+base:
+  # ── Agent 业务行为（不包含 LLM provider / model 选型）───────────────
+  agent:
+    # 单轮最多允许工具调用次数。
+    max_tool_call_limit: 10
+    # 是否把工具调用记录写入最终对话历史。
+    include_tool_records: true
+    # 是否输出详细调试日志。
+    verbose_logging: true
+
+    # 记忆子 Agent 的摘要、召回、剧情记忆触发参数。
+    memory_sub_agent:
+      enabled: true
+      summary:
+        # 每批压缩的用户轮次数。
+        compress_batch_size: 5
+        # 压缩后保留的最近对话轮数。
+        keep_rounds: 5
+        # 是否启用自动摘要压缩。
+        compression_enabled: true
+      recall:
+        # 每次上下文召回最多注入的记忆条数。
+        max_items: 5
+      story:
+        # N 轮后触发剧情记忆提取；0 表示关闭自动触发。
+        trigger_rounds: 0
+
+    # 状态子 Agent 开关。
+    status_sub_agent:
+      enabled: true
+
+  # ── Workspace 内数据目录 ──────────────────────────────────────────
+  data:
+    # 角色卡 JSON 文件所在子目录。
+    character_path: character
+    # 世界书 JSON 文件所在子目录。
+    lorebook_path: lorebook
+
+  # ── 记忆检索与索引业务参数 ────────────────────────────────────────
+  memory:
+    # 是否启用向量记忆索引与检索。
+    enabled: true
+    # 是否启用向量 + 关键词 + raw markdown 的混合召回。
+    hybrid_enabled: true
+    # 向量召回候选数量。
+    vector_k: 50
+    # 关键词检索 tokenizer：jieba / bigram / both。
+    keyword_tokenizer: jieba
+    # 关键词召回候选数量。
+    keyword_k: 50
+    # Raw markdown 召回模式：disabled / always / fallback_only。
+    raw_md_mode: fallback_only
+    # fallback_only 模式下主召回不足的触发阈值；0 表示使用当前候选池目标。
+    raw_md_min_results: 0
+    # 混合评分中向量相似度权重。
+    hybrid_vector_weight: 0.47
+    # 混合评分中关键词匹配权重。
+    hybrid_keyword_weight: 0.18
+    # 混合评分中 raw markdown 原文覆盖权重。
+    hybrid_raw_md_weight: 0.05
+    # 混合评分中原始查询精确/模糊命中权重。
+    hybrid_exact_weight: 0.10
+    # 混合评分中 query planner 扩展查询命中权重。
+    hybrid_expanded_weight: 0.10
+    # 混合评分中时间新近度权重。
+    hybrid_recency_weight: 0.05
+    # 混合评分中记忆粒度优先级权重。
+    hybrid_granularity_weight: 0.05
+    # 进入 reranker 的候选数量。
+    rerank_candidate_k: 8
+    # LLM rerank 分数在最终融合分中的权重。
+    rerank_score_weight: 0.70
+    # 最终返回给上下文的记忆条数。
+    top_k: 2
+    # jieba 用户词典路径；留空表示使用默认词典。
+    jieba_dict: ""
+    # 单文件超过此字符数时分块。
+    chunk_size: 2000
+    # 分块重叠字符数。
+    chunk_overlap: 64
+
+  # ── 核心/记忆侧日志配置 ───────────────────────────────────────────
+  logging:
+    # 核心工具和 rp_memory 手动 CLI 的日志级别。当前阶段默认 DEBUG。
+    log_level: DEBUG
+
+# 固定 profile 名称；覆盖文件无需在这里声明 file。
+profiles:
+  local: {}
+  test: {}
+  prod: {}

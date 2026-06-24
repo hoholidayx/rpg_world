@@ -1,7 +1,4 @@
-"""CLI 快捷入口。
-
-用于与 ``run.py`` 同级快速查找和单独调试 CLI。
-"""
+"""CLI 独立进程入口。"""
 
 from __future__ import annotations
 
