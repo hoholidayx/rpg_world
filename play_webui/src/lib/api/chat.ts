@@ -11,6 +11,7 @@ export function createStreamRequest(payload: SendMessagePayload, signal?: AbortS
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       workspace: payload.workspace,
+      story_id: payload.storyId,
       session_id: payload.sessionId,
       text: payload.text,
       mode: payload.mode,

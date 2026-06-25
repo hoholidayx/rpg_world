@@ -184,11 +184,11 @@ function Sidebar() {
   )
 }
 
-function Header({ sessionId }: { sessionId: string }) {
+function Header({ storyId, sessionId }: { storyId: number; sessionId: string }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4">
       <div>
-        <h1 className="text-xl font-bold text-slate-950">故事：雾港 / {sessionId}</h1>
+        <h1 className="text-xl font-bold text-slate-950">故事：{storyId} / {sessionId}</h1>
         <p className="mt-1 text-sm text-slate-500">雾港序章：码头钟楼下的第一幕</p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
@@ -292,13 +292,13 @@ function Timeline() {
   )
 }
 
-function Composer({ workspace, sessionId }: { workspace: string; sessionId: string }) {
+function Composer({ workspace, storyId, sessionId }: { workspace: string; storyId: number; sessionId: string }) {
   return (
-    <section data-workspace={workspace} data-session-id={sessionId} className="border-t border-slate-200 bg-white px-6 py-4">
+    <section data-workspace={workspace} data-story-id={storyId} data-session-id={sessionId} className="border-t border-slate-200 bg-white px-6 py-4">
       <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2">
           <div className="flex flex-wrap gap-2">
-            <CommandPaletteDialog workspace={workspace} sessionId={sessionId} />
+            <CommandPaletteDialog workspace={workspace} storyId={storyId} sessionId={sessionId} />
             <button className="rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-500">输入 / 触发命令</button>
           </div>
         </div>
@@ -308,7 +308,7 @@ function Composer({ workspace, sessionId }: { workspace: string; sessionId: stri
             placeholder="输入你的行动、台词或 GM 指令..."
             defaultValue=""
           />
-          <SendStopButton workspace={workspace} sessionId={sessionId} />
+          <SendStopButton workspace={workspace} storyId={storyId} sessionId={sessionId} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-2">
           <div className="flex flex-wrap gap-2">
@@ -338,7 +338,7 @@ function RightRail() {
   )
 }
 
-export function SessionRoom({ workspace, sessionId }: { workspace: string; sessionId: string }) {
+export function SessionRoom({ workspace, storyId, sessionId }: { workspace: string; storyId: number; sessionId: string }) {
   const [leftWidth, setLeftWidth] = useState(defaultSidebarSizes.left)
   const [rightWidth, setRightWidth] = useState(defaultSidebarSizes.right)
   const [dragState, setDragState] = useState<DragState | null>(null)
@@ -395,6 +395,7 @@ export function SessionRoom({ workspace, sessionId }: { workspace: string; sessi
     <main
       style={gridStyle}
       data-workspace={workspace}
+      data-story-id={storyId}
       data-session-id={sessionId}
       className="min-h-screen bg-[#f7f7fa] text-slate-900 lg:grid lg:h-screen lg:min-h-0 lg:grid-cols-[var(--session-grid-columns)] lg:overflow-hidden"
     >
@@ -408,9 +409,9 @@ export function SessionRoom({ workspace, sessionId }: { workspace: string; sessi
         <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400" />
       </button>
       <section className="flex min-h-screen min-w-0 flex-col lg:h-screen lg:min-h-0">
-        <Header sessionId={sessionId} />
+        <Header storyId={storyId} sessionId={sessionId} />
         <Timeline />
-        <Composer workspace={workspace} sessionId={sessionId} />
+        <Composer workspace={workspace} storyId={storyId} sessionId={sessionId} />
       </section>
       <button
         type="button"

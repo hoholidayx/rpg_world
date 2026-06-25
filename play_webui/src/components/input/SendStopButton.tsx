@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Plane, Square } from 'lucide-react'
 
-export function SendStopButton({ workspace, sessionId }: { workspace: string; sessionId: string }) {
+export function SendStopButton({ workspace, storyId, sessionId }: { workspace: string; storyId: number; sessionId: string }) {
   const [isSending, setIsSending] = useState(false)
   const Icon = isSending ? Square : Plane
   const label = isSending ? '停止' : '发送'
@@ -12,6 +12,7 @@ export function SendStopButton({ workspace, sessionId }: { workspace: string; se
     <button
       type="button"
       data-workspace={workspace}
+      data-story-id={storyId}
       data-session-id={sessionId}
       aria-pressed={isSending}
       onClick={() => setIsSending((current) => !current)}

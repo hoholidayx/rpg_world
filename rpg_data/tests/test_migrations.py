@@ -167,6 +167,13 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             for story_id in story_ids:
                 conn.execute(
                     """
+                    INSERT INTO sessions (workspace_id, story_id, session_key)
+                    VALUES ('multi_workspace', ?, 'shared_session')
+                    """,
+                    (story_id,),
+                )
+                conn.execute(
+                    """
                     INSERT INTO story_characters (workspace_id, story_id, character_id)
                     VALUES ('multi_workspace', ?, ?)
                     """,
@@ -199,10 +206,33 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             """,
             (lorebook_entry_id,),
         ).fetchone()["count"]
+        session_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM sessions
+            WHERE workspace_id = 'multi_workspace'
+              AND session_key = 'shared_session'
+            """
+        ).fetchone()["count"]
 
         assert story_count == 2
+        assert session_count == 2
         assert character_mount_count == 2
         assert lorebook_mount_count == 2
+
+        try:
+            with db.transaction(conn):
+                conn.execute(
+                    """
+                    INSERT INTO sessions (workspace_id, story_id, session_key)
+                    VALUES ('multi_workspace', ?, 'shared_session')
+                    """,
+                    (story_ids[0],),
+                )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            raise AssertionError("expected duplicate story session key to fail")
     finally:
         conn.close()
 

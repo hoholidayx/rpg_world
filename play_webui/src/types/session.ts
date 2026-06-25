@@ -7,6 +7,7 @@ export type WorkspaceSummary = {
 export type SessionSummary = {
   id: string
   workspace: string
+  storyId: number
   title?: string | null
   description?: string | null
   createdAt?: string | null

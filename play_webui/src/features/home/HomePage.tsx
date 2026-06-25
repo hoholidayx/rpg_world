@@ -28,14 +28,8 @@ import {
 import { listWorkspaces } from '@/lib/api/sessions'
 import type { SessionSummary, WorkspaceSummary } from '@/types/session'
 
-const demoWorkspace: WorkspaceSummary = {
-  id: 'demo_workspace',
-  name: 'Demo Workspace',
-  description: 'Demo workspace for RPG World data module examples',
-}
-
-function sessionHref(session: Pick<SessionSummary, 'id' | 'workspace'>) {
-  return `/session/${session.id}?workspace=${encodeURIComponent(session.workspace)}`
+function sessionHref(session: Pick<SessionSummary, 'id' | 'workspace' | 'storyId'>) {
+  return `/session/${session.id}?workspace=${encodeURIComponent(session.workspace)}&story_id=${encodeURIComponent(session.storyId)}`
 }
 
 const navItems = [
@@ -56,8 +50,9 @@ const stories = [
     sessions: 3,
     characters: 5,
     updatedAt: '2025/05/30 14:22',
-    workspace: demoWorkspace.id,
-    sessionId: 'demo_session',
+    workspace: '',
+    storyId: 1,
+    sessionId: 'demo_forest_main',
     selected: true,
     artClass: 'from-slate-700 via-slate-500 to-indigo-200',
     accent: 'bg-slate-100',
@@ -70,7 +65,8 @@ const stories = [
     sessions: 2,
     characters: 4,
     updatedAt: '2025/05/29 19:33',
-    workspace: demoWorkspace.id,
+    workspace: '',
+    storyId: 2,
     sessionId: 'market_edge',
     artClass: 'from-emerald-900 via-emerald-600 to-emerald-100',
     accent: 'bg-emerald-100',
@@ -83,7 +79,8 @@ const stories = [
     sessions: 1,
     characters: 3,
     updatedAt: '2025/05/20 11:11',
-    workspace: demoWorkspace.id,
+    workspace: '',
+    storyId: 1,
     sessionId: 'forest_night',
     artClass: 'from-amber-700 via-orange-300 to-amber-50',
     accent: 'bg-amber-100',
@@ -98,8 +95,9 @@ const recentSessions: Array<SessionSummary & {
   artClass: string
 }> = [
   {
-    id: 'demo_session',
-    workspace: demoWorkspace.id,
+    id: 'demo_forest_main',
+    workspace: '',
+    storyId: 1,
     title: '雾港序章：码头钟楼下的第一幕',
     description: '适合验证 Play WebUI 基础流程，包含流式叙事、角色状态、场景切换...',
     story: '雾港',
@@ -111,7 +109,8 @@ const recentSessions: Array<SessionSummary & {
   },
   {
     id: 'market_edge',
-    workspace: demoWorkspace.id,
+    workspace: '',
+    storyId: 2,
     title: '黑市边缘：旧灯笼里的第二把钥匙',
     description: '微弱的灯火晃动，门后的齿轮仍在转动。',
     story: '黑市边缘',
@@ -123,7 +122,8 @@ const recentSessions: Array<SessionSummary & {
   },
   {
     id: 'ledger_name',
-    workspace: demoWorkspace.id,
+    workspace: '',
+    storyId: 2,
     title: '黑市余波：账本背面的名字',
     description: '账本合上，名字未被抹去，新的线索浮出水面。',
     story: '黑市边缘',
@@ -172,7 +172,7 @@ function MiniLandscape({ className }: { className: string }) {
   )
 }
 
-function StoryCard({ story, workspace }: { story: (typeof stories)[number]; workspace: string }) {
+function StoryCard({ story, workspace }: { story: (typeof stories)[number]; workspace: string | null }) {
   return (
     <article
       className={`rounded-xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg ${
@@ -205,27 +205,35 @@ function StoryCard({ story, workspace }: { story: (typeof stories)[number]; work
       </div>
       <div className="mt-4 flex items-center justify-between gap-4">
         <p className="text-xs text-slate-500">更新时间&nbsp;&nbsp; {story.updatedAt}</p>
-        <Link
-          href={sessionHref({ id: story.sessionId, workspace })}
-          className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:border-violet-300 hover:text-violet-700"
-        >
-          查看
-        </Link>
+        {workspace ? (
+          <Link
+            href={sessionHref({ id: story.sessionId, workspace, storyId: story.storyId })}
+            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:border-violet-300 hover:text-violet-700"
+          >
+            查看
+          </Link>
+        ) : (
+          <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-400">查看</span>
+        )}
       </div>
     </article>
   )
 }
 
-function RecentSessionRow({ session, workspace }: { session: (typeof recentSessions)[number]; workspace: string }) {
-  const href = sessionHref({ id: session.id, workspace })
+function RecentSessionRow({ session, workspace }: { session: (typeof recentSessions)[number]; workspace: string | null }) {
+  const href = workspace ? sessionHref({ id: session.id, workspace, storyId: session.storyId }) : null
 
   return (
     <article className="grid gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-violet-200 hover:shadow-md md:grid-cols-[auto_minmax(0,1fr)_220px_auto_auto] md:items-center">
       <MiniLandscape className={session.artClass} />
       <div className="min-w-0">
-        <Link href={href} className="block truncate text-sm font-bold text-slate-950 hover:text-violet-700">
-          {session.title}
-        </Link>
+        {href ? (
+          <Link href={href} className="block truncate text-sm font-bold text-slate-950 hover:text-violet-700">
+            {session.title}
+          </Link>
+        ) : (
+          <span className="block truncate text-sm font-bold text-slate-500">{session.title}</span>
+        )}
         <p className="mt-1 truncate text-xs text-slate-500">{session.description}</p>
       </div>
       <dl className="grid gap-1 text-xs text-slate-500">
@@ -244,13 +252,19 @@ function RecentSessionRow({ session, workspace }: { session: (typeof recentSessi
       </dl>
       <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${session.statusClass}`}>{session.status}</span>
       <div className="flex items-center gap-2">
-        <Link
-          href={href}
-          aria-label={`继续 ${session.title}`}
-          className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-900 transition hover:border-violet-300 hover:text-violet-700"
-        >
-          <Play size={16} fill="currentColor" />
-        </Link>
+        {href ? (
+          <Link
+            href={href}
+            aria-label={`继续 ${session.title}`}
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-900 transition hover:border-violet-300 hover:text-violet-700"
+          >
+            <Play size={16} fill="currentColor" />
+          </Link>
+        ) : (
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-300">
+            <Play size={16} fill="currentColor" />
+          </span>
+        )}
         <button className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100" aria-label="更多">
           <MoreHorizontal size={18} />
         </button>
@@ -262,14 +276,19 @@ function RecentSessionRow({ session, workspace }: { session: (typeof recentSessi
 function WorkspaceSwitcher({
   value,
   workspaces,
+  isLoading,
+  isError,
   onChange,
 }: {
-  value: string
+  value: string | null
   workspaces: WorkspaceSummary[]
-  onChange: (workspace: string) => void
+  isLoading: boolean
+  isError: boolean
+  onChange: (workspace: string | null) => void
 }) {
   const [open, setOpen] = useState(false)
-  const selectedWorkspace = workspaces.find((workspace) => workspace.id === value) ?? workspaces[0] ?? demoWorkspace
+  const selectedWorkspace = value ? workspaces.find((workspace) => workspace.id === value) : null
+  const label = selectedWorkspace?.name ?? (isLoading ? '加载中' : isError ? '加载失败' : '暂无 workspace')
 
   return (
     <div className="relative">
@@ -283,12 +302,12 @@ function WorkspaceSwitcher({
       >
         <FolderOpen size={16} className="text-slate-400" />
         <span className="hidden text-slate-500 sm:inline">Workspace</span>
-        <span className="max-w-28 truncate font-semibold">{selectedWorkspace.name}</span>
+        <span className="max-w-28 truncate font-semibold">{label}</span>
         <ChevronDown size={16} className={`text-slate-400 transition ${open ? 'rotate-180 text-violet-500' : ''}`} />
       </button>
       {open ? (
         <div className="absolute left-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl shadow-slate-200/70" role="menu">
-          {workspaces.map((workspace) => {
+          {workspaces.length ? workspaces.map((workspace) => {
             const selected = workspace.id === value
 
             return (
@@ -314,7 +333,11 @@ function WorkspaceSwitcher({
                 {selected ? <Check size={16} className="shrink-0 text-violet-600" /> : null}
               </button>
             )
-          })}
+          }) : (
+            <div className="px-3 py-2.5 text-sm text-slate-500">
+              {isError ? 'workspace 加载失败' : '暂无 workspace'}
+            </div>
+          )}
         </div>
       ) : null}
     </div>
@@ -322,19 +345,20 @@ function WorkspaceSwitcher({
 }
 
 export function HomePage() {
-  const [currentWorkspace, setCurrentWorkspace] = useState(demoWorkspace.id)
+  const [currentWorkspace, setCurrentWorkspace] = useState<string | null>(null)
   const workspacesQuery = useQuery({
     queryKey: ['play-workspaces'],
     queryFn: listWorkspaces,
   })
-  const workspaceOptions = useMemo(
-    () => (workspacesQuery.data?.length ? workspacesQuery.data : [demoWorkspace]),
-    [workspacesQuery.data],
-  )
+  const workspaceOptions = useMemo(() => workspacesQuery.data ?? [], [workspacesQuery.data])
 
   useEffect(() => {
-    if (!workspaceOptions.some((workspace) => workspace.id === currentWorkspace)) {
-      setCurrentWorkspace(workspaceOptions[0]?.id ?? demoWorkspace.id)
+    if (workspaceOptions.length === 0) {
+      if (currentWorkspace !== null) setCurrentWorkspace(null)
+      return
+    }
+    if (!currentWorkspace || !workspaceOptions.some((workspace) => workspace.id === currentWorkspace)) {
+      setCurrentWorkspace(workspaceOptions[0].id)
     }
   }, [currentWorkspace, workspaceOptions])
 
@@ -343,7 +367,13 @@ export function HomePage() {
       <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-slate-200/80 bg-white/90 px-6 backdrop-blur">
         <div className="flex items-center gap-4">
           <Logo />
-          <WorkspaceSwitcher value={currentWorkspace} workspaces={workspaceOptions} onChange={setCurrentWorkspace} />
+          <WorkspaceSwitcher
+            value={currentWorkspace}
+            workspaces={workspaceOptions}
+            isLoading={workspacesQuery.isLoading}
+            isError={workspacesQuery.isError}
+            onChange={setCurrentWorkspace}
+          />
         </div>
         <div className="hidden items-center gap-10 text-sm text-slate-900 md:flex">
           <span className="flex items-center gap-2">
@@ -428,10 +458,12 @@ export function HomePage() {
                   <StoryCard key={story.title} story={story} workspace={currentWorkspace} />
                 ))}
               </div>
-              <Link href={sessionHref({ id: 'demo_session', workspace: currentWorkspace })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
-                查看全部故事
-                <ChevronRight size={16} />
-              </Link>
+              {currentWorkspace ? (
+                <Link href={sessionHref({ id: 'demo_forest_main', workspace: currentWorkspace, storyId: 1 })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
+                  查看全部故事
+                  <ChevronRight size={16} />
+                </Link>
+              ) : null}
             </section>
 
             <section className="rounded-2xl bg-white/60 p-6 shadow-sm">
@@ -443,10 +475,12 @@ export function HomePage() {
                   <RecentSessionRow key={session.title} session={session} workspace={currentWorkspace} />
                 ))}
               </div>
-              <Link href={sessionHref({ id: 'demo_session', workspace: currentWorkspace })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
-                查看全部会话
-                <ChevronRight size={16} />
-              </Link>
+              {currentWorkspace ? (
+                <Link href={sessionHref({ id: 'demo_forest_main', workspace: currentWorkspace, storyId: 1 })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
+                  查看全部会话
+                  <ChevronRight size={16} />
+                </Link>
+              ) : null}
             </section>
           </section>
 

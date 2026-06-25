@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS stories (
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
-    story_id INTEGER,
+    story_id INTEGER NOT NULL,
     session_key TEXT NOT NULL,
     title TEXT NOT NULL DEFAULT '',
     state_json TEXT NOT NULL DEFAULT '{}',
@@ -38,8 +38,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE SET NULL,
-    UNIQUE (workspace_id, session_key)
+    FOREIGN KEY (story_id, workspace_id) REFERENCES stories(id, workspace_id) ON DELETE CASCADE,
+    UNIQUE (workspace_id, story_id, session_key)
 );
 
 CREATE TABLE IF NOT EXISTS characters (

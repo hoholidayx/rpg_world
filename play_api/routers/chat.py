@@ -9,24 +9,34 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from play_api.backends import get_agent_backend
+from play_api.routers._locator import require_session_locator
 
 router = APIRouter(prefix="/chat", tags=["play-chat"])
 
 
 class PlayChatRequest(BaseModel):
-    workspace: str = "demo_workspace"
-    session_id: str = "demo_session"
+    workspace: str
+    story_id: int
+    session_id: str
     text: str
     mode: str = "ic"
 
 
 @router.post("/turn")
 async def create_turn(payload: PlayChatRequest) -> dict[str, object]:
-    result = await get_agent_backend().send(payload.workspace, payload.session_id, payload.text, payload.mode)
+    await require_session_locator(payload.workspace, payload.story_id, payload.session_id)
+    result = await get_agent_backend().send(
+        payload.workspace,
+        payload.story_id,
+        payload.session_id,
+        payload.text,
+        payload.mode,
+    )
     return {
         "turnId": f"turn_{payload.session_id}",
         "status": "completed",
         "workspace": payload.workspace,
+        "storyId": payload.story_id,
         "mode": payload.mode,
         "reply": result.get("reply", ""),
         "agent": result,
@@ -35,9 +45,12 @@ async def create_turn(payload: PlayChatRequest) -> dict[str, object]:
 
 @router.post("/stream")
 async def stream_turn(payload: PlayChatRequest) -> StreamingResponse:
+    await require_session_locator(payload.workspace, payload.story_id, payload.session_id)
+
     async def event_generator():
         async for event in get_agent_backend().stream(
             payload.workspace,
+            payload.story_id,
             payload.session_id,
             payload.text,
             payload.mode,

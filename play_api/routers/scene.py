@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from play_api.backends import get_agent_backend
+from play_api.routers._locator import require_session_locator
 
 
 router = APIRouter(prefix="/scene", tags=["play-scene"])
@@ -23,10 +24,12 @@ class PlayScene(BaseModel):
 
 @router.get("/current", response_model=PlayScene)
 async def get_current_scene(
-    workspace: str = Query(default="demo_workspace"),
-    session_id: str = Query(default="demo_session", alias="sessionId"),
+    workspace: str = Query(...),
+    story_id: int = Query(...),
+    session_id: str = Query(...),
 ) -> PlayScene:
-    scene = await get_agent_backend().get_scene(workspace, session_id)
+    await require_session_locator(workspace, story_id, session_id)
+    scene = await get_agent_backend().get_scene(workspace, story_id, session_id)
     return PlayScene(
         attrs=dict(scene.get("attrs", {})),
         time=str(scene["time"]) if scene.get("time") is not None else None,

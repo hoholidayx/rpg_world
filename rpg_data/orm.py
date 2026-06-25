@@ -102,8 +102,7 @@ class Session(BaseModel):
         Story,
         backref="sessions",
         column_name="story_id",
-        null=True,
-        on_delete="SET NULL",
+        on_delete="CASCADE",
     )
     session_key = TextField()
     title = TextField(default="")

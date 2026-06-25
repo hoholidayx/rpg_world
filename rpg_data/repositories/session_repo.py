@@ -15,9 +15,9 @@ class SessionRepository:
     def create(
         self,
         workspace_id: str,
+        story_id: int,
         session_key: str,
         *,
-        story_id: int | None = None,
         title: str = "",
         state_json: str = "{}",
         last_story_turn_index: int = 0,
@@ -49,6 +49,16 @@ class SessionRepository:
     def get(self, session_id: int) -> Session | None:
         return get_or_none(Session, session_id)
 
+    def get_by_locator(self, workspace_id: str, story_id: int, session_key: str) -> Session | None:
+        return (
+            Session.select()
+            .where(
+                Session.workspace == workspace_id,
+                Session.story == story_id,
+                Session.session_key == session_key,
+            )
+            .first()
+        )
+
     def update_timestamp(self, session_id: int) -> Session | None:
         return update_timestamp(Session, session_id)
-

@@ -81,20 +81,20 @@ def test_repositories_create_workspace_story_session_and_query_sessions(
             second_story = stories.create("campaign", "学院旧梦")
             sessions.create(
                 "campaign",
-                "forest_main",
-                story_id=first_story.id,
+                first_story.id,
+                "shared_main",
                 title="Forest Main",
             )
             sessions.create(
                 "campaign",
+                first_story.id,
                 "forest_side",
-                story_id=first_story.id,
                 title="Forest Side",
             )
             sessions.create(
                 "campaign",
-                "academy_main",
-                story_id=second_story.id,
+                second_story.id,
+                "shared_main",
                 title="Academy Main",
             )
 
@@ -110,18 +110,20 @@ def test_repositories_create_workspace_story_session_and_query_sessions(
         )
 
         assert [row.session_key for row in workspace_sessions] == [
-            "forest_main",
+            "shared_main",
             "forest_side",
-            "academy_main",
+            "shared_main",
         ]
         assert [row.session_key for row in first_story_sessions] == [
-            "forest_main",
+            "shared_main",
             "forest_side",
         ]
         assert [row.session_key for row in filtered_sessions] == [
-            "forest_main",
+            "shared_main",
             "forest_side",
         ]
+        assert sessions.get_by_locator("campaign", first_story.id, "shared_main").title == "Forest Main"
+        assert sessions.get_by_locator("campaign", second_story.id, "shared_main").title == "Academy Main"
 
         touched = sessions.update_timestamp(workspace_sessions[0].id)
         assert touched.id == workspace_sessions[0].id
