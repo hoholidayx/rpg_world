@@ -125,7 +125,7 @@ def test_initial_schema_creates_default_data_workspace() -> None:
         assert dict(row) == {
             "id": "default",
             "name": "Default",
-            "root_path": "data",
+            "root_path": "data/default_workspace",
         }
     finally:
         conn.close()

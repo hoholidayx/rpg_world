@@ -123,7 +123,12 @@ CREATE TABLE IF NOT EXISTS story_lorebook_entries (
 );
 
 INSERT OR IGNORE INTO workspaces (id, name, root_path, description)
-VALUES ('default', 'Default', 'data', 'Default workspace under the data directory');
+VALUES (
+    'default',
+    'Default',
+    'data/default_workspace',
+    'Default workspace under the data/default_workspace directory'
+);
 
 CREATE INDEX IF NOT EXISTS idx_stories_workspace_id ON stories(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id);
