@@ -64,6 +64,7 @@ include = [
     "channels*",
     "play_api*",
     "rpg_core*",
+    "rpg_data*",
     "rp_memory*",
     "llama_service*",
 ]
