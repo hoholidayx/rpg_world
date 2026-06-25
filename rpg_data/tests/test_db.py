@@ -8,7 +8,7 @@ from rpg_data import db
 from rpg_data.settings import get_database_path
 
 
-def test_get_database_path_defaults_to_runtime_data(monkeypatch) -> None:
+def test_get_database_path_defaults_to_data(monkeypatch) -> None:
     monkeypatch.delenv("RPG_WORLD_DB_PATH", raising=False)
 
     path = get_database_path()

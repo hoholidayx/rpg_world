@@ -78,6 +78,7 @@ exclude = [
 [tool.setuptools.package-data]
 dashboard_api = ["*.json"]
 rpg_core = ["jinja/**/*.jinja"]
+rpg_data = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
