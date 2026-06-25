@@ -7,10 +7,7 @@ from collections.abc import AsyncIterator
 from play_api import agent_client
 
 
-class AgentPlayBackend:
-    async def list_workspaces(self) -> list[dict[str, object]]:
-        return [{"id": "default", "name": "默认工作区", "description": "Agent service workspace"}]
-
+class AgentBackend:
     async def list_sessions(self, workspace: str) -> list[dict[str, object]]:
         result = await agent_client.get_agent_client().list_sessions(workspace, "demo_session")
         sessions = [str(item) for item in result.get("sessions", []) if str(item)]

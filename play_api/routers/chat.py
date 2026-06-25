@@ -8,13 +8,13 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from play_api.backends import get_play_backend
+from play_api.backends import get_agent_backend
 
 router = APIRouter(prefix="/chat", tags=["play-chat"])
 
 
 class PlayChatRequest(BaseModel):
-    workspace: str = "default"
+    workspace: str = "demo_workspace"
     session_id: str = "demo_session"
     text: str
     mode: str = "ic"
@@ -22,7 +22,7 @@ class PlayChatRequest(BaseModel):
 
 @router.post("/turn")
 async def create_turn(payload: PlayChatRequest) -> dict[str, object]:
-    result = await get_play_backend().send(payload.workspace, payload.session_id, payload.text, payload.mode)
+    result = await get_agent_backend().send(payload.workspace, payload.session_id, payload.text, payload.mode)
     return {
         "turnId": f"turn_{payload.session_id}",
         "status": "completed",
@@ -36,7 +36,7 @@ async def create_turn(payload: PlayChatRequest) -> dict[str, object]:
 @router.post("/stream")
 async def stream_turn(payload: PlayChatRequest) -> StreamingResponse:
     async def event_generator():
-        async for event in get_play_backend().stream(
+        async for event in get_agent_backend().stream(
             payload.workspace,
             payload.session_id,
             payload.text,

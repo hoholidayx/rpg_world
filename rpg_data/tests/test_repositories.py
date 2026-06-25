@@ -16,10 +16,10 @@ from rpg_data.repositories.story_lorebook_repo import StoryLorebookEntryReposito
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services.bootstrap import (
-    DEFAULT_STORY_TITLE,
-    DEFAULT_WORKSPACE_ID,
-    DEFAULT_WORKSPACE_ROOT_PATH,
-    ensure_default_workspace_and_story,
+    DEMO_STORY_TITLE,
+    DEMO_WORKSPACE_ID,
+    DEMO_WORKSPACE_ROOT_PATH,
+    get_demo_workspace_and_story,
 )
 
 
@@ -37,22 +37,22 @@ def _migrated_database(tmp_path: Path) -> SqliteDatabase:
     return database
 
 
-def test_bootstrap_ensures_default_workspace_and_story(tmp_path: Path) -> None:
+def test_bootstrap_reads_demo_workspace_and_story(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
-        workspace, story = ensure_default_workspace_and_story(database)
-        workspace_again, story_again = ensure_default_workspace_and_story(database)
+        workspace, story = get_demo_workspace_and_story(database)
+        workspace_again, story_again = get_demo_workspace_and_story(database)
 
-        assert workspace.id == DEFAULT_WORKSPACE_ID
-        assert workspace.root_path == DEFAULT_WORKSPACE_ROOT_PATH
-        assert story.title == DEFAULT_STORY_TITLE
+        assert workspace.id == DEMO_WORKSPACE_ID
+        assert workspace.root_path == DEMO_WORKSPACE_ROOT_PATH
+        assert story.title == DEMO_STORY_TITLE
         assert workspace_again.id == workspace.id
         assert story_again.id == story.id
         assert (
             Story.select()
             .where(
-                (Story.workspace == DEFAULT_WORKSPACE_ID)
-                & (Story.title == DEFAULT_STORY_TITLE)
+                (Story.workspace == DEMO_WORKSPACE_ID)
+                & (Story.title == DEMO_STORY_TITLE)
             )
             .count()
             == 1
@@ -138,11 +138,13 @@ def test_character_lorebook_and_mount_repositories(tmp_path: Path) -> None:
         lorebook_entries = LorebookEntryRepository(database)
         story_characters = StoryCharacterRepository(database)
         story_lorebook_entries = StoryLorebookEntryRepository(database)
+        workspaces = WorkspaceRepository(database)
 
         with database.atomic():
-            story = stories.create("default", "北境森林")
+            workspaces.create("repo_mounts", "Repo Mounts", "data/repo_mounts")
+            story = stories.create("repo_mounts", "北境森林")
             character = characters.create(
-                "default",
+                "repo_mounts",
                 "Alice",
                 personality="curious",
                 content="A young wizard.",
@@ -154,18 +156,18 @@ def test_character_lorebook_and_mount_repositories(tmp_path: Path) -> None:
                 tags_json='["外观"]',
             )
             lorebook = lorebook_entries.create(
-                "default",
+                "repo_mounts",
                 "World History",
                 content="Forged from ashes.",
                 tags_json='["history"]',
             )
             character_mount = story_characters.create(
-                "default",
+                "repo_mounts",
                 story.id,
                 character.id,
             )
             lorebook_mount = story_lorebook_entries.create(
-                "default",
+                "repo_mounts",
                 story.id,
                 lorebook.id,
             )

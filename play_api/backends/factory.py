@@ -1,14 +1,14 @@
-"""Factory for the configured Play API backend."""
+"""Factory for Play API backend providers."""
 
 from __future__ import annotations
 
-from play_api.backends.agent import AgentPlayBackend
-from play_api.backends.base import PlayBackend
-from play_api.backends.mock import MockPlayBackend
-from play_api.settings import play_settings
+from play_api.backends.agent import AgentBackend
+from play_api.backends.data_manager import DataManagerBackend
 
 
-def get_play_backend() -> PlayBackend:
-    if play_settings.use_mock_backend():
-        return MockPlayBackend()
-    return AgentPlayBackend()
+def get_agent_backend() -> AgentBackend:
+    return AgentBackend()
+
+
+def get_data_manager_backend() -> DataManagerBackend:
+    return DataManagerBackend()

@@ -34,7 +34,7 @@ export async function readApiError(response: Response, fallback = '请求失败'
         .join('; ')
     }
   } catch {
-    // Response may not contain JSON in early mock endpoints.
+    // Response may not contain JSON during early backend failures.
   }
   return fallback
 }

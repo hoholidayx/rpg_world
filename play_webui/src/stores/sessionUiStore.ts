@@ -10,7 +10,7 @@ type SessionUiState = {
 }
 
 export const useSessionUiStore = create<SessionUiState>((set) => ({
-  workspace: 'default',
+  workspace: 'demo_workspace',
   sessionId: null,
   draft: '',
   setWorkspace: (workspace) => set({ workspace }),

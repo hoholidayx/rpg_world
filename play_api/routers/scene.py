@@ -1,11 +1,11 @@
-"""Scene mock endpoints for Play WebUI."""
+"""Scene endpoints for Play WebUI."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from play_api.backends import get_play_backend
+from play_api.backends import get_agent_backend
 
 
 router = APIRouter(prefix="/scene", tags=["play-scene"])
@@ -23,10 +23,10 @@ class PlayScene(BaseModel):
 
 @router.get("/current", response_model=PlayScene)
 async def get_current_scene(
-    workspace: str = Query(default="default"),
+    workspace: str = Query(default="demo_workspace"),
     session_id: str = Query(default="demo_session", alias="sessionId"),
 ) -> PlayScene:
-    scene = await get_play_backend().get_scene(workspace, session_id)
+    scene = await get_agent_backend().get_scene(workspace, session_id)
     return PlayScene(
         attrs=dict(scene.get("attrs", {})),
         time=str(scene["time"]) if scene.get("time") is not None else None,

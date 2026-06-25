@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from play_api.backends import get_play_backend
+from play_api.backends import get_agent_backend
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
 
@@ -34,7 +34,7 @@ class PlayTurn(BaseModel):
 
 
 @router.get("", response_model=list[PlaySessionSummary])
-async def list_sessions(workspace: str = Query(default="default")) -> list[PlaySessionSummary]:
+async def list_sessions(workspace: str = Query(default="demo_workspace")) -> list[PlaySessionSummary]:
     now = datetime.now(UTC).isoformat()
     return [
         PlaySessionSummary(
@@ -45,20 +45,20 @@ async def list_sessions(workspace: str = Query(default="default")) -> list[PlayS
             created_at=now,
             updated_at=now,
         )
-        for session in await get_play_backend().list_sessions(workspace)
+        for session in await get_agent_backend().list_sessions(workspace)
     ]
 
 
 @router.get("/{session_id}/history", response_model=list[PlayTurn])
 async def get_session_history(
     session_id: str,
-    workspace: str = Query(default="default"),
+    workspace: str = Query(default="demo_workspace"),
 ) -> list[PlayTurn]:
     now = datetime.now(UTC).isoformat()
     turns: list[PlayTurn] = []
     pending_user: str | None = None
     turn_id = 1
-    for message in await get_play_backend().get_history(workspace, session_id):
+    for message in await get_agent_backend().get_history(workspace, session_id):
         role = message.get("role")
         content = str(message.get("content", ""))
         if role == "user":

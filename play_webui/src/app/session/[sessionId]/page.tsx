@@ -8,6 +8,6 @@ export default async function SessionPage({
   searchParams: Promise<{ workspace?: string }>
 }) {
   const { sessionId } = await params
-  const { workspace = 'default' } = await searchParams
+  const { workspace = 'demo_workspace' } = await searchParams
   return <SessionRoom workspace={workspace} sessionId={sessionId} />
 }

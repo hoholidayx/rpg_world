@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   BookOpen,
   Check,
@@ -24,26 +25,14 @@ import {
   UserRound,
   UsersRound,
 } from 'lucide-react'
+import { listWorkspaces } from '@/lib/api/sessions'
 import type { SessionSummary, WorkspaceSummary } from '@/types/session'
 
-const defaultWorkspace: WorkspaceSummary = {
-  id: 'default',
-  name: 'Default',
+const demoWorkspace: WorkspaceSummary = {
+  id: 'demo_workspace',
+  name: 'Demo Workspace',
+  description: 'Demo workspace for RPG World data module examples',
 }
-
-const workspaceOptions: WorkspaceSummary[] = [
-  defaultWorkspace,
-  {
-    id: 'fog_port',
-    name: 'Fog Port',
-    description: '雾港测试工作区',
-  },
-  {
-    id: 'sandbox',
-    name: 'Sandbox',
-    description: '沙盒工作区',
-  },
-]
 
 function sessionHref(session: Pick<SessionSummary, 'id' | 'workspace'>) {
   return `/session/${session.id}?workspace=${encodeURIComponent(session.workspace)}`
@@ -67,7 +56,7 @@ const stories = [
     sessions: 3,
     characters: 5,
     updatedAt: '2025/05/30 14:22',
-    workspace: defaultWorkspace.id,
+    workspace: demoWorkspace.id,
     sessionId: 'demo_session',
     selected: true,
     artClass: 'from-slate-700 via-slate-500 to-indigo-200',
@@ -81,7 +70,7 @@ const stories = [
     sessions: 2,
     characters: 4,
     updatedAt: '2025/05/29 19:33',
-    workspace: defaultWorkspace.id,
+    workspace: demoWorkspace.id,
     sessionId: 'market_edge',
     artClass: 'from-emerald-900 via-emerald-600 to-emerald-100',
     accent: 'bg-emerald-100',
@@ -94,7 +83,7 @@ const stories = [
     sessions: 1,
     characters: 3,
     updatedAt: '2025/05/20 11:11',
-    workspace: defaultWorkspace.id,
+    workspace: demoWorkspace.id,
     sessionId: 'forest_night',
     artClass: 'from-amber-700 via-orange-300 to-amber-50',
     accent: 'bg-amber-100',
@@ -110,7 +99,7 @@ const recentSessions: Array<SessionSummary & {
 }> = [
   {
     id: 'demo_session',
-    workspace: defaultWorkspace.id,
+    workspace: demoWorkspace.id,
     title: '雾港序章：码头钟楼下的第一幕',
     description: '适合验证 Play WebUI 基础流程，包含流式叙事、角色状态、场景切换...',
     story: '雾港',
@@ -122,7 +111,7 @@ const recentSessions: Array<SessionSummary & {
   },
   {
     id: 'market_edge',
-    workspace: defaultWorkspace.id,
+    workspace: demoWorkspace.id,
     title: '黑市边缘：旧灯笼里的第二把钥匙',
     description: '微弱的灯火晃动，门后的齿轮仍在转动。',
     story: '黑市边缘',
@@ -134,7 +123,7 @@ const recentSessions: Array<SessionSummary & {
   },
   {
     id: 'ledger_name',
-    workspace: defaultWorkspace.id,
+    workspace: demoWorkspace.id,
     title: '黑市余波：账本背面的名字',
     description: '账本合上，名字未被抹去，新的线索浮出水面。',
     story: '黑市边缘',
@@ -270,9 +259,17 @@ function RecentSessionRow({ session, workspace }: { session: (typeof recentSessi
   )
 }
 
-function WorkspaceSwitcher({ value, onChange }: { value: string; onChange: (workspace: string) => void }) {
+function WorkspaceSwitcher({
+  value,
+  workspaces,
+  onChange,
+}: {
+  value: string
+  workspaces: WorkspaceSummary[]
+  onChange: (workspace: string) => void
+}) {
   const [open, setOpen] = useState(false)
-  const selectedWorkspace = workspaceOptions.find((workspace) => workspace.id === value) ?? defaultWorkspace
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === value) ?? workspaces[0] ?? demoWorkspace
 
   return (
     <div className="relative">
@@ -291,7 +288,7 @@ function WorkspaceSwitcher({ value, onChange }: { value: string; onChange: (work
       </button>
       {open ? (
         <div className="absolute left-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl shadow-slate-200/70" role="menu">
-          {workspaceOptions.map((workspace) => {
+          {workspaces.map((workspace) => {
             const selected = workspace.id === value
 
             return (
@@ -325,19 +322,33 @@ function WorkspaceSwitcher({ value, onChange }: { value: string; onChange: (work
 }
 
 export function HomePage() {
-  const [currentWorkspace, setCurrentWorkspace] = useState(defaultWorkspace.id)
+  const [currentWorkspace, setCurrentWorkspace] = useState(demoWorkspace.id)
+  const workspacesQuery = useQuery({
+    queryKey: ['play-workspaces'],
+    queryFn: listWorkspaces,
+  })
+  const workspaceOptions = useMemo(
+    () => (workspacesQuery.data?.length ? workspacesQuery.data : [demoWorkspace]),
+    [workspacesQuery.data],
+  )
+
+  useEffect(() => {
+    if (!workspaceOptions.some((workspace) => workspace.id === currentWorkspace)) {
+      setCurrentWorkspace(workspaceOptions[0]?.id ?? demoWorkspace.id)
+    }
+  }, [currentWorkspace, workspaceOptions])
 
   return (
     <main className="min-h-screen bg-[#f7f8fc] text-slate-900">
       <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-slate-200/80 bg-white/90 px-6 backdrop-blur">
         <div className="flex items-center gap-4">
           <Logo />
-          <WorkspaceSwitcher value={currentWorkspace} onChange={setCurrentWorkspace} />
+          <WorkspaceSwitcher value={currentWorkspace} workspaces={workspaceOptions} onChange={setCurrentWorkspace} />
         </div>
         <div className="hidden items-center gap-10 text-sm text-slate-900 md:flex">
           <span className="flex items-center gap-2">
             <span className="h-3 w-3 rounded-full bg-emerald-500" />
-            Play API mock
+            Play API ready
           </span>
           <span className="flex items-center gap-2">
             <span className="h-3 w-3 rounded-full bg-emerald-500" />
@@ -375,7 +386,7 @@ export function HomePage() {
             <div className="space-y-4 text-sm text-slate-600">
               <p className="flex items-center gap-3">
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                Play API mock
+                Play API ready
               </p>
               <p className="flex items-center gap-3">
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />

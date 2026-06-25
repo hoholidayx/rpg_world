@@ -2,7 +2,7 @@
 
 Play API 是 Play WebUI 的专用后端接口层。它刻意独立于现有
 Dashboard API，避免两个前端后续体验演进时被同一套 HTTP 契约绑定。
-当前所有路由仅返回空数据或简单 mock。
+聊天相关接口通过 Agent 服务后端，数据管理接口通过 rpg_data 后端。
 """
 
 from __future__ import annotations

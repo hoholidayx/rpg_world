@@ -86,7 +86,7 @@ def test_initial_schema_enforces_foreign_keys() -> None:
             conn.execute(
                 """
                 INSERT INTO characters (workspace_id, name, content)
-                VALUES ('default', 'Alice', 'A young wizard.')
+                VALUES ('demo_workspace', 'Test Alice', 'A young wizard.')
                 """
             )
             character_id = conn.execute("SELECT id FROM characters").fetchone()["id"]
@@ -114,20 +114,14 @@ def test_initial_schema_enforces_foreign_keys() -> None:
         conn.close()
 
 
-def test_initial_schema_creates_default_data_workspace() -> None:
+def test_initial_schema_does_not_create_default_workspace() -> None:
     conn = db.connect(":memory:")
     try:
         run_migrations(conn)
 
-        row = conn.execute(
-            "SELECT id, name, root_path FROM workspaces WHERE id = 'default'"
-        ).fetchone()
+        row = conn.execute("SELECT id FROM workspaces WHERE id = 'default'").fetchone()
 
-        assert dict(row) == {
-            "id": "default",
-            "name": "Default",
-            "root_path": "data/default_workspace",
-        }
+        assert row is None
     finally:
         conn.close()
 
@@ -138,12 +132,18 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
         run_migrations(conn)
 
         with db.transaction(conn):
+            conn.execute(
+                """
+                INSERT INTO workspaces (id, name, root_path)
+                VALUES ('multi_workspace', 'Multi Workspace', 'data/multi_workspace')
+                """
+            )
             story_ids = []
             for title in ("北境森林", "学院旧梦"):
                 conn.execute(
                     """
                     INSERT INTO stories (workspace_id, title)
-                    VALUES ('default', ?)
+                    VALUES ('multi_workspace', ?)
                     """,
                     (title,),
                 )
@@ -152,14 +152,14 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             conn.execute(
                 """
                 INSERT INTO characters (workspace_id, name, content)
-                VALUES ('default', 'Alice', 'A young wizard.')
+                VALUES ('multi_workspace', 'Alice', 'A young wizard.')
                 """
             )
             character_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.execute(
                 """
                 INSERT INTO lorebook_entries (workspace_id, name, content)
-                VALUES ('default', 'World History', 'Forged from ashes.')
+                VALUES ('multi_workspace', 'World History', 'Forged from ashes.')
                 """
             )
             lorebook_entry_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -168,7 +168,7 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
                 conn.execute(
                     """
                     INSERT INTO story_characters (workspace_id, story_id, character_id)
-                    VALUES ('default', ?, ?)
+                    VALUES ('multi_workspace', ?, ?)
                     """,
                     (story_id, character_id),
                 )
@@ -179,13 +179,13 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
                         story_id,
                         lorebook_entry_id
                     )
-                    VALUES ('default', ?, ?)
+                    VALUES ('multi_workspace', ?, ?)
                     """,
                     (story_id, lorebook_entry_id),
                 )
 
         story_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM stories WHERE workspace_id = 'default'"
+            "SELECT COUNT(*) AS count FROM stories WHERE workspace_id = 'multi_workspace'"
         ).fetchone()["count"]
         character_mount_count = conn.execute(
             "SELECT COUNT(*) AS count FROM story_characters WHERE character_id = ?",
