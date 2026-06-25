@@ -684,6 +684,15 @@ wheels = [
 ]
 
 [[package]]
+name = "peewee"
+version = "4.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/57/19440fc02ffd66c0c1a92da1f3a28e17bd4fa1099f8152fd08f1bbe43991/peewee-4.1.0.tar.gz", hash = "sha256:58090f75c58a5e9e9e43b6265c5a17a46ae1797c51b7554d24577dcff11e8515", size = 752243, upload-time = "2026-06-16T14:40:05.264Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/dd/fbc5bbaf69eea289182e03d3120b301b19559ccc887053105001a2ace155/peewee-4.1.0-py3-none-any.whl", hash = "sha256:222aec3df487045dd5deaff08fd8984f956af538df7e13cc2e63815968e25ac7", size = 155074, upload-time = "2026-06-16T14:40:04.06Z" },
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1079,6 +1088,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "loguru" },
     { name = "openai" },
+    { name = "peewee" },
     { name = "prompt-toolkit" },
     { name = "pydantic" },
     { name = "python-telegram-bot" },
@@ -1113,6 +1123,7 @@ requires-dist = [
     { name = "llama-cpp-python", marker = "extra == 'llama'", specifier = ">=0.2.90" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "openai", specifier = ">=1.0" },
+    { name = "peewee", specifier = ">=3.17" },
     { name = "prompt-toolkit", specifier = ">=3.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "python-telegram-bot", specifier = ">=21.0" },
