@@ -70,7 +70,8 @@ def test_run_migrations_is_idempotent() -> None:
         ).fetchall()
 
         assert [(row["version"], row["name"]) for row in rows] == [
-            ("0001", "0001_initial.sql")
+            ("0001", "0001_initial.sql"),
+            ("0002", "0002_demo.sql"),
         ]
     finally:
         conn.close()
@@ -202,5 +203,87 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
         assert story_count == 2
         assert character_mount_count == 2
         assert lorebook_mount_count == 2
+    finally:
+        conn.close()
+
+
+def test_demo_migration_creates_demo_workspace_data() -> None:
+    conn = db.connect(":memory:")
+    try:
+        run_migrations(conn)
+
+        workspace = conn.execute(
+            """
+            SELECT id, name, root_path
+            FROM workspaces
+            WHERE id = 'demo_workspace'
+            """
+        ).fetchone()
+        story_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM stories
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        session_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM sessions
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        character_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM characters
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        character_detail_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM character_details
+            WHERE character_id IN (
+                SELECT id
+                FROM characters
+                WHERE workspace_id = 'demo_workspace'
+            )
+            """
+        ).fetchone()["count"]
+        lorebook_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM lorebook_entries
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        character_mount_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM story_characters
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        lorebook_mount_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM story_lorebook_entries
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+
+        assert dict(workspace) == {
+            "id": "demo_workspace",
+            "name": "Demo Workspace",
+            "root_path": "data/demo_workspace",
+        }
+        assert story_count == 2
+        assert session_count == 2
+        assert character_count == 2
+        assert character_detail_count == 2
+        assert lorebook_count == 2
+        assert character_mount_count == 4
+        assert lorebook_mount_count == 4
     finally:
         conn.close()
