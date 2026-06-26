@@ -9,6 +9,7 @@ __all__ = [
     "CharacterDetail",
     "LorebookEntry",
     "Session",
+    "SessionProfile",
     "Story",
     "StoryCharacter",
     "StoryLorebookEntry",
@@ -44,13 +45,26 @@ class Story:
 
 @dataclass(frozen=True)
 class Session:
-    id: int
+    id: str
     workspace_id: str
     story_id: int
-    session_key: str
-    title: str = ""
     state_json: str = "{}"
     last_story_turn_index: int = 0
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+    title: str = ""
+    description: str = ""
+    profile_metadata_json: str = "{}"
+    profile_created_at: str = ""
+    profile_updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionProfile:
+    session_id: str
+    title: str = ""
+    description: str = ""
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""

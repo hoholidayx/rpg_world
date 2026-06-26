@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from play_api.backends import close_data_manager_backend, get_data_manager_backend
 from play_api.settings import play_settings
-from play_api.routers import chat, commands, scene, sessions, workspace
+from play_api.routers import sessions, workspace
 
 
 @asynccontextmanager
@@ -40,6 +40,3 @@ app.add_middleware(
 _PLAY_API_PREFIX = play_settings.service.api_prefix
 app.include_router(workspace.router, prefix=_PLAY_API_PREFIX)
 app.include_router(sessions.router, prefix=_PLAY_API_PREFIX)
-app.include_router(scene.router, prefix=_PLAY_API_PREFIX)
-app.include_router(commands.router, prefix=_PLAY_API_PREFIX)
-app.include_router(chat.router, prefix=_PLAY_API_PREFIX)

@@ -3,9 +3,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { getCurrentScene } from '@/lib/api/scene'
 
-export function useScene(workspace: string, storyId: number, sessionId: string) {
+export function useScene(sessionId: string) {
   return useQuery({
-    queryKey: ['play-scene', workspace, storyId, sessionId],
-    queryFn: () => getCurrentScene(workspace, storyId, sessionId),
+    queryKey: ['play-scene', sessionId],
+    queryFn: () => getCurrentScene(sessionId),
   })
 }

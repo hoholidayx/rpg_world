@@ -27,6 +27,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_workspaces",
             "rpg_stories",
             "rpg_sessions",
+            "rpg_session_profiles",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -38,6 +39,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_workspaces",
             "rpg_stories",
             "rpg_sessions",
+            "rpg_session_profiles",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -51,7 +53,11 @@ def test_run_migrations_creates_initial_tables() -> None:
         character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_characters)")}
         lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_lorebook_entries)")}
 
+        profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_profiles)")}
+
         assert "last_story_turn_index" in session_columns
+        assert "session_key" not in session_columns
+        assert {"session_id", "title", "description"}.issubset(profile_columns)
         assert "last_story_rp_his_id" not in session_columns
         assert "enabled" not in character_columns
         assert "enabled" not in lorebook_columns
@@ -164,13 +170,20 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             )
             lorebook_entry_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-            for story_id in story_ids:
+            for index, story_id in enumerate(story_ids, start=1):
                 conn.execute(
                     """
-                    INSERT INTO rpg_sessions (workspace_id, story_id, session_key)
-                    VALUES ('multi_workspace', ?, 'shared_session')
+                    INSERT INTO rpg_sessions (id, workspace_id, story_id)
+                    VALUES (?, 'multi_workspace', ?)
                     """,
-                    (story_id,),
+                    (f"multi_session_{index}", story_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO rpg_session_profiles (session_id, title)
+                    VALUES (?, ?)
+                    """,
+                    (f"multi_session_{index}", f"Session {index}"),
                 )
                 conn.execute(
                     """
@@ -211,7 +224,6 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             SELECT COUNT(*) AS count
             FROM rpg_sessions
             WHERE workspace_id = 'multi_workspace'
-              AND session_key = 'shared_session'
             """
         ).fetchone()["count"]
 
@@ -224,15 +236,15 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             with db.transaction(conn):
                 conn.execute(
                     """
-                    INSERT INTO rpg_sessions (workspace_id, story_id, session_key)
-                    VALUES ('multi_workspace', ?, 'shared_session')
+                    INSERT INTO rpg_sessions (id, workspace_id, story_id)
+                    VALUES ('multi_session_1', 'multi_workspace', ?)
                     """,
-                    (story_ids[0],),
+                    (story_ids[1],),
                 )
         except sqlite3.IntegrityError:
             pass
         else:
-            raise AssertionError("expected duplicate story session key to fail")
+            raise AssertionError("expected duplicate session id to fail")
     finally:
         conn.close()
 
@@ -261,6 +273,17 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
             SELECT COUNT(*) AS count
             FROM rpg_sessions
             WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        profile_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM rpg_session_profiles
+            WHERE session_id IN (
+                SELECT id
+                FROM rpg_sessions
+                WHERE workspace_id = 'demo_workspace'
+            )
             """
         ).fetchone()["count"]
         character_count = conn.execute(
@@ -310,6 +333,7 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
         }
         assert story_count == 2
         assert session_count == 2
+        assert profile_count == 2
         assert character_count == 2
         assert character_detail_count == 2
         assert lorebook_count == 2

@@ -23,6 +23,7 @@ __all__ = [
     "CharacterDetailRecord",
     "CharacterRecord",
     "LorebookEntryRecord",
+    "SessionProfileRecord",
     "SessionRecord",
     "StoryCharacterRecord",
     "StoryLorebookEntryRecord",
@@ -104,7 +105,7 @@ class StoryRecord(BaseRecord):
 
 
 class SessionRecord(BaseRecord):
-    id = AutoField()
+    id = CharField(primary_key=True)
     workspace = ForeignKeyField(
         WorkspaceRecord,
         backref="sessions",
@@ -117,17 +118,33 @@ class SessionRecord(BaseRecord):
         column_name="story_id",
         on_delete="CASCADE",
     )
-    session_key = TextField()
-    title = TextField(default="")
     state_json = TextField(default="{}")
     last_story_turn_index = IntegerField(default=0)
-    metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
     created_at = TextField()
     updated_at = TextField()
 
     class Meta:
         table_name = "rpg_sessions"
+
+
+class SessionProfileRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        primary_key=True,
+        backref="profile",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    title = TextField(default="")
+    description = TextField(default="")
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_profiles"
 
 
 class CharacterRecord(BaseRecord):
@@ -258,6 +275,7 @@ RECORD_MODELS = (
     WorkspaceRecord,
     StoryRecord,
     SessionRecord,
+    SessionProfileRecord,
     CharacterRecord,
     CharacterDetailRecord,
     LorebookEntryRecord,

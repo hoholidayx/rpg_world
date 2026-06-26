@@ -58,14 +58,23 @@ class DataManagerBackend:
     ) -> list[dict[str, object]] | None:
         return self._catalog.list_sessions(workspace, story_id)
 
-    async def get_session_by_locator(
+    async def create_session(
         self,
         workspace: str,
         story_id: int,
-        session_id: str,
+        *,
+        title: str = "",
+        description: str = "",
     ) -> dict[str, object] | None:
-        return self._catalog.get_session_by_locator(
+        return self._catalog.create_session(
             workspace,
             story_id,
-            session_id,
+            title=title,
+            description=description,
         )
+
+    async def get_session(
+        self,
+        session_id: str,
+    ) -> dict[str, object] | None:
+        return self._catalog.get_session(session_id)

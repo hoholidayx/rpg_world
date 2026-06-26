@@ -26,20 +26,29 @@ CREATE TABLE IF NOT EXISTS rpg_stories (
 );
 
 CREATE TABLE IF NOT EXISTS rpg_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     story_id INTEGER NOT NULL,
-    session_key TEXT NOT NULL,
-    title TEXT NOT NULL DEFAULT '',
     state_json TEXT NOT NULL DEFAULT '{}',
     last_story_turn_index INTEGER NOT NULL DEFAULT 0,
-    metadata_json TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
-    UNIQUE (workspace_id, story_id, session_key)
+    -- 会话必须绑定到同一 workspace 下的 story，避免跨 workspace 误挂载。
+    FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rpg_session_profiles (
+    session_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- 可读标题/描述独立存放，rpg_sessions.id 保持稳定的公开定位 ID。
+    FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS rpg_characters (
@@ -101,6 +110,7 @@ CREATE TABLE IF NOT EXISTS rpg_story_characters (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
     FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
+    -- 角色卡可挂载到多个 story；这里只禁止同一 story 重复挂同一角色。
     FOREIGN KEY (character_id, workspace_id) REFERENCES rpg_characters(id, workspace_id) ON DELETE CASCADE,
     UNIQUE (story_id, character_id)
 );
@@ -118,6 +128,7 @@ CREATE TABLE IF NOT EXISTS rpg_story_lorebook_entries (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
     FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
+    -- 世界书条目可挂载到多个 story；这里只禁止同一 story 重复挂同一条目。
     FOREIGN KEY (lorebook_entry_id, workspace_id) REFERENCES rpg_lorebook_entries(id, workspace_id) ON DELETE CASCADE,
     UNIQUE (story_id, lorebook_entry_id)
 );

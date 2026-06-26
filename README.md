@@ -91,6 +91,18 @@ cfg.cli_workspace
 
 当前路线调整为 Play WebUI 主体验、Telegram 辅助触达：Play WebUI 同时负责沉浸式 RP、数据管理和调试入口。Telegram 继续保持稳定可用，作为轻量入口、推送通知、快速回复与兜底渠道。
 
+### Play 会话与数据目录
+
+Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
+
+- 1 个 workspace 下可以有多个 story。
+- 1 个 story 下可以有多个 session。
+- 角色卡和世界书条目属于 workspace，通过挂载表关联到 story；同一个角色卡或世界书条目可以挂载到多个 story。
+- Play 侧公开 `session_id` 是全局唯一短 ID，格式为 `s_` + 10 位小写字母/数字，例如 `s_forest001`。创建 session 时绑定 `workspace_id + story_id`，之后会话内接口只传 `session_id`。
+- `rpg_session_profiles` 保存会话标题、描述等可读字段；`rpg_sessions.id` 保持稳定，用作 URL 和 Agent session id。
+
+Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，再调用 Agent 服务当前仍使用的 `workspace + session_id`。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`scene`、`commands`、`turn`、`stream`。旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
+
 ### Telegram 渠道
 
 Telegram 渠道当前支持：

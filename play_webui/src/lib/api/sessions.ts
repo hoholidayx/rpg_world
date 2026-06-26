@@ -11,8 +11,17 @@ export function listSessions(workspace: string, storyId: number) {
   )
 }
 
-export function getSessionHistory(workspace: string, storyId: number, sessionId: string) {
-  return playApiFetch<Turn[]>(
-    `${withWorkspace(`/sessions/${sessionId}/history`, workspace)}&story_id=${encodeURIComponent(storyId)}`,
-  )
+export function getSession(sessionId: string) {
+  return playApiFetch<SessionSummary>(`/sessions/${encodeURIComponent(sessionId)}`)
+}
+
+export function createSession(workspace: string, storyId: number, title?: string) {
+  return playApiFetch<SessionSummary>('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ workspaceId: workspace, storyId, title: title ?? '' }),
+  })
+}
+
+export function getSessionHistory(sessionId: string) {
+  return playApiFetch<Turn[]>(`/sessions/${encodeURIComponent(sessionId)}/history`)
 }

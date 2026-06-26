@@ -96,23 +96,29 @@ def test_repositories_create_workspace_story_session_and_query_sessions(
             )
             first_story = rpg_stories.create("campaign", "北境森林")
             second_story = rpg_stories.create("campaign", "学院旧梦")
-            rpg_sessions.create(
+            forest_main = rpg_sessions.create(
                 "campaign",
                 first_story.id,
-                "shared_main",
+                session_id="s_forestmain",
                 title="Forest Main",
             )
-            rpg_sessions.create(
+            forest_side = rpg_sessions.create(
                 "campaign",
                 first_story.id,
-                "forest_side",
+                session_id="s_forestside",
                 title="Forest Side",
+                description="Side route",
             )
-            rpg_sessions.create(
+            academy_main = rpg_sessions.create(
                 "campaign",
                 second_story.id,
-                "shared_main",
+                session_id="s_academymain",
                 title="Academy Main",
+            )
+            generated = rpg_sessions.create(
+                "campaign",
+                second_story.id,
+                title="Generated Main",
             )
 
         assert isinstance(workspace, models.Workspace)
@@ -128,27 +134,27 @@ def test_repositories_create_workspace_story_session_and_query_sessions(
             story_id=first_story.id,
         )
 
-        assert [row.session_key for row in workspace_sessions] == [
-            "shared_main",
-            "forest_side",
-            "shared_main",
+        assert {row.id for row in workspace_sessions} == {
+            forest_main.id,
+            forest_side.id,
+            academy_main.id,
+            generated.id,
+        }
+        assert [row.id for row in first_story_sessions] == [
+            forest_main.id,
+            forest_side.id,
         ]
-        assert [row.session_key for row in first_story_sessions] == [
-            "shared_main",
-            "forest_side",
-        ]
-        assert [row.session_key for row in filtered_sessions] == [
-            "shared_main",
-            "forest_side",
-        ]
-        assert (
-            rpg_sessions.get_by_locator("campaign", first_story.id, "shared_main").title
-            == "Forest Main"
-        )
-        assert (
-            rpg_sessions.get_by_locator("campaign", second_story.id, "shared_main").title
-            == "Academy Main"
-        )
+        assert {row.id for row in filtered_sessions} == {
+            forest_main.id,
+            forest_side.id,
+        }
+        assert rpg_sessions.get(forest_main.id).title == "Forest Main"
+        assert rpg_sessions.get(forest_side.id).description == "Side route"
+        assert rpg_sessions.get(academy_main.id).title == "Academy Main"
+        assert generated.id.startswith("s_")
+        assert len(generated.id) == 12
+        assert generated.id[2:].isalnum()
+        assert generated.id[2:].islower()
 
         touched = rpg_sessions.update_timestamp(workspace_sessions[0].id)
         assert isinstance(touched, models.Session)

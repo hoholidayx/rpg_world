@@ -59,14 +59,34 @@ def to_story(row: records.StoryRecord) -> models.Story:
 
 
 def to_session(row: records.SessionRecord) -> models.Session:
+    profile = getattr(row, "session_profile", None)
+    if profile is None:
+        try:
+            profile = row.profile.get()
+        except Exception:
+            profile = None
     return models.Session(
-        id=int(row.id),
+        id=str(row.id),
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
-        session_key=str(row.session_key),
-        title=str(row.title or ""),
         state_json=str(row.state_json or "{}"),
         last_story_turn_index=int(row.last_story_turn_index),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+        title=str(profile.title or "") if profile is not None else "",
+        description=str(profile.description or "") if profile is not None else "",
+        profile_metadata_json=str(profile.metadata_json or "{}") if profile is not None else "{}",
+        profile_created_at=str(profile.created_at) if profile is not None else "",
+        profile_updated_at=str(profile.updated_at) if profile is not None else "",
+    )
+
+
+def to_session_profile(row: records.SessionProfileRecord) -> models.SessionProfile:
+    return models.SessionProfile(
+        session_id=str(row.session_id),
+        title=str(row.title or ""),
+        description=str(row.description or ""),
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),
         created_at=str(row.created_at),

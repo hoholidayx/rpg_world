@@ -6,6 +6,7 @@
 - 修改启动流程、渠道生命周期、共享状态或 `AgentManager` 前，先阅读 `CLAUDE.md`。
 - 根目录聚合 supervisor 入口已移除；各进程必须通过独立入口启动。只有 `run_agent.py` 持有 `AgentManager` / `RPGGameAgent` / `rp_memory` / llama lazy worker，其它进程只能通过 `agent_service.client.AgentClient` 访问 Agent 服务。
 - 保持 `play_api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
+- Play WebUI 会话内链路只使用全局短 `session_id` 定位；创建 session 时在 `rpg_data` 绑定 `workspace_id + story_id`，之后由 Play API 反查上下文并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
 - `data/` 是运行数据目录。会话历史、摘要、向量索引、SQLite WAL/SHM 等文件默认不纳入提交。
 
 ## 常用命令
@@ -36,6 +37,8 @@
 - 上下文主流程保持结构化，最终发送给 LLM 前由 `ContextRenderer` 渲染；调试 markdown/token 概览放在 `ContextInspector`，不要回流到 `RPGContext` 数据模型。
 - `当前场景.csv` 是高优先级 scene 状态，应作为 user prefix 进入最终用户消息；不要把它当普通状态表放入 `STATUS_TABLES`。
 - RP Modules 是 RP 业务模块占位，不是通用 skill 体系；骰子、战斗、物品等能力应围绕 RP 工具流程和受控状态读写设计。
+- `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
+- Play API 会话内接口集中在 `/sessions/{session_id}/history|scene|commands|turn|stream`；`chat.py`、`scene.py`、`commands.py` 旧 router 仅作占位，不要把它们恢复为主入口。
 
 ## 测试要求
 - 所有外部调用使用 mock，避免真实 LLM、Telegram 或网络依赖。
@@ -53,7 +56,7 @@
 - `llama_service/llm.yaml` 管 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。
 - 它们都支持 `base + profiles`；`local` / `test` / `prod` 是固定 profile 名称，同级 `settings.local.yaml` / `llm.local.yaml` 等覆盖文件会自动加载。
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。
-- `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。
+- `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。Play WebUI 新建 session 默认生成 `s_` + 10 位小写字母/数字的短 ID，并作为公开 URL ID 与 Agent session id。
 - 工作区选择不要写回运行时状态。Telegram/CLI 默认工作区来自 `settings.yaml`，API/WebUI 通过请求参数传入。
 
 ## 提交规范

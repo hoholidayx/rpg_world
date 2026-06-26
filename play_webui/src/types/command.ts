@@ -7,8 +7,6 @@ export type PlayCommand = {
 }
 
 export type SendMessagePayload = {
-  workspace: string
-  storyId: number
   sessionId: string
   text: string
   mode: InputMode

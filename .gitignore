@@ -38,6 +38,8 @@ llm.*.yaml
 !**/llm.*.example.yaml
 
 # Runtime data
+data/**/*.sqlite3
+data/**/*.sqlite3-*
 data/models/
 data/**/sessions/
 

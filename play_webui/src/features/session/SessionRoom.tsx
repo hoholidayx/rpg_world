@@ -2,9 +2,12 @@
 
 import { CSSProperties, PointerEvent, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useQuery } from '@tanstack/react-query'
 import { DebugEventLauncher } from '@/components/debug/DebugEventLauncher'
 import { CommandPaletteDialog } from '@/components/input/CommandPaletteDialog'
 import { SendStopButton } from '@/components/input/SendStopButton'
+import { getSession } from '@/lib/api/sessions'
+import type { SessionSummary } from '@/types/session'
 import {
   Copy,
   Maximize2,
@@ -184,12 +187,14 @@ function Sidebar() {
   )
 }
 
-function Header({ storyId, sessionId }: { storyId: number; sessionId: string }) {
+function Header({ session, sessionId }: { session: SessionSummary | undefined; sessionId: string }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4">
       <div>
-        <h1 className="text-xl font-bold text-slate-950">故事：{storyId} / {sessionId}</h1>
-        <p className="mt-1 text-sm text-slate-500">雾港序章：码头钟楼下的第一幕</p>
+        <h1 className="text-xl font-bold text-slate-950">{session?.title ?? '加载会话中'}</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          {session ? `故事：${session.storyId} / ${session.id}` : sessionId}
+        </p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <span className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700">
@@ -292,13 +297,13 @@ function Timeline() {
   )
 }
 
-function Composer({ workspace, storyId, sessionId }: { workspace: string; storyId: number; sessionId: string }) {
+function Composer({ sessionId }: { sessionId: string }) {
   return (
-    <section data-workspace={workspace} data-story-id={storyId} data-session-id={sessionId} className="border-t border-slate-200 bg-white px-6 py-4">
+    <section data-session-id={sessionId} className="border-t border-slate-200 bg-white px-6 py-4">
       <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2">
           <div className="flex flex-wrap gap-2">
-            <CommandPaletteDialog workspace={workspace} storyId={storyId} sessionId={sessionId} />
+            <CommandPaletteDialog sessionId={sessionId} />
             <button className="rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-500">输入 / 触发命令</button>
           </div>
         </div>
@@ -308,7 +313,7 @@ function Composer({ workspace, storyId, sessionId }: { workspace: string; storyI
             placeholder="输入你的行动、台词或 GM 指令..."
             defaultValue=""
           />
-          <SendStopButton workspace={workspace} storyId={storyId} sessionId={sessionId} />
+          <SendStopButton sessionId={sessionId} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-2">
           <div className="flex flex-wrap gap-2">
@@ -338,10 +343,17 @@ function RightRail() {
   )
 }
 
-export function SessionRoom({ workspace, storyId, sessionId }: { workspace: string; storyId: number; sessionId: string }) {
+export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [leftWidth, setLeftWidth] = useState(defaultSidebarSizes.left)
   const [rightWidth, setRightWidth] = useState(defaultSidebarSizes.right)
   const [dragState, setDragState] = useState<DragState | null>(null)
+  const sessionQuery = useQuery({
+    queryKey: ['play-session', sessionId],
+    // workspace/story 不再从路由传入，避免前端持有可失配的会话定位三元组。
+    queryFn: () => getSession(sessionId),
+  })
+
+  const session = sessionQuery.data
 
   useEffect(() => {
     if (!dragState) return
@@ -394,8 +406,8 @@ export function SessionRoom({ workspace, storyId, sessionId }: { workspace: stri
   return (
     <main
       style={gridStyle}
-      data-workspace={workspace}
-      data-story-id={storyId}
+      data-workspace={session?.workspace ?? ''}
+      data-story-id={session?.storyId ?? ''}
       data-session-id={sessionId}
       className="min-h-screen bg-[#f7f7fa] text-slate-900 lg:grid lg:h-screen lg:min-h-0 lg:grid-cols-[var(--session-grid-columns)] lg:overflow-hidden"
     >
@@ -409,9 +421,9 @@ export function SessionRoom({ workspace, storyId, sessionId }: { workspace: stri
         <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400" />
       </button>
       <section className="flex min-h-screen min-w-0 flex-col lg:h-screen lg:min-h-0">
-        <Header storyId={storyId} sessionId={sessionId} />
+        <Header session={session} sessionId={sessionId} />
         <Timeline />
-        <Composer workspace={workspace} storyId={storyId} sessionId={sessionId} />
+        <Composer sessionId={sessionId} />
       </section>
       <button
         type="button"

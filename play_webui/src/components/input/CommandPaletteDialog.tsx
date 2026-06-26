@@ -64,7 +64,7 @@ const commandGroups: CommandGroup[] = [
   },
 ]
 
-export function CommandPaletteDialog({ workspace, storyId, sessionId }: { workspace: string; storyId: number; sessionId: string }) {
+export function CommandPaletteDialog({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false)
 
   const closeOnEscape = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -77,8 +77,6 @@ export function CommandPaletteDialog({ workspace, storyId, sessionId }: { worksp
     <>
       <button
         type="button"
-        data-workspace={workspace}
-        data-story-id={storyId}
         data-session-id={sessionId}
         onClick={() => setOpen(true)}
         className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-bold text-slate-600 transition hover:border-violet-200 hover:text-violet-700"
@@ -94,8 +92,6 @@ export function CommandPaletteDialog({ workspace, storyId, sessionId }: { worksp
             aria-modal="true"
             aria-label="命令面板"
             tabIndex={-1}
-            data-workspace={workspace}
-            data-story-id={storyId}
             data-session-id={sessionId}
             onKeyDown={closeOnEscape}
             className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl shadow-slate-300/70"

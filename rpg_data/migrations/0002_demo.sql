@@ -44,48 +44,62 @@ VALUES (
 );
 
 INSERT OR IGNORE INTO rpg_sessions (
+    id,
     workspace_id,
     story_id,
-    session_key,
-    title,
     state_json,
-    last_story_turn_index,
-    metadata_json
+    last_story_turn_index
 )
 VALUES (
+    's_forest001',
     'demo_workspace',
     (
         SELECT id
         FROM rpg_stories
         WHERE workspace_id = 'demo_workspace' AND title = '北境森林 Demo'
     ),
-    'demo_forest_main',
-    '北境森林主线',
     '{"scene":"北境森林·石林·圆形封印祭坛","time":"第 1 年 1 月 1 日 8 时 30 分"}',
-    0,
+    0
+);
+
+INSERT OR IGNORE INTO rpg_session_profiles (
+    session_id,
+    title,
+    metadata_json
+)
+VALUES (
+    's_forest001',
+    '北境森林主线',
     '{"kind":"demo"}'
 );
 
 INSERT OR IGNORE INTO rpg_sessions (
+    id,
     workspace_id,
     story_id,
-    session_key,
-    title,
     state_json,
-    last_story_turn_index,
-    metadata_json
+    last_story_turn_index
 )
 VALUES (
+    's_academy01',
     'demo_workspace',
     (
         SELECT id
         FROM rpg_stories
         WHERE workspace_id = 'demo_workspace' AND title = '奥术学院 Demo'
     ),
-    'demo_academy_main',
-    '奥术学院档案',
     '{"scene":"奥术学院·旧档案馆","time":"第 1 年 1 月 3 日 14 时"}',
-    0,
+    0
+);
+
+INSERT OR IGNORE INTO rpg_session_profiles (
+    session_id,
+    title,
+    metadata_json
+)
+VALUES (
+    's_academy01',
+    '奥术学院档案',
     '{"kind":"demo"}'
 );
 

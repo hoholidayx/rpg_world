@@ -47,17 +47,30 @@ class CatalogService:
         )
         return [_session_summary(session) for session in sessions]
 
-    def get_session_by_locator(
+    def create_session(
         self,
         workspace_id: str,
         story_id: int,
-        session_key: str,
+        *,
+        title: str = "",
+        description: str = "",
     ) -> _SessionSummary | None:
-        session = self._sessions.get_by_locator(
+        story = self._stories.get(story_id)
+        if story is None or story.workspace_id != workspace_id:
+            return None
+        session = self._sessions.create(
             workspace_id,
             story_id,
-            session_key,
+            title=title,
+            description=description,
         )
+        return _session_summary(session)
+
+    def get_session(
+        self,
+        session_id: str,
+    ) -> _SessionSummary | None:
+        session = self._sessions.get(session_id)
         return _session_summary(session) if session is not None else None
 
 
@@ -71,12 +84,13 @@ def _workspace_summary(workspace: models.Workspace) -> _WorkspaceSummary:
 
 
 def _session_summary(session: models.Session) -> _SessionSummary:
+    # 对外只暴露全局 session id；workspace/story 作为已绑定上下文返回给 Play API 使用。
     return {
-        "id": str(session.session_key),
+        "id": str(session.id),
         "workspace": str(session.workspace_id),
         "story_id": int(session.story_id),
-        "title": str(session.title or session.session_key),
-        "description": None,
+        "title": str(session.title or session.id),
+        "description": str(session.description or "") or None,
         "created_at": str(session.created_at),
         "updated_at": str(session.updated_at),
     }

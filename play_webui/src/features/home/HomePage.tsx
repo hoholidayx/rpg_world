@@ -28,8 +28,8 @@ import {
 import { listWorkspaces } from '@/lib/api/sessions'
 import type { SessionSummary, WorkspaceSummary } from '@/types/session'
 
-function sessionHref(session: Pick<SessionSummary, 'id' | 'workspace' | 'storyId'>) {
-  return `/session/${session.id}?workspace=${encodeURIComponent(session.workspace)}&story_id=${encodeURIComponent(session.storyId)}`
+function sessionHref(session: Pick<SessionSummary, 'id'>) {
+  return `/session/${session.id}`
 }
 
 const navItems = [
@@ -52,7 +52,7 @@ const stories = [
     updatedAt: '2025/05/30 14:22',
     workspace: '',
     storyId: 1,
-    sessionId: 'demo_forest_main',
+    sessionId: 's_forest001',
     selected: true,
     artClass: 'from-slate-700 via-slate-500 to-indigo-200',
     accent: 'bg-slate-100',
@@ -67,7 +67,7 @@ const stories = [
     updatedAt: '2025/05/29 19:33',
     workspace: '',
     storyId: 2,
-    sessionId: 'market_edge',
+    sessionId: 's_academy01',
     artClass: 'from-emerald-900 via-emerald-600 to-emerald-100',
     accent: 'bg-emerald-100',
   },
@@ -81,7 +81,7 @@ const stories = [
     updatedAt: '2025/05/20 11:11',
     workspace: '',
     storyId: 1,
-    sessionId: 'forest_night',
+    sessionId: 's_forest001',
     artClass: 'from-amber-700 via-orange-300 to-amber-50',
     accent: 'bg-amber-100',
   },
@@ -95,7 +95,7 @@ const recentSessions: Array<SessionSummary & {
   artClass: string
 }> = [
   {
-    id: 'demo_forest_main',
+    id: 's_forest001',
     workspace: '',
     storyId: 1,
     title: '雾港序章：码头钟楼下的第一幕',
@@ -108,7 +108,7 @@ const recentSessions: Array<SessionSummary & {
     artClass: 'from-slate-900 via-blue-950 to-slate-400',
   },
   {
-    id: 'market_edge',
+    id: 's_academy01',
     workspace: '',
     storyId: 2,
     title: '黑市边缘：旧灯笼里的第二把钥匙',
@@ -207,7 +207,7 @@ function StoryCard({ story, workspace }: { story: (typeof stories)[number]; work
         <p className="text-xs text-slate-500">更新时间&nbsp;&nbsp; {story.updatedAt}</p>
         {workspace ? (
           <Link
-            href={sessionHref({ id: story.sessionId, workspace, storyId: story.storyId })}
+            href={sessionHref({ id: story.sessionId })}
             className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:border-violet-300 hover:text-violet-700"
           >
             查看
@@ -221,7 +221,7 @@ function StoryCard({ story, workspace }: { story: (typeof stories)[number]; work
 }
 
 function RecentSessionRow({ session, workspace }: { session: (typeof recentSessions)[number]; workspace: string | null }) {
-  const href = workspace ? sessionHref({ id: session.id, workspace, storyId: session.storyId }) : null
+  const href = workspace ? sessionHref({ id: session.id }) : null
 
   return (
     <article className="grid gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-violet-200 hover:shadow-md md:grid-cols-[auto_minmax(0,1fr)_220px_auto_auto] md:items-center">
@@ -459,7 +459,7 @@ export function HomePage() {
                 ))}
               </div>
               {currentWorkspace ? (
-                <Link href={sessionHref({ id: 'demo_forest_main', workspace: currentWorkspace, storyId: 1 })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
+                <Link href={sessionHref({ id: 's_forest001' })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
                   查看全部故事
                   <ChevronRight size={16} />
                 </Link>
@@ -476,7 +476,7 @@ export function HomePage() {
                 ))}
               </div>
               {currentWorkspace ? (
-                <Link href={sessionHref({ id: 'demo_forest_main', workspace: currentWorkspace, storyId: 1 })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
+                <Link href={sessionHref({ id: 's_forest001' })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
                   查看全部会话
                   <ChevronRight size={16} />
                 </Link>

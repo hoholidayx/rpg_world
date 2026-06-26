@@ -13,6 +13,8 @@ RPG World 的产品定位从“Telegram 优先的 RP 聊天入口”升级为“
 
 Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。不要恢复 Dashboard API/WebUI。
 
+Play WebUI 的会话定位采用 `rpg_data` catalog 中的全局短 `session_id`。创建 session 时绑定 `workspace_id + story_id`；进入会话后，前端 URL 和会话内请求只传 `session_id`，由 Play API 反查 workspace/story 并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
+
 ## 启动
 
 ```bash
@@ -100,10 +102,10 @@ rpg_world/
 │   ├── settings.py               #   PlaySettings 单例
 │   ├── backends/                 #   AgentClient / rpg_data 后端适配
 │   └── routers/
-│       ├── chat.py               #   turn/stream/command
-│       ├── commands.py           #   command metadata
-│       ├── scene.py              #   scene HUD data
-│       ├── sessions.py           #   session APIs
+│       ├── sessions.py           #   session APIs + history/scene/commands/turn/stream
+│       ├── chat.py               #   legacy placeholder；不要恢复为主入口
+│       ├── commands.py           #   legacy placeholder；不要恢复为主入口
+│       ├── scene.py              #   legacy placeholder；不要恢复为主入口
 │       └── workspace.py          #   workspace APIs
 ├── play_webui/                   # Play WebUI：Next.js + React + TypeScript
 │   ├── src/app/                  #   App Router
@@ -198,6 +200,12 @@ agent = AgentManager.get_or_create(session_id="mygame_01")
 在不同 workspace 下会得到不同 agent，避免跨工作区污染。所有入口必须提供有效
 workspace；API 空 workspace 会解析为 API 默认工作区，Telegram/CLI
 从 `settings.yaml` 读取 workspace，缺省时分别使用渠道默认 workspace。
+
+### Play catalog 与 session 定位
+
+`rpg_data` 的数据关系是：workspace 下有多个 story，story 下有多个 session；角色卡和世界书条目属于 workspace，并通过 `rpg_story_characters`、`rpg_story_lorebook_entries` 挂载到 story。同一个角色卡或世界书条目可以挂载到多个 story，挂载表只禁止同一 story 内重复挂载。
+
+Play WebUI 公开的 `session_id` 是短 ID，格式为 `s_` + 10 位小写字母/数字，兼容 `rpg_core` 当前 `^[A-Za-z0-9_]+$` 校验。`rpg_sessions.id` 是稳定定位 ID，`rpg_session_profiles` 保存 title、description 等可读字段。Play API 是 catalog session 到 Agent 服务的边界层：会话内接口只收 `session_id`，内部解析出 workspace/story，再用 `workspace + session_id` 调用 Agent 服务；本轮不要求 Agent/rpg_core 感知 story。
 
 ### ChannelAdapter 基类（`channels/base.py`）
 
@@ -403,13 +411,12 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 
 | 模块 | 路由文件 | 职责 |
 |---|---|---|
-| workspace | `play_api/routers/workspace.py` | 工作区列表、创建、切换相关能力 |
-| sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取与状态 |
-| scene | `play_api/routers/scene.py` | 当前场景 HUD 数据 |
-| commands | `play_api/routers/commands.py` | 可用命令元数据 |
-| chat | `play_api/routers/chat.py` | Agent turn、SSE 流式事件、命令执行 |
+| workspace | `play_api/routers/workspace.py` | 工作区列表 |
+| sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取，以及 `history/scene/commands/turn/stream` 子资源 |
+| scene / commands / chat | 对应 router 文件 | legacy placeholder，保留模块名但不作为主入口 |
 
 - Play API 通过 `agent_service.client.AgentClient` 访问 Agent 服务。
+- Play WebUI 会话内请求只传 `session_id`；Play API 负责从 catalog 解析 workspace/story。
 - API Key 通过 `X-OpenAI-Api-Key` header 传递。
 - SSE 流式格式：`data: {json}\n\n`。
 
