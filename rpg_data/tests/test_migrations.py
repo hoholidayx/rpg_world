@@ -23,33 +23,33 @@ def test_run_migrations_creates_initial_tables() -> None:
         }
 
         assert {
-            "schema_migrations",
-            "workspaces",
-            "stories",
-            "sessions",
-            "characters",
-            "character_details",
-            "lorebook_entries",
-            "story_characters",
-            "story_lorebook_entries",
+            "rpg_schema_migrations",
+            "rpg_workspaces",
+            "rpg_stories",
+            "rpg_sessions",
+            "rpg_characters",
+            "rpg_character_details",
+            "rpg_lorebook_entries",
+            "rpg_story_characters",
+            "rpg_story_lorebook_entries",
         }.issubset(tables)
 
         for table in (
-            "workspaces",
-            "stories",
-            "sessions",
-            "characters",
-            "character_details",
-            "lorebook_entries",
-            "story_characters",
-            "story_lorebook_entries",
+            "rpg_workspaces",
+            "rpg_stories",
+            "rpg_sessions",
+            "rpg_characters",
+            "rpg_character_details",
+            "rpg_lorebook_entries",
+            "rpg_story_characters",
+            "rpg_story_lorebook_entries",
         ):
             columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
             assert {"created_at", "updated_at", "version"}.issubset(columns)
 
-        session_columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
-        character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(characters)")}
-        lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(lorebook_entries)")}
+        session_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_sessions)")}
+        character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_characters)")}
+        lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_lorebook_entries)")}
 
         assert "last_story_turn_index" in session_columns
         assert "last_story_rp_his_id" not in session_columns
@@ -66,7 +66,7 @@ def test_run_migrations_is_idempotent() -> None:
         run_migrations(conn)
 
         rows = conn.execute(
-            "SELECT version, name FROM schema_migrations ORDER BY version"
+            "SELECT version, name FROM rpg_schema_migrations ORDER BY version"
         ).fetchall()
 
         assert [(row["version"], row["name"]) for row in rows] == [
@@ -85,14 +85,14 @@ def test_initial_schema_enforces_foreign_keys() -> None:
         with db.transaction(conn):
             conn.execute(
                 """
-                INSERT INTO characters (workspace_id, name, content)
+                INSERT INTO rpg_characters (workspace_id, name, content)
                 VALUES ('demo_workspace', 'Test Alice', 'A young wizard.')
                 """
             )
-            character_id = conn.execute("SELECT id FROM characters").fetchone()["id"]
+            character_id = conn.execute("SELECT id FROM rpg_characters").fetchone()["id"]
             conn.execute(
                 """
-                INSERT INTO character_details (character_id, name, content, tags_json)
+                INSERT INTO rpg_character_details (character_id, name, content, tags_json)
                 VALUES (?, '外貌', '银白色长发。', '["外观"]')
                 """,
                 (character_id,),
@@ -102,7 +102,7 @@ def test_initial_schema_enforces_foreign_keys() -> None:
             with db.transaction(conn):
                 conn.execute(
                     """
-                    INSERT INTO lorebook_entries (workspace_id, name, content)
+                    INSERT INTO rpg_lorebook_entries (workspace_id, name, content)
                     VALUES ('missing', 'World History', 'Forged from ashes.')
                     """
                 )
@@ -119,7 +119,7 @@ def test_initial_schema_does_not_create_default_workspace() -> None:
     try:
         run_migrations(conn)
 
-        row = conn.execute("SELECT id FROM workspaces WHERE id = 'default'").fetchone()
+        row = conn.execute("SELECT id FROM rpg_workspaces WHERE id = 'default'").fetchone()
 
         assert row is None
     finally:
@@ -134,7 +134,7 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
         with db.transaction(conn):
             conn.execute(
                 """
-                INSERT INTO workspaces (id, name, root_path)
+                INSERT INTO rpg_workspaces (id, name, root_path)
                 VALUES ('multi_workspace', 'Multi Workspace', 'data/multi_workspace')
                 """
             )
@@ -142,7 +142,7 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             for title in ("北境森林", "学院旧梦"):
                 conn.execute(
                     """
-                    INSERT INTO stories (workspace_id, title)
+                    INSERT INTO rpg_stories (workspace_id, title)
                     VALUES ('multi_workspace', ?)
                     """,
                     (title,),
@@ -151,14 +151,14 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
 
             conn.execute(
                 """
-                INSERT INTO characters (workspace_id, name, content)
+                INSERT INTO rpg_characters (workspace_id, name, content)
                 VALUES ('multi_workspace', 'Alice', 'A young wizard.')
                 """
             )
             character_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.execute(
                 """
-                INSERT INTO lorebook_entries (workspace_id, name, content)
+                INSERT INTO rpg_lorebook_entries (workspace_id, name, content)
                 VALUES ('multi_workspace', 'World History', 'Forged from ashes.')
                 """
             )
@@ -167,21 +167,21 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             for story_id in story_ids:
                 conn.execute(
                     """
-                    INSERT INTO sessions (workspace_id, story_id, session_key)
+                    INSERT INTO rpg_sessions (workspace_id, story_id, session_key)
                     VALUES ('multi_workspace', ?, 'shared_session')
                     """,
                     (story_id,),
                 )
                 conn.execute(
                     """
-                    INSERT INTO story_characters (workspace_id, story_id, character_id)
+                    INSERT INTO rpg_story_characters (workspace_id, story_id, character_id)
                     VALUES ('multi_workspace', ?, ?)
                     """,
                     (story_id, character_id),
                 )
                 conn.execute(
                     """
-                    INSERT INTO story_lorebook_entries (
+                    INSERT INTO rpg_story_lorebook_entries (
                         workspace_id,
                         story_id,
                         lorebook_entry_id
@@ -192,16 +192,16 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
                 )
 
         story_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM stories WHERE workspace_id = 'multi_workspace'"
+            "SELECT COUNT(*) AS count FROM rpg_stories WHERE workspace_id = 'multi_workspace'"
         ).fetchone()["count"]
         character_mount_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM story_characters WHERE character_id = ?",
+            "SELECT COUNT(*) AS count FROM rpg_story_characters WHERE character_id = ?",
             (character_id,),
         ).fetchone()["count"]
         lorebook_mount_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM story_lorebook_entries
+            FROM rpg_story_lorebook_entries
             WHERE lorebook_entry_id = ?
             """,
             (lorebook_entry_id,),
@@ -209,7 +209,7 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
         session_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM sessions
+            FROM rpg_sessions
             WHERE workspace_id = 'multi_workspace'
               AND session_key = 'shared_session'
             """
@@ -224,7 +224,7 @@ def test_workspace_supports_multiple_stories_and_shared_mounts() -> None:
             with db.transaction(conn):
                 conn.execute(
                     """
-                    INSERT INTO sessions (workspace_id, story_id, session_key)
+                    INSERT INTO rpg_sessions (workspace_id, story_id, session_key)
                     VALUES ('multi_workspace', ?, 'shared_session')
                     """,
                     (story_ids[0],),
@@ -245,38 +245,38 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
         workspace = conn.execute(
             """
             SELECT id, name, root_path
-            FROM workspaces
+            FROM rpg_workspaces
             WHERE id = 'demo_workspace'
             """
         ).fetchone()
         story_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM stories
+            FROM rpg_stories
             WHERE workspace_id = 'demo_workspace'
             """
         ).fetchone()["count"]
         session_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM sessions
+            FROM rpg_sessions
             WHERE workspace_id = 'demo_workspace'
             """
         ).fetchone()["count"]
         character_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM characters
+            FROM rpg_characters
             WHERE workspace_id = 'demo_workspace'
             """
         ).fetchone()["count"]
         character_detail_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM character_details
+            FROM rpg_character_details
             WHERE character_id IN (
                 SELECT id
-                FROM characters
+                FROM rpg_characters
                 WHERE workspace_id = 'demo_workspace'
             )
             """
@@ -284,21 +284,21 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
         lorebook_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM lorebook_entries
+            FROM rpg_lorebook_entries
             WHERE workspace_id = 'demo_workspace'
             """
         ).fetchone()["count"]
         character_mount_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM story_characters
+            FROM rpg_story_characters
             WHERE workspace_id = 'demo_workspace'
             """
         ).fetchone()["count"]
         lorebook_mount_count = conn.execute(
             """
             SELECT COUNT(*) AS count
-            FROM story_lorebook_entries
+            FROM rpg_story_lorebook_entries
             WHERE workspace_id = 'demo_workspace'
             """
         ).fetchone()["count"]

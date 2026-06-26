@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from peewee import Database
 
-from rpg_data.orm import StoryCharacter, bind_database
-from rpg_data.repositories._utils import get_or_none, update_timestamp
+from rpg_data import models
+from rpg_data.repositories.records import StoryCharacterRecord, bind_database
+from rpg_data.repositories._utils import get_or_none, to_story_character, update_timestamp
 
 
 class StoryCharacterRepository:
     def __init__(self, database: Database) -> None:
-        self.database = bind_database(database)
+        bind_database(database)
 
     def create(
         self,
@@ -21,32 +22,40 @@ class StoryCharacterRepository:
         enabled: bool = True,
         sort_order: int = 0,
         metadata_json: str = "{}",
-    ) -> StoryCharacter:
-        return StoryCharacter.create(
+    ) -> models.StoryCharacter:
+        return to_story_character(StoryCharacterRecord.create(
             workspace=workspace_id,
             story=story_id,
             character=character_id,
             enabled=enabled,
             sort_order=sort_order,
             metadata_json=metadata_json,
-        )
+        ))
 
     def list(
         self,
         *,
         workspace_id: str | None = None,
         story_id: int | None = None,
-    ) -> list[StoryCharacter]:
-        query = StoryCharacter.select()
+    ) -> list[models.StoryCharacter]:
+        query = StoryCharacterRecord.select()
         if workspace_id is not None:
-            query = query.where(StoryCharacter.workspace == workspace_id)
+            query = query.where(StoryCharacterRecord.workspace == workspace_id)
         if story_id is not None:
-            query = query.where(StoryCharacter.story == story_id)
-        return list(query.order_by(StoryCharacter.story, StoryCharacter.sort_order, StoryCharacter.id))
+            query = query.where(StoryCharacterRecord.story == story_id)
+        return [
+            to_story_character(row)
+            for row in query.order_by(
+                StoryCharacterRecord.story,
+                StoryCharacterRecord.sort_order,
+                StoryCharacterRecord.id,
+            )
+        ]
 
-    def get(self, mount_id: int) -> StoryCharacter | None:
-        return get_or_none(StoryCharacter, mount_id)
+    def get(self, mount_id: int) -> models.StoryCharacter | None:
+        row = get_or_none(StoryCharacterRecord, mount_id)
+        return to_story_character(row) if row is not None else None
 
-    def update_timestamp(self, mount_id: int) -> StoryCharacter | None:
-        return update_timestamp(StoryCharacter, mount_id)
-
+    def update_timestamp(self, mount_id: int) -> models.StoryCharacter | None:
+        row = update_timestamp(StoryCharacterRecord, mount_id)
+        return to_story_character(row) if row is not None else None

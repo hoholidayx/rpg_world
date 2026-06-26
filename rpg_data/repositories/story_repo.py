@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from peewee import Database
 
-from rpg_data.orm import Story, bind_database
-from rpg_data.repositories._utils import get_or_none, update_timestamp
+from rpg_data import models
+from rpg_data.repositories.records import StoryRecord, bind_database
+from rpg_data.repositories._utils import get_or_none, to_story, update_timestamp
 
 
 class StoryRepository:
     def __init__(self, database: Database) -> None:
-        self.database = bind_database(database)
+        bind_database(database)
 
     def create(
         self,
@@ -20,24 +21,25 @@ class StoryRepository:
         summary: str = "",
         description: str = "",
         metadata_json: str = "{}",
-    ) -> Story:
-        return Story.create(
+    ) -> models.Story:
+        return to_story(StoryRecord.create(
             workspace=workspace_id,
             title=title,
             summary=summary,
             description=description,
             metadata_json=metadata_json,
-        )
+        ))
 
-    def list(self, workspace_id: str | None = None) -> list[Story]:
-        query = Story.select()
+    def list(self, workspace_id: str | None = None) -> list[models.Story]:
+        query = StoryRecord.select()
         if workspace_id is not None:
-            query = query.where(Story.workspace == workspace_id)
-        return list(query.order_by(Story.created_at, Story.id))
+            query = query.where(StoryRecord.workspace == workspace_id)
+        return [to_story(row) for row in query.order_by(StoryRecord.created_at, StoryRecord.id)]
 
-    def get(self, story_id: int) -> Story | None:
-        return get_or_none(Story, story_id)
+    def get(self, story_id: int) -> models.Story | None:
+        row = get_or_none(StoryRecord, story_id)
+        return to_story(row) if row is not None else None
 
-    def update_timestamp(self, story_id: int) -> Story | None:
-        return update_timestamp(Story, story_id)
-
+    def update_timestamp(self, story_id: int) -> models.Story | None:
+        row = update_timestamp(StoryRecord, story_id)
+        return to_story(row) if row is not None else None

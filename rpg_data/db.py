@@ -5,11 +5,21 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
 
 from rpg_data.settings import get_database_path
 
+if TYPE_CHECKING:
+    from peewee import Database, SqliteDatabase
+
 _BUSY_TIMEOUT_MS = 5000
+
+__all__ = [
+    "bind_peewee_database",
+    "connect",
+    "make_peewee_database",
+    "transaction",
+]
 
 
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
@@ -27,6 +37,22 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def make_peewee_database(db_path: str | Path | None = None) -> "SqliteDatabase":
+    """Create a Peewee SQLite database for repository-backed access."""
+
+    from rpg_data.repositories.records import make_database
+
+    return make_database(db_path)
+
+
+def bind_peewee_database(database: "Database") -> "Database":
+    """Bind all repository record models to ``database``."""
+
+    from rpg_data.repositories.records import bind_database
+
+    return bind_database(database)
+
+
 @contextmanager
 def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """Run a SQLite transaction, committing on success and rolling back on error."""
@@ -39,4 +65,3 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
         raise
     else:
         conn.commit()
-

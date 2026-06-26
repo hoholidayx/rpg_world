@@ -19,7 +19,20 @@ from peewee import (
 
 from rpg_data.settings import get_database_path
 
-database_proxy = DatabaseProxy()
+__all__ = [
+    "CharacterDetailRecord",
+    "CharacterRecord",
+    "LorebookEntryRecord",
+    "SessionRecord",
+    "StoryCharacterRecord",
+    "StoryLorebookEntryRecord",
+    "StoryRecord",
+    "WorkspaceRecord",
+    "bind_database",
+    "make_database",
+]
+
+_database_proxy = DatabaseProxy()
 
 
 def make_database(db_path: str | Path | None = None) -> SqliteDatabase:
@@ -41,21 +54,21 @@ def make_database(db_path: str | Path | None = None) -> SqliteDatabase:
 def bind_database(database: Database) -> Database:
     """Bind all ORM models to ``database`` and return it."""
 
-    if database_proxy.obj is not database:
-        if database_proxy.obj is None:
-            database_proxy.initialize(database)
+    if _database_proxy.obj is not database:
+        if _database_proxy.obj is None:
+            _database_proxy.initialize(database)
         else:
-            database_proxy.initialize(database)
-    database.bind(MODELS, bind_refs=False, bind_backrefs=False)
+            _database_proxy.initialize(database)
+    database.bind(RECORD_MODELS, bind_refs=False, bind_backrefs=False)
     return database
 
 
-class BaseModel(Model):
+class BaseRecord(Model):
     class Meta:
-        database = database_proxy
+        database = _database_proxy
 
 
-class Workspace(BaseModel):
+class WorkspaceRecord(BaseRecord):
     id = CharField(primary_key=True)
     name = TextField()
     root_path = TextField()
@@ -67,13 +80,13 @@ class Workspace(BaseModel):
     updated_at = TextField()
 
     class Meta:
-        table_name = "workspaces"
+        table_name = "rpg_workspaces"
 
 
-class Story(BaseModel):
+class StoryRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
-        Workspace,
+        WorkspaceRecord,
         backref="stories",
         column_name="workspace_id",
         on_delete="CASCADE",
@@ -87,19 +100,19 @@ class Story(BaseModel):
     updated_at = TextField()
 
     class Meta:
-        table_name = "stories"
+        table_name = "rpg_stories"
 
 
-class Session(BaseModel):
+class SessionRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
-        Workspace,
+        WorkspaceRecord,
         backref="sessions",
         column_name="workspace_id",
         on_delete="CASCADE",
     )
     story = ForeignKeyField(
-        Story,
+        StoryRecord,
         backref="sessions",
         column_name="story_id",
         on_delete="CASCADE",
@@ -114,13 +127,13 @@ class Session(BaseModel):
     updated_at = TextField()
 
     class Meta:
-        table_name = "sessions"
+        table_name = "rpg_sessions"
 
 
-class Character(BaseModel):
+class CharacterRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
-        Workspace,
+        WorkspaceRecord,
         backref="characters",
         column_name="workspace_id",
         on_delete="CASCADE",
@@ -134,13 +147,13 @@ class Character(BaseModel):
     updated_at = TextField()
 
     class Meta:
-        table_name = "characters"
+        table_name = "rpg_characters"
 
 
-class CharacterDetail(BaseModel):
+class CharacterDetailRecord(BaseRecord):
     id = AutoField()
     character = ForeignKeyField(
-        Character,
+        CharacterRecord,
         backref="details",
         column_name="character_id",
         on_delete="CASCADE",
@@ -155,13 +168,13 @@ class CharacterDetail(BaseModel):
     updated_at = TextField()
 
     class Meta:
-        table_name = "character_details"
+        table_name = "rpg_character_details"
 
 
-class LorebookEntry(BaseModel):
+class LorebookEntryRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
-        Workspace,
+        WorkspaceRecord,
         backref="lorebook_entries",
         column_name="workspace_id",
         on_delete="CASCADE",
@@ -176,25 +189,25 @@ class LorebookEntry(BaseModel):
     updated_at = TextField()
 
     class Meta:
-        table_name = "lorebook_entries"
+        table_name = "rpg_lorebook_entries"
 
 
-class StoryCharacter(BaseModel):
+class StoryCharacterRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
-        Workspace,
+        WorkspaceRecord,
         backref="story_characters",
         column_name="workspace_id",
         on_delete="CASCADE",
     )
     story = ForeignKeyField(
-        Story,
+        StoryRecord,
         backref="character_mounts",
         column_name="story_id",
         on_delete="CASCADE",
     )
     character = ForeignKeyField(
-        Character,
+        CharacterRecord,
         backref="story_mounts",
         column_name="character_id",
         on_delete="CASCADE",
@@ -207,25 +220,25 @@ class StoryCharacter(BaseModel):
     updated_at = TextField()
 
     class Meta:
-        table_name = "story_characters"
+        table_name = "rpg_story_characters"
 
 
-class StoryLorebookEntry(BaseModel):
+class StoryLorebookEntryRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
-        Workspace,
+        WorkspaceRecord,
         backref="story_lorebook_entries",
         column_name="workspace_id",
         on_delete="CASCADE",
     )
     story = ForeignKeyField(
-        Story,
+        StoryRecord,
         backref="lorebook_mounts",
         column_name="story_id",
         on_delete="CASCADE",
     )
     lorebook_entry = ForeignKeyField(
-        LorebookEntry,
+        LorebookEntryRecord,
         backref="story_mounts",
         column_name="lorebook_entry_id",
         on_delete="CASCADE",
@@ -238,16 +251,16 @@ class StoryLorebookEntry(BaseModel):
     updated_at = TextField()
 
     class Meta:
-        table_name = "story_lorebook_entries"
+        table_name = "rpg_story_lorebook_entries"
 
 
-MODELS = (
-    Workspace,
-    Story,
-    Session,
-    Character,
-    CharacterDetail,
-    LorebookEntry,
-    StoryCharacter,
-    StoryLorebookEntry,
+RECORD_MODELS = (
+    WorkspaceRecord,
+    StoryRecord,
+    SessionRecord,
+    CharacterRecord,
+    CharacterDetailRecord,
+    LorebookEntryRecord,
+    StoryCharacterRecord,
+    StoryLorebookEntryRecord,
 )

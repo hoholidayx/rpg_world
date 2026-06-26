@@ -1,4 +1,4 @@
-INSERT OR IGNORE INTO workspaces (
+INSERT OR IGNORE INTO rpg_workspaces (
     id,
     name,
     root_path,
@@ -13,7 +13,7 @@ VALUES (
     '{"kind":"demo"}'
 );
 
-INSERT OR IGNORE INTO stories (
+INSERT OR IGNORE INTO rpg_stories (
     workspace_id,
     title,
     summary,
@@ -28,7 +28,7 @@ VALUES (
     '{"kind":"demo","order":1}'
 );
 
-INSERT OR IGNORE INTO stories (
+INSERT OR IGNORE INTO rpg_stories (
     workspace_id,
     title,
     summary,
@@ -43,7 +43,7 @@ VALUES (
     '{"kind":"demo","order":2}'
 );
 
-INSERT OR IGNORE INTO sessions (
+INSERT OR IGNORE INTO rpg_sessions (
     workspace_id,
     story_id,
     session_key,
@@ -56,7 +56,7 @@ VALUES (
     'demo_workspace',
     (
         SELECT id
-        FROM stories
+        FROM rpg_stories
         WHERE workspace_id = 'demo_workspace' AND title = '北境森林 Demo'
     ),
     'demo_forest_main',
@@ -66,7 +66,7 @@ VALUES (
     '{"kind":"demo"}'
 );
 
-INSERT OR IGNORE INTO sessions (
+INSERT OR IGNORE INTO rpg_sessions (
     workspace_id,
     story_id,
     session_key,
@@ -79,7 +79,7 @@ VALUES (
     'demo_workspace',
     (
         SELECT id
-        FROM stories
+        FROM rpg_stories
         WHERE workspace_id = 'demo_workspace' AND title = '奥术学院 Demo'
     ),
     'demo_academy_main',
@@ -89,7 +89,7 @@ VALUES (
     '{"kind":"demo"}'
 );
 
-INSERT OR IGNORE INTO characters (
+INSERT OR IGNORE INTO rpg_characters (
     workspace_id,
     name,
     personality,
@@ -104,7 +104,7 @@ VALUES (
     '{"kind":"demo","role":"player"}'
 );
 
-INSERT OR IGNORE INTO characters (
+INSERT OR IGNORE INTO rpg_characters (
     workspace_id,
     name,
     personality,
@@ -119,7 +119,7 @@ VALUES (
     '{"kind":"demo","role":"companion"}'
 );
 
-INSERT OR IGNORE INTO character_details (
+INSERT OR IGNORE INTO rpg_character_details (
     character_id,
     name,
     enabled,
@@ -130,7 +130,7 @@ INSERT OR IGNORE INTO character_details (
 VALUES (
     (
         SELECT id
-        FROM characters
+        FROM rpg_characters
         WHERE workspace_id = 'demo_workspace' AND name = 'Bob'
     ),
     '战斗风格',
@@ -140,7 +140,7 @@ VALUES (
     10
 );
 
-INSERT OR IGNORE INTO character_details (
+INSERT OR IGNORE INTO rpg_character_details (
     character_id,
     name,
     enabled,
@@ -151,7 +151,7 @@ INSERT OR IGNORE INTO character_details (
 VALUES (
     (
         SELECT id
-        FROM characters
+        FROM rpg_characters
         WHERE workspace_id = 'demo_workspace' AND name = 'Alice'
     ),
     '外貌',
@@ -161,7 +161,7 @@ VALUES (
     10
 );
 
-INSERT OR IGNORE INTO lorebook_entries (
+INSERT OR IGNORE INTO rpg_lorebook_entries (
     workspace_id,
     name,
     content,
@@ -178,7 +178,7 @@ VALUES (
     '{"kind":"demo"}'
 );
 
-INSERT OR IGNORE INTO lorebook_entries (
+INSERT OR IGNORE INTO rpg_lorebook_entries (
     workspace_id,
     name,
     content,
@@ -195,7 +195,7 @@ VALUES (
     '{"kind":"demo"}'
 );
 
-INSERT OR IGNORE INTO story_characters (
+INSERT OR IGNORE INTO rpg_story_characters (
     workspace_id,
     story_id,
     character_id,
@@ -205,18 +205,18 @@ INSERT OR IGNORE INTO story_characters (
 )
 SELECT
     'demo_workspace',
-    stories.id,
-    characters.id,
+    rpg_stories.id,
+    rpg_characters.id,
     1,
-    CASE characters.name WHEN 'Bob' THEN 10 ELSE 20 END,
+    CASE rpg_characters.name WHEN 'Bob' THEN 10 ELSE 20 END,
     '{"kind":"demo"}'
-FROM stories
-JOIN characters ON characters.workspace_id = stories.workspace_id
-WHERE stories.workspace_id = 'demo_workspace'
-  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo')
-  AND characters.name IN ('Bob', 'Alice');
+FROM rpg_stories
+JOIN rpg_characters ON rpg_characters.workspace_id = rpg_stories.workspace_id
+WHERE rpg_stories.workspace_id = 'demo_workspace'
+  AND rpg_stories.title IN ('北境森林 Demo', '奥术学院 Demo')
+  AND rpg_characters.name IN ('Bob', 'Alice');
 
-INSERT OR IGNORE INTO story_lorebook_entries (
+INSERT OR IGNORE INTO rpg_story_lorebook_entries (
     workspace_id,
     story_id,
     lorebook_entry_id,
@@ -226,13 +226,13 @@ INSERT OR IGNORE INTO story_lorebook_entries (
 )
 SELECT
     'demo_workspace',
-    stories.id,
-    lorebook_entries.id,
+    rpg_stories.id,
+    rpg_lorebook_entries.id,
     1,
-    CASE lorebook_entries.name WHEN '炎心之木' THEN 10 ELSE 20 END,
+    CASE rpg_lorebook_entries.name WHEN '炎心之木' THEN 10 ELSE 20 END,
     '{"kind":"demo"}'
-FROM stories
-JOIN lorebook_entries ON lorebook_entries.workspace_id = stories.workspace_id
-WHERE stories.workspace_id = 'demo_workspace'
-  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo')
-  AND lorebook_entries.name IN ('炎心之木', '圆形封印祭坛');
+FROM rpg_stories
+JOIN rpg_lorebook_entries ON rpg_lorebook_entries.workspace_id = rpg_stories.workspace_id
+WHERE rpg_stories.workspace_id = 'demo_workspace'
+  AND rpg_stories.title IN ('北境森林 Demo', '奥术学院 Demo')
+  AND rpg_lorebook_entries.name IN ('炎心之木', '圆形封印祭坛');

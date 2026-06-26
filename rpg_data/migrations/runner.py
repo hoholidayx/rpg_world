@@ -28,7 +28,7 @@ def run_migrations(conn: sqlite3.Connection) -> None:
             _execute_sql_script(conn, sql)
             conn.execute(
                 """
-                INSERT INTO schema_migrations (version, name, checksum)
+                INSERT INTO rpg_schema_migrations (version, name, checksum)
                 VALUES (?, ?, ?)
                 """,
                 (version, migration_path.name, checksum),
@@ -39,7 +39,7 @@ def run_migrations(conn: sqlite3.Connection) -> None:
 def _ensure_schema_migrations(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS schema_migrations (
+        CREATE TABLE IF NOT EXISTS rpg_schema_migrations (
             version TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             checksum TEXT NOT NULL,
@@ -51,7 +51,7 @@ def _ensure_schema_migrations(conn: sqlite3.Connection) -> None:
 
 
 def _get_applied_versions(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute("SELECT version FROM schema_migrations").fetchall()
+    rows = conn.execute("SELECT version FROM rpg_schema_migrations").fetchall()
     return {row["version"] for row in rows}
 
 

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS workspaces (
+CREATE TABLE IF NOT EXISTS rpg_workspaces (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     root_path TEXT NOT NULL,
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS stories (
+CREATE TABLE IF NOT EXISTS rpg_stories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -20,12 +20,12 @@ CREATE TABLE IF NOT EXISTS stories (
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
     UNIQUE (workspace_id, title),
     UNIQUE (id, workspace_id)
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS rpg_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
     story_id INTEGER NOT NULL,
@@ -37,12 +37,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (story_id, workspace_id) REFERENCES stories(id, workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
     UNIQUE (workspace_id, story_id, session_key)
 );
 
-CREATE TABLE IF NOT EXISTS characters (
+CREATE TABLE IF NOT EXISTS rpg_characters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -52,12 +52,12 @@ CREATE TABLE IF NOT EXISTS characters (
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
     UNIQUE (workspace_id, name),
     UNIQUE (id, workspace_id)
 );
 
-CREATE TABLE IF NOT EXISTS character_details (
+CREATE TABLE IF NOT EXISTS rpg_character_details (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     character_id INTEGER NOT NULL,
     name TEXT NOT NULL,
@@ -68,11 +68,11 @@ CREATE TABLE IF NOT EXISTS character_details (
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    FOREIGN KEY (character_id) REFERENCES rpg_characters(id) ON DELETE CASCADE,
     UNIQUE (character_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS lorebook_entries (
+CREATE TABLE IF NOT EXISTS rpg_lorebook_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -83,12 +83,12 @@ CREATE TABLE IF NOT EXISTS lorebook_entries (
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
     UNIQUE (workspace_id, name),
     UNIQUE (id, workspace_id)
 );
 
-CREATE TABLE IF NOT EXISTS story_characters (
+CREATE TABLE IF NOT EXISTS rpg_story_characters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
     story_id INTEGER NOT NULL,
@@ -99,13 +99,13 @@ CREATE TABLE IF NOT EXISTS story_characters (
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (story_id, workspace_id) REFERENCES stories(id, workspace_id) ON DELETE CASCADE,
-    FOREIGN KEY (character_id, workspace_id) REFERENCES characters(id, workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (character_id, workspace_id) REFERENCES rpg_characters(id, workspace_id) ON DELETE CASCADE,
     UNIQUE (story_id, character_id)
 );
 
-CREATE TABLE IF NOT EXISTS story_lorebook_entries (
+CREATE TABLE IF NOT EXISTS rpg_story_lorebook_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
     story_id INTEGER NOT NULL,
@@ -116,21 +116,21 @@ CREATE TABLE IF NOT EXISTS story_lorebook_entries (
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (story_id, workspace_id) REFERENCES stories(id, workspace_id) ON DELETE CASCADE,
-    FOREIGN KEY (lorebook_entry_id, workspace_id) REFERENCES lorebook_entries(id, workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (lorebook_entry_id, workspace_id) REFERENCES rpg_lorebook_entries(id, workspace_id) ON DELETE CASCADE,
     UNIQUE (story_id, lorebook_entry_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_stories_workspace_id ON stories(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_story_id ON sessions(story_id);
-CREATE INDEX IF NOT EXISTS idx_characters_workspace_id ON characters(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_character_details_character_id ON character_details(character_id);
-CREATE INDEX IF NOT EXISTS idx_lorebook_entries_workspace_id ON lorebook_entries(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_story_characters_workspace_id ON story_characters(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_story_characters_story_id ON story_characters(story_id);
-CREATE INDEX IF NOT EXISTS idx_story_characters_character_id ON story_characters(character_id);
-CREATE INDEX IF NOT EXISTS idx_story_lorebook_entries_workspace_id ON story_lorebook_entries(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_story_lorebook_entries_story_id ON story_lorebook_entries(story_id);
-CREATE INDEX IF NOT EXISTS idx_story_lorebook_entries_lorebook_entry_id ON story_lorebook_entries(lorebook_entry_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_stories_workspace_id ON rpg_stories(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_sessions_workspace_id ON rpg_sessions(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_sessions_story_id ON rpg_sessions(story_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_characters_workspace_id ON rpg_characters(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_character_details_character_id ON rpg_character_details(character_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_lorebook_entries_workspace_id ON rpg_lorebook_entries(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_characters_workspace_id ON rpg_story_characters(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_characters_story_id ON rpg_story_characters(story_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_characters_character_id ON rpg_story_characters(character_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_lorebook_entries_workspace_id ON rpg_story_lorebook_entries(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_lorebook_entries_story_id ON rpg_story_lorebook_entries(story_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_lorebook_entries_lorebook_entry_id ON rpg_story_lorebook_entries(lorebook_entry_id);
