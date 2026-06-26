@@ -18,6 +18,6 @@ export type Turn = {
   turnId: number
   userMessage: string
   assistantMessage?: string | null
-  source?: 'play_webui' | 'dashboard' | 'telegram' | 'cli'
+  source?: 'play_webui' | 'telegram' | 'cli'
   createdAt?: string | null
 }

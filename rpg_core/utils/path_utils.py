@@ -185,8 +185,8 @@ def resolve_api_workspace(workspace: str) -> str:
     """Resolve workspace for API/WebUI requests.
 
     When *workspace* is empty (not selected in the frontend),
-    defaults to ``"data/dashboard_api_default_workspace"`` so the API
-    always has a valid workspace directory.
+    defaults to the API workspace so the API always has a valid
+    workspace directory.
     """
     if workspace and workspace.strip():
         return workspace.strip()

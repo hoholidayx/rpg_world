@@ -21,7 +21,7 @@ def test_non_agent_processes_do_not_import_agent_runtime() -> None:
         "configure_llama_client_from_runtime_config",
     )
     violations: list[str] = []
-    for path in _python_files("dashboard_api", "play_api", "channels"):
+    for path in _python_files("play_api", "channels"):
         text = path.read_text(encoding="utf-8")
         for marker in forbidden:
             if marker in text:
@@ -32,7 +32,7 @@ def test_non_agent_processes_do_not_import_agent_runtime() -> None:
 
 def test_only_agent_service_configures_llama_client_from_runtime_config() -> None:
     violations: list[str] = []
-    for path in _python_files("agent_service", "dashboard_api", "play_api", "channels"):
+    for path in _python_files("agent_service", "play_api", "channels"):
         text = path.read_text(encoding="utf-8")
         if "configure_llama_client_from_runtime_config" in text and not str(path).endswith("agent_service/main.py"):
             violations.append(str(path.relative_to(ROOT)))

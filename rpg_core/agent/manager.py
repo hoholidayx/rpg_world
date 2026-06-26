@@ -92,7 +92,7 @@ class AgentManager:
         Parameters
         ----------
         workspace:
-            工作区标识。空值时自动回退到 ``data/dashboard_api_default_workspace``，
+            工作区标识。空值时自动回退到 API 默认工作区，
             与 ``resolve_api_workspace`` 行为保持一致。
         session_id:
             初始化时使用的 session ID。默认为 ``"default"``，

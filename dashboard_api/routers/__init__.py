@@ -1,1 +1,0 @@
-"""RPG World API routers."""

@@ -2,7 +2,7 @@
 
 ## 0. 背景与目标
 
-当前方向调整为：**Play WebUI 作为唯一 Web 主体验**，同时承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口；`dashboard_webui` 后续弃用并删除。
+当前方向调整为：**Play WebUI 作为唯一 Web 主体验**，同时承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口；Dashboard API 和 Dashboard WebUI 已删除，后续不要恢复依赖。
 
 本计划以“最小 MVP 但直接面向目标架构”为原则，不做旧文件存量数据兼容，也不迁移 `data/` 下已有测试数据。新的数据源从第一版开始即以 SQLite 数据库为权威来源，文件系统仅保留配置、记忆原文/导入导出文件、临时运行产物和后续备份用途。
 
@@ -12,14 +12,14 @@
 - Play WebUI 可以创建故事、创建会话、进入 Play Room、发送一轮消息并看到 SSE 流式结果。
 - 一轮消息会在数据库中形成完整的 `session -> turn -> messages -> turn_events` 记录。
 - 场景 HUD、角色列表、已 pin 状态和调试事件可以从数据库刷新。
-- Dashboard WebUI 不再作为 MVP 依赖；`dashboard_api` 可以暂时保留但不作为新能力入口。
+- Dashboard API/WebUI 不再作为 MVP 依赖。
 - `data/` 下旧 `history.jsonl`、`session.json`、角色 JSON、世界书 JSON、状态 CSV 测试数据不需要迁移，也不要求兼容。
 
 ### 0.2 非目标
 
 - 不做多用户账号体系，只预留 `owner_id` / `player_id` 字段。
 - 不做远程 DB / PostgreSQL，MVP 使用 SQLite。
-- 不做旧 Dashboard WebUI 功能完整平移后再启动 MVP；Play WebUI 只实现最小必要管理能力。
+- 不做旧 Dashboard 功能完整平移后再启动 MVP；Play WebUI 只实现最小必要管理能力。
 - 不做旧 JSON/CSV/JSONL 数据导入迁移。
 - 不合并 `rp_memory` 的向量索引数据库；记忆检索仍保持独立。
 - 不引入独立 Data Service 进程；先使用共享无状态数据模块。
@@ -831,7 +831,7 @@ Codex 提示词：
 
 ### Step 12：新增最小数据管理页面
 
-目标：Play WebUI 能替代 Dashboard WebUI 的 MVP 管理能力。
+目标：Play WebUI 提供 MVP 管理能力。
 
 Codex 提示词：
 
@@ -843,12 +843,12 @@ Codex 提示词：
 3. 世界书 tab 支持 list/create/edit name/content/keywords/enabled。
 4. 状态 tab 支持 list/create status table 和 row，支持 pin/unpin。
 5. 所有请求调用 Play API 新增的角色/世界书/状态 CRUD。
-6. 不再跳转 Dashboard WebUI。
+6. 不跳转任何旧 Dashboard 入口。
 7. 运行 cd play_webui && npm run build。
 完成后提交 commit，提交信息：feat: Play WebUI 增加最小数据管理页面。
 ```
 
-### Step 13：清理 Dashboard WebUI 依赖
+### Step 13：清理旧 Web 依赖
 
 目标：Play WebUI MVP 不依赖 Dashboard。
 
@@ -857,12 +857,11 @@ Codex 提示词：
 ```text
 清理 Play MVP 对 Dashboard WebUI 的依赖。
 要求：
-1. 搜索代码和文档中 Play 流程跳转 Dashboard 的入口，改为 Play WebUI 内部页面或 TODO 标记。
-2. dashboard_webui 暂不删除，但在文档中标记 deprecated。
-3. dashboard_api 暂不删除，但新功能不要依赖它。
-4. 更新 CLAUDE.md 和 todos/webui_product_requirements.md 中 Dashboard/Play 的阶段描述，使其符合 Play WebUI 统一承载数据管理的目标。
-5. 运行 uv run python -m pytest play_api/tests rpg_data/tests -q，以及 cd play_webui && npm run build。
-完成后提交 commit，提交信息：docs: 标记 Dashboard WebUI 后续弃用。
+1. 搜索代码和文档中 Play 流程跳转旧 Web 入口的位置，改为 Play WebUI 内部页面或 TODO 标记。
+2. 确认没有 `/dashboard_api`、`dashboard_api`、`dashboard_webui` 或 `run_dashboard_api` 依赖。
+3. 更新 CLAUDE.md 和 todos/webui_product_requirements.md，使其符合 Play WebUI 统一承载数据管理的目标。
+4. 运行 uv run python -m pytest play_api/tests rpg_data/tests -q，以及 cd play_webui && npm run build。
+完成后提交 commit，提交信息：chore: 清理旧 Web 依赖。
 ```
 
 ### Step 14：端到端 MVP 验收测试
@@ -935,12 +934,9 @@ rpg_world/
   play_api/                 # Play WebUI 聚合 API：DataManagerBackend + AgentBackend
   play_webui/               # 唯一 Web 主体验
   rp_memory/                # 独立记忆检索/索引
-  dashboard_api/            # 过渡期保留，后续删除或合并
-  dashboard_webui/          # deprecated，MVP 完成后删除
   data/
     .runtime/
       rpg_world.sqlite3
       rpg_world.sqlite3-wal
       rpg_world.sqlite3-shm
 ```
-

@@ -3,27 +3,27 @@ from __future__ import annotations
 import asyncio
 
 import run_agent
-import run_dashboard_api
 import run_cli
+import run_play_api
 import run_telegram
 
 
-def test_run_dashboard_api_main_invokes_uvicorn(monkeypatch):
+def test_run_play_api_main_invokes_uvicorn(monkeypatch):
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _fake_run(*args, **kwargs):
         calls.append((args, kwargs))
 
-    monkeypatch.setattr(run_dashboard_api.uvicorn, "run", _fake_run)
+    monkeypatch.setattr(run_play_api.uvicorn, "run", _fake_run)
 
-    assert run_dashboard_api.main() is None
+    assert run_play_api.main() is None
     assert len(calls) == 1
     args, kwargs = calls[0]
-    assert args == ("dashboard_api.main:app",)
-    assert kwargs["host"] == run_dashboard_api.api_settings.service.host
-    assert kwargs["port"] == run_dashboard_api.api_settings.service.port
-    assert kwargs["reload"] == run_dashboard_api.api_settings.service.reload
-    assert kwargs["log_level"] == run_dashboard_api.api_settings.log_level.lower()
+    assert args == ("play_api.main:app",)
+    assert kwargs["host"] == run_play_api.play_settings.service.host
+    assert kwargs["port"] == run_play_api.play_settings.service.port
+    assert kwargs["reload"] == run_play_api.play_settings.service.reload
+    assert kwargs["log_level"] == run_play_api.play_settings.logging.log_level.lower()
 
 
 def test_run_agent_main_invokes_uvicorn(monkeypatch):

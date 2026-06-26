@@ -9,10 +9,9 @@ RPG 世界管理子系统——故事数据管理、场景上下文构建、LLM 
 RPG World 的产品定位从“Telegram 优先的 RP 聊天入口”升级为“WebUI 主体验 + Telegram 辅助触达”的 AI RPG World 平台：
 
 - **Play WebUI**：前台游玩端，面向玩家，提供沉浸式 RP 聊天、场景 HUD、角色/NPC 信息、剧情日志、快捷行动和玩法模块交互。
-- **Dashboard WebUI**：后台管理端，面向创作者/管理员，维护 workspace、session、角色卡、世界书、状态表、记忆、摘要、配置和上下文诊断。
 - **Telegram**：保留为轻量入口、推送通知、快速回复和 WebUI 不可用时的兜底交互，不承载复杂沉浸式 UI。
 
-两个 WebUI 项目应作为独立前端应用演进，但共享同一套 FastAPI / `rpg_core` / `rp_memory` 后端能力。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。
+Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。不要恢复 Dashboard API/WebUI。
 
 ## 启动
 
@@ -21,18 +20,15 @@ RPG World 的产品定位从“Telegram 优先的 RP 聊天入口”升级为“
 uv run python -m run_agent
 
 # 独立入口，按需分别启动
-uv run python -m run_dashboard_api
 uv run python -m run_play_api
 uv run python -m run_telegram
 uv run python -m run_cli
 
 # 或直接 uvicorn
-uv run uvicorn dashboard_api.main:app --reload --reload-dir dashboard_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llama_service --host 127.0.0.1 --port 8000
+uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llama_service --host 127.0.0.1 --port 8000
 
-# Dashboard WebUI 开发服务器（端口 5173，代理 /dashboard_api → 后端）
-cd dashboard_webui && npx vite
-
-# Play WebUI 是后续独立前台项目；产品需求见 todos/webui_product_requirements.md
+# Play WebUI 开发服务器
+cd play_webui && npm run dev
 
 # CLI / Telegram 通过 agent_client 访问 Agent 服务
 uv run python -m channels.cli.repl
@@ -46,7 +42,6 @@ uv run python3 -c "from rpg_core.status import StatusManager; print('ok')"
 ```
 rpg_world/
 ├── run_agent.py                   # Agent 服务入口（唯一 agent runtime owner）
-├── run_dashboard_api.py           # Dashboard API 入口
 ├── run_play_api.py                # Play API 入口
 ├── run_cli.py                     # CLI 入口（AgentClient）
 ├── run_telegram.py                # Telegram 入口（AgentClient）
@@ -99,32 +94,22 @@ rpg_world/
 │   ├── rerank/                   #   pointwise rerank
 │   └── storage/                  #   SQLite repository / vector / text index
 ├── llama_service/                # llama.cpp 本地模型服务客户端/服务端
-├──  api/                          # FastAPI 应用
+├── play_api/                     # Play WebUI 专用 FastAPI 应用
 │   ├── main.py                   #   入口 + CORS + lifespan（不启动渠道）
-│   ├── deps.py                   #   管理器单例
-│   ├── logger.py                 #   API 日志配置
-│   ├── settings.yaml             #   Dashboard API 进程配置（监听 + 日志）
-│   ├── settings.py               #   ApiSettings 单例
+│   ├── settings.yaml             #   Play API 进程配置（监听 + 日志）
+│   ├── settings.py               #   PlaySettings 单例
+│   ├── backends/                 #   AgentClient / rpg_data 后端适配
 │   └── routers/
-│       ├── character.py          #   CRUD /dashboard_api/v1/characters
-│       ├── lorebook.py           #   CRUD /dashboard_api/v1/lorebook
-│       ├── status.py             #   CRUD /dashboard_api/v1/status
-│       ├── chat.py               #   send/stream(SSE)/command/history
-│       ├── sessions.py           #   list/create/delete/clone
-│       └── workspace.py          #   list/create/rename/delete
-├── dashboard_webui/              # Dashboard WebUI：Vue 3 SPA（Ant Design Vue + Pinia，数据/配置管理）
-│   ├── settings.yaml
-│   ├── vite.config.js            # 代理 /dashboard_api → 后端
-│   ├── run_dev.sh
-│   └── src/
-│       ├── main.js
-│       ├── App.vue               # 根组件（主题配置）
-│       ├── router/index.js
-│       ├── layouts/              # DashboardLayout（侧边栏 + 工作区选择器）
-│       ├── stores/               # session / theme / workspace
-│       ├── composables/          # useCRUD / useCommands
-│       ├──  api/                  # Axios 客户端
-│       └── views/                # Dashboard views: Character, Lorebook, Status, Sessions, Overview, diagnostics
+│       ├── chat.py               #   turn/stream/command
+│       ├── commands.py           #   command metadata
+│       ├── scene.py              #   scene HUD data
+│       ├── sessions.py           #   session APIs
+│       └── workspace.py          #   workspace APIs
+├── play_webui/                   # Play WebUI：Next.js + React + TypeScript
+│   ├── src/app/                  #   App Router
+│   ├── src/features/             #   home/session/scene/stream features
+│   ├── src/lib/api/              #   Play API client
+│   └── src/components/           #   Timeline、Scene HUD、输入区等
 └── data/                         # 数据文件
     └── {workspace}/
         ├── character/
@@ -142,12 +127,11 @@ rpg_world/
 
 RPG World 采用 **单 Agent 服务 + 独立入口** 模式。根目录聚合 supervisor 入口已移除。
 只有 `run_agent.py` 进程持有 `AgentManager`、`RPGGameAgent`、`rp_memory` 和 llama lazy worker。
-Dashboard API、Play API、CLI、Telegram 不创建 agent，不缓存 agent，不配置 llama，只通过
+Play API、CLI、Telegram 不创建 agent，不缓存 agent，不配置 llama，只通过
 `agent_service.client.AgentClient` 访问 Agent 服务。
 
 ```
 run_agent          -> agent_service.main:app
-run_dashboard_api  -> dashboard_api.main:app      -> AgentClient
 run_play_api       -> play_api.main:app           -> AgentClient
 run_cli            -> channels.cli.repl           -> AgentClient
 run_telegram       -> channels.telegram.runner    -> AgentClient
@@ -157,7 +141,6 @@ run_telegram       -> channels.telegram.runner    -> AgentClient
 
 ```
 run_agent.py -> agent_service.main
-run_dashboard_api.py -> dashboard_api.main
 run_play_api.py -> play_api.main
 run_telegram.py -> channels.telegram.runner
 run_cli.py      -> channels.cli.repl
@@ -177,12 +160,11 @@ agent_service 进程
 
 ### 配置（`settings.yaml` / `llm.yaml`）
 
-配置已拆分到各进程/模块目录：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`dashboard_api/settings.yaml` 管 Dashboard API 监听与日志，`play_api/settings.yaml` 管 Play API 监听与日志，`llama_service/llm.yaml` 管 LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置。它们都采用 `base + profiles`，通过 `RPG_WORLD_PROFILE` 选择 profile，默认 `local`；同级 `settings.local.yaml` / `llm.local.yaml` 等 profile 覆盖文件会自动加载。
+配置已拆分到各进程/模块目录：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听与日志，`llama_service/llm.yaml` 管 LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置。它们都采用 `base + profiles`，通过 `RPG_WORLD_PROFILE` 选择 profile，默认 `local`；同级 `settings.local.yaml` / `llm.local.yaml` 等 profile 覆盖文件会自动加载。
 进程启停不由配置控制。监听和客户端配置通过 `ChannelsSettings` 的类型化属性访问（`channels/config.py`），外部调用不做字符串拼接：
 
 ```python
 channels_settings.agent_port
-channels_settings.dashboard_api_port
 channels_settings.play_api_port
 channels_settings.agent_client_base_url
 channels_settings.telegram_bots
@@ -214,7 +196,7 @@ agent = AgentManager.get_or_create(session_id="mygame_01")
 
 `AgentManager` 的缓存键包含 `workspace`、`session_id`、`api_key`。同名 session
 在不同 workspace 下会得到不同 agent，避免跨工作区污染。所有入口必须提供有效
-workspace；Dashboard API 空 workspace 会解析为 `data/dashboard_api_default_workspace`，Telegram/CLI
+workspace；API 空 workspace 会解析为 API 默认工作区，Telegram/CLI
 从 `settings.yaml` 读取 workspace，缺省时分别使用渠道默认 workspace。
 
 ### ChannelAdapter 基类（`channels/base.py`）
@@ -414,40 +396,22 @@ agent.send(user_input)
 
 ### REST API
 
-```
-GET    /dashboard_api/v1/{resource}           — 列表
-POST   /dashboard_api/v1/{resource}           — 创建
-GET    /dashboard_api/v1/{resource}/{name}     — 详情
-PUT    /dashboard_api/v1/{resource}/{name}     — 更新
-DELETE /dashboard_api/v1/{resource}/{name}     — 删除
-```
+Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api/v1`。路由集中在
+`play_api/routers/`，作为 Play WebUI 的唯一 Web 后端契约。
 
-Chat API：
+当前主要路由：
 
-```
-GET    /dashboard_api/v1/chat/history          — 获取历史会话
-POST   /dashboard_api/v1/chat/send             — 发送消息（缓冲回复）
-POST   /dashboard_api/v1/chat/stream           — 发送消息（SSE 流式回复）
-POST   /dashboard_api/v1/chat/command          — 执行斜杠命令
-GET    /dashboard_api/v1/chat/commands         — 获取可用斜杠命令
-```
+| 模块 | 路由文件 | 职责 |
+|---|---|---|
+| workspace | `play_api/routers/workspace.py` | 工作区列表、创建、切换相关能力 |
+| sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取与状态 |
+| scene | `play_api/routers/scene.py` | 当前场景 HUD 数据 |
+| commands | `play_api/routers/commands.py` | 可用命令元数据 |
+| chat | `play_api/routers/chat.py` | Agent turn、SSE 流式事件、命令执行 |
 
-Workspace / Session API：
-
-```
-GET    /dashboard_api/v1/workspaces                         — 列出工作区
-POST   /dashboard_api/v1/workspaces                         — 创建工作区
-PUT    /dashboard_api/v1/workspaces/{workspace}             — 重命名工作区
-DELETE /dashboard_api/v1/workspaces/{workspace}             — 删除工作区
-GET    /dashboard_api/v1/workspaces/{workspace}/sessions    — 列出会话
-POST   /dashboard_api/v1/workspaces/{workspace}/sessions    — 创建会话
-DELETE /dashboard_api/v1/workspaces/{workspace}/sessions/{session_id}
-POST   /dashboard_api/v1/workspaces/{workspace}/sessions/{session_id}/clone
-```
-
-- Agent 实例通过 `AgentManager` 统一管理
-- API Key 通过 `X-OpenAI-Api-Key` header 传递
-- SSE 流式格式：`data: {json}\n\n`
+- Play API 通过 `agent_service.client.AgentClient` 访问 Agent 服务。
+- API Key 通过 `X-OpenAI-Api-Key` header 传递。
+- SSE 流式格式：`data: {json}\n\n`。
 
 ### 对话历史持久化
 
@@ -487,14 +451,11 @@ POST   /dashboard_api/v1/workspaces/{workspace}/sessions/{session_id}/clone
 
 ### 前端注意事项
 
-- **DashboardLayout** 侧边栏含工作区选择器 + 会话选择器
-- `useCRUD` composable 适用于 character/lorebook CRUD 页面
-- 当前 WebUI 优先作为个人数据管理后台：角色卡、世界书、状态表、workspace、session 管理优先
-- `ChatView` 使用 SSE 流式渲染（`streamMessage()` 基于 fetch + ReadableStream），但完整 Chat UX 排在 Telegram 稳定之后
-- 中文路径在前端 axios 层用 `encodeURIComponent()` 编码
-- 暗色模式：`data-theme` 属性控制，Pinia store 持久化
-- Vite 开发代理：`/api` → `http://127.0.0.1:8000`
-- `session_id` 输入必须与后端一致，只允许字母、数字、下划线，不允许连字符
+- Play WebUI 使用 Next.js App Router + React + TypeScript。
+- Play WebUI 只访问 Play API，不直接访问 `data/`。
+- Web 管理能力也沉淀在 Play WebUI 内，不跳转旧 Dashboard。
+- 中文路径在前端 API 层用 `encodeURIComponent()` 编码。
+- `session_id` 输入必须与后端一致，只允许字母、数字、下划线，不允许连字符。
 
 ### 数据格式
 
@@ -509,7 +470,7 @@ POST   /dashboard_api/v1/workspaces/{workspace}/sessions/{session_id}/clone
 当前自动化测试基线：
 
 ```bash
-uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llama_service/tests dashboard_api/tests play_api/tests agent_service/tests -q
+uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llama_service/tests play_api/tests agent_service/tests rpg_data/tests -q
 ```
 
 这些测试 mock 外部 LLM、Telegram SDK 和网络调用，不需要真实 API key。若本地缺少 `pytest-asyncio`，`rpg_core/tests/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。
@@ -520,7 +481,7 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llama_serv
 - `rpg_core/tests/`：命令分发、上下文、scene、session、summary、AgentManager。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank。
 - `llama_service/tests/`：llama 本地服务客户端/服务端协议。
-- `dashboard_api/tests/`：workspace/session/character/lorebook/status/chat 契约。
+- `play_api/tests/`：Play API workspace/session/scene/chat 契约。
 
 ## 当前实现优先级
 
@@ -528,7 +489,7 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llama_serv
    会话管理、stream/non-stream、异常回复、命令菜单、配置和日志。
 2. **P1：核心数据与记忆链路**。确保角色卡、世界书、状态表、summary、memory
    在 Telegram 使用路径下稳定可用。
-3. **P2：WebUI 数据管理后台**。优先完善数据维护能力，方便人工管理工作区、
+3. **P2：Play WebUI 管理能力**。在 Play WebUI 内完善数据维护能力，方便人工管理工作区、
    角色、世界书、状态表和会话。
-4. **P3：WebUI Chat**。最后再完善 SSE 体验、tool records、stats、多会话聊天 UX
+4. **P3：Play WebUI Chat 体验**。继续完善 SSE 体验、tool records、stats、多会话聊天 UX
    和前端分包。
