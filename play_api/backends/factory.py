@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from play_api.backends.agent import AgentBackend
 from play_api.backends.data_manager import DataManagerBackend
+from rpg_data.services import reset_data_service_gateways
 from rpg_data.settings import get_database_path
 
 _data_manager_backend: DataManagerBackend | None = None
@@ -33,3 +34,4 @@ def close_data_manager_backend() -> None:
     if _data_manager_backend is not None:
         _data_manager_backend.close()
         _data_manager_backend = None
+    reset_data_service_gateways()

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rpg_data import db
-from rpg_data.migrations.runner import run_migrations
-from rpg_data.services.catalog import CatalogService
+from rpg_data.services import DataServiceGateway, get_data_service_gateway
 from rpg_data.settings import get_database_path
 
 
@@ -19,44 +17,25 @@ class DataManagerBackend:
             if db_path is not None
             else get_database_path()
         )
-        self._database = db.bind_peewee_database(
-            db.make_peewee_database(self._database_path)
-        )
-        self._catalog = CatalogService(self._database)
-        self._initialized = False
-        self._initialize()
+        self._gateway: DataServiceGateway = get_data_service_gateway(self._database_path)
+        self._gateway.initialize()
 
     @property
     def database_path(self) -> Path:
         return self._database_path
 
-    def _initialize(self) -> None:
-        if self._initialized:
-            return
-
-        conn = db.connect(self._database_path)
-        try:
-            run_migrations(conn)
-        finally:
-            conn.close()
-
-        self._database.connect(reuse_if_open=True)
-        self._initialized = True
-
     def close(self) -> None:
-        if not self._database.is_closed():
-            self._database.close()
-        self._initialized = False
+        self._gateway.close()
 
     async def list_workspaces(self) -> list[dict[str, object]]:
-        return self._catalog.list_workspaces()
+        return self._gateway.catalog.list_workspaces()
 
     async def list_sessions(
         self,
         workspace: str,
         story_id: int,
     ) -> list[dict[str, object]] | None:
-        return self._catalog.list_sessions(workspace, story_id)
+        return self._gateway.catalog.list_sessions(workspace, story_id)
 
     async def create_session(
         self,
@@ -66,7 +45,7 @@ class DataManagerBackend:
         title: str = "",
         description: str = "",
     ) -> dict[str, object] | None:
-        return self._catalog.create_session(
+        return self._gateway.catalog.create_session(
             workspace,
             story_id,
             title=title,
@@ -77,4 +56,4 @@ class DataManagerBackend:
         self,
         session_id: str,
     ) -> dict[str, object] | None:
-        return self._catalog.get_session(session_id)
+        return self._gateway.catalog.get_session(session_id)

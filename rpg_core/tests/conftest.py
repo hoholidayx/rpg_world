@@ -240,7 +240,6 @@ def temp_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "get_status_dir", lambda workspace, session_id: session_root(workspace, session_id) / "status")
     monkeypatch.setattr(settings, "get_vector_db_path", lambda workspace, session_id: str(session_root(workspace, session_id) / "memory_vectors.db"))
     monkeypatch.setattr(settings, "character_path", lambda workspace: str(workspace_root(workspace) / "character"))
-    monkeypatch.setattr(settings, "lorebook_path", lambda workspace: str(workspace_root(workspace) / "lorebook"))
     return root
 
 

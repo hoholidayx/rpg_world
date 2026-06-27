@@ -42,8 +42,6 @@ base:
   data:
     # 角色卡 JSON 文件所在子目录。
     character_path: character
-    # 世界书 JSON 文件所在子目录。
-    lorebook_path: lorebook
 
   # ── 记忆检索与索引业务参数 ────────────────────────────────────────
   memory:

@@ -1,7 +1,5 @@
-"""Lorebook (world book) module — entries, loader, manager, schemas."""
+"""Lorebook (world book) module."""
 
 from rpg_core.lorebook.manager import LorebookManager
-from rpg_core.lorebook.loader import LorebookLoader
-from rpg_core.lorebook.models import LorebookEntry
 
-__all__ = ["LorebookEntry", "LorebookLoader", "LorebookManager"]
+__all__ = ["LorebookManager"]

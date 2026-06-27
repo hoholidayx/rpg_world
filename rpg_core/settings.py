@@ -13,8 +13,8 @@ passes a workspace identifier:
 - ``""`` − the default/root workspace (maps to ``data/``)
 - ``"data/<name>"`` − a named workspace under ``data/<name>/``
 
-Relative path values (``data.character_path``, ``data.lorebook_path`` from
-``rpg_core/settings.yaml``) are resolved against the workspace root via
+Relative path values (``data.character_path`` from ``rpg_core/settings.yaml``)
+are resolved against the workspace root via
 :func:`rpg_core.utils.path_utils.resolve_rpg_path`.
 
 Session-scoped data paths are deterministic (not user-configurable):
@@ -310,12 +310,6 @@ class Settings(ProfiledYamlSettings):
         """Resolve the character data directory for *workspace*."""
         data = self._raw.get("data", {})
         value = data.get("character_path", "character") if isinstance(data, dict) else "character"
-        return str(resolve_rpg_path(value, _PACKAGE_ROOT, workspace))
-
-    def lorebook_path(self, workspace: str) -> str:
-        """Resolve the lorebook data directory for *workspace*."""
-        data = self._raw.get("data", {})
-        value = data.get("lorebook_path", "lorebook") if isinstance(data, dict) else "lorebook"
         return str(resolve_rpg_path(value, _PACKAGE_ROOT, workspace))
 
     @property

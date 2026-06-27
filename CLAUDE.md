@@ -79,7 +79,7 @@ rpg_world/
 │   ├── context/                  # 结构化 RPG 上下文、固定层、渲染边界和诊断
 │   ├── jinja/                    # Jinja2 模板
 │   ├── character/                # 角色卡（JSON）
-│   ├── lorebook/                 # 世界书（JSON）
+│   ├── lorebook/                 # 世界书（rpg_data 只读适配）
 │   ├── status/                   # 状态表（CSV）
 │   ├── summary/                  # 对话摘要
 │   ├── common_types.py           # 共享类型别名
@@ -115,7 +115,6 @@ rpg_world/
 └── data/                         # 数据文件
     └── {workspace}/
         ├── character/
-        ├── lorebook/
         └── sessions/{id}/
             ├── history.jsonl
             ├── history_cold.jsonl
@@ -437,12 +436,16 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 
 ### Loader + Manager + BaseManager 模式
 
-每个数据域（character/lorebook/status）遵循：
+文件型数据域（character/status）遵循：
 
 1. **Loader** — 纯文件 I/O
 2. **Manager** — 继承 `BaseManager`，持有 `self.data` 缓存
 3. **BaseManager** — 向 `FileWatcher` 注册数据目录
 4. **FileWatcher** — watchdog Observer，500ms 防抖
+
+lorebook 是例外：`rpg_core.lorebook.LorebookManager` 只保存 `session_id`，
+通过 `rpg_data.services.lorebook.LorebookReadService` 实时读取当前 session
+绑定 story 的世界书挂载，不再读取 JSON，也不注册 `FileWatcher`。
 
 ### 结构化类型系统（`agent/agent_types.py`）
 

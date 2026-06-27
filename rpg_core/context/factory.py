@@ -24,7 +24,8 @@ def build_rpg_context(
     ``status_mgr``, ``scene_tracker`` — ready to pass to
     ``RPGContextBuilder.build()``.
 
-    Cross-session data (character, lorebook) is loaded from *workspace* root.
+    Character data is loaded from *workspace* root. Lorebook data is read from
+    the rpg_data catalog by *session_id* and its bound story.
     Session-scoped data (status, summary, memory, history) is loaded from
     ``sessions/{session_id}/`` under *workspace*.
     """
@@ -89,7 +90,7 @@ def build_rpg_context(
     try:
         from rpg_core.lorebook import LorebookManager
 
-        lorebook_mgr = LorebookManager(rpg_settings.lorebook_path(workspace))
+        lorebook_mgr = LorebookManager(session_id)
     except Exception as exc:
         logger.debug("[RPG World] LorebookManager init skipped: {}", exc)
 

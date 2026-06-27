@@ -9,6 +9,7 @@ __all__ = [
     "CharacterDetail",
     "LorebookEntry",
     "Session",
+    "SessionLorebookEntry",
     "SessionProfile",
     "Story",
     "StoryCharacter",
@@ -110,6 +111,20 @@ class LorebookEntry:
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionLorebookEntry:
+    id: int
+    mount_id: int
+    workspace_id: str
+    story_id: int
+    name: str
+    content: str = ""
+    description: str = ""
+    tags: tuple[str, ...] = ()
+    enabled: bool = True
+    sort_order: int = 0
 
 
 @dataclass(frozen=True)

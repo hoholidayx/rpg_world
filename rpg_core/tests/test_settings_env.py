@@ -25,7 +25,6 @@ base:
 {agent_extra}
   data:
     character_path: character
-    lorebook_path: lorebook
   memory:
     enabled: false
     rerank_score_weight: 0.70
@@ -132,7 +131,6 @@ def test_llm_profile_files_override_base_config(tmp_path: Path, monkeypatch) -> 
 base:
   data:
     character_path: character
-    lorebook_path: lorebook
   memory:
     enabled: false
   modules:
@@ -234,7 +232,6 @@ base:
       enabled: true
   data:
     character_path: character
-    lorebook_path: lorebook
   memory:
     enabled: true
     top_k: 5
