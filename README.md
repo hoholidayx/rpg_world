@@ -122,7 +122,7 @@ Telegram 渠道当前支持：
 | `agent/` | LLM Agent 引擎（消息队列、chat loop、子 Agent、命令系统） |
 | `context/` | 结构化 RPG 上下文构建、LLM 边界渲染、上下文诊断 |
 | `scene/` | 场景状态跟踪（时间/地点/属性） |
-| `character/` | 角色卡 CRUD |
+| `character/` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `lorebook/` | 世界书只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `status/` | 状态表（CSV 表格） |
 | `summary/` | 对话摘要压缩 |
@@ -360,8 +360,6 @@ base:
     max_tool_call_limit: 10
     include_tool_records: true
     verbose_logging: true
-  data:
-    character_path: character
   memory:
     top_k: 2
     keyword_tokenizer: jieba

@@ -9,21 +9,18 @@ class FakeLorebookService:
         self.entries = entries or []
         self.calls: list[tuple[str, str]] = []
 
-    def list_entries(self, session_id: str, *, enabled_only: bool = False):
+    def list_entries(self, session_id: str):
         self.calls.append(("list_entries", session_id))
-        entries = list(self.entries)
-        if enabled_only:
-            entries = [entry for entry in entries if entry.enabled]
-        return entries
+        return list(self.entries)
 
     def list_enabled_entries(self, session_id: str):
         self.calls.append(("list_enabled_entries", session_id))
-        return [entry for entry in self.entries if entry.enabled]
+        return list(self.entries)
 
-    def get_entry(self, session_id: str, name: str, *, enabled_only: bool = False):
+    def get_entry(self, session_id: str, name: str):
         self.calls.append(("get_entry", session_id))
         for entry in self.entries:
-            if entry.name == name and (entry.enabled or not enabled_only):
+            if entry.name == name:
                 return entry
         return None
 
@@ -33,7 +30,6 @@ def _entry(
     *,
     entry_id: int = 1,
     mount_id: int = 10,
-    enabled: bool = True,
     sort_order: int = 0,
 ) -> SessionLorebookEntry:
     return SessionLorebookEntry(
@@ -45,7 +41,6 @@ def _entry(
         content=f"{name} content",
         description=f"{name} description",
         tags=("tag",),
-        enabled=enabled,
         sort_order=sort_order,
     )
 
@@ -65,7 +60,6 @@ def test_lorebook_manager_delegates_to_service_without_path_or_cache() -> None:
             "content": "First content",
             "description": "First description",
             "tags": ["tag"],
-            "enable": True,
             "sort_order": 20,
         }
     ]
@@ -99,13 +93,13 @@ def test_lorebook_manager_defaults_to_gateway_service(monkeypatch) -> None:
 
 def test_lorebook_manager_lists_all_entries_and_gets_by_name() -> None:
     service = FakeLorebookService([
-        _entry("Enabled", enabled=True),
-        _entry("Disabled", entry_id=2, mount_id=11, enabled=False),
+        _entry("First"),
+        _entry("Second", entry_id=2, mount_id=11),
     ])
     manager = LorebookManager("s_main", service=service)
 
-    assert [entry["name"] for entry in manager.list_entries()] == ["Enabled", "Disabled"]
-    assert manager.get_entry("Disabled")["enable"] is False
+    assert [entry["name"] for entry in manager.list_entries()] == ["First", "Second"]
+    assert manager.get_entry("Second")["name"] == "Second"
 
 
 def test_lorebook_manager_missing_entry_raises_file_not_found() -> None:
@@ -125,6 +119,7 @@ def test_context_factory_initializes_lorebook_manager_with_session_id(
     temp_settings,
 ) -> None:
     del temp_settings
+    import rpg_core.character as character_module
     import rpg_core.lorebook as lorebook_module
     from rpg_core.context.factory import build_rpg_context
 
@@ -137,6 +132,14 @@ def test_context_factory_initializes_lorebook_manager_with_session_id(
         def list_enabled_entries(self):
             return []
 
+    class FakeCharacterManager:
+        def __init__(self, session_id: str) -> None:
+            self.session_id = session_id
+
+        def list_enabled_characters(self):
+            return []
+
+    monkeypatch.setattr(character_module, "CharacterManager", FakeCharacterManager)
     monkeypatch.setattr(lorebook_module, "LorebookManager", FakeLorebookManager)
 
     context = build_rpg_context(workspace="data/test", session_id="s_factory")

@@ -19,7 +19,6 @@ class StoryLorebookEntryRepository:
         story_id: int,
         lorebook_entry_id: int,
         *,
-        enabled: bool = True,
         sort_order: int = 0,
         metadata_json: str = "{}",
     ) -> models.StoryLorebookEntry:
@@ -27,7 +26,6 @@ class StoryLorebookEntryRepository:
             workspace=workspace_id,
             story=story_id,
             lorebook_entry=lorebook_entry_id,
-            enabled=enabled,
             sort_order=sort_order,
             metadata_json=metadata_json,
         ))

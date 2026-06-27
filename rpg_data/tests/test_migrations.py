@@ -51,7 +51,10 @@ def test_run_migrations_creates_initial_tables() -> None:
 
         session_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_sessions)")}
         character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_characters)")}
+        character_detail_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_character_details)")}
         lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_lorebook_entries)")}
+        story_character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_story_characters)")}
+        story_lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_story_lorebook_entries)")}
 
         profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_profiles)")}
 
@@ -60,7 +63,10 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert {"session_id", "title", "description"}.issubset(profile_columns)
         assert "last_story_rp_his_id" not in session_columns
         assert "enabled" not in character_columns
+        assert "enabled" not in character_detail_columns
         assert "enabled" not in lorebook_columns
+        assert "enabled" not in story_character_columns
+        assert "enabled" not in story_lorebook_columns
     finally:
         conn.close()
 

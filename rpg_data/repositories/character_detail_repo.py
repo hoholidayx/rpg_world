@@ -18,7 +18,6 @@ class CharacterDetailRepository:
         character_id: int,
         name: str,
         *,
-        enabled: bool = True,
         content: str = "",
         tags_json: str = "[]",
         sort_order: int = 0,
@@ -26,7 +25,6 @@ class CharacterDetailRepository:
         return to_character_detail(CharacterDetailRecord.create(
             character=character_id,
             name=name,
-            enabled=enabled,
             content=content,
             tags_json=tags_json,
             sort_order=sort_order,

@@ -19,9 +19,11 @@ def test_gateway_initializes_migrations_and_exposes_services(tmp_path: Path) -> 
     gateway = get_data_service_gateway(tmp_path / "gateway.sqlite3")
 
     workspaces = gateway.catalog.list_workspaces()
+    characters = gateway.character.list_characters("s_forest001")
     lorebook_entries = gateway.lorebook.list_enabled_entries("s_forest001")
 
     assert {workspace["id"] for workspace in workspaces} == {"demo_workspace"}
+    assert [character.name for character in characters] == ["Bob", "Alice"]
     assert [entry.name for entry in lorebook_entries] == ["炎心之木", "圆形封印祭坛"]
 
 

@@ -9,6 +9,8 @@ __all__ = [
     "CharacterDetail",
     "LorebookEntry",
     "Session",
+    "SessionCharacter",
+    "SessionCharacterDetail",
     "SessionLorebookEntry",
     "SessionProfile",
     "Story",
@@ -90,7 +92,6 @@ class CharacterDetail:
     id: int
     character_id: int
     name: str
-    enabled: bool = True
     content: str = ""
     tags_json: str = "[]"
     sort_order: int = 0
@@ -123,7 +124,29 @@ class SessionLorebookEntry:
     content: str = ""
     description: str = ""
     tags: tuple[str, ...] = ()
-    enabled: bool = True
+    sort_order: int = 0
+
+
+@dataclass(frozen=True)
+class SessionCharacterDetail:
+    id: int
+    character_id: int
+    name: str
+    content: str = ""
+    tags: tuple[str, ...] = ()
+    sort_order: int = 0
+
+
+@dataclass(frozen=True)
+class SessionCharacter:
+    id: int
+    mount_id: int
+    workspace_id: str
+    story_id: int
+    name: str
+    personality: str = ""
+    content: str = ""
+    details: tuple[SessionCharacterDetail, ...] = ()
     sort_order: int = 0
 
 
@@ -133,7 +156,6 @@ class StoryCharacter:
     workspace_id: str
     story_id: int
     character_id: int
-    enabled: bool = True
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1
@@ -147,7 +169,6 @@ class StoryLorebookEntry:
     workspace_id: str
     story_id: int
     lorebook_entry_id: int
-    enabled: bool = True
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1

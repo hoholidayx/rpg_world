@@ -1,7 +1,5 @@
-"""Character card module — loader, manager, schemas."""
+"""Character card module."""
 
-from rpg_core.character.loader import CharacterLoader
 from rpg_core.character.manager import CharacterManager
-from rpg_core.character.models import CharacterData, CharacterDetail
 
-__all__ = ["CharacterData", "CharacterDetail", "CharacterLoader", "CharacterManager"]
+__all__ = ["CharacterManager"]

@@ -59,25 +59,24 @@ def test_lorebook_read_service_lists_session_story_mounts(tmp_path: Path) -> Non
                 content="Second content",
                 tags_json="{bad json",
             )
-            disabled = lorebooks.create("main_ws", "Disabled", content="Hidden")
+            unmounted = lorebooks.create("main_ws", "Unmounted", content="Hidden")
             side_only = lorebooks.create("main_ws", "Side Only", content="Side")
             other_only = lorebooks.create("other_ws", "Other Only", content="Other")
 
             mounts.create("main_ws", main_story.id, second.id, sort_order=20)
             mounts.create("main_ws", main_story.id, first.id, sort_order=10)
-            mounts.create("main_ws", main_story.id, disabled.id, enabled=False, sort_order=5)
             mounts.create("main_ws", side_story.id, side_only.id, sort_order=1)
             mounts.create("other_ws", other_story.id, other_only.id, sort_order=1)
 
         service = LorebookReadService(database)
 
         all_entries = service.list_entries(main_session.id)
-        assert [entry.name for entry in all_entries] == ["Disabled", "First", "Second"]
-        assert [entry.sort_order for entry in all_entries] == [5, 10, 20]
-        assert all_entries[1].tags == ("alpha", "beta")
-        assert all_entries[2].tags == ()
-        assert all_entries[1].workspace_id == "main_ws"
-        assert all_entries[1].story_id == main_story.id
+        assert [entry.name for entry in all_entries] == ["First", "Second"]
+        assert [entry.sort_order for entry in all_entries] == [10, 20]
+        assert all_entries[0].tags == ("alpha", "beta")
+        assert all_entries[1].tags == ()
+        assert all_entries[0].workspace_id == "main_ws"
+        assert all_entries[0].story_id == main_story.id
 
         enabled_entries = service.list_enabled_entries(main_session.id)
         assert [entry.name for entry in enabled_entries] == ["First", "Second"]
@@ -85,7 +84,7 @@ def test_lorebook_read_service_lists_session_story_mounts(tmp_path: Path) -> Non
         assert service.list_enabled_entries(other_session.id)[0].name == "Other Only"
 
         assert service.get_entry(main_session.id, "First").content == "First content"
-        assert service.get_entry(main_session.id, "Disabled", enabled_only=True) is None
+        assert service.get_entry(main_session.id, unmounted.name) is None
         assert service.get_entry(main_session.id, "Side Only") is None
         assert service.list_entries("missing_session") == []
         assert service.get_entry("missing_session", "First") is None

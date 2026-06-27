@@ -35,7 +35,7 @@ class LorebookManager:
         ]
 
     def list_enabled_entries(self) -> list[dict[str, object]]:
-        """Return enabled lorebook entries mounted to this session's story."""
+        """Compatibility alias for mounted lorebook entries."""
 
         return [
             _entry_to_dict(entry)
@@ -61,6 +61,5 @@ def _entry_to_dict(entry: "SessionLorebookEntry") -> dict[str, object]:
         "content": entry.content,
         "description": entry.description,
         "tags": list(entry.tags),
-        "enable": entry.enabled,
         "sort_order": entry.sort_order,
     }

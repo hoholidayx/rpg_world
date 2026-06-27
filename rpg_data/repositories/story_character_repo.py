@@ -19,7 +19,6 @@ class StoryCharacterRepository:
         story_id: int,
         character_id: int,
         *,
-        enabled: bool = True,
         sort_order: int = 0,
         metadata_json: str = "{}",
     ) -> models.StoryCharacter:
@@ -27,7 +26,6 @@ class StoryCharacterRepository:
             workspace=workspace_id,
             story=story_id,
             character=character_id,
-            enabled=enabled,
             sort_order=sort_order,
             metadata_json=metadata_json,
         ))

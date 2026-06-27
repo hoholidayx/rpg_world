@@ -136,7 +136,6 @@ VALUES (
 INSERT OR IGNORE INTO rpg_character_details (
     character_id,
     name,
-    enabled,
     content,
     tags_json,
     sort_order
@@ -148,7 +147,6 @@ VALUES (
         WHERE workspace_id = 'demo_workspace' AND name = 'Bob'
     ),
     '战斗风格',
-    1,
     '擅长双手重剑，战斗时喜欢正面冲锋。',
     '["战斗"]',
     10
@@ -157,7 +155,6 @@ VALUES (
 INSERT OR IGNORE INTO rpg_character_details (
     character_id,
     name,
-    enabled,
     content,
     tags_json,
     sort_order
@@ -169,7 +166,6 @@ VALUES (
         WHERE workspace_id = 'demo_workspace' AND name = 'Alice'
     ),
     '外貌',
-    1,
     '银白色长发，紫罗兰色瞳孔，战斗时穿轻便法师袍。',
     '["外观"]',
     10
@@ -213,7 +209,6 @@ INSERT OR IGNORE INTO rpg_story_characters (
     workspace_id,
     story_id,
     character_id,
-    enabled,
     sort_order,
     metadata_json
 )
@@ -221,7 +216,6 @@ SELECT
     'demo_workspace',
     rpg_stories.id,
     rpg_characters.id,
-    1,
     CASE rpg_characters.name WHEN 'Bob' THEN 10 ELSE 20 END,
     '{"kind":"demo"}'
 FROM rpg_stories
@@ -234,7 +228,6 @@ INSERT OR IGNORE INTO rpg_story_lorebook_entries (
     workspace_id,
     story_id,
     lorebook_entry_id,
-    enabled,
     sort_order,
     metadata_json
 )
@@ -242,7 +235,6 @@ SELECT
     'demo_workspace',
     rpg_stories.id,
     rpg_lorebook_entries.id,
-    1,
     CASE rpg_lorebook_entries.name WHEN '炎心之木' THEN 10 ELSE 20 END,
     '{"kind":"demo"}'
 FROM rpg_stories

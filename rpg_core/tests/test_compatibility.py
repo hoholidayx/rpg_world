@@ -2,18 +2,7 @@ from __future__ import annotations
 
 import json
 
-from rpg_core.character.models import CharacterDetail
 from rpg_core.summary.store import SummaryStore
-
-
-def test_character_detail_tags_use_independent_list():
-    first = CharacterDetail(name="A")
-    second = CharacterDetail(name="B")
-
-    first.tags.append("x")
-
-    assert first.tags == ["x"]
-    assert second.tags == []
 
 
 def test_summary_store_loads_legacy_shape(tmp_path):

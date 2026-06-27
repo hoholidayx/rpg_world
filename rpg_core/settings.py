@@ -7,15 +7,11 @@ are **read-only** thereafter.  The active profile is selected through
 
 Path resolution
 ---------------
-Workspace is an explicit parameter in every path method.  The caller always
+Workspace is an explicit parameter in session path methods.  The caller always
 passes a workspace identifier:
 
 - ``""`` − the default/root workspace (maps to ``data/``)
 - ``"data/<name>"`` − a named workspace under ``data/<name>/``
-
-Relative path values (``data.character_path`` from ``rpg_core/settings.yaml``)
-are resolved against the workspace root via
-:func:`rpg_core.utils.path_utils.resolve_rpg_path`.
 
 Session-scoped data paths are deterministic (not user-configurable):
 ``{workspace_root}/sessions/{session_id}/{filename}``.
@@ -43,8 +39,6 @@ from rpg_core.llm.keys import (
 )
 from rpg_core.utils.path_utils import (
     PACKAGE_ROOT as _PACKAGE_ROOT,
-    _KNOWN_DATA_DIRS,
-    resolve_rpg_path,
     resolve_workspace_root,
 )
 
@@ -297,20 +291,6 @@ class Settings(ProfiledYamlSettings):
         if legacy_model:
             return
         raise ValueError(f"llm biz config invalid: {AGENT_MAIN_BIZ_KEY}.model is required")
-
-    # ------------------------------------------------------------------
-    # Workspace-scoped path methods
-    #
-    # Every method that returns a data path receives an explicit
-    # *workspace* parameter.  There is NO implicit "active workspace" —
-    # callers always specify which workspace they operate on.
-    # ------------------------------------------------------------------
-
-    def character_path(self, workspace: str) -> str:
-        """Resolve the character data directory for *workspace*."""
-        data = self._raw.get("data", {})
-        value = data.get("character_path", "character") if isinstance(data, dict) else "character"
-        return str(resolve_rpg_path(value, _PACKAGE_ROOT, workspace))
 
     @property
     def jinja_dir(self) -> Path:

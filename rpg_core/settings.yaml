@@ -38,11 +38,6 @@ base:
     status_sub_agent:
       enabled: true
 
-  # ── Workspace 内数据目录 ──────────────────────────────────────────
-  data:
-    # 角色卡 JSON 文件所在子目录。
-    character_path: character
-
   # ── 记忆检索与索引业务参数 ────────────────────────────────────────
   memory:
     # 是否启用向量记忆索引与检索。

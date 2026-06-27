@@ -176,7 +176,6 @@ class CharacterDetailRecord(BaseRecord):
         on_delete="CASCADE",
     )
     name = TextField()
-    enabled = BooleanField(default=True)
     content = TextField(default="")
     tags_json = TextField(default="[]")
     sort_order = IntegerField(default=0)
@@ -229,7 +228,6 @@ class StoryCharacterRecord(BaseRecord):
         column_name="character_id",
         on_delete="CASCADE",
     )
-    enabled = BooleanField(default=True)
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
@@ -260,7 +258,6 @@ class StoryLorebookEntryRecord(BaseRecord):
         column_name="lorebook_entry_id",
         on_delete="CASCADE",
     )
-    enabled = BooleanField(default=True)
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
