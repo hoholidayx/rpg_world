@@ -4,7 +4,7 @@ import pytest
 
 import rpg_core.agent.manager as agent_manager_module
 from rpg_core.agent.manager import AgentManager
-from rpg_core.llm.manager import ProviderOverrides
+from llm_service.manager import ProviderOverrides
 
 
 class FakeAgent:

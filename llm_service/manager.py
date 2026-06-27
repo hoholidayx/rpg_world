@@ -15,11 +15,11 @@ from typing import TypeAlias
 
 from openai import AsyncOpenAI
 
-from llama_service import LlamaEmbeddingModel, LlamaRerankModel
-from llama_service.client import LlamaCompletionModel
-from rpg_core.llm.base_provider import LLMProvider
-from rpg_core.llm.config import BizConfig, resolve_biz_config
-from rpg_core.llm.keys import (
+from llm_service import LlamaEmbeddingModel, LlamaRerankModel
+from llm_service.client import LlamaCompletionModel
+from llm_service.base_provider import DocumentScoreProvider, LLMProvider
+from llm_service.config import BizConfig, resolve_biz_config
+from llm_service.keys import (
     LLM_KIND_EMBEDDING,
     LLM_KIND_RERANK,
     PROVIDER_LLAMA,
@@ -29,15 +29,15 @@ from rpg_core.llm.keys import (
     RERANK_MODEL_TYPE_CHAT_POINTWISE,
     RERANK_MODEL_TYPE_QWEN3_LOGIT,
 )
-from rpg_core.llm.llama_provider import (
+from llm_service.llama_provider import (
     LlamaCompletionProvider,
     LlamaEmbeddingProvider,
+    LlamaLogitRerankProvider,
 )
-from rpg_core.llm.openai_provider import OpenAIProvider
-from rp_memory.rerank.providers import MemoryScoreProvider
+from llm_service.openai_provider import OpenAIProvider
 
 
-ManagedProvider: TypeAlias = LLMProvider | MemoryScoreProvider
+ManagedProvider: TypeAlias = LLMProvider | DocumentScoreProvider
 
 
 @dataclass(frozen=True)
@@ -352,9 +352,7 @@ class LLMManager:
         verbose: bool = False,
         request_timeout_ms: int = 60000,
         max_length: int | None = None,
-    ):
-        from rp_memory.rerank.providers import LogitRerankProvider
-
+    ) -> LlamaLogitRerankProvider:
         model = self._build_llama_rerank_model(
             scope=scope,
             model_path=model_path,
@@ -363,7 +361,7 @@ class LLMManager:
             verbose=verbose,
             request_timeout_ms=request_timeout_ms,
         )
-        return LogitRerankProvider(
+        return LlamaLogitRerankProvider(
             model_path=model_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
@@ -385,7 +383,7 @@ class LLMManager:
         """Return a fully constructed provider for *biz_key*.
 
         This is the **only** public method business code should call.
-        Config lives in ``llama_service/llm.yaml``; provider differences (OpenAI /
+        Config lives in ``llm_service/llm.yaml``; provider differences (OpenAI /
         llama / chat / embedding / rerank) are handled internally.
         """
         with self._lock:
@@ -494,13 +492,11 @@ class LLMManager:
     ) -> ManagedProvider:
         rerank_model_type = cfg.rerank_model_type
         if rerank_model_type == RERANK_MODEL_TYPE_CHAT_POINTWISE:
-            from rp_memory.rerank.providers import ChatPointwiseScoreProvider
-
             if backend != PROVIDER_OPENAI:
                 raise ValueError(
                     f"{biz_key} config invalid: rerank_model_type={rerank_model_type!r} requires provider={PROVIDER_OPENAI!r}"
                 )
-            chat_provider = self._build_openai_provider(
+            return self._build_openai_provider(
                 scope=biz_key,
                 model=self._openai_model(cfg, overrides),
                 api_key=self._openai_api_key(cfg, overrides),
@@ -508,7 +504,6 @@ class LLMManager:
                 max_tokens=self._openai_max_tokens(cfg, overrides),
                 temperature=self._openai_temperature(cfg, overrides),
             )
-            return ChatPointwiseScoreProvider(chat_provider)
         if rerank_model_type == RERANK_MODEL_TYPE_QWEN3_LOGIT:
             if backend != PROVIDER_LLAMA:
                 raise ValueError(

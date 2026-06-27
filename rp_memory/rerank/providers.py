@@ -5,25 +5,17 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from rpg_core.common_types import DebugInfo
 
-
-from llama_service.client import LlamaRerankModel
-from rpg_core.llm.base_provider import LLMProvider
-from rpg_core.llm.types import LLMResponse
+from llm_service.base_provider import DocumentScoreProvider, LLMProvider
+from llm_service.types import LLMResponse
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.rerank.common import (
     MEMORY_RERANK_SYSTEM_PROMPT,
     build_pointwise_prompt,
     parse_pointwise_output,
     short_preview,
-)
-
-
-DEFAULT_QWEN_RERANK_INSTRUCTION = (
-    "Given a user query, judge whether the candidate memory is relevant and useful for answering it."
 )
 
 
@@ -86,69 +78,33 @@ class ChatPointwiseScoreProvider(MemoryScoreProvider):
         )
 
 
-class LogitRerankProvider(LLMProvider, MemoryScoreProvider):
-    """Rerank provider backed by local model yes/no logits."""
+class LogitRerankProvider(MemoryScoreProvider):
+    """Memory-score adapter for generic local yes/no-logit document rerank."""
 
-    def __init__(
-        self,
-        *,
-        model_path: str | Path,
-        n_ctx: int = 4096,
-        n_gpu_layers: int = 0,
-        verbose: bool = False,
-        request_timeout_ms: int = 60000,
-        instruction: str = DEFAULT_QWEN_RERANK_INSTRUCTION,
-        max_length: int | None = None,
-        model: LlamaRerankModel | None = None,
-    ) -> None:
-        self._model_path = str(Path(model_path))
-        self._instruction = instruction or DEFAULT_QWEN_RERANK_INSTRUCTION
-        self._max_length = max(1, int(max_length or n_ctx))
-        self._model = model or LlamaRerankModel(
-            self._model_path,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            verbose=verbose,
-            request_timeout_ms=request_timeout_ms,
-        )
+    def __init__(self, provider: DocumentScoreProvider) -> None:
+        self._provider = provider
 
     def get_default_model(self) -> str:
-        return self._model_path
+        get_default_model = getattr(self._provider, "get_default_model", None)
+        if callable(get_default_model):
+            return str(get_default_model())
+        return type(self._provider).__name__
 
     async def score(self, query: str, candidates: list[MemoryCandidate]) -> list[MemoryScore]:
         documents = [candidate.content for candidate in candidates]
-        raw_scores = await asyncio.to_thread(
-            self._model.rerank,
-            query,
-            documents,
-            instruction=self._instruction,
-            max_length=self._max_length,
-        )
-        if len(raw_scores) != len(candidates):
-            raise ValueError(f"rerank score count mismatch: expected={len(candidates)} got={len(raw_scores)}")
+        raw_scores = await self._provider.score_documents(query, documents)
+        if len(raw_scores) != len(documents):
+            raise ValueError(f"rerank score count mismatch: expected={len(documents)} got={len(raw_scores)}")
         results: list[MemoryScore] = []
         for raw in raw_scores:
-            score = max(0.0, min(1.0, float(raw.get("score", 0.0))))
-            yes_logit = float(raw.get("yes_logit", 0.0))
-            no_logit = float(raw.get("no_logit", 0.0))
             results.append(
                 MemoryScore(
-                    score=score,
-                    reason="yes/no logits",
-                    debug={
-                        "source": "logits",
-                        "yes_logit": yes_logit,
-                        "no_logit": no_logit,
-                    },
+                    score=raw.clamped_score,
+                    reason=raw.reason,
+                    debug=dict(raw.debug),
                 )
             )
         return results
-
-    async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
-        raise NotImplementedError("LogitRerankProvider supports score(), not chat()")
-
-    async def chat_stream(self, messages: list[dict], tools: list[dict] | None = None):
-        raise NotImplementedError("LogitRerankProvider supports score(), not chat_stream()")
 
 
 class _RerankParseError(Exception):

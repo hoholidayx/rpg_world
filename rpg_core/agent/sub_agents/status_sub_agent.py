@@ -33,7 +33,7 @@ from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
-    from rpg_core.llm.manager import ProviderOverrides
+    from llm_service.manager import ProviderOverrides
 
     from rpg_core.agent.sub_agents.context import SubAgentContext
 

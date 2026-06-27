@@ -1,4 +1,4 @@
-"""LLM configuration — typed accessors for ``llama_service/llm.yaml``.
+"""LLM configuration — typed accessors for ``llm_service/llm.yaml``.
 
 This module owns the standalone LLM settings file.  Business code never
 touches raw YAML keys directly; it gets a ``BizConfig`` via
@@ -12,9 +12,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from commons.settings import PROFILE_ENV, load_profiled_yaml, load_yaml_mapping, resolve_profile_name
-from rpg_core.common_types import ConfigDict, ConfigValue
-from rpg_core.llm.keys import (
+from commons.settings import ConfigDict, ConfigValue, PROFILE_ENV, load_profiled_yaml, load_yaml_mapping, resolve_profile_name
+from llm_service.keys import (
     LLM_KIND_CHAT,
     LLM_KIND_RERANK,
     LLM_KINDS,
@@ -27,7 +26,7 @@ from rpg_core.llm.keys import (
 )
 from commons.settings import deep_merge_dicts, optional_bool, optional_float, optional_int
 
-_LLM_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "llama_service" / "llm.yaml"
+_LLM_SETTINGS_PATH = Path(__file__).resolve().parent / "llm.yaml"
 _PROFILE_ENV = PROFILE_ENV
 
 # ── cached raw config ──────────────────────────────────────────────────
@@ -68,7 +67,7 @@ def _resolve_profile_name() -> str:
     """Determine the active profile name."""
     if not _LLM_SETTINGS_PATH.is_file():
         return (os.environ.get(_PROFILE_ENV) or "").strip() or "local"
-    return resolve_profile_name(load_yaml_mapping(_LLM_SETTINGS_PATH, "llama_service/llm.yaml"), env_var=_PROFILE_ENV)
+    return resolve_profile_name(load_yaml_mapping(_LLM_SETTINGS_PATH, "llm_service/llm.yaml"), env_var=_PROFILE_ENV)
 
 
 def _load_raw() -> ConfigDict:
@@ -92,7 +91,7 @@ def _load_raw() -> ConfigDict:
         return _raw_settings
 
     _cache_key = current_key
-    _raw_settings = load_profiled_yaml(_LLM_SETTINGS_PATH, profile_name, label="llama_service/llm.yaml")
+    _raw_settings = load_profiled_yaml(_LLM_SETTINGS_PATH, profile_name, label="llm_service/llm.yaml")
     return _raw_settings
 
 
@@ -114,7 +113,7 @@ def get_active_profile() -> str:
 
 
 def get_runtime_config() -> LLMRuntimeConfig:
-    """Return typed runtime settings from ``llama_service/llm.yaml``."""
+    """Return typed runtime settings from ``llm_service/llm.yaml``."""
     raw = load_llm_settings()
     runtime = raw.get("runtime", {})
     if not isinstance(runtime, dict):

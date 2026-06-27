@@ -1,8 +1,21 @@
-"""Provider-level LLM response and streaming types."""
+"""Provider-level LLM response, streaming, and local-runtime types."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TypeAlias
+
+JsonScalar: TypeAlias = str | int | float | bool | None
+JsonValue: TypeAlias = "JsonScalar | list[JsonValue] | dict[str, JsonValue]"
+JsonObject: TypeAlias = dict[str, JsonValue]
+
+LlamaModelConfig: TypeAlias = JsonObject
+LlamaRequestParams: TypeAlias = JsonObject
+LlamaResponsePayload: TypeAlias = JsonValue
+LlamaModelHandle: TypeAlias = object
+LlamaLogits: TypeAlias = object
+LlamaCacheKeyPart: TypeAlias = JsonScalar
+LlamaCacheKey: TypeAlias = tuple[LlamaCacheKeyPart, ...]
 
 
 @dataclass
@@ -64,3 +77,16 @@ class ProviderChunk:
     model: str | None = None
     request_id: str | None = None
     created: int | None = None
+
+
+@dataclass(frozen=True)
+class DocumentScore:
+    """Normalized score for one generic document rerank candidate."""
+
+    score: float
+    reason: str = ""
+    debug: JsonObject = field(default_factory=dict)
+
+    @property
+    def clamped_score(self) -> float:
+        return max(0.0, min(1.0, float(self.score)))

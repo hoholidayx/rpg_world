@@ -64,7 +64,7 @@ include = [
     "rpg_core*",
     "rpg_data*",
     "rp_memory*",
-    "llama_service*",
+    "llm_service*",
 ]
 exclude = [
     "data*",

@@ -40,8 +40,8 @@ from rpg_core.session.manager import SessionManager
 
 if TYPE_CHECKING:
     from rpg_core.agent.agent import RPGGameAgent
-    from rpg_core.llm.base_provider import LLMProvider
-    from rpg_core.llm.manager import ProviderOverrides
+    from llm_service.base_provider import LLMProvider
+    from llm_service.manager import ProviderOverrides
     from rp_memory.recalled_memory import RecalledMemoryStore
     from rp_memory.story_memory import StoryMemoryStore
     from rpg_core.summary.store import SummaryStore

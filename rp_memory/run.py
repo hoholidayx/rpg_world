@@ -35,8 +35,8 @@ logger.add(
 )
 
 from rpg_core.session.manager import SessionManager
-from rpg_core.llm.config import resolve_llm_config
-from rpg_core.llm.keys import MEMORY_EMBED_BIZ_KEY, MEMORY_QUERY_PLANNER_BIZ_KEY, MEMORY_RERANK_BIZ_KEY
+from llm_service.config import resolve_llm_config
+from llm_service.keys import MEMORY_EMBED_BIZ_KEY, MEMORY_QUERY_PLANNER_BIZ_KEY, MEMORY_RERANK_BIZ_KEY
 from rp_memory.recalled_memory import RecalledMemoryStore
 from rp_memory.memory_manager import MemoryManager, format_recall_item
 from rpg_core.utils.path_utils import (

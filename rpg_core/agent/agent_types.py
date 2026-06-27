@@ -21,7 +21,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 
-from rpg_core.llm.types import LLMResponse, LLMUsage, ProviderChunk
+from llm_service.types import LLMResponse, LLMUsage, ProviderChunk
 
 
 # ── shared JSON type aliases ──────────────────────────────────────────

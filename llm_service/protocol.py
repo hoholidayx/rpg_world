@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from rpg_core.common_types import LlamaModelConfig, LlamaRequestParams, LlamaResponsePayload
+from llm_service.types import LlamaModelConfig, LlamaRequestParams, LlamaResponsePayload
 
 LlamaOperation = Literal["embedding_dimension", "embed", "complete", "complete_stream", "rerank", "shutdown"]
 

@@ -12,12 +12,15 @@ from pathlib import Path
 
 from loguru import logger
 
-from llama_service import LlamaEmbeddingModel
-from llama_service.client import LlamaCompletionModel
-from rpg_core.llm.base_provider import LLMProvider
-from rpg_core.llm.types import LLMResponse, ProviderChunk
+from llm_service.client import LlamaCompletionModel, LlamaEmbeddingModel, LlamaRerankModel
+from llm_service.base_provider import DocumentScoreProvider, LLMProvider
+from llm_service.types import DocumentScore, LLMResponse, ProviderChunk
 
 _TAG = "[LlamaCompletionProvider]"
+
+DEFAULT_QWEN_RERANK_INSTRUCTION = (
+    "Given a user query, judge whether the candidate document is relevant and useful for answering it."
+)
 
 
 class LlamaCompletionProvider(LLMProvider):
@@ -283,3 +286,67 @@ class LlamaEmbeddingProvider(LLMProvider):
 
     def dimension(self) -> int:
         return self._dim
+
+
+class LlamaLogitRerankProvider(LLMProvider, DocumentScoreProvider):
+    """Generic document rerank provider backed by local yes/no logits."""
+
+    def __init__(
+        self,
+        *,
+        model_path: str | Path,
+        n_ctx: int = 4096,
+        n_gpu_layers: int = 0,
+        verbose: bool = False,
+        request_timeout_ms: int = 60000,
+        instruction: str = DEFAULT_QWEN_RERANK_INSTRUCTION,
+        max_length: int | None = None,
+        model: LlamaRerankModel | None = None,
+    ) -> None:
+        self._model_path = str(Path(model_path))
+        self._instruction = instruction or DEFAULT_QWEN_RERANK_INSTRUCTION
+        self._max_length = max(1, int(max_length or n_ctx))
+        self._model = model or LlamaRerankModel(
+            self._model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            verbose=verbose,
+            request_timeout_ms=request_timeout_ms,
+        )
+
+    def get_default_model(self) -> str:
+        return self._model_path
+
+    async def score_documents(self, query: str, documents: list[str]) -> list[DocumentScore]:
+        raw_scores = await asyncio.to_thread(
+            self._model.rerank,
+            query,
+            documents,
+            instruction=self._instruction,
+            max_length=self._max_length,
+        )
+        if len(raw_scores) != len(documents):
+            raise ValueError(f"rerank score count mismatch: expected={len(documents)} got={len(raw_scores)}")
+        results: list[DocumentScore] = []
+        for raw in raw_scores:
+            score = max(0.0, min(1.0, float(raw.get("score", 0.0))))
+            yes_logit = float(raw.get("yes_logit", 0.0))
+            no_logit = float(raw.get("no_logit", 0.0))
+            results.append(
+                DocumentScore(
+                    score=score,
+                    reason="yes/no logits",
+                    debug={
+                        "source": "logits",
+                        "yes_logit": yes_logit,
+                        "no_logit": no_logit,
+                    },
+                )
+            )
+        return results
+
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
+        raise NotImplementedError("LlamaLogitRerankProvider supports score_documents(), not chat()")
+
+    async def chat_stream(self, messages: list[dict], tools: list[dict] | None = None):
+        raise NotImplementedError("LlamaLogitRerankProvider supports score_documents(), not chat_stream()")

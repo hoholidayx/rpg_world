@@ -14,9 +14,9 @@ from typing import Callable
 
 from loguru import logger
 
-from rpg_core.common_types import LlamaModelConfig, LlamaRequestParams, LlamaResponsePayload
-from rpg_core.llm.config import get_runtime_config
-from llama_service.protocol import LlamaOperation, LlamaResponse, make_request
+from llm_service.config import get_runtime_config
+from llm_service.protocol import LlamaOperation, LlamaResponse, make_request
+from llm_service.types import LlamaModelConfig, LlamaRequestParams, LlamaResponsePayload
 
 
 class LlamaClientError(Exception):
@@ -476,7 +476,7 @@ def _default_process_factory(
     response_queue: MPQueue,
     max_parallel_models: int,
 ) -> mp.Process:
-    from llama_service.server import serve
+    from llm_service.server import serve
 
     return mp.Process(
         target=serve,
@@ -498,7 +498,7 @@ def get_llama_client() -> LlamaClient:
 
 
 def configure_llama_client_from_runtime_config() -> LlamaClient:
-    """Configure the process-wide llama client from ``llama_service/llm.yaml``."""
+    """Configure the process-wide llama client from ``llm_service/llm.yaml``."""
     runtime = get_runtime_config()
     client = get_llama_client()
     client.configure(

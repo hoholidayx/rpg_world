@@ -153,7 +153,7 @@ MVP 中以下数据直接以数据库为权威：
 ### 2.2 文件系统保留的数据
 
 - `rpg_core/settings.yaml`、`agent_service/settings.yaml`、`play_api/settings.yaml` 等进程配置。
-- `llama_service/llm.yaml`。
+- `llm_service/llm.yaml`。
 - 记忆原文、导入导出包、手工备份。
 - `rp_memory` 自己维护的向量索引或 FTS 数据库。
 - SQLite WAL/SHM 运行文件。

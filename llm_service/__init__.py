@@ -1,6 +1,6 @@
-"""Process-isolated llama.cpp service."""
+"""Unified LLM service package and local llama.cpp runtime."""
 
-from llama_service.client import (
+from llm_service.client import (
     LlamaClient,
     LlamaCompletionModel,
     LlamaEmbeddingModel,

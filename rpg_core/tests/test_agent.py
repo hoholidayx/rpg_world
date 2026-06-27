@@ -8,7 +8,7 @@ import pytest
 
 import rpg_core.agent.agent as agent_module
 from rpg_core.agent.agent import RPGGameAgent
-from rpg_core.llm.manager import ProviderOverrides
+from llm_service.manager import ProviderOverrides
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     QueueItem,

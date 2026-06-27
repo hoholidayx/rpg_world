@@ -23,7 +23,7 @@ from agent_service.schemas import (
     AgentSessionCreateRequest,
 )
 from agent_service.settings import settings as process_settings
-from llama_service.client import configure_llama_client_from_runtime_config
+from llm_service.client import configure_llama_client_from_runtime_config
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_core.agent.command import CommandResult
 from rpg_core.agent.loop import AgentReply

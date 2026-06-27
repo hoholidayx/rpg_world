@@ -13,7 +13,7 @@ from rp_memory.planning.planner import (
 )
 
 if TYPE_CHECKING:
-    from rpg_core.llm.base_provider import LLMProvider
+    from llm_service.base_provider import LLMProvider
 
 
 class OpenAIQueryPlanner(BaseQueryPlanner):

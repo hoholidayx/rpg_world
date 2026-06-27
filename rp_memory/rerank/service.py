@@ -7,13 +7,14 @@ import time
 
 from loguru import logger
 
+from llm_service.base_provider import DocumentScoreProvider
 from rp_memory.asyncio_utils import run_awaitable_sync
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.rerank.base import MemoryReranker
 from rp_memory.rerank.common import (
     blend_pointwise_scores,
 )
-from rp_memory.rerank.providers import ChatPointwiseScoreProvider, MemoryScoreProvider
+from rp_memory.rerank.providers import ChatPointwiseScoreProvider, LogitRerankProvider, MemoryScoreProvider
 
 
 class PointwiseMemoryReranker(MemoryReranker):
@@ -151,6 +152,8 @@ def _compact(text: str) -> str:
 def _as_score_provider(provider: object, *, max_candidate_chars: int) -> MemoryScoreProvider:
     if isinstance(provider, MemoryScoreProvider):
         return provider
+    if isinstance(provider, DocumentScoreProvider):
+        return LogitRerankProvider(provider)
     return ChatPointwiseScoreProvider(provider, max_candidate_chars=max_candidate_chars)  # type: ignore[arg-type]
 
 

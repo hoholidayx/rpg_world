@@ -18,7 +18,7 @@ from rpg_core.common_types import Metadata
 from loguru import logger
 
 if TYPE_CHECKING:
-    from rpg_core.llm.base_provider import LLMProvider
+    from llm_service.base_provider import LLMProvider
     from rp_memory.planning.planner import BaseQueryPlanner
     from rp_memory.recalled_memory import RecalledMemoryStore
     from rp_memory.retrieval.retriever import BaseRetriever
@@ -188,8 +188,8 @@ class MemoryManager:
     def _build_embedding(mem_cfg: MemorySettings):
         if not getattr(mem_cfg, "enabled", True):
             return None
-        from rpg_core.llm.keys import MEMORY_EMBED_BIZ_KEY
-        from rpg_core.llm.manager import LLMManager
+        from llm_service.keys import MEMORY_EMBED_BIZ_KEY
+        from llm_service.manager import LLMManager
 
         try:
             embedding = LLMManager.get().get_provider(MEMORY_EMBED_BIZ_KEY)
@@ -372,9 +372,9 @@ class MemoryManager:
         if not getattr(mem_cfg, "query_planner_enabled", False):
             logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
             return rule_based_planner
-        from rpg_core.llm.keys import MEMORY_QUERY_PLANNER_BIZ_KEY
-        from rpg_core.llm.manager import LLMManager
-        from rpg_core.llm.keys import PROVIDER_LLAMA
+        from llm_service.keys import MEMORY_QUERY_PLANNER_BIZ_KEY
+        from llm_service.manager import LLMManager
+        from llm_service.keys import PROVIDER_LLAMA
         from rp_memory.planning.openai_planner import OpenAIQueryPlanner
         from rp_memory.planning.planner import FallbackQueryPlanner, LlamaQueryPlanner
 
@@ -397,17 +397,15 @@ class MemoryManager:
             if not mem_cfg.rerank_enabled:
                 logger.info("[MemoryManager] reranker mode — disabled")
                 return None
-            from rpg_core.llm.keys import MEMORY_RERANK_BIZ_KEY
-            from rpg_core.llm.manager import LLMManager
+            from llm_service.keys import MEMORY_RERANK_BIZ_KEY
+            from llm_service.manager import LLMManager
             from rp_memory.rerank.service import PointwiseMemoryReranker
-            from rpg_core.llm.keys import PROVIDER_OPENAI, PROVIDER_LLAMA
-            from rp_memory.rerank.providers import ChatPointwiseScoreProvider, LogitRerankProvider
+            from llm_service.keys import PROVIDER_OPENAI, PROVIDER_LLAMA
+            from llm_service.base_provider import DocumentScoreProvider
 
             provider = LLMManager.get().get_provider(MEMORY_RERANK_BIZ_KEY)
             rerank_weight = mem_cfg.rerank_score_weight
-            if isinstance(provider, ChatPointwiseScoreProvider):
-                provider_label = PROVIDER_OPENAI
-            elif isinstance(provider, LogitRerankProvider):
+            if isinstance(provider, DocumentScoreProvider):
                 provider_label = PROVIDER_LLAMA
             else:
                 provider_label = PROVIDER_OPENAI if mem_cfg.rerank_provider.provider == PROVIDER_OPENAI else PROVIDER_LLAMA

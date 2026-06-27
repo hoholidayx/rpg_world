@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
-from rpg_core.llm.types import LLMUsage
+from llm_service.types import LLMUsage
 from agent_service.settings import settings
 
 

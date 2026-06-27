@@ -15,8 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rpg_core.agent.agent import RPGGameAgent
-from rpg_core.llm.manager import LLMManager, ProviderOverrides
-from rpg_core.llm.keys import AGENT_MAIN_BIZ_KEY
+from llm_service.manager import LLMManager, ProviderOverrides
+from llm_service.keys import AGENT_MAIN_BIZ_KEY
 from rpg_core.utils.path_utils import (
     ensure_workspace_dir,
     require_workspace,

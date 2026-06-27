@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
-from rpg_core.llm.types import LLMResponse, ProviderChunk
+from llm_service.types import DocumentScore, LLMResponse, ProviderChunk
 
 
 class EmbeddingProviderError(Exception):
@@ -66,3 +66,15 @@ class LLMProvider(ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not support embedding"
         )
+
+
+class DocumentScoreProvider(ABC):
+    """Provider-neutral document rerank interface.
+
+    Domain packages adapt these generic document scores into their own
+    candidate models and debug payloads.
+    """
+
+    @abstractmethod
+    async def score_documents(self, query: str, documents: list[str]) -> list[DocumentScore]:
+        """Return normalized scores in the same order as *documents*."""

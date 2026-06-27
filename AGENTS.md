@@ -15,9 +15,9 @@
 - `uv run python -m run_play_api`：启动 Play API。
 - `uv run python -m run_cli`：启动 CLI（通过 Agent 服务交互）。
 - `uv run python -m run_telegram`：启动 Telegram（通过 Agent 服务交互）。
-- `uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llama_service --host 127.0.0.1 --port 8000`：直接调试 Play API。
+- `uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llm_service --host 127.0.0.1 --port 8000`：直接调试 Play API。
 - `uv run python -m channels.cli.repl`：启动独立 CLI。
-- `uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llama_service/tests play_api/tests agent_service/tests rpg_data/tests -q`：运行 Python 测试基线。
+- `uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests -q`：运行 Python 测试基线。
 - `uv run python -m pytest channels/tests/test_telegram.py -q`：专项验证 Telegram。
 - `cd play_webui && npm run dev`：启动 Play 前端开发服务器。
 - `cd play_webui && npm run build`：构建 Play 前端产物。
@@ -53,7 +53,7 @@
 
 ## 配置与数据
 - 配置按进程/模块拆分：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听与日志。
-- `llama_service/llm.yaml` 管 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。
+- `llm_service/llm.yaml` 管 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。
 - 它们都支持 `base + profiles`；`local` / `test` / `prod` 是固定 profile 名称，同级 `settings.local.yaml` / `llm.local.yaml` 等覆盖文件会自动加载。
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。
 - `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。Play WebUI 新建 session 默认生成 `s_` + 10 位小写字母/数字的短 ID，并作为公开 URL ID 与 Agent session id。

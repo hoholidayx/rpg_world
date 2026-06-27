@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from rp_memory.chunker import Chunker, FileTextExtractor
-from rpg_core.llm.base_provider import (
+from llm_service.base_provider import (
     EmbeddingProviderError,
     LLMProvider as EmbeddingProvider,
 )

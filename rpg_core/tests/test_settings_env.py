@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from rpg_core.llm.openai_provider import OpenAIProvider
+from llm_service.openai_provider import OpenAIProvider
 from rpg_core import settings as settings_module
-from rpg_core.llm import config as llm_config_module
+from llm_service import config as llm_config_module
 
 
 def _write_settings(
@@ -490,7 +490,7 @@ def test_agent_llm_model_empty_raises(tmp_path: Path, monkeypatch) -> None:
         settings_module.Settings()
 
 
-def test_openai_provider_uses_settings_api_key(monkeypatch) -> None:
+def test_openai_provider_uses_constructor_api_key(monkeypatch) -> None:
     captured: dict[str, str | None] = {}
 
     class DummyClient:
@@ -499,33 +499,26 @@ def test_openai_provider_uses_settings_api_key(monkeypatch) -> None:
             captured["base_url"] = base_url
             captured["http_client"] = http_client
 
-    monkeypatch.setattr("rpg_core.llm.openai_provider.AsyncOpenAI", DummyClient)
-    monkeypatch.setattr(
-        "rpg_core.llm.openai_provider.settings.get_openai_api_key",
-        lambda explicit=None: explicit or "resolved-from-settings",
-    )
+    monkeypatch.setattr("llm_service.openai_provider.AsyncOpenAI", DummyClient)
 
     OpenAIProvider(model="test-model")
-    assert captured["api_key"] == "resolved-from-settings"
+    assert captured["api_key"] is None
 
     OpenAIProvider(model="test-model", api_key="explicit-key")
     assert captured["api_key"] == "explicit-key"
 
 
-def test_openai_provider_stores_resolved_settings_when_client_injected(monkeypatch) -> None:
+def test_openai_provider_stores_constructor_values_when_client_injected() -> None:
     dummy_client = object()
-    monkeypatch.setattr(
-        "rpg_core.llm.openai_provider.settings.get_openai_api_key",
-        lambda explicit=None: explicit or "resolved-from-settings",
-    )
 
     provider = OpenAIProvider(
         model="test-model",
+        api_key="explicit-key",
         base_url="https://example.test/v1",
         http_client=object(),
         client=dummy_client,  # type: ignore[arg-type]
     )
 
     assert provider._client is dummy_client
-    assert provider._api_key == "resolved-from-settings"
+    assert provider._api_key == "explicit-key"
     assert provider._base_url == "https://example.test/v1"

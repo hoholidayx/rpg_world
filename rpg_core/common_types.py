@@ -16,11 +16,3 @@ ConfigValue: TypeAlias = JsonValue
 ConfigDict: TypeAlias = JsonObject
 Metadata: TypeAlias = JsonObject
 DebugInfo: TypeAlias = JsonObject
-
-LlamaModelConfig: TypeAlias = ConfigDict
-LlamaRequestParams: TypeAlias = ConfigDict
-LlamaResponsePayload: TypeAlias = JsonValue
-LlamaModelHandle: TypeAlias = object
-LlamaLogits: TypeAlias = object
-LlamaCacheKeyPart: TypeAlias = JsonScalar
-LlamaCacheKey: TypeAlias = tuple[LlamaCacheKeyPart, ...]

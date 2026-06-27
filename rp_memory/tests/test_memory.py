@@ -8,13 +8,14 @@ import json
 import pytest
 
 from rp_memory.candidate import MemoryCandidate
-from rpg_core.llm.manager import LLMManager
-from rpg_core.llm.keys import (
+from llm_service.manager import LLMManager
+from llm_service.keys import (
     MEMORY_RERANK_BIZ_KEY,
     RERANK_MODEL_TYPE_CHAT_POINTWISE,
     RERANK_MODEL_TYPE_QWEN3_LOGIT,
 )
-from rpg_core.llm.openai_provider import OpenAIProvider
+from llm_service.openai_provider import OpenAIProvider
+from llm_service.llama_provider import LlamaLogitRerankProvider
 from rp_memory.memory_manager import MemoryManager, RecallItem
 from rp_memory import run as memory_run
 from rp_memory.storage.types import ChunkRecord, IndexedFileState
@@ -178,7 +179,7 @@ def test_openai_memory_sync_apis_work_inside_running_loop(monkeypatch):
         "95\t强相关",
     ]
     monkeypatch.setattr(
-        "rpg_core.llm.openai_provider.AsyncOpenAI",
+        "llm_service.openai_provider.AsyncOpenAI",
         DummyAsyncOpenAI,
     )
     async def _run() -> tuple[int, tuple[int, int], str]:
@@ -281,7 +282,7 @@ def test_openai_reranker_path(monkeypatch):
         "5\t无关",
     ]
     monkeypatch.setattr(
-        "rpg_core.llm.openai_provider.AsyncOpenAI",
+        "llm_service.openai_provider.AsyncOpenAI",
         DummyAsyncOpenAI,
     )
     provider = OpenAIProvider(
@@ -331,7 +332,7 @@ def test_memory_manager_reranker_uses_settings_rerank_score_weight(monkeypatch):
         def get(cls) -> FakeManager:  # noqa: ANN101
             return FakeManager()
 
-    monkeypatch.setattr("rpg_core.llm.manager.LLMManager", FakeLLMManager)
+    monkeypatch.setattr("llm_service.manager.LLMManager", FakeLLMManager)
     reranker = MemoryManager._build_reranker(
         SimpleNamespace(
             rerank_enabled=True,
@@ -365,12 +366,12 @@ def test_llm_manager_builds_logit_provider_for_llama_rerank(monkeypatch):
         def rerank(self, query, documents, *, instruction, max_length):  # noqa: ANN001
             return [{"score": 0.9, "yes_logit": 2.0, "no_logit": 0.0} for _ in documents]
 
-    monkeypatch.setattr("rpg_core.llm.manager.resolve_biz_config", lambda _key: FakeCfg())
-    monkeypatch.setattr("rpg_core.llm.manager.LlamaRerankModel", FakeRerankModel)
+    monkeypatch.setattr("llm_service.manager.resolve_biz_config", lambda _key: FakeCfg())
+    monkeypatch.setattr("llm_service.manager.LlamaRerankModel", FakeRerankModel)
 
     provider = LLMManager().get_provider(MEMORY_RERANK_BIZ_KEY)
 
-    assert isinstance(provider, LogitRerankProvider)
+    assert isinstance(provider, LlamaLogitRerankProvider)
     assert provider.get_default_model() == "/tmp/qwen-rerank.gguf"
 
 
@@ -390,11 +391,12 @@ def test_llm_manager_builds_chat_score_provider_for_openai_rerank(monkeypatch):
         def _build_openai_client(self, **_kwargs):  # noqa: ANN003
             return SimpleNamespace()
 
-    monkeypatch.setattr("rpg_core.llm.manager.resolve_biz_config", lambda _key: FakeCfg())
+    monkeypatch.setattr("llm_service.manager.resolve_biz_config", lambda _key: FakeCfg())
 
     provider = FakeManager().get_provider(MEMORY_RERANK_BIZ_KEY)
 
-    assert isinstance(provider, ChatPointwiseScoreProvider)
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.get_default_model() == "rerank-model"
 
 
 def test_llm_manager_rejects_rerank_model_type_backend_mismatch(monkeypatch):
@@ -404,7 +406,7 @@ def test_llm_manager_rejects_rerank_model_type_backend_mismatch(monkeypatch):
         rerank_model_type = RERANK_MODEL_TYPE_QWEN3_LOGIT
         shared_from = ""
 
-    monkeypatch.setattr("rpg_core.llm.manager.resolve_biz_config", lambda _key: FakeCfg())
+    monkeypatch.setattr("llm_service.manager.resolve_biz_config", lambda _key: FakeCfg())
 
     with pytest.raises(ValueError, match="rerank_model_type"):
         LLMManager().get_provider(MEMORY_RERANK_BIZ_KEY)
@@ -490,12 +492,13 @@ def test_qwen_reranker_provider_scores_without_chat():
             ]
 
     model = FakeRerankModel()
-    provider = LogitRerankProvider(
+    document_provider = LlamaLogitRerankProvider(
         model_path="/tmp/qwen-rerank.gguf",
         n_ctx=256,
         instruction="match memories",
         model=model,
     )
+    provider = LogitRerankProvider(document_provider)
 
     scores = asyncio.run(
         provider.score(

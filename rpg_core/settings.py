@@ -30,8 +30,8 @@ from commons.settings import (
     forgiving_float,
 )
 from rpg_core.common_types import ConfigDict, ConfigValue
-from rpg_core.llm.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
-from rpg_core.llm.keys import (
+from llm_service.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
+from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
     MEMORY_EMBED_BIZ_KEY,
     MEMORY_QUERY_PLANNER_BIZ_KEY,

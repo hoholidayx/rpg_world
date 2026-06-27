@@ -9,9 +9,8 @@ import httpx
 from loguru import logger
 from openai import AsyncOpenAI
 
-from rpg_core.llm.base_provider import LLMProvider
-from rpg_core.llm.types import LLMResponse, LLMUsage, ProviderChunk
-from rpg_core.settings import settings
+from llm_service.base_provider import LLMProvider
+from llm_service.types import LLMResponse, LLMUsage, ProviderChunk
 
 
 def _build_usage(raw, raw_dict: dict[str, object] | None) -> LLMUsage | None:
@@ -63,7 +62,7 @@ class OpenAIProvider(LLMProvider):
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._dimension: int | None = None
-        self._api_key = settings.get_openai_api_key(api_key)
+        self._api_key = api_key
         self._base_url = base_url
         self._http_client = http_client
 

@@ -39,8 +39,8 @@ from rpg_core.context import RPGContextBuilder
 from rpg_core.context.fixed_layer import FixedLayerComposer
 from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.rpg_context import Role, Message
-from rpg_core.llm.base_provider import LLMProvider
-from rpg_core.llm.keys import (
+from llm_service.base_provider import LLMProvider
+from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
@@ -51,7 +51,7 @@ from rpg_core.settings import settings
 from rpg_core.utils.path_utils import PACKAGE_ROOT
 from rpg_core.utils.watcher import get_watcher
 from rpg_core.summary.compressor import SummaryCompressor
-from rpg_core.llm.manager import LLMManager, ProviderOverrides
+from llm_service.manager import LLMManager, ProviderOverrides
 
 if TYPE_CHECKING:
     from rpg_core.character.manager import CharacterManager

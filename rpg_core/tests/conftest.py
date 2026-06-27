@@ -14,7 +14,7 @@ from rp_memory.candidate import MemoryCandidate
 from rp_memory.planning.plan import QueryPlan
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
-from rpg_core.llm.manager import LLMManager
+from llm_service.manager import LLMManager
 
 
 class FakeTokenCounter:

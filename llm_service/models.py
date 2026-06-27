@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from rpg_core.common_types import (
+from llm_service.types import (
     LlamaCacheKey,
     LlamaLogits,
     JsonValue,

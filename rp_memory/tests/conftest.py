@@ -6,7 +6,7 @@ import pytest
 
 from rp_memory.candidate import MemoryCandidate
 from rpg_core.context.rpg_context import Message
-from rpg_core.llm.manager import LLMManager
+from llm_service.manager import LLMManager
 
 
 class FakeTokenCounter:

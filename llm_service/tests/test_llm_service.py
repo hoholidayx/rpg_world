@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from llama_service.client import (
+from llm_service.client import (
     LlamaClient,
     LlamaClientRemoteError,
     LlamaClientTimeout,
@@ -16,14 +16,14 @@ from llama_service.client import (
     get_llama_client,
     set_llama_client,
 )
-from llama_service.models import LlamaModelCache, build_qwen_rerank_prompt, model_cache_key
-from llama_service.protocol import error_response, ok_response
-from llama_service.server import LlamaServiceServer
+from llm_service.models import LlamaModelCache, build_qwen_rerank_prompt, model_cache_key
+from llm_service.protocol import error_response, ok_response
+from llm_service.server import LlamaServiceServer
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.planning.planner import FallbackQueryPlanner, LlamaQueryPlanner
 from rp_memory.rerank.service import PointwiseMemoryReranker
-from rpg_core.llm import llama_provider as llama_provider_module
-from rpg_core.llm.llama_provider import LlamaCompletionProvider
+from llm_service import llama_provider as llama_provider_module
+from llm_service.llama_provider import LlamaCompletionProvider
 
 
 class _FakeProcess:
@@ -329,7 +329,7 @@ def test_planner_and_reranker_fallback_when_client_fails(tmp_path):
 def test_configure_llama_client_from_runtime_config_updates_process_config(monkeypatch):
     set_llama_client(None)
     monkeypatch.setattr(
-        "llama_service.client.get_runtime_config",
+        "llm_service.client.get_runtime_config",
         lambda: type(
             "Runtime",
             (),

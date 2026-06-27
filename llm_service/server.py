@@ -6,14 +6,14 @@ import queue
 import threading
 from multiprocessing.queues import Queue as MPQueue
 
-from rpg_core.common_types import LlamaCacheKey, LlamaResponsePayload
-from llama_service.models import LlamaModelCache, model_cache_key
-from llama_service.protocol import (
+from llm_service.models import LlamaModelCache, model_cache_key
+from llm_service.protocol import (
     LlamaRequest,
     LlamaResponse,
     error_response,
     ok_response,
 )
+from llm_service.types import LlamaCacheKey, LlamaResponsePayload
 
 
 class _Actor:
