@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -22,6 +23,8 @@ __all__ = [
     "reset_data_service_gateways",
 ]
 
+logger = logging.getLogger("rpg_data.gateway")
+
 
 class DataServiceGateway:
     """Own the shared database lifecycle for rpg_data services."""
@@ -34,6 +37,7 @@ class DataServiceGateway:
         self._lorebook: LorebookReadService | None = None
         self._status: StatusTableService | None = None
         self._initialized = False
+        logger.debug("data service gateway created db_path=%s", self._database_path)
 
     @property
     def database_path(self) -> Path:
@@ -51,6 +55,7 @@ class DataServiceGateway:
     def catalog(self) -> CatalogService:
         database = self.database
         if self._catalog is None:
+            logger.debug("creating catalog service db_path=%s", self._database_path)
             self._catalog = CatalogService(database, status_service=self.status)
         self._ensure_bound()
         return self._catalog
@@ -59,6 +64,7 @@ class DataServiceGateway:
     def character(self) -> CharacterReadService:
         database = self.database
         if self._character is None:
+            logger.debug("creating character service db_path=%s", self._database_path)
             self._character = CharacterReadService(database)
         self._ensure_bound()
         return self._character
@@ -67,6 +73,7 @@ class DataServiceGateway:
     def lorebook(self) -> LorebookReadService:
         database = self.database
         if self._lorebook is None:
+            logger.debug("creating lorebook service db_path=%s", self._database_path)
             self._lorebook = LorebookReadService(database)
         self._ensure_bound()
         return self._lorebook
@@ -75,6 +82,7 @@ class DataServiceGateway:
     def status(self) -> StatusTableService:
         database = self.database
         if self._status is None:
+            logger.debug("creating status service db_path=%s", self._database_path)
             self._status = StatusTableService(database)
         self._ensure_bound()
         return self._status
@@ -84,21 +92,27 @@ class DataServiceGateway:
             self._ensure_bound()
             return
 
+        logger.info("initializing data service gateway db_path=%s", self._database_path)
         database = db.bind_peewee_database(db.make_peewee_database(self._database_path))
         database.connect(reuse_if_open=True)
         try:
+            logger.debug("running migrations db_path=%s", self._database_path)
             _run_migrations(database, self._database_path)
+            logger.debug("running runtime bootstrap db_path=%s", self._database_path)
             bootstrap_runtime_data(database)
         except Exception:
+            logger.exception("data service gateway initialization failed db_path=%s", self._database_path)
             if not database.is_closed():
                 database.close()
             raise
         self._database = database
         self._initialized = True
         self._ensure_bound()
+        logger.info("data service gateway initialized db_path=%s", self._database_path)
 
     def close(self) -> None:
         if self._database is not None and not self._database.is_closed():
+            logger.info("closing data service gateway db_path=%s", self._database_path)
             self._database.close()
         self._initialized = False
         self._catalog = None
@@ -123,14 +137,18 @@ def get_data_service_gateway(db_path: str | Path | None = None) -> DataServiceGa
     cache_key = str(database_path)
     gateway = _GATEWAYS.get(cache_key)
     if gateway is None:
+        logger.debug("creating cached data service gateway db_path=%s", database_path)
         gateway = DataServiceGateway(database_path)
         _GATEWAYS[cache_key] = gateway
+    else:
+        logger.debug("reusing cached data service gateway db_path=%s", database_path)
     return gateway
 
 
 def reset_data_service_gateways() -> None:
     """Close and clear cached gateways."""
 
+    logger.info("resetting data service gateways count=%s", len(_GATEWAYS))
     for gateway in list(_GATEWAYS.values()):
         gateway.close()
     _GATEWAYS.clear()
@@ -142,6 +160,7 @@ def _normalize_database_path(db_path: str | Path | None) -> Path:
 
 def _run_migrations(database: Database, database_path: Path) -> None:
     if str(database_path) == ":memory:":
+        logger.debug("running migrations on in-memory peewee connection")
         conn = database.connection()
         previous_row_factory = conn.row_factory
         conn.row_factory = sqlite3.Row
@@ -151,6 +170,7 @@ def _run_migrations(database: Database, database_path: Path) -> None:
             conn.row_factory = previous_row_factory
         return
 
+    logger.debug("running migrations using sqlite connection db_path=%s", database_path)
     conn = db.connect(database_path)
     try:
         run_migrations(conn)

@@ -52,13 +52,22 @@ class LorebookReadService:
             )
         )
 
-        return [
+        result = [
             _to_session_lorebook_entry(row)
             for row in query.order_by(
                 StoryLorebookEntryRecord.sort_order,
                 StoryLorebookEntryRecord.id,
             )
         ]
+        logger.debug(
+            "listed lorebook entries session_id=%s workspace_id=%s story_id=%s count=%s names=%s",
+            session_id,
+            session.workspace_id,
+            session.story_id,
+            len(result),
+            [entry.name for entry in result],
+        )
+        return result
 
     def list_enabled_entries(self, session_id: str) -> list[models.SessionLorebookEntry]:
         """Compatibility alias for mounted lorebook entries."""
@@ -74,7 +83,9 @@ class LorebookReadService:
 
         for entry in self.list_entries(session_id):
             if entry.name == name:
+                logger.debug("loaded lorebook entry session_id=%s name=%s entry_id=%s", session_id, name, entry.id)
                 return entry
+        logger.debug("lorebook entry not found session_id=%s name=%s", session_id, name)
         return None
 
 

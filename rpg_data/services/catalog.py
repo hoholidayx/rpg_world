@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from peewee import Database
 
 from rpg_data import models
@@ -12,6 +14,7 @@ from rpg_data.services.status import StatusTableService
 
 __all__ = ["CatalogService"]
 
+logger = logging.getLogger("rpg_data.catalog")
 
 _WorkspaceSummary = dict[str, object]
 _SessionSummary = dict[str, object]
@@ -39,7 +42,9 @@ class CatalogService:
             if workspace.enabled
         ]
         workspaces.sort(key=lambda workspace: (workspace.name, workspace.id))
-        return [_workspace_summary(workspace) for workspace in workspaces]
+        result = [_workspace_summary(workspace) for workspace in workspaces]
+        logger.debug("listed workspaces count=%s ids=%s", len(result), [item["id"] for item in result])
+        return result
 
     def list_sessions(
         self,
@@ -48,12 +53,21 @@ class CatalogService:
     ) -> list[_SessionSummary] | None:
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
+            logger.warning("list sessions rejected missing story workspace_id=%s story_id=%s", workspace_id, story_id)
             return None
         sessions = self._sessions.list(
             workspace_id=workspace_id,
             story_id=story_id,
         )
-        return [_session_summary(session) for session in sessions]
+        result = [_session_summary(session) for session in sessions]
+        logger.debug(
+            "listed sessions workspace_id=%s story_id=%s count=%s session_ids=%s",
+            workspace_id,
+            story_id,
+            len(result),
+            [item["id"] for item in result],
+        )
+        return result
 
     def create_session(
         self,
@@ -65,7 +79,9 @@ class CatalogService:
     ) -> _SessionSummary | None:
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
+            logger.warning("create session rejected missing story workspace_id=%s story_id=%s", workspace_id, story_id)
             return None
+        logger.info("creating session workspace_id=%s story_id=%s title=%s", workspace_id, story_id, title)
         with self._database.atomic():
             session = self._sessions.create(
                 workspace_id,
@@ -74,15 +90,31 @@ class CatalogService:
                 description=description,
             )
             if self._status is not None:
-                self._status.initialize_session_tables(session.id)
-        return _session_summary(session)
+                tables = self._status.initialize_session_tables(session.id)
+                logger.info(
+                    "initialized session status tables session_id=%s table_count=%s",
+                    session.id,
+                    len(tables),
+                )
+        result = _session_summary(session)
+        logger.info("created session session_id=%s workspace_id=%s story_id=%s", session.id, workspace_id, story_id)
+        return result
 
     def get_session(
         self,
         session_id: str,
     ) -> _SessionSummary | None:
         session = self._sessions.get(session_id)
-        return _session_summary(session) if session is not None else None
+        if session is None:
+            logger.debug("session not found session_id=%s", session_id)
+            return None
+        logger.debug(
+            "loaded session session_id=%s workspace_id=%s story_id=%s",
+            session_id,
+            session.workspace_id,
+            session.story_id,
+        )
+        return _session_summary(session)
 
 
 def _workspace_summary(workspace: models.Workspace) -> _WorkspaceSummary:

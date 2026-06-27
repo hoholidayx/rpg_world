@@ -42,6 +42,7 @@ class StatusTableService:
     def __init__(self, database: Database) -> None:
         self._database = database
         bind_database(database)
+        logger.debug("status table service initialized database=%s", database)
 
     # ------------------------------------------------------------------
     # Template type CRUD
@@ -54,7 +55,9 @@ class StatusTableService:
             .where(StatusTypeRecord.workspace == workspace_id)
             .order_by(StatusTypeRecord.sort_order, StatusTypeRecord.id)
         )
-        return [_to_status_type(row) for row in rows]
+        result = [_to_status_type(row) for row in rows]
+        logger.debug("listed status types workspace_id=%s count=%s", workspace_id, len(result))
+        return result
 
     def create_type(
         self,
@@ -79,7 +82,15 @@ class StatusTableService:
                 metadata_json=metadata_json,
             )
         except IntegrityError as exc:
+            logger.warning("status type create conflict workspace_id=%s name=%s", workspace_id, name)
             raise ValueError(f"Status type already exists: {name}") from exc
+        logger.info(
+            "created status type type_id=%s workspace_id=%s name=%s builtin_key=%s",
+            row.id,
+            workspace_id,
+            name,
+            builtin_key,
+        )
         return _to_status_type(row)
 
     def rename_type(self, type_id: int, new_name: str) -> models.StatusType:
@@ -139,6 +150,13 @@ class StatusTableService:
             resolve_workspace_relative_path(workspace_root, _template_type_relative_path(old_name)),
             resolve_workspace_relative_path(workspace_root, _TEMPLATE_STATUS_DIR),
         )
+        logger.info(
+            "renamed status type type_id=%s old_name=%s new_name=%s moved_files=%s",
+            type_id,
+            old_name,
+            new_name,
+            len(moved),
+        )
         return _to_status_type(self._get_type_row(type_id))
 
     def delete_type(self, type_id: int) -> None:
@@ -157,6 +175,13 @@ class StatusTableService:
         _remove_empty_parents(
             resolve_workspace_relative_path(workspace_root, _template_type_relative_path(str(row.name))),
             resolve_workspace_relative_path(workspace_root, _TEMPLATE_STATUS_DIR),
+        )
+        logger.info(
+            "deleted status type type_id=%s workspace_id=%s name=%s template_files=%s",
+            type_id,
+            row.workspace_id,
+            row.name,
+            len(template_paths),
         )
 
     # ------------------------------------------------------------------
@@ -184,7 +209,14 @@ class StatusTableService:
             StatusTableTemplateRecord.id,
         )
         workspace_root = self._workspace_root(workspace_id)
-        return [_to_template(row, workspace_root) for row in query]
+        result = [_to_template(row, workspace_root) for row in query]
+        logger.debug(
+            "listed status templates workspace_id=%s type_name=%s count=%s",
+            workspace_id,
+            type_name,
+            len(result),
+        )
+        return result
 
     def get_template(self, template_id: int) -> models.StatusTableTemplate | None:
         row = (
@@ -195,8 +227,16 @@ class StatusTableService:
             .first()
         )
         if row is None:
+            logger.debug("status template not found template_id=%s", template_id)
             return None
-        return _to_template(row, self._workspace_root(str(row.workspace_id)))
+        template = _to_template(row, self._workspace_root(str(row.workspace_id)))
+        logger.debug(
+            "loaded status template template_id=%s workspace_id=%s name=%s",
+            template_id,
+            template.workspace_id,
+            template.name,
+        )
+        return template
 
     def create_template(
         self,
@@ -219,7 +259,8 @@ class StatusTableService:
         if path.exists():
             raise FileExistsError(str(path))
 
-        _write_csv(path, headers, rows)
+        output_headers, output_rows = _materialize_csv_data(headers, rows)
+        _write_csv(path, output_headers, output_rows)
         try:
             with self._database.atomic():
                 row = StatusTableTemplateRecord.create(
@@ -234,6 +275,17 @@ class StatusTableService:
         except Exception:
             _unlink_missing_ok(path)
             raise
+        logger.info(
+            "created status template template_id=%s workspace_id=%s type_name=%s "
+            "name=%s relative_path=%s headers=%s rows=%s",
+            row.id,
+            workspace_id,
+            type_name,
+            name,
+            relative_path,
+            output_headers,
+            output_rows,
+        )
         return _to_template(row, workspace_root)
 
     def update_template(
@@ -255,6 +307,7 @@ class StatusTableService:
         target_name = str(row.name) if name is None else name
         _validate_name(target_name, "status table")
 
+        old_relative_path = str(row.relative_path)
         old_path = resolve_workspace_relative_path(workspace_root, row.relative_path)
         new_relative_path = _template_relative_path(str(target_type.name), target_name)
         new_path = resolve_workspace_relative_path(workspace_root, new_relative_path)
@@ -287,6 +340,16 @@ class StatusTableService:
                 old_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(new_path), str(old_path))
             raise
+        logger.info(
+            "updated status template template_id=%s old_relative_path=%s "
+            "new_relative_path=%s path_changed=%s headers=%s rows=%s",
+            template_id,
+            old_relative_path,
+            new_relative_path,
+            path_changed,
+            output_headers,
+            output_rows,
+        )
         return _to_template(self._get_template_row(template_id), workspace_root)
 
     def delete_template(self, template_id: int) -> None:
@@ -297,6 +360,12 @@ class StatusTableService:
             row.delete_instance(recursive=True)
         _unlink_missing_ok(path)
         _remove_empty_parents(path.parent, resolve_workspace_relative_path(workspace_root, _TEMPLATE_STATUS_DIR))
+        logger.info(
+            "deleted status template template_id=%s workspace_id=%s relative_path=%s",
+            template_id,
+            row.workspace_id,
+            row.relative_path,
+        )
 
     # ------------------------------------------------------------------
     # Story mounts
@@ -318,7 +387,14 @@ class StatusTableService:
             )
             .order_by(StoryStatusTableRecord.sort_order, StoryStatusTableRecord.id)
         )
-        return [_to_story_mount(row) for row in query]
+        result = [_to_story_mount(row) for row in query]
+        logger.debug(
+            "listed story status mounts workspace_id=%s story_id=%s count=%s",
+            workspace_id,
+            story_id,
+            len(result),
+        )
+        return result
 
     def mount_template(
         self,
@@ -344,12 +420,32 @@ class StatusTableService:
                 metadata_json=metadata_json,
             )
         except IntegrityError as exc:
+            logger.warning(
+                "status template mount conflict workspace_id=%s story_id=%s template_id=%s",
+                workspace_id,
+                story_id,
+                template_id,
+            )
             raise ValueError(f"Status table already mounted to story: {story_id}/{template_id}") from exc
+        logger.info(
+            "mounted status template mount_id=%s workspace_id=%s story_id=%s template_id=%s",
+            row.id,
+            workspace_id,
+            story_id,
+            template_id,
+        )
         return _to_story_mount(self._get_story_mount_row(int(row.id)))
 
     def unmount_template(self, mount_id: int) -> None:
         row = self._get_story_mount_row(mount_id)
         row.delete_instance()
+        logger.info(
+            "unmounted status template mount_id=%s workspace_id=%s story_id=%s template_id=%s",
+            mount_id,
+            row.workspace_id,
+            row.story_id,
+            row.status_table_id,
+        )
 
     # ------------------------------------------------------------------
     # Session copies
@@ -358,10 +454,22 @@ class StatusTableService:
     def initialize_session_tables(self, session_id: str) -> list[models.SessionStatusTable]:
         session = self._get_session_row(session_id)
         if SessionStatusTableRecord.select().where(SessionStatusTableRecord.session == session_id).exists():
-            return self.list_tables(session_id)
+            tables = self.list_tables(session_id)
+            logger.debug(
+                "session status tables already initialized session_id=%s table_count=%s",
+                session_id,
+                len(tables),
+            )
+            return tables
 
         workspace_id = str(session.workspace_id)
         story_id = int(session.story_id)
+        logger.info(
+            "initializing session status tables session_id=%s workspace_id=%s story_id=%s",
+            session_id,
+            workspace_id,
+            story_id,
+        )
         workspace_root = self._workspace_root(workspace_id)
         created_files: list[Path] = []
         type_map: dict[int, SessionStatusTypeRecord] = {}
@@ -377,6 +485,7 @@ class StatusTableService:
             )
             .order_by(StoryStatusTableRecord.sort_order, StoryStatusTableRecord.id)
         )
+        logger.debug("found mounted status templates session_id=%s mount_count=%s", session_id, len(mounts))
         try:
             with self._database.atomic():
                 for mount in mounts:
@@ -417,6 +526,11 @@ class StatusTableService:
                         metadata_json=str(template.metadata_json or "{}"),
                     )
         except Exception:
+            logger.exception(
+                "failed to initialize session status tables session_id=%s created_files=%s",
+                session_id,
+                len(created_files),
+            )
             for path in reversed(created_files):
                 _unlink_missing_ok(path)
                 _remove_empty_parents(
@@ -424,7 +538,15 @@ class StatusTableService:
                     resolve_workspace_relative_path(workspace_root, _session_root_relative_path(story_id, session_id)),
                 )
             raise
-        return self.list_tables(session_id)
+        tables = self.list_tables(session_id)
+        logger.info(
+            "initialized session status tables session_id=%s type_count=%s table_count=%s copied_files=%s",
+            session_id,
+            len(type_map),
+            len(tables),
+            len(created_files),
+        )
+        return tables
 
     def list_session_types(self, session_id: str) -> list[models.SessionStatusType]:
         rows = (
@@ -433,7 +555,9 @@ class StatusTableService:
             .where(SessionStatusTypeRecord.session == session_id)
             .order_by(SessionStatusTypeRecord.sort_order, SessionStatusTypeRecord.id)
         )
-        return [_to_session_type(row) for row in rows]
+        result = [_to_session_type(row) for row in rows]
+        logger.debug("listed session status types session_id=%s count=%s", session_id, len(result))
+        return result
 
     def create_session_type(
         self,
@@ -458,7 +582,15 @@ class StatusTableService:
                 metadata_json=metadata_json,
             )
         except IntegrityError as exc:
+            logger.warning("session status type create conflict session_id=%s name=%s", session_id, name)
             raise ValueError(f"Session status type already exists: {name}") from exc
+        logger.info(
+            "created session status type session_type_id=%s session_id=%s name=%s builtin_key=%s",
+            row.id,
+            session_id,
+            name,
+            builtin_key,
+        )
         return _to_session_type(row)
 
     def list_tables(
@@ -484,10 +616,18 @@ class StatusTableService:
             SessionStatusTableRecord.sort_order,
             SessionStatusTableRecord.id,
         )
-        return [
+        result = [
             _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
             for row in query
         ]
+        logger.debug(
+            "listed session status tables session_id=%s type_name=%s include_scene=%s count=%s",
+            session_id,
+            type_name,
+            include_scene,
+            len(result),
+        )
+        return result
 
     def list_context_tables(self, session_id: str) -> list[models.SessionStatusTable]:
         tables: list[models.SessionStatusTable] = []
@@ -511,6 +651,7 @@ class StatusTableService:
                 tables.append(_to_session_table(row, self._workspace_root(str(row.session_type.workspace_id))))
             except FileNotFoundError as exc:
                 logger.debug("skip missing status table CSV for context: %s", exc)
+        logger.debug("listed context status tables session_id=%s count=%s", session_id, len(tables))
         return tables
 
     def get_table(
@@ -522,11 +663,26 @@ class StatusTableService:
         row = self._find_session_table(session_id, type_name, table_name)
         if row is None:
             raise FileNotFoundError(f"Status table not found: {type_name}/{table_name}")
-        return _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
+        table = _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
+        logger.debug(
+            "loaded status table session_id=%s type_name=%s table_name=%s table_id=%s",
+            session_id,
+            type_name,
+            table_name,
+            table.id,
+        )
+        return table
 
     def get_table_by_id(self, table_id: int) -> models.SessionStatusTable:
         row = self._get_session_table_row(table_id)
-        return _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
+        table = _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
+        logger.debug(
+            "loaded status table by id table_id=%s session_id=%s name=%s",
+            table_id,
+            table.session_id,
+            table.name,
+        )
+        return table
 
     def create_table(
         self,
@@ -554,7 +710,8 @@ class StatusTableService:
         if path.exists():
             raise FileExistsError(str(path))
 
-        _write_csv(path, headers, rows)
+        output_headers, output_rows = _materialize_csv_data(headers, rows)
+        _write_csv(path, output_headers, output_rows)
         try:
             row = SessionStatusTableRecord.create(
                 session=session_id,
@@ -569,6 +726,17 @@ class StatusTableService:
         except Exception:
             _unlink_missing_ok(path)
             raise
+        logger.info(
+            "created session status table table_id=%s session_id=%s type_name=%s "
+            "table_name=%s relative_path=%s headers=%s rows=%s",
+            row.id,
+            session_id,
+            type_name,
+            table_name,
+            relative_path,
+            output_headers,
+            output_rows,
+        )
         return _to_session_table(row, workspace_root)
 
     def save_table(
@@ -586,8 +754,19 @@ class StatusTableService:
         path = resolve_workspace_relative_path(workspace_root, row.relative_path)
         if not path.is_file():
             raise FileNotFoundError(str(path))
-        _write_csv(path, headers, rows)
+        output_headers, output_rows = _materialize_csv_data(headers, rows)
+        _write_csv(path, output_headers, output_rows)
         _touch(SessionStatusTableRecord, int(row.id))
+        logger.info(
+            "saved session status table table_id=%s session_id=%s type_name=%s "
+            "table_name=%s headers=%s rows=%s",
+            row.id,
+            session_id,
+            type_name,
+            table_name,
+            output_headers,
+            output_rows,
+        )
         return self.get_table(session_id, type_name, table_name)
 
     def set_cell(
@@ -597,6 +776,13 @@ class StatusTableService:
         column: int | str,
         value: str,
     ) -> models.SessionStatusTable:
+        logger.info(
+            "updating status table cell table_id=%s row_ref=%s column=%s value=%s",
+            table_id,
+            row,
+            column,
+            value,
+        )
         return self._update_table_data(
             table_id,
             lambda data: data.with_cell(row, column, value),
@@ -607,9 +793,11 @@ class StatusTableService:
         table_id: int,
         values: Iterable[str],
     ) -> models.SessionStatusTable:
+        row_values = _materialize_row_values(values)
+        logger.info("appending status table row table_id=%s values=%s", table_id, row_values)
         return self._update_table_data(
             table_id,
-            lambda data: data.with_appended_row(values),
+            lambda data: data.with_appended_row(row_values),
         )
 
     def replace_row(
@@ -618,9 +806,11 @@ class StatusTableService:
         row: int | models.StatusRowRef,
         values: Iterable[str],
     ) -> models.SessionStatusTable:
+        row_values = _materialize_row_values(values)
+        logger.info("replacing status table row table_id=%s row_ref=%s values=%s", table_id, row, row_values)
         return self._update_table_data(
             table_id,
-            lambda data: data.with_replaced_row(row, values),
+            lambda data: data.with_replaced_row(row, row_values),
         )
 
     def delete_row(
@@ -628,6 +818,7 @@ class StatusTableService:
         table_id: int,
         row: int | models.StatusRowRef,
     ) -> models.SessionStatusTable:
+        logger.info("deleting status table row table_id=%s row_ref=%s", table_id, row)
         return self._update_table_data(
             table_id,
             lambda data: data.with_deleted_row(row),
@@ -642,6 +833,14 @@ class StatusTableService:
         key_column: int | str = models.STATUS_KEY_COLUMN,
         value_column: int | str = models.STATUS_VALUE_COLUMN,
     ) -> models.SessionStatusTable:
+        logger.info(
+            "setting status table key/value table_id=%s key=%s value=%s key_column=%s value_column=%s",
+            table_id,
+            key,
+            value,
+            key_column,
+            value_column,
+        )
         return self._update_table_data(
             table_id,
             lambda data: data.with_key_value(
@@ -659,6 +858,12 @@ class StatusTableService:
         *,
         key_column: int | str = models.STATUS_KEY_COLUMN,
     ) -> models.SessionStatusTable:
+        logger.info(
+            "deleting status table key/value table_id=%s key=%s key_column=%s",
+            table_id,
+            key,
+            key_column,
+        )
         return self._update_table_data(
             table_id,
             lambda data: data.without_key(key, key_column=key_column),
@@ -704,6 +909,14 @@ class StatusTableService:
                 old_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(new_path), str(old_path))
             raise
+        logger.info(
+            "renamed session status table session_id=%s type_name=%s old_name=%s new_name=%s relative_path=%s",
+            session_id,
+            type_name,
+            old_name,
+            new_name,
+            new_relative_path,
+        )
         return self.get_table(session_id, type_name, new_name)
 
     def delete_table(self, session_id: str, type_name: str, table_name: str) -> None:
@@ -722,6 +935,13 @@ class StatusTableService:
                 _session_root_relative_path(int(row.session_type.story_id), session_id),
             ),
         )
+        logger.info(
+            "deleted session status table table_id=%s session_id=%s type_name=%s table_name=%s",
+            row.id,
+            session_id,
+            type_name,
+            table_name,
+        )
 
     def clear_unindexed_session_files(self, session_id: str) -> list[str]:
         """Delete session status CSV files that are not referenced by SQL indexes.
@@ -739,6 +959,11 @@ class StatusTableService:
             _session_status_root_relative_path(int(session.story_id), session_id),
         )
         if not status_root.is_dir():
+            logger.debug(
+                "skip orphan status csv cleanup missing directory session_id=%s root=%s",
+                session_id,
+                status_root,
+            )
             return []
 
         indexed_paths = {
@@ -756,6 +981,15 @@ class StatusTableService:
             _unlink_missing_ok(path)
             removed.append(resolved.relative_to(workspace_root_resolved).as_posix())
             _remove_empty_parents(path.parent, status_root)
+        if removed:
+            logger.info(
+                "removed unindexed session status files session_id=%s count=%s paths=%s",
+                session_id,
+                len(removed),
+                removed,
+            )
+        else:
+            logger.debug("no unindexed session status files session_id=%s", session_id)
         return removed
 
     # ------------------------------------------------------------------
@@ -775,14 +1009,20 @@ class StatusTableService:
             .first()
         )
         if row is None:
+            logger.debug("active scene table not found session_id=%s", session_id)
             return None
-        return _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
+        table = _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
+        logger.debug("loaded active scene table session_id=%s table_id=%s name=%s", session_id, table.id, table.name)
+        return table
 
     def get_scene_attrs(self, session_id: str) -> dict[str, str] | None:
         table = self.get_active_scene_table(session_id)
         if table is None:
+            logger.debug("scene attrs unavailable session_id=%s", session_id)
             return None
-        return _rows_to_attrs(table.rows)
+        attrs = _rows_to_attrs(table.rows)
+        logger.debug("loaded scene attrs session_id=%s attr_count=%s attrs=%s", session_id, len(attrs), attrs)
+        return attrs
 
     def replace_scene_attrs(
         self,
@@ -791,6 +1031,7 @@ class StatusTableService:
     ) -> dict[str, str] | None:
         table = self.get_active_scene_table(session_id)
         if table is None:
+            logger.debug("replace scene attrs skipped missing scene session_id=%s", session_id)
             return None
         clean_attrs = {str(key): str(value) for key, value in attrs.items()}
         updated = self._replace_table_data(
@@ -800,24 +1041,51 @@ class StatusTableService:
                 rows=tuple((key, value) for key, value in clean_attrs.items()),
             ),
         )
+        logger.info(
+            "replaced scene attrs session_id=%s table_id=%s attr_count=%s attrs=%s",
+            session_id,
+            table.id,
+            len(clean_attrs),
+            clean_attrs,
+        )
         return _rows_to_attrs(updated.rows)
 
     def set_scene_attr(self, session_id: str, key: str, value: str) -> dict[str, str] | None:
         table = self.get_active_scene_table(session_id)
         if table is None:
+            logger.debug("set scene attr skipped missing scene session_id=%s key=%s", session_id, key)
             return None
         updated = self.set_key_value(table.id, str(key), str(value))
+        logger.info(
+            "set scene attr session_id=%s table_id=%s key=%s value=%s updated_attrs=%s",
+            session_id,
+            table.id,
+            key,
+            value,
+            _rows_to_attrs(updated.rows),
+        )
         return _rows_to_attrs(updated.rows)
 
     def delete_scene_attr(self, session_id: str, key: str) -> dict[str, str] | None:
         table = self.get_active_scene_table(session_id)
         if table is None:
+            logger.debug("delete scene attr skipped missing scene session_id=%s key=%s", session_id, key)
             return None
         if key not in SCENE_PROTECTED_ATTRS:
             try:
                 table = self.delete_key_value(table.id, str(key))
+                logger.info(
+                    "deleted scene attr session_id=%s table_id=%s key=%s updated_attrs=%s",
+                    session_id,
+                    table.id,
+                    key,
+                    _rows_to_attrs(table.rows),
+                )
             except FileNotFoundError:
+                logger.debug("delete scene attr skipped missing key session_id=%s key=%s", session_id, key)
                 pass
+        else:
+            logger.debug("delete scene attr skipped protected key session_id=%s key=%s", session_id, key)
         return _rows_to_attrs(table.rows)
 
     # ------------------------------------------------------------------
@@ -845,6 +1113,17 @@ class StatusTableService:
             raise FileNotFoundError(str(path))
         _write_csv(path, data.headers, data.rows)
         _touch(SessionStatusTableRecord, int(row.id))
+        logger.info(
+            "wrote session status csv table_id=%s session_id=%s relative_path=%s "
+            "header_count=%s row_count=%s headers=%s rows=%s",
+            table_id,
+            row.session_id,
+            row.relative_path,
+            len(data.headers),
+            len(data.rows),
+            data.headers,
+            data.rows,
+        )
         return self.get_table_by_id(table_id)
 
     def _workspace_root(self, workspace_id: str) -> Path:
@@ -1116,6 +1395,22 @@ def _read_csv(path: Path) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]
     headers = tuple(str(cell) for cell in raw_rows[0])
     rows = tuple(tuple(str(cell) for cell in row) for row in raw_rows[1:])
     return headers, rows
+
+
+def _materialize_csv_data(
+    headers: Iterable[str],
+    rows: Iterable[Iterable[str]],
+) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    return (
+        tuple(str(item) for item in headers),
+        tuple(tuple(str(cell) for cell in row) for row in rows),
+    )
+
+
+def _materialize_row_values(values: Iterable[str]) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)):
+        return (str(values),)
+    return tuple(str(item) for item in values)
 
 
 def _write_csv(path: Path, headers: Iterable[str], rows: Iterable[Iterable[str]]) -> None:

@@ -54,10 +54,19 @@ class CharacterReadService:
             )
         )
         detail_map = _load_details([int(row.character_id) for row in rows])
-        return [
+        result = [
             _to_session_character(row, detail_map.get(int(row.character_id), ()))
             for row in rows
         ]
+        logger.debug(
+            "listed characters session_id=%s workspace_id=%s story_id=%s count=%s names=%s",
+            session_id,
+            session.workspace_id,
+            session.story_id,
+            len(result),
+            [character.name for character in result],
+        )
+        return result
 
     def get_character(
         self,
@@ -68,7 +77,9 @@ class CharacterReadService:
 
         for character in self.list_characters(session_id):
             if character.name == name:
+                logger.debug("loaded character session_id=%s name=%s character_id=%s", session_id, name, character.id)
                 return character
+        logger.debug("character not found session_id=%s name=%s", session_id, name)
         return None
 
 

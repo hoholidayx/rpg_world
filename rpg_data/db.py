@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from peewee import Database, SqliteDatabase
 
 _BUSY_TIMEOUT_MS = 5000
+logger = logging.getLogger("rpg_data.db")
 
 __all__ = [
     "bind_peewee_database",
@@ -29,11 +31,13 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
 
+    logger.debug("opening sqlite connection path=%s", path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+    logger.debug("sqlite connection ready path=%s busy_timeout_ms=%s", path, _BUSY_TIMEOUT_MS)
     return conn
 
 
@@ -42,6 +46,7 @@ def make_peewee_database(db_path: str | Path | None = None) -> "SqliteDatabase":
 
     from rpg_data.repositories.records import make_database
 
+    logger.debug("creating peewee database db_path=%s", resolve_database_path(db_path))
     return make_database(db_path)
 
 
@@ -50,6 +55,7 @@ def bind_peewee_database(database: "Database") -> "Database":
 
     from rpg_data.repositories.records import bind_database
 
+    logger.debug("binding peewee database database=%s", database)
     return bind_database(database)
 
 
