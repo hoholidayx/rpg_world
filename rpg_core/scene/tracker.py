@@ -1,8 +1,8 @@
 """SceneTracker — 纯内存场景状态管理器。
 
 维护当前场景的时间、地点、人物等上下文，通过 StatusManager 持久化到
-``status/全局状态/当前场景.csv``，自行渲染 ``[scene]...[/scene]`` 注入到
-用户消息的 user_before 位置，不走通用 status_tables.jinja。
+rpg_data 当前 session 的 active scene 状态表，自行渲染 ``[scene]...[/scene]``
+注入到用户消息的 user_before 位置，不走通用 status_tables.jinja。
 
 MemorySubAgent 过滤 system 角色消息，场景信息必须在 user 消息中才能被
 总结归纳可见。
@@ -10,7 +10,6 @@ MemorySubAgent 过滤 system 角色消息，场景信息必须在 user 消息中
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,8 +20,6 @@ class SceneTracker:
     """场景状态管理器——维护当前场景的时间、空间、人物等上下文。
 
     常量：
-        TABLE_TYPE: 状态类型目录名。
-        TABLE_NAME: 状态表文件名（不含 .csv）。
         DEFAULT_ATTRS: 首次初始化时的默认属性行。
 
     用法::
@@ -39,12 +36,13 @@ class SceneTracker:
         # → "[scene]\\n时间: ...\\n位置: 城堡\\n[/scene]"
     """
 
-    TABLE_TYPE = "全局状态"
-    TABLE_NAME = "当前场景"
+    TIME_ATTR = "时间"
+    LOCATION_ATTR = "位置"
+    PRESENT_CHARACTERS_ATTR = "在场人物"
     DEFAULT_ATTRS: dict[str, str] = {
-        "时间": "第 1 年 1 月 1 日 6 时",
-        "位置": "",
-        "在场人物": "",
+        TIME_ATTR: "第 1 年 1 月 1 日 6 时",
+        LOCATION_ATTR: "",
+        PRESENT_CHARACTERS_ATTR: "",
     }
     MAX_ATTRS = 8
     """场景属性总数上限（含默认属性），超出后 set_attr 返回错误。"""
@@ -62,24 +60,26 @@ class SceneTracker:
 
         # StatusManager 引用（None = 不持久化）
         self._status_mgr: StatusManager | None = None
+        self._scene_table_id: int | None = None
+        self._table_key: tuple[str, str] | None = None
 
     # ── 常量访问 ─────────────────────────────────────────────────────
 
     @property
-    def table_key(self) -> tuple[str, str]:
+    def table_key(self) -> tuple[str, str] | None:
         """供 builder 排除通用状态表时使用，避免硬编码。"""
-        return (self.TABLE_TYPE, self.TABLE_NAME)
+        return self._table_key
 
     # ── 持久化绑定 ──────────────────────────────────────────────────
 
     def bind_status_manager(self, mgr: StatusManager | None) -> None:
-        """绑定 StatusManager 引用，用于读写 ``当前场景`` 状态表。"""
+        """绑定 StatusManager 引用，用于读写 active scene 状态表。"""
         self._status_mgr = mgr
 
     def load_from_status_table(self) -> bool:
-        """从 ``全局状态/当前场景`` 表恢复场景属性。
+        """从 active scene 表恢复场景属性。
 
-        表不存在时用 ``DEFAULT_ATTRS`` 创建并写入。
+        表未挂载时返回 ``False``，不自动创建。
         结构化时间字段从默认值开始（历史消息中的 ``[scene]`` 标签
         已包含时间变化轨迹，供 LLM 参考）。
         """
@@ -87,49 +87,35 @@ class SceneTracker:
             return False
 
         mgr = self._status_mgr
-        try:
-            tables = mgr.list_tables(self.TABLE_TYPE)
-        except Exception:
-            tables = []
+        scene_ref = mgr.get_active_scene_table_ref()
+        if scene_ref is None:
+            self._scene_table_id = None
+            self._table_key = None
+            return False
 
-        if self.TABLE_NAME in tables:
-            try:
-                tbl = mgr.get_table(self.TABLE_TYPE, self.TABLE_NAME)
-                for row in tbl.get("rows", []):
-                    if len(row) >= 2:
-                        self._attrs[row[0]] = row[1]
-                return True
-            except Exception:
-                pass
+        self._scene_table_id, self._table_key = scene_ref
+        attrs = mgr.get_scene_attrs() or {}
+        if attrs:
+            self._attrs = dict(self.DEFAULT_ATTRS)
+            self._attrs.update({str(key): str(value) for key, value in attrs.items()})
+            return True
 
-        # 表不存在 → 创建
+        # 已挂载但内容为空 → 只初始化现有 active scene 表
         self._save_to_status_table()
         return False
 
     def _save_to_status_table(self) -> None:
-        """将 ``_attrs`` 全量写入 ``全局状态/当前场景`` 表。"""
-        if self._status_mgr is None:
+        """将 ``_attrs`` 写入已挂载 active scene 表。"""
+        if self._status_mgr is None or self._scene_table_id is None:
             return
 
-        mgr = self._status_mgr
-        headers = ["属性", "值"]
-        rows = [[k, v] for k, v in self._attrs.items()]
+        for key, value in self._attrs.items():
+            self._persist_attr(key, value)
 
-        try:
-            mgr.create_table(self.TABLE_TYPE, self.TABLE_NAME, headers, rows)
-        except ValueError:
-            # 表已存在 → save
-            mgr.save_table(self.TABLE_TYPE, self.TABLE_NAME, headers, rows)
-        except FileNotFoundError:
-            # 类型目录不存在 → 先创建类型再 save
-            try:
-                mgr.create_type(self.TABLE_TYPE)
-            except ValueError:
-                pass
-            try:
-                mgr.create_table(self.TABLE_TYPE, self.TABLE_NAME, headers, rows)
-            except ValueError:
-                mgr.save_table(self.TABLE_TYPE, self.TABLE_NAME, headers, rows)
+    def _persist_attr(self, key: str, value: str) -> None:
+        if self._status_mgr is None or self._scene_table_id is None:
+            return
+        self._status_mgr.set_key_value(self._scene_table_id, key, value)
 
     # ── 时间操作 ─────────────────────────────────────────────────────
 
@@ -166,8 +152,8 @@ class SceneTracker:
             else:
                 self._attrs[k] = str(v)
 
-        self._attrs["时间"] = self._format_time()
-        self._save_to_status_table()
+        self._attrs[self.TIME_ATTR] = self._format_time()
+        self._persist_attr(self.TIME_ATTR, self._attrs[self.TIME_ATTR])
         return dict(self._attrs)
 
     @property
@@ -192,7 +178,7 @@ class SceneTracker:
                 f"请先删除不再需要的属性再新增"
             )
         self._attrs[key] = value
-        self._save_to_status_table()
+        self._persist_attr(key, value)
         return dict(self._attrs)
 
     def delete_attr(self, key: str) -> dict[str, str]:
@@ -200,7 +186,11 @@ class SceneTracker:
         if key in self.protected_attrs:
             return dict(self._attrs)
         self._attrs.pop(key, None)
-        self._save_to_status_table()
+        if self._status_mgr is not None and self._scene_table_id is not None:
+            try:
+                self._status_mgr.delete_key_value(self._scene_table_id, key)
+            except FileNotFoundError:
+                pass
         return dict(self._attrs)
 
     # ── 上下文渲染 ──────────────────────────────────────────────────

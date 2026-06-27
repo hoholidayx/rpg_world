@@ -24,10 +24,11 @@ def build_rpg_context(
     ``status_mgr``, ``scene_tracker`` — ready to pass to
     ``RPGContextBuilder.build()``.
 
-    Character and lorebook data are read from the rpg_data catalog by
-    *session_id* and its bound story.
-    Session-scoped data (status, summary, memory, history) is loaded from
-    ``sessions/{session_id}/`` under *workspace*.
+    Character, lorebook, and status indexes are read from the rpg_data catalog
+    by *session_id* and its bound story. Status table CSV content is resolved
+    from the rpg_data workspace root under
+    ``stories/{story_id}/{session_id}/status/``. Summary, memory, and history
+    remain loaded from ``sessions/{session_id}/`` under *workspace*.
     """
     from rpg_core.settings import settings as rpg_settings
     from rpg_core.context.builder import RPGContextBuilder
@@ -94,23 +95,24 @@ def build_rpg_context(
     except Exception as exc:
         logger.debug("[RPG World] LorebookManager init skipped: {}", exc)
 
-    # ── Session-scoped Manager ────────────────────────────────────────
+    # ── Session-scoped rpg_data Status Manager ────────────────────────
     try:
         from rpg_core.status import StatusManager
 
-        status_mgr = StatusManager(str(rpg_settings.get_status_dir(workspace, session_id)))
+        status_mgr = StatusManager(session_id)
     except Exception as exc:
         logger.debug("[RPG World] StatusManager init skipped: {}", exc)
 
-    # ── SceneTracker (binds to status_mgr, both session-scoped) ────────
+    # ── SceneTracker (only when story-mounted scene table exists) ──────
     scene_tracker: SceneTracker | None = None
     if status_mgr is not None:
         try:
             from rpg_core.scene import SceneTracker
 
-            scene_tracker = SceneTracker()
-            scene_tracker.bind_status_manager(status_mgr)
-            scene_tracker.load_from_status_table()
+            if status_mgr.get_active_scene_table() is not None:
+                scene_tracker = SceneTracker()
+                scene_tracker.bind_status_manager(status_mgr)
+                scene_tracker.load_from_status_table()
         except Exception as exc:
             logger.debug("[RPG World] SceneTracker init skipped: {}", exc)
 

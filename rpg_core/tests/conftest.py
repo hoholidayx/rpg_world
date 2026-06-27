@@ -165,28 +165,55 @@ class FakeMemorySubAgent:
 
 
 class FakeStatusManager:
-    def __init__(self, tables: dict[str, dict[str, dict[str, object]]] | None = None) -> None:
-        self.tables = tables or {}
+    def __init__(self, scene_table: dict[str, object] | None = None) -> None:
+        self.scene_table = scene_table
+        self.calls: list[tuple[str, int, str, str | None]] = []
 
-    def list_types(self):
-        return list(self.tables.keys())
+    def get_active_scene_table(self):
+        return self.scene_table
 
-    def list_tables(self, type_name: str):
-        return list(self.tables.get(type_name, {}).keys())
+    def get_active_scene_table_ref(self):
+        if self.scene_table is None:
+            return None
+        return (
+            int(self.scene_table["id"]),
+            (str(self.scene_table["type_name"]), str(self.scene_table["name"])),
+        )
 
-    def get_table(self, type_name: str, table_name: str):
-        return self.tables[type_name][table_name]
+    def get_scene_attrs(self):
+        if self.scene_table is None:
+            return None
+        attrs: dict[str, str] = {}
+        for row in self.scene_table.get("rows", []):
+            if len(row) >= 2:
+                attrs[str(row[0])] = str(row[1])
+        return attrs
 
-    def create_type(self, name: str):
-        self.tables.setdefault(name, {})
+    def set_key_value(self, table_id: int, key: str, value: str):
+        self.calls.append(("set", table_id, key, value))
+        if self.scene_table is None:
+            raise FileNotFoundError("scene table missing")
+        rows = self.scene_table.setdefault("rows", [])
+        for row in rows:
+            if row and row[0] == key:
+                if len(row) < 2:
+                    row.append(value)
+                else:
+                    row[1] = value
+                return self.scene_table
+        rows.append([key, value])
+        return self.scene_table
 
-    def create_table(self, type_name: str, table_name: str, headers, rows):  # noqa: ANN001
-        self.tables.setdefault(type_name, {})
-        self.tables[type_name][table_name] = {"name": table_name, "headers": headers, "rows": rows}
-        return self.tables[type_name][table_name]
-
-    def save_table(self, type_name: str, table_name: str, headers, rows):  # noqa: ANN001
-        return self.create_table(type_name, table_name, headers, rows)
+    def delete_key_value(self, table_id: int, key: str):
+        self.calls.append(("delete", table_id, key, None))
+        if self.scene_table is None:
+            raise FileNotFoundError("scene table missing")
+        rows = self.scene_table.setdefault("rows", [])
+        for idx, row in enumerate(rows):
+            if row and row[0] == key:
+                del rows[idx]
+                return self.scene_table
+        raise FileNotFoundError(key)
 
 
 @pytest.fixture
@@ -237,7 +264,6 @@ def temp_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "get_summary_path", lambda workspace, session_id: session_root(workspace, session_id) / "rpg_summaries.json")
     monkeypatch.setattr(settings, "get_story_memory_path", lambda workspace, session_id: session_root(workspace, session_id) / "story_memory.json")
     monkeypatch.setattr(settings, "get_persistent_memory_path", lambda workspace, session_id: session_root(workspace, session_id) / "persistent_memory.md")
-    monkeypatch.setattr(settings, "get_status_dir", lambda workspace, session_id: session_root(workspace, session_id) / "status")
     monkeypatch.setattr(settings, "get_vector_db_path", lambda workspace, session_id: str(session_root(workspace, session_id) / "memory_vectors.db"))
     return root
 

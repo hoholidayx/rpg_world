@@ -6,7 +6,7 @@ import csv
 import logging
 import shutil
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 from peewee import Database, DoesNotExist, IntegrityError, SQL
 
@@ -29,7 +29,7 @@ __all__ = ["StatusTableService"]
 logger = logging.getLogger("rpg_data.status")
 
 SCENE_BUILTIN_KEY = "scene"
-SCENE_DEFAULT_HEADERS = ("属性", "值")
+SCENE_DEFAULT_HEADERS = (models.STATUS_KEY_COLUMN, models.STATUS_VALUE_COLUMN)
 SCENE_PROTECTED_ATTRS = {"时间", "位置", "在场人物"}
 _TEMPLATE_STATUS_DIR = "template_status"
 _SESSION_STORIES_DIR = "stories"
@@ -524,6 +524,10 @@ class StatusTableService:
             raise FileNotFoundError(f"Status table not found: {type_name}/{table_name}")
         return _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
 
+    def get_table_by_id(self, table_id: int) -> models.SessionStatusTable:
+        row = self._get_session_table_row(table_id)
+        return _to_session_table(row, self._workspace_root(str(row.session_type.workspace_id)))
+
     def create_table(
         self,
         session_id: str,
@@ -585,6 +589,80 @@ class StatusTableService:
         _write_csv(path, headers, rows)
         _touch(SessionStatusTableRecord, int(row.id))
         return self.get_table(session_id, type_name, table_name)
+
+    def set_cell(
+        self,
+        table_id: int,
+        row: int | models.StatusRowRef,
+        column: int | str,
+        value: str,
+    ) -> models.SessionStatusTable:
+        return self._update_table_data(
+            table_id,
+            lambda data: data.with_cell(row, column, value),
+        )
+
+    def append_row(
+        self,
+        table_id: int,
+        values: Iterable[str],
+    ) -> models.SessionStatusTable:
+        return self._update_table_data(
+            table_id,
+            lambda data: data.with_appended_row(values),
+        )
+
+    def replace_row(
+        self,
+        table_id: int,
+        row: int | models.StatusRowRef,
+        values: Iterable[str],
+    ) -> models.SessionStatusTable:
+        return self._update_table_data(
+            table_id,
+            lambda data: data.with_replaced_row(row, values),
+        )
+
+    def delete_row(
+        self,
+        table_id: int,
+        row: int | models.StatusRowRef,
+    ) -> models.SessionStatusTable:
+        return self._update_table_data(
+            table_id,
+            lambda data: data.with_deleted_row(row),
+        )
+
+    def set_key_value(
+        self,
+        table_id: int,
+        key: str,
+        value: str,
+        *,
+        key_column: int | str = models.STATUS_KEY_COLUMN,
+        value_column: int | str = models.STATUS_VALUE_COLUMN,
+    ) -> models.SessionStatusTable:
+        return self._update_table_data(
+            table_id,
+            lambda data: data.with_key_value(
+                key,
+                value,
+                key_column=key_column,
+                value_column=value_column,
+            ),
+        )
+
+    def delete_key_value(
+        self,
+        table_id: int,
+        key: str,
+        *,
+        key_column: int | str = models.STATUS_KEY_COLUMN,
+    ) -> models.SessionStatusTable:
+        return self._update_table_data(
+            table_id,
+            lambda data: data.without_key(key, key_column=key_column),
+        )
 
     def rename_table(
         self,
@@ -715,33 +793,59 @@ class StatusTableService:
         if table is None:
             return None
         clean_attrs = {str(key): str(value) for key, value in attrs.items()}
-        self.save_table(
-            session_id,
-            table.type_name,
-            table.name,
-            SCENE_DEFAULT_HEADERS,
-            [[key, value] for key, value in clean_attrs.items()],
+        updated = self._replace_table_data(
+            table.id,
+            models.StatusTableData(
+                headers=SCENE_DEFAULT_HEADERS,
+                rows=tuple((key, value) for key, value in clean_attrs.items()),
+            ),
         )
-        return clean_attrs
+        return _rows_to_attrs(updated.rows)
 
     def set_scene_attr(self, session_id: str, key: str, value: str) -> dict[str, str] | None:
-        attrs = self.get_scene_attrs(session_id)
-        if attrs is None:
+        table = self.get_active_scene_table(session_id)
+        if table is None:
             return None
-        attrs[str(key)] = str(value)
-        return self.replace_scene_attrs(session_id, attrs)
+        updated = self.set_key_value(table.id, str(key), str(value))
+        return _rows_to_attrs(updated.rows)
 
     def delete_scene_attr(self, session_id: str, key: str) -> dict[str, str] | None:
-        attrs = self.get_scene_attrs(session_id)
-        if attrs is None:
+        table = self.get_active_scene_table(session_id)
+        if table is None:
             return None
         if key not in SCENE_PROTECTED_ATTRS:
-            attrs.pop(key, None)
-        return self.replace_scene_attrs(session_id, attrs)
+            try:
+                table = self.delete_key_value(table.id, str(key))
+            except FileNotFoundError:
+                pass
+        return _rows_to_attrs(table.rows)
 
     # ------------------------------------------------------------------
     # Internal lookups
     # ------------------------------------------------------------------
+
+    def _update_table_data(
+        self,
+        table_id: int,
+        transform: Callable[[models.StatusTableData], models.StatusTableData],
+    ) -> models.SessionStatusTable:
+        current = self.get_table_by_id(table_id)
+        updated = transform(current.data)
+        return self._replace_table_data(table_id, updated)
+
+    def _replace_table_data(
+        self,
+        table_id: int,
+        data: models.StatusTableData,
+    ) -> models.SessionStatusTable:
+        row = self._get_session_table_row(table_id)
+        workspace_root = self._workspace_root(str(row.session_type.workspace_id))
+        path = resolve_workspace_relative_path(workspace_root, row.relative_path)
+        if not path.is_file():
+            raise FileNotFoundError(str(path))
+        _write_csv(path, data.headers, data.rows)
+        _touch(SessionStatusTableRecord, int(row.id))
+        return self.get_table_by_id(table_id)
 
     def _workspace_root(self, workspace_id: str) -> Path:
         try:
@@ -830,6 +934,18 @@ class StatusTableService:
         )
         if row is None:
             raise FileNotFoundError(f"Session status type not found: {session_id}/{type_name}")
+        return row
+
+    def _get_session_table_row(self, table_id: int) -> SessionStatusTableRecord:
+        row = (
+            SessionStatusTableRecord
+            .select(SessionStatusTableRecord, SessionStatusTypeRecord)
+            .join(SessionStatusTypeRecord)
+            .where(SessionStatusTableRecord.id == table_id)
+            .first()
+        )
+        if row is None:
+            raise FileNotFoundError(f"Session status table not found: {table_id}")
         return row
 
     def _find_session_table(

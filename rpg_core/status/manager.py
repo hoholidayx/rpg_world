@@ -1,241 +1,148 @@
-"""StatusManager — manage status types and CSV tables with full CRUD."""
+"""Thin agent-facing adapter for session status tables."""
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
+from typing import TYPE_CHECKING, Iterable
 
-from rpg_core.utils.manager_base import BaseManager
-from rpg_core.status.loader import StatusLoader
+from rpg_data.models import STATUS_KEY_COLUMN, STATUS_VALUE_COLUMN, StatusRowRef
+from rpg_data.services import get_data_service_gateway
+
+if TYPE_CHECKING:
+    from rpg_data.models import SessionStatusTable
+    from rpg_data.services.status import StatusTableService
 
 
-class StatusManager(BaseManager):
-    """Manages status types and CSV tables in memory with CRUD operations.
+class StatusManager:
+    """Read and update status tables copied for one session."""
 
-    Data layout — subdirectories as types, ``.csv`` files within::
-
-        path/
-        ├── 全局状态/
-        │   ├── 待完成事件.csv
-        │   └── 世界状态.csv
-        └── 角色状态/
-            ├── 服装.csv
-            └── 生理状态.csv
-
-    The in-memory cache is structured as::
-
-        {
-          "<type_name>": {
-            "<table_name>": {"name": …, "headers": […], "rows": [[…], …]},
-            …
-          },
-          …
-        }
-    """
-
-    def __init__(self, path: str | Path) -> None:
-        self.path = Path(path).resolve()
-        self.loader = StatusLoader(self.path)
-        # {type_name: {table_name: {name, headers, rows}}}
-        self.data: dict[str, dict[str, dict[str, object]]] = {}
-        super().__init__()
+    def __init__(
+        self,
+        session_id: str,
+        service: "StatusTableService | None" = None,
+    ) -> None:
+        self.session_id = session_id
+        self._service = service or get_data_service_gateway().status
 
     # ------------------------------------------------------------------
-    # BaseManager abstract methods
-    # ------------------------------------------------------------------
-
-    def _data_dir(self) -> Path:
-        return self.path
-
-    def reload(self) -> None:
-        """Re-read all types and tables from disk into memory."""
-        logger = logging.getLogger("rpg_core.manager")
-        logger.info("StatusManager.reload from %s", self.path)
-        self.data = {}
-        for type_name in self.loader.list_types():
-            tables: dict[str, dict[str, object]] = {}
-            for table_name in self.loader.list_tables(type_name):
-                try:
-                    tables[table_name] = self.loader.get_table(type_name, table_name)
-                except FileNotFoundError:
-                    continue
-            self.data[type_name] = tables
-        logger.info("  -> loaded %d types", len(self.data))
-
-    def load(self) -> dict[str, dict[str, dict[str, object]]]:
-        """Alias for ``reload()`` returning ``self.data``."""
-        self.reload()
-        return self.data
-
-    # ------------------------------------------------------------------
-    # Type CRUD
+    # Reads used by context building
     # ------------------------------------------------------------------
 
     def list_types(self) -> list[str]:
-        """Return all type names."""
-        if not self.data:
-            self.load()
-        return list(self.data.keys())
-
-    def create_type(self, name: str) -> str:
-        """Create a new type (directory).
-
-        Raises ``ValueError`` if the type already exists.
-        """
-        if self.loader.type_exists(name):
-            raise ValueError(f"Status type already exists: {name}")
-        self.loader.create_type(name)
-        self.data[name] = {}
-        return name
-
-    def rename_type(self, old_name: str, new_name: str) -> str:
-        """Rename a type.
-
-        Raises ``FileNotFoundError`` if ``old_name`` does not exist.
-        Raises ``ValueError`` if ``new_name`` already exists.
-        """
-        if not self.loader.type_exists(old_name):
-            raise FileNotFoundError(f"Status type not found: {old_name}")
-        if old_name != new_name and self.loader.type_exists(new_name):
-            raise ValueError(f"Status type already exists: {new_name}")
-        self.loader.rename_type(old_name, new_name)
-        tables = self.data.pop(old_name, {})
-        self.data[new_name] = tables
-        return new_name
-
-    def delete_type(self, name: str) -> None:
-        """Delete a type and all its tables.
-
-        Raises ``FileNotFoundError`` if not found.
-        """
-        if not self.loader.type_exists(name):
-            raise FileNotFoundError(f"Status type not found: {name}")
-        self.loader.delete_type(name)
-        self.data.pop(name, None)
-
-    # ------------------------------------------------------------------
-    # Table CRUD
-    # ------------------------------------------------------------------
-
-    def _ensure_loaded(self) -> None:
-        if not self.data:
-            self.load()
-
-    def _type_tables(self, type_name: str) -> dict[str, dict[str, object]]:
-        """Return the table dict for *type_name*, loading if needed."""
-        self._ensure_loaded()
-        tables = self.data.get(type_name)
-        if tables is None:
-            # Try fresh disk lookup
-            if self.loader.type_exists(type_name):
-                tables = {}
-                for table_name in self.loader.list_tables(type_name):
-                    try:
-                        tables[table_name] = self.loader.get_table(type_name, table_name)
-                    except FileNotFoundError:
-                        continue
-                self.data[type_name] = tables
-            else:
-                raise FileNotFoundError(f"Status type not found: {type_name}")
-        return tables
+        return [
+            status_type.name
+            for status_type in self._service.list_session_types(self.session_id)
+        ]
 
     def list_tables(self, type_name: str) -> list[str]:
-        """Return all table names for a type."""
-        return list(self._type_tables(type_name).keys())
+        return [
+            table.name
+            for table in self._service.list_tables(self.session_id, type_name)
+        ]
+
+    def list_context_tables(self) -> list[dict[str, object]]:
+        return [
+            _table_to_dict(table)
+            for table in self._service.list_context_tables(self.session_id)
+        ]
 
     def get_table(self, type_name: str, table_name: str) -> dict[str, object]:
-        """Return a single table's data.
+        return _table_to_dict(
+            self._service.get_table(self.session_id, type_name, table_name)
+        )
 
-        Raises ``FileNotFoundError`` if type or table not found.
-        """
-        tables = self._type_tables(type_name)
-        table = tables.get(table_name)
+    def get_table_by_id(self, table_id: int) -> dict[str, object]:
+        return _table_to_dict(self._service.get_table_by_id(table_id))
+
+    # ------------------------------------------------------------------
+    # Generic table writes
+    # ------------------------------------------------------------------
+
+    def set_cell(
+        self,
+        table_id: int,
+        row: int | StatusRowRef,
+        column: int | str,
+        value: str,
+    ) -> dict[str, object]:
+        return _table_to_dict(
+            self._service.set_cell(table_id, row, column, value)
+        )
+
+    def append_row(
+        self,
+        table_id: int,
+        values: Iterable[str],
+    ) -> dict[str, object]:
+        return _table_to_dict(self._service.append_row(table_id, values))
+
+    def replace_row(
+        self,
+        table_id: int,
+        row: int | StatusRowRef,
+        values: Iterable[str],
+    ) -> dict[str, object]:
+        return _table_to_dict(
+            self._service.replace_row(table_id, row, values)
+        )
+
+    def delete_row(
+        self,
+        table_id: int,
+        row: int | StatusRowRef,
+    ) -> dict[str, object]:
+        return _table_to_dict(self._service.delete_row(table_id, row))
+
+    def set_key_value(
+        self,
+        table_id: int,
+        key: str,
+        value: str,
+        *,
+        key_column: int | str = STATUS_KEY_COLUMN,
+        value_column: int | str = STATUS_VALUE_COLUMN,
+    ) -> dict[str, object]:
+        return _table_to_dict(
+            self._service.set_key_value(
+                table_id,
+                key,
+                value,
+                key_column=key_column,
+                value_column=value_column,
+            )
+        )
+
+    def delete_key_value(
+        self,
+        table_id: int,
+        key: str,
+        *,
+        key_column: int | str = STATUS_KEY_COLUMN,
+    ) -> dict[str, object]:
+        return _table_to_dict(
+            self._service.delete_key_value(
+                table_id,
+                key,
+                key_column=key_column,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Scene helpers
+    # ------------------------------------------------------------------
+
+    def get_active_scene_table(self) -> dict[str, object] | None:
+        table = self._service.get_active_scene_table(self.session_id)
+        return _table_to_dict(table) if table is not None else None
+
+    def get_active_scene_table_ref(self) -> tuple[int, tuple[str, str]] | None:
+        table = self._service.get_active_scene_table(self.session_id)
         if table is None:
-            # Try fresh disk lookup
-            try:
-                table = self.loader.get_table(type_name, table_name)
-                tables[table_name] = table
-            except FileNotFoundError:
-                raise FileNotFoundError(
-                    f"Table not found: {type_name}/{table_name}"
-                ) from None
-        return table
+            return None
+        return table.id, (table.type_name, table.name)
 
-    def create_table(
-        self,
-        type_name: str,
-        table_name: str,
-        headers: list[str] | None = None,
-        rows: list[list[str]] | None = None,
-    ) -> dict[str, object]:
-        """Create a new table in a type.
+    def get_scene_attrs(self) -> dict[str, str] | None:
+        return self._service.get_scene_attrs(self.session_id)
 
-        Raises ``ValueError`` if the table already exists.
-        """
-        tables = self._type_tables(type_name)
-        if self.loader.table_exists(type_name, table_name):
-            raise ValueError(
-                f"Table already exists: {type_name}/{table_name}"
-            )
 
-        headers = headers or []
-        rows = rows or []
-        self.loader.save_table(type_name, table_name, headers, rows)
-        data = {"name": table_name, "headers": headers, "rows": rows}
-        tables[table_name] = data
-        return data
-
-    def save_table(
-        self,
-        type_name: str,
-        table_name: str,
-        headers: list[str],
-        rows: list[list[str]],
-    ) -> dict[str, object]:
-        """Update an existing table's data.
-
-        Raises ``FileNotFoundError`` if the table does not exist.
-        """
-        tables = self._type_tables(type_name)
-        if not self.loader.table_exists(type_name, table_name):
-            raise FileNotFoundError(
-                f"Table not found: {type_name}/{table_name}"
-            )
-
-        self.loader.save_table(type_name, table_name, headers, rows)
-        data = {"name": table_name, "headers": headers, "rows": rows}
-        tables[table_name] = data
-        return data
-
-    def rename_table(
-        self, type_name: str, old_name: str, new_name: str
-    ) -> dict[str, object]:
-        """Rename a table.
-
-        Raises ``FileNotFoundError`` if the old name does not exist.
-        Raises ``ValueError`` if the new name already exists.
-        """
-        tables = self._type_tables(type_name)
-        if not self.loader.table_exists(type_name, old_name):
-            raise FileNotFoundError(
-                f"Table not found: {type_name}/{old_name}"
-            )
-        if old_name != new_name and self.loader.table_exists(type_name, new_name):
-            raise ValueError(
-                f"Table already exists: {type_name}/{new_name}"
-            )
-
-        self.loader.rename_table(type_name, old_name, new_name)
-        data = tables.pop(old_name, {"name": old_name, "headers": [], "rows": []})
-        data["name"] = new_name
-        tables[new_name] = data
-        return data
-
-    def delete_table(self, type_name: str, table_name: str) -> None:
-        """Delete a table.
-
-        Raises ``FileNotFoundError`` if not found.
-        """
-        tables = self._type_tables(type_name)
-        self.loader.delete_table(type_name, table_name)
-        tables.pop(table_name, None)
+def _table_to_dict(table: "SessionStatusTable") -> dict[str, object]:
+    return table.to_dict()

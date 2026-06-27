@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from rpg_data.models import StatusRowRef
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
@@ -168,6 +169,60 @@ def test_session_copy_is_independent_from_template_and_other_sessions(tmp_path: 
 
     assert service.get_table(str(first["id"]), "世界状态", "旗帜").rows == (("封印", "已修复"),)
     assert service.get_table(str(second["id"]), "世界状态", "旗帜").rows == (("封印", "破裂"),)
+
+
+def test_table_id_selector_writes_are_visible_from_csv(tmp_path: Path) -> None:
+    gateway, workspace_id, workspace_root, story = _workspace(tmp_path, "selector_ws")
+    service = gateway.status
+
+    service.create_type(workspace_id, "世界状态")
+    template = service.create_template(
+        workspace_id,
+        "世界状态",
+        "旗帜",
+        headers=["名称", "值"],
+        rows=[["封印", "完整"]],
+    )
+    service.mount_template(workspace_id, story.id, template.id)
+    session = gateway.catalog.create_session(workspace_id, story.id, title="Selector")
+    assert session is not None
+
+    table = service.get_table(str(session["id"]), "世界状态", "旗帜")
+    service.set_cell(table.id, StatusRowRef.match("名称", "封印"), "值", "破裂")
+    service.append_row(table.id, ["钟声", "响起", "ignored"])
+    service.replace_row(table.id, StatusRowRef.match("名称", "钟声"), ["钟声", "静默"])
+    updated = service.delete_row(table.id, StatusRowRef.match("名称", "封印"))
+
+    assert updated.rows == (("钟声", "静默"),)
+    with (workspace_root / table.relative_path).open("r", encoding="utf-8-sig", newline="") as fh:
+        assert list(csv.reader(fh)) == [["名称", "值"], ["钟声", "静默"]]
+
+
+def test_key_value_write_updates_appends_and_rejects_duplicates(tmp_path: Path) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "key_ws")
+    service = gateway.status
+
+    service.create_type(workspace_id, "场景状态", builtin_key="scene")
+    template = service.create_template(
+        workspace_id,
+        "场景状态",
+        "当前场景",
+        headers=["属性", "值"],
+        rows=[["位置", "森林"]],
+    )
+    service.mount_template(workspace_id, story.id, template.id)
+    session = gateway.catalog.create_session(workspace_id, story.id, title="Key")
+    assert session is not None
+
+    table = service.get_active_scene_table(str(session["id"]))
+    assert table is not None
+    assert service.set_key_value(table.id, "位置", "城堡").rows == (("位置", "城堡"),)
+    assert service.set_key_value(table.id, "天气", "雨").rows == (("位置", "城堡"), ("天气", "雨"))
+    assert service.delete_key_value(table.id, "位置").rows == (("天气", "雨"),)
+
+    service.append_row(table.id, ["天气", "雾"])
+    with pytest.raises(ValueError):
+        service.set_key_value(table.id, "天气", "晴")
 
 
 def test_scene_is_story_mounted_and_active_scene_uses_first_sorted_table(tmp_path: Path) -> None:

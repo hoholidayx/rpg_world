@@ -1,6 +1,5 @@
-"""RPG Status module — typed CSV tables organized by type subdirectories."""
+"""RPG Status module — session status adapter backed by rpg_data."""
 
-from rpg_core.status.loader import StatusLoader
 from rpg_core.status.manager import StatusManager
 
-__all__ = ["StatusLoader", "StatusManager"]
+__all__ = ["StatusManager"]

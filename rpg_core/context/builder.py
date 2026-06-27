@@ -39,29 +39,16 @@ if TYPE_CHECKING:
 
 def _flatten_status_tables(
     status_mgr: StatusManager | None,
-    exclude_tables: set[tuple[str, str]] | None = None,
 ) -> list[dict[str, object]]:
-    """Flatten StatusManager data into a list of ``{name, headers, rows}``.
+    """Return normal status tables for context rendering."""
 
-    If *exclude_tables* is given (set of ``(type_name, table_name)`` tuples),
-    those tables are skipped — used by SceneTracker to avoid duplicating the
-    ``当前场景`` table in the generic status layer.
-    """
-    tables: list[dict[str, object]] = []
+    if status_mgr is None:
+        return []
     try:
-        for type_name in status_mgr.list_types():
-            for table_name in status_mgr.list_tables(type_name):
-                if exclude_tables and (type_name, table_name) in exclude_tables:
-                    continue
-                try:
-                    tbl = status_mgr.get_table(type_name, table_name)
-                    tables.append(tbl)
-                except Exception as exc:
-                    logger.debug("[RPGContextBuilder] skip status table {}/{}: {}", type_name, table_name, exc)
-                    continue
+        return list(status_mgr.list_context_tables())
     except Exception as exc:
         logger.debug("[RPGContextBuilder] flatten status tables failed: {}", exc)
-    return tables
+        return []
 
 
 # ── builder ──────────────────────────────────────────────────────────
@@ -223,14 +210,7 @@ class RPGContextBuilder:
 
         status_tables: list[dict] = []
         if status_mgr and self.config.enable_status_tables:
-            # 排除 SceneTracker 持有的场景表，避免重复
-            exclude = None
-            if scene_tracker:
-                try:
-                    exclude = {scene_tracker.table_key}
-                except Exception as exc:
-                    logger.debug("[RPGContextBuilder] scene table key unavailable: {}", exc)
-            status_tables = _flatten_status_tables(status_mgr, exclude_tables=exclude)
+            status_tables = _flatten_status_tables(status_mgr)
 
         # ── 7. Build user message with User Extension Layer ─────────
         user_before = self._build_extension_blocks(

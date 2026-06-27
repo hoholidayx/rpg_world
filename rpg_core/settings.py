@@ -434,9 +434,9 @@ class Settings(ProfiledYamlSettings):
     def session_dir(self, workspace: str, session_id: str) -> Path:
         """Return the per-session directory for *session_id*.
 
-        All session-scoped data (status, history, summary, memory) lives
+        All file-backed session data (history, summary, memory) lives
         under this directory.  Use the dedicated getter methods below
-        (``get_status_dir``, ``get_history_path``, …) to access specific
+        (``get_history_path``, ``get_story_memory_path``, …) to access specific
         sub-paths; avoid joining *session_dir* by hand.
         """
         return self.sessions_base_dir(workspace) / session_id
@@ -534,12 +534,6 @@ class Settings(ProfiledYamlSettings):
     def get_vector_db_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``memory_vectors.db`` path for the given session."""
         return self.session_dir(workspace, session_id) / "memory_vectors.db"
-
-    # ── Session-scoped directory getters ──────────────────────────────
-
-    def get_status_dir(self, workspace: str, session_id: str) -> Path:
-        """Return the ``status/`` directory for the given session."""
-        return self.session_dir(workspace, session_id) / "status"
 
     # ── Session-scoped file path getters ──────────────────────────────
 

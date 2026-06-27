@@ -7,7 +7,15 @@ from rpg_core.tests.conftest import FakeStatusManager
 
 
 def test_scene_tracker_loads_and_saves_status_table():
-    mgr = FakeStatusManager()
+    mgr = FakeStatusManager(
+        {
+            "id": 42,
+            "type_name": "场景状态",
+            "name": "当前场景",
+            "headers": ["属性", "值"],
+            "rows": [],
+        }
+    )
     tracker = SceneTracker()
     tracker.bind_status_manager(mgr)
 
@@ -15,22 +23,21 @@ def test_scene_tracker_loads_and_saves_status_table():
     assert loaded is False
     assert tracker.get_context().startswith("[scene]")
     assert "时间:" in tracker.get_context()
-    assert "当前场景" in mgr.tables["全局状态"]
+    assert ("set", 42, "时间", "第 1 年 1 月 1 日 6 时") in mgr.calls
 
     tracker.set_attr("位置", "城堡")
-    assert mgr.tables["全局状态"]["当前场景"]["rows"][1] == ["位置", "城堡"]
+    assert ["位置", "城堡"] in mgr.scene_table["rows"]
+    assert ("set", 42, "位置", "城堡") in mgr.calls
 
 
 def test_scene_tracker_existing_table_round_trip():
     mgr = FakeStatusManager(
         {
-            "全局状态": {
-                "当前场景": {
-                    "name": "当前场景",
-                    "headers": ["属性", "值"],
-                    "rows": [["时间", "第 9 年 8 月 7 日 12 时"], ["位置", "大厅"]],
-                }
-            }
+            "id": 7,
+            "type_name": "场景状态",
+            "name": "当前场景",
+            "headers": ["属性", "值"],
+            "rows": [["时间", "第 9 年 8 月 7 日 12 时"], ["位置", "大厅"]],
         }
     )
     tracker = SceneTracker()
@@ -40,6 +47,18 @@ def test_scene_tracker_existing_table_round_trip():
     context = tracker.get_context()
     assert "第 9 年 8 月 7 日 12 时" in context
     assert "大厅" in context
+
+
+def test_scene_tracker_does_not_create_unmounted_scene():
+    mgr = FakeStatusManager()
+    tracker = SceneTracker()
+    tracker.bind_status_manager(mgr)
+
+    assert tracker.load_from_status_table() is False
+    tracker.set_attr("位置", "城堡")
+
+    assert mgr.scene_table is None
+    assert mgr.calls == []
 
 
 def test_scene_tracker_attr_limit_and_protected_delete():

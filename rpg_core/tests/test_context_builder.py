@@ -138,13 +138,11 @@ def test_build_context_layers_and_user_extensions():
         character_mgr=FakeManager([{"name": "Alice"}]),
         lorebook_mgr=FakeManager([{"name": "Lore"}]),
         status_mgr=SimpleNamespace(
-            list_types=lambda: ["全局状态"],
-            list_tables=lambda type_name: ["当前场景", "世界状态"],
-            get_table=lambda type_name, table_name: {
-                "name": table_name,
+            list_context_tables=lambda: [{
+                "name": "世界状态",
                 "headers": ["属性", "值"],
                 "rows": [["k", "v"]],
-            },
+            }],
         ),
         scene_tracker=FakeStatusTracker(),
     )
