@@ -13,9 +13,14 @@ __all__ = [
     "SessionCharacterDetail",
     "SessionLorebookEntry",
     "SessionProfile",
+    "SessionStatusTable",
+    "SessionStatusType",
     "Story",
     "StoryCharacter",
     "StoryLorebookEntry",
+    "StoryStatusTable",
+    "StatusTableTemplate",
+    "StatusType",
     "Workspace",
 ]
 
@@ -169,6 +174,94 @@ class StoryLorebookEntry:
     workspace_id: str
     story_id: int
     lorebook_entry_id: int
+    sort_order: int = 0
+    metadata_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class StatusType:
+    id: int
+    workspace_id: str
+    name: str
+    builtin_key: str = ""
+    sort_order: int = 0
+    metadata_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class StatusTableTemplate:
+    id: int
+    workspace_id: str
+    type_id: int
+    type_name: str
+    builtin_key: str
+    name: str
+    relative_path: str
+    description: str = ""
+    headers: tuple[str, ...] = ()
+    rows: tuple[tuple[str, ...], ...] = ()
+    sort_order: int = 0
+    metadata_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class StoryStatusTable:
+    id: int
+    workspace_id: str
+    story_id: int
+    status_table_id: int
+    type_id: int
+    type_name: str
+    builtin_key: str
+    table_name: str
+    relative_path: str
+    sort_order: int = 0
+    metadata_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionStatusType:
+    id: int
+    session_id: str
+    workspace_id: str
+    story_id: int
+    source_type_id: int | None
+    name: str
+    builtin_key: str = ""
+    sort_order: int = 0
+    metadata_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionStatusTable:
+    id: int
+    session_id: str
+    session_type_id: int
+    workspace_id: str
+    story_id: int
+    source_table_id: int | None
+    type_name: str
+    builtin_key: str
+    name: str
+    relative_path: str
+    description: str = ""
+    headers: tuple[str, ...] = ()
+    rows: tuple[tuple[str, ...], ...] = ()
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1

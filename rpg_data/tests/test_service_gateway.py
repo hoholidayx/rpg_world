@@ -21,10 +21,12 @@ def test_gateway_initializes_migrations_and_exposes_services(tmp_path: Path) -> 
     workspaces = gateway.catalog.list_workspaces()
     characters = gateway.character.list_characters("s_forest001")
     lorebook_entries = gateway.lorebook.list_enabled_entries("s_forest001")
+    status_types = gateway.status.list_types("demo_workspace")
 
     assert {workspace["id"] for workspace in workspaces} == {"demo_workspace"}
     assert [character.name for character in characters] == ["Bob", "Alice"]
     assert [entry.name for entry in lorebook_entries] == ["炎心之木", "圆形封印祭坛"]
+    assert status_types == []
 
 
 def test_gateway_supports_in_memory_database() -> None:

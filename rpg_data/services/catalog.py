@@ -8,6 +8,7 @@ from rpg_data import models
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
+from rpg_data.services.status import StatusTableService
 
 __all__ = ["CatalogService"]
 
@@ -19,10 +20,17 @@ _SessionSummary = dict[str, object]
 class CatalogService:
     """Expose workspace/story/session metadata without leaking repositories."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        status_service: StatusTableService | None = None,
+    ) -> None:
+        self._database = database
         self._workspaces = WorkspaceRepository(database)
         self._stories = StoryRepository(database)
         self._sessions = SessionRepository(database)
+        self._status = status_service
 
     def list_workspaces(self) -> list[_WorkspaceSummary]:
         workspaces = [
@@ -58,12 +66,15 @@ class CatalogService:
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
             return None
-        session = self._sessions.create(
-            workspace_id,
-            story_id,
-            title=title,
-            description=description,
-        )
+        with self._database.atomic():
+            session = self._sessions.create(
+                workspace_id,
+                story_id,
+                title=title,
+                description=description,
+            )
+            if self._status is not None:
+                self._status.initialize_session_tables(session.id)
         return _session_summary(session)
 
     def get_session(

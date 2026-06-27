@@ -130,6 +130,95 @@ CREATE TABLE IF NOT EXISTS rpg_story_lorebook_entries (
     UNIQUE (story_id, lorebook_entry_id)
 );
 
+CREATE TABLE IF NOT EXISTS rpg_status_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    builtin_key TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
+    UNIQUE (workspace_id, name),
+    UNIQUE (id, workspace_id)
+);
+
+CREATE TABLE IF NOT EXISTS rpg_status_table_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL,
+    type_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (type_id, workspace_id) REFERENCES rpg_status_types(id, workspace_id) ON DELETE CASCADE,
+    UNIQUE (type_id, name),
+    UNIQUE (workspace_id, relative_path),
+    UNIQUE (id, workspace_id)
+);
+
+CREATE TABLE IF NOT EXISTS rpg_story_status_tables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL,
+    story_id INTEGER NOT NULL,
+    status_table_id INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (status_table_id, workspace_id) REFERENCES rpg_status_table_templates(id, workspace_id) ON DELETE CASCADE,
+    UNIQUE (story_id, status_table_id)
+);
+
+CREATE TABLE IF NOT EXISTS rpg_session_status_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    story_id INTEGER NOT NULL,
+    source_type_id INTEGER,
+    name TEXT NOT NULL,
+    builtin_key TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
+    UNIQUE (session_id, name),
+    UNIQUE (id, session_id)
+);
+
+CREATE TABLE IF NOT EXISTS rpg_session_status_tables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    session_type_id INTEGER NOT NULL,
+    source_table_id INTEGER,
+    name TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_type_id, session_id) REFERENCES rpg_session_status_types(id, session_id) ON DELETE CASCADE,
+    UNIQUE (session_type_id, name),
+    UNIQUE (session_id, relative_path)
+);
+
 CREATE INDEX IF NOT EXISTS idx_rpg_stories_workspace_id ON rpg_stories(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_sessions_workspace_id ON rpg_sessions(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_sessions_story_id ON rpg_sessions(story_id);
@@ -142,3 +231,12 @@ CREATE INDEX IF NOT EXISTS idx_rpg_story_characters_character_id ON rpg_story_ch
 CREATE INDEX IF NOT EXISTS idx_rpg_story_lorebook_entries_workspace_id ON rpg_story_lorebook_entries(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_story_lorebook_entries_story_id ON rpg_story_lorebook_entries(story_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_story_lorebook_entries_lorebook_entry_id ON rpg_story_lorebook_entries(lorebook_entry_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_status_types_workspace_id ON rpg_status_types(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_status_table_templates_workspace_id ON rpg_status_table_templates(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_status_table_templates_type_id ON rpg_status_table_templates(type_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_status_tables_workspace_id ON rpg_story_status_tables(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_status_tables_story_id ON rpg_story_status_tables(story_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_status_tables_status_table_id ON rpg_story_status_tables(status_table_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_status_types_session_id ON rpg_session_status_types(session_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_status_tables_session_id ON rpg_session_status_tables(session_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_status_tables_session_type_id ON rpg_session_status_tables(session_type_id);

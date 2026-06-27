@@ -12,7 +12,8 @@ from rpg_data.migrations.runner import run_migrations
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterReadService
 from rpg_data.services.lorebook import LorebookReadService
-from rpg_data.settings import get_database_path
+from rpg_data.services.status import StatusTableService
+from rpg_data.settings import resolve_database_path
 
 __all__ = [
     "DataServiceGateway",
@@ -30,6 +31,7 @@ class DataServiceGateway:
         self._catalog: CatalogService | None = None
         self._character: CharacterReadService | None = None
         self._lorebook: LorebookReadService | None = None
+        self._status: StatusTableService | None = None
         self._initialized = False
 
     @property
@@ -48,7 +50,7 @@ class DataServiceGateway:
     def catalog(self) -> CatalogService:
         database = self.database
         if self._catalog is None:
-            self._catalog = CatalogService(database)
+            self._catalog = CatalogService(database, status_service=self.status)
         self._ensure_bound()
         return self._catalog
 
@@ -67,6 +69,14 @@ class DataServiceGateway:
             self._lorebook = LorebookReadService(database)
         self._ensure_bound()
         return self._lorebook
+
+    @property
+    def status(self) -> StatusTableService:
+        database = self.database
+        if self._status is None:
+            self._status = StatusTableService(database)
+        self._ensure_bound()
+        return self._status
 
     def initialize(self) -> None:
         if self._initialized:
@@ -87,6 +97,7 @@ class DataServiceGateway:
         self._catalog = None
         self._character = None
         self._lorebook = None
+        self._status = None
 
     def _ensure_bound(self) -> None:
         if self._database is None:
@@ -119,9 +130,7 @@ def reset_data_service_gateways() -> None:
 
 
 def _normalize_database_path(db_path: str | Path | None) -> Path:
-    if db_path is None:
-        return get_database_path()
-    return Path(db_path).expanduser()
+    return resolve_database_path(db_path)
 
 
 def _run_migrations(database: Database, database_path: Path) -> None:

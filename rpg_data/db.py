@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
-from rpg_data.settings import get_database_path
+from rpg_data.settings import resolve_database_path
 
 if TYPE_CHECKING:
     from peewee import Database, SqliteDatabase
@@ -25,7 +25,7 @@ __all__ = [
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     """Open a configured SQLite connection and apply runtime pragmas."""
 
-    path = Path(db_path).expanduser() if db_path is not None else get_database_path()
+    path = resolve_database_path(db_path)
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
 

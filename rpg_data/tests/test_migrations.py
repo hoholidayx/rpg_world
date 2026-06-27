@@ -33,6 +33,11 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_lorebook_entries",
             "rpg_story_characters",
             "rpg_story_lorebook_entries",
+            "rpg_status_types",
+            "rpg_status_table_templates",
+            "rpg_story_status_tables",
+            "rpg_session_status_types",
+            "rpg_session_status_tables",
         }.issubset(tables)
 
         for table in (
@@ -45,6 +50,11 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_lorebook_entries",
             "rpg_story_characters",
             "rpg_story_lorebook_entries",
+            "rpg_status_types",
+            "rpg_status_table_templates",
+            "rpg_story_status_tables",
+            "rpg_session_status_types",
+            "rpg_session_status_tables",
         ):
             columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
             assert {"created_at", "updated_at", "version"}.issubset(columns)
@@ -55,6 +65,8 @@ def test_run_migrations_creates_initial_tables() -> None:
         lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_lorebook_entries)")}
         story_character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_story_characters)")}
         story_lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_story_lorebook_entries)")}
+        status_template_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_status_table_templates)")}
+        session_status_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_status_tables)")}
 
         profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_profiles)")}
 
@@ -67,6 +79,12 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "enabled" not in lorebook_columns
         assert "enabled" not in story_character_columns
         assert "enabled" not in story_lorebook_columns
+        assert "relative_path" in status_template_columns
+        assert "relative_path" in session_status_columns
+        assert "headers_json" not in status_template_columns
+        assert "rows_json" not in status_template_columns
+        assert "headers_json" not in session_status_columns
+        assert "rows_json" not in session_status_columns
     finally:
         conn.close()
 

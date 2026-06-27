@@ -17,7 +17,7 @@ from peewee import (
     TextField,
 )
 
-from rpg_data.settings import get_database_path
+from rpg_data.settings import resolve_database_path
 
 __all__ = [
     "CharacterDetailRecord",
@@ -25,9 +25,14 @@ __all__ = [
     "LorebookEntryRecord",
     "SessionProfileRecord",
     "SessionRecord",
+    "SessionStatusTableRecord",
+    "SessionStatusTypeRecord",
     "StoryCharacterRecord",
     "StoryLorebookEntryRecord",
+    "StoryStatusTableRecord",
     "StoryRecord",
+    "StatusTableTemplateRecord",
+    "StatusTypeRecord",
     "WorkspaceRecord",
     "bind_database",
     "make_database",
@@ -39,7 +44,7 @@ _database_proxy = DatabaseProxy()
 def make_database(db_path: str | Path | None = None) -> SqliteDatabase:
     """Create a Peewee SQLite database using the rpg_data pragmas."""
 
-    path = Path(db_path).expanduser() if db_path is not None else get_database_path()
+    path = resolve_database_path(db_path)
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
     return SqliteDatabase(
@@ -268,6 +273,144 @@ class StoryLorebookEntryRecord(BaseRecord):
         table_name = "rpg_story_lorebook_entries"
 
 
+class StatusTypeRecord(BaseRecord):
+    id = AutoField()
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="status_types",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    name = TextField()
+    builtin_key = TextField(default="")
+    sort_order = IntegerField(default=0)
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_status_types"
+
+
+class StatusTableTemplateRecord(BaseRecord):
+    id = AutoField()
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="status_table_templates",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    status_type = ForeignKeyField(
+        StatusTypeRecord,
+        backref="templates",
+        column_name="type_id",
+        on_delete="CASCADE",
+    )
+    name = TextField()
+    relative_path = TextField()
+    description = TextField(default="")
+    sort_order = IntegerField(default=0)
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_status_table_templates"
+
+
+class StoryStatusTableRecord(BaseRecord):
+    id = AutoField()
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="story_status_tables",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="status_table_mounts",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    status_table = ForeignKeyField(
+        StatusTableTemplateRecord,
+        backref="story_mounts",
+        column_name="status_table_id",
+        on_delete="CASCADE",
+    )
+    sort_order = IntegerField(default=0)
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_status_tables"
+
+
+class SessionStatusTypeRecord(BaseRecord):
+    id = AutoField()
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="status_types",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="session_status_types",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="session_status_types",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    source_type_id = IntegerField(null=True)
+    name = TextField()
+    builtin_key = TextField(default="")
+    sort_order = IntegerField(default=0)
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_status_types"
+
+
+class SessionStatusTableRecord(BaseRecord):
+    id = AutoField()
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="status_tables",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    session_type = ForeignKeyField(
+        SessionStatusTypeRecord,
+        backref="tables",
+        column_name="session_type_id",
+        on_delete="CASCADE",
+    )
+    source_table_id = IntegerField(null=True)
+    name = TextField()
+    relative_path = TextField()
+    description = TextField(default="")
+    sort_order = IntegerField(default=0)
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_status_tables"
+
+
 RECORD_MODELS = (
     WorkspaceRecord,
     StoryRecord,
@@ -278,4 +421,9 @@ RECORD_MODELS = (
     LorebookEntryRecord,
     StoryCharacterRecord,
     StoryLorebookEntryRecord,
+    StatusTypeRecord,
+    StatusTableTemplateRecord,
+    StoryStatusTableRecord,
+    SessionStatusTypeRecord,
+    SessionStatusTableRecord,
 )

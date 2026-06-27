@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from rpg_data import db
-from rpg_data.settings import get_database_path
+from rpg_data.settings import (
+    get_database_path,
+    resolve_database_path,
+    resolve_workspace_relative_path,
+    resolve_workspace_root,
+)
 
 
 def test_get_database_path_defaults_to_data(monkeypatch) -> None:
@@ -21,6 +26,30 @@ def test_get_database_path_can_be_overridden(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(configured))
 
     assert get_database_path() == configured
+
+
+def test_resolve_database_path_preserves_memory_database() -> None:
+    assert str(resolve_database_path(":memory:")) == ":memory:"
+
+
+def test_resolve_workspace_root_uses_configured_base(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+
+    assert resolve_workspace_root("data/campaign") == (tmp_path / "data" / "campaign").resolve()
+
+
+def test_resolve_workspace_relative_path_rejects_escapes(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+
+    assert resolve_workspace_relative_path(workspace, "status/table.csv") == (
+        workspace / "status" / "table.csv"
+    ).resolve()
+
+    with pytest.raises(ValueError):
+        resolve_workspace_relative_path(workspace, "../outside.csv")
+
+    with pytest.raises(ValueError):
+        resolve_workspace_relative_path(workspace, tmp_path / "outside.csv")
 
 
 def test_connect_creates_parent_directory_and_can_create_table(tmp_path: Path) -> None:
