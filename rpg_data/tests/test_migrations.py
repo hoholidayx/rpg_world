@@ -349,6 +349,35 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
             WHERE workspace_id = 'demo_workspace'
             """
         ).fetchone()["count"]
+        status_type_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM rpg_status_types
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        status_template_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM rpg_status_table_templates
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        status_mount_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM rpg_story_status_tables
+            WHERE workspace_id = 'demo_workspace'
+            """
+        ).fetchone()["count"]
+        scene_template = conn.execute(
+            """
+            SELECT relative_path, metadata_json
+            FROM rpg_status_table_templates
+            WHERE workspace_id = 'demo_workspace'
+              AND name = '北境森林当前场景'
+            """
+        ).fetchone()
 
         assert dict(workspace) == {
             "id": "demo_workspace",
@@ -363,5 +392,10 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
         assert lorebook_count == 2
         assert character_mount_count == 4
         assert lorebook_mount_count == 4
+        assert status_type_count == 2
+        assert status_template_count == 3
+        assert status_mount_count == 4
+        assert scene_template["relative_path"] == "template_status/场景/北境森林当前场景.csv"
+        assert '"_bootstrap_csv"' in scene_template["metadata_json"]
     finally:
         conn.close()

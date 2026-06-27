@@ -209,7 +209,7 @@ workspace；API 空 workspace 会解析为 API 默认工作区，Telegram/CLI
 
 `rpg_data` 的数据关系是：workspace 下有多个 story，story 下有多个 session；角色卡和世界书条目属于 workspace，并通过 `rpg_story_characters`、`rpg_story_lorebook_entries` 挂载到 story。同一个角色卡或世界书条目可以挂载到多个 story，挂载表只禁止同一 story 内重复挂载。
 
-状态表也由 `rpg_data` 管理索引。SQLite 保存状态类型、模板、story 挂载、session 副本、排序、`builtin_key` 和 workspace-relative `relative_path`；CSV 是 headers/rows 的唯一内容源。模板文件放在 `{workspace_root}/template_status/`，创建 session 时 `CatalogService` 调用 `StatusTableService.initialize_session_tables()`，把当前 story 已挂载模板复制到 `{workspace_root}/stories/{story_id}/{session_id}/status/`。模板后续修改不影响已有 session 副本。
+状态表也由 `rpg_data` 管理索引。SQLite 保存状态类型、模板、story 挂载、session 副本、排序、`builtin_key` 和 workspace-relative `relative_path`；CSV 是 headers/rows 的唯一内容源。模板文件放在 `{workspace_root}/template_status/`，创建 session 时 `CatalogService` 调用 `StatusTableService.initialize_session_tables()`，把当前 story 已挂载模板复制到 `{workspace_root}/stories/{story_id}/{session_id}/status/`。模板后续修改不影响已有 session 副本。`DataServiceGateway` 初始化时会按 SQL 索引 materialize workspace 目录和缺失 CSV；缺失 CSV 的初始内容只来自 SQL 行的 `metadata_json._bootstrap_csv`，bootstrap 代码不要硬编码 demo 或业务数据。
 
 `当前场景` 是 `builtin_key="scene"` 的特殊状态类型，展示名可以自定义，但仍必须挂载到 story 才会被 session 感知。多张 scene 表存在时，v1 消费排序第一张 active scene。
 
@@ -465,6 +465,8 @@ character/lorebook/status 是例外：`rpg_core.character.CharacterManager`、
 CSV 是唯一内容源；service 不通过目录扫描发现状态表。通用写操作以 session table id
 为入口，支持 header 名称、行匹配和 key/value selector。外部代码应通过
 `get_data_service_gateway().status` 取得 service，不要新增 per-service 全局 getter。
+gateway/bootstrap 只能把 SQL 已索引的路径 materialize 到文件系统，不负责发现或创建
+业务索引。
 
 ### 结构化类型系统（`agent/agent_types.py`）
 

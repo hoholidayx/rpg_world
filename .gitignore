@@ -42,6 +42,8 @@ data/**/*.sqlite3
 data/**/*.sqlite3-*
 data/models/
 data/**/sessions/
+data/**/stories/
+data/**/template_status/
 
 # Logs and temp files
 *.log

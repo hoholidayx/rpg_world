@@ -8,6 +8,7 @@ from pathlib import Path
 from peewee import Database
 
 from rpg_data import db
+from rpg_data.bootstrap import bootstrap_runtime_data
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterReadService
@@ -85,7 +86,13 @@ class DataServiceGateway:
 
         database = db.bind_peewee_database(db.make_peewee_database(self._database_path))
         database.connect(reuse_if_open=True)
-        _run_migrations(database, self._database_path)
+        try:
+            _run_migrations(database, self._database_path)
+            bootstrap_runtime_data(database)
+        except Exception:
+            if not database.is_closed():
+                database.close()
+            raise
         self._database = database
         self._initialized = True
         self._ensure_bound()

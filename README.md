@@ -110,6 +110,8 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 - CSV 是 headers/rows 的唯一来源；service 不扫描目录补索引，也不把表格内容双写进 SQL。
 - 模板文件位于 `{workspace_root}/template_status/{type_name}/{table_name}.csv`。
 - session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/{type_name}/{table_name}.csv`。
+- `DataServiceGateway` 初始化时会按 SQL 索引 materialize workspace 目录、模板 CSV 和 session 副本；bootstrap 不写业务索引，不扫描目录发现表。
+- 缺失 CSV 的初始内容只从对应 SQL 行的 `metadata_json._bootstrap_csv` 还原；CSV 已存在时不覆盖。
 - `当前场景` 是 `builtin_key="scene"` 的特殊状态类型，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。
 - `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，索引中的 `relative_path` 必须是 workspace 相对路径，统一由 `rpg_data.settings` 解析并阻止路径逃逸。
 
