@@ -13,9 +13,7 @@ __test__ = False  # 阻止 pytest 自动收集（本文件为独立 CLI，非 py
 
 
 import sys
-import shutil
 import time
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,18 +32,12 @@ logger.add(
     colorize=True,
 )
 
-from rpg_core.session.manager import SessionManager
 from llm_service.config import resolve_llm_config
 from llm_service.keys import MEMORY_EMBED_BIZ_KEY, MEMORY_QUERY_PLANNER_BIZ_KEY, MEMORY_RERANK_BIZ_KEY
 from rp_memory.recalled_memory import RecalledMemoryStore
 from rp_memory.memory_manager import MemoryManager, format_recall_item
-from rpg_core.utils.path_utils import (
-    PACKAGE_ROOT,
-    ensure_workspace_dir,
-    list_workspaces,
-    resolve_workspace_root,
-)
 from rpg_core.utils.watcher import get_watcher
+from rpg_data.services import get_data_service_gateway
 
 if TYPE_CHECKING:
     from rp_memory.memory_manager import RecallItem
@@ -55,10 +47,6 @@ def _print_separator(title: str) -> None:
     print(f"\n{'=' * 60}")
     print(f"  {title}")
     print(f"{'=' * 60}")
-
-
-def _format_workspace_name(workspace: str) -> str:
-    return workspace or "默认（根工作区）"
 
 
 def _format_secret(value: str | None) -> str:
@@ -101,26 +89,25 @@ def _print_provider_config(title: str, provider_cfg, biz_key: str) -> None:  # n
 
 
 def _print_available_workspaces() -> None:
-    workspaces = list_workspaces(PACKAGE_ROOT)
+    workspaces = get_data_service_gateway().catalog.list_workspaces()
     print("  可用 workspaces:")
     for item in workspaces:
-        name = item["name"] or ""
-        label = item["label"]
-        print(f"    - {label}: {_format_workspace_name(name)}")
+        print(f"    - {item['name']}: {item['id']}")
 
 
-def _create_temp_workspace() -> str:
-    workspace = f"data/memory_cli_{uuid.uuid4().hex[:8]}"
-    ensure_workspace_dir(PACKAGE_ROOT, workspace)
-    return workspace
+def _session_root(session: str) -> Path:
+    return get_data_service_gateway().catalog.get_session_runtime_dir(session)
 
 
-def _ensure_session(workspace: str, session: str) -> bool:
-    sessions = SessionManager.list_sessions(workspace)
-    if session in sessions:
-        return False
-    SessionManager.create(workspace, session)
-    return True
+def _vector_db_path(session: str) -> Path:
+    return _session_root(session) / "memory_vectors.db"
+
+
+def _ensure_session(session: str) -> None:
+    if get_data_service_gateway().catalog.get_session(session) is None:
+        raise FileNotFoundError(
+            f"Session {session!r} not found in rpg_data. Create it through catalog/Agent service first."
+        )
 
 
 def show_config(workspace: str, session: str) -> None:
@@ -159,8 +146,8 @@ def show_config(workspace: str, session: str) -> None:
     _print_line("rerank_candidate_k:", mem.rerank_candidate_k)
     _print_line("rerank_score_weight:", mem.rerank_score_weight)
     _print_provider_config("rerank", mem.rerank_provider, MEMORY_RERANK_BIZ_KEY)
-    _print_line("DB path:", settings.get_vector_db_path(workspace, session))
-    _print_line("session dir:", settings.session_dir(workspace, session))
+    _print_line("DB path:", _vector_db_path(session))
+    _print_line("session dir:", _session_root(session))
 
 
 def create_manager(workspace: str, session: str) -> MemoryManager | None:
@@ -168,10 +155,11 @@ def create_manager(workspace: str, session: str) -> MemoryManager | None:
     _print_separator("2. MemoryManager.create() 同步创建")
 
     recalled = RecalledMemoryStore()
+    session_root = _session_root(session)
     mm = MemoryManager.create(
         recalled_store=recalled,
-        session_dir=str(settings.session_dir(workspace, session)),
-        get_vector_db_path=str(settings.get_vector_db_path(workspace, session)),
+        session_dir=str(session_root),
+        get_vector_db_path=str(session_root / "memory_vectors.db"),
         mem_cfg=settings.memory_settings,
     )
 
@@ -183,8 +171,8 @@ def create_manager(workspace: str, session: str) -> MemoryManager | None:
     print(f"  类型: {type(mm).__name__}")
     print(f"  index_manager: {mm._index_manager is not None}")
     print(f"  retriever: {mm._retriever is not None}")
-    print(f"  DB 文件: {settings.get_vector_db_path(workspace, session)}")
-    print(f"  DB 存在: {settings.get_vector_db_path(workspace, session).exists()}")
+    print(f"  DB 文件: {_vector_db_path(session)}")
+    print(f"  DB 存在: {_vector_db_path(session).exists()}")
     return mm
 
 
@@ -232,7 +220,7 @@ def inspect_vector_store(workspace: str, session: str) -> None:
     """5. 直接检查 VectorStore 中的数据。"""
     _print_separator("5. VectorStore 内容检查")
 
-    db_path = settings.get_vector_db_path(workspace, session)
+    db_path = _vector_db_path(session)
 
     if not db_path.exists():
         print("  ⚠️  DB 不存在，跳过")
@@ -293,22 +281,13 @@ def cleanup_workspace(workspace: str, session: str, remove_workspace: bool = Fal
     """6. 清理测试数据。"""
     _print_separator("6. 清理")
 
-    try:
-        SessionManager.delete(workspace, session)
-        print(f"  🗑️  删除 session: {session}")
-    except Exception as exc:
-        print(f"  ⚠️  删除 session 失败: {exc}")
-
-    db = settings.get_vector_db_path(workspace, session)
+    db = _vector_db_path(session)
     if db.exists():
         db.unlink()
         print(f"  🗑️  删除 DB: {db}")
 
     if remove_workspace:
-        ws_root = resolve_workspace_root(PACKAGE_ROOT, workspace)
-        if ws_root.exists():
-            shutil.rmtree(ws_root, ignore_errors=True)
-            print(f"  🗑️  删除 workspace: {ws_root}")
+        print("  ⚠️  catalog workspace/session 不由 memory CLI 删除")
 
 
 def _loop(mm: MemoryManager, workspace: str, session: str) -> None:
@@ -355,8 +334,8 @@ def _loop(mm: MemoryManager, workspace: str, session: str) -> None:
             _print_separator("MemoryManager 状态")
             print(f"  workspace:          {workspace}")
             print(f"  session:           {session}")
-            print(f"  DB:                {settings.get_vector_db_path(workspace, session)}")
-            print(f"  DB 存在:            {settings.get_vector_db_path(workspace, session).exists()}")
+            print(f"  DB:                {_vector_db_path(session)}")
+            print(f"  DB 存在:            {_vector_db_path(session).exists()}")
             print(f"  inited:             {mm._inited}")
             print(f"  index_manager:      {mm._index_manager is not None}")
             print(f"  retriever:          {mm._retriever is not None}")
@@ -388,7 +367,7 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="MemoryManager CLI 测试")
-    parser.add_argument("--workspace", default="", help="测试用 workspace（默认: 自动创建临时 workspace）")
+    parser.add_argument("--workspace", default="", help="仅用于显示；session 路径始终由 rpg_data catalog 解析")
     parser.add_argument("--session", default="test_mm", help="测试用的 session ID（默认: test_mm）")
     parser.add_argument("--query", default="记忆", help="启动后首次 recall 的查询文本（默认: 记忆）")
     parser.add_argument("--skip-cleanup", action="store_true", help="保留测试数据不清理")
@@ -399,8 +378,8 @@ def main() -> None:
         _print_available_workspaces()
         return
 
-    workspace = args.workspace.strip() or _create_temp_workspace()
-    temporary_workspace = not bool(args.workspace.strip())
+    workspace = args.workspace.strip()
+    temporary_workspace = False
 
     print(f"\n🔧 MemoryManager 测试 — workspace={workspace!r} session={args.session!r}\n")
 
@@ -411,7 +390,7 @@ def main() -> None:
             print("\n  ⚠️  memory 未启用（settings.yaml memory.enabled = false）")
             return
 
-        _ensure_session(workspace, args.session)
+        _ensure_session(args.session)
         mm = create_manager(workspace, args.session)
         if mm is not None:
             # 同步初始化并启动 FileWatcher

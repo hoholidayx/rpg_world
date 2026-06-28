@@ -49,16 +49,6 @@ class AgentSessionCreateRequest(_BaseSchema):
     title: str = ""
 
 
-class AgentSessionCloneRequest(_BaseSchema):
-    workspace: str
-    target_session_id: str
-
-    @field_validator("target_session_id")
-    @classmethod
-    def _validate_target_session_id(cls, value: str) -> str:
-        return SessionManager.validate_session_id(value)
-
-
 class AgentHealthResponse(_BaseSchema):
     status: str = "ok"
 

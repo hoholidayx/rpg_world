@@ -1,4 +1,4 @@
-"""BatchSummaryStore — 管理 sessions/{session_id}/summaries/ 目录下的 markdown 摘要文件。
+"""BatchSummaryStore — 管理 session runtime 下的 markdown 摘要文件。
 
 批次文件是记忆唯一真源，overall.md 是聚合概览（唯一注入 context 的摘要）。
 """
@@ -23,12 +23,10 @@ _FRONT_MATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
 class BatchSummaryStore:
-    """管理 sessions/{session_id}/summaries/ 目录下的 markdown 摘要文件。"""
+    """管理 ``{session_root}/summaries/`` 目录下的 markdown 摘要文件。"""
 
-    def __init__(self, workspace: str, session_id: str) -> None:
-        from rpg_core.settings import settings
-
-        self._dir = settings.session_dir(workspace, session_id) / "summaries"
+    def __init__(self, session_root: Path) -> None:
+        self._dir = Path(session_root) / "summaries"
         self._dir.mkdir(parents=True, exist_ok=True)
         self._index: list[dict] = []
         self._load_index()

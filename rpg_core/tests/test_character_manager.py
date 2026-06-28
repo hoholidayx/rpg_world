@@ -151,9 +151,9 @@ def test_character_manager_missing_character_or_detail_raises() -> None:
 
 def test_context_factory_initializes_character_manager_with_session_id(
     monkeypatch,
-    temp_settings,
+    make_data_session,
 ) -> None:
-    del temp_settings
+    make_data_session("s_factory")
     import rpg_core.character as character_module
     import rpg_core.lorebook as lorebook_module
     from rpg_core.context.factory import build_rpg_context

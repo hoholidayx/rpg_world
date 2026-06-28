@@ -19,7 +19,6 @@ from agent_service.schemas import (
     AgentCommandRequest,
     AgentHealthResponse,
     AgentMessageRequest,
-    AgentSessionCloneRequest,
     AgentSessionCreateRequest,
     AgentSessionEnsureRequest,
 )
@@ -137,35 +136,6 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="story not found in workspace")
 
     return _session_payload(session)
-
-
-@app.delete(f"{_service_prefix()}/chat/sessions/{{session_id}}")
-async def delete_session(
-    session_id: str,
-    workspace: str = Query(...),
-) -> dict[str, Any]:
-    workspace = _require_workspace(workspace)
-    session_id = _require_session_id(session_id)
-    available = set(SessionManager.list_sessions(workspace))
-    if session_id not in available:
-        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
-    SessionManager.delete(workspace, session_id)
-    AgentManager.drop_session(session_id)
-    return {"status": "deleted", "session_id": session_id}
-
-
-@app.post(f"{_service_prefix()}/chat/sessions/{{session_id}}/clone")
-async def clone_session(session_id: str, body: AgentSessionCloneRequest) -> dict[str, Any]:
-    workspace = _require_workspace(body.workspace)
-    session_id = _require_session_id(session_id)
-    target_id = _require_session_id(body.target_session_id)
-    try:
-        SessionManager.clone(workspace, session_id, target_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Source session {session_id!r} not found")
-    except FileExistsError:
-        raise HTTPException(status_code=409, detail=f"Target session {target_id!r} already exists")
-    return {"status": "cloned", "source": session_id, "target": target_id}
 
 
 @app.post(f"{_service_prefix()}/chat/send")

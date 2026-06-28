@@ -1,19 +1,47 @@
 """AgentManager 单例单元测试。
 
-所有测试 mock 掉 ``RPGGameAgent._ensure_initialized`` 避免真实 LLM 调用，
-无需 API key。
+所有测试替换 ``RPGGameAgent``，只验证 ``AgentManager`` 缓存语义，
+不触发真实上下文、rpg_data 或 LLM 初始化。
 """
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
+import rpg_core.agent.manager as agent_manager_module
 from rpg_core.agent.manager import AgentManager
 
-# mock agent._ensure_initialized 为 no-op，避免创建真实的 OpenAI provider
-_AGENT_PATCH_PATH = "rpg_core.agent.agent.RPGGameAgent._ensure_initialized"
+
+class FakeAgent:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self._session_id = kwargs["session_id"]
+        self.init_calls = 0
+
+    async def _ensure_initialized(self) -> None:
+        self.init_calls += 1
+
+
+@pytest.fixture(autouse=True)
+def _fake_agent_runtime(monkeypatch):
+    AgentManager.reset()
+    monkeypatch.setattr(agent_manager_module, "RPGGameAgent", FakeAgent)
+
+    class FakeProvider:
+        def get_default_model(self) -> str:
+            return "default-model"
+
+    class FakeLLMManager:
+        def get_provider(self, biz_key):  # noqa: ANN001
+            return FakeProvider()
+
+    monkeypatch.setattr(
+        agent_manager_module.LLMManager,
+        "get",
+        classmethod(lambda cls: FakeLLMManager()),
+    )
+    yield
+    AgentManager.reset()
 
 
 class TestAgentManager:
@@ -56,17 +84,16 @@ class TestAgentManager:
         assert AgentManager._initialized is False
 
     def test_ensure_initialized_once(self):
-        with patch(_AGENT_PATCH_PATH, return_value=None):
-            AgentManager.reset()
-            assert AgentManager._initialized is False
+        AgentManager.reset()
+        assert AgentManager._initialized is False
 
-            import asyncio
-            asyncio.run(AgentManager.ensure_initialized(workspace="data/test"))
-            assert AgentManager._initialized is True
-            assert len(AgentManager._instances) == 1
+        import asyncio
+        asyncio.run(AgentManager.ensure_initialized(workspace="data/test"))
+        assert AgentManager._initialized is True
+        assert len(AgentManager._instances) == 1
 
-            asyncio.run(AgentManager.ensure_initialized(workspace="data/test"))
-            assert len(AgentManager._instances) == 1
+        asyncio.run(AgentManager.ensure_initialized(workspace="data/test"))
+        assert len(AgentManager._instances) == 1
 
     def test_get_or_create_after_reset(self):
         a1 = AgentManager.get_or_create(workspace="data/test", session_id="s1")
@@ -75,8 +102,7 @@ class TestAgentManager:
         assert a1 is not a2  # reset 后应新创建
 
     async def test_ensure_initialized_updates_flag(self):
-        with patch(_AGENT_PATCH_PATH, return_value=None):
-            AgentManager.reset()
-            assert AgentManager._initialized is False
-            await AgentManager.ensure_initialized(workspace="data/test")
-            assert AgentManager._initialized is True
+        AgentManager.reset()
+        assert AgentManager._initialized is False
+        await AgentManager.ensure_initialized(workspace="data/test")
+        assert AgentManager._initialized is True

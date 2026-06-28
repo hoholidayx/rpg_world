@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import re
-import shutil
 
 from loguru import logger
 
 from rpg_core.context.rpg_context import Message, Role
-from rpg_core.settings import settings
 
 _TAG = "[SessionManager]"
 
@@ -274,47 +272,6 @@ class SessionManager:
         removed = before - len(self.__history)
         logger.debug(_TAG + " truncated: removed {} msgs, {} remaining", removed, len(self.__history))
         return removed
-
-    # ── Session lifecycle (class methods) ──────────────────────────────
-
-    @classmethod
-    def create(cls, workspace: str, session_id: str) -> None:
-        """Create a legacy session directory. Raises ``FileExistsError`` if exists."""
-        cls.validate_session_id(session_id)
-        sdir = settings.session_dir(workspace, session_id)
-        sdir.mkdir(parents=True, exist_ok=False)
-
-    @classmethod
-    def delete(cls, workspace: str, session_id: str) -> None:
-        """Delete a legacy session directory and all its contents."""
-        sdir = settings.session_dir(workspace, session_id)
-        if sdir.exists():
-            shutil.rmtree(sdir)
-
-    @classmethod
-    def list_sessions(cls, workspace: str) -> list[str]:
-        """Discover legacy session IDs under the given workspace."""
-        sdir = settings.sessions_base_dir(workspace)
-        if not sdir.is_dir():
-            return []
-        return sorted(
-            d.name for d in sdir.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
-        )
-
-    @classmethod
-    def clone(cls, workspace: str, source_id: str, target_id: str) -> None:
-        """Clone a legacy session directory to a new session ID."""
-        cls.validate_session_id(source_id)
-        cls.validate_session_id(target_id)
-        src_dir = settings.session_dir(workspace, source_id)
-        dst_dir = settings.session_dir(workspace, target_id)
-        if not src_dir.exists():
-            raise FileNotFoundError(f"Source session {source_id!r} not found")
-        if dst_dir.exists():
-            raise FileExistsError(f"Target session {target_id!r} already exists")
-        dst_dir.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src_dir, dst_dir)
 
     # ── Session switch ─────────────────────────────────────────────────
 

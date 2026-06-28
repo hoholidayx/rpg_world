@@ -56,10 +56,6 @@ class FakeAsyncClient:
         self.calls.append(("POST", url, {"json": json}))
         return FakeResponse({"reply": "ok"})
 
-    async def delete(self, url: str, params=None):
-        self.calls.append(("DELETE", url, {"params": params}))
-        return FakeResponse({"status": "deleted"})
-
     def stream(self, method: str, url: str, json=None):
         self.calls.append((method, url, {"json": json}))
         return FakeStreamResponse([
@@ -88,12 +84,10 @@ async def test_client_session_crud_uses_agent_service_contract() -> None:
     client = AgentClient(base_url="http://agent")
     await client.ensure_session("ws", 1, session_id="s1", title="Default")
     await client.create_session("ws", 1, title="Alt")
-    await client.list_sessions("ws", 1)
-    await client.clone_session("data/ws", "s2", "s3")
-    result = await client.delete_session("data/ws", "s2")
+    result = await client.list_sessions("ws", 1)
 
-    assert result == {"status": "deleted"}
-    assert FakeAsyncClient.calls[-5:] == [
+    assert result == {"ok": True, "commands": []}
+    assert FakeAsyncClient.calls[-3:] == [
         (
             "POST",
             "http://agent/chat/session/ensure",
@@ -101,12 +95,6 @@ async def test_client_session_crud_uses_agent_service_contract() -> None:
         ),
         ("POST", "http://agent/chat/sessions", {"json": {"workspace_id": "ws", "story_id": 1, "title": "Alt"}}),
         ("GET", "http://agent/chat/sessions", {"params": {"workspace_id": "ws", "story_id": 1}}),
-        (
-            "POST",
-            "http://agent/chat/sessions/s2/clone",
-            {"json": {"workspace": "data/ws", "target_session_id": "s3"}},
-        ),
-        ("DELETE", "http://agent/chat/sessions/s2", {"params": {"workspace": "data/ws"}}),
     ]
 
 

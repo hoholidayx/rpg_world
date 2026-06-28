@@ -130,9 +130,9 @@ def test_status_manager_delegates_selector_writes() -> None:
 
 def test_context_factory_initializes_status_manager_with_session_id(
     monkeypatch,
-    temp_settings,
+    make_data_session,
 ) -> None:
-    del temp_settings
+    make_data_session("s_factory")
     import rpg_core.character as character_module
     import rpg_core.lorebook as lorebook_module
     import rpg_core.status as status_module

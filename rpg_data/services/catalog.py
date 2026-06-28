@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from peewee import Database
 
@@ -11,6 +12,7 @@ from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services.status import StatusTableService
+from rpg_data.settings import resolve_workspace_relative_path, resolve_workspace_root
 
 __all__ = ["CatalogService"]
 
@@ -118,6 +120,42 @@ class CatalogService:
         )
         return _session_summary(session)
 
+    def get_workspace_runtime_dir(self, workspace_id: str) -> Path:
+        """Return the resolved catalog workspace root directory."""
+
+        workspace = self._workspaces.get(workspace_id)
+        if workspace is None:
+            raise FileNotFoundError(f"Workspace not found in rpg_data: {workspace_id}")
+        path = resolve_workspace_root(workspace.root_path)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def get_session_workspace_dir(self, session_id: str) -> Path:
+        """Return the resolved workspace root for the session's workspace."""
+
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise FileNotFoundError(f"Session not found in rpg_data: {session_id}")
+        return self.get_workspace_runtime_dir(session.workspace_id)
+
+    def get_session_runtime_dir(self, session_id: str) -> Path:
+        """Return the catalog-owned runtime directory for a session.
+
+        Session-scoped runtime files live under the story-bound session root:
+        ``{workspace_root}/stories/{story_id}/{session_id}``.
+        """
+
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise FileNotFoundError(f"Session not found in rpg_data: {session_id}")
+        workspace_root = self.get_workspace_runtime_dir(session.workspace_id)
+        path = resolve_workspace_relative_path(
+            workspace_root,
+            _session_runtime_relative_path(int(session.story_id), str(session.id)),
+        )
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
 
 def _workspace_summary(workspace: models.Workspace) -> _WorkspaceSummary:
     description = str(workspace.description or "")
@@ -139,3 +177,7 @@ def _session_summary(session: models.Session) -> _SessionSummary:
         "created_at": str(session.created_at),
         "updated_at": str(session.updated_at),
     }
+
+
+def _session_runtime_relative_path(story_id: int, session_id: str) -> str:
+    return f"stories/{story_id}/{session_id}"

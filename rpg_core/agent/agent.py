@@ -48,7 +48,6 @@ from llm_service.keys import (
 from rpg_core.scene import SceneTracker
 from rpg_core.session import SessionManager
 from rpg_core.settings import settings
-from rpg_core.utils.path_utils import PACKAGE_ROOT
 from rpg_core.utils.watcher import get_watcher
 from rpg_core.summary.compressor import SummaryCompressor
 from llm_service.manager import LLMManager, ProviderOverrides
@@ -717,15 +716,11 @@ class RPGGameAgent:
 
     def _setup_tool_registry(self) -> None:
         """Create and populate the ToolRegistry with built-in file tools."""
-        from rpg_core.utils.path_utils import resolve_workspace_root, PACKAGE_ROOT
-        from rpg_core.settings import settings
         from rpg_core.agent.tools.file_tools import FileToolSandbox
+        from rpg_data.services import get_data_service_gateway
 
-        ws_root = resolve_workspace_root(PACKAGE_ROOT, self._workspace)
-        sandbox = FileToolSandbox(
-            workspace_root=ws_root,
-            session_root=settings.session_dir(self._workspace, self._session_id),
-        )
+        session_root = get_data_service_gateway().catalog.get_session_runtime_dir(self._session_id)
+        sandbox = FileToolSandbox(session_root=session_root)
         self._tool_registry = ToolRegistry()
         self._tool_registry.register_all([
             ListFilesTool(sandbox),

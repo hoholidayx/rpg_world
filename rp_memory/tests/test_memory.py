@@ -604,7 +604,7 @@ def test_inspect_vector_store_loads_sqlite_vec_backend(tmp_path, monkeypatch, ca
     store.upsert([ChunkRecord(id=1, text='vector chunk', metadata={'source': 'vec', 'file': 'a.md', 'chunk_idx': 0})], [[0.1, 0.2, 0.3]])
     store.close()
 
-    monkeypatch.setattr(memory_run.settings, 'get_vector_db_path', lambda workspace, session: db_path)
+    monkeypatch.setattr(memory_run, '_vector_db_path', lambda session: db_path)
 
     memory_run.inspect_vector_store('ws', 'sess')
 

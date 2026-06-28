@@ -116,9 +116,9 @@ def test_lorebook_manager_missing_entry_raises_file_not_found() -> None:
 
 def test_context_factory_initializes_lorebook_manager_with_session_id(
     monkeypatch,
-    temp_settings,
+    make_data_session,
 ) -> None:
-    del temp_settings
+    make_data_session("s_factory")
     import rpg_core.character as character_module
     import rpg_core.lorebook as lorebook_module
     from rpg_core.context.factory import build_rpg_context

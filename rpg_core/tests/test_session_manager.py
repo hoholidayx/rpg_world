@@ -17,18 +17,6 @@ def test_validate_session_id():
         SessionManager.validate_session_id("bad-id")
 
 
-def test_create_list_delete_clone_session(temp_settings, workspace):
-    SessionManager.create(workspace, "s1")
-    SessionManager.create(workspace, "s2")
-    assert SessionManager.list_sessions(workspace) == ["s1", "s2"]
-
-    SessionManager.clone(workspace, "s1", "s3")
-    assert sorted(SessionManager.list_sessions(workspace)) == ["s1", "s2", "s3"]
-
-    SessionManager.delete(workspace, "s2")
-    assert sorted(SessionManager.list_sessions(workspace)) == ["s1", "s3"]
-
-
 def test_load_requires_rpg_data_session(rpg_data_gateway):  # noqa: ARG001
     mgr = SessionManager(session_id="missing_session", history_enabled=True)
 

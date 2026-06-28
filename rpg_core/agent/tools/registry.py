@@ -13,7 +13,7 @@ class ToolRegistry:
     Usage::
 
         registry = ToolRegistry()
-        registry.register(ReadFileTool(workspace_root))
+        registry.register(ReadFileTool(session_root))
         registry.register_all([ListFilesTool(...), GrepTool(...)])
 
         schemas = registry.get_openai_schemas()   # → list[dict]

@@ -5,16 +5,9 @@ are **read-only** thereafter.  The active profile is selected through
 ``RPG_WORLD_PROFILE`` before the Python process starts; it defaults to
 ``local``.
 
-Path resolution
----------------
-Workspace is an explicit parameter in session path methods.  The caller always
-passes a workspace identifier:
-
-- ``""`` − the default/root workspace (maps to ``data/``)
-- ``"data/<name>"`` − a named workspace under ``data/<name>/``
-
-Session-scoped data paths are deterministic (not user-configurable):
-``{workspace_root}/sessions/{session_id}/{filename}``.
+Session runtime file paths are owned by ``rpg_data.catalog``.  Core settings
+only expose business/config values; code that needs a session directory must
+ask ``CatalogService.get_session_runtime_dir(session_id)``.
 """
 
 from __future__ import annotations
@@ -37,18 +30,12 @@ from llm_service.keys import (
     MEMORY_QUERY_PLANNER_BIZ_KEY,
     MEMORY_RERANK_BIZ_KEY,
 )
-from rpg_core.utils.path_utils import (
-    PACKAGE_ROOT as _PACKAGE_ROOT,
-    resolve_workspace_root,
-)
+from rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
 
 # Location of rpg_core process/business settings.
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 _RPG_CORE_DIR = Path(__file__).resolve().parent
 _PROFILE_ENV = PROFILE_ENV
-
-# Session data directory name — deterministic, not configurable.
-_SESSION_DIR_NAME = "sessions"
 
 @dataclass
 class MemorySettings:
@@ -411,34 +398,12 @@ class Settings(ProfiledYamlSettings):
     # Workspace operations
     # ------------------------------------------------------------------
 
-    # list_workspaces() has moved to rpg_core.utils.path_utils
-    # as a pure function.  Workspace discovery is not a settings concern.
+    # Workspace discovery and runtime path resolution are rpg_data catalog
+    # concerns. Core settings must not discover workspace directories.
 
     # set_active_workspace() has been removed.  Workspace is no longer
     # a mutable server-wide state — every API call / agent instance
     # explicitly passes the workspace it operates on.
-
-    # ------------------------------------------------------------------
-    # Session operations (deterministic paths, not from settings.yaml)
-    #
-    # Every method receives an explicit *workspace* parameter.
-    # Core principle: every session-scoped data domain has a dedicated
-    # getter method.  Do NOT join "sessions" / filenames outside this
-    # class — call the method instead.
-    # ------------------------------------------------------------------
-
-    def sessions_base_dir(self, workspace: str) -> Path:
-        """Return the ``sessions/`` base directory under *workspace*."""
-        return resolve_workspace_root(_PACKAGE_ROOT, workspace) / _SESSION_DIR_NAME
-
-    def session_dir(self, workspace: str, session_id: str) -> Path:
-        """Return the per-session directory for *session_id*.
-
-        Legacy file-backed session data lives under this directory.  Use the
-        dedicated getter methods below to access specific sub-paths; avoid
-        joining *session_dir* by hand.
-        """
-        return self.sessions_base_dir(workspace) / session_id
 
     # ── 记忆配置 ────────────────────────────────────────────────
 
@@ -529,48 +494,6 @@ class Settings(ProfiledYamlSettings):
         except ValueError:
             return ""
         return Settings._resolve_package_path(cfg.llama.get("model_path"))
-
-    def get_vector_db_path(self, workspace: str, session_id: str) -> Path:
-        """Return the ``memory_vectors.db`` path for the given session."""
-        return self.session_dir(workspace, session_id) / "memory_vectors.db"
-
-    # ── Session-scoped file path getters ──────────────────────────────
-
-    def get_history_path(self, workspace: str, session_id: str) -> Path:
-        """Return the ``history.jsonl`` file path for the given session.
-
-        主历史文件，用于构建上下文和压缩。``MemorySubAgent.compact_history()`` 会截断此文件。
-        """
-        return self.session_dir(workspace, session_id) / "history.jsonl"
-
-    def get_cold_history_path(self, workspace: str, session_id: str) -> Path:
-        """Return the ``history_cold.jsonl`` file path for the given session.
-
-        冷备份历史文件，只追加写入，永不截断。与主 history.jsonl 同步写入，
-        用于后续的记忆搜寻和数据恢复。
-        """
-        return self.session_dir(workspace, session_id) / "history_cold.jsonl"
-
-    def get_summary_path(self, workspace: str, session_id: str) -> Path:
-        """Return the ``rpg_summaries.json`` file path for the given session."""
-        return self.session_dir(workspace, session_id) / "rpg_summaries.json"
-
-    def get_persistent_memory_path(self, workspace: str, session_id: str) -> Path:
-        """Return the ``persistent_memory.json`` file path for the given session."""
-        return self.session_dir(workspace, session_id) / "persistent_memory.json"
-
-    def get_session_meta_path(self, workspace: str, session_id: str) -> Path:
-        """Return the ``session.json`` metadata file path for the given session."""
-        return self.session_dir(workspace, session_id) / "session.json"
-
-    # ── Session file listing ──────────────────────────────────────────
-
-    def list_session_files(self, workspace: str, session_id: str) -> list[Path]:
-        """List all files and directories inside a session's data dir."""
-        sdir = self.session_dir(workspace, session_id)
-        if not sdir.is_dir():
-            return []
-        return sorted(sdir.iterdir())
 
 # Singleton
 settings = Settings()

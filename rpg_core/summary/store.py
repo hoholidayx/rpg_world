@@ -21,7 +21,7 @@ def _register_watcher(file_path: Path, callback: Callable[[], None]) -> None:
 class SummaryStore:
     """摘要持久化存储。
 
-    文件位置: sessions/{session_id}/rpg_summaries.json
+    文件位置: {session_root}/rpg_summaries.json
     数据格式: ["summary text 1", "summary text 2", ...]
 
     注册 FileWatcher 监听文件变更，异步/离线归纳后自动同步。

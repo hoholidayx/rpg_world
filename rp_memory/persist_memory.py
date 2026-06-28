@@ -9,7 +9,7 @@ from pathlib import Path
 class PersistentMemoryStore:
     """常驻记忆 —— 对应固定层的"常驻memory"模块。
 
-    数据来自 sessions/{session_id}/persistent_memory.json，由 Dream 进程维护。
+    数据来自 {session_root}/persistent_memory.json，由 Dream 进程维护。
     以结构化 section 列表存储（{title, content}），通过 Jinja 模板渲染到上下文。
     """
 

@@ -17,11 +17,7 @@ from typing import TYPE_CHECKING
 from rpg_core.agent.agent import RPGGameAgent
 from llm_service.manager import LLMManager
 from llm_service.keys import AGENT_MAIN_BIZ_KEY
-from rpg_core.utils.path_utils import (
-    ensure_workspace_dir,
-    require_workspace,
-)
-from rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
+from rpg_core.utils.path_utils import require_workspace
 from rpg_core.utils.path_utils import resolve_api_workspace
 
 if TYPE_CHECKING:
@@ -65,7 +61,6 @@ class AgentManager:
         key = cls._cache_key(session_id)
         if key not in cls._instances:
             workspace = require_workspace(workspace)
-            ensure_workspace_dir(_PACKAGE_ROOT, workspace)
             manager = LLMManager.get()
             provider = manager.get_provider(AGENT_MAIN_BIZ_KEY)
             cls._instances[key] = RPGGameAgent(

@@ -102,40 +102,11 @@ class FakeGateway:
 
 
 class FakeSessionManager:
-    sessions: dict[str, set[str]] = {}
-
     @staticmethod
     def validate_session_id(session_id: str) -> str:
         if not session_id or any(ch in session_id for ch in "/\\"):
             raise ValueError("session_id must match ^[A-Za-z0-9_]+$")
         return session_id
-
-    @classmethod
-    def list_sessions(cls, workspace: str) -> list[str]:
-        return sorted(cls.sessions.get(workspace, set()))
-
-    @classmethod
-    def create(cls, workspace: str, session_id: str) -> None:
-        cls.validate_session_id(session_id)
-        bucket = cls.sessions.setdefault(workspace, set())
-        if session_id in bucket:
-            raise FileExistsError(session_id)
-        bucket.add(session_id)
-
-    @classmethod
-    def delete(cls, workspace: str, session_id: str) -> None:
-        cls.sessions.get(workspace, set()).discard(session_id)
-
-    @classmethod
-    def clone(cls, workspace: str, source_id: str, target_id: str) -> None:
-        cls.validate_session_id(source_id)
-        cls.validate_session_id(target_id)
-        bucket = cls.sessions.setdefault(workspace, set())
-        if source_id not in bucket:
-            raise FileNotFoundError(source_id)
-        if target_id in bucket:
-            raise FileExistsError(target_id)
-        bucket.add(target_id)
 
 
 def test_agent_service_contracts(monkeypatch) -> None:
@@ -143,7 +114,6 @@ def test_agent_service_contracts(monkeypatch) -> None:
     monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
     monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
-    FakeSessionManager.sessions = {"data/ws": {"s2"}}
     FakeCatalog.reset()
 
     with TestClient(service_main.app) as client:
@@ -215,20 +185,6 @@ def test_agent_service_contracts(monkeypatch) -> None:
             params={"workspace_id": "ws", "story_id": 1},
         )
         assert sessions.json()["sessions"] == ["s1", "generated_1", "generated_2"]
-
-        cloned = client.post(
-            "/agent/v1/chat/sessions/s2/clone",
-            json={"workspace": "data/ws", "target_session_id": "s3"},
-        )
-        assert cloned.status_code == 200
-        assert cloned.json()["target"] == "s3"
-
-        deleted = client.delete(
-            "/agent/v1/chat/sessions/s2",
-            params={"workspace": "data/ws"},
-        )
-        assert deleted.status_code == 200
-        assert deleted.json()["session_id"] == "s2"
 
         send = client.post(
             "/agent/v1/chat/send",

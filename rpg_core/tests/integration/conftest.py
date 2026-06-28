@@ -120,12 +120,6 @@ async def integration_agent(integration_settings, integration_workspace, integra
         watcher.clear_all()
 
 
-@pytest.fixture
-def integration_session_dir(integration_settings, integration_workspace):
-    session_id = "integration_smoke"
-    return integration_settings.session_dir(str(integration_workspace), session_id)
-
-
 def _ensure_integration_session(gateway, integration_workspace, session_id: str) -> None:
     from rpg_data.repositories.session_repo import SessionRepository
     from rpg_data.repositories.story_repo import StoryRepository

@@ -116,11 +116,12 @@ rpg_world/
 └── data/                         # 数据文件
     └── {workspace}/
         ├── template_status/      # 状态表模板 CSV（rpg_data 索引）
-        ├── stories/{story_id}/{session_id}/status/
-        │   └── ...               # session 独立状态表副本 CSV（rpg_data 索引）
-        └── sessions/{id}/
+        └── stories/{story_id}/{session_id}/
+            ├── status/
+            │   └── ...           # session 独立状态表副本 CSV（rpg_data 索引）
             ├── rpg_summaries.json
             ├── summaries/
+            ├── persistent_memory.json
             └── memory_vectors.db
 ```
 
@@ -438,9 +439,9 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 
 会话层的 turn / rounds 统一由 `SessionManager` 负责，显式 `turn_id` 是当前主路径；旧无 turn_id 消息仅在内存分组工具中保留降级规则。故事记忆续提游标按最后处理的 `turn_id` 持久化，进程重启后从 rpg_data 继续。
 
-Agent runtime 会话消息和剧情记忆由 `rpg_data` 管理；摘要和 memory 文件集中在 `{workspace_root}/sessions/{session_id}/` 下。
-`rpg_data` 管理的状态表 session 副本单独位于 `{workspace_root}/stories/{story_id}/{session_id}/status/`，
-由 SQL 索引记录 workspace-relative 路径。
+Agent runtime 会话消息和剧情记忆由 `rpg_data` 管理；摘要、persistent memory 和 memory 文件集中在
+`CatalogService.get_session_runtime_dir(session_id)` 返回的 `{workspace_root}/stories/{story_id}/{session_id}/` 下。
+`rpg_data` 管理的状态表 session 副本位于该目录的 `status/` 子目录，由 SQL 索引记录 workspace-relative 路径。
 
 `session_id` 只能使用英文字母、数字和下划线，规则为 `^[A-Za-z0-9_]+$`。所有创建入口都由 `rpg_data` 生成 ID；不要恢复 `cli_direct`、`telegram_<chat_id>` 这类渠道自造默认 ID，也不要允许用户输入新 session ID。
 

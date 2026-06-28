@@ -38,6 +38,7 @@ def build_rpg_context(
     from rp_memory.story_memory import StoryMemoryStore
     from rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_core.summary.store import SummaryStore
+    from rpg_data.services import get_data_service_gateway
 
     config = RPGContextConfig()
     builder = RPGContextBuilder(
@@ -45,12 +46,14 @@ def build_rpg_context(
         world_name=world_name,
     )
 
+    session_root = get_data_service_gateway().catalog.get_session_runtime_dir(session_id)
+
     # ── Session-scoped Stores ─────────────────────────────────────────
     builder.set_summary_store(
-        SummaryStore(rpg_settings.get_summary_path(workspace, session_id))
+        SummaryStore(session_root / "rpg_summaries.json")
     )
     builder.set_batch_summary_store(
-        BatchSummaryStore(workspace, session_id)
+        BatchSummaryStore(session_root)
     )
     builder.set_story_memory_store(
         StoryMemoryStore(session_id)
@@ -58,7 +61,7 @@ def build_rpg_context(
     recalled_store = RecalledMemoryStore()
     builder.set_recalled_memory_store(recalled_store)
     builder.set_persistent_memory_store(
-        PersistentMemoryStore(rpg_settings.get_persistent_memory_path(workspace, session_id))
+        PersistentMemoryStore(session_root / "persistent_memory.json")
     )
 
     # ── MemoryManager（封装向量记忆检索） ─────────────────────────
@@ -69,8 +72,8 @@ def build_rpg_context(
 
         memory_manager = MemoryManager.create(
             recalled_store=recalled_store,  # type: ignore[arg-type]
-            session_dir=rpg_settings.session_dir(workspace, session_id),
-            get_vector_db_path=rpg_settings.get_vector_db_path(workspace, session_id),
+            session_dir=str(session_root),
+            get_vector_db_path=str(session_root / "memory_vectors.db"),
             mem_cfg=rpg_settings.memory_settings,
         )
     except Exception as exc:

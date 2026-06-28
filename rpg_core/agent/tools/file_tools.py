@@ -1,4 +1,4 @@
-"""File-system tools: list, read, write, grep, restricted by RPG data scope."""
+"""File-system tools restricted to the current RPG session runtime directory."""
 
 from __future__ import annotations
 
@@ -12,21 +12,18 @@ from rpg_core.agent.tools.base import BaseTool
 _MAX_READ_SIZE = 100 * 1024  # 100 KB
 _GREP_MAX_FILES = 200
 _GREP_BLOCK_SIZE = 50 * 1024  # per-file limit for grep content
-_SCOPE_WORKSPACE = "workspace"
 _SCOPE_SESSION = "session"
-_VALID_SCOPES = {_SCOPE_WORKSPACE, _SCOPE_SESSION}
-_SESSION_DIR_NAME = "sessions"
+_VALID_SCOPES = {_SCOPE_SESSION}
 
 
 @dataclass(frozen=True)
 class FileToolSandbox:
-    """Resolve file-tool paths against explicit RPG data scopes."""
+    """Resolve file-tool paths against the current session runtime directory."""
 
-    workspace_root: Path
     session_root: Path
 
     def resolve(self, scope: str, raw: str = "") -> Path:
-        """Resolve *raw* under *scope*, rejecting traversal and cross-session access."""
+        """Resolve *raw* under the current session root, rejecting traversal."""
         scope = _normalize_scope(scope)
         raw_path = Path(raw or "")
         if raw_path.is_absolute():
@@ -37,14 +34,11 @@ class FileToolSandbox:
         rel = _relative_to(target, root)
         if rel is None:
             raise ValueError(f"Path escapes {scope} scope: {raw!r}")
-        if scope == _SCOPE_WORKSPACE and rel.parts[:1] == (_SESSION_DIR_NAME,):
-            raise ValueError("Workspace scope cannot access sessions; use session scope for the current session")
         return target
 
     def root_for(self, scope: str) -> Path:
-        scope = _normalize_scope(scope)
-        root = self.session_root if scope == _SCOPE_SESSION else self.workspace_root
-        return root.resolve()
+        _normalize_scope(scope)
+        return self.session_root.resolve()
 
     def display_path(self, scope: str, path: Path) -> Path:
         root = self.root_for(scope)
@@ -54,16 +48,15 @@ class FileToolSandbox:
         return rel
 
 
-def _safe_resolve(workspace_root: Path, raw: str) -> Path:
-    """Resolve *raw* relative to workspace_root, rejecting traversal escapes."""
-    sandbox = FileToolSandbox(workspace_root=workspace_root, session_root=workspace_root / _SESSION_DIR_NAME)
-    return sandbox.resolve(_SCOPE_WORKSPACE, raw)
+def _safe_resolve(session_root: Path, raw: str) -> Path:
+    """Resolve *raw* relative to session_root, rejecting traversal escapes."""
+    return FileToolSandbox(session_root=Path(session_root)).resolve(_SCOPE_SESSION, raw)
 
 
 def _normalize_scope(scope: str) -> str:
-    scope = (scope or _SCOPE_WORKSPACE).strip()
+    scope = (scope or _SCOPE_SESSION).strip()
     if scope not in _VALID_SCOPES:
-        raise ValueError(f"Invalid scope {scope!r}; expected 'workspace' or 'session'")
+        raise ValueError(f"Invalid scope {scope!r}; only 'session' scope is supported")
     return scope
 
 
@@ -77,12 +70,9 @@ def _relative_to(path: Path, root: Path) -> Path | None:
 def _scope_parameter() -> dict[str, object]:
     return {
         "type": "string",
-        "enum": [_SCOPE_WORKSPACE, _SCOPE_SESSION],
-        "description": (
-            "Data scope to access. Use 'workspace' for shared workspace files excluding sessions, "
-            "or 'session' for the current session directory."
-        ),
-        "default": _SCOPE_WORKSPACE,
+        "enum": [_SCOPE_SESSION],
+        "description": "Data scope to access. Only the current session directory is available.",
+        "default": _SCOPE_SESSION,
     }
 
 
@@ -94,8 +84,7 @@ class ListFilesTool(BaseTool):
 
     name = "list_files"
     description = (
-        "List files and subdirectories under a data scope. Workspace scope excludes sessions; "
-        "session scope is limited to the current session."
+        "List files and subdirectories under the current session directory."
     )
 
     def __init__(self, sandbox: FileToolSandbox | Path) -> None:
@@ -114,7 +103,7 @@ class ListFilesTool(BaseTool):
             },
         }
 
-    async def execute(self, path: str = "", scope: str = _SCOPE_WORKSPACE) -> str:
+    async def execute(self, path: str = "", scope: str = _SCOPE_SESSION) -> str:
         scope = _normalize_scope(scope)
         target = self._sandbox.resolve(scope, path)
         if not target.exists():
@@ -122,10 +111,7 @@ class ListFilesTool(BaseTool):
         if not target.is_dir():
             return f"Error: not a directory: {path!r}"
 
-        entries = [
-            p for p in target.iterdir()
-            if not (scope == _SCOPE_WORKSPACE and target == self._sandbox.root_for(scope) and p.name == _SESSION_DIR_NAME)
-        ]
+        entries = list(target.iterdir())
         entries = sorted(entries, key=lambda p: (not p.is_dir(), p.name))
         lines: list[str] = []
         for p in entries:
@@ -142,10 +128,7 @@ class ReadFileTool(BaseTool):
     """Read a file's text content."""
 
     name = "read_file"
-    description = (
-        "Read a file under a data scope. Workspace scope excludes sessions; "
-        "session scope is limited to the current session."
-    )
+    description = "Read a file under the current session directory."
 
     def __init__(self, sandbox: FileToolSandbox | Path) -> None:
         self._sandbox = _coerce_sandbox(sandbox)
@@ -163,7 +146,7 @@ class ReadFileTool(BaseTool):
             "required": ["path"],
         }
 
-    async def execute(self, path: str, scope: str = _SCOPE_WORKSPACE) -> str:
+    async def execute(self, path: str, scope: str = _SCOPE_SESSION) -> str:
         target = self._sandbox.resolve(scope, path)
         if not target.exists():
             return f"Error: file not found: {path!r}"
@@ -189,8 +172,7 @@ class WriteFileTool(BaseTool):
 
     name = "write_file"
     description = (
-        "Create or overwrite a file under a data scope. Creates parent directories if needed. "
-        "Workspace scope excludes sessions; session scope is limited to the current session."
+        "Create or overwrite a file under the current session directory. Creates parent directories if needed."
     )
 
     def __init__(self, sandbox: FileToolSandbox | Path) -> None:
@@ -213,7 +195,7 @@ class WriteFileTool(BaseTool):
             "required": ["path", "content"],
         }
 
-    async def execute(self, path: str, content: str, scope: str = _SCOPE_WORKSPACE) -> str:
+    async def execute(self, path: str, content: str, scope: str = _SCOPE_SESSION) -> str:
         target = self._sandbox.resolve(scope, path)
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -238,9 +220,8 @@ class GrepTool(BaseTool):
 
     name = "grep"
     description = (
-        "Search file contents with a regex pattern under a data scope. Use glob to narrow file types "
-        "(e.g. '*.json', '*.md'). Results limited to first 200 files. Workspace scope excludes sessions; "
-        "session scope is limited to the current session."
+        "Search file contents with a regex pattern under the current session directory. "
+        "Use glob to narrow file types (e.g. '*.json', '*.md'). Results limited to first 200 files."
     )
 
     def __init__(self, sandbox: FileToolSandbox | Path) -> None:
@@ -274,7 +255,7 @@ class GrepTool(BaseTool):
         pattern: str,
         glob: str = "*",
         path: str = "",
-        scope: str = _SCOPE_WORKSPACE,
+        scope: str = _SCOPE_SESSION,
     ) -> str:
         import re
 
@@ -297,11 +278,6 @@ class GrepTool(BaseTool):
                 continue
             resolved = p.resolve()
             if _relative_to(resolved, self._sandbox.root_for(scope)) is None:
-                continue
-            if scope == _SCOPE_WORKSPACE and (
-                _is_under_workspace_sessions(p, self._sandbox.workspace_root)
-                or _is_under_workspace_sessions(resolved, self._sandbox.workspace_root)
-            ):
                 continue
             if b"\x00" in p.read_bytes()[:4096]:
                 continue
@@ -338,12 +314,7 @@ def _coerce_sandbox(value: FileToolSandbox | Path) -> FileToolSandbox:
     if isinstance(value, FileToolSandbox):
         return value
     root = Path(value)
-    return FileToolSandbox(workspace_root=root, session_root=root / _SESSION_DIR_NAME)
-
-
-def _is_under_workspace_sessions(path: Path, workspace_root: Path) -> bool:
-    rel = _relative_to(path, workspace_root)
-    return rel is not None and rel.parts[:1] == (_SESSION_DIR_NAME,)
+    return FileToolSandbox(session_root=root)
 
 
 def _human_size(size: int) -> str:

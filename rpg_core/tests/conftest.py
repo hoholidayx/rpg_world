@@ -13,7 +13,6 @@ from rpg_core.context.rpg_context import Message, Role
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.planning.plan import QueryPlan
 from rpg_core.session.manager import SessionManager
-from rpg_core.settings import settings
 from llm_service.manager import LLMManager
 
 
@@ -242,29 +241,6 @@ def fake_recalled_store():
             self.items = list(items)
 
     return _Store()
-
-
-@pytest.fixture
-def temp_settings(tmp_path, monkeypatch):
-    """Redirect session/workspace paths into a temporary directory."""
-    root = tmp_path / "rpg"
-
-    def workspace_root(workspace: str) -> Path:
-        ws = workspace or "data/default"
-        return (root / ws).resolve()
-
-    def session_root(workspace: str, session_id: str) -> Path:
-        return workspace_root(workspace) / "sessions" / session_id
-
-    monkeypatch.setattr(settings, "session_dir", session_root)
-    monkeypatch.setattr(settings, "sessions_base_dir", lambda workspace: workspace_root(workspace) / "sessions")
-    monkeypatch.setattr(settings, "get_history_path", lambda workspace, session_id: session_root(workspace, session_id) / "history.jsonl")
-    monkeypatch.setattr(settings, "get_cold_history_path", lambda workspace, session_id: session_root(workspace, session_id) / "history_cold.jsonl")
-    monkeypatch.setattr(settings, "get_session_meta_path", lambda workspace, session_id: session_root(workspace, session_id) / "session.json")
-    monkeypatch.setattr(settings, "get_summary_path", lambda workspace, session_id: session_root(workspace, session_id) / "rpg_summaries.json")
-    monkeypatch.setattr(settings, "get_persistent_memory_path", lambda workspace, session_id: session_root(workspace, session_id) / "persistent_memory.md")
-    monkeypatch.setattr(settings, "get_vector_db_path", lambda workspace, session_id: str(session_root(workspace, session_id) / "memory_vectors.db"))
-    return root
 
 
 @pytest.fixture

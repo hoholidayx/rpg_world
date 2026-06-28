@@ -23,7 +23,6 @@ class FakeAgent:
 def _reset_manager(monkeypatch):
     AgentManager.reset()
     monkeypatch.setattr(agent_manager_module, "RPGGameAgent", FakeAgent)
-    monkeypatch.setattr(agent_manager_module, "ensure_workspace_dir", lambda *args, **kwargs: None)
     class FakeProvider:
         def get_default_model(self) -> str:
             return "default-model"

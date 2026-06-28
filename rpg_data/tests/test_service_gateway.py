@@ -65,6 +65,25 @@ def test_gateway_supports_in_memory_database(
     assert (tmp_path / "data/demo_workspace").is_dir()
 
 
+def test_catalog_resolves_session_runtime_dir(tmp_path: Path) -> None:
+    gateway = get_data_service_gateway(tmp_path / "runtime.sqlite3")
+
+    workspace_root = gateway.catalog.get_workspace_runtime_dir("demo_workspace")
+    session_workspace_root = gateway.catalog.get_session_workspace_dir("s_forest001")
+    session_root = gateway.catalog.get_session_runtime_dir("s_forest001")
+
+    assert workspace_root == (tmp_path / "data/demo_workspace").resolve()
+    assert session_workspace_root == workspace_root
+    assert session_root == (
+        tmp_path / "data/demo_workspace/stories/1/s_forest001"
+    ).resolve()
+    assert session_root.is_dir()
+    with pytest.raises(FileNotFoundError, match="Workspace not found in rpg_data"):
+        gateway.catalog.get_workspace_runtime_dir("missing_workspace")
+    with pytest.raises(FileNotFoundError, match="Session not found in rpg_data"):
+        gateway.catalog.get_session_runtime_dir("missing_session")
+
+
 def test_gateway_recovers_demo_session_files_without_indexes(tmp_path: Path) -> None:
     db_path = tmp_path / "recover.sqlite3"
     gateway = get_data_service_gateway(db_path)

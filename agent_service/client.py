@@ -106,18 +106,6 @@ class AgentClient:
             },
         )
 
-    async def delete_session(self, workspace: str, session_id: str) -> dict[str, Any]:
-        return await self._delete(
-            f"/chat/sessions/{session_id}",
-            params={"workspace": workspace},
-        )
-
-    async def clone_session(self, workspace: str, session_id: str, target_session_id: str) -> dict[str, Any]:
-        return await self._post(
-            f"/chat/sessions/{session_id}/clone",
-            json={"workspace": workspace, "target_session_id": target_session_id},
-        )
-
     async def send(
         self,
         workspace: str,
@@ -180,19 +168,6 @@ class AgentClient:
         client = self._request_http_client()
         try:
             response = await client.post(self._url(path), json=json)
-            response.raise_for_status()
-            return response.json()
-        except httpx.ConnectError as exc:
-            raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
-        except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response)) from exc
-        except httpx.HTTPError as exc:
-            raise AgentClientError(str(exc)) from exc
-
-    async def _delete(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        client = self._request_http_client()
-        try:
-            response = await client.delete(self._url(path), params=params)
             response.raise_for_status()
             return response.json()
         except httpx.ConnectError as exc:
