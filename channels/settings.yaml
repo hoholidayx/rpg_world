@@ -24,7 +24,7 @@ base:
           # 从环境变量读取 token。
           token_env: TELEGRAM_BOT_TOKEN_MAIN
           # 此 bot 绑定的 rpg_data workspace/story。
-          workspace_id: 非公开行程
+          workspace_id: demo_workspace
           story_id: 1
           # 留空时启动 bot 自动创建默认 session；非空时只加载并校验现有 session。
           session_id: ""
@@ -48,7 +48,7 @@ base:
     # ── CLI 渠道配置 ───────────────────────────────────────────────
     cli:
       # CLI 绑定的 rpg_data workspace/story。
-      workspace_id: 非公开行程
+      workspace_id: demo_workspace
       story_id: 1
       # 留空时启动 CLI 自动创建新 session；非空时只加载并校验现有 session。
       session_id: ""
