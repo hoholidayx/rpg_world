@@ -12,6 +12,7 @@ __all__ = [
     "SessionCharacter",
     "SessionCharacterDetail",
     "SessionLorebookEntry",
+    "SessionMessage",
     "SessionProfile",
     "SessionStatusTable",
     "SessionStatusType",
@@ -80,6 +81,22 @@ class SessionProfile:
     session_id: str
     title: str = ""
     description: str = ""
+    metadata_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionMessage:
+    id: int
+    session_id: str
+    role: str
+    content: str = ""
+    turn_id: int = 0
+    seq_in_turn: int = 0
+    tool_call_id: str = ""
+    tool_calls_json: str = ""
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""

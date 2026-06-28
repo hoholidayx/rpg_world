@@ -51,6 +51,38 @@ CREATE TABLE IF NOT EXISTS rpg_session_profiles (
     FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS rpg_session_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
+    content TEXT NOT NULL DEFAULT '',
+    turn_id INTEGER NOT NULL DEFAULT 0,
+    seq_in_turn INTEGER NOT NULL DEFAULT 0,
+    tool_call_id TEXT NOT NULL DEFAULT '',
+    tool_calls_json TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rpg_session_backup_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
+    content TEXT NOT NULL DEFAULT '',
+    turn_id INTEGER NOT NULL DEFAULT 0,
+    seq_in_turn INTEGER NOT NULL DEFAULT 0,
+    tool_call_id TEXT NOT NULL DEFAULT '',
+    tool_calls_json TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS rpg_characters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
@@ -222,6 +254,10 @@ CREATE TABLE IF NOT EXISTS rpg_session_status_tables (
 CREATE INDEX IF NOT EXISTS idx_rpg_stories_workspace_id ON rpg_stories(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_sessions_workspace_id ON rpg_sessions(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_sessions_story_id ON rpg_sessions(story_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_session_id_id ON rpg_session_messages(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_turn ON rpg_session_messages(session_id, turn_id, seq_in_turn, id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_backup_messages_session_id_id ON rpg_session_backup_messages(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_backup_messages_turn ON rpg_session_backup_messages(session_id, turn_id, seq_in_turn, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_characters_workspace_id ON rpg_characters(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_character_details_character_id ON rpg_character_details(character_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_lorebook_entries_workspace_id ON rpg_lorebook_entries(workspace_id);

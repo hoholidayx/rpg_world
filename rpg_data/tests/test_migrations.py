@@ -28,6 +28,8 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_stories",
             "rpg_sessions",
             "rpg_session_profiles",
+            "rpg_session_messages",
+            "rpg_session_backup_messages",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -45,6 +47,8 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_stories",
             "rpg_sessions",
             "rpg_session_profiles",
+            "rpg_session_messages",
+            "rpg_session_backup_messages",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -60,6 +64,8 @@ def test_run_migrations_creates_initial_tables() -> None:
             assert {"created_at", "updated_at", "version"}.issubset(columns)
 
         session_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_sessions)")}
+        session_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_messages)")}
+        backup_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_backup_messages)")}
         character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_characters)")}
         character_detail_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_character_details)")}
         lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_lorebook_entries)")}
@@ -73,6 +79,17 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "last_story_turn_index" in session_columns
         assert "session_key" not in session_columns
         assert {"session_id", "title", "description"}.issubset(profile_columns)
+        assert {
+            "session_id",
+            "role",
+            "content",
+            "turn_id",
+            "seq_in_turn",
+            "tool_call_id",
+            "tool_calls_json",
+        }.issubset(session_message_columns)
+        assert session_message_columns == backup_message_columns
+        assert "hid" not in session_message_columns
         assert "last_story_rp_his_id" not in session_columns
         assert "enabled" not in character_columns
         assert "enabled" not in character_detail_columns
@@ -85,6 +102,23 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "rows_json" not in status_template_columns
         assert "headers_json" not in session_status_columns
         assert "rows_json" not in session_status_columns
+
+        indexes = {
+            row["name"]
+            for row in conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'index'
+                """
+            )
+        }
+        assert {
+            "idx_rpg_session_messages_session_id_id",
+            "idx_rpg_session_messages_turn",
+            "idx_rpg_session_backup_messages_session_id_id",
+            "idx_rpg_session_backup_messages_turn",
+        }.issubset(indexes)
     finally:
         conn.close()
 
@@ -140,6 +174,46 @@ def test_initial_schema_enforces_foreign_keys() -> None:
             pass
         else:
             raise AssertionError("expected missing workspace foreign key to fail")
+
+        with db.transaction(conn):
+            conn.execute(
+                """
+                INSERT INTO rpg_session_messages (session_id, role, content)
+                VALUES ('s_forest001', 'user', 'hello')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO rpg_session_backup_messages (session_id, role, content)
+                VALUES ('s_forest001', 'assistant', 'world')
+                """
+            )
+
+        try:
+            with db.transaction(conn):
+                conn.execute(
+                    """
+                    INSERT INTO rpg_session_messages (session_id, role, content)
+                    VALUES ('s_forest001', 'bad_role', 'hello')
+                    """
+                )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            raise AssertionError("expected invalid message role to fail")
+
+        try:
+            with db.transaction(conn):
+                conn.execute(
+                    """
+                    INSERT INTO rpg_session_backup_messages (session_id, role, content)
+                    VALUES ('missing_session', 'user', 'hello')
+                    """
+                )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            raise AssertionError("expected missing session foreign key to fail")
     finally:
         conn.close()
 

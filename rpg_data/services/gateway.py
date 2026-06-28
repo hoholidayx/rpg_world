@@ -11,9 +11,11 @@ from peewee import Database
 from rpg_data import db
 from rpg_data.bootstrap import bootstrap_runtime_data
 from rpg_data.migrations.runner import run_migrations
+from rpg_data.services.backup import BackupService
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterReadService
 from rpg_data.services.lorebook import LorebookReadService
+from rpg_data.services.message import MessageService
 from rpg_data.services.status import StatusTableService
 from rpg_data.settings import resolve_database_path
 
@@ -35,6 +37,8 @@ class DataServiceGateway:
         self._catalog: CatalogService | None = None
         self._character: CharacterReadService | None = None
         self._lorebook: LorebookReadService | None = None
+        self._messages: MessageService | None = None
+        self._backup: BackupService | None = None
         self._status: StatusTableService | None = None
         self._initialized = False
         logger.debug("data service gateway created db_path=%s", self._database_path)
@@ -79,6 +83,24 @@ class DataServiceGateway:
         return self._lorebook
 
     @property
+    def messages(self) -> MessageService:
+        database = self.database
+        if self._messages is None:
+            logger.debug("creating message service db_path=%s", self._database_path)
+            self._messages = MessageService(database)
+        self._ensure_bound()
+        return self._messages
+
+    @property
+    def backup(self) -> BackupService:
+        database = self.database
+        if self._backup is None:
+            logger.debug("creating backup service db_path=%s", self._database_path)
+            self._backup = BackupService(database)
+        self._ensure_bound()
+        return self._backup
+
+    @property
     def status(self) -> StatusTableService:
         database = self.database
         if self._status is None:
@@ -118,6 +140,8 @@ class DataServiceGateway:
         self._catalog = None
         self._character = None
         self._lorebook = None
+        self._messages = None
+        self._backup = None
         self._status = None
 
     def _ensure_bound(self) -> None:

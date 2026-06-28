@@ -25,12 +25,16 @@ def test_gateway_initializes_migrations_and_exposes_services(
     workspaces = gateway.catalog.list_workspaces()
     characters = gateway.character.list_characters("s_forest001")
     lorebook_entries = gateway.lorebook.list_enabled_entries("s_forest001")
+    message_count = gateway.messages.count("s_forest001")
+    backup_message_count = gateway.backup.messages.count("s_forest001")
     status_types = gateway.status.list_types("demo_workspace")
     status_tables = gateway.status.list_tables("s_forest001")
 
     assert {workspace["id"] for workspace in workspaces} == {"demo_workspace"}
     assert [character.name for character in characters] == ["Bob", "Alice"]
     assert [entry.name for entry in lorebook_entries] == ["炎心之木", "圆形封印祭坛"]
+    assert message_count == 0
+    assert backup_message_count == 0
     assert [(item.name, item.builtin_key) for item in status_types] == [
         ("场景", "scene"),
         ("世界状态", ""),

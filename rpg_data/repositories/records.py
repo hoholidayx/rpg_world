@@ -23,6 +23,8 @@ __all__ = [
     "CharacterDetailRecord",
     "CharacterRecord",
     "LorebookEntryRecord",
+    "SessionBackupMessageRecord",
+    "SessionMessageRecord",
     "SessionProfileRecord",
     "SessionRecord",
     "SessionStatusTableRecord",
@@ -150,6 +152,52 @@ class SessionProfileRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_session_profiles"
+
+
+class SessionMessageRecord(BaseRecord):
+    id = AutoField()
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="messages",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    role = TextField()
+    content = TextField(default="")
+    turn_id = IntegerField(default=0)
+    seq_in_turn = IntegerField(default=0)
+    tool_call_id = TextField(default="")
+    tool_calls_json = TextField(default="")
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_messages"
+
+
+class SessionBackupMessageRecord(BaseRecord):
+    id = AutoField()
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="backup_messages",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    role = TextField()
+    content = TextField(default="")
+    turn_id = IntegerField(default=0)
+    seq_in_turn = IntegerField(default=0)
+    tool_call_id = TextField(default="")
+    tool_calls_json = TextField(default="")
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_backup_messages"
 
 
 class CharacterRecord(BaseRecord):
@@ -416,6 +464,8 @@ RECORD_MODELS = (
     StoryRecord,
     SessionRecord,
     SessionProfileRecord,
+    SessionMessageRecord,
+    SessionBackupMessageRecord,
     CharacterRecord,
     CharacterDetailRecord,
     LorebookEntryRecord,
