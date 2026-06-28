@@ -60,13 +60,13 @@ async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
     gateway, current_session = _current_catalog_session(agent)
 
     sessions = gateway.catalog.list_sessions(
-        str(current_session["workspace"]),
-        int(current_session["story_id"]),
+        str(current_session.workspace_id),
+        int(current_session.story_id),
     ) or []
     current = agent._session_id
     lines = [f"会话列表 ({len(sessions)}):", f"当前会话: {current}"]
     for session in sessions:
-        sid = str(session["id"])
+        sid = str(session.id)
         marker = " （当前）" if sid == current else ""
         lines.append(f"- {sid}{marker}")
     return "\n".join(lines)
@@ -77,13 +77,13 @@ async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
     title = " ".join(args).strip() or "New Session"
     gateway, current_session = _current_catalog_session(agent)
     created = gateway.catalog.create_session(
-        str(current_session["workspace"]),
-        int(current_session["story_id"]),
+        str(current_session.workspace_id),
+        int(current_session.story_id),
         title=title,
     )
     if created is None:
         return "[错误] 无法在当前故事下创建会话"
-    sid = str(created["id"])
+    sid = str(created.id)
     return f"[会话已创建: {sid}]"
 
 
@@ -102,8 +102,8 @@ async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
     target = gateway.catalog.get_session(sid)
     if (
         target is None
-        or str(target["workspace"]) != str(current_session["workspace"])
-        or int(target["story_id"]) != int(current_session["story_id"])
+        or str(target.workspace_id) != str(current_session.workspace_id)
+        or int(target.story_id) != int(current_session.story_id)
     ):
         return f"[会话不存在: {sid}]"
     await agent.switch_session(sid)

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 from rpg_core.agent import command as command_module
 from rpg_core.agent.command import CommandDispatcher, format_command_help
+from rpg_data import models
 
 
 class TestCommandDispatcher:
@@ -100,15 +101,15 @@ class TestCommandDispatcher:
         fake_gateway = SimpleNamespace(
             catalog=SimpleNamespace(
                 list_sessions=lambda workspace, story_id: [
-                    {"id": "s1"},
-                    {"id": "s2"},
+                    models.Session("s1", workspace, story_id),
+                    models.Session("s2", workspace, story_id),
                 ],
             ),
         )
         monkeypatch.setattr(
             command_module,
             "_current_catalog_session",
-            lambda agent: (fake_gateway, {"workspace": "data/test", "story_id": 1}),
+            lambda agent: (fake_gateway, models.Session("s2", "data/test", 1)),
         )
 
         result = await dispatcher.dispatch("/sessions")

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { AppShell } from '@/features/layout/AppShell'
 import {
   BookOpen,
   Check,
@@ -345,87 +346,9 @@ function WorkspaceSwitcher({
 }
 
 export function HomePage() {
-  const [currentWorkspace, setCurrentWorkspace] = useState<string | null>(null)
-  const workspacesQuery = useQuery({
-    queryKey: ['play-workspaces'],
-    queryFn: listWorkspaces,
-  })
-  const workspaceOptions = useMemo(() => workspacesQuery.data ?? [], [workspacesQuery.data])
-
-  useEffect(() => {
-    if (workspaceOptions.length === 0) {
-      if (currentWorkspace !== null) setCurrentWorkspace(null)
-      return
-    }
-    if (!currentWorkspace || !workspaceOptions.some((workspace) => workspace.id === currentWorkspace)) {
-      setCurrentWorkspace(workspaceOptions[0].id)
-    }
-  }, [currentWorkspace, workspaceOptions])
-
   return (
-    <main className="min-h-screen bg-[#f7f8fc] text-slate-900">
-      <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-slate-200/80 bg-white/90 px-6 backdrop-blur">
-        <div className="flex items-center gap-4">
-          <Logo />
-          <WorkspaceSwitcher
-            value={currentWorkspace}
-            workspaces={workspaceOptions}
-            isLoading={workspacesQuery.isLoading}
-            isError={workspacesQuery.isError}
-            onChange={setCurrentWorkspace}
-          />
-        </div>
-        <div className="hidden items-center gap-10 text-sm text-slate-900 md:flex">
-          <span className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-emerald-500" />
-            Play API ready
-          </span>
-          <span className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-emerald-500" />
-            SSE ready
-          </span>
-        </div>
-        <button className="flex items-center gap-3 rounded-full px-2 py-1 text-sm font-medium text-slate-900 transition hover:bg-slate-100">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">P</span>
-          <span className="hidden sm:inline">Player One</span>
-          <ChevronDown size={16} className="text-slate-400" />
-        </button>
-      </header>
-
-      <div className="grid min-h-[calc(100vh-72px)] lg:grid-cols-[296px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-slate-200 bg-white/70 px-6 py-9 lg:flex lg:flex-col lg:justify-between">
-          <nav className="space-y-3">
-            {navItems.map((item) => (
-              <a
-                key={item.label}
-                className={`flex items-center gap-4 rounded-xl px-5 py-4 text-base font-medium transition ${
-                  item.active
-                    ? 'bg-violet-50 text-violet-700 shadow-sm'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
-                }`}
-                href="#"
-              >
-                <item.icon size={22} />
-                {item.label}
-              </a>
-            ))}
-          </nav>
-
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="mb-4 text-sm text-slate-400">系统状态</p>
-            <div className="space-y-4 text-sm text-slate-600">
-              <p className="flex items-center gap-3">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                Play API ready
-              </p>
-              <p className="flex items-center gap-3">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                SSE ready
-              </p>
-            </div>
-          </section>
-        </aside>
-
+    <AppShell>
+      {({ currentWorkspace }) => (
         <div className="grid gap-6 px-5 py-8 xl:grid-cols-[minmax(0,1fr)_352px] xl:px-7">
           <section className="min-w-0 space-y-7">
             <section className="relative overflow-hidden rounded-2xl bg-white px-9 py-8 shadow-sm">
@@ -445,7 +368,7 @@ export function HomePage() {
               </div>
             </section>
 
-            <section className="rounded-2xl bg-white/60 p-6 shadow-sm">
+            <section id="stories" className="rounded-2xl bg-white/60 p-6 shadow-sm">
               <div className="mb-5 flex items-center justify-between gap-4">
                 <h2 className="text-xl font-bold text-slate-950">我的故事</h2>
                 <button className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:bg-violet-700">
@@ -466,7 +389,7 @@ export function HomePage() {
               ) : null}
             </section>
 
-            <section className="rounded-2xl bg-white/60 p-6 shadow-sm">
+            <section id="recent-sessions" className="rounded-2xl bg-white/60 p-6 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-slate-950">最近会话</h2>
               </div>
@@ -551,7 +474,7 @@ export function HomePage() {
             </section>
           </aside>
         </div>
-      </div>
-    </main>
+      )}
+    </AppShell>
   )
 }

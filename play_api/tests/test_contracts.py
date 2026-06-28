@@ -39,6 +39,11 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert workspaces.status_code == 200
     assert {workspace["id"] for workspace in workspaces.json()} == {"demo_workspace"}
 
+    stories = client.get("/play-api/v1/workspaces/demo_workspace/stories")
+    assert stories.status_code == 200
+    assert stories.json()[0]["title"] == "北境森林 Demo"
+    assert client.get("/play-api/v1/workspaces/missing/stories").status_code == 404
+
     assert client.get("/play-api/v1/sessions").status_code == 422
     assert client.get(
         "/play-api/v1/sessions",
@@ -99,3 +104,93 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert "hello" in turn.json()["reply"]
     assert ("commands", "demo_workspace", demo_session_id) in fake_agent.calls
     assert ("send", "demo_workspace", demo_session_id) in fake_agent.calls
+
+    lorebooks = client.get("/play-api/v1/workspaces/demo_workspace/lorebook-entries")
+    assert lorebooks.status_code == 200
+    assert {entry["name"] for entry in lorebooks.json()} >= {"炎心之木", "圆形封印祭坛"}
+    assert lorebooks.json()[0]["workspaceId"] == "demo_workspace"
+    assert isinstance(lorebooks.json()[0]["tags"], list)
+    assert isinstance(lorebooks.json()[0]["metadata"], dict)
+    assert client.get("/play-api/v1/workspaces/missing/lorebook-entries").status_code == 404
+
+    new_entry = client.post(
+        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        json={
+            "name": "潮汐信号",
+            "content": "海岸线上古老的信号系统。",
+            "description": "用于测试世界书管理接口。",
+            "tags": ["规则", "组织"],
+            "metadata": {"ui": {"displayVersion": "v1.0.0"}},
+        },
+    )
+    assert new_entry.status_code == 200
+    assert new_entry.json()["name"] == "潮汐信号"
+    assert new_entry.json()["tags"] == ["规则", "组织"]
+    assert new_entry.json()["metadata"]["ui"]["displayVersion"] == "v1.0.0"
+    assert client.post(
+        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        json={"name": ""},
+    ).status_code == 422
+
+    patched = client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{new_entry.json()['id']}",
+        json={"description": "更新后的短描述", "tags": ["地点"]},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["description"] == "更新后的短描述"
+    assert patched.json()["tags"] == ["地点"]
+    assert patched.json()["version"] == 2
+    assert client.patch(
+        f"/play-api/v1/workspaces/missing/lorebook-entries/{new_entry.json()['id']}",
+        json={"name": "Nope"},
+    ).status_code == 404
+
+    story_lorebooks = client.get("/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries")
+    assert story_lorebooks.status_code == 200
+    assert story_lorebooks.json()[0]["mountId"] is not None
+    assert client.get("/play-api/v1/workspaces/demo_workspace/stories/999/lorebook-entries").status_code == 404
+
+    mounted = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries/{new_entry.json()['id']}/mount"
+    )
+    assert mounted.status_code == 200
+    assert mounted.json()["name"] == "潮汐信号"
+    assert mounted.json()["storyId"] == 1
+    duplicate_mount = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries/{new_entry.json()['id']}/mount"
+    )
+    assert duplicate_mount.status_code == 200
+    assert duplicate_mount.json()["mountId"] == mounted.json()["mountId"]
+
+    removed = client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-mounts/{mounted.json()['mountId']}"
+    )
+    assert removed.status_code == 204
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-mounts/{mounted.json()['mountId']}"
+    ).status_code == 404
+
+    delete_target = client.post(
+        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        json={
+            "name": "待删除条目",
+            "content": "临时内容",
+            "tags": ["tmp"],
+        },
+    )
+    assert delete_target.status_code == 200
+    delete_mount = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries/{delete_target.json()['id']}/mount"
+    )
+    assert delete_mount.status_code == 200
+    deleted_entry = client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{delete_target.json()['id']}"
+    )
+    assert deleted_entry.status_code == 204
+    assert client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{delete_target.json()['id']}",
+        json={"name": "Gone"},
+    ).status_code == 404
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{delete_target.json()['id']}"
+    ).status_code == 404

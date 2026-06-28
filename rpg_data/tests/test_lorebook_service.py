@@ -11,7 +11,7 @@ from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_lorebook_repo import StoryLorebookEntryRepository
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
-from rpg_data.services.lorebook import LorebookReadService
+from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
 
 
 def _migrated_database(tmp_path: Path) -> SqliteDatabase:
@@ -88,5 +88,78 @@ def test_lorebook_read_service_lists_session_story_mounts(tmp_path: Path) -> Non
         assert service.get_entry(main_session.id, "Side Only") is None
         assert service.list_entries("missing_session") == []
         assert service.get_entry("missing_session", "First") is None
+    finally:
+        database.close()
+
+
+def test_lorebook_management_service_manages_entries_and_mounts(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        workspaces = WorkspaceRepository(database)
+        stories = StoryRepository(database)
+
+        with database.atomic():
+            workspaces.create("main_ws", "Main", "data/main_ws")
+            story = stories.create("main_ws", "Main Story")
+            other_story = stories.create("main_ws", "Other Story")
+
+        service = LorebookManagementService(database)
+
+        created = service.create_entry(
+            "main_ws",
+            name="Harbor Bell",
+            content="The thirteenth ring is a warning.",
+            description="A local legend.",
+            tags=["place", " myth ", ""],
+            metadata={"ui": {"displayVersion": "v1.0.0"}},
+        )
+        assert created is not None
+        assert created.name == "Harbor Bell"
+        assert created.tags_json == '["place", "myth"]'
+        assert created.metadata_json == '{"ui": {"displayVersion": "v1.0.0"}}'
+        assert service.create_entry("missing_ws", name="Hidden") is None
+
+        listed = service.list_entries("main_ws")
+        assert listed is not None
+        assert [entry.name for entry in listed] == ["Harbor Bell"]
+        assert service.list_entries("missing_ws") is None
+
+        updated = service.update_entry(
+            "main_ws",
+            int(created.id),
+            name="Harbor Bell Revised",
+            tags=["place"],
+            metadata={"ui": {"displayVersion": "v1.0.1"}},
+        )
+        assert updated is not None
+        assert updated.name == "Harbor Bell Revised"
+        assert updated.tags_json == '["place"]'
+        assert updated.version == 2
+        assert service.update_entry("other_ws", int(created.id), name="Nope") is None
+
+        mounted = service.mount_entry("main_ws", story.id, int(created.id))
+        assert mounted is not None
+        assert mounted.mount.id is not None
+        assert mounted.mount.story_id == story.id
+        assert mounted.entry.name == "Harbor Bell Revised"
+
+        duplicate = service.mount_entry("main_ws", story.id, int(created.id))
+        assert duplicate is not None
+        assert duplicate.mount.id == mounted.mount.id
+
+        assert service.list_story_entries("main_ws", story.id)[0].entry.name == "Harbor Bell Revised"
+        assert service.list_story_entries("main_ws", other_story.id) == []
+        assert service.list_story_entries("main_ws", 99999) is None
+
+        assert service.unmount_entry("main_ws", story.id, int(mounted.mount.id)) is True
+        assert service.unmount_entry("main_ws", story.id, int(mounted.mount.id)) is False
+        assert service.list_story_entries("main_ws", story.id) == []
+
+        remounted = service.mount_entry("main_ws", story.id, int(created.id))
+        assert remounted is not None
+        assert service.delete_entry("main_ws", int(created.id)) is True
+        assert service.delete_entry("main_ws", int(created.id)) is False
+        assert service.list_entries("main_ws") == []
+        assert service.list_story_entries("main_ws", story.id) == []
     finally:
         database.close()

@@ -18,9 +18,6 @@ __all__ = ["CatalogService"]
 
 logger = logging.getLogger("rpg_data.catalog")
 
-_WorkspaceSummary = dict[str, object]
-_SessionSummary = dict[str, object]
-
 
 class CatalogService:
     """Expose workspace/story/session metadata without leaking repositories."""
@@ -37,22 +34,21 @@ class CatalogService:
         self._sessions = SessionRepository(database)
         self._status = status_service
 
-    def list_workspaces(self) -> list[_WorkspaceSummary]:
+    def list_workspaces(self) -> list[models.Workspace]:
         workspaces = [
             workspace
             for workspace in self._workspaces.list()
             if workspace.enabled
         ]
         workspaces.sort(key=lambda workspace: (workspace.name, workspace.id))
-        result = [_workspace_summary(workspace) for workspace in workspaces]
-        logger.debug("listed workspaces count=%s ids=%s", len(result), [item["id"] for item in result])
-        return result
+        logger.debug("listed workspaces count=%s ids=%s", len(workspaces), [workspace.id for workspace in workspaces])
+        return workspaces
 
     def list_sessions(
         self,
         workspace_id: str,
         story_id: int,
-    ) -> list[_SessionSummary] | None:
+    ) -> list[models.Session] | None:
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
             logger.warning("list sessions rejected missing story workspace_id=%s story_id=%s", workspace_id, story_id)
@@ -61,15 +57,28 @@ class CatalogService:
             workspace_id=workspace_id,
             story_id=story_id,
         )
-        result = [_session_summary(session) for session in sessions]
         logger.debug(
             "listed sessions workspace_id=%s story_id=%s count=%s session_ids=%s",
             workspace_id,
             story_id,
-            len(result),
-            [item["id"] for item in result],
+            len(sessions),
+            [session.id for session in sessions],
         )
-        return result
+        return sessions
+
+    def list_stories(self, workspace_id: str) -> list[models.Story] | None:
+        workspace = self._workspaces.get(workspace_id)
+        if workspace is None:
+            logger.warning("list stories rejected missing workspace_id=%s", workspace_id)
+            return None
+        stories = self._stories.list(workspace_id)
+        logger.debug(
+            "listed stories workspace_id=%s count=%s story_ids=%s",
+            workspace_id,
+            len(stories),
+            [story.id for story in stories],
+        )
+        return stories
 
     def create_session(
         self,
@@ -79,7 +88,7 @@ class CatalogService:
         session_id: str | None = None,
         title: str = "",
         description: str = "",
-    ) -> _SessionSummary | None:
+    ) -> models.Session | None:
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
             logger.warning("create session rejected missing story workspace_id=%s story_id=%s", workspace_id, story_id)
@@ -100,14 +109,13 @@ class CatalogService:
                     session.id,
                     len(tables),
                 )
-        result = _session_summary(session)
         logger.info("created session session_id=%s workspace_id=%s story_id=%s", session.id, workspace_id, story_id)
-        return result
+        return session
 
     def get_session(
         self,
         session_id: str,
-    ) -> _SessionSummary | None:
+    ) -> models.Session | None:
         session = self._sessions.get(session_id)
         if session is None:
             logger.debug("session not found session_id=%s", session_id)
@@ -118,7 +126,7 @@ class CatalogService:
             session.workspace_id,
             session.story_id,
         )
-        return _session_summary(session)
+        return session
 
     def get_workspace_runtime_dir(self, workspace_id: str) -> Path:
         """Return the resolved catalog workspace root directory."""
@@ -155,28 +163,6 @@ class CatalogService:
         )
         path.mkdir(parents=True, exist_ok=True)
         return path
-
-
-def _workspace_summary(workspace: models.Workspace) -> _WorkspaceSummary:
-    description = str(workspace.description or "")
-    return {
-        "id": str(workspace.id),
-        "name": str(workspace.name),
-        "description": description or None,
-    }
-
-
-def _session_summary(session: models.Session) -> _SessionSummary:
-    # 对外只暴露全局 session id；workspace/story 作为已绑定上下文返回给 Play API 使用。
-    return {
-        "id": str(session.id),
-        "workspace": str(session.workspace_id),
-        "story_id": int(session.story_id),
-        "title": str(session.title or session.id),
-        "description": str(session.description or "") or None,
-        "created_at": str(session.created_at),
-        "updated_at": str(session.updated_at),
-    }
 
 
 def _session_runtime_relative_path(story_id: int, session_id: str) -> str:

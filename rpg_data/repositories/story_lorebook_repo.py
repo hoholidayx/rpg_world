@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from peewee import Database
+from peewee import IntegrityError
 
 from rpg_data import models
 from rpg_data.repositories.records import StoryLorebookEntryRecord, bind_database
@@ -53,6 +54,54 @@ class StoryLorebookEntryRepository:
     def get(self, mount_id: int) -> models.StoryLorebookEntry | None:
         row = get_or_none(StoryLorebookEntryRecord, mount_id)
         return to_story_lorebook_entry(row) if row is not None else None
+
+    def get_for_story_entry(
+        self,
+        story_id: int,
+        lorebook_entry_id: int,
+    ) -> models.StoryLorebookEntry | None:
+        row = (
+            StoryLorebookEntryRecord
+            .select()
+            .where(
+                (StoryLorebookEntryRecord.story == story_id)
+                & (StoryLorebookEntryRecord.lorebook_entry == lorebook_entry_id)
+            )
+            .first()
+        )
+        return to_story_lorebook_entry(row) if row is not None else None
+
+    def mount(
+        self,
+        workspace_id: str,
+        story_id: int,
+        lorebook_entry_id: int,
+        *,
+        metadata_json: str = "{}",
+    ) -> models.StoryLorebookEntry:
+        existing = self.get_for_story_entry(story_id, lorebook_entry_id)
+        if existing is not None:
+            return existing
+        try:
+            return self.create(
+                workspace_id,
+                story_id,
+                lorebook_entry_id,
+                metadata_json=metadata_json,
+            )
+        except IntegrityError:
+            existing = self.get_for_story_entry(story_id, lorebook_entry_id)
+            if existing is not None:
+                return existing
+            raise
+
+    def delete(self, mount_id: int) -> bool:
+        return bool(
+            StoryLorebookEntryRecord
+            .delete()
+            .where(StoryLorebookEntryRecord.id == mount_id)
+            .execute()
+        )
 
     def update_timestamp(self, mount_id: int) -> models.StoryLorebookEntry | None:
         row = update_timestamp(StoryLorebookEntryRecord, mount_id)

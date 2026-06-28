@@ -92,7 +92,7 @@ def _print_available_workspaces() -> None:
     workspaces = get_data_service_gateway().catalog.list_workspaces()
     print("  可用 workspaces:")
     for item in workspaces:
-        print(f"    - {item['name']}: {item['id']}")
+        print(f"    - {item.name}: {item.id}")
 
 
 def _session_root(session: str) -> Path:

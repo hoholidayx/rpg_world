@@ -7,6 +7,7 @@ from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.command import CommandDef, CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.context.rpg_context import Message, Role
+from rpg_data import models
 
 
 class FakeAgent:
@@ -54,19 +55,19 @@ class FakeAgentManager:
 
 
 class FakeCatalog:
-    sessions: dict[str, dict[str, object]] = {}
+    sessions: dict[str, models.Session] = {}
     created_count = 0
 
     @classmethod
     def reset(cls) -> None:
         cls.sessions = {
-            "s1": {"id": "s1", "workspace": "ws", "story_id": 1, "title": "Existing"},
-            "foreign": {"id": "foreign", "workspace": "other", "story_id": 2, "title": "Foreign"},
+            "s1": models.Session("s1", "ws", 1, title="Existing"),
+            "foreign": models.Session("foreign", "other", 2, title="Foreign"),
         }
         cls.created_count = 0
 
     @classmethod
-    def get_session(cls, session_id: str) -> dict[str, object] | None:
+    def get_session(cls, session_id: str) -> models.Session | None:
         return cls.sessions.get(session_id)
 
     @classmethod
@@ -77,23 +78,23 @@ class FakeCatalog:
         *,
         title: str = "",
         session_id: str | None = None,
-    ) -> dict[str, object] | None:
+    ) -> models.Session | None:
         if workspace_id == "missing":
             return None
         cls.created_count += 1
         sid = session_id or f"generated_{cls.created_count}"
-        session = {"id": sid, "workspace": workspace_id, "story_id": story_id, "title": title}
+        session = models.Session(sid, workspace_id, story_id, title=title)
         cls.sessions[sid] = session
         return session
 
     @classmethod
-    def list_sessions(cls, workspace_id: str, story_id: int) -> list[dict[str, object]] | None:
+    def list_sessions(cls, workspace_id: str, story_id: int) -> list[models.Session] | None:
         if workspace_id == "missing":
             return None
         return [
             session
             for session in cls.sessions.values()
-            if session["workspace"] == workspace_id and int(session["story_id"]) == story_id
+            if session.workspace_id == workspace_id and int(session.story_id) == story_id
         ]
 
 

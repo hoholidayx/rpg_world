@@ -194,6 +194,7 @@ def test_character_lorebook_and_mount_repositories(tmp_path: Path) -> None:
                 "World History",
                 content="Forged from ashes.",
                 tags_json='["history"]',
+                metadata_json='{"ui":{"displayVersion":"v1.0.0"}}',
             )
             character_mount = rpg_story_characters.create(
                 "repo_mounts",
@@ -214,15 +215,36 @@ def test_character_lorebook_and_mount_repositories(tmp_path: Path) -> None:
         assert rpg_characters.get(character.id).name == "Alice"
         assert rpg_character_details.list(character.id)[0].id == detail.id
         assert rpg_lorebook_entries.get(lorebook.id).name == "World History"
+        updated_lorebook = rpg_lorebook_entries.update(
+            lorebook.id,
+            name="World History Revised",
+            tags_json='["history","revised"]',
+        )
+        assert updated_lorebook is not None
+        assert updated_lorebook.name == "World History Revised"
+        assert updated_lorebook.tags_json == '["history","revised"]'
+        assert updated_lorebook.version == lorebook.version + 1
         assert rpg_story_characters.list(story_id=story.id)[0].id == character_mount.id
         assert (
             rpg_story_lorebook_entries.list(story_id=story.id)[0].id
             == lorebook_mount.id
         )
+        duplicate_lorebook_mount = rpg_story_lorebook_entries.mount(
+            "repo_mounts",
+            story.id,
+            lorebook.id,
+        )
+        assert duplicate_lorebook_mount.id == lorebook_mount.id
         touched_character_mount = rpg_story_characters.update_timestamp(character_mount.id)
         touched_lorebook_mount = rpg_story_lorebook_entries.update_timestamp(lorebook_mount.id)
 
         assert touched_character_mount.id == character_mount.id
         assert touched_lorebook_mount.id == lorebook_mount.id
+        assert rpg_story_lorebook_entries.delete(lorebook_mount.id) is True
+        assert rpg_story_lorebook_entries.get(lorebook_mount.id) is None
+        assert rpg_story_lorebook_entries.delete(lorebook_mount.id) is False
+        assert rpg_lorebook_entries.delete(lorebook.id) is True
+        assert rpg_lorebook_entries.get(lorebook.id) is None
+        assert rpg_lorebook_entries.delete(lorebook.id) is False
     finally:
         database.close()

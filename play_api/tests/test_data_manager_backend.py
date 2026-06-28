@@ -6,31 +6,30 @@ import pytest
 
 from play_api.backends import data_manager as data_manager_module
 from play_api.backends.data_manager import DataManagerBackend
+from rpg_data import models
 
 
 class FakeCatalog:
     def list_workspaces(self):
-        return [{"id": "workspace"}]
+        return [models.Workspace("workspace", "Workspace", "data/workspace")]
+
+    def list_stories(self, workspace: str):
+        return [models.Story(1, workspace, "Story")]
 
     def list_sessions(self, workspace: str, story_id: int):
-        return [{"id": "session", "workspace": workspace, "story_id": story_id}]
+        return [models.Session("session", workspace, story_id)]
 
     def create_session(self, workspace: str, story_id: int, *, title: str = "", description: str = ""):
-        return {
-            "id": "created",
-            "workspace": workspace,
-            "story_id": story_id,
-            "title": title,
-            "description": description,
-        }
+        return models.Session("created", workspace, story_id, title=title, description=description)
 
     def get_session(self, session_id: str):
-        return {"id": session_id, "workspace": "workspace", "story_id": 1}
+        return models.Session(session_id, "workspace", 1)
 
 
 class FakeGateway:
     def __init__(self) -> None:
         self.catalog = FakeCatalog()
+        self.lorebook_management = FakeLorebookManagement()
         self.initialize_calls = 0
         self.close_calls = 0
 
@@ -39,6 +38,48 @@ class FakeGateway:
 
     def close(self) -> None:
         self.close_calls += 1
+
+
+class FakeLorebookManagement:
+    def list_entries(self, workspace: str):
+        return [models.LorebookEntry(1, workspace, "Entry")]
+
+    def create_entry(self, workspace: str, **kwargs):
+        return models.LorebookEntry(
+            2,
+            workspace,
+            str(kwargs["name"]),
+            content=str(kwargs.get("content") or ""),
+            description=str(kwargs.get("description") or ""),
+        )
+
+    def update_entry(self, workspace: str, entry_id: int, **kwargs):
+        return models.LorebookEntry(entry_id, workspace, str(kwargs["name"]), version=2)
+
+    def delete_entry(self, workspace: str, entry_id: int):
+        return workspace == "workspace" and entry_id == 1
+
+    def list_story_entries(self, workspace: str, story_id: int):
+        return [_lorebook_detail(workspace, story_id)]
+
+    def mount_entry(self, workspace: str, story_id: int, entry_id: int):
+        return _lorebook_detail(workspace, story_id, entry_id=entry_id)
+
+    def unmount_entry(self, workspace: str, story_id: int, mount_id: int):
+        return workspace == "workspace" and story_id == 1 and mount_id == 10
+
+
+def _lorebook_detail(
+    workspace: str,
+    story_id: int,
+    *,
+    entry_id: int = 1,
+    mount_id: int = 10,
+) -> models.StoryLorebookEntryDetail:
+    return models.StoryLorebookEntryDetail(
+        mount=models.StoryLorebookEntry(mount_id, workspace, story_id, entry_id),
+        entry=models.LorebookEntry(entry_id, workspace, "Entry"),
+    )
 
 
 @pytest.mark.asyncio
@@ -57,10 +98,18 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
 
     assert requested_paths == [db_path]
     assert gateway.initialize_calls == 1
-    assert await backend.list_workspaces() == [{"id": "workspace"}]
+    assert await backend.list_workspaces() == [{"id": "workspace", "name": "Workspace", "description": None}]
+    assert (await backend.list_stories("workspace"))[0]["title"] == "Story"
     assert (await backend.list_sessions("workspace", 1))[0]["id"] == "session"
     assert (await backend.create_session("workspace", 1, title="Title"))["title"] == "Title"
     assert (await backend.get_session("session"))["id"] == "session"
+    assert (await backend.list_lorebook_entries("workspace"))[0]["name"] == "Entry"
+    assert (await backend.create_lorebook_entry("workspace", name="New"))["name"] == "New"
+    assert (await backend.update_lorebook_entry("workspace", 1, name="Updated"))["name"] == "Updated"
+    assert await backend.delete_lorebook_entry("workspace", 1) is True
+    assert (await backend.list_story_lorebook_entries("workspace", 1))[0]["mount_id"] == 10
+    assert (await backend.mount_lorebook_entry("workspace", 1, 1))["mount_id"] == 10
+    assert await backend.unmount_lorebook_entry("workspace", 1, 10) is True
 
     backend.close()
 

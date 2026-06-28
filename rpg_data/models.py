@@ -20,6 +20,7 @@ __all__ = [
     "Story",
     "StoryCharacter",
     "StoryLorebookEntry",
+    "StoryLorebookEntryDetail",
     "StoryStatusTable",
     "StatusRowRef",
     "StatusTableData",
@@ -251,6 +252,12 @@ class StoryLorebookEntry:
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class StoryLorebookEntryDetail:
+    mount: StoryLorebookEntry
+    entry: LorebookEntry
 
 
 @dataclass(frozen=True)

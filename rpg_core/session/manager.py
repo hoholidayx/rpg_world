@@ -297,7 +297,13 @@ class SessionManager:
         if session is None:
             return {}
         return {
-            **session,
+            "id": str(session.id),
+            "workspace_id": str(session.workspace_id),
+            "story_id": int(session.story_id),
+            "title": str(session.title or session.id),
+            "description": str(session.description or ""),
+            "created_at": str(session.created_at),
+            "updated_at": str(session.updated_at),
             "story_memory_last_turn_id": gateway.story_memory.get_last_turn_id(self._session_id),
         }
 

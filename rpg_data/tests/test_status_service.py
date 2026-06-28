@@ -123,11 +123,11 @@ def test_story_mount_controls_session_copy_visibility(tmp_path: Path) -> None:
 
     assert forest_session is not None
     assert academy_session is not None
-    assert [table.name for table in service.list_tables(str(forest_session["id"]))] == ["旗帜"]
-    assert service.list_tables(str(academy_session["id"])) == []
+    assert [table.name for table in service.list_tables(str(forest_session.id))] == ["旗帜"]
+    assert service.list_tables(str(academy_session.id)) == []
 
-    session_table = service.get_table(str(forest_session["id"]), "世界状态", "旗帜")
-    assert session_table.relative_path == f"stories/{forest_story.id}/{forest_session['id']}/status/世界状态/旗帜.csv"
+    session_table = service.get_table(str(forest_session.id), "世界状态", "旗帜")
+    assert session_table.relative_path == f"stories/{forest_story.id}/{forest_session.id}/status/世界状态/旗帜.csv"
     assert (workspace_root / session_table.relative_path).is_file()
 
 
@@ -157,19 +157,19 @@ def test_session_copy_is_independent_from_template_and_other_sessions(tmp_path: 
     second = gateway.catalog.create_session(workspace_id, story.id, title="Second")
     assert second is not None
 
-    assert service.get_table(str(first["id"]), "世界状态", "旗帜").rows == (("封印", "完整"),)
-    assert service.get_table(str(second["id"]), "世界状态", "旗帜").rows == (("封印", "破裂"),)
+    assert service.get_table(str(first.id), "世界状态", "旗帜").rows == (("封印", "完整"),)
+    assert service.get_table(str(second.id), "世界状态", "旗帜").rows == (("封印", "破裂"),)
 
     service.save_table(
-        str(first["id"]),
+        str(first.id),
         "世界状态",
         "旗帜",
         ["名称", "值"],
         [["封印", "已修复"]],
     )
 
-    assert service.get_table(str(first["id"]), "世界状态", "旗帜").rows == (("封印", "已修复"),)
-    assert service.get_table(str(second["id"]), "世界状态", "旗帜").rows == (("封印", "破裂"),)
+    assert service.get_table(str(first.id), "世界状态", "旗帜").rows == (("封印", "已修复"),)
+    assert service.get_table(str(second.id), "世界状态", "旗帜").rows == (("封印", "破裂"),)
 
 
 def test_table_id_selector_writes_are_visible_from_csv(tmp_path: Path) -> None:
@@ -188,7 +188,7 @@ def test_table_id_selector_writes_are_visible_from_csv(tmp_path: Path) -> None:
     session = gateway.catalog.create_session(workspace_id, story.id, title="Selector")
     assert session is not None
 
-    table = service.get_table(str(session["id"]), "世界状态", "旗帜")
+    table = service.get_table(str(session.id), "世界状态", "旗帜")
     service.set_cell(table.id, StatusRowRef.match("名称", "封印"), "值", "破裂")
     service.append_row(table.id, ["钟声", "响起", "ignored"])
     service.replace_row(table.id, StatusRowRef.match("名称", "钟声"), ["钟声", "静默"])
@@ -215,7 +215,7 @@ def test_key_value_write_updates_appends_and_rejects_duplicates(tmp_path: Path) 
     session = gateway.catalog.create_session(workspace_id, story.id, title="Key")
     assert session is not None
 
-    table = service.get_active_scene_table(str(session["id"]))
+    table = service.get_active_scene_table(str(session.id))
     assert table is not None
     assert service.set_key_value(table.id, "位置", "城堡").rows == (("位置", "城堡"),)
     assert service.set_key_value(table.id, "天气", "雨").rows == (("位置", "城堡"), ("天气", "雨"))
@@ -259,7 +259,7 @@ def test_scene_is_story_mounted_and_active_scene_uses_first_sorted_table(tmp_pat
 
     session = gateway.catalog.create_session(workspace_id, story.id, title="Scene")
     assert session is not None
-    session_id = str(session["id"])
+    session_id = str(session.id)
 
     assert service.get_active_scene_table(session_id).name == "当前场景"
     assert service.get_scene_attrs(session_id) == {
@@ -292,8 +292,8 @@ def test_scene_not_mounted_is_not_visible_to_session(tmp_path: Path) -> None:
     session = gateway.catalog.create_session(workspace_id, story.id, title="No Scene")
     assert session is not None
 
-    assert service.get_active_scene_table(str(session["id"])) is None
-    assert service.get_scene_attrs(str(session["id"])) is None
+    assert service.get_active_scene_table(str(session.id)) is None
+    assert service.get_scene_attrs(str(session.id)) is None
 
 
 def test_catalog_status_timing_works_when_catalog_is_accessed_first(tmp_path: Path) -> None:
@@ -314,7 +314,7 @@ def test_catalog_status_timing_works_when_catalog_is_accessed_first(tmp_path: Pa
     session = catalog.create_session(workspace_id, story.id, title="Timing")
 
     assert session is not None
-    assert service.get_table(str(session["id"]), "世界状态", "旗帜").rows == (("封印", "完整"),)
+    assert service.get_table(str(session.id), "世界状态", "旗帜").rows == (("封印", "完整"),)
 
 
 def test_clear_unindexed_session_files_only_removes_orphan_csv(tmp_path: Path) -> None:
@@ -332,7 +332,7 @@ def test_clear_unindexed_session_files_only_removes_orphan_csv(tmp_path: Path) -
     service.mount_template(workspace_id, story.id, template.id)
     session = gateway.catalog.create_session(workspace_id, story.id, title="Cleanup")
     assert session is not None
-    session_id = str(session["id"])
+    session_id = str(session.id)
 
     indexed_table = service.get_table(session_id, "世界状态", "旗帜")
     indexed_path = workspace_root / indexed_table.relative_path

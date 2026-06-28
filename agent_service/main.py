@@ -29,6 +29,7 @@ from rpg_core.agent.command import CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.agent.manager import AgentManager
 from rpg_core.session import SessionManager
+from rpg_data import models
 from rpg_data.services import get_data_service_gateway
 
 
@@ -100,7 +101,7 @@ async def list_sessions(
     if sessions is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return {
-        "sessions": [str(session["id"]) for session in sessions],
+        "sessions": [str(session.id) for session in sessions],
     }
 
 
@@ -124,7 +125,7 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> dict[str, Any]:
         session = gateway.catalog.get_session(body.session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"Session {body.session_id!r} not found")
-        if str(session["workspace"]) != workspace_id or int(session["story_id"]) != story_id:
+        if str(session.workspace_id) != workspace_id or int(session.story_id) != story_id:
             raise HTTPException(status_code=400, detail=f"Session {body.session_id!r} does not belong to workspace/story")
     else:
         session = gateway.catalog.create_session(
@@ -198,7 +199,7 @@ def _get_agent(workspace: str, session_id: str):
     )
 
 
-def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> dict[str, object]:
+def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> models.Session:
     workspace_id = _require_workspace(workspace_id)
     session = get_data_service_gateway().catalog.create_session(workspace_id, story_id, title=title)
     if session is None:
@@ -206,12 +207,12 @@ def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> 
     return session
 
 
-def _session_payload(session: dict[str, object]) -> dict[str, Any]:
+def _session_payload(session: models.Session) -> dict[str, Any]:
     return {
-        "workspace": str(session["workspace"]),
-        "story_id": int(session["story_id"]),
-        "session_id": str(session["id"]),
-        "title": str(session.get("title") or session["id"]),
+        "workspace": str(session.workspace_id),
+        "story_id": int(session.story_id),
+        "session_id": str(session.id),
+        "title": str(session.title or session.id),
     }
 
 

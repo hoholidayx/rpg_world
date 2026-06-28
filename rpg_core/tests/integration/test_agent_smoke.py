@@ -122,10 +122,10 @@ async def test_session_create_and_switch_isolate_history(integration_agent, inte
     current_session = integration_data_gateway.catalog.get_session("integration_smoke")
     assert current_session is not None
     sessions = integration_data_gateway.catalog.list_sessions(
-        str(current_session["workspace"]),
-        int(current_session["story_id"]),
+        str(current_session.workspace_id),
+        int(current_session.story_id),
     )
-    assert sorted(session["id"] for session in sessions or []) == sorted([created_session_id, "integration_smoke"])
+    assert sorted(session.id for session in sessions or []) == sorted([created_session_id, "integration_smoke"])
 
     first_reply = await asyncio.wait_for(
         integration_agent.send("Reply in one short sentence."),

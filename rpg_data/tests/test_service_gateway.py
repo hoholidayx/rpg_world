@@ -31,7 +31,7 @@ def test_gateway_initializes_migrations_and_exposes_services(
     status_types = gateway.status.list_types("demo_workspace")
     status_tables = gateway.status.list_tables("s_forest001")
 
-    assert {workspace["id"] for workspace in workspaces} == {"demo_workspace"}
+    assert {workspace.id for workspace in workspaces} == {"demo_workspace"}
     assert [character.name for character in characters] == ["Bob", "Alice"]
     assert [entry.name for entry in lorebook_entries] == ["炎心之木", "圆形封印祭坛"]
     assert message_count == 0
@@ -61,7 +61,7 @@ def test_gateway_supports_in_memory_database(
 ) -> None:
     gateway = get_data_service_gateway(":memory:")
 
-    assert gateway.catalog.list_workspaces()[0]["id"] == "demo_workspace"
+    assert gateway.catalog.list_workspaces()[0].id == "demo_workspace"
     assert (tmp_path / "data/demo_workspace").is_dir()
 
 
@@ -238,5 +238,5 @@ def test_gateways_for_different_paths_do_not_share_data(tmp_path: Path) -> None:
 
     WorkspaceRepository(first.database).create("first_only", "First Only", "data/first")
 
-    assert any(workspace["id"] == "first_only" for workspace in first.catalog.list_workspaces())
-    assert all(workspace["id"] != "first_only" for workspace in second.catalog.list_workspaces())
+    assert any(workspace.id == "first_only" for workspace in first.catalog.list_workspaces())
+    assert all(workspace.id != "first_only" for workspace in second.catalog.list_workspaces())
