@@ -10,7 +10,7 @@ from typing import Callable
 def _register_watcher(file_path: Path, callback: Callable[[], None]) -> None:
     """向 FileWatcher 注册单个文件的变更回调。
 
-    轻量工具函数，不引入 BaseManager 的完整开销。
+    轻量工具函数，避免为单文件 summary store 引入额外抽象。
     在 watcher start 之前或之后都可以注册。
     """
     from rpg_core.utils.watcher import get_watcher

@@ -46,8 +46,14 @@ def test_get_or_create_reuses_same_key():
     second = AgentManager.get_or_create(workspace="data/other", session_id="s1")
 
     assert first is second
-    assert first.kwargs["workspace"] == "data/test"
+    assert first.kwargs["workspace"] == ""
     assert first.kwargs["session_id"] == "s1"
+
+
+def test_get_or_create_ignores_workspace_for_runtime_creation():
+    agent = AgentManager.get_or_create(workspace="data/test", session_id="s1")
+
+    assert agent.kwargs["workspace"] == ""
 
 
 def test_get_or_create_separates_by_session_only():

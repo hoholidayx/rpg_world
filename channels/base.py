@@ -86,15 +86,13 @@ class ChannelAdapter(ABC):
         return f"{self.name}_{chat_id}"
 
     def get_workspace(self) -> str:
-        """返回渠道的默认 workspace 名称。
+        """Return the resolved Agent-service workspace for this channel.
 
-        默认格式 ``"data/{channel_name}_default_workspace"``，
-        与 :meth:`get_session_id` 的 ``{channel_name}_{chat_id}`` 模式对应。
-        子类可覆盖以绑定不同的 workspace。
+        Concrete entrypoints must resolve catalog sessions through
+        ``workspace_id + story_id`` and pass the Agent-service workspace into
+        their adapter. The base class intentionally has no legacy fallback.
         """
-        from rpg_core.utils.path_utils import default_workspace_name
-
-        return default_workspace_name(self.name)
+        raise RuntimeError(f"{self.name} workspace is not resolved")
 
     # ── 消息处理管线 ────────────────────────────────────────────────────
 

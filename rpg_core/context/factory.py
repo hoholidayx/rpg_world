@@ -24,6 +24,7 @@ def build_rpg_context(
     ``status_mgr``, ``scene_tracker`` — ready to pass to
     ``RPGContextBuilder.build()``.
 
+    ``workspace`` is kept for compatibility with older callers and is ignored.
     Character, lorebook, and status indexes are read from the rpg_data catalog
     by *session_id* and its bound story. Status table CSV content is resolved
     from the rpg_data workspace root under

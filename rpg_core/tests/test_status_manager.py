@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 from rpg_data.models import SessionStatusTable
 from rpg_core.status.manager import StatusManager
-from rpg_core.utils.manager_base import BaseManager
 
 
 def _table(
@@ -90,7 +89,8 @@ def test_status_manager_is_thin_session_adapter() -> None:
     service = FakeStatusService()
     manager = StatusManager("s_main", service=service)
 
-    assert not isinstance(manager, BaseManager)
+    assert not hasattr(manager, "reload")
+    assert not hasattr(manager, "_data_dir")
     assert not hasattr(manager, "path")
     assert not hasattr(manager, "loader")
     assert manager.list_types() == ["世界状态", "场景状态"]

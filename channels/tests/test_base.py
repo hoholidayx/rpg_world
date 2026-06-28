@@ -21,6 +21,7 @@ class RecordingAdapter(ChannelAdapter):
         self.deltas: list[tuple[str, str, bool]] = []
         self.started = False
         self.stopped = False
+        self.workspace = "resolved_workspace"
 
     async def start(self) -> None:
         self.started = True
@@ -34,6 +35,9 @@ class RecordingAdapter(ChannelAdapter):
     async def send_delta(self, chat_id: str, delta: str, final: bool = False) -> None:
         self.deltas.append((chat_id, delta, final))
         await super().send_delta(chat_id, delta, final=final)
+
+    def get_workspace(self) -> str:
+        return self.workspace
 
 
 class TestChannelAdapter:
@@ -51,6 +55,15 @@ class TestChannelAdapter:
         adapter = RecordingAdapter()
         assert adapter.get_session_id("12345") == "recording_12345"
         assert adapter.get_session_id("abc") == "recording_abc"
+
+    async def test_base_workspace_has_no_legacy_fallback(self):
+        class UnresolvedAdapter(RecordingAdapter):
+            def get_workspace(self) -> str:
+                return ChannelAdapter.get_workspace(self)
+
+        adapter = UnresolvedAdapter()
+        with pytest.raises(RuntimeError, match="workspace is not resolved"):
+            adapter.get_workspace()
 
     async def test_start_stop_lifecycle(self):
         adapter = RecordingAdapter()
@@ -103,7 +116,7 @@ class TestChannelAdapter:
         adapter.bind_agent_client(agent)
 
         await adapter._handle_message("chat999", "user1", "hi")
-        assert agent.calls[-1] == ("send", ("data/recording_default_workspace", "recording_chat999", "hi"))
+        assert agent.calls[-1] == ("send", ("resolved_workspace", "recording_chat999", "hi"))
 
     async def test_stream_multiple_deltas(self):
         """多段流式内容应该逐段通过 send_delta 推送。"""

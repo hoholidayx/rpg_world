@@ -92,6 +92,8 @@ class RPGGameAgent:
             token_counter: TokenCounter | None = None,
     ) -> None:
         self._session_id = session_id
+        # Kept for compatibility with older callers; rpg_data catalog resolves
+        # all business/runtime locations from the globally unique session_id.
         self._workspace = workspace
         self._world_name = world_name
         self._model = model
@@ -120,7 +122,7 @@ class RPGGameAgent:
         self._fixed_sections = []
         self._session = SessionManager(
             session_id=self._session_id,
-            workspace=self._workspace,
+            workspace="",
             history_enabled=self._history_enabled,
         )
         self._tool_registry: ToolRegistry | None = None
@@ -679,7 +681,6 @@ class RPGGameAgent:
         """
         self._rpg_ctx = _build_rpg_context(
             world_name=self._world_name,
-            workspace=self._workspace,
             session_id=self._session_id,
         )
         self._builder = self._rpg_ctx["builder"]
@@ -693,8 +694,7 @@ class RPGGameAgent:
         if self._status_sub_agent is not None:
             _sub_ctx_status = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
             self._status_sub_agent.bind_context(_sub_ctx_status)
-            # 刷新 StatusSubAgent 的 SceneTracker 工具引用，确保切换 session 后
-            # 场景状态写入正确的 session 目录
+            # 刷新 SceneTracker 工具引用，确保切换 session 后写入当前 session 状态表。
             if self._scene_tracker is not None:
                 self._status_sub_agent._tool_providers.clear()
                 self._status_sub_agent.add_tool_provider(self._scene_tracker)
@@ -811,7 +811,7 @@ class RPGGameAgent:
 
             self._setup_tool_registry()
 
-            # 启动文件监听（管理器已在 BaseManager.__init__ 中注册路径）
+            # 启动文件监听（summary / memory store 会注册自己的 session 文件路径）
             get_watcher().start()
 
             # 启动消息队列消费者
@@ -820,11 +820,13 @@ class RPGGameAgent:
             self._initialized = True
 
 
-def _build_rpg_context(world_name: str, workspace: str, session_id: str) -> dict[str, object]:
+def _build_rpg_context(world_name: str, session_id: str) -> dict[str, object]:
     """Inline import of the factory to keep the top level free of side effects."""
     from rpg_core.context.factory import build_rpg_context
 
-    return build_rpg_context(world_name=world_name, workspace=workspace, session_id=session_id)
+    return build_rpg_context(world_name=world_name, session_id=session_id)
+
+
 def _build_sub_agent_context(
         character_mgr: CharacterManager | None,
         lorebook_mgr: LorebookManager | None,

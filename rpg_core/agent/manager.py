@@ -1,6 +1,6 @@
 """AgentManager — 单例，统一管理 RPGGameAgent 的创建与缓存。
 
-确保同一进程内只有一个 agent 实例池、一个 FileWatcher、一套 Manager 缓存。
+确保同一进程内只有一个 agent 实例池和一个 FileWatcher。
 
 用法::
 
@@ -17,8 +17,6 @@ from typing import TYPE_CHECKING
 from rpg_core.agent.agent import RPGGameAgent
 from llm_service.manager import LLMManager
 from llm_service.keys import AGENT_MAIN_BIZ_KEY
-from rpg_core.utils.path_utils import require_workspace
-from rpg_core.utils.path_utils import resolve_api_workspace
 
 if TYPE_CHECKING:
     pass
@@ -29,7 +27,7 @@ class AgentManager:
 
     统一管理 ``RPGGameAgent`` 的创建与缓存，确保同一进程内：
     - 相同全局 ``session_id`` 复用同一 agent 实例
-    - ``FileWatcher``、``BaseManager`` 等全局资源只初始化一次
+    - ``FileWatcher`` 等全局资源只初始化一次
     - 所有模块（FastAPI / Telegram / CLI）共享同一 agent 池
     """
 
@@ -52,7 +50,7 @@ class AgentManager:
         Parameters
         ----------
         workspace:
-            工作区标识（``""`` 表示根工作区，``"data/<name>"`` 表示命名工作区）。
+            兼容旧调用保留，核心运行时不再使用它定位业务数据。
         session_id:
             会话 ID，同一会话复用同一 agent。
         Session IDs are globally unique in rpg_data, so the runtime cache is
@@ -60,11 +58,10 @@ class AgentManager:
         """
         key = cls._cache_key(session_id)
         if key not in cls._instances:
-            workspace = require_workspace(workspace)
             manager = LLMManager.get()
             provider = manager.get_provider(AGENT_MAIN_BIZ_KEY)
             cls._instances[key] = RPGGameAgent(
-                workspace=workspace,
+                workspace="",
                 session_id=session_id,
                 model=provider.get_default_model(),
             )
@@ -74,19 +71,17 @@ class AgentManager:
     async def ensure_initialized(cls, workspace: str = "", session_id: str = "default") -> None:
         """确保至少有一个 agent 完成初始化。
 
-        触发 ``FileWatcher`` 的启动和 ``BaseManager`` 缓存加载。
+        触发 ``FileWatcher`` 的启动和 session-scoped runtime 初始化。
         在所有模块启动前调用一次即可。
 
         Parameters
         ----------
         workspace:
-            工作区标识。空值时自动回退到 API 默认工作区，
-            与 ``resolve_api_workspace`` 行为保持一致。
+            兼容旧调用保留，核心运行时不再使用它定位业务数据。
         session_id:
             初始化时使用的 session ID。默认为 ``"default"``，
             调用方应根据实际使用的 session 传入。
         """
-        workspace = resolve_api_workspace(workspace)
         if session_id in cls._initialized_targets:
             return
         agent = cls.get_or_create(workspace=workspace, session_id=session_id)
