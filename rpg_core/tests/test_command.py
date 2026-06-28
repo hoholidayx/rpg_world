@@ -6,6 +6,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from rpg_core.agent import command as command_module
 from rpg_core.agent.command import CommandDispatcher, format_command_help
 
 
@@ -83,8 +84,6 @@ class TestCommandDispatcher:
 
     @pytest.mark.asyncio
     async def test_sessions_command_marks_current_session(self, monkeypatch):
-        from rpg_core.session import SessionManager
-
         fake_agent = SimpleNamespace(
             clear_history=lambda: None,
             reload_rpg_context=AsyncMock(),
@@ -98,7 +97,19 @@ class TestCommandDispatcher:
         dispatcher = CommandDispatcher(agent=fake_agent)
         dispatcher.register_default_builtins()
 
-        monkeypatch.setattr(SessionManager, "list_sessions", classmethod(lambda cls, workspace: ["s1", "s2"]))
+        fake_gateway = SimpleNamespace(
+            catalog=SimpleNamespace(
+                list_sessions=lambda workspace, story_id: [
+                    {"id": "s1"},
+                    {"id": "s2"},
+                ],
+            ),
+        )
+        monkeypatch.setattr(
+            command_module,
+            "_current_catalog_session",
+            lambda agent: (fake_gateway, {"workspace": "data/test", "story_id": 1}),
+        )
 
         result = await dispatcher.dispatch("/sessions")
 

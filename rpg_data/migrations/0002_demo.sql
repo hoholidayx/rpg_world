@@ -48,7 +48,7 @@ INSERT OR IGNORE INTO rpg_sessions (
     workspace_id,
     story_id,
     state_json,
-    last_story_turn_index
+    story_memory_last_turn_id
 )
 VALUES (
     's_forest001',
@@ -78,7 +78,7 @@ INSERT OR IGNORE INTO rpg_sessions (
     workspace_id,
     story_id,
     state_json,
-    last_story_turn_index
+    story_memory_last_turn_id
 )
 VALUES (
     's_academy01',

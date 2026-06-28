@@ -30,6 +30,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_session_profiles",
             "rpg_session_messages",
             "rpg_session_backup_messages",
+            "rpg_session_story_memories",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -49,6 +50,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_session_profiles",
             "rpg_session_messages",
             "rpg_session_backup_messages",
+            "rpg_session_story_memories",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -66,6 +68,7 @@ def test_run_migrations_creates_initial_tables() -> None:
         session_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_sessions)")}
         session_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_messages)")}
         backup_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_backup_messages)")}
+        story_memory_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_story_memories)")}
         character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_characters)")}
         character_detail_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_character_details)")}
         lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_lorebook_entries)")}
@@ -76,7 +79,8 @@ def test_run_migrations_creates_initial_tables() -> None:
 
         profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_profiles)")}
 
-        assert "last_story_turn_index" in session_columns
+        assert "story_memory_last_turn_id" in session_columns
+        assert "last_story_turn_index" not in session_columns
         assert "session_key" not in session_columns
         assert {"session_id", "title", "description"}.issubset(profile_columns)
         assert {
@@ -90,6 +94,13 @@ def test_run_migrations_creates_initial_tables() -> None:
         }.issubset(session_message_columns)
         assert session_message_columns == backup_message_columns
         assert "hid" not in session_message_columns
+        assert {
+            "session_id",
+            "turn_id",
+            "text",
+            "dream_processed",
+            "metadata_json",
+        }.issubset(story_memory_columns)
         assert "last_story_rp_his_id" not in session_columns
         assert "enabled" not in character_columns
         assert "enabled" not in character_detail_columns
@@ -118,6 +129,9 @@ def test_run_migrations_creates_initial_tables() -> None:
             "idx_rpg_session_messages_turn",
             "idx_rpg_session_backup_messages_session_id_id",
             "idx_rpg_session_backup_messages_turn",
+            "idx_rpg_session_story_memories_session_id_id",
+            "idx_rpg_session_story_memories_turn",
+            "idx_rpg_session_story_memories_dream",
         }.issubset(indexes)
     finally:
         conn.close()

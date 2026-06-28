@@ -736,12 +736,13 @@ class MemorySubAgent(BaseSubAgent):
                 call_rec.duration_ms,
             )
         details = decision.get("story_details", [])
+        turn_id = SessionManager.latest_turn_id(conv)
 
         added = 0
         if details and self._story_store:
             for detail in details:
                 try:
-                    self._story_store.add_detail(detail, {"source": "memory_sub_agent"})
+                    self._story_store.add_detail(detail, turn_id=turn_id)
                     added += 1
                 except Exception as exc:
                     logger.warning(

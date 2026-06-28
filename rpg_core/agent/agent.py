@@ -192,28 +192,6 @@ class RPGGameAgent:
 
     # ── public API ─────────────────────────────────────────────────────
 
-    async def single_turn(self, user_input: str, record_history: bool = False) -> AgentReply:
-        """One-shot message — send user text, get structured reply.
-
-        Delegates to ``send()`` for the core logic, then rolls back
-        ``_history`` so that no conversation state persists across
-        calls.  Each invocation is stateless while sharing the same
-        internal send path.
-
-        When *record_history* is ``False`` (default), no history is
-        loaded from or saved to disk.  Pass ``record_history=True`` to
-        persist this single turn to the JSONL file for the session.
-        """
-        cp = self._session.checkpoint()
-        original = self._session.history_enabled
-        self._session.set_history_enabled(record_history)
-        try:
-            reply = await self.send(user_input)
-        finally:
-            self._session.set_history_enabled(original)
-            self._session.rollback(cp)
-        return reply
-
     async def send(self, user_input: str) -> AgentReply:
         """Send user text through the message queue and return a structured ``AgentReply``.
 
@@ -236,7 +214,7 @@ class RPGGameAgent:
         (the chat loop).  The 5-layer context is built once; subsequent
         iterations append raw assistant/tool messages.
 
-        The user message in ``_history`` / JSONL includes the ``[scene]``
+        The user message in session history includes the ``[scene]``
         context so that MemorySubAgent can see scene timeline during
         summarization (it filters ``role == "system"`` messages).
         """
@@ -580,7 +558,7 @@ class RPGGameAgent:
 
     @property
     def last_tool_records(self) -> list[ToolCallRecord] | None:
-        """Tool-call records from the most recent ``send()`` / ``single_turn()``.
+        """Tool-call records from the most recent ``send()``.
 
         ``None`` if no tool calls were made.  Useful for displaying
         intermediate tool usage in UIs without persisting them to history.
@@ -590,8 +568,8 @@ class RPGGameAgent:
     def clear_history(self) -> None:
         """清空对话历史（RPG 数据保留不动）。
 
-        Also truncates the JSONL file on disk so the next session starts
-        fresh.
+        Also clears the mutable rpg_data message table so the next session
+        starts fresh. Cold backup records are append-only.
         """
         if self._initialized:
             self._session.clear()

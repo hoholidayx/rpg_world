@@ -27,8 +27,8 @@ def build_rpg_context(
     Character, lorebook, and status indexes are read from the rpg_data catalog
     by *session_id* and its bound story. Status table CSV content is resolved
     from the rpg_data workspace root under
-    ``stories/{story_id}/{session_id}/status/``. Summary, memory, and history
-    remain loaded from ``sessions/{session_id}/`` under *workspace*.
+    ``stories/{story_id}/{session_id}/status/``. Story memory and history are
+    loaded from rpg_data by *session_id*.
     """
     from rpg_core.settings import settings as rpg_settings
     from rpg_core.context.builder import RPGContextBuilder
@@ -53,7 +53,7 @@ def build_rpg_context(
         BatchSummaryStore(workspace, session_id)
     )
     builder.set_story_memory_store(
-        StoryMemoryStore(rpg_settings.get_story_memory_path(workspace, session_id))
+        StoryMemoryStore(session_id)
     )
     recalled_store = RecalledMemoryStore()
     builder.set_recalled_memory_store(recalled_store)

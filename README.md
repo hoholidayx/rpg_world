@@ -455,12 +455,12 @@ Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace` 绑定。`
 ## Session ID 规则
 
 `session_id` 只能包含英文字母、数字和下划线，规则为 `^[A-Za-z0-9_]+$`。
-它会直接映射到 `sessions/{session_id}/` 目录，因此默认渠道会话名使用下划线格式，例如 `cli_direct`、`telegram_main_12345`。
+Play WebUI 创建 session 时会在 `rpg_data` 绑定 `workspace_id + story_id`，会话内链路只使用全局短 `session_id`。
 
 ### 会话历史字段
 
-`history.jsonl` 中每条消息会持久化 `hid`、`turn_id`、`seq_in_turn` 等字段。`hid` 只是记录用的消息标识，不参与逻辑计算。
-turn / rounds / 历史切片等逻辑统一由 `SessionManager` 提供，降级顺序为 `turn_id -> user anchor -> 2 messages -> 1 message`。故事记忆续提游标按逻辑 turn 索引持久化，因此重启后也能沿同一规则继续提取。
+会话消息写入 `rpg_session_messages`，冷备份写入 `rpg_session_backup_messages`。数据库自增 `id` 映射为 `Message.uid`；`turn_id` 和 `seq_in_turn` 由 `SessionManager` 管理。
+剧情记忆写入 `rpg_session_story_memories`，续提游标保存在 `rpg_sessions.story_memory_last_turn_id`。
 
 ## 测试
 

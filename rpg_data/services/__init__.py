@@ -10,6 +10,7 @@ from rpg_data.services.gateway import (
 )
 from rpg_data.services.lorebook import LorebookReadService
 from rpg_data.services.message import MessageService
+from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "DataServiceGateway",
     "LorebookReadService",
     "MessageService",
+    "StoryMemoryService",
     "StatusTableService",
     "get_data_service_gateway",
     "reset_data_service_gateways",

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS rpg_sessions (
     workspace_id TEXT NOT NULL,
     story_id INTEGER NOT NULL,
     state_json TEXT NOT NULL DEFAULT '{}',
-    last_story_turn_index INTEGER NOT NULL DEFAULT 0,
+    story_memory_last_turn_id INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -76,6 +76,19 @@ CREATE TABLE IF NOT EXISTS rpg_session_backup_messages (
     seq_in_turn INTEGER NOT NULL DEFAULT 0,
     tool_call_id TEXT NOT NULL DEFAULT '',
     tool_calls_json TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rpg_session_story_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    turn_id INTEGER NOT NULL DEFAULT 0,
+    text TEXT NOT NULL DEFAULT '',
+    dream_processed INTEGER NOT NULL DEFAULT 0 CHECK (dream_processed IN (0, 1)),
     metadata_json TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -258,6 +271,9 @@ CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_session_id_id ON rpg_session
 CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_turn ON rpg_session_messages(session_id, turn_id, seq_in_turn, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_backup_messages_session_id_id ON rpg_session_backup_messages(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_backup_messages_turn ON rpg_session_backup_messages(session_id, turn_id, seq_in_turn, id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_story_memories_session_id_id ON rpg_session_story_memories(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_story_memories_turn ON rpg_session_story_memories(session_id, turn_id, id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_story_memories_dream ON rpg_session_story_memories(session_id, dream_processed, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_characters_workspace_id ON rpg_characters(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_character_details_character_id ON rpg_character_details(character_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_lorebook_entries_workspace_id ON rpg_lorebook_entries(workspace_id);

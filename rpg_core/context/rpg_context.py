@@ -42,7 +42,7 @@ class MsgKey:
 
     ROLE = "role"
     CONTENT = "content"
-    HID = "hid"
+    UID = "uid"
     TURN_ID = "turn_id"
     SEQ_IN_TURN = "seq_in_turn"
 
@@ -50,13 +50,13 @@ class MsgKey:
 class Message:
     """Typed wrapper for OpenAI-compatible message dicts."""
 
-    __slots__ = ("_role", "_content", "_hid", "_turn_id", "_seq_in_turn", "_tool_call_id", "_tool_calls")
+    __slots__ = ("_role", "_content", "_uid", "_turn_id", "_seq_in_turn", "_tool_call_id", "_tool_calls")
 
     def __init__(
         self,
         role: Role | str,
         content: str,
-        hid: int = 0,
+        uid: int = 0,
         turn_id: int = 0,
         seq_in_turn: int = 0,
         tool_call_id: str = "",
@@ -64,7 +64,7 @@ class Message:
     ) -> None:
         self._role = Role(role) if isinstance(role, str) else role
         self._content = content
-        self._hid = int(hid)
+        self._uid = int(uid)
         self._turn_id = int(turn_id)
         self._seq_in_turn = int(seq_in_turn)
         self._tool_call_id = tool_call_id
@@ -79,8 +79,8 @@ class Message:
         return self._content
 
     @property
-    def hid(self) -> int:
-        return self._hid
+    def uid(self) -> int:
+        return self._uid
 
     @property
     def turn_id(self) -> int:
@@ -120,8 +120,8 @@ class Message:
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {MsgKey.ROLE: self._role.value, MsgKey.CONTENT: self._content}
-        if self._hid:
-            d[MsgKey.HID] = self._hid
+        if self._uid:
+            d[MsgKey.UID] = self._uid
         if self._turn_id:
             d[MsgKey.TURN_ID] = self._turn_id
         if self._seq_in_turn:
@@ -137,7 +137,7 @@ class Message:
         return cls(
             role=d[MsgKey.ROLE],
             content=d.get(MsgKey.CONTENT, ""),
-            hid=int(d.get(MsgKey.HID, 0) or 0),
+            uid=int(d.get(MsgKey.UID, 0) or 0),
             turn_id=int(d.get(MsgKey.TURN_ID, 0) or 0),
             seq_in_turn=int(d.get(MsgKey.SEQ_IN_TURN, 0) or 0),
             tool_call_id=d.get("tool_call_id", ""),

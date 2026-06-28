@@ -66,7 +66,7 @@ class ToolCallRecord:
 
 
 class AgentReply:
-    """Structured result returned by ``send()`` / ``single_turn()``.
+    """Structured result returned by ``send()``.
 
     Contains the final text reply and optional intermediate records
     (tool calls, status sub-agent, and aggregated stats).

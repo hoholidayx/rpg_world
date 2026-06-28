@@ -165,7 +165,7 @@ MVP 不读取、迁移或兼容以下旧数据：
 - `data/<workspace>/sessions/<session_id>/history.jsonl`。
 - `history_cold.jsonl`。
 - `session.json`。
-- `rpg_summaries.json` / `story_memory.json` / `persistent_memory.json`。
+- `rpg_summaries.json` / `persistent_memory.json`。
 - `character/*.json`。
 - `lorebook/*.json`。
 - `status/**/*.csv`。

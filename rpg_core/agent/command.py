@@ -57,14 +57,18 @@ async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
 
 async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
     """列出当前工作区所有会话。"""
-    from rpg_core.session import SessionManager
+    gateway, current_session = _current_catalog_session(agent)
 
-    sessions = SessionManager.list_sessions(agent._workspace)
+    sessions = gateway.catalog.list_sessions(
+        str(current_session["workspace"]),
+        int(current_session["story_id"]),
+    ) or []
     current = agent._session_id
     lines = [f"会话列表 ({len(sessions)}):", f"当前会话: {current}"]
-    for s in sessions:
-        marker = " （当前）" if s == current else ""
-        lines.append(f"- {s}{marker}")
+    for session in sessions:
+        sid = str(session["id"])
+        marker = " （当前）" if sid == current else ""
+        lines.append(f"- {sid}{marker}")
     return "\n".join(lines)
 
 
@@ -76,11 +80,21 @@ async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
         return "[错误] 需要提供 session_id: /session_create <id>"
     sid = args[0]
     try:
-        SessionManager.create(agent._workspace, sid)
+        SessionManager.validate_session_id(sid)
     except ValueError as exc:
         return f"[错误] {exc}"
-    except FileExistsError:
+
+    gateway, current_session = _current_catalog_session(agent)
+    if gateway.catalog.get_session(sid) is not None:
         return f"[会话已存在: {sid}]"
+    created = gateway.catalog.create_session(
+        str(current_session["workspace"]),
+        int(current_session["story_id"]),
+        session_id=sid,
+        title=sid,
+    )
+    if created is None:
+        return f"[错误] 无法在当前故事下创建会话: {sid}"
     return f"[会话已创建: {sid}]"
 
 
@@ -95,10 +109,26 @@ async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
         SessionManager.validate_session_id(sid)
     except ValueError as exc:
         return f"[错误] {exc}"
-    if sid not in SessionManager.list_sessions(agent._workspace):
+    gateway, current_session = _current_catalog_session(agent)
+    target = gateway.catalog.get_session(sid)
+    if (
+        target is None
+        or str(target["workspace"]) != str(current_session["workspace"])
+        or int(target["story_id"]) != int(current_session["story_id"])
+    ):
         return f"[会话不存在: {sid}]"
     await agent.switch_session(sid)
     return f"[已切换到会话: {sid}]"
+
+
+def _current_catalog_session(agent: RPGGameAgent):
+    from rpg_data.services import get_data_service_gateway
+
+    gateway = get_data_service_gateway()
+    current_session = gateway.catalog.get_session(agent._session_id)
+    if current_session is None:
+        raise FileNotFoundError(f"Session not found in rpg_data: {agent._session_id}")
+    return gateway, current_session
 
 
 # ── 数据类 ──────────────────────────────────────────────────────────────
@@ -201,7 +231,7 @@ class CommandDispatcher:
         )
         self.register_builtin(
             "/session_create", "创建新会话",
-            "用法：/session_create <id>。在新会话目录下初始化数据文件。", _cmd_session_create,
+            "用法：/session_create <id>。在当前故事下创建新的 rpg_data 会话。", _cmd_session_create,
         )
         self.register_builtin(
             "/session_switch", "切换到指定会话",

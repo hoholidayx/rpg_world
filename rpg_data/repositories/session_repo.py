@@ -8,6 +8,7 @@ import string
 from peewee import JOIN
 from peewee import IntegrityError
 from peewee import Database
+from peewee import SQL
 
 from rpg_data import models
 from rpg_data.repositories.records import SessionProfileRecord, SessionRecord, bind_database
@@ -28,7 +29,7 @@ class SessionRepository:
         title: str = "",
         description: str = "",
         state_json: str = "{}",
-        last_story_turn_index: int = 0,
+        story_memory_last_turn_id: int = 0,
         metadata_json: str = "{}",
     ) -> models.Session:
         created_id = session_id or _new_session_id()
@@ -40,7 +41,7 @@ class SessionRepository:
                         workspace=workspace_id,
                         story=story_id,
                         state_json=state_json,
-                        last_story_turn_index=last_story_turn_index,
+                        story_memory_last_turn_id=story_memory_last_turn_id,
                     )
                     SessionProfileRecord.create(
                         session=created_id,
@@ -92,6 +93,24 @@ class SessionRepository:
     def update_timestamp(self, session_id: str) -> models.Session | None:
         row = update_timestamp(SessionRecord, session_id)
         return to_session(row) if row is not None else None
+
+    def update_story_memory_last_turn_id(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> models.Session | None:
+        updated = (
+            SessionRecord
+            .update(
+                story_memory_last_turn_id=max(0, int(turn_id)),
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(SessionRecord.id == session_id)
+            .execute()
+        )
+        if not updated:
+            return None
+        return self.get(session_id)
 
 
 _SESSION_ID_ALPHABET = string.ascii_lowercase + string.digits

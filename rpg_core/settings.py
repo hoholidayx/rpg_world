@@ -434,10 +434,9 @@ class Settings(ProfiledYamlSettings):
     def session_dir(self, workspace: str, session_id: str) -> Path:
         """Return the per-session directory for *session_id*.
 
-        All file-backed session data (history, summary, memory) lives
-        under this directory.  Use the dedicated getter methods below
-        (``get_history_path``, ``get_story_memory_path``, …) to access specific
-        sub-paths; avoid joining *session_dir* by hand.
+        Legacy file-backed session data lives under this directory.  Use the
+        dedicated getter methods below to access specific sub-paths; avoid
+        joining *session_dir* by hand.
         """
         return self.sessions_base_dir(workspace) / session_id
 
@@ -555,10 +554,6 @@ class Settings(ProfiledYamlSettings):
     def get_summary_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``rpg_summaries.json`` file path for the given session."""
         return self.session_dir(workspace, session_id) / "rpg_summaries.json"
-
-    def get_story_memory_path(self, workspace: str, session_id: str) -> Path:
-        """Return the ``story_memory.json`` file path for the given session."""
-        return self.session_dir(workspace, session_id) / "story_memory.json"
 
     def get_persistent_memory_path(self, workspace: str, session_id: str) -> Path:
         """Return the ``persistent_memory.json`` file path for the given session."""

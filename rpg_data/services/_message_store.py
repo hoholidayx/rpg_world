@@ -92,6 +92,19 @@ class BaseSessionMessageStore:
             .count()
         )
 
+    def latest_turn_id(self, session_id: str) -> int:
+        row = (
+            self._record_model
+            .select(self._record_model.turn_id)
+            .where(self._record_model.session == session_id)
+            .order_by(self._record_model.turn_id.desc(), self._record_model.id.desc())
+            .limit(1)
+            .first()
+        )
+        if row is None:
+            return 0
+        return max(0, int(row.turn_id))
+
     def update(
         self,
         message_id: int,

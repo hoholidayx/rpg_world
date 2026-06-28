@@ -57,7 +57,7 @@ class CallRecord:
 
 @dataclass
 class TurnStats:
-    """一次 ``send()`` / ``single_turn()`` 中所有 LLM 调用的聚合。
+    """一次 ``send()`` 中所有 LLM 调用的聚合。
 
     Usage::
 

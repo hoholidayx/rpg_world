@@ -16,6 +16,7 @@ from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterReadService
 from rpg_data.services.lorebook import LorebookReadService
 from rpg_data.services.message import MessageService
+from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
 from rpg_data.settings import resolve_database_path
 
@@ -39,6 +40,7 @@ class DataServiceGateway:
         self._lorebook: LorebookReadService | None = None
         self._messages: MessageService | None = None
         self._backup: BackupService | None = None
+        self._story_memory: StoryMemoryService | None = None
         self._status: StatusTableService | None = None
         self._initialized = False
         logger.debug("data service gateway created db_path=%s", self._database_path)
@@ -101,6 +103,15 @@ class DataServiceGateway:
         return self._backup
 
     @property
+    def story_memory(self) -> StoryMemoryService:
+        database = self.database
+        if self._story_memory is None:
+            logger.debug("creating story memory service db_path=%s", self._database_path)
+            self._story_memory = StoryMemoryService(database)
+        self._ensure_bound()
+        return self._story_memory
+
+    @property
     def status(self) -> StatusTableService:
         database = self.database
         if self._status is None:
@@ -142,6 +153,7 @@ class DataServiceGateway:
         self._lorebook = None
         self._messages = None
         self._backup = None
+        self._story_memory = None
         self._status = None
 
     def _ensure_bound(self) -> None:

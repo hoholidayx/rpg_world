@@ -27,6 +27,7 @@ __all__ = [
     "SessionMessageRecord",
     "SessionProfileRecord",
     "SessionRecord",
+    "SessionStoryMemoryRecord",
     "SessionStatusTableRecord",
     "SessionStatusTypeRecord",
     "StoryCharacterRecord",
@@ -126,7 +127,7 @@ class SessionRecord(BaseRecord):
         on_delete="CASCADE",
     )
     state_json = TextField(default="{}")
-    last_story_turn_index = IntegerField(default=0)
+    story_memory_last_turn_id = IntegerField(default=0)
     version = IntegerField(default=1)
     created_at = TextField()
     updated_at = TextField()
@@ -198,6 +199,26 @@ class SessionBackupMessageRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_session_backup_messages"
+
+
+class SessionStoryMemoryRecord(BaseRecord):
+    id = AutoField()
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="story_memories",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    turn_id = IntegerField(default=0)
+    text = TextField(default="")
+    dream_processed = BooleanField(default=False)
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_story_memories"
 
 
 class CharacterRecord(BaseRecord):
@@ -466,6 +487,7 @@ RECORD_MODELS = (
     SessionProfileRecord,
     SessionMessageRecord,
     SessionBackupMessageRecord,
+    SessionStoryMemoryRecord,
     CharacterRecord,
     CharacterDetailRecord,
     LorebookEntryRecord,

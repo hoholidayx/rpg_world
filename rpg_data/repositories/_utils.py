@@ -70,7 +70,7 @@ def to_session(row: records.SessionRecord) -> models.Session:
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
         state_json=str(row.state_json or "{}"),
-        last_story_turn_index=int(row.last_story_turn_index),
+        story_memory_last_turn_id=int(row.story_memory_last_turn_id),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),
@@ -106,6 +106,20 @@ def to_session_message(
         seq_in_turn=int(row.seq_in_turn),
         tool_call_id=str(row.tool_call_id or ""),
         tool_calls_json=str(row.tool_calls_json or ""),
+        metadata_json=str(row.metadata_json or "{}"),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_session_story_memory(row: records.SessionStoryMemoryRecord) -> models.SessionStoryMemory:
+    return models.SessionStoryMemory(
+        id=int(row.id),
+        session_id=str(row.session_id),
+        turn_id=int(row.turn_id),
+        text=str(row.text or ""),
+        dream_processed=bool(row.dream_processed),
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),
         created_at=str(row.created_at),

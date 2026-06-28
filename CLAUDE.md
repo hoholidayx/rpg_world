@@ -121,9 +121,6 @@ rpg_world/
         ├── stories/{story_id}/{session_id}/status/
         │   └── ...               # session 独立状态表副本 CSV（rpg_data 索引）
         └── sessions/{id}/
-            ├── history.jsonl
-            ├── history_cold.jsonl
-            ├── story_memory.json
             ├── rpg_summaries.json
             ├── summaries/
             └── memory_vectors.db
@@ -383,7 +380,7 @@ agent.send(user_input)
   → run_chat_loop(provider, tool_registry, messages)
     → LLM 可能调工具（scene.set_time / set_attr / file tools）
     → 每轮记录 TurnStats + CallRecord
-  → 回复写入 _history + history.jsonl + history_cold.jsonl
+  → 回复写入 _history + rpg_data 主消息表 + backup 消息表
   → 返回 AgentReply（含 text + tool_records + stats）
 ```
 
@@ -432,16 +429,16 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 
 ### 对话历史持久化
 
-- `history.jsonl` — 主文件，消息记录使用 `hid` 作为标识，`hid` 只用于记录，不参与 turn 逻辑
-- `history_cold.jsonl` — 冷备份，只追加永不截断
-- `story_memory.json` — 剧情记忆（FileWatcher）
-- `rpg_summaries.json` — 对话摘要（FileWatcher）
-- `summaries/` — 批次摘要文件
+- `rpg_session_messages` — 主消息表，`id` 映射为 `Message.uid`，支持替换、清空、截断
+- `rpg_session_backup_messages` — 冷备份消息表，只追加永不截断
+- `rpg_session_story_memories` — 剧情记忆表，记录 `turn_id` 和 `dream_processed`
+- `rpg_sessions.story_memory_last_turn_id` — 剧情记忆续提游标
+- `rpg_summaries.json` / `summaries/` — 对话摘要文件
 - `memory_vectors.db*` — memory SQLite / WAL / SHM 索引文件
 
-会话层的 turn / rounds 统一由 `SessionManager` 负责，降级顺序固定为：`turn_id -> user anchor -> 2 messages -> 1 message`。故事记忆续提游标按逻辑 turn 索引持久化，进程重启后继续沿同一套 turn 分组规则提取。
+会话层的 turn / rounds 统一由 `SessionManager` 负责，显式 `turn_id` 是当前主路径；旧无 turn_id 消息仅在内存分组工具中保留降级规则。故事记忆续提游标按最后处理的 `turn_id` 持久化，进程重启后从 rpg_data 继续。
 
-Agent runtime 会话历史、摘要和 memory 文件集中在 `{workspace_root}/sessions/{session_id}/` 下。
+Agent runtime 会话消息和剧情记忆由 `rpg_data` 管理；摘要和 memory 文件集中在 `{workspace_root}/sessions/{session_id}/` 下。
 `rpg_data` 管理的状态表 session 副本单独位于 `{workspace_root}/stories/{story_id}/{session_id}/status/`，
 由 SQL 索引记录 workspace-relative 路径。
 

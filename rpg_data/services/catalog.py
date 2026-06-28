@@ -74,6 +74,7 @@ class CatalogService:
         workspace_id: str,
         story_id: int,
         *,
+        session_id: str | None = None,
         title: str = "",
         description: str = "",
     ) -> _SessionSummary | None:
@@ -86,6 +87,7 @@ class CatalogService:
             session = self._sessions.create(
                 workspace_id,
                 story_id,
+                session_id=session_id,
                 title=title,
                 description=description,
             )

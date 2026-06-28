@@ -93,6 +93,9 @@ class MessageService:
     def count(self, session_id: str) -> int:
         return self._store.count(session_id)
 
+    def latest_turn_id(self, session_id: str) -> int:
+        return self._store.latest_turn_id(session_id)
+
     def replace(
         self,
         session_id: str,

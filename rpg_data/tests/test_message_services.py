@@ -15,6 +15,7 @@ from rpg_data.repositories.records import (
 )
 from rpg_data.services.backup import BackupService
 from rpg_data.services.message import MessageService
+from rpg_data.services.story_memory import StoryMemoryService
 
 
 def _migrated_database(tmp_path: Path) -> SqliteDatabase:
@@ -49,6 +50,7 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         assert [row.content for row in messages.list("s_forest001")] == ["hello", "world"]
         assert messages.count("s_forest001") == 2
         assert not hasattr(first, "hid")
+        assert first.to_message_dict()["uid"] == first.id
         assert messages.list("s_forest001", limit=1, offset=1)[0].id == second.id
 
         updated = messages.update(second.id, content="updated", tool_call_id="tc1")
@@ -97,6 +99,47 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
 
         with pytest.raises(ValueError):
             messages.append("s_forest001", "bad_role", "invalid")
+    finally:
+        database.close()
+
+
+def test_story_memory_service_crud_and_cursor(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        story_memory = StoryMemoryService(database)
+
+        first = story_memory.add_detail("s_forest001", "remember this", turn_id=2)
+        second = story_memory.add_detail(
+            "s_forest001",
+            "dream this",
+            turn_id=3,
+            dream_processed=True,
+            metadata_json='{"kind":"test"}',
+        )
+
+        assert [row.text for row in story_memory.list("s_forest001")] == ["remember this", "dream this"]
+        assert [row.id for row in story_memory.list("s_forest001", dream_processed=True)] == [second.id]
+        assert story_memory.get(first.id).to_context_dict()["turn_id"] == 2
+        assert story_memory.get(second.id).to_context_dict()["metadata"] == {"kind": "test"}
+
+        assert story_memory.get_last_turn_id("s_forest001") == 0
+        story_memory.set_last_turn_id("s_forest001", 3)
+        assert story_memory.get_last_turn_id("s_forest001") == 3
+
+        assert story_memory.set_dream_processed([first.id], dream_processed=True) == 1
+        assert {row.id for row in story_memory.list("s_forest001", dream_processed=True)} == {
+            first.id,
+            second.id,
+        }
+
+        replacement = story_memory.set_details(
+            "s_forest001",
+            [
+                {"text": "replacement", "turn_id": 4, "metadata": {"kind": "unit"}},
+            ],
+        )
+        assert [row.text for row in replacement] == ["replacement"]
+        assert story_memory.list("s_forest001")[0].to_context_dict()["metadata"] == {"kind": "unit"}
     finally:
         database.close()
 

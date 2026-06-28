@@ -262,10 +262,59 @@ def temp_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "get_cold_history_path", lambda workspace, session_id: session_root(workspace, session_id) / "history_cold.jsonl")
     monkeypatch.setattr(settings, "get_session_meta_path", lambda workspace, session_id: session_root(workspace, session_id) / "session.json")
     monkeypatch.setattr(settings, "get_summary_path", lambda workspace, session_id: session_root(workspace, session_id) / "rpg_summaries.json")
-    monkeypatch.setattr(settings, "get_story_memory_path", lambda workspace, session_id: session_root(workspace, session_id) / "story_memory.json")
     monkeypatch.setattr(settings, "get_persistent_memory_path", lambda workspace, session_id: session_root(workspace, session_id) / "persistent_memory.md")
     monkeypatch.setattr(settings, "get_vector_db_path", lambda workspace, session_id: str(session_root(workspace, session_id) / "memory_vectors.db"))
     return root
+
+
+@pytest.fixture
+def rpg_data_gateway(tmp_path, monkeypatch):
+    from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
+
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_data.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    gateway = get_data_service_gateway()
+    yield gateway
+    reset_data_service_gateways()
+
+
+@pytest.fixture
+def make_data_session(rpg_data_gateway):
+    from rpg_data.repositories.session_repo import SessionRepository
+    from rpg_data.repositories.story_repo import StoryRepository
+    from rpg_data.repositories.workspace_repo import WorkspaceRepository
+
+    def _make(
+        session_id: str = "s1",
+        *,
+        workspace_id: str = "test_workspace",
+        story_title: str = "Test Story",
+    ) -> str:
+        database = rpg_data_gateway.database
+        workspaces = WorkspaceRepository(database)
+        stories = StoryRepository(database)
+        sessions = SessionRepository(database)
+
+        with database.atomic():
+            if workspaces.get(workspace_id) is None:
+                workspaces.create(workspace_id, workspace_id, f"data/{workspace_id}")
+            story = next(
+                (candidate for candidate in stories.list(workspace_id) if candidate.title == story_title),
+                None,
+            )
+            if story is None:
+                story = stories.create(workspace_id, story_title)
+            if sessions.get(session_id) is None:
+                sessions.create(
+                    workspace_id,
+                    story.id,
+                    session_id=session_id,
+                    title=session_id,
+                )
+        return session_id
+
+    return _make
 
 
 @pytest.fixture

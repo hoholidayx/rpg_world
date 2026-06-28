@@ -68,12 +68,25 @@ def integration_settings(monkeypatch):
 
 
 @pytest.fixture
-def integration_workspace(tmp_path):
-    return tmp_path
+def integration_workspace(tmp_path, monkeypatch):
+    from rpg_data.services import reset_data_service_gateways
+
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_data.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    yield tmp_path
+    reset_data_service_gateways()
+
+
+@pytest.fixture
+def integration_data_gateway(integration_workspace):  # noqa: ARG001
+    from rpg_data.services import get_data_service_gateway
+
+    return get_data_service_gateway()
 
 
 @pytest_asyncio.fixture
-async def integration_agent(integration_settings, integration_workspace):
+async def integration_agent(integration_settings, integration_workspace, integration_data_gateway):
     session_id = "integration_smoke"
     workspace = str(integration_workspace)
     api_key = integration_settings.resolve_openai_api_key()
@@ -81,6 +94,7 @@ async def integration_agent(integration_settings, integration_workspace):
         pytest.skip(
             "configure agent.api_key or INTEGRATION_OPENAI_API_KEY in rpg_core/tests/integration/settings.test.yaml"
         )
+    _ensure_integration_session(integration_data_gateway, integration_workspace, session_id)
     agent = RPGGameAgent(
         session_id=session_id,
         workspace=workspace,
@@ -110,3 +124,27 @@ async def integration_agent(integration_settings, integration_workspace):
 def integration_session_dir(integration_settings, integration_workspace):
     session_id = "integration_smoke"
     return integration_settings.session_dir(str(integration_workspace), session_id)
+
+
+def _ensure_integration_session(gateway, integration_workspace, session_id: str) -> None:
+    from rpg_data.repositories.session_repo import SessionRepository
+    from rpg_data.repositories.story_repo import StoryRepository
+    from rpg_data.repositories.workspace_repo import WorkspaceRepository
+
+    workspace_id = "integration_workspace"
+    database = gateway.database
+    workspaces = WorkspaceRepository(database)
+    stories = StoryRepository(database)
+    sessions = SessionRepository(database)
+
+    with database.atomic():
+        if workspaces.get(workspace_id) is None:
+            workspaces.create(workspace_id, "Integration Workspace", str(integration_workspace))
+        story = next(
+            (candidate for candidate in stories.list(workspace_id) if candidate.title == "Integration Story"),
+            None,
+        )
+        if story is None:
+            story = stories.create(workspace_id, "Integration Story")
+        if sessions.get(session_id) is None:
+            sessions.create(workspace_id, story.id, session_id=session_id, title=session_id)

@@ -14,6 +14,7 @@ __all__ = [
     "SessionLorebookEntry",
     "SessionMessage",
     "SessionProfile",
+    "SessionStoryMemory",
     "SessionStatusTable",
     "SessionStatusType",
     "Story",
@@ -65,7 +66,7 @@ class Session:
     workspace_id: str
     story_id: int
     state_json: str = "{}"
-    last_story_turn_index: int = 0
+    story_memory_last_turn_id: int = 0
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
@@ -101,6 +102,53 @@ class SessionMessage:
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+
+    def to_message_dict(self) -> dict[str, object]:
+        data: dict[str, object] = {
+            "role": self.role,
+            "content": self.content,
+        }
+        if self.id:
+            data["uid"] = self.id
+        if self.turn_id:
+            data["turn_id"] = self.turn_id
+        if self.seq_in_turn:
+            data["seq_in_turn"] = self.seq_in_turn
+        if self.tool_call_id:
+            data["tool_call_id"] = self.tool_call_id
+        if self.tool_calls_json:
+            import json
+
+            data["tool_calls"] = json.loads(self.tool_calls_json)
+        return data
+
+
+@dataclass(frozen=True)
+class SessionStoryMemory:
+    id: int
+    session_id: str
+    turn_id: int
+    text: str = ""
+    dream_processed: bool = False
+    metadata_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_context_dict(self) -> dict[str, object]:
+        import json
+
+        try:
+            metadata = json.loads(self.metadata_json or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        return {
+            "id": self.id,
+            "turn_id": self.turn_id,
+            "text": self.text,
+            "dream_processed": self.dream_processed,
+            "metadata": metadata if isinstance(metadata, dict) else {},
+        }
 
 
 @dataclass(frozen=True)

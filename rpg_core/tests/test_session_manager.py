@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from rpg_core.context.rpg_context import Message, Role
@@ -31,7 +29,19 @@ def test_create_list_delete_clone_session(temp_settings, workspace):
     assert sorted(SessionManager.list_sessions(workspace)) == ["s1", "s3"]
 
 
-def test_append_persists_history_and_unique_ids(temp_settings, workspace):
+def test_load_requires_rpg_data_session(rpg_data_gateway):  # noqa: ARG001
+    mgr = SessionManager(session_id="missing_session", history_enabled=True)
+
+    with pytest.raises(FileNotFoundError):
+        mgr.load()
+
+
+def test_append_persists_messages_backup_and_unique_uids(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
+    make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
 
@@ -40,93 +50,105 @@ def test_append_persists_history_and_unique_ids(temp_settings, workspace):
     mgr.append(Role.ASSISTANT, "world", turn_id=turn_id)
     mgr.end_turn(turn_id)
 
-    history_path = temp_settings / workspace / "sessions" / "s1" / "history.jsonl"
-    cold_path = temp_settings / workspace / "sessions" / "s1" / "history_cold.jsonl"
-    meta_path = temp_settings / workspace / "sessions" / "s1" / "session.json"
+    main_rows = rpg_data_gateway.messages.list("s1")
+    backup_rows = rpg_data_gateway.backup.messages.list("s1")
 
-    history_rows = history_path.read_text(encoding="utf-8").strip().splitlines()
-    cold_rows = cold_path.read_text(encoding="utf-8").strip().splitlines()
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-
-    assert len(history_rows) == 2
-    assert len(cold_rows) == 2
-    assert json.loads(history_rows[0])["hid"] != json.loads(history_rows[1])["hid"]
-    assert json.loads(history_rows[0])["turn_id"] == json.loads(history_rows[1])["turn_id"] == turn_id
-    assert json.loads(history_rows[0])["seq_in_turn"] == 1
-    assert json.loads(history_rows[1])["seq_in_turn"] == 2
-    assert meta["next_turn_id"] == turn_id + 1
-    assert mgr.history[0].content == "hello"
+    assert [row.content for row in main_rows] == ["hello", "world"]
+    assert [row.content for row in backup_rows] == ["hello", "world"]
+    assert [row.id for row in main_rows] == [message.uid for message in mgr.history]
+    assert main_rows[0].id != main_rows[1].id
+    assert [row.turn_id for row in main_rows] == [turn_id, turn_id]
+    assert [row.seq_in_turn for row in main_rows] == [1, 2]
     assert mgr.count_new_turns_since_story() == 1
 
     reloaded = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     reloaded.load()
+    assert [message.uid for message in reloaded.history] == [row.id for row in main_rows]
     assert reloaded.begin_turn() == turn_id + 1
 
 
-def test_count_new_turns_uses_user_anchor_when_turn_ids_missing(temp_settings, workspace):
+def test_story_cursor_uses_turn_ids(make_data_session, workspace):
+    make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
 
-    mgr.append(Role.USER, "u1", turn_id=0)
-    mgr.append(Role.ASSISTANT, "a1", turn_id=0)
-    mgr.append(Role.ASSISTANT, "tool-like", turn_id=0)
+    t1 = mgr.begin_turn()
+    mgr.append(Role.USER, "u1", turn_id=t1)
+    mgr.append(Role.ASSISTANT, "a1", turn_id=t1)
+    mgr.end_turn(t1)
+    t2 = mgr.begin_turn()
+    mgr.append(Role.USER, "u2", turn_id=t2)
+    mgr.append(Role.ASSISTANT, "a2", turn_id=t2)
+    mgr.end_turn(t2)
 
+    mgr.set_story_memory_last_turn_id(t1)
+
+    assert [m.content for m in mgr.story_messages_since_last_extraction()] == ["u2", "a2"]
     assert mgr.count_new_turns_since_story() == 1
 
-
-def test_count_new_turns_uses_two_message_fallback_without_user_anchor(temp_settings, workspace):
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
-    mgr.load()
-
-    mgr.replace_history([
-        Message(Role.ASSISTANT, "a1", hid=1, turn_id=0, seq_in_turn=0),
-        Message(Role.TOOL, "tool1", hid=2, turn_id=0, seq_in_turn=0),
-        Message(Role.SYSTEM, "sys1", hid=3, turn_id=0, seq_in_turn=0),
-    ], persist=False)
-
-    assert mgr.count_new_turns_since_story() == 2
+    mgr.mark_story_messages_processed(mgr.story_messages_since_last_extraction())
+    assert mgr.story_memory_last_turn_id == t2
+    assert mgr.story_messages_since_last_extraction() == []
 
 
-def test_count_new_turns_uses_single_message_fallback_without_user_anchor(temp_settings, workspace):
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
-    mgr.load()
+def test_iter_turn_groups_uses_two_message_fallback_without_user_anchor():
+    messages = [
+        Message(Role.ASSISTANT, "a1", uid=1, turn_id=0, seq_in_turn=0),
+        Message(Role.TOOL, "tool1", uid=2, turn_id=0, seq_in_turn=0),
+        Message(Role.SYSTEM, "sys1", uid=3, turn_id=0, seq_in_turn=0),
+    ]
 
-    mgr.replace_history([
-        Message(Role.ASSISTANT, "a1", hid=1, turn_id=0, seq_in_turn=0),
-    ], persist=False)
+    assert [
+        [message.content for message in group]
+        for group in SessionManager.iter_turn_groups(messages)
+    ] == [["a1", "tool1"], ["sys1"]]
 
-    assert mgr.count_new_turns_since_story() == 1
+
+def test_iter_turn_groups_uses_single_message_fallback_without_user_anchor():
+    messages = [
+        Message(Role.ASSISTANT, "a1", uid=1, turn_id=0, seq_in_turn=0),
+    ]
+
+    assert [
+        [message.content for message in group]
+        for group in SessionManager.iter_turn_groups(messages)
+    ] == [["a1"]]
 
 
-def test_message_from_dict_ignores_legacy_rp_his_key():
-    legacy_key = "rp_" + "his_id"
-    msg = Message.from_dict({"role": "user", "content": "hello", legacy_key: 123})
+def test_message_from_dict_ignores_legacy_hid_key():
+    msg = Message.from_dict({"role": "user", "content": "hello", "hid": 123})
 
-    assert msg.hid == 0
+    assert msg.uid == 0
     assert msg.to_dict() == {"role": "user", "content": "hello"}
 
 
-def test_story_turn_cursor_uses_logical_groups_without_turn_ids(temp_settings, workspace):
+def test_story_cursor_survives_restart(make_data_session, workspace):
+    make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
-    mgr.replace_history([
-        Message(Role.ASSISTANT, "a1", hid=1, turn_id=0, seq_in_turn=0),
-        Message(Role.TOOL, "t1", hid=2, turn_id=0, seq_in_turn=0),
-        Message(Role.SYSTEM, "s1", hid=3, turn_id=0, seq_in_turn=0),
-    ], persist=True)
-    mgr.set_last_story_turn_index(1)
+
+    t1 = mgr.begin_turn()
+    mgr.append(Role.USER, "u1", turn_id=t1)
+    mgr.append(Role.ASSISTANT, "a1", turn_id=t1)
+    mgr.end_turn(t1)
+    t2 = mgr.begin_turn()
+    mgr.append(Role.USER, "u2", turn_id=t2)
+    mgr.append(Role.ASSISTANT, "a2", turn_id=t2)
+    mgr.end_turn(t2)
+    mgr.set_story_memory_last_turn_id(t1)
 
     reloaded = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     reloaded.load()
 
-    assert [m.content for m in reloaded.story_messages_since_last_extraction()] == ["s1"]
+    assert [m.content for m in reloaded.story_messages_since_last_extraction()] == ["u2", "a2"]
     assert reloaded.count_new_turns_since_story() == 1
 
     reloaded.mark_story_messages_processed(reloaded.story_messages_since_last_extraction())
-    assert reloaded.last_story_turn_index == 2
+    assert reloaded.story_memory_last_turn_id == t2
 
 
-def test_rebuild_turn_state_after_history_compaction(temp_settings, workspace):
+def test_rebuild_turn_state_after_history_compaction(make_data_session, workspace):
+    make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
 
@@ -141,8 +163,8 @@ def test_rebuild_turn_state_after_history_compaction(temp_settings, workspace):
     mgr.end_turn(t2)
 
     mgr.replace_history([
-        Message(Role.USER, "u2", hid=3, turn_id=t2, seq_in_turn=1),
-    ], persist=False)
+        Message(Role.USER, "u2", turn_id=t2, seq_in_turn=1),
+    ], persist=True)
 
     mgr.append(Role.ASSISTANT, "a2", turn_id=t2)
     t3 = mgr.begin_turn()
@@ -151,7 +173,12 @@ def test_rebuild_turn_state_after_history_compaction(temp_settings, workspace):
     assert t3 == t2 + 1
 
 
-def test_clear_truncate_checkpoint_and_rollback(temp_settings, workspace):
+def test_clear_and_truncate_update_main_history_only(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
+    make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
     t1 = mgr.begin_turn()
@@ -163,21 +190,23 @@ def test_clear_truncate_checkpoint_and_rollback(temp_settings, workspace):
     mgr.append(Role.ASSISTANT, "a2", turn_id=t2)
     mgr.end_turn(t2)
 
-    checkpoint = mgr.checkpoint()
-    t3 = mgr.begin_turn()
-    mgr.append(Role.USER, "temp", turn_id=t3)
-    mgr.rollback(checkpoint)
-    assert [m.content for m in mgr.history][-1] == "a2"
+    assert rpg_data_gateway.backup.messages.count("s1") == 4
 
     removed = mgr.truncate(2)
     assert removed == 2
     assert [m.content for m in mgr.history] == ["u2", "a2"]
+    assert [row.content for row in rpg_data_gateway.messages.list("s1")] == ["u2", "a2"]
+    assert rpg_data_gateway.backup.messages.count("s1") == 4
 
     mgr.clear()
     assert mgr.history == []
+    assert rpg_data_gateway.messages.count("s1") == 0
+    assert rpg_data_gateway.backup.messages.count("s1") == 4
 
 
-def test_switch_to_reload_history(temp_settings, workspace):
+def test_switch_to_reload_history(make_data_session, workspace):
+    make_data_session("s1")
+    make_data_session("s2")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
     mgr.append(Role.USER, "hello")
@@ -188,10 +217,11 @@ def test_switch_to_reload_history(temp_settings, workspace):
 
     mgr.switch_to("s2")
     assert [m.content for m in mgr.history] == ["world"]
-    assert mgr.meta["created_at"]
+    assert mgr.meta["story_memory_last_turn_id"] == 0
 
 
-def test_history_snapshot_is_read_only(temp_settings, workspace):
+def test_history_snapshot_is_read_only(make_data_session, workspace):
+    make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
     mgr.append(Role.USER, "hello")
