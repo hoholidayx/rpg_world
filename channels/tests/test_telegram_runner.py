@@ -15,12 +15,16 @@ def _make_bot(name: str, enabled: bool = True) -> TelegramBotSettings:
         name=name,
         enabled=enabled,
         token=f"token-{name}",
-        workspace=f"data/{name}",
+        workspace_id=f"{name}_workspace",
+        story_id=1,
+        session_id="",
+        session_title=name,
         streaming=True,
         proxy="",
         stream_edit_interval_ms=800,
         stream_edit_min_chars=24,
         request_timeout_ms=5000,
+        auto_pin_created_session=True,
     )
 
 
@@ -37,6 +41,14 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     class FakeAgentClient:
         def __init__(self):
             client_calls.append("created")
+
+        async def ensure_session(self, workspace_id, story_id, *, session_id=None, title=""):  # noqa: ANN001
+            return {
+                "workspace": f"data/{workspace_id}",
+                "story_id": story_id,
+                "session_id": f"resolved_{workspace_id}",
+                "title": title,
+            }
 
     class FakeTelegramAdapter:
         def __init__(self, **kwargs):  # noqa: ANN003
@@ -60,11 +72,15 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     assert client_calls == ["created", "created"]
     assert created_adapters[0]["bot_name"] == "main"
     assert created_adapters[0]["token"] == "token-main"
-    assert created_adapters[0]["workspace"] == "data/main"
+    assert created_adapters[0]["workspace"] == "data/main_workspace"
+    assert created_adapters[0]["workspace_id"] == "main_workspace"
+    assert created_adapters[0]["story_id"] == 1
+    assert created_adapters[0]["session_id"] == "resolved_main_workspace"
+    assert created_adapters[0]["auto_pin_created_session"] is True
     assert created_adapters[0]["streaming"] is True
     assert created_adapters[1]["bot_name"] == "prod"
     assert created_adapters[1]["token"] == "token-prod"
-    assert created_adapters[1]["workspace"] == "data/prod"
+    assert created_adapters[1]["workspace"] == "data/prod_workspace"
 
 
 @pytest.mark.asyncio

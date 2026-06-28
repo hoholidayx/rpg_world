@@ -1,6 +1,6 @@
 """Telegram 专用会话交互状态机。
 
-负责 Telegram 渠道里的会话菜单、会话切换和二段式会话创建，
+负责 Telegram 渠道里的会话菜单、会话切换和二段式临时交互，
 避免这些交互逻辑污染通用 adapter / core 命令分发。
 """
 
@@ -17,8 +17,6 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from agent_service.client import AgentClient
-
-from rpg_core.session import SessionManager
 
 _SESSION_PICKER_TOKEN_PREFIX = "tg_sess"
 _SESSION_CREATE_TTL_SECONDS = 300
@@ -37,7 +35,7 @@ class _PickerAction:
 
 
 class TelegramSessionFlow:
-    """管理 Telegram 会话菜单、会话切换与 session_create 二段输入。"""
+    """管理 Telegram 会话菜单、会话切换与可复用二段输入状态。"""
 
     def __init__(self) -> None:
         self._session_overrides: dict[str, str] = {}
@@ -152,45 +150,44 @@ class TelegramSessionFlow:
         text: str,
         *,
         agent_client: AgentClient | None,
-        workspace: str,
-        session_id: str,
+        workspace_id: str,
+        story_id: int,
         send_text: Callable[[str], Awaitable[None]],
         auto_pin_created_session: bool = False,
     ) -> bool:
-        """消费 session_create 的二段输入。"""
+        """消费保留的二段创建状态。
+
+        当前 /session_create 已不再进入该流程；该实现仅保留给后续
+        Telegram 专属二段交互复用。
+        """
         if self.expire_session_create_flow(chat_id):
             await send_text("会话创建已超时，请重新发送 /session_create。")
             return True
         if not self._is_session_create_flow_active(chat_id):
             return False
 
-        candidate = text.strip()
-        if candidate.lower() == "/cancel":
+        title = text.strip()
+        if title.lower() == "/cancel":
             self.cancel_session_create_flow(chat_id)
             await send_text("已取消创建会话。")
             return True
 
-        try:
-            SessionManager.validate_session_id(candidate)
-        except ValueError as exc:
-            await send_text(f"[错误] 会话名无效：{exc}")
-            return True
-
         if agent_client is not None:
-            result = await agent_client.execute_command(
-                workspace,
-                session_id,
-                f"/session_create {candidate}",
+            result = await agent_client.create_session(
+                workspace_id,
+                story_id,
+                title=title,
             )
-            reply = str(result.get("reply", ""))
+            created_session_id = str(result.get("session_id") or "")
+            reply = f"[会话已创建: {created_session_id}]" if created_session_id else "会话创建完成。"
         else:
             await send_text("会话创建暂不可用。")
             return True
-        if reply.startswith("[会话已创建: "):
+        if created_session_id:
             self.cancel_session_create_flow(chat_id)
             self.maybe_pin_created_session(
                 chat_id,
-                candidate,
+                created_session_id,
                 auto_pin=auto_pin_created_session,
             )
         await send_text(reply or "会话创建完成。")
@@ -223,14 +220,6 @@ class TelegramSessionFlow:
             await send_session_picker()
             return True
 
-        if name == "/session_create" and len(parts) == 1:
-            self.start_session_create_flow(chat_id)
-            await send_text(
-                "请输入新会话 ID（仅字母、数字、下划线，长度不超过 64）。\n"
-                "发送 /cancel 可取消创建。",
-            )
-            return True
-
         return False
 
     async def handle_callback_query(
@@ -240,6 +229,7 @@ class TelegramSessionFlow:
         *,
         send_text: Callable[[str], Awaitable[None]],
         switch_session: Callable[[str], Awaitable[None]],
+        create_session: Callable[[], Awaitable[None]],
     ) -> bool:
         """处理会话菜单按钮点击。"""
         token = str(callback_data or "")
@@ -253,11 +243,7 @@ class TelegramSessionFlow:
             return True
 
         if action.kind == "create":
-            self.start_session_create_flow(chat_id)
-            await send_text(
-                "请输入新会话 ID（仅字母、数字、下划线，长度不超过 64）。\n"
-                "发送 /cancel 可取消创建。",
-            )
+            await create_session()
             return True
 
         if action.kind == "switch" and action.session_id:

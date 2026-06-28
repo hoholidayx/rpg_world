@@ -14,12 +14,17 @@ from peewee import Database
 from rpg_data.repositories.records import (
     SessionRecord,
     SessionStatusTableRecord,
+    StoryRecord,
     StatusTableTemplateRecord,
     WorkspaceRecord,
     bind_database,
 )
 from rpg_data.services.status import StatusTableService
-from rpg_data.settings import resolve_workspace_relative_path, resolve_workspace_root
+from rpg_data.settings import (
+    get_bootstrap_delete_orphan_dirs,
+    resolve_workspace_relative_path,
+    resolve_workspace_root,
+)
 
 __all__ = ["bootstrap_runtime_data"]
 
@@ -43,16 +48,21 @@ def bootstrap_runtime_data(database: Database) -> None:
     bind_database(database)
     logger.info("runtime bootstrap started")
     workspace_roots, workspace_count = _ensure_workspace_roots()
+    orphan_dirs_removed = _cleanup_orphan_runtime_dirs(workspace_roots)
+    orphan_status_files_removed = _cleanup_unindexed_status_files(workspace_roots)
     template_file_count = _ensure_template_files(workspace_roots)
     session_copy_count = _ensure_session_copies(database)
     session_file_count = _ensure_session_files(workspace_roots)
     logger.info(
         "runtime bootstrap finished workspace_count=%s template_files_created=%s "
-        "sessions_initialized=%s session_files_restored=%s",
+        "sessions_initialized=%s session_files_restored=%s orphan_dirs_removed=%s "
+        "orphan_status_files_removed=%s",
         workspace_count,
         template_file_count,
         session_copy_count,
         session_file_count,
+        orphan_dirs_removed,
+        orphan_status_files_removed,
     )
 
 
@@ -67,6 +77,258 @@ def _ensure_workspace_roots() -> tuple[dict[str, Path], int]:
         roots[workspace_id] = root
         logger.debug("workspace root materialized workspace_id=%s root=%s", workspace_id, root)
     return roots, len(roots)
+
+
+def _cleanup_orphan_runtime_dirs(workspace_roots: dict[str, Path]) -> int:
+    if not get_bootstrap_delete_orphan_dirs():
+        logger.info("runtime bootstrap orphan directory cleanup disabled")
+        return 0
+
+    workspace_root_set = {root.resolve() for root in workspace_roots.values()}
+    removed_count = 0
+    removed_count += _cleanup_orphan_workspace_dirs(workspace_root_set)
+    removed_count += _cleanup_orphan_story_dirs(workspace_roots)
+    removed_count += _cleanup_orphan_session_dirs(workspace_roots)
+    logger.info("runtime bootstrap orphan directory cleanup finished removed_count=%s", removed_count)
+    return removed_count
+
+
+def _cleanup_orphan_workspace_dirs(workspace_root_set: set[Path]) -> int:
+    removed_count = 0
+    candidate_parents = {root.parent for root in workspace_root_set}
+    for parent in sorted(candidate_parents):
+        if not parent.is_dir():
+            continue
+        for child in sorted(parent.iterdir()):
+            if not child.is_dir():
+                continue
+            child_root = child.resolve()
+            if child_root in workspace_root_set:
+                continue
+            if not _looks_like_workspace_root(child_root):
+                logger.debug("workspace orphan scan skipped non-workspace dir path=%s", child_root)
+                continue
+            if _remove_orphan_dir(child_root, kind="workspace"):
+                removed_count += 1
+    return removed_count
+
+
+def _cleanup_orphan_story_dirs(workspace_roots: dict[str, Path]) -> int:
+    indexed_story_ids: dict[str, set[str]] = {}
+    for story in StoryRecord.select(StoryRecord.id, StoryRecord.workspace):
+        indexed_story_ids.setdefault(str(story.workspace_id), set()).add(str(story.id))
+
+    removed_count = 0
+    for workspace_id, root in sorted(workspace_roots.items()):
+        stories_dir = root / _STORIES_DIR
+        if not stories_dir.is_dir():
+            continue
+        allowed = indexed_story_ids.get(workspace_id, set())
+        for child in sorted(stories_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            if child.name in allowed:
+                continue
+            if _remove_orphan_dir(child, kind="story", workspace_id=workspace_id, story_id=child.name):
+                removed_count += 1
+    return removed_count
+
+
+def _cleanup_orphan_session_dirs(workspace_roots: dict[str, Path]) -> int:
+    indexed_sessions: dict[tuple[str, str], set[str]] = {}
+    for session in SessionRecord.select(SessionRecord.id, SessionRecord.workspace, SessionRecord.story):
+        key = (str(session.workspace_id), str(session.story_id))
+        indexed_sessions.setdefault(key, set()).add(str(session.id))
+
+    removed_count = 0
+    for workspace_id, root in sorted(workspace_roots.items()):
+        stories_dir = root / _STORIES_DIR
+        if not stories_dir.is_dir():
+            continue
+        for story_dir in sorted(stories_dir.iterdir()):
+            if not story_dir.is_dir():
+                continue
+            allowed = indexed_sessions.get((workspace_id, story_dir.name), set())
+            for session_dir in sorted(story_dir.iterdir()):
+                if not session_dir.is_dir():
+                    continue
+                if session_dir.name in allowed:
+                    continue
+                if _remove_orphan_dir(
+                    session_dir,
+                    kind="session",
+                    workspace_id=workspace_id,
+                    story_id=story_dir.name,
+                    session_id=session_dir.name,
+                ):
+                    removed_count += 1
+    return removed_count
+
+
+def _looks_like_workspace_root(path: Path) -> bool:
+    return (path / _STORIES_DIR).is_dir() or (path / _TEMPLATE_STATUS_DIR).is_dir()
+
+
+def _remove_orphan_dir(
+    path: Path,
+    *,
+    kind: str,
+    workspace_id: str = "",
+    story_id: str = "",
+    session_id: str = "",
+) -> bool:
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return False
+    except Exception:
+        logger.exception(
+            "failed to remove orphan runtime directory kind=%s workspace_id=%s "
+            "story_id=%s session_id=%s path=%s",
+            kind,
+            workspace_id or "<unknown>",
+            story_id or "<unknown>",
+            session_id or "<unknown>",
+            path,
+        )
+        return False
+    logger.warning(
+        "removed orphan runtime directory kind=%s workspace_id=%s story_id=%s "
+        "session_id=%s path=%s",
+        kind,
+        workspace_id or "<unknown>",
+        story_id or "<unknown>",
+        session_id or "<unknown>",
+        path,
+    )
+    return True
+
+
+def _cleanup_unindexed_status_files(workspace_roots: dict[str, Path]) -> int:
+    if not get_bootstrap_delete_orphan_dirs():
+        logger.info("runtime bootstrap unindexed status file cleanup disabled")
+        return 0
+
+    removed_count = 0
+    removed_count += _cleanup_unindexed_template_status_files(workspace_roots)
+    removed_count += _cleanup_unindexed_session_status_files(workspace_roots)
+    logger.info("runtime bootstrap unindexed status file cleanup finished removed_count=%s", removed_count)
+    return removed_count
+
+
+def _cleanup_unindexed_template_status_files(workspace_roots: dict[str, Path]) -> int:
+    indexed_paths: dict[str, set[Path]] = {}
+    for table in StatusTableTemplateRecord.select(
+        StatusTableTemplateRecord.workspace,
+        StatusTableTemplateRecord.relative_path,
+    ):
+        workspace_id = str(table.workspace_id)
+        workspace_root = _workspace_root(workspace_roots, workspace_id)
+        indexed_paths.setdefault(workspace_id, set()).add(
+            resolve_workspace_relative_path(workspace_root, str(table.relative_path)).resolve()
+        )
+
+    removed_count = 0
+    for workspace_id, root in sorted(workspace_roots.items()):
+        template_root = root / _TEMPLATE_STATUS_DIR
+        if not template_root.is_dir():
+            continue
+        allowed = indexed_paths.get(workspace_id, set())
+        for path in sorted(template_root.rglob("*.csv")):
+            if path.resolve() in allowed:
+                continue
+            if _remove_orphan_status_file(path, root, kind="template", workspace_id=workspace_id):
+                removed_count += 1
+                _remove_empty_parents(path.parent, template_root)
+    return removed_count
+
+
+def _cleanup_unindexed_session_status_files(workspace_roots: dict[str, Path]) -> int:
+    indexed_paths: dict[str, set[Path]] = {}
+    for table in SessionStatusTableRecord.select(
+        SessionStatusTableRecord.session,
+        SessionStatusTableRecord.relative_path,
+    ):
+        session_id = str(table.session_id)
+        session = table.session
+        workspace_root = _workspace_root(workspace_roots, str(session.workspace_id))
+        indexed_paths.setdefault(session_id, set()).add(
+            resolve_workspace_relative_path(workspace_root, str(table.relative_path)).resolve()
+        )
+
+    removed_count = 0
+    for session in SessionRecord.select(SessionRecord.id, SessionRecord.workspace, SessionRecord.story):
+        workspace_id = str(session.workspace_id)
+        story_id = str(session.story_id)
+        session_id = str(session.id)
+        root = _workspace_root(workspace_roots, workspace_id)
+        status_root = root / _STORIES_DIR / story_id / session_id / "status"
+        if not status_root.is_dir():
+            continue
+        allowed = indexed_paths.get(session_id, set())
+        for path in sorted(status_root.rglob("*.csv")):
+            if path.resolve() in allowed:
+                continue
+            if _remove_orphan_status_file(
+                path,
+                root,
+                kind="session",
+                workspace_id=workspace_id,
+                story_id=story_id,
+                session_id=session_id,
+            ):
+                removed_count += 1
+                _remove_empty_parents(path.parent, status_root)
+    return removed_count
+
+
+def _remove_orphan_status_file(
+    path: Path,
+    workspace_root: Path,
+    *,
+    kind: str,
+    workspace_id: str,
+    story_id: str = "",
+    session_id: str = "",
+) -> bool:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    except Exception:
+        logger.exception(
+            "failed to remove unindexed status csv kind=%s workspace_id=%s "
+            "story_id=%s session_id=%s path=%s",
+            kind,
+            workspace_id,
+            story_id or "<unknown>",
+            session_id or "<unknown>",
+            path,
+        )
+        return False
+    relative_path = path.resolve().relative_to(workspace_root.resolve()).as_posix()
+    logger.warning(
+        "removed unindexed status csv kind=%s workspace_id=%s story_id=%s "
+        "session_id=%s relative_path=%s path=%s",
+        kind,
+        workspace_id,
+        story_id or "<unknown>",
+        session_id or "<unknown>",
+        relative_path,
+        path,
+    )
+    return True
+
+
+def _remove_empty_parents(start: Path, stop: Path) -> None:
+    stop_resolved = stop.resolve()
+    current = start.resolve()
+    while current != stop_resolved:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
 
 
 def _ensure_template_files(workspace_roots: dict[str, Path]) -> int:

@@ -16,7 +16,7 @@ router = APIRouter(prefix="/sessions", tags=["play-sessions"])
 
 
 class PlaySessionCreateRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     workspace_id: str = Field(alias="workspaceId")
     story_id: int = Field(alias="storyId")

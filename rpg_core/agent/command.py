@@ -74,27 +74,16 @@ async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
 
 async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
     """创建新会话。"""
-    from rpg_core.session import SessionManager
-
-    if not args:
-        return "[错误] 需要提供 session_id: /session_create <id>"
-    sid = args[0]
-    try:
-        SessionManager.validate_session_id(sid)
-    except ValueError as exc:
-        return f"[错误] {exc}"
-
+    title = " ".join(args).strip() or "New Session"
     gateway, current_session = _current_catalog_session(agent)
-    if gateway.catalog.get_session(sid) is not None:
-        return f"[会话已存在: {sid}]"
     created = gateway.catalog.create_session(
         str(current_session["workspace"]),
         int(current_session["story_id"]),
-        session_id=sid,
-        title=sid,
+        title=title,
     )
     if created is None:
-        return f"[错误] 无法在当前故事下创建会话: {sid}"
+        return "[错误] 无法在当前故事下创建会话"
+    sid = str(created["id"])
     return f"[会话已创建: {sid}]"
 
 
@@ -231,7 +220,7 @@ class CommandDispatcher:
         )
         self.register_builtin(
             "/session_create", "创建新会话",
-            "用法：/session_create <id>。在当前故事下创建新的 rpg_data 会话。", _cmd_session_create,
+            "用法：/session_create [title]。在当前故事下创建新的 rpg_data 会话，ID 由系统生成。", _cmd_session_create,
         )
         self.register_builtin(
             "/session_switch", "切换到指定会话",

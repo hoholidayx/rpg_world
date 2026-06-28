@@ -23,27 +23,25 @@ class TestAgentManager:
         AgentManager.reset()
 
     def test_cache_key(self):
-        key1 = AgentManager._cache_key("data/test", "default", None)
-        key2 = AgentManager._cache_key("data/test", "default", "sk-xxx")
-        key3 = AgentManager._cache_key("data/test", "mygame", None)
-        assert key1 == "data/test::default::"
-        assert key2 == "data/test::default::sk-xxx"
-        assert key3 == "data/test::mygame::"
+        key1 = AgentManager._cache_key("default")
+        key2 = AgentManager._cache_key("mygame")
+        assert key1 == "default"
+        assert key2 == "mygame"
 
     def test_get_or_create_default(self):
         agent = AgentManager.get_or_create(workspace="data/test")
         assert agent._session_id == "default"
-        assert AgentManager._instances["data/test::default::"] is agent
+        assert AgentManager._instances["default"] is agent
 
     def test_get_or_create_twice_returns_same(self):
-        a1 = AgentManager.get_or_create(workspace="data/test", session_id="test1", api_key="key1")
-        a2 = AgentManager.get_or_create(workspace="data/test", session_id="test1", api_key="key1")
+        a1 = AgentManager.get_or_create(workspace="data/test", session_id="test1")
+        a2 = AgentManager.get_or_create(workspace="data/other", session_id="test1")
         assert a1 is a2  # 同一实例
 
-    def test_get_or_create_different_keys(self):
-        a1 = AgentManager.get_or_create(workspace="data/test", session_id="test", api_key="key1")
-        a2 = AgentManager.get_or_create(workspace="data/test", session_id="test", api_key="key2")
-        assert a1 is not a2  # 不同 api_key 应不同实例
+    def test_get_or_create_workspace_not_cache_key(self):
+        a1 = AgentManager.get_or_create(workspace="data/test", session_id="test")
+        a2 = AgentManager.get_or_create(workspace="data/other", session_id="test")
+        assert a1 is a2
 
     def test_get_or_create_different_sessions(self):
         a1 = AgentManager.get_or_create(workspace="data/test", session_id="session1")

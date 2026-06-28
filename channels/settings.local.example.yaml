@@ -7,4 +7,8 @@ channels:
       main:
         enabled: true
         bot_token: "1234567890:your-telegram-bot-token"
-        workspace: data/your_workspace
+        workspace_id: your_workspace
+        story_id: 1
+        session_id: ""
+        session_title: main
+        auto_pin_created_session: false

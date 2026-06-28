@@ -75,7 +75,8 @@ agent_cfg.service.port
 agent_cfg.agent_client.base_url
 play_settings.service.port
 cfg.telegram_bots
-cfg.cli_workspace
+cfg.cli_workspace_id
+cfg.cli_story_id
 ```
 
 ### 多渠道适配器
@@ -100,6 +101,7 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - 角色卡和世界书条目属于 workspace，通过挂载表关联到 story；同一个角色卡或世界书条目可以挂载到多个 story。
 - 状态表模板属于 workspace，通过 `rpg_story_status_tables` 挂载到 story；创建 session 时会把已挂载模板复制为该 session 独立副本。
 - Play 侧公开 `session_id` 是全局唯一短 ID，格式为 `s_` + 10 位小写字母/数字，例如 `s_forest001`。创建 session 时绑定 `workspace_id + story_id`，之后会话内接口只传 `session_id`。
+- CLI / Telegram 启动时也先通过 Agent service 的 `ensure_session(workspace_id, story_id, session_id, title)` 解析会话；`session_id` 为空时创建系统生成 ID 的 session，非空时只校验并加载既有 session。
 - `rpg_session_profiles` 保存会话标题、描述等可读字段；`rpg_sessions.id` 保持稳定，用作 URL 和 Agent session id。
 
 Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，再调用 Agent 服务当前仍使用的 `workspace + session_id`。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`scene`、`commands`、`turn`、`stream`。旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
@@ -112,6 +114,7 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 - session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/{type_name}/{table_name}.csv`。
 - `DataServiceGateway` 初始化时会按 SQL 索引 materialize workspace 目录、模板 CSV 和 session 副本；bootstrap 不写业务索引，不扫描目录发现表。
 - 缺失 CSV 的初始内容只从对应 SQL 行的 `metadata_json._bootstrap_csv` 还原；CSV 已存在时不覆盖。
+- Bootstrap 默认会删除不在 SQL 索引里的 workspace/story/session 目录，以及 `template_status` / session `status` 下未索引的 CSV。可用 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=false` 关闭；日志会输出每个删除项和汇总计数。
 - `当前场景` 是 `builtin_key="scene"` 的特殊状态类型，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。
 - `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，索引中的 `relative_path` 必须是 workspace 相对路径，统一由 `rpg_data.settings` 解析并阻止路径逃逸。
 
@@ -123,8 +126,8 @@ Telegram 渠道当前支持：
 - `streaming=true` 时通过编辑消息实现流式输出。
 - Markdown 到 Telegram HTML 的渲染与 4096 字符分块发送。
 - `/start`、后端斜杠命令透传，以及 Telegram 菜单命令规范化。
-- `/sessions` 会话菜单、按钮切换会话、`/session_create` 二段式创建、`/cancel` 取消。
-- `chat_id` 默认映射为 `telegram_<bot_name>_<chat_id>`，显式切换后会在当前 chat 内钉住 session。
+- 每个 bot 绑定 `workspace_id + story_id`，启动时解析一个默认 session；未 pin 的 chat 使用 bot 默认 session，显式切换后会在当前 chat 内钉住 session。
+- `/sessions` 会话菜单、按钮切换会话、`/session_create [title...]` 立即创建系统生成 ID 的 session；`/cancel` 保留给 Telegram 专属二段交互状态。
 - `proxy`、流式编辑间隔、最小编辑字符数、请求超时等参数由 `channels/settings.yaml` 的 bot 配置控制。
 
 ### 核心引擎
@@ -397,10 +400,16 @@ base:
         main:
           enabled: false
           token_env: TELEGRAM_BOT_TOKEN_MAIN
-          workspace: data/工作区名
+          workspace_id: demo_workspace
+          story_id: 1
+          session_id: ""
+          session_title: main
+          auto_pin_created_session: false
     cli:
-      workspace: data/工作区名
-      session_id: cli_direct
+      workspace_id: demo_workspace
+      story_id: 1
+      session_id: ""
+      session_title: CLI
       streaming: true
   logging:
     log_level: DEBUG
@@ -449,13 +458,13 @@ base:
 
 `rerank_score_weight` 是排序业务参数，留在 `rpg_core/settings.yaml`；不要写入 `llm_service/llm.yaml` 的 provider 配置。
 
-工作区不再放在旧 JSON 配置中。API/WebUI 通过请求参数选择 workspace；
-Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace` 绑定。`rpg_data` 中的 workspace 根目录来自 `rpg_workspaces.root_path`；状态表文件索引只保存相对路径，不保存绝对路径。
+工作区不再放在旧 JSON 配置中。API/WebUI 通过请求参数或 catalog session 解析 workspace；
+Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace_id + story_id` 绑定故事。`session_id` 可留空，此时启动时创建系统生成 ID 的默认 session；非空时只校验并加载既有 session。旧 `workspace` 字段、`cli_direct` 默认 ID 和用户自定义 session ID 创建入口都不再保留。`rpg_data` 中的 workspace 根目录来自 `rpg_workspaces.root_path`；状态表文件索引只保存相对路径，不保存绝对路径。
 
 ## Session ID 规则
 
 `session_id` 只能包含英文字母、数字和下划线，规则为 `^[A-Za-z0-9_]+$`。
-Play WebUI 创建 session 时会在 `rpg_data` 绑定 `workspace_id + story_id`，会话内链路只使用全局短 `session_id`。
+所有创建入口都由 `rpg_data` 生成全局唯一 session ID；用户只允许指定 title。Play WebUI 创建 session 时会在 `rpg_data` 绑定 `workspace_id + story_id`，会话内链路只使用全局短 `session_id`。
 
 ### 会话历史字段
 
@@ -478,7 +487,7 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 - `llm_service/tests/`：LLM provider 配置、manager 路由与 llama 本地 runtime 协议。
 - `play_api/tests/`：Play API workspace/session/scene/chat 契约。
 
-Telegram 测试已覆盖会话菜单、命令规范化、二段式创建、流式编辑节流、
+Telegram 测试已覆盖会话菜单、命令规范化、系统生成 ID 的创建流程、流式编辑节流、
 Markdown 渲染和长文本分块。后续修改 Telegram 行为必须补对应测试。
 
 ## 当前实现优先级

@@ -49,11 +49,13 @@ class CLIAdapter(ChannelAdapter):
         streaming: bool = True,
         session_id: str | None = None,
         workspace: str | None = None,
+        session_title: str | None = None,
     ) -> None:
         super().__init__()
         self._streaming = streaming
         self._session_id_override = (session_id or "").strip() or None
         self._workspace_override = (workspace or "").strip() or None
+        self._session_title = (session_title or "").strip() or None
         self._session = PromptSession(
             history=FileHistory(str(_HISTORY_PATH)),
             enable_history_search=True,
@@ -66,12 +68,12 @@ class CLIAdapter(ChannelAdapter):
     def get_session_id(self, chat_id: str) -> str:
         if self._session_id_override is not None:
             return self._session_id_override
-        return super().get_session_id(chat_id)
+        raise RuntimeError("CLI session is not resolved")
 
     def get_workspace(self) -> str:
         if self._workspace_override is not None:
             return self._workspace_override
-        return super().get_workspace()
+        raise RuntimeError("CLI workspace is not resolved")
 
     def get_initial_session_id(self) -> str:
         """Return the session used by this single-chat CLI adapter."""
@@ -84,6 +86,8 @@ class CLIAdapter(ChannelAdapter):
         self._running = True
         self._console.print(
             "[bold green]RPG World CLI[/bold green]\n"
+            f"  Session: {self.get_initial_session_id()}"
+            f"{f' ({self._session_title})' if self._session_title else ''}\n"
             "  命令: /help  /clear  /reload  /context  /compact  /extract_story_memory\n"
             "  /sessions  /session_create  /session_switch  /memory_reindex  /quit\n"
             "  输入 /help 查看完整命令列表",

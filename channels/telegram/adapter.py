@@ -114,6 +114,10 @@ class TelegramAdapter(ChannelAdapter):
         auto_pin_created_session: bool = False,
         agent_client: AgentClient | None = None,
         workspace: str | None = None,
+        workspace_id: str | None = None,
+        story_id: int | None = None,
+        session_id: str | None = None,
+        session_title: str | None = None,
     ) -> None:
         super().__init__()
         self._bot_name = bot_name
@@ -125,6 +129,10 @@ class TelegramAdapter(ChannelAdapter):
         self._request_timeout = max(0, request_timeout_ms) / 1000.0
         self._auto_pin_created_session = auto_pin_created_session
         self._workspace_override = (workspace or "").strip() or None
+        self._workspace_id = (workspace_id or "").strip()
+        self._story_id = int(story_id or 0)
+        self._default_session_id = (session_id or "").strip()
+        self._session_title = (session_title or bot_name or "Telegram").strip()
         self._app: Application | None = None
         # chat_id → _StreamBuf, 用于流式增量编辑
         self._stream_buf: dict[str, _StreamBuf] = {}
@@ -139,7 +147,7 @@ class TelegramAdapter(ChannelAdapter):
     def get_workspace(self) -> str:
         if self._workspace_override:
             return self._workspace_override
-        return super().get_workspace()
+        raise RuntimeError("Telegram workspace is not resolved")
 
     # ── 生命周期 ────────────────────────────────────────────────────────
 
@@ -237,7 +245,9 @@ class TelegramAdapter(ChannelAdapter):
 
     def get_session_id(self, chat_id: str) -> str:
         """优先返回 Telegram chat 绑定的显式 session，否则使用默认映射。"""
-        return self._session_flow.get_session_id(chat_id, super().get_session_id(chat_id))
+        if not self._default_session_id:
+            raise RuntimeError("Telegram default session is not resolved")
+        return self._session_flow.get_session_id(chat_id, self._default_session_id)
 
     async def send_text(self, chat_id: str, text: str) -> None:
         """发送完整文本消息。超出 4096 字符自动分块。"""
@@ -443,7 +453,7 @@ class TelegramAdapter(ChannelAdapter):
         ]
         command_payload = await self._agent_client.list_commands(
             self.get_workspace(),
-            self.get_session_id("default"),
+            self._default_session_id,
         )
         raw_commands = command_payload.get("commands", [])
         for cmd in raw_commands:
@@ -473,7 +483,7 @@ class TelegramAdapter(ChannelAdapter):
             await self.send_text(chat_id, "会话菜单暂不可用。")
             return
         current = self.get_session_id(chat_id)
-        payload = await self._agent_client.list_sessions(self.get_workspace(), current)
+        payload = await self._agent_client.list_sessions(self._workspace_id, self._story_id)
         sessions = [str(item) for item in payload.get("sessions", [])]
         text = self._session_flow.render_session_picker_text(sessions, current)
 
@@ -487,6 +497,27 @@ class TelegramAdapter(ChannelAdapter):
                 reply_markup=self._session_flow.build_session_picker(sessions, current),
             ),
         )
+
+    async def _create_chat_session(self, chat_id: str, title: str | None = None) -> None:
+        if not self._agent_client:
+            await self.send_text(chat_id, "会话创建暂不可用。")
+            return
+        result = await self._agent_client.create_session(
+            self._workspace_id,
+            self._story_id,
+            title=(title or self._session_title or "").strip(),
+        )
+        session_id = str(result.get("session_id") or "")
+        if not session_id:
+            await self.send_text(chat_id, "会话创建失败：服务未返回 session_id。")
+            return
+        self._session_flow.maybe_pin_created_session(
+            chat_id,
+            session_id,
+            auto_pin=self._auto_pin_created_session,
+        )
+        suffix = "，已切换到该会话" if self._auto_pin_created_session else ""
+        await self.send_text(chat_id, f"[会话已创建: {session_id}{suffix}]")
 
     # ── 事件处理 ────────────────────────────────────────────────────────
 
@@ -509,8 +540,8 @@ class TelegramAdapter(ChannelAdapter):
                 chat_id,
                 text,
                 agent_client=self._agent_client,
-                workspace=self.get_workspace(),
-                session_id=self.get_session_id(chat_id),
+                workspace_id=self._workspace_id,
+                story_id=self._story_id,
                 send_text=lambda reply: self.send_text(chat_id, reply),
                 auto_pin_created_session=self._auto_pin_created_session,
             ):
@@ -580,6 +611,21 @@ class TelegramAdapter(ChannelAdapter):
         ):
             return
 
+        if command.startswith("/session_create"):
+            parts = command.split(maxsplit=1)
+            title = parts[1].strip() if len(parts) > 1 else self._session_title
+            try:
+                await self._create_chat_session(chat_id, title=title)
+            except Exception:
+                logger.exception(
+                    "telegram: session_create failed chat_id={} user_id={} command={}",
+                    chat_id,
+                    user_id,
+                    _preview_text(command),
+                )
+                await self.send_text(chat_id, "会话创建失败，请稍后重试。")
+            return
+
         if not self._agent_client:
             logger.warning(
                 "telegram: command ignored because agent is missing chat_id={} user_id={} command={}",
@@ -638,6 +684,7 @@ class TelegramAdapter(ChannelAdapter):
             str(query.data or ""),
             send_text=lambda reply: self.send_text(chat_id, reply),
             switch_session=lambda session_id: self._switch_chat_session(chat_id, session_id),
+            create_session=lambda: self._create_chat_session(chat_id),
         ):
             return
 

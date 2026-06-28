@@ -62,39 +62,48 @@ class AgentClient:
         self,
         workspace: str,
         session_id: str,
-        api_key: str | None = None,
     ) -> dict[str, Any]:
         params = {"workspace": workspace, "session_id": session_id}
-        if api_key:
-            params["api_key"] = api_key
         return await self._get("/chat/history", params=params)
 
     async def list_commands(
         self,
         workspace: str,
         session_id: str,
-        api_key: str | None = None,
     ) -> dict[str, Any]:
         params = {"workspace": workspace, "session_id": session_id}
-        if api_key:
-            params["api_key"] = api_key
         return await self._get("/chat/commands", params=params)
 
     async def list_sessions(
         self,
-        workspace: str,
-        session_id: str,
-        api_key: str | None = None,
+        workspace_id: str,
+        story_id: int,
     ) -> dict[str, Any]:
-        params = {"workspace": workspace, "session_id": session_id}
-        if api_key:
-            params["api_key"] = api_key
+        params = {"workspace_id": workspace_id, "story_id": story_id}
         return await self._get("/chat/sessions", params=params)
 
-    async def create_session(self, workspace: str, session_id: str) -> dict[str, Any]:
+    async def create_session(self, workspace_id: str, story_id: int, *, title: str = "") -> dict[str, Any]:
         return await self._post(
             "/chat/sessions",
-            json={"workspace": workspace, "session_id": session_id},
+            json={"workspace_id": workspace_id, "story_id": story_id, "title": title},
+        )
+
+    async def ensure_session(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        session_id: str | None = None,
+        title: str = "",
+    ) -> dict[str, Any]:
+        return await self._post(
+            "/chat/session/ensure",
+            json={
+                "workspace_id": workspace_id,
+                "story_id": story_id,
+                "session_id": session_id,
+                "title": title,
+            },
         )
 
     async def delete_session(self, workspace: str, session_id: str) -> dict[str, Any]:
@@ -114,11 +123,10 @@ class AgentClient:
         workspace: str,
         session_id: str,
         message: str,
-        api_key: str | None = None,
     ) -> dict[str, Any]:
         return await self._post(
             "/chat/send",
-            json=self._payload(workspace, session_id, api_key, message=message),
+            json=self._payload(workspace, session_id, message=message),
         )
 
     async def execute_command(
@@ -126,11 +134,10 @@ class AgentClient:
         workspace: str,
         session_id: str,
         command: str,
-        api_key: str | None = None,
     ) -> dict[str, Any]:
         return await self._post(
             "/chat/command",
-            json=self._payload(workspace, session_id, api_key, command=command),
+            json=self._payload(workspace, session_id, command=command),
         )
 
     async def stream(
@@ -138,9 +145,8 @@ class AgentClient:
         workspace: str,
         session_id: str,
         message: str,
-        api_key: str | None = None,
     ) -> AsyncIterator[AgentStreamEvent]:
-        payload = self._payload(workspace, session_id, api_key, message=message)
+        payload = self._payload(workspace, session_id, message=message)
         client = self._stream_http_client()
         try:
             async with client.stream("POST", self._url("/chat/stream"), json=payload) as response:
@@ -221,12 +227,9 @@ class AgentClient:
     def _payload(
         workspace: str,
         session_id: str,
-        api_key: str | None,
         **extra: Any,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"workspace": workspace, "session_id": session_id}
-        if api_key:
-            payload["api_key"] = api_key
         payload.update(extra)
         return payload
 

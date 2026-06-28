@@ -38,7 +38,15 @@ def mock_app() -> MagicMock:
 @pytest.fixture
 def adapter(mock_app: MagicMock) -> TelegramAdapter:
     """创建一个已注入 mock app 的 TelegramAdapter。"""
-    a = TelegramAdapter(token="fake:token", streaming=True)
+    a = TelegramAdapter(
+        token="fake:token",
+        streaming=True,
+        workspace="data/tg_workspace",
+        workspace_id="tg_workspace",
+        story_id=1,
+        session_id="tg_default",
+        session_title="Telegram",
+    )
     a._app = mock_app  # 注入 mock，避免真实网络连接
     return a
 
@@ -47,28 +55,28 @@ class TestTelegramAdapter:
     """TelegramAdapter 核心功能测试。"""
 
     async def test_get_session_id(self, adapter: TelegramAdapter):
-        assert adapter.get_session_id("12345") == "telegram_default_12345"
-        assert adapter.get_session_id("abc") == "telegram_default_abc"
+        assert adapter.get_session_id("12345") == "tg_default"
+        assert adapter.get_session_id("abc") == "tg_default"
 
     async def test_get_session_id_respects_pinned_session(self, adapter: TelegramAdapter):
         adapter._session_flow.pin_session("12345", "my_tel")
         assert adapter.get_session_id("12345") == "my_tel"
 
     async def test_default_streaming_flag(self):
-        a = TelegramAdapter(token="fake:token")
+        a = TelegramAdapter(token="fake:token", session_id="tg_default", workspace="data/tg")
         assert a._streaming is True  # 默认流式
 
-        a2 = TelegramAdapter(token="fake:token", streaming=False)
+        a2 = TelegramAdapter(token="fake:token", streaming=False, session_id="tg_default", workspace="data/tg")
         assert a2._streaming is False
 
     async def test_stream_throttle_defaults(self):
-        a = TelegramAdapter(token="fake:token")
+        a = TelegramAdapter(token="fake:token", session_id="tg_default", workspace="data/tg")
         assert a._stream_edit_interval == 0.8
         assert a._stream_edit_min_chars == 24
         assert a._request_timeout == 5.0
 
     async def test_proxy_is_stored(self):
-        a = TelegramAdapter(token="fake:token", proxy="http://127.0.0.1:7890")
+        a = TelegramAdapter(token="fake:token", proxy="http://127.0.0.1:7890", session_id="tg_default", workspace="data/tg")
         assert a._proxy == "http://127.0.0.1:7890"
 
     async def test_on_message_routes_to_agent_client(self, adapter: TelegramAdapter):
@@ -188,8 +196,8 @@ class TestTelegramAdapter:
 
     async def test_on_command_normalizes_menu_alias(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        agent.execute_command = AsyncMock(
-            return_value={"reply": "done", "handled": True},
+        agent.create_session = AsyncMock(
+            return_value={"session_id": "generated_1", "title": "abc"},
         )
         adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
@@ -201,12 +209,14 @@ class TestTelegramAdapter:
 
         await adapter._on_command(update, object())
 
-        agent.execute_command.assert_awaited_once()
-        assert agent.execute_command.await_args.args[-1] == "/session_create abc"
-        adapter.send_text.assert_awaited_once_with("123", "done")
+        agent.create_session.assert_awaited_once_with("tg_workspace", 1, title="abc")
+        adapter.send_text.assert_awaited_once_with("123", "[会话已创建: generated_1]")
 
-    async def test_on_command_session_create_starts_two_step_flow(self, adapter: TelegramAdapter):
+    async def test_on_command_session_create_creates_immediately(self, adapter: TelegramAdapter):
         agent = FakeAgent()
+        agent.create_session = AsyncMock(
+            return_value={"session_id": "generated_1", "title": "Telegram"},
+        )
         adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
         update = MagicMock()
@@ -217,9 +227,9 @@ class TestTelegramAdapter:
 
         await adapter._on_command(update, object())
 
-        assert adapter._session_flow._pending_session_create  # noqa: SLF001
-        adapter.send_text.assert_awaited_once()
-        assert "请输入新会话 ID" in adapter.send_text.call_args.args[1]
+        assert not adapter._session_flow._pending_session_create  # noqa: SLF001
+        agent.create_session.assert_awaited_once_with("tg_workspace", 1, title="Telegram")
+        adapter.send_text.assert_awaited_once_with("123", "[会话已创建: generated_1]")
 
     async def test_on_command_unknown(self, adapter: TelegramAdapter):
         agent = FakeAgent()
@@ -238,8 +248,8 @@ class TestTelegramAdapter:
 
     async def test_pending_session_create_consumes_plain_text(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        agent.execute_command = AsyncMock(
-            return_value={"reply": "[会话已创建: my_tel]", "handled": True},
+        agent.create_session = AsyncMock(
+            return_value={"session_id": "generated_1", "title": "my title"},
         )
         adapter.bind_agent_client(agent)
         from channels.telegram.session_flow import _PendingSessionCreate
@@ -251,58 +261,62 @@ class TestTelegramAdapter:
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
-        update.message.text = "my_tel"
+        update.message.text = "my title"
         update.effective_chat.id = 123
         update.effective_user.id = 456
 
         await adapter._on_message(update, object())
 
-        agent.execute_command.assert_awaited_once()
-        assert agent.execute_command.await_args.args[-1] == "/session_create my_tel"
+        agent.create_session.assert_awaited_once_with("tg_workspace", 1, title="my title")
         assert "123" not in adapter._session_flow._pending_session_create  # noqa: SLF001
-        adapter.send_text.assert_awaited_once_with("123", "[会话已创建: my_tel]")
+        adapter.send_text.assert_awaited_once_with("123", "[会话已创建: generated_1]")
 
     async def test_pending_session_create_does_not_pin_new_session_by_default(self, adapter: TelegramAdapter):
         agent = FakeAgent()
-        agent.execute_command = AsyncMock(
-            return_value={"reply": "[会话已创建: my_tel]", "handled": True},
+        agent.create_session = AsyncMock(
+            return_value={"session_id": "generated_1", "title": "my title"},
         )
         adapter.bind_agent_client(agent)
         adapter._session_flow.start_session_create_flow("123")
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
-        update.message.text = "my_tel"
+        update.message.text = "my title"
         update.effective_chat.id = 123
         update.effective_user.id = 456
 
         await adapter._on_message(update, object())
 
-        assert adapter.get_session_id("123") == "telegram_default_123"
+        assert adapter.get_session_id("123") == "tg_default"
 
     async def test_pending_session_create_can_pin_new_session_when_enabled(self, mock_app: MagicMock):
         adapter = TelegramAdapter(
             token="fake:token",
             streaming=True,
             auto_pin_created_session=True,
+            workspace="data/tg_workspace",
+            workspace_id="tg_workspace",
+            story_id=1,
+            session_id="tg_default",
+            session_title="Telegram",
         )
         adapter._app = mock_app
         agent = FakeAgent()
-        agent.execute_command = AsyncMock(
-            return_value={"reply": "[会话已创建: my_tel]", "handled": True},
+        agent.create_session = AsyncMock(
+            return_value={"session_id": "generated_1", "title": "my title"},
         )
         adapter.bind_agent_client(agent)
         adapter._session_flow.start_session_create_flow("123")
         adapter.send_text = AsyncMock()
         update = MagicMock()
         update.message = MagicMock()
-        update.message.text = "my_tel"
+        update.message.text = "my title"
         update.effective_chat.id = 123
         update.effective_user.id = 456
 
         await adapter._on_message(update, object())
 
-        assert adapter.get_session_id("123") == "my_tel"
+        assert adapter.get_session_id("123") == "generated_1"
 
     async def test_pending_session_create_timeout_consumes_once(self, adapter: TelegramAdapter):
         from channels.telegram.session_flow import _PendingSessionCreate
@@ -325,8 +339,11 @@ class TestTelegramAdapter:
         adapter.send_text.assert_awaited_once()
         assert "会话创建已超时" in adapter.send_text.call_args.args[1]
 
-    async def test_pending_session_create_rejects_invalid_input(self, adapter: TelegramAdapter):
+    async def test_pending_session_create_accepts_title_text(self, adapter: TelegramAdapter):
         agent = FakeAgent()
+        agent.create_session = AsyncMock(
+            return_value={"session_id": "generated_1", "title": "我想要一个新会话"},
+        )
         adapter.bind_agent_client(agent)
         from channels.telegram.session_flow import _PendingSessionCreate
         import channels.telegram.session_flow as telegram_session_flow_module
@@ -343,9 +360,9 @@ class TestTelegramAdapter:
 
         await adapter._on_message(update, object())
 
-        assert "123" in adapter._session_flow._pending_session_create  # noqa: SLF001
-        adapter.send_text.assert_awaited_once()
-        assert "会话名无效" in adapter.send_text.call_args.args[1]
+        assert "123" not in adapter._session_flow._pending_session_create  # noqa: SLF001
+        agent.create_session.assert_awaited_once()
+        adapter.send_text.assert_awaited_once_with("123", "[会话已创建: generated_1]")
 
     async def test_pending_session_create_canceled_by_temporary_command(self, adapter: TelegramAdapter):
         agent = FakeAgent()
@@ -419,7 +436,7 @@ class TestTelegramAdapter:
 
         assert agent.calls[-1] == (
             "stream",
-            ("data/telegram_default_default_workspace", "my_tel", "hello"),
+            ("data/tg_workspace", "my_tel", "hello"),
         )
 
     async def test_start_configures_proxy_and_handlers(self, monkeypatch):
@@ -445,7 +462,15 @@ class TestTelegramAdapter:
             MagicMock(return_value=builder),
         )
 
-        adapter = TelegramAdapter(token="fake:token", proxy="http://127.0.0.1:7890")
+        adapter = TelegramAdapter(
+            token="fake:token",
+            proxy="http://127.0.0.1:7890",
+            workspace="data/tg_workspace",
+            workspace_id="tg_workspace",
+            story_id=1,
+            session_id="tg_default",
+            session_title="Telegram",
+        )
         agent = FakeAgent()
         agent._commands = [
             *agent._commands,

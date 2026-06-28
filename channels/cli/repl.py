@@ -39,12 +39,20 @@ def _configure_standard_logging() -> None:
 
 async def main() -> int:
     _configure_standard_logging()
+    client = AgentClient()
+    session = await client.ensure_session(
+        channels_settings.cli_workspace_id,
+        channels_settings.cli_story_id,
+        session_id=channels_settings.cli_session_id or None,
+        title=channels_settings.cli_session_title,
+    )
     adapter = CLIAdapter(
         streaming=channels_settings.cli_streaming,
-        session_id=channels_settings.cli_session_id,
-        workspace=channels_settings.cli_workspace,
+        session_id=str(session["session_id"]),
+        workspace=str(session["workspace"]),
+        session_title=str(session.get("title") or channels_settings.cli_session_title),
     )
-    adapter.bind_agent_client(AgentClient())
+    adapter.bind_agent_client(client)
     await adapter.start()
     return 0
 

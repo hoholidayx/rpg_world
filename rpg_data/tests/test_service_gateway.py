@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,108 @@ def test_gateway_recovers_demo_session_files_without_indexes(tmp_path: Path) -> 
         ("场景", "北境森林当前场景"),
         ("世界状态", "世界线索"),
     ]
+
+
+def test_gateway_bootstrap_removes_orphan_runtime_dirs_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.delenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", raising=False)
+    db_path = tmp_path / "cleanup.sqlite3"
+    gateway = get_data_service_gateway(db_path)
+    assert gateway.catalog.get_session("s_forest001") is not None
+
+    data_dir = tmp_path / "data"
+    orphan_workspace = data_dir / "orphan_workspace"
+    orphan_story = data_dir / "demo_workspace" / "stories" / "999"
+    orphan_session = data_dir / "demo_workspace" / "stories" / "1" / "s_orphan"
+    for directory in (orphan_workspace / "stories", orphan_story, orphan_session):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "marker.txt").write_text("orphan", encoding="utf-8")
+
+    reset_data_service_gateways()
+    caplog.set_level(logging.INFO, logger="rpg_data.bootstrap")
+    get_data_service_gateway(db_path).catalog.list_workspaces()
+
+    assert not orphan_workspace.exists()
+    assert not orphan_story.exists()
+    assert not orphan_session.exists()
+    assert "removed orphan runtime directory kind=workspace" in caplog.text
+    assert "removed orphan runtime directory kind=story" in caplog.text
+    assert "removed orphan runtime directory kind=session" in caplog.text
+    assert "orphan_dirs_removed=3" in caplog.text
+
+
+def test_gateway_bootstrap_removes_unindexed_status_csv_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.delenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", raising=False)
+    db_path = tmp_path / "cleanup_status.sqlite3"
+    gateway = get_data_service_gateway(db_path)
+    tables = gateway.status.list_tables("s_forest001")
+    assert tables
+
+    data_dir = tmp_path / "data" / "demo_workspace"
+    indexed_session_path = data_dir / tables[0].relative_path
+    orphan_session_csv = indexed_session_path.with_name("孤儿状态.csv")
+    orphan_template_csv = data_dir / "template_status" / "场景" / "孤儿模板.csv"
+    orphan_note = indexed_session_path.with_name("notes.txt")
+    orphan_session_csv.write_text("名称\n孤儿\n", encoding="utf-8")
+    orphan_template_csv.write_text("名称\n孤儿\n", encoding="utf-8")
+    orphan_note.write_text("keep me", encoding="utf-8")
+
+    reset_data_service_gateways()
+    caplog.set_level(logging.INFO, logger="rpg_data.bootstrap")
+    get_data_service_gateway(db_path).status.list_tables("s_forest001")
+
+    assert indexed_session_path.is_file()
+    assert orphan_note.is_file()
+    assert not orphan_session_csv.exists()
+    assert not orphan_template_csv.exists()
+    assert "removed unindexed status csv kind=session" in caplog.text
+    assert "removed unindexed status csv kind=template" in caplog.text
+    assert "orphan_status_files_removed=2" in caplog.text
+
+
+def test_gateway_bootstrap_can_preserve_orphan_runtime_dirs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
+    db_path = tmp_path / "preserve.sqlite3"
+    get_data_service_gateway(db_path).status.list_tables("s_forest001")
+
+    orphan_session = tmp_path / "data" / "demo_workspace" / "stories" / "1" / "s_orphan"
+    orphan_session.mkdir(parents=True, exist_ok=True)
+    (orphan_session / "marker.txt").write_text("orphan", encoding="utf-8")
+    orphan_status_csv = (
+        tmp_path
+        / "data"
+        / "demo_workspace"
+        / "stories"
+        / "1"
+        / "s_forest001"
+        / "status"
+        / "场景"
+        / "孤儿状态.csv"
+    )
+    orphan_status_csv.write_text("名称\n孤儿\n", encoding="utf-8")
+
+    reset_data_service_gateways()
+    caplog.set_level(logging.INFO, logger="rpg_data.bootstrap")
+    get_data_service_gateway(db_path).catalog.list_workspaces()
+
+    assert orphan_session.is_dir()
+    assert orphan_status_csv.is_file()
+    assert "runtime bootstrap orphan directory cleanup disabled" in caplog.text
+    assert "runtime bootstrap unindexed status file cleanup disabled" in caplog.text
+    assert "orphan_dirs_removed=0" in caplog.text
+    assert "orphan_status_files_removed=0" in caplog.text
+
 
 
 def test_gateway_is_cached_by_database_path_and_reset_closes(tmp_path: Path) -> None:

@@ -21,6 +21,7 @@ from agent_service.schemas import (
     AgentMessageRequest,
     AgentSessionCloneRequest,
     AgentSessionCreateRequest,
+    AgentSessionEnsureRequest,
 )
 from agent_service.settings import settings as process_settings
 from llm_service.client import configure_llama_client_from_runtime_config
@@ -29,6 +30,7 @@ from rpg_core.agent.command import CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.agent.manager import AgentManager
 from rpg_core.session import SessionManager
+from rpg_data.services import get_data_service_gateway
 
 
 def _service_prefix() -> str:
@@ -62,9 +64,8 @@ async def health() -> AgentHealthResponse:
 async def get_history(
     workspace: str = Query(...),
     session_id: str = Query(...),
-    api_key: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    agent = _get_agent(workspace, session_id, api_key)
+    agent = _get_agent(workspace, session_id)
     try:
         await agent._ensure_initialized()
     except Exception as exc:
@@ -76,9 +77,8 @@ async def get_history(
 async def list_commands(
     workspace: str = Query(...),
     session_id: str = Query(...),
-    api_key: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    agent = _get_agent(workspace, session_id, api_key)
+    agent = _get_agent(workspace, session_id)
     try:
         await agent._ensure_initialized()
     except Exception as exc:
@@ -93,28 +93,50 @@ async def list_commands(
 
 @app.get(f"{_service_prefix()}/chat/sessions")
 async def list_sessions(
-    workspace: str = Query(...),
-    session_id: str = Query(...),
-    api_key: str | None = Query(default=None),
+    workspace_id: str = Query(...),
+    story_id: int = Query(...),
 ) -> dict[str, Any]:
-    del api_key
-    workspace = _require_workspace(workspace)
-    session_id = _require_session_id(session_id)
+    workspace_id = _require_workspace(workspace_id)
+    sessions = get_data_service_gateway().catalog.list_sessions(workspace_id, story_id)
+    if sessions is None:
+        raise HTTPException(status_code=404, detail="story not found in workspace")
     return {
-        "sessions": SessionManager.list_sessions(workspace),
-        "active_session": session_id,
+        "sessions": [str(session["id"]) for session in sessions],
     }
 
 
 @app.post(f"{_service_prefix()}/chat/sessions")
 async def create_session(body: AgentSessionCreateRequest) -> dict[str, Any]:
-    workspace = _require_workspace(body.workspace)
-    session_id = _require_session_id(body.session_id)
-    try:
-        SessionManager.create(workspace, session_id)
-    except FileExistsError:
-        raise HTTPException(status_code=409, detail=f"Session {session_id!r} already exists")
-    return {"status": "created", "session_id": session_id}
+    session = _create_catalog_session(
+        body.workspace_id,
+        int(body.story_id),
+        title=str(body.title or ""),
+    )
+    return {"status": "created", **_session_payload(session)}
+
+
+@app.post(f"{_service_prefix()}/chat/session/ensure")
+async def ensure_session(body: AgentSessionEnsureRequest) -> dict[str, Any]:
+    workspace_id = _require_workspace(body.workspace_id)
+    story_id = int(body.story_id)
+    gateway = get_data_service_gateway()
+
+    if body.session_id:
+        session = gateway.catalog.get_session(body.session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session {body.session_id!r} not found")
+        if str(session["workspace"]) != workspace_id or int(session["story_id"]) != story_id:
+            raise HTTPException(status_code=400, detail=f"Session {body.session_id!r} does not belong to workspace/story")
+    else:
+        session = gateway.catalog.create_session(
+            workspace_id,
+            story_id,
+            title=str(body.title or ""),
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="story not found in workspace")
+
+    return _session_payload(session)
 
 
 @app.delete(f"{_service_prefix()}/chat/sessions/{{session_id}}")
@@ -128,7 +150,7 @@ async def delete_session(
     if session_id not in available:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
     SessionManager.delete(workspace, session_id)
-    AgentManager.drop_session(workspace, session_id)
+    AgentManager.drop_session(session_id)
     return {"status": "deleted", "session_id": session_id}
 
 
@@ -148,7 +170,7 @@ async def clone_session(session_id: str, body: AgentSessionCloneRequest) -> dict
 
 @app.post(f"{_service_prefix()}/chat/send")
 async def chat_send(body: AgentMessageRequest) -> dict[str, Any]:
-    agent = _get_agent(body.workspace, body.session_id, body.api_key)
+    agent = _get_agent(body.workspace, body.session_id)
     try:
         reply = await agent.send(body.message)
     except Exception as exc:
@@ -158,7 +180,7 @@ async def chat_send(body: AgentMessageRequest) -> dict[str, Any]:
 
 @app.post(f"{_service_prefix()}/chat/command")
 async def chat_command(body: AgentCommandRequest) -> dict[str, Any]:
-    agent = _get_agent(body.workspace, body.session_id, body.api_key)
+    agent = _get_agent(body.workspace, body.session_id)
     command = body.command.strip()
     try:
         result = await agent.execute_command(command)
@@ -176,7 +198,7 @@ async def chat_command(body: AgentCommandRequest) -> dict[str, Any]:
 
 @app.post(f"{_service_prefix()}/chat/stream")
 async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
-    agent = _get_agent(body.workspace, body.session_id, body.api_key)
+    agent = _get_agent(body.workspace, body.session_id)
 
     async def event_generator() -> AsyncIterator[str]:
         try:
@@ -197,14 +219,30 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
     )
 
 
-def _get_agent(workspace: str, session_id: str, api_key: str | None = None):
+def _get_agent(workspace: str, session_id: str):
     workspace = _require_workspace(workspace)
     session_id = _require_session_id(session_id)
     return AgentManager.get_or_create(
         workspace=workspace,
         session_id=session_id,
-        api_key=api_key,
     )
+
+
+def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> dict[str, object]:
+    workspace_id = _require_workspace(workspace_id)
+    session = get_data_service_gateway().catalog.create_session(workspace_id, story_id, title=title)
+    if session is None:
+        raise HTTPException(status_code=404, detail="story not found in workspace")
+    return session
+
+
+def _session_payload(session: dict[str, object]) -> dict[str, Any]:
+    return {
+        "workspace": str(session["workspace"]),
+        "story_id": int(session["story_id"]),
+        "session_id": str(session["id"]),
+        "title": str(session.get("title") or session["id"]),
+    }
 
 
 def _require_workspace(workspace: str) -> str:

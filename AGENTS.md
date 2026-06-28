@@ -7,6 +7,8 @@
 - 根目录聚合 supervisor 入口已移除；各进程必须通过独立入口启动。只有 `run_agent.py` 持有 `AgentManager` / `RPGGameAgent` / `rp_memory` / llama lazy worker，其它进程只能通过 `agent_service.client.AgentClient` 访问 Agent 服务。
 - 保持 `play_api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
 - Play WebUI 会话内链路只使用全局短 `session_id` 定位；创建 session 时在 `rpg_data` 绑定 `workspace_id + story_id`，之后由 Play API 反查上下文并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
+- CLI / Telegram 也必须通过 `rpg_data` catalog 解析会话：配置使用 `workspace_id + story_id + optional session_id + session_title`；未配置 `session_id` 时由 Agent service 创建系统生成 ID 的 session，配置了则只校验并加载既有 session。不要恢复 `workspace` 字段、`cli_direct` 默认 ID 或用户自定义 session ID 创建入口。
+- `AgentManager` 只按全局 `session_id` 缓存 agent；`api_key` 不再作为 Agent service schema、AgentClient 参数或缓存键。LLM key/provider 选择只走 `llm_service` 配置。
 - `data/` 是运行数据目录。会话历史、摘要、向量索引、SQLite WAL/SHM 等文件默认不纳入提交。
 
 ## 常用命令
@@ -40,7 +42,7 @@
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
 - `rpg_data` 状态表采用“SQL 完整索引 + CSV 内容源”：SQL 记录 type、template、story mount、session copy、排序和 workspace-relative `relative_path`，CSV 保存 headers/rows；不要通过目录扫描发现状态表，也不要把绝对文件路径写进索引。
 - 状态表模板文件位于 `{workspace_root}/template_status/`，session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/`。创建 session 时由 `CatalogService` 触发复制已挂载模板，后续模板修改不影响既有 session。
-- `rpg_data` bootstrap 只按 SQL 索引 materialize workspace 目录和缺失 CSV 文件；不要在 bootstrap 代码中硬编码 demo 或业务数据。缺失 CSV 的初始内容应来自 SQL 行的 `metadata_json._bootstrap_csv`，CSV 已存在时不得覆盖。
+- `rpg_data` bootstrap 只按 SQL 索引 materialize workspace 目录和缺失 CSV 文件；不要在 bootstrap 代码中硬编码 demo 或业务数据。缺失 CSV 的初始内容应来自 SQL 行的 `metadata_json._bootstrap_csv`，CSV 已存在时不得覆盖。默认会删除不在 SQL 索引中的 workspace/story/session 目录以及未索引 status CSV；如需保留孤儿运行文件，可设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=false`，并确保日志能清楚输出删除/跳过结果。
 - Play API 会话内接口集中在 `/sessions/{session_id}/history|scene|commands|turn|stream`；`chat.py`、`scene.py`、`commands.py` 旧 router 仅作占位，不要把它们恢复为主入口。
 
 ## 测试要求
@@ -59,8 +61,8 @@
 - `llm_service/llm.yaml` 管 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。
 - 它们都支持 `base + profiles`；`local` / `test` / `prod` 是固定 profile 名称，同级 `settings.local.yaml` / `llm.local.yaml` 等覆盖文件会自动加载。
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。
-- `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。Play WebUI 新建 session 默认生成 `s_` + 10 位小写字母/数字的短 ID，并作为公开 URL ID 与 Agent session id。
-- 工作区选择不要写回运行时状态。Telegram/CLI 默认工作区来自 `settings.yaml`，API/WebUI 通过请求参数传入。
+- `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。所有 session 创建入口都由 `rpg_data` 生成 ID；用户只允许指定 title。
+- 工作区选择不要写回运行时状态。Telegram/CLI 通过 `channels/settings.yaml` 配置 `workspace_id + story_id`，API/WebUI 通过请求参数或 catalog session 反查上下文。
 - `rpg_data` 只通过 `rpg_workspaces.root_path` 定位 workspace 根目录；状态表索引用 workspace-relative 路径，经 `rpg_data.settings.resolve_workspace_relative_path()` 解析并校验不逃逸 workspace。
 
 ## 提交规范

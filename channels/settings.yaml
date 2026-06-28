@@ -14,7 +14,7 @@ base:
       # 全局访问控制列表；["*"] 表示不限制。
       allow_from: ["*"]
       # 多 bot 字典。key 是 bot 唯一标识，只允许字母、数字、下划线。
-      # 每个 bot 独立绑定 workspace，独立运行。
+      # 每个 bot 独立绑定 workspace_id + story_id，独立运行。
       bots:
         main:
           # 是否启用此 bot；默认关闭，避免无 token 时启动失败。
@@ -23,8 +23,13 @@ base:
           bot_token: null
           # 从环境变量读取 token。
           token_env: TELEGRAM_BOT_TOKEN_MAIN
-          # 此 bot 绑定的 workspace。
-          workspace: data/非公开行程
+          # 此 bot 绑定的 rpg_data workspace/story。
+          workspace_id: 非公开行程
+          story_id: 1
+          # 留空时启动 bot 自动创建默认 session；非空时只加载并校验现有 session。
+          session_id: ""
+          # 自动创建默认 session 时使用的标题。
+          session_title: main
           # 单 bot 访问控制；["*"] 表示不限制。
           allow_from: ["*"]
           # 是否使用流式增量编辑回复。
@@ -37,13 +42,18 @@ base:
           stream_edit_min_chars: 64
           # 单次 Telegram API 请求超时，单位毫秒。
           request_timeout_ms: 5000
+          # 新建会话后是否立即把当前 chat pin 到该会话。
+          auto_pin_created_session: false
 
     # ── CLI 渠道配置 ───────────────────────────────────────────────
     cli:
-      # CLI 默认 workspace；留空时使用 data/cli_default_workspace。
-      workspace: data/非公开行程
-      # CLI 默认 session_id。
-      session_id: cli_direct
+      # CLI 绑定的 rpg_data workspace/story。
+      workspace_id: 非公开行程
+      story_id: 1
+      # 留空时启动 CLI 自动创建新 session；非空时只加载并校验现有 session。
+      session_id: ""
+      # 自动创建 session 时使用的标题。
+      session_title: CLI
       # 是否使用流式输出。
       streaming: true
 

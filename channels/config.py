@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 
 from commons.settings import ConfigDict, ProfiledYamlSettings, forgiving_int, optional_bool
+from rpg_core.session import SessionManager
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 _TELEGRAM_BOT_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9_]+$")
@@ -20,21 +21,27 @@ class TelegramBotSettings:
     name: str
     enabled: bool = False
     token: str = ""
-    workspace: str = ""
+    workspace_id: str = ""
+    story_id: int = 0
+    session_id: str = ""
+    session_title: str = ""
     allow_from: list[str] | None = None
     streaming: bool = True
     proxy: str = ""
     stream_edit_interval_ms: int = 800
     stream_edit_min_chars: int = 24
     request_timeout_ms: int = 5000
+    auto_pin_created_session: bool = False
 
 
 @dataclass(frozen=True)
 class CliChannelSettings:
     """Resolved CLI channel configuration."""
 
-    workspace: str = ""
-    session_id: str = "cli_direct"
+    workspace_id: str = ""
+    story_id: int = 0
+    session_id: str = ""
+    session_title: str = "CLI"
     streaming: bool = True
 
 
@@ -82,16 +89,20 @@ class ChannelsSettings(ProfiledYamlSettings):
     # ── CLI channel config ──────────────────────────────────────────────
 
     @property
-    def cli_workspace(self) -> str:
-        """CLI channel workspace."""
-        from rpg_core.utils.path_utils import default_workspace_name
+    def cli_workspace_id(self) -> str:
+        return self.cli_channel.workspace_id
 
-        configured = self.cli_channel.workspace
-        return configured if configured else default_workspace_name("cli")
+    @property
+    def cli_story_id(self) -> int:
+        return self.cli_channel.story_id
 
     @property
     def cli_session_id(self) -> str:
         return self.cli_channel.session_id
+
+    @property
+    def cli_session_title(self) -> str:
+        return self.cli_channel.session_title
 
     @property
     def cli_streaming(self) -> bool:
@@ -100,9 +111,16 @@ class ChannelsSettings(ProfiledYamlSettings):
     @property
     def cli_channel(self) -> CliChannelSettings:
         raw = self._channel_cfg("cli")
+        if "workspace" in raw:
+            raise ValueError("channels.cli.workspace is no longer supported; use workspace_id")
+        session_id = str(raw.get("session_id", "") or "").strip()
+        if session_id:
+            session_id = SessionManager.validate_session_id(session_id)
         return CliChannelSettings(
-            workspace=str(raw.get("workspace", "") or ""),
-            session_id=str(raw.get("session_id", "cli_direct") or "cli_direct"),
+            workspace_id=str(raw.get("workspace_id", "") or ""),
+            story_id=self._int(raw, "channels.cli", "story_id", 0),
+            session_id=session_id,
+            session_title=str(raw.get("session_title", "CLI") or "CLI"),
             streaming=self._bool(raw, "channels.cli", "streaming", True),
         )
 
@@ -126,6 +144,8 @@ class ChannelsSettings(ProfiledYamlSettings):
         return None
 
     def _build_telegram_bot(self, name: str, bot: ConfigDict) -> TelegramBotSettings:
+        if "workspace" in bot:
+            raise ValueError(f"telegram bot config invalid: bot={name} workspace is no longer supported; use workspace_id")
         token_env = self._first_non_empty(bot.get("token_env"))
         token = self._first_non_empty(
             bot.get("bot_token"),
@@ -134,17 +154,24 @@ class ChannelsSettings(ProfiledYamlSettings):
         allow_from = bot.get("allow_from", ["*"])
         if not isinstance(allow_from, list):
             allow_from = ["*"]
+        session_id = str(bot.get("session_id", "") or "").strip()
+        if session_id:
+            session_id = SessionManager.validate_session_id(session_id)
         return TelegramBotSettings(
             name=str(name),
             enabled=self._bool(bot, "channels.telegram.bots", "enabled", False),
             token=token,
-            workspace=str(bot.get("workspace", "") or ""),
+            workspace_id=str(bot.get("workspace_id", "") or ""),
+            story_id=self._int(bot, "channels.telegram.bots", "story_id", 0),
+            session_id=session_id,
+            session_title=str(bot.get("session_title", str(name)) or str(name)),
             allow_from=[str(item) for item in allow_from],
             streaming=self._bool(bot, "channels.telegram.bots", "streaming", True),
             proxy=str(bot.get("proxy", "") or ""),
             stream_edit_interval_ms=self._int(bot, "channels.telegram.bots", "stream_edit_interval_ms", 800),
             stream_edit_min_chars=self._int(bot, "channels.telegram.bots", "stream_edit_min_chars", 24),
             request_timeout_ms=self._int(bot, "channels.telegram.bots", "request_timeout_ms", 5000),
+            auto_pin_created_session=self._bool(bot, "channels.telegram.bots", "auto_pin_created_session", False),
         )
 
     def _validate_settings(self) -> None:
@@ -154,8 +181,7 @@ class ChannelsSettings(ProfiledYamlSettings):
             raise ValueError("telegram bot config invalid: bots must be a mapping")
 
         seen_names: set[str] = set()
-        token_to_workspace: dict[str, tuple[str, str]] = {}
-        workspace_to_token: dict[str, tuple[str, str]] = {}
+        token_to_story: dict[str, tuple[str, str, int]] = {}
         for name, raw_bot in bots.items():
             if not isinstance(raw_bot, dict):
                 raise ValueError("telegram bot config invalid: bot entry must be a mapping")
@@ -170,24 +196,25 @@ class ChannelsSettings(ProfiledYamlSettings):
                 continue
             if not bot.token:
                 raise ValueError(f"telegram bot config invalid: bot={name} missing token")
-            if not bot.workspace.strip():
-                raise ValueError(f"telegram bot config invalid: bot={name} missing workspace")
-            if bot.token in token_to_workspace:
-                other_name, other_workspace = token_to_workspace[bot.token]
-                if other_workspace != bot.workspace:
+            if not bot.workspace_id.strip():
+                raise ValueError(f"telegram bot config invalid: bot={name} missing workspace_id")
+            if bot.story_id <= 0:
+                raise ValueError(f"telegram bot config invalid: bot={name} missing story_id")
+            if bot.token in token_to_story:
+                other_name, other_workspace_id, other_story_id = token_to_story[bot.token]
+                if other_workspace_id != bot.workspace_id or other_story_id != bot.story_id:
                     raise ValueError(
-                        "telegram bot config invalid: token reused across workspaces "
+                        "telegram bot config invalid: token reused across workspace/story "
                         f"bot={name} conflicts_with={other_name} "
-                        f"workspace={bot.workspace} other_workspace={other_workspace}"
+                        f"workspace_id={bot.workspace_id} story_id={bot.story_id} "
+                        f"other_workspace_id={other_workspace_id} other_story_id={other_story_id}"
                     )
-            token_to_workspace[bot.token] = (name, bot.workspace)
-            if bot.workspace in workspace_to_token:
-                other_name, other_token = workspace_to_token[bot.workspace]
-                if other_token != bot.token:
-                    raise ValueError(
-                        "telegram bot config invalid: workspace reused by multiple tokens "
-                        f"bot={name} conflicts_with={other_name} workspace={bot.workspace}"
-                    )
-            workspace_to_token[bot.workspace] = (name, bot.token)
+            token_to_story[bot.token] = (name, bot.workspace_id, bot.story_id)
+
+        cli = self.cli_channel
+        if not cli.workspace_id.strip():
+            raise ValueError("channels.cli.workspace_id is required")
+        if cli.story_id <= 0:
+            raise ValueError("channels.cli.story_id is required")
 settings = ChannelsSettings()
 """Module-level singleton."""

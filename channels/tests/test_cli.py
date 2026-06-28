@@ -21,12 +21,17 @@ class TestCLIAdapter:
     """CLIAdapter 核心功能测试。"""
 
     async def test_get_session_id(self):
-        adapter = CLIAdapter()
-        assert adapter.get_session_id("direct") == "cli_direct"
+        adapter = CLIAdapter(session_id="resolved_session", workspace="data/ws")
+        assert adapter.get_session_id("direct") == "resolved_session"
 
     async def test_get_initial_session_id_uses_adapter_chat_mapping(self):
+        adapter = CLIAdapter(session_id="resolved_session", workspace="data/ws")
+        assert adapter.get_initial_session_id() == "resolved_session"
+
+    async def test_unresolved_session_raises(self):
         adapter = CLIAdapter()
-        assert adapter.get_initial_session_id() == "cli_direct"
+        with pytest.raises(RuntimeError, match="session is not resolved"):
+            adapter.get_session_id("direct")
 
     async def test_get_session_id_uses_override(self):
         adapter = CLIAdapter(session_id="custom_session")
@@ -79,7 +84,7 @@ class TestCLIAdapter:
 
     async def test_start_exits_on_quit(self):
         """输入 /quit 应退出循环。"""
-        adapter = CLIAdapter(agent_client=FakeAgent())
+        adapter = CLIAdapter(agent_client=FakeAgent(), session_id="resolved_session", workspace="data/ws")
         adapter._console.print = MagicMock()
         adapter._session.prompt_async = AsyncMock(side_effect=["/quit"])
 
@@ -92,18 +97,18 @@ class TestCLIAdapter:
     async def test_handle_message_command(self):
         """命令通过 AgentClient send() 统一处理。"""
         agent = FakeAgent()
-        adapter = CLIAdapter(agent_client=agent, streaming=False)
+        adapter = CLIAdapter(agent_client=agent, streaming=False, session_id="resolved_session", workspace="data/ws")
         adapter._console.print = MagicMock()
 
         reply = await adapter._handle_message("direct", "user", "/clear")
         # FakeAgent.send() 返回 "[mock] reply to: /clear"
         assert reply == "[mock] reply to: /clear"
-        assert agent.calls[-1] == ("send", ("data/cli_default_workspace", "cli_direct", "/clear"))
+        assert agent.calls[-1] == ("send", ("data/ws", "resolved_session", "/clear"))
 
     async def test_handle_message_command_streaming(self):
         """命令通过 AgentClient stream() 统一处理（流式路径）。"""
         agent = FakeAgent()
-        adapter = CLIAdapter(agent_client=agent, streaming=True)
+        adapter = CLIAdapter(agent_client=agent, streaming=True, session_id="resolved_session", workspace="data/ws")
         adapter._console.print = MagicMock()
 
         reply = await adapter._handle_message("direct", "user", "/clear")
@@ -126,7 +131,7 @@ class TestCLIAdapter:
     async def test_stream_and_send_uses_send_stream(self):
         """_stream_and_send 应调用 AgentClient stream。"""
         agent = FakeAgent()
-        adapter = CLIAdapter(agent_client=agent)
+        adapter = CLIAdapter(agent_client=agent, session_id="resolved_session", workspace="data/ws")
         adapter._console.print = MagicMock()
 
         result = await adapter._stream_and_send("direct", "hi")

@@ -14,7 +14,6 @@ class _BaseSchema(BaseModel):
 class AgentRequestBase(_BaseSchema):
     workspace: str
     session_id: str = DEFAULT_SESSION_ID
-    api_key: str | None = None
 
     @field_validator("session_id")
     @classmethod
@@ -30,14 +29,24 @@ class AgentCommandRequest(AgentRequestBase):
     command: str
 
 
-class AgentSessionCreateRequest(_BaseSchema):
-    workspace: str
-    session_id: str
+class AgentSessionEnsureRequest(_BaseSchema):
+    workspace_id: str
+    story_id: int
+    session_id: str | None = None
+    title: str = ""
 
     @field_validator("session_id")
     @classmethod
-    def _validate_session_id(cls, value: str) -> str:
-        return SessionManager.validate_session_id(value)
+    def _validate_optional_session_id(cls, value: str | None) -> str | None:
+        if value is None or not str(value).strip():
+            return None
+        return SessionManager.validate_session_id(str(value))
+
+
+class AgentSessionCreateRequest(_BaseSchema):
+    workspace_id: str
+    story_id: int
+    title: str = ""
 
 
 class AgentSessionCloneRequest(_BaseSchema):

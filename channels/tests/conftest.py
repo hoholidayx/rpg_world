@@ -84,8 +84,33 @@ class FakeAgent:
             return {"reply": f"[mock cmd] {command}", "handled": True, "active_session": args[1]}
         return CommandResult(reply=f"[mock cmd] {command}", handled=True)
 
-    async def list_sessions(self, _workspace: str, session_id: str) -> dict[str, object]:
-        return {"sessions": [session_id], "active_session": session_id}
+    async def list_sessions(self, _workspace_id: str, _story_id: int) -> dict[str, object]:
+        return {"sessions": ["tg_default"]}
+
+    async def create_session(self, workspace_id: str, story_id: int, *, title: str = "") -> dict[str, object]:
+        self.calls.append(("create_session", (workspace_id, str(story_id), title)))
+        return {
+            "workspace": workspace_id,
+            "story_id": story_id,
+            "session_id": "generated_session",
+            "title": title,
+        }
+
+    async def ensure_session(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        session_id: str | None = None,
+        title: str = "",
+    ) -> dict[str, object]:
+        self.calls.append(("ensure_session", (workspace_id, str(story_id), session_id or "", title)))
+        return {
+            "workspace": workspace_id,
+            "story_id": story_id,
+            "session_id": session_id or "generated_session",
+            "title": title,
+        }
 
 
 class FakeStreamAgent(FakeAgent):

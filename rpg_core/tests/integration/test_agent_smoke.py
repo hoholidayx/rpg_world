@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import pytest
 
@@ -115,13 +116,16 @@ async def test_session_create_and_switch_isolate_history(integration_agent, inte
     )
     assert create_result.handled is True
     assert "已创建" in create_result.reply
+    match = re.search(r"\[会话已创建: ([A-Za-z0-9_]+)\]", create_result.reply)
+    assert match is not None
+    created_session_id = match.group(1)
     current_session = integration_data_gateway.catalog.get_session("integration_smoke")
     assert current_session is not None
     sessions = integration_data_gateway.catalog.list_sessions(
         str(current_session["workspace"]),
         int(current_session["story_id"]),
     )
-    assert sorted(session["id"] for session in sessions or []) == ["alt_session", "integration_smoke"]
+    assert sorted(session["id"] for session in sessions or []) == sorted([created_session_id, "integration_smoke"])
 
     first_reply = await asyncio.wait_for(
         integration_agent.send("Reply in one short sentence."),
@@ -131,12 +135,12 @@ async def test_session_create_and_switch_isolate_history(integration_agent, inte
     assert first_reply.stats.total_tokens > 0
 
     switch_result = await asyncio.wait_for(
-        integration_agent.execute_command("/session_switch alt_session"),
+        integration_agent.execute_command(f"/session_switch {created_session_id}"),
         timeout=120,
     )
     assert switch_result.handled is True
     assert "已切换" in switch_result.reply
-    assert integration_agent._session_id == "alt_session"
+    assert integration_agent._session_id == created_session_id
     assert integration_agent.history == []
 
     second_reply = await asyncio.wait_for(
@@ -148,7 +152,7 @@ async def test_session_create_and_switch_isolate_history(integration_agent, inte
     assert [m.turn_id for m in integration_agent.history] == [1, 1]
 
     default_rows = integration_data_gateway.messages.list("integration_smoke")
-    alt_rows = integration_data_gateway.messages.list("alt_session")
+    alt_rows = integration_data_gateway.messages.list(created_session_id)
 
     assert default_rows[0].turn_id == 1
     assert len(alt_rows) == 2

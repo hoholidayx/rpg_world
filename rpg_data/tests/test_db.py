@@ -6,6 +6,7 @@ import pytest
 
 from rpg_data import db
 from rpg_data.settings import (
+    get_bootstrap_delete_orphan_dirs,
     get_database_path,
     resolve_database_path,
     resolve_workspace_relative_path,
@@ -26,6 +27,18 @@ def test_get_database_path_can_be_overridden(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(configured))
 
     assert get_database_path() == configured
+
+
+def test_bootstrap_delete_orphan_dirs_defaults_to_enabled(monkeypatch) -> None:
+    monkeypatch.delenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", raising=False)
+
+    assert get_bootstrap_delete_orphan_dirs() is True
+
+
+def test_bootstrap_delete_orphan_dirs_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
+
+    assert get_bootstrap_delete_orphan_dirs() is False
 
 
 def test_resolve_database_path_preserves_memory_database() -> None:

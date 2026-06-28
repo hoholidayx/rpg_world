@@ -45,6 +45,13 @@ async def _start_enabled_bots(
             stop_event.set()
 
     for bot in enabled_bots:
+        client = AgentClient()
+        session = await client.ensure_session(
+            bot.workspace_id,
+            bot.story_id,
+            session_id=bot.session_id or None,
+            title=bot.session_title,
+        )
         adapter = TelegramAdapter(
             bot_name=bot.name,
             token=bot.token,
@@ -53,13 +60,24 @@ async def _start_enabled_bots(
             stream_edit_interval_ms=bot.stream_edit_interval_ms,
             stream_edit_min_chars=bot.stream_edit_min_chars,
             request_timeout_ms=bot.request_timeout_ms,
-            workspace=bot.workspace,
-            agent_client=AgentClient(),
+            auto_pin_created_session=bot.auto_pin_created_session,
+            workspace=str(session["workspace"]),
+            workspace_id=bot.workspace_id,
+            story_id=bot.story_id,
+            session_id=str(session["session_id"]),
+            session_title=str(session.get("title") or bot.session_title),
+            agent_client=client,
         )
         start_task = asyncio.create_task(adapter.start(), name=f"telegram:{bot.name}")
         start_task.add_done_callback(_on_start_done)
         runtimes.append(_BotRuntime(bot.name, adapter, start_task))
-        logger.info("Telegram bot started task registered bot={} workspace={}", bot.name, bot.workspace)
+        logger.info(
+            "Telegram bot started task registered bot={} workspace_id={} story_id={} session_id={}",
+            bot.name,
+            bot.workspace_id,
+            bot.story_id,
+            session["session_id"],
+        )
 
     return runtimes
 

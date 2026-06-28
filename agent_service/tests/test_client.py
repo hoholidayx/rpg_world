@@ -75,24 +75,32 @@ def _patch_httpx(monkeypatch):
 
 
 async def test_client_send_uses_standard_payload() -> None:
-    result = await AgentClient(base_url="http://agent").send("data/ws", "s1", "hello", api_key="key")
+    result = await AgentClient(base_url="http://agent").send("data/ws", "s1", "hello")
     assert result == {"reply": "ok"}
     assert FakeAsyncClient.calls[-1] == (
         "POST",
         "http://agent/chat/send",
-        {"json": {"workspace": "data/ws", "session_id": "s1", "api_key": "key", "message": "hello"}},
+        {"json": {"workspace": "data/ws", "session_id": "s1", "message": "hello"}},
     )
 
 
 async def test_client_session_crud_uses_agent_service_contract() -> None:
     client = AgentClient(base_url="http://agent")
-    await client.create_session("data/ws", "s2")
+    await client.ensure_session("ws", 1, session_id="s1", title="Default")
+    await client.create_session("ws", 1, title="Alt")
+    await client.list_sessions("ws", 1)
     await client.clone_session("data/ws", "s2", "s3")
     result = await client.delete_session("data/ws", "s2")
 
     assert result == {"status": "deleted"}
-    assert FakeAsyncClient.calls[-3:] == [
-        ("POST", "http://agent/chat/sessions", {"json": {"workspace": "data/ws", "session_id": "s2"}}),
+    assert FakeAsyncClient.calls[-5:] == [
+        (
+            "POST",
+            "http://agent/chat/session/ensure",
+            {"json": {"workspace_id": "ws", "story_id": 1, "session_id": "s1", "title": "Default"}},
+        ),
+        ("POST", "http://agent/chat/sessions", {"json": {"workspace_id": "ws", "story_id": 1, "title": "Alt"}}),
+        ("GET", "http://agent/chat/sessions", {"params": {"workspace_id": "ws", "story_id": 1}}),
         (
             "POST",
             "http://agent/chat/sessions/s2/clone",
