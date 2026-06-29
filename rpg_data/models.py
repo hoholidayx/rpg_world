@@ -242,6 +242,12 @@ class StoryCharacter:
 
 
 @dataclass(frozen=True)
+class StoryCharacterDetail:
+    mount: StoryCharacter
+    character: Character
+
+
+@dataclass(frozen=True)
 class StoryLorebookEntry:
     id: int
     workspace_id: str

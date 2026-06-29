@@ -2,7 +2,7 @@
 
 from rpg_data.services.backup import BackupMessageComponent, BackupService
 from rpg_data.services.catalog import CatalogService
-from rpg_data.services.character import CharacterReadService
+from rpg_data.services.character import CharacterManagementService, CharacterReadService
 from rpg_data.services.gateway import (
     DataServiceGateway,
     get_data_service_gateway,
@@ -17,6 +17,7 @@ __all__ = [
     "BackupMessageComponent",
     "BackupService",
     "CatalogService",
+    "CharacterManagementService",
     "CharacterReadService",
     "DataServiceGateway",
     "LorebookManagementService",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from peewee import Database
+from peewee import IntegrityError
 
 from rpg_data import models
 from rpg_data.repositories.records import StoryCharacterRecord, bind_database
@@ -53,6 +54,54 @@ class StoryCharacterRepository:
     def get(self, mount_id: int) -> models.StoryCharacter | None:
         row = get_or_none(StoryCharacterRecord, mount_id)
         return to_story_character(row) if row is not None else None
+
+    def get_for_story_character(
+        self,
+        story_id: int,
+        character_id: int,
+    ) -> models.StoryCharacter | None:
+        row = (
+            StoryCharacterRecord
+            .select()
+            .where(
+                (StoryCharacterRecord.story == story_id)
+                & (StoryCharacterRecord.character == character_id)
+            )
+            .first()
+        )
+        return to_story_character(row) if row is not None else None
+
+    def mount(
+        self,
+        workspace_id: str,
+        story_id: int,
+        character_id: int,
+        *,
+        metadata_json: str = "{}",
+    ) -> models.StoryCharacter:
+        existing = self.get_for_story_character(story_id, character_id)
+        if existing is not None:
+            return existing
+        try:
+            return self.create(
+                workspace_id,
+                story_id,
+                character_id,
+                metadata_json=metadata_json,
+            )
+        except IntegrityError:
+            existing = self.get_for_story_character(story_id, character_id)
+            if existing is not None:
+                return existing
+            raise
+
+    def delete(self, mount_id: int) -> bool:
+        return bool(
+            StoryCharacterRecord
+            .delete()
+            .where(StoryCharacterRecord.id == mount_id)
+            .execute()
+        )
 
     def update_timestamp(self, mount_id: int) -> models.StoryCharacter | None:
         row = update_timestamp(StoryCharacterRecord, mount_id)

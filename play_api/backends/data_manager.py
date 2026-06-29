@@ -79,6 +79,181 @@ class DataManagerBackend:
     async def scan_orphan_runtime(self) -> dict[str, list[dict[str, str]]]:
         return scan_orphan_runtime_data(self._gateway.database)
 
+    async def list_characters(self, workspace: str) -> list[dict[str, object]] | None:
+        characters = self._gateway.character_management.list_characters(workspace)
+        if characters is None:
+            return None
+        return [
+            _character_summary(
+                character,
+                self._gateway.character_management.list_details(workspace, int(character.id)) or [],
+            )
+            for character in characters
+        ]
+
+    async def create_character(
+        self,
+        workspace: str,
+        *,
+        name: str,
+        personality: str = "",
+        content: str = "",
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        character = self._gateway.character_management.create_character(
+            workspace,
+            name=name,
+            personality=personality,
+            content=content,
+            metadata=metadata,
+        )
+        if character is None:
+            return None
+        return _character_summary(
+            character,
+            self._gateway.character_management.list_details(workspace, int(character.id)) or [],
+        )
+
+    async def get_character(
+        self,
+        workspace: str,
+        character_id: int,
+    ) -> dict[str, object] | None:
+        characters = self._gateway.character_management.list_characters(workspace)
+        if characters is None:
+            return None
+        for character in characters:
+            if int(character.id) == int(character_id):
+                return _character_summary(
+                    character,
+                    self._gateway.character_management.list_details(workspace, int(character.id)) or [],
+                )
+        return None
+
+    async def update_character(
+        self,
+        workspace: str,
+        character_id: int,
+        *,
+        name: str | None = None,
+        personality: str | None = None,
+        content: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        character = self._gateway.character_management.update_character(
+            workspace,
+            character_id,
+            name=name,
+            personality=personality,
+            content=content,
+            metadata=metadata,
+        )
+        if character is None:
+            return None
+        return _character_summary(
+            character,
+            self._gateway.character_management.list_details(workspace, int(character.id)) or [],
+        )
+
+    async def delete_character(
+        self,
+        workspace: str,
+        character_id: int,
+    ) -> bool:
+        return self._gateway.character_management.delete_character(workspace, character_id)
+
+    async def create_character_detail(
+        self,
+        workspace: str,
+        character_id: int,
+        *,
+        name: str,
+        content: str = "",
+        tags: list[str] | None = None,
+        sort_order: int = 0,
+    ) -> dict[str, object] | None:
+        detail = self._gateway.character_management.create_detail(
+            workspace,
+            character_id,
+            name=name,
+            content=content,
+            tags=tags or [],
+            sort_order=sort_order,
+        )
+        if detail is None:
+            return None
+        return _character_detail_summary(detail)
+
+    async def update_character_detail(
+        self,
+        workspace: str,
+        character_id: int,
+        detail_id: int,
+        *,
+        name: str | None = None,
+        content: str | None = None,
+        tags: list[str] | None = None,
+        sort_order: int | None = None,
+    ) -> dict[str, object] | None:
+        detail = self._gateway.character_management.update_detail(
+            workspace,
+            character_id,
+            detail_id,
+            name=name,
+            content=content,
+            tags=tags,
+            sort_order=sort_order,
+        )
+        if detail is None:
+            return None
+        return _character_detail_summary(detail)
+
+    async def delete_character_detail(
+        self,
+        workspace: str,
+        character_id: int,
+        detail_id: int,
+    ) -> bool:
+        return self._gateway.character_management.delete_detail(workspace, character_id, detail_id)
+
+    async def list_story_characters(
+        self,
+        workspace: str,
+        story_id: int,
+    ) -> list[dict[str, object]] | None:
+        characters = self._gateway.character_management.list_story_characters(workspace, story_id)
+        if characters is None:
+            return None
+        return [
+            _mounted_character_summary(
+                item,
+                self._gateway.character_management.list_details(workspace, int(item.character.id)) or [],
+            )
+            for item in characters
+        ]
+
+    async def mount_character(
+        self,
+        workspace: str,
+        story_id: int,
+        character_id: int,
+    ) -> dict[str, object] | None:
+        character = self._gateway.character_management.mount_character(workspace, story_id, character_id)
+        if character is None:
+            return None
+        return _mounted_character_summary(
+            character,
+            self._gateway.character_management.list_details(workspace, int(character.character.id)) or [],
+        )
+
+    async def unmount_character(
+        self,
+        workspace: str,
+        story_id: int,
+        mount_id: int,
+    ) -> bool | None:
+        return self._gateway.character_management.unmount_character(workspace, story_id, mount_id)
+
     async def list_lorebook_entries(self, workspace: str) -> list[dict[str, object]] | None:
         entries = self._gateway.lorebook_management.list_entries(workspace)
         if entries is None:
@@ -226,6 +401,52 @@ def _session_summary(session: models.Session) -> dict[str, object]:
         "created_at": str(session.created_at),
         "updated_at": str(session.updated_at),
     }
+
+
+def _character_summary(
+    character: models.Character,
+    details: list[models.CharacterDetail],
+) -> dict[str, object]:
+    return {
+        "id": int(character.id),
+        "workspace_id": str(character.workspace_id),
+        "name": str(character.name),
+        "personality": str(character.personality or ""),
+        "content": str(character.content or ""),
+        "metadata": _parse_metadata(character.metadata_json),
+        "details": [_character_detail_summary(detail) for detail in details],
+        "version": int(character.version),
+        "created_at": str(character.created_at),
+        "updated_at": str(character.updated_at),
+    }
+
+
+def _character_detail_summary(detail: models.CharacterDetail) -> dict[str, object]:
+    return {
+        "id": int(detail.id),
+        "character_id": int(detail.character_id),
+        "name": str(detail.name),
+        "content": str(detail.content or ""),
+        "tags": list(_parse_tags(detail.tags_json)),
+        "sort_order": int(detail.sort_order),
+        "version": int(detail.version),
+        "created_at": str(detail.created_at),
+        "updated_at": str(detail.updated_at),
+    }
+
+
+def _mounted_character_summary(
+    detail: models.StoryCharacterDetail,
+    details: list[models.CharacterDetail],
+) -> dict[str, object]:
+    result = _character_summary(detail.character, details)
+    result.update(
+        {
+            "mount_id": int(detail.mount.id),
+            "story_id": int(detail.mount.story_id),
+        }
+    )
+    return result
 
 
 def _lorebook_entry_summary(entry: models.LorebookEntry) -> dict[str, object]:

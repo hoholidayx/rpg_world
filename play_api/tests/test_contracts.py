@@ -107,6 +107,126 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert ("commands", demo_session_id) in fake_agent.calls
     assert ("send", demo_session_id) in fake_agent.calls
 
+    characters = client.get("/play-api/v1/workspaces/demo_workspace/characters")
+    assert characters.status_code == 200
+    assert {character["name"] for character in characters.json()} >= {"Bob", "Alice"}
+    assert characters.json()[0]["workspaceId"] == "demo_workspace"
+    assert isinstance(characters.json()[0]["details"], list)
+    assert isinstance(characters.json()[0]["metadata"], dict)
+    assert client.get("/play-api/v1/workspaces/missing/characters").status_code == 404
+
+    new_character = client.post(
+        "/play-api/v1/workspaces/demo_workspace/characters",
+        json={
+            "name": "守夜人伊凡",
+            "personality": "谨慎，疲惫但可靠",
+            "content": "灯塔旧守夜人，知道潮汐与失火名单。",
+            "metadata": {"ui": {"displayVersion": "v1.0.0", "roleLabel": "NPC"}},
+        },
+    )
+    assert new_character.status_code == 200
+    assert new_character.json()["name"] == "守夜人伊凡"
+    assert new_character.json()["personality"] == "谨慎，疲惫但可靠"
+    assert new_character.json()["metadata"]["ui"]["roleLabel"] == "NPC"
+    assert client.post(
+        "/play-api/v1/workspaces/demo_workspace/characters",
+        json={"name": ""},
+    ).status_code == 422
+
+    patched_character = client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}",
+        json={"personality": "谨慎，口风很紧", "metadata": {"ui": {"displayVersion": "v1.0.1"}}},
+    )
+    assert patched_character.status_code == 200
+    assert patched_character.json()["personality"] == "谨慎，口风很紧"
+    assert patched_character.json()["version"] == 2
+    assert client.patch(
+        f"/play-api/v1/workspaces/missing/characters/{new_character.json()['id']}",
+        json={"name": "Nope"},
+    ).status_code == 404
+
+    new_detail = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details",
+        json={
+            "name": "禁忌话题",
+            "content": "拒绝谈论灯塔失火当夜。",
+            "tags": ["秘密", "话题"],
+            "sortOrder": 10,
+        },
+    )
+    assert new_detail.status_code == 200
+    assert new_detail.json()["name"] == "禁忌话题"
+    assert new_detail.json()["tags"] == ["秘密", "话题"]
+    assert new_detail.json()["sortOrder"] == 10
+
+    patched_detail = client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details/{new_detail.json()['id']}",
+        json={"content": "只在午夜后透露线索。", "tags": ["秘密"], "sortOrder": 20},
+    )
+    assert patched_detail.status_code == 200
+    assert patched_detail.json()["content"] == "只在午夜后透露线索。"
+    assert patched_detail.json()["tags"] == ["秘密"]
+    assert patched_detail.json()["sortOrder"] == 20
+    assert patched_detail.json()["version"] == 2
+    assert client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details/99999",
+        json={"name": "Nope"},
+    ).status_code == 404
+
+    story_characters = client.get("/play-api/v1/workspaces/demo_workspace/stories/1/characters")
+    assert story_characters.status_code == 200
+    assert story_characters.json()[0]["mountId"] is not None
+    assert client.get("/play-api/v1/workspaces/demo_workspace/stories/999/characters").status_code == 404
+
+    mounted_character = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/characters/{new_character.json()['id']}/mount"
+    )
+    assert mounted_character.status_code == 200
+    assert mounted_character.json()["name"] == "守夜人伊凡"
+    assert mounted_character.json()["storyId"] == 1
+    duplicate_character_mount = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/characters/{new_character.json()['id']}/mount"
+    )
+    assert duplicate_character_mount.status_code == 200
+    assert duplicate_character_mount.json()["mountId"] == mounted_character.json()["mountId"]
+
+    removed_character_mount = client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/character-mounts/{mounted_character.json()['mountId']}"
+    )
+    assert removed_character_mount.status_code == 204
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/character-mounts/{mounted_character.json()['mountId']}"
+    ).status_code == 404
+
+    delete_character_target = client.post(
+        "/play-api/v1/workspaces/demo_workspace/characters",
+        json={"name": "待删除角色", "content": "临时角色"},
+    )
+    assert delete_character_target.status_code == 200
+    delete_character_detail = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{delete_character_target.json()['id']}/details",
+        json={"name": "临时细节", "content": "tmp"},
+    )
+    assert delete_character_detail.status_code == 200
+    delete_character_mount = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/characters/{delete_character_target.json()['id']}/mount"
+    )
+    assert delete_character_mount.status_code == 200
+    deleted_character = client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{delete_character_target.json()['id']}"
+    )
+    assert deleted_character.status_code == 204
+    assert client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{delete_character_target.json()['id']}",
+        json={"name": "Gone"},
+    ).status_code == 404
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details/{new_detail.json()['id']}"
+    ).status_code == 204
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details/{new_detail.json()['id']}"
+    ).status_code == 404
+
     lorebooks = client.get("/play-api/v1/workspaces/demo_workspace/lorebook-entries")
     assert lorebooks.status_code == 200
     assert {entry["name"] for entry in lorebooks.json()} >= {"炎心之木", "圆形封印祭坛"}

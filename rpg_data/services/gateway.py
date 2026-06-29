@@ -13,7 +13,7 @@ from rpg_data.bootstrap import bootstrap_runtime_data
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.services.backup import BackupService
 from rpg_data.services.catalog import CatalogService
-from rpg_data.services.character import CharacterReadService
+from rpg_data.services.character import CharacterManagementService, CharacterReadService
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
 from rpg_data.services.message import MessageService
 from rpg_data.services.story_memory import StoryMemoryService
@@ -37,6 +37,7 @@ class DataServiceGateway:
         self._database: Database | None = None
         self._catalog: CatalogService | None = None
         self._character: CharacterReadService | None = None
+        self._character_management: CharacterManagementService | None = None
         self._lorebook: LorebookReadService | None = None
         self._lorebook_management: LorebookManagementService | None = None
         self._messages: MessageService | None = None
@@ -75,6 +76,15 @@ class DataServiceGateway:
             self._character = CharacterReadService(database)
         self._ensure_bound()
         return self._character
+
+    @property
+    def character_management(self) -> CharacterManagementService:
+        database = self.database
+        if self._character_management is None:
+            logger.debug("creating character management service db_path=%s", self._database_path)
+            self._character_management = CharacterManagementService(database)
+        self._ensure_bound()
+        return self._character_management
 
     @property
     def lorebook(self) -> LorebookReadService:
@@ -160,6 +170,7 @@ class DataServiceGateway:
         self._initialized = False
         self._catalog = None
         self._character = None
+        self._character_management = None
         self._lorebook = None
         self._lorebook_management = None
         self._messages = None

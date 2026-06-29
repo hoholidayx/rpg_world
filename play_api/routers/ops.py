@@ -23,6 +23,8 @@ class PlayDeleteConfirmationToken(BaseModel):
 
 
 class OrphanRuntimeItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     kind: str
     workspace_id: str = Field(alias="workspaceId")
     story_id: str = Field(alias="storyId")

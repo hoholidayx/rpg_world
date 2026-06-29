@@ -29,6 +29,7 @@ class FakeCatalog:
 class FakeGateway:
     def __init__(self) -> None:
         self.catalog = FakeCatalog()
+        self.character_management = FakeCharacterManagement()
         self.lorebook_management = FakeLorebookManagement()
         self.initialize_calls = 0
         self.close_calls = 0
@@ -72,6 +73,77 @@ class FakeLorebookManagement:
         return workspace == "workspace" and story_id == 1 and mount_id == 10
 
 
+class FakeCharacterManagement:
+    def list_characters(self, workspace: str):
+        if workspace != "workspace":
+            return None
+        return [models.Character(1, workspace, "Character")]
+
+    def create_character(self, workspace: str, **kwargs):
+        return models.Character(
+            2,
+            workspace,
+            str(kwargs["name"]),
+            personality=str(kwargs.get("personality") or ""),
+            content=str(kwargs.get("content") or ""),
+        )
+
+    def update_character(self, workspace: str, character_id: int, **kwargs):
+        return models.Character(character_id, workspace, str(kwargs["name"]), version=2)
+
+    def delete_character(self, workspace: str, character_id: int):
+        return workspace == "workspace" and character_id == 1
+
+    def list_details(self, workspace: str, character_id: int):
+        if workspace != "workspace":
+            return None
+        return [models.CharacterDetail(11, character_id, "Detail", tags_json='["tag"]')]
+
+    def create_detail(self, workspace: str, character_id: int, **kwargs):
+        return models.CharacterDetail(
+            12,
+            character_id,
+            str(kwargs["name"]),
+            content=str(kwargs.get("content") or ""),
+            tags_json='["new"]',
+            sort_order=int(kwargs.get("sort_order") or 0),
+        )
+
+    def update_detail(self, workspace: str, character_id: int, detail_id: int, **kwargs):
+        return models.CharacterDetail(
+            detail_id,
+            character_id,
+            str(kwargs["name"]),
+            tags_json='["updated"]',
+            version=2,
+        )
+
+    def delete_detail(self, workspace: str, character_id: int, detail_id: int):
+        return workspace == "workspace" and character_id == 1 and detail_id == 11
+
+    def list_story_characters(self, workspace: str, story_id: int):
+        return [_character_mount_detail(workspace, story_id)]
+
+    def mount_character(self, workspace: str, story_id: int, character_id: int):
+        return _character_mount_detail(workspace, story_id, character_id=character_id)
+
+    def unmount_character(self, workspace: str, story_id: int, mount_id: int):
+        return workspace == "workspace" and story_id == 1 and mount_id == 20
+
+
+def _character_mount_detail(
+    workspace: str,
+    story_id: int,
+    *,
+    character_id: int = 1,
+    mount_id: int = 20,
+) -> models.StoryCharacterDetail:
+    return models.StoryCharacterDetail(
+        mount=models.StoryCharacter(mount_id, workspace, story_id, character_id),
+        character=models.Character(character_id, workspace, "Character"),
+    )
+
+
 def _lorebook_detail(
     workspace: str,
     story_id: int,
@@ -112,6 +184,19 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
     )
     assert (await backend.get_session("session"))["id"] == "session"
     assert await backend.scan_orphan_runtime() == {"orphan_directories": [], "unindexed_status_files": []}
+    assert (await backend.list_characters("workspace"))[0]["name"] == "Character"
+    assert (await backend.list_characters("workspace"))[0]["details"][0]["tags"] == ["tag"]
+    assert (await backend.create_character("workspace", name="New"))["name"] == "New"
+    assert (await backend.get_character("workspace", 1))["name"] == "Character"
+    assert await backend.get_character("missing", 1) is None
+    assert (await backend.update_character("workspace", 1, name="Updated"))["name"] == "Updated"
+    assert await backend.delete_character("workspace", 1) is True
+    assert (await backend.create_character_detail("workspace", 1, name="New Detail"))["name"] == "New Detail"
+    assert (await backend.update_character_detail("workspace", 1, 11, name="Updated Detail"))["version"] == 2
+    assert await backend.delete_character_detail("workspace", 1, 11) is True
+    assert (await backend.list_story_characters("workspace", 1))[0]["mount_id"] == 20
+    assert (await backend.mount_character("workspace", 1, 1))["mount_id"] == 20
+    assert await backend.unmount_character("workspace", 1, 20) is True
     assert (await backend.list_lorebook_entries("workspace"))[0]["name"] == "Entry"
     assert (await backend.create_lorebook_entry("workspace", name="New"))["name"] == "New"
     assert (await backend.get_lorebook_entry("workspace", 1))["name"] == "Entry"
