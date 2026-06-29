@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS rpg_stories (
     workspace_id TEXT NOT NULL,
     title TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '',
-    description TEXT NOT NULL DEFAULT '',
+    -- Story-level fixed system prompt; stored now and planned for fix layer integration later.
+    story_prompt TEXT NOT NULL DEFAULT '',
+    first_message TEXT NOT NULL DEFAULT '',
     metadata_json TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

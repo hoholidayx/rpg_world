@@ -399,7 +399,8 @@ def _story_summary(story: models.Story) -> dict[str, object]:
         "workspace": str(story.workspace_id),
         "title": str(story.title),
         "summary": str(story.summary or "") or None,
-        "description": str(story.description or "") or None,
+        "story_prompt": str(story.story_prompt or ""),
+        "first_message": str(story.first_message or ""),
         "created_at": str(story.created_at),
         "updated_at": str(story.updated_at),
     }

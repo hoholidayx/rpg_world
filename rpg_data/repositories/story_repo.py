@@ -19,14 +19,17 @@ class StoryRepository:
         title: str,
         *,
         summary: str = "",
-        description: str = "",
+        story_prompt: str = "",
+        first_message: str = "",
         metadata_json: str = "{}",
     ) -> models.Story:
+        # story_prompt is stored only for now; fix layer integration is a later step.
         return to_story(StoryRecord.create(
             workspace=workspace_id,
             title=title,
             summary=summary,
-            description=description,
+            story_prompt=story_prompt,
+            first_message=first_message,
             metadata_json=metadata_json,
         ))
 

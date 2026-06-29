@@ -66,6 +66,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             assert {"created_at", "updated_at", "version"}.issubset(columns)
 
         session_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_sessions)")}
+        story_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_stories)")}
         session_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_messages)")}
         backup_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_backup_messages)")}
         story_memory_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_story_memories)")}
@@ -82,6 +83,8 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "story_memory_last_turn_id" in session_columns
         assert "last_story_turn_index" not in session_columns
         assert "session_key" not in session_columns
+        assert {"story_prompt", "first_message"}.issubset(story_columns)
+        assert "description" not in story_columns
         assert {"session_id", "title", "description"}.issubset(profile_columns)
         assert {
             "session_id",

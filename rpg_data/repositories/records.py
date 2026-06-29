@@ -102,7 +102,9 @@ class StoryRecord(BaseRecord):
     )
     title = TextField()
     summary = TextField(default="")
-    description = TextField(default="")
+    # Story-level fixed system prompt; planned to be integrated into fix layer later.
+    story_prompt = TextField(default="")
+    first_message = TextField(default="")
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
     created_at = TextField()

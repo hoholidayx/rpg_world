@@ -3,7 +3,8 @@ export type StorySummary = {
   workspace: string
   title: string
   summary?: string | null
-  description?: string | null
+  storyPrompt: string
+  firstMessage: string
   createdAt?: string | null
   updatedAt?: string | null
 }

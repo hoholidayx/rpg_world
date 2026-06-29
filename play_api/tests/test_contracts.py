@@ -45,6 +45,9 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     stories = client.get("/play-api/v1/workspaces/demo_workspace/stories")
     assert stories.status_code == 200
     assert stories.json()[0]["title"] == "北境森林 Demo"
+    assert stories.json()[0]["storyPrompt"] == "用于验证 workspace、story、session、角色卡与 lorebook 挂载关系的演示故事。"
+    assert stories.json()[0]["firstMessage"] == ""
+    assert "description" not in stories.json()[0]
     assert client.get("/play-api/v1/workspaces/missing/stories").status_code == 404
 
     assert client.get("/play-api/v1/sessions").status_code == 422

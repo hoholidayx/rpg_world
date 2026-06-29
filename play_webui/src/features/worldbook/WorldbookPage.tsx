@@ -737,7 +737,7 @@ function WorldbookContent() {
                         <EntryVisual entry={entry} />
                         <div className="min-w-0 flex-1">
                           <h3 className="truncate text-sm font-bold text-slate-950">{story.title}</h3>
-                          <p className="mt-1 truncate text-xs text-slate-500">{story.summary || story.description || '暂无故事描述'}</p>
+                          <p className="mt-1 truncate text-xs text-slate-500">{story.summary || '暂无故事摘要'}</p>
                         </div>
                         <button
                           type="button"
@@ -780,7 +780,7 @@ function WorldbookContent() {
                                 <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">已挂载</span>
                               ) : null}
                             </div>
-                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{story.summary || story.description || '暂无故事描述'}</p>
+                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{story.summary || '暂无故事摘要'}</p>
                           </div>
                           <button
                             type="button"

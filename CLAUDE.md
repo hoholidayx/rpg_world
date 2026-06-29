@@ -203,6 +203,8 @@ agent = AgentManager.get_or_create(session_id="mygame_01")
 
 `rpg_data` 的数据关系是：workspace 下有多个 story，story 下有多个 session；角色卡和世界书条目属于 workspace，并通过 `rpg_story_characters`、`rpg_story_lorebook_entries` 挂载到 story。同一个角色卡或世界书条目可以挂载到多个 story，挂载表只禁止同一 story 内重复挂载。
 
+Story 主数据字段中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词。`story_prompt` 当前只存储和通过 Play API 返回，待后续集成入 fix layer；在该集成完成前，不要把它接入 `RPGContext` 或固定层渲染。当前 story schema 变更直接体现在 `0001_initial.sql` 和 `0002_demo.sql`，不新增后续迁移版本。
+
 状态表也由 `rpg_data` 管理索引。SQLite 保存状态类型、模板、story 挂载、session 副本、排序、`builtin_key` 和 workspace-relative `relative_path`；CSV 是 headers/rows 的唯一内容源。模板文件放在 `{workspace_root}/template_status/`，创建 session 时 `CatalogService` 调用 `StatusTableService.initialize_session_tables()`，把当前 story 已挂载模板复制到 `{workspace_root}/stories/{story_id}/{session_id}/status/`。模板后续修改不影响已有 session 副本。`DataServiceGateway` 初始化时会按 SQL 索引 materialize workspace 目录和缺失 CSV；缺失 CSV 的初始内容只来自 SQL 行的 `metadata_json._bootstrap_csv`，bootstrap 代码不要硬编码 demo 或业务数据。Bootstrap 默认不删除不在 SQL 索引中的 workspace/story/session 目录，以及 template/session status 下未索引 CSV；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，日志必须输出删除/跳过明细和汇总计数。
 
 `当前场景` 是 `builtin_key="scene"` 的特殊状态类型，展示名可以自定义，但仍必须挂载到 story 才会被 session 感知。多张 scene 表存在时，v1 消费排序第一张 active scene。

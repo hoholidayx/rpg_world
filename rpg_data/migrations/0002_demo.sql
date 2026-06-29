@@ -17,7 +17,8 @@ INSERT OR IGNORE INTO rpg_stories (
     workspace_id,
     title,
     summary,
-    description,
+    story_prompt,
+    first_message,
     metadata_json
 )
 VALUES (
@@ -25,6 +26,7 @@ VALUES (
     '北境森林 Demo',
     'Bob 与 Alice 在北境森林追查幽蓝封印。',
     '用于验证 workspace、story、session、角色卡与 lorebook 挂载关系的演示故事。',
+    '',
     '{"kind":"demo","order":1}'
 );
 
@@ -32,7 +34,8 @@ INSERT OR IGNORE INTO rpg_stories (
     workspace_id,
     title,
     summary,
-    description,
+    story_prompt,
+    first_message,
     metadata_json
 )
 VALUES (
@@ -40,6 +43,7 @@ VALUES (
     '奥术学院 Demo',
     'Alice 返回学院调查炎心之木的旧档案。',
     '用于验证同一角色卡和 lorebook entry 可挂载到多个 story。',
+    '',
     '{"kind":"demo","order":2}'
 );
 

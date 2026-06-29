@@ -14,7 +14,7 @@ class FakeCatalog:
         return [models.Workspace("workspace", "Workspace", "data/workspace")]
 
     def list_stories(self, workspace: str):
-        return [models.Story(1, workspace, "Story")]
+        return [models.Story(1, workspace, "Story", story_prompt="Prompt", first_message="First")]
 
     def list_sessions(self, workspace: str, story_id: int):
         return [models.Session("session", workspace, story_id)]
@@ -175,6 +175,8 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
     assert gateway.initialize_calls == 1
     assert await backend.list_workspaces() == [{"id": "workspace", "name": "Workspace", "description": None}]
     assert (await backend.list_stories("workspace"))[0]["title"] == "Story"
+    assert (await backend.list_stories("workspace"))[0]["story_prompt"] == "Prompt"
+    assert (await backend.list_stories("workspace"))[0]["first_message"] == "First"
     assert (await backend.list_sessions("workspace", 1))[0]["id"] == "session"
     assert (await backend.create_session("workspace", 1, title="Title"))["title"] == "Title"
     monkeypatch.setattr(

@@ -40,6 +40,7 @@
 - `当前场景.csv` 是高优先级 scene 状态，应作为 user prefix 进入最终用户消息；不要把它当普通状态表放入 `STATUS_TABLES`。在 `rpg_data` 新状态表架构中，scene 是 `builtin_key="scene"` 的状态类型，仍必须挂载到 story 才能被 session 感知。
 - RP Modules 是 RP 业务模块占位，不是通用 skill 体系；骰子、战斗、物品等能力应围绕 RP 工具流程和受控状态读写设计。
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
+- Story 主数据字段保持：`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词；`story_prompt` 目前只存储和经 API 返回，待后续集成入 fix layer，本次不要把它接入上下文渲染。
 - `rpg_data` 状态表采用“SQL 完整索引 + CSV 内容源”：SQL 记录 type、template、story mount、session copy、排序和 workspace-relative `relative_path`，CSV 保存 headers/rows；不要通过目录扫描发现状态表，也不要把绝对文件路径写进索引。
 - 状态表模板文件位于 `{workspace_root}/template_status/`，session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/`。创建 session 时由 `CatalogService` 触发复制已挂载模板，后续模板修改不影响既有 session。
 - `rpg_data` bootstrap 只按 SQL 索引 materialize workspace 目录和缺失 CSV 文件；不要在 bootstrap 代码中硬编码 demo 或业务数据。缺失 CSV 的初始内容应来自 SQL 行的 `metadata_json._bootstrap_csv`，CSV 已存在时不得覆盖。默认不删除不在 SQL 索引中的 workspace/story/session 目录以及未索引 status CSV；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，并确保日志能清楚输出删除/跳过结果。

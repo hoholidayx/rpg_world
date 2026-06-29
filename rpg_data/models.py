@@ -54,7 +54,9 @@ class Story:
     workspace_id: str
     title: str
     summary: str = ""
-    description: str = ""
+    # Story-level fixed system prompt; planned to be integrated into fix layer later.
+    story_prompt: str = ""
+    first_message: str = ""
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""
