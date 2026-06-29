@@ -11,7 +11,7 @@ RPG World 的产品定位从“Telegram 优先的 RP 聊天入口”升级为“
 - **Play WebUI**：前台游玩端，面向玩家，提供沉浸式 RP 聊天、场景 HUD、角色/NPC 信息、剧情日志、快捷行动和玩法模块交互。
 - **Telegram**：保留为轻量入口、推送通知、快速回复和 WebUI 不可用时的兜底交互，不承载复杂沉浸式 UI。
 
-Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。不要恢复 Dashboard API/WebUI。
+Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。Play API 当前挂载 sessions、workspace、lorebook、ops 管理接口；不要恢复 Dashboard API/WebUI。
 
 Play WebUI 的会话定位采用 `rpg_data` catalog 中的全局短 `session_id`。创建 session 时绑定 `workspace_id + story_id`；进入会话后，前端 URL 和会话内请求只传 `session_id`，由 Play API 反查 workspace/story 并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
 
@@ -183,8 +183,7 @@ channels_settings.cli_session_id
 
 ### AgentManager（`rpg_core/agent/manager.py`）
 
-进程内单例，统一管理 `RPGGameAgent` 的创建与缓存。每个子进程各自持有一个
-独立实例池：
+进程内单例，统一管理 `RPGGameAgent` 的创建与缓存。当前生产拓扑中只有 Agent 服务进程应持有实例池；Play API、CLI、Telegram 只能通过 `AgentClient` 访问它。
 
 ```python
 from rpg_core.agent.manager import AgentManager
@@ -195,9 +194,7 @@ agent = AgentManager.get_or_create(session_id="mygame_01")
 单个进程内，所有模块通过同一个 `AgentManager` 获取 agent，确保 FileWatcher
 只初始化一次、BaseManager 缓存一致。跨进程不共享这些对象。
 
-`AgentManager` 的缓存键只包含全局唯一 `session_id`。`workspace` 参数只用于创建
-`RPGGameAgent` 时解析数据根，不能参与缓存分叉；`api_key` 不再作为 Agent service
-schema、AgentClient 参数或缓存键。LLM provider / key 选择统一走 `llm_service/llm.yaml`。
+`AgentManager` 的缓存键只包含全局唯一 `session_id`；`RPGGameAgent` 也只按该 ID 解析 catalog session 和运行目录，不再接收 workspace 作为运行态 locator。`api_key` 不再作为 Agent service schema、AgentClient 参数或缓存键。LLM provider / key 选择统一走 `llm_service/llm.yaml`。
 所有入口必须先解析出有效 catalog session；Telegram/CLI 通过 `channels/settings.yaml`
 配置的 `workspace_id + story_id + optional session_id + session_title` 调用 Agent service
 `/chat/session/ensure`。
@@ -222,7 +219,7 @@ schema、AgentClient 参数或缓存键。LLM provider / key 选择统一走 `ll
 | `stop()` | 优雅关闭 |
 | `send_text()` | 发送完整文本 |
 | `send_delta()` | 可选流式增量 |
-| `_handle_message()` | 统一消息管线（session 切换 → agent.send → 发送回复） |
+| `_handle_message()` | 统一消息管线（解析全局 session_id → AgentClient send/stream → 发送回复） |
 
 命令分发统一由 agent 的 `_send_impl()` / `_send_stream_impl()` 处理，
 不放在渠道层，确保所有渠道行为一致。
@@ -507,19 +504,15 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 
 覆盖范围：
 
-- `channels/tests/`：ChannelAdapter、CLI、AgentManager、Telegram 渠道。
+- `channels/tests/`：ChannelAdapter、CLI、Telegram 渠道和渠道侧会话流程。
 - `rpg_core/tests/`：命令分发、上下文、scene、session、summary、AgentManager。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank。
 - `llm_service/tests/`：LLM provider 配置、manager 路由与 llama 本地 runtime 协议。
-- `play_api/tests/`：Play API workspace/session/scene/chat 契约。
+- `play_api/tests/`：Play API workspace/session/scene/turn/stream、lorebook 和 ops 等契约。
 
 ## 当前实现优先级
 
-1. **P0：Telegram 渠道完善**。保障 Telegram 作为主要对话入口，包括真实运行、
-   会话管理、stream/non-stream、异常回复、命令菜单、配置和日志。
-2. **P1：核心数据与记忆链路**。确保角色卡、世界书、状态表、summary、memory
-   在 Telegram 使用路径下稳定可用。
-3. **P2：Play WebUI 管理能力**。在 Play WebUI 内完善数据维护能力，方便人工管理工作区、
-   角色、世界书、状态表和会话。
-4. **P3：Play WebUI Chat 体验**。继续完善 SSE 体验、tool records、stats、多会话聊天 UX
-   和前端分包。
+1. **P0：Play WebUI 主体验与 Play API 契约**。优先保障 session 房间、SSE/turn、workspace、lorebook、ops 和状态维护等 Web 主链路。
+2. **P1：核心数据、上下文与记忆链路**。确保角色卡、世界书、状态表、summary、story memory 和 rp_memory 在全局 `session_id` 语义下稳定可用。
+3. **P2：Telegram/CLI 轻量入口稳定性**。保持真实 Telegram 长轮询、会话菜单、stream/non-stream、异常回复、命令菜单和运行配置可靠。
+4. **P3：玩法模块与沉浸式细节**。骰子、战斗、物品等新增体验型能力优先沉淀到 Play WebUI，并通过受控工具和状态读写接入核心。
