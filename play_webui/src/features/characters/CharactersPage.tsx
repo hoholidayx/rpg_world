@@ -304,6 +304,7 @@ function CharactersContent() {
   const [avatarDialogOpen, setAvatarDialogOpen] = useState(false)
   const [avatarInput, setAvatarInput] = useState('')
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
+  const [detailDeleteTarget, setDetailDeleteTarget] = useState<CharacterDetail | null>(null)
   const [editingDetailId, setEditingDetailId] = useState<number | null>(null)
   const [detailDraft, setDetailDraft] = useState<DetailDraft>(emptyDetailDraft)
 
@@ -521,6 +522,7 @@ function CharactersContent() {
       return deleteCharacterDetail(currentWorkspace, selectedCharacter.id, detailId)
     },
     onSuccess: () => {
+      setDetailDeleteTarget(null)
       invalidateCharacters()
     },
   })
@@ -861,7 +863,7 @@ function CharactersContent() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => deleteDetailMutation.mutate(detail.id)}
+                            onClick={() => setDetailDeleteTarget(detail)}
                             disabled={deleteDetailMutation.isPending}
                             className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
                             aria-label={`删除细节 ${detail.name}`}
@@ -1057,6 +1059,37 @@ function CharactersContent() {
               className="flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white shadow-lg shadow-rose-100 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {deleteMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+              删除
+            </button>
+          </footer>
+        </ModalShell>
+      ) : null}
+
+      {detailDeleteTarget ? (
+        <ModalShell title="删除角色细节" onClose={() => setDetailDeleteTarget(null)}>
+          <div className="px-6 py-5">
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-4">
+              <h3 className="text-sm font-bold text-rose-700">确认删除「{detailDeleteTarget.name}」？</h3>
+              <p className="mt-2 text-sm leading-6 text-rose-700/80">
+                删除后会从当前角色卡中移除该细节条目。这个操作不会删除角色本体，也不会影响其它细节。
+              </p>
+            </div>
+          </div>
+          <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+            <button
+              type="button"
+              onClick={() => setDetailDeleteTarget(null)}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:text-violet-700"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => deleteDetailMutation.mutate(detailDeleteTarget.id)}
+              disabled={deleteDetailMutation.isPending}
+              className="flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white shadow-lg shadow-rose-100 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deleteDetailMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
               删除
             </button>
           </footer>
