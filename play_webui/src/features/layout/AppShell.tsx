@@ -37,7 +37,7 @@ const navItems = [
   { label: '故事库', icon: BookOpen, href: '/#stories' },
   { label: '角色库', icon: UsersRound, href: '/characters' },
   { label: '世界设定', icon: Globe2, href: '/worldbook' },
-  { label: '设置', icon: Settings, href: '/#settings' },
+  { label: '设置', icon: Settings, href: '/settings', target: '_blank', rel: 'noreferrer' },
 ]
 
 function Logo() {
@@ -195,6 +195,8 @@ export function AppShell({ children }: AppShellProps) {
                       : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
                   }`}
                   href={item.href}
+                  target={item.target}
+                  rel={item.rel}
                 >
                   <item.icon size={22} />
                   {item.label}

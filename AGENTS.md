@@ -42,7 +42,7 @@
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
 - `rpg_data` 状态表采用“SQL 完整索引 + CSV 内容源”：SQL 记录 type、template、story mount、session copy、排序和 workspace-relative `relative_path`，CSV 保存 headers/rows；不要通过目录扫描发现状态表，也不要把绝对文件路径写进索引。
 - 状态表模板文件位于 `{workspace_root}/template_status/`，session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/`。创建 session 时由 `CatalogService` 触发复制已挂载模板，后续模板修改不影响既有 session。
-- `rpg_data` bootstrap 只按 SQL 索引 materialize workspace 目录和缺失 CSV 文件；不要在 bootstrap 代码中硬编码 demo 或业务数据。缺失 CSV 的初始内容应来自 SQL 行的 `metadata_json._bootstrap_csv`，CSV 已存在时不得覆盖。默认会删除不在 SQL 索引中的 workspace/story/session 目录以及未索引 status CSV；如需保留孤儿运行文件，可设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=false`，并确保日志能清楚输出删除/跳过结果。
+- `rpg_data` bootstrap 只按 SQL 索引 materialize workspace 目录和缺失 CSV 文件；不要在 bootstrap 代码中硬编码 demo 或业务数据。缺失 CSV 的初始内容应来自 SQL 行的 `metadata_json._bootstrap_csv`，CSV 已存在时不得覆盖。默认不删除不在 SQL 索引中的 workspace/story/session 目录以及未索引 status CSV；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，并确保日志能清楚输出删除/跳过结果。
 - Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|scene|commands|turn|stream`；workspace、lorebook、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
 
 ## 测试要求

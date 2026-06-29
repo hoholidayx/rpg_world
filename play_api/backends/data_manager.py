@@ -8,7 +8,12 @@ from pathlib import Path
 from rpg_data import models
 from rpg_data.services import DataServiceGateway, get_data_service_gateway
 from rpg_data.settings import get_database_path
-from rpg_data.bootstrap import scan_orphan_runtime_data
+from rpg_data.bootstrap import (
+    delete_unindexed_runtime_item,
+    delete_unindexed_runtime_items,
+    scan_orphan_runtime_data,
+    scan_unindexed_runtime_data,
+)
 
 
 class DataManagerBackend:
@@ -78,6 +83,15 @@ class DataManagerBackend:
 
     async def scan_orphan_runtime(self) -> dict[str, list[dict[str, str]]]:
         return scan_orphan_runtime_data(self._gateway.database)
+
+    async def scan_unindexed_runtime(self, workspace: str) -> dict[str, list[dict[str, str]]] | None:
+        return scan_unindexed_runtime_data(self._gateway.database, workspace)
+
+    async def delete_unindexed_runtime_item(self, item: dict[str, str]) -> bool | None:
+        return delete_unindexed_runtime_item(self._gateway.database, item)
+
+    async def delete_unindexed_runtime_items(self, items: list[dict[str, str]]) -> bool | None:
+        return delete_unindexed_runtime_items(self._gateway.database, items)
 
     async def list_characters(self, workspace: str) -> list[dict[str, object]] | None:
         characters = self._gateway.character_management.list_characters(workspace)

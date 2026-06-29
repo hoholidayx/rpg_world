@@ -31,6 +31,7 @@ class _FakeAgentClient:
 
 def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     fake_agent = _FakeAgentClient()
     monkeypatch.setattr(agent_client, "_client", fake_agent)
     reset_delete_confirmation_tokens()
@@ -318,6 +319,59 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert ops_scan.status_code == 200
     assert "orphanDirectories" in ops_scan.json()
     assert "unindexedStatusFiles" in ops_scan.json()
+
+    workspace_root = tmp_path / "data" / "demo_workspace"
+    unindexed_session_dir = workspace_root / "stories" / "1" / "s_unindexed_ops"
+    unindexed_session_dir.mkdir(parents=True, exist_ok=True)
+    (unindexed_session_dir / "marker.txt").write_text("tmp", encoding="utf-8")
+    unindexed_status_csv = workspace_root / "stories" / "1" / demo_session_id / "status" / "场景" / "未索引状态.csv"
+    unindexed_status_csv.parent.mkdir(parents=True, exist_ok=True)
+    unindexed_status_csv.write_text("名称\n临时\n", encoding="utf-8")
+    top_unindexed_workspace = tmp_path / "data" / "unindexed_workspace"
+    (top_unindexed_workspace / "stories").mkdir(parents=True, exist_ok=True)
+
+    unindexed_scan = client.get(
+        "/play-api/v1/ops/unindexed-runtime",
+        params={"workspace_id": "demo_workspace"},
+    )
+    assert unindexed_scan.status_code == 200
+    items = unindexed_scan.json()["items"]
+    assert any(item["category"] == "runtime_directory" and item["sessionId"] == "s_unindexed_ops" for item in items)
+    assert any(item["category"] == "status_csv" and item["relativePath"].endswith("未索引状态.csv") for item in items)
+    assert all(item["workspaceId"] == "demo_workspace" for item in items)
+    assert all(item["kind"] != "workspace" for item in items)
+    assert client.get(
+        "/play-api/v1/ops/unindexed-runtime",
+        params={"workspace_id": "missing"},
+    ).status_code == 404
+
+    runtime_item = next(item for item in items if item["category"] == "runtime_directory" and item["sessionId"] == "s_unindexed_ops")
+    status_item = next(item for item in items if item["category"] == "status_csv" and item["relativePath"].endswith("未索引状态.csv"))
+    batch_items = [runtime_item, status_item]
+    assert client.post("/play-api/v1/ops/unindexed-runtime/delete", json={"items": batch_items}).status_code == 409
+    runtime_token = client.post("/play-api/v1/ops/unindexed-runtime/delete-token", json={"items": batch_items})
+    assert runtime_token.status_code == 200
+    assert client.post(
+        "/play-api/v1/ops/unindexed-runtime/delete",
+        json={"items": batch_items},
+        headers={"X-Delete-Confirm-Token": "bad-token"},
+    ).status_code == 409
+    deleted_runtime = client.post(
+        "/play-api/v1/ops/unindexed-runtime/delete",
+        json={"items": list(reversed(batch_items))},
+        headers={"X-Delete-Confirm-Token": runtime_token.json()["token"]},
+    )
+    assert deleted_runtime.status_code == 204
+    assert not unindexed_session_dir.exists()
+    assert not unindexed_status_csv.exists()
+    assert client.post(
+        "/play-api/v1/ops/unindexed-runtime/delete",
+        json={"items": batch_items},
+        headers={"X-Delete-Confirm-Token": runtime_token.json()["token"]},
+    ).status_code == 409
+
+    stale_token = client.post("/play-api/v1/ops/unindexed-runtime/delete-token", json={"items": batch_items})
+    assert stale_token.status_code == 404
 
     ops_mount_entry = client.post(
         "/play-api/v1/workspaces/demo_workspace/lorebook-entries",

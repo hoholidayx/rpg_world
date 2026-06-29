@@ -114,7 +114,7 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 - session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/{type_name}/{table_name}.csv`。
 - `DataServiceGateway` 初始化时会按 SQL 索引 materialize workspace 目录、模板 CSV 和 session 副本；bootstrap 不写业务索引，不扫描目录发现表。
 - 缺失 CSV 的初始内容只从对应 SQL 行的 `metadata_json._bootstrap_csv` 还原；CSV 已存在时不覆盖。
-- Bootstrap 默认会删除不在 SQL 索引里的 workspace/story/session 目录，以及 `template_status` / session `status` 下未索引的 CSV。可用 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=false` 关闭；日志会输出每个删除项和汇总计数。
+- Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录，以及 `template_status` / session `status` 下未索引的 CSV。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
 - `当前场景` 是 `builtin_key="scene"` 的特殊状态类型，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。
 - `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，索引中的 `relative_path` 必须是 workspace 相对路径，统一由 `rpg_data.settings` 解析并阻止路径逃逸。
 

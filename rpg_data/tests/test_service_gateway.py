@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from rpg_data.bootstrap import scan_orphan_runtime_data
+from rpg_data.bootstrap import (
+    delete_unindexed_runtime_item,
+    delete_unindexed_runtime_items,
+    scan_orphan_runtime_data,
+    scan_unindexed_runtime_data,
+)
 from rpg_data.repositories.records import SessionStatusTableRecord, SessionStatusTypeRecord
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
@@ -249,6 +254,41 @@ def test_scan_orphan_runtime_data_reports_without_deleting(
     assert any(item["relative_path"].endswith("孤儿状态.csv") for item in scan["unindexed_status_files"])
     assert orphan_session.is_dir()
     assert orphan_status_csv.is_file()
+
+
+def test_workspace_unindexed_runtime_scan_and_delete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
+    db_path = tmp_path / "delete_unindexed.sqlite3"
+    gateway = get_data_service_gateway(db_path)
+    gateway.status.list_tables("s_forest001")
+
+    workspace_root = tmp_path / "data" / "demo_workspace"
+    unindexed_session = workspace_root / "stories" / "1" / "s_unindexed"
+    unindexed_session.mkdir(parents=True, exist_ok=True)
+    (unindexed_session / "marker.txt").write_text("tmp", encoding="utf-8")
+    unindexed_status_csv = workspace_root / "stories" / "1" / "s_forest001" / "status" / "场景" / "未索引.csv"
+    unindexed_status_csv.write_text("名称\n临时\n", encoding="utf-8")
+    top_unindexed_workspace = tmp_path / "data" / "unindexed_workspace"
+    (top_unindexed_workspace / "stories").mkdir(parents=True, exist_ok=True)
+
+    scan = scan_unindexed_runtime_data(gateway.database, "demo_workspace")
+
+    assert scan is not None
+    assert scan_unindexed_runtime_data(gateway.database, "missing") is None
+    assert all(item["workspace_id"] == "demo_workspace" for item in scan["items"])
+    assert all(item["kind"] != "workspace" for item in scan["items"])
+    session_item = next(item for item in scan["items"] if item["category"] == "runtime_directory")
+    status_item = next(item for item in scan["items"] if item["category"] == "status_csv")
+
+    assert delete_unindexed_runtime_item(gateway.database, {**session_item, "path": str(unindexed_session / "wrong")}) is False
+    assert delete_unindexed_runtime_items(gateway.database, [session_item, status_item]) is True
+    assert not unindexed_session.exists()
+    assert delete_unindexed_runtime_item(gateway.database, session_item) is False
+    assert not unindexed_status_csv.exists()
+    assert top_unindexed_workspace.is_dir()
 
 
 def test_gateway_is_cached_by_database_path_and_reset_closes(tmp_path: Path) -> None:
