@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from play_api.backends import close_data_manager_backend, get_data_manager_backend
 from play_api.settings import play_settings
-from play_api.routers import lorebook, sessions, workspace
+from play_api.routers import lorebook, ops, sessions, workspace
 
 
 @asynccontextmanager
@@ -40,4 +40,5 @@ app.add_middleware(
 _PLAY_API_PREFIX = play_settings.service.api_prefix
 app.include_router(workspace.router, prefix=_PLAY_API_PREFIX)
 app.include_router(lorebook.router, prefix=_PLAY_API_PREFIX)
+app.include_router(ops.router, prefix=_PLAY_API_PREFIX)
 app.include_router(sessions.router, prefix=_PLAY_API_PREFIX)
