@@ -29,13 +29,13 @@ def get_bootstrap_delete_orphan_dirs() -> bool:
 
     value = os.getenv(BOOTSTRAP_DELETE_ORPHAN_DIRS_ENV)
     if value is None or str(value).strip() == "":
-        return True
+        return False
     normalized = str(value).strip().lower()
     if normalized in {"1", "true", "yes", "on"}:
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
-    return True
+    return False
 
 
 def get_database_path() -> Path:
