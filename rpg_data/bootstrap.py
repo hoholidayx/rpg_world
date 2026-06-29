@@ -26,7 +26,7 @@ from rpg_data.settings import (
     resolve_workspace_root,
 )
 
-__all__ = ["bootstrap_runtime_data"]
+__all__ = ["bootstrap_runtime_data", "scan_orphan_runtime_data"]
 
 logger = logging.getLogger("rpg_data.bootstrap")
 
@@ -64,6 +64,154 @@ def bootstrap_runtime_data(database: Database) -> None:
         orphan_dirs_removed,
         orphan_status_files_removed,
     )
+
+
+def scan_orphan_runtime_data(database: Database) -> dict[str, list[dict[str, str]]]:
+    """Return runtime directories/status CSV files not indexed by SQL.
+
+    This is a read-only companion for operational tooling. It intentionally
+    reuses the same index rules as bootstrap cleanup, but never deletes files.
+    """
+
+    bind_database(database)
+    workspace_roots = _workspace_roots_from_index()
+    return {
+        "orphan_directories": _scan_orphan_runtime_dirs(workspace_roots),
+        "unindexed_status_files": _scan_unindexed_status_files(workspace_roots),
+    }
+
+
+def _workspace_roots_from_index() -> dict[str, Path]:
+    return {
+        str(workspace.id): resolve_workspace_root(str(workspace.root_path))
+        for workspace in WorkspaceRecord.select()
+    }
+
+
+def _scan_orphan_runtime_dirs(workspace_roots: dict[str, Path]) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+    workspace_root_set = {root.resolve() for root in workspace_roots.values()}
+    candidate_parents = {root.parent for root in workspace_root_set}
+    for parent in sorted(candidate_parents):
+        if not parent.is_dir():
+            continue
+        for child in sorted(parent.iterdir()):
+            if not child.is_dir():
+                continue
+            child_root = child.resolve()
+            if child_root not in workspace_root_set and _looks_like_workspace_root(child_root):
+                results.append({
+                    "kind": "workspace",
+                    "workspace_id": "",
+                    "story_id": "",
+                    "session_id": "",
+                    "path": str(child_root),
+                    "relative_path": "",
+                })
+
+    indexed_story_ids: dict[str, set[str]] = {}
+    for story in StoryRecord.select(StoryRecord.id, StoryRecord.workspace):
+        indexed_story_ids.setdefault(str(story.workspace_id), set()).add(str(story.id))
+    for workspace_id, root in sorted(workspace_roots.items()):
+        stories_dir = root / _STORIES_DIR
+        if not stories_dir.is_dir():
+            continue
+        allowed = indexed_story_ids.get(workspace_id, set())
+        for child in sorted(stories_dir.iterdir()):
+            if child.is_dir() and child.name not in allowed:
+                results.append({
+                    "kind": "story",
+                    "workspace_id": workspace_id,
+                    "story_id": child.name,
+                    "session_id": "",
+                    "path": str(child.resolve()),
+                    "relative_path": _relative_to_root(child, root),
+                })
+
+    indexed_sessions: dict[tuple[str, str], set[str]] = {}
+    for session in SessionRecord.select(SessionRecord.id, SessionRecord.workspace, SessionRecord.story):
+        key = (str(session.workspace_id), str(session.story_id))
+        indexed_sessions.setdefault(key, set()).add(str(session.id))
+    for workspace_id, root in sorted(workspace_roots.items()):
+        stories_dir = root / _STORIES_DIR
+        if not stories_dir.is_dir():
+            continue
+        for story_dir in sorted(stories_dir.iterdir()):
+            if not story_dir.is_dir():
+                continue
+            allowed = indexed_sessions.get((workspace_id, story_dir.name), set())
+            for session_dir in sorted(story_dir.iterdir()):
+                if session_dir.is_dir() and session_dir.name not in allowed:
+                    results.append({
+                        "kind": "session",
+                        "workspace_id": workspace_id,
+                        "story_id": story_dir.name,
+                        "session_id": session_dir.name,
+                        "path": str(session_dir.resolve()),
+                        "relative_path": _relative_to_root(session_dir, root),
+                    })
+    return results
+
+
+def _scan_unindexed_status_files(workspace_roots: dict[str, Path]) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+    indexed_template_paths: dict[str, set[Path]] = {}
+    for table in StatusTableTemplateRecord.select(StatusTableTemplateRecord.workspace, StatusTableTemplateRecord.relative_path):
+        workspace_id = str(table.workspace_id)
+        workspace_root = _workspace_root(workspace_roots, workspace_id)
+        indexed_template_paths.setdefault(workspace_id, set()).add(
+            resolve_workspace_relative_path(workspace_root, str(table.relative_path)).resolve()
+        )
+    for workspace_id, root in sorted(workspace_roots.items()):
+        template_root = root / _TEMPLATE_STATUS_DIR
+        if not template_root.is_dir():
+            continue
+        allowed = indexed_template_paths.get(workspace_id, set())
+        for path in sorted(template_root.rglob("*.csv")):
+            if path.resolve() not in allowed:
+                results.append({
+                    "kind": "template",
+                    "workspace_id": workspace_id,
+                    "story_id": "",
+                    "session_id": "",
+                    "path": str(path.resolve()),
+                    "relative_path": _relative_to_root(path, root),
+                })
+
+    indexed_session_paths: dict[str, set[Path]] = {}
+    for table in SessionStatusTableRecord.select(SessionStatusTableRecord.session, SessionStatusTableRecord.relative_path):
+        session_id = str(table.session_id)
+        workspace_root = _workspace_root(workspace_roots, str(table.session.workspace_id))
+        indexed_session_paths.setdefault(session_id, set()).add(
+            resolve_workspace_relative_path(workspace_root, str(table.relative_path)).resolve()
+        )
+    for session in SessionRecord.select(SessionRecord.id, SessionRecord.workspace, SessionRecord.story):
+        workspace_id = str(session.workspace_id)
+        story_id = str(session.story_id)
+        session_id = str(session.id)
+        root = _workspace_root(workspace_roots, workspace_id)
+        status_root = root / _STORIES_DIR / story_id / session_id / "status"
+        if not status_root.is_dir():
+            continue
+        allowed = indexed_session_paths.get(session_id, set())
+        for path in sorted(status_root.rglob("*.csv")):
+            if path.resolve() not in allowed:
+                results.append({
+                    "kind": "session",
+                    "workspace_id": workspace_id,
+                    "story_id": story_id,
+                    "session_id": session_id,
+                    "path": str(path.resolve()),
+                    "relative_path": _relative_to_root(path, root),
+                })
+    return results
+
+
+def _relative_to_root(path: Path, root: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return ""
 
 
 def _ensure_workspace_roots() -> tuple[dict[str, Path], int]:

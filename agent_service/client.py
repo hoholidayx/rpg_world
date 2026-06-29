@@ -148,6 +148,8 @@ class AgentClient:
                     yield _event_from_dict(json.loads(raw))
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise AgentClientError(_http_error_message(exc.response)) from exc
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 

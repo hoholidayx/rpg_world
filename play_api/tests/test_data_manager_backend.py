@@ -32,6 +32,7 @@ class FakeGateway:
         self.lorebook_management = FakeLorebookManagement()
         self.initialize_calls = 0
         self.close_calls = 0
+        self.database = object()
 
     def initialize(self) -> None:
         self.initialize_calls += 1
@@ -42,6 +43,8 @@ class FakeGateway:
 
 class FakeLorebookManagement:
     def list_entries(self, workspace: str):
+        if workspace != "workspace":
+            return None
         return [models.LorebookEntry(1, workspace, "Entry")]
 
     def create_entry(self, workspace: str, **kwargs):
@@ -102,13 +105,23 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
     assert (await backend.list_stories("workspace"))[0]["title"] == "Story"
     assert (await backend.list_sessions("workspace", 1))[0]["id"] == "session"
     assert (await backend.create_session("workspace", 1, title="Title"))["title"] == "Title"
+    monkeypatch.setattr(
+        data_manager_module,
+        "scan_orphan_runtime_data",
+        lambda database: {"orphan_directories": [], "unindexed_status_files": []},
+    )
     assert (await backend.get_session("session"))["id"] == "session"
+    assert await backend.scan_orphan_runtime() == {"orphan_directories": [], "unindexed_status_files": []}
     assert (await backend.list_lorebook_entries("workspace"))[0]["name"] == "Entry"
     assert (await backend.create_lorebook_entry("workspace", name="New"))["name"] == "New"
+    assert (await backend.get_lorebook_entry("workspace", 1))["name"] == "Entry"
+    assert await backend.get_lorebook_entry("missing", 1) is None
     assert (await backend.update_lorebook_entry("workspace", 1, name="Updated"))["name"] == "Updated"
     assert await backend.delete_lorebook_entry("workspace", 1) is True
     assert (await backend.list_story_lorebook_entries("workspace", 1))[0]["mount_id"] == 10
     assert (await backend.mount_lorebook_entry("workspace", 1, 1))["mount_id"] == 10
+    assert (await backend.get_lorebook_mount("workspace", 1, 10))["mount_id"] == 10
+    assert await backend.get_lorebook_mount("workspace", 1, 999) is None
     assert await backend.unmount_lorebook_entry("workspace", 1, 10) is True
 
     backend.close()

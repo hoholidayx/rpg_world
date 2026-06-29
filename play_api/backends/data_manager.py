@@ -8,6 +8,7 @@ from pathlib import Path
 from rpg_data import models
 from rpg_data.services import DataServiceGateway, get_data_service_gateway
 from rpg_data.settings import get_database_path
+from rpg_data.bootstrap import scan_orphan_runtime_data
 
 
 class DataManagerBackend:
@@ -75,6 +76,9 @@ class DataManagerBackend:
             return None
         return _session_summary(session)
 
+    async def scan_orphan_runtime(self) -> dict[str, list[dict[str, str]]]:
+        return scan_orphan_runtime_data(self._gateway.database)
+
     async def list_lorebook_entries(self, workspace: str) -> list[dict[str, object]] | None:
         entries = self._gateway.lorebook_management.list_entries(workspace)
         if entries is None:
@@ -102,6 +106,19 @@ class DataManagerBackend:
         if entry is None:
             return None
         return _lorebook_entry_summary(entry)
+
+    async def get_lorebook_entry(
+        self,
+        workspace: str,
+        entry_id: int,
+    ) -> dict[str, object] | None:
+        entries = self._gateway.lorebook_management.list_entries(workspace)
+        if entries is None:
+            return None
+        for entry in entries:
+            if int(entry.id) == int(entry_id):
+                return _lorebook_entry_summary(entry)
+        return None
 
     async def update_lorebook_entry(
         self,
@@ -154,6 +171,20 @@ class DataManagerBackend:
         if entry is None:
             return None
         return _mounted_lorebook_entry_summary(entry)
+
+    async def get_lorebook_mount(
+        self,
+        workspace: str,
+        story_id: int,
+        mount_id: int,
+    ) -> dict[str, object] | None:
+        entries = self._gateway.lorebook_management.list_story_entries(workspace, story_id)
+        if entries is None:
+            return None
+        for entry in entries:
+            if int(entry.mount.id) == int(mount_id):
+                return _mounted_lorebook_entry_summary(entry)
+        return None
 
     async def unmount_lorebook_entry(
         self,

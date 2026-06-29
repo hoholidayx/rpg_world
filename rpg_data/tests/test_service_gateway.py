@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from rpg_data.bootstrap import scan_orphan_runtime_data
 from rpg_data.repositories.records import SessionStatusTableRecord, SessionStatusTypeRecord
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
@@ -115,12 +116,12 @@ def test_gateway_recovers_demo_session_files_without_indexes(tmp_path: Path) -> 
     ]
 
 
-def test_gateway_bootstrap_removes_orphan_runtime_dirs_by_default(
+def test_gateway_bootstrap_removes_orphan_runtime_dirs_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.delenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", raising=False)
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "true")
     db_path = tmp_path / "cleanup.sqlite3"
     gateway = get_data_service_gateway(db_path)
     assert gateway.catalog.get_session("s_forest001") is not None
@@ -146,12 +147,12 @@ def test_gateway_bootstrap_removes_orphan_runtime_dirs_by_default(
     assert "orphan_dirs_removed=3" in caplog.text
 
 
-def test_gateway_bootstrap_removes_unindexed_status_csv_by_default(
+def test_gateway_bootstrap_removes_unindexed_status_csv_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.delenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", raising=False)
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "true")
     db_path = tmp_path / "cleanup_status.sqlite3"
     gateway = get_data_service_gateway(db_path)
     tables = gateway.status.list_tables("s_forest001")
@@ -215,6 +216,39 @@ def test_gateway_bootstrap_can_preserve_orphan_runtime_dirs(
     assert "orphan_dirs_removed=0" in caplog.text
     assert "orphan_status_files_removed=0" in caplog.text
 
+
+
+def test_scan_orphan_runtime_data_reports_without_deleting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
+    db_path = tmp_path / "scan_orphans.sqlite3"
+    gateway = get_data_service_gateway(db_path)
+    tables = gateway.status.list_tables("s_forest001")
+    assert tables
+
+    workspace_root = tmp_path / "data" / "demo_workspace"
+    orphan_session = workspace_root / "stories" / "1" / "s_orphan"
+    orphan_session.mkdir(parents=True, exist_ok=True)
+    (orphan_session / "marker.txt").write_text("orphan", encoding="utf-8")
+    orphan_status_csv = (
+        workspace_root
+        / "stories"
+        / "1"
+        / "s_forest001"
+        / "status"
+        / "场景"
+        / "孤儿状态.csv"
+    )
+    orphan_status_csv.write_text("名称\n孤儿\n", encoding="utf-8")
+
+    scan = scan_orphan_runtime_data(gateway.database)
+
+    assert any(item["kind"] == "session" and item["session_id"] == "s_orphan" for item in scan["orphan_directories"])
+    assert any(item["relative_path"].endswith("孤儿状态.csv") for item in scan["unindexed_status_files"])
+    assert orphan_session.is_dir()
+    assert orphan_status_csv.is_file()
 
 
 def test_gateway_is_cached_by_database_path_and_reset_closes(tmp_path: Path) -> None:

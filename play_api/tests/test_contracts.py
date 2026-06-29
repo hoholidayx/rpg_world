@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from play_api import agent_client
 from play_api.main import app
+from play_api.delete_tokens import reset_delete_confirmation_tokens
 
 
 class _FakeAgentClient:
@@ -32,6 +33,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     fake_agent = _FakeAgentClient()
     monkeypatch.setattr(agent_client, "_client", fake_agent)
+    reset_delete_confirmation_tokens()
     client = TestClient(app)
     demo_session_id = "s_forest001"
 
@@ -191,6 +193,53 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{delete_target.json()['id']}",
         json={"name": "Gone"},
     ).status_code == 404
+
+    ops_scan = client.get("/play-api/v1/ops/orphan-runtime")
+    assert ops_scan.status_code == 200
+    assert "orphanDirectories" in ops_scan.json()
+    assert "unindexedStatusFiles" in ops_scan.json()
+
+    ops_mount_entry = client.post(
+        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        json={"name": "运维挂载删除", "content": "ops"},
+    )
+    assert ops_mount_entry.status_code == 200
+    ops_mount = client.post(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries/{ops_mount_entry.json()['id']}/mount"
+    )
+    assert ops_mount.status_code == 200
     assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{delete_target.json()['id']}"
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-mounts/{ops_mount.json()['mountId']}"
+    ).status_code == 409
+    ops_mount_token = client.post(
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-mounts/{ops_mount.json()['mountId']}/delete-token"
+    )
+    assert ops_mount_token.status_code == 200
+    assert client.delete(
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-mounts/{ops_mount.json()['mountId']}",
+        headers={"X-Delete-Confirm-Token": ops_mount_token.json()["token"]},
+    ).status_code == 204
+    assert client.delete(
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-mounts/{ops_mount.json()['mountId']}",
+        headers={"X-Delete-Confirm-Token": ops_mount_token.json()["token"]},
+    ).status_code == 409
+
+    ops_entry = client.post(
+        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        json={"name": "运维条目删除", "content": "ops"},
+    )
+    assert ops_entry.status_code == 200
+    assert client.delete(
+        f"/play-api/v1/ops/workspaces/demo_workspace/lorebook-entries/{ops_entry.json()['id']}"
+    ).status_code == 409
+    ops_entry_token = client.post(
+        f"/play-api/v1/ops/workspaces/demo_workspace/lorebook-entries/{ops_entry.json()['id']}/delete-token"
+    )
+    assert ops_entry_token.status_code == 200
+    assert client.delete(
+        f"/play-api/v1/ops/workspaces/demo_workspace/lorebook-entries/{ops_entry.json()['id']}",
+        headers={"X-Delete-Confirm-Token": ops_entry_token.json()["token"]},
+    ).status_code == 204
+    assert client.post(
+        f"/play-api/v1/ops/workspaces/demo_workspace/lorebook-entries/{ops_entry.json()['id']}/delete-token"
     ).status_code == 404
