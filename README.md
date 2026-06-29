@@ -81,14 +81,14 @@ cfg.cli_story_id
 
 ### 多渠道适配器
 
-所有外部交互渠道继承同一抽象基类 `ChannelAdapter`：
+CLI / Telegram 等消息渠道继承同一抽象基类 `ChannelAdapter`；Play WebUI 不继承该基类，而是通过 Play API 调用 Agent service：
 
 | 渠道 | 实现 | 技术栈 |
 |---|---|---|
 | CLI | `channels/cli/adapter.py` | Rich + prompt_toolkit |
 | Telegram | `channels/telegram/adapter.py` | python-telegram-bot |
-| WebUI Play | API/SSE/WebSocket 前端 | 沉浸式主客户端 |
-| 未来 | 只需继承 ChannelAdapter | 实现 start/stop/send_text 即可 |
+| Play WebUI | Next.js App Router + React + TypeScript，经 Play API/SSE 访问后端 | 沉浸式主客户端 |
+| 未来消息渠道 | 只需继承 ChannelAdapter | 实现 start/stop/send_text 即可 |
 
 当前路线调整为 Play WebUI 主体验、Telegram 辅助触达：Play WebUI 同时负责沉浸式 RP、数据管理和调试入口。Telegram 继续保持稳定可用，作为轻量入口、推送通知、快速回复与兜底渠道。
 
@@ -100,11 +100,11 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - 1 个 story 下可以有多个 session。
 - 角色卡和世界书条目属于 workspace，通过挂载表关联到 story；同一个角色卡或世界书条目可以挂载到多个 story。
 - 状态表模板属于 workspace，通过 `rpg_story_status_tables` 挂载到 story；创建 session 时会把已挂载模板复制为该 session 独立副本。
-- Play 侧公开 `session_id` 是全局唯一短 ID，格式为 `s_` + 10 位小写字母/数字，例如 `s_forest001`。创建 session 时绑定 `workspace_id + story_id`，之后会话内接口只传 `session_id`。
+- Play 侧公开 `session_id` 是全局唯一短 ID，创建入口由 `rpg_data` 生成，当前生成格式为 `s_` + 10 位小写字母/数字；创建 session 时绑定 `workspace_id + story_id`，之后会话内接口只传 `session_id`。
 - CLI / Telegram 启动时也先通过 Agent service 的 `ensure_session(workspace_id, story_id, session_id, title)` 解析会话；`session_id` 为空时创建系统生成 ID 的 session，非空时只校验并加载既有 session。
 - `rpg_session_profiles` 保存会话标题、描述等可读字段；`rpg_sessions.id` 保持稳定，用作 URL 和 Agent session id。
 
-Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，再调用 Agent 服务当前仍使用的 `workspace + session_id`。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`scene`、`commands`、`turn`、`stream`。旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
+Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`scene`、`commands`、`turn`、`stream`。workspace、lorebook、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
 
 状态表在 `rpg_data` 中采用“SQL 完整索引 + CSV 内容源”：
 
@@ -481,24 +481,21 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 
 当前测试会 mock LLM、Telegram SDK 和网络调用。若本地缺少 `pytest-asyncio`，`rpg_core/tests/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。覆盖范围包括：
 
-- `channels/tests/`：ChannelAdapter、CLI、AgentManager、Telegram 渠道。
+- `channels/tests/`：ChannelAdapter、CLI、Telegram 渠道和渠道侧会话流程。
 - `rpg_core/tests/`：命令分发、上下文、scene、session、summary、AgentManager。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank。
 - `llm_service/tests/`：LLM provider 配置、manager 路由与 llama 本地 runtime 协议。
-- `play_api/tests/`：Play API workspace/session/scene/chat 契约。
+- `play_api/tests/`：Play API workspace/session/scene/turn/stream、lorebook 和 ops 等契约。
 
 Telegram 测试已覆盖会话菜单、命令规范化、系统生成 ID 的创建流程、流式编辑节流、
 Markdown 渲染和长文本分块。后续修改 Telegram 行为必须补对应测试。
 
 ## 当前实现优先级
 
-1. **P0：Telegram 渠道稳定性**。优先保障真实 Telegram 长轮询、会话管理、
-   stream/non-stream、异常回复、命令菜单和运行配置可靠。
-2. **P1：核心数据与记忆链路**。确保角色卡、世界书、状态表、summary、memory
-   在 Telegram 主入口下稳定可用。
-3. **P2：WebUI 数据管理后台**。优先完善角色、世界书、状态、workspace、session
-   管理能力，方便人工维护数据。
-4. **P3：WebUI Chat 体验**。最后再完善 SSE、tool records、stats、聊天 UX 和前端分包。
+1. **P0：Play WebUI 主体验与 Play API 契约**。优先保障 session 房间、SSE/turn、workspace、lorebook、ops 和状态维护等 Web 主链路。
+2. **P1：核心数据、上下文与记忆链路**。确保角色卡、世界书、状态表、summary、story memory 和 rp_memory 在全局 `session_id` 语义下稳定可用。
+3. **P2：Telegram/CLI 轻量入口稳定性**。保持真实 Telegram 长轮询、会话菜单、stream/non-stream、异常回复、命令菜单和运行配置可靠。
+4. **P3：玩法模块与沉浸式细节**。骰子、战斗、物品等新增体验型能力优先沉淀到 Play WebUI，并通过受控工具和状态读写接入核心。
 
 ## 相关文档
 

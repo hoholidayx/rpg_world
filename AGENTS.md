@@ -26,7 +26,7 @@
 
 ## 代码规范
 - Python 使用 4 空格缩进，模块/函数用 `snake_case`，类用 `PascalCase`。
-- Vue 组件使用 `PascalCase.vue`，store/composable 使用 `camelCase` 或 `useXxx`。
+- Play WebUI 使用 Next.js App Router + React + TypeScript；React 组件用 `PascalCase.tsx`，hook/composable 用 `useXxx`，前端状态 store 用清晰的 camelCase 命名。
 - 新增注释只解释非直观逻辑，避免复述代码。
 - 配置访问必须走封装：`settings.memory_settings`、`settings.agent_model`、`channels.config.settings`、`resolve_biz_config()`、`get_runtime_config()` 或 `LLMManager`。
 - 业务代码不要直接解析 YAML key，不要直接 new OpenAI/llama 客户端。
@@ -43,7 +43,7 @@
 - `rpg_data` 状态表采用“SQL 完整索引 + CSV 内容源”：SQL 记录 type、template、story mount、session copy、排序和 workspace-relative `relative_path`，CSV 保存 headers/rows；不要通过目录扫描发现状态表，也不要把绝对文件路径写进索引。
 - 状态表模板文件位于 `{workspace_root}/template_status/`，session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/`。创建 session 时由 `CatalogService` 触发复制已挂载模板，后续模板修改不影响既有 session。
 - `rpg_data` bootstrap 只按 SQL 索引 materialize workspace 目录和缺失 CSV 文件；不要在 bootstrap 代码中硬编码 demo 或业务数据。缺失 CSV 的初始内容应来自 SQL 行的 `metadata_json._bootstrap_csv`，CSV 已存在时不得覆盖。默认会删除不在 SQL 索引中的 workspace/story/session 目录以及未索引 status CSV；如需保留孤儿运行文件，可设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=false`，并确保日志能清楚输出删除/跳过结果。
-- Play API 会话内接口集中在 `/sessions/{session_id}/history|scene|commands|turn|stream`；`chat.py`、`scene.py`、`commands.py` 旧 router 仅作占位，不要把它们恢复为主入口。
+- Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|scene|commands|turn|stream`；workspace、lorebook、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
 
 ## 测试要求
 - 所有外部调用使用 mock，避免真实 LLM、Telegram 或网络依赖。
