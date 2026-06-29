@@ -12,7 +12,6 @@ class _BaseSchema(BaseModel):
 
 
 class AgentRequestBase(_BaseSchema):
-    workspace: str
     session_id: str = DEFAULT_SESSION_ID
 
     @field_validator("session_id")

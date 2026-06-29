@@ -114,11 +114,10 @@ class ChannelAdapter(ABC):
             return None
 
         session_id = self.get_session_id(chat_id)
-        workspace = self.get_workspace()
         if self._streaming:
             reply = await self._stream_and_send(chat_id, text)
         else:
-            result = await self._agent_client.send(workspace, session_id, text)
+            result = await self._agent_client.send(session_id, text)
             reply_text = str(result.get("reply", ""))
             await self.send_text(chat_id, reply_text)
             return reply_text
@@ -137,7 +136,7 @@ class ChannelAdapter(ABC):
             return AgentReply(text="")
 
         full_text = ""
-        event_source = self._agent_client.stream(self.get_workspace(), self.get_session_id(chat_id), text)
+        event_source = self._agent_client.stream(self.get_session_id(chat_id), text)
         async for event in event_source:
             if event.kind == StreamEventKind.TEXT:
                 full_text += event.content

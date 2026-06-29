@@ -78,23 +78,19 @@ class RPGGameAgent:
     """
 
     def __init__(
-            self,
-            session_id: str = "default",
-            workspace: str = "",
+        self,
+        session_id: str = "default",
         world_name: str = "Nanobot Realm",
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
-            history_enabled: bool = True,
-            tools: list[BaseTool] | None = None,
-            token_counter: TokenCounter | None = None,
+        history_enabled: bool = True,
+        tools: list[BaseTool] | None = None,
+        token_counter: TokenCounter | None = None,
     ) -> None:
         self._session_id = session_id
-        # Kept for compatibility with older callers; rpg_data catalog resolves
-        # all business/runtime locations from the globally unique session_id.
-        self._workspace = workspace
         self._world_name = world_name
         self._model = model
         self._api_key = api_key
@@ -122,7 +118,6 @@ class RPGGameAgent:
         self._fixed_sections = []
         self._session = SessionManager(
             session_id=self._session_id,
-            workspace="",
             history_enabled=self._history_enabled,
         )
         self._tool_registry: ToolRegistry | None = None

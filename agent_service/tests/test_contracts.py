@@ -11,8 +11,7 @@ from rpg_data import models
 
 
 class FakeAgent:
-    def __init__(self, workspace: str, session_id: str) -> None:
-        self.workspace = workspace
+    def __init__(self, session_id: str) -> None:
         self._session_id = session_id
         self.history = [Message(Role.USER, "hello"), Message(Role.ASSISTANT, "hi")]
 
@@ -40,9 +39,9 @@ class FakeAgentManager:
     instances: dict[str, FakeAgent] = {}
 
     @classmethod
-    def get_or_create(cls, workspace: str, session_id: str):
+    def get_or_create(cls, session_id: str):
         if session_id not in cls.instances:
-            cls.instances[session_id] = FakeAgent(workspace, session_id)
+            cls.instances[session_id] = FakeAgent(session_id)
         return cls.instances[session_id]
 
     @classmethod
@@ -122,14 +121,14 @@ def test_agent_service_contracts(monkeypatch) -> None:
 
         history = client.get(
             "/agent/v1/chat/history",
-            params={"workspace": "data/ws", "session_id": "s1"},
+            params={"session_id": "s1"},
         )
         assert history.status_code == 200
         assert history.json()["history"][0]["content"] == "hello"
 
         commands = client.get(
             "/agent/v1/chat/commands",
-            params={"workspace": "data/ws", "session_id": "s1"},
+            params={"session_id": "s1"},
         )
         assert commands.status_code == 200
         assert commands.json()["commands"][0]["command"] == "/help"
@@ -177,7 +176,7 @@ def test_agent_service_contracts(monkeypatch) -> None:
 
         api_key_rejected = client.post(
             "/agent/v1/chat/send",
-            json={"workspace": "data/ws", "session_id": "s1", "message": "go", "api_key": "legacy"},
+            json={"session_id": "s1", "message": "go", "api_key": "legacy"},
         )
         assert api_key_rejected.status_code == 422
 
@@ -189,14 +188,14 @@ def test_agent_service_contracts(monkeypatch) -> None:
 
         send = client.post(
             "/agent/v1/chat/send",
-            json={"workspace": "data/ws", "session_id": "s1", "message": "go"},
+            json={"session_id": "s1", "message": "go"},
         )
         assert send.status_code == 200
         assert send.json()["reply"] == "reply:go"
 
         command = client.post(
             "/agent/v1/chat/command",
-            json={"workspace": "data/ws", "session_id": "s1", "command": "/session_switch s2"},
+            json={"session_id": "s1", "command": "/session_switch s2"},
         )
         assert command.status_code == 200
         assert command.json()["active_session"] == "s2"
@@ -204,7 +203,7 @@ def test_agent_service_contracts(monkeypatch) -> None:
         with client.stream(
             "POST",
             "/agent/v1/chat/stream",
-            json={"workspace": "data/ws", "session_id": "s1", "message": "go"},
+            json={"session_id": "s1", "message": "go"},
         ) as stream:
             body = "".join(stream.iter_text())
         assert '"kind": "text"' in body

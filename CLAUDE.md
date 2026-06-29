@@ -210,7 +210,7 @@ schema、AgentClient 参数或缓存键。LLM provider / key 选择统一走 `ll
 
 `当前场景` 是 `builtin_key="scene"` 的特殊状态类型，展示名可以自定义，但仍必须挂载到 story 才会被 session 感知。多张 scene 表存在时，v1 消费排序第一张 active scene。
 
-`rpg_sessions.id` 是跨 workspace/story 全局唯一的稳定定位 ID，兼容 `rpg_core` 当前 `^[A-Za-z0-9_]+$` 校验。所有创建入口都由 `rpg_data` 生成 session ID，用户只允许指定 title；`rpg_session_profiles` 保存 title、description 等可读字段。Play API 是 catalog session 到 Agent 服务的边界层：会话内接口只收 `session_id`，内部解析出 workspace/story，再用 `workspace + session_id` 调用 Agent 服务。CLI / Telegram 启动时也先 ensure session：配置了 `session_id` 只校验并加载既有 session，未配置则创建系统生成 ID 的默认 session。
+`rpg_sessions.id` 是跨 workspace/story 全局唯一的稳定定位 ID，兼容 `rpg_core` 当前 `^[A-Za-z0-9_]+$` 校验。所有创建入口都由 `rpg_data` 生成 session ID，用户只允许指定 title；`rpg_session_profiles` 保存 title、description 等可读字段。Play API 是 catalog session 到 Agent 服务的边界层：会话内接口只收 `session_id`，内部解析出 workspace/story；Agent 服务运行态只接收全局 `session_id`。CLI / Telegram 启动时也先 ensure session：配置了 `session_id` 只校验并加载既有 session，未配置则创建系统生成 ID 的默认 session。
 
 ### ChannelAdapter 基类（`channels/base.py`）
 

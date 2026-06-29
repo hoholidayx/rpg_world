@@ -436,7 +436,7 @@ class TestTelegramAdapter:
 
         assert agent.calls[-1] == (
             "stream",
-            ("data/tg_workspace", "my_tel", "hello"),
+            ("my_tel", "hello"),
         )
 
     async def test_start_configures_proxy_and_handlers(self, monkeypatch):

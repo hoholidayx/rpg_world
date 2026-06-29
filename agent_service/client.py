@@ -60,18 +60,16 @@ class AgentClient:
 
     async def get_history(
         self,
-        workspace: str,
         session_id: str,
     ) -> dict[str, Any]:
-        params = {"workspace": workspace, "session_id": session_id}
+        params = {"session_id": session_id}
         return await self._get("/chat/history", params=params)
 
     async def list_commands(
         self,
-        workspace: str,
         session_id: str,
     ) -> dict[str, Any]:
-        params = {"workspace": workspace, "session_id": session_id}
+        params = {"session_id": session_id}
         return await self._get("/chat/commands", params=params)
 
     async def list_sessions(
@@ -108,33 +106,30 @@ class AgentClient:
 
     async def send(
         self,
-        workspace: str,
         session_id: str,
         message: str,
     ) -> dict[str, Any]:
         return await self._post(
             "/chat/send",
-            json=self._payload(workspace, session_id, message=message),
+            json=self._payload(session_id, message=message),
         )
 
     async def execute_command(
         self,
-        workspace: str,
         session_id: str,
         command: str,
     ) -> dict[str, Any]:
         return await self._post(
             "/chat/command",
-            json=self._payload(workspace, session_id, command=command),
+            json=self._payload(session_id, command=command),
         )
 
     async def stream(
         self,
-        workspace: str,
         session_id: str,
         message: str,
     ) -> AsyncIterator[AgentStreamEvent]:
-        payload = self._payload(workspace, session_id, message=message)
+        payload = self._payload(session_id, message=message)
         client = self._stream_http_client()
         try:
             async with client.stream("POST", self._url("/chat/stream"), json=payload) as response:
@@ -202,11 +197,10 @@ class AgentClient:
 
     @staticmethod
     def _payload(
-        workspace: str,
         session_id: str,
         **extra: Any,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"workspace": workspace, "session_id": session_id}
+        payload: dict[str, Any] = {"session_id": session_id}
         payload.update(extra)
         return payload
 

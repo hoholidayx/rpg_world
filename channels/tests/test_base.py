@@ -116,7 +116,7 @@ class TestChannelAdapter:
         adapter.bind_agent_client(agent)
 
         await adapter._handle_message("chat999", "user1", "hi")
-        assert agent.calls[-1] == ("send", ("resolved_workspace", "recording_chat999", "hi"))
+        assert agent.calls[-1] == ("send", ("recording_chat999", "hi"))
 
     async def test_stream_multiple_deltas(self):
         """多段流式内容应该逐段通过 send_delta 推送。"""

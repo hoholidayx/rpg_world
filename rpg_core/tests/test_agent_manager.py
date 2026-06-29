@@ -42,24 +42,17 @@ def _reset_manager(monkeypatch):
 
 
 def test_get_or_create_reuses_same_key():
-    first = AgentManager.get_or_create(workspace="data/test", session_id="s1")
-    second = AgentManager.get_or_create(workspace="data/other", session_id="s1")
+    first = AgentManager.get_or_create(session_id="s1")
+    second = AgentManager.get_or_create(session_id="s1")
 
     assert first is second
-    assert first.kwargs["workspace"] == ""
     assert first.kwargs["session_id"] == "s1"
 
 
-def test_get_or_create_ignores_workspace_for_runtime_creation():
-    agent = AgentManager.get_or_create(workspace="data/test", session_id="s1")
-
-    assert agent.kwargs["workspace"] == ""
-
-
 def test_get_or_create_separates_by_session_only():
-    first = AgentManager.get_or_create(workspace="data/test", session_id="s1")
-    second = AgentManager.get_or_create(workspace="data/other", session_id="s1")
-    third = AgentManager.get_or_create(workspace="data/test", session_id="s2")
+    first = AgentManager.get_or_create(session_id="s1")
+    second = AgentManager.get_or_create(session_id="s1")
+    third = AgentManager.get_or_create(session_id="s2")
 
     assert first is second
     assert first is not third
@@ -84,7 +77,7 @@ def test_get_or_create_uses_default_provider(monkeypatch):
         classmethod(lambda cls: FakeLLMManager()),
     )
 
-    agent = AgentManager.get_or_create(workspace="data/test", session_id="s1")
+    agent = AgentManager.get_or_create(session_id="s1")
 
     assert agent.kwargs["model"] == "override-model"
     assert calls[0] == "agent.main"
@@ -92,9 +85,9 @@ def test_get_or_create_uses_default_provider(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ensure_initialized_is_keyed_by_session_id():
-    await AgentManager.ensure_initialized(workspace="data/ws1", session_id="s1")
-    await AgentManager.ensure_initialized(workspace="data/ws1", session_id="s1")
-    await AgentManager.ensure_initialized(workspace="data/ws2", session_id="s1")
+    await AgentManager.ensure_initialized(session_id="s1")
+    await AgentManager.ensure_initialized(session_id="s1")
+    await AgentManager.ensure_initialized(session_id="s1")
 
     assert len(AgentManager._initialized_targets) == 1
     assert len(FakeAgent.instances) == 1
@@ -102,7 +95,7 @@ async def test_ensure_initialized_is_keyed_by_session_id():
 
 
 def test_reset_clears_cache_and_init_targets():
-    AgentManager.get_or_create(workspace="data/test", session_id="s1")
+    AgentManager.get_or_create(session_id="s1")
     AgentManager._initialized_targets.add("s1")
 
     AgentManager.reset()
