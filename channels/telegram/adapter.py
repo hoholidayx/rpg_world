@@ -452,7 +452,6 @@ class TelegramAdapter(ChannelAdapter):
             BotCommand(command="start", description="开始对话"),
         ]
         command_payload = await self._agent_client.list_commands(
-            self.get_workspace(),
             self._default_session_id,
         )
         raw_commands = command_payload.get("commands", [])
@@ -644,7 +643,6 @@ class TelegramAdapter(ChannelAdapter):
         )
         try:
             result = await self._agent_client.execute_command(
-                self.get_workspace(),
                 self.get_session_id(chat_id),
                 command,
             )
@@ -692,7 +690,6 @@ class TelegramAdapter(ChannelAdapter):
         if not self._agent_client:
             return
         await self._agent_client.execute_command(
-            self.get_workspace(),
             self.get_session_id(chat_id),
             f"/session_switch {session_id}",
         )

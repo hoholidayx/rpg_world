@@ -42,15 +42,12 @@ class AgentManager:
     @classmethod
     def get_or_create(
         cls,
-        workspace: str = "",
         session_id: str = "default",
     ) -> RPGGameAgent:
         """获取或创建一个 ``RPGGameAgent`` 实例。
 
         Parameters
         ----------
-        workspace:
-            兼容旧调用保留，核心运行时不再使用它定位业务数据。
         session_id:
             会话 ID，同一会话复用同一 agent。
         Session IDs are globally unique in rpg_data, so the runtime cache is
@@ -61,14 +58,13 @@ class AgentManager:
             manager = LLMManager.get()
             provider = manager.get_provider(AGENT_MAIN_BIZ_KEY)
             cls._instances[key] = RPGGameAgent(
-                workspace="",
                 session_id=session_id,
                 model=provider.get_default_model(),
             )
         return cls._instances[key]
 
     @classmethod
-    async def ensure_initialized(cls, workspace: str = "", session_id: str = "default") -> None:
+    async def ensure_initialized(cls, session_id: str = "default") -> None:
         """确保至少有一个 agent 完成初始化。
 
         触发 ``FileWatcher`` 的启动和 session-scoped runtime 初始化。
@@ -76,15 +72,13 @@ class AgentManager:
 
         Parameters
         ----------
-        workspace:
-            兼容旧调用保留，核心运行时不再使用它定位业务数据。
         session_id:
             初始化时使用的 session ID。默认为 ``"default"``，
             调用方应根据实际使用的 session 传入。
         """
         if session_id in cls._initialized_targets:
             return
-        agent = cls.get_or_create(workspace=workspace, session_id=session_id)
+        agent = cls.get_or_create(session_id=session_id)
         await agent._ensure_initialized()
         cls._initialized_targets.add(session_id)
         cls._initialized = True

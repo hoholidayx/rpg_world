@@ -139,7 +139,7 @@ class CLIAdapter(ChannelAdapter):
             return ""
         full_text = ""
         try:
-            event_source = self._agent_client.stream(self.get_workspace(), self.get_session_id(chat_id), text)
+            event_source = self._agent_client.stream(self.get_session_id(chat_id), text)
             async for event in event_source:
                 if event.kind == StreamEventKind.TEXT:
                     full_text += event.content
@@ -184,7 +184,7 @@ class CLIAdapter(ChannelAdapter):
         if not self._agent_client:
             return ""
         try:
-            reply = await self._agent_client.send(self.get_workspace(), self.get_session_id(chat_id), text)
+            reply = await self._agent_client.send(self.get_session_id(chat_id), text)
         except Exception as exc:
             self._console.print(f"[red][error] {exc}[/red]")
             return ""

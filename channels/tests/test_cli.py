@@ -103,7 +103,7 @@ class TestCLIAdapter:
         reply = await adapter._handle_message("direct", "user", "/clear")
         # FakeAgent.send() 返回 "[mock] reply to: /clear"
         assert reply == "[mock] reply to: /clear"
-        assert agent.calls[-1] == ("send", ("data/ws", "resolved_session", "/clear"))
+        assert agent.calls[-1] == ("send", ("resolved_session", "/clear"))
 
     async def test_handle_message_command_streaming(self):
         """命令通过 AgentClient stream() 统一处理（流式路径）。"""

@@ -114,7 +114,6 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
     agent._initialized = False
     agent._init_lock = None
     agent._world_name = "world"
-    agent._workspace = "data/test"
     agent._session_id = "s1"
     agent._model = "gpt-4o"
     agent._api_key = None
@@ -184,7 +183,6 @@ def test_rpg_game_agent_default_model_no_longer_forces_gpt4o(monkeypatch):
 
     agent = RPGGameAgent(
         session_id="test",
-        workspace="data/test",
         model=None,
     )
 
@@ -254,7 +252,6 @@ async def test_ensure_initialized_populates_model_from_provider(monkeypatch):
     agent._initialized = False
     agent._init_lock = None
     agent._world_name = "world"
-    agent._workspace = "data/test"
     agent._session_id = "s1"
     agent._model = None
     agent._api_key = None

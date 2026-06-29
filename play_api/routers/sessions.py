@@ -81,7 +81,7 @@ def _session_summary(session: dict[str, object]) -> PlaySessionSummary:
 
 
 def _session_context(session: dict[str, object]) -> tuple[str, int, str]:
-    # Play API 负责把公开 session id 解析成 Agent 服务仍需要的 workspace + session_id。
+    # Play API 负责校验公开 session id；Agent 服务运行态只需要 session_id。
     return (
         str(session["workspace"]),
         int(session["story_id"]),

@@ -62,10 +62,9 @@ async def health() -> AgentHealthResponse:
 
 @app.get(f"{_service_prefix()}/chat/history")
 async def get_history(
-    workspace: str = Query(...),
     session_id: str = Query(...),
 ) -> dict[str, Any]:
-    agent = _get_agent(workspace, session_id)
+    agent = _get_agent(session_id)
     try:
         await agent._ensure_initialized()
     except Exception as exc:
@@ -75,10 +74,9 @@ async def get_history(
 
 @app.get(f"{_service_prefix()}/chat/commands")
 async def list_commands(
-    workspace: str = Query(...),
     session_id: str = Query(...),
 ) -> dict[str, Any]:
-    agent = _get_agent(workspace, session_id)
+    agent = _get_agent(session_id)
     try:
         await agent._ensure_initialized()
     except Exception as exc:
@@ -141,7 +139,7 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> dict[str, Any]:
 
 @app.post(f"{_service_prefix()}/chat/send")
 async def chat_send(body: AgentMessageRequest) -> dict[str, Any]:
-    agent = _get_agent(body.workspace, body.session_id)
+    agent = _get_agent(body.session_id)
     try:
         reply = await agent.send(body.message)
     except Exception as exc:
@@ -151,7 +149,7 @@ async def chat_send(body: AgentMessageRequest) -> dict[str, Any]:
 
 @app.post(f"{_service_prefix()}/chat/command")
 async def chat_command(body: AgentCommandRequest) -> dict[str, Any]:
-    agent = _get_agent(body.workspace, body.session_id)
+    agent = _get_agent(body.session_id)
     command = body.command.strip()
     try:
         result = await agent.execute_command(command)
@@ -169,7 +167,7 @@ async def chat_command(body: AgentCommandRequest) -> dict[str, Any]:
 
 @app.post(f"{_service_prefix()}/chat/stream")
 async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
-    agent = _get_agent(body.workspace, body.session_id)
+    agent = _get_agent(body.session_id)
 
     async def event_generator() -> AsyncIterator[str]:
         try:
@@ -190,13 +188,9 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
     )
 
 
-def _get_agent(workspace: str, session_id: str):
-    workspace = _require_workspace(workspace)
+def _get_agent(session_id: str):
     session_id = _require_session_id(session_id)
-    return AgentManager.get_or_create(
-        workspace=workspace,
-        session_id=session_id,
-    )
+    return AgentManager.get_or_create(session_id=session_id)
 
 
 def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> models.Session:

@@ -11,10 +11,8 @@ import pytest
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     StreamEventKind,
-    TurnStats,
 )
 from rpg_core.agent.command import CommandDef, CommandResult
-from rpg_core.agent.loop import AgentReply
 
 
 class FakeAgent:
@@ -43,13 +41,11 @@ class FakeAgent:
     async def switch_session(self, session_id: str) -> None:
         self.current_session = session_id
 
-    async def send(self, *args: str) -> dict[str, object] | AgentReply:
+    async def send(self, *args: str) -> dict[str, object]:
         self.calls.append(("send", tuple(args)))
         text = args[-1]
         reply = f"[mock] reply to: {text}"
-        if len(args) >= 3:
-            return {"reply": reply, "stats": {}}
-        return AgentReply(text=reply, stats=TurnStats())
+        return {"reply": reply, "stats": {}}
 
     async def send_stream(self, text: str) -> AsyncIterator[AgentStreamEvent]:
         """模拟流式输出：一条 text 事件 + 一条 done 事件。"""
@@ -80,9 +76,7 @@ class FakeAgent:
     async def execute_command(self, *args: str) -> dict[str, object] | CommandResult:
         self.calls.append(("execute_command", tuple(args)))
         command = args[-1]
-        if len(args) >= 3:
-            return {"reply": f"[mock cmd] {command}", "handled": True, "active_session": args[1]}
-        return CommandResult(reply=f"[mock cmd] {command}", handled=True)
+        return {"reply": f"[mock cmd] {command}", "handled": True, "active_session": args[0] if args else ""}
 
     async def list_sessions(self, _workspace_id: str, _story_id: int) -> dict[str, object]:
         return {"sessions": ["tg_default"]}

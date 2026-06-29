@@ -71,12 +71,12 @@ def _patch_httpx(monkeypatch):
 
 
 async def test_client_send_uses_standard_payload() -> None:
-    result = await AgentClient(base_url="http://agent").send("data/ws", "s1", "hello")
+    result = await AgentClient(base_url="http://agent").send("s1", "hello")
     assert result == {"reply": "ok"}
     assert FakeAsyncClient.calls[-1] == (
         "POST",
         "http://agent/chat/send",
-        {"json": {"workspace": "data/ws", "session_id": "s1", "message": "hello"}},
+        {"json": {"session_id": "s1", "message": "hello"}},
     )
 
 
@@ -101,7 +101,7 @@ async def test_client_session_crud_uses_agent_service_contract() -> None:
 async def test_client_stream_parses_sse_events() -> None:
     events = [
         event
-        async for event in AgentClient(base_url="http://agent").stream("data/ws", "s1", "hello")
+        async for event in AgentClient(base_url="http://agent").stream("s1", "hello")
     ]
     assert [event.kind for event in events] == [StreamEventKind.TEXT, StreamEventKind.DONE]
     assert events[-1].content == "hi"

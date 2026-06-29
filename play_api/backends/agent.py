@@ -9,8 +9,8 @@ from play_api import agent_client
 
 class AgentBackend:
     async def get_history(self, workspace: str, story_id: int, session_id: str) -> list[dict[str, object]]:
-        del story_id
-        result = await agent_client.get_agent_client().get_history(workspace, session_id)
+        del workspace, story_id
+        result = await agent_client.get_agent_client().get_history(session_id)
         return list(result.get("history", []))
 
     async def get_scene(self, workspace: str, story_id: int, session_id: str) -> dict[str, object]:
@@ -23,8 +23,8 @@ class AgentBackend:
         }
 
     async def list_commands(self, workspace: str, story_id: int, session_id: str) -> list[dict[str, object]]:
-        del story_id
-        result = await agent_client.get_agent_client().list_commands(workspace, session_id)
+        del workspace, story_id
+        result = await agent_client.get_agent_client().list_commands(session_id)
         return [
             {
                 "name": str(item.get("command", "")),
@@ -35,8 +35,8 @@ class AgentBackend:
         ]
 
     async def send(self, workspace: str, story_id: int, session_id: str, text: str, mode: str) -> dict[str, object]:
-        del story_id
-        return await agent_client.get_agent_client().send(workspace, session_id, text)
+        del workspace, story_id
+        return await agent_client.get_agent_client().send(session_id, text)
 
     async def stream(
         self,
@@ -46,6 +46,6 @@ class AgentBackend:
         text: str,
         mode: str,
     ) -> AsyncIterator[dict[str, object]]:
-        del story_id
-        async for event in agent_client.get_agent_client().stream(workspace, session_id, text):
+        del workspace, story_id
+        async for event in agent_client.get_agent_client().stream(session_id, text):
             yield event.to_dict()
