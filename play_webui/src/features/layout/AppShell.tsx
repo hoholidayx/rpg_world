@@ -17,6 +17,7 @@ import {
   Sparkles,
   UsersRound,
 } from 'lucide-react'
+import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { listWorkspaces } from '@/lib/api/sessions'
 import type { WorkspaceSummary } from '@/types/session'
 
@@ -205,19 +206,28 @@ export function AppShell({ children }: AppShellProps) {
             })}
           </nav>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="mb-4 text-sm text-slate-400">系统状态</p>
-            <div className="space-y-4 text-sm text-slate-600">
-              <p className="flex items-center gap-3">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                Play API ready
-              </p>
-              <p className="flex items-center gap-3">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                SSE ready
-              </p>
+          <div className="space-y-4">
+            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="mb-4 text-sm text-slate-400">系统状态</p>
+              <div className="space-y-4 text-sm text-slate-600">
+                <p className="flex items-center gap-3">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  Play API ready
+                </p>
+                <p className="flex items-center gap-3">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  SSE ready
+                </p>
+              </div>
+            </section>
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div>
+                <p className="text-sm font-semibold text-slate-700">外观主题</p>
+                <p className="mt-0.5 text-xs text-slate-400">亮色 / 暗色 / 系统</p>
+              </div>
+              <ThemeSwitcher />
             </div>
-          </section>
+          </div>
         </aside>
 
         <AppShellContext.Provider value={shellState}>

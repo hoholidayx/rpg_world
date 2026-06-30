@@ -36,3 +36,76 @@ textarea {
   background: #ddd6fe;
   color: #4c1d95;
 }
+
+.dark body {
+  background: #0b1020;
+  color: #e5e7eb;
+}
+
+.dark ::selection {
+  background: #6d28d9;
+  color: #f5f3ff;
+}
+
+@layer utilities {
+  .dark .bg-\[\#f7f8fc\] {
+    background: radial-gradient(circle at top left, rgba(124, 58, 237, 0.18), transparent 32%), #0b1020;
+  }
+
+  .dark .bg-white,
+  .dark .bg-white\/70,
+  .dark .bg-white\/90 {
+    background-color: rgb(15 23 42 / 0.86);
+  }
+
+  .dark .bg-slate-50,
+  .dark .bg-slate-50\/60,
+  .dark .bg-slate-50\/70,
+  .dark .bg-slate-100 {
+    background-color: rgb(30 41 59 / 0.78);
+  }
+
+  .dark .bg-violet-50,
+  .dark .bg-violet-50\/60,
+  .dark .bg-violet-50\/70,
+  .dark .bg-violet-100 {
+    background-color: rgb(109 40 217 / 0.18);
+  }
+
+  .dark .border-slate-100,
+  .dark .border-slate-200,
+  .dark .border-slate-200\/80,
+  .dark .border-violet-100,
+  .dark .border-violet-200 {
+    border-color: rgb(51 65 85 / 0.9);
+  }
+
+  .dark .text-slate-950,
+  .dark .text-slate-900,
+  .dark .text-slate-800,
+  .dark .text-slate-700 {
+    color: #f8fafc;
+  }
+
+  .dark .text-slate-600,
+  .dark .text-slate-500 {
+    color: #cbd5e1;
+  }
+
+  .dark .text-slate-400 {
+    color: #94a3b8;
+  }
+
+  .dark .text-violet-700,
+  .dark .text-violet-600,
+  .dark .text-violet-500 {
+    color: #c4b5fd;
+  }
+
+  .dark .shadow-sm,
+  .dark .shadow-lg,
+  .dark .shadow-xl,
+  .dark .shadow-2xl {
+    --tw-shadow-color: rgb(0 0 0 / 0.35);
+  }
+}
