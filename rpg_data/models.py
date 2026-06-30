@@ -300,7 +300,7 @@ class StatusRowRef:
 
 @dataclass(frozen=True)
 class StatusTableData:
-    """Immutable helper for reading and editing CSV-shaped status data."""
+    """Immutable helper for reading and editing key-value status data."""
 
     headers: tuple[str, ...] = ()
     rows: tuple[tuple[str, ...], ...] = ()

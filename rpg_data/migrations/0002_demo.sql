@@ -294,10 +294,10 @@ VALUES (
         WHERE workspace_id = 'demo_workspace' AND builtin_key = 'scene'
     ),
     '北境森林当前场景',
-    'template_status/场景/北境森林当前场景.csv',
+    'template_status/场景/北境森林当前场景.status.json',
     '北境森林演示故事的当前场景。',
     0,
-    '{"kind":"demo","_bootstrap_csv":{"headers":["属性","值"],"rows":[["时间","第 1 年 1 月 1 日 8 时 30 分"],["位置","北境森林·石林·圆形封印祭坛"],["在场人物","Bob, Alice"]]}}'
+    '{"kind":"demo"}'
 );
 
 INSERT OR IGNORE INTO rpg_status_table_templates (
@@ -317,10 +317,10 @@ VALUES (
         WHERE workspace_id = 'demo_workspace' AND builtin_key = 'scene'
     ),
     '奥术学院当前场景',
-    'template_status/场景/奥术学院当前场景.csv',
+    'template_status/场景/奥术学院当前场景.status.json',
     '奥术学院演示故事的当前场景。',
     0,
-    '{"kind":"demo","_bootstrap_csv":{"headers":["属性","值"],"rows":[["时间","第 1 年 1 月 3 日 14 时"],["位置","奥术学院·旧档案馆"],["在场人物","Alice"]]}}'
+    '{"kind":"demo"}'
 );
 
 INSERT OR IGNORE INTO rpg_status_table_templates (
@@ -340,10 +340,10 @@ VALUES (
         WHERE workspace_id = 'demo_workspace' AND name = '世界状态'
     ),
     '世界线索',
-    'template_status/世界状态/世界线索.csv',
+    'template_status/世界状态/世界线索.status.json',
     '演示普通状态表如何进入上下文。',
     10,
-    '{"kind":"demo","_bootstrap_csv":{"headers":["项目","状态","备注"],"rows":[["幽蓝封印","异常波动","圆形封印祭坛附近出现微弱蓝光。"],["炎心之木","待调查","相关记载散落在北境与学院档案中。"]]}}'
+    '{"kind":"demo"}'
 );
 
 INSERT OR IGNORE INTO rpg_story_status_tables (

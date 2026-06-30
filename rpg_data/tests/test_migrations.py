@@ -486,7 +486,7 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
         assert status_type_count == 2
         assert status_template_count == 3
         assert status_mount_count == 4
-        assert scene_template["relative_path"] == "template_status/场景/北境森林当前场景.csv"
-        assert '"_bootstrap_csv"' in scene_template["metadata_json"]
+        assert scene_template["relative_path"] == "template_status/场景/北境森林当前场景.status.json"
+        assert '"_bootstrap_csv"' not in scene_template["metadata_json"]
     finally:
         conn.close()

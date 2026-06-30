@@ -1,8 +1,8 @@
-"""SceneTracker — 纯内存场景状态管理器。
+"""SceneTracker — active scene status table adapter.
 
-维护当前场景的时间、地点、人物等上下文，通过 StatusManager 持久化到
-rpg_data 当前 session 的 active scene 状态表，自行渲染 ``[scene]...[/scene]``
-注入到用户消息的 user_before 位置，不走通用 status_tables.jinja。
+通过 StatusManager 直接读写 rpg_data 当前 session 的 active scene 状态表，
+自行渲染 ``[scene]...[/scene]`` 注入到用户消息的 user_before 位置，不走通用
+status_tables.jinja。
 
 MemorySubAgent 过滤 system 角色消息，场景信息必须在 user 消息中才能被
 总结归纳可见。
@@ -17,24 +17,7 @@ if TYPE_CHECKING:
 
 
 class SceneTracker:
-    """场景状态管理器——维护当前场景的时间、空间、人物等上下文。
-
-    常量：
-        DEFAULT_ATTRS: 首次初始化时的默认属性行。
-
-    用法::
-
-        tracker = SceneTracker()
-        tracker.bind_status_manager(status_mgr)
-        tracker.load_from_status_table()
-
-        tracker.set_time(year=3, month=6, day=15, hour=14)
-        tracker.set_attr("位置", "城堡")
-        tracker.delete_attr("天气")
-
-        context = tracker.get_context()
-        # → "[scene]\\n时间: ...\\n位置: 城堡\\n[/scene]"
-    """
+    """场景状态管理器，所有状态读写都以 rpg_data 文件为真源。"""
 
     TIME_ATTR = "时间"
     LOCATION_ATTR = "位置"
@@ -55,9 +38,6 @@ class SceneTracker:
         self._hour: int = 6
         self._minute: int = 0
 
-        # 场景属性（key-value，与状态表行对应）
-        self._attrs: dict[str, str] = dict(self.DEFAULT_ATTRS)
-
         # StatusManager 引用（None = 不持久化）
         self._status_mgr: StatusManager | None = None
         self._scene_table_id: int | None = None
@@ -77,12 +57,7 @@ class SceneTracker:
         self._status_mgr = mgr
 
     def load_from_status_table(self) -> bool:
-        """从 active scene 表恢复场景属性。
-
-        表未挂载时返回 ``False``，不自动创建。
-        结构化时间字段从默认值开始（历史消息中的 ``[scene]`` 标签
-        已包含时间变化轨迹，供 LLM 参考）。
-        """
+        """绑定 active scene 表引用；不缓存表内容。"""
         if self._status_mgr is None:
             return False
 
@@ -94,28 +69,7 @@ class SceneTracker:
             return False
 
         self._scene_table_id, self._table_key = scene_ref
-        attrs = mgr.get_scene_attrs() or {}
-        if attrs:
-            self._attrs = dict(self.DEFAULT_ATTRS)
-            self._attrs.update({str(key): str(value) for key, value in attrs.items()})
-            return True
-
-        # 已挂载但内容为空 → 只初始化现有 active scene 表
-        self._save_to_status_table()
-        return False
-
-    def _save_to_status_table(self) -> None:
-        """将 ``_attrs`` 写入已挂载 active scene 表。"""
-        if self._status_mgr is None or self._scene_table_id is None:
-            return
-
-        for key, value in self._attrs.items():
-            self._persist_attr(key, value)
-
-    def _persist_attr(self, key: str, value: str) -> None:
-        if self._status_mgr is None or self._scene_table_id is None:
-            return
-        self._status_mgr.set_key_value(self._scene_table_id, key, value)
+        return True
 
     # ── 时间操作 ─────────────────────────────────────────────────────
 
@@ -143,27 +97,24 @@ class SceneTracker:
             tracker.set_time(year=3, month=6, day=15, hour=14, minute=30)
             # → 时间变为 "第 3 年 6 月 15 日 14 时 30 分"
 
-        其余关键字参数直接写入 ``_attrs``（不参与 _format_time）。
+        其余关键字参数直接写入状态表（不参与 _format_time）。
         """
         STRUCT_FIELDS = {"year", "month", "day", "hour", "minute"}
+        pending_attrs: dict[str, str] = {}
         for k, v in kwargs.items():
             if k in STRUCT_FIELDS:
                 setattr(self, f"_{k}", v)
             else:
-                self._attrs[k] = str(v)
+                pending_attrs[k] = str(v)
 
-        self._attrs[self.TIME_ATTR] = self._format_time()
-        self._persist_attr(self.TIME_ATTR, self._attrs[self.TIME_ATTR])
-        return dict(self._attrs)
-
-    @property
-    def protected_attrs(self) -> set[str]:
-        """不可被删除的默认属性 key 集合。"""
-        return set(self.DEFAULT_ATTRS.keys())
+        attrs = self._runtime_set_attr(self.TIME_ATTR, self._format_time())
+        for key, value in pending_attrs.items():
+            attrs = self._runtime_set_attr(key, value)
+        return attrs
 
     @property
     def attr_count(self) -> int:
-        return len(self._attrs)
+        return len(self._current_attrs())
 
     # ── 场景属性操作 ────────────────────────────────────────────────
 
@@ -172,26 +123,23 @@ class SceneTracker:
 
         超出 ``MAX_ATTRS`` 上限时抛 ``ValueError``。
         """
-        if key not in self._attrs and len(self._attrs) >= self.MAX_ATTRS:
+        attrs = self._current_attrs()
+        if key not in attrs and len(attrs) >= self.MAX_ATTRS:
             raise ValueError(
                 f"场景属性已达上限（{self.MAX_ATTRS} 个），"
                 f"请先删除不再需要的属性再新增"
             )
-        self._attrs[key] = value
-        self._persist_attr(key, value)
-        return dict(self._attrs)
+        return self._runtime_set_attr(key, value)
 
     def delete_attr(self, key: str) -> dict[str, str]:
-        """删除场景属性。默认属性（如时间、位置）不可删除，静默忽略。"""
-        if key in self.protected_attrs:
-            return dict(self._attrs)
-        self._attrs.pop(key, None)
+        """删除场景属性；失败时返回当前文件状态。"""
         if self._status_mgr is not None and self._scene_table_id is not None:
             try:
-                self._status_mgr.delete_key_value(self._scene_table_id, key)
-            except FileNotFoundError:
-                pass
-        return dict(self._attrs)
+                table = self._status_mgr.runtime_delete_key_value(self._scene_table_id, key)
+                return self._attrs_from_table(table)
+            except (FileNotFoundError, PermissionError):
+                return self._current_attrs()
+        return self._current_attrs()
 
     # ── 上下文渲染 ──────────────────────────────────────────────────
 
@@ -201,7 +149,7 @@ class SceneTracker:
         末尾附带简短引导提示，指引 LLM 使用场景工具更新数据。
         """
         lines = ["[scene]"]
-        for k, v in self._attrs.items():
+        for k, v in self._current_attrs().items():
             if v:
                 lines.append(f"{k}: {v}")
             else:
@@ -210,6 +158,24 @@ class SceneTracker:
         lines.append("（场景状态已由 StatusSubAgent 自动预处理。需要手动调整时可使用 scene_time / scene_attr / scene_del_attr 工具。注意及时清理已过期的属性，避免堆积。）")
         lines.append("[/scene]")
         return "\n".join(lines)
+
+    def _runtime_set_attr(self, key: str, value: str) -> dict[str, str]:
+        if self._status_mgr is None or self._scene_table_id is None:
+            return self._current_attrs()
+        table = self._status_mgr.runtime_set_key_value(self._scene_table_id, key, value)
+        return self._attrs_from_table(table)
+
+    def _current_attrs(self) -> dict[str, str]:
+        if self._status_mgr is None:
+            return {}
+        return dict(self._status_mgr.get_scene_attrs() or {})
+
+    def _attrs_from_table(self, table: dict[str, object]) -> dict[str, str]:
+        attrs: dict[str, str] = {}
+        for row in table.get("rows", []):
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                attrs[str(row[0])] = str(row[1])
+        return attrs
 
     # ── 工具注册 ────────────────────────────────────────────────────
 

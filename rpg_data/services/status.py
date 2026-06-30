@@ -1,12 +1,12 @@
-"""Status table service backed by SQL indexes and CSV content files."""
+"""Status table service backed by SQL indexes and JSON content files."""
 
 from __future__ import annotations
 
-import csv
+import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from peewee import Database, DoesNotExist, IntegrityError, SQL
 
@@ -30,14 +30,17 @@ logger = logging.getLogger("rpg_data.status")
 
 SCENE_BUILTIN_KEY = "scene"
 SCENE_DEFAULT_HEADERS = (models.STATUS_KEY_COLUMN, models.STATUS_VALUE_COLUMN)
-SCENE_PROTECTED_ATTRS = {"时间", "位置", "在场人物"}
+SCENE_DEFAULT_LOCKED_KEYS = {"时间", "位置", "在场人物"}
 _TEMPLATE_STATUS_DIR = "template_status"
 _SESSION_STORIES_DIR = "stories"
 _SESSION_STATUS_DIR = "status"
+_STATUS_FILE_SUFFIX = ".status.json"
+_STATUS_TABLE_KIND = "status_table"
+_STATUS_TABLE_MODE = "key_value"
 
 
 class StatusTableService:
-    """Manage status table indexes in SQL and table content in CSV files."""
+    """Manage status table indexes in SQL and table content in JSON files."""
 
     def __init__(self, database: Database) -> None:
         self._database = database
@@ -122,6 +125,7 @@ class StatusTableService:
                 raise FileExistsError(str(new_path))
 
         moved: list[tuple[Path, Path]] = []
+        rewritten: list[tuple[Path, dict[str, Any]]] = []
         try:
             for old_path, new_path, _template in moves:
                 if old_path == new_path:
@@ -131,6 +135,13 @@ class StatusTableService:
                 new_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(old_path), str(new_path))
                 moved.append((old_path, new_path))
+            for old_path, new_path, _template in moves:
+                target_path = new_path if old_path != new_path else old_path
+                document = _read_status_document(target_path)
+                rewritten.append((target_path, dict(document)))
+                document["typeName"] = new_name
+                document["builtinKey"] = str(row.builtin_key or "")
+                _write_status_document(target_path, document)
             with self._database.atomic():
                 row.name = new_name
                 row.updated_at = SQL("CURRENT_TIMESTAMP")
@@ -140,6 +151,9 @@ class StatusTableService:
                     template.updated_at = SQL("CURRENT_TIMESTAMP")
                     template.save()
         except Exception:
+            for path, document in reversed(rewritten):
+                if path.exists():
+                    _write_status_document(path, document)
             for old_path, new_path in reversed(moved):
                 if new_path.exists() and not old_path.exists():
                     old_path.parent.mkdir(parents=True, exist_ok=True)
@@ -259,8 +273,17 @@ class StatusTableService:
         if path.exists():
             raise FileExistsError(str(path))
 
-        output_headers, output_rows = _materialize_csv_data(headers, rows)
-        _write_csv(path, output_headers, output_rows)
+        output_headers, output_rows = _materialize_table_data(headers, rows)
+        _write_status_json(
+            path,
+            type_name=type_name,
+            name=name,
+            builtin_key=str(type_row.builtin_key or ""),
+            description=description,
+            headers=output_headers,
+            rows=output_rows,
+            metadata_json=metadata_json,
+        )
         try:
             with self._database.atomic():
                 row = StatusTableTemplateRecord.create(
@@ -311,7 +334,7 @@ class StatusTableService:
         old_path = resolve_workspace_relative_path(workspace_root, row.relative_path)
         new_relative_path = _template_relative_path(str(target_type.name), target_name)
         new_path = resolve_workspace_relative_path(workspace_root, new_relative_path)
-        current_headers, current_rows = _read_csv(old_path)
+        current_headers, current_rows = _read_status_json(old_path)
         output_headers = current_headers if headers is None else tuple(str(item) for item in headers)
         output_rows = current_rows if rows is None else tuple(tuple(str(cell) for cell in item) for item in rows)
         path_changed = old_path != new_path
@@ -324,7 +347,17 @@ class StatusTableService:
                 new_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(old_path), str(new_path))
                 moved = True
-            _write_csv(new_path, output_headers, output_rows)
+            output_description = str(row.description or "") if description is None else description
+            _write_status_json(
+                new_path,
+                type_name=str(target_type.name),
+                name=target_name,
+                builtin_key=str(target_type.builtin_key or ""),
+                description=output_description,
+                headers=output_headers,
+                rows=output_rows,
+                metadata_json=str(row.metadata_json or "{}"),
+            )
             with self._database.atomic():
                 row.status_type = target_type.id
                 row.name = target_name
@@ -491,6 +524,15 @@ class StatusTableService:
                 for mount in mounts:
                     template = mount.status_table
                     type_row = template.status_type
+                    source_path = resolve_workspace_relative_path(workspace_root, template.relative_path)
+                    if not source_path.is_file():
+                        logger.warning(
+                            "skip missing mounted status template session_id=%s template_id=%s relative_path=%s",
+                            session_id,
+                            template.id,
+                            template.relative_path,
+                        )
+                        continue
                     session_type = type_map.get(int(type_row.id))
                     if session_type is None:
                         session_type = SessionStatusTypeRecord.create(
@@ -505,9 +547,6 @@ class StatusTableService:
                         )
                         type_map[int(type_row.id)] = session_type
 
-                    source_path = resolve_workspace_relative_path(workspace_root, template.relative_path)
-                    if not source_path.is_file():
-                        raise FileNotFoundError(str(source_path))
                     relative_path = _session_relative_path(story_id, session_id, str(type_row.name), str(template.name))
                     target_path = resolve_workspace_relative_path(workspace_root, relative_path)
                     if target_path.exists():
@@ -649,8 +688,8 @@ class StatusTableService:
         for row in query:
             try:
                 tables.append(_to_session_table(row, self._workspace_root(str(row.session_type.workspace_id))))
-            except FileNotFoundError as exc:
-                logger.debug("skip missing status table CSV for context: %s", exc)
+            except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+                logger.debug("skip unavailable status table JSON for context: %s", exc)
         logger.debug("listed context status tables session_id=%s count=%s", session_id, len(tables))
         return tables
 
@@ -710,8 +749,17 @@ class StatusTableService:
         if path.exists():
             raise FileExistsError(str(path))
 
-        output_headers, output_rows = _materialize_csv_data(headers, rows)
-        _write_csv(path, output_headers, output_rows)
+        output_headers, output_rows = _materialize_table_data(headers, rows)
+        _write_status_json(
+            path,
+            type_name=type_name,
+            name=table_name,
+            builtin_key=str(session_type.builtin_key or ""),
+            description=description,
+            headers=output_headers,
+            rows=output_rows,
+            metadata_json=metadata_json,
+        )
         try:
             row = SessionStatusTableRecord.create(
                 session=session_id,
@@ -754,8 +802,17 @@ class StatusTableService:
         path = resolve_workspace_relative_path(workspace_root, row.relative_path)
         if not path.is_file():
             raise FileNotFoundError(str(path))
-        output_headers, output_rows = _materialize_csv_data(headers, rows)
-        _write_csv(path, output_headers, output_rows)
+        output_headers, output_rows = _materialize_table_data(headers, rows)
+        _write_status_json(
+            path,
+            type_name=str(row.session_type.name),
+            name=str(row.name),
+            builtin_key=str(row.session_type.builtin_key or ""),
+            description=str(row.description or ""),
+            headers=output_headers,
+            rows=output_rows,
+            metadata_json=str(row.metadata_json or "{}"),
+        )
         _touch(SessionStatusTableRecord, int(row.id))
         logger.info(
             "saved session status table table_id=%s session_id=%s type_name=%s "
@@ -869,6 +926,40 @@ class StatusTableService:
             lambda data: data.without_key(key, key_column=key_column),
         )
 
+    def runtime_set_key_value(
+        self,
+        table_id: int,
+        key: str,
+        value: str,
+        *,
+        key_column: int | str = models.STATUS_KEY_COLUMN,
+        value_column: int | str = models.STATUS_VALUE_COLUMN,
+    ) -> models.SessionStatusTable:
+        """Set a key/value pair from LLM runtime.
+
+        Runtime locks protect the key identity, not the value, so updating any
+        existing key's value remains allowed. Newly created rows are unlocked.
+        """
+
+        return self.set_key_value(
+            table_id,
+            key,
+            value,
+            key_column=key_column,
+            value_column=value_column,
+        )
+
+    def runtime_delete_key_value(
+        self,
+        table_id: int,
+        key: str,
+        *,
+        key_column: int | str = models.STATUS_KEY_COLUMN,
+    ) -> models.SessionStatusTable:
+        if self._runtime_key_locked(table_id, key):
+            raise PermissionError(f"Status key is runtime locked: {key}")
+        return self.delete_key_value(table_id, key, key_column=key_column)
+
     def rename_table(
         self,
         session_id: str,
@@ -899,6 +990,17 @@ class StatusTableService:
         new_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(old_path), str(new_path))
         try:
+            headers, rows = _read_status_json(new_path)
+            _write_status_json(
+                new_path,
+                type_name=type_name,
+                name=new_name,
+                builtin_key=str(row.session_type.builtin_key or ""),
+                description=str(row.description or ""),
+                headers=headers,
+                rows=rows,
+                metadata_json=str(row.metadata_json or "{}"),
+            )
             with self._database.atomic():
                 row.name = new_name
                 row.relative_path = new_relative_path
@@ -944,11 +1046,12 @@ class StatusTableService:
         )
 
     def clear_unindexed_session_files(self, session_id: str) -> list[str]:
-        """Delete session status CSV files that are not referenced by SQL indexes.
+        """Delete session status JSON files that are not referenced by SQL indexes.
 
         SQL remains the complete index for status tables. This cleanup only scans
-        the current session's status copy directory and removes orphan ``.csv``
-        files under it; indexed files and non-CSV files are left untouched.
+        the current session's status copy directory and removes orphan
+        ``.status.json`` files under it; indexed files and non-status files are
+        left untouched.
         Returned paths are relative to the workspace root.
         """
 
@@ -960,7 +1063,7 @@ class StatusTableService:
         )
         if not status_root.is_dir():
             logger.debug(
-                "skip orphan status csv cleanup missing directory session_id=%s root=%s",
+                "skip unindexed status json cleanup missing directory session_id=%s root=%s",
                 session_id,
                 status_root,
             )
@@ -974,7 +1077,7 @@ class StatusTableService:
         }
         removed: list[str] = []
         workspace_root_resolved = workspace_root.resolve()
-        for path in sorted(status_root.rglob("*.csv")):
+        for path in sorted(status_root.rglob(f"*{_STATUS_FILE_SUFFIX}")):
             resolved = path.resolve()
             if resolved in indexed_paths:
                 continue
@@ -1055,7 +1158,7 @@ class StatusTableService:
         if table is None:
             logger.debug("set scene attr skipped missing scene session_id=%s key=%s", session_id, key)
             return None
-        updated = self.set_key_value(table.id, str(key), str(value))
+        updated = self.runtime_set_key_value(table.id, str(key), str(value))
         logger.info(
             "set scene attr session_id=%s table_id=%s key=%s value=%s updated_attrs=%s",
             session_id,
@@ -1071,21 +1174,19 @@ class StatusTableService:
         if table is None:
             logger.debug("delete scene attr skipped missing scene session_id=%s key=%s", session_id, key)
             return None
-        if key not in SCENE_PROTECTED_ATTRS:
-            try:
-                table = self.delete_key_value(table.id, str(key))
-                logger.info(
-                    "deleted scene attr session_id=%s table_id=%s key=%s updated_attrs=%s",
-                    session_id,
-                    table.id,
-                    key,
-                    _rows_to_attrs(table.rows),
-                )
-            except FileNotFoundError:
-                logger.debug("delete scene attr skipped missing key session_id=%s key=%s", session_id, key)
-                pass
-        else:
-            logger.debug("delete scene attr skipped protected key session_id=%s key=%s", session_id, key)
+        try:
+            table = self.runtime_delete_key_value(table.id, str(key))
+            logger.info(
+                "deleted scene attr session_id=%s table_id=%s key=%s updated_attrs=%s",
+                session_id,
+                table.id,
+                key,
+                _rows_to_attrs(table.rows),
+            )
+        except FileNotFoundError:
+            logger.debug("delete scene attr skipped missing key session_id=%s key=%s", session_id, key)
+        except PermissionError:
+            logger.debug("delete scene attr skipped runtime locked key session_id=%s key=%s", session_id, key)
         return _rows_to_attrs(table.rows)
 
     # ------------------------------------------------------------------
@@ -1111,10 +1212,19 @@ class StatusTableService:
         path = resolve_workspace_relative_path(workspace_root, row.relative_path)
         if not path.is_file():
             raise FileNotFoundError(str(path))
-        _write_csv(path, data.headers, data.rows)
+        _write_status_json(
+            path,
+            type_name=str(row.session_type.name),
+            name=str(row.name),
+            builtin_key=str(row.session_type.builtin_key or ""),
+            description=str(row.description or ""),
+            headers=data.headers,
+            rows=data.rows,
+            metadata_json=str(row.metadata_json or "{}"),
+        )
         _touch(SessionStatusTableRecord, int(row.id))
         logger.info(
-            "wrote session status csv table_id=%s session_id=%s relative_path=%s "
+            "wrote session status json table_id=%s session_id=%s relative_path=%s "
             "header_count=%s row_count=%s headers=%s rows=%s",
             table_id,
             row.session_id,
@@ -1125,6 +1235,17 @@ class StatusTableService:
             data.rows,
         )
         return self.get_table_by_id(table_id)
+
+    def _runtime_key_locked(self, table_id: int, key: str) -> bool:
+        row = self._get_session_table_row(table_id)
+        workspace_root = self._workspace_root(str(row.session_type.workspace_id))
+        path = resolve_workspace_relative_path(workspace_root, row.relative_path)
+        document = _read_status_document(path)
+        expected = str(key)
+        for item in _iter_status_rows(document):
+            if str(item.get("key", "")) == expected:
+                return bool(item.get("runtimeKeyLocked", False))
+        raise FileNotFoundError(f"Status table key not found: {key}")
 
     def _workspace_root(self, workspace_id: str) -> Path:
         try:
@@ -1264,17 +1385,18 @@ def _to_template(
     row: StatusTableTemplateRecord,
     workspace_root: Path,
 ) -> models.StatusTableTemplate:
-    headers, rows = _read_csv(resolve_workspace_relative_path(workspace_root, row.relative_path))
+    document = _read_status_document(resolve_workspace_relative_path(workspace_root, row.relative_path))
+    headers, rows = _status_data_from_document(document)
     status_type = row.status_type
     return models.StatusTableTemplate(
         id=int(row.id),
         workspace_id=str(row.workspace_id),
         type_id=int(row.type_id),
-        type_name=str(status_type.name),
-        builtin_key=str(status_type.builtin_key or ""),
-        name=str(row.name),
+        type_name=str(document.get("typeName") or status_type.name),
+        builtin_key=str(document.get("builtinKey") or status_type.builtin_key or ""),
+        name=str(document.get("name") or row.name),
         relative_path=str(row.relative_path),
-        description=str(row.description or ""),
+        description=str(document.get("description") or row.description or ""),
         headers=headers,
         rows=rows,
         sort_order=int(row.sort_order),
@@ -1328,7 +1450,8 @@ def _to_session_table(
     row: SessionStatusTableRecord,
     workspace_root: Path,
 ) -> models.SessionStatusTable:
-    headers, rows = _read_csv(resolve_workspace_relative_path(workspace_root, row.relative_path))
+    document = _read_status_document(resolve_workspace_relative_path(workspace_root, row.relative_path))
+    headers, rows = _status_data_from_document(document)
     session_type = row.session_type
     source_table_id = None if row.source_table_id is None else int(row.source_table_id)
     return models.SessionStatusTable(
@@ -1338,11 +1461,11 @@ def _to_session_table(
         workspace_id=str(session_type.workspace_id),
         story_id=int(session_type.story_id),
         source_table_id=source_table_id,
-        type_name=str(session_type.name),
-        builtin_key=str(session_type.builtin_key or ""),
-        name=str(row.name),
+        type_name=str(document.get("typeName") or session_type.name),
+        builtin_key=str(document.get("builtinKey") or session_type.builtin_key or ""),
+        name=str(document.get("name") or row.name),
         relative_path=str(row.relative_path),
-        description=str(row.description or ""),
+        description=str(document.get("description") or row.description or ""),
         headers=headers,
         rows=rows,
         sort_order=int(row.sort_order),
@@ -1361,7 +1484,7 @@ def _validate_name(name: str, label: str) -> None:
 
 
 def _template_relative_path(type_name: str, table_name: str) -> str:
-    return f"{_TEMPLATE_STATUS_DIR}/{type_name}/{table_name}.csv"
+    return f"{_TEMPLATE_STATUS_DIR}/{type_name}/{table_name}{_STATUS_FILE_SUFFIX}"
 
 
 def _template_type_relative_path(type_name: str) -> str:
@@ -1382,22 +1505,35 @@ def _session_relative_path(
     type_name: str,
     table_name: str,
 ) -> str:
-    return f"{_SESSION_STORIES_DIR}/{story_id}/{session_id}/{_SESSION_STATUS_DIR}/{type_name}/{table_name}.csv"
+    return f"{_SESSION_STORIES_DIR}/{story_id}/{session_id}/{_SESSION_STATUS_DIR}/{type_name}/{table_name}{_STATUS_FILE_SUFFIX}"
 
 
-def _read_csv(path: Path) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+def _read_status_json(path: Path) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    return _status_data_from_document(_read_status_document(path))
+
+
+def _status_data_from_document(document: Mapping[str, Any]) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    key_column = str(document.get("keyColumn") or models.STATUS_KEY_COLUMN)
+    value_column = str(document.get("valueColumn") or models.STATUS_VALUE_COLUMN)
+    rows: list[tuple[str, str]] = []
+    for raw_row in _iter_status_rows(document):
+        rows.append((str(raw_row.get("key", "")), str(raw_row.get("value", ""))))
+    return (key_column, value_column), tuple(rows)
+
+
+def _read_status_document(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(str(path))
-    with path.open("r", encoding="utf-8-sig", newline="") as fh:
-        raw_rows = list(csv.reader(fh))
-    if not raw_rows:
-        return (), ()
-    headers = tuple(str(cell) for cell in raw_rows[0])
-    rows = tuple(tuple(str(cell) for cell in row) for row in raw_rows[1:])
-    return headers, rows
+    with path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not isinstance(data, dict):
+        raise ValueError(f"Status table JSON must be an object: {path}")
+    if data.get("kind") != _STATUS_TABLE_KIND or data.get("mode") != _STATUS_TABLE_MODE:
+        raise ValueError(f"Unsupported status table JSON: {path}")
+    return data
 
 
-def _materialize_csv_data(
+def _materialize_table_data(
     headers: Iterable[str],
     rows: Iterable[Iterable[str]],
 ) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
@@ -1413,13 +1549,121 @@ def _materialize_row_values(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(str(item) for item in values)
 
 
-def _write_csv(path: Path, headers: Iterable[str], rows: Iterable[Iterable[str]]) -> None:
+def _write_status_json(
+    path: Path,
+    *,
+    type_name: str,
+    name: str,
+    builtin_key: str,
+    description: str,
+    headers: Iterable[str],
+    rows: Iterable[Iterable[str]],
+    metadata_json: str,
+) -> None:
+    existing_locks = _locked_keys_from_existing_document(path)
+    document = _build_status_document(
+        type_name=type_name,
+        name=name,
+        builtin_key=builtin_key,
+        description=description,
+        headers=headers,
+        rows=rows,
+        metadata_json=metadata_json,
+        existing_locks=existing_locks,
+    )
+    _write_status_document(path, document)
+
+
+def _write_status_document(path: Path, document: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8-sig", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow([str(item) for item in headers])
-        for row in rows:
-            writer.writerow([str(cell) for cell in row])
+    with path.open("w", encoding="utf-8") as fh:
+        json.dump(document, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+
+
+def _build_status_document(
+    *,
+    type_name: str,
+    name: str,
+    builtin_key: str,
+    description: str,
+    headers: Iterable[str],
+    rows: Iterable[Iterable[str]],
+    metadata_json: str,
+    existing_locks: Mapping[str, bool] | None = None,
+) -> dict[str, Any]:
+    output_headers, output_rows = _materialize_table_data(headers, rows)
+    key_column = output_headers[0] if output_headers else models.STATUS_KEY_COLUMN
+    value_column = output_headers[1] if len(output_headers) > 1 else models.STATUS_VALUE_COLUMN
+    locked_by_key = dict(existing_locks or {})
+    metadata = _parse_metadata(metadata_json)
+
+    json_rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in output_rows:
+        key = row[0] if row else ""
+        if not key:
+            raise ValueError("Status table row key must not be empty")
+        if key in seen:
+            raise ValueError(f"Status table key is duplicated: {key}")
+        seen.add(key)
+        value = row[1] if len(row) > 1 else ""
+        locked = locked_by_key.get(key)
+        if locked is None:
+            locked = builtin_key == SCENE_BUILTIN_KEY and key in SCENE_DEFAULT_LOCKED_KEYS
+        json_rows.append({
+            "key": key,
+            "value": value,
+            "runtimeKeyLocked": bool(locked),
+            "metadata": {},
+        })
+
+    return {
+        "schemaVersion": 1,
+        "kind": _STATUS_TABLE_KIND,
+        "mode": _STATUS_TABLE_MODE,
+        "typeName": str(type_name),
+        "name": str(name),
+        "builtinKey": str(builtin_key or ""),
+        "description": str(description or ""),
+        "keyColumn": str(key_column),
+        "valueColumn": str(value_column),
+        "rows": json_rows,
+        "metadata": metadata,
+    }
+
+
+def _iter_status_rows(document: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    raw_rows = document.get("rows", [])
+    if not isinstance(raw_rows, list):
+        return ()
+    rows: list[dict[str, Any]] = []
+    for item in raw_rows:
+        if isinstance(item, dict):
+            rows.append(item)
+    return tuple(rows)
+
+
+def _locked_keys_from_existing_document(path: Path) -> dict[str, bool]:
+    try:
+        document = _read_status_document(path)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        return {}
+    return {
+        str(row.get("key", "")): bool(row.get("runtimeKeyLocked", False))
+        for row in _iter_status_rows(document)
+        if row.get("key")
+    }
+
+
+def _parse_metadata(raw: str | None) -> dict[str, Any]:
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
 
 
 def _unlink_missing_ok(path: Path) -> None:

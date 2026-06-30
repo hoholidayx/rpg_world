@@ -24,7 +24,7 @@ def _table(
         type_name=type_name,
         builtin_key=builtin_key,
         name=name,
-        relative_path=f"stories/20/s_main/status/{type_name}/{name}.csv",
+        relative_path=f"stories/20/s_main/status/{type_name}/{name}.status.json",
         description="",
         headers=("属性", "值"),
         rows=rows,

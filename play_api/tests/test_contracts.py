@@ -327,9 +327,9 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     unindexed_session_dir = workspace_root / "stories" / "1" / "s_unindexed_ops"
     unindexed_session_dir.mkdir(parents=True, exist_ok=True)
     (unindexed_session_dir / "marker.txt").write_text("tmp", encoding="utf-8")
-    unindexed_status_csv = workspace_root / "stories" / "1" / demo_session_id / "status" / "场景" / "未索引状态.csv"
-    unindexed_status_csv.parent.mkdir(parents=True, exist_ok=True)
-    unindexed_status_csv.write_text("名称\n临时\n", encoding="utf-8")
+    unindexed_status_json = workspace_root / "stories" / "1" / demo_session_id / "status" / "场景" / "未索引状态.status.json"
+    unindexed_status_json.parent.mkdir(parents=True, exist_ok=True)
+    unindexed_status_json.write_text("{}", encoding="utf-8")
     top_unindexed_workspace = tmp_path / "data" / "unindexed_workspace"
     (top_unindexed_workspace / "stories").mkdir(parents=True, exist_ok=True)
 
@@ -340,7 +340,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert unindexed_scan.status_code == 200
     items = unindexed_scan.json()["items"]
     assert any(item["category"] == "runtime_directory" and item["sessionId"] == "s_unindexed_ops" for item in items)
-    assert any(item["category"] == "status_csv" and item["relativePath"].endswith("未索引状态.csv") for item in items)
+    assert any(item["category"] == "status_json" and item["relativePath"].endswith("未索引状态.status.json") for item in items)
     assert all(item["workspaceId"] == "demo_workspace" for item in items)
     assert all(item["kind"] != "workspace" for item in items)
     assert client.get(
@@ -349,7 +349,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     ).status_code == 404
 
     runtime_item = next(item for item in items if item["category"] == "runtime_directory" and item["sessionId"] == "s_unindexed_ops")
-    status_item = next(item for item in items if item["category"] == "status_csv" and item["relativePath"].endswith("未索引状态.csv"))
+    status_item = next(item for item in items if item["category"] == "status_json" and item["relativePath"].endswith("未索引状态.status.json"))
     batch_items = [runtime_item, status_item]
     assert client.post("/play-api/v1/ops/unindexed-runtime/delete", json={"items": batch_items}).status_code == 409
     runtime_token = client.post("/play-api/v1/ops/unindexed-runtime/delete-token", json={"items": batch_items})
@@ -366,7 +366,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     )
     assert deleted_runtime.status_code == 204
     assert not unindexed_session_dir.exists()
-    assert not unindexed_status_csv.exists()
+    assert not unindexed_status_json.exists()
     assert client.post(
         "/play-api/v1/ops/unindexed-runtime/delete",
         json={"items": batch_items},

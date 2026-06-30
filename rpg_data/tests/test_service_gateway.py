@@ -24,6 +24,19 @@ def _reset_gateways(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     reset_data_service_gateways()
 
 
+def _create_indexed_status_table(gateway, session_id: str = "s_forest001"):
+    service = gateway.status
+    if "测试状态" not in [item.name for item in service.list_session_types(session_id)]:
+        service.create_session_type(session_id, "测试状态")
+    return service.create_table(
+        session_id,
+        "测试状态",
+        "索引状态",
+        headers=["名称", "值"],
+        rows=[["封印", "完整"]],
+    )
+
+
 def test_gateway_initializes_migrations_and_exposes_services(
     tmp_path: Path,
 ) -> None:
@@ -46,20 +59,11 @@ def test_gateway_initializes_migrations_and_exposes_services(
         ("场景", "scene"),
         ("世界状态", ""),
     ]
-    assert [(item.type_name, item.name) for item in status_tables] == [
-        ("场景", "北境森林当前场景"),
-        ("世界状态", "世界线索"),
-    ]
-    assert status_tables[0].headers == ("属性", "值")
-    assert status_tables[0].rows[0] == ("时间", "第 1 年 1 月 1 日 8 时 30 分")
-    assert (
+    assert status_tables == []
+    assert not (
         tmp_path
-        / "data/demo_workspace/template_status/场景/北境森林当前场景.csv"
-    ).is_file()
-    assert (
-        tmp_path
-        / "data/demo_workspace/stories/1/s_forest001/status/场景/北境森林当前场景.csv"
-    ).is_file()
+        / "data/demo_workspace/template_status/场景/北境森林当前场景.status.json"
+    ).exists()
 
 
 def test_gateway_supports_in_memory_database(
@@ -90,16 +94,11 @@ def test_catalog_resolves_session_runtime_dir(tmp_path: Path) -> None:
         gateway.catalog.get_session_runtime_dir("missing_session")
 
 
-def test_gateway_recovers_demo_session_files_without_indexes(tmp_path: Path) -> None:
+def test_gateway_skips_demo_status_indexes_when_source_json_is_missing(tmp_path: Path) -> None:
     db_path = tmp_path / "recover.sqlite3"
     gateway = get_data_service_gateway(db_path)
     original = gateway.status.list_tables("s_forest001")
-    assert original
-    original_paths = [
-        tmp_path / "data/demo_workspace" / table.relative_path
-        for table in original
-    ]
-    assert all(path.is_file() for path in original_paths)
+    assert original == []
 
     SessionStatusTableRecord.delete().where(
         SessionStatusTableRecord.session == "s_forest001"
@@ -107,18 +106,11 @@ def test_gateway_recovers_demo_session_files_without_indexes(tmp_path: Path) -> 
     SessionStatusTypeRecord.delete().where(
         SessionStatusTypeRecord.session == "s_forest001"
     ).execute()
-    assert all(path.is_file() for path in original_paths)
 
     reset_data_service_gateways()
     recovered_gateway = get_data_service_gateway(db_path)
 
-    assert [
-        (table.type_name, table.name)
-        for table in recovered_gateway.status.list_tables("s_forest001")
-    ] == [
-        ("场景", "北境森林当前场景"),
-        ("世界状态", "世界线索"),
-    ]
+    assert recovered_gateway.status.list_tables("s_forest001") == []
 
 
 def test_gateway_bootstrap_removes_orphan_runtime_dirs_when_enabled(
@@ -152,7 +144,7 @@ def test_gateway_bootstrap_removes_orphan_runtime_dirs_when_enabled(
     assert "orphan_dirs_removed=3" in caplog.text
 
 
-def test_gateway_bootstrap_removes_unindexed_status_csv_when_enabled(
+def test_gateway_bootstrap_removes_unindexed_status_json_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -160,16 +152,16 @@ def test_gateway_bootstrap_removes_unindexed_status_csv_when_enabled(
     monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "true")
     db_path = tmp_path / "cleanup_status.sqlite3"
     gateway = get_data_service_gateway(db_path)
-    tables = gateway.status.list_tables("s_forest001")
-    assert tables
+    table = _create_indexed_status_table(gateway)
 
     data_dir = tmp_path / "data" / "demo_workspace"
-    indexed_session_path = data_dir / tables[0].relative_path
-    orphan_session_csv = indexed_session_path.with_name("孤儿状态.csv")
-    orphan_template_csv = data_dir / "template_status" / "场景" / "孤儿模板.csv"
+    indexed_session_path = data_dir / table.relative_path
+    orphan_session_json = indexed_session_path.with_name("未索引状态.status.json")
+    orphan_template_json = data_dir / "template_status" / "场景" / "未索引模板.status.json"
     orphan_note = indexed_session_path.with_name("notes.txt")
-    orphan_session_csv.write_text("名称\n孤儿\n", encoding="utf-8")
-    orphan_template_csv.write_text("名称\n孤儿\n", encoding="utf-8")
+    orphan_session_json.write_text("{}", encoding="utf-8")
+    orphan_template_json.parent.mkdir(parents=True, exist_ok=True)
+    orphan_template_json.write_text("{}", encoding="utf-8")
     orphan_note.write_text("keep me", encoding="utf-8")
 
     reset_data_service_gateways()
@@ -178,11 +170,11 @@ def test_gateway_bootstrap_removes_unindexed_status_csv_when_enabled(
 
     assert indexed_session_path.is_file()
     assert orphan_note.is_file()
-    assert not orphan_session_csv.exists()
-    assert not orphan_template_csv.exists()
-    assert "removed unindexed status csv kind=session" in caplog.text
-    assert "removed unindexed status csv kind=template" in caplog.text
-    assert "orphan_status_files_removed=2" in caplog.text
+    assert not orphan_session_json.exists()
+    assert not orphan_template_json.exists()
+    assert "removed unindexed status json kind=session" in caplog.text
+    assert "removed unindexed status json kind=template" in caplog.text
+    assert "unindexed_status_files_removed=2" in caplog.text
 
 
 def test_gateway_bootstrap_can_preserve_orphan_runtime_dirs(
@@ -197,7 +189,7 @@ def test_gateway_bootstrap_can_preserve_orphan_runtime_dirs(
     orphan_session = tmp_path / "data" / "demo_workspace" / "stories" / "1" / "s_orphan"
     orphan_session.mkdir(parents=True, exist_ok=True)
     (orphan_session / "marker.txt").write_text("orphan", encoding="utf-8")
-    orphan_status_csv = (
+    unindexed_status_json = (
         tmp_path
         / "data"
         / "demo_workspace"
@@ -206,20 +198,21 @@ def test_gateway_bootstrap_can_preserve_orphan_runtime_dirs(
         / "s_forest001"
         / "status"
         / "场景"
-        / "孤儿状态.csv"
+        / "未索引状态.status.json"
     )
-    orphan_status_csv.write_text("名称\n孤儿\n", encoding="utf-8")
+    unindexed_status_json.parent.mkdir(parents=True, exist_ok=True)
+    unindexed_status_json.write_text("{}", encoding="utf-8")
 
     reset_data_service_gateways()
     caplog.set_level(logging.INFO, logger="rpg_data.bootstrap")
     get_data_service_gateway(db_path).catalog.list_workspaces()
 
     assert orphan_session.is_dir()
-    assert orphan_status_csv.is_file()
+    assert unindexed_status_json.is_file()
     assert "runtime bootstrap orphan directory cleanup disabled" in caplog.text
     assert "runtime bootstrap unindexed status file cleanup disabled" in caplog.text
     assert "orphan_dirs_removed=0" in caplog.text
-    assert "orphan_status_files_removed=0" in caplog.text
+    assert "unindexed_status_files_removed=0" in caplog.text
 
 
 
@@ -230,30 +223,30 @@ def test_scan_orphan_runtime_data_reports_without_deleting(
     monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
     db_path = tmp_path / "scan_orphans.sqlite3"
     gateway = get_data_service_gateway(db_path)
-    tables = gateway.status.list_tables("s_forest001")
-    assert tables
+    _create_indexed_status_table(gateway)
 
     workspace_root = tmp_path / "data" / "demo_workspace"
     orphan_session = workspace_root / "stories" / "1" / "s_orphan"
     orphan_session.mkdir(parents=True, exist_ok=True)
     (orphan_session / "marker.txt").write_text("orphan", encoding="utf-8")
-    orphan_status_csv = (
+    unindexed_status_json = (
         workspace_root
         / "stories"
         / "1"
         / "s_forest001"
         / "status"
         / "场景"
-        / "孤儿状态.csv"
+        / "未索引状态.status.json"
     )
-    orphan_status_csv.write_text("名称\n孤儿\n", encoding="utf-8")
+    unindexed_status_json.parent.mkdir(parents=True, exist_ok=True)
+    unindexed_status_json.write_text("{}", encoding="utf-8")
 
     scan = scan_orphan_runtime_data(gateway.database)
 
     assert any(item["kind"] == "session" and item["session_id"] == "s_orphan" for item in scan["orphan_directories"])
-    assert any(item["relative_path"].endswith("孤儿状态.csv") for item in scan["unindexed_status_files"])
+    assert any(item["relative_path"].endswith("未索引状态.status.json") for item in scan["unindexed_status_files"])
     assert orphan_session.is_dir()
-    assert orphan_status_csv.is_file()
+    assert unindexed_status_json.is_file()
 
 
 def test_workspace_unindexed_runtime_scan_and_delete(
@@ -263,14 +256,15 @@ def test_workspace_unindexed_runtime_scan_and_delete(
     monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
     db_path = tmp_path / "delete_unindexed.sqlite3"
     gateway = get_data_service_gateway(db_path)
-    gateway.status.list_tables("s_forest001")
+    _create_indexed_status_table(gateway)
 
     workspace_root = tmp_path / "data" / "demo_workspace"
     unindexed_session = workspace_root / "stories" / "1" / "s_unindexed"
     unindexed_session.mkdir(parents=True, exist_ok=True)
     (unindexed_session / "marker.txt").write_text("tmp", encoding="utf-8")
-    unindexed_status_csv = workspace_root / "stories" / "1" / "s_forest001" / "status" / "场景" / "未索引.csv"
-    unindexed_status_csv.write_text("名称\n临时\n", encoding="utf-8")
+    unindexed_status_json = workspace_root / "stories" / "1" / "s_forest001" / "status" / "场景" / "未索引.status.json"
+    unindexed_status_json.parent.mkdir(parents=True, exist_ok=True)
+    unindexed_status_json.write_text("{}", encoding="utf-8")
     top_unindexed_workspace = tmp_path / "data" / "unindexed_workspace"
     (top_unindexed_workspace / "stories").mkdir(parents=True, exist_ok=True)
 
@@ -281,13 +275,13 @@ def test_workspace_unindexed_runtime_scan_and_delete(
     assert all(item["workspace_id"] == "demo_workspace" for item in scan["items"])
     assert all(item["kind"] != "workspace" for item in scan["items"])
     session_item = next(item for item in scan["items"] if item["category"] == "runtime_directory")
-    status_item = next(item for item in scan["items"] if item["category"] == "status_csv")
+    status_item = next(item for item in scan["items"] if item["category"] == "status_json")
 
     assert delete_unindexed_runtime_item(gateway.database, {**session_item, "path": str(unindexed_session / "wrong")}) is False
     assert delete_unindexed_runtime_items(gateway.database, [session_item, status_item]) is True
     assert not unindexed_session.exists()
     assert delete_unindexed_runtime_item(gateway.database, session_item) is False
-    assert not unindexed_status_csv.exists()
+    assert not unindexed_status_json.exists()
     assert top_unindexed_workspace.is_dir()
 
 

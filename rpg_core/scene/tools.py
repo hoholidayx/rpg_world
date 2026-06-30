@@ -119,13 +119,12 @@ class SetAttrTool(BaseTool):
 
 
 class DeleteAttrTool(BaseTool):
-    """删除当前场景的一个非默认属性。"""
+    """删除当前场景的一个属性。"""
 
     name = "scene_del_attr"
 
     def __init__(self, tracker: SceneTracker) -> None:
         self._tracker = tracker
-        self._protected = ", ".join(tracker.DEFAULT_ATTRS)
 
     def parameters(self) -> dict[str, object]:
         return {
@@ -133,16 +132,15 @@ class DeleteAttrTool(BaseTool):
             "properties": {
                 "key": {
                     "type": "string",
-                    "description": (
-                        f"要删除的属性名。注意 {self._protected} 为默认属性，不可删除。"
-                    ),
+                    "description": "要删除的属性名。",
                 },
             },
             "required": ["key"],
         }
 
     async def execute(self, key: str) -> str:
-        if key in self._tracker.protected_attrs:
-            return f"「{key}」为默认属性，不可删除"
-        self._tracker.delete_attr(key)
+        before = self._tracker.get_context()
+        attrs = self._tracker.delete_attr(key)
+        if key in attrs and before == self._tracker.get_context():
+            return f"场景属性未删除：{key}"
         return f"场景属性已删除：{key}"

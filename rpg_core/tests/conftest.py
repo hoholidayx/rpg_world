@@ -203,6 +203,9 @@ class FakeStatusManager:
         rows.append([key, value])
         return self.scene_table
 
+    def runtime_set_key_value(self, table_id: int, key: str, value: str):
+        return self.set_key_value(table_id, key, value)
+
     def delete_key_value(self, table_id: int, key: str):
         self.calls.append(("delete", table_id, key, None))
         if self.scene_table is None:
@@ -213,6 +216,9 @@ class FakeStatusManager:
                 del rows[idx]
                 return self.scene_table
         raise FileNotFoundError(key)
+
+    def runtime_delete_key_value(self, table_id: int, key: str):
+        return self.delete_key_value(table_id, key)
 
 
 @pytest.fixture

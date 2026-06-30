@@ -126,6 +126,40 @@ class StatusManager:
             )
         )
 
+    def runtime_set_key_value(
+        self,
+        table_id: int,
+        key: str,
+        value: str,
+        *,
+        key_column: int | str = STATUS_KEY_COLUMN,
+        value_column: int | str = STATUS_VALUE_COLUMN,
+    ) -> dict[str, object]:
+        return _table_to_dict(
+            self._service.runtime_set_key_value(
+                table_id,
+                key,
+                value,
+                key_column=key_column,
+                value_column=value_column,
+            )
+        )
+
+    def runtime_delete_key_value(
+        self,
+        table_id: int,
+        key: str,
+        *,
+        key_column: int | str = STATUS_KEY_COLUMN,
+    ) -> dict[str, object]:
+        return _table_to_dict(
+            self._service.runtime_delete_key_value(
+                table_id,
+                key,
+                key_column=key_column,
+            )
+        )
+
     # ------------------------------------------------------------------
     # Scene helpers
     # ------------------------------------------------------------------
