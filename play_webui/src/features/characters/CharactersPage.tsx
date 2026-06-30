@@ -596,8 +596,8 @@ function CharactersContent() {
                   onClick={() => setSelectedCharacterId(character.id)}
                   className={`w-full rounded-xl border p-3 text-left transition ${
                     selected
-                      ? 'border-violet-500 bg-violet-50/50 shadow-sm shadow-violet-100'
-                      : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/30'
+                      ? 'border-violet-500 bg-violet-50/50 shadow-sm shadow-violet-100 dark:border-violet-400/60 dark:bg-violet-500/[0.08] dark:shadow-[0_0_0_1px_rgba(167,139,250,0.10)]'
+                      : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/30 dark:border-slate-700/80 dark:bg-slate-900/70 dark:hover:border-violet-400/40 dark:hover:bg-slate-900/85'
                   }`}
                 >
                   <div className="flex gap-3">

@@ -176,8 +176,10 @@ function MiniLandscape({ className }: { className: string }) {
 function StoryCard({ story, workspace }: { story: (typeof stories)[number]; workspace: string | null }) {
   return (
     <article
-      className={`rounded-xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg ${
-        story.selected ? 'border-violet-500 shadow-violet-100' : 'border-slate-200'
+      className={`rounded-xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:bg-slate-900/70 dark:hover:bg-slate-900/85 ${
+        story.selected
+          ? 'border-violet-500 shadow-violet-100 dark:border-violet-400/60 dark:bg-violet-500/[0.08] dark:shadow-[0_0_0_1px_rgba(167,139,250,0.10)]'
+          : 'border-slate-200 dark:border-slate-700/80'
       }`}
     >
       <div className="flex items-start gap-4">
@@ -225,7 +227,7 @@ function RecentSessionRow({ session, workspace }: { session: (typeof recentSessi
   const href = workspace ? sessionHref({ id: session.id }) : null
 
   return (
-    <article className="grid gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-violet-200 hover:shadow-md md:grid-cols-[auto_minmax(0,1fr)_220px_auto_auto] md:items-center">
+    <article className="grid gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-violet-200 hover:shadow-md dark:border-slate-700/80 dark:bg-slate-900/70 dark:hover:border-violet-400/40 dark:hover:bg-slate-900/85 md:grid-cols-[auto_minmax(0,1fr)_220px_auto_auto] md:items-center">
       <MiniLandscape className={session.artClass} />
       <div className="min-w-0">
         {href ? (
@@ -368,7 +370,7 @@ export function HomePage() {
               </div>
             </section>
 
-            <section id="stories" className="rounded-2xl bg-white/60 p-6 shadow-sm">
+            <section id="stories" className="rounded-2xl border border-slate-200/70 bg-white/60 p-6 shadow-sm dark:border-slate-700/70 dark:bg-slate-950/35">
               <div className="mb-5 flex items-center justify-between gap-4">
                 <h2 className="text-xl font-bold text-slate-950">我的故事</h2>
                 <button className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:bg-violet-700">
@@ -389,7 +391,7 @@ export function HomePage() {
               ) : null}
             </section>
 
-            <section id="recent-sessions" className="rounded-2xl bg-white/60 p-6 shadow-sm">
+            <section id="recent-sessions" className="rounded-2xl border border-slate-200/70 bg-white/60 p-6 shadow-sm dark:border-slate-700/70 dark:bg-slate-950/35">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-slate-950">最近会话</h2>
               </div>

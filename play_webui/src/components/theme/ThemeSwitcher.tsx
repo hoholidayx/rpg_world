@@ -11,7 +11,7 @@ const themeOptions: Array<{ value: ThemePreference; label: string; description: 
   { value: 'system', label: '跟随系统', description: '自动匹配设备外观', icon: Monitor },
 ]
 
-export function ThemeSwitcher() {
+export function ThemeSwitcher({ menuAlign = 'left' }: { menuAlign?: 'left' | 'right' }) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const theme = useThemeStore((state) => state.theme)
@@ -42,7 +42,12 @@ export function ThemeSwitcher() {
         <SelectedIcon size={19} />
       </button>
       {open ? (
-        <div className="absolute bottom-full left-0 z-50 mb-3 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-200/70 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40" role="menu">
+        <div
+          className={`absolute bottom-full z-50 mb-3 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-200/70 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40 ${
+            menuAlign === 'right' ? 'right-0' : 'left-0'
+          }`}
+          role="menu"
+        >
           <p className="px-3 pb-2 pt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">主题模式</p>
           {themeOptions.map((option) => {
             const Icon = option.icon

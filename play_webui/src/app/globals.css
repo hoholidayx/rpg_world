@@ -53,6 +53,7 @@ textarea {
   }
 
   .dark .bg-white,
+  .dark .bg-white\/60,
   .dark .bg-white\/70,
   .dark .bg-white\/90 {
     background-color: rgb(15 23 42 / 0.86);
@@ -66,10 +67,12 @@ textarea {
   }
 
   .dark .bg-violet-50,
+  .dark .bg-violet-50\/30,
+  .dark .bg-violet-50\/50,
   .dark .bg-violet-50\/60,
   .dark .bg-violet-50\/70,
   .dark .bg-violet-100 {
-    background-color: rgb(109 40 217 / 0.18);
+    background-color: rgb(124 58 237 / 0.12);
   }
 
   .dark .border-slate-100,
@@ -78,6 +81,11 @@ textarea {
   .dark .border-violet-100,
   .dark .border-violet-200 {
     border-color: rgb(51 65 85 / 0.9);
+  }
+
+  .dark .border-violet-400,
+  .dark .border-violet-500 {
+    border-color: rgb(167 139 250 / 0.55);
   }
 
   .dark .text-slate-950,
@@ -107,5 +115,10 @@ textarea {
   .dark .shadow-xl,
   .dark .shadow-2xl {
     --tw-shadow-color: rgb(0 0 0 / 0.35);
+  }
+
+  .dark .shadow-violet-100,
+  .dark .shadow-violet-200 {
+    --tw-shadow-color: rgb(76 29 149 / 0.22);
   }
 }

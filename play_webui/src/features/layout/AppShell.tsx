@@ -220,12 +220,8 @@ export function AppShell({ children }: AppShellProps) {
                 </p>
               </div>
             </section>
-            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div>
-                <p className="text-sm font-semibold text-slate-700">外观主题</p>
-                <p className="mt-0.5 text-xs text-slate-400">亮色 / 暗色 / 系统</p>
-              </div>
-              <ThemeSwitcher />
+            <div className="flex justify-end">
+              <ThemeSwitcher menuAlign="right" />
             </div>
           </div>
         </aside>
