@@ -13,10 +13,12 @@ import {
   FolderOpen,
   Globe2,
   Home,
+  Menu,
   Settings,
   Sparkles,
   TableProperties,
   UsersRound,
+  X,
 } from 'lucide-react'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { listWorkspaces } from '@/lib/api/sessions'
@@ -43,13 +45,13 @@ const navItems = [
   { label: '设置', icon: Settings, href: '/settings', target: '_blank', rel: 'noreferrer' },
 ]
 
-function Logo() {
+function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <Link href="/" className="flex items-center gap-3">
       <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-lg shadow-violet-200">
         <Sparkles size={22} fill="currentColor" />
       </span>
-      <span className="text-xl font-bold text-slate-950">RPG World Play</span>
+      <span className={`text-xl font-bold text-slate-950 ${compact ? 'hidden sm:inline' : ''}`}>RPG World Play</span>
     </Link>
   )
 }
@@ -76,14 +78,14 @@ function WorkspaceSwitcher({
       <button
         type="button"
         onClick={() => setOpen((isOpen) => !isOpen)}
-        className="flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm transition hover:border-violet-200 hover:bg-violet-50/70 hover:text-violet-700"
+        className="flex h-10 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 text-sm font-medium text-slate-900 shadow-sm transition hover:border-violet-200 hover:bg-violet-50/70 hover:text-violet-700 sm:gap-2 sm:px-3"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="切换 workspace"
       >
         <FolderOpen size={16} className="text-slate-400" />
         <span className="hidden text-slate-500 sm:inline">Workspace</span>
-        <span className="max-w-28 truncate font-semibold">{label}</span>
+        <span className="max-w-16 truncate font-semibold sm:max-w-28">{label}</span>
         <ChevronDown size={16} className={`text-slate-400 transition ${open ? 'rotate-180 text-violet-500' : ''}`} />
       </button>
       {open ? (
@@ -130,9 +132,43 @@ function isActivePath(pathname: string, href: string) {
   return pathname.startsWith(href)
 }
 
+function NavigationLinks({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string
+  onNavigate?: () => void
+}) {
+  return (
+    <nav className="space-y-3">
+      {navItems.map((item) => {
+        const active = isActivePath(pathname, item.href)
+        return (
+          <Link
+            key={item.label}
+            className={`flex items-center gap-4 rounded-xl px-5 py-4 text-base font-medium transition ${
+              active
+                ? 'bg-violet-50 text-violet-700 shadow-sm'
+                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+            href={item.href}
+            target={item.target}
+            rel={item.rel}
+            onClick={onNavigate}
+          >
+            <item.icon size={22} />
+            {item.label}
+          </Link>
+        )
+      })}
+    </nav>
+  )
+}
+
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname()
   const [currentWorkspace, setCurrentWorkspace] = useState<string | null>(null)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const workspacesQuery = useQuery({
     queryKey: ['play-workspaces'],
     queryFn: listWorkspaces,
@@ -154,11 +190,25 @@ export function AppShell({ children }: AppShellProps) {
     [currentWorkspace, workspaceOptions],
   )
 
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [pathname])
+
   return (
     <main className="min-h-screen bg-[#f7f8fc] text-slate-900">
-      <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-slate-200/80 bg-white/90 px-6 backdrop-blur">
-        <div className="flex items-center gap-4">
-          <Logo />
+      <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between gap-3 border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur md:px-6">
+        <div className="flex min-w-0 items-center gap-3 md:gap-4">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:hidden"
+            aria-label="打开导航"
+            aria-haspopup="dialog"
+            aria-expanded={mobileNavOpen}
+          >
+            <Menu size={20} />
+          </button>
+          <Logo compact />
           <WorkspaceSwitcher
             value={currentWorkspace}
             workspaces={workspaceOptions}
@@ -177,36 +227,62 @@ export function AppShell({ children }: AppShellProps) {
             SSE ready
           </span>
         </div>
-        <button className="flex items-center gap-3 rounded-full px-2 py-1 text-sm font-medium text-slate-900 transition hover:bg-slate-100">
+        <button className="flex shrink-0 items-center gap-1 rounded-full px-1 py-1 text-sm font-medium text-slate-900 transition hover:bg-slate-100 sm:gap-3 sm:px-2">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">P</span>
           <span className="hidden sm:inline">Player One</span>
-          <ChevronDown size={16} className="text-slate-400" />
+          <ChevronDown size={16} className="hidden text-slate-400 sm:block" />
         </button>
       </header>
 
+      {mobileNavOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="移动端导航">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/30"
+            aria-label="关闭导航"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <aside className="relative flex h-full w-[min(320px,86vw)] flex-col border-r border-slate-200 bg-white px-5 py-5 shadow-2xl shadow-slate-950/20">
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <div className="mb-6 flex items-center justify-between gap-3">
+                <Logo />
+                <button
+                  type="button"
+                  onClick={() => setMobileNavOpen(false)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                  aria-label="关闭导航"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <NavigationLinks pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
+            </div>
+
+            <div className="shrink-0 space-y-4 pt-6">
+              <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="mb-3 text-sm text-slate-400">系统状态</p>
+                <div className="space-y-3 text-sm text-slate-600">
+                  <p className="flex items-center gap-3">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Play API ready
+                  </p>
+                  <p className="flex items-center gap-3">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    SSE ready
+                  </p>
+                </div>
+              </section>
+              <div className="flex justify-end">
+                <ThemeSwitcher menuAlign="right" />
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
       <div className="grid min-h-[calc(100vh-72px)] lg:grid-cols-[296px_minmax(0,1fr)]">
         <aside className="hidden border-r border-slate-200 bg-white/70 px-6 py-9 lg:flex lg:flex-col lg:justify-between">
-          <nav className="space-y-3">
-            {navItems.map((item) => {
-              const active = isActivePath(pathname, item.href)
-              return (
-                <Link
-                  key={item.label}
-                  className={`flex items-center gap-4 rounded-xl px-5 py-4 text-base font-medium transition ${
-                    active
-                      ? 'bg-violet-50 text-violet-700 shadow-sm'
-                      : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
-                  }`}
-                  href={item.href}
-                  target={item.target}
-                  rel={item.rel}
-                >
-                  <item.icon size={22} />
-                  {item.label}
-                </Link>
-              )
-            })}
-          </nav>
+          <NavigationLinks pathname={pathname} />
 
           <div className="space-y-4">
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
