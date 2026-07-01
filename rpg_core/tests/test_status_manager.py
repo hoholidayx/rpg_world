@@ -2,32 +2,30 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from rpg_data.models import SessionStatusTable
+from rpg_data.models import STATUS_KIND_NORMAL, STATUS_KIND_SCENE, SessionStatusTable, StatusTableDocument
 from rpg_core.status.manager import StatusManager
 
 
 def _table(
     *,
     table_id: int = 1,
-    type_name: str = "世界状态",
+    status_kind: str = STATUS_KIND_NORMAL,
     name: str = "旗帜",
-    builtin_key: str = "",
-    rows: tuple[tuple[str, ...], ...] = (("封印", "完整"),),
+    rows: tuple[tuple[str, str], ...] = (("封印", "完整"),),
 ) -> SessionStatusTable:
     return SessionStatusTable(
         id=table_id,
         session_id="s_main",
-        session_type_id=10,
         workspace_id="ws",
         story_id=20,
         source_table_id=30,
-        type_name=type_name,
-        builtin_key=builtin_key,
+        origin="template_copy",
+        status_kind=status_kind,
         name=name,
-        relative_path=f"stories/20/s_main/status/{type_name}/{name}.status.json",
         description="",
-        headers=("属性", "值"),
-        rows=rows,
+        document=StatusTableDocument.from_data(
+            SimpleNamespace(headers=("属性", "值"), rows=rows)  # type: ignore[arg-type]
+        ),
         sort_order=0,
         metadata_json="{}",
         version=1,
@@ -42,26 +40,25 @@ class FakeStatusService:
         self.normal_table = _table()
         self.scene_table = _table(
             table_id=2,
-            type_name="场景状态",
+            status_kind=STATUS_KIND_SCENE,
             name="当前场景",
-            builtin_key="scene",
             rows=(("位置", "森林"),),
         )
 
-    def list_session_types(self, session_id: str):
-        self.calls.append(("list_session_types", session_id))
-        return [SimpleNamespace(name="世界状态"), SimpleNamespace(name="场景状态")]
-
-    def list_tables(self, session_id: str, type_name: str):
-        self.calls.append(("list_tables", session_id, type_name))
-        return [self.scene_table if type_name == "场景状态" else self.normal_table]
+    def list_tables(self, session_id: str, status_kind: str | None = None):
+        self.calls.append(("list_tables", session_id, status_kind))
+        if status_kind == STATUS_KIND_SCENE:
+            return [self.scene_table]
+        if status_kind == STATUS_KIND_NORMAL:
+            return [self.normal_table]
+        return [self.normal_table, self.scene_table]
 
     def list_context_tables(self, session_id: str):
         self.calls.append(("list_context_tables", session_id))
         return [self.normal_table]
 
-    def get_table(self, session_id: str, type_name: str, table_name: str):
-        self.calls.append(("get_table", session_id, type_name, table_name))
+    def get_table(self, session_id: str, table_name: str, status_kind: str | None = None):
+        self.calls.append(("get_table", session_id, table_name, status_kind))
         return self.normal_table
 
     def get_table_by_id(self, table_id: int):
@@ -93,10 +90,12 @@ def test_status_manager_is_thin_session_adapter() -> None:
     assert not hasattr(manager, "_data_dir")
     assert not hasattr(manager, "path")
     assert not hasattr(manager, "loader")
-    assert manager.list_types() == ["世界状态", "场景状态"]
-    assert manager.list_tables("世界状态") == ["旗帜"]
+    assert manager.list_types() == [STATUS_KIND_NORMAL, STATUS_KIND_SCENE]
+    assert manager.list_tables(STATUS_KIND_NORMAL) == ["旗帜"]
     assert manager.list_context_tables()[0]["name"] == "旗帜"
+    assert manager.get_table("旗帜", STATUS_KIND_NORMAL)["id"] == 1
     assert manager.get_active_scene_table()["id"] == 2
+    assert manager.get_active_scene_table_ref() == (2, (STATUS_KIND_SCENE, "当前场景"))
     assert manager.get_scene_attrs() == {"位置": "森林"}
 
 

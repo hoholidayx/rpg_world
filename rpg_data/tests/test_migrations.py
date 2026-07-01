@@ -36,10 +36,8 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_lorebook_entries",
             "rpg_story_characters",
             "rpg_story_lorebook_entries",
-            "rpg_status_types",
             "rpg_status_table_templates",
             "rpg_story_status_tables",
-            "rpg_session_status_types",
             "rpg_session_status_tables",
         }.issubset(tables)
 
@@ -56,10 +54,8 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_lorebook_entries",
             "rpg_story_characters",
             "rpg_story_lorebook_entries",
-            "rpg_status_types",
             "rpg_status_table_templates",
             "rpg_story_status_tables",
-            "rpg_session_status_types",
             "rpg_session_status_tables",
         ):
             columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -110,8 +106,10 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "enabled" not in lorebook_columns
         assert "enabled" not in story_character_columns
         assert "enabled" not in story_lorebook_columns
-        assert "relative_path" in status_template_columns
-        assert "relative_path" in session_status_columns
+        assert {"status_kind", "document_json"}.issubset(status_template_columns)
+        assert {"status_kind", "document_json", "origin", "source_table_id"}.issubset(session_status_columns)
+        assert "relative_path" not in status_template_columns
+        assert "relative_path" not in session_status_columns
         assert "headers_json" not in status_template_columns
         assert "rows_json" not in status_template_columns
         assert "headers_json" not in session_status_columns
@@ -440,13 +438,6 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
             WHERE workspace_id = 'demo_workspace'
             """
         ).fetchone()["count"]
-        status_type_count = conn.execute(
-            """
-            SELECT COUNT(*) AS count
-            FROM rpg_status_types
-            WHERE workspace_id = 'demo_workspace'
-            """
-        ).fetchone()["count"]
         status_template_count = conn.execute(
             """
             SELECT COUNT(*) AS count
@@ -463,7 +454,7 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
         ).fetchone()["count"]
         scene_template = conn.execute(
             """
-            SELECT relative_path, metadata_json
+            SELECT status_kind, document_json, metadata_json
             FROM rpg_status_table_templates
             WHERE workspace_id = 'demo_workspace'
               AND name = '北境森林当前场景'
@@ -483,10 +474,10 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
         assert lorebook_count == 2
         assert character_mount_count == 4
         assert lorebook_mount_count == 4
-        assert status_type_count == 2
         assert status_template_count == 3
         assert status_mount_count == 4
-        assert scene_template["relative_path"] == "template_status/场景/北境森林当前场景.status.json"
+        assert scene_template["status_kind"] == "scene"
+        assert '"runtimeKeyLocked":true' in scene_template["document_json"]
         assert '"_bootstrap_csv"' not in scene_template["metadata_json"]
     finally:
         conn.close()

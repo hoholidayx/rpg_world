@@ -42,13 +42,12 @@ function itemKey(item: UnindexedRuntimeItem) {
 }
 
 function categoryLabel(item: UnindexedRuntimeItem) {
-  return item.category === 'status_json' ? '未索引状态表' : '未索引运行目录'
+  return '未索引运行目录'
 }
 
 function kindLabel(kind: string) {
   if (kind === 'story') return '故事目录'
   if (kind === 'session') return '会话目录'
-  if (kind === 'template') return '模板状态表'
   return kind || '未知类型'
 }
 
@@ -135,7 +134,7 @@ function SettingsHero() {
       <div className="relative z-10">
         <p className="mb-2 text-sm font-semibold text-violet-600">设置后台</p>
         <h1 className="text-3xl font-bold leading-tight text-slate-950">工作区数据清理</h1>
-        <p className="mt-3 max-w-2xl text-base leading-7 text-slate-500">扫描当前工作区未索引的运行目录与状态表文件，确认后通过 Ops 接口删除。</p>
+        <p className="mt-3 max-w-2xl text-base leading-7 text-slate-500">扫描当前工作区未索引的运行目录，确认后通过 Ops 接口删除。</p>
       </div>
       <div className="absolute inset-y-0 right-0 hidden w-[42%] overflow-hidden md:block">
         <div className="absolute bottom-0 right-0 h-full w-full bg-gradient-to-l from-violet-100 via-indigo-50 to-transparent" />
@@ -186,7 +185,6 @@ function DataCleanupContainer({ workspaceId }: { workspaceId: string | null }) {
   const selectedItem = selectedItems.length === 1 ? selectedItems[0] : null
   const selectedKeySet = useMemo(() => new Set(selectedKeys), [selectedKeys])
   const runtimeDirectoryCount = items?.filter((item) => item.category === 'runtime_directory').length ?? 0
-  const statusJsonCount = items?.filter((item) => item.category === 'status_json').length ?? 0
   const itemKeys = useMemo(() => items?.map(itemKey) ?? [], [items])
 
   function clearDeleteState() {
@@ -266,9 +264,8 @@ function DataCleanupContainer({ workspaceId }: { workspaceId: string | null }) {
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-3">
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
         <StatCard label="未索引目录" value={runtimeDirectoryCount} icon={FolderOpen} />
-        <StatCard label="未索引状态表" value={statusJsonCount} icon={FileWarning} />
         <StatCard label="总计" value={items?.length ?? 0} icon={ShieldCheck} />
       </div>
 

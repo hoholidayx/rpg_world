@@ -89,8 +89,8 @@ def resolve_workspace_relative_path(
 ) -> Path:
     """Resolve a catalog relative path inside a workspace root.
 
-    SQL stores status table file locations as workspace-relative paths. This
-    helper is the single boundary that turns those indexes into real paths and
+    Catalog runtime directories are stored as workspace-relative paths. This
+    helper is the single boundary that turns those locators into real paths and
     rejects traversal or absolute paths that escape the workspace.
     """
 

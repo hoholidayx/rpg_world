@@ -318,6 +318,79 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         json={"name": "Gone"},
     ).status_code == 404
 
+    status_templates = client.get("/play-api/v1/workspaces/demo_workspace/status-templates")
+    assert status_templates.status_code == 200
+    assert {item["statusKind"] for item in status_templates.json()} == {"scene", "normal"}
+    assert client.get("/play-api/v1/workspaces/missing/status-templates").status_code == 404
+
+    new_status_template = client.post(
+        "/play-api/v1/workspaces/demo_workspace/status-templates",
+        json={
+            "name": "测试状态表",
+            "statusKind": "normal",
+            "keyColumn": "属性",
+            "valueColumn": "值",
+            "rows": [{"key": "钟声", "value": "未响", "runtimeKeyLocked": False}],
+            "metadata": {"ui": {"compact": True}},
+        },
+    )
+    assert new_status_template.status_code == 200
+    assert new_status_template.json()["name"] == "测试状态表"
+    assert new_status_template.json()["rows"][0]["key"] == "钟声"
+    assert new_status_template.json()["metadata"]["ui"]["compact"] is True
+
+    patched_status_template = client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/status-templates/{new_status_template.json()['id']}",
+        json={
+            "description": "更新后的状态表",
+            "rows": [{"key": "钟声", "value": "响起", "runtimeKeyLocked": True}],
+        },
+    )
+    assert patched_status_template.status_code == 200
+    assert patched_status_template.json()["description"] == "更新后的状态表"
+    assert patched_status_template.json()["rows"][0]["runtimeKeyLocked"] is True
+
+    status_mounts = client.get("/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts")
+    assert status_mounts.status_code == 200
+    assert {item["statusKind"] for item in status_mounts.json()} == {"scene", "normal"}
+    new_status_mount = client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts",
+        json={"templateId": new_status_template.json()["id"], "sortOrder": 30},
+    )
+    assert new_status_mount.status_code == 200
+    assert new_status_mount.json()["tableName"] == "测试状态表"
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts/{new_status_mount.json()['id']}"
+    ).status_code == 204
+
+    session_status_tables = client.get(f"/play-api/v1/sessions/{demo_session_id}/status-tables")
+    assert session_status_tables.status_code == 200
+    assert {item["name"] for item in session_status_tables.json()} >= {"世界线索", "北境森林当前场景"}
+    assert client.get("/play-api/v1/sessions/missing/status-tables").status_code == 404
+
+    new_session_table = client.post(
+        f"/play-api/v1/sessions/{demo_session_id}/status-tables",
+        json={
+            "name": "会话临时表",
+            "rows": [{"key": "余烬", "value": "微光"}],
+        },
+    )
+    assert new_session_table.status_code == 200
+    assert new_session_table.json()["origin"] == "session_native"
+    patched_session_table = client.patch(
+        f"/play-api/v1/sessions/{demo_session_id}/status-tables/{new_session_table.json()['id']}",
+        json={
+            "name": "会话状态",
+            "rows": [{"key": "余烬", "value": "熄灭"}],
+        },
+    )
+    assert patched_session_table.status_code == 200
+    assert patched_session_table.json()["name"] == "会话状态"
+    assert patched_session_table.json()["rows"][0]["value"] == "熄灭"
+    assert client.delete(
+        f"/play-api/v1/sessions/{demo_session_id}/status-tables/{new_session_table.json()['id']}"
+    ).status_code == 204
+
     ops_scan = client.get("/play-api/v1/ops/orphan-runtime")
     assert ops_scan.status_code == 200
     assert "orphanDirectories" in ops_scan.json()
@@ -327,9 +400,6 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     unindexed_session_dir = workspace_root / "stories" / "1" / "s_unindexed_ops"
     unindexed_session_dir.mkdir(parents=True, exist_ok=True)
     (unindexed_session_dir / "marker.txt").write_text("tmp", encoding="utf-8")
-    unindexed_status_json = workspace_root / "stories" / "1" / demo_session_id / "status" / "场景" / "未索引状态.status.json"
-    unindexed_status_json.parent.mkdir(parents=True, exist_ok=True)
-    unindexed_status_json.write_text("{}", encoding="utf-8")
     top_unindexed_workspace = tmp_path / "data" / "unindexed_workspace"
     (top_unindexed_workspace / "stories").mkdir(parents=True, exist_ok=True)
 
@@ -340,7 +410,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert unindexed_scan.status_code == 200
     items = unindexed_scan.json()["items"]
     assert any(item["category"] == "runtime_directory" and item["sessionId"] == "s_unindexed_ops" for item in items)
-    assert any(item["category"] == "status_json" and item["relativePath"].endswith("未索引状态.status.json") for item in items)
+    assert all(item["category"] == "runtime_directory" for item in items)
     assert all(item["workspaceId"] == "demo_workspace" for item in items)
     assert all(item["kind"] != "workspace" for item in items)
     assert client.get(
@@ -349,8 +419,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     ).status_code == 404
 
     runtime_item = next(item for item in items if item["category"] == "runtime_directory" and item["sessionId"] == "s_unindexed_ops")
-    status_item = next(item for item in items if item["category"] == "status_json" and item["relativePath"].endswith("未索引状态.status.json"))
-    batch_items = [runtime_item, status_item]
+    batch_items = [runtime_item]
     assert client.post("/play-api/v1/ops/unindexed-runtime/delete", json={"items": batch_items}).status_code == 409
     runtime_token = client.post("/play-api/v1/ops/unindexed-runtime/delete-token", json={"items": batch_items})
     assert runtime_token.status_code == 200
@@ -361,12 +430,11 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     ).status_code == 409
     deleted_runtime = client.post(
         "/play-api/v1/ops/unindexed-runtime/delete",
-        json={"items": list(reversed(batch_items))},
+        json={"items": batch_items},
         headers={"X-Delete-Confirm-Token": runtime_token.json()["token"]},
     )
     assert deleted_runtime.status_code == 204
     assert not unindexed_session_dir.exists()
-    assert not unindexed_status_json.exists()
     assert client.post(
         "/play-api/v1/ops/unindexed-runtime/delete",
         json={"items": batch_items},

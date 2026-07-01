@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import json
+from dataclasses import asdict, dataclass, field
+from typing import Mapping
 
 __all__ = [
     "Character",
@@ -16,7 +18,6 @@ __all__ = [
     "SessionProfile",
     "SessionStoryMemory",
     "SessionStatusTable",
-    "SessionStatusType",
     "Story",
     "StoryCharacter",
     "StoryLorebookEntry",
@@ -24,13 +25,29 @@ __all__ = [
     "StoryStatusTable",
     "StatusRowRef",
     "StatusTableData",
+    "StatusTableDocument",
+    "StatusTableRow",
     "StatusTableTemplate",
-    "StatusType",
+    "STATUS_KIND_NORMAL",
+    "STATUS_KIND_SCENE",
+    "STATUS_ORIGIN_SESSION_NATIVE",
+    "STATUS_ORIGIN_TEMPLATE_COPY",
     "STATUS_KEY_COLUMN",
+    "STATUS_TABLE_KIND",
+    "STATUS_TABLE_MODE_KEY_VALUE",
     "STATUS_VALUE_COLUMN",
     "Workspace",
+    "parse_status_document",
+    "serialize_status_document",
+    "validate_status_kind",
 ]
 
+STATUS_TABLE_KIND = "status_table"
+STATUS_TABLE_MODE_KEY_VALUE = "key_value"
+STATUS_KIND_SCENE = "scene"
+STATUS_KIND_NORMAL = "normal"
+STATUS_ORIGIN_TEMPLATE_COPY = "template_copy"
+STATUS_ORIGIN_SESSION_NATIVE = "session_native"
 STATUS_KEY_COLUMN = "属性"
 STATUS_VALUE_COLUMN = "值"
 
@@ -269,19 +286,6 @@ class StoryLorebookEntryDetail:
 
 
 @dataclass(frozen=True)
-class StatusType:
-    id: int
-    workspace_id: str
-    name: str
-    builtin_key: str = ""
-    sort_order: int = 0
-    metadata_json: str = "{}"
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
 class StatusRowRef:
     """Reference a status table row by index or by matching a cell value."""
 
@@ -436,17 +440,229 @@ class StatusTableData:
 
 
 @dataclass(frozen=True)
+class StatusTableRow:
+    key: str
+    value: str
+    runtime_key_locked: bool = False
+    metadata: Mapping[str, object] = field(default_factory=dict)
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "key": self.key,
+            "value": self.value,
+            "runtimeKeyLocked": self.runtime_key_locked,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class StatusTableDocument:
+    schema_version: int = 1
+    kind: str = STATUS_TABLE_KIND
+    mode: str = STATUS_TABLE_MODE_KEY_VALUE
+    key_column: str = STATUS_KEY_COLUMN
+    value_column: str = STATUS_VALUE_COLUMN
+    rows: tuple[StatusTableRow, ...] = ()
+    metadata: Mapping[str, object] = field(default_factory=dict)
+
+    @classmethod
+    def from_rows(
+        cls,
+        *,
+        key_column: str = STATUS_KEY_COLUMN,
+        value_column: str = STATUS_VALUE_COLUMN,
+        rows: tuple[StatusTableRow, ...] | list[StatusTableRow] | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> "StatusTableDocument":
+        return cls(
+            key_column=str(key_column or STATUS_KEY_COLUMN),
+            value_column=str(value_column or STATUS_VALUE_COLUMN),
+            rows=tuple(rows or ()),
+            metadata=dict(metadata or {}),
+        ).validated()
+
+    @classmethod
+    def from_data(
+        cls,
+        data: StatusTableData,
+        *,
+        locked_keys: set[str] | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> "StatusTableDocument":
+        key_column = data.headers[0] if data.headers else STATUS_KEY_COLUMN
+        value_column = data.headers[1] if len(data.headers) > 1 else STATUS_VALUE_COLUMN
+        locked = locked_keys or set()
+        rows = tuple(
+            StatusTableRow(
+                key=row[0] if row else "",
+                value=row[1] if len(row) > 1 else "",
+                runtime_key_locked=(row[0] if row else "") in locked,
+            )
+            for row in data.rows
+        )
+        return cls.from_rows(
+            key_column=key_column,
+            value_column=value_column,
+            rows=rows,
+            metadata=metadata,
+        )
+
+    @property
+    def headers(self) -> tuple[str, str]:
+        return (self.key_column, self.value_column)
+
+    @property
+    def data_rows(self) -> tuple[tuple[str, str], ...]:
+        return tuple((row.key, row.value) for row in self.rows)
+
+    def to_data(self) -> StatusTableData:
+        return StatusTableData(headers=self.headers, rows=self.data_rows)
+
+    def with_data(self, data: StatusTableData) -> "StatusTableDocument":
+        locked_by_key = {row.key: row.runtime_key_locked for row in self.rows}
+        metadata_by_key = {row.key: dict(row.metadata) for row in self.rows}
+        rows = tuple(
+            StatusTableRow(
+                key=row[0] if row else "",
+                value=row[1] if len(row) > 1 else "",
+                runtime_key_locked=locked_by_key.get(row[0] if row else "", False),
+                metadata=metadata_by_key.get(row[0] if row else "", {}),
+            )
+            for row in data.rows
+        )
+        key_column = data.headers[0] if data.headers else self.key_column
+        value_column = data.headers[1] if len(data.headers) > 1 else self.value_column
+        return StatusTableDocument(
+            schema_version=self.schema_version,
+            kind=self.kind,
+            mode=self.mode,
+            key_column=key_column,
+            value_column=value_column,
+            rows=rows,
+            metadata=dict(self.metadata),
+        ).validated()
+
+    def with_key_value(self, key: str, value: str) -> "StatusTableDocument":
+        expected = str(key)
+        updated: list[StatusTableRow] = []
+        matched = False
+        for row in self.rows:
+            if row.key == expected:
+                updated.append(StatusTableRow(row.key, str(value), row.runtime_key_locked, dict(row.metadata)))
+                matched = True
+            else:
+                updated.append(row)
+        if not matched:
+            updated.append(StatusTableRow(expected, str(value), False, {}))
+        return StatusTableDocument(
+            schema_version=self.schema_version,
+            kind=self.kind,
+            mode=self.mode,
+            key_column=self.key_column,
+            value_column=self.value_column,
+            rows=tuple(updated),
+            metadata=dict(self.metadata),
+        ).validated()
+
+    def without_key(self, key: str) -> "StatusTableDocument":
+        expected = str(key)
+        if expected not in {row.key for row in self.rows}:
+            raise FileNotFoundError(f"Status table key not found: {key}")
+        return StatusTableDocument(
+            schema_version=self.schema_version,
+            kind=self.kind,
+            mode=self.mode,
+            key_column=self.key_column,
+            value_column=self.value_column,
+            rows=tuple(row for row in self.rows if row.key != expected),
+            metadata=dict(self.metadata),
+        ).validated()
+
+    def row_for_key(self, key: str) -> StatusTableRow | None:
+        expected = str(key)
+        for row in self.rows:
+            if row.key == expected:
+                return row
+        return None
+
+    def validated(self) -> "StatusTableDocument":
+        if self.kind != STATUS_TABLE_KIND:
+            raise ValueError(f"Unsupported status table kind: {self.kind}")
+        if self.mode != STATUS_TABLE_MODE_KEY_VALUE:
+            raise ValueError(f"Unsupported status table mode: {self.mode}")
+        seen: set[str] = set()
+        for row in self.rows:
+            if not row.key:
+                raise ValueError("Status table row key must not be empty")
+            if row.key in seen:
+                raise ValueError(f"Status table key is duplicated: {row.key}")
+            seen.add(row.key)
+        return self
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "schemaVersion": self.schema_version,
+            "kind": self.kind,
+            "mode": self.mode,
+            "keyColumn": self.key_column,
+            "valueColumn": self.value_column,
+            "rows": [row.to_json_dict() for row in self.rows],
+            "metadata": dict(self.metadata),
+        }
+
+
+def parse_status_document(raw: str) -> StatusTableDocument:
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("Status table document JSON is invalid") from exc
+    if not isinstance(data, dict):
+        raise ValueError("Status table document must be an object")
+    raw_rows = data.get("rows", [])
+    if not isinstance(raw_rows, list):
+        raw_rows = []
+    rows: list[StatusTableRow] = []
+    for item in raw_rows:
+        if not isinstance(item, dict):
+            continue
+        raw_metadata = item.get("metadata", {})
+        rows.append(StatusTableRow(
+            key=str(item.get("key", "")),
+            value=str(item.get("value", "")),
+            runtime_key_locked=bool(item.get("runtimeKeyLocked", False)),
+            metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
+        ))
+    raw_metadata = data.get("metadata", {})
+    return StatusTableDocument(
+        schema_version=int(data.get("schemaVersion") or 1),
+        kind=str(data.get("kind") or STATUS_TABLE_KIND),
+        mode=str(data.get("mode") or STATUS_TABLE_MODE_KEY_VALUE),
+        key_column=str(data.get("keyColumn") or STATUS_KEY_COLUMN),
+        value_column=str(data.get("valueColumn") or STATUS_VALUE_COLUMN),
+        rows=tuple(rows),
+        metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
+    ).validated()
+
+
+def serialize_status_document(document: StatusTableDocument) -> str:
+    return json.dumps(document.validated().to_json_dict(), ensure_ascii=False, separators=(",", ":"))
+
+
+def validate_status_kind(value: str) -> str:
+    kind = str(value or STATUS_KIND_NORMAL)
+    if kind not in {STATUS_KIND_SCENE, STATUS_KIND_NORMAL}:
+        raise ValueError(f"Unsupported status kind: {kind}")
+    return kind
+
+
+@dataclass(frozen=True)
 class StatusTableTemplate:
     id: int
     workspace_id: str
-    type_id: int
-    type_name: str
-    builtin_key: str
     name: str
-    relative_path: str
+    status_kind: str = STATUS_KIND_NORMAL
     description: str = ""
-    headers: tuple[str, ...] = ()
-    rows: tuple[tuple[str, ...], ...] = ()
+    document: StatusTableDocument = field(default_factory=StatusTableDocument)
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1
@@ -454,8 +670,16 @@ class StatusTableTemplate:
     updated_at: str = ""
 
     @property
+    def headers(self) -> tuple[str, str]:
+        return self.document.headers
+
+    @property
+    def rows(self) -> tuple[tuple[str, str], ...]:
+        return self.document.data_rows
+
+    @property
     def data(self) -> StatusTableData:
-        return StatusTableData(headers=self.headers, rows=self.rows)
+        return self.document.to_data()
 
     def to_dict(self) -> dict[str, object]:
         return _status_table_as_dict(self)
@@ -467,27 +691,9 @@ class StoryStatusTable:
     workspace_id: str
     story_id: int
     status_table_id: int
-    type_id: int
-    type_name: str
-    builtin_key: str
     table_name: str
-    relative_path: str
-    sort_order: int = 0
-    metadata_json: str = "{}"
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class SessionStatusType:
-    id: int
-    session_id: str
-    workspace_id: str
-    story_id: int
-    source_type_id: int | None
-    name: str
-    builtin_key: str = ""
+    status_kind: str = STATUS_KIND_NORMAL
+    description: str = ""
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1
@@ -499,17 +705,14 @@ class SessionStatusType:
 class SessionStatusTable:
     id: int
     session_id: str
-    session_type_id: int
     workspace_id: str
     story_id: int
     source_table_id: int | None
-    type_name: str
-    builtin_key: str
+    origin: str
     name: str
-    relative_path: str
+    status_kind: str = STATUS_KIND_NORMAL
     description: str = ""
-    headers: tuple[str, ...] = ()
-    rows: tuple[tuple[str, ...], ...] = ()
+    document: StatusTableDocument = field(default_factory=StatusTableDocument)
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1
@@ -517,8 +720,16 @@ class SessionStatusTable:
     updated_at: str = ""
 
     @property
+    def headers(self) -> tuple[str, str]:
+        return self.document.headers
+
+    @property
+    def rows(self) -> tuple[tuple[str, str], ...]:
+        return self.document.data_rows
+
+    @property
     def data(self) -> StatusTableData:
-        return StatusTableData(headers=self.headers, rows=self.rows)
+        return self.document.to_data()
 
     def to_dict(self) -> dict[str, object]:
         return _status_table_as_dict(self)
@@ -526,6 +737,7 @@ class SessionStatusTable:
 
 def _status_table_as_dict(table: object) -> dict[str, object]:
     data = asdict(table)
+    data["document"] = table.document.to_json_dict()  # type: ignore[attr-defined]
     data["headers"] = list(table.headers)  # type: ignore[attr-defined]
     data["rows"] = [list(row) for row in table.rows]  # type: ignore[attr-defined]
     return data

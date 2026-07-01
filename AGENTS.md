@@ -37,13 +37,13 @@
 - `memory.raw_md_mode` 语义保持：`disabled` 关闭，`always` 主召回，`fallback_only` 仅在主召回不足或失败时补候选。
 - memory rerank 使用统一的 `PointwiseMemoryReranker`，不要恢复旧的 provider-specific reranker/factory。
 - 上下文主流程保持结构化，最终发送给 LLM 前由 `ContextRenderer` 渲染；调试 markdown/token 概览放在 `ContextInspector`，不要回流到 `RPGContext` 数据模型。
-- `当前场景.csv` 是高优先级 scene 状态，应作为 user prefix 进入最终用户消息；不要把它当普通状态表放入 `STATUS_TABLES`。在 `rpg_data` 新状态表架构中，scene 是 `builtin_key="scene"` 的状态类型，仍必须挂载到 story 才能被 session 感知。
+- `当前场景` 是高优先级 scene 状态，应作为 user prefix 进入最终用户消息；不要把它当普通状态表放入 `STATUS_TABLES`。在 `rpg_data` 状态表架构中，scene 是 `status_kind="scene"` 的状态表，仍必须挂载到 story 才能被 session 感知。
 - RP Modules 是 RP 业务模块占位，不是通用 skill 体系；骰子、战斗、物品等能力应围绕 RP 工具流程和受控状态读写设计。
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
 - Story 主数据字段保持：`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词；`story_prompt` 目前只存储和经 API 返回，待后续集成入 fix layer，本次不要把它接入上下文渲染。
-- `rpg_data` 状态表采用“SQL 完整索引 + CSV 内容源”：SQL 记录 type、template、story mount、session copy、排序和 workspace-relative `relative_path`，CSV 保存 headers/rows；不要通过目录扫描发现状态表，也不要把绝对文件路径写进索引。
-- 状态表模板文件位于 `{workspace_root}/template_status/`，session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/`。创建 session 时由 `CatalogService` 触发复制已挂载模板，后续模板修改不影响既有 session。
-- `rpg_data` bootstrap 只按 SQL 索引 materialize workspace 目录和缺失 CSV 文件；不要在 bootstrap 代码中硬编码 demo 或业务数据。缺失 CSV 的初始内容应来自 SQL 行的 `metadata_json._bootstrap_csv`，CSV 已存在时不得覆盖。默认不删除不在 SQL 索引中的 workspace/story/session 目录以及未索引 status CSV；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，并确保日志能清楚输出删除/跳过结果。
+- `rpg_data` 状态表采用 SQLite document 真源：模板表与会话表都在 SQL 行内保存封装后的 `document_json`，`status_kind` 只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。`rpg_data` 对外返回 `StatusTableDocument` / `StatusTableRow` 等 dataclass，不暴露原始 JSON 字符串作为正文数据。
+- 状态表模板通过 `rpg_story_status_tables` 挂载到 story。创建 session 时由 `CatalogService` 触发复制已挂载模板的 `document_json` 到 `rpg_session_status_tables`，`origin="template_copy"`；后续模板修改不影响已有 session 副本。会话原生运行时表直接写入 `rpg_session_status_tables`，`origin="session_native"`。
+- `rpg_data` bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；不要在 bootstrap 代码中硬编码 demo 或业务数据。默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，并确保日志能清楚输出删除/跳过结果。
 - Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|scene|commands|turn|stream`；workspace、lorebook、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
 
 ## 测试要求
@@ -64,7 +64,7 @@
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。
 - `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。所有 session 创建入口都由 `rpg_data` 生成 ID；用户只允许指定 title。
 - 工作区选择不要写回运行时状态。Telegram/CLI 通过 `channels/settings.yaml` 配置 `workspace_id + story_id`，API/WebUI 通过请求参数或 catalog session 反查上下文。
-- `rpg_data` 只通过 `rpg_workspaces.root_path` 定位 workspace 根目录；状态表索引用 workspace-relative 路径，经 `rpg_data.settings.resolve_workspace_relative_path()` 解析并校验不逃逸 workspace。
+- `rpg_data` 只通过 `rpg_workspaces.root_path` 定位 workspace 根目录；workspace/story/session 运行目录使用 workspace-relative 路径时，经 `rpg_data.settings.resolve_workspace_relative_path()` 解析并校验不逃逸 workspace。
 
 ## 提交规范
 - 提交信息使用 `feat:`、`fix:`、`refactor:`、`chore:` 等前缀，后接清晰中文说明。

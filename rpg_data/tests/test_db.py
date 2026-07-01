@@ -54,15 +54,15 @@ def test_resolve_workspace_root_uses_configured_base(tmp_path: Path, monkeypatch
 def test_resolve_workspace_relative_path_rejects_escapes(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
 
-    assert resolve_workspace_relative_path(workspace, "status/table.csv") == (
-        workspace / "status" / "table.csv"
+    assert resolve_workspace_relative_path(workspace, "stories/1/s_demo") == (
+        workspace / "stories" / "1" / "s_demo"
     ).resolve()
 
     with pytest.raises(ValueError):
-        resolve_workspace_relative_path(workspace, "../outside.csv")
+        resolve_workspace_relative_path(workspace, "../outside")
 
     with pytest.raises(ValueError):
-        resolve_workspace_relative_path(workspace, tmp_path / "outside.csv")
+        resolve_workspace_relative_path(workspace, tmp_path / "outside")
 
 
 def test_connect_creates_parent_directory_and_can_create_table(tmp_path: Path) -> None:

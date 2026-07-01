@@ -176,7 +176,7 @@ class FakeStatusManager:
             return None
         return (
             int(self.scene_table["id"]),
-            (str(self.scene_table["type_name"]), str(self.scene_table["name"])),
+            (str(self.scene_table.get("status_kind", "scene")), str(self.scene_table["name"])),
         )
 
     def get_scene_attrs(self):

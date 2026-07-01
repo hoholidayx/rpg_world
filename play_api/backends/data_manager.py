@@ -383,6 +383,169 @@ class DataManagerBackend:
     ) -> bool | None:
         return self._gateway.lorebook_management.unmount_entry(workspace, story_id, mount_id)
 
+    async def list_status_templates(
+        self,
+        workspace: str,
+        status_kind: str | None = None,
+    ) -> list[dict[str, object]] | None:
+        if not _workspace_exists(self._gateway, workspace):
+            return None
+        return [
+            _status_template_summary(template)
+            for template in self._gateway.status.list_templates(workspace, status_kind=status_kind)
+        ]
+
+    async def create_status_template(
+        self,
+        workspace: str,
+        *,
+        name: str,
+        status_kind: str,
+        document: models.StatusTableDocument,
+        description: str = "",
+        sort_order: int = 0,
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        if not _workspace_exists(self._gateway, workspace):
+            return None
+        template = self._gateway.status.create_template(
+            workspace,
+            name,
+            status_kind=status_kind,
+            document=document,
+            description=description,
+            sort_order=sort_order,
+            metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+        )
+        return _status_template_summary(template)
+
+    async def update_status_template(
+        self,
+        workspace: str,
+        template_id: int,
+        *,
+        name: str | None = None,
+        status_kind: str | None = None,
+        document: models.StatusTableDocument | None = None,
+        description: str | None = None,
+        sort_order: int | None = None,
+    ) -> dict[str, object] | None:
+        template = self._gateway.status.get_template(template_id)
+        if template is None or template.workspace_id != workspace:
+            return None
+        updated = self._gateway.status.update_template(
+            template_id,
+            name=name,
+            status_kind=status_kind,
+            document=document,
+            description=description,
+            sort_order=sort_order,
+        )
+        return _status_template_summary(updated)
+
+    async def delete_status_template(self, workspace: str, template_id: int) -> bool | None:
+        template = self._gateway.status.get_template(template_id)
+        if template is None or template.workspace_id != workspace:
+            return None
+        self._gateway.status.delete_template(template_id)
+        return True
+
+    async def list_story_status_mounts(self, workspace: str, story_id: int) -> list[dict[str, object]] | None:
+        stories = self._gateway.catalog.list_stories(workspace)
+        if stories is None or not any(int(story.id) == int(story_id) for story in stories):
+            return None
+        return [
+            _status_mount_summary(mount)
+            for mount in self._gateway.status.list_story_mounts(workspace, story_id)
+        ]
+
+    async def mount_status_template(
+        self,
+        workspace: str,
+        story_id: int,
+        template_id: int,
+        *,
+        sort_order: int = 0,
+    ) -> dict[str, object] | None:
+        try:
+            mount = self._gateway.status.mount_template(workspace, story_id, template_id, sort_order=sort_order)
+        except FileNotFoundError:
+            return None
+        return _status_mount_summary(mount)
+
+    async def unmount_status_template(self, workspace: str, story_id: int, mount_id: int) -> bool | None:
+        mounts = self._gateway.status.list_story_mounts(workspace, story_id)
+        if not any(int(mount.id) == int(mount_id) for mount in mounts):
+            return None
+        self._gateway.status.unmount_template(mount_id)
+        return True
+
+    async def list_session_status_tables(
+        self,
+        session_id: str,
+        status_kind: str | None = None,
+    ) -> list[dict[str, object]] | None:
+        if self._gateway.catalog.get_session(session_id) is None:
+            return None
+        return [
+            _session_status_table_summary(table)
+            for table in self._gateway.status.list_tables(session_id, status_kind=status_kind)
+        ]
+
+    async def create_session_status_table(
+        self,
+        session_id: str,
+        *,
+        name: str,
+        status_kind: str,
+        document: models.StatusTableDocument,
+        description: str = "",
+        sort_order: int = 0,
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        if self._gateway.catalog.get_session(session_id) is None:
+            return None
+        table = self._gateway.status.create_table(
+            session_id,
+            name,
+            status_kind=status_kind,
+            document=document,
+            description=description,
+            sort_order=sort_order,
+            metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+        )
+        return _session_status_table_summary(table)
+
+    async def update_session_status_table(
+        self,
+        session_id: str,
+        table_id: int,
+        *,
+        name: str | None = None,
+        document: models.StatusTableDocument | None = None,
+    ) -> dict[str, object] | None:
+        try:
+            table = self._gateway.status.get_table_by_id(table_id)
+        except FileNotFoundError:
+            return None
+        if table.session_id != session_id:
+            return None
+        if name is not None:
+            table = self._gateway.status.rename_table(table_id, name)
+        if document is not None:
+            table = self._gateway.status.save_table(table_id, document)
+        return _session_status_table_summary(table)
+
+    async def delete_session_status_table(self, session_id: str, table_id: int) -> bool | None:
+        try:
+            table = self._gateway.status.get_table_by_id(table_id)
+        except FileNotFoundError:
+            return None
+        if table.session_id != session_id:
+            return None
+        self._gateway.status.delete_table(table_id)
+        return True
+
 
 def _workspace_summary(workspace: models.Workspace) -> dict[str, object]:
     description = str(workspace.description or "")
@@ -391,6 +554,10 @@ def _workspace_summary(workspace: models.Workspace) -> dict[str, object]:
         "name": str(workspace.name),
         "description": description or None,
     }
+
+
+def _workspace_exists(gateway: DataServiceGateway, workspace: str) -> bool:
+    return any(item.id == workspace for item in gateway.catalog.list_workspaces())
 
 
 def _story_summary(story: models.Story) -> dict[str, object]:
@@ -487,6 +654,78 @@ def _mounted_lorebook_entry_summary(detail: models.StoryLorebookEntryDetail) -> 
             "story_id": int(detail.mount.story_id),
         }
     )
+    return result
+
+
+def _status_document_summary(document: models.StatusTableDocument) -> dict[str, object]:
+    return {
+        "key_column": document.key_column,
+        "value_column": document.value_column,
+        "rows": [
+            {
+                "key": row.key,
+                "value": row.value,
+                "runtime_key_locked": row.runtime_key_locked,
+                "metadata": dict(row.metadata),
+            }
+            for row in document.rows
+        ],
+        "metadata": dict(document.metadata),
+    }
+
+
+def _status_template_summary(template: models.StatusTableTemplate) -> dict[str, object]:
+    result = {
+        "id": int(template.id),
+        "workspace_id": str(template.workspace_id),
+        "name": str(template.name),
+        "status_kind": str(template.status_kind),
+        "description": str(template.description or ""),
+        "sort_order": int(template.sort_order),
+        "metadata": _parse_metadata(template.metadata_json),
+        "version": int(template.version),
+        "created_at": str(template.created_at),
+        "updated_at": str(template.updated_at),
+    }
+    result.update(_status_document_summary(template.document))
+    return result
+
+
+def _status_mount_summary(mount: models.StoryStatusTable) -> dict[str, object]:
+    return {
+        "id": int(mount.id),
+        "workspace_id": str(mount.workspace_id),
+        "story_id": int(mount.story_id),
+        "status_table_id": int(mount.status_table_id),
+        "table_name": str(mount.table_name),
+        "status_kind": str(mount.status_kind),
+        "description": str(mount.description or ""),
+        "sort_order": int(mount.sort_order),
+        "metadata": _parse_metadata(mount.metadata_json),
+        "version": int(mount.version),
+        "created_at": str(mount.created_at),
+        "updated_at": str(mount.updated_at),
+    }
+
+
+def _session_status_table_summary(table: models.SessionStatusTable) -> dict[str, object]:
+    result = {
+        "id": int(table.id),
+        "session_id": str(table.session_id),
+        "workspace_id": str(table.workspace_id),
+        "story_id": int(table.story_id),
+        "source_table_id": table.source_table_id,
+        "origin": str(table.origin),
+        "name": str(table.name),
+        "status_kind": str(table.status_kind),
+        "description": str(table.description or ""),
+        "sort_order": int(table.sort_order),
+        "metadata": _parse_metadata(table.metadata_json),
+        "version": int(table.version),
+        "created_at": str(table.created_at),
+        "updated_at": str(table.updated_at),
+    }
+    result.update(_status_document_summary(table.document))
     return result
 
 

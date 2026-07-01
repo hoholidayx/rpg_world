@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class SceneTracker:
-    """场景状态管理器，所有状态读写都以 rpg_data 文件为真源。"""
+    """场景状态管理器，所有状态读写都直接委托给 rpg_data。"""
 
     TIME_ATTR = "时间"
     LOCATION_ATTR = "位置"
@@ -132,7 +132,7 @@ class SceneTracker:
         return self._runtime_set_attr(key, value)
 
     def delete_attr(self, key: str) -> dict[str, str]:
-        """删除场景属性；失败时返回当前文件状态。"""
+        """删除场景属性；失败时返回 rpg_data 当前状态。"""
         if self._status_mgr is not None and self._scene_table_id is not None:
             try:
                 table = self._status_mgr.runtime_delete_key_value(self._scene_table_id, key)

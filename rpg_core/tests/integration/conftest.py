@@ -88,7 +88,6 @@ def integration_data_gateway(integration_workspace):  # noqa: ARG001
 @pytest_asyncio.fixture
 async def integration_agent(integration_settings, integration_workspace, integration_data_gateway):
     session_id = "integration_smoke"
-    workspace = str(integration_workspace)
     api_key = integration_settings.resolve_openai_api_key()
     if not api_key:
         pytest.skip(
@@ -97,7 +96,6 @@ async def integration_agent(integration_settings, integration_workspace, integra
     _ensure_integration_session(integration_data_gateway, integration_workspace, session_id)
     agent = RPGGameAgent(
         session_id=session_id,
-        workspace=workspace,
         model=integration_settings.agent_model,
         api_key=api_key,
         base_url=integration_settings.agent_base_url,

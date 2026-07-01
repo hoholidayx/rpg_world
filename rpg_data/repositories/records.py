@@ -29,13 +29,11 @@ __all__ = [
     "SessionRecord",
     "SessionStoryMemoryRecord",
     "SessionStatusTableRecord",
-    "SessionStatusTypeRecord",
     "StoryCharacterRecord",
     "StoryLorebookEntryRecord",
     "StoryStatusTableRecord",
     "StoryRecord",
     "StatusTableTemplateRecord",
-    "StatusTypeRecord",
     "WorkspaceRecord",
     "bind_database",
     "make_database",
@@ -344,26 +342,6 @@ class StoryLorebookEntryRecord(BaseRecord):
         table_name = "rpg_story_lorebook_entries"
 
 
-class StatusTypeRecord(BaseRecord):
-    id = AutoField()
-    workspace = ForeignKeyField(
-        WorkspaceRecord,
-        backref="status_types",
-        column_name="workspace_id",
-        on_delete="CASCADE",
-    )
-    name = TextField()
-    builtin_key = TextField(default="")
-    sort_order = IntegerField(default=0)
-    metadata_json = TextField(default="{}")
-    version = IntegerField(default=1)
-    created_at = TextField()
-    updated_at = TextField()
-
-    class Meta:
-        table_name = "rpg_status_types"
-
-
 class StatusTableTemplateRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
@@ -372,15 +350,10 @@ class StatusTableTemplateRecord(BaseRecord):
         column_name="workspace_id",
         on_delete="CASCADE",
     )
-    status_type = ForeignKeyField(
-        StatusTypeRecord,
-        backref="templates",
-        column_name="type_id",
-        on_delete="CASCADE",
-    )
     name = TextField()
-    relative_path = TextField()
+    status_kind = TextField(default="normal")
     description = TextField(default="")
+    document_json = TextField()
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
@@ -421,39 +394,6 @@ class StoryStatusTableRecord(BaseRecord):
         table_name = "rpg_story_status_tables"
 
 
-class SessionStatusTypeRecord(BaseRecord):
-    id = AutoField()
-    session = ForeignKeyField(
-        SessionRecord,
-        backref="status_types",
-        column_name="session_id",
-        on_delete="CASCADE",
-    )
-    workspace = ForeignKeyField(
-        WorkspaceRecord,
-        backref="session_status_types",
-        column_name="workspace_id",
-        on_delete="CASCADE",
-    )
-    story = ForeignKeyField(
-        StoryRecord,
-        backref="session_status_types",
-        column_name="story_id",
-        on_delete="CASCADE",
-    )
-    source_type_id = IntegerField(null=True)
-    name = TextField()
-    builtin_key = TextField(default="")
-    sort_order = IntegerField(default=0)
-    metadata_json = TextField(default="{}")
-    version = IntegerField(default=1)
-    created_at = TextField()
-    updated_at = TextField()
-
-    class Meta:
-        table_name = "rpg_session_status_types"
-
-
 class SessionStatusTableRecord(BaseRecord):
     id = AutoField()
     session = ForeignKeyField(
@@ -462,16 +402,24 @@ class SessionStatusTableRecord(BaseRecord):
         column_name="session_id",
         on_delete="CASCADE",
     )
-    session_type = ForeignKeyField(
-        SessionStatusTypeRecord,
-        backref="tables",
-        column_name="session_type_id",
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="session_status_tables",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="session_status_tables",
+        column_name="story_id",
         on_delete="CASCADE",
     )
     source_table_id = IntegerField(null=True)
+    origin = TextField()
     name = TextField()
-    relative_path = TextField()
+    status_kind = TextField(default="normal")
     description = TextField(default="")
+    document_json = TextField()
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
@@ -495,9 +443,7 @@ RECORD_MODELS = (
     LorebookEntryRecord,
     StoryCharacterRecord,
     StoryLorebookEntryRecord,
-    StatusTypeRecord,
     StatusTableTemplateRecord,
     StoryStatusTableRecord,
-    SessionStatusTypeRecord,
     SessionStatusTableRecord,
 )

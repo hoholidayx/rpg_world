@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Iterable
 
-from rpg_data.models import STATUS_KEY_COLUMN, STATUS_VALUE_COLUMN, StatusRowRef
+from rpg_data.models import STATUS_KEY_COLUMN, STATUS_KIND_NORMAL, STATUS_KIND_SCENE, STATUS_VALUE_COLUMN, StatusRowRef
 from rpg_data.services import get_data_service_gateway
 
 if TYPE_CHECKING:
@@ -28,15 +28,12 @@ class StatusManager:
     # ------------------------------------------------------------------
 
     def list_types(self) -> list[str]:
-        return [
-            status_type.name
-            for status_type in self._service.list_session_types(self.session_id)
-        ]
+        return [STATUS_KIND_NORMAL, STATUS_KIND_SCENE]
 
-    def list_tables(self, type_name: str) -> list[str]:
+    def list_tables(self, status_kind: str | None = None) -> list[str]:
         return [
             table.name
-            for table in self._service.list_tables(self.session_id, type_name)
+            for table in self._service.list_tables(self.session_id, status_kind)
         ]
 
     def list_context_tables(self) -> list[dict[str, object]]:
@@ -45,10 +42,8 @@ class StatusManager:
             for table in self._service.list_context_tables(self.session_id)
         ]
 
-    def get_table(self, type_name: str, table_name: str) -> dict[str, object]:
-        return _table_to_dict(
-            self._service.get_table(self.session_id, type_name, table_name)
-        )
+    def get_table(self, table_name: str, status_kind: str | None = None) -> dict[str, object]:
+        return _table_to_dict(self._service.get_table(self.session_id, table_name, status_kind))
 
     def get_table_by_id(self, table_id: int) -> dict[str, object]:
         return _table_to_dict(self._service.get_table_by_id(table_id))
@@ -172,7 +167,7 @@ class StatusManager:
         table = self._service.get_active_scene_table(self.session_id)
         if table is None:
             return None
-        return table.id, (table.type_name, table.name)
+        return table.id, (table.status_kind, table.name)
 
     def get_scene_attrs(self) -> dict[str, str] | None:
         return self._service.get_scene_attrs(self.session_id)

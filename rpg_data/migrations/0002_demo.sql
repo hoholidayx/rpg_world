@@ -247,101 +247,59 @@ WHERE rpg_stories.workspace_id = 'demo_workspace'
   AND rpg_stories.title IN ('北境森林 Demo', '奥术学院 Demo')
   AND rpg_lorebook_entries.name IN ('炎心之木', '圆形封印祭坛');
 
-INSERT OR IGNORE INTO rpg_status_types (
-    workspace_id,
-    name,
-    builtin_key,
-    sort_order,
-    metadata_json
-)
-VALUES (
-    'demo_workspace',
-    '场景',
-    'scene',
-    0,
-    '{"kind":"demo"}'
-);
-
-INSERT OR IGNORE INTO rpg_status_types (
-    workspace_id,
-    name,
-    builtin_key,
-    sort_order,
-    metadata_json
-)
-VALUES (
-    'demo_workspace',
-    '世界状态',
-    '',
-    10,
-    '{"kind":"demo"}'
-);
-
 INSERT OR IGNORE INTO rpg_status_table_templates (
     workspace_id,
-    type_id,
     name,
-    relative_path,
+    status_kind,
     description,
+    document_json,
     sort_order,
     metadata_json
 )
 VALUES (
     'demo_workspace',
-    (
-        SELECT id
-        FROM rpg_status_types
-        WHERE workspace_id = 'demo_workspace' AND builtin_key = 'scene'
-    ),
     '北境森林当前场景',
-    'template_status/场景/北境森林当前场景.status.json',
+    'scene',
     '北境森林演示故事的当前场景。',
+    '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 1 日 8 时 30 分","runtimeKeyLocked":true,"metadata":{}},{"key":"位置","value":"北境森林·石林·圆形封印祭坛","runtimeKeyLocked":true,"metadata":{}},{"key":"在场人物","value":"Bob, Alice","runtimeKeyLocked":true,"metadata":{}}],"metadata":{"ui":{}}}',
     0,
     '{"kind":"demo"}'
 );
 
 INSERT OR IGNORE INTO rpg_status_table_templates (
     workspace_id,
-    type_id,
     name,
-    relative_path,
+    status_kind,
     description,
+    document_json,
     sort_order,
     metadata_json
 )
 VALUES (
     'demo_workspace',
-    (
-        SELECT id
-        FROM rpg_status_types
-        WHERE workspace_id = 'demo_workspace' AND builtin_key = 'scene'
-    ),
     '奥术学院当前场景',
-    'template_status/场景/奥术学院当前场景.status.json',
+    'scene',
     '奥术学院演示故事的当前场景。',
+    '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 3 日 14 时","runtimeKeyLocked":true,"metadata":{}},{"key":"位置","value":"奥术学院·旧档案馆","runtimeKeyLocked":true,"metadata":{}},{"key":"在场人物","value":"Alice","runtimeKeyLocked":true,"metadata":{}}],"metadata":{"ui":{}}}',
     0,
     '{"kind":"demo"}'
 );
 
 INSERT OR IGNORE INTO rpg_status_table_templates (
     workspace_id,
-    type_id,
     name,
-    relative_path,
+    status_kind,
     description,
+    document_json,
     sort_order,
     metadata_json
 )
 VALUES (
     'demo_workspace',
-    (
-        SELECT id
-        FROM rpg_status_types
-        WHERE workspace_id = 'demo_workspace' AND name = '世界状态'
-    ),
     '世界线索',
-    'template_status/世界状态/世界线索.status.json',
+    'normal',
     '演示普通状态表如何进入上下文。',
+    '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"项目","valueColumn":"状态","rows":[{"key":"幽蓝封印","value":"异常波动","runtimeKeyLocked":false,"metadata":{"备注":"圆形封印祭坛附近出现微弱蓝光。"}},{"key":"炎心之木","value":"待调查","runtimeKeyLocked":false,"metadata":{"备注":"相关记载散落在北境与学院档案中。"}}],"metadata":{"ui":{}}}',
     10,
     '{"kind":"demo"}'
 );

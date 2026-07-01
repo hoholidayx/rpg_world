@@ -1,4 +1,4 @@
-export type UnindexedRuntimeCategory = 'runtime_directory' | 'status_json'
+export type UnindexedRuntimeCategory = 'runtime_directory'
 
 export type UnindexedRuntimeItem = {
   category: UnindexedRuntimeCategory
