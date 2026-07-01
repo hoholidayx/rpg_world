@@ -321,6 +321,10 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     status_templates = client.get("/play-api/v1/workspaces/demo_workspace/status-templates")
     assert status_templates.status_code == 200
     assert {item["statusKind"] for item in status_templates.json()} == {"scene", "normal"}
+    mounted_scene_template = next(item for item in status_templates.json() if item["statusKind"] == "scene")
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/status-templates/{mounted_scene_template['id']}"
+    ).status_code == 409
     assert client.get("/play-api/v1/workspaces/missing/status-templates").status_code == 404
 
     new_status_template = client.post(
@@ -349,6 +353,10 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert patched_status_template.status_code == 200
     assert patched_status_template.json()["description"] == "更新后的状态表"
     assert patched_status_template.json()["rows"][0]["runtimeKeyLocked"] is True
+    assert client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/status-templates/{new_status_template.json()['id']}",
+        json={"statusKind": "scene"},
+    ).status_code == 422
 
     status_mounts = client.get("/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts")
     assert status_mounts.status_code == 200
@@ -381,14 +389,37 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         f"/play-api/v1/sessions/{demo_session_id}/status-tables/{new_session_table.json()['id']}",
         json={
             "name": "会话状态",
+            "description": "运行时描述更新",
+            "sortOrder": 88,
             "rows": [{"key": "余烬", "value": "熄灭"}],
         },
     )
     assert patched_session_table.status_code == 200
     assert patched_session_table.json()["name"] == "会话状态"
+    assert patched_session_table.json()["description"] == "运行时描述更新"
+    assert patched_session_table.json()["sortOrder"] == 88
     assert patched_session_table.json()["rows"][0]["value"] == "熄灭"
+    assert client.patch(
+        f"/play-api/v1/sessions/{demo_session_id}/status-tables/{new_session_table.json()['id']}",
+        json={"statusKind": "scene"},
+    ).status_code == 422
     assert client.delete(
         f"/play-api/v1/sessions/{demo_session_id}/status-tables/{new_session_table.json()['id']}"
+    ).status_code == 204
+
+    new_scene_session_table = client.post(
+        f"/play-api/v1/sessions/{demo_session_id}/status-tables",
+        json={
+            "name": "会话场景",
+            "statusKind": "scene",
+            "rows": [{"key": "位置", "value": "石门"}],
+        },
+    )
+    assert new_scene_session_table.status_code == 200
+    assert new_scene_session_table.json()["statusKind"] == "scene"
+    assert new_scene_session_table.json()["rows"][0]["runtimeKeyLocked"] is True
+    assert client.delete(
+        f"/play-api/v1/sessions/{demo_session_id}/status-tables/{new_scene_session_table.json()['id']}"
     ).status_code == 204
 
     workspace_root = tmp_path / "data" / "demo_workspace"

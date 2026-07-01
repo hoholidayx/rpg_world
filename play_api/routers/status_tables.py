@@ -75,7 +75,6 @@ class StatusTemplatePatch(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str | None = None
-    status_kind: str | None = Field(default=None, alias="statusKind")
     description: str | None = None
     sort_order: int | None = Field(default=None, alias="sortOrder")
     key_column: str | None = Field(default=None, alias="keyColumn")
@@ -108,6 +107,8 @@ class SessionStatusTablePatch(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str | None = None
+    description: str | None = None
+    sort_order: int | None = Field(default=None, alias="sortOrder")
     key_column: str | None = Field(default=None, alias="keyColumn")
     value_column: str | None = Field(default=None, alias="valueColumn")
     rows: list[StatusRowPayload] | None = None
@@ -269,7 +270,6 @@ async def update_status_template(workspace_id: str, template_id: int, payload: S
         workspace_id,
         template_id,
         name=payload.name,
-        status_kind=payload.status_kind,
         document=payload.to_document(current),
         description=payload.description,
         sort_order=payload.sort_order,
@@ -357,6 +357,8 @@ async def update_session_status_table(session_id: str, table_id: int, payload: S
         table_id,
         name=payload.name,
         document=payload.to_document(current),
+        description=payload.description,
+        sort_order=payload.sort_order,
     )
     if item is None:
         raise HTTPException(status_code=404, detail="status table not found")

@@ -336,6 +336,33 @@ class StatusTableService:
         row.save()
         return _to_session_table(row)
 
+    def update_table(
+        self,
+        table_id: int,
+        *,
+        name: str | None = None,
+        document: models.StatusTableDocument | None = None,
+        description: str | None = None,
+        sort_order: int | None = None,
+    ) -> models.SessionStatusTable:
+        row = self._get_session_table_row(table_id)
+        target_name = str(row.name) if name is None else name
+        _validate_name(target_name, "session status table")
+        row.name = target_name
+        if document is not None:
+            row.document_json = models.serialize_status_document(_document_for_kind(str(row.status_kind), document))
+        if description is not None:
+            row.description = description
+        if sort_order is not None:
+            row.sort_order = sort_order
+        row.updated_at = SQL("CURRENT_TIMESTAMP")
+        try:
+            row.save()
+        except IntegrityError as exc:
+            raise ValueError(f"Session status table already exists: {row.session_id}/{target_name}") from exc
+        logger.info("updated session status table table_id=%s name=%s", table_id, target_name)
+        return _to_session_table(self._get_session_table_row(table_id))
+
     def rename_table(self, table_id: int, new_name: str) -> models.SessionStatusTable:
         _validate_name(new_name, "session status table")
         row = self._get_session_table_row(table_id)

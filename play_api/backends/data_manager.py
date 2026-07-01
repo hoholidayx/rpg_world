@@ -519,6 +519,8 @@ class DataManagerBackend:
         *,
         name: str | None = None,
         document: models.StatusTableDocument | None = None,
+        description: str | None = None,
+        sort_order: int | None = None,
     ) -> dict[str, object] | None:
         try:
             table = self._gateway.status.get_table_by_id(table_id)
@@ -526,10 +528,13 @@ class DataManagerBackend:
             return None
         if table.session_id != session_id:
             return None
-        if name is not None:
-            table = self._gateway.status.rename_table(table_id, name)
-        if document is not None:
-            table = self._gateway.status.save_table(table_id, document)
+        table = self._gateway.status.update_table(
+            table_id,
+            name=name,
+            document=document,
+            description=description,
+            sort_order=sort_order,
+        )
         return _session_status_table_summary(table)
 
     async def delete_session_status_table(self, session_id: str, table_id: int) -> bool | None:
