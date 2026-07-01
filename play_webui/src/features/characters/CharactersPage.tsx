@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bold,
@@ -22,6 +21,8 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
+import { ConfirmDialog, Dialog } from '@/components/common/Dialog'
+import { StoryMountDialog } from '@/components/common/StoryMountDialog'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import {
   createCharacter,
@@ -178,35 +179,6 @@ function MarkdownPreview({ value }: { value: string }) {
   )
 }
 
-function ModalShell({
-  title,
-  onClose,
-  children,
-}: {
-  title: string
-  onClose: () => void
-  children: ReactNode
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/20 px-4 py-8 backdrop-blur-sm">
-      <section className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-300/70">
-        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
-          <h2 className="text-xl font-bold text-slate-950">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="关闭"
-          >
-            <X size={18} />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
-  )
-}
-
 function CharacterVisual({ character }: { character: CharacterCard }) {
   const avatarUrl = getUiString(character.metadata, 'avatarUrl')
   return (
@@ -346,6 +318,10 @@ function CharactersContent() {
         .map((character) => ({ story: group.story, character }))
     )),
     [selectedCharacter, storyCharacterGroups],
+  )
+  const selectedCharacterMountedStoryIds = useMemo(
+    () => new Set(selectedCharacterMounts.map(({ story }) => story.id)),
+    [selectedCharacterMounts],
   )
   const selectedDetails = useMemo(
     () => [...(selectedCharacter?.details ?? [])].sort((first, second) => first.sortOrder - second.sortOrder || first.id - second.id),
@@ -894,18 +870,22 @@ function CharactersContent() {
       </div>
 
       {mountDialogOpen ? (
-        <MountDialog
+        <StoryMountDialog
           stories={stories}
-          selectedCharacter={selectedCharacter}
-          selectedCharacterMounts={selectedCharacterMounts}
-          mountPending={mountMutation.isPending}
+          description={selectedCharacter ? `将「${selectedCharacter.name}」添加到故事。` : '请先选择一个角色。'}
+          mountedStoryIds={selectedCharacterMountedStoryIds}
+          pending={mountMutation.isPending}
+          disabled={!selectedCharacter}
+          footerNote="添加后右侧会显示当前角色的故事挂载。"
           onClose={() => setMountDialogOpen(false)}
-          onMount={(storyId, characterId) => mountMutation.mutate({ storyId, characterId })}
+          onMount={(storyId) => {
+            if (selectedCharacter) mountMutation.mutate({ storyId, characterId: selectedCharacter.id })
+          }}
         />
       ) : null}
 
       {detailDialogOpen ? (
-        <ModalShell title={editingDetailId ? '编辑角色细节' : '添加角色细节'} onClose={() => setDetailDialogOpen(false)}>
+        <Dialog title={editingDetailId ? '编辑角色细节' : '添加角色细节'} onClose={() => setDetailDialogOpen(false)}>
           <div className="space-y-4 px-6 py-5">
             <label className="grid gap-2 text-sm font-semibold text-slate-700">
               细节名
@@ -955,11 +935,11 @@ function CharactersContent() {
               保存
             </button>
           </footer>
-        </ModalShell>
+        </Dialog>
       ) : null}
 
       {avatarDialogOpen ? (
-        <ModalShell title="编辑头像" onClose={() => setAvatarDialogOpen(false)}>
+        <Dialog title="编辑头像" onClose={() => setAvatarDialogOpen(false)}>
           <div className="grid gap-5 px-6 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="relative aspect-square overflow-hidden rounded-xl bg-gradient-to-br from-slate-700 via-slate-500 to-indigo-200">
@@ -1031,143 +1011,32 @@ function CharactersContent() {
               </button>
             </div>
           </footer>
-        </ModalShell>
+        </Dialog>
       ) : null}
 
       {deleteDialogOpen ? (
-        <ModalShell title="删除角色" onClose={() => setDeleteDialogOpen(false)}>
-          <div className="px-6 py-5">
-            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-4">
-              <h3 className="text-sm font-bold text-rose-700">确认删除「{selectedCharacter?.name ?? '当前角色'}」？</h3>
-              <p className="mt-2 text-sm leading-6 text-rose-700/80">
-                删除后会同时移除它在所有故事里的挂载关系和角色细节。这个操作不会删除其它角色。
-              </p>
-            </div>
-          </div>
-          <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
-            <button
-              type="button"
-              onClick={() => setDeleteDialogOpen(false)}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:text-violet-700"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={() => deleteMutation.mutate()}
-              disabled={!selectedCharacter || deleteMutation.isPending}
-              className="flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white shadow-lg shadow-rose-100 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {deleteMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-              删除
-            </button>
-          </footer>
-        </ModalShell>
+        <ConfirmDialog
+          title="删除角色"
+          heading={`确认删除「${selectedCharacter?.name ?? '当前角色'}」？`}
+          body="删除后会同时移除它在所有故事里的挂载关系和角色细节。这个操作不会删除其它角色。"
+          pending={deleteMutation.isPending}
+          disabled={!selectedCharacter}
+          onClose={() => setDeleteDialogOpen(false)}
+          onConfirm={() => deleteMutation.mutate()}
+        />
       ) : null}
 
       {detailDeleteTarget ? (
-        <ModalShell title="删除角色细节" onClose={() => setDetailDeleteTarget(null)}>
-          <div className="px-6 py-5">
-            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-4">
-              <h3 className="text-sm font-bold text-rose-700">确认删除「{detailDeleteTarget.name}」？</h3>
-              <p className="mt-2 text-sm leading-6 text-rose-700/80">
-                删除后会从当前角色卡中移除该细节条目。这个操作不会删除角色本体，也不会影响其它细节。
-              </p>
-            </div>
-          </div>
-          <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
-            <button
-              type="button"
-              onClick={() => setDetailDeleteTarget(null)}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:text-violet-700"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={() => deleteDetailMutation.mutate(detailDeleteTarget.id)}
-              disabled={deleteDetailMutation.isPending}
-              className="flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white shadow-lg shadow-rose-100 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {deleteDetailMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-              删除
-            </button>
-          </footer>
-        </ModalShell>
+        <ConfirmDialog
+          title="删除角色细节"
+          heading={`确认删除「${detailDeleteTarget.name}」？`}
+          body="删除后会从当前角色卡中移除该细节条目。这个操作不会删除角色本体，也不会影响其它细节。"
+          pending={deleteDetailMutation.isPending}
+          onClose={() => setDetailDeleteTarget(null)}
+          onConfirm={() => deleteDetailMutation.mutate(detailDeleteTarget.id)}
+        />
       ) : null}
     </div>
-  )
-}
-
-function MountDialog({
-  stories,
-  selectedCharacter,
-  selectedCharacterMounts,
-  mountPending,
-  onClose,
-  onMount,
-}: {
-  stories: StorySummary[]
-  selectedCharacter: CharacterCard | null
-  selectedCharacterMounts: { story: StorySummary; character: CharacterCard }[]
-  mountPending: boolean
-  onClose: () => void
-  onMount: (storyId: number, characterId: number) => void
-}) {
-  return (
-    <ModalShell title="添加故事挂载" onClose={onClose}>
-      <div className="border-b border-slate-200 bg-slate-50/70 px-6 py-4">
-        <p className="text-sm text-slate-500">
-          {selectedCharacter ? `将「${selectedCharacter.name}」添加到故事。` : '请先选择一个角色。'}
-        </p>
-      </div>
-      <div className="max-h-[520px] overflow-y-auto px-5 py-5">
-        <div className="rounded-2xl border border-slate-200 bg-white">
-          {stories.length ? stories.map((story) => {
-            const alreadyMountedInStory = selectedCharacterMounts.some((mount) => mount.story.id === story.id)
-            return (
-              <article
-                key={story.id}
-                className="grid gap-3 border-b border-slate-100 px-4 py-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="truncate text-sm font-bold text-slate-950">{story.title}</h3>
-                    {alreadyMountedInStory ? (
-                      <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">已挂载</span>
-                    ) : null}
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{story.summary || '暂无故事摘要'}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (selectedCharacter) onMount(story.id, selectedCharacter.id)
-                  }}
-                  disabled={!selectedCharacter || alreadyMountedInStory || mountPending}
-                  className="flex h-10 items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-semibold text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
-                >
-                  {mountPending ? <Loader2 size={16} className="animate-spin" /> : alreadyMountedInStory ? <Check size={16} /> : <Plus size={16} />}
-                  {alreadyMountedInStory ? '已添加' : '添加'}
-                </button>
-              </article>
-            )
-          }) : (
-            <div className="px-4 py-10 text-center text-sm text-slate-500">暂无故事</div>
-          )}
-        </div>
-      </div>
-      <footer className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4 text-xs text-slate-500">
-        <span>添加后右侧会显示当前角色的故事挂载。</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:text-violet-700"
-        >
-          完成
-        </button>
-      </footer>
-    </ModalShell>
   )
 }
 

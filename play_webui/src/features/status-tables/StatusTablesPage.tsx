@@ -8,12 +8,12 @@ import {
   Copy,
   FilePlus2,
   Loader2,
-  Plus,
   Save,
   TableProperties,
   Trash2,
-  X,
 } from 'lucide-react'
+import { ConfirmDialog, Dialog } from '@/components/common/Dialog'
+import { StoryMountDialog } from '@/components/common/StoryMountDialog'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import { listSessions } from '@/lib/api/sessions'
 import {
@@ -32,7 +32,7 @@ import {
 import { listStories } from '@/lib/api/stories'
 import type { SessionSummary } from '@/types/session'
 import type { StorySummary } from '@/types/story'
-import type { StatusKind, StatusOrigin, StatusRow, StatusTable, StoryStatusMount } from '@/types/statusTables'
+import type { StatusKind, StatusOrigin, StatusRow, StatusTable } from '@/types/statusTables'
 
 type ViewMode = 'templates' | 'runtime'
 
@@ -123,27 +123,6 @@ function uniqueStatusTableName(baseName: string, tables: StatusTable[]) {
   }
 
   return `${firstCopy} ${Date.now()}`
-}
-
-function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/20 px-4 py-8 backdrop-blur-sm">
-      <section className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-300/70">
-        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
-          <h2 className="text-xl font-bold text-slate-950">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="关闭"
-          >
-            <X size={18} />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
-  )
 }
 
 function Chip({ children, tone = 'violet' }: { children: ReactNode; tone?: 'violet' | 'green' | 'amber' | 'sky' | 'gray' }) {
@@ -363,7 +342,7 @@ function StatusKindCreateDialog({
   const [kind, setKind] = useState<StatusKind>('normal')
 
   return (
-    <ModalShell title={title} onClose={onClose}>
+    <Dialog title={title} onClose={onClose} size="xl">
       <div className="space-y-5 px-6 py-5">
         <label>
           <FieldLabel label="状态种类" note="创建后只读" />
@@ -391,122 +370,7 @@ function StatusKindCreateDialog({
           创建
         </button>
       </footer>
-    </ModalShell>
-  )
-}
-
-function DeleteDialog({
-  title,
-  heading,
-  body,
-  pending,
-  onClose,
-  onDelete,
-}: {
-  title: string
-  heading: string
-  body: string
-  pending: boolean
-  onClose: () => void
-  onDelete: () => void
-}) {
-  return (
-    <ModalShell title={title} onClose={onClose}>
-      <div className="px-6 py-5">
-        <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-4">
-          <h3 className="text-sm font-bold text-rose-700">{heading}</h3>
-          <p className="mt-2 text-sm leading-6 text-rose-700/80">{body}</p>
-        </div>
-      </div>
-      <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
-        <button
-          type="button"
-          onClick={onClose}
-          className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:text-violet-700"
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={pending}
-          className="flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white shadow-lg shadow-rose-100 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {pending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-          删除
-        </button>
-      </footer>
-    </ModalShell>
-  )
-}
-
-function MountDialog({
-  stories,
-  selectedTemplate,
-  selectedTemplateMounts,
-  pending,
-  onClose,
-  onMount,
-}: {
-  stories: StorySummary[]
-  selectedTemplate: StatusTable | null
-  selectedTemplateMounts: { story: StorySummary; mount: StoryStatusMount }[]
-  pending: boolean
-  onClose: () => void
-  onMount: (storyId: number) => void
-}) {
-  return (
-    <ModalShell title="添加故事挂载" onClose={onClose}>
-      <div className="border-b border-slate-200 bg-slate-50/70 px-6 py-4">
-        <p className="text-sm text-slate-500">
-          {selectedTemplate ? `将「${selectedTemplate.name}」添加到故事。` : '请先选择一个状态表模板。'}
-        </p>
-      </div>
-      <div className="max-h-[520px] overflow-y-auto px-5 py-5">
-        <div className="rounded-2xl border border-slate-200 bg-white">
-          {stories.length ? stories.map((story) => {
-            const alreadyMountedInStory = selectedTemplateMounts.some((mount) => mount.story.id === story.id)
-            return (
-              <article
-                key={story.id}
-                className="grid gap-3 border-b border-slate-100 px-4 py-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="truncate text-sm font-bold text-slate-950">{story.title}</h3>
-                    {alreadyMountedInStory ? (
-                      <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">已挂载</span>
-                    ) : null}
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{story.summary || '暂无故事摘要'}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onMount(story.id)}
-                  disabled={!selectedTemplate || alreadyMountedInStory || pending}
-                  className="flex h-10 items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-semibold text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
-                >
-                  {pending ? <Loader2 size={16} className="animate-spin" /> : alreadyMountedInStory ? <Check size={16} /> : <Plus size={16} />}
-                  {alreadyMountedInStory ? '已添加' : '添加'}
-                </button>
-              </article>
-            )
-          }) : (
-            <div className="px-4 py-10 text-center text-sm text-slate-500">暂无故事</div>
-          )}
-        </div>
-      </div>
-      <footer className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4 text-xs text-slate-500">
-        <span>添加后右侧会显示当前模板的故事挂载。</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:text-violet-700"
-        >
-          完成
-        </button>
-      </footer>
-    </ModalShell>
+    </Dialog>
   )
 }
 
@@ -532,7 +396,7 @@ function CopyTemplateToSessionDialog({
   onCopy: () => void
 }) {
   return (
-    <ModalShell title="复制到会话" onClose={onClose}>
+    <Dialog title="复制到会话" onClose={onClose} size="xl">
       <div className="border-b border-slate-200 bg-slate-50/70 px-6 py-4">
         <p className="text-sm text-slate-500">
           {selectedTemplate ? `将「${selectedTemplate.name}」复制到「${story.title}」的一个会话运行时。` : '请先选择一个状态表模板。'}
@@ -576,7 +440,7 @@ function CopyTemplateToSessionDialog({
           复制
         </button>
       </footer>
-    </ModalShell>
+    </Dialog>
   )
 }
 
@@ -658,6 +522,10 @@ function StatusTablesContent() {
         .map((mount) => ({ story: group.story, mount }))
     )),
     [selectedTemplate, storyMountGroups],
+  )
+  const selectedTemplateMountedStoryIds = useMemo(
+    () => new Set(selectedTemplateMounts.map(({ story }) => story.id)),
+    [selectedTemplateMounts],
   )
   const selectedRuntimeTable = runtimeTables.find((table) => table.id === selectedRuntimeTableId) ?? null
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null
@@ -1288,11 +1156,13 @@ function StatusTablesContent() {
       ) : null}
 
       {mountDialogOpen ? (
-        <MountDialog
+        <StoryMountDialog
           stories={stories}
-          selectedTemplate={selectedTemplate}
-          selectedTemplateMounts={selectedTemplateMounts}
+          description={selectedTemplate ? `将「${selectedTemplate.name}」添加到故事。` : '请先选择一个状态表模板。'}
+          mountedStoryIds={selectedTemplateMountedStoryIds}
           pending={mountMutation.isPending}
+          disabled={!selectedTemplate}
+          footerNote="添加后右侧会显示当前模板的故事挂载。"
           onClose={() => setMountDialogOpen(false)}
           onMount={(storyId) => mountMutation.mutate(storyId)}
         />
@@ -1313,24 +1183,24 @@ function StatusTablesContent() {
       ) : null}
 
       {deleteTemplateOpen && selectedTemplate ? (
-        <DeleteDialog
+        <ConfirmDialog
           title="删除模板"
           heading={`确认删除「${selectedTemplate.name}」？`}
           body="删除后会移除这个工作区状态表模板。这个操作不会影响已经创建的会话副本，也不会删除其它模板。"
           pending={deleteTemplateMutation.isPending}
           onClose={() => setDeleteTemplateOpen(false)}
-          onDelete={() => deleteTemplateMutation.mutate()}
+          onConfirm={() => deleteTemplateMutation.mutate()}
         />
       ) : null}
 
       {deleteRuntimeOpen && selectedRuntimeTable ? (
-        <DeleteDialog
+        <ConfirmDialog
           title="删除状态表"
           heading={`确认删除「${selectedRuntimeTable.name}」？`}
           body="删除后会从当前会话中移除该状态表。这个操作不会回写模板，也不会影响其它会话。"
           pending={deleteRuntimeMutation.isPending}
           onClose={() => setDeleteRuntimeOpen(false)}
-          onDelete={() => deleteRuntimeMutation.mutate()}
+          onConfirm={() => deleteRuntimeMutation.mutate()}
         />
       ) : null}
     </div>

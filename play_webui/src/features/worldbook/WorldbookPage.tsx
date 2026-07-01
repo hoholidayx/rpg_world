@@ -1,12 +1,10 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bold,
   ImagePlus,
-  Check,
   Eye,
   FilePlus2,
   Italic,
@@ -20,6 +18,8 @@ import {
   Trash2,
   Type,
 } from 'lucide-react'
+import { ConfirmDialog, Dialog } from '@/components/common/Dialog'
+import { StoryMountDialog } from '@/components/common/StoryMountDialog'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import {
   createLorebookEntry,
@@ -141,35 +141,6 @@ function EntryVisual({ entry }: { entry: LorebookEntry }) {
   )
 }
 
-function ModalShell({
-  title,
-  onClose,
-  children,
-}: {
-  title: string
-  onClose: () => void
-  children: ReactNode
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/20 px-4 py-8 backdrop-blur-sm">
-      <section className="w-full max-w-3xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-300/70">
-        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
-          <h2 className="text-xl font-bold text-slate-950">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="关闭"
-          >
-            <X size={18} />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
-  )
-}
-
 function MarkdownPreview({ value }: { value: string }) {
   const lines = value.split('\n')
   return (
@@ -254,6 +225,10 @@ function WorldbookContent() {
         .map((entry) => ({ story: group.story, entry }))
     )),
     [selectedEntry, storyEntryGroups],
+  )
+  const selectedEntryMountedStoryIds = useMemo(
+    () => new Set(selectedEntryMounts.map(({ story }) => story.id)),
+    [selectedEntryMounts],
   )
   const tagFilters = useMemo(() => {
     const tags: string[] = []
@@ -758,94 +733,34 @@ function WorldbookContent() {
             </div>
 
             {mountDialogOpen ? (
-              <ModalShell title="添加故事挂载" onClose={() => setMountDialogOpen(false)}>
-                <div className="border-b border-slate-200 bg-slate-50/70 px-6 py-4">
-                  <p className="text-sm text-slate-500">
-                    {selectedEntry ? `将「${selectedEntry.name}」添加到故事。` : '请先选择一个世界书条目。'}
-                  </p>
-                </div>
-                <div className="max-h-[520px] overflow-y-auto px-5 py-5">
-                  <div className="rounded-2xl border border-slate-200 bg-white">
-                    {stories.length ? stories.map((story) => {
-                      const alreadyMountedInStory = selectedEntryMounts.some((mount) => mount.story.id === story.id)
-                      return (
-                        <article
-                          key={story.id}
-                          className="grid gap-3 border-b border-slate-100 px-4 py-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="truncate text-sm font-bold text-slate-950">{story.title}</h3>
-                              {alreadyMountedInStory ? (
-                                <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">已挂载</span>
-                              ) : null}
-                            </div>
-                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{story.summary || '暂无故事摘要'}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (selectedEntry) mountMutation.mutate({ storyId: story.id, entryId: selectedEntry.id })
-                            }}
-                            disabled={!selectedEntry || alreadyMountedInStory || mountMutation.isPending}
-                            className="flex h-10 items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-semibold text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
-                          >
-                            {mountMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : alreadyMountedInStory ? <Check size={16} /> : <Plus size={16} />}
-                            {alreadyMountedInStory ? '已添加' : '添加'}
-                          </button>
-                        </article>
-                      )
-                    }) : (
-                      <div className="px-4 py-10 text-center text-sm text-slate-500">暂无故事</div>
-                    )}
-                  </div>
-                </div>
-                <footer className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4 text-xs text-slate-500">
-                  <span>添加后右侧会显示当前条目的故事挂载。</span>
-                  <button
-                    type="button"
-                    onClick={() => setMountDialogOpen(false)}
-                    className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:text-violet-700"
-                  >
-                    完成
-                  </button>
-                </footer>
-              </ModalShell>
+              <StoryMountDialog
+                stories={stories}
+                description={selectedEntry ? `将「${selectedEntry.name}」添加到故事。` : '请先选择一个世界书条目。'}
+                mountedStoryIds={selectedEntryMountedStoryIds}
+                pending={mountMutation.isPending}
+                disabled={!selectedEntry}
+                footerNote="添加后右侧会显示当前条目的故事挂载。"
+                onClose={() => setMountDialogOpen(false)}
+                onMount={(storyId) => {
+                  if (selectedEntry) mountMutation.mutate({ storyId, entryId: selectedEntry.id })
+                }}
+              />
             ) : null}
 
             {deleteDialogOpen ? (
-              <ModalShell title="删除世界书条目" onClose={() => setDeleteDialogOpen(false)}>
-                <div className="px-6 py-5">
-                  <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-4">
-                    <h3 className="text-sm font-bold text-rose-700">确认删除「{selectedEntry?.name ?? '当前条目'}」？</h3>
-                    <p className="mt-2 text-sm leading-6 text-rose-700/80">
-                      删除后会同时移除它在所有故事里的挂载关系。这个操作不会删除其它世界书条目。
-                    </p>
-                  </div>
-                </div>
-                <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteDialogOpen(false)}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:text-violet-700"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteMutation.mutate()}
-                    disabled={!selectedEntry || deleteMutation.isPending}
-                    className="flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white shadow-lg shadow-rose-100 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {deleteMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                    删除
-                  </button>
-                </footer>
-              </ModalShell>
+              <ConfirmDialog
+                title="删除世界书条目"
+                heading={`确认删除「${selectedEntry?.name ?? '当前条目'}」？`}
+                body="删除后会同时移除它在所有故事里的挂载关系。这个操作不会删除其它世界书条目。"
+                pending={deleteMutation.isPending}
+                disabled={!selectedEntry}
+                onClose={() => setDeleteDialogOpen(false)}
+                onConfirm={() => deleteMutation.mutate()}
+              />
             ) : null}
 
             {thumbnailDialogOpen ? (
-              <ModalShell title="编辑缩略图" onClose={() => setThumbnailDialogOpen(false)}>
+              <Dialog title="编辑缩略图" onClose={() => setThumbnailDialogOpen(false)}>
                 <div className="grid gap-5 px-6 py-5 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className={`relative aspect-square overflow-hidden rounded-xl bg-gradient-to-br ${fallbackThumbnailClass}`}>
@@ -917,7 +832,7 @@ function WorldbookContent() {
                     </button>
                   </div>
                 </footer>
-              </ModalShell>
+              </Dialog>
             ) : null}
           </div>
   )
