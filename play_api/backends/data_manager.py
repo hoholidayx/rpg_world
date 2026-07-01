@@ -11,7 +11,6 @@ from rpg_data.settings import get_database_path
 from rpg_data.bootstrap import (
     delete_unindexed_runtime_item,
     delete_unindexed_runtime_items,
-    scan_orphan_runtime_data,
     scan_unindexed_runtime_data,
 )
 
@@ -80,9 +79,6 @@ class DataManagerBackend:
         if session is None:
             return None
         return _session_summary(session)
-
-    async def scan_orphan_runtime(self) -> dict[str, list[dict[str, str]]]:
-        return scan_orphan_runtime_data(self._gateway.database)
 
     async def scan_unindexed_runtime(self, workspace: str) -> dict[str, list[dict[str, str]]] | None:
         return scan_unindexed_runtime_data(self._gateway.database, workspace)

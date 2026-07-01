@@ -391,11 +391,6 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         f"/play-api/v1/sessions/{demo_session_id}/status-tables/{new_session_table.json()['id']}"
     ).status_code == 204
 
-    ops_scan = client.get("/play-api/v1/ops/orphan-runtime")
-    assert ops_scan.status_code == 200
-    assert "orphanDirectories" in ops_scan.json()
-    assert "unindexedStatusFiles" in ops_scan.json()
-
     workspace_root = tmp_path / "data" / "demo_workspace"
     unindexed_session_dir = workspace_root / "stories" / "1" / "s_unindexed_ops"
     unindexed_session_dir.mkdir(parents=True, exist_ok=True)

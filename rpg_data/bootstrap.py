@@ -15,13 +15,12 @@ from rpg_data.repositories.records import (
     WorkspaceRecord,
     bind_database,
 )
-from rpg_data.settings import get_bootstrap_delete_orphan_dirs, resolve_workspace_root
+from rpg_data.settings import get_bootstrap_delete_unindexed_dirs, resolve_workspace_root
 
 __all__ = [
     "bootstrap_runtime_data",
     "delete_unindexed_runtime_item",
     "delete_unindexed_runtime_items",
-    "scan_orphan_runtime_data",
     "scan_unindexed_runtime_data",
 ]
 
@@ -36,29 +35,14 @@ def bootstrap_runtime_data(database: Database) -> None:
     bind_database(database)
     logger.info("runtime bootstrap started")
     workspace_roots, workspace_count = _ensure_workspace_roots()
-    orphan_dirs_removed = _cleanup_orphan_runtime_dirs(workspace_roots)
+    unindexed_dirs_removed = _cleanup_unindexed_runtime_dirs(workspace_roots)
     session_copy_count = _ensure_session_copies(database)
     logger.info(
-        "runtime bootstrap finished workspace_count=%s sessions_initialized=%s orphan_dirs_removed=%s",
+        "runtime bootstrap finished workspace_count=%s sessions_initialized=%s unindexed_dirs_removed=%s",
         workspace_count,
         session_copy_count,
-        orphan_dirs_removed,
+        unindexed_dirs_removed,
     )
-
-
-def scan_orphan_runtime_data(database: Database) -> dict[str, list[dict[str, str]]]:
-    """Return runtime directories not indexed by SQL.
-
-    ``unindexed_status_files`` is kept as an empty compatibility key for the Ops
-    response shape; status tables no longer have file-backed indexes.
-    """
-
-    bind_database(database)
-    workspace_roots = _workspace_roots_from_index()
-    return {
-        "orphan_directories": _scan_orphan_runtime_dirs(workspace_roots),
-        "unindexed_status_files": [],
-    }
 
 
 def scan_unindexed_runtime_data(database: Database, workspace_id: str) -> dict[str, list[dict[str, str]]] | None:
@@ -68,10 +52,9 @@ def scan_unindexed_runtime_data(database: Database, workspace_id: str) -> dict[s
     workspace_roots = _workspace_roots_from_index()
     if workspace_id not in workspace_roots:
         return None
-    scan = scan_orphan_runtime_data(database)
     items = [
         _unindexed_item("runtime_directory", item)
-        for item in scan["orphan_directories"]
+        for item in _scan_unindexed_runtime_dirs(workspace_roots)
         if item.get("workspace_id") == workspace_id and item.get("kind") != "workspace"
     ]
     return {"items": items}
@@ -121,7 +104,7 @@ def delete_unindexed_runtime_items(database: Database, items: list[dict[str, str
 def _delete_unindexed_runtime_match(workspace_id: str, match: dict[str, str]) -> bool:
     if match["category"] != "runtime_directory":
         return False
-    return _remove_orphan_dir(
+    return _remove_unindexed_dir(
         Path(str(match["path"])),
         kind=str(match["kind"]),
         workspace_id=workspace_id,
@@ -171,7 +154,7 @@ def _workspace_roots_from_index() -> dict[str, Path]:
     }
 
 
-def _scan_orphan_runtime_dirs(workspace_roots: dict[str, Path]) -> list[dict[str, str]]:
+def _scan_unindexed_runtime_dirs(workspace_roots: dict[str, Path]) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
     workspace_root_set = {root.resolve() for root in workspace_roots.values()}
     candidate_parents = {root.parent for root in workspace_root_set}
@@ -255,20 +238,20 @@ def _ensure_workspace_roots() -> tuple[dict[str, Path], int]:
     return roots, len(roots)
 
 
-def _cleanup_orphan_runtime_dirs(workspace_roots: dict[str, Path]) -> int:
-    if not get_bootstrap_delete_orphan_dirs():
-        logger.info("runtime bootstrap orphan directory cleanup disabled")
+def _cleanup_unindexed_runtime_dirs(workspace_roots: dict[str, Path]) -> int:
+    if not get_bootstrap_delete_unindexed_dirs():
+        logger.info("runtime bootstrap unindexed directory cleanup disabled")
         return 0
     workspace_root_set = {root.resolve() for root in workspace_roots.values()}
     removed_count = 0
-    removed_count += _cleanup_orphan_workspace_dirs(workspace_root_set)
-    removed_count += _cleanup_orphan_story_dirs(workspace_roots)
-    removed_count += _cleanup_orphan_session_dirs(workspace_roots)
-    logger.info("runtime bootstrap orphan directory cleanup finished removed_count=%s", removed_count)
+    removed_count += _cleanup_unindexed_workspace_dirs(workspace_root_set)
+    removed_count += _cleanup_unindexed_story_dirs(workspace_roots)
+    removed_count += _cleanup_unindexed_session_dirs(workspace_roots)
+    logger.info("runtime bootstrap unindexed directory cleanup finished removed_count=%s", removed_count)
     return removed_count
 
 
-def _cleanup_orphan_workspace_dirs(workspace_root_set: set[Path]) -> int:
+def _cleanup_unindexed_workspace_dirs(workspace_root_set: set[Path]) -> int:
     removed_count = 0
     candidate_parents = {root.parent for root in workspace_root_set}
     for parent in sorted(candidate_parents):
@@ -280,12 +263,12 @@ def _cleanup_orphan_workspace_dirs(workspace_root_set: set[Path]) -> int:
             child_root = child.resolve()
             if child_root in workspace_root_set or not _looks_like_workspace_root(child_root):
                 continue
-            if _remove_orphan_dir(child_root, kind="workspace"):
+            if _remove_unindexed_dir(child_root, kind="workspace"):
                 removed_count += 1
     return removed_count
 
 
-def _cleanup_orphan_story_dirs(workspace_roots: dict[str, Path]) -> int:
+def _cleanup_unindexed_story_dirs(workspace_roots: dict[str, Path]) -> int:
     indexed_story_ids: dict[str, set[str]] = {}
     for story in StoryRecord.select(StoryRecord.id, StoryRecord.workspace):
         indexed_story_ids.setdefault(str(story.workspace_id), set()).add(str(story.id))
@@ -297,12 +280,12 @@ def _cleanup_orphan_story_dirs(workspace_roots: dict[str, Path]) -> int:
         allowed = indexed_story_ids.get(workspace_id, set())
         for child in sorted(stories_dir.iterdir()):
             if child.is_dir() and child.name not in allowed:
-                if _remove_orphan_dir(child, kind="story", workspace_id=workspace_id, story_id=child.name):
+                if _remove_unindexed_dir(child, kind="story", workspace_id=workspace_id, story_id=child.name):
                     removed_count += 1
     return removed_count
 
 
-def _cleanup_orphan_session_dirs(workspace_roots: dict[str, Path]) -> int:
+def _cleanup_unindexed_session_dirs(workspace_roots: dict[str, Path]) -> int:
     indexed_sessions: dict[tuple[str, str], set[str]] = {}
     for session in SessionRecord.select(SessionRecord.id, SessionRecord.workspace, SessionRecord.story):
         key = (str(session.workspace_id), str(session.story_id))
@@ -318,7 +301,7 @@ def _cleanup_orphan_session_dirs(workspace_roots: dict[str, Path]) -> int:
             allowed = indexed_sessions.get((workspace_id, story_dir.name), set())
             for session_dir in sorted(story_dir.iterdir()):
                 if session_dir.is_dir() and session_dir.name not in allowed:
-                    if _remove_orphan_dir(
+                    if _remove_unindexed_dir(
                         session_dir,
                         kind="session",
                         workspace_id=workspace_id,
@@ -333,7 +316,7 @@ def _looks_like_workspace_root(path: Path) -> bool:
     return (path / _STORIES_DIR).is_dir()
 
 
-def _remove_orphan_dir(
+def _remove_unindexed_dir(
     path: Path,
     *,
     kind: str,
@@ -347,7 +330,7 @@ def _remove_orphan_dir(
         return False
     except Exception:
         logger.exception(
-            "failed to remove orphan runtime directory kind=%s workspace_id=%s story_id=%s session_id=%s path=%s",
+            "failed to remove unindexed runtime directory kind=%s workspace_id=%s story_id=%s session_id=%s path=%s",
             kind,
             workspace_id or "<unknown>",
             story_id or "<unknown>",
@@ -356,7 +339,7 @@ def _remove_orphan_dir(
         )
         return False
     logger.warning(
-        "removed orphan runtime directory kind=%s workspace_id=%s story_id=%s session_id=%s path=%s",
+        "removed unindexed runtime directory kind=%s workspace_id=%s story_id=%s session_id=%s path=%s",
         kind,
         workspace_id or "<unknown>",
         story_id or "<unknown>",

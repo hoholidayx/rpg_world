@@ -179,13 +179,7 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
     assert (await backend.list_stories("workspace"))[0]["first_message"] == "First"
     assert (await backend.list_sessions("workspace", 1))[0]["id"] == "session"
     assert (await backend.create_session("workspace", 1, title="Title"))["title"] == "Title"
-    monkeypatch.setattr(
-        data_manager_module,
-        "scan_orphan_runtime_data",
-        lambda database: {"orphan_directories": [], "unindexed_status_files": []},
-    )
     assert (await backend.get_session("session"))["id"] == "session"
-    assert await backend.scan_orphan_runtime() == {"orphan_directories": [], "unindexed_status_files": []}
     assert (await backend.list_characters("workspace"))[0]["name"] == "Character"
     assert (await backend.list_characters("workspace"))[0]["details"][0]["tags"] == ["tag"]
     assert (await backend.create_character("workspace", name="New"))["name"] == "New"

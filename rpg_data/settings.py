@@ -7,15 +7,15 @@ from pathlib import Path
 
 DATABASE_PATH_ENV = "RPG_WORLD_DB_PATH"
 WORKSPACE_ROOT_BASE_ENV = "RPG_WORLD_WORKSPACE_ROOT_BASE"
-BOOTSTRAP_DELETE_ORPHAN_DIRS_ENV = "RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS"
+BOOTSTRAP_DELETE_UNINDEXED_DIRS_ENV = "RPG_WORLD_BOOTSTRAP_DELETE_UNINDEXED_DIRS"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DATABASE_PATH = _PROJECT_ROOT / "data" / "rpg_world.sqlite3"
 
 __all__ = [
     "DATABASE_PATH_ENV",
-    "BOOTSTRAP_DELETE_ORPHAN_DIRS_ENV",
+    "BOOTSTRAP_DELETE_UNINDEXED_DIRS_ENV",
     "WORKSPACE_ROOT_BASE_ENV",
-    "get_bootstrap_delete_orphan_dirs",
+    "get_bootstrap_delete_unindexed_dirs",
     "get_database_path",
     "get_workspace_root_base",
     "resolve_database_path",
@@ -24,10 +24,10 @@ __all__ = [
 ]
 
 
-def get_bootstrap_delete_orphan_dirs() -> bool:
-    """Return whether bootstrap should remove catalog-orphan runtime dirs."""
+def get_bootstrap_delete_unindexed_dirs() -> bool:
+    """Return whether bootstrap should remove catalog-unindexed runtime dirs."""
 
-    value = os.getenv(BOOTSTRAP_DELETE_ORPHAN_DIRS_ENV)
+    value = os.getenv(BOOTSTRAP_DELETE_UNINDEXED_DIRS_ENV)
     if value is None or str(value).strip() == "":
         return False
     normalized = str(value).strip().lower()

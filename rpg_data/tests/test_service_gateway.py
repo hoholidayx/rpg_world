@@ -8,7 +8,6 @@ import pytest
 from rpg_data.bootstrap import (
     delete_unindexed_runtime_item,
     delete_unindexed_runtime_items,
-    scan_orphan_runtime_data,
     scan_unindexed_runtime_data,
 )
 from rpg_data.repositories.records import SessionStatusTableRecord
@@ -104,84 +103,84 @@ def test_gateway_bootstrap_recreates_missing_session_status_copies(tmp_path: Pat
     assert [table.name for table in recovered] == ["世界线索", "北境森林当前场景"]
 
 
-def test_gateway_bootstrap_removes_orphan_runtime_dirs_when_enabled(
+def test_gateway_bootstrap_removes_unindexed_runtime_dirs_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "true")
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_UNINDEXED_DIRS", "true")
     db_path = tmp_path / "cleanup.sqlite3"
     gateway = get_data_service_gateway(db_path)
     assert gateway.catalog.get_session("s_forest001") is not None
 
     data_dir = tmp_path / "data"
-    orphan_workspace = data_dir / "orphan_workspace"
-    orphan_story = data_dir / "demo_workspace" / "stories" / "999"
-    orphan_session = data_dir / "demo_workspace" / "stories" / "1" / "s_orphan"
-    for directory in (orphan_workspace / "stories", orphan_story, orphan_session):
+    unindexed_workspace = data_dir / "unindexed_workspace"
+    unindexed_story = data_dir / "demo_workspace" / "stories" / "999"
+    unindexed_session = data_dir / "demo_workspace" / "stories" / "1" / "s_unindexed"
+    for directory in (unindexed_workspace / "stories", unindexed_story, unindexed_session):
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "marker.txt").write_text("orphan", encoding="utf-8")
+        (directory / "marker.txt").write_text("unindexed", encoding="utf-8")
 
     reset_data_service_gateways()
     caplog.set_level(logging.INFO, logger="rpg_data.bootstrap")
     get_data_service_gateway(db_path).catalog.list_workspaces()
 
-    assert not orphan_workspace.exists()
-    assert not orphan_story.exists()
-    assert not orphan_session.exists()
-    assert "removed orphan runtime directory kind=workspace" in caplog.text
-    assert "removed orphan runtime directory kind=story" in caplog.text
-    assert "removed orphan runtime directory kind=session" in caplog.text
-    assert "orphan_dirs_removed=3" in caplog.text
+    assert not unindexed_workspace.exists()
+    assert not unindexed_story.exists()
+    assert not unindexed_session.exists()
+    assert "removed unindexed runtime directory kind=workspace" in caplog.text
+    assert "removed unindexed runtime directory kind=story" in caplog.text
+    assert "removed unindexed runtime directory kind=session" in caplog.text
+    assert "unindexed_dirs_removed=3" in caplog.text
 
 
-def test_gateway_bootstrap_can_preserve_orphan_runtime_dirs(
+def test_gateway_bootstrap_can_preserve_unindexed_runtime_dirs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_UNINDEXED_DIRS", "false")
     db_path = tmp_path / "preserve.sqlite3"
     get_data_service_gateway(db_path).status.list_tables("s_forest001")
 
-    orphan_session = tmp_path / "data" / "demo_workspace" / "stories" / "1" / "s_orphan"
-    orphan_session.mkdir(parents=True, exist_ok=True)
-    (orphan_session / "marker.txt").write_text("orphan", encoding="utf-8")
+    unindexed_session = tmp_path / "data" / "demo_workspace" / "stories" / "1" / "s_unindexed"
+    unindexed_session.mkdir(parents=True, exist_ok=True)
+    (unindexed_session / "marker.txt").write_text("unindexed", encoding="utf-8")
 
     reset_data_service_gateways()
     caplog.set_level(logging.INFO, logger="rpg_data.bootstrap")
     get_data_service_gateway(db_path).catalog.list_workspaces()
 
-    assert orphan_session.is_dir()
-    assert "runtime bootstrap orphan directory cleanup disabled" in caplog.text
-    assert "orphan_dirs_removed=0" in caplog.text
+    assert unindexed_session.is_dir()
+    assert "runtime bootstrap unindexed directory cleanup disabled" in caplog.text
+    assert "unindexed_dirs_removed=0" in caplog.text
 
 
-def test_scan_orphan_runtime_data_reports_without_deleting(
+def test_scan_unindexed_runtime_data_reports_without_deleting(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
-    db_path = tmp_path / "scan_orphans.sqlite3"
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_UNINDEXED_DIRS", "false")
+    db_path = tmp_path / "scan_unindexed.sqlite3"
     gateway = get_data_service_gateway(db_path)
 
     workspace_root = tmp_path / "data" / "demo_workspace"
-    orphan_session = workspace_root / "stories" / "1" / "s_orphan"
-    orphan_session.mkdir(parents=True, exist_ok=True)
-    (orphan_session / "marker.txt").write_text("orphan", encoding="utf-8")
+    unindexed_session = workspace_root / "stories" / "1" / "s_unindexed"
+    unindexed_session.mkdir(parents=True, exist_ok=True)
+    (unindexed_session / "marker.txt").write_text("unindexed", encoding="utf-8")
 
-    scan = scan_orphan_runtime_data(gateway.database)
+    scan = scan_unindexed_runtime_data(gateway.database, "demo_workspace")
 
-    assert any(item["kind"] == "session" and item["session_id"] == "s_orphan" for item in scan["orphan_directories"])
-    assert scan["unindexed_status_files"] == []
-    assert orphan_session.is_dir()
+    assert scan is not None
+    assert any(item["kind"] == "session" and item["session_id"] == "s_unindexed" for item in scan["items"])
+    assert unindexed_session.is_dir()
 
 
 def test_workspace_unindexed_runtime_scan_and_delete(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS", "false")
+    monkeypatch.setenv("RPG_WORLD_BOOTSTRAP_DELETE_UNINDEXED_DIRS", "false")
     db_path = tmp_path / "delete_unindexed.sqlite3"
     gateway = get_data_service_gateway(db_path)
 

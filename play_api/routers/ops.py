@@ -24,24 +24,6 @@ class PlayDeleteConfirmationToken(BaseModel):
     expires_in_seconds: int = Field(alias="expiresInSeconds")
 
 
-class OrphanRuntimeItem(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    kind: str
-    workspace_id: str = Field(alias="workspaceId")
-    story_id: str = Field(alias="storyId")
-    session_id: str = Field(alias="sessionId")
-    relative_path: str = Field(alias="relativePath")
-    path: str
-
-
-class OrphanRuntimeScanResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    orphan_directories: list[OrphanRuntimeItem] = Field(alias="orphanDirectories")
-    unindexed_status_files: list[OrphanRuntimeItem] = Field(alias="unindexedStatusFiles")
-
-
 class UnindexedRuntimeItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -84,17 +66,6 @@ def _unindexed_delete_purpose(items: list[UnindexedRuntimeItem]) -> str:
 def _require_delete_token(token: str | None, purpose: str) -> None:
     if not consume_delete_confirmation_token(token, purpose):
         raise HTTPException(status_code=409, detail="delete confirmation token is required or invalid")
-
-
-def _scan_item(item: dict[str, str]) -> OrphanRuntimeItem:
-    return OrphanRuntimeItem(
-        kind=str(item.get("kind", "")),
-        workspace_id=str(item.get("workspace_id", "")),
-        story_id=str(item.get("story_id", "")),
-        session_id=str(item.get("session_id", "")),
-        relative_path=str(item.get("relative_path", "")),
-        path=str(item.get("path", "")),
-    )
 
 
 def _unindexed_scan_item(item: dict[str, str]) -> UnindexedRuntimeItem:
@@ -142,15 +113,6 @@ def _request_unindexed_items(request: UnindexedRuntimeDeleteRequest) -> list[Uni
     if any(item.workspace_id != workspace_id for item in items):
         raise HTTPException(status_code=400, detail="all unindexed runtime items must belong to the same workspace")
     return items
-
-
-@router.get("/orphan-runtime", response_model=OrphanRuntimeScanResponse)
-async def scan_orphan_runtime() -> OrphanRuntimeScanResponse:
-    scan = await get_data_manager_backend().scan_orphan_runtime()
-    return OrphanRuntimeScanResponse(
-        orphan_directories=[_scan_item(item) for item in scan.get("orphan_directories", [])],
-        unindexed_status_files=[_scan_item(item) for item in scan.get("unindexed_status_files", [])],
-    )
 
 
 @router.get("/unindexed-runtime", response_model=UnindexedRuntimeScanResponse)
