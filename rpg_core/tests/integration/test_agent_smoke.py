@@ -6,7 +6,7 @@ import re
 import pytest
 
 from rpg_core.agent.agent_types import StreamEventKind
-from rpg_core.context.rpg_context import Role
+from rpg_core.context.rpg_context import LayerType, Role
 
 pytestmark = pytest.mark.integration
 
@@ -106,6 +106,27 @@ async def test_command_help_and_context_are_available(integration_agent):
     assert sessions_result.handled is True
     assert "会话列表" in sessions_result.reply
     assert "integration_smoke" in sessions_result.reply
+
+
+@pytest.mark.asyncio
+async def test_status_tables_and_scene_enter_agent_context(integration_status_agent):
+    ctx = integration_status_agent._build_ctx_for_inspection("inspect status")
+    user_content = ctx.render_layer(LayerType.USER_MESSAGE)
+    status_content = ctx.render_layer(LayerType.STATUS_TABLES)
+
+    assert integration_status_agent._scene_tracker is not None
+    assert user_content is not None
+    assert "[scene]" in user_content
+    assert "位置: 集成测试大厅" in user_content
+    assert "在场人物: 测试者" in user_content
+    assert "inspect status" in user_content
+
+    assert [table["name"] for table in ctx.status_tables.tables] == ["集成线索"]
+    assert status_content is not None
+    assert "## 状态表格" in status_content
+    assert "### 集成线索" in status_content
+    assert "状态表已挂载" in status_content
+    assert "集成当前场景" not in status_content
 
 
 @pytest.mark.asyncio

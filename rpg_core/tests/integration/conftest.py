@@ -18,6 +18,7 @@ import pytest_asyncio
 from rpg_core import settings as settings_module
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.utils.watcher import get_watcher
+from rpg_data import models
 
 _INTEGRATION_MARKER = "integration"
 
@@ -118,6 +119,39 @@ async def integration_agent(integration_settings, integration_workspace, integra
         watcher.clear_all()
 
 
+@pytest_asyncio.fixture
+async def integration_status_agent(integration_settings, integration_workspace, integration_data_gateway):
+    session_id = "integration_status"
+    api_key = integration_settings.resolve_openai_api_key()
+    if not api_key:
+        pytest.skip(
+            "configure agent.api_key or INTEGRATION_OPENAI_API_KEY in rpg_core/tests/integration/settings.test.yaml"
+        )
+    _ensure_integration_session_with_status(integration_data_gateway, integration_workspace, session_id)
+    agent = RPGGameAgent(
+        session_id=session_id,
+        model=integration_settings.agent_model,
+        api_key=api_key,
+        base_url=integration_settings.agent_base_url,
+        max_tokens=integration_settings.agent_max_tokens,
+        temperature=integration_settings.agent_temperature,
+    )
+    await agent._ensure_initialized()
+
+    try:
+        yield agent
+    finally:
+        consumer = getattr(agent, "_consumer_task", None)
+        if consumer is not None:
+            consumer.cancel()
+            with suppress(asyncio.CancelledError):
+                await consumer
+
+        watcher = get_watcher()
+        watcher.stop()
+        watcher.clear_all()
+
+
 def _ensure_integration_session(gateway, integration_workspace, session_id: str) -> None:
     from rpg_data.repositories.session_repo import SessionRepository
     from rpg_data.repositories.story_repo import StoryRepository
@@ -140,3 +174,52 @@ def _ensure_integration_session(gateway, integration_workspace, session_id: str)
             story = stories.create(workspace_id, "Integration Story")
         if sessions.get(session_id) is None:
             sessions.create(workspace_id, story.id, session_id=session_id, title=session_id)
+
+
+def _ensure_integration_session_with_status(gateway, integration_workspace, session_id: str) -> None:
+    from rpg_data.repositories.session_repo import SessionRepository
+    from rpg_data.repositories.story_repo import StoryRepository
+    from rpg_data.repositories.workspace_repo import WorkspaceRepository
+
+    workspace_id = "integration_workspace"
+    database = gateway.database
+    workspaces = WorkspaceRepository(database)
+    stories = StoryRepository(database)
+    sessions = SessionRepository(database)
+
+    with database.atomic():
+        if workspaces.get(workspace_id) is None:
+            workspaces.create(workspace_id, "Integration Workspace", str(integration_workspace))
+        story = next(
+            (candidate for candidate in stories.list(workspace_id) if candidate.title == "Integration Status Story"),
+            None,
+        )
+        if story is None:
+            story = stories.create(workspace_id, "Integration Status Story")
+
+        scene_template = gateway.status.create_template(
+            workspace_id,
+            "集成当前场景",
+            status_kind=models.STATUS_KIND_SCENE,
+            rows=[
+                ["时间", "第 2 年 3 月 4 日 5 时"],
+                ["位置", "集成测试大厅"],
+                ["在场人物", "测试者"],
+            ],
+            sort_order=10,
+        )
+        normal_template = gateway.status.create_template(
+            workspace_id,
+            "集成线索",
+            rows=[
+                ["线索", "状态表已挂载"],
+            ],
+            sort_order=20,
+        )
+        gateway.status.mount_template(workspace_id, story.id, scene_template.id, sort_order=10)
+        gateway.status.mount_template(workspace_id, story.id, normal_template.id, sort_order=20)
+
+        if sessions.get(session_id) is None:
+            sessions.create(workspace_id, story.id, session_id=session_id, title=session_id)
+
+    gateway.status.initialize_session_tables(session_id)
