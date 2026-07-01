@@ -44,7 +44,7 @@
 - `rpg_data` 状态表采用 SQLite document 真源：模板表与会话表都在 SQL 行内保存封装后的 `document_json`，`status_kind` 只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。`rpg_data` 对外返回 `StatusTableDocument` / `StatusTableRow` 等 dataclass，不暴露原始 JSON 字符串作为正文数据。
 - 状态表模板通过 `rpg_story_status_tables` 挂载到 story。创建 session 时由 `CatalogService` 触发复制已挂载模板的 `document_json` 到 `rpg_session_status_tables`，`origin="template_copy"`；后续模板修改不影响已有 session 副本。会话原生运行时表直接写入 `rpg_session_status_tables`，`origin="session_native"`。
 - `rpg_data` bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；不要在 bootstrap 代码中硬编码 demo 或业务数据。默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，并确保日志能清楚输出删除/跳过结果。
-- Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|scene|commands|turn|stream`；workspace、lorebook、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
+- Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|scene|commands|turn|stream`；workspace、characters、lorebook、status-tables、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
 
 ## 测试要求
 - 所有外部调用使用 mock，避免真实 LLM、Telegram 或网络依赖。

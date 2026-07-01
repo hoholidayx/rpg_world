@@ -105,19 +105,18 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - CLI / Telegram 启动时也先通过 Agent service 的 `ensure_session(workspace_id, story_id, session_id, title)` 解析会话；`session_id` 为空时创建系统生成 ID 的 session，非空时只校验并加载既有 session。
 - `rpg_session_profiles` 保存会话标题、描述等可读字段；`rpg_sessions.id` 保持稳定，用作 URL 和 Agent session id。
 
-Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`scene`、`commands`、`turn`、`stream`。workspace、lorebook、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
+Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`scene`、`commands`、`turn`、`stream`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
 
-状态表在 `rpg_data` 中采用“SQL 完整索引 + CSV 内容源”：
+状态表在 `rpg_data` 中采用 SQLite document 真源：
 
-- SQLite 记录状态类型、模板、story 挂载、session 副本、排序、`builtin_key` 和 workspace-relative `relative_path`。
-- CSV 是 headers/rows 的唯一来源；service 不扫描目录补索引，也不把表格内容双写进 SQL。
-- 模板文件位于 `{workspace_root}/template_status/{type_name}/{table_name}.csv`。
-- session 副本位于 `{workspace_root}/stories/{story_id}/{session_id}/status/{type_name}/{table_name}.csv`。
-- `DataServiceGateway` 初始化时会按 SQL 索引 materialize workspace 目录、模板 CSV 和 session 副本；bootstrap 不写业务索引，不扫描目录发现表。
-- 缺失 CSV 的初始内容只从对应 SQL 行的 `metadata_json._bootstrap_csv` 还原；CSV 已存在时不覆盖。
-- Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录，以及 `template_status` / session `status` 下未索引的 CSV。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
-- `当前场景` 是 `builtin_key="scene"` 的特殊状态类型，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。
-- `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，索引中的 `relative_path` 必须是 workspace 相对路径，统一由 `rpg_data.settings` 解析并阻止路径逃逸。
+- 模板表和会话表都在 SQL 行内保存封装后的 `document_json`，对外通过 `StatusTableDocument` / `StatusTableRow` 等 dataclass 暴露，不把原始 JSON 字符串作为正文数据返回。
+- SQLite 同时记录模板、story 挂载、session 副本、来源关系、排序、`metadata_json` 和 `status_kind`；`status_kind` 当前只允许 `scene` / `normal`。
+- 状态表模板属于 workspace，通过 `rpg_story_status_tables` 挂载到 story；创建 session 时会把当时已挂载模板的 `document_json` 复制到 `rpg_session_status_tables`，`origin="template_copy"`。
+- 模板后续修改不影响已有 session 副本；运行时直接新建的会话表写入 `rpg_session_status_tables`，`origin="session_native"`。
+- `DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；service 不扫描目录补业务索引，也不维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。
+- Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
+- `当前场景` 是 `status_kind="scene"` 的特殊状态表，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。
+- `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，workspace/story/session 运行目录使用 workspace-relative 路径时统一由 `rpg_data.settings` 解析并阻止路径逃逸。
 
 ### Telegram 渠道
 
@@ -140,7 +139,7 @@ Telegram 渠道当前支持：
 | `scene/` | 场景状态跟踪（时间/地点/属性） |
 | `character/` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `lorebook/` | 世界书只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
-| `status/` | 状态表薄适配，通过 `rpg_data` 按 session 读取 SQL 索引和 CSV 内容源 |
+| `status/` | 状态表薄适配，通过 `rpg_data` 按 session 读取 SQLite document 真源 |
 | `summary/` | 对话摘要压缩 |
 | 顶层 `llm_service/` | LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析与本地 llama runtime |
 
@@ -164,7 +163,7 @@ Telegram 渠道当前支持：
 4. Story Memory / Recalled Memory / Status Tables / RP Modules。
 5. User Message。
 
-`当前场景.csv` 不作为普通状态表进入 `STATUS_TABLES`。它由 `SceneTracker` 作为高优先级 user prefix 合入最终用户消息，确保故事时间、地点和场景状态被模型重点关注，并随 user message 进入历史用于后续有序归纳。`rpg_data` 用 `builtin_key="scene"` 表达这一类特殊状态；未挂载到 story 时 session 不会感知 scene，也不会注册 scene 工具。
+`当前场景` 不作为普通状态表进入 `STATUS_TABLES`。它由 `SceneTracker` 作为高优先级 user prefix 合入最终用户消息，确保故事时间、地点和场景状态被模型重点关注，并随 user message 进入历史用于后续有序归纳。`rpg_data` 用 `status_kind="scene"` 表达这一类特殊状态；未挂载到 story 时 session 不会感知 scene，也不会注册 scene 工具。
 
 ## 记忆系统
 
@@ -460,7 +459,7 @@ base:
 `rerank_score_weight` 是排序业务参数，留在 `rpg_core/settings.yaml`；不要写入 `llm_service/llm.yaml` 的 provider 配置。
 
 工作区不再放在旧 JSON 配置中。API/WebUI 通过请求参数或 catalog session 解析 workspace；
-Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace_id + story_id` 绑定故事。`session_id` 可留空，此时启动时创建系统生成 ID 的默认 session；非空时只校验并加载既有 session。旧 `workspace` 字段、`cli_direct` 默认 ID 和用户自定义 session ID 创建入口都不再保留。`rpg_data` 中的 workspace 根目录来自 `rpg_workspaces.root_path`；状态表文件索引只保存相对路径，不保存绝对路径。
+Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace_id + story_id` 绑定故事。`session_id` 可留空，此时启动时创建系统生成 ID 的默认 session；非空时只校验并加载既有 session。旧 `workspace` 字段、`cli_direct` 默认 ID 和用户自定义 session ID 创建入口都不再保留。`rpg_data` 中的 workspace 根目录来自 `rpg_workspaces.root_path`；workspace/story/session 运行目录使用 workspace-relative 路径时由 `rpg_data.settings` 解析并阻止路径逃逸。
 
 ## Session ID 规则
 
@@ -486,14 +485,14 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 - `rpg_core/tests/`：命令分发、上下文、scene、session、summary、AgentManager。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank。
 - `llm_service/tests/`：LLM provider 配置、manager 路由与 llama 本地 runtime 协议。
-- `play_api/tests/`：Play API workspace/session/scene/turn/stream、lorebook 和 ops 等契约。
+- `play_api/tests/`：Play API workspace/session/scene/turn/stream、characters、lorebook、status-tables 和 ops 等契约。
 
 Telegram 测试已覆盖会话菜单、命令规范化、系统生成 ID 的创建流程、流式编辑节流、
 Markdown 渲染和长文本分块。后续修改 Telegram 行为必须补对应测试。
 
 ## 当前实现优先级
 
-1. **P0：Play WebUI 主体验与 Play API 契约**。优先保障 session 房间、SSE/turn、workspace、lorebook、ops 和状态维护等 Web 主链路。
+1. **P0：Play WebUI 主体验与 Play API 契约**。优先保障 session 房间、SSE/turn、workspace、characters、lorebook、status-tables、ops 等 Web 主链路。
 2. **P1：核心数据、上下文与记忆链路**。确保角色卡、世界书、状态表、summary、story memory 和 rp_memory 在全局 `session_id` 语义下稳定可用。
 3. **P2：Telegram/CLI 轻量入口稳定性**。保持真实 Telegram 长轮询、会话菜单、stream/non-stream、异常回复、命令菜单和运行配置可靠。
 4. **P3：玩法模块与沉浸式细节**。骰子、战斗、物品等新增体验型能力优先沉淀到 Play WebUI，并通过受控工具和状态读写接入核心。

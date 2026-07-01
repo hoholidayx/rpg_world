@@ -11,7 +11,7 @@ RPG World 的产品定位从“Telegram 优先的 RP 聊天入口”升级为“
 - **Play WebUI**：前台游玩端，面向玩家，提供沉浸式 RP 聊天、场景 HUD、角色/NPC 信息、剧情日志、快捷行动和玩法模块交互。
 - **Telegram**：保留为轻量入口、推送通知、快速回复和 WebUI 不可用时的兜底交互，不承载复杂沉浸式 UI。
 
-Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。Play API 当前挂载 sessions、workspace、lorebook、ops 管理接口；不要恢复 Dashboard API/WebUI。
+Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口。前端不得复制核心业务规则；渠道之间必须共享 workspace/session 映射，避免故事分裂。Play API 当前挂载 sessions、workspace、characters、lorebook、status-tables、ops 管理接口；不要恢复 Dashboard API/WebUI。
 
 Play WebUI 的会话定位采用 `rpg_data` catalog 中的全局短 `session_id`。创建 session 时绑定 `workspace_id + story_id`；进入会话后，前端 URL 和会话内请求只传 `session_id`，由 Play API 反查 workspace/story 并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
 
@@ -104,13 +104,17 @@ rpg_world/
 │   ├── backends/                 #   AgentClient / rpg_data 后端适配
 │   └── routers/
 │       ├── sessions.py           #   session APIs + history/scene/commands/turn/stream
+│       ├── characters.py         #   角色库 + story 挂载 APIs
+│       ├── lorebook.py           #   世界书 + story 挂载 APIs
+│       ├── status_tables.py      #   状态表模板、story 挂载、session 表 APIs
+│       ├── ops.py                #   运维清理和删除确认 APIs
 │       ├── chat.py               #   legacy placeholder；不要恢复为主入口
 │       ├── commands.py           #   legacy placeholder；不要恢复为主入口
 │       ├── scene.py              #   legacy placeholder；不要恢复为主入口
 │       └── workspace.py          #   workspace APIs
 ├── play_webui/                   # Play WebUI：Next.js + React + TypeScript
 │   ├── src/app/                  #   App Router
-│   ├── src/features/             #   home/session/scene/stream features
+│   ├── src/features/             #   home/session/characters/worldbook/status/settings features
 │   ├── src/lib/api/              #   Play API client
 │   └── src/components/           #   Timeline、Scene HUD、输入区等
 └── data/                         # 运行数据文件
@@ -417,6 +421,10 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 |---|---|---|
 | workspace | `play_api/routers/workspace.py` | 工作区列表 |
 | sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取，以及 `history/scene/commands/turn/stream` 子资源 |
+| characters | `play_api/routers/characters.py` | workspace 角色库、角色详情、story 挂载 |
+| lorebook | `play_api/routers/lorebook.py` | workspace 世界书条目、story 挂载 |
+| status-tables | `play_api/routers/status_tables.py` | 状态表模板、story 挂载、session 运行表 |
+| ops | `play_api/routers/ops.py` | 未索引运行目录扫描、删除确认与运维清理 |
 | scene / commands / chat | 对应 router 文件 | legacy placeholder，保留模块名但不作为主入口 |
 
 - Play API 通过 `agent_service.client.AgentClient` 访问 Agent 服务。
@@ -437,7 +445,7 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 
 Agent runtime 会话消息和剧情记忆由 `rpg_data` 管理；摘要、persistent memory 和 memory 文件集中在
 `CatalogService.get_session_runtime_dir(session_id)` 返回的 `{workspace_root}/stories/{story_id}/{session_id}/` 下。
-`rpg_data` 管理的状态表 session 副本位于该目录的 `status/` 子目录，由 SQL 索引记录 workspace-relative 路径。
+`rpg_data` 管理的状态表 session 副本位于 SQLite `rpg_session_status_tables.document_json`，不再依赖该目录下的 `status/` CSV 或 workspace-relative 状态表路径。
 
 `session_id` 只能使用英文字母、数字和下划线，规则为 `^[A-Za-z0-9_]+$`。所有创建入口都由 `rpg_data` 生成 ID；不要恢复 `cli_direct`、`telegram_<chat_id>` 这类渠道自造默认 ID，也不要允许用户输入新 session ID。
 
@@ -508,11 +516,11 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 - `rpg_core/tests/`：命令分发、上下文、scene、session、summary、AgentManager。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank。
 - `llm_service/tests/`：LLM provider 配置、manager 路由与 llama 本地 runtime 协议。
-- `play_api/tests/`：Play API workspace/session/scene/turn/stream、lorebook 和 ops 等契约。
+- `play_api/tests/`：Play API workspace/session/scene/turn/stream、characters、lorebook、status-tables 和 ops 等契约。
 
 ## 当前实现优先级
 
-1. **P0：Play WebUI 主体验与 Play API 契约**。优先保障 session 房间、SSE/turn、workspace、lorebook、ops 和状态维护等 Web 主链路。
+1. **P0：Play WebUI 主体验与 Play API 契约**。优先保障 session 房间、SSE/turn、workspace、characters、lorebook、status-tables、ops 等 Web 主链路。
 2. **P1：核心数据、上下文与记忆链路**。确保角色卡、世界书、状态表、summary、story memory 和 rp_memory 在全局 `session_id` 语义下稳定可用。
 3. **P2：Telegram/CLI 轻量入口稳定性**。保持真实 Telegram 长轮询、会话菜单、stream/non-stream、异常回复、命令菜单和运行配置可靠。
 4. **P3：玩法模块与沉浸式细节**。骰子、战斗、物品等新增体验型能力优先沉淀到 Play WebUI，并通过受控工具和状态读写接入核心。
