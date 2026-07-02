@@ -133,6 +133,18 @@ def test_repositories_create_workspace_story_session_and_query_sessions(
         assert first_story.story_prompt == "固定故事提示词"
         assert first_story.first_message == "你在北境森林醒来。"
         assert [row.title for row in rpg_stories.list("campaign")] == ["北境森林", "学院旧梦"]
+        updated_story = rpg_stories.update(
+            first_story.id,
+            summary="新的短摘要",
+            story_prompt="更新后的固定故事提示词",
+            first_message="你在雾港醒来。",
+        )
+        assert updated_story is not None
+        assert updated_story.title == "北境森林"
+        assert updated_story.summary == "新的短摘要"
+        assert updated_story.story_prompt == "更新后的固定故事提示词"
+        assert updated_story.first_message == "你在雾港醒来。"
+        assert updated_story.version == first_story.version + 1
 
         workspace_sessions = rpg_sessions.list(workspace_id="campaign")
         first_story_sessions = rpg_sessions.list(story_id=first_story.id)

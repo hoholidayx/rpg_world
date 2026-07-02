@@ -38,7 +38,7 @@ const AppShellContext = createContext<AppShellState | null>(null)
 const navItems = [
   { label: '首页', icon: Home, href: '/' },
   { label: '最近会话', icon: Clock3, href: '/#recent-sessions' },
-  { label: '故事库', icon: BookOpen, href: '/#stories' },
+  { label: '故事库', icon: BookOpen, href: '/stories' },
   { label: '角色库', icon: UsersRound, href: '/characters' },
   { label: '世界设定', icon: Globe2, href: '/worldbook' },
   { label: '状态表', icon: TableProperties, href: '/status-tables' },

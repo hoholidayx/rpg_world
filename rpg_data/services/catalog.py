@@ -80,6 +80,55 @@ class CatalogService:
         )
         return stories
 
+    def create_story(
+        self,
+        workspace_id: str,
+        *,
+        title: str,
+        summary: str = "",
+        story_prompt: str = "",
+        first_message: str = "",
+    ) -> models.Story | None:
+        workspace = self._workspaces.get(workspace_id)
+        if workspace is None:
+            logger.warning("create story rejected missing workspace_id=%s", workspace_id)
+            return None
+        logger.info("creating story workspace_id=%s title=%s", workspace_id, title)
+        with self._database.atomic():
+            story = self._stories.create(
+                workspace_id,
+                title,
+                summary=summary,
+                story_prompt=story_prompt,
+                first_message=first_message,
+            )
+        logger.info("created story story_id=%s workspace_id=%s", story.id, workspace_id)
+        return story
+
+    def update_story(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        title: str | None = None,
+        summary: str | None = None,
+        story_prompt: str | None = None,
+        first_message: str | None = None,
+    ) -> models.Story | None:
+        story = self._stories.get(story_id)
+        if story is None or story.workspace_id != workspace_id:
+            logger.warning("update story rejected missing story workspace_id=%s story_id=%s", workspace_id, story_id)
+            return None
+        logger.info("updating story workspace_id=%s story_id=%s", workspace_id, story_id)
+        with self._database.atomic():
+            return self._stories.update(
+                story_id,
+                title=title,
+                summary=summary,
+                story_prompt=story_prompt,
+                first_message=first_message,
+            )
+
     def create_session(
         self,
         workspace_id: str,

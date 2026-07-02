@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from peewee import Database
+from peewee import Database, SQL
 
 from rpg_data import models
 from rpg_data.repositories.records import StoryRecord, bind_database
@@ -40,6 +40,36 @@ class StoryRepository:
         return [to_story(row) for row in query.order_by(StoryRecord.created_at, StoryRecord.id)]
 
     def get(self, story_id: int) -> models.Story | None:
+        row = get_or_none(StoryRecord, story_id)
+        return to_story(row) if row is not None else None
+
+    def update(
+        self,
+        story_id: int,
+        *,
+        title: str | None = None,
+        summary: str | None = None,
+        story_prompt: str | None = None,
+        first_message: str | None = None,
+    ) -> models.Story | None:
+        fields: dict[str, object] = {}
+        if title is not None:
+            fields["title"] = title
+        if summary is not None:
+            fields["summary"] = summary
+        if story_prompt is not None:
+            fields["story_prompt"] = story_prompt
+        if first_message is not None:
+            fields["first_message"] = first_message
+        if not fields:
+            row = get_or_none(StoryRecord, story_id)
+            return to_story(row) if row is not None else None
+
+        fields["version"] = StoryRecord.version + 1
+        fields["updated_at"] = SQL("CURRENT_TIMESTAMP")
+        updated = StoryRecord.update(**fields).where(StoryRecord.id == story_id).execute()
+        if not updated:
+            return None
         row = get_or_none(StoryRecord, story_id)
         return to_story(row) if row is not None else None
 

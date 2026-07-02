@@ -54,6 +54,49 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert stories.json()[0]["firstMessage"] == ""
     assert "description" not in stories.json()[0]
     assert client.get("/play-api/v1/workspaces/missing/stories").status_code == 404
+    new_story = client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories",
+        json={
+            "title": "雾港钟楼",
+            "summary": "潮湿港口的失踪案。",
+            "storyPrompt": "固定故事提示词，仅存储展示。",
+            "firstMessage": "你听见远处钟声。",
+        },
+    )
+    assert new_story.status_code == 200
+    assert new_story.json()["workspace"] == "demo_workspace"
+    assert new_story.json()["title"] == "雾港钟楼"
+    assert new_story.json()["summary"] == "潮湿港口的失踪案。"
+    assert new_story.json()["storyPrompt"] == "固定故事提示词，仅存储展示。"
+    assert new_story.json()["firstMessage"] == "你听见远处钟声。"
+    assert client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories",
+        json={"title": " "},
+    ).status_code == 422
+    assert client.post(
+        "/play-api/v1/workspaces/missing/stories",
+        json={"title": "不存在 workspace 的故事"},
+    ).status_code == 404
+    patched_story = client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/stories/{new_story.json()['id']}",
+        json={
+            "summary": "钟楼与沉船旧账。",
+            "storyPrompt": "更新后的固定故事提示词。",
+        },
+    )
+    assert patched_story.status_code == 200
+    assert patched_story.json()["title"] == "雾港钟楼"
+    assert patched_story.json()["summary"] == "钟楼与沉船旧账。"
+    assert patched_story.json()["storyPrompt"] == "更新后的固定故事提示词。"
+    assert patched_story.json()["firstMessage"] == "你听见远处钟声。"
+    assert client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/stories/{new_story.json()['id']}",
+        json={"title": ""},
+    ).status_code == 422
+    assert client.patch(
+        "/play-api/v1/workspaces/demo_workspace/stories/99999",
+        json={"summary": "missing"},
+    ).status_code == 404
 
     assert client.get("/play-api/v1/sessions").status_code == 422
     assert client.get(

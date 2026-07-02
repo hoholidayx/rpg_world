@@ -43,6 +43,48 @@ class DataManagerBackend:
             return None
         return [_story_summary(story) for story in stories]
 
+    async def create_story(
+        self,
+        workspace: str,
+        *,
+        title: str,
+        summary: str = "",
+        story_prompt: str = "",
+        first_message: str = "",
+    ) -> dict[str, object] | None:
+        story = self._gateway.catalog.create_story(
+            workspace,
+            title=title,
+            summary=summary,
+            story_prompt=story_prompt,
+            first_message=first_message,
+        )
+        if story is None:
+            return None
+        return _story_summary(story)
+
+    async def update_story(
+        self,
+        workspace: str,
+        story_id: int,
+        *,
+        title: str | None = None,
+        summary: str | None = None,
+        story_prompt: str | None = None,
+        first_message: str | None = None,
+    ) -> dict[str, object] | None:
+        story = self._gateway.catalog.update_story(
+            workspace,
+            story_id,
+            title=title,
+            summary=summary,
+            story_prompt=story_prompt,
+            first_message=first_message,
+        )
+        if story is None:
+            return None
+        return _story_summary(story)
+
     async def list_sessions(
         self,
         workspace: str,

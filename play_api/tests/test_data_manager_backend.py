@@ -16,6 +16,48 @@ class FakeCatalog:
     def list_stories(self, workspace: str):
         return [models.Story(1, workspace, "Story", story_prompt="Prompt", first_message="First")]
 
+    def create_story(
+        self,
+        workspace: str,
+        *,
+        title: str,
+        summary: str = "",
+        story_prompt: str = "",
+        first_message: str = "",
+    ):
+        if workspace != "workspace":
+            return None
+        return models.Story(
+            2,
+            workspace,
+            title,
+            summary=summary,
+            story_prompt=story_prompt,
+            first_message=first_message,
+        )
+
+    def update_story(
+        self,
+        workspace: str,
+        story_id: int,
+        *,
+        title: str | None = None,
+        summary: str | None = None,
+        story_prompt: str | None = None,
+        first_message: str | None = None,
+    ):
+        if workspace != "workspace":
+            return None
+        return models.Story(
+            story_id,
+            workspace,
+            title or "Story",
+            summary=summary or "Updated summary",
+            story_prompt=story_prompt or "Prompt",
+            first_message=first_message or "First",
+            version=2,
+        )
+
     def list_sessions(self, workspace: str, story_id: int):
         return [models.Session("session", workspace, story_id)]
 
@@ -177,6 +219,10 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
     assert (await backend.list_stories("workspace"))[0]["title"] == "Story"
     assert (await backend.list_stories("workspace"))[0]["story_prompt"] == "Prompt"
     assert (await backend.list_stories("workspace"))[0]["first_message"] == "First"
+    assert (await backend.create_story("workspace", title="New Story"))["title"] == "New Story"
+    assert (await backend.create_story("missing", title="New Story")) is None
+    assert (await backend.update_story("workspace", 1, summary="Updated summary"))["summary"] == "Updated summary"
+    assert (await backend.update_story("missing", 1, summary="Updated summary")) is None
     assert (await backend.list_sessions("workspace", 1))[0]["id"] == "session"
     assert (await backend.create_session("workspace", 1, title="Title"))["title"] == "Title"
     assert (await backend.get_session("session"))["id"] == "session"
