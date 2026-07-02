@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play WebUI Session Center Mockup</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --soft: #f1f5f9;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --line: #dbe3ef;
+      --violet: #5b21b6;
+      --violet-fill: #4f46e5;
+      --violet-soft: #f3e8ff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --sky: #0369a1;
+      --sky-soft: #e0f2fe;
+      --rose: #be123c;
+      --rose-soft: #ffe4e6;
+      --shadow: 0 16px 44px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 3px solid rgba(124, 58, 237, 0.22);
+      outline-offset: 2px;
+    }
+
+    .session-center {
+      width: min(1440px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 32px 0 44px;
+    }
+
+    .page-bar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: #10b981;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      max-width: 840px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      color: var(--ink);
+      padding: 0 14px;
+      font-weight: 900;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    }
+
+    .button.primary {
+      border-color: var(--violet-fill);
+      background: var(--violet-fill);
+      color: white;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto auto;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .search {
+      position: relative;
+    }
+
+    .search span {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--faint);
+      font-weight: 900;
+    }
+
+    .search input,
+    .select {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      color: var(--ink);
+      outline: none;
+    }
+
+    .search input {
+      padding: 0 14px 0 42px;
+    }
+
+    .select {
+      padding: 0 34px 0 12px;
+      font-weight: 800;
+    }
+
+    .segmented {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+    }
+
+    .segment {
+      min-height: 34px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 12px;
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .segment.active {
+      background: var(--ink);
+      color: white;
+    }
+
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 15px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .metric-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      margin-top: 10px;
+      font-size: 28px;
+      font-weight: 950;
+      line-height: 1;
+    }
+
+    .metric-note {
+      margin-top: 8px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .focus-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 18px;
+      margin-bottom: 18px;
+      align-items: stretch;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    .panel-head p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .continue-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .continue-card {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      cursor: pointer;
+      transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+    }
+
+    .continue-card:hover,
+    .continue-card.selected {
+      border-color: #7c3aed;
+      box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.13), var(--shadow);
+      transform: translateY(-2px);
+    }
+
+    .art {
+      position: relative;
+      height: 110px;
+      overflow: hidden;
+      background:
+        linear-gradient(160deg, rgba(15, 23, 42, 0.18), rgba(15, 23, 42, 0.82)),
+        linear-gradient(28deg, #1e293b 0 24%, #475569 24% 37%, #94a3b8 37% 46%, #0f172a 46% 100%);
+    }
+
+    .art.market {
+      background:
+        linear-gradient(160deg, rgba(17, 24, 39, 0.12), rgba(17, 24, 39, 0.86)),
+        linear-gradient(32deg, #27160b 0 26%, #92400e 26% 34%, #334155 34% 58%, #0f766e 58% 100%);
+    }
+
+    .art.forest {
+      background:
+        linear-gradient(160deg, rgba(12, 18, 16, 0.1), rgba(12, 18, 16, 0.82)),
+        linear-gradient(24deg, #064e3b 0 35%, #166534 35% 45%, #713f12 45% 58%, #fbbf24 58% 100%);
+    }
+
+    .art:before,
+    .art:after {
+      content: "";
+      position: absolute;
+      display: block;
+    }
+
+    .art:before {
+      width: 92px;
+      height: 68px;
+      left: 18px;
+      bottom: -14px;
+      border-radius: 48% 48% 0 0;
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .art:after {
+      width: 26px;
+      height: 70px;
+      left: 74px;
+      bottom: 0;
+      border-radius: 14px 14px 0 0;
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: 56px 20px 0 -8px rgba(255, 255, 255, 0.4), 104px 16px 0 -10px rgba(255, 255, 255, 0.26);
+    }
+
+    .card-body {
+      padding: 13px;
+    }
+
+    .badge-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 9px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 25px;
+      border-radius: 999px;
+      padding: 0 9px;
+      font-size: 11px;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .badge.live {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .badge.paused {
+      background: var(--sky-soft);
+      color: var(--sky);
+    }
+
+    .badge.done {
+      background: var(--violet-soft);
+      color: var(--violet);
+    }
+
+    .small-id {
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .title {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 950;
+    }
+
+    .desc {
+      min-height: 42px;
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .card-meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .mini-stat {
+      border-radius: 7px;
+      background: var(--soft);
+      padding: 8px;
+      min-width: 0;
+    }
+
+    .mini-stat b {
+      display: block;
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mini-stat span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .inspector {
+      height: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .inspector-top {
+      height: 112px;
+    }
+
+    .inspector-body {
+      padding: 16px;
+    }
+
+    .inspector-title {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .inspector-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .field-block {
+      margin-top: 14px;
+    }
+
+    .field-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 950;
+      text-transform: uppercase;
+    }
+
+    .field-value {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfdff;
+      color: #334155;
+      padding: 10px 11px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .inspector-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px;
+      margin-top: 14px;
+    }
+
+    .table-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      overflow: hidden;
+    }
+
+    .session-list {
+      display: grid;
+    }
+
+    .session-row {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1.25fr) minmax(150px, .8fr) minmax(130px, .7fr) 96px 84px;
+      gap: 12px;
+      align-items: center;
+      min-height: 68px;
+      padding: 10px 14px;
+      border-top: 1px solid var(--line);
+      background: white;
+    }
+
+    .session-row.header {
+      min-height: 42px;
+      border-top: 0;
+      background: #fbfdff;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 950;
+      text-transform: uppercase;
+    }
+
+    .session-row[hidden] {
+      display: none;
+    }
+
+    .avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: var(--soft);
+      color: var(--muted);
+      font-weight: 950;
+    }
+
+    .avatar.teal {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .avatar.amber {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .avatar.violet {
+      background: var(--violet-soft);
+      color: var(--violet);
+    }
+
+    .row-main {
+      min-width: 0;
+    }
+
+    .row-title {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .row-meta {
+      display: block;
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .small-button {
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: white;
+      color: var(--ink);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .small-button.dark {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: white;
+    }
+
+    .empty-state {
+      display: none;
+      border-top: 1px dashed var(--line);
+      padding: 26px;
+      color: var(--muted);
+      text-align: center;
+      font-weight: 850;
+    }
+
+    .empty-state.visible {
+      display: block;
+    }
+
+    @media (max-width: 1180px) {
+      .focus-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .continue-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 980px) {
+      .session-row,
+      .session-row.header {
+        grid-template-columns: 34px minmax(0, 1fr) 86px;
+      }
+
+      .hide-mobile {
+        display: none;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .session-center {
+        width: min(100vw - 28px, 720px);
+        padding-top: 22px;
+      }
+
+      .page-bar,
+      .toolbar,
+      .metric-strip {
+        grid-template-columns: 1fr;
+      }
+
+      .actions,
+      .toolbar > * {
+        justify-content: stretch;
+      }
+
+      .button,
+      .select {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="session-center" aria-label="会话中心内容区">
+    <!--
+      设计取向：
+      不把入口只做成“最近会话”。更适合落地为“会话中心”：上方是继续游玩的最近会话，
+      下方是完整会话列表。当前 API 只能按 workspace + story_id 获取 sessions；
+      跨 story 最近会话需要前端聚合多个 story 的 listSessions，或新增后端聚合接口。
+    -->
+    <div class="page-bar">
+      <div>
+        <p class="eyebrow"><span class="dot"></span>demo_workspace / session center</p>
+        <h1>会话中心</h1>
+        <p class="subtitle">从最近游玩的 session 继续，也可以按 story、状态、更新时间检索完整会话列表；会话内链路只使用全局短 session_id。</p>
+      </div>
+      <div class="actions">
+        <button class="button" type="button">导出日志</button>
+        <button class="button primary" type="button">＋ 新建会话</button>
+      </div>
+    </div>
+
+    <div class="toolbar" aria-label="筛选会话">
+      <label class="search">
+        <span>⌕</span>
+        <input id="sessionSearch" placeholder="搜索 session_id、标题、故事、地点、摘要">
+      </label>
+      <div class="segmented" role="tablist" aria-label="会话状态">
+        <button class="segment active" type="button" data-filter="all">全部</button>
+        <button class="segment" type="button" data-filter="active">进行中</button>
+        <button class="segment" type="button" data-filter="paused">暂停</button>
+        <button class="segment" type="button" data-filter="done">完成</button>
+      </div>
+      <select class="select" aria-label="故事筛选" id="storyFilter">
+        <option value="all">全部故事</option>
+        <option value="雾港钟楼">雾港钟楼</option>
+        <option value="黑市边缘">黑市边缘</option>
+        <option value="永夜之森">永夜之森</option>
+      </select>
+    </div>
+
+    <div class="metric-strip">
+      <div class="metric">
+        <div class="metric-label"><span>活跃会话</span><span>Live</span></div>
+        <div class="metric-value">7</div>
+        <div class="metric-note">最近 7 天有更新</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><span>待继续</span><span>Resume</span></div>
+        <div class="metric-value">3</div>
+        <div class="metric-note">有未完成剧情钩子</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><span>跨渠道</span><span>Channel</span></div>
+        <div class="metric-value">4</div>
+        <div class="metric-note">Telegram/CLI 入口创建</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><span>需整理</span><span>Memory</span></div>
+        <div class="metric-value">2</div>
+        <div class="metric-note">建议摘要或回滚检查</div>
+      </div>
+    </div>
+
+    <div class="focus-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>继续游玩</h2>
+            <p>最近高价值入口，优先展示 active、刚更新、或有未完成场景目标的会话。</p>
+          </div>
+          <button class="button" type="button">刷新</button>
+        </div>
+        <div class="panel-body">
+          <div class="continue-grid">
+            <div class="continue-card selected" tabindex="0" role="button" data-session="s_forest001">
+              <div class="art"></div>
+              <div class="card-body">
+                <div class="badge-row"><span class="badge live">● 进行中</span><span class="small-id">s_forest001</span></div>
+                <span class="title">雾港序章：码头钟楼下的第一幕</span>
+                <p class="desc">钟楼第七声后，码头尽头出现不该亮起的灯。</p>
+                <div class="card-meta">
+                  <div class="mini-stat"><b>雾港钟楼</b><span>story</span></div>
+                  <div class="mini-stat"><b>码头区</b><span>scene</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="continue-card" tabindex="0" role="button" data-session="s_academy01">
+              <div class="art market"></div>
+              <div class="card-body">
+                <div class="badge-row"><span class="badge paused">暂停中</span><span class="small-id">s_academy01</span></div>
+                <span class="title">黑市边缘：旧灯笼里的第二把钥匙</span>
+                <p class="desc">账本背面多出新名字，旧灯笼仍在微微发热。</p>
+                <div class="card-meta">
+                  <div class="mini-stat"><b>黑市边缘</b><span>story</span></div>
+                  <div class="mini-stat"><b>黑市中堂</b><span>scene</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="continue-card" tabindex="0" role="button" data-session="s_forest_new">
+              <div class="art forest"></div>
+              <div class="card-body">
+                <div class="badge-row"><span class="badge live">● 新开局</span><span class="small-id">s_forest_new</span></div>
+                <span class="title">永夜之森：树根下的火光</span>
+                <p class="desc">苔藓亮起，远处传来湿木燃烧般的轻响。</p>
+                <div class="card-meta">
+                  <div class="mini-stat"><b>永夜之森</b><span>story</span></div>
+                  <div class="mini-stat"><b>林下入口</b><span>scene</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector" id="inspector" aria-label="选中会话详情">
+        <div class="art inspector-top"></div>
+        <div class="inspector-body">
+          <h2 class="inspector-title">雾港序章：码头钟楼下的第一幕</h2>
+          <p class="inspector-subtitle">s_forest001 · demo_workspace · story #1</p>
+          <div class="field-block">
+            <div class="field-label"><span>当前场景</span><span>scene</span></div>
+            <div class="field-value">时间：夜晚第七声钟后；地点：雾港码头区；在场：Bob、Alice；风险：灯塔异常。</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>最近回合</span><span>turn 38</span></div>
+            <div class="field-value">玩家追问旧船队债务，Bob 避开视线并提到“第十二分钟”。</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>运行状态</span><span>status tables</span></div>
+            <div class="field-value">scene 1 张，normal 3 张；session 副本来自 template_copy，后续独立更新。</div>
+          </div>
+          <div class="inspector-actions">
+            <button class="button primary" type="button">进入会话</button>
+            <button class="button" type="button">查看日志</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-panel">
+      <div class="panel-head">
+        <div>
+          <h2>完整会话列表</h2>
+          <p>完整列表更适合管理和调试；最近会话更适合作为继续游玩的入口。</p>
+        </div>
+        <button class="button" type="button">选择列</button>
+      </div>
+      <div class="session-list" id="sessionList">
+        <div class="session-row header">
+          <span></span>
+          <span>会话</span>
+          <span class="hide-mobile">故事</span>
+          <span class="hide-mobile">当前场景</span>
+          <span class="hide-mobile">状态</span>
+          <span>操作</span>
+        </div>
+
+        <div class="session-row" data-session="s_forest001" data-status="active" data-story="雾港钟楼" data-search="s_forest001 雾港序章 码头钟楼 第一幕 雾港钟楼 码头区 Bob Alice">
+          <div class="avatar teal">S</div>
+          <div class="row-main"><span class="row-title">雾港序章：码头钟楼下的第一幕</span><span class="row-meta">s_forest001 · 更新 2026/07/02 19:20 · Play WebUI</span></div>
+          <div class="row-main hide-mobile"><span class="row-title">雾港钟楼</span><span class="row-meta">story_id 1</span></div>
+          <div class="row-main hide-mobile"><span class="row-title">雾港码头区</span><span class="row-meta">Bob / Alice 在场</span></div>
+          <span class="badge live hide-mobile">● 进行中</span>
+          <button class="small-button dark" type="button">进入</button>
+        </div>
+
+        <div class="session-row" data-session="s_academy01" data-status="paused" data-story="黑市边缘" data-search="s_academy01 黑市边缘 旧灯笼 第二把钥匙 黑市中堂 账本">
+          <div class="avatar amber">S</div>
+          <div class="row-main"><span class="row-title">黑市边缘：旧灯笼里的第二把钥匙</span><span class="row-meta">s_academy01 · 更新 2026/07/01 23:42 · Telegram</span></div>
+          <div class="row-main hide-mobile"><span class="row-title">黑市边缘</span><span class="row-meta">story_id 2</span></div>
+          <div class="row-main hide-mobile"><span class="row-title">黑市中堂</span><span class="row-meta">账本线索未闭合</span></div>
+          <span class="badge paused hide-mobile">暂停中</span>
+          <button class="small-button dark" type="button">进入</button>
+        </div>
+
+        <div class="session-row" data-session="ledger_name" data-status="done" data-story="黑市边缘" data-search="ledger_name 黑市余波 账本背面的名字 密档房 已完成">
+          <div class="avatar violet">S</div>
+          <div class="row-main"><span class="row-title">黑市余波：账本背面的名字</span><span class="row-meta">ledger_name · 更新 2026/06/29 15:10 · Play WebUI</span></div>
+          <div class="row-main hide-mobile"><span class="row-title">黑市边缘</span><span class="row-meta">story_id 2</span></div>
+          <div class="row-main hide-mobile"><span class="row-title">密档房</span><span class="row-meta">分支已收束</span></div>
+          <span class="badge done hide-mobile">已完成</span>
+          <button class="small-button" type="button">查看</button>
+        </div>
+
+        <div class="session-row" data-session="s_forest_new" data-status="active" data-story="永夜之森" data-search="s_forest_new 永夜之森 树根 火光 林下入口 新开局">
+          <div class="avatar teal">S</div>
+          <div class="row-main"><span class="row-title">永夜之森：树根下的火光</span><span class="row-meta">s_forest_new · 更新 2026/06/28 17:05 · CLI</span></div>
+          <div class="row-main hide-mobile"><span class="row-title">永夜之森</span><span class="row-meta">story_id 3</span></div>
+          <div class="row-main hide-mobile"><span class="row-title">林下入口</span><span class="row-meta">开场 scene 初始化</span></div>
+          <span class="badge live hide-mobile">● 进行中</span>
+          <button class="small-button dark" type="button">进入</button>
+        </div>
+
+        <div class="empty-state" id="emptyState">没有匹配的会话</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const sessionDetails = {
+      s_forest001: {
+        title: '雾港序章：码头钟楼下的第一幕',
+        meta: 's_forest001 · demo_workspace · story #1',
+        art: '',
+        scene: '时间：夜晚第七声钟后；地点：雾港码头区；在场：Bob、Alice；风险：灯塔异常。',
+        turn: '玩家追问旧船队债务，Bob 避开视线并提到“第十二分钟”。',
+        status: 'scene 1 张，normal 3 张；session 副本来自 template_copy，后续独立更新。',
+      },
+      s_academy01: {
+        title: '黑市边缘：旧灯笼里的第二把钥匙',
+        meta: 's_academy01 · demo_workspace · story #2',
+        art: 'market',
+        scene: '时间：雨夜；地点：黑市中堂；在场：凯、米拉；风险：账本被第三方盯上。',
+        turn: '玩家接过铜钥匙后，旧灯笼短暂熄灭，摊主要求立刻交出抵押物。',
+        status: 'Telegram 创建，已 pin 到当前 chat；状态表 normal 2 张等待更新。',
+      },
+      s_forest_new: {
+        title: '永夜之森：树根下的火光',
+        meta: 's_forest_new · demo_workspace · story #3',
+        art: 'forest',
+        scene: '时间：黄昏后；地点：林下入口；在场：莉安；风险：苔藓光路正在消失。',
+        turn: '开场首条消息已生成，玩家尚未进入第一个正式行动。',
+        status: '新建 session 已复制 scene 与 normal 模板；暂无摘要。',
+      },
+    };
+
+    const searchInput = document.querySelector('#sessionSearch');
+    const storyFilter = document.querySelector('#storyFilter');
+    const filterButtons = [...document.querySelectorAll('.segment[data-filter]')];
+    const rows = [...document.querySelectorAll('.session-row[data-session]')];
+    const cards = [...document.querySelectorAll('.continue-card')];
+    const emptyState = document.querySelector('#emptyState');
+    const inspector = document.querySelector('#inspector');
+    let activeFilter = 'all';
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
+    }
+
+    function selectSession(sessionId) {
+      const detail = sessionDetails[sessionId] || sessionDetails.s_forest001;
+      cards.forEach((card) => card.classList.toggle('selected', card.dataset.session === sessionId));
+      inspector.innerHTML = `
+        <div class="art inspector-top ${detail.art}"></div>
+        <div class="inspector-body">
+          <h2 class="inspector-title">${escapeHtml(detail.title)}</h2>
+          <p class="inspector-subtitle">${escapeHtml(detail.meta)}</p>
+          <div class="field-block">
+            <div class="field-label"><span>当前场景</span><span>scene</span></div>
+            <div class="field-value">${escapeHtml(detail.scene)}</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>最近回合</span><span>turn</span></div>
+            <div class="field-value">${escapeHtml(detail.turn)}</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>运行状态</span><span>status tables</span></div>
+            <div class="field-value">${escapeHtml(detail.status)}</div>
+          </div>
+          <div class="inspector-actions">
+            <button class="button primary" type="button">进入会话</button>
+            <button class="button" type="button">查看日志</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function applyFilters() {
+      const query = searchInput.value.trim().toLowerCase();
+      const story = storyFilter.value;
+      let count = 0;
+      rows.forEach((row) => {
+        const matchesStatus = activeFilter === 'all' || row.dataset.status === activeFilter;
+        const matchesStory = story === 'all' || row.dataset.story === story;
+        const matchesQuery = !query || `${row.dataset.search} ${row.innerText}`.toLowerCase().includes(query);
+        const visible = matchesStatus && matchesStory && matchesQuery;
+        row.hidden = !visible;
+        if (visible) count += 1;
+      });
+      emptyState.classList.toggle('visible', count === 0);
+    }
+
+    filterButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        activeFilter = button.dataset.filter;
+        filterButtons.forEach((item) => item.classList.toggle('active', item === button));
+        applyFilters();
+      });
+    });
+
+    cards.forEach((card) => {
+      card.addEventListener('click', () => selectSession(card.dataset.session));
+      card.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectSession(card.dataset.session);
+        }
+      });
+    });
+
+    rows.forEach((row) => {
+      row.addEventListener('click', () => selectSession(row.dataset.session));
+    });
+
+    searchInput.addEventListener('input', applyFilters);
+    storyFilter.addEventListener('change', applyFilters);
+  </script>
+</body>
+</html>

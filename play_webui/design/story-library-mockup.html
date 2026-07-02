@@ -1,0 +1,1301 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play WebUI Story Library Mockup</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --surface-soft: #f1f5f9;
+      --surface-warm: #fff7ed;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --line: #dbe3ef;
+      --violet: #6d28d9;
+      --violet-soft: #f3e8ff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --rose: #be123c;
+      --rose-soft: #ffe4e6;
+      --shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 3px solid rgba(124, 58, 237, 0.22);
+      outline-offset: 2px;
+    }
+
+    .story-library {
+      width: min(1440px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 32px 0 44px;
+    }
+
+    .page-bar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .page-subtitle {
+      margin: 10px 0 0;
+      max-width: 760px;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--ink);
+      padding: 0 14px;
+      font-weight: 800;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    }
+
+    .button.primary {
+      border-color: #4f46e5;
+      background: #4f46e5;
+      color: white;
+    }
+
+    .button.icon {
+      width: 40px;
+      padding: 0;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto auto;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .search {
+      position: relative;
+    }
+
+    .search span {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--faint);
+      font-weight: 900;
+    }
+
+    .search input {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--ink);
+      padding: 0 14px 0 42px;
+      outline: none;
+    }
+
+    .search input:focus {
+      border-color: #a78bfa;
+      box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+    }
+
+    .segmented {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .segment {
+      min-height: 34px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 12px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .segment.active {
+      background: var(--ink);
+      color: white;
+    }
+
+    .select {
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--ink);
+      padding: 0 34px 0 12px;
+      font-weight: 700;
+    }
+
+    .summary-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+
+    .metric {
+      min-height: 92px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 16px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .metric-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .metric-value {
+      margin-top: 10px;
+      font-size: 28px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .metric-note {
+      margin-top: 8px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .story-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .story-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+      cursor: pointer;
+      transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+    }
+
+    .story-card:hover {
+      transform: translateY(-2px);
+      border-color: #a78bfa;
+      box-shadow: var(--shadow);
+    }
+
+    .story-card[hidden] {
+      display: none;
+    }
+
+    .story-card.selected {
+      border-color: #7c3aed;
+      box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.13), var(--shadow);
+    }
+
+    .cover {
+      position: relative;
+      height: 156px;
+      overflow: hidden;
+      background: #1e293b;
+    }
+
+    .cover.fog-harbor {
+      background:
+        linear-gradient(160deg, rgba(15, 23, 42, 0.2), rgba(15, 23, 42, 0.84)),
+        linear-gradient(28deg, #1e293b 0 24%, #475569 24% 37%, #94a3b8 37% 46%, #0f172a 46% 100%);
+    }
+
+    .cover.black-market {
+      background:
+        linear-gradient(160deg, rgba(17, 24, 39, 0.1), rgba(17, 24, 39, 0.88)),
+        linear-gradient(32deg, #27160b 0 26%, #92400e 26% 34%, #334155 34% 58%, #0f766e 58% 100%);
+    }
+
+    .cover.evernight {
+      background:
+        linear-gradient(160deg, rgba(12, 18, 16, 0.1), rgba(12, 18, 16, 0.82)),
+        linear-gradient(24deg, #064e3b 0 35%, #166534 35% 45%, #713f12 45% 58%, #fbbf24 58% 100%);
+    }
+
+    .cover.clocktower {
+      background:
+        linear-gradient(160deg, rgba(30, 41, 59, 0.08), rgba(30, 41, 59, 0.82)),
+        linear-gradient(30deg, #312e81 0 28%, #7c3aed 28% 38%, #64748b 38% 54%, #f8fafc 54% 100%);
+    }
+
+    .cover:before,
+    .cover:after {
+      content: "";
+      position: absolute;
+      display: block;
+    }
+
+    .cover:before {
+      width: 112px;
+      height: 86px;
+      left: 22px;
+      bottom: -18px;
+      border-radius: 48% 48% 0 0;
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .cover:after {
+      width: 34px;
+      height: 92px;
+      left: 84px;
+      bottom: 0;
+      border-radius: 18px 18px 0 0;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: 70px 28px 0 -9px rgba(255, 255, 255, 0.42), 134px 18px 0 -12px rgba(255, 255, 255, 0.3);
+    }
+
+    .cover-meta {
+      position: absolute;
+      inset: auto 14px 12px 14px;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      border-radius: 999px;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .badge.live {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .badge.draft {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .badge.done {
+      background: var(--violet-soft);
+      color: var(--violet);
+    }
+
+    .badge.archived {
+      background: #e2e8f0;
+      color: #475569;
+    }
+
+    .cover-id {
+      color: rgba(255, 255, 255, 0.86);
+      font-size: 12px;
+      font-weight: 800;
+      text-shadow: 0 1px 10px rgba(0, 0, 0, 0.35);
+    }
+
+    .story-body {
+      padding: 16px;
+    }
+
+    .story-title-row {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .story-title {
+      margin: 0;
+      font-size: 19px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .kebab {
+      width: 32px;
+      height: 32px;
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      color: var(--muted);
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .summary {
+      min-height: 46px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .asset-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .asset {
+      min-width: 0;
+      border-radius: 7px;
+      background: var(--surface-soft);
+      padding: 9px 10px;
+    }
+
+    .asset b {
+      display: block;
+      font-size: 15px;
+      line-height: 1;
+    }
+
+    .asset span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .story-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .updated {
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .story-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .small-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--ink);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .small-button.dark {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: white;
+    }
+
+    .inspector {
+      position: sticky;
+      top: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .inspector-cover {
+      height: 132px;
+    }
+
+    .inspector-body {
+      padding: 18px;
+    }
+
+    .inspector-title {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .inspector-title h2 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      margin-bottom: 16px;
+    }
+
+    .tab {
+      min-height: 34px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .tab.active {
+      background: white;
+      color: var(--ink);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.07);
+    }
+
+    .field-block {
+      margin-top: 16px;
+    }
+
+    .field-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .field-value {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfdff;
+      color: #334155;
+      padding: 11px 12px;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .mount-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .mount-item {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 54px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 8px 10px;
+    }
+
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    .avatar.teal {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .avatar.amber {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .avatar.violet {
+      background: var(--violet-soft);
+      color: var(--violet);
+    }
+
+    .mount-name {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .mount-meta {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .mount-chip {
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      padding: 5px 8px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .session-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .session-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      min-height: 64px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 10px 12px;
+    }
+
+    .session-title {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .session-meta {
+      margin-top: 5px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .danger-note {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      margin-top: 16px;
+      border: 1px solid #fecdd3;
+      border-radius: var(--radius);
+      background: var(--rose-soft);
+      padding: 11px;
+      color: var(--rose);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.55;
+    }
+
+    .empty-state {
+      display: none;
+      border: 1px dashed var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.7);
+      padding: 32px;
+      color: var(--muted);
+      text-align: center;
+      font-weight: 800;
+    }
+
+    .empty-state.visible {
+      display: block;
+    }
+
+    @media (max-width: 1180px) {
+      .content-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .inspector {
+        position: static;
+      }
+    }
+
+    @media (max-width: 880px) {
+      .story-library {
+        width: min(100vw - 28px, 720px);
+        padding-top: 22px;
+      }
+
+      .page-bar,
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .actions,
+      .toolbar > * {
+        justify-content: stretch;
+      }
+
+      .button,
+      .select {
+        width: 100%;
+      }
+
+      .summary-strip,
+      .story-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .asset-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="story-library" aria-label="故事库内容区">
+    <div class="page-bar">
+      <div>
+        <p class="eyebrow"><span class="dot"></span>demo_workspace / Play catalog</p>
+        <h1>故事库</h1>
+        <p class="page-subtitle">管理 story 主数据、开场模板、角色与世界书挂载，以及创建后按全局 session_id 进入的游玩会话。</p>
+      </div>
+      <div class="actions" aria-label="故事库操作">
+        <button class="button icon" title="导入故事" aria-label="导入故事">⇧</button>
+        <button class="button primary" type="button">＋ 新建故事</button>
+      </div>
+    </div>
+
+    <!--
+      落地备注：当前 Play API 只有 GET /play-api/v1/workspaces/{workspace_id}/stories，
+      没有服务端 search/query 参数，也不会返回角色、世界书、状态表、session 聚合数据。
+      这个输入框在效果图中只演示前端本地过滤；真实落地若要跨挂载资产搜索，需要新增聚合搜索接口，
+      或由前端额外拉取 story mounts / sessions 后在本地过滤。
+    -->
+    <div class="toolbar" aria-label="筛选故事">
+      <label class="search">
+        <span>⌕</span>
+        <input id="storySearch" value="" placeholder="搜索故事标题、摘要、角色、世界书条目">
+      </label>
+      <div class="segmented" role="tablist" aria-label="故事状态">
+        <button class="segment active" type="button" data-filter="all">全部</button>
+        <button class="segment" type="button" data-filter="live">进行中</button>
+        <button class="segment" type="button" data-filter="draft">未开始</button>
+        <button class="segment" type="button" data-filter="archived">归档</button>
+      </div>
+      <select class="select" aria-label="排序">
+        <option>最近更新优先</option>
+        <option>故事标题 A-Z</option>
+        <option>会话数量优先</option>
+      </select>
+    </div>
+
+    <div class="summary-strip" aria-label="故事库概览">
+      <div class="metric">
+        <div class="metric-label"><span>故事</span><span>Book</span></div>
+        <div class="metric-value">12</div>
+        <div class="metric-note">8 个已绑定运行会话</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><span>挂载角色</span><span>Users</span></div>
+        <div class="metric-value">47</div>
+        <div class="metric-note">3 个故事等待补角色</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><span>世界书条目</span><span>Globe</span></div>
+        <div class="metric-value">89</div>
+        <div class="metric-note">跨 story 复用 21 条</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><span>状态表模板</span><span>Table</span></div>
+        <div class="metric-value">18</div>
+        <div class="metric-note">scene 模板 5 张</div>
+      </div>
+    </div>
+
+    <div class="content-grid">
+      <div class="story-grid" aria-label="故事列表">
+        <div class="story-card selected" tabindex="0" role="button" data-story="fog-harbor" data-status="live" data-search="雾港钟楼 潮湿的港口城市 钟楼 码头 旧仓库 Bob Alice 炎心之木 圆形封印祭坛 世界线索 当前场景">
+          <div class="cover fog-harbor">
+            <div class="cover-meta">
+              <span class="badge live">● 进行中</span>
+              <span class="cover-id">story #1</span>
+            </div>
+          </div>
+          <div class="story-body">
+            <div class="story-title-row">
+              <h2 class="story-title">雾港钟楼</h2>
+              <button class="kebab" title="更多" aria-label="更多">⋯</button>
+            </div>
+            <p class="summary">潮湿的港口城市，迷雾笼罩钟楼、码头与旧仓库，失踪案牵出沉没船队的旧账。</p>
+            <div class="asset-row" aria-label="挂载资产">
+              <div class="asset"><b>5</b><span>角色</span></div>
+              <div class="asset"><b>14</b><span>世界书</span></div>
+              <div class="asset"><b>4</b><span>状态表</span></div>
+              <div class="asset"><b>3</b><span>会话</span></div>
+            </div>
+            <div class="story-footer">
+              <span class="updated">更新 2026/07/02 19:20</span>
+              <div class="story-actions">
+                <button class="small-button">编辑</button>
+                <button class="small-button dark">继续</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="story-card" tabindex="0" role="button" data-story="black-market" data-status="live" data-search="黑市边缘 秩序 混乱 账本 旧灯笼 第二把钥匙 密档房 阵营声望">
+          <div class="cover black-market">
+            <div class="cover-meta">
+              <span class="badge live">● 进行中</span>
+              <span class="cover-id">story #2</span>
+            </div>
+          </div>
+          <div class="story-body">
+            <div class="story-title-row">
+              <h2 class="story-title">黑市边缘</h2>
+              <button class="kebab" title="更多" aria-label="更多">⋯</button>
+            </div>
+            <p class="summary">在秩序与混乱的缝隙中生存，账本、旧灯笼和第二把钥匙改变每个阵营的立场。</p>
+            <div class="asset-row" aria-label="挂载资产">
+              <div class="asset"><b>4</b><span>角色</span></div>
+              <div class="asset"><b>11</b><span>世界书</span></div>
+              <div class="asset"><b>3</b><span>状态表</span></div>
+              <div class="asset"><b>2</b><span>会话</span></div>
+            </div>
+            <div class="story-footer">
+              <span class="updated">更新 2026/07/01 23:42</span>
+              <div class="story-actions">
+                <button class="small-button">编辑</button>
+                <button class="small-button dark">继续</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="story-card" tabindex="0" role="button" data-story="evernight" data-status="draft" data-search="永夜之森 古老森林 低语 火焰树根 猎人 学者 失落文明 scene">
+          <div class="cover evernight">
+            <div class="cover-meta">
+              <span class="badge draft">○ 未开始</span>
+              <span class="cover-id">story #3</span>
+            </div>
+          </div>
+          <div class="story-body">
+            <div class="story-title-row">
+              <h2 class="story-title">永夜之森</h2>
+              <button class="kebab" title="更多" aria-label="更多">⋯</button>
+            </div>
+            <p class="summary">古老森林中的低语与火焰树根相连，猎人、学者和迷路旅人寻找失落文明的入口。</p>
+            <div class="asset-row" aria-label="挂载资产">
+              <div class="asset"><b>3</b><span>角色</span></div>
+              <div class="asset"><b>9</b><span>世界书</span></div>
+              <div class="asset"><b>2</b><span>状态表</span></div>
+              <div class="asset"><b>0</b><span>会话</span></div>
+            </div>
+            <div class="story-footer">
+              <span class="updated">更新 2026/06/28 17:05</span>
+              <div class="story-actions">
+                <button class="small-button">编辑</button>
+                <button class="small-button dark">开局</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="story-card" tabindex="0" role="button" data-story="mirror-academy" data-status="archived" data-search="镜面学院 地下镜廊 未发生的选择 结课钟 名字 归档">
+          <div class="cover clocktower">
+            <div class="cover-meta">
+              <span class="badge archived">归档</span>
+              <span class="cover-id">story #4</span>
+            </div>
+          </div>
+          <div class="story-body">
+            <div class="story-title-row">
+              <h2 class="story-title">镜面学院</h2>
+              <button class="kebab" title="更多" aria-label="更多">⋯</button>
+            </div>
+            <p class="summary">学院地下的镜廊记录所有未发生的选择，结课钟响时，每位学生都会失去一个名字。</p>
+            <div class="asset-row" aria-label="挂载资产">
+              <div class="asset"><b>8</b><span>角色</span></div>
+              <div class="asset"><b>18</b><span>世界书</span></div>
+              <div class="asset"><b>5</b><span>状态表</span></div>
+              <div class="asset"><b>6</b><span>会话</span></div>
+            </div>
+            <div class="story-footer">
+              <span class="updated">更新 2026/06/12 09:31</span>
+              <div class="story-actions">
+                <button class="small-button">编辑</button>
+                <button class="small-button dark">查看</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="empty-state" id="emptyState">没有匹配的故事</div>
+
+      <!--
+        落地备注：右侧面板不是独立来源的数据卡，而是“当前选中 story”的 inspector。
+        交互规则：默认选中第一张故事卡；点击故事卡或键盘 Enter/Space 切换 selectedStoryKey，
+        renderInspector() 用当前 story 的 summary / first_message / story_prompt / mounts / sessions 更新面板。
+        搜索或状态筛选隐藏当前选中项时，自动选中第一个仍可见的 story。
+      -->
+      <div class="inspector" id="inspector" aria-label="选中故事详情">
+        <div class="cover inspector-cover fog-harbor">
+          <div class="cover-meta">
+            <span class="badge live">● 进行中</span>
+            <span class="cover-id">s_forest001</span>
+          </div>
+        </div>
+        <div class="inspector-body">
+          <div class="inspector-title">
+            <div>
+              <h2>雾港钟楼</h2>
+              <p class="updated">workspace demo_workspace · story_id 1</p>
+            </div>
+            <button class="button icon" title="更多" aria-label="更多">⋯</button>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="详情视图">
+            <button class="tab active" type="button">概览</button>
+            <button class="tab" type="button">挂载</button>
+            <button class="tab" type="button">会话</button>
+          </div>
+
+          <div class="field-block">
+            <div class="field-label"><span>summary</span><span>短摘要</span></div>
+            <div class="field-value">雾港的钟楼每晚慢十二分钟，玩家需要在码头、旧仓库和市政厅之间追查沉没船队留下的债务。</div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-label"><span>first_message</span><span>开场模板</span></div>
+            <div class="field-value">潮湿的海雾贴着石板路。钟楼敲响第七声时，你在码头尽头看见一盏不该亮起的灯。</div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-label"><span>story_prompt</span><span>固定提示词</span></div>
+            <div class="field-value">雾港是低魔悬疑都市。保持线索可追踪，NPC 动机清晰，避免提前揭露幕后主谋。</div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-label"><span>挂载角色</span><span>rpg_story_characters</span></div>
+            <div class="mount-list">
+              <div class="mount-item">
+                <div class="avatar teal">B</div>
+                <div><span class="mount-name">Bob · 港口巡夜人</span><span class="mount-meta">谨慎 / 疲惫 / 线索持有者</span></div>
+                <span class="mount-chip">#10</span>
+              </div>
+              <div class="mount-item">
+                <div class="avatar amber">A</div>
+                <div><span class="mount-name">Alice · 私家调查员</span><span class="mount-meta">玩家同伴 / 旧船队档案</span></div>
+                <span class="mount-chip">#20</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-label"><span>世界书与状态表</span><span>story mounts</span></div>
+            <div class="mount-list">
+              <div class="mount-item">
+                <div class="avatar violet">W</div>
+                <div><span class="mount-name">炎心之木 / 圆形封印祭坛</span><span class="mount-meta">14 条世界书 · 按 sort_order 注入 fixed layer</span></div>
+                <span class="mount-chip">14</span>
+              </div>
+              <div class="mount-item">
+                <div class="avatar teal">S</div>
+                <div><span class="mount-name">北境森林当前场景</span><span class="mount-meta">status_kind scene · session 创建时复制</span></div>
+                <span class="mount-chip">scene</span>
+              </div>
+              <div class="mount-item">
+                <div class="avatar amber">T</div>
+                <div><span class="mount-name">世界线索 / 角色装备 / 阵营声望</span><span class="mount-meta">normal 状态表模板 · document_json 真源</span></div>
+                <span class="mount-chip">3</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-label"><span>最近会话</span><span>全局 session_id</span></div>
+            <div class="session-list">
+              <div class="session-row">
+                <div><span class="session-title">雾港序章：码头钟楼下的第一幕</span><div class="session-meta">s_forest001 · 2026/07/02 19:20</div></div>
+                <button class="small-button dark">进入</button>
+              </div>
+              <div class="session-row">
+                <div><span class="session-title">旧仓库：第十二分钟</span><div class="session-meta">s_harbor012 · 2026/06/30 22:18</div></div>
+                <button class="small-button">查看</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="danger-note">
+            <div class="avatar" aria-hidden="true">!</div>
+            <div>模板变更不会覆盖已有 session 副本；新会话会从当前 story 挂载复制状态表 document。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const stories = {
+      'fog-harbor': {
+        id: 1,
+        key: 'fog-harbor',
+        title: '雾港钟楼',
+        sessionId: 's_forest001',
+        status: '● 进行中',
+        statusClass: 'live',
+        coverClass: 'fog-harbor',
+        workspace: 'demo_workspace',
+        summary: '雾港的钟楼每晚慢十二分钟，玩家需要在码头、旧仓库和市政厅之间追查沉没船队留下的债务。',
+        firstMessage: '潮湿的海雾贴着石板路。钟楼敲响第七声时，你在码头尽头看见一盏不该亮起的灯。',
+        storyPrompt: '雾港是低魔悬疑都市。保持线索可追踪，NPC 动机清晰，避免提前揭露幕后主谋。',
+        characters: [
+          ['B', 'teal', 'Bob · 港口巡夜人', '谨慎 / 疲惫 / 线索持有者', '#10'],
+          ['A', 'amber', 'Alice · 私家调查员', '玩家同伴 / 旧船队档案', '#20'],
+        ],
+        mounts: [
+          ['W', 'violet', '炎心之木 / 圆形封印祭坛', '14 条世界书 · 按 sort_order 注入 fixed layer', '14'],
+          ['S', 'teal', '北境森林当前场景', 'status_kind scene · session 创建时复制', 'scene'],
+          ['T', 'amber', '世界线索 / 角色装备 / 阵营声望', 'normal 状态表模板 · document_json 真源', '3'],
+        ],
+        sessions: [
+          ['雾港序章：码头钟楼下的第一幕', 's_forest001 · 2026/07/02 19:20', '进入', true],
+          ['旧仓库：第十二分钟', 's_harbor012 · 2026/06/30 22:18', '查看', false],
+        ],
+      },
+      'black-market': {
+        id: 2,
+        key: 'black-market',
+        title: '黑市边缘',
+        sessionId: 's_academy01',
+        status: '● 进行中',
+        statusClass: 'live',
+        coverClass: 'black-market',
+        workspace: 'demo_workspace',
+        summary: '黑市中堂的每笔交易都有回声。账本背面的名字指向旧灯笼、密档房和第二把钥匙。',
+        firstMessage: '雨棚下的灯笼忽明忽暗，摊主把一枚铜钥匙推到你面前，示意你不要立刻回头。',
+        storyPrompt: '黑市边缘是阵营博弈故事。让交易有代价，让线索能被验证，保持 NPC 立场可被玩家影响。',
+        characters: [
+          ['K', 'amber', '凯 · 黑市掮客', '消息灵通 / 只相信抵押物', '#10'],
+          ['M', 'teal', '米拉 · 账本保管人', '冷静 / 避免正面冲突', '#20'],
+        ],
+        mounts: [
+          ['W', 'violet', '旧灯笼 / 密档房 / 中堂规约', '11 条世界书 · 黑市空间与势力', '11'],
+          ['S', 'teal', '黑市当前场景', 'status_kind scene · 记录地点与当前交易', 'scene'],
+          ['T', 'amber', '阵营声望 / 交易债务', 'normal 状态表模板 · 运行时可写', '2'],
+        ],
+        sessions: [
+          ['黑市边缘：旧灯笼里的第二把钥匙', 's_academy01 · 2026/07/01 23:42', '进入', true],
+          ['黑市余波：账本背面的名字', 'ledger_name · 2026/06/29 15:10', '查看', false],
+        ],
+      },
+      'evernight': {
+        id: 3,
+        key: 'evernight',
+        title: '永夜之森',
+        sessionId: '未创建',
+        status: '○ 未开始',
+        statusClass: 'draft',
+        coverClass: 'evernight',
+        workspace: 'demo_workspace',
+        summary: '古老森林中的低语与火焰树根相连，猎人、学者和迷路旅人寻找失落文明的入口。',
+        firstMessage: '树冠遮住最后一线天光，远处传来湿木燃烧般的轻响，你脚边的苔藓忽然亮起。',
+        storyPrompt: '永夜之森偏探索和神秘。每个地标都应能留下可回收的线索，避免把森林写成单纯迷宫。',
+        characters: [
+          ['L', 'teal', '莉安 · 失路猎人', '方向感异常 / 害怕火光', '#10'],
+          ['O', 'amber', '奥汀 · 流亡学者', '记录癖 / 相信古文字', '#20'],
+        ],
+        mounts: [
+          ['W', 'violet', '炎心之木 / 林下遗迹', '9 条世界书 · 森林传说', '9'],
+          ['S', 'teal', '森林当前场景', 'status_kind scene · 未创建 session', 'scene'],
+          ['T', 'amber', '世界线索 / 营地资源', 'normal 状态表模板 · 等待复制', '2'],
+        ],
+        sessions: [
+          ['尚未创建游玩会话', '创建后由 rpg_data 生成全局 session_id', '开局', true],
+        ],
+      },
+      'mirror-academy': {
+        id: 4,
+        key: 'mirror-academy',
+        title: '镜面学院',
+        sessionId: 's_mirror006',
+        status: '归档',
+        statusClass: 'archived',
+        coverClass: 'clocktower',
+        workspace: 'demo_workspace',
+        summary: '学院地下的镜廊记录所有未发生的选择，结课钟响时，每位学生都会失去一个名字。',
+        firstMessage: '镜廊尽头的钟声没有回音，黑板上多出一行你从未写过的笔迹。',
+        storyPrompt: '镜面学院强调因果回滚和身份悬疑。归档故事默认只读，除非明确恢复为 active。',
+        characters: [
+          ['P', 'violet', '珀尔 · 代理导师', '温和 / 隐瞒毕业规则', '#10'],
+          ['N', 'amber', '诺亚 · 无名学生', '记忆残缺 / 重复同一天', '#20'],
+        ],
+        mounts: [
+          ['W', 'violet', '镜廊 / 结课钟 / 无名册', '18 条世界书 · 归档设定', '18'],
+          ['S', 'teal', '学院当前场景', 'status_kind scene · 已归档', 'scene'],
+          ['T', 'amber', '身份线索 / 回滚分支 / 学院规则', 'normal 状态表模板', '5'],
+        ],
+        sessions: [
+          ['镜面学院：结课钟响之前', 's_mirror006 · 2026/06/12 09:31', '查看', false],
+          ['镜廊回声：第三次点名', 's_mirror003 · 2026/06/04 21:06', '查看', false],
+        ],
+      },
+    };
+
+    const storyCards = [...document.querySelectorAll('.story-card')];
+    const inspector = document.querySelector('#inspector');
+    const searchInput = document.querySelector('#storySearch');
+    const emptyState = document.querySelector('#emptyState');
+    const filterButtons = [...document.querySelectorAll('.segment[data-filter]')];
+    let activeFilter = 'all';
+    let selectedStoryKey = 'fog-harbor';
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
+    }
+
+    function mountRows(items) {
+      return items.map(([letter, tone, title, meta, chip]) => `
+        <div class="mount-item">
+          <div class="avatar ${tone}">${escapeHtml(letter)}</div>
+          <div><span class="mount-name">${escapeHtml(title)}</span><span class="mount-meta">${escapeHtml(meta)}</span></div>
+          <span class="mount-chip">${escapeHtml(chip)}</span>
+        </div>
+      `).join('');
+    }
+
+    function sessionRows(items) {
+      return items.map(([title, meta, action, primary]) => `
+        <div class="session-row">
+          <div><span class="session-title">${escapeHtml(title)}</span><div class="session-meta">${escapeHtml(meta)}</div></div>
+          <button class="small-button ${primary ? 'dark' : ''}" type="button">${escapeHtml(action)}</button>
+        </div>
+      `).join('');
+    }
+
+    function renderInspector(key) {
+      const story = stories[key];
+      if (!story) return;
+      selectedStoryKey = key;
+      storyCards.forEach((card) => card.classList.toggle('selected', card.dataset.story === key));
+      inspector.innerHTML = `
+        <div class="cover inspector-cover ${story.coverClass}">
+          <div class="cover-meta">
+            <span class="badge ${story.statusClass}">${escapeHtml(story.status)}</span>
+            <span class="cover-id">${escapeHtml(story.sessionId)}</span>
+          </div>
+        </div>
+        <div class="inspector-body">
+          <div class="inspector-title">
+            <div>
+              <h2>${escapeHtml(story.title)}</h2>
+              <p class="updated">workspace ${escapeHtml(story.workspace)} · story_id ${story.id}</p>
+            </div>
+            <button class="button icon" title="更多" aria-label="更多" type="button">⋯</button>
+          </div>
+          <div class="tabs" role="tablist" aria-label="详情视图">
+            <button class="tab active" type="button">概览</button>
+            <button class="tab" type="button">挂载</button>
+            <button class="tab" type="button">会话</button>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>summary</span><span>短摘要</span></div>
+            <div class="field-value">${escapeHtml(story.summary)}</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>first_message</span><span>开场模板</span></div>
+            <div class="field-value">${escapeHtml(story.firstMessage)}</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>story_prompt</span><span>固定提示词</span></div>
+            <div class="field-value">${escapeHtml(story.storyPrompt)}</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>挂载角色</span><span>rpg_story_characters</span></div>
+            <div class="mount-list">${mountRows(story.characters)}</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>世界书与状态表</span><span>story mounts</span></div>
+            <div class="mount-list">${mountRows(story.mounts)}</div>
+          </div>
+          <div class="field-block">
+            <div class="field-label"><span>最近会话</span><span>全局 session_id</span></div>
+            <div class="session-list">${sessionRows(story.sessions)}</div>
+          </div>
+          <div class="danger-note">
+            <div class="avatar" aria-hidden="true">!</div>
+            <div>模板变更不会覆盖已有 session 副本；新会话会从当前 story 挂载复制状态表 document。</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function applyFilters() {
+      const query = searchInput.value.trim().toLowerCase();
+      let visibleCount = 0;
+      let selectedVisible = false;
+      storyCards.forEach((card) => {
+        const matchesStatus = activeFilter === 'all' || card.dataset.status === activeFilter;
+        const haystack = `${card.dataset.search || ''} ${card.innerText}`.toLowerCase();
+        const matchesQuery = !query || haystack.includes(query);
+        const visible = matchesStatus && matchesQuery;
+        card.hidden = !visible;
+        if (visible) {
+          visibleCount += 1;
+          if (card.dataset.story === selectedStoryKey) selectedVisible = true;
+        }
+      });
+      emptyState.classList.toggle('visible', visibleCount === 0);
+      if (!selectedVisible && visibleCount > 0) {
+        const next = storyCards.find((card) => !card.hidden);
+        renderInspector(next.dataset.story);
+      }
+    }
+
+    storyCards.forEach((card) => {
+      card.addEventListener('click', (event) => {
+        if (event.target.closest('button')) return;
+        renderInspector(card.dataset.story);
+      });
+      card.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          renderInspector(card.dataset.story);
+        }
+      });
+    });
+
+    filterButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        activeFilter = button.dataset.filter;
+        filterButtons.forEach((item) => item.classList.toggle('active', item === button));
+        applyFilters();
+      });
+    });
+
+    searchInput.addEventListener('input', applyFilters);
+
+  </script>
+</body>
+</html>
