@@ -384,7 +384,7 @@ export function HomePage() {
                 ))}
               </div>
               {currentWorkspace ? (
-                <Link href={sessionHref({ id: 's_forest001' })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
+                <Link href="/stories" className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
                   查看全部故事
                   <ChevronRight size={16} />
                 </Link>
@@ -401,7 +401,7 @@ export function HomePage() {
                 ))}
               </div>
               {currentWorkspace ? (
-                <Link href={sessionHref({ id: 's_forest001' })} className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
+                <Link href="/sessions" className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
                   查看全部会话
                   <ChevronRight size={16} />
                 </Link>
