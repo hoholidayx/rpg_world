@@ -1,0 +1,1144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <!--
+    落地备注：
+    - 该设计稿模拟后续“设置 / 上下文预览”子功能的 container 内容。
+    - 数据来源预期为 Agent context --json / context-preview.v1 payload。
+    - Messages tab 需要把 message.content 按 Markdown 渲染，并兼容字符串中的字面量 \n。
+    - Layer tab 与 JSON tab 必须保持接口返回的原始内容展示，不做 \n 归一化或 Markdown 解析。
+  -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play WebUI Context Preview Mockup</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --line: #dbe3ef;
+      --line-strong: #cbd5e1;
+      --violet: #4f46e5;
+      --violet-soft: #eef2ff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --sky: #0369a1;
+      --sky-soft: #e0f2fe;
+      --rose: #be123c;
+      --rose-soft: #ffe4e6;
+      --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    select:focus-visible {
+      outline: 3px solid rgba(79, 70, 229, 0.22);
+      outline-offset: 2px;
+    }
+
+    .mock-host {
+      width: min(1480px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 32px 0;
+    }
+
+    .context-preview {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .preview-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 22px;
+      align-items: start;
+      padding: 22px 22px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: #10b981;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .head-status {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: white;
+      color: var(--muted);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .chip.violet {
+      border-color: #c7d2fe;
+      background: var(--violet-soft);
+      color: #3730a3;
+    }
+
+    .chip.teal {
+      border-color: #99f6e4;
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .preview-controls {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+      gap: 12px;
+      align-items: end;
+      padding: 16px 22px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .field {
+      min-width: 0;
+    }
+
+    .field-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .select {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      color: var(--ink);
+      padding: 0 12px;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      border: 1px solid var(--violet);
+      border-radius: var(--radius);
+      background: var(--violet);
+      color: white;
+      padding: 0 14px;
+      font-size: 14px;
+      font-weight: 900;
+      white-space: nowrap;
+      box-shadow: 0 10px 22px rgba(79, 70, 229, 0.16);
+    }
+
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .metric {
+      min-height: 88px;
+      padding: 16px 18px;
+      border-right: 1px solid var(--line);
+    }
+
+    .metric:last-child {
+      border-right: 0;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 25px;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .metric em {
+      display: block;
+      margin-top: 7px;
+      color: var(--faint);
+      font-size: 12px;
+      font-style: normal;
+      font-weight: 800;
+    }
+
+    .preview-workspace {
+      display: grid;
+      grid-template-columns: minmax(270px, 330px) minmax(0, 1fr);
+      min-height: 620px;
+    }
+
+    .layer-panel {
+      border-right: 1px solid var(--line);
+      background: #fbfdff;
+      min-width: 0;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 54px;
+      border-bottom: 1px solid var(--line);
+      padding: 0 16px;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    .panel-title span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .layer-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .layer-row {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: inherit;
+      padding: 13px 16px;
+      text-align: left;
+    }
+
+    .layer-row:hover {
+      background: #f1f5f9;
+    }
+
+    .layer-row.active {
+      background: #eef2ff;
+      box-shadow: inset 3px 0 0 var(--violet);
+    }
+
+    .layer-row.inactive {
+      color: var(--faint);
+    }
+
+    .layer-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .layer-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .layer-role {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      padding: 3px 7px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .layer-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #10b981;
+    }
+
+    .inactive .status-dot {
+      background: #cbd5e1;
+    }
+
+    .content-panel {
+      min-width: 0;
+      background: var(--surface);
+    }
+
+    .content-toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      min-height: 54px;
+      border-bottom: 1px solid var(--line);
+      padding: 8px 16px;
+    }
+
+    .selection-title {
+      min-width: 0;
+    }
+
+    .selection-title strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+    }
+
+    .selection-title span {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .segmented {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+    }
+
+    .segment {
+      min-height: 32px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .segment.active {
+      background: var(--ink);
+      color: white;
+    }
+
+    .content-body {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 566px;
+    }
+
+    .detail-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    .detail {
+      min-height: 62px;
+      border-right: 1px solid var(--line);
+      padding: 12px 14px;
+    }
+
+    .detail:last-child {
+      border-right: 0;
+    }
+
+    .detail span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .detail strong {
+      display: block;
+      margin-top: 5px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .viewer {
+      min-width: 0;
+      padding: 16px;
+      background: #f8fafc;
+    }
+
+    pre {
+      overflow: auto;
+      min-height: 448px;
+      max-height: 520px;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .message-list {
+      display: grid;
+      gap: 10px;
+      overflow: auto;
+      max-height: 520px;
+      padding-right: 4px;
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 12px;
+    }
+
+    .message-role {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 28px;
+      border-radius: 999px;
+      background: var(--sky-soft);
+      color: var(--sky);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .message-role.user {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .message-role.assistant {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .message-markdown {
+      min-width: 0;
+      color: #1e293b;
+      font-size: 13px;
+      line-height: 1.7;
+      word-break: break-word;
+    }
+
+    .message-markdown > *:first-child {
+      margin-top: 0;
+    }
+
+    .message-markdown > *:last-child {
+      margin-bottom: 0;
+    }
+
+    .message-markdown h1,
+    .message-markdown h2,
+    .message-markdown h3,
+    .message-markdown h4 {
+      margin: 12px 0 6px;
+      color: #0f172a;
+      font-size: 14px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    .message-markdown p {
+      margin: 0 0 9px;
+    }
+
+    .message-markdown ul {
+      margin: 0 0 10px;
+      padding-left: 18px;
+    }
+
+    .message-markdown li {
+      margin: 3px 0;
+    }
+
+    .message-markdown code {
+      border-radius: 5px;
+      background: #f1f5f9;
+      color: #334155;
+      padding: 2px 5px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .message-markdown pre {
+      min-height: 0;
+      max-height: 260px;
+      margin: 0 0 10px;
+      background: #111827;
+      color: #e5e7eb;
+    }
+
+    .message-markdown table {
+      width: 100%;
+      margin: 8px 0 10px;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .message-markdown th,
+    .message-markdown td {
+      border: 1px solid var(--line);
+      padding: 7px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .message-markdown th {
+      background: #f8fafc;
+      color: #334155;
+      font-weight: 900;
+    }
+
+    @media (max-width: 1120px) {
+      .preview-controls {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .button {
+        grid-column: 1 / -1;
+      }
+
+      .preview-workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .layer-panel {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .layer-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .layer-row {
+        border-right: 1px solid var(--line);
+      }
+    }
+
+    @media (max-width: 760px) {
+      .mock-host {
+        width: min(100vw - 24px, 1480px);
+        padding: 16px 0;
+      }
+
+      .preview-head,
+      .content-toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .head-status {
+        justify-content: flex-start;
+      }
+
+      .preview-controls,
+      .metric-strip,
+      .detail-strip,
+      .layer-list {
+        grid-template-columns: 1fr;
+      }
+
+      .metric,
+      .detail,
+      .layer-row {
+        border-right: 0;
+      }
+
+      .segmented {
+        width: 100%;
+      }
+
+      .segment {
+        flex: 1;
+      }
+
+      .message {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="mock-host">
+    <section class="context-preview" aria-label="上下文预览">
+      <header class="preview-head">
+        <div>
+          <p class="eyebrow"><span class="dot"></span><span>设置 / 调试</span></p>
+          <h1>上下文预览</h1>
+          <p class="subtitle">选择故事和会话后查看当前渲染上下文，用于核对进入 LLM 边界的 layers 与 messages。</p>
+        </div>
+        <div class="head-status" aria-label="上下文状态">
+          <span class="chip violet" id="format-chip">context-preview.v1</span>
+          <span class="chip teal" id="session-chip">s_fog_intro</span>
+        </div>
+      </header>
+
+      <div class="preview-controls">
+        <label class="field">
+          <span class="field-label"><span>故事</span><span>workspace / story</span></span>
+          <select class="select" id="story-select" aria-label="选择故事"></select>
+        </label>
+        <label class="field">
+          <span class="field-label"><span>会话</span><span>global session_id</span></span>
+          <select class="select" id="session-select" aria-label="选择会话"></select>
+        </label>
+        <button class="button" type="button" id="refresh-button">刷新预览</button>
+      </div>
+
+      <div class="metric-strip" aria-label="上下文统计">
+        <div class="metric">
+          <span>总 token</span>
+          <strong id="metric-tokens">8,642</strong>
+          <em id="metric-window">历史窗口 5 轮</em>
+        </div>
+        <div class="metric">
+          <span>活跃层</span>
+          <strong id="metric-layers">7 / 9</strong>
+          <em>layers</em>
+        </div>
+        <div class="metric">
+          <span>Messages</span>
+          <strong id="metric-messages">11</strong>
+          <em>final boundary</em>
+        </div>
+        <div class="metric">
+          <span>选中层 token</span>
+          <strong id="metric-selected">2,316</strong>
+          <em id="metric-selected-type">fixed_layer</em>
+        </div>
+      </div>
+
+      <div class="preview-workspace">
+        <aside class="layer-panel">
+          <div class="panel-title">
+            <h2>Context Layers</h2>
+            <span id="layer-count">9 layers</span>
+          </div>
+          <div class="layer-list" id="layer-list"></div>
+        </aside>
+
+        <section class="content-panel" aria-label="上下文内容">
+          <div class="content-toolbar">
+            <div class="selection-title">
+              <strong id="selected-title">Fixed Layer</strong>
+              <span id="selected-desc">2 段固定指令 + 3 条世界书 + 2 张角色卡</span>
+            </div>
+            <nav class="segmented" aria-label="预览模式">
+              <button class="segment active" type="button" data-view="layer">Layer</button>
+              <button class="segment" type="button" data-view="messages">Messages</button>
+              <button class="segment" type="button" data-view="json">JSON</button>
+            </nav>
+          </div>
+
+          <div class="content-body">
+            <div class="detail-strip">
+              <div class="detail">
+                <span>role</span>
+                <strong id="detail-role">system</strong>
+              </div>
+              <div class="detail">
+                <span>status</span>
+                <strong id="detail-status">active</strong>
+              </div>
+              <div class="detail">
+                <span>chars / tokens</span>
+                <strong id="detail-size">7,420 / 2,316</strong>
+              </div>
+            </div>
+            <div class="viewer" id="viewer"></div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const layerNames = {
+      fixed_layer: 'Fixed Layer',
+      persistent_memory: 'Persistent Memory',
+      summary: 'Summary',
+      hot_history: 'Hot History',
+      story_memory: 'Story Memory',
+      recalled_memory: 'Recalled Memory',
+      status_tables: 'Status Tables',
+      rp_modules: 'RP Modules',
+      user_message: 'User Message'
+    };
+
+    const stories = [
+      {
+        id: 'fog-harbor',
+        title: '雾港钟楼',
+        sessions: [
+          {
+            id: 's_fog_intro',
+            title: '雾港序章 · 第 7 回合',
+            context: makeContext({
+              sessionId: 's_fog_intro',
+              tokens: 8642,
+              messages: 11,
+              activeLayers: 7,
+              hotHistoryRounds: 5,
+              fixed: '## Core RP Contract\\n你正在主持《雾港钟楼》。保持第二人称叙事，优先推进玩家可感知的细节。\\n\\n## Characters\\n- Alice：港口调查员，谨慎但愿意冒险。\\n- Bob：钟楼守夜人，知道旧仓库的暗门。\\n\\n## Lorebook\\n- 雾潮每晚 23:00 会淹没下层码头。\\n- 钟楼齿轮停摆时，附近的罗盘会指向旧仓库。',
+              summary: '玩家抵达雾港后发现钟楼停摆，Bob 暗示旧仓库里有第二套钟锤。',
+              status: '## 当前场景\\n地点: 码头钟楼外\\n时间: 雾潮前 18 分钟\\n氛围: 潮湿、压迫、远处有铁链声\\n\\n## 状态表\\n| key | value |\\n| --- | --- |\\n| tide_level | rising |\\n| bob_trust | 42 |\\n| warehouse_key | 未取得 |',
+              user: '[当前场景]\\n码头钟楼外，雾潮前 18 分钟。\\n\\n玩家输入：我让 Bob 先带路去旧仓库，但留意他的手。'
+            })
+          },
+          {
+            id: 's_clocktower_debug',
+            title: '钟楼地下室 · 调试会话',
+            context: makeContext({
+              sessionId: 's_clocktower_debug',
+              tokens: 6128,
+              messages: 8,
+              activeLayers: 6,
+              hotHistoryRounds: 4,
+              fixed: '## Core RP Contract\\n雾港钟楼调试会话。维持悬疑节奏，并输出可追踪的状态变化。\\n\\n## Characters\\n- Alice：调查员。\\n- Bob：守夜人。',
+              summary: '地下室入口已打开，玩家正在验证钟楼机关与雾潮时间的关系。',
+              status: '## 当前场景\\n地点: 钟楼地下室\\n时间: 22:37\\n\\n## 状态表\\nclock_gear: unlocked\\nfog_pressure: high',
+              user: '玩家输入：检查齿轮背后的刻字。'
+            })
+          }
+        ]
+      },
+      {
+        id: 'black-market',
+        title: '黑市边缘',
+        sessions: [
+          {
+            id: 's_market_lantern',
+            title: '旧灯笼交易 · 第 3 回合',
+            context: makeContext({
+              sessionId: 's_market_lantern',
+              tokens: 7314,
+              messages: 9,
+              activeLayers: 7,
+              hotHistoryRounds: 5,
+              fixed: '## Core RP Contract\\n你正在主持《黑市边缘》。保持低声、紧张、交易驱动的节奏。\\n\\n## Lorebook\\n- 旧灯笼是黑市通行信物。\\n- 账本背面的名字会改变持有者的债务归属。',
+              summary: '玩家已取得旧灯笼，但账本持有人要求当场交换一个真实名字。',
+              status: '## 当前场景\\n地点: 黑市中堂\\n时间: 宵禁后\\n\\n## 状态表\\n| key | value |\\n| debt | 未结清 |\\n| lantern_owner | player |\\n| guard_attention | medium |',
+              user: '玩家输入：我把灯笼放在桌上，问他真正想买的是什么。'
+            })
+          }
+        ]
+      }
+    ];
+
+    let currentStoryIndex = 0;
+    let currentSessionIndex = 0;
+    let currentLayerIndex = 0;
+    let currentView = 'layer';
+
+    const storySelect = document.getElementById('story-select');
+    const sessionSelect = document.getElementById('session-select');
+    const layerList = document.getElementById('layer-list');
+    const viewer = document.getElementById('viewer');
+    const formatChip = document.getElementById('format-chip');
+    const sessionChip = document.getElementById('session-chip');
+
+    function makeContext(seed) {
+      const layers = [
+        layer('fixed_layer', 'system', 'active', 7420, 2316, '2 段固定指令 + 3 条世界书 + 2 张角色卡', seed.fixed),
+        layer('persistent_memory', 'system', 'inactive', 0, 0, '-', ''),
+        layer('summary', 'system', 'active', seed.summary.length, 142, seed.summary, '## Overall Summary\\n' + seed.summary),
+        layer('hot_history', 'mixed', 'active', 1960, 682, '5 轮 / 8 条 (user=4, assistant=4, tool=0, system=0)', '[user]\\n我靠近钟楼门口。\\n\\n[assistant]\\n门缝里有潮湿铁锈味，Bob 的灯在发抖。\\n\\n[user]\\n我问他旧仓库钥匙在哪。\\n\\n[assistant]\\n他避开你的目光，说钥匙不在活人手里。'),
+        layer('story_memory', 'system', 'active', 840, 238, '4 条剧情细节', '## Story Memory\\n- Bob 曾在钟楼停摆当天失踪 11 分钟。\\n- Alice 记下了旧仓库门上的三枚铆钉。\\n- 雾潮与钟锤缺失有关。\\n- 码头巡逻队今晚提前换岗。'),
+        layer('recalled_memory', 'system', 'active', 760, 221, '3 条召回记忆', '## Recalled Memory\\n- 玩家上次承诺不把 Bob 交给巡逻队。\\n- 旧仓库暗门需要听见钟声才会出现。\\n- Alice 对机械机关有优势。'),
+        layer('status_tables', 'system', 'active', seed.status.length, 344, '2 张状态表', seed.status),
+        layer('rp_modules', 'system', 'active', 380, 96, '1 个 RP 模块运行态', '## RP Modules\\nDice: 遇到高不确定行动时调用 check_dc；当前没有待结算检定。'),
+        layer('user_message', 'user', 'active', seed.user.length, 86, seed.user.slice(0, 50), seed.user)
+      ];
+      return {
+        formatVersion: 'context-preview.v1',
+        sessionId: seed.sessionId,
+        hotHistoryRounds: seed.hotHistoryRounds,
+        totals: {
+          layerCount: layers.length,
+          activeLayers: seed.activeLayers,
+          tokenCount: seed.tokens,
+          messageCount: seed.messages
+        },
+        layers,
+        messages: [
+          { role: 'system', content: seed.fixed },
+          { role: 'system', content: '## Overall Summary\\n' + seed.summary },
+          { role: 'user', content: '我靠近钟楼门口。', turn_id: 1, seq_in_turn: 1 },
+          { role: 'assistant', content: '门缝里有潮湿铁锈味，Bob 的灯在发抖。', turn_id: 1, seq_in_turn: 2 },
+          { role: 'system', content: seed.status },
+          { role: 'system', content: '## RP Modules\\nDice: 遇到高不确定行动时调用 check_dc；当前没有待结算检定。' },
+          { role: 'user', content: seed.user }
+        ]
+      };
+    }
+
+    function layer(type, role, status, charCount, tokenCount, description, content) {
+      return { index: 0, type, role, status, charCount, tokenCount, description, content };
+    }
+
+    function init() {
+      storySelect.innerHTML = stories.map((story, index) => `<option value="${index}">${escapeHtml(story.title)}</option>`).join('');
+      storySelect.addEventListener('change', () => {
+        currentStoryIndex = Number(storySelect.value);
+        currentSessionIndex = 0;
+        currentLayerIndex = 0;
+        renderSessions();
+        renderAll();
+      });
+      sessionSelect.addEventListener('change', () => {
+        currentSessionIndex = Number(sessionSelect.value);
+        currentLayerIndex = 0;
+        renderAll();
+      });
+      document.getElementById('refresh-button').addEventListener('click', () => {
+        const button = document.getElementById('refresh-button');
+        button.textContent = '已刷新';
+        setTimeout(() => { button.textContent = '刷新预览'; }, 900);
+      });
+      document.querySelectorAll('.segment').forEach((button) => {
+        button.addEventListener('click', () => {
+          currentView = button.dataset.view;
+          document.querySelectorAll('.segment').forEach((item) => item.classList.toggle('active', item === button));
+          renderViewer();
+        });
+      });
+      renderSessions();
+      renderAll();
+    }
+
+    function renderSessions() {
+      const sessions = stories[currentStoryIndex].sessions;
+      sessionSelect.innerHTML = sessions.map((session, index) => `<option value="${index}">${escapeHtml(session.title)}</option>`).join('');
+      sessionSelect.value = String(currentSessionIndex);
+    }
+
+    function currentContext() {
+      return stories[currentStoryIndex].sessions[currentSessionIndex].context;
+    }
+
+    function renderAll() {
+      const context = currentContext();
+      formatChip.textContent = context.formatVersion;
+      sessionChip.textContent = context.sessionId;
+      document.getElementById('metric-tokens').textContent = number(context.totals.tokenCount);
+      document.getElementById('metric-window').textContent = `历史窗口 ${context.hotHistoryRounds} 轮`;
+      document.getElementById('metric-layers').textContent = `${context.totals.activeLayers} / ${context.totals.layerCount}`;
+      document.getElementById('metric-messages').textContent = String(context.totals.messageCount);
+      document.getElementById('layer-count').textContent = `${context.totals.layerCount} layers`;
+      renderLayers();
+      renderSelection();
+      renderViewer();
+    }
+
+    function renderLayers() {
+      const context = currentContext();
+      layerList.innerHTML = context.layers.map((item, index) => {
+        item.index = index;
+        const active = index === currentLayerIndex ? ' active' : '';
+        const inactive = item.status === 'inactive' ? ' inactive' : '';
+        return `
+          <button class="layer-row${active}${inactive}" type="button" data-index="${index}">
+            <span class="layer-line">
+              <span class="layer-name">${escapeHtml(layerNames[item.type] || item.type)}</span>
+              <span class="layer-role">${escapeHtml(item.role)}</span>
+            </span>
+            <span class="layer-meta">
+              <span class="status-dot"></span>
+              <span>${escapeHtml(item.status)}</span>
+              <span>${number(item.tokenCount)} tokens</span>
+            </span>
+          </button>
+        `;
+      }).join('');
+      layerList.querySelectorAll('.layer-row').forEach((button) => {
+        button.addEventListener('click', () => {
+          currentLayerIndex = Number(button.dataset.index);
+          renderLayers();
+          renderSelection();
+          if (currentView === 'layer') renderViewer();
+        });
+      });
+    }
+
+    function renderSelection() {
+      const selected = currentContext().layers[currentLayerIndex];
+      document.getElementById('selected-title').textContent = layerNames[selected.type] || selected.type;
+      document.getElementById('selected-desc').textContent = selected.description;
+      document.getElementById('detail-role').textContent = selected.role;
+      document.getElementById('detail-status').textContent = selected.status;
+      document.getElementById('detail-size').textContent = `${number(selected.charCount)} / ${number(selected.tokenCount)}`;
+      document.getElementById('metric-selected').textContent = number(selected.tokenCount);
+      document.getElementById('metric-selected-type').textContent = selected.type;
+    }
+
+    function renderViewer() {
+      const context = currentContext();
+      if (currentView === 'messages') {
+        viewer.innerHTML = `<div class="message-list">${context.messages.map((message) => `
+          <article class="message">
+            <span class="message-role ${roleClass(message.role)}">${escapeHtml(message.role)}</span>
+            <div class="message-markdown">${renderMarkdown(message.content)}</div>
+          </article>
+        `).join('')}</div>`;
+        return;
+      }
+      const text = currentView === 'json'
+        ? JSON.stringify(context, null, 2)
+        : context.layers[currentLayerIndex].content || '(inactive layer)';
+      viewer.innerHTML = `<pre>${escapeHtml(text)}</pre>`;
+    }
+
+    function number(value) {
+      return Number(value).toLocaleString('en-US');
+    }
+
+    function renderMarkdown(markdown) {
+      const lines = normalizeNewlines(markdown).split('\n');
+      const html = [];
+      let paragraph = [];
+
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+        html.push(`<p>${renderInline(paragraph.join(' '))}</p>`);
+        paragraph = [];
+      };
+
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+          flushParagraph();
+          continue;
+        }
+
+        if (trimmed.startsWith('```')) {
+          flushParagraph();
+          const code = [];
+          index += 1;
+          while (index < lines.length && !lines[index].trim().startsWith('```')) {
+            code.push(lines[index]);
+            index += 1;
+          }
+          html.push(`<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`);
+          continue;
+        }
+
+        const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+        if (heading) {
+          flushParagraph();
+          const level = heading[1].length;
+          html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+          continue;
+        }
+
+        if (isTableStart(lines, index)) {
+          flushParagraph();
+          const rows = [];
+          while (index < lines.length && isTableRow(lines[index])) {
+            rows.push(lines[index]);
+            index += 1;
+          }
+          index -= 1;
+          html.push(renderTable(rows));
+          continue;
+        }
+
+        if (/^[-*]\s+/.test(trimmed)) {
+          flushParagraph();
+          const items = [];
+          while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+            items.push(lines[index].trim().replace(/^[-*]\s+/, ''));
+            index += 1;
+          }
+          index -= 1;
+          html.push(`<ul>${items.map((item) => `<li>${renderInline(item)}</li>`).join('')}</ul>`);
+          continue;
+        }
+
+        paragraph.push(trimmed);
+      }
+
+      flushParagraph();
+      return html.join('') || '<p class="muted">(empty)</p>';
+    }
+
+    function normalizeNewlines(value) {
+      return String(value)
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/\\n/g, '\n');
+    }
+
+    function renderInline(text) {
+      const codeSpans = [];
+      let html = escapeHtml(text).replace(/`([^`]+)`/g, (_match, code) => {
+        const token = `@@CODE_${codeSpans.length}@@`;
+        codeSpans.push(`<code>${code}</code>`);
+        return token;
+      });
+      html = html
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      codeSpans.forEach((code, index) => {
+        html = html.replace(`@@CODE_${index}@@`, code);
+      });
+      return html;
+    }
+
+    function renderTable(rows) {
+      const normalized = rows.filter((row) => !/^\|?[\s:-]+\|[\s|:-]*$/.test(row.trim()));
+      const cells = normalized.map(splitTableRow);
+      if (!cells.length) return '';
+      const [head, ...body] = cells;
+      return `
+        <table>
+          <thead><tr>${head.map((cell) => `<th>${renderInline(cell)}</th>`).join('')}</tr></thead>
+          <tbody>${body.map((row) => `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      `;
+    }
+
+    function splitTableRow(row) {
+      return row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+    }
+
+    function isTableStart(lines, index) {
+      return isTableRow(lines[index]) && index + 1 < lines.length && /^\|?[\s:-]+\|[\s|:-]*$/.test(lines[index + 1].trim());
+    }
+
+    function isTableRow(line) {
+      return /^\|.+\|$/.test(line.trim());
+    }
+
+    function roleClass(role) {
+      return String(role).replace(/[^a-z_-]/gi, '').toLowerCase();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    init();
+  </script>
+</body>
+</html>
