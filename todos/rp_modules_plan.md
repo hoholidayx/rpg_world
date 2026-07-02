@@ -194,7 +194,6 @@ RP Modules 是业务配置，放在 `rpg_core/settings.yaml`，不放进 `llm_se
 base:
   rp_modules:
     enabled: true
-    reveal_mechanics_default: concise
 
     modules:
       dice:

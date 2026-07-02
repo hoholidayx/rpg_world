@@ -207,7 +207,6 @@ class RPModuleSettings:
     """RP Modules business settings."""
 
     enabled: bool = True
-    reveal_mechanics_default: str = "concise"
     dice: DiceModuleSettings = field(default_factory=DiceModuleSettings)
 
 
@@ -294,7 +293,6 @@ class Settings(ProfiledYamlSettings):
 
         return RPModuleSettings(
             enabled=bool(raw.get("enabled", True)),
-            reveal_mechanics_default=str(raw.get("reveal_mechanics_default", "concise") or "concise"),
             dice=DiceModuleSettings(
                 enabled=bool(dice_raw.get("enabled", True)),
                 allow_auto_checks=bool(dice_raw.get("allow_auto_checks", True)),

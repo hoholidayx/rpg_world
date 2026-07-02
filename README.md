@@ -140,6 +140,7 @@ Telegram 渠道当前支持：
 | `character/` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `lorebook/` | 世界书只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `status/` | 状态表薄适配，通过 `rpg_data` 按 session 读取 SQLite document 真源 |
+| `rp_modules/` | RP 玩法模块框架，当前包含 Dice 骰子模块 |
 | `summary/` | 对话摘要压缩 |
 | 顶层 `llm_service/` | LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析与本地 llama runtime |
 
@@ -150,20 +151,28 @@ Telegram 渠道当前支持：
 `rpg_core/context/` 的主流程保持结构化数据，直到发送给 LLM 前才由 Jinja2 模板统一渲染：
 
 - `RPGContextBuilder` 负责读取角色卡、世界书、摘要、记忆、状态表和用户扩展块，产出结构化 `RPGContext`。
-- `FixedLayerComposer` 负责稳定的固定层 section，例如核心 RP 指令。固定层尽量保持不变，以利于前缀缓存命中。
+- `FixedLayerComposer` 负责稳定的固定层 section，例如核心 RP 指令和已启用 RP Module 的静态契约。固定层尽量保持不变，以利于前缀缓存命中。
 - `ContextRenderer` 只在 LLM 请求边界把结构化层渲染为 message objects。
 - `ContextInspector` 只服务 `/context`、日志和调试输出，不进入主业务数据模型。
-- `RP_MODULES` 是为后续 RP 模块预留的运行态层，不做通用 skill 体系；骰子、战斗、物品等应围绕 RP 业务工具和状态交互设计。
+- `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。当前 `dice` 模块通过 `RPModuleRegistry` 注册固定层契约、工具和斜杠命令。
+- `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Dice MVP 默认不注入动态运行态，只在固定层声明裁定原则，并通过工具/命令返回结果。
 
 当前发送顺序按缓存稳定性和 RP 注意力组织：
 
-1. Fixed Layer：固定 RP 指令、世界书、角色卡。
+1. Fixed Layer：固定 RP 指令、已启用 RP Module 静态契约、世界书、角色卡。
 2. Persistent Memory / Summary。
 3. Hot History。
 4. Story Memory / Recalled Memory / Status Tables / RP Modules。
 5. User Message。
 
 `当前场景` 不作为普通状态表进入 `STATUS_TABLES`。它由 `SceneTracker` 作为高优先级 user prefix 合入最终用户消息，确保故事时间、地点和场景状态被模型重点关注，并随 user message 进入历史用于后续有序归纳。`rpg_data` 用 `status_kind="scene"` 表达这一类特殊状态；未挂载到 story 时 session 不会感知 scene，也不会注册 scene 工具。
+
+RP Modules 采用上下文分层策略：
+
+- 稳定、低频变化的规则只放进 fixed layer，例如 dice 的“何时掷骰、必须调用工具、不得替玩家做选择”。
+- 高频或临时模块状态才进入 `RP_MODULES` 动态层；Dice MVP 没有动态层内容。
+- 工具 schema 常驻注册，但骰子点数只在 LLM 调用 `rp_dice_roll` / `rp_dice_check_dc` 或用户显式输入 `/roll` / `/check_dc` 时产生。
+- `/rp_modules`、`/rp_module dice`、`/roll`、`/check_dc` 都由 `CommandDispatcher` 在 LLM 前拦截，不进入对话历史。
 
 ## 记忆系统
 

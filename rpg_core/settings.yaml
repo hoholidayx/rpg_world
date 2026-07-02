@@ -41,7 +41,6 @@ base:
   # ── RP Modules 玩法机制配置 ─────────────────────────────────────
   rp_modules:
     enabled: true
-    reveal_mechanics_default: concise
     modules:
       dice:
         enabled: true

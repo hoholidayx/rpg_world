@@ -228,7 +228,6 @@ def test_rp_module_settings_defaults(tmp_path: Path, monkeypatch) -> None:
     rp_modules = settings_module.Settings().rp_module_settings
 
     assert rp_modules.enabled is True
-    assert rp_modules.reveal_mechanics_default == "concise"
     assert rp_modules.dice.enabled is True
     assert rp_modules.dice.default_dc == 12
 
@@ -245,7 +244,6 @@ def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> Non
             "  memory:\n",
             """  rp_modules:
     enabled: false
-    reveal_mechanics_default: none
     modules:
       dice:
         enabled: false
@@ -264,7 +262,6 @@ def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> Non
     rp_modules = settings_module.Settings().rp_module_settings
 
     assert rp_modules.enabled is False
-    assert rp_modules.reveal_mechanics_default == "none"
     assert rp_modules.dice.enabled is False
     assert rp_modules.dice.allow_auto_checks is False
     assert rp_modules.dice.default_dc == 15

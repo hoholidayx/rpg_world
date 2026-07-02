@@ -78,6 +78,7 @@ rpg_world/
 │   ├── character/                # 角色卡（rpg_data 只读适配）
 │   ├── lorebook/                 # 世界书（rpg_data 只读适配）
 │   ├── status/                   # 状态表薄适配（rpg_data SQLite document 真源）
+│   ├── rp_modules/               # RP 玩法模块（dice 等，不是通用 skill）
 │   ├── summary/                  # 对话摘要
 │   ├── common_types.py           # 共享类型别名
 │   ├── settings.py               # Settings 单例
@@ -335,7 +336,7 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 
 | 模块 | 职责 |
 |---|---|
-| `fixed_layer.py` | `FixedLayerComposer` 与 `FixedLayerSection`，维护稳定固定层 |
+| `fixed_layer.py` | `FixedLayerComposer` 与 `FixedLayerSection`，维护稳定固定层和 RP Module 静态契约 |
 | `builder.py` | 读取世界书、角色卡、摘要、记忆、状态表、用户扩展块，构建结构化 `RPGContext` |
 | `rpg_context.py` | 只保留上下文层数据结构和薄委托方法 |
 | `renderer.py` | LLM 请求边界渲染，将结构化层转成 OpenAI-compatible messages |
@@ -346,14 +347,14 @@ LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache
 
 | 层 | role | 内容 | 变更频率 |
 |---|---|---|---|
-| [0] Fixed | system | 系统提示 + 世界书 + 角色卡 | ★ 几乎不变 |
+| [0] Fixed | system | 系统提示 + 已启用 RP Module 静态契约 + 世界书 + 角色卡 | ★ 几乎不变 |
 | [1] Persistent Memory | system | 常驻记忆 | ★ 离线更新 |
 | [2] Summary | system | 历史摘要（条件触发） | ★☆ 少量 |
 | [3..N] Hot History | mixed | 最近 N 轮对话 | ★★☆ 每轮追加 |
 | [N+1] Story Memory | system | 剧情细节 | ★★☆ 累积 |
 | [N+2] Recalled Memory | system | 动态召回 | ★★★ 动态注入 |
 | [N+3] Status Tables | system | 普通状态表，不包含 `status_kind="scene"` 的当前场景 | ★★★★ 高频变化 |
-| [N+4] RP Modules | system | RP 模块运行态，如骰子、战斗、物品等后续模块 | ★★★★ 动态 |
+| [N+4] RP Modules | system | RP 模块动态运行态；Dice MVP 默认为空 | ★★★★ 动态 |
 | [N+5] User Message | user | `[scene]` + 用户输入 + 前后缀 | 总是新的 |
 
 `当前场景` 是 `status_kind="scene"` 的特殊状态表，不走普通 `STATUS_TABLES` 层。`SceneTracker.get_context()`
@@ -366,9 +367,25 @@ LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache
 展平为 OpenAI-compatible 消息列表。不要在 builder 或 dataclass 中提前拼接最终 prompt，
 也不要把 markdown 诊断输出放回主业务数据模型。
 
-RP Modules 不是通用 skill 体系。后续骰子、战斗、物品、关系等能力应定义为围绕 RP 语义的模块：
+RP Modules 不是通用 skill 体系。骰子、战斗、物品、关系等能力必须定义为围绕 RP 语义的模块：
 模块可以注册工具、暴露运行态 section、读写受控状态，但固定 instruction 层和不可变模块描述应保持稳定，
-避免频繁变化破坏 prefix cache。
+避免频繁变化破坏 prefix cache。当前实现位于 `rpg_core/rp_modules/`，由 session-scoped
+`RPModuleRegistry` 收集 fixed sections、runtime sections、tools 和 commands，并在
+`RPGGameAgent._ensure_initialized()` / reload / session switch 后重建或重新绑定。
+
+RP Modules 使用常规上下文分层/分配策略：
+
+- 静态契约进入 fixed layer：例如 dice 的“何时掷骰、必须调用工具、不得替玩家选择行动”。
+- 动态运行态只在模块确有临时状态时进入 `RP_MODULES` system layer；Dice MVP 的 `get_runtime_sections()` 返回空列表。
+- 工具 schema 常驻注册到 `ToolRegistry`，但具体机制结果只在 LLM tool call 或显式斜杠命令时产生。
+- RP Modules 不进入 user prefix，不写 history；`[scene]` 仍是唯一高优先级 user prefix 运行态。
+
+Dice MVP 已实现：
+
+- 公开工具名固定为 `rp_dice_roll`、`rp_dice_check_dc`。
+- 手动命令为 `/roll` 和 `/check_dc`，另有 `/rp_modules`、`/rp_module dice` 用于查看模块状态。
+- 支持基础表达式如 `d20`、`1d20`、`2d6+3`、`4d6-2`、`1d100`。
+- 不实现 JSONL 审计，不写普通状态表，不修改 Scene Runtime；结果只通过工具返回文本或命令输出呈现。
 
 ### Agent 数据流
 
@@ -377,9 +394,10 @@ agent.send(user_input)
   → CommandDispatcher 拦截斜杠命令（是则旁路 LLM，不入历史）
   → StatusSubAgent.update() 预更新状态表（~1-2K tokens 避免主 loop round-trip）
   → SceneTracker.get_context() → [scene] 嵌入 user message
+  → RPModuleRegistry 收集模块 runtime sections（Dice MVP 为空）
   → _build_transformed_context() → builder.build() → RPGContext.to_message_objects()
   → run_chat_loop(provider, tool_registry, messages)
-    → LLM 可能调工具（scene.set_time / set_attr / file tools）
+    → LLM 可能调工具（scene tools / RP module tools / file tools）
     → 每轮记录 TurnStats + CallRecord
   → 回复写入 _history + rpg_data 主消息表 + backup 消息表
   → 返回 AgentReply（含 text + tool_records + stats）
@@ -406,6 +424,10 @@ agent.send(user_input)
 | `/session_create [title]` | 内置 | 创建系统生成 ID 的新会话 |
 | `/session_switch <id>` | 内置 | 切换到指定会话 |
 | `/memory_reindex` | 内置 | 手动重建 memory 索引 |
+| `/rp_modules` | RPModuleRegistry | 列出已启用 RP Modules |
+| `/rp_module <name>` | RPModuleRegistry | 查看指定 RP Module 状态 |
+| `/roll <expr> [reason]` | Dice RP Module | 手动掷骰 |
+| `/check_dc <expr> dc=<n> [reason]` | Dice RP Module | 手动 DC 检定 |
 
 命令统一由 agent 内部的 `CommandDispatcher` 处理，不经过 LLM，不入对话历史。
 所有渠道（CLI / API / Telegram）共享同一逻辑。
