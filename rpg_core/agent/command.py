@@ -52,6 +52,10 @@ async def _cmd_help(agent: RPGGameAgent, args: list[str]) -> str:
 
 async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
     """查看当前上下文结构和 token 用量。"""
+    if args == ["--json"]:
+        return await agent.get_context_json()
+    if args:
+        return "[错误] 用法：/context [--json]"
     return await agent.get_context_markdown()
 
 
@@ -212,7 +216,7 @@ class CommandDispatcher:
         )
         self.register_builtin(
             "/context", "查看当前上下文结构和 token 用量",
-            "显示 5 层 RPG 上下文的每层信息。", _cmd_context,
+            "用法：/context [--json]。默认显示上下文概览；加 --json 输出完整渲染内容。", _cmd_context,
         )
         self.register_builtin(
             "/sessions", "列出当前工作区所有会话",

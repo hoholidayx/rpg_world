@@ -8,6 +8,7 @@ from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.rpg_context import (
     FixedLayerData,
     HotHistoryLayer,
+    LayerType,
     Message,
     RPGContext,
     Role,
@@ -66,6 +67,56 @@ def test_context_inspector_handles_hot_history_without_user_anchor(fake_token_co
     assert summary[3].description == "2 轮 / 3 条 (user=0, assistant=1, tool=1, system=1)"
     assert summary[-1].type == "user_message"
     assert summary[-1].status == "active"
+
+
+def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_token_counter):
+    ctx = RPGContext(
+        fixed_layer=FixedLayerData(sections=[FixedLayerSection(id="core", title="核心", content="fixed")]),
+        hot_history=HotHistoryLayer(messages=[
+            Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
+            Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
+        ]),
+        user_message=UserMessageLayer(user_input="inspect"),
+    )
+
+    payload = ContextInspector(ctx, fake_token_counter, hot_history_rounds=3).to_payload(session_id="s1")
+
+    assert payload["formatVersion"] == "context-preview.v1"
+    assert payload["sessionId"] == "s1"
+    assert payload["hotHistoryRounds"] == 3
+    assert payload["totals"] == {
+        "layerCount": 9,
+        "activeLayers": 3,
+        "tokenCount": 6,
+        "messageCount": 4,
+    }
+
+    layers = payload["layers"]
+    fixed = layers[0]
+    assert fixed["index"] == 0
+    assert fixed["type"] == LayerType.FIXED
+    assert fixed["role"] == Role.SYSTEM.value
+    assert fixed["status"] == "active"
+    assert fixed["content"] == "fixed|core|0|0"
+
+    summary = layers[2]
+    assert summary["type"] == LayerType.SUMMARY
+    assert summary["status"] == "inactive"
+    assert summary["content"] == ""
+
+    hot_history = layers[3]
+    assert hot_history["type"] == LayerType.HOT_HISTORY
+    assert hot_history["description"] == "1 轮 / 2 条 (user=1, assistant=1, tool=0, system=0)"
+    assert "[user]\nu1" in hot_history["content"]
+    assert "[assistant]\na1" in hot_history["content"]
+
+    messages = payload["messages"]
+    assert messages == [
+        {"role": "system", "content": "fixed|core|0|0"},
+        {"role": "user", "content": "u1", "turn_id": 1, "seq_in_turn": 1},
+        {"role": "assistant", "content": "a1", "turn_id": 1, "seq_in_turn": 2},
+        {"role": "user", "content": "inspect"},
+    ]
 
 
 def test_fixed_layer_composer_accepts_static_module_sections():

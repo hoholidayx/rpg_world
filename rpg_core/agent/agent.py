@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time as _time
 from asyncio import Future
 from collections.abc import AsyncIterator
@@ -641,6 +642,21 @@ class RPGGameAgent:
             self._token_counter,
             hot_history_rounds=self._builder.config.hot_history_rounds,
         ).to_markdown()
+
+    async def get_context_payload(self, user_input: str = "") -> dict[str, object]:
+        """Build the full 5-layer context and return a JSON-ready payload."""
+        await self._ensure_initialized()
+        ctx = self._build_ctx_for_inspection(user_input)
+        return ContextInspector(
+            ctx,
+            self._token_counter,
+            hot_history_rounds=self._builder.config.hot_history_rounds,
+        ).to_payload(session_id=self._session_id)
+
+    async def get_context_json(self, user_input: str = "") -> str:
+        """Build the full 5-layer context and return formatted JSON text."""
+        payload = await self.get_context_payload(user_input)
+        return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def _build_ctx_for_inspection(self, user_input: str = "") -> "RPGContext":
         """Build context for inspection (no _history mutation, no LLM call)."""

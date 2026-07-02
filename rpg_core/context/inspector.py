@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rpg_core.context.rpg_context import LayerType, RPGContext, Role
+from rpg_core.context.rpg_context import LayerType, Message, RPGContext, Role
 from rpg_core.session.turns import count_roles
 from rpg_core.utils.tokenizer import TokenCounter
 
@@ -39,8 +39,38 @@ class ContextInspector:
         self._hot_history_rounds = hot_history_rounds
 
     def layer_summary(self) -> list[LayerInfo]:
-        layers: list[LayerInfo] = []
-        self._add_rendered_layer(
+        return [
+            LayerInfo(
+                type=str(layer["type"]),
+                role=str(layer["role"]),
+                status=str(layer["status"]),
+                char_count=int(layer["charCount"]),
+                token_count=int(layer["tokenCount"]),
+                description=str(layer["description"]),
+            )
+            for layer in self._layer_payloads()
+        ]
+
+    def to_payload(self, session_id: str = "") -> dict[str, object]:
+        layers = self._layer_payloads()
+        messages = [message.to_dict() for message in self._ctx.to_message_objects()]
+        return {
+            "formatVersion": "context-preview.v1",
+            "sessionId": session_id,
+            "hotHistoryRounds": self._hot_history_rounds,
+            "totals": {
+                "layerCount": len(layers),
+                "activeLayers": sum(1 for layer in layers if layer["status"] == "active"),
+                "tokenCount": sum(int(layer["tokenCount"]) for layer in layers),
+                "messageCount": len(messages),
+            },
+            "layers": layers,
+            "messages": messages,
+        }
+
+    def _layer_payloads(self) -> list[dict[str, object]]:
+        layers: list[dict[str, object]] = []
+        self._add_rendered_layer_payload(
             layers,
             LayerType.FIXED,
             Role.SYSTEM.value,
@@ -50,7 +80,7 @@ class ContextInspector:
                 char_count=len(self._ctx.fixed_layer.characters),
             ),
         )
-        self._add_rendered_layer(
+        self._add_rendered_layer_payload(
             layers,
             LayerType.PERSISTENT_MEMORY,
             Role.SYSTEM.value,
@@ -58,32 +88,32 @@ class ContextInspector:
             if self._ctx.persistent_memory.active
             else "-",
         )
-        self._add_rendered_layer(
+        self._add_rendered_layer_payload(
             layers,
             LayerType.SUMMARY,
             Role.SYSTEM.value,
             _preview_text(self._ctx.summary.text or "", 50),
         )
-        self._add_hot_history_summary(layers)
-        self._add_rendered_layer(
+        self._add_hot_history_payload(layers)
+        self._add_rendered_layer_payload(
             layers,
             LayerType.STORY_MEMORY,
             Role.SYSTEM.value,
             f"{len(self._ctx.story_memory.details)} 条剧情细节" if self._ctx.story_memory.active else "-",
         )
-        self._add_rendered_layer(
+        self._add_rendered_layer_payload(
             layers,
             LayerType.RECALLED_MEMORY,
             Role.SYSTEM.value,
             f"{len(self._ctx.recalled_memory.items)} 条召回记忆" if self._ctx.recalled_memory.active else "-",
         )
-        self._add_rendered_layer(
+        self._add_rendered_layer_payload(
             layers,
             LayerType.STATUS_TABLES,
             Role.SYSTEM.value,
             f"{len(self._ctx.status_tables.tables)} 张状态表" if self._ctx.status_tables.active else "-",
         )
-        self._add_rendered_layer(
+        self._add_rendered_layer_payload(
             layers,
             LayerType.RP_MODULES,
             Role.SYSTEM.value,
@@ -91,7 +121,13 @@ class ContextInspector:
         )
         # USER_MESSAGE 的摘要需要包含 scene/user prefix 等最终拼接结果，所以这里先渲染再预览。
         user_content = self._ctx.render_layer(LayerType.USER_MESSAGE)
-        self._add_layer(layers, LayerType.USER_MESSAGE, Role.USER.value, user_content, _preview_text(user_content or "", 50))
+        self._add_layer_payload(
+            layers,
+            LayerType.USER_MESSAGE,
+            Role.USER.value,
+            user_content,
+            _preview_text(user_content or "", 50),
+        )
         return layers
 
     def to_markdown(self) -> str:
@@ -133,70 +169,78 @@ class ContextInspector:
 
         return "\n".join(lines)
 
-    def _add_rendered_layer(
+    def _add_rendered_layer_payload(
         self,
-        layers: list[LayerInfo],
+        layers: list[dict[str, object]],
         type_: str,
         role: str,
         description: str,
     ) -> None:
-        self._add_layer(layers, type_, role, self._ctx.render_layer(type_), description)
+        self._add_layer_payload(layers, type_, role, self._ctx.render_layer(type_), description)
 
-    def _add_layer(
+    def _add_layer_payload(
         self,
-        layers: list[LayerInfo],
+        layers: list[dict[str, object]],
         type_: str,
         role: str,
         content: str | None,
         description: str,
     ) -> None:
         if content:
-            layers.append(LayerInfo(
-                type=type_,
-                role=role,
-                status="active",
-                char_count=len(content),
-                token_count=self._token_counter.count(content),
-                description=description,
-            ))
+            layers.append({
+                "index": len(layers),
+                "type": type_,
+                "role": role,
+                "status": "active",
+                "charCount": len(content),
+                "tokenCount": self._token_counter.count(content),
+                "description": description,
+                "content": content,
+            })
             return
-        layers.append(LayerInfo(
-            type=type_,
-            role=role,
-            status="inactive",
-            char_count=0,
-            token_count=0,
-            description="-",
-        ))
+        layers.append({
+            "index": len(layers),
+            "type": type_,
+            "role": role,
+            "status": "inactive",
+            "charCount": 0,
+            "tokenCount": 0,
+            "description": "-",
+            "content": "",
+        })
 
-    def _add_hot_history_summary(self, layers: list[LayerInfo]) -> None:
+    def _add_hot_history_payload(self, layers: list[dict[str, object]]) -> None:
         if not self._ctx.hot_history.messages:
-            layers.append(LayerInfo(
-                type=LayerType.HOT_HISTORY,
-                role="mixed",
-                status="inactive",
-                char_count=0,
-                token_count=0,
-                description="-",
-            ))
+            layers.append({
+                "index": len(layers),
+                "type": LayerType.HOT_HISTORY,
+                "role": "mixed",
+                "status": "inactive",
+                "charCount": 0,
+                "tokenCount": 0,
+                "description": "-",
+                "content": "",
+            })
             return
 
         from rpg_core.session.manager import SessionManager
 
         role_counts = count_roles(self._ctx.hot_history.messages)
         turn_count = SessionManager.count_turns(self._ctx.hot_history.messages)
-        layers.append(LayerInfo(
-            type=LayerType.HOT_HISTORY,
-            role="mixed",
-            status="active",
-            char_count=sum(len(m.content) for m in self._ctx.hot_history.messages),
-            token_count=self._token_counter.count_messages(self._ctx.hot_history.messages),
-            description=(
+        layers.append({
+            "index": len(layers),
+            "type": LayerType.HOT_HISTORY,
+            "role": "mixed",
+            "status": "active",
+            "charCount": sum(len(m.content) for m in self._ctx.hot_history.messages),
+            "tokenCount": self._token_counter.count_messages(self._ctx.hot_history.messages),
+            "description": (
                 f"{turn_count} 轮 / {len(self._ctx.hot_history.messages)} 条 "
                 f"(user={role_counts['user']}, assistant={role_counts['assistant']}, "
                 f"tool={role_counts['tool']}, system={role_counts['system']})"
             ),
-        ))
+            "content": _render_hot_history_content(self._ctx.hot_history.messages),
+        })
 
 
 def _layer_display_name(type_: str) -> str:
@@ -219,6 +263,10 @@ def _preview_text(text: str, max_chars: int = 50) -> str:
     if len(compact) <= max_chars:
         return compact
     return compact[:max_chars] + "..."
+
+
+def _render_hot_history_content(messages: list[Message]) -> str:
+    return "\n\n".join(f"[{message.role.value}]\n{message.content}" for message in messages)
 
 
 def _build_fixed_desc(section_count: int, lore_count: int, char_count: int) -> str:

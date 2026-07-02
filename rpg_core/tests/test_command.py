@@ -73,6 +73,54 @@ class TestCommandDispatcher:
         text = format_command_help([])
         assert text == "当前没有可用命令。"
 
+    @pytest.mark.asyncio
+    async def test_context_command_defaults_to_markdown(self):
+        fake_agent = SimpleNamespace(
+            get_context_markdown=AsyncMock(return_value="markdown context"),
+            get_context_json=AsyncMock(return_value='{"ok": true}'),
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/context")
+
+        assert result.handled is True
+        assert result.reply == "markdown context"
+        fake_agent.get_context_markdown.assert_awaited_once()
+        fake_agent.get_context_json.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_context_command_supports_json_flag(self):
+        fake_agent = SimpleNamespace(
+            get_context_markdown=AsyncMock(return_value="markdown context"),
+            get_context_json=AsyncMock(return_value='{"formatVersion": "context-preview.v1"}'),
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/context --json")
+
+        assert result.handled is True
+        assert result.reply == '{"formatVersion": "context-preview.v1"}'
+        fake_agent.get_context_json.assert_awaited_once()
+        fake_agent.get_context_markdown.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_context_command_rejects_unknown_args(self):
+        fake_agent = SimpleNamespace(
+            get_context_markdown=AsyncMock(return_value="markdown context"),
+            get_context_json=AsyncMock(return_value='{"ok": true}'),
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/context --bad")
+
+        assert result.handled is True
+        assert result.reply == "[错误] 用法：/context [--json]"
+        fake_agent.get_context_markdown.assert_not_awaited()
+        fake_agent.get_context_json.assert_not_awaited()
+
     def test_session_id_validation_has_length_limit(self):
         from rpg_core.session import SessionManager
 

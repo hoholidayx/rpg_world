@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,6 +11,7 @@ import rpg_core.agent.agent as agent_module
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.command import CommandDispatcher
 from rpg_core.agent.tools import BaseTool
+from rpg_core.context.rpg_context import HotHistoryLayer, Message, RPGContext, Role
 from llm_service.manager import ProviderOverrides
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.settings import RPModuleSettings
@@ -222,6 +224,45 @@ def test_register_rp_module_commands_exposes_check_dc():
     assert "/roll" in command_names
     assert "/check_dc" in command_names
     assert "/check" not in command_names
+
+
+@pytest.mark.asyncio
+async def test_get_context_json_does_not_mutate_history(fake_token_counter):
+    class FakeBuilder:
+        config = SimpleNamespace(hot_history_rounds=2)
+
+        def __init__(self) -> None:
+            self.last_messages = None
+
+        def build(self, *, messages, **_kwargs):  # noqa: ANN001
+            self.last_messages = messages
+            return RPGContext(hot_history=HotHistoryLayer(messages=list(messages)))
+
+    history = [Message(Role.USER, "old", turn_id=1, seq_in_turn=1)]
+    builder = FakeBuilder()
+    agent = object.__new__(RPGGameAgent)
+    agent._ensure_initialized = AsyncMock()
+    agent._session_id = "s_json"
+    agent._token_counter = fake_token_counter
+    agent._builder = builder
+    agent._fixed_sections = []
+    agent._session = SimpleNamespace(history=history)
+    agent._character_mgr = None
+    agent._lorebook_mgr = None
+    agent._status_mgr = None
+    agent._scene_tracker = None
+    agent._rp_module_registry = None
+
+    payload = json.loads(await agent.get_context_json("preview"))
+
+    assert [message.content for message in history] == ["old"]
+    assert builder.last_messages is not history
+    assert [message.content for message in builder.last_messages] == ["old", "preview"]
+    assert payload["sessionId"] == "s_json"
+    assert payload["messages"] == [
+        {"role": "user", "content": "old", "turn_id": 1, "seq_in_turn": 1},
+        {"role": "user", "content": "preview"},
+    ]
 
 
 def test_setup_tool_registry_registers_rp_module_tools(tmp_path, monkeypatch):
