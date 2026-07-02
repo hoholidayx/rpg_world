@@ -22,7 +22,12 @@ class _FakeAgentClient:
 
     async def list_commands(self, session_id: str) -> dict[str, object]:
         self.calls.append(("commands", session_id))
-        return {"commands": [{"command": "/continue", "description": "继续叙事"}]}
+        return {
+            "commands": [
+                {"command": "/continue", "description": "继续叙事"},
+                {"command": "/check_dc", "description": "手动 DC 检定"},
+            ]
+        }
 
     async def send(self, session_id: str, text: str) -> dict[str, object]:
         self.calls.append(("send", session_id))
@@ -98,6 +103,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     )
     assert commands.status_code == 200
     assert commands.json()[0]["name"] == "/continue"
+    assert commands.json()[1]["name"] == "/check_dc"
 
     turn = client.post(
         f"/play-api/v1/sessions/{demo_session_id}/turn",

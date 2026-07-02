@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock
 
 from rpg_core.agent import command as command_module
 from rpg_core.agent.command import CommandDispatcher, format_command_help
+from rpg_core.rp_modules.registry import RPModuleRegistry
+from rpg_core.settings import RPModuleSettings
 from rpg_data import models
 
 
@@ -117,3 +119,32 @@ class TestCommandDispatcher:
         assert result.handled is True
         assert "当前会话: s2" in result.reply
         assert "- s2 （当前）" in result.reply
+
+    @pytest.mark.asyncio
+    async def test_rp_module_commands_are_dispatched(self):
+        dispatcher = CommandDispatcher(agent=SimpleNamespace())
+        dispatcher.register_default_builtins()
+        registry = RPModuleRegistry(
+            session_id="s1",
+            world_name="world",
+            settings=RPModuleSettings(),
+        )
+        for command in registry.get_commands():
+            dispatcher.register_builtin(
+                command.name,
+                command.description,
+                command.detail,
+                command.handler,
+            )
+
+        commands = dispatcher.list_commands()
+        assert "/check_dc" in [command.name for command in commands]
+        assert "/check" not in [command.name for command in commands]
+
+        roll = await dispatcher.dispatch("/roll 1d2")
+        check = await dispatcher.dispatch("/check_dc 1d2 dc=1")
+
+        assert roll.handled is True
+        assert "骰子结果:" in roll.reply
+        assert check.handled is True
+        assert "检定结果:" in check.reply

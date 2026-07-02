@@ -191,6 +191,26 @@ class CoreLoggingSettings:
     log_level: str = "DEBUG"
 
 
+@dataclass(frozen=True)
+class DiceModuleSettings:
+    """Dice RP module settings."""
+
+    enabled: bool = True
+    allow_auto_checks: bool = True
+    default_dc: int = 12
+    max_dice_count: int = 100
+    max_die_sides: int = 1000
+
+
+@dataclass(frozen=True)
+class RPModuleSettings:
+    """RP Modules business settings."""
+
+    enabled: bool = True
+    reveal_mechanics_default: str = "concise"
+    dice: DiceModuleSettings = field(default_factory=DiceModuleSettings)
+
+
 class Settings(ProfiledYamlSettings):
     """Read-only settings proxy. Attributes mirror merged core settings."""
 
@@ -259,6 +279,29 @@ class Settings(ProfiledYamlSettings):
         raw = self._mapping("logging")
         return CoreLoggingSettings(
             log_level=str(raw.get("log_level", "DEBUG") or "DEBUG"),
+        )
+
+    @property
+    def rp_module_settings(self) -> RPModuleSettings:
+        """RP Modules typed settings."""
+        raw = self._mapping("rp_modules")
+        modules = raw.get("modules", {})
+        if not isinstance(modules, dict):
+            modules = {}
+        dice_raw = modules.get("dice", {})
+        if not isinstance(dice_raw, dict):
+            dice_raw = {}
+
+        return RPModuleSettings(
+            enabled=bool(raw.get("enabled", True)),
+            reveal_mechanics_default=str(raw.get("reveal_mechanics_default", "concise") or "concise"),
+            dice=DiceModuleSettings(
+                enabled=bool(dice_raw.get("enabled", True)),
+                allow_auto_checks=bool(dice_raw.get("allow_auto_checks", True)),
+                default_dc=int(dice_raw.get("default_dc", 12)),
+                max_dice_count=int(dice_raw.get("max_dice_count", 100)),
+                max_die_sides=int(dice_raw.get("max_die_sides", 1000)),
+            ),
         )
 
     def _validate_settings(self) -> None:

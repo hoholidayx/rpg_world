@@ -8,7 +8,11 @@ import pytest
 
 import rpg_core.agent.agent as agent_module
 from rpg_core.agent.agent import RPGGameAgent
+from rpg_core.agent.command import CommandDispatcher
+from rpg_core.agent.tools import BaseTool
 from llm_service.manager import ProviderOverrides
+from rpg_core.rp_modules.registry import RPModuleRegistry
+from rpg_core.settings import RPModuleSettings
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     QueueItem,
@@ -188,6 +192,69 @@ def test_rpg_game_agent_default_model_no_longer_forces_gpt4o(monkeypatch):
 
     assert agent._model is None
     assert agent._provider_overrides == ProviderOverrides()
+
+
+def test_setup_rp_module_registry_adds_dice_fixed_section():
+    agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s1"
+    agent._world_name = "world"
+    agent._status_mgr = None
+    agent._scene_tracker = None
+
+    agent._setup_rp_module_registry()
+
+    assert agent._rp_module_registry is not None
+    assert any(section.id == "rp_module_dice" for section in agent._fixed_sections)
+
+
+def test_register_rp_module_commands_exposes_check_dc():
+    agent = object.__new__(RPGGameAgent)
+    agent._cmd_dispatcher = CommandDispatcher(agent=agent)
+    agent._rp_module_registry = RPModuleRegistry(
+        session_id="s1",
+        world_name="world",
+        settings=RPModuleSettings(),
+    )
+
+    agent._register_rp_module_commands()
+
+    command_names = [command.name for command in agent._cmd_dispatcher.list_commands()]
+    assert "/roll" in command_names
+    assert "/check_dc" in command_names
+    assert "/check" not in command_names
+
+
+def test_setup_tool_registry_registers_rp_module_tools(tmp_path, monkeypatch):
+    class FakeTool(BaseTool):
+        name = "rp_fake_tool"
+        description = "fake"
+
+        def parameters(self):
+            return {"type": "object", "properties": {}}
+
+        async def execute(self, **kwargs):
+            return "ok"
+
+    class FakeRegistry:
+        def get_tools(self):
+            return [FakeTool()]
+
+    class FakeGateway:
+        catalog = SimpleNamespace(get_session_runtime_dir=lambda session_id: tmp_path)
+
+    import rpg_data.services as data_services
+
+    monkeypatch.setattr(data_services, "get_data_service_gateway", lambda: FakeGateway())
+
+    agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s1"
+    agent._scene_tracker = None
+    agent._extra_tools = []
+    agent._rp_module_registry = FakeRegistry()
+
+    agent._setup_tool_registry()
+
+    assert "rp_fake_tool" in agent._tool_registry
 
 
 @pytest.mark.asyncio

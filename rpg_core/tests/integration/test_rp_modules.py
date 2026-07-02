@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import asyncio
+from contextlib import suppress
+
+import pytest
+
+import rpg_core.agent.agent as agent_module
+from rpg_core.agent.agent import RPGGameAgent
+from rpg_core.context.rpg_context import LayerType
+from rpg_core.tests.integration.conftest import _ensure_integration_session
+from rpg_core.utils.watcher import get_watcher
+
+pytestmark = pytest.mark.integration
+
+
+class _NoLLMProvider:
+    async def chat(self, messages, tools=None):  # noqa: ANN001
+        raise AssertionError("RP module integration test must not call chat LLM")
+
+    async def chat_stream(self, messages, tools=None):  # noqa: ANN001
+        raise AssertionError("RP module integration test must not call streaming LLM")
+        yield
+
+    def get_default_model(self) -> str:
+        return "no-llm-model"
+
+
+class _NoLLMManager:
+    def get_provider(self, _biz_key, overrides=None):  # noqa: ANN001
+        return _NoLLMProvider()
+
+
+@pytest.mark.asyncio
+async def test_rp_modules_and_dice_commands_work_without_real_llm(
+    monkeypatch,
+    integration_settings,  # noqa: ARG001
+    integration_workspace,
+    integration_data_gateway,
+):
+    monkeypatch.setattr(agent_module.LLMManager, "get", classmethod(lambda cls: _NoLLMManager()))
+
+    session_id = "integration_rp_modules"
+    _ensure_integration_session(integration_data_gateway, integration_workspace, session_id)
+    agent = RPGGameAgent(session_id=session_id)
+    await agent._ensure_initialized()
+
+    try:
+        command_names = [command.name for command in agent.list_commands()]
+        assert "/rp_modules" in command_names
+        assert "/rp_module" in command_names
+        assert "/roll" in command_names
+        assert "/check_dc" in command_names
+        assert "/check" not in command_names
+
+        tool_names = [
+            schema["function"]["name"]
+            for schema in agent._tool_registry.get_openai_schemas()
+        ]
+        assert "rp_dice_roll" in tool_names
+        assert "rp_dice_check_dc" in tool_names
+
+        ctx = agent._build_ctx_for_inspection("inspect dice")
+        fixed_content = ctx.render_layer(LayerType.FIXED) or ""
+        assert "[rp_module_dice]" in fixed_content
+        assert "rp_dice_roll" in fixed_content
+        assert ctx.rp_modules.active is False
+
+        modules_result = await asyncio.wait_for(agent.execute_command("/rp_modules"), timeout=10)
+        module_result = await asyncio.wait_for(agent.execute_command("/rp_module dice"), timeout=10)
+        roll_result = await asyncio.wait_for(agent.execute_command("/roll 1d20"), timeout=10)
+        check_result = await asyncio.wait_for(agent.execute_command("/check_dc 1d20 dc=12"), timeout=10)
+
+        assert modules_result.handled is True
+        assert "dice" in modules_result.reply
+        assert module_result.handled is True
+        assert "RP Module: dice" in module_result.reply
+        assert "/check_dc" in module_result.reply
+        assert roll_result.handled is True
+        assert "骰子结果:" in roll_result.reply
+        assert check_result.handled is True
+        assert "检定结果:" in check_result.reply
+
+        assert agent.history == []
+        assert integration_data_gateway.messages.count(session_id) == 0
+    finally:
+        consumer = getattr(agent, "_consumer_task", None)
+        if consumer is not None:
+            consumer.cancel()
+            with suppress(asyncio.CancelledError):
+                await consumer
+
+        watcher = get_watcher()
+        watcher.stop()
+        watcher.clear_all()

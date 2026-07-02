@@ -218,6 +218,60 @@ def test_resolve_openai_api_key_can_skip_agent_fallback(tmp_path: Path, monkeypa
     ) is None
 
 
+def test_rp_module_settings_defaults(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    rp_modules = settings_module.Settings().rp_module_settings
+
+    assert rp_modules.enabled is True
+    assert rp_modules.reveal_mechanics_default == "concise"
+    assert rp_modules.dice.enabled is True
+    assert rp_modules.dice.default_dc == 12
+
+
+def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(
+        cfg,
+        agent_extra="",
+    )
+    original = cfg.read_text(encoding="utf-8")
+    cfg.write_text(
+        original.replace(
+            "  memory:\n",
+            """  rp_modules:
+    enabled: false
+    reveal_mechanics_default: none
+    modules:
+      dice:
+        enabled: false
+        allow_auto_checks: false
+        default_dc: 15
+        max_dice_count: 8
+        max_die_sides: 100
+  memory:\n""",
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    rp_modules = settings_module.Settings().rp_module_settings
+
+    assert rp_modules.enabled is False
+    assert rp_modules.reveal_mechanics_default == "none"
+    assert rp_modules.dice.enabled is False
+    assert rp_modules.dice.allow_auto_checks is False
+    assert rp_modules.dice.default_dc == 15
+    assert rp_modules.dice.max_dice_count == 8
+    assert rp_modules.dice.max_die_sides == 100
+
+
 def test_memory_settings_merge_shared_openai_and_resolve_nested_llama_paths(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "settings.yaml"
     cfg.write_text(

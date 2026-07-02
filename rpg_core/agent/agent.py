@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from rpg_core.character.manager import CharacterManager
     from rpg_core.agent.command import CommandDef
     from rpg_core.lorebook.manager import LorebookManager
+    from rpg_core.rp_modules import RPModuleRegistry
     from rp_memory.memory_manager import MemoryManager
     from rpg_core.status.manager import StatusManager
 
@@ -126,6 +127,7 @@ class RPGGameAgent:
         self._memory_sub_agent: MemorySubAgent | None = None
         self._compressor: SummaryCompressor | None = None
         self._cmd_dispatcher: CommandDispatcher | None = None
+        self._rp_module_registry: RPModuleRegistry | None = None
         self._memory_manager: MemoryManager | None = None
         self._rpg_ctx: dict[str, object] = {}
         self._init_lock: asyncio.Lock | None = None
@@ -578,6 +580,8 @@ class RPGGameAgent:
         if not self._initialized:
             return
         self._refresh_rpg_context()
+        self._register_rp_module_commands()
+        self._setup_tool_registry()
 
     async def switch_session(self, session_id: str) -> None:
         """原地切换到指定会话，不退出 REPL/Agent。
@@ -598,6 +602,7 @@ class RPGGameAgent:
             self._memory_manager.init()
         get_watcher().start()
         self._session.switch_to(session_id)
+        self._register_rp_module_commands()
         self._setup_tool_registry()
         logger.info("[MainAgent] switched to session: {}", session_id)
 
@@ -663,6 +668,7 @@ class RPGGameAgent:
             lorebook_mgr=self._lorebook_mgr,
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
+            rp_module_sections=self._get_rp_module_runtime_sections(user_input=user_input),
         )
         return ctx
 
@@ -696,6 +702,54 @@ class RPGGameAgent:
         if self._memory_sub_agent is not None:
             _sub_ctx_memory = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
             self._memory_sub_agent.bind_context(_sub_ctx_memory)
+        if self._rp_module_registry is not None:
+            self._setup_rp_module_registry()
+
+    def _setup_rp_module_registry(self) -> None:
+        """Build the session-scoped RP Module registry and fixed sections."""
+        from rpg_core.rp_modules import RPModuleRegistry
+
+        rp_settings = getattr(settings, "rp_module_settings", None)
+        self._rp_module_registry = RPModuleRegistry(
+            session_id=self._session_id,
+            world_name=self._world_name,
+            status_mgr=self._status_mgr,
+            scene_tracker=self._scene_tracker,
+            settings=rp_settings,
+        )
+
+        module_sections = self._rp_module_registry.get_fixed_sections()
+        composer = FixedLayerComposer(self._world_name)
+        if module_sections and hasattr(composer, "with_module_sections"):
+            self._fixed_sections = composer.with_module_sections(module_sections).sections
+        else:
+            self._fixed_sections = [*composer.sections, *module_sections]
+
+    def _register_rp_module_commands(self) -> None:
+        """Expose RP Module slash commands through the existing dispatcher."""
+        dispatcher = getattr(self, "_cmd_dispatcher", None)
+        registry = getattr(self, "_rp_module_registry", None)
+        if dispatcher is None or registry is None:
+            return
+        if not hasattr(dispatcher, "register_builtin"):
+            return
+        for command in registry.get_commands():
+            dispatcher.register_builtin(
+                command.name,
+                command.description,
+                command.detail,
+                command.handler,
+            )
+
+    def _get_rp_module_runtime_sections(self, user_input: str = ""):
+        """Collect dynamic RP module sections. Dice MVP returns an empty list."""
+        if self._rp_module_registry is None:
+            return []
+        from rpg_core.rp_modules.models import ModuleContextRequest
+
+        return self._rp_module_registry.get_runtime_sections(
+            ModuleContextRequest(session_id=self._session_id, user_input=user_input),
+        )
 
     def _build_transformed_context(self) -> list[Message]:
         """Build the 5-layer RPG context as Message objects."""
@@ -706,6 +760,7 @@ class RPGGameAgent:
             lorebook_mgr=self._lorebook_mgr,
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
+            rp_module_sections=self._get_rp_module_runtime_sections(),
         )
         return ctx.to_message_objects()
 
@@ -725,6 +780,8 @@ class RPGGameAgent:
         ])
         if self._scene_tracker:
             self._tool_registry.register_all(self._scene_tracker.get_tools())
+        if self._rp_module_registry:
+            self._tool_registry.register_all(self._rp_module_registry.get_tools())
         if self._extra_tools:
             self._tool_registry.register_all(self._extra_tools)
 
@@ -739,7 +796,7 @@ class RPGGameAgent:
             if self._initialized:
                 return
 
-            self._fixed_sections = FixedLayerComposer(self._world_name).sections
+            self._setup_rp_module_registry()
             self._session.load()
 
             # ── MemoryManager 初始化（仅注册 FileWatcher） ─────────
@@ -797,6 +854,7 @@ class RPGGameAgent:
             # ── CommandDispatcher ─────────────────────────────────────────
             self._cmd_dispatcher = CommandDispatcher(agent=self)
             self._cmd_dispatcher.register_default_builtins()
+            self._register_rp_module_commands()
 
             # 子 Agent 命令
             if self._status_sub_agent is not None and self._status_sub_agent.enabled:
