@@ -168,6 +168,13 @@ def test_agent_service_contracts(monkeypatch) -> None:
         )
         assert missing.status_code == 404
 
+        missing_history = client.get(
+            "/agent/v1/chat/history",
+            params={"session_id": "missing_session"},
+        )
+        assert missing_history.status_code == 404
+        assert missing_history.json()["detail"] == "Session 'missing_session' not found"
+
         mismatch = client.post(
             "/agent/v1/chat/session/ensure",
             json={"workspace_id": "ws", "story_id": 1, "session_id": "foreign", "title": "Ignored"},

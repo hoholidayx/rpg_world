@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable
 from datetime import UTC, datetime
+from typing import TypeVar
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_service.client import AgentClientError, AgentServiceUnavailable
 from play_api.backends import get_agent_backend, get_data_manager_backend
 from play_api.routers._locator import resolve_session_or_404
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
+T = TypeVar("T")
 
 
 class PlaySessionCreateRequest(BaseModel):
@@ -89,6 +93,19 @@ def _session_context(session: dict[str, object]) -> tuple[str, int, str]:
     )
 
 
+async def _agent_call(awaitable: Awaitable[T]) -> T:
+    try:
+        return await awaitable
+    except AgentServiceUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AgentClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+def _agent_error_event(exc: AgentClientError) -> dict[str, object]:
+    return {"kind": "error", "content": str(exc)}
+
+
 @router.get("", response_model=list[PlaySessionSummary])
 async def list_sessions(
     workspace: str = Query(...),
@@ -128,7 +145,10 @@ async def get_session_history(
     turns: list[PlayTurn] = []
     pending_user: str | None = None
     turn_id = 1
-    for message in await get_agent_backend().get_history(workspace, story_id, agent_session_id):
+    history = await _agent_call(
+        get_agent_backend().get_history(workspace, story_id, agent_session_id)
+    )
+    for message in history:
         role = message.get("role")
         content = str(message.get("content", ""))
         if role == "user":
@@ -166,13 +186,16 @@ async def get_current_scene(session_id: str) -> PlayScene:
 @router.get("/{session_id}/commands", response_model=list[PlayCommand])
 async def list_commands(session_id: str) -> list[PlayCommand]:
     workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    commands = await _agent_call(
+        get_agent_backend().list_commands(workspace, story_id, agent_session_id)
+    )
     return [
         PlayCommand(
             name=str(item.get("name", "")),
             description=str(item.get("description", "")),
             mode=str(item.get("mode", "slash")),
         )
-        for item in await get_agent_backend().list_commands(workspace, story_id, agent_session_id)
+        for item in commands
     ]
 
 
@@ -180,12 +203,14 @@ async def list_commands(session_id: str) -> list[PlayCommand]:
 async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, object]:
     session = await resolve_session_or_404(session_id)
     workspace, story_id, agent_session_id = _session_context(session)
-    result = await get_agent_backend().send(
-        workspace,
-        story_id,
-        agent_session_id,
-        payload.text,
-        payload.mode,
+    result = await _agent_call(
+        get_agent_backend().send(
+            workspace,
+            story_id,
+            agent_session_id,
+            payload.text,
+            payload.mode,
+        )
     )
     return {
         "turnId": f"turn_{agent_session_id}",
@@ -205,13 +230,16 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
 
     async def event_generator():
         # SSE 事件保持 Agent 服务原始结构，Play API 这里只负责转发与 session 解析。
-        async for event in get_agent_backend().stream(
-            workspace,
-            story_id,
-            agent_session_id,
-            payload.text,
-            payload.mode,
-        ):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        try:
+            async for event in get_agent_backend().stream(
+                workspace,
+                story_id,
+                agent_session_id,
+                payload.text,
+                payload.mode,
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except (AgentServiceUnavailable, AgentClientError) as exc:
+            yield f"data: {json.dumps(_agent_error_event(exc), ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

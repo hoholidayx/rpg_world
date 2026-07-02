@@ -190,6 +190,8 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
 
 def _get_agent(session_id: str):
     session_id = _require_session_id(session_id)
+    if get_data_service_gateway().catalog.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
     return AgentManager.get_or_create(session_id=session_id)
 
 
