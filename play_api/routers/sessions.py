@@ -46,6 +46,39 @@ class PlayCommand(BaseModel):
     mode: str = "slash"
 
 
+class ContextPreviewTotals(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    layer_count: int = Field(alias="layerCount")
+    active_layers: int = Field(alias="activeLayers")
+    token_count: int = Field(alias="tokenCount")
+    message_count: int = Field(alias="messageCount")
+
+
+class ContextPreviewLayer(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    index: int
+    type: str
+    role: str
+    status: str
+    char_count: int = Field(alias="charCount")
+    token_count: int = Field(alias="tokenCount")
+    description: str
+    content: str
+
+
+class ContextPreviewPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    format_version: str = Field(alias="formatVersion")
+    session_id: str = Field(alias="sessionId")
+    hot_history_rounds: int | None = Field(alias="hotHistoryRounds")
+    totals: ContextPreviewTotals
+    layers: list[ContextPreviewLayer] = Field(default_factory=list)
+    messages: list[dict[str, object]] = Field(default_factory=list)
+
+
 class PlayChatRequest(BaseModel):
     text: str
     mode: str = "ic"
@@ -197,6 +230,15 @@ async def list_commands(session_id: str) -> list[PlayCommand]:
         )
         for item in commands
     ]
+
+
+@router.get("/{session_id}/context-preview", response_model=ContextPreviewPayload)
+async def get_context_preview(session_id: str) -> ContextPreviewPayload:
+    workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    preview = await _agent_call(
+        get_agent_backend().get_context_preview(workspace, story_id, agent_session_id)
+    )
+    return ContextPreviewPayload.model_validate(preview)
 
 
 @router.post("/{session_id}/turn")

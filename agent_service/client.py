@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict, cast
 
 import httpx
 
@@ -20,6 +20,33 @@ class AgentClientError(RuntimeError):
 
 class AgentServiceUnavailable(AgentClientError):
     """Raised when the Agent service cannot be reached."""
+
+
+class ContextPreviewTotals(TypedDict):
+    layerCount: int
+    activeLayers: int
+    tokenCount: int
+    messageCount: int
+
+
+class ContextPreviewLayer(TypedDict):
+    index: int
+    type: str
+    role: str
+    status: str
+    charCount: int
+    tokenCount: int
+    description: str
+    content: str
+
+
+class ContextPreviewPayload(TypedDict):
+    formatVersion: str
+    sessionId: str
+    hotHistoryRounds: int | None
+    totals: ContextPreviewTotals
+    layers: list[ContextPreviewLayer]
+    messages: list[dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -71,6 +98,13 @@ class AgentClient:
     ) -> dict[str, Any]:
         params = {"session_id": session_id}
         return await self._get("/chat/commands", params=params)
+
+    async def get_context_preview(
+        self,
+        session_id: str,
+    ) -> ContextPreviewPayload:
+        params = {"session_id": session_id}
+        return cast(ContextPreviewPayload, await self._get("/chat/context-preview", params=params))
 
     async def list_sessions(
         self,

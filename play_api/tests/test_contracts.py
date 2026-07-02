@@ -29,6 +29,33 @@ class _FakeAgentClient:
             ]
         }
 
+    async def get_context_preview(self, session_id: str) -> dict[str, object]:
+        self.calls.append(("context-preview", session_id))
+        return {
+            "formatVersion": "context-preview.v1",
+            "sessionId": session_id,
+            "hotHistoryRounds": 5,
+            "totals": {
+                "layerCount": 1,
+                "activeLayers": 1,
+                "tokenCount": 3,
+                "messageCount": 1,
+            },
+            "layers": [
+                {
+                    "index": 0,
+                    "type": "fixed_layer",
+                    "role": "system",
+                    "status": "active",
+                    "charCount": 12,
+                    "tokenCount": 3,
+                    "description": "fixed",
+                    "content": "## Fixed",
+                }
+            ],
+            "messages": [{"role": "system", "content": "## Fixed"}],
+        }
+
     async def send(self, session_id: str, text: str) -> dict[str, object]:
         self.calls.append(("send", session_id))
         return {"reply": f"agent reply: {text}"}
@@ -148,6 +175,16 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert commands.json()[0]["name"] == "/continue"
     assert commands.json()[1]["name"] == "/check_dc"
 
+    context_preview = client.get(
+        f"/play-api/v1/sessions/{demo_session_id}/context-preview",
+    )
+    assert context_preview.status_code == 200
+    assert context_preview.json()["formatVersion"] == "context-preview.v1"
+    assert context_preview.json()["sessionId"] == demo_session_id
+    assert context_preview.json()["totals"]["tokenCount"] == 3
+    assert context_preview.json()["layers"][0]["content"] == "## Fixed"
+    assert context_preview.json()["messages"][0]["content"] == "## Fixed"
+
     turn = client.post(
         f"/play-api/v1/sessions/{demo_session_id}/turn",
         json={
@@ -158,6 +195,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert turn.json()["status"] == "completed"
     assert "hello" in turn.json()["reply"]
     assert ("commands", demo_session_id) in fake_agent.calls
+    assert ("context-preview", demo_session_id) in fake_agent.calls
     assert ("send", demo_session_id) in fake_agent.calls
 
     characters = client.get("/play-api/v1/workspaces/demo_workspace/characters")

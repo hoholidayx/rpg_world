@@ -50,6 +50,8 @@ class FakeAsyncClient:
 
     async def get(self, url: str, params=None):
         self.calls.append(("GET", url, {"params": params}))
+        if url.endswith("/chat/context-preview"):
+            return FakeResponse({"formatVersion": "context-preview.v1", "sessionId": params["session_id"]})
         return FakeResponse({"ok": True, "commands": []})
 
     async def post(self, url: str, json=None):
@@ -96,6 +98,17 @@ async def test_client_session_crud_uses_agent_service_contract() -> None:
         ("POST", "http://agent/chat/sessions", {"json": {"workspace_id": "ws", "story_id": 1, "title": "Alt"}}),
         ("GET", "http://agent/chat/sessions", {"params": {"workspace_id": "ws", "story_id": 1}}),
     ]
+
+
+async def test_client_get_context_preview_uses_agent_service_contract() -> None:
+    result = await AgentClient(base_url="http://agent").get_context_preview("s1")
+
+    assert result == {"formatVersion": "context-preview.v1", "sessionId": "s1"}
+    assert FakeAsyncClient.calls[-1] == (
+        "GET",
+        "http://agent/chat/context-preview",
+        {"params": {"session_id": "s1"}},
+    )
 
 
 async def test_client_stream_parses_sse_events() -> None:

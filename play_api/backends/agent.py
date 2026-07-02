@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from agent_service.client import ContextPreviewPayload
 from play_api import agent_client
 
 
@@ -33,6 +34,10 @@ class AgentBackend:
             }
             for item in result.get("commands", [])
         ]
+
+    async def get_context_preview(self, workspace: str, story_id: int, session_id: str) -> ContextPreviewPayload:
+        del workspace, story_id
+        return await agent_client.get_agent_client().get_context_preview(session_id)
 
     async def send(self, workspace: str, story_id: int, session_id: str, text: str, mode: str) -> dict[str, object]:
         del workspace, story_id

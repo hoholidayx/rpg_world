@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from agent_service.schemas import (
     AgentCommandRequest,
+    AgentContextPreviewResponse,
     AgentHealthResponse,
     AgentMessageRequest,
     AgentSessionCreateRequest,
@@ -87,6 +88,18 @@ async def list_commands(
             for c in agent.list_commands()
         ],
     }
+
+
+@app.get(f"{_service_prefix()}/chat/context-preview", response_model=AgentContextPreviewResponse)
+async def get_context_preview(
+    session_id: str = Query(...),
+) -> AgentContextPreviewResponse:
+    agent = _get_agent(session_id)
+    try:
+        payload = await agent.get_context_payload()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Context preview failed: {exc}") from exc
+    return AgentContextPreviewResponse.model_validate(payload)
 
 
 @app.get(f"{_service_prefix()}/chat/sessions")

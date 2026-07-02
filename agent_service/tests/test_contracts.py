@@ -31,6 +31,32 @@ class FakeAgent:
             self._session_id = parts[1]
         return CommandResult(reply=f"cmd:{command}", handled=True)
 
+    async def get_context_payload(self) -> dict[str, object]:
+        return {
+            "formatVersion": "context-preview.v1",
+            "sessionId": self._session_id,
+            "hotHistoryRounds": 5,
+            "totals": {
+                "layerCount": 1,
+                "activeLayers": 1,
+                "tokenCount": 3,
+                "messageCount": 1,
+            },
+            "layers": [
+                {
+                    "index": 0,
+                    "type": "fixed_layer",
+                    "role": "system",
+                    "status": "active",
+                    "charCount": 12,
+                    "tokenCount": 3,
+                    "description": "fixed",
+                    "content": "## Fixed",
+                }
+            ],
+            "messages": [{"role": "system", "content": "## Fixed"}],
+        }
+
     def list_commands(self):
         return [CommandDef(name="/help", description="help", detail="list commands")]
 
@@ -132,6 +158,16 @@ def test_agent_service_contracts(monkeypatch) -> None:
         )
         assert commands.status_code == 200
         assert commands.json()["commands"][0]["command"] == "/help"
+
+        context_preview = client.get(
+            "/agent/v1/chat/context-preview",
+            params={"session_id": "s1"},
+        )
+        assert context_preview.status_code == 200
+        assert context_preview.json()["formatVersion"] == "context-preview.v1"
+        assert context_preview.json()["sessionId"] == "s1"
+        assert context_preview.json()["layers"][0]["content"] == "## Fixed"
+        assert context_preview.json()["messages"][0]["content"] == "## Fixed"
 
         sessions = client.get(
             "/agent/v1/chat/sessions",
