@@ -31,6 +31,8 @@ def test_gateway_initializes_migrations_and_exposes_services(
     workspaces = gateway.catalog.list_workspaces()
     characters = gateway.character.list_characters("s_forest001")
     lorebook_entries = gateway.lorebook.list_enabled_entries("s_forest001")
+    messages = gateway.messages.list("s_forest001")
+    backup_messages = gateway.backup.messages.list("s_forest001")
     message_count = gateway.messages.count("s_forest001")
     backup_message_count = gateway.backup.messages.count("s_forest001")
     templates = gateway.status.list_templates("demo_workspace")
@@ -41,8 +43,12 @@ def test_gateway_initializes_migrations_and_exposes_services(
     assert {workspace.id for workspace in workspaces} == {"demo_workspace"}
     assert [character.name for character in characters] == ["Bob", "Alice"]
     assert [entry.name for entry in lorebook_entries] == ["炎心之木", "圆形封印祭坛"]
-    assert message_count == 0
-    assert backup_message_count == 0
+    assert message_count == 16
+    assert backup_message_count == 16
+    assert messages[0].content == "我拨开覆盖在石林入口的霜藤，确认 Alice 是否跟在身后。"
+    assert [message.turn_id for message in messages[:4]] == [1, 1, 2, 2]
+    assert [message.seq_in_turn for message in messages[:4]] == [1, 2, 1, 2]
+    assert [message.content for message in backup_messages[:2]] == [message.content for message in messages[:2]]
     assert [(item.name, item.status_kind) for item in templates] == [
         ("世界线索", "normal"),
         ("北境森林当前场景", "scene"),

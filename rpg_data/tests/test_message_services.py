@@ -31,15 +31,29 @@ def _migrated_database(tmp_path: Path) -> SqliteDatabase:
     return database
 
 
+def _create_test_session(database: SqliteDatabase, session_id: str) -> str:
+    database.execute_sql(
+        """
+        INSERT INTO rpg_sessions (id, workspace_id, story_id)
+        SELECT ?, 'demo_workspace', id
+        FROM rpg_stories
+        WHERE workspace_id = 'demo_workspace' AND title = '北境森林 Demo'
+        """,
+        (session_id,),
+    )
+    return session_id
+
+
 def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
         messages = MessageService(database)
         backup = BackupService(database)
+        session_id = _create_test_session(database, "s_message_crud")
 
-        first = messages.append("s_forest001", "user", "hello", turn_id=1, seq_in_turn=1)
+        first = messages.append(session_id, "user", "hello", turn_id=1, seq_in_turn=1)
         second = messages.append(
-            "s_forest001",
+            session_id,
             "assistant",
             "world",
             turn_id=1,
@@ -47,11 +61,11 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
             tool_calls_json='[{"id":"tc1"}]',
         )
 
-        assert [row.content for row in messages.list("s_forest001")] == ["hello", "world"]
-        assert messages.count("s_forest001") == 2
+        assert [row.content for row in messages.list(session_id)] == ["hello", "world"]
+        assert messages.count(session_id) == 2
         assert not hasattr(first, "hid")
         assert first.to_message_dict()["uid"] == first.id
-        assert messages.list("s_forest001", limit=1, offset=1)[0].id == second.id
+        assert messages.list(session_id, limit=1, offset=1)[0].id == second.id
 
         updated = messages.update(second.id, content="updated", tool_call_id="tc1")
         assert updated is not None
@@ -59,7 +73,7 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         assert updated.tool_call_id == "tc1"
 
         mapped = messages.append_mapping(
-            "s_forest001",
+            session_id,
             {
                 "role": "assistant",
                 "content": "uses tool",
@@ -73,9 +87,9 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         assert messages.delete(first.id)
         assert messages.get(first.id) is None
 
-        backup.messages.append("s_forest001", "user", "cold copy", turn_id=1, seq_in_turn=1)
+        backup.messages.append(session_id, "user", "cold copy", turn_id=1, seq_in_turn=1)
         replacement = messages.replace(
-            "s_forest001",
+            session_id,
             [
                 {"role": "user", "content": "u1", "turn_id": 10, "seq_in_turn": 1},
                 {"role": "assistant", "content": "a1", "turn_id": 10, "seq_in_turn": 2},
@@ -84,21 +98,21 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         )
 
         assert [row.content for row in replacement] == ["u1", "a1", "u2"]
-        assert backup.messages.count("s_forest001") == 1
+        assert backup.messages.count(session_id) == 1
 
-        assert messages.truncate_before_index("s_forest001", 1) == 1
-        assert [row.content for row in messages.list("s_forest001")] == ["a1", "u2"]
+        assert messages.truncate_before_index(session_id, 1) == 1
+        assert [row.content for row in messages.list(session_id)] == ["a1", "u2"]
 
-        boundary_id = messages.list("s_forest001")[1].id
-        assert messages.truncate_before_id("s_forest001", boundary_id) == 1
-        assert [row.content for row in messages.list("s_forest001")] == ["u2"]
+        boundary_id = messages.list(session_id)[1].id
+        assert messages.truncate_before_id(session_id, boundary_id) == 1
+        assert [row.content for row in messages.list(session_id)] == ["u2"]
 
-        assert messages.truncate_before_index("s_forest001", 999) == 1
-        assert messages.count("s_forest001") == 0
-        assert backup.messages.count("s_forest001") == 1
+        assert messages.truncate_before_index(session_id, 999) == 1
+        assert messages.count(session_id) == 0
+        assert backup.messages.count(session_id) == 1
 
         with pytest.raises(ValueError):
-            messages.append("s_forest001", "bad_role", "invalid")
+            messages.append(session_id, "bad_role", "invalid")
     finally:
         database.close()
 
@@ -149,10 +163,11 @@ def test_backup_messages_are_append_only_and_independent(tmp_path: Path) -> None
     try:
         messages = MessageService(database)
         backup = BackupService(database)
+        session_id = _create_test_session(database, "s_message_backup")
 
-        main = messages.append("s_forest001", "user", "main", turn_id=1, seq_in_turn=1)
+        main = messages.append(session_id, "user", "main", turn_id=1, seq_in_turn=1)
         cold = backup.messages.append_mapping(
-            "s_forest001",
+            session_id,
             {
                 "role": "user",
                 "content": "main",
@@ -160,22 +175,22 @@ def test_backup_messages_are_append_only_and_independent(tmp_path: Path) -> None
                 "seq_in_turn": main.seq_in_turn,
             },
         )
-        backup.messages.append("s_forest001", "assistant", "cold-only", turn_id=1, seq_in_turn=2)
+        backup.messages.append(session_id, "assistant", "cold-only", turn_id=1, seq_in_turn=2)
 
-        assert [row.content for row in messages.list("s_forest001")] == ["main"]
-        assert [row.content for row in backup.messages.list("s_forest001")] == ["main", "cold-only"]
+        assert [row.content for row in messages.list(session_id)] == ["main"]
+        assert [row.content for row in backup.messages.list(session_id)] == ["main", "cold-only"]
         assert backup.messages.get(cold.id).content == "main"
-        assert backup.messages.count("s_forest001") == 2
+        assert backup.messages.count(session_id) == 2
         assert not hasattr(backup.messages, "delete")
         assert not hasattr(backup.messages, "truncate_before_index")
 
-        SessionRecord.delete().where(SessionRecord.id == "s_forest001").execute()
+        SessionRecord.delete().where(SessionRecord.id == session_id).execute()
 
         assert SessionMessageRecord.select().where(
-            SessionMessageRecord.session == "s_forest001"
+            SessionMessageRecord.session == session_id
         ).count() == 0
         assert SessionBackupMessageRecord.select().where(
-            SessionBackupMessageRecord.session == "s_forest001"
+            SessionBackupMessageRecord.session == session_id
         ).count() == 0
     finally:
         database.close()

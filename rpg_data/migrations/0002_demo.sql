@@ -107,6 +107,85 @@ VALUES (
     '{"kind":"demo"}'
 );
 
+INSERT INTO rpg_session_messages (
+    session_id,
+    role,
+    content,
+    turn_id,
+    seq_in_turn,
+    metadata_json
+)
+SELECT
+    demo_messages.session_id,
+    demo_messages.role,
+    demo_messages.content,
+    demo_messages.turn_id,
+    demo_messages.seq_in_turn,
+    demo_messages.metadata_json
+FROM (
+    SELECT 's_forest001' AS session_id, 'user' AS role, '我拨开覆盖在石林入口的霜藤，确认 Alice 是否跟在身后。' AS content, 1 AS turn_id, 1 AS seq_in_turn, '{"kind":"demo","speaker":"Bob"}' AS metadata_json
+    UNION ALL SELECT 's_forest001', 'assistant', '霜藤被剑鞘挑开，露出一条向下倾斜的青石小径。Alice 把斗篷帽檐压低，指尖浮起一粒冷蓝色火星：“封印的光比昨晚更亮了。”', 1, 2, '{"kind":"demo","speaker":"Narrator"}'
+    UNION ALL SELECT 's_forest001', 'user', '我让 Alice 先别靠近圆盘，自己蹲下检查石板上有没有新鲜脚印。', 2, 1, '{"kind":"demo","speaker":"Bob"}'
+    UNION ALL SELECT 's_forest001', 'assistant', '石板缝里有半枚湿泥脚印，鞋底纹路细窄，不像巡林人的重靴。脚印一路绕开主径，停在祭坛东侧一块刻着火焰纹的立石前。', 2, 2, '{"kind":"demo","speaker":"Narrator"}'
+    UNION ALL SELECT 's_forest001', 'user', '我低声问 Alice：学院里有人会用这种鞋底纹路吗？', 3, 1, '{"kind":"demo","speaker":"Bob"}'
+    UNION ALL SELECT 's_forest001', 'assistant', 'Alice 的表情僵了一瞬：“高阶学徒常穿软底靴进档案塔，但他们不该知道这座祭坛的位置。”她把冷蓝火星靠近脚印，火星突然向东偏折。', 3, 2, '{"kind":"demo","speaker":"Alice"}'
+    UNION ALL SELECT 's_forest001', 'user', '我沿着火星偏折的方向看过去，寻找有没有被移动过的石块。', 4, 1, '{"kind":"demo","speaker":"Bob"}'
+    UNION ALL SELECT 's_forest001', 'assistant', '东侧立石背后，一枚刻着树枝图案的铜扣卡在裂缝里。铜扣边缘还残留微热，像刚从某件制服上扯下来。', 4, 2, '{"kind":"demo","speaker":"Narrator"}'
+    UNION ALL SELECT 's_forest001', 'user', '我把铜扣交给 Alice，看她能不能认出树枝图案。', 5, 1, '{"kind":"demo","speaker":"Bob"}'
+    UNION ALL SELECT 's_forest001', 'assistant', 'Alice 用拇指擦去铜扣上的灰，声音压得很低：“这是炎心之木研究会的旧徽记。学院二十年前就禁止这个社团活动了。”', 5, 2, '{"kind":"demo","speaker":"Alice"}'
+    UNION ALL SELECT 's_forest001', 'user', '我问她这个研究会为什么被禁止，同时注意祭坛圆盘有没有变化。', 6, 1, '{"kind":"demo","speaker":"Bob"}'
+    UNION ALL SELECT 's_forest001', 'assistant', '“他们试图把封印当作燃料。”Alice 话音刚落，圆盘中心的幽蓝光芒猛地收缩，像有一只眼睛在石下睁开。周围立石依次响起细微的裂声。', 6, 2, '{"kind":"demo","speaker":"Narrator"}'
+    UNION ALL SELECT 's_forest001', 'user', '我立刻后退半步，举起剑挡在 Alice 身前，观察哪块立石先裂开。', 7, 1, '{"kind":"demo","speaker":"Bob"}'
+    UNION ALL SELECT 's_forest001', 'assistant', '最先裂开的是北侧立石。裂缝里没有火光，只有一缕潮湿的黑烟，烟中传出不属于森林的海潮声。Alice 抬头看你：“Bob，这不是学院记录里的封印反应。”', 7, 2, '{"kind":"demo","speaker":"Narrator"}'
+    UNION ALL SELECT 's_forest001', 'user', '我让 Alice 记录海潮声，然后准备撬开北侧立石外层的碎片。', 8, 1, '{"kind":"demo","speaker":"Bob"}'
+    UNION ALL SELECT 's_forest001', 'assistant', '碎片被剑尖撬下时，一枚潮湿的黑色羽毛从裂缝里滑落。羽轴上写着一行极细的银字：North Gate opens when the tree burns.', 8, 2, '{"kind":"demo","speaker":"Narrator"}'
+    UNION ALL SELECT 's_academy01', 'user', '我把北境带回来的铜扣放在旧档案馆桌面上，询问管理员有没有炎心之木研究会的禁档。', 1, 1, '{"kind":"demo","speaker":"Alice"}'
+    UNION ALL SELECT 's_academy01', 'assistant', '管理员莫兰抬起眼镜，先看铜扣，再看你袖口残留的蓝霜：“如果你问的是二十年前那批档案，它们已经被封入东塔地下库。”', 1, 2, '{"kind":"demo","speaker":"Morlan"}'
+    UNION ALL SELECT 's_academy01', 'user', '我追问是谁有权限进入东塔地下库。', 2, 1, '{"kind":"demo","speaker":"Alice"}'
+    UNION ALL SELECT 's_academy01', 'assistant', '“院长、三名档案监护人，以及持有旧式火漆钥匙的人。”莫兰把铜扣推回你面前，“而这枚扣子属于已经注销的监护人制服。”', 2, 2, '{"kind":"demo","speaker":"Morlan"}'
+    UNION ALL SELECT 's_academy01', 'user', '我检查铜扣背面是否有火漆残留或编号。', 3, 1, '{"kind":"demo","speaker":"Alice"}'
+    UNION ALL SELECT 's_academy01', 'assistant', '铜扣背面被划过三道细痕，像是有人故意抹掉编号。但在扣针根部，你找到一点暗红火漆，火漆里混着微量银粉。', 3, 2, '{"kind":"demo","speaker":"Narrator"}'
+    UNION ALL SELECT 's_academy01', 'user', '我请求莫兰查最近一次调阅东塔地下库的登记。', 4, 1, '{"kind":"demo","speaker":"Alice"}'
+    UNION ALL SELECT 's_academy01', 'assistant', '莫兰犹豫片刻，还是抽出一册灰皮登记簿。最近一次调阅写在昨夜 23:10，签名处不是姓名，而是一枚小小的树枝烙印。', 4, 2, '{"kind":"demo","speaker":"Morlan"}'
+    UNION ALL SELECT 's_academy01', 'user', '我问这枚树枝烙印是否和炎心之木研究会有关。', 5, 1, '{"kind":"demo","speaker":"Alice"}'
+    UNION ALL SELECT 's_academy01', 'assistant', '“有关，但不完整。”莫兰翻到二十年前的禁令页，“研究会原本的徽记有树枝和火焰。只有树枝，意味着他们在寻找还没点燃的载体。”', 5, 2, '{"kind":"demo","speaker":"Morlan"}'
+    UNION ALL SELECT 's_academy01', 'user', '我准备去东塔地下库，同时让莫兰留意是否有人跟踪我。', 6, 1, '{"kind":"demo","speaker":"Alice"}'
+    UNION ALL SELECT 's_academy01', 'assistant', '莫兰递给你一枚临时通行铜片：“地下库会记录每一次开门的温度。若门把手是热的，别进去。”窗外，学院钟声在下午两点敲响，却多出了一记低沉回音。', 6, 2, '{"kind":"demo","speaker":"Narrator"}'
+) AS demo_messages
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM rpg_session_messages existing
+    WHERE existing.session_id = demo_messages.session_id
+      AND existing.turn_id = demo_messages.turn_id
+      AND existing.seq_in_turn = demo_messages.seq_in_turn
+);
+
+INSERT INTO rpg_session_backup_messages (
+    session_id,
+    role,
+    content,
+    turn_id,
+    seq_in_turn,
+    metadata_json
+)
+SELECT
+    session_id,
+    role,
+    content,
+    turn_id,
+    seq_in_turn,
+    metadata_json
+FROM rpg_session_messages demo_messages
+WHERE demo_messages.session_id IN ('s_forest001', 's_academy01')
+  AND demo_messages.metadata_json LIKE '%"kind":"demo"%'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM rpg_session_backup_messages existing
+      WHERE existing.session_id = demo_messages.session_id
+        AND existing.turn_id = demo_messages.turn_id
+        AND existing.seq_in_turn = demo_messages.seq_in_turn
+  );
+
 INSERT OR IGNORE INTO rpg_characters (
     workspace_id,
     name,
