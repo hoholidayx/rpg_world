@@ -1,348 +1,540 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { AppShell } from '@/features/layout/AppShell'
+import { useRouter } from 'next/navigation'
+import { useMemo } from 'react'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertCircle,
   BookOpen,
-  Check,
-  ChevronDown,
   ChevronRight,
-  CircleDot,
   Clock3,
-  Compass,
-  FolderOpen,
-  Globe2,
-  Home,
-  Import,
-  Megaphone,
-  MoreHorizontal,
+  FilePlus2,
+  Loader2,
   Play,
-  Plus,
-  Settings,
   Sparkles,
-  UploadCloud,
-  UserRound,
-  UsersRound,
 } from 'lucide-react'
-import { listWorkspaces } from '@/lib/api/sessions'
-import type { SessionSummary, WorkspaceSummary } from '@/types/session'
+import { AppShell, useAppShell } from '@/features/layout/AppShell'
+import { createSession, listSessions } from '@/lib/api/sessions'
+import { listStories } from '@/lib/api/stories'
+import { cn } from '@/lib/utils/cn'
+import type { SessionSummary } from '@/types/session'
+import type { StoryComputedStatus, StorySummary } from '@/types/story'
 
-function sessionHref(session: Pick<SessionSummary, 'id'>) {
-  return `/session/${session.id}`
+type StoryHomeItem = StorySummary & {
+  sessions: SessionSummary[]
+  latestSession?: SessionSummary | null
+  latestAt: number
+  computedStatus: StoryComputedStatus
+  sessionsError: string | null
 }
 
-const navItems = [
-  { label: '首页', icon: Home, active: true },
-  { label: '最近会话', icon: Clock3 },
-  { label: '故事库', icon: BookOpen },
-  { label: '角色库', icon: UsersRound },
-  { label: '世界设定', icon: Globe2 },
-  { label: '设置', icon: Settings },
+type SessionHomeItem = SessionSummary & {
+  storyTitle: string
+  storySummary: string
+  latestAt: number
+  computedActivity: 'recent' | 'stale'
+}
+
+const RECENT_WINDOW_DAYS = 7
+const RECENT_WINDOW_MS = RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000
+
+const coverClasses = [
+  'from-slate-900 via-slate-700 to-cyan-100',
+  'from-teal-900 via-emerald-700 to-amber-100',
+  'from-stone-900 via-amber-800 to-teal-100',
+  'from-indigo-900 via-sky-700 to-slate-100',
+  'from-zinc-900 via-stone-700 to-rose-100',
 ]
 
-const stories = [
-  {
-    title: '雾港',
-    summary: '潮湿的港口城市，迷雾笼罩着钟楼与码头，隐秘的交易在夜色中进行。',
-    status: '进行中',
-    statusClass: 'bg-violet-100 text-violet-700',
-    sessions: 3,
-    characters: 5,
-    updatedAt: '2025/05/30 14:22',
-    workspace: '',
-    storyId: 1,
-    sessionId: 's_forest001',
-    selected: true,
-    artClass: 'from-slate-700 via-slate-500 to-indigo-200',
-    accent: 'bg-slate-100',
+const statusMeta: Record<StoryComputedStatus, { label: string; badgeClass: string; dotClass: string }> = {
+  live: {
+    label: '进行中',
+    badgeClass: 'bg-teal-100 text-teal-700',
+    dotClass: 'bg-teal-500',
   },
-  {
-    title: '黑市边缘',
-    summary: '在秩序与混乱的缝隙中生存，每个选择都可能改变你的立场。',
-    status: '进行中',
-    statusClass: 'bg-emerald-100 text-emerald-700',
-    sessions: 2,
-    characters: 4,
-    updatedAt: '2025/05/29 19:33',
-    workspace: '',
-    storyId: 2,
-    sessionId: 's_academy01',
-    artClass: 'from-emerald-900 via-emerald-600 to-emerald-100',
-    accent: 'bg-emerald-100',
+  draft: {
+    label: '未开始',
+    badgeClass: 'bg-amber-100 text-amber-700',
+    dotClass: 'bg-amber-500',
   },
-  {
-    title: '永夜之森',
-    summary: '古老森林中的低语与传说，寻找失落的文明与被遗忘的真相。',
-    status: '未开始',
-    statusClass: 'bg-slate-100 text-slate-500',
-    sessions: 1,
-    characters: 3,
-    updatedAt: '2025/05/20 11:11',
-    workspace: '',
-    storyId: 1,
-    sessionId: 's_forest001',
-    artClass: 'from-amber-700 via-orange-300 to-amber-50',
-    accent: 'bg-amber-100',
-  },
-]
+}
 
-const recentSessions: Array<SessionSummary & {
-  story: string
-  place: string
-  status: string
-  statusClass: string
-  artClass: string
-}> = [
-  {
-    id: 's_forest001',
-    workspace: '',
-    storyId: 1,
-    title: '雾港序章：码头钟楼下的第一幕',
-    description: '适合验证 Play WebUI 基础流程，包含流式叙事、角色状态、场景切换...',
-    story: '雾港',
-    place: '雾港 - 码头区',
-    updatedAt: '2025/05/30 14:22',
-    status: '进行中',
-    statusClass: 'bg-violet-100 text-violet-700',
-    artClass: 'from-slate-900 via-blue-950 to-slate-400',
+const activityMeta: Record<SessionHomeItem['computedActivity'], { label: string; badgeClass: string; dotClass: string }> = {
+  recent: {
+    label: '最近活跃',
+    badgeClass: 'bg-teal-100 text-teal-700',
+    dotClass: 'bg-teal-500',
   },
-  {
-    id: 's_academy01',
-    workspace: '',
-    storyId: 2,
-    title: '黑市边缘：旧灯笼里的第二把钥匙',
-    description: '微弱的灯火晃动，门后的齿轮仍在转动。',
-    story: '黑市边缘',
-    place: '黑市中堂',
-    updatedAt: '2025/05/28 21:07',
-    status: '暂停中',
-    statusClass: 'bg-sky-100 text-sky-700',
-    artClass: 'from-stone-900 via-amber-950 to-stone-400',
+  stale: {
+    label: '较久未更新',
+    badgeClass: 'bg-sky-100 text-sky-700',
+    dotClass: 'bg-sky-500',
   },
-  {
-    id: 'ledger_name',
-    workspace: '',
-    storyId: 2,
-    title: '黑市余波：账本背面的名字',
-    description: '账本合上，名字未被抹去，新的线索浮出水面。',
-    story: '黑市边缘',
-    place: '密档房',
-    updatedAt: '2025/05/27 11:41',
-    status: '已完成',
-    statusClass: 'bg-emerald-100 text-emerald-700',
-    artClass: 'from-zinc-900 via-stone-700 to-yellow-100',
-  },
-]
+}
 
-const storyStats = [
-  { label: '全部故事', value: 3, icon: FolderOpen, color: 'text-slate-500' },
-  { label: '进行中', value: 2, icon: CircleDot, color: 'text-emerald-500' },
-  { label: '未开始', value: 1, icon: Clock3, color: 'text-slate-400' },
-  { label: '已完成', value: 0, icon: Compass, color: 'text-orange-500' },
-]
+function formatDate(value?: string | null) {
+  if (!value) return '暂无'
+  return value.replace('T', ' ').slice(0, 16)
+}
 
-const quickLinks = [
-  { label: '创建角色', icon: UserRound },
-  { label: '导入设定', icon: Import },
-  { label: '世界设定', icon: Globe2 },
-  { label: '设置', icon: Settings },
-]
+function getTimestamp(value?: string | null) {
+  if (!value) return 0
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
 
-function Logo() {
+function latestTimestamp(session: SessionSummary) {
+  return Math.max(getTimestamp(session.updatedAt), getTimestamp(session.createdAt))
+}
+
+function toErrorMessage(reason: unknown) {
+  return reason instanceof Error ? reason.message : '加载失败'
+}
+
+function pickCoverClass(value: string | number) {
+  const source = String(value)
+  const total = source.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  return coverClasses[total % coverClasses.length]
+}
+
+function toStoryHomeItem(
+  story: StorySummary,
+  sessions: SessionSummary[],
+  sessionsError: string | null,
+): StoryHomeItem {
+  const sortedSessions = [...sessions].sort((first, second) => latestTimestamp(second) - latestTimestamp(first))
+  const latestSession = sortedSessions[0] ?? null
+  const latestAt = Math.max(
+    getTimestamp(story.updatedAt),
+    getTimestamp(story.createdAt),
+    ...sortedSessions.map(latestTimestamp),
+  )
+
+  return {
+    ...story,
+    sessions: sortedSessions,
+    latestSession,
+    latestAt,
+    computedStatus: sortedSessions.length ? 'live' : 'draft',
+    sessionsError,
+  }
+}
+
+function toSessionHomeItem(session: SessionSummary, story: StorySummary, now: number): SessionHomeItem {
+  const latestAt = latestTimestamp(session)
+
+  return {
+    ...session,
+    storyTitle: story.title,
+    storySummary: story.summary ?? '',
+    latestAt,
+    computedActivity: latestAt && now - latestAt <= RECENT_WINDOW_MS ? 'recent' : 'stale',
+  }
+}
+
+function StoryArtwork({ item }: { item: Pick<StoryHomeItem, 'id' | 'title'> }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-lg shadow-violet-200">
-        <Sparkles size={22} fill="currentColor" />
+    <div className={cn('relative h-28 overflow-hidden bg-gradient-to-br', pickCoverClass(item.id))}>
+      <div className="absolute bottom-[-26px] left-6 h-24 w-28 rounded-t-full bg-white/15" />
+      <div className="absolute bottom-0 left-24 h-24 w-9 rounded-t-full bg-white/60 shadow-[72px_24px_0_-8px_rgba(255,255,255,0.36)]" />
+      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-slate-950/45 to-transparent" />
+      <span className="absolute bottom-3 right-3 max-w-[9rem] truncate text-xs font-extrabold text-white/90 drop-shadow">
+        story #{item.id}
+      </span>
+    </div>
+  )
+}
+
+function SessionArtwork({ item }: { item: Pick<SessionHomeItem, 'id' | 'storyId'> }) {
+  return (
+    <div className={cn('relative h-14 w-20 shrink-0 overflow-hidden rounded-lg bg-gradient-to-br', pickCoverClass(`${item.storyId}-${item.id}`))}>
+      <div className="absolute bottom-[-14px] left-3 h-11 w-14 rounded-t-full bg-white/15" />
+      <div className="absolute bottom-0 left-10 h-12 w-5 rounded-t-full bg-white/55 shadow-[32px_11px_0_-6px_rgba(255,255,255,0.28)]" />
+      <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-slate-950/35 to-transparent" />
+    </div>
+  )
+}
+
+function StoryStatusBadge({ status }: { status: StoryComputedStatus }) {
+  const meta = statusMeta[status]
+
+  return (
+    <span className={cn('inline-flex h-7 items-center gap-2 rounded-full px-3 text-xs font-black', meta.badgeClass)}>
+      <span className={cn('h-2 w-2 rounded-full', meta.dotClass)} />
+      {meta.label}
+    </span>
+  )
+}
+
+function ActivityBadge({ activity }: { activity: SessionHomeItem['computedActivity'] }) {
+  const meta = activityMeta[activity]
+
+  return (
+    <span className={cn('inline-flex h-7 items-center gap-2 rounded-full px-3 text-xs font-black', meta.badgeClass)}>
+      <span className={cn('h-2 w-2 rounded-full', meta.dotClass)} />
+      {meta.label}
+    </span>
+  )
+}
+
+function MetricCard({
+  label,
+  value,
+  note,
+  icon: Icon,
+}: {
+  label: string
+  value: number
+  note: string
+  icon: typeof BookOpen
+}) {
+  return (
+    <section className="min-h-24 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3 text-xs font-black uppercase text-slate-500">
+        <span>{label}</span>
+        <Icon size={18} className="text-slate-400" />
       </div>
-      <span className="text-xl font-bold text-slate-950">RPG World Play</span>
-    </div>
+      <p className="mt-3 text-3xl font-black leading-none text-slate-950">{value}</p>
+      <p className="mt-2 text-xs font-semibold text-slate-400">{note}</p>
+    </section>
   )
 }
 
-function MiniLandscape({ className }: { className: string }) {
-  return (
-    <div className={`relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-gradient-to-br ${className}`}>
-      <div className="absolute -bottom-8 left-2 h-16 w-16 rounded-full bg-white/10" />
-      <div className="absolute -bottom-7 right-4 h-20 w-20 rounded-full bg-black/20" />
-      <div className="absolute bottom-3 left-5 h-8 w-3 rounded-t-full bg-white/60" />
-      <div className="absolute bottom-2 left-4 h-2 w-5 rounded-sm bg-white/40" />
-      <div className="absolute right-4 top-4 h-2 w-2 rounded-full bg-white/70" />
-    </div>
-  )
-}
+function StoryCard({
+  item,
+  sessionPending,
+  onPlay,
+}: {
+  item: StoryHomeItem
+  sessionPending: boolean
+  onPlay: () => void
+}) {
+  const actionLabel = item.latestSession ? '继续' : '开局'
 
-function StoryCard({ story, workspace }: { story: (typeof stories)[number]; workspace: string | null }) {
   return (
-    <article
-      className={`rounded-xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:bg-slate-900/70 dark:hover:bg-slate-900/85 ${
-        story.selected
-          ? 'border-violet-500 shadow-violet-100 dark:border-violet-400/60 dark:bg-violet-500/[0.08] dark:shadow-[0_0_0_1px_rgba(167,139,250,0.10)]'
-          : 'border-slate-200 dark:border-slate-700/80'
-      }`}
-    >
-      <div className="flex items-start gap-4">
-        <div className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-full bg-gradient-to-br ${story.artClass}`}>
-          <div className="absolute bottom-0 left-2 h-8 w-12 rounded-t-full bg-white/20" />
-          <div className="absolute bottom-3 left-7 h-10 w-3 rounded-t-full bg-white/60" />
-          <div className="absolute bottom-1 right-3 h-3 w-6 rounded-full bg-black/20" />
+    <article className="overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-lg">
+      <StoryArtwork item={item} />
+      <div className="p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <StoryStatusBadge status={item.computedStatus} />
+          <span className="truncate text-xs font-black text-slate-400">更新 {formatDate(item.latestSession?.updatedAt ?? item.updatedAt ?? item.createdAt)}</span>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="truncate text-lg font-bold text-slate-950">{story.title}</h3>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${story.statusClass}`}>{story.status}</span>
+        <h2 className="truncate text-lg font-black text-slate-950">{item.title}</h2>
+        <p className="mt-2 line-clamp-2 min-h-11 text-sm leading-6 text-slate-500">{item.summary || '暂无故事摘要'}</p>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
+            <b className="block text-base leading-none text-slate-950">{item.sessions.length}</b>
+            <span className="mt-1 block truncate text-xs font-bold text-slate-500">会话</span>
           </div>
-          <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{story.summary}</p>
+          <div className="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
+            <b className="block truncate text-sm text-slate-950">{item.latestSession?.title || item.latestSession?.id || '暂无'}</b>
+            <span className="mt-1 block truncate text-xs font-bold text-slate-500">最近会话</span>
+          </div>
         </div>
-      </div>
-      <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <p className="text-slate-400">会话</p>
-          <p className="font-semibold text-slate-900">{story.sessions}</p>
-        </div>
-        <div>
-          <p className="text-slate-400">角色</p>
-          <p className="font-semibold text-slate-900">{story.characters}</p>
-        </div>
-      </div>
-      <div className="mt-4 flex items-center justify-between gap-4">
-        <p className="text-xs text-slate-500">更新时间&nbsp;&nbsp; {story.updatedAt}</p>
-        {workspace ? (
-          <Link
-            href={sessionHref({ id: story.sessionId })}
-            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:border-violet-300 hover:text-violet-700"
-          >
-            查看
+
+        {item.sessionsError ? (
+          <p className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+            <AlertCircle size={14} />
+            会话加载失败
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+          <Link href={`/stories/${item.id}/edit`} className="text-xs font-black text-slate-500 transition hover:text-teal-700">
+            编辑故事
           </Link>
-        ) : (
-          <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-400">查看</span>
-        )}
+          <button
+            type="button"
+            disabled={sessionPending}
+            onClick={onPlay}
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {sessionPending ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
+            {actionLabel}
+          </button>
+        </div>
       </div>
     </article>
   )
 }
 
-function RecentSessionRow({ session, workspace }: { session: (typeof recentSessions)[number]; workspace: string | null }) {
-  const href = workspace ? sessionHref({ id: session.id }) : null
-
+function SessionRow({ item, onEnter }: { item: SessionHomeItem; onEnter: () => void }) {
   return (
-    <article className="grid gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-violet-200 hover:shadow-md dark:border-slate-700/80 dark:bg-slate-900/70 dark:hover:border-violet-400/40 dark:hover:bg-slate-900/85 md:grid-cols-[auto_minmax(0,1fr)_220px_auto_auto] md:items-center">
-      <MiniLandscape className={session.artClass} />
-      <div className="min-w-0">
-        {href ? (
-          <Link href={href} className="block truncate text-sm font-bold text-slate-950 hover:text-violet-700">
-            {session.title}
+    <article className="grid gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-violet-300 hover:shadow-md md:grid-cols-[auto_minmax(0,1fr)_minmax(150px,0.45fr)_auto] md:items-center">
+      <div className="flex min-w-0 items-center gap-3">
+        <SessionArtwork item={item} />
+        <div className="min-w-0">
+          <Link href={`/session/${item.id}`} className="block truncate text-sm font-black text-slate-950 hover:text-violet-700">
+            {item.title || item.id}
           </Link>
-        ) : (
-          <span className="block truncate text-sm font-bold text-slate-500">{session.title}</span>
-        )}
-        <p className="mt-1 truncate text-xs text-slate-500">{session.description}</p>
+          <p className="mt-1 truncate text-xs font-semibold text-slate-400">{item.id} · 更新 {formatDate(item.updatedAt ?? item.createdAt)}</p>
+        </div>
       </div>
-      <dl className="grid gap-1 text-xs text-slate-500">
-        <div className="flex gap-2">
-          <dt>故事：</dt>
-          <dd>{session.story}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt>地点：</dt>
-          <dd>{session.place}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt>更新时间：</dt>
-          <dd>{session.updatedAt}</dd>
-        </div>
-      </dl>
-      <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${session.statusClass}`}>{session.status}</span>
-      <div className="flex items-center gap-2">
-        {href ? (
-          <Link
-            href={href}
-            aria-label={`继续 ${session.title}`}
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-900 transition hover:border-violet-300 hover:text-violet-700"
-          >
-            <Play size={16} fill="currentColor" />
-          </Link>
-        ) : (
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-300">
-            <Play size={16} fill="currentColor" />
-          </span>
-        )}
-        <button className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100" aria-label="更多">
-          <MoreHorizontal size={18} />
+      <p className="line-clamp-2 text-sm leading-6 text-slate-500 md:line-clamp-1">{item.description || item.storySummary || '暂无描述'}</p>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-black text-slate-950">{item.storyTitle}</p>
+        <p className="mt-1 truncate text-xs font-semibold text-slate-400">story #{item.storyId}</p>
+      </div>
+      <div className="flex items-center justify-between gap-3 md:justify-end">
+        <ActivityBadge activity={item.computedActivity} />
+        <button
+          type="button"
+          onClick={onEnter}
+          className="inline-flex h-9 items-center justify-center rounded-lg bg-violet-600 px-3 text-xs font-black text-white transition hover:bg-violet-700"
+        >
+          进入
         </button>
       </div>
     </article>
   )
 }
 
-function WorkspaceSwitcher({
-  value,
-  workspaces,
-  isLoading,
-  isError,
-  onChange,
+function StorySkeleton() {
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="h-28 animate-pulse bg-slate-200" />
+      <div className="space-y-4 p-4">
+        <div className="h-5 w-2/3 animate-pulse rounded bg-slate-200" />
+        <div className="space-y-2">
+          <div className="h-3 animate-pulse rounded bg-slate-100" />
+          <div className="h-3 w-4/5 animate-pulse rounded bg-slate-100" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {[0, 1].map((item) => <div key={item} className="h-12 animate-pulse rounded-lg bg-slate-100" />)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SessionSkeleton() {
+  return (
+    <div className="h-24 animate-pulse rounded-lg border border-slate-200 bg-white shadow-sm" />
+  )
+}
+
+function EmptyState({
+  title,
+  description,
+  action,
 }: {
-  value: string | null
-  workspaces: WorkspaceSummary[]
-  isLoading: boolean
-  isError: boolean
-  onChange: (workspace: string | null) => void
+  title: string
+  description: string
+  action?: React.ReactNode
 }) {
-  const [open, setOpen] = useState(false)
-  const selectedWorkspace = value ? workspaces.find((workspace) => workspace.id === value) : null
-  const label = selectedWorkspace?.name ?? (isLoading ? '加载中' : isError ? '加载失败' : '暂无 workspace')
+  return (
+    <section className="rounded-lg border border-dashed border-slate-300 bg-white/70 px-6 py-12 text-center">
+      <Sparkles size={28} className="mx-auto text-violet-600" />
+      <h2 className="mt-3 text-lg font-black text-slate-950">{title}</h2>
+      <p className="mt-2 text-sm font-semibold text-slate-500">{description}</p>
+      {action ? <div className="mt-5">{action}</div> : null}
+    </section>
+  )
+}
+
+function HomeContent() {
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const { currentWorkspace } = useAppShell()
+  const now = useMemo(() => Date.now(), [currentWorkspace])
+
+  const storiesQuery = useQuery({
+    queryKey: ['play-stories', currentWorkspace],
+    queryFn: () => listStories(currentWorkspace ?? ''),
+    enabled: Boolean(currentWorkspace),
+  })
+  const stories = useMemo(() => storiesQuery.data ?? [], [storiesQuery.data])
+
+  const sessionQueries = useQueries({
+    queries: stories.map((story) => ({
+      queryKey: ['play-sessions', currentWorkspace, story.id],
+      queryFn: () => listSessions(currentWorkspace ?? '', story.id),
+      enabled: Boolean(currentWorkspace),
+    })),
+  })
+
+  const storyItems = useMemo(() => stories
+    .map((story, index) => toStoryHomeItem(
+      story,
+      sessionQueries[index]?.data ?? [],
+      sessionQueries[index]?.isError ? toErrorMessage(sessionQueries[index]?.error) : null,
+    ))
+    .sort((first, second) => second.latestAt - first.latestAt),
+  [sessionQueries, stories])
+
+  const sessionItems = useMemo(() => storyItems
+    .flatMap((story) => story.sessions.map((session) => toSessionHomeItem(session, story, now)))
+    .sort((first, second) => second.latestAt - first.latestAt),
+  [now, storyItems])
+
+  const recentStories = storyItems.slice(0, 6)
+  const recentSessions = sessionItems.slice(0, 6)
+  const liveStoryCount = storyItems.filter((item) => item.computedStatus === 'live').length
+  const recentSessionCount = sessionItems.filter((item) => item.computedActivity === 'recent').length
+  const sessionErrors = storyItems.filter((item) => item.sessionsError)
+  const sessionsLoading = sessionQueries.some((query) => query.isLoading)
+  const initialLoading = storiesQuery.isLoading || (sessionsLoading && storyItems.length === 0)
+
+  const createSessionMutation = useMutation({
+    mutationFn: (story: StoryHomeItem) => {
+      if (!currentWorkspace) throw new Error('workspace missing')
+      return createSession(currentWorkspace, story.id, `${story.title} 新会话`)
+    },
+    onSuccess: (session, story) => {
+      queryClient.invalidateQueries({ queryKey: ['play-sessions', currentWorkspace, story.id] })
+      queryClient.invalidateQueries({ queryKey: ['play-story-library-aggregate', currentWorkspace, story.id] })
+      router.push(`/session/${session.id}`)
+    },
+  })
+
+  function playStory(story: StoryHomeItem) {
+    if (story.latestSession) {
+      router.push(`/session/${story.latestSession.id}`)
+      return
+    }
+    createSessionMutation.mutate(story)
+  }
+
+  function enterSession(session: SessionHomeItem) {
+    router.push(`/session/${session.id}`)
+  }
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((isOpen) => !isOpen)}
-        className="flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm transition hover:border-violet-200 hover:bg-violet-50/70 hover:text-violet-700"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="切换 workspace"
-      >
-        <FolderOpen size={16} className="text-slate-400" />
-        <span className="hidden text-slate-500 sm:inline">Workspace</span>
-        <span className="max-w-28 truncate font-semibold">{label}</span>
-        <ChevronDown size={16} className={`text-slate-400 transition ${open ? 'rotate-180 text-violet-500' : ''}`} />
-      </button>
-      {open ? (
-        <div className="absolute left-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl shadow-slate-200/70" role="menu">
-          {workspaces.length ? workspaces.map((workspace) => {
-            const selected = workspace.id === value
-
-            return (
-              <button
-                key={workspace.id}
-                type="button"
-                onClick={() => {
-                  onChange(workspace.id)
-                  setOpen(false)
-                }}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                  selected ? 'bg-violet-50 text-violet-700' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-950'
-                }`}
-                role="menuitem"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-                  <FolderOpen size={16} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{workspace.name}</span>
-                  {workspace.description ? <span className="mt-0.5 block truncate text-xs text-slate-500">{workspace.description}</span> : null}
-                </span>
-                {selected ? <Check size={16} className="shrink-0 text-violet-600" /> : null}
-              </button>
-            )
-          }) : (
-            <div className="px-3 py-2.5 text-sm text-slate-500">
-              {isError ? 'workspace 加载失败' : '暂无 workspace'}
-            </div>
-          )}
+    <div className="min-w-0 px-5 py-8 xl:px-7">
+      <section className="mb-6 grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+        <div>
+          <p className="mb-2 flex items-center gap-2 text-sm font-black text-slate-500">
+            <span className="h-2.5 w-2.5 rounded-full bg-violet-500" />
+            {currentWorkspace ?? '未选择 workspace'} / home
+          </p>
+          <h1 className="text-3xl font-black text-slate-950">首页</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+            按 story 聚合最近会话，保留故事库与会话中心一致的继续游玩入口。
+          </p>
         </div>
-      ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/stories"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm transition hover:border-teal-300 hover:text-teal-700"
+          >
+            <BookOpen size={16} />
+            故事库
+          </Link>
+          <Link
+            href="/sessions"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700"
+          >
+            <Clock3 size={16} />
+            会话中心
+          </Link>
+        </div>
+      </section>
+
+      <section className="mb-6 grid gap-3 md:grid-cols-3" aria-label="首页概览">
+        <MetricCard label="故事" value={storyItems.length} note={`${liveStoryCount} 个已有会话`} icon={BookOpen} />
+        <MetricCard label="会话" value={sessionItems.length} note="按当前 workspace 聚合" icon={Clock3} />
+        <MetricCard label="最近活跃" value={recentSessionCount} note={`${RECENT_WINDOW_DAYS} 天内有更新`} icon={Play} />
+      </section>
+
+      {!currentWorkspace ? (
+        <EmptyState title="请选择 workspace" description="选择 workspace 后即可查看首页故事与会话。" />
+      ) : storiesQuery.isError ? (
+        <section className="rounded-lg border border-rose-200 bg-rose-50 px-6 py-6 text-sm font-semibold text-rose-700">
+          故事加载失败：{toErrorMessage(storiesQuery.error)}
+        </section>
+      ) : initialLoading ? (
+        <div className="grid gap-6">
+          <section>
+            <div className="mb-3 h-6 w-28 animate-pulse rounded bg-slate-200" />
+            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+              {[0, 1, 2].map((item) => <StorySkeleton key={item} />)}
+            </div>
+          </section>
+          <section>
+            <div className="mb-3 h-6 w-28 animate-pulse rounded bg-slate-200" />
+            <div className="grid gap-3">
+              {[0, 1, 2].map((item) => <SessionSkeleton key={item} />)}
+            </div>
+          </section>
+        </div>
+      ) : stories.length === 0 ? (
+        <EmptyState
+          title="还没有故事"
+          description="新建一个 story 后，首页会展示最近故事和关联会话。"
+          action={(
+            <Link
+              href="/stories/new"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"
+            >
+              <FilePlus2 size={16} />
+              新建故事
+            </Link>
+          )}
+        />
+      ) : (
+        <div className="grid gap-6">
+          {sessionErrors.length ? (
+            <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+              <span className="mr-2 inline-flex align-[-2px]"><AlertCircle size={16} /></span>
+              部分 story 会话加载失败：{sessionErrors.map((item) => `${item.title}（${item.sessionsError}）`).join('；')}
+            </section>
+          ) : null}
+
+          <section className="overflow-hidden rounded-lg border border-slate-200 bg-white/60 shadow-sm">
+            <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-950">最近故事</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-500">与故事库一致，按故事更新时间和最近会话排序。</p>
+              </div>
+              <Link href="/stories" className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:border-teal-300 hover:text-teal-700">
+                查看全部
+                <ChevronRight size={14} />
+              </Link>
+            </header>
+            <div className="grid gap-4 p-4 md:grid-cols-2 2xl:grid-cols-3">
+              {recentStories.map((item) => (
+                <StoryCard
+                  key={item.id}
+                  item={item}
+                  sessionPending={createSessionMutation.isPending && createSessionMutation.variables?.id === item.id}
+                  onPlay={() => playStory(item)}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="overflow-hidden rounded-lg border border-slate-200 bg-white/60 shadow-sm">
+            <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-950">最近会话</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-500">与会话中心一致，按全局 session_id 进入游玩。</p>
+              </div>
+              <Link href="/sessions" className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:border-violet-300 hover:text-violet-700">
+                查看全部
+                <ChevronRight size={14} />
+              </Link>
+            </header>
+            {sessionsLoading && recentSessions.length === 0 ? (
+              <div className="grid gap-3 p-4">
+                {[0, 1, 2].map((item) => <SessionSkeleton key={item} />)}
+              </div>
+            ) : recentSessions.length ? (
+              <div className="grid gap-3 p-4">
+                {recentSessions.map((item) => (
+                  <SessionRow key={item.id} item={item} onEnter={() => enterSession(item)} />
+                ))}
+              </div>
+            ) : (
+              <div className="border-t border-dashed border-slate-200 px-6 py-12 text-center">
+                <h2 className="text-lg font-black text-slate-950">还没有会话</h2>
+                <p className="mt-2 text-sm font-semibold text-slate-500">从最近故事中选择“开局”即可创建第一个会话。</p>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   )
 }
@@ -350,133 +542,7 @@ function WorkspaceSwitcher({
 export function HomePage() {
   return (
     <AppShell>
-      {({ currentWorkspace }) => (
-        <div className="grid gap-6 px-5 py-8 xl:grid-cols-[minmax(0,1fr)_352px] xl:px-7">
-          <section className="min-w-0 space-y-7">
-            <section className="relative overflow-hidden rounded-2xl bg-white px-9 py-8 shadow-sm">
-              <div className="relative z-10">
-                <h1 className="text-4xl font-bold leading-tight text-slate-950">欢迎回来，Player One</h1>
-                <p className="mt-3 text-lg text-slate-500">选择一个故事，继续你的冒险。</p>
-              </div>
-              <div className="absolute inset-y-0 right-0 hidden w-[48%] overflow-hidden md:block">
-                <div className="absolute bottom-0 right-0 h-full w-full bg-gradient-to-l from-violet-100 via-indigo-50 to-transparent" />
-                <div className="absolute bottom-0 right-20 h-24 w-96 rounded-[100%] bg-indigo-200/70" />
-                <div className="absolute bottom-2 right-0 h-40 w-80 rounded-[100%] bg-violet-200/70" />
-                <div className="absolute bottom-0 right-32 h-16 w-48 rounded-t-full bg-indigo-300/40" />
-                <div className="absolute right-48 top-8 h-16 w-16 rounded-full bg-amber-100" />
-                <div className="absolute bottom-4 right-24 h-1 w-32 rounded-full bg-indigo-300/60" />
-                <div className="absolute bottom-6 right-28 h-0 w-0 border-b-[46px] border-l-[16px] border-r-[16px] border-b-indigo-700 border-l-transparent border-r-transparent" />
-                <div className="absolute bottom-5 right-24 h-10 w-24 rounded-b-full bg-indigo-700" />
-              </div>
-            </section>
-
-            <section id="stories" className="rounded-2xl border border-slate-200/70 bg-white/60 p-6 shadow-sm dark:border-slate-700/70 dark:bg-slate-950/35">
-              <div className="mb-5 flex items-center justify-between gap-4">
-                <h2 className="text-xl font-bold text-slate-950">我的故事</h2>
-                <button className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:bg-violet-700">
-                  <Plus size={16} />
-                  新建故事
-                </button>
-              </div>
-              <div className="grid gap-5 min-[1400px]:grid-cols-2 2xl:grid-cols-3">
-                {stories.map((story) => (
-                  <StoryCard key={story.title} story={story} workspace={currentWorkspace} />
-                ))}
-              </div>
-              {currentWorkspace ? (
-                <Link href="/stories" className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
-                  查看全部故事
-                  <ChevronRight size={16} />
-                </Link>
-              ) : null}
-            </section>
-
-            <section id="recent-sessions" className="rounded-2xl border border-slate-200/70 bg-white/60 p-6 shadow-sm dark:border-slate-700/70 dark:bg-slate-950/35">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-slate-950">最近会话</h2>
-              </div>
-              <div className="space-y-3">
-                {recentSessions.map((session) => (
-                  <RecentSessionRow key={session.title} session={session} workspace={currentWorkspace} />
-                ))}
-              </div>
-              {currentWorkspace ? (
-                <Link href="/sessions" className="mx-auto mt-6 flex w-fit items-center gap-2 text-sm font-medium text-violet-700">
-                  查看全部会话
-                  <ChevronRight size={16} />
-                </Link>
-              ) : null}
-            </section>
-          </section>
-
-          <aside className="space-y-4">
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
-              <h2 className="mb-5 text-lg font-bold text-slate-950">快捷开始</h2>
-              <div className="grid grid-cols-2 gap-4">
-                <button className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-violet-300 hover:text-violet-700">
-                  <Plus size={18} className="text-violet-600" />
-                  新建空白会话
-                </button>
-                <button className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-sky-300 hover:text-sky-700">
-                  <UploadCloud size={18} className="text-sky-500" />
-                  导入故事设定
-                </button>
-                <button className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-orange-300 hover:text-orange-700">
-                  <UserRound size={18} className="text-orange-500" />
-                  角色沙盒
-                </button>
-                <button className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700">
-                  <Globe2 size={18} className="text-emerald-500" />
-                  世界设定
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
-              <h2 className="mb-5 text-lg font-bold text-slate-950">故事分类</h2>
-              <div className="space-y-4">
-                {storyStats.map((stat) => (
-                  <div key={stat.label} className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-3 text-slate-500">
-                      <stat.icon size={16} className={stat.color} />
-                      {stat.label}
-                    </span>
-                    <span className="text-slate-600">{stat.value}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center gap-3">
-                <h2 className="text-lg font-bold text-slate-950">公告</h2>
-                <Megaphone size={16} className="text-slate-400" />
-              </div>
-              <p className="text-sm leading-6 text-slate-500">欢迎使用 RPG World Play。</p>
-              <p className="mt-1 text-sm leading-6 text-slate-500">可以在设置中调整偏好与界面主题。</p>
-            </section>
-
-            <section className="rounded-2xl bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-lg font-bold text-slate-950">快速入口</h2>
-              <div className="space-y-3">
-                {quickLinks.map((link) => (
-                  <a
-                    key={link.label}
-                    href="#"
-                    className="flex items-center justify-between rounded-lg px-1 py-2 text-sm text-slate-500 transition hover:text-violet-700"
-                  >
-                    <span className="flex items-center gap-3">
-                      <link.icon size={17} />
-                      {link.label}
-                    </span>
-                    <ChevronRight size={16} />
-                  </a>
-                ))}
-              </div>
-            </section>
-          </aside>
-        </div>
-      )}
+      <HomeContent />
     </AppShell>
   )
 }
