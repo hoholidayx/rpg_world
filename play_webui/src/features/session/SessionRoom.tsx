@@ -1,96 +1,65 @@
 'use client'
 
-import { CSSProperties, PointerEvent, useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import { CSSProperties, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { DebugEventLauncher } from '@/components/debug/DebugEventLauncher'
-import { CommandPaletteDialog } from '@/components/input/CommandPaletteDialog'
-import { SendStopButton } from '@/components/input/SendStopButton'
-import { getSession } from '@/lib/api/sessions'
-import type { SessionSummary } from '@/types/session'
+import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
+import { ConfirmDialog } from '@/components/common/Dialog'
+import { listStoryCharacters } from '@/lib/api/characters'
+import { getCurrentScene } from '@/lib/api/scene'
+import { getSession, getSessionHistory } from '@/lib/api/sessions'
+import { listSessionStatusTables } from '@/lib/api/statusTables'
+import { consumeChatStream } from '@/lib/stream/sse'
+import { cn } from '@/lib/utils/cn'
+import type { CharacterCard } from '@/types/characters'
+import type { CurrentAgentStreamEvent } from '@/types/stream'
+import { SessionComposer } from './SessionComposer'
+import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
+import { SessionSettingsMenu } from './SessionSettingsMenu'
+import { SessionTimeline } from './SessionTimeline'
 import {
-  Copy,
-  Maximize2,
-  RotateCcw,
-  Settings,
-  Sparkles,
-  Star,
-  Zap,
-} from 'lucide-react'
-
-const sceneRows = [
-  ['地点', '雾港钟楼码头'],
-  ['时间', '雨夜 23:40'],
-  ['天气', '海雾'],
-  ['危险', '低'],
-  ['线索', '铜钥匙'],
-  ['氛围', '潮湿、压抑、带着未说出口的秘密'],
-]
-
-const characterTags = ['警惕', '试探', '低声交谈']
-
-const statusTables = [
-  {
-    title: '当前场景',
-    rows: [
-      ['地点', '雾港钟楼码头'],
-      ['时间', '雨夜 23:40'],
-      ['天气', '海雾'],
-      ['危险', '低（0%）'],
-      ['氛围', '潮湿、压抑'],
-    ],
-  },
-  {
-    title: '关系：伊凡',
-    rows: [
-      ['态度', '中性 +10'],
-      ['信任', '仍在试探'],
-      ['压力', '轻微'],
-      ['最近互动', '交出铜钥匙'],
-    ],
-  },
-  {
-    title: '线索',
-    rows: [
-      ['铜钥匙', '已获得'],
-      ['潮汐信号', '0'],
-      ['第十三下钟', '待确认'],
-      ['门后的名字', '未知'],
-    ],
-  },
-  {
-    title: '世界进度',
-    rows: [
-      ['章节', '序章 1 / 5'],
-      ['下一幕', '未开启'],
-      ['主线推进', '18%'],
-      ['分支风险', '低'],
-    ],
-  },
-  {
-    title: '随身物品',
-    rows: [
-      ['铜钥匙', '1'],
-      ['防水火柴', '3'],
-      ['旧地图', '残页'],
-      ['银币', '12'],
-    ],
-  },
-]
-
-const quickActions = ['观察钥匙', '询问守夜人', '检查钟楼', '保持沉默']
+  findCharacterByName,
+  firstLetter,
+  formatDateTime,
+  getCharacterAvatarUrl,
+  pickPlayerCharacter,
+} from './sessionRoomHelpers'
+import type {
+  ConfirmRequest,
+  NarrativeStyle,
+  NarrativeStyleId,
+  SessionInputMode,
+  SessionSpeaker,
+  SessionTimelineMessage,
+} from './sessionRoomTypes'
 
 const defaultSidebarSizes = {
-  left: 282,
-  right: 314,
+  left: 300,
+  right: 340,
 }
 
+const collapsedSidebarSize = 72
+
 const sidebarLimits = {
-  leftMin: 232,
-  leftMax: 420,
-  rightMin: 260,
-  rightMax: 460,
+  leftMin: 260,
+  leftMax: 460,
+  rightMin: 280,
+  rightMax: 500,
 }
+
+const narrativeStyles: NarrativeStyle[] = [
+  { id: 'default', label: '默认', prompt: '' },
+  { id: 'detailed', label: '细腻描写', prompt: '请用细腻描写推进这一幕。' },
+  { id: 'fast', label: '快速推进', prompt: '请快速推进到下一个关键选择。' },
+  { id: 'options', label: '多给选项', prompt: '请在回应末尾给出多个可选择的行动方向。' },
+]
+
+const quickActions = [
+  '我仔细观察周围最异常的细节，并判断它是否会带来危险。',
+  '我向在场角色追问刚才那句话里被刻意回避的部分。',
+  '我放慢动作，先确认随身物品、线索和当前处境。',
+  '我主动推进到下一处关键地点，留意途中是否有人跟踪。',
+]
 
 type DragState = {
   side: 'left' | 'right'
@@ -99,261 +68,246 @@ type DragState = {
   startRight: number
 }
 
+type MobilePanel = 'left' | 'right' | null
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function Logo() {
-  return (
-    <Link href="/" className="flex items-center gap-3">
-      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-lg shadow-violet-200">
-        <Sparkles size={22} fill="currentColor" />
-      </span>
-      <span className="text-lg font-bold text-slate-950">RPG World Play</span>
-    </Link>
-  )
+function makePlayerSpeaker(character: CharacterCard | null): SessionSpeaker {
+  return {
+    name: character?.name ?? '你',
+    label: 'IC',
+    avatarUrl: getCharacterAvatarUrl(character),
+    fallback: firstLetter(character?.name ?? '你'),
+    tone: 'player',
+  }
 }
 
-function Panel({ title, action, children }: { title: string; action?: string; children: React.ReactNode }) {
-  return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-        <h2 className="text-lg font-bold text-slate-950">{title}</h2>
-        {action ? <button className="rounded-full border border-slate-200 px-3 py-1 text-sm font-medium text-slate-600">{action}</button> : <Star size={18} className="text-slate-500" />}
-      </div>
-      {children}
-    </section>
-  )
+function makeAssistantSpeaker(content: string, characters: CharacterCard[], playerCharacter: CharacterCard | null): SessionSpeaker {
+  const candidates = characters.filter((character) => character.id !== playerCharacter?.id)
+  const matched = candidates.find((character) => content.includes(character.name)) ?? candidates[0] ?? null
+  if (matched) {
+    return {
+      name: matched.name,
+      avatarUrl: getCharacterAvatarUrl(matched),
+      fallback: firstLetter(matched.name),
+      tone: 'assistant',
+    }
+  }
+  return {
+    name: 'Narrator',
+    avatarUrl: '',
+    fallback: '旁',
+    tone: 'assistant',
+  }
 }
 
-function StatusTable({ title, rows }: { title: string; rows: string[][] }) {
-  return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <h3 className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-950">{title}</h3>
-      <div className="divide-y divide-slate-100">
-        {rows.map(([key, value]) => (
-          <dl key={key} className="grid grid-cols-[82px_minmax(0,1fr)] gap-3 px-3 py-2 text-sm leading-5">
-            <dt className="truncate text-slate-400">{key}</dt>
-            <dd className="min-w-0 break-words font-medium text-slate-700">{value}</dd>
-          </dl>
-        ))}
-      </div>
-    </section>
-  )
+function toolSpeaker(): SessionSpeaker {
+  return {
+    name: '工具结果',
+    fallback: '⚒',
+    tone: 'tool',
+  }
 }
 
-function Sidebar() {
-  return (
-    <aside className="min-h-0 overflow-y-auto border-r border-slate-200 bg-white px-5 py-5 lg:h-screen">
-      <Logo />
-
-      <div className="mt-4 space-y-4">
-        <Panel title="场景 HUD">
-          <dl className="space-y-3 px-4 py-4 text-sm">
-            {sceneRows.map(([label, value]) => (
-              <div key={label} className="grid grid-cols-[52px_minmax(0,1fr)] gap-3">
-                <dt className="text-slate-400">{label}</dt>
-                <dd className={`font-semibold ${label === '危险' ? 'text-emerald-600' : 'text-slate-950'}`}>{value}</dd>
-              </div>
-            ))}
-          </dl>
-        </Panel>
-
-        <Panel title="角色" action="全部">
-          <div className="px-4 py-4">
-            <div className="mb-3 flex gap-2">
-              <span className="rounded-lg bg-violet-100 px-3 py-1 text-sm font-bold text-violet-700">伊凡</span>
-              <span className="rounded-lg border border-slate-200 px-3 py-1 text-sm text-slate-500">你</span>
-              <span className="rounded-lg border border-slate-200 px-3 py-1 text-sm text-slate-500">更多</span>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-slate-200 text-xl font-bold text-slate-600">伊</div>
-              <div className="min-w-0">
-                <h3 className="font-bold text-slate-950">守夜人伊凡</h3>
-                <p className="mt-1 text-sm leading-5 text-slate-500">谨慎、疲惫，似乎知道某个秘密。</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {characterTags.map((tag) => (
-                    <span key={tag} className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500 odd:bg-slate-50 last:border-emerald-200 last:bg-emerald-50 last:text-emerald-700">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Panel>
-      </div>
-    </aside>
-  )
+function thinkingSpeaker(): SessionSpeaker {
+  return {
+    name: '思考中',
+    fallback: '…',
+    tone: 'thinking',
+  }
 }
 
-function Header({ session, sessionId }: { session: SessionSummary | undefined; sessionId: string }) {
-  return (
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4">
-      <div>
-        <h1 className="text-xl font-bold text-slate-950">{session?.title ?? '加载会话中'}</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {session ? `故事：${session.storyId} / ${session.id}` : sessionId}
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700">
-          ● SSE · done
-        </span>
-        <DebugEventLauncher />
-      </div>
-    </header>
-  )
+function errorSpeaker(): SessionSpeaker {
+  return {
+    name: '错误',
+    fallback: '!',
+    tone: 'error',
+  }
 }
 
-function AssistantMessage({ speaker, children }: { speaker: string; children: React.ReactNode }) {
+function assistantPreview(turnId: number, characters: CharacterCard[], playerCharacter: CharacterCard | null): SessionTimelineMessage {
+  const content = '雾气在前方慢慢散开，新的线索浮出水面。当前版本仅做前端预览；真正的重试、编辑与删除会在后续 turn API 支持后持久化。'
+  return {
+    id: `local-retry-${turnId}-${crypto.randomUUID()}`,
+    turnId,
+    role: 'assistant',
+    content,
+    createdAt: new Date().toISOString(),
+    speaker: makeAssistantSpeaker(content, characters, playerCharacter),
+    status: 'local',
+  }
+}
+
+function streamPlaceholder(turnId: number, characters: CharacterCard[], playerCharacter: CharacterCard | null): SessionTimelineMessage {
+  return {
+    id: `local-stream-${turnId}-${crypto.randomUUID()}`,
+    turnId,
+    role: 'assistant',
+    content: '',
+    createdAt: new Date().toISOString(),
+    speaker: makeAssistantSpeaker('', characters, playerCharacter),
+    status: 'streaming',
+  }
+}
+
+function mapHistoryToMessages({
+  turns,
+  characters,
+  playerCharacter,
+}: {
+  turns: Awaited<ReturnType<typeof getSessionHistory>> | undefined
+  characters: CharacterCard[]
+  playerCharacter: CharacterCard | null
+}): SessionTimelineMessage[] {
+  const playerSpeaker = makePlayerSpeaker(playerCharacter)
+
+  return (turns ?? []).flatMap((turn, index) => {
+    const turnId = turn.turnId || index + 1
+    const userMessage: SessionTimelineMessage = {
+      id: `history-${turnId}-user`,
+      turnId,
+      role: 'user',
+      content: turn.userMessage,
+      createdAt: turn.createdAt,
+      speaker: playerSpeaker,
+    }
+
+    if (!turn.assistantMessage) return [userMessage]
+
+    const assistantMessage: SessionTimelineMessage = {
+      id: `history-${turnId}-assistant`,
+      turnId,
+      role: 'assistant',
+      content: turn.assistantMessage,
+      createdAt: turn.createdAt,
+      speaker: makeAssistantSpeaker(turn.assistantMessage, characters, playerCharacter),
+      status: 'done',
+    }
+
+    return [userMessage, assistantMessage]
+  })
+}
+
+function Toast({ message }: { message: string }) {
   return (
-    <div className="grid grid-cols-[44px_minmax(0,720px)] gap-3">
-      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-base font-bold text-slate-600">{speaker}</div>
-      <div>
-        <p className="mb-2 text-sm text-slate-400">23:41&nbsp;&nbsp; 助手（Narrator）</p>
-        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 leading-7 text-slate-950 shadow-sm">{children}</div>
-      </div>
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        'pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-950 px-4 py-2 text-sm font-bold text-white shadow-2xl transition',
+        message ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0',
+      )}
+    >
+      {message}
     </div>
-  )
-}
-
-function UserMessage({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="ml-auto grid max-w-[520px] grid-cols-[minmax(0,1fr)_44px] gap-3">
-      <div>
-        <p className="mb-2 text-right text-sm text-slate-400">23:41&nbsp;&nbsp; 你（IC）</p>
-        <div className="rounded-2xl bg-violet-600 px-5 py-4 leading-7 text-white shadow-xl shadow-violet-200">{children}</div>
-      </div>
-      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-violet-100 text-base font-bold text-violet-700">你</div>
-    </div>
-  )
-}
-
-function ToolCall() {
-  return (
-    <div className="grid grid-cols-[44px_minmax(0,520px)] gap-3">
-      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-slate-600">
-        <Settings size={17} />
-      </div>
-      <div className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-blue-800">
-        工具调用：线索检定（观察守夜人动作）→ 成功（难度 12，结果 14）
-      </div>
-    </div>
-  )
-}
-
-function QuickActionCard() {
-  return (
-    <div className="grid grid-cols-[44px_minmax(0,420px)] gap-3">
-      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-amber-500">
-        <Zap size={18} fill="currentColor" />
-      </div>
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-        <h3 className="font-bold text-slate-950">快捷行动</h3>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {quickActions.map((action) => (
-            <button key={action} className="rounded-lg border border-amber-300 bg-white/70 px-3 py-2 text-sm font-bold text-amber-800">
-              {action}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function Timeline() {
-  return (
-    <section className="min-h-0 flex-1 overflow-y-auto bg-[#f7f7fa] px-6 py-9">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-8 flex items-center justify-center gap-4 text-sm text-slate-400">
-          <span className="h-px w-48 bg-slate-200" />
-          时间线 / Timeline
-          <span className="h-px w-48 bg-slate-200" />
-        </div>
-
-        <div className="space-y-8">
-          <UserMessage>我拉紧斗篷，沿着潮湿的石阶走向码头钟楼。</UserMessage>
-          <AssistantMessage speaker="旁">
-            雾气贴着地面翻涌，钟楼二层透出一线琥珀色灯光。守夜人停下擦拭灯罩的动作，像是已经等你很久。
-          </AssistantMessage>
-          <UserMessage>我压低声音问他：今晚是谁敲响了第十三下钟？</UserMessage>
-          <AssistantMessage speaker="伊">
-            守夜人没有立刻回答。他从怀里取出一枚沾着盐霜的铜钥匙，轻轻推到你面前：“先确认你还记得门后的名字。”
-          </AssistantMessage>
-          <div className="ml-[54px] flex gap-2">
-            {[RotateCcw, Copy, Maximize2].map((Icon, index) => (
-              <button key={index} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500">
-                <Icon size={14} />
-              </button>
-            ))}
-          </div>
-          <ToolCall />
-          <QuickActionCard />
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function Composer({ sessionId }: { sessionId: string }) {
-  return (
-    <section data-session-id={sessionId} className="border-t border-slate-200 bg-white px-6 py-4">
-      <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2">
-          <div className="flex flex-wrap gap-2">
-            <CommandPaletteDialog sessionId={sessionId} />
-            <button className="rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-500">输入 / 触发命令</button>
-          </div>
-        </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_128px] gap-4 px-4 py-3">
-          <textarea
-            className="min-h-24 resize-none border-0 bg-transparent pt-2 text-base text-slate-900 outline-none placeholder:text-slate-400"
-            placeholder="输入你的行动、台词或 GM 指令..."
-            defaultValue=""
-          />
-          <SendStopButton sessionId={sessionId} />
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-2">
-          <div className="flex flex-wrap gap-2">
-            <button className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">细腻描写</button>
-            <button className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500">快速推进</button>
-            <button className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500">多给选项</button>
-          </div>
-          <p className="text-xs text-slate-500">Enter 发送 / Shift+Enter 换行</p>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function RightRail() {
-  return (
-    <aside className="min-h-0 overflow-y-auto border-l border-slate-200 bg-white px-5 py-5 lg:h-screen">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-4 text-lg font-bold text-slate-950">状态表</h2>
-        <div className="space-y-3">
-          {statusTables.map((table) => (
-            <StatusTable key={table.title} {...table} />
-          ))}
-        </div>
-      </section>
-    </aside>
   )
 }
 
 export function SessionRoom({ sessionId }: { sessionId: string }) {
+  const router = useRouter()
   const [leftWidth, setLeftWidth] = useState(defaultSidebarSizes.left)
   const [rightWidth, setRightWidth] = useState(defaultSidebarSizes.right)
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [rightCollapsed, setRightCollapsed] = useState(false)
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [dragState, setDragState] = useState<DragState | null>(null)
+  const [inputMode, setInputMode] = useState<SessionInputMode>('ic')
+  const [narrativeStyleId, setNarrativeStyleId] = useState<NarrativeStyleId>('default')
+  const [composerText, setComposerText] = useState('')
+  const [localMessages, setLocalMessages] = useState<SessionTimelineMessage[]>([])
+  const [hiddenMessageIds, setHiddenMessageIds] = useState<Set<string>>(() => new Set())
+  const [hiddenFromTurn, setHiddenFromTurn] = useState<number | null>(null)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
+  const [toastMessage, setToastMessage] = useState('')
+  const [sending, setSending] = useState(false)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
   const sessionQuery = useQuery({
     queryKey: ['play-session', sessionId],
-    // workspace/story 不再从路由传入，避免前端持有可失配的会话定位三元组。
     queryFn: () => getSession(sessionId),
   })
 
   const session = sessionQuery.data
+
+  const historyQuery = useQuery({
+    queryKey: ['play-session-history', sessionId],
+    queryFn: () => getSessionHistory(sessionId),
+  })
+
+  const sceneQuery = useQuery({
+    queryKey: ['play-session-scene', sessionId],
+    queryFn: () => getCurrentScene(sessionId),
+  })
+
+  const statusTablesQuery = useQuery({
+    queryKey: ['play-session-status-tables', sessionId, 'normal'],
+    queryFn: () => listSessionStatusTables(sessionId, 'normal'),
+  })
+
+  const charactersQuery = useQuery({
+    queryKey: ['play-story-characters', session?.workspace, session?.storyId],
+    enabled: Boolean(session?.workspace && session?.storyId),
+    queryFn: () => listStoryCharacters(session?.workspace ?? '', session?.storyId ?? 0),
+  })
+
+  const characters = charactersQuery.data ?? []
+  const playerCharacter = useMemo(() => {
+    const scenePlayer = sceneQuery.data?.presentCharacters
+      ?.map((name) => findCharacterByName(characters, name))
+      .find((character): character is CharacterCard => Boolean(character))
+    return scenePlayer ?? pickPlayerCharacter(characters)
+  }, [characters, sceneQuery.data?.presentCharacters])
+
+  const baseMessages = useMemo(
+    () => mapHistoryToMessages({ turns: historyQuery.data, characters, playerCharacter }),
+    [characters, historyQuery.data, playerCharacter],
+  )
+
+  const visibleMessages = useMemo(() => {
+    const visibleBase = hiddenFromTurn === null
+      ? baseMessages
+      : baseMessages.filter((message) => message.turnId < hiddenFromTurn)
+    return [...visibleBase, ...localMessages]
+      .filter((message) => !hiddenMessageIds.has(message.id))
+      .sort((first, second) => first.turnId - second.turnId)
+  }, [baseMessages, hiddenFromTurn, hiddenMessageIds, localMessages])
+
+  const lastTurnId = useMemo(
+    () => Math.max(0, ...visibleMessages.map((message) => message.turnId)),
+    [visibleMessages],
+  )
+
+  const currentNarrativeStyle = narrativeStyles.find((style) => style.id === narrativeStyleId) ?? narrativeStyles[0]
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message)
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = setTimeout(() => setToastMessage(''), 2200)
+  }, [])
+
+  useEffect(() => {
+    setLocalMessages([])
+    setHiddenMessageIds(new Set())
+    setHiddenFromTurn(null)
+    setEditingMessageId(null)
+    setEditDraft('')
+    setComposerText('')
+    setMobilePanel(null)
+    setSettingsOpen(false)
+  }, [sessionId])
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+      abortRef.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
     if (!dragState) return
@@ -388,9 +342,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const gridStyle = useMemo(
     () =>
       ({
-        '--session-grid-columns': `${leftWidth}px 8px minmax(0,1fr) 8px ${rightWidth}px`,
+        '--session-grid-columns': `${leftCollapsed ? collapsedSidebarSize : leftWidth}px 8px minmax(0,1fr) 8px ${
+          rightCollapsed ? collapsedSidebarSize : rightWidth
+        }px`,
       }) as CSSProperties,
-    [leftWidth, rightWidth],
+    [leftCollapsed, leftWidth, rightCollapsed, rightWidth],
   )
 
   const startDrag = (side: 'left' | 'right') => (event: PointerEvent<HTMLButtonElement>) => {
@@ -403,37 +359,423 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     })
   }
 
+  const hideFromTurn = useCallback((turnId: number) => {
+    setHiddenFromTurn((current) => (current === null ? turnId : Math.min(current, turnId)))
+    setLocalMessages((current) => current.filter((message) => message.turnId < turnId))
+    setEditingMessageId(null)
+    setEditDraft('')
+  }, [])
+
+  const requestConfirm = useCallback((request: ConfirmRequest) => {
+    setConfirmRequest(request)
+  }, [])
+
+  const performRetry = useCallback((message: SessionTimelineMessage) => {
+    hideFromTurn(message.turnId)
+    setLocalMessages((current) => [...current, assistantPreview(message.turnId, characters, playerCharacter)])
+    showToast(`已删除 turn #${message.turnId} 及之后内容，并触发重试预览`)
+  }, [characters, hideFromTurn, playerCharacter, showToast])
+
+  const handleRetry = useCallback((message: SessionTimelineMessage) => {
+    if (message.turnId >= lastTurnId) {
+      performRetry(message)
+      return
+    }
+    requestConfirm({
+      title: '确认重试',
+      heading: '该操作会影响后续回合',
+      body: `重试 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn。当前版本只做前端预览，不会写入后端。`,
+      confirmLabel: '确认重试',
+      onConfirm: () => performRetry(message),
+    })
+  }, [lastTurnId, performRetry, requestConfirm])
+
+  const handleCopy = useCallback((message: SessionTimelineMessage) => {
+    navigator.clipboard?.writeText(message.content).then(
+      () => showToast('已复制当前消息'),
+      () => showToast('复制失败，请手动选择文本'),
+    )
+  }, [showToast])
+
+  const handleStartEdit = useCallback((message: SessionTimelineMessage) => {
+    setEditingMessageId(message.id)
+    setEditDraft(message.content)
+  }, [])
+
+  const performSendEdited = useCallback((message: SessionTimelineMessage, text: string) => {
+    hideFromTurn(message.turnId)
+    const editedMessage: SessionTimelineMessage = {
+      ...message,
+      id: `local-edit-${message.turnId}-${crypto.randomUUID()}`,
+      content: text,
+      createdAt: new Date().toISOString(),
+      status: 'local',
+    }
+    setLocalMessages((current) => {
+      const next = [...current, editedMessage]
+      if (message.role === 'user') {
+        next.push(assistantPreview(message.turnId, characters, playerCharacter))
+      }
+      return next
+    })
+    showToast(`已发送编辑后的 turn #${message.turnId} 预览`)
+  }, [characters, hideFromTurn, playerCharacter, showToast])
+
+  const handleSendEdit = useCallback((message: SessionTimelineMessage) => {
+    const text = editDraft.trim()
+    if (!text) {
+      showToast('编辑内容不能为空')
+      return
+    }
+    if (message.turnId < lastTurnId) {
+      requestConfirm({
+        title: '确认发送编辑',
+        heading: '该操作会影响后续回合',
+        body: `发送编辑后的 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn，并使用新的内容重新生成。当前版本只做前端预览。`,
+        confirmLabel: '确认发送',
+        onConfirm: () => performSendEdited(message, text),
+      })
+      return
+    }
+    performSendEdited(message, text)
+  }, [editDraft, lastTurnId, performSendEdited, requestConfirm, showToast])
+
+  const handleDelete = useCallback((message: SessionTimelineMessage) => {
+    requestConfirm({
+      title: '确认删除',
+      heading: '删除当前消息',
+      body: '删除会从当前时间线移除这条消息。当前版本只做前端预览，不会写入后端。',
+      confirmLabel: '确认删除',
+      onConfirm: () => {
+        setHiddenMessageIds((current) => {
+          const next = new Set(current)
+          next.add(message.id)
+          return next
+        })
+        showToast(`已删除 turn #${message.turnId} 中的当前消息`)
+      },
+    })
+  }, [requestConfirm, showToast])
+
+  const insertComposerText = useCallback((text: string) => {
+    setComposerText((current) => {
+      const prefix = current.trim() ? '\n' : ''
+      return `${current}${prefix}${text}`
+    })
+  }, [])
+
+  const appendStreamEvent = useCallback((event: CurrentAgentStreamEvent, assistantMessageId: string, turnId: number) => {
+    if (event.kind === 'text') {
+      setLocalMessages((current) =>
+        current.map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                content: `${message.content}${event.content ?? ''}`,
+                status: 'streaming',
+              }
+            : message,
+        ),
+      )
+      return
+    }
+
+    if (event.kind === 'thinking') {
+      setLocalMessages((current) => [
+        ...current,
+        {
+          id: `local-thinking-${turnId}-${crypto.randomUUID()}`,
+          turnId,
+          role: 'thinking',
+          content: event.content ?? '思考中...',
+          createdAt: new Date().toISOString(),
+          speaker: thinkingSpeaker(),
+          status: 'local',
+        },
+      ])
+      return
+    }
+
+    if (event.kind === 'tool_call' || event.kind === 'tool_result') {
+      setLocalMessages((current) => [
+        ...current,
+        {
+          id: `local-tool-${turnId}-${crypto.randomUUID()}`,
+          turnId,
+          role: 'tool',
+          content: event.tool_result_preview ?? event.tool_name ?? '工具事件',
+          createdAt: new Date().toISOString(),
+          speaker: toolSpeaker(),
+          status: 'local',
+        },
+      ])
+      return
+    }
+
+    if (event.kind === 'done') {
+      setLocalMessages((current) =>
+        current.map((message) =>
+          message.id === assistantMessageId
+            ? { ...message, status: 'done', content: message.content || '已完成。' }
+            : message,
+        ),
+      )
+      return
+    }
+
+    if (event.kind === 'error') {
+      setLocalMessages((current) => [
+        ...current.map((message) =>
+          message.id === assistantMessageId ? { ...message, status: 'error' as const } : message,
+        ),
+        {
+          id: `local-error-${turnId}-${crypto.randomUUID()}`,
+          turnId,
+          role: 'error',
+          content: event.content ?? '流式请求失败',
+          createdAt: new Date().toISOString(),
+          speaker: errorSpeaker(),
+          status: 'error',
+        },
+      ])
+    }
+  }, [])
+
+  const handleSend = useCallback(async () => {
+    const text = composerText.trim()
+    if (!text) {
+      showToast('请输入内容后再发送')
+      return
+    }
+
+    const turnId = lastTurnId + 1
+    const style = currentNarrativeStyle
+    const playerSpeaker = makePlayerSpeaker(playerCharacter)
+    const userMessage: SessionTimelineMessage = {
+      id: `local-user-${turnId}-${crypto.randomUUID()}`,
+      turnId,
+      role: 'user',
+      content: text,
+      createdAt: new Date().toISOString(),
+      speaker: { ...playerSpeaker, label: inputMode.toUpperCase() },
+      hiddenPrompt: style.prompt,
+      status: style.prompt ? 'local' : undefined,
+    }
+    const assistantMessage = streamPlaceholder(turnId, characters, playerCharacter)
+    const controller = new AbortController()
+    abortRef.current = controller
+    setComposerText('')
+    setSending(true)
+    setLocalMessages((current) => [...current, userMessage, assistantMessage])
+
+    try {
+      // 叙事风格目前只保存在本地 message metadata；待后端支持独立 prompt 字段后再随 payload 发送。
+      await consumeChatStream(
+        {
+          sessionId,
+          text,
+          mode: inputMode,
+        },
+        {
+          signal: controller.signal,
+          onEvent: (event) => appendStreamEvent(event, assistantMessage.id, turnId),
+        },
+      )
+    } catch (error) {
+      if (controller.signal.aborted) {
+        setLocalMessages((current) =>
+          current.map((message) =>
+            message.id === assistantMessage.id
+              ? { ...message, status: 'done', content: message.content || '已停止当前流式响应。' }
+              : message,
+          ),
+        )
+      } else {
+        setLocalMessages((current) => [
+          ...current.map((message) =>
+            message.id === assistantMessage.id ? { ...message, status: 'error' as const } : message,
+          ),
+          {
+            id: `local-error-${turnId}-${crypto.randomUUID()}`,
+            turnId,
+            role: 'error',
+            content: error instanceof Error ? error.message : '未知流式错误',
+            createdAt: new Date().toISOString(),
+            speaker: errorSpeaker(),
+            status: 'error',
+          },
+        ])
+      }
+    } finally {
+      setSending(false)
+      abortRef.current = null
+    }
+  }, [appendStreamEvent, characters, composerText, currentNarrativeStyle, inputMode, lastTurnId, playerCharacter, sessionId, showToast])
+
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort()
+    showToast('已停止当前流式响应')
+  }, [showToast])
+
+  const handleConfirm = () => {
+    const action = confirmRequest?.onConfirm
+    setConfirmRequest(null)
+    action?.()
+  }
+
   return (
     <main
       style={gridStyle}
       data-workspace={session?.workspace ?? ''}
       data-story-id={session?.storyId ?? ''}
       data-session-id={sessionId}
-      className="min-h-screen bg-[#f7f7fa] text-slate-900 lg:grid lg:h-screen lg:min-h-0 lg:grid-cols-[var(--session-grid-columns)] lg:overflow-hidden"
+      className="min-h-screen bg-[#f7f8fc] text-slate-900 lg:grid lg:h-screen lg:min-h-0 lg:grid-cols-[var(--session-grid-columns)] lg:overflow-hidden"
     >
-      <Sidebar />
+      {mobilePanel ? (
+        <button
+          type="button"
+          aria-label="关闭侧栏"
+          onClick={() => setMobilePanel(null)}
+          className="fixed inset-0 z-30 bg-slate-950/20 backdrop-blur-[1px] lg:hidden"
+        />
+      ) : null}
+
+      <SessionLeftRail
+        scene={sceneQuery.data}
+        sceneLoading={sceneQuery.isLoading}
+        characters={characters}
+        charactersLoading={charactersQuery.isLoading}
+        collapsed={leftCollapsed}
+        mobileOpen={mobilePanel === 'left'}
+        onCloseMobile={() => setMobilePanel(null)}
+        onToggleCollapsed={() => setLeftCollapsed((current) => !current)}
+      />
       <button
         type="button"
         aria-label="调整左侧栏宽度"
         onPointerDown={startDrag('left')}
-        className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
+        disabled={leftCollapsed}
+        className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 disabled:cursor-default disabled:opacity-40 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
       >
         <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400" />
       </button>
+
       <section className="flex min-h-screen min-w-0 flex-col lg:h-screen lg:min-h-0">
-        <Header session={session} sessionId={sessionId} />
-        <Timeline />
-        <Composer sessionId={sessionId} />
+        <header className="flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-black text-slate-950 sm:text-xl">{session?.title ?? '加载会话中'}</h1>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-400">
+              <span>
+                story <code className="font-mono text-slate-600">#{session?.storyId ?? '-'}</code>
+              </span>
+              <span>
+                session <code className="font-mono text-slate-600">{session?.id ?? sessionId}</code>
+              </span>
+              {session?.updatedAt ? <span>更新 {formatDateTime(session.updatedAt)}</span> : null}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMobilePanel('left')}
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:hidden"
+              aria-label="打开场景栏"
+            >
+              <AlignJustify size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobilePanel('right')}
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:hidden"
+              aria-label="打开状态栏"
+            >
+              <TableProperties size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/sessions')}
+              className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+            >
+              <LogOut size={16} />
+              退出
+            </button>
+            <SessionSettingsMenu
+              open={settingsOpen}
+              leftCollapsed={leftCollapsed}
+              rightCollapsed={rightCollapsed}
+              onToggleOpen={() => setSettingsOpen((current) => !current)}
+              onToggleSide={(side) => {
+                if (side === 'left') setLeftCollapsed((current) => !current)
+                else setRightCollapsed((current) => !current)
+              }}
+            />
+          </div>
+        </header>
+
+        <SessionTimeline
+          messages={visibleMessages}
+          quickActions={quickActions}
+          editingMessageId={editingMessageId}
+          editDraft={editDraft}
+          onEditDraftChange={setEditDraft}
+          onCopy={handleCopy}
+          onRetry={handleRetry}
+          onEdit={handleStartEdit}
+          onDelete={handleDelete}
+          onEditCancel={() => {
+            setEditingMessageId(null)
+            setEditDraft('')
+            showToast('已取消编辑')
+          }}
+          onEditSend={handleSendEdit}
+          onInsertQuickAction={insertComposerText}
+        />
+
+        <SessionComposer
+          sessionId={sessionId}
+          text={composerText}
+          mode={inputMode}
+          narrativeStyleId={narrativeStyleId}
+          narrativeStyles={narrativeStyles}
+          sending={sending}
+          onTextChange={setComposerText}
+          onModeChange={setInputMode}
+          onNarrativeStyleChange={setNarrativeStyleId}
+          onSend={handleSend}
+          onStop={handleStop}
+        />
       </section>
+
       <button
         type="button"
         aria-label="调整右侧栏宽度"
         onPointerDown={startDrag('right')}
-        className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
+        disabled={rightCollapsed}
+        className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 disabled:cursor-default disabled:opacity-40 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
       >
         <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400" />
       </button>
-      <RightRail />
+      <SessionRightRail
+        tables={statusTablesQuery.data ?? []}
+        loading={statusTablesQuery.isLoading}
+        collapsed={rightCollapsed}
+        mobileOpen={mobilePanel === 'right'}
+        onCloseMobile={() => setMobilePanel(null)}
+        onToggleCollapsed={() => setRightCollapsed((current) => !current)}
+      />
+
+      {confirmRequest ? (
+        <ConfirmDialog
+          title={confirmRequest.title}
+          heading={confirmRequest.heading}
+          body={confirmRequest.body}
+          confirmLabel={confirmRequest.confirmLabel}
+          pending={false}
+          onClose={() => setConfirmRequest(null)}
+          onConfirm={handleConfirm}
+        />
+      ) : null}
+      <Toast message={toastMessage} />
     </main>
   )
 }

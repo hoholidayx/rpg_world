@@ -1,0 +1,2157 @@
+<!--
+  Changelog:
+  - 移除会话页右上角“调试事件”入口；保留“设置”弹出菜单能力，菜单只承载布局控制与输入偏好。
+  - 将 SessionRoom 收敛为沉浸式游玩工作台：左侧聚焦当前场景/在场角色，中间聚焦剧情时间线与输入器，右侧暂时只保留状态表。
+  - 补齐基础交互预览：左右侧栏收起、拖拽调宽、设置菜单、顶部退出按钮、命令面板、输入模式切换、叙事风格单选（含默认）、快捷行动完整文本填入、发送/停止状态、消息图标操作与重试/编辑发送/删除确认。
+  - 字段展示仅使用当前 Play WebUI 已有模型可表达的信息：session_id、story_id、title、description、scene、history、status tables；去掉不必要的硬编码调试事件列表。
+  - Composer 对齐现有输入架构：IC/OOC/GM 模式、命令面板、Send/Stop、可插入快捷命令；叙事风格作为隐式提示词模式，不直接写入输入框。
+  - 对话与在场角色按“已配置头像优先”的形态展示；玩家 IC 也显示为已选角色身份。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play WebUI Session Room Mockup</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --soft: #f1f5f9;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --line: #dbe3ef;
+      --line-strong: #cbd5e1;
+      --violet: #4f46e5;
+      --violet-strong: #5b21b6;
+      --violet-soft: #eef2ff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --sky: #0369a1;
+      --sky-soft: #e0f2fe;
+      --rose: #be123c;
+      --rose-soft: #ffe4e6;
+      --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      --left: 300px;
+      --right: 340px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    textarea,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    textarea:focus-visible,
+    input:focus-visible {
+      outline: 3px solid rgba(79, 70, 229, 0.22);
+      outline-offset: 2px;
+    }
+
+    .session-room {
+      display: grid;
+      grid-template-columns: var(--left) 8px minmax(0, 1fr) 8px var(--right);
+      height: 100vh;
+      min-height: 720px;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    .session-room.left-collapsed {
+      --left: 72px;
+    }
+
+    .session-room.right-collapsed {
+      --right: 72px;
+    }
+
+    .side {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      border-color: var(--line);
+      background: rgba(255, 255, 255, 0.88);
+    }
+
+    .side-inner {
+      display: flex;
+      height: 100%;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .left-rail {
+      border-right: 1px solid var(--line);
+    }
+
+    .right-rail {
+      border-left: 1px solid var(--line);
+    }
+
+    .rail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 64px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: white;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      gap: 10px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .brand-mark,
+    .avatar,
+    .tool-avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius);
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      color: white;
+      font-weight: 950;
+      box-shadow: 0 10px 22px rgba(79, 70, 229, 0.18);
+    }
+
+    .avatar {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.88);
+      background:
+        radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.94) 0 13%, transparent 14%),
+        radial-gradient(circle at 50% 78%, rgba(255, 255, 255, 0.82) 0 24%, transparent 25%),
+        linear-gradient(135deg, #4f46e5, #0f766e);
+      color: white;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+    }
+
+    .avatar::after {
+      content: attr(data-fallback);
+      position: absolute;
+      inset: auto 0 4px;
+      color: rgba(255, 255, 255, 0.92);
+      font-size: 10px;
+      font-weight: 950;
+      text-align: center;
+      text-shadow: 0 1px 3px rgba(15, 23, 42, 0.24);
+    }
+
+    .avatar.player {
+      background:
+        radial-gradient(circle at 50% 32%, #fef3c7 0 14%, transparent 15%),
+        radial-gradient(circle at 50% 81%, #f8fafc 0 25%, transparent 26%),
+        linear-gradient(135deg, #4338ca, #0891b2);
+    }
+
+    .avatar.ivan {
+      background:
+        radial-gradient(circle at 50% 33%, #fed7aa 0 14%, transparent 15%),
+        radial-gradient(circle at 50% 82%, #334155 0 25%, transparent 26%),
+        linear-gradient(135deg, #1e293b, #92400e);
+    }
+
+    .avatar.lamplighter {
+      background:
+        radial-gradient(circle at 50% 33%, #fde68a 0 14%, transparent 15%),
+        radial-gradient(circle at 50% 82%, #facc15 0 24%, transparent 25%),
+        linear-gradient(135deg, #0f172a, #0369a1);
+    }
+
+    .avatar.narrator {
+      background:
+        radial-gradient(circle at 50% 34%, #e2e8f0 0 14%, transparent 15%),
+        radial-gradient(circle at 50% 81%, #cbd5e1 0 25%, transparent 26%),
+        linear-gradient(135deg, #64748b, #334155);
+    }
+
+    .brand-title,
+    .rail-title-text {
+      min-width: 0;
+    }
+
+    .brand-title strong,
+    .rail-title-text strong {
+      display: block;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 950;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .brand-title span,
+    .rail-title-text span {
+      display: block;
+      margin-top: 2px;
+      overflow: hidden;
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      color: var(--muted);
+      transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+    }
+
+    .icon-button:hover {
+      border-color: #c4b5fd;
+      background: var(--violet-soft);
+      color: var(--violet-strong);
+    }
+
+    .rail-scroll,
+    .timeline {
+      min-height: 0;
+      overflow-y: auto;
+    }
+
+    .rail-scroll {
+      padding: 14px;
+    }
+
+    .panel {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .panel + .panel {
+      margin-top: 12px;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 44px;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      background: var(--surface-soft);
+    }
+
+    .panel-head h2,
+    .panel-head h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .panel-head small {
+      color: var(--faint);
+      font-weight: 850;
+    }
+
+    .scene-list,
+    .status-list {
+      margin: 0;
+    }
+
+    .scene-list div,
+    .status-row {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr);
+      gap: 10px;
+      padding: 9px 12px;
+      border-top: 1px solid #eef2f7;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .scene-list div:first-child,
+    .status-row:first-child {
+      border-top: 0;
+    }
+
+    dt {
+      color: var(--faint);
+      font-weight: 800;
+    }
+
+    dd {
+      margin: 0;
+      min-width: 0;
+      color: var(--ink);
+      font-weight: 800;
+      word-break: break-word;
+    }
+
+    .character-card {
+      padding: 12px;
+    }
+
+    .character-main {
+      display: grid;
+      grid-template-columns: 46px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .character-main h3,
+    .message-meta strong {
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 950;
+    }
+
+    .character-main p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 10px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: white;
+      color: var(--muted);
+      padding: 0 9px;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .chip.teal {
+      border-color: #99f6e4;
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .chip.violet {
+      border-color: #c7d2fe;
+      background: var(--violet-soft);
+      color: #3730a3;
+    }
+
+    .chip.amber {
+      border-color: #fde68a;
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .chip.sky {
+      border-color: #bae6fd;
+      background: var(--sky-soft);
+      color: var(--sky);
+    }
+
+    .rail-collapsed .brand-title,
+    .rail-collapsed .rail-title-text,
+    .rail-collapsed .rail-scroll,
+    .rail-collapsed .hide-on-collapse {
+      display: none;
+    }
+
+    .rail-collapsed .rail-header {
+      justify-content: center;
+      padding-inline: 10px;
+    }
+
+    .rail-collapsed .rail-header {
+      flex-direction: column;
+    }
+
+    .resize-handle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      background: #eef2f7;
+      padding: 0;
+      cursor: col-resize;
+    }
+
+    .resize-handle span {
+      width: 2px;
+      height: 72px;
+      border-radius: 999px;
+      background: #cbd5e1;
+      transition: background 0.16s ease;
+    }
+
+    .resize-handle:hover span,
+    .resize-handle.dragging span {
+      background: var(--violet);
+    }
+
+    .center {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      background: var(--bg);
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      min-height: 72px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.94);
+      padding: 12px 18px;
+      backdrop-filter: blur(10px);
+    }
+
+    .session-title {
+      min-width: 0;
+    }
+
+    .session-title h1 {
+      margin: 0;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 19px;
+      line-height: 1.2;
+      font-weight: 950;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 10px;
+      margin-top: 5px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .session-meta code {
+      font-family: var(--mono);
+      color: var(--muted);
+    }
+
+    .top-actions {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .exit-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      color: var(--muted);
+      padding: 0 12px;
+      font-size: 13px;
+      font-weight: 950;
+      transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+    }
+
+    .exit-button:hover {
+      border-color: #fecdd3;
+      background: var(--rose-soft);
+      color: var(--rose);
+    }
+
+    .settings-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      z-index: 20;
+      display: none;
+      width: 286px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: var(--shadow);
+    }
+
+    .settings-menu.open {
+      display: block;
+    }
+
+    .settings-head {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .settings-head strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 950;
+    }
+
+    .settings-head span {
+      display: block;
+      margin-top: 3px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .menu-list {
+      padding: 6px;
+    }
+
+    .menu-item {
+      display: grid;
+      width: 100%;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: center;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      padding: 9px;
+      color: var(--ink);
+      text-align: left;
+    }
+
+    .menu-item:hover {
+      background: var(--violet-soft);
+    }
+
+    .menu-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      background: var(--soft);
+      color: var(--muted);
+      font-weight: 950;
+    }
+
+    .menu-copy strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .menu-copy span {
+      display: block;
+      margin-top: 2px;
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      border-radius: 999px;
+      background: #cbd5e1;
+    }
+
+    .switch::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: white;
+      transition: transform 0.18s ease;
+    }
+
+    .switch.on {
+      background: var(--violet);
+    }
+
+    .switch.on::after {
+      transform: translateX(16px);
+    }
+
+    .timeline {
+      flex: 1;
+      padding: 26px 20px 28px;
+      background:
+        linear-gradient(180deg, rgba(248, 250, 252, 0.82), rgba(247, 248, 252, 0.9)),
+        radial-gradient(circle at 18% 0%, rgba(79, 70, 229, 0.08), transparent 34%);
+    }
+
+    .timeline-inner {
+      width: min(920px, 100%);
+      margin: 0 auto;
+    }
+
+    .day-divider {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      margin-bottom: 24px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .day-divider::before,
+    .day-divider::after {
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: var(--line);
+    }
+
+    .message-stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 720px);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .message.user {
+      grid-template-columns: minmax(0, 540px) 42px;
+      justify-content: end;
+    }
+
+    .message.user .bubble-wrap {
+      order: 1;
+    }
+
+    .message.user .avatar {
+      order: 2;
+    }
+
+    .message-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 6px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .message.user .message-meta {
+      justify-content: flex-end;
+    }
+
+    .bubble {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 14px 16px;
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1.75;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+    }
+
+    .message.user .bubble {
+      border-color: var(--violet);
+      background: var(--violet);
+      color: white;
+      box-shadow: 0 12px 26px rgba(79, 70, 229, 0.18);
+    }
+
+    .message-actions {
+      position: relative;
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .message.user .message-actions {
+      justify-content: flex-end;
+    }
+
+    .mini-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 30px;
+      height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: white;
+      color: var(--muted);
+      padding: 0 8px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .mini-button.danger {
+      color: var(--rose);
+    }
+
+    .mini-button:hover {
+      border-color: #c4b5fd;
+      color: var(--violet-strong);
+    }
+
+    .mini-button.danger:hover {
+      border-color: #fecdd3;
+      background: var(--rose-soft);
+      color: var(--rose);
+    }
+
+    .more-menu {
+      position: absolute;
+      top: 36px;
+      left: 112px;
+      z-index: 12;
+      display: none;
+      min-width: 124px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 6px;
+      box-shadow: var(--shadow);
+    }
+
+    .message.user .more-menu {
+      right: 0;
+      left: auto;
+    }
+
+    .more-menu.open {
+      display: block;
+    }
+
+    .more-menu button {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 8px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--rose);
+      padding: 8px 9px;
+      font-size: 13px;
+      font-weight: 950;
+      text-align: left;
+    }
+
+    .more-menu button:hover {
+      background: var(--rose-soft);
+    }
+
+    .bubble.editing {
+      padding: 10px;
+    }
+
+    .bubble-editor {
+      min-height: 110px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: white;
+      color: var(--ink);
+      padding: 10px;
+    }
+
+    .message.user .bubble-editor {
+      border-color: rgba(255, 255, 255, 0.42);
+      background: rgba(255, 255, 255, 0.96);
+      color: var(--ink);
+    }
+
+    .edit-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .edit-actions button {
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: white;
+      color: var(--muted);
+      padding: 0 11px;
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .edit-actions button[data-edit-send] {
+      border-color: var(--violet);
+      background: var(--violet);
+      color: white;
+    }
+
+    .tool-avatar {
+      background: var(--sky-soft);
+      color: var(--sky);
+      box-shadow: none;
+    }
+
+    .tool-card {
+      border: 1px solid #bae6fd;
+      border-radius: var(--radius);
+      background: var(--sky-soft);
+      padding: 12px 14px;
+      color: #075985;
+      font-size: 13px;
+      line-height: 1.6;
+      font-weight: 850;
+    }
+
+    .suggestions {
+      margin-left: 54px;
+      border: 1px solid #fde68a;
+      border-radius: var(--radius);
+      background: #fffbeb;
+      padding: 12px;
+    }
+
+    .suggestions h3 {
+      margin: 0 0 10px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .suggestion-grid {
+      display: grid;
+      gap: 8px;
+    }
+
+    .suggestion {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid #fcd34d;
+      border-radius: 7px;
+      background: white;
+      color: #92400e;
+      padding: 9px 11px;
+      font-size: 13px;
+      line-height: 1.55;
+      font-weight: 900;
+      text-align: left;
+    }
+
+    .composer {
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
+      padding: 12px 18px 14px;
+    }
+
+    .composer-shell {
+      width: min(1040px, 100%);
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: 0 12px 34px rgba(15, 23, 42, 0.08);
+    }
+
+    .composer-top,
+    .composer-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      background: var(--surface-soft);
+    }
+
+    .composer-top {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .composer-bottom {
+      border-top: 1px solid var(--line);
+    }
+
+    .segmented {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+    }
+
+    .segment {
+      min-height: 30px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .segment.active {
+      background: var(--ink);
+      color: white;
+    }
+
+    .style-radio {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .style-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .radio-pill {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: white;
+      color: var(--muted);
+      padding: 0 11px 0 30px;
+      font-size: 12px;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .radio-pill input {
+      position: absolute;
+      left: 10px;
+      width: 13px;
+      height: 13px;
+      accent-color: var(--violet);
+    }
+
+    .radio-pill:has(input:checked) {
+      border-color: #c7d2fe;
+      background: var(--violet-soft);
+      color: #3730a3;
+    }
+
+    .composer-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 116px;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 86px;
+      resize: vertical;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      padding: 6px 0;
+      outline: none;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    textarea::placeholder {
+      color: var(--faint);
+    }
+
+    .send-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 86px;
+      border: 0;
+      border-radius: var(--radius);
+      background: var(--violet);
+      color: white;
+      padding: 0 16px;
+      font-size: 15px;
+      font-weight: 950;
+      box-shadow: 0 12px 24px rgba(79, 70, 229, 0.18);
+    }
+
+    .send-button.stopping {
+      background: #e11d48;
+      box-shadow: 0 12px 24px rgba(225, 29, 72, 0.14);
+    }
+
+    .hint {
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .tab-panel {
+      padding: 10px;
+    }
+
+    .status-table {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+    }
+
+    .status-table + .status-table {
+      margin-top: 10px;
+    }
+
+    .status-table h3 {
+      margin: 0;
+      border-bottom: 1px solid #eef2f7;
+      background: var(--surface-soft);
+      padding: 9px 10px;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(15, 23, 42, 0.24);
+      backdrop-filter: blur(2px);
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal {
+      width: min(960px, 100%);
+      max-height: min(720px, calc(100vh - 48px));
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.24);
+    }
+
+    .modal.confirm {
+      width: min(440px, 100%);
+    }
+
+    .confirm-body {
+      padding: 18px;
+    }
+
+    .confirm-body p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+      font-weight: 800;
+    }
+
+    .confirm-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      border-top: 1px solid var(--line);
+      background: var(--surface-soft);
+      padding: 12px 18px;
+    }
+
+    .confirm-actions button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      color: var(--muted);
+      padding: 0 13px;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .confirm-actions .danger {
+      border-color: #fda4af;
+      background: #e11d48;
+      color: white;
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      padding: 16px 18px;
+      background: var(--surface-soft);
+    }
+
+    .modal-head h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 950;
+    }
+
+    .command-search {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 16px 18px 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 0 12px;
+    }
+
+    .command-search input {
+      min-width: 0;
+      flex: 1;
+      height: 44px;
+      border: 0;
+      outline: none;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .command-body {
+      max-height: 470px;
+      overflow-y: auto;
+      padding: 16px 18px 18px;
+    }
+
+    .command-group + .command-group {
+      margin-top: 16px;
+    }
+
+    .command-group h3 {
+      margin: 0 0 8px;
+      color: var(--violet-strong);
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .command-item {
+      display: grid;
+      width: 100%;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      border: 0;
+      border-radius: var(--radius);
+      background: transparent;
+      padding: 12px;
+      text-align: left;
+    }
+
+    .command-item:hover,
+    .command-item.active {
+      background: var(--surface-soft);
+    }
+
+    .command-name {
+      display: inline-flex;
+      margin-right: 8px;
+      border-radius: 6px;
+      background: var(--violet-soft);
+      color: #3730a3;
+      padding: 4px 7px;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .command-item p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      font-weight: 750;
+    }
+
+    .shortcut {
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 80;
+      display: none;
+      max-width: 360px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #0f172a;
+      color: white;
+      padding: 11px 13px;
+      font-size: 13px;
+      font-weight: 850;
+      box-shadow: 0 20px 48px rgba(15, 23, 42, 0.28);
+    }
+
+    .toast.show {
+      display: block;
+    }
+
+    @media (max-width: 1100px) {
+      .session-room {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: 100vh;
+        overflow: visible;
+      }
+
+      .resize-handle {
+        display: none;
+      }
+
+      .side {
+        display: none;
+      }
+
+      .side.open-mobile {
+        display: block;
+        position: fixed;
+        inset: 72px auto 0 0;
+        z-index: 40;
+        width: min(360px, 88vw);
+        border-right: 1px solid var(--line);
+        box-shadow: 0 22px 60px rgba(15, 23, 42, 0.2);
+      }
+
+      .right-rail.open-mobile {
+        inset: 72px 0 0 auto;
+        border-left: 1px solid var(--line);
+        border-right: 0;
+      }
+
+      .center {
+        min-height: 100vh;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+      }
+
+      .mobile-only {
+        display: inline-flex !important;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .top-actions {
+        justify-content: flex-start;
+      }
+
+      .message,
+      .message.user {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .message .avatar,
+      .message.user .avatar {
+        display: none;
+      }
+
+      .message.user .bubble-wrap {
+        order: 0;
+      }
+
+      .composer-main {
+        grid-template-columns: 1fr;
+      }
+
+      .send-button {
+        min-height: 46px;
+      }
+
+      .composer-top,
+      .composer-bottom {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .suggestions {
+        margin-left: 0;
+      }
+    }
+
+    .mobile-only {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="session-room" id="sessionRoom" data-session-id="s_academy01" data-story-id="2">
+    <aside class="side left-rail" id="leftRail">
+      <div class="side-inner">
+        <header class="rail-header">
+          <a class="brand" href="#">
+            <span class="brand-mark">R</span>
+            <span class="brand-title">
+              <strong>RPG World Play</strong>
+              <span>immersive session</span>
+            </span>
+          </a>
+          <button class="icon-button" type="button" data-toggle-side="left" aria-label="收起左侧栏" title="收起左侧栏">◀</button>
+        </header>
+
+        <div class="rail-scroll">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>当前场景</h2>
+              <span class="chip teal">scene</span>
+            </div>
+            <dl class="scene-list">
+              <div><dt>地点</dt><dd>雾港钟楼码头</dd></div>
+              <div><dt>时间</dt><dd>雨夜 23:40</dd></div>
+              <div><dt>氛围</dt><dd>潮湿、压抑，远处雾笛断续响起</dd></div>
+              <div><dt>在场</dt><dd>林晚、守夜人伊凡、码头巡灯员</dd></div>
+              <div><dt>风险</dt><dd><span class="chip amber">低</span></dd></div>
+            </dl>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>在场角色</h2>
+              <small>story mounts</small>
+            </div>
+            <div class="character-card">
+              <div class="character-main">
+                <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
+                <div>
+                  <h3>林晚</h3>
+                  <p>玩家当前扮演角色，来自角色库挂载。</p>
+                </div>
+              </div>
+            </div>
+            <div class="character-card">
+              <div class="character-main">
+                <span class="avatar ivan" data-fallback="伊" aria-label="守夜人伊凡头像"></span>
+                <div>
+                  <h3>守夜人伊凡</h3>
+                  <p>谨慎、疲惫，知道钟楼旧门后的某个名字。</p>
+                </div>
+              </div>
+            </div>
+            <div class="character-card">
+              <div class="character-main">
+                <span class="avatar lamplighter" data-fallback="巡" aria-label="码头巡灯员头像"></span>
+                <div>
+                  <h3>码头巡灯员</h3>
+                  <p>正在远处巡灯，可能听见关键对话。</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </aside>
+
+    <button class="resize-handle" type="button" data-resize="left" aria-label="调整左侧栏宽度"><span></span></button>
+
+    <section class="center">
+      <header class="topbar">
+        <div class="session-title">
+          <h1>黑市边缘：旧灯笼里的第二把钥匙</h1>
+          <div class="session-meta">
+            <span>story <code>#2</code></span>
+            <span>session <code>s_academy01</code></span>
+            <span>更新 2026-07-03 23:41</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button class="icon-button mobile-only" type="button" data-mobile-panel="left" aria-label="打开场景栏">☰</button>
+          <button class="icon-button mobile-only" type="button" data-mobile-panel="right" aria-label="打开状态栏">▤</button>
+          <button class="exit-button" type="button" data-toast="退出到会话中心">退出</button>
+          <button class="icon-button" id="settingsButton" type="button" aria-expanded="false" aria-label="设置" title="设置">⚙</button>
+
+          <section class="settings-menu" id="settingsMenu" aria-label="会话设置菜单">
+            <div class="settings-head">
+              <strong>会话设置</strong>
+              <span>布局与输入偏好</span>
+            </div>
+            <div class="menu-list">
+              <button class="menu-item" type="button" data-toggle-side="left">
+                <span class="menu-icon">◧</span>
+                <span class="menu-copy"><strong>左侧栏</strong><span>场景与角色信息</span></span>
+                <span class="switch on" data-switch="left"></span>
+              </button>
+              <button class="menu-item" type="button" data-toggle-side="right">
+                <span class="menu-icon">◨</span>
+                <span class="menu-copy"><strong>右侧栏</strong><span>状态表</span></span>
+                <span class="switch on" data-switch="right"></span>
+              </button>
+            </div>
+          </section>
+        </div>
+      </header>
+
+      <section class="timeline" id="timeline">
+        <div class="timeline-inner">
+          <div class="day-divider">回合 12 / 雾港钟楼码头</div>
+          <div class="message-stack" id="messageStack">
+            <article class="message user" data-turn-index="10">
+              <div class="bubble-wrap">
+                <div class="message-meta"><span>23:40</span><strong>林晚（IC）</strong></div>
+                <div class="bubble">我拉紧斗篷，沿着潮湿的石阶走向码头钟楼。</div>
+                <div class="message-actions">
+                  <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
+                  <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
+                  <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
+                  <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
+                  <div class="more-menu">
+                    <button type="button" data-action="delete"><span>⌫</span>删除</button>
+                  </div>
+                </div>
+              </div>
+              <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
+            </article>
+
+            <article class="message" data-turn-index="11">
+              <span class="avatar narrator" data-fallback="旁" aria-label="Narrator 头像"></span>
+              <div class="bubble-wrap">
+                <div class="message-meta"><span>23:40</span><strong>Narrator</strong><span class="chip teal">done</span></div>
+                <div class="bubble">雾气贴着地面翻涌，钟楼二层透出一线琥珀色灯光。守夜人停下擦拭灯罩的动作，像是已经等你很久。</div>
+                <div class="message-actions">
+                  <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
+                  <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
+                  <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
+                  <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
+                  <div class="more-menu">
+                    <button type="button" data-action="delete"><span>⌫</span>删除</button>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="message user" data-turn-index="12" data-last-turn="true">
+              <div class="bubble-wrap">
+                <div class="message-meta"><span>23:41</span><strong>林晚（IC）</strong></div>
+                <div class="bubble">我压低声音问他：今晚是谁敲响了第十三下钟？</div>
+                <div class="message-actions">
+                  <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
+                  <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
+                  <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
+                  <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
+                  <div class="more-menu">
+                    <button type="button" data-action="delete"><span>⌫</span>删除</button>
+                  </div>
+                </div>
+              </div>
+              <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
+            </article>
+
+            <article class="message" data-turn-index="12" data-last-turn="true">
+              <span class="avatar ivan" data-fallback="伊" aria-label="守夜人伊凡头像"></span>
+              <div class="bubble-wrap">
+                <div class="message-meta"><span>23:41</span><strong>守夜人伊凡</strong><span class="chip violet">assistant</span></div>
+                <div class="bubble">守夜人没有立刻回答。他从怀里取出一枚沾着盐霜的铜钥匙，轻轻推到你面前：“先确认你还记得门后的名字。”</div>
+                <div class="message-actions">
+                  <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
+                  <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
+                  <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
+                  <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
+                  <div class="more-menu">
+                    <button type="button" data-action="delete"><span>⌫</span>删除</button>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="message turn-dependent" data-turn-index="12">
+              <span class="tool-avatar">⚒</span>
+              <div class="bubble-wrap">
+                <div class="message-meta"><span>23:41</span><strong>工具结果</strong><span class="chip sky">roll</span></div>
+                <div class="tool-card">线索检定（观察守夜人动作）→ 成功。难度 12，结果 14；铜钥匙边缘刻有“North Gate”。</div>
+              </div>
+            </article>
+
+            <section class="suggestions turn-dependent" data-turn-index="12" aria-label="快捷行动">
+              <h3>快捷行动</h3>
+              <div class="suggestion-grid">
+                <button class="suggestion" type="button" data-insert="我仔细观察铜钥匙上的刻痕。">我仔细观察铜钥匙上的刻痕。</button>
+                <button class="suggestion" type="button" data-insert="我询问守夜人“North Gate”指向哪里。">我询问守夜人“North Gate”指向哪里。</button>
+                <button class="suggestion" type="button" data-insert="我请伊凡带我去钟楼二层，追踪旧门后的名字。">我请伊凡带我去钟楼二层，追踪旧门后的名字。</button>
+                <button class="suggestion" type="button" data-insert="我低头确认铜钥匙、旧地图和银币是否还在身上。">我低头确认铜钥匙、旧地图和银币是否还在身上。</button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="composer">
+        <div class="composer-shell">
+          <div class="composer-top">
+            <div class="segmented" role="tablist" aria-label="输入模式">
+              <button class="segment active" type="button" data-mode="IC">IC</button>
+              <button class="segment" type="button" data-mode="OOC">OOC</button>
+              <button class="segment" type="button" data-mode="GM">GM</button>
+            </div>
+            <button class="mini-button" type="button" id="openCommand">⌘ 命令面板</button>
+          </div>
+          <div class="composer-main">
+            <textarea id="composerText" placeholder="输入你的行动、台词或 GM 指令..."></textarea>
+            <button class="send-button" id="sendButton" type="button">✈ 发送</button>
+          </div>
+          <div class="composer-bottom">
+            <div class="style-radio" role="radiogroup" aria-label="叙事风格">
+              <span class="style-label">叙事风格</span>
+              <label class="radio-pill">
+                <input type="radio" name="narrativeStyle" value="默认" data-style-prompt="" checked>
+                默认
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="narrativeStyle" value="细腻描写" data-style-prompt="请用细腻描写推进这一幕。">
+                细腻描写
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="narrativeStyle" value="快速推进" data-style-prompt="请快速推进到下一个关键选择。">
+                快速推进
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="narrativeStyle" value="多给选项" data-style-prompt="请在回应结尾给出三个可选行动。">
+                多给选项
+              </label>
+            </div>
+            <span class="hint">Enter 发送 / Shift+Enter 换行</span>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <button class="resize-handle" type="button" data-resize="right" aria-label="调整右侧栏宽度"><span></span></button>
+
+    <aside class="side right-rail" id="rightRail">
+      <div class="side-inner">
+        <header class="rail-header">
+          <span class="rail-title-text hide-on-collapse">
+            <strong>状态表</strong>
+            <span>session document truth</span>
+          </span>
+          <button class="icon-button" type="button" data-toggle-side="right" aria-label="收起右侧栏" title="收起右侧栏">▶</button>
+        </header>
+
+        <div class="rail-scroll">
+          <section class="tab-panel">
+            <div class="status-table">
+              <h3>当前场景</h3>
+              <dl class="status-list">
+                <div class="status-row"><dt>地点</dt><dd>雾港钟楼码头</dd></div>
+                <div class="status-row"><dt>时间</dt><dd>雨夜 23:40</dd></div>
+                <div class="status-row"><dt>天气</dt><dd>海雾</dd></div>
+                <div class="status-row"><dt>氛围</dt><dd>潮湿、压抑</dd></div>
+              </dl>
+            </div>
+            <div class="status-table">
+              <h3>线索</h3>
+              <dl class="status-list">
+                <div class="status-row"><dt>铜钥匙</dt><dd>已获得；刻有 North Gate</dd></div>
+                <div class="status-row"><dt>第十三下钟</dt><dd>待确认</dd></div>
+                <div class="status-row"><dt>门后名字</dt><dd>未知</dd></div>
+              </dl>
+            </div>
+            <div class="status-table">
+              <h3>随身物品</h3>
+              <dl class="status-list">
+                <div class="status-row"><dt>铜钥匙</dt><dd>1</dd></div>
+                <div class="status-row"><dt>旧地图</dt><dd>残页</dd></div>
+                <div class="status-row"><dt>银币</dt><dd>12</dd></div>
+              </dl>
+            </div>
+          </section>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div class="modal-backdrop" id="commandModal">
+    <section class="modal" role="dialog" aria-modal="true" aria-label="命令面板">
+      <header class="modal-head">
+        <div>
+          <h2>命令面板</h2>
+          <div class="session-meta"><span>session <code>s_academy01</code></span><span>命令选择</span></div>
+        </div>
+        <button class="icon-button" type="button" id="closeCommand" aria-label="关闭命令面板">×</button>
+      </header>
+      <div class="command-search">
+        <span>⌘</span>
+        <input id="commandSearch" value="/sc" aria-label="搜索命令">
+        <span class="hint">Esc 关闭</span>
+      </div>
+      <div class="command-body">
+        <section class="command-group">
+          <h3>场景相关</h3>
+          <button class="command-item active" type="button" data-command="/scene 雾港钟楼二层 追踪旧门后的名字">
+            <span><span class="command-name">/scene</span><strong>[名称] [描述]</strong><p>切换或创建当前场景，设置场景描述与氛围。</p></span>
+            <span class="shortcut">Enter</span>
+          </button>
+        </section>
+        <section class="command-group">
+          <h3>角色与互动</h3>
+          <button class="command-item" type="button" data-command="/npc 伊凡 追问 North Gate">
+            <span><span class="command-name">/npc</span><strong>[名称] [操作]</strong><p>与 NPC 互动、查询或管理 NPC 信息。</p></span>
+            <span class="shortcut">Ctrl+2</span>
+          </button>
+        </section>
+        <section class="command-group">
+          <h3>状态与信息</h3>
+          <button class="command-item" type="button" data-command="/status">
+            <span><span class="command-name">/status</span><p>查看角色状态、属性、装备与资源。</p></span>
+            <span class="shortcut">Ctrl+3</span>
+          </button>
+        </section>
+        <section class="command-group">
+          <h3>检定与骰子</h3>
+          <button class="command-item" type="button" data-command="/roll 1d20+2 观察铜钥匙">
+            <span><span class="command-name">/roll 1d20</span><strong>[修正值] [标签]</strong><p>进行骰子检定，支持任意骰子表达式。</p></span>
+            <span class="shortcut">Ctrl+R</span>
+          </button>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" id="confirmModal">
+    <section class="modal confirm" role="dialog" aria-modal="true" aria-label="确认操作">
+      <header class="modal-head">
+        <h2 id="confirmTitle">确认操作</h2>
+        <button class="icon-button" type="button" id="closeConfirm" aria-label="关闭确认弹窗">×</button>
+      </header>
+      <div class="confirm-body">
+        <p id="confirmMessage">该操作需要二次确认。</p>
+      </div>
+      <footer class="confirm-actions">
+        <button type="button" id="cancelConfirm">取消</button>
+        <button type="button" class="danger" id="confirmActionButton">确认</button>
+      </footer>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const room = document.getElementById('sessionRoom')
+    const leftRail = document.getElementById('leftRail')
+    const rightRail = document.getElementById('rightRail')
+    const settingsButton = document.getElementById('settingsButton')
+    const settingsMenu = document.getElementById('settingsMenu')
+    const toast = document.getElementById('toast')
+    const composerText = document.getElementById('composerText')
+    const sendButton = document.getElementById('sendButton')
+    const messageStack = document.getElementById('messageStack')
+    const commandModal = document.getElementById('commandModal')
+    const openCommand = document.getElementById('openCommand')
+    const closeCommand = document.getElementById('closeCommand')
+    const commandSearch = document.getElementById('commandSearch')
+    const confirmModal = document.getElementById('confirmModal')
+    const confirmTitle = document.getElementById('confirmTitle')
+    const confirmMessage = document.getElementById('confirmMessage')
+    const closeConfirm = document.getElementById('closeConfirm')
+    const cancelConfirm = document.getElementById('cancelConfirm')
+    const confirmActionButton = document.getElementById('confirmActionButton')
+
+    let toastTimer = null
+    let isSending = false
+    let dragState = null
+    let pendingConfirmAction = null
+
+    function showToast(message) {
+      toast.textContent = message
+      toast.classList.add('show')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200)
+    }
+
+    function closeSettings() {
+      settingsMenu.classList.remove('open')
+      settingsButton.setAttribute('aria-expanded', 'false')
+    }
+
+    function toggleSide(side) {
+      const isLeft = side === 'left'
+      const className = isLeft ? 'left-collapsed' : 'right-collapsed'
+      const rail = isLeft ? leftRail : rightRail
+      room.classList.toggle(className)
+      rail.classList.toggle('rail-collapsed')
+      const collapsed = room.classList.contains(className)
+      document.querySelectorAll(`[data-switch="${side}"]`).forEach((item) => item.classList.toggle('on', !collapsed))
+    }
+
+    function insertText(text) {
+      const prefix = composerText.value.trim() ? '\n' : ''
+      composerText.value += prefix + text
+      composerText.focus()
+    }
+
+    function getNarrativeStyle() {
+      const selected = document.querySelector('input[name="narrativeStyle"]:checked')
+      return {
+        label: selected ? selected.value : '默认',
+        prompt: selected ? selected.dataset.stylePrompt : '',
+      }
+    }
+
+    function messageActions() {
+      return `
+        <div class="message-actions">
+          <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
+          <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
+          <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
+          <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
+          <div class="more-menu">
+            <button type="button" data-action="delete"><span>⌫</span>删除</button>
+          </div>
+        </div>
+      `
+    }
+
+    function getTurnIndex(element) {
+      const value = Number(element?.dataset.turnIndex)
+      return Number.isFinite(value) ? value : 0
+    }
+
+    function getLastTurnIndex() {
+      return Math.max(
+        0,
+        ...[...document.querySelectorAll('.message[data-turn-index]')].map(getTurnIndex),
+      )
+    }
+
+    function closeAllMoreMenus(except) {
+      document.querySelectorAll('.more-menu.open').forEach((menu) => {
+        if (menu !== except) menu.classList.remove('open')
+      })
+    }
+
+    function closeConfirmModal() {
+      confirmModal.classList.remove('open')
+      pendingConfirmAction = null
+    }
+
+    function openConfirmModal({ title, message, actionLabel, onConfirm }) {
+      confirmTitle.textContent = title
+      confirmMessage.textContent = message
+      confirmActionButton.textContent = actionLabel
+      pendingConfirmAction = onConfirm
+      confirmModal.classList.add('open')
+    }
+
+    function deleteTurnsFrom(turnIndex) {
+      document.querySelectorAll('[data-turn-index]').forEach((item) => {
+        if (getTurnIndex(item) >= turnIndex) item.remove()
+      })
+    }
+
+    function retryTurn(turnIndex) {
+      deleteTurnsFrom(turnIndex)
+      showToast(`已删除 turn #${turnIndex} 及之后内容，并触发重试`)
+      setTimeout(() => appendAssistantPreview(turnIndex), 650)
+    }
+
+    function sendEditedTurn(message, text) {
+      const turnIndex = getTurnIndex(message)
+      deleteTurnsFrom(turnIndex)
+      showToast(`已发送编辑后的 turn #${turnIndex}，并重新生成后续内容`)
+      const article = document.createElement('article')
+      article.className = 'message user'
+      article.dataset.turnIndex = String(turnIndex)
+      article.dataset.lastTurn = 'true'
+      article.innerHTML = `
+        <div class="bubble-wrap">
+          <div class="message-meta"><span>刚刚</span><strong>林晚（IC）</strong></div>
+          <div class="bubble"></div>
+          ${messageActions()}
+        </div>
+        <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
+      `
+      article.querySelector('.bubble').textContent = text
+      messageStack.appendChild(article)
+      setTimeout(() => appendAssistantPreview(turnIndex), 650)
+    }
+
+    function requestRetryTurn(message) {
+      const turnIndex = getTurnIndex(message)
+      if (turnIndex >= getLastTurnIndex()) {
+        retryTurn(turnIndex)
+        return
+      }
+      openConfirmModal({
+        title: '确认重试',
+        message: `重试 turn #${turnIndex} 会删除该 turn 以及之后更新的所有 turn。`,
+        actionLabel: '确认重试',
+        onConfirm: () => retryTurn(turnIndex),
+      })
+    }
+
+    function confirmDeleteMessage(message) {
+      const turnIndex = getTurnIndex(message)
+      openConfirmModal({
+        title: '确认删除',
+        message: `删除当前消息会从时间线移除该内容。`,
+        actionLabel: '确认删除',
+        onConfirm: () => {
+          message.remove()
+          closeAllMoreMenus()
+          showToast(`已删除 turn #${turnIndex} 中的当前消息`)
+        },
+      })
+    }
+
+    function startInlineEdit(message) {
+      const bubble = message.querySelector('.bubble')
+      if (!bubble || bubble.classList.contains('editing')) return
+      const original = bubble.textContent.trim()
+      bubble.dataset.originalText = original
+      bubble.classList.add('editing')
+      bubble.innerHTML = `
+        <textarea class="bubble-editor">${original}</textarea>
+        <div class="edit-actions">
+          <button type="button" data-edit-cancel>取消</button>
+          <button type="button" data-edit-send>发送</button>
+        </div>
+      `
+      bubble.querySelector('.bubble-editor').focus()
+    }
+
+    function finishInlineEdit(button, save) {
+      const bubble = button.closest('.bubble')
+      const message = button.closest('.message')
+      const editor = bubble.querySelector('.bubble-editor')
+      const nextText = save ? editor.value.trim() : bubble.dataset.originalText
+      if (!save) {
+        bubble.classList.remove('editing')
+        bubble.textContent = nextText || ''
+        showToast('已取消编辑')
+        return
+      }
+      const turnIndex = getTurnIndex(message)
+      const sendEdit = () => sendEditedTurn(message, nextText || bubble.dataset.originalText || '')
+      if (turnIndex < getLastTurnIndex()) {
+        openConfirmModal({
+          title: '确认发送编辑',
+          message: `发送编辑后的 turn #${turnIndex} 会删除该 turn 以及之后更新的所有 turn，并使用新的内容重新生成。`,
+          actionLabel: '确认发送',
+          onConfirm: sendEdit,
+        })
+        return
+      }
+      sendEdit()
+    }
+
+    function appendUserMessage(text) {
+      const style = getNarrativeStyle()
+      const article = document.createElement('article')
+      article.className = 'message user'
+      article.dataset.narrativeStyle = style.label
+      article.dataset.hiddenPrompt = style.prompt
+      article.dataset.turnIndex = String(getLastTurnIndex() + 1)
+      article.dataset.lastTurn = 'true'
+      article.innerHTML = `
+        <div class="bubble-wrap">
+          <div class="message-meta"><span>刚刚</span><strong>林晚（IC）</strong></div>
+          <div class="bubble"></div>
+          ${messageActions()}
+        </div>
+        <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
+      `
+      article.querySelector('.bubble').textContent = text
+      messageStack.appendChild(article)
+      article.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+
+    function appendAssistantPreview(turnIndex = getLastTurnIndex()) {
+      const article = document.createElement('article')
+      article.className = 'message'
+      article.dataset.turnIndex = String(turnIndex)
+      article.dataset.lastTurn = 'true'
+      article.innerHTML = `
+        <span class="avatar narrator" data-fallback="旁" aria-label="Narrator 头像"></span>
+        <div class="bubble-wrap">
+          <div class="message-meta"><span>刚刚</span><strong>Narrator</strong><span class="chip amber">streaming</span></div>
+          <div class="bubble">雾气在钟楼二层的窗缝里凝成水珠。伊凡的目光掠过钥匙边缘：“North Gate 不是城门，是旧账本上的一个名字。”</div>
+          ${messageActions()}
+        </div>
+      `
+      messageStack.appendChild(article)
+      article.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+
+    settingsButton.addEventListener('click', (event) => {
+      event.stopPropagation()
+      const open = !settingsMenu.classList.contains('open')
+      settingsMenu.classList.toggle('open', open)
+      settingsButton.setAttribute('aria-expanded', String(open))
+    })
+
+    document.addEventListener('click', (event) => {
+      if (!settingsMenu.contains(event.target) && event.target !== settingsButton) {
+        closeSettings()
+      }
+      if (!event.target.closest('.message-actions')) {
+        closeAllMoreMenus()
+      }
+    })
+
+    document.querySelectorAll('[data-toggle-side]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation()
+        toggleSide(button.dataset.toggleSide)
+      })
+    })
+
+    document.querySelectorAll('[data-mobile-panel]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const rail = button.dataset.mobilePanel === 'left' ? leftRail : rightRail
+        rail.classList.toggle('open-mobile')
+      })
+    })
+
+    document.querySelectorAll('[data-toast]').forEach((button) => {
+      button.addEventListener('click', () => showToast(button.dataset.toast))
+    })
+
+    document.querySelectorAll('[data-insert]').forEach((button) => {
+      button.addEventListener('click', () => insertText(button.dataset.insert))
+    })
+
+    messageStack.addEventListener('click', (event) => {
+      const editButton = event.target.closest('[data-edit-cancel], [data-edit-send]')
+      if (editButton) {
+        finishInlineEdit(editButton, Boolean(editButton.dataset.editSend !== undefined))
+        return
+      }
+
+      const actionButton = event.target.closest('[data-action]')
+      if (!actionButton) return
+      const message = actionButton.closest('.message')
+      if (!message) return
+      const action = actionButton.dataset.action
+
+      if (action === 'more') {
+        const menu = actionButton.parentElement.querySelector('.more-menu')
+        const shouldOpen = !menu.classList.contains('open')
+        closeAllMoreMenus(menu)
+        menu.classList.toggle('open', shouldOpen)
+        return
+      }
+
+      if (action === 'delete') {
+        confirmDeleteMessage(message)
+        return
+      }
+
+      if (action === 'copy') {
+        showToast('已复制当前消息')
+        return
+      }
+
+      if (action === 'edit') {
+        startInlineEdit(message)
+        return
+      }
+
+      if (action === 'retry') {
+        requestRetryTurn(message)
+      }
+    })
+
+    document.querySelectorAll('.segment').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.segment').forEach((item) => item.classList.remove('active'))
+        button.classList.add('active')
+      })
+    })
+
+    sendButton.addEventListener('click', () => {
+      if (isSending) {
+        isSending = false
+        sendButton.classList.remove('stopping')
+        sendButton.textContent = '✈ 发送'
+        showToast('已停止当前流式响应')
+        return
+      }
+      const text = composerText.value.trim()
+      if (!text) {
+        showToast('请输入内容后再发送')
+        composerText.focus()
+        return
+      }
+      appendUserMessage(text)
+      composerText.value = ''
+      isSending = true
+      sendButton.classList.add('stopping')
+      sendButton.textContent = '■ 停止'
+      setTimeout(() => {
+        appendAssistantPreview()
+        isSending = false
+        sendButton.classList.remove('stopping')
+        sendButton.textContent = '✈ 发送'
+      }, 900)
+    })
+
+    composerText.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault()
+        sendButton.click()
+      }
+    })
+
+    function openCommandModal() {
+      commandModal.classList.add('open')
+      setTimeout(() => commandSearch.focus(), 0)
+    }
+
+    function closeCommandModal() {
+      commandModal.classList.remove('open')
+    }
+
+    openCommand.addEventListener('click', openCommandModal)
+    closeCommand.addEventListener('click', closeCommandModal)
+    closeConfirm.addEventListener('click', closeConfirmModal)
+    cancelConfirm.addEventListener('click', closeConfirmModal)
+    confirmActionButton.addEventListener('click', () => {
+      pendingConfirmAction?.()
+      closeConfirmModal()
+    })
+    commandModal.addEventListener('click', (event) => {
+      if (event.target === commandModal) closeCommandModal()
+    })
+    confirmModal.addEventListener('click', (event) => {
+      if (event.target === confirmModal) closeConfirmModal()
+    })
+
+    document.querySelectorAll('[data-command]').forEach((button) => {
+      button.addEventListener('click', () => {
+        composerText.value = button.dataset.command
+        closeCommandModal()
+        composerText.focus()
+      })
+    })
+
+    document.addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        openCommandModal()
+      }
+      if (event.key === 'Escape') {
+        closeCommandModal()
+        closeConfirmModal()
+        closeSettings()
+        closeAllMoreMenus()
+      }
+    })
+
+    document.querySelectorAll('[data-resize]').forEach((handle) => {
+      handle.addEventListener('pointerdown', (event) => {
+        handle.setPointerCapture(event.pointerId)
+        handle.classList.add('dragging')
+        dragState = {
+          side: handle.dataset.resize,
+          startX: event.clientX,
+          left: parseInt(getComputedStyle(room).getPropertyValue('--left'), 10),
+          right: parseInt(getComputedStyle(room).getPropertyValue('--right'), 10),
+          handle,
+        }
+      })
+      handle.addEventListener('pointermove', (event) => {
+        if (!dragState || dragState.handle !== handle) return
+        const delta = event.clientX - dragState.startX
+        if (dragState.side === 'left') {
+          const next = Math.min(420, Math.max(240, dragState.left + delta))
+          room.style.setProperty('--left', `${next}px`)
+          room.classList.remove('left-collapsed')
+          leftRail.classList.remove('rail-collapsed')
+        } else {
+          const next = Math.min(480, Math.max(280, dragState.right - delta))
+          room.style.setProperty('--right', `${next}px`)
+          room.classList.remove('right-collapsed')
+          rightRail.classList.remove('rail-collapsed')
+        }
+      })
+      handle.addEventListener('pointerup', () => {
+        handle.classList.remove('dragging')
+        dragState = null
+      })
+      handle.addEventListener('pointercancel', () => {
+        handle.classList.remove('dragging')
+        dragState = null
+      })
+    })
+  </script>
+</body>
+</html>

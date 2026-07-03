@@ -1,9 +1,11 @@
-export type InputMode = 'ic' | 'ooc' | 'gm' | 'slash'
+export type InputMode = 'ic' | 'ooc' | 'gm'
+
+export type CommandMode = InputMode | 'slash'
 
 export type PlayCommand = {
   name: string
   description: string
-  mode: InputMode | 'slash'
+  mode: CommandMode
 }
 
 export type SendMessagePayload = {
