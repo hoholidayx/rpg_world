@@ -2,11 +2,22 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Settings, Sparkles } from 'lucide-react'
+import { Eye, Sparkles, Trash2, type LucideIcon } from 'lucide-react'
 import { listWorkspaces } from '@/lib/api/sessions'
+import { ContextPreviewSettingsContainer } from './context-preview/ContextPreviewSettingsContainer'
 import { DataCleanupSettingsContainer } from './cleanup/DataCleanupSettingsContainer'
-import { SettingsHero } from './SettingsHero'
 import { SettingsWorkspaceSwitcher } from './SettingsWorkspaceSwitcher'
+
+type SettingsSection = 'context-preview' | 'data-cleanup'
+
+const settingsSections: Array<{
+  id: SettingsSection
+  label: string
+  icon: LucideIcon
+}> = [
+  { id: 'context-preview', label: '上下文预览', icon: Eye },
+  { id: 'data-cleanup', label: '数据清理', icon: Trash2 },
+]
 
 function Logo() {
   return (
@@ -21,6 +32,7 @@ function Logo() {
 
 export function SettingsPage() {
   const [currentWorkspace, setCurrentWorkspace] = useState<string | null>(null)
+  const [activeSection, setActiveSection] = useState<SettingsSection>('context-preview')
   const workspacesQuery = useQuery({
     queryKey: ['play-workspaces'],
     queryFn: listWorkspaces,
@@ -69,10 +81,25 @@ export function SettingsPage() {
       <div className="grid min-h-[calc(100vh-72px)] lg:grid-cols-[296px_minmax(0,1fr)]">
         <aside className="hidden border-r border-slate-200 bg-white/70 px-6 py-9 lg:flex lg:flex-col lg:justify-between">
           <nav className="space-y-3">
-            <div className="flex items-center gap-4 rounded-xl bg-violet-50 px-5 py-4 text-base font-medium text-violet-700 shadow-sm">
-              <Settings size={22} />
-              数据清理
-            </div>
+            {settingsSections.map((section) => {
+              const Icon = section.icon
+              const selected = section.id === activeSection
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => setActiveSection(section.id)}
+                  className={`flex w-full items-center gap-4 rounded-xl px-5 py-4 text-left text-base font-medium transition ${
+                    selected
+                      ? 'bg-violet-50 text-violet-700 shadow-sm'
+                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  <Icon size={22} />
+                  {section.label}
+                </button>
+              )
+            })}
           </nav>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -92,8 +119,30 @@ export function SettingsPage() {
 
         <div className="min-w-0 px-5 py-8 xl:px-7">
           <div className="mx-auto max-w-[1500px] space-y-6">
-            <SettingsHero />
-            <DataCleanupSettingsContainer workspaceId={currentWorkspace} />
+            <nav className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-2 lg:hidden" aria-label="设置分区">
+              {settingsSections.map((section) => {
+                const Icon = section.icon
+                const selected = section.id === activeSection
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => setActiveSection(section.id)}
+                    className={`flex h-11 items-center justify-center gap-2 rounded-md text-sm font-bold transition ${
+                      selected ? 'bg-slate-950 text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <Icon size={16} />
+                    {section.label}
+                  </button>
+                )
+              })}
+            </nav>
+            {activeSection === 'context-preview' ? (
+              <ContextPreviewSettingsContainer workspaceId={currentWorkspace} />
+            ) : (
+              <DataCleanupSettingsContainer workspaceId={currentWorkspace} />
+            )}
           </div>
         </div>
       </div>
