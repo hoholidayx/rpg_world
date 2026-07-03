@@ -65,6 +65,15 @@ function splitTableRow(row: string) {
   return row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
 }
 
+function bracketTagName(line: string) {
+  const match = line.trim().match(/^\[([A-Za-z][A-Za-z0-9_-]*)\]$/)
+  return match?.[1] ?? null
+}
+
+function isBracketClose(line: string, tagName: string) {
+  return line.trim() === `[/${tagName}]`
+}
+
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g).filter(Boolean)
   return parts.map((part, index) => {
@@ -149,7 +158,37 @@ function collectTableRows(lines: string[], startIndex: number) {
   return { rows, nextIndex: index }
 }
 
-function renderMarkdownBlocks(content: string) {
+function collectBracketBlock(lines: string[], startIndex: number, tagName: string) {
+  const innerLines: string[] = []
+  let index = startIndex + 1
+
+  while (index < lines.length) {
+    if (isBracketClose(lines[index], tagName)) {
+      return { innerLines, nextIndex: index + 1 }
+    }
+    innerLines.push(lines[index])
+    index += 1
+  }
+
+  return null
+}
+
+function renderBracketBlock(tagName: string, innerLines: string[], key: string) {
+  return (
+    <section key={key} className="mb-3 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+      <div className="border-b border-slate-200 bg-white px-3 py-2">
+        <span className="inline-flex h-6 items-center rounded-full border border-indigo-100 bg-indigo-50 px-2.5 font-mono text-[11px] font-bold text-indigo-700">
+          {tagName}
+        </span>
+      </div>
+      <div className="px-3 py-3">
+        {renderMarkdownBlocks(innerLines.join('\n'))}
+      </div>
+    </section>
+  )
+}
+
+function renderMarkdownBlocks(content: string): ReactNode {
   const lines = normalizeMessageMarkdown(content).split('\n')
   const blocks: ReactNode[] = []
   let paragraph: string[] = []
@@ -174,6 +213,19 @@ function renderMarkdownBlocks(content: string) {
     if (!trimmed) {
       flushParagraph()
       continue
+    }
+
+    const tagName = bracketTagName(trimmed)
+    if (tagName) {
+      const block = collectBracketBlock(lines, index, tagName)
+      if (block) {
+        flushParagraph()
+        const key = `bracket-${blockIndex}`
+        blocks.push(renderBracketBlock(tagName, block.innerLines, key))
+        blockIndex += 1
+        index = block.nextIndex - 1
+        continue
+      }
     }
 
     if (trimmed.startsWith('```')) {
