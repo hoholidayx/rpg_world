@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["play-characters"])
@@ -18,7 +17,7 @@ class PlayCharacterPayload(BaseModel):
     name: str
     personality: str = ""
     content: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
     @field_validator("name")
     @classmethod
@@ -35,7 +34,7 @@ class PlayCharacterPatch(BaseModel):
     name: str | None = None
     personality: str | None = None
     content: str | None = None
-    metadata: dict[str, Any] | None = None
+    metadata: JsonObject | None = None
 
     @field_validator("name")
     @classmethod
@@ -106,7 +105,7 @@ class PlayCharacter(BaseModel):
     name: str
     personality: str
     content: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
     details: list[PlayCharacterDetail] = Field(default_factory=list)
     version: int
     created_at: str | None = Field(default=None, alias="createdAt")

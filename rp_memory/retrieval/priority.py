@@ -7,7 +7,7 @@ retrieval orchestration code.
 
 from __future__ import annotations
 
-from rpg_core.common_types import JsonValue, Metadata
+from commons.types import JsonValue, Metadata
 
 DEFAULT_GRANULARITY_SCORES: dict[str, float] = {
     "batch": 1.00,

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
 from rpg_data import models
 
@@ -19,7 +18,7 @@ class StatusRowPayload(BaseModel):
     key: str
     value: str = ""
     runtime_key_locked: bool = Field(default=False, alias="runtimeKeyLocked")
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
     @field_validator("key")
     @classmethod
@@ -36,7 +35,7 @@ class StatusDocumentPayload(BaseModel):
     key_column: str = Field(default=models.STATUS_KEY_COLUMN, alias="keyColumn")
     value_column: str = Field(default=models.STATUS_VALUE_COLUMN, alias="valueColumn")
     rows: list[StatusRowPayload] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
     def to_document(self) -> models.StatusTableDocument:
         return models.StatusTableDocument.from_rows(
@@ -60,7 +59,7 @@ class StatusTemplatePayload(StatusDocumentPayload):
     status_kind: str = Field(default=models.STATUS_KIND_NORMAL, alias="statusKind")
     description: str = ""
     sort_order: int = Field(default=0, alias="sortOrder")
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
     @field_validator("name")
     @classmethod
@@ -80,7 +79,7 @@ class StatusTemplatePatch(BaseModel):
     key_column: str | None = Field(default=None, alias="keyColumn")
     value_column: str | None = Field(default=None, alias="valueColumn")
     rows: list[StatusRowPayload] | None = None
-    metadata: dict[str, Any] | None = None
+    metadata: JsonObject | None = None
 
     def to_document(self, fallback: dict[str, object]) -> models.StatusTableDocument | None:
         if self.key_column is None and self.value_column is None and self.rows is None and self.metadata is None:
@@ -100,7 +99,7 @@ class SessionStatusTablePayload(StatusDocumentPayload):
     status_kind: str = Field(default=models.STATUS_KIND_NORMAL, alias="statusKind")
     description: str = ""
     sort_order: int = Field(default=0, alias="sortOrder")
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
 class SessionStatusTablePatch(BaseModel):
@@ -112,7 +111,7 @@ class SessionStatusTablePatch(BaseModel):
     key_column: str | None = Field(default=None, alias="keyColumn")
     value_column: str | None = Field(default=None, alias="valueColumn")
     rows: list[StatusRowPayload] | None = None
-    metadata: dict[str, Any] | None = None
+    metadata: JsonObject | None = None
 
     def to_document(self, fallback: dict[str, object]) -> models.StatusTableDocument | None:
         if self.key_column is None and self.value_column is None and self.rows is None and self.metadata is None:
@@ -130,7 +129,7 @@ class StatusTableResponse(BaseModel):
     key_column: str = Field(alias="keyColumn")
     value_column: str = Field(alias="valueColumn")
     rows: list[StatusRowPayload]
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
     sort_order: int = Field(alias="sortOrder")
     version: int
     created_at: str = Field(alias="createdAt")
@@ -153,7 +152,7 @@ class StoryStatusMountResponse(BaseModel):
     status_kind: str = Field(alias="statusKind")
     description: str
     sort_order: int = Field(alias="sortOrder")
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
     version: int
     created_at: str = Field(alias="createdAt")
     updated_at: str = Field(alias="updatedAt")

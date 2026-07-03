@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import cast
 
+from commons.types import JsonObject
 from rpg_core.context.config import ExtensionModuleDef
 from rpg_core.context.fixed_layer import FixedLayerSection
 
@@ -60,7 +61,7 @@ class Message:
         turn_id: int = 0,
         seq_in_turn: int = 0,
         tool_call_id: str = "",
-        tool_calls: list[dict] | None = None,
+        tool_calls: list[JsonObject] | None = None,
     ) -> None:
         self._role = Role(role) if isinstance(role, str) else role
         self._content = content
@@ -99,11 +100,11 @@ class Message:
         self._tool_call_id = value
 
     @property
-    def tool_calls(self) -> list[dict] | None:
+    def tool_calls(self) -> list[JsonObject] | None:
         return self._tool_calls
 
     @tool_calls.setter
-    def tool_calls(self, value: list[dict] | None) -> None:
+    def tool_calls(self, value: list[JsonObject] | None) -> None:
         self._tool_calls = value
 
     def is_user(self) -> bool:
@@ -134,14 +135,15 @@ class Message:
 
     @classmethod
     def from_dict(cls, d: dict[str, object]) -> Message:
+        raw_tool_calls = d.get("tool_calls")
         return cls(
-            role=d[MsgKey.ROLE],
-            content=d.get(MsgKey.CONTENT, ""),
+            role=str(d[MsgKey.ROLE]),
+            content=str(d.get(MsgKey.CONTENT) or ""),
             uid=int(d.get(MsgKey.UID, 0) or 0),
             turn_id=int(d.get(MsgKey.TURN_ID, 0) or 0),
             seq_in_turn=int(d.get(MsgKey.SEQ_IN_TURN, 0) or 0),
-            tool_call_id=d.get("tool_call_id", ""),
-            tool_calls=d.get("tool_calls"),
+            tool_call_id=str(d.get("tool_call_id", "") or ""),
+            tool_calls=cast(list[JsonObject], raw_tool_calls) if isinstance(raw_tool_calls, list) else None,
         )
 
     def __repr__(self) -> str:
@@ -152,8 +154,8 @@ class Message:
 class FixedLayerData:
     world_name: str = ""
     sections: list[FixedLayerSection] = field(default_factory=list)
-    lorebook_entries: list[dict[str, Any]] = field(default_factory=list)
-    characters: list[dict[str, Any]] = field(default_factory=list)
+    lorebook_entries: list[JsonObject] = field(default_factory=list)
+    characters: list[JsonObject] = field(default_factory=list)
 
     @property
     def active(self) -> bool:
@@ -189,7 +191,7 @@ class HotHistoryLayer:
 
 @dataclass(frozen=True)
 class StoryMemoryLayer:
-    details: list[dict[str, Any]] = field(default_factory=list)
+    details: list[JsonObject] = field(default_factory=list)
 
     @property
     def active(self) -> bool:
@@ -207,7 +209,7 @@ class RecalledMemoryLayer:
 
 @dataclass(frozen=True)
 class StatusTablesLayer:
-    tables: list[dict[str, Any]] = field(default_factory=list)
+    tables: list[JsonObject] = field(default_factory=list)
 
     @property
     def active(self) -> bool:

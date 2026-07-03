@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from peewee import SQL, DoesNotExist, Model
 
@@ -12,14 +12,14 @@ from rpg_data.repositories import records
 ModelT = TypeVar("ModelT", bound=Model)
 
 
-def get_or_none(model: type[ModelT], row_id: Any) -> ModelT | None:
+def get_or_none(model: type[ModelT], row_id: object) -> ModelT | None:
     try:
         return model.get_by_id(row_id)
     except DoesNotExist:
         return None
 
 
-def update_timestamp(model: type[ModelT], row_id: Any) -> ModelT | None:
+def update_timestamp(model: type[ModelT], row_id: object) -> ModelT | None:
     updated = (
         model.update(updated_at=SQL("CURRENT_TIMESTAMP"))
         .where(model._meta.primary_key == row_id)

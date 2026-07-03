@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import cast
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,13 +17,27 @@ from fastapi.responses import StreamingResponse
 
 from agent_service.schemas import (
     AgentCommandRequest,
+    AgentCommandResultPayload,
+    AgentCommandsPayload,
+    AgentCommandsResponse,
     AgentContextPreviewResponse,
+    AgentHistoryPayload,
+    AgentHistoryResponse,
     AgentHealthResponse,
     AgentMessageRequest,
+    AgentReplyPayload,
+    AgentSessionCreatePayload,
     AgentSessionCreateRequest,
+    AgentSessionCreateResponse,
     AgentSessionEnsureRequest,
+    AgentSessionPayload,
+    AgentSessionPayloadDict,
+    AgentSessionsPayload,
+    AgentSessionsResponse,
+    AgentStatsPayload,
 )
 from agent_service.settings import settings as process_settings
+from commons.types import JsonObject, JsonValue
 from llm_service.client import configure_llama_client_from_runtime_config
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_core.agent.command import CommandResult
@@ -61,22 +75,22 @@ async def health() -> AgentHealthResponse:
     return AgentHealthResponse()
 
 
-@app.get(f"{_service_prefix()}/chat/history")
+@app.get(f"{_service_prefix()}/chat/history", response_model=AgentHistoryResponse)
 async def get_history(
     session_id: str = Query(...),
-) -> dict[str, Any]:
+) -> AgentHistoryPayload:
     agent = _get_agent(session_id)
     try:
         await agent._ensure_initialized()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Agent initialization failed: {exc}") from exc
-    return {"history": [m.to_dict() for m in agent.history]}
+    return {"history": [cast(JsonObject, m.to_dict()) for m in agent.history]}
 
 
-@app.get(f"{_service_prefix()}/chat/commands")
+@app.get(f"{_service_prefix()}/chat/commands", response_model=AgentCommandsResponse)
 async def list_commands(
     session_id: str = Query(...),
-) -> dict[str, Any]:
+) -> AgentCommandsPayload:
     agent = _get_agent(session_id)
     try:
         await agent._ensure_initialized()
@@ -102,11 +116,11 @@ async def get_context_preview(
     return AgentContextPreviewResponse.model_validate(payload)
 
 
-@app.get(f"{_service_prefix()}/chat/sessions")
+@app.get(f"{_service_prefix()}/chat/sessions", response_model=AgentSessionsResponse)
 async def list_sessions(
     workspace_id: str = Query(...),
     story_id: int = Query(...),
-) -> dict[str, Any]:
+) -> AgentSessionsPayload:
     workspace_id = _require_workspace(workspace_id)
     sessions = get_data_service_gateway().catalog.list_sessions(workspace_id, story_id)
     if sessions is None:
@@ -116,8 +130,8 @@ async def list_sessions(
     }
 
 
-@app.post(f"{_service_prefix()}/chat/sessions")
-async def create_session(body: AgentSessionCreateRequest) -> dict[str, Any]:
+@app.post(f"{_service_prefix()}/chat/sessions", response_model=AgentSessionCreateResponse)
+async def create_session(body: AgentSessionCreateRequest) -> AgentSessionCreatePayload:
     session = _create_catalog_session(
         body.workspace_id,
         int(body.story_id),
@@ -126,8 +140,8 @@ async def create_session(body: AgentSessionCreateRequest) -> dict[str, Any]:
     return {"status": "created", **_session_payload(session)}
 
 
-@app.post(f"{_service_prefix()}/chat/session/ensure")
-async def ensure_session(body: AgentSessionEnsureRequest) -> dict[str, Any]:
+@app.post(f"{_service_prefix()}/chat/session/ensure", response_model=AgentSessionPayload)
+async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayloadDict:
     workspace_id = _require_workspace(body.workspace_id)
     story_id = int(body.story_id)
     gateway = get_data_service_gateway()
@@ -151,7 +165,7 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> dict[str, Any]:
 
 
 @app.post(f"{_service_prefix()}/chat/send")
-async def chat_send(body: AgentMessageRequest) -> dict[str, Any]:
+async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
     agent = _get_agent(body.session_id)
     try:
         reply = await agent.send(body.message)
@@ -161,7 +175,7 @@ async def chat_send(body: AgentMessageRequest) -> dict[str, Any]:
 
 
 @app.post(f"{_service_prefix()}/chat/command")
-async def chat_command(body: AgentCommandRequest) -> dict[str, Any]:
+async def chat_command(body: AgentCommandRequest) -> AgentCommandResultPayload:
     agent = _get_agent(body.session_id)
     command = body.command.strip()
     try:
@@ -216,7 +230,7 @@ def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> 
     return session
 
 
-def _session_payload(session: models.Session) -> dict[str, Any]:
+def _session_payload(session: models.Session) -> AgentSessionPayloadDict:
     return {
         "workspace": str(session.workspace_id),
         "story_id": int(session.story_id),
@@ -242,32 +256,32 @@ def _require_session_id(session_id: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _reply_to_dict(reply: AgentReply) -> dict[str, Any]:
-    result: dict[str, Any] = {"reply": reply.text}
+def _reply_to_dict(reply: AgentReply) -> AgentReplyPayload:
+    result: AgentReplyPayload = {"reply": reply.text}
     if reply.tool_records:
         result["tool_records"] = [
             {
-                "tool_calls": r.assistant_message.get("tool_calls", []),
-                "tool_results": r.tool_results,
+                "tool_calls": _json_value(r.assistant_message.get("tool_calls", [])),
+                "tool_results": cast(list[JsonObject], r.tool_results),
                 "reasoning_content": r.reasoning_content,
             }
             for r in reply.tool_records
         ]
     if reply.status_sub_agent_records:
-        result["status_sub_agent_records"] = reply.status_sub_agent_records
+        result["status_sub_agent_records"] = cast(list[JsonObject], reply.status_sub_agent_records)
     if reply.stats:
         result["stats"] = _stats_to_dict(reply.stats)
     return result
 
 
-def _command_result_to_dict(result: CommandResult) -> dict[str, Any]:
-    payload: dict[str, Any] = {"reply": result.reply, "handled": result.handled}
+def _command_result_to_dict(result: CommandResult) -> AgentCommandResultPayload:
+    payload: AgentCommandResultPayload = {"reply": result.reply, "handled": result.handled}
     if result.stats is not None:
-        payload["stats"] = result.stats
+        payload["stats"] = cast(JsonObject, dict(result.stats))
     return payload
 
 
-def _stats_to_dict(stats: TurnStats) -> dict[str, Any]:
+def _stats_to_dict(stats: TurnStats) -> AgentStatsPayload:
     return {
         "total_duration_ms": stats.total_duration_ms,
         "total_prompt_tokens": stats.total_prompt_tokens,
@@ -276,3 +290,7 @@ def _stats_to_dict(stats: TurnStats) -> dict[str, Any]:
         "total_cached_tokens": stats.total_cached_tokens,
         "call_count": len(stats.calls),
     }
+
+
+def _json_value(value: object) -> JsonValue:
+    return cast(JsonValue, value)

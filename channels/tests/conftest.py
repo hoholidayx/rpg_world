@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
 
 import pytest
 
@@ -143,7 +142,7 @@ class FakeBot:
     edited_messages: list[dict] = field(default_factory=list)
     _message_counter: int = 0
 
-    async def send_message(self, chat_id: int, text: str, **kwargs: Any) -> object:
+    async def send_message(self, chat_id: int, text: str, **kwargs: object) -> object:
         self._message_counter += 1
         msg_id = self._message_counter
         self.sent_messages.append({
@@ -154,7 +153,7 @@ class FakeBot:
         })
         return _FakeMessage(msg_id)
 
-    async def edit_message_text(self, chat_id: int, message_id: int, text: str, **kwargs: Any) -> None:
+    async def edit_message_text(self, chat_id: int, message_id: int, text: str, **kwargs: object) -> None:
         self.edited_messages.append({
             "chat_id": chat_id,
             "message_id": message_id,

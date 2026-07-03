@@ -47,6 +47,7 @@ rpg_world/
 ├── run_play_api.py                # Play API 入口
 ├── run_cli.py                     # CLI 入口（AgentClient）
 ├── run_telegram.py                # Telegram 入口（AgentClient）
+├── commons/                       # 共享配置加载与 JSON/YAML 类型别名
 ├── channels/                     # 多渠道适配器
 │   ├── base.py                   #   ChannelAdapter 抽象基类
 │   ├── config.py                 #   ChannelsSettings 配置加载
@@ -80,7 +81,6 @@ rpg_world/
 │   ├── status/                   # 状态表薄适配（rpg_data SQLite document 真源）
 │   ├── rp_modules/               # RP 玩法模块（dice 等，不是通用 skill）
 │   ├── summary/                  # 对话摘要
-│   ├── common_types.py           # 共享类型别名
 │   ├── settings.py               # Settings 单例
 │   └── utils/
 │       ├── manager_base.py       #   BaseManager（注册 FileWatcher）

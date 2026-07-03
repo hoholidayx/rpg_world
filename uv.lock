@@ -1096,6 +1096,7 @@ dependencies = [
     { name = "rich" },
     { name = "sqlite-vec" },
     { name = "tiktoken" },
+    { name = "typing-extensions" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchdog" },
 ]
@@ -1132,6 +1133,7 @@ requires-dist = [
     { name = "rpg-world", extras = ["llama"], marker = "extra == 'all'" },
     { name = "sqlite-vec", specifier = ">=0.1.6" },
     { name = "tiktoken", specifier = ">=0.7" },
+    { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27" },
     { name = "watchdog", specifier = ">=4.0" },
 ]

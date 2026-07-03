@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Literal, NotRequired, TypedDict
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from commons.types import JsonObject, JsonValue
 from rpg_core.session.manager import DEFAULT_SESSION_ID, SessionManager
 
 
@@ -53,11 +56,32 @@ class AgentHealthResponse(_BaseSchema):
 
 
 class AgentHistoryResponse(_BaseSchema):
-    history: list[dict] = Field(default_factory=list)
+    history: list[JsonObject] = Field(default_factory=list)
+
+
+class AgentCommandInfo(_BaseSchema):
+    command: str
+    description: str
+    detail: str
 
 
 class AgentCommandsResponse(_BaseSchema):
-    commands: list[dict] = Field(default_factory=list)
+    commands: list[AgentCommandInfo] = Field(default_factory=list)
+
+
+class AgentSessionsResponse(_BaseSchema):
+    sessions: list[str] = Field(default_factory=list)
+
+
+class AgentSessionPayload(_BaseSchema):
+    workspace: str
+    story_id: int
+    session_id: str
+    title: str
+
+
+class AgentSessionCreateResponse(AgentSessionPayload):
+    status: Literal["created"] = "created"
 
 
 class AgentContextPreviewTotals(BaseModel):
@@ -90,4 +114,85 @@ class AgentContextPreviewResponse(BaseModel):
     hot_history_rounds: int | None = Field(alias="hotHistoryRounds")
     totals: AgentContextPreviewTotals
     layers: list[AgentContextPreviewLayer] = Field(default_factory=list)
-    messages: list[dict[str, object]] = Field(default_factory=list)
+    messages: list[JsonObject] = Field(default_factory=list)
+
+
+class AgentHealthPayload(TypedDict):
+    status: str
+
+
+class AgentHistoryPayload(TypedDict):
+    history: list[JsonObject]
+
+
+class AgentCommandPayload(TypedDict):
+    command: str
+    description: str
+    detail: str
+
+
+class AgentCommandsPayload(TypedDict):
+    commands: list[AgentCommandPayload]
+
+
+class AgentSessionsPayload(TypedDict):
+    sessions: list[str]
+
+
+class AgentSessionPayloadDict(TypedDict):
+    workspace: str
+    story_id: int
+    session_id: str
+    title: str
+
+
+class AgentSessionCreatePayload(AgentSessionPayloadDict):
+    status: Literal["created"]
+
+
+class AgentStatsPayload(TypedDict):
+    total_duration_ms: float
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    total_tokens: int
+    total_cached_tokens: int
+    call_count: int
+
+
+class AgentToolRecordPayload(TypedDict):
+    tool_calls: JsonValue
+    tool_results: list[JsonObject]
+    reasoning_content: str | None
+
+
+class AgentReplyPayloadBase(TypedDict):
+    reply: str
+
+
+class AgentReplyPayload(AgentReplyPayloadBase, total=False):
+    tool_records: list[AgentToolRecordPayload]
+    status_sub_agent_records: list[JsonObject]
+    stats: AgentStatsPayload
+
+
+class AgentCommandResultPayloadBase(TypedDict):
+    reply: str
+    handled: bool
+
+
+class AgentCommandResultPayload(AgentCommandResultPayloadBase, total=False):
+    stats: JsonObject
+    active_session: str
+
+
+class AgentStreamEventPayload(TypedDict):
+    kind: str
+    content: NotRequired[str]
+    tool_name: NotRequired[str]
+    tool_arguments: NotRequired[str]
+    tool_result_preview: NotRequired[str]
+    round_index: NotRequired[int]
+    usage: NotRequired[JsonObject]
+    duration_ms: NotRequired[float]
+    model: NotRequired[str]
+    finish_reason: NotRequired[str]

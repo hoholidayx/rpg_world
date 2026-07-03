@@ -24,12 +24,6 @@ from enum import Enum, StrEnum
 from llm_service.types import LLMResponse, LLMUsage, ProviderChunk
 
 
-# ── shared JSON type aliases ──────────────────────────────────────────
-
-JsonDict = dict[str, object]
-JsonValue = object
-
-
 # ── 一次 LLM 调用的记录 ──────────────────────────────────────────────
 
 

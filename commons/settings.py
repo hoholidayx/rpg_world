@@ -5,12 +5,14 @@ from __future__ import annotations
 import copy
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable, cast
 
 import yaml
 
-ConfigDict = dict[str, Any]
-ConfigValue = Any
+from commons.types import YamlMapping, YamlValue
+
+ConfigDict = YamlMapping
+ConfigValue = YamlValue
 YamlMergeFn = Callable[[ConfigDict, ConfigDict], ConfigDict]
 
 PROFILE_ENV = "RPG_WORLD_PROFILE"
@@ -22,7 +24,7 @@ def load_yaml_mapping(path: Path, label: str) -> ConfigDict:
         loaded = yaml.safe_load(f) or {}
     if not isinstance(loaded, dict):
         raise ValueError(f"{label} must be a mapping")
-    return loaded
+    return cast(ConfigDict, loaded)
 
 
 def deep_merge_dicts(base: ConfigDict, override: ConfigDict) -> ConfigDict:
@@ -126,7 +128,7 @@ def _inline_profile_override(
             f"{label} profile must not declare file/required: {profile_name}; "
             "use the sibling profile YAML file instead"
         )
-    return dict(profile)
+    return cast(ConfigDict, dict(profile))
 
 
 def load_profiled_yaml(

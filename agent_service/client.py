@@ -5,13 +5,24 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
 
 import httpx
 
-from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
-from llm_service.types import LLMUsage
+from agent_service.schemas import (
+    AgentCommandResultPayload,
+    AgentCommandsPayload,
+    AgentHealthPayload,
+    AgentHistoryPayload,
+    AgentReplyPayload,
+    AgentSessionCreatePayload,
+    AgentSessionPayloadDict,
+    AgentSessionsPayload,
+)
 from agent_service.settings import settings
+from commons.types import JsonObject
+from llm_service.types import LLMUsage
+from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
 
 
 class AgentClientError(RuntimeError):
@@ -46,7 +57,7 @@ class ContextPreviewPayload(TypedDict):
     hotHistoryRounds: int | None
     totals: ContextPreviewTotals
     layers: list[ContextPreviewLayer]
-    messages: list[dict[str, object]]
+    messages: list[JsonObject]
 
 
 @dataclass(frozen=True)
@@ -82,22 +93,22 @@ class AgentClient:
         self._request_client: httpx.AsyncClient | None = None
         self._stream_client: httpx.AsyncClient | None = None
 
-    async def health(self) -> dict[str, Any]:
-        return await self._get("/health")
+    async def health(self) -> AgentHealthPayload:
+        return cast(AgentHealthPayload, await self._get("/health"))
 
     async def get_history(
         self,
         session_id: str,
-    ) -> dict[str, Any]:
+    ) -> AgentHistoryPayload:
         params = {"session_id": session_id}
-        return await self._get("/chat/history", params=params)
+        return cast(AgentHistoryPayload, await self._get("/chat/history", params=params))
 
     async def list_commands(
         self,
         session_id: str,
-    ) -> dict[str, Any]:
+    ) -> AgentCommandsPayload:
         params = {"session_id": session_id}
-        return await self._get("/chat/commands", params=params)
+        return cast(AgentCommandsPayload, await self._get("/chat/commands", params=params))
 
     async def get_context_preview(
         self,
@@ -110,15 +121,16 @@ class AgentClient:
         self,
         workspace_id: str,
         story_id: int,
-    ) -> dict[str, Any]:
+    ) -> AgentSessionsPayload:
         params = {"workspace_id": workspace_id, "story_id": story_id}
-        return await self._get("/chat/sessions", params=params)
+        return cast(AgentSessionsPayload, await self._get("/chat/sessions", params=params))
 
-    async def create_session(self, workspace_id: str, story_id: int, *, title: str = "") -> dict[str, Any]:
-        return await self._post(
+    async def create_session(self, workspace_id: str, story_id: int, *, title: str = "") -> AgentSessionCreatePayload:
+        result = await self._post(
             "/chat/sessions",
             json={"workspace_id": workspace_id, "story_id": story_id, "title": title},
         )
+        return cast(AgentSessionCreatePayload, result)
 
     async def ensure_session(
         self,
@@ -127,8 +139,8 @@ class AgentClient:
         *,
         session_id: str | None = None,
         title: str = "",
-    ) -> dict[str, Any]:
-        return await self._post(
+    ) -> AgentSessionPayloadDict:
+        result = await self._post(
             "/chat/session/ensure",
             json={
                 "workspace_id": workspace_id,
@@ -137,33 +149,36 @@ class AgentClient:
                 "title": title,
             },
         )
+        return cast(AgentSessionPayloadDict, result)
 
     async def send(
         self,
         session_id: str,
         message: str,
-    ) -> dict[str, Any]:
-        return await self._post(
+    ) -> AgentReplyPayload:
+        result = await self._post(
             "/chat/send",
-            json=self._payload(session_id, message=message),
+            json={"session_id": session_id, "message": message},
         )
+        return cast(AgentReplyPayload, result)
 
     async def execute_command(
         self,
         session_id: str,
         command: str,
-    ) -> dict[str, Any]:
-        return await self._post(
+    ) -> AgentCommandResultPayload:
+        result = await self._post(
             "/chat/command",
-            json=self._payload(session_id, command=command),
+            json={"session_id": session_id, "command": command},
         )
+        return cast(AgentCommandResultPayload, result)
 
     async def stream(
         self,
         session_id: str,
         message: str,
     ) -> AsyncIterator[AgentStreamEvent]:
-        payload = self._payload(session_id, message=message)
+        payload: JsonObject = {"session_id": session_id, "message": message}
         client = self._stream_http_client()
         try:
             async with client.stream("POST", self._url("/chat/stream"), json=payload) as response:
@@ -174,7 +189,9 @@ class AgentClient:
                     raw = line.removeprefix("data:").strip()
                     if not raw:
                         continue
-                    yield _event_from_dict(json.loads(raw))
+                    payload_obj: object = json.loads(raw)
+                    if isinstance(payload_obj, dict):
+                        yield _event_from_dict(cast(JsonObject, payload_obj))
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
@@ -182,12 +199,12 @@ class AgentClient:
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 
-    async def _get(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _get(self, path: str, *, params: dict[str, str | int] | None = None) -> JsonObject:
         client = self._request_http_client()
         try:
             response = await client.get(self._url(path), params=params)
             response.raise_for_status()
-            return response.json()
+            return _json_response(response)
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
@@ -195,12 +212,12 @@ class AgentClient:
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 
-    async def _post(self, path: str, *, json: dict[str, Any]) -> dict[str, Any]:
+    async def _post(self, path: str, *, json: JsonObject) -> JsonObject:
         client = self._request_http_client()
         try:
             response = await client.post(self._url(path), json=json)
             response.raise_for_status()
-            return response.json()
+            return _json_response(response)
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
@@ -229,25 +246,24 @@ class AgentClient:
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
 
-    @staticmethod
-    def _payload(
-        session_id: str,
-        **extra: Any,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"session_id": session_id}
-        payload.update(extra)
-        return payload
-
 
 def _http_error_message(response: httpx.Response) -> str:
     try:
-        detail = response.json().get("detail")
+        payload: object = response.json()
+        detail = payload.get("detail") if isinstance(payload, dict) else response.text
     except Exception:
         detail = response.text
     return str(detail or f"Agent service returned HTTP {response.status_code}")
 
 
-def _event_from_dict(data: dict[str, Any]) -> AgentStreamEvent:
+def _json_response(response: httpx.Response) -> JsonObject:
+    payload: object = response.json()
+    if not isinstance(payload, dict):
+        raise AgentClientError(f"Agent service returned non-object JSON from {response.url}")
+    return cast(JsonObject, payload)
+
+
+def _event_from_dict(data: JsonObject) -> AgentStreamEvent:
     usage = data.get("usage")
     usage_obj = None
     if isinstance(usage, dict):
@@ -257,16 +273,22 @@ def _event_from_dict(data: dict[str, Any]) -> AgentStreamEvent:
             total_tokens=int(usage.get("total_tokens", 0) or 0),
             prompt_tokens_details={"cached_tokens": int(usage.get("cached_tokens", 0) or 0)},
         )
-    kind = StreamEventKind(data.get("kind", "text"))
+    kind = StreamEventKind(str(data.get("kind") or "text"))
     return AgentStreamEvent(
         kind=kind,
         content=str(data.get("content", "") or ""),
-        tool_name=data.get("tool_name"),
-        tool_arguments=data.get("tool_arguments"),
-        tool_result_preview=data.get("tool_result_preview"),
+        tool_name=_optional_string(data.get("tool_name")),
+        tool_arguments=_optional_string(data.get("tool_arguments")),
+        tool_result_preview=_optional_string(data.get("tool_result_preview")),
         round_index=int(data.get("round_index", 0) or 0),
         usage=usage_obj,
-        model=data.get("model"),
-        finish_reason=data.get("finish_reason"),
+        model=_optional_string(data.get("model")),
+        finish_reason=_optional_string(data.get("finish_reason")),
         duration_ms=float(data.get("duration_ms", 0.0) or 0.0),
     )
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)

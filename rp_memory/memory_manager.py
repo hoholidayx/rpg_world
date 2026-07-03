@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rpg_core.common_types import Metadata
+from commons.types import Metadata
 
 from loguru import logger
 

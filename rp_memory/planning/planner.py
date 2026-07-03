@@ -9,7 +9,7 @@ from functools import lru_cache
 
 from loguru import logger
 
-from rpg_core.common_types import JsonObject, JsonValue
+from commons.types import JsonObject, JsonValue
 from llm_service.base_provider import LLMProvider
 from rp_memory.asyncio_utils import run_awaitable_sync
 from rp_memory.planning.plan import QueryPlan, make_empty_plan

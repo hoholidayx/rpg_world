@@ -22,7 +22,7 @@ from commons.settings import (
     ProfiledYamlSettings,
     forgiving_float,
 )
-from rpg_core.common_types import ConfigDict, ConfigValue
+from commons.types import ConfigDict, ConfigValue
 from llm_service.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
 from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,

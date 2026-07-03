@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 from rpg_core.context import RPModuleRuntimeSection
 
-ModuleCommandHandler = Callable[[Any, list[str]], Awaitable[str]]
+ModuleCommandHandler = Callable[[object, list[str]], Awaitable[str]]
 
 
 @dataclass(frozen=True)

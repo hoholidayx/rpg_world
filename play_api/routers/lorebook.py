@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["play-lorebook"])
@@ -19,7 +18,7 @@ class PlayLorebookEntryPayload(BaseModel):
     content: str = ""
     description: str = ""
     tags: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
     @field_validator("name")
     @classmethod
@@ -37,7 +36,7 @@ class PlayLorebookEntryPatch(BaseModel):
     content: str | None = None
     description: str | None = None
     tags: list[str] | None = None
-    metadata: dict[str, Any] | None = None
+    metadata: JsonObject | None = None
 
     @field_validator("name")
     @classmethod
@@ -60,7 +59,7 @@ class PlayLorebookEntry(BaseModel):
     content: str
     description: str
     tags: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
     version: int
     created_at: str | None = Field(default=None, alias="createdAt")
     updated_at: str | None = Field(default=None, alias="updatedAt")

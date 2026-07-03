@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rpg_core.common_types import Metadata
+from commons.types import Metadata
 
 
 @dataclass

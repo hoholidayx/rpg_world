@@ -6,7 +6,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from rpg_core.common_types import DebugInfo
+from commons.types import DebugInfo
 
 from llm_service.base_provider import DocumentScoreProvider, LLMProvider
 from llm_service.types import LLMResponse
