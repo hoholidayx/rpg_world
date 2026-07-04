@@ -230,6 +230,7 @@ class RPGGameAgent:
                 )
 
         # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
+        self._session.validate_loaded_turn_metadata(label="history")
         turn_stats = TurnStats(started_at=_time.monotonic())
         turn_id = self._session.begin_turn()
 
@@ -384,6 +385,7 @@ class RPGGameAgent:
                 return
 
         # ── TurnStats 聚合器 ───────────────────────────────────────
+        self._session.validate_loaded_turn_metadata(label="history")
         turn_stats = TurnStats(started_at=_time.monotonic())
         turn_id = self._session.begin_turn()
 
@@ -554,6 +556,62 @@ class RPGGameAgent:
     def history(self) -> list[Message]:
         """Read-only view of the raw conversation history (before RPG transform)."""
         return self._session.history
+
+    async def reload_history(self) -> None:
+        """Reload mutable SQL history into this cached agent."""
+        await self._ensure_initialized()
+        await self._queue.join()
+        self._session.load()
+
+    async def retry_turn(self, turn_id: int) -> AgentReply:
+        """Truncate from *turn_id* and regenerate from that turn's user message."""
+        await self._ensure_initialized()
+        await self._queue.join()
+        source_message = self._session.first_user_message_for_turn(turn_id)
+        if source_message is None:
+            raise FileNotFoundError(f"user message not found for turn: {turn_id}")
+        source_text = source_message.content
+        self._session.truncate_from_turn(turn_id)
+        return await self.send(source_text)
+
+    async def update_message_content(self, message_id: int, content: str) -> dict[str, object]:
+        """Update one history message.
+
+        User-message edits branch the story from the affected turn and then
+        regenerate through the normal send path. Non-user edits are persisted
+        directly and only reload the in-memory history.
+        """
+        await self._ensure_initialized()
+        await self._queue.join()
+        current = self._session.get_message(message_id)
+        if current is None:
+            raise FileNotFoundError(f"session message not found: {message_id}")
+        if current.is_user() and current.turn_id > 0:
+            self._session.truncate_from_turn(current.turn_id)
+            reply = await self.send(content)
+            return {
+                "regenerated": True,
+                "affected_turn_id": current.turn_id,
+                "reply": reply.text,
+            }
+        latest_turn_id = self._session.latest_turn_id(self._session.history)
+        updated = self._session.update_message_content(message_id, content)
+        truncated_from_turn = None
+        if updated.turn_id > 0 and updated.turn_id < latest_turn_id:
+            truncated_from_turn = updated.turn_id + 1
+            self._session.truncate_from_turn(truncated_from_turn)
+        return {
+            "regenerated": False,
+            "affected_turn_id": updated.turn_id,
+            "message_id": updated.uid,
+            "truncated_from_turn": truncated_from_turn,
+        }
+
+    async def delete_message(self, message_id: int) -> Message:
+        """Delete one history message and reload this cached agent."""
+        await self._ensure_initialized()
+        await self._queue.join()
+        return self._session.delete_message(message_id)
 
     @property
     def last_tool_records(self) -> list[ToolCallRecord] | None:

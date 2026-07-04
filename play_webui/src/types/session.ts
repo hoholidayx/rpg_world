@@ -16,8 +16,15 @@ export type SessionSummary = {
 
 export type Turn = {
   turnId: number
-  userMessage: string
-  assistantMessage?: string | null
-  source?: 'play_webui' | 'telegram' | 'cli'
+  messages: HistoryMessage[]
+}
+
+export type HistoryMessage = {
+  messageId: number
+  turnId: number
+  seqInTurn: number
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  content: string
+  metadata: Record<string, unknown>
   createdAt?: string | null
 }

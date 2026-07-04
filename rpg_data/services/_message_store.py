@@ -84,6 +84,18 @@ class BaseSessionMessageStore:
         row = get_or_none(self._record_model, message_id)
         return to_session_message(row) if row is not None else None
 
+    def get_for_session(self, session_id: str, message_id: int) -> models.SessionMessage | None:
+        row = (
+            self._record_model
+            .select()
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.id == int(message_id))
+            )
+            .first()
+        )
+        return to_session_message(row) if row is not None else None
+
     def count(self, session_id: str) -> int:
         return int(
             self._record_model
@@ -154,6 +166,18 @@ class BaseSessionMessageStore:
         )
         return bool(deleted)
 
+    def delete_for_session(self, session_id: str, message_id: int) -> bool:
+        deleted = (
+            self._record_model
+            .delete()
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.id == int(message_id))
+            )
+            .execute()
+        )
+        return bool(deleted)
+
     def clear(self, session_id: str) -> int:
         return int(
             self._record_model
@@ -211,6 +235,20 @@ class BaseSessionMessageStore:
         if boundary is None:
             return self.clear(session_id)
         return self.truncate_before_id(session_id, int(boundary.id))
+
+    def truncate_from_turn(self, session_id: str, turn_id: int) -> int:
+        boundary_turn = int(turn_id)
+        if boundary_turn <= 0:
+            raise ValueError("turn_id must be positive")
+        return int(
+            self._record_model
+            .delete()
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.turn_id >= boundary_turn)
+            )
+            .execute()
+        )
 
 
 def _validate_role(role: str) -> str:

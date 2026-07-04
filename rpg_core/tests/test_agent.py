@@ -12,6 +12,8 @@ from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.command import CommandDispatcher
 from rpg_core.agent.tools import BaseTool
 from rpg_core.context.rpg_context import HotHistoryLayer, Message, RPGContext, Role
+from rpg_core.session.manager import SessionManager
+from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from llm_service.manager import ProviderOverrides
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.settings import RPModuleSettings
@@ -58,6 +60,24 @@ async def test_queue_consumer_surfaces_stream_errors(monkeypatch):
         consumer_task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await consumer_task
+
+
+@pytest.mark.asyncio
+async def test_send_impl_rejects_invalid_loaded_turn_metadata_before_new_turn():
+    session = SessionManager(history_enabled=False)
+    session.replace_history(
+        [
+            Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
+            Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=0),
+        ],
+        persist=False,
+    )
+    agent = object.__new__(RPGGameAgent)
+    agent._cmd_dispatcher = None
+    agent._session = session
+
+    with pytest.raises(InvalidTurnMetadataError, match=r"history\[1\]"):
+        await agent._send_impl("go")
 
 
 @pytest.mark.asyncio

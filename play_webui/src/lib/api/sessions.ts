@@ -25,3 +25,27 @@ export function createSession(workspace: string, storyId: number, title?: string
 export function getSessionHistory(sessionId: string) {
   return playApiFetch<Turn[]>(`/sessions/${encodeURIComponent(sessionId)}/history`)
 }
+
+export function retrySessionTurn(sessionId: string, turnId: number) {
+  return playApiFetch<{ status: string }>(
+    `/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/retry`,
+    { method: 'POST' },
+  )
+}
+
+export function updateSessionMessage(sessionId: string, messageId: number, content: string) {
+  return playApiFetch<{ status: string }>(
+    `/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    },
+  )
+}
+
+export function deleteSessionMessage(sessionId: string, messageId: number) {
+  return playApiFetch<{ status: string }>(
+    `/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`,
+    { method: 'DELETE' },
+  )
+}

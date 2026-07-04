@@ -10,7 +10,7 @@ export type NarrativeStyle = {
   prompt: string
 }
 
-export type SpeakerTone = 'player' | 'assistant' | 'tool' | 'thinking' | 'error'
+export type SpeakerTone = 'player' | 'assistant' | 'tool' | 'system' | 'thinking' | 'error'
 
 export type SessionSpeaker = {
   name: string
@@ -22,13 +22,20 @@ export type SessionSpeaker = {
 
 export type SessionTimelineMessage = {
   id: string
+  messageId?: number
   turnId: number
-  role: 'user' | 'assistant' | 'tool' | 'thinking' | 'error'
+  seqInTurn?: number
+  role: 'user' | 'assistant' | 'tool' | 'system' | 'thinking' | 'error'
   content: string
+  metadata?: Record<string, unknown>
   createdAt?: string | null
   speaker: SessionSpeaker
   status?: 'done' | 'streaming' | 'local' | 'error'
   hiddenPrompt?: string
+  canCopy?: boolean
+  canRetry?: boolean
+  canEdit?: boolean
+  canDelete?: boolean
 }
 
 export type ConfirmRequest = {

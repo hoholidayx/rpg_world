@@ -5,6 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from rpg_core.session.turn_metadata import (
+    InvalidTurnMetadataError,
+    has_trustworthy_turn_metadata,
+    validate_turn_metadata,
+)
+
 if TYPE_CHECKING:
     from rpg_core.context.rpg_context import Message
 

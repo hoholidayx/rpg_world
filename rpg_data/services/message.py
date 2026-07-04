@@ -61,6 +61,9 @@ class MessageService:
     def get(self, message_id: int) -> models.SessionMessage | None:
         return self._store.get(message_id)
 
+    def get_for_session(self, session_id: str, message_id: int) -> models.SessionMessage | None:
+        return self._store.get_for_session(session_id, message_id)
+
     def update(
         self,
         message_id: int,
@@ -87,6 +90,9 @@ class MessageService:
     def delete(self, message_id: int) -> bool:
         return self._store.delete(message_id)
 
+    def delete_for_session(self, session_id: str, message_id: int) -> bool:
+        return self._store.delete_for_session(session_id, message_id)
+
     def clear(self, session_id: str) -> int:
         return self._store.clear(session_id)
 
@@ -108,3 +114,6 @@ class MessageService:
 
     def truncate_before_index(self, session_id: str, keep_from_index: int) -> int:
         return self._store.truncate_before_index(session_id, keep_from_index)
+
+    def truncate_from_turn(self, session_id: str, turn_id: int) -> int:
+        return self._store.truncate_from_turn(session_id, turn_id)

@@ -28,6 +28,10 @@ from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
 class AgentClientError(RuntimeError):
     """Base error raised by ``AgentClient``."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class AgentServiceUnavailable(AgentClientError):
     """Raised when the Agent service cannot be reached."""
@@ -162,6 +166,38 @@ class AgentClient:
         )
         return cast(AgentReplyPayload, result)
 
+    async def retry_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> AgentReplyPayload:
+        result = await self._post(
+            f"/chat/turns/{int(turn_id)}/retry",
+            json={"session_id": session_id},
+        )
+        return cast(AgentReplyPayload, result)
+
+    async def update_message(
+        self,
+        session_id: str,
+        message_id: int,
+        content: str,
+    ) -> JsonObject:
+        return await self._patch(
+            f"/chat/messages/{int(message_id)}",
+            json={"session_id": session_id, "content": content},
+        )
+
+    async def delete_message(
+        self,
+        session_id: str,
+        message_id: int,
+    ) -> JsonObject:
+        return await self._delete(
+            f"/chat/messages/{int(message_id)}",
+            params={"session_id": session_id},
+        )
+
     async def execute_command(
         self,
         session_id: str,
@@ -195,7 +231,7 @@ class AgentClient:
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response)) from exc
+            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 
@@ -208,7 +244,7 @@ class AgentClient:
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response)) from exc
+            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 
@@ -221,7 +257,33 @@ class AgentClient:
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response)) from exc
+            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
+        except httpx.HTTPError as exc:
+            raise AgentClientError(str(exc)) from exc
+
+    async def _patch(self, path: str, *, json: JsonObject) -> JsonObject:
+        client = self._request_http_client()
+        try:
+            response = await client.patch(self._url(path), json=json)
+            response.raise_for_status()
+            return _json_response(response)
+        except httpx.ConnectError as exc:
+            raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
+        except httpx.HTTPError as exc:
+            raise AgentClientError(str(exc)) from exc
+
+    async def _delete(self, path: str, *, params: dict[str, str | int] | None = None) -> JsonObject:
+        client = self._request_http_client()
+        try:
+            response = await client.delete(self._url(path), params=params)
+            response.raise_for_status()
+            return _json_response(response)
+        except httpx.ConnectError as exc:
+            raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 

@@ -9,18 +9,21 @@ function MiniButton({
   label,
   onClick,
   children,
+  disabled = false,
 }: {
   label: string
   onClick: () => void
   children: React.ReactNode
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       aria-label={label}
       title={label}
-      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300 disabled:shadow-none disabled:hover:border-slate-100 disabled:hover:bg-slate-50 disabled:hover:text-slate-300"
     >
       {children}
     </button>
@@ -44,25 +47,37 @@ function MessageActions({
   onEdit: (message: SessionTimelineMessage) => void
   onDelete: (message: SessionTimelineMessage) => void
 }) {
+  const canCopy = message.canCopy ?? Boolean(message.content.trim())
+  const canRetry = Boolean(message.canRetry)
+  const canEdit = Boolean(message.canEdit)
+  const canDelete = Boolean(message.canDelete)
+
   return (
     <div className="relative mt-2 flex items-center gap-1.5">
-      <MiniButton label="复制" onClick={() => onCopy(message)}>
+      <MiniButton label="复制" disabled={!canCopy} onClick={() => onCopy(message)}>
         <Copy size={14} />
       </MiniButton>
-      <MiniButton label="重试" onClick={() => onRetry(message)}>
-        <RotateCcw size={14} />
-      </MiniButton>
-      <MiniButton label="编辑" onClick={() => onEdit(message)}>
-        <Pencil size={14} />
-      </MiniButton>
-      <MiniButton label="更多" onClick={onToggleMore}>
-        <MoreHorizontal size={15} />
-      </MiniButton>
-      {moreOpen ? (
+      {canRetry ? (
+        <MiniButton label="重试" onClick={() => onRetry(message)}>
+          <RotateCcw size={14} />
+        </MiniButton>
+      ) : null}
+      {canEdit ? (
+        <MiniButton label="编辑" onClick={() => onEdit(message)}>
+          <Pencil size={14} />
+        </MiniButton>
+      ) : null}
+      {canDelete ? (
+        <MiniButton label="更多" onClick={onToggleMore}>
+          <MoreHorizontal size={15} />
+        </MiniButton>
+      ) : null}
+      {moreOpen && canDelete ? (
         <div className="absolute right-0 top-full z-20 mt-2 w-32 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-200/80">
           <button
             type="button"
             onClick={() => onDelete(message)}
+            disabled={!canDelete}
             className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-bold text-rose-600 transition hover:bg-rose-50"
           >
             <Trash2 size={14} />
@@ -94,6 +109,7 @@ function MessageBubble({
     user: 'border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-100',
     assistant: 'border-slate-200 bg-white text-slate-950 shadow-sm',
     tool: 'border-sky-200 bg-sky-50 text-sky-800',
+    system: 'border-slate-200 bg-slate-50 text-slate-600',
     thinking: 'border-amber-200 bg-amber-50 text-amber-800',
     error: 'border-rose-200 bg-rose-50 text-rose-700',
   }[message.role]

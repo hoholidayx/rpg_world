@@ -25,11 +25,13 @@ from agent_service.schemas import (
     AgentHistoryResponse,
     AgentHealthResponse,
     AgentMessageRequest,
+    AgentMessageUpdateRequest,
     AgentReplyPayload,
     AgentSessionCreatePayload,
     AgentSessionCreateRequest,
     AgentSessionCreateResponse,
     AgentSessionEnsureRequest,
+    AgentSessionMutationRequest,
     AgentSessionPayload,
     AgentSessionPayloadDict,
     AgentSessionsPayload,
@@ -43,7 +45,7 @@ from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnSt
 from rpg_core.agent.command import CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.agent.manager import AgentManager
-from rpg_core.session import SessionManager
+from rpg_core.session import InvalidTurnMetadataError, SessionManager, validate_turn_metadata
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway
 
@@ -84,7 +86,12 @@ async def get_history(
         await agent._ensure_initialized()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Agent initialization failed: {exc}") from exc
-    return {"history": [cast(JsonObject, m.to_dict()) for m in agent.history]}
+    rows = get_data_service_gateway().messages.list(session_id)
+    try:
+        validate_turn_metadata(rows, label="history")
+    except InvalidTurnMetadataError as exc:
+        raise _turn_metadata_http_error(exc) from exc
+    return {"history": [_message_payload(row) for row in rows]}
 
 
 @app.get(f"{_service_prefix()}/chat/commands", response_model=AgentCommandsResponse)
@@ -169,9 +176,66 @@ async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
     agent = _get_agent(body.session_id)
     try:
         reply = await agent.send(body.message)
+    except InvalidTurnMetadataError as exc:
+        raise _turn_metadata_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Chat send failed: {exc}") from exc
     return _reply_to_dict(reply)
+
+
+@app.post(f"{_service_prefix()}/chat/turns/{{turn_id}}/retry")
+async def retry_turn(turn_id: int, body: AgentSessionMutationRequest) -> AgentReplyPayload:
+    agent = _get_agent(body.session_id)
+    try:
+        reply = await agent.retry_turn(turn_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidTurnMetadataError as exc:
+        raise _turn_metadata_http_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Retry failed: {exc}") from exc
+    return _reply_to_dict(reply)
+
+
+@app.patch(f"{_service_prefix()}/chat/messages/{{message_id}}")
+async def update_message(message_id: int, body: AgentMessageUpdateRequest) -> JsonObject:
+    agent = _get_agent(body.session_id)
+    try:
+        result = await agent.update_message_content(message_id, body.content)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidTurnMetadataError as exc:
+        raise _turn_metadata_http_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Message update failed: {exc}") from exc
+    return cast(JsonObject, {"status": "updated", **result})
+
+
+@app.delete(f"{_service_prefix()}/chat/messages/{{message_id}}")
+async def delete_message(
+    message_id: int,
+    session_id: str = Query(...),
+) -> JsonObject:
+    agent = _get_agent(session_id)
+    try:
+        deleted = await agent.delete_message(message_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidTurnMetadataError as exc:
+        raise _turn_metadata_http_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Message delete failed: {exc}") from exc
+    return {
+        "status": "deleted",
+        "message_id": deleted.uid,
+        "turn_id": deleted.turn_id,
+    }
 
 
 @app.post(f"{_service_prefix()}/chat/command")
@@ -256,6 +320,10 @@ def _require_session_id(session_id: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _turn_metadata_http_error(exc: InvalidTurnMetadataError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc))
+
+
 def _reply_to_dict(reply: AgentReply) -> AgentReplyPayload:
     result: AgentReplyPayload = {"reply": reply.text}
     if reply.tool_records:
@@ -272,6 +340,45 @@ def _reply_to_dict(reply: AgentReply) -> AgentReplyPayload:
     if reply.stats:
         result["stats"] = _stats_to_dict(reply.stats)
     return result
+
+
+def _message_payload(row: models.SessionMessage) -> JsonObject:
+    payload: dict[str, JsonValue] = {
+        "messageId": int(row.id),
+        "turnId": int(row.turn_id),
+        "seqInTurn": int(row.seq_in_turn),
+        "role": str(row.role),
+        "content": str(row.content or ""),
+        "metadata": _metadata_from_json(row.metadata_json),
+    }
+    if row.created_at:
+        payload["createdAt"] = str(row.created_at)
+    if row.tool_call_id:
+        payload["toolCallId"] = str(row.tool_call_id)
+    if row.tool_calls_json:
+        payload["toolCalls"] = _json_value(_json_from_text(row.tool_calls_json, fallback=[]))
+
+    # Backward-friendly aliases for lower-level clients that still expect raw
+    # Message.to_dict()-style fields.
+    payload["uid"] = int(row.id)
+    payload["turn_id"] = int(row.turn_id)
+    payload["seq_in_turn"] = int(row.seq_in_turn)
+    return cast(JsonObject, payload)
+
+
+def _metadata_from_json(raw: str) -> JsonObject:
+    try:
+        payload: object = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return cast(JsonObject, payload) if isinstance(payload, dict) else {}
+
+
+def _json_from_text(raw: str, *, fallback: object) -> object:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return fallback
 
 
 def _command_result_to_dict(result: CommandResult) -> AgentCommandResultPayload:

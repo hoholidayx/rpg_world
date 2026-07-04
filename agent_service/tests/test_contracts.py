@@ -21,6 +21,15 @@ class FakeAgent:
     async def send(self, message: str) -> AgentReply:
         return AgentReply(text=f"reply:{message}")
 
+    async def retry_turn(self, turn_id: int) -> AgentReply:
+        return AgentReply(text=f"retry:{turn_id}")
+
+    async def update_message_content(self, message_id: int, content: str) -> dict[str, object]:
+        return {"regenerated": False, "affected_turn_id": 1, "message_id": message_id, "content": content}
+
+    async def delete_message(self, message_id: int) -> Message:
+        return Message(Role.USER, "deleted", uid=message_id, turn_id=1, seq_in_turn=1)
+
     async def send_stream(self, message: str):
         yield AgentStreamEvent(kind=StreamEventKind.TEXT, content=f"stream:{message}")
         yield AgentStreamEvent(kind=StreamEventKind.DONE, content=f"stream:{message}")
@@ -123,8 +132,64 @@ class FakeCatalog:
         ]
 
 
+class FakeMessages:
+    @staticmethod
+    def list(session_id: str) -> list[models.SessionMessage]:
+        return [
+            models.SessionMessage(
+                id=1,
+                session_id=session_id,
+                role="user",
+                content="hello",
+                turn_id=1,
+                seq_in_turn=1,
+                metadata_json='{"speakerName":"Bob"}',
+                created_at="2026-01-01T00:00:00",
+            ),
+            models.SessionMessage(
+                id=2,
+                session_id=session_id,
+                role="assistant",
+                content="hi",
+                turn_id=1,
+                seq_in_turn=2,
+                metadata_json='{"speakerName":"Narrator"}',
+                created_at="2026-01-01T00:00:01",
+            ),
+        ]
+
+
+class InvalidTurnMessages:
+    @staticmethod
+    def list(session_id: str) -> list[models.SessionMessage]:
+        return [
+            models.SessionMessage(
+                id=1,
+                session_id=session_id,
+                role="user",
+                content="hello",
+                turn_id=1,
+                seq_in_turn=1,
+            ),
+            models.SessionMessage(
+                id=2,
+                session_id=session_id,
+                role="assistant",
+                content="broken",
+                turn_id=1,
+                seq_in_turn=0,
+            ),
+        ]
+
+
 class FakeGateway:
     catalog = FakeCatalog
+    messages = FakeMessages
+
+
+class InvalidHistoryGateway:
+    catalog = FakeCatalog
+    messages = InvalidTurnMessages
 
 
 class FakeSessionManager:
@@ -151,6 +216,8 @@ def test_agent_service_contracts(monkeypatch) -> None:
         )
         assert history.status_code == 200
         assert history.json()["history"][0]["content"] == "hello"
+        assert history.json()["history"][0]["messageId"] == 1
+        assert history.json()["history"][0]["metadata"]["speakerName"] == "Bob"
 
         commands = client.get(
             "/agent/v1/chat/commands",
@@ -236,6 +303,28 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert send.status_code == 200
         assert send.json()["reply"] == "reply:go"
 
+        retry = client.post(
+            "/agent/v1/chat/turns/1/retry",
+            json={"session_id": "s1"},
+        )
+        assert retry.status_code == 200
+        assert retry.json()["reply"] == "retry:1"
+
+        update = client.patch(
+            "/agent/v1/chat/messages/1",
+            json={"session_id": "s1", "content": "edited"},
+        )
+        assert update.status_code == 200
+        assert update.json()["status"] == "updated"
+        assert update.json()["message_id"] == 1
+
+        delete = client.delete(
+            "/agent/v1/chat/messages/1",
+            params={"session_id": "s1"},
+        )
+        assert delete.status_code == 200
+        assert delete.json()["status"] == "deleted"
+
         command = client.post(
             "/agent/v1/chat/command",
             json={"session_id": "s1", "command": "/session_switch s2"},
@@ -251,3 +340,20 @@ def test_agent_service_contracts(monkeypatch) -> None:
             body = "".join(stream.iter_text())
         assert '"kind": "text"' in body
         assert '"kind": "done"' in body
+
+
+def test_agent_service_history_rejects_invalid_turn_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(service_main, "AgentManager", FakeAgentManager)
+    monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
+    monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: InvalidHistoryGateway)
+    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
+    FakeCatalog.reset()
+
+    with TestClient(service_main.app) as client:
+        history = client.get(
+            "/agent/v1/chat/history",
+            params={"session_id": "s1"},
+        )
+
+    assert history.status_code == 409
+    assert "history[1]" in history.json()["detail"]

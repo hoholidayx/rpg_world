@@ -27,6 +27,14 @@ class AgentMessageRequest(AgentRequestBase):
     message: str
 
 
+class AgentSessionMutationRequest(AgentRequestBase):
+    pass
+
+
+class AgentMessageUpdateRequest(AgentRequestBase):
+    content: str
+
+
 class AgentCommandRequest(AgentRequestBase):
     command: str
 

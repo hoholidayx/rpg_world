@@ -156,7 +156,8 @@ function sceneSummary(scene?: Scene | null) {
 function latestTurnSummary(turns?: Turn[] | null) {
   const latest = turns?.[turns.length - 1]
   if (!latest) return '暂无回合记录'
-  return latest.assistantMessage || latest.userMessage || '暂无回合记录'
+  const latestMessage = [...latest.messages].reverse().find((message) => message.content.trim())
+  return latestMessage?.content || '暂无回合记录'
 }
 
 function tableOriginSummary(tables?: StatusTable[] | null) {

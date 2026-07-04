@@ -158,6 +158,34 @@ def test_story_memory_service_crud_and_cursor(tmp_path: Path) -> None:
         database.close()
 
 
+def test_message_service_truncate_from_turn_keeps_backup_append_only(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        backup = BackupService(database)
+        session_id = _create_test_session(database, "s_message_truncate_from_turn")
+
+        for turn_id, role, content, seq in [
+            (1, "user", "u1", 1),
+            (1, "assistant", "a1", 2),
+            (2, "user", "u2", 1),
+            (2, "assistant", "a2", 2),
+            (3, "user", "u3", 1),
+        ]:
+            messages.append(session_id, role, content, turn_id=turn_id, seq_in_turn=seq)
+            backup.messages.append(session_id, role, content, turn_id=turn_id, seq_in_turn=seq)
+
+        assert messages.truncate_from_turn(session_id, 2) == 3
+        assert [row.content for row in messages.list(session_id)] == ["u1", "a1"]
+        assert [row.content for row in backup.messages.list(session_id)] == ["u1", "a1", "u2", "a2", "u3"]
+        assert messages.get_for_session(session_id, messages.list(session_id)[0].id).content == "u1"
+
+        with pytest.raises(ValueError):
+            messages.truncate_from_turn(session_id, 0)
+    finally:
+        database.close()
+
+
 def test_backup_messages_are_append_only_and_independent(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:

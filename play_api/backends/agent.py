@@ -14,15 +14,6 @@ class AgentBackend:
         result = await agent_client.get_agent_client().get_history(session_id)
         return list(result.get("history", []))
 
-    async def get_scene(self, workspace: str, story_id: int, session_id: str) -> dict[str, object]:
-        return {
-            "attrs": {"workspace": workspace, "story_id": str(story_id), "session_id": session_id},
-            "time": None,
-            "location": None,
-            "presentCharacters": [],
-            "mood": None,
-        }
-
     async def list_commands(self, workspace: str, story_id: int, session_id: str) -> list[dict[str, object]]:
         del workspace, story_id
         result = await agent_client.get_agent_client().list_commands(session_id)
@@ -42,6 +33,25 @@ class AgentBackend:
     async def send(self, workspace: str, story_id: int, session_id: str, text: str, mode: str) -> dict[str, object]:
         del workspace, story_id
         return await agent_client.get_agent_client().send(session_id, text)
+
+    async def retry_turn(self, workspace: str, story_id: int, session_id: str, turn_id: int) -> dict[str, object]:
+        del workspace, story_id
+        return await agent_client.get_agent_client().retry_turn(session_id, turn_id)
+
+    async def update_message(
+        self,
+        workspace: str,
+        story_id: int,
+        session_id: str,
+        message_id: int,
+        content: str,
+    ) -> dict[str, object]:
+        del workspace, story_id
+        return await agent_client.get_agent_client().update_message(session_id, message_id, content)
+
+    async def delete_message(self, workspace: str, story_id: int, session_id: str, message_id: int) -> dict[str, object]:
+        del workspace, story_id
+        return await agent_client.get_agent_client().delete_message(session_id, message_id)
 
     async def stream(
         self,

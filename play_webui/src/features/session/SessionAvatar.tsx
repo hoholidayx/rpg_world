@@ -5,6 +5,7 @@ const toneClass = {
   player: 'bg-violet-100 text-violet-700 ring-violet-100',
   assistant: 'bg-slate-200 text-slate-700 ring-slate-100',
   tool: 'bg-sky-100 text-sky-700 ring-sky-100',
+  system: 'bg-slate-100 text-slate-500 ring-slate-100',
   thinking: 'bg-amber-100 text-amber-700 ring-amber-100',
   error: 'bg-rose-100 text-rose-700 ring-rose-100',
 }

@@ -192,6 +192,48 @@ def test_clear_and_truncate_update_main_history_only(
     assert rpg_data_gateway.backup.messages.count("s1") == 4
 
 
+def test_history_mutations_reload_and_rewind_story_cursor(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
+    make_data_session("s1")
+    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr.load()
+
+    t1 = mgr.begin_turn()
+    mgr.append(Role.USER, "u1", turn_id=t1)
+    mgr.append(Role.ASSISTANT, "a1", turn_id=t1)
+    mgr.end_turn(t1)
+    t2 = mgr.begin_turn()
+    mgr.append(Role.USER, "u2", turn_id=t2)
+    mgr.append(Role.ASSISTANT, "a2", turn_id=t2)
+    mgr.end_turn(t2)
+    t3 = mgr.begin_turn()
+    mgr.append(Role.USER, "u3", turn_id=t3)
+    mgr.end_turn(t3)
+    mgr.set_story_memory_last_turn_id(t3)
+
+    second_turn_user = next(message for message in mgr.history if message.content == "u2")
+    updated = mgr.update_message_content(second_turn_user.uid, "u2 edited")
+    assert updated.content == "u2 edited"
+    assert [message.content for message in mgr.history] == ["u1", "a1", "u2 edited", "a2", "u3"]
+    assert mgr.story_memory_last_turn_id == t1
+
+    deleted = mgr.delete_message(next(message.uid for message in mgr.history if message.content == "a2"))
+    assert deleted.content == "a2"
+    assert [message.content for message in mgr.history] == ["u1", "a1", "u2 edited", "u3"]
+    assert rpg_data_gateway.backup.messages.count("s1") == 5
+
+    mgr.set_story_memory_last_turn_id(t3)
+    removed = mgr.truncate_from_turn(t2)
+    assert removed == 2
+    assert [message.content for message in mgr.history] == ["u1", "a1"]
+    assert [row.content for row in rpg_data_gateway.messages.list("s1")] == ["u1", "a1"]
+    assert rpg_data_gateway.backup.messages.count("s1") == 5
+    assert mgr.story_memory_last_turn_id == t1
+
+
 def test_switch_to_reload_history(make_data_session, workspace):
     make_data_session("s1")
     make_data_session("s2")

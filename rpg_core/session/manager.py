@@ -7,6 +7,10 @@ import re
 from loguru import logger
 
 from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.turn_metadata import (
+    has_trustworthy_turn_metadata,
+    validate_turn_metadata,
+)
 
 _TAG = "[SessionManager]"
 
@@ -111,17 +115,16 @@ class SessionManager:
     @staticmethod
     def has_trustworthy_turn_ids(messages: list[Message]) -> bool:
         """Return whether explicit turn ids can be used safely."""
-        if not messages:
-            return False
-        if any(msg.turn_id <= 0 or msg.seq_in_turn <= 0 for msg in messages):
-            return False
+        return has_trustworthy_turn_metadata(messages)
 
-        last_turn_id = 0
-        for msg in messages:
-            if msg.turn_id < last_turn_id:
-                return False
-            last_turn_id = msg.turn_id
-        return True
+    @staticmethod
+    def validate_turn_metadata(messages: list[Message], *, label: str = "history") -> None:
+        """Strictly validate explicit turn metadata for external operations."""
+        validate_turn_metadata(messages, label=label)
+
+    def validate_loaded_turn_metadata(self, *, label: str = "history") -> None:
+        """Strictly validate the currently loaded in-memory history."""
+        self.validate_turn_metadata(self.__history, label=label)
 
     @classmethod
     def iter_turn_groups(cls, messages: list[Message]) -> list[list[Message]]:
@@ -204,9 +207,12 @@ class SessionManager:
             turn_id = self._active_turn_id or self.begin_turn()
         if seq_in_turn is None:
             seq_in_turn = self._turn_seq_by_turn.get(turn_id, 1)
-        self._turn_seq_by_turn[turn_id] = seq_in_turn + 1
 
         text = str(content or "")
+        pending = Message(role_value, text, turn_id=turn_id, seq_in_turn=seq_in_turn)
+        self.validate_turn_metadata([*self.__history, pending], label="history")
+        self._turn_seq_by_turn[turn_id] = seq_in_turn + 1
+
         uid = 0
         if self._history_enabled:
             gateway = self._require_data_session()
@@ -272,6 +278,116 @@ class SessionManager:
         removed = before - len(self.__history)
         logger.debug(_TAG + " truncated: removed {} msgs, {} remaining", removed, len(self.__history))
         return removed
+
+    def get_message(self, message_id: int) -> Message | None:
+        """Return one message from this session by its persisted message id."""
+        target_id = int(message_id)
+        for message in self.__history:
+            if message.uid == target_id:
+                return message
+
+        if not self._history_enabled:
+            return None
+
+        row = self._require_data_session().messages.get_for_session(self._session_id, target_id)
+        if row is None:
+            return None
+        return Message.from_dict(row.to_message_dict())
+
+    def turn_messages(self, turn_id: int) -> list[Message]:
+        """Return loaded messages for one explicit turn id."""
+        self.validate_loaded_turn_metadata(label="history")
+        target_turn = int(turn_id)
+        return [message for message in self.__history if message.turn_id == target_turn]
+
+    def first_user_message_for_turn(self, turn_id: int) -> Message | None:
+        """Return the first user message in a turn, if present."""
+        messages = sorted(self.turn_messages(turn_id), key=lambda item: item.seq_in_turn or 0)
+        return next((message for message in messages if message.is_user()), None)
+
+    def truncate_from_turn(self, turn_id: int) -> int:
+        """Remove *turn_id* and all following turns from mutable history.
+
+        The backup message table remains append-only. If story-memory extraction
+        has already processed the affected turn, its cursor is rewound to the
+        turn immediately before the deletion boundary.
+        """
+        boundary_turn = int(turn_id)
+        if boundary_turn <= 0:
+            raise ValueError("turn_id must be positive")
+        self.validate_loaded_turn_metadata(label="history")
+
+        before = len(self.__history)
+        if self._history_enabled:
+            gateway = self._require_data_session()
+            with gateway.database.atomic():
+                removed = gateway.messages.truncate_from_turn(self._session_id, boundary_turn)
+                self._rewind_story_memory_cursor(boundary_turn)
+            self.load()
+            return removed
+
+        self.__history = [message for message in self.__history if message.turn_id < boundary_turn]
+        self._rewind_story_memory_cursor(boundary_turn)
+        self._rebuild_turn_state()
+        return before - len(self.__history)
+
+    def update_message_content(self, message_id: int, content: str) -> Message:
+        """Update a persisted message body and reload in-memory history."""
+        target_id = int(message_id)
+        self.validate_loaded_turn_metadata(label="history")
+        if not self._history_enabled:
+            for index, message in enumerate(self.__history):
+                if message.uid == target_id:
+                    updated = Message(
+                        message.role,
+                        str(content),
+                        uid=message.uid,
+                        turn_id=message.turn_id,
+                        seq_in_turn=message.seq_in_turn,
+                        tool_call_id=message.tool_call_id,
+                        tool_calls=message.tool_calls,
+                    )
+                    self.__history[index] = updated
+                    self._rewind_story_memory_cursor(updated.turn_id)
+                    self._rebuild_turn_state()
+                    return updated
+            raise FileNotFoundError(f"session message not found: {message_id}")
+
+        gateway = self._require_data_session()
+        with gateway.database.atomic():
+            current = gateway.messages.get_for_session(self._session_id, target_id)
+            if current is None:
+                raise FileNotFoundError(f"session message not found: {message_id}")
+            updated_row = gateway.messages.update(target_id, content=str(content))
+            if updated_row is None:
+                raise FileNotFoundError(f"session message not found: {message_id}")
+            self._rewind_story_memory_cursor(int(current.turn_id))
+        self.load()
+        return Message.from_dict(updated_row.to_message_dict())
+
+    def delete_message(self, message_id: int) -> Message:
+        """Delete one message from mutable history and reload memory."""
+        target_id = int(message_id)
+        self.validate_loaded_turn_metadata(label="history")
+        if not self._history_enabled:
+            for index, message in enumerate(self.__history):
+                if message.uid == target_id:
+                    deleted = self.__history.pop(index)
+                    self._rewind_story_memory_cursor(deleted.turn_id)
+                    self._rebuild_turn_state()
+                    return deleted
+            raise FileNotFoundError(f"session message not found: {message_id}")
+
+        gateway = self._require_data_session()
+        with gateway.database.atomic():
+            current = gateway.messages.get_for_session(self._session_id, target_id)
+            if current is None:
+                raise FileNotFoundError(f"session message not found: {message_id}")
+            if not gateway.messages.delete_for_session(self._session_id, target_id):
+                raise FileNotFoundError(f"session message not found: {message_id}")
+            self._rewind_story_memory_cursor(int(current.turn_id))
+        self.load()
+        return Message.from_dict(current.to_message_dict())
 
     # ── Session switch ─────────────────────────────────────────────────
 
@@ -365,6 +481,7 @@ class SessionManager:
             persist = self._history_enabled
 
         if persist and self._history_enabled:
+            self.validate_loaded_turn_metadata(label="history")
             rows = self._require_data_session().messages.replace(
                 self._session_id,
                 (msg.to_dict() for msg in self.__history),
@@ -382,6 +499,19 @@ class SessionManager:
             seq_by_turn[msg.turn_id] = max(seq_by_turn.get(msg.turn_id, 0), msg.seq_in_turn)
         self._turn_seq_by_turn = {turn_id: seq + 1 for turn_id, seq in seq_by_turn.items()}
         self._active_turn_id = None
+
+    def _rewind_story_memory_cursor(self, affected_turn_id: int) -> None:
+        if affected_turn_id <= 0:
+            return
+        target = max(0, int(affected_turn_id) - 1)
+        if self._history_enabled:
+            current = self._require_data_session().story_memory.get_last_turn_id(self._session_id)
+            if current >= int(affected_turn_id):
+                self._require_data_session().story_memory.set_last_turn_id(self._session_id, target)
+                self._story_memory_last_turn_id = target
+            return
+        if self._story_memory_last_turn_id >= int(affected_turn_id):
+            self._story_memory_last_turn_id = target
 
     def _require_data_session(self):
         from rpg_data.services import get_data_service_gateway

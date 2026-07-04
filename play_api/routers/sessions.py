@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable
 from datetime import UTC, datetime
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -14,9 +14,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent_service.client import AgentClientError, AgentServiceUnavailable
 from play_api.backends import get_agent_backend, get_data_manager_backend
 from play_api.routers._locator import resolve_session_or_404
+from rpg_core.session.turn_metadata import (
+    InvalidTurnMetadataError,
+    has_trustworthy_turn_metadata,
+    validate_turn_metadata,
+)
+from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
 T = TypeVar("T")
+HistoryTransformSource = Literal["api", "agent_internal"]
 
 
 class PlaySessionCreateRequest(BaseModel):
@@ -84,6 +91,10 @@ class PlayChatRequest(BaseModel):
     mode: str = "ic"
 
 
+class PlayMessageUpdateRequest(BaseModel):
+    content: str
+
+
 class PlayScene(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -94,14 +105,23 @@ class PlayScene(BaseModel):
     mood: str | None = None
 
 
+class PlayHistoryMessage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    message_id: int = Field(alias="messageId")
+    turn_id: int = Field(alias="turnId")
+    seq_in_turn: int = Field(alias="seqInTurn")
+    role: Literal["user", "assistant", "tool", "system"]
+    content: str
+    metadata: dict[str, object] = Field(default_factory=dict)
+    created_at: str | None = Field(default=None, alias="createdAt")
+
+
 class PlayTurn(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     turn_id: int = Field(alias="turnId")
-    user_message: str = Field(alias="userMessage")
-    assistant_message: str | None = Field(default=None, alias="assistantMessage")
-    source: str = "play_webui"
-    created_at: str | None = Field(default=None, alias="createdAt")
+    messages: list[PlayHistoryMessage] = Field(default_factory=list)
 
 
 def _session_summary(session: dict[str, object]) -> PlaySessionSummary:
@@ -132,11 +152,156 @@ async def _agent_call(awaitable: Awaitable[T]) -> T:
     except AgentServiceUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AgentClientError as exc:
+        if exc.status_code == 409:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 def _agent_error_event(exc: AgentClientError) -> dict[str, object]:
     return {"kind": "error", "content": str(exc)}
+
+
+_SCENE_TIME_KEYS = ("time", "时间")
+_SCENE_LOCATION_KEYS = ("location", "位置", "地点")
+_SCENE_PRESENT_KEYS = ("presentCharacters", "present_characters", "在场人物", "在场角色", "在场")
+_SCENE_MOOD_KEYS = ("mood", "氛围", "气氛", "情绪")
+
+
+def _first_present(raw: dict[str, object], *keys: str) -> object | None:
+    for key in keys:
+        value = raw.get(key)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _positive_int(value: object | None) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _history_role(raw: dict[str, object]) -> Literal["user", "assistant", "tool", "system"]:
+    role = str(raw.get("role") or "assistant").lower()
+    if role == "user":
+        return "user"
+    if role == "tool":
+        return "tool"
+    if role == "system":
+        return "system"
+    return "assistant"
+
+
+def _history_message(
+    raw: dict[str, object],
+    fallback_turn_id: int,
+    fallback_seq: int,
+    *,
+    use_raw_turn_ids: bool = True,
+) -> PlayHistoryMessage:
+    metadata = raw.get("metadata")
+    raw_turn_id = _positive_int(_first_present(raw, "turnId", "turn_id")) if use_raw_turn_ids else None
+    raw_seq = _positive_int(_first_present(raw, "seqInTurn", "seq_in_turn")) if use_raw_turn_ids else None
+    return PlayHistoryMessage(
+        message_id=_positive_int(_first_present(raw, "messageId", "uid")) or 0,
+        turn_id=raw_turn_id or fallback_turn_id,
+        seq_in_turn=raw_seq or fallback_seq,
+        role=_history_role(raw),
+        content=str(raw.get("content") or ""),
+        metadata=metadata if isinstance(metadata, dict) else {},
+        created_at=str(raw.get("createdAt")) if raw.get("createdAt") is not None else None,
+    )
+
+
+def _pair_history_groups(history: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+    return [history[index:index + 2] for index in range(0, len(history), 2)]
+
+
+def _legacy_history_groups(history: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+    user_indices = [index for index, raw in enumerate(history) if _history_role(raw) == "user"]
+    if not user_indices:
+        return _pair_history_groups(history)
+
+    groups: list[list[dict[str, object]]] = []
+    for index, user_index in enumerate(user_indices):
+        start = 0 if index == 0 else user_index
+        end = user_indices[index + 1] if index + 1 < len(user_indices) else len(history)
+        groups.append(history[start:end])
+    return groups
+
+
+def _turns_from_history(
+    history: list[dict[str, object]],
+    *,
+    source: HistoryTransformSource = "api",
+) -> list[PlayTurn]:
+    if not history:
+        return []
+
+    if source == "api":
+        validate_turn_metadata(history, label="history")
+    elif not has_trustworthy_turn_metadata(history):
+        return [
+            PlayTurn(
+                turn_id=turn_id,
+                messages=[
+                    _history_message(raw, turn_id, seq, use_raw_turn_ids=False)
+                    for seq, raw in enumerate(group, start=1)
+                ],
+            )
+            for turn_id, group in enumerate(_legacy_history_groups(history), start=1)
+        ]
+
+    turn_messages: dict[int, list[PlayHistoryMessage]] = {}
+    for raw in history:
+        turn_id = _positive_int(_first_present(raw, "turnId", "turn_id")) or 1
+        seq_by_turn = len(turn_messages.get(turn_id, [])) + 1
+        message = _history_message(raw, turn_id, seq_by_turn)
+        turn_messages.setdefault(message.turn_id, []).append(message)
+
+    turns: list[PlayTurn] = []
+    for turn_id in sorted(turn_messages):
+        messages = sorted(turn_messages[turn_id], key=lambda item: item.seq_in_turn)
+        turns.append(PlayTurn(turn_id=turn_id, messages=messages))
+    return turns
+
+
+def _scene_from_attrs(attrs: dict[str, str] | None) -> PlayScene:
+    if not attrs:
+        return PlayScene()
+    used: set[str] = set()
+    time_value, time_key = _first_attr(attrs, _SCENE_TIME_KEYS)
+    location_value, location_key = _first_attr(attrs, _SCENE_LOCATION_KEYS)
+    present_value, present_key = _first_attr(attrs, _SCENE_PRESENT_KEYS)
+    mood_value, mood_key = _first_attr(attrs, _SCENE_MOOD_KEYS)
+    used.update(key for key in (time_key, location_key, present_key, mood_key) if key)
+    return PlayScene(
+        attrs={key: value for key, value in attrs.items() if key not in used},
+        time=time_value,
+        location=location_value,
+        present_characters=_split_scene_list(present_value),
+        mood=mood_value,
+    )
+
+
+def _first_attr(attrs: dict[str, str], keys: tuple[str, ...]) -> tuple[str | None, str | None]:
+    for key in keys:
+        if key in attrs and str(attrs[key]).strip():
+            return str(attrs[key]), key
+    return None, None
+
+
+def _split_scene_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    normalized = value.replace("、", ",").replace("，", ",").replace("；", ",").replace(";", ",")
+    return [item.strip() for item in normalized.split(",") if item.strip()]
 
 
 @router.get("", response_model=list[PlaySessionSummary])
@@ -174,46 +339,20 @@ async def get_session_history(
     session_id: str,
 ) -> list[PlayTurn]:
     workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
-    now = datetime.now(UTC).isoformat()
-    turns: list[PlayTurn] = []
-    pending_user: str | None = None
-    turn_id = 1
     history = await _agent_call(
         get_agent_backend().get_history(workspace, story_id, agent_session_id)
     )
-    for message in history:
-        role = message.get("role")
-        content = str(message.get("content", ""))
-        if role == "user":
-            pending_user = content
-            continue
-        if role == "assistant" and pending_user is not None:
-            turns.append(
-                PlayTurn(
-                    turn_id=turn_id,
-                    user_message=pending_user,
-                    assistant_message=content,
-                    created_at=now,
-                )
-            )
-            turn_id += 1
-            pending_user = None
-    if pending_user is not None:
-        turns.append(PlayTurn(turn_id=turn_id, user_message=pending_user, created_at=now))
-    return turns
+    try:
+        return _turns_from_history(history, source="api")
+    except InvalidTurnMetadataError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/{session_id}/scene", response_model=PlayScene)
 async def get_current_scene(session_id: str) -> PlayScene:
-    workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
-    scene = await get_agent_backend().get_scene(workspace, story_id, agent_session_id)
-    return PlayScene(
-        attrs=dict(scene.get("attrs", {})),
-        time=str(scene["time"]) if scene.get("time") is not None else None,
-        location=str(scene["location"]) if scene.get("location") is not None else None,
-        present_characters=list(scene.get("presentCharacters", [])),
-        mood=str(scene["mood"]) if scene.get("mood") is not None else None,
-    )
+    _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    attrs = get_data_service_gateway().status.get_scene_attrs(agent_session_id)
+    return _scene_from_attrs(attrs)
 
 
 @router.get("/{session_id}/commands", response_model=list[PlayCommand])
@@ -262,6 +401,61 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
         "sessionId": agent_session_id,
         "mode": payload.mode,
         "reply": result.get("reply", ""),
+        "agent": result,
+    }
+
+
+@router.post("/{session_id}/turns/{turn_id}/retry")
+async def retry_turn(session_id: str, turn_id: int) -> dict[str, object]:
+    session = await resolve_session_or_404(session_id)
+    workspace, story_id, agent_session_id = _session_context(session)
+    result = await _agent_call(
+        get_agent_backend().retry_turn(workspace, story_id, agent_session_id, turn_id)
+    )
+    return {
+        "status": "completed",
+        "workspace": workspace,
+        "storyId": story_id,
+        "sessionId": agent_session_id,
+        "turnId": turn_id,
+        "agent": result,
+    }
+
+
+@router.patch("/{session_id}/messages/{message_id}")
+async def update_message(
+    session_id: str,
+    message_id: int,
+    payload: PlayMessageUpdateRequest,
+) -> dict[str, object]:
+    session = await resolve_session_or_404(session_id)
+    workspace, story_id, agent_session_id = _session_context(session)
+    result = await _agent_call(
+        get_agent_backend().update_message(workspace, story_id, agent_session_id, message_id, payload.content)
+    )
+    return {
+        "status": "updated",
+        "workspace": workspace,
+        "storyId": story_id,
+        "sessionId": agent_session_id,
+        "messageId": message_id,
+        "agent": result,
+    }
+
+
+@router.delete("/{session_id}/messages/{message_id}")
+async def delete_message(session_id: str, message_id: int) -> dict[str, object]:
+    session = await resolve_session_or_404(session_id)
+    workspace, story_id, agent_session_id = _session_context(session)
+    result = await _agent_call(
+        get_agent_backend().delete_message(workspace, story_id, agent_session_id, message_id)
+    )
+    return {
+        "status": "deleted",
+        "workspace": workspace,
+        "storyId": story_id,
+        "sessionId": agent_session_id,
+        "messageId": message_id,
         "agent": result,
     }
 

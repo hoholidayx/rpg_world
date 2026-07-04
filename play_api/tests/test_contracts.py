@@ -1,10 +1,71 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from play_api import agent_client
 from play_api.main import app
 from play_api.delete_tokens import reset_delete_confirmation_tokens
+from play_api.routers.sessions import _turns_from_history
+from rpg_core.session.turn_metadata import InvalidTurnMetadataError
+
+
+def test_history_fallback_groups_legacy_messages_by_user_anchor() -> None:
+    turns = _turns_from_history(
+        [
+            {"messageId": 1, "role": "system", "content": "preface"},
+            {"messageId": 2, "role": "user", "content": "u1"},
+            {"messageId": 3, "role": "assistant", "content": "a1"},
+            {"messageId": 4, "role": "user", "content": "u2"},
+            {"messageId": 5, "role": "assistant", "content": "a2"},
+        ],
+        source="agent_internal",
+    )
+
+    assert [turn.turn_id for turn in turns] == [1, 2]
+    assert [[message.content for message in turn.messages] for turn in turns] == [
+        ["preface", "u1", "a1"],
+        ["u2", "a2"],
+    ]
+    assert [[message.seq_in_turn for message in turn.messages] for turn in turns] == [[1, 2, 3], [1, 2]]
+
+
+def test_history_fallback_groups_legacy_messages_by_pairs_without_user_anchor() -> None:
+    turns = _turns_from_history(
+        [
+            {"messageId": 1, "role": "assistant", "content": "a1"},
+            {"messageId": 2, "role": "tool", "content": "tool1"},
+            {"messageId": 3, "role": "system", "content": "sys1"},
+        ],
+        source="agent_internal",
+    )
+
+    assert [turn.turn_id for turn in turns] == [1, 2]
+    assert [[message.content for message in turn.messages] for turn in turns] == [["a1", "tool1"], ["sys1"]]
+    assert [[message.seq_in_turn for message in turn.messages] for turn in turns] == [[1, 2], [1]]
+
+
+def test_history_api_source_rejects_invalid_turn_metadata() -> None:
+    with pytest.raises(InvalidTurnMetadataError, match=r"history\[1\]"):
+        _turns_from_history(
+            [
+                {"messageId": 1, "turnId": 1, "seqInTurn": 1, "role": "user", "content": "u1"},
+                {"messageId": 2, "turnId": 1, "seqInTurn": 0, "role": "assistant", "content": "a1"},
+                {"messageId": 3, "turnId": 2, "seqInTurn": 1, "role": "user", "content": "u2"},
+            ],
+            source="api",
+        )
+
+
+def test_history_api_source_rejects_missing_turn_metadata() -> None:
+    with pytest.raises(InvalidTurnMetadataError, match=r"history\[0\]"):
+        _turns_from_history(
+            [
+                {"messageId": 1, "role": "user", "content": "u1"},
+                {"messageId": 2, "turnId": 1, "seqInTurn": 2, "role": "assistant", "content": "a1"},
+            ],
+            source="api",
+        )
 
 
 class _FakeAgentClient:
@@ -15,8 +76,24 @@ class _FakeAgentClient:
         self.calls.append(("history", session_id))
         return {
             "history": [
-                {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "reply"},
+                {
+                    "messageId": 1,
+                    "turnId": 1,
+                    "seqInTurn": 1,
+                    "role": "user",
+                    "content": "hello",
+                    "metadata": {"speakerName": "Bob"},
+                    "createdAt": "2026-01-01T00:00:00",
+                },
+                {
+                    "messageId": 2,
+                    "turnId": 1,
+                    "seqInTurn": 2,
+                    "role": "assistant",
+                    "content": "reply",
+                    "metadata": {"speakerName": "Narrator"},
+                    "createdAt": "2026-01-01T00:00:01",
+                },
             ]
         }
 
@@ -59,6 +136,42 @@ class _FakeAgentClient:
     async def send(self, session_id: str, text: str) -> dict[str, object]:
         self.calls.append(("send", session_id))
         return {"reply": f"agent reply: {text}"}
+
+    async def retry_turn(self, session_id: str, turn_id: int) -> dict[str, object]:
+        self.calls.append(("retry", session_id, str(turn_id)))
+        return {"reply": f"retry:{turn_id}"}
+
+    async def update_message(self, session_id: str, message_id: int, content: str) -> dict[str, object]:
+        self.calls.append(("update-message", session_id, str(message_id)))
+        return {"status": "updated", "content": content}
+
+    async def delete_message(self, session_id: str, message_id: int) -> dict[str, object]:
+        self.calls.append(("delete-message", session_id, str(message_id)))
+        return {"status": "deleted"}
+
+
+class _InvalidHistoryAgentClient(_FakeAgentClient):
+    async def get_history(self, session_id: str) -> dict[str, object]:
+        self.calls.append(("history", session_id))
+        return {
+            "history": [
+                {"messageId": 1, "turnId": 1, "seqInTurn": 1, "role": "user", "content": "hello"},
+                {"messageId": 2, "turnId": 1, "seqInTurn": 0, "role": "assistant", "content": "reply"},
+            ]
+        }
+
+
+def test_history_endpoint_rejects_invalid_turn_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_client, "_client", _InvalidHistoryAgentClient())
+    reset_delete_confirmation_tokens()
+    client = TestClient(app)
+
+    response = client.get("/play-api/v1/sessions/s_forest001/history")
+
+    assert response.status_code == 409
+    assert "history[1]" in response.json()["detail"]
 
 
 def test_play_api_contracts(tmp_path, monkeypatch) -> None:
@@ -146,6 +259,13 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert session.status_code == 200
     assert session.json()["title"] == "北境森林主线"
 
+    history = client.get(f"/play-api/v1/sessions/{demo_session_id}/history")
+    assert history.status_code == 200
+    assert history.json()[0]["turnId"] == 1
+    assert "canRetry" not in history.json()[0]
+    assert history.json()[0]["messages"][0]["messageId"] == 1
+    assert history.json()[0]["messages"][0]["metadata"]["speakerName"] == "Bob"
+
     missing_story_sessions = client.get(
         "/play-api/v1/sessions",
         params={"workspace": "demo_workspace", "story_id": 999},
@@ -166,7 +286,9 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         f"/play-api/v1/sessions/{demo_session_id}/scene",
     )
     assert scene.status_code == 200
-    assert scene.json()["location"] is None
+    assert scene.json()["location"] == "北境森林·石林·圆形封印祭坛"
+    assert scene.json()["time"] == "第 1 年 1 月 1 日 8 时 30 分"
+    assert scene.json()["presentCharacters"] == ["Bob", "Alice"]
 
     commands = client.get(
         f"/play-api/v1/sessions/{demo_session_id}/commands",
@@ -194,9 +316,29 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert turn.status_code == 200
     assert turn.json()["status"] == "completed"
     assert "hello" in turn.json()["reply"]
+
+    retry = client.post(f"/play-api/v1/sessions/{demo_session_id}/turns/1/retry")
+    assert retry.status_code == 200
+    assert retry.json()["status"] == "completed"
+    assert retry.json()["turnId"] == 1
+
+    update_message = client.patch(
+        f"/play-api/v1/sessions/{demo_session_id}/messages/1",
+        json={"content": "edited"},
+    )
+    assert update_message.status_code == 200
+    assert update_message.json()["status"] == "updated"
+
+    delete_message = client.delete(f"/play-api/v1/sessions/{demo_session_id}/messages/1")
+    assert delete_message.status_code == 200
+    assert delete_message.json()["status"] == "deleted"
+
     assert ("commands", demo_session_id) in fake_agent.calls
     assert ("context-preview", demo_session_id) in fake_agent.calls
     assert ("send", demo_session_id) in fake_agent.calls
+    assert ("retry", demo_session_id, "1") in fake_agent.calls
+    assert ("update-message", demo_session_id, "1") in fake_agent.calls
+    assert ("delete-message", demo_session_id, "1") in fake_agent.calls
 
     characters = client.get("/play-api/v1/workspaces/demo_workspace/characters")
     assert characters.status_code == 200

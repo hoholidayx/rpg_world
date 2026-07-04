@@ -12,6 +12,11 @@ class _FailingHistoryClient:
         raise AgentClientError("Agent service returned HTTP 502")
 
 
+class _ConflictHistoryClient:
+    async def get_history(self, session_id: str) -> dict[str, object]:
+        raise AgentClientError("invalid turn metadata at history[1]", status_code=409)
+
+
 class _UnavailableHistoryClient:
     async def get_history(self, session_id: str) -> dict[str, object]:
         raise AgentServiceUnavailable("Agent service unavailable: connection refused")
@@ -39,6 +44,18 @@ def test_history_maps_agent_client_error_to_bad_gateway(tmp_path, monkeypatch) -
 
     assert response.status_code == 502
     assert response.json()["detail"] == "Agent service returned HTTP 502"
+
+
+def test_history_preserves_agent_conflict_status(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_client, "_client", _ConflictHistoryClient())
+
+    with TestClient(app) as client:
+        response = client.get("/play-api/v1/sessions/s_forest001/history")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "invalid turn metadata at history[1]"
 
 
 def test_history_maps_agent_unavailable_to_service_unavailable(tmp_path, monkeypatch) -> None:

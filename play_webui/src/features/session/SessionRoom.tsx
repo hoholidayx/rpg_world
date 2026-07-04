@@ -2,12 +2,18 @@
 
 import { CSSProperties, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { listStoryCharacters } from '@/lib/api/characters'
 import { getCurrentScene } from '@/lib/api/scene'
-import { getSession, getSessionHistory } from '@/lib/api/sessions'
+import {
+  deleteSessionMessage,
+  getSession,
+  getSessionHistory,
+  retrySessionTurn,
+  updateSessionMessage,
+} from '@/lib/api/sessions'
 import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { consumeChatStream } from '@/lib/stream/sse'
 import { cn } from '@/lib/utils/cn'
@@ -62,6 +68,7 @@ type DragState = {
 }
 
 type MobilePanel = 'left' | 'right' | null
+type HistoryMessage = Awaited<ReturnType<typeof getSessionHistory>>[number]['messages'][number]
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -77,19 +84,11 @@ function makePlayerSpeaker(character: CharacterCard | null): SessionSpeaker {
   }
 }
 
-function makeAssistantSpeaker(content: string, characters: CharacterCard[], playerCharacter: CharacterCard | null): SessionSpeaker {
-  const candidates = characters.filter((character) => character.id !== playerCharacter?.id)
-  const matched = candidates.find((character) => content.includes(character.name)) ?? candidates[0] ?? null
-  if (matched) {
-    return {
-      name: matched.name,
-      avatarUrl: getCharacterAvatarUrl(matched),
-      fallback: firstLetter(matched.name),
-      tone: 'assistant',
-    }
-  }
+function makeAssistantSpeaker(): SessionSpeaker {
+  // Assistant output is currently one mixed narrative block. Character-level
+  // avatars need a future structured segments layer instead of speaker metadata.
   return {
-    name: 'Narrator',
+    name: '旁白',
     avatarUrl: '',
     fallback: '旁',
     tone: 'assistant',
@@ -120,66 +119,88 @@ function errorSpeaker(): SessionSpeaker {
   }
 }
 
-function assistantPreview(turnId: number, characters: CharacterCard[], playerCharacter: CharacterCard | null): SessionTimelineMessage {
-  const content = '雾气在前方慢慢散开，新的线索浮出水面。当前版本仅做前端预览；真正的重试、编辑与删除会在后续 turn API 支持后持久化。'
+function systemSpeaker(): SessionSpeaker {
   return {
-    id: `local-retry-${turnId}-${crypto.randomUUID()}`,
-    turnId,
-    role: 'assistant',
-    content,
-    createdAt: new Date().toISOString(),
-    speaker: makeAssistantSpeaker(content, characters, playerCharacter),
-    status: 'local',
+    name: '系统',
+    fallback: 'S',
+    tone: 'system',
   }
 }
 
-function streamPlaceholder(turnId: number, characters: CharacterCard[], playerCharacter: CharacterCard | null): SessionTimelineMessage {
+function streamPlaceholder(turnId: number): SessionTimelineMessage {
   return {
     id: `local-stream-${turnId}-${crypto.randomUUID()}`,
     turnId,
+    seqInTurn: 2,
     role: 'assistant',
     content: '',
     createdAt: new Date().toISOString(),
-    speaker: makeAssistantSpeaker('', characters, playerCharacter),
+    speaker: makeAssistantSpeaker(),
     status: 'streaming',
+    canCopy: false,
+    canRetry: false,
+    canEdit: false,
+    canDelete: false,
   }
+}
+
+function timelineRole(role: HistoryMessage['role']): SessionTimelineMessage['role'] {
+  if (role === 'user' || role === 'assistant' || role === 'tool' || role === 'system') return role
+  return 'assistant'
+}
+
+function makeHistorySpeaker(
+  message: HistoryMessage,
+  playerCharacter: CharacterCard | null,
+): SessionSpeaker {
+  const role = timelineRole(message.role)
+
+  if (role === 'user') {
+    return makePlayerSpeaker(playerCharacter)
+  }
+
+  if (role === 'assistant') {
+    return makeAssistantSpeaker()
+  }
+
+  if (role === 'tool') return toolSpeaker()
+  return systemSpeaker()
 }
 
 function mapHistoryToMessages({
   turns,
-  characters,
   playerCharacter,
 }: {
   turns: Awaited<ReturnType<typeof getSessionHistory>> | undefined
-  characters: CharacterCard[]
   playerCharacter: CharacterCard | null
 }): SessionTimelineMessage[] {
-  const playerSpeaker = makePlayerSpeaker(playerCharacter)
+  return (turns ?? []).flatMap((turn, turnIndex) => {
+    const turnHasPersistentUser = turn.messages.some(
+      (message) => Boolean(message.messageId) && timelineRole(message.role) === 'user',
+    )
 
-  return (turns ?? []).flatMap((turn, index) => {
-    const turnId = turn.turnId || index + 1
-    const userMessage: SessionTimelineMessage = {
-      id: `history-${turnId}-user`,
-      turnId,
-      role: 'user',
-      content: turn.userMessage,
-      createdAt: turn.createdAt,
-      speaker: playerSpeaker,
-    }
+    return turn.messages.map((message, messageIndex) => {
+      const role = timelineRole(message.role)
+      const persistent = Boolean(message.messageId)
+      const turnActionRole = role === 'user' || role === 'assistant'
 
-    if (!turn.assistantMessage) return [userMessage]
-
-    const assistantMessage: SessionTimelineMessage = {
-      id: `history-${turnId}-assistant`,
-      turnId,
-      role: 'assistant',
-      content: turn.assistantMessage,
-      createdAt: turn.createdAt,
-      speaker: makeAssistantSpeaker(turn.assistantMessage, characters, playerCharacter),
-      status: 'done',
-    }
-
-    return [userMessage, assistantMessage]
+      return {
+        id: message.messageId ? `history-${message.messageId}` : `history-${turn.turnId || turnIndex + 1}-${messageIndex}`,
+        messageId: message.messageId || undefined,
+        turnId: message.turnId || turn.turnId || turnIndex + 1,
+        seqInTurn: message.seqInTurn || messageIndex + 1,
+        role,
+        content: message.content,
+        metadata: message.metadata,
+        createdAt: message.createdAt,
+        speaker: makeHistorySpeaker(message, playerCharacter),
+        status: message.role === 'assistant' ? 'done' : undefined,
+        canCopy: Boolean(message.content.trim()),
+        canRetry: persistent && turnActionRole && turnHasPersistentUser,
+        canEdit: persistent && turnActionRole,
+        canDelete: persistent && turnActionRole,
+      }
+    })
   })
 }
 
@@ -200,6 +221,7 @@ function Toast({ message }: { message: string }) {
 
 export function SessionRoom({ sessionId }: { sessionId: string }) {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const [leftWidth, setLeftWidth] = useState(defaultSidebarSizes.left)
   const [rightWidth, setRightWidth] = useState(defaultSidebarSizes.right)
   const [leftCollapsed, setLeftCollapsed] = useState(false)
@@ -211,8 +233,6 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [narrativeStyleId, setNarrativeStyleId] = useState<NarrativeStyleId>('default')
   const [composerText, setComposerText] = useState('')
   const [localMessages, setLocalMessages] = useState<SessionTimelineMessage[]>([])
-  const [hiddenMessageIds, setHiddenMessageIds] = useState<Set<string>>(() => new Set())
-  const [hiddenFromTurn, setHiddenFromTurn] = useState<number | null>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
@@ -258,18 +278,14 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   }, [characters, sceneQuery.data?.presentCharacters])
 
   const baseMessages = useMemo(
-    () => mapHistoryToMessages({ turns: historyQuery.data, characters, playerCharacter }),
-    [characters, historyQuery.data, playerCharacter],
+    () => mapHistoryToMessages({ turns: historyQuery.data, playerCharacter }),
+    [historyQuery.data, playerCharacter],
   )
 
   const visibleMessages = useMemo(() => {
-    const visibleBase = hiddenFromTurn === null
-      ? baseMessages
-      : baseMessages.filter((message) => message.turnId < hiddenFromTurn)
-    return [...visibleBase, ...localMessages]
-      .filter((message) => !hiddenMessageIds.has(message.id))
-      .sort((first, second) => first.turnId - second.turnId)
-  }, [baseMessages, hiddenFromTurn, hiddenMessageIds, localMessages])
+    return [...baseMessages, ...localMessages]
+      .sort((first, second) => first.turnId - second.turnId || (first.seqInTurn ?? 0) - (second.seqInTurn ?? 0))
+  }, [baseMessages, localMessages])
 
   const lastTurnId = useMemo(
     () => Math.max(0, ...visibleMessages.map((message) => message.turnId)),
@@ -286,8 +302,6 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     setLocalMessages([])
-    setHiddenMessageIds(new Set())
-    setHiddenFromTurn(null)
     setEditingMessageId(null)
     setEditDraft('')
     setComposerText('')
@@ -352,38 +366,67 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     })
   }
 
-  const hideFromTurn = useCallback((turnId: number) => {
-    setHiddenFromTurn((current) => (current === null ? turnId : Math.min(current, turnId)))
-    setLocalMessages((current) => current.filter((message) => message.turnId < turnId))
-    setEditingMessageId(null)
-    setEditDraft('')
-  }, [])
+  const refreshSessionData = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['play-session-history', sessionId] }),
+        queryClient.invalidateQueries({ queryKey: ['play-session-scene', sessionId] }),
+        queryClient.invalidateQueries({ queryKey: ['play-session-status-tables', sessionId] }),
+      ])
+      setLocalMessages([])
+      setEditingMessageId(null)
+      setEditDraft('')
+      return true
+    } catch {
+      if (!silent) showToast('刷新失败，请手动刷新页面')
+      return false
+    }
+  }, [queryClient, sessionId, showToast])
 
   const requestConfirm = useCallback((request: ConfirmRequest) => {
     setConfirmRequest(request)
   }, [])
 
-  const performRetry = useCallback((message: SessionTimelineMessage) => {
-    hideFromTurn(message.turnId)
-    setLocalMessages((current) => [...current, assistantPreview(message.turnId, characters, playerCharacter)])
-    showToast(`已删除 turn #${message.turnId} 及之后内容，并触发重试预览`)
-  }, [characters, hideFromTurn, playerCharacter, showToast])
+  const performRetry = useCallback(async (message: SessionTimelineMessage) => {
+    if (!message.canRetry) {
+      showToast('当前回合不可重试')
+      return
+    }
+    showToast(`正在重试 turn #${message.turnId}`)
+    try {
+      await retrySessionTurn(sessionId, message.turnId)
+      const refreshed = await refreshSessionData({ silent: true })
+      showToast(refreshed ? `已重试 turn #${message.turnId}` : '重试完成，但刷新失败，请手动刷新页面')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '重试失败')
+    }
+  }, [refreshSessionData, sessionId, showToast])
 
   const handleRetry = useCallback((message: SessionTimelineMessage) => {
+    if (!message.canRetry) {
+      showToast('当前回合不可重试')
+      return
+    }
     if (message.turnId >= lastTurnId) {
-      performRetry(message)
+      void performRetry(message)
       return
     }
     requestConfirm({
       title: '确认重试',
       heading: '该操作会影响后续回合',
-      body: `重试 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn。当前版本只做前端预览，不会写入后端。`,
+      body: `重试 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn，并重新生成回应。`,
       confirmLabel: '确认重试',
-      onConfirm: () => performRetry(message),
+      onConfirm: () => {
+        void performRetry(message)
+      },
     })
-  }, [lastTurnId, performRetry, requestConfirm])
+  }, [lastTurnId, performRetry, requestConfirm, showToast])
 
   const handleCopy = useCallback((message: SessionTimelineMessage) => {
+    if (!message.content.trim()) {
+      showToast('当前消息没有可复制内容')
+      return
+    }
     navigator.clipboard?.writeText(message.content).then(
       () => showToast('已复制当前消息'),
       () => showToast('复制失败，请手动选择文本'),
@@ -391,30 +434,34 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   }, [showToast])
 
   const handleStartEdit = useCallback((message: SessionTimelineMessage) => {
+    if (!message.canEdit || !message.messageId) {
+      showToast('当前消息不可编辑')
+      return
+    }
     setEditingMessageId(message.id)
     setEditDraft(message.content)
-  }, [])
+  }, [showToast])
 
-  const performSendEdited = useCallback((message: SessionTimelineMessage, text: string) => {
-    hideFromTurn(message.turnId)
-    const editedMessage: SessionTimelineMessage = {
-      ...message,
-      id: `local-edit-${message.turnId}-${crypto.randomUUID()}`,
-      content: text,
-      createdAt: new Date().toISOString(),
-      status: 'local',
+  const performSendEdited = useCallback(async (message: SessionTimelineMessage, text: string) => {
+    if (!message.canEdit || !message.messageId) {
+      showToast('当前消息不可编辑')
+      return
     }
-    setLocalMessages((current) => {
-      const next = [...current, editedMessage]
-      if (message.role === 'user') {
-        next.push(assistantPreview(message.turnId, characters, playerCharacter))
-      }
-      return next
-    })
-    showToast(`已发送编辑后的 turn #${message.turnId} 预览`)
-  }, [characters, hideFromTurn, playerCharacter, showToast])
+    showToast('正在发送编辑')
+    try {
+      await updateSessionMessage(sessionId, message.messageId, text)
+      const refreshed = await refreshSessionData({ silent: true })
+      showToast(refreshed ? '已发送编辑' : '编辑已提交，但刷新失败，请手动刷新页面')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '编辑失败')
+    }
+  }, [refreshSessionData, sessionId, showToast])
 
   const handleSendEdit = useCallback((message: SessionTimelineMessage) => {
+    if (!message.canEdit || !message.messageId) {
+      showToast('当前消息不可编辑')
+      return
+    }
     const text = editDraft.trim()
     if (!text) {
       showToast('编辑内容不能为空')
@@ -424,31 +471,47 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       requestConfirm({
         title: '确认发送编辑',
         heading: '该操作会影响后续回合',
-        body: `发送编辑后的 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn，并使用新的内容重新生成。当前版本只做前端预览。`,
+        body: `发送编辑后的 turn #${message.turnId} 会影响后续回合；用户消息会从该 turn 重新生成，其他消息会写入修改后的内容。`,
         confirmLabel: '确认发送',
-        onConfirm: () => performSendEdited(message, text),
+        onConfirm: () => {
+          void performSendEdited(message, text)
+        },
       })
       return
     }
-    performSendEdited(message, text)
+    void performSendEdited(message, text)
   }, [editDraft, lastTurnId, performSendEdited, requestConfirm, showToast])
 
+  const performDelete = useCallback(async (message: SessionTimelineMessage) => {
+    if (!message.canDelete || !message.messageId) {
+      showToast('当前消息不可删除')
+      return
+    }
+    showToast('正在删除消息')
+    try {
+      await deleteSessionMessage(sessionId, message.messageId)
+      const refreshed = await refreshSessionData({ silent: true })
+      showToast(refreshed ? '已删除消息' : '删除已提交，但刷新失败，请手动刷新页面')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '删除失败')
+    }
+  }, [refreshSessionData, sessionId, showToast])
+
   const handleDelete = useCallback((message: SessionTimelineMessage) => {
+    if (!message.canDelete) {
+      showToast('当前消息不可删除')
+      return
+    }
     requestConfirm({
       title: '确认删除',
       heading: '删除当前消息',
-      body: '删除会从当前时间线移除这条消息。当前版本只做前端预览，不会写入后端。',
+      body: '删除会从当前会话历史中移除这条消息。',
       confirmLabel: '确认删除',
       onConfirm: () => {
-        setHiddenMessageIds((current) => {
-          const next = new Set(current)
-          next.add(message.id)
-          return next
-        })
-        showToast(`已删除 turn #${message.turnId} 中的当前消息`)
+        void performDelete(message)
       },
     })
-  }, [requestConfirm, showToast])
+  }, [performDelete, requestConfirm, showToast])
 
   const appendStreamEvent = useCallback((event: CurrentAgentStreamEvent, assistantMessageId: string, turnId: number) => {
     if (event.kind === 'text') {
@@ -459,6 +522,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
                 ...message,
                 content: `${message.content}${event.content ?? ''}`,
                 status: 'streaming',
+                canCopy: Boolean(`${message.content}${event.content ?? ''}`.trim()),
               }
             : message,
         ),
@@ -472,11 +536,16 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         {
           id: `local-thinking-${turnId}-${crypto.randomUUID()}`,
           turnId,
+          seqInTurn: 3,
           role: 'thinking',
           content: event.content ?? '思考中...',
           createdAt: new Date().toISOString(),
           speaker: thinkingSpeaker(),
           status: 'local',
+          canCopy: Boolean((event.content ?? '思考中...').trim()),
+          canRetry: false,
+          canEdit: false,
+          canDelete: false,
         },
       ])
       return
@@ -488,11 +557,16 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         {
           id: `local-tool-${turnId}-${crypto.randomUUID()}`,
           turnId,
+          seqInTurn: 4,
           role: 'tool',
           content: event.tool_result_preview ?? event.tool_name ?? '工具事件',
           createdAt: new Date().toISOString(),
           speaker: toolSpeaker(),
           status: 'local',
+          canCopy: Boolean((event.tool_result_preview ?? event.tool_name ?? '工具事件').trim()),
+          canRetry: false,
+          canEdit: false,
+          canDelete: false,
         },
       ])
       return
@@ -502,7 +576,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       setLocalMessages((current) =>
         current.map((message) =>
           message.id === assistantMessageId
-            ? { ...message, status: 'done', content: message.content || '已完成。' }
+            ? { ...message, status: 'done', content: message.content || '已完成。', canCopy: Boolean((message.content || '已完成。').trim()) }
             : message,
         ),
       )
@@ -517,11 +591,16 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         {
           id: `local-error-${turnId}-${crypto.randomUUID()}`,
           turnId,
+          seqInTurn: 5,
           role: 'error',
           content: event.content ?? '流式请求失败',
           createdAt: new Date().toISOString(),
           speaker: errorSpeaker(),
           status: 'error',
+          canCopy: Boolean((event.content ?? '流式请求失败').trim()),
+          canRetry: false,
+          canEdit: false,
+          canDelete: false,
         },
       ])
     }
@@ -540,14 +619,19 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     const userMessage: SessionTimelineMessage = {
       id: `local-user-${turnId}-${crypto.randomUUID()}`,
       turnId,
+      seqInTurn: 1,
       role: 'user',
       content: text,
       createdAt: new Date().toISOString(),
       speaker: { ...playerSpeaker, label: inputMode.toUpperCase() },
       hiddenPrompt: style.prompt,
       status: style.prompt ? 'local' : undefined,
+      canCopy: true,
+      canRetry: false,
+      canEdit: false,
+      canDelete: false,
     }
-    const assistantMessage = streamPlaceholder(turnId, characters, playerCharacter)
+    const assistantMessage = streamPlaceholder(turnId)
     const controller = new AbortController()
     abortRef.current = controller
     setComposerText('')
@@ -572,7 +656,12 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         setLocalMessages((current) =>
           current.map((message) =>
             message.id === assistantMessage.id
-              ? { ...message, status: 'done', content: message.content || '已停止当前流式响应。' }
+              ? {
+                  ...message,
+                  status: 'done',
+                  content: message.content || '已停止当前流式响应。',
+                  canCopy: Boolean((message.content || '已停止当前流式响应。').trim()),
+                }
               : message,
           ),
         )
@@ -584,19 +673,26 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           {
             id: `local-error-${turnId}-${crypto.randomUUID()}`,
             turnId,
+            seqInTurn: 5,
             role: 'error',
             content: error instanceof Error ? error.message : '未知流式错误',
             createdAt: new Date().toISOString(),
             speaker: errorSpeaker(),
             status: 'error',
+            canCopy: Boolean((error instanceof Error ? error.message : '未知流式错误').trim()),
+            canRetry: false,
+            canEdit: false,
+            canDelete: false,
           },
         ])
       }
     } finally {
       setSending(false)
       abortRef.current = null
+      const refreshed = await refreshSessionData({ silent: true })
+      if (!refreshed) showToast('发送完成，但刷新失败，请手动刷新页面')
     }
-  }, [appendStreamEvent, characters, composerText, currentNarrativeStyle, inputMode, lastTurnId, playerCharacter, sessionId, showToast])
+  }, [appendStreamEvent, composerText, currentNarrativeStyle, inputMode, lastTurnId, playerCharacter, refreshSessionData, sessionId, showToast])
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort()
