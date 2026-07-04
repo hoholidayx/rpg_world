@@ -12,8 +12,7 @@ import {
   deleteSessionMessage,
   getSession,
   getSessionHistory,
-  retrySessionTurn,
-  updateSessionMessage,
+  truncateSessionTurn,
 } from '@/lib/api/sessions'
 import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { consumeChatStream } from '@/lib/stream/sse'
@@ -176,10 +175,6 @@ function mapHistoryToMessages({
   playerCharacter: CharacterCard | null
 }): SessionTimelineMessage[] {
   return (turns ?? []).flatMap((turn, turnIndex) => {
-    const turnHasPersistentUser = turn.messages.some(
-      (message) => Boolean(message.messageId) && timelineRole(message.role) === 'user',
-    )
-
     return turn.messages.map((message, messageIndex) => {
       const role = timelineRole(message.role)
       const persistent = Boolean(message.messageId)
@@ -197,12 +192,20 @@ function mapHistoryToMessages({
         speaker: makeHistorySpeaker(message, playerCharacter),
         status: message.role === 'assistant' ? 'done' : undefined,
         canCopy: Boolean(message.content.trim()),
-        canRetry: persistent && turnActionRole && turnHasPersistentUser,
-        canEdit: persistent && turnActionRole,
+        canRetry: persistent && role === 'user',
+        canEdit: persistent && role === 'user',
         canDelete: persistent && turnActionRole,
       }
     })
   })
+}
+
+function canEditMessage(message: SessionTimelineMessage): message is SessionTimelineMessage & { messageId: number; role: 'user' } {
+  return Boolean(message.canEdit && message.messageId && message.role === 'user')
+}
+
+function canRetryMessage(message: SessionTimelineMessage): message is SessionTimelineMessage & { messageId: number; role: 'user' } {
+  return Boolean(message.canRetry && message.messageId && message.role === 'user')
 }
 
 function Toast({ message }: { message: string }) {
@@ -234,6 +237,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [narrativeStyleId, setNarrativeStyleId] = useState<NarrativeStyleId>('default')
   const [composerText, setComposerText] = useState('')
   const [localMessages, setLocalMessages] = useState<SessionTimelineMessage[]>([])
+  const [optimisticTruncateFromTurn, setOptimisticTruncateFromTurn] = useState<number | null>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
@@ -284,9 +288,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   )
 
   const visibleMessages = useMemo(() => {
-    return [...baseMessages, ...localMessages]
+    const historyMessages = optimisticTruncateFromTurn === null
+      ? baseMessages
+      : baseMessages.filter((message) => message.turnId < optimisticTruncateFromTurn)
+
+    return [...historyMessages, ...localMessages]
       .sort((first, second) => first.turnId - second.turnId || (first.seqInTurn ?? 0) - (second.seqInTurn ?? 0))
-  }, [baseMessages, localMessages])
+  }, [baseMessages, localMessages, optimisticTruncateFromTurn])
 
   const lastTurnId = useMemo(
     () => Math.max(0, ...visibleMessages.map((message) => message.turnId)),
@@ -303,6 +311,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     setLocalMessages([])
+    setOptimisticTruncateFromTurn(null)
     setEditingMessageId(null)
     setEditDraft('')
     setComposerText('')
@@ -375,6 +384,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         queryClient.invalidateQueries({ queryKey: ['play-session-status-tables', sessionId] }),
       ])
       setLocalMessages([])
+      setOptimisticTruncateFromTurn(null)
       setEditingMessageId(null)
       setEditDraft('')
       return true
@@ -388,131 +398,46 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setConfirmRequest(request)
   }, [])
 
-  const performRetry = useCallback(async (message: SessionTimelineMessage) => {
-    if (!message.canRetry) {
-      showToast('当前回合不可重试')
-      return
+  const showRegenerationPreview = useCallback((message: SessionTimelineMessage & { role: 'user' }, text: string) => {
+    const turnId = message.turnId
+    const previewUserMessage: SessionTimelineMessage = {
+      id: `local-regenerate-user-${turnId}-${crypto.randomUUID()}`,
+      turnId,
+      seqInTurn: 1,
+      role: 'user',
+      content: text,
+      createdAt: new Date().toISOString(),
+      speaker: message.speaker,
+      status: 'local',
+      canCopy: true,
+      canRetry: false,
+      canEdit: false,
+      canDelete: false,
     }
-    showToast(`正在重试 turn #${message.turnId}`)
-    try {
-      await retrySessionTurn(sessionId, message.turnId)
-      const refreshed = await refreshSessionData({ silent: true })
-      showToast(refreshed ? `已重试 turn #${message.turnId}` : '重试完成，但刷新失败，请手动刷新页面')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '重试失败')
-    }
-  }, [refreshSessionData, sessionId, showToast])
+    const assistantMessage = streamPlaceholder(turnId)
 
-  const handleRetry = useCallback((message: SessionTimelineMessage) => {
-    if (!message.canRetry) {
-      showToast('当前回合不可重试')
-      return
-    }
-    if (message.turnId >= lastTurnId) {
-      void performRetry(message)
-      return
-    }
-    requestConfirm({
-      title: '确认重试',
-      heading: '该操作会影响后续回合',
-      body: `重试 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn，并重新生成回应。`,
-      confirmLabel: '确认重试',
-      onConfirm: () => {
-        void performRetry(message)
-      },
-    })
-  }, [lastTurnId, performRetry, requestConfirm, showToast])
+    setOptimisticTruncateFromTurn(turnId)
+    setLocalMessages((current) => [
+      ...current.filter((item) => item.turnId < turnId),
+      previewUserMessage,
+      assistantMessage,
+    ])
+    setEditingMessageId(null)
+    setEditDraft('')
+    return assistantMessage
+  }, [])
 
-  const handleCopy = useCallback((message: SessionTimelineMessage) => {
-    if (!message.content.trim()) {
-      showToast('当前消息没有可复制内容')
-      return
-    }
-    navigator.clipboard?.writeText(message.content).then(
-      () => showToast('已复制当前消息'),
-      () => showToast('复制失败，请手动选择文本'),
-    )
-  }, [showToast])
+  const restoreRegenerationPreview = useCallback(() => {
+    setOptimisticTruncateFromTurn(null)
+    setLocalMessages([])
+  }, [])
 
-  const handleStartEdit = useCallback((message: SessionTimelineMessage) => {
-    if (!message.canEdit || !message.messageId) {
-      showToast('当前消息不可编辑')
-      return
-    }
-    setEditingMessageId(message.id)
-    setEditDraft(message.content)
-  }, [showToast])
-
-  const performSendEdited = useCallback(async (message: SessionTimelineMessage, text: string) => {
-    if (!message.canEdit || !message.messageId) {
-      showToast('当前消息不可编辑')
-      return
-    }
-    showToast('正在发送编辑')
-    try {
-      await updateSessionMessage(sessionId, message.messageId, text)
-      const refreshed = await refreshSessionData({ silent: true })
-      showToast(refreshed ? '已发送编辑' : '编辑已提交，但刷新失败，请手动刷新页面')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '编辑失败')
-    }
-  }, [refreshSessionData, sessionId, showToast])
-
-  const handleSendEdit = useCallback((message: SessionTimelineMessage) => {
-    if (!message.canEdit || !message.messageId) {
-      showToast('当前消息不可编辑')
-      return
-    }
-    const text = editDraft.trim()
-    if (!text) {
-      showToast('编辑内容不能为空')
-      return
-    }
-    if (message.turnId < lastTurnId) {
-      requestConfirm({
-        title: '确认发送编辑',
-        heading: '该操作会影响后续回合',
-        body: `发送编辑后的 turn #${message.turnId} 会影响后续回合；用户消息会从该 turn 重新生成，其他消息会写入修改后的内容。`,
-        confirmLabel: '确认发送',
-        onConfirm: () => {
-          void performSendEdited(message, text)
-        },
-      })
-      return
-    }
-    void performSendEdited(message, text)
-  }, [editDraft, lastTurnId, performSendEdited, requestConfirm, showToast])
-
-  const performDelete = useCallback(async (message: SessionTimelineMessage) => {
-    if (!message.canDelete || !message.messageId) {
-      showToast('当前消息不可删除')
-      return
-    }
-    showToast('正在删除消息')
-    try {
-      await deleteSessionMessage(sessionId, message.messageId)
-      const refreshed = await refreshSessionData({ silent: true })
-      showToast(refreshed ? '已删除消息' : '删除已提交，但刷新失败，请手动刷新页面')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '删除失败')
-    }
-  }, [refreshSessionData, sessionId, showToast])
-
-  const handleDelete = useCallback((message: SessionTimelineMessage) => {
-    if (!message.canDelete) {
-      showToast('当前消息不可删除')
-      return
-    }
-    requestConfirm({
-      title: '确认删除',
-      heading: '删除当前消息',
-      body: '删除会从当前会话历史中移除这条消息。',
-      confirmLabel: '确认删除',
-      onConfirm: () => {
-        void performDelete(message)
-      },
-    })
-  }, [performDelete, requestConfirm, showToast])
+  const clearRegenerationPreviewAfterTruncate = useCallback((turnId: number) => {
+    setOptimisticTruncateFromTurn(turnId)
+    setLocalMessages([])
+    setEditingMessageId(null)
+    setEditDraft('')
+  }, [])
 
   const appendStreamEvent = useCallback((event: CurrentAgentStreamEvent, assistantMessageId: string, turnId: number) => {
     if (event.kind === 'text') {
@@ -606,6 +531,200 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       ])
     }
   }, [])
+
+  const performRegeneration = useCallback(async ({
+    message,
+    text,
+    pendingToast,
+    successToast,
+    failureToast,
+  }: {
+    message: SessionTimelineMessage & { messageId: number; role: 'user' }
+    text: string
+    pendingToast: string
+    successToast: string
+    failureToast: string
+  }) => {
+    if (sending) {
+      showToast('当前仍在生成，请稍后再试')
+      return
+    }
+
+    const assistantMessage = showRegenerationPreview(message, text)
+    const controller = new AbortController()
+    let truncated = false
+    let streamFailure: string | null = null
+    abortRef.current = controller
+    setSending(true)
+    showToast(pendingToast)
+
+    try {
+      await truncateSessionTurn(sessionId, message.turnId)
+      truncated = true
+      await consumeChatStream(
+        {
+          sessionId,
+          text,
+          mode: inputMode,
+        },
+        {
+          signal: controller.signal,
+          onEvent: (event) => {
+            appendStreamEvent(event, assistantMessage.id, message.turnId)
+            if (event.kind === 'error') streamFailure = event.content ?? failureToast
+          },
+        },
+      )
+      if (streamFailure) throw new Error(streamFailure)
+      const refreshed = await refreshSessionData({ silent: true })
+      showToast(refreshed ? successToast : `${successToast}，但刷新失败，请手动刷新页面`)
+    } catch (error) {
+      if (!truncated) {
+        restoreRegenerationPreview()
+      } else {
+        clearRegenerationPreviewAfterTruncate(message.turnId)
+        await refreshSessionData({ silent: true })
+      }
+      showToast(error instanceof Error ? error.message : failureToast)
+    } finally {
+      setSending(false)
+      abortRef.current = null
+    }
+  }, [
+    appendStreamEvent,
+    clearRegenerationPreviewAfterTruncate,
+    inputMode,
+    refreshSessionData,
+    restoreRegenerationPreview,
+    sending,
+    sessionId,
+    showRegenerationPreview,
+    showToast,
+  ])
+
+  const performRetry = useCallback(async (message: SessionTimelineMessage) => {
+    if (!canRetryMessage(message)) {
+      showToast('当前回合不可重试')
+      return
+    }
+    await performRegeneration({
+      message,
+      text: message.content,
+      pendingToast: `正在重试 turn #${message.turnId}`,
+      successToast: `已重试 turn #${message.turnId}`,
+      failureToast: '重试失败',
+    })
+  }, [performRegeneration, showToast])
+
+  const handleRetry = useCallback((message: SessionTimelineMessage) => {
+    if (!canRetryMessage(message)) {
+      showToast('当前回合不可重试')
+      return
+    }
+    if (message.turnId >= lastTurnId) {
+      void performRetry(message)
+      return
+    }
+    requestConfirm({
+      title: '确认重试',
+      heading: '该操作会影响后续回合',
+      body: `重试 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn，并重新生成回应。`,
+      confirmLabel: '确认重试',
+      onConfirm: () => {
+        void performRetry(message)
+      },
+    })
+  }, [lastTurnId, performRetry, requestConfirm, showToast])
+
+  const handleCopy = useCallback((message: SessionTimelineMessage) => {
+    if (!message.content.trim()) {
+      showToast('当前消息没有可复制内容')
+      return
+    }
+    navigator.clipboard?.writeText(message.content).then(
+      () => showToast('已复制当前消息'),
+      () => showToast('复制失败，请手动选择文本'),
+    )
+  }, [showToast])
+
+  const handleStartEdit = useCallback((message: SessionTimelineMessage) => {
+    if (!canEditMessage(message)) {
+      showToast('当前消息不可编辑')
+      return
+    }
+    setEditingMessageId(message.id)
+    setEditDraft(message.content)
+  }, [showToast])
+
+  const performSendEdited = useCallback(async (message: SessionTimelineMessage, text: string) => {
+    if (!canEditMessage(message)) {
+      showToast('当前消息不可编辑')
+      return
+    }
+    await performRegeneration({
+      message,
+      text,
+      pendingToast: '正在发送编辑',
+      successToast: '已发送编辑',
+      failureToast: '编辑失败',
+    })
+  }, [performRegeneration, showToast])
+
+  const handleSendEdit = useCallback((message: SessionTimelineMessage) => {
+    if (!canEditMessage(message)) {
+      showToast('当前消息不可编辑')
+      return
+    }
+    const text = editDraft.trim()
+    if (!text) {
+      showToast('编辑内容不能为空')
+      return
+    }
+    if (message.turnId < lastTurnId) {
+      requestConfirm({
+        title: '确认发送编辑',
+        heading: '该操作会影响后续回合',
+        body: `发送编辑后的 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn，并从这条用户消息重新生成回应。`,
+        confirmLabel: '确认发送',
+        onConfirm: () => {
+          void performSendEdited(message, text)
+        },
+      })
+      return
+    }
+    void performSendEdited(message, text)
+  }, [editDraft, lastTurnId, performSendEdited, requestConfirm, showToast])
+
+  const performDelete = useCallback(async (message: SessionTimelineMessage) => {
+    if (!message.canDelete || !message.messageId) {
+      showToast('当前消息不可删除')
+      return
+    }
+    showToast('正在删除消息')
+    try {
+      await deleteSessionMessage(sessionId, message.messageId)
+      const refreshed = await refreshSessionData({ silent: true })
+      showToast(refreshed ? '已删除消息' : '删除已提交，但刷新失败，请手动刷新页面')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '删除失败')
+    }
+  }, [refreshSessionData, sessionId, showToast])
+
+  const handleDelete = useCallback((message: SessionTimelineMessage) => {
+    if (!message.canDelete) {
+      showToast('当前消息不可删除')
+      return
+    }
+    requestConfirm({
+      title: '确认删除',
+      heading: '删除当前消息',
+      body: '删除会从当前会话历史中移除这条消息。',
+      confirmLabel: '确认删除',
+      onConfirm: () => {
+        void performDelete(message)
+      },
+    })
+  }, [performDelete, requestConfirm, showToast])
 
   const handleSend = useCallback(async () => {
     const text = composerText.trim()

@@ -14,6 +14,7 @@ from typing import cast
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from agent_service.schemas import (
     AgentCommandRequest,
@@ -25,7 +26,6 @@ from agent_service.schemas import (
     AgentHistoryResponse,
     AgentHealthResponse,
     AgentMessageRequest,
-    AgentMessageUpdateRequest,
     AgentReplyPayload,
     AgentSessionCreatePayload,
     AgentSessionCreateRequest,
@@ -183,11 +183,11 @@ async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
     return _reply_to_dict(reply)
 
 
-@app.post(f"{_service_prefix()}/chat/turns/{{turn_id}}/retry")
-async def retry_turn(turn_id: int, body: AgentSessionMutationRequest) -> AgentReplyPayload:
+@app.post(f"{_service_prefix()}/chat/session/reload-history")
+async def reload_history(body: AgentSessionMutationRequest) -> JsonObject:
     agent = _get_agent(body.session_id)
     try:
-        reply = await agent.retry_turn(turn_id)
+        await agent.reload_history()
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except InvalidTurnMetadataError as exc:
@@ -195,15 +195,15 @@ async def retry_turn(turn_id: int, body: AgentSessionMutationRequest) -> AgentRe
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Retry failed: {exc}") from exc
-    return _reply_to_dict(reply)
+        raise HTTPException(status_code=400, detail=f"History reload failed: {exc}") from exc
+    return {"status": "reloaded", "session_id": body.session_id}
 
 
-@app.patch(f"{_service_prefix()}/chat/messages/{{message_id}}")
-async def update_message(message_id: int, body: AgentMessageUpdateRequest) -> JsonObject:
+@app.post(f"{_service_prefix()}/chat/session/turns/{{turn_id}}/truncate")
+async def truncate_history(turn_id: int, body: AgentSessionMutationRequest) -> JsonObject:
     agent = _get_agent(body.session_id)
     try:
-        result = await agent.update_message_content(message_id, body.content)
+        result = await agent.truncate_history_from_turn(turn_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except InvalidTurnMetadataError as exc:
@@ -211,8 +211,24 @@ async def update_message(message_id: int, body: AgentMessageUpdateRequest) -> Js
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Message update failed: {exc}") from exc
-    return cast(JsonObject, {"status": "updated", **result})
+        raise HTTPException(status_code=400, detail=f"History truncate failed: {exc}") from exc
+
+    logger.info(
+        "[AgentService] history truncate result: session_id={}, turn_id={}, removed={}, sync_status={}",
+        body.session_id,
+        turn_id,
+        result.get("removed"),
+        result.get("agent_sync_status"),
+    )
+    if result.get("agent_sync_status") != "synced":
+        logger.warning(
+            "[AgentService] dropping cached agent after truncate sync issue: session_id={}, turn_id={}, sync_status={}",
+            body.session_id,
+            turn_id,
+            result.get("agent_sync_status"),
+        )
+        AgentManager.drop_session(body.session_id)
+    return result
 
 
 @app.delete(f"{_service_prefix()}/chat/messages/{{message_id}}")

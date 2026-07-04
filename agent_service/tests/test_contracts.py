@@ -21,11 +21,18 @@ class FakeAgent:
     async def send(self, message: str) -> AgentReply:
         return AgentReply(text=f"reply:{message}")
 
-    async def retry_turn(self, turn_id: int) -> AgentReply:
-        return AgentReply(text=f"retry:{turn_id}")
+    async def reload_history(self) -> None:
+        self.history = [Message(Role.USER, "reloaded", turn_id=1, seq_in_turn=1)]
 
-    async def update_message_content(self, message_id: int, content: str) -> dict[str, object]:
-        return {"regenerated": False, "affected_turn_id": 1, "message_id": message_id, "content": content}
+    async def truncate_history_from_turn(self, turn_id: int) -> dict[str, object]:
+        self.history = [message for message in self.history if message.turn_id < turn_id]
+        return {
+            "status": "truncated",
+            "session_id": self._session_id,
+            "turn_id": turn_id,
+            "removed": 1,
+            "agent_sync_status": "synced",
+        }
 
     async def delete_message(self, message_id: int) -> Message:
         return Message(Role.USER, "deleted", uid=message_id, turn_id=1, seq_in_turn=1)
@@ -86,6 +93,27 @@ class FakeAgentManager:
     @classmethod
     def drop_session(cls, session_id: str) -> None:
         cls.instances.pop(session_id, None)
+
+
+class FailedSyncAgent(FakeAgent):
+    async def truncate_history_from_turn(self, turn_id: int) -> dict[str, object]:
+        return {
+            "status": "truncated",
+            "session_id": self._session_id,
+            "turn_id": turn_id,
+            "removed": 1,
+            "agent_sync_status": "failed",
+        }
+
+
+class FailedSyncAgentManager(FakeAgentManager):
+    instances: dict[str, FakeAgent] = {}
+
+    @classmethod
+    def get_or_create(cls, session_id: str):
+        if session_id not in cls.instances:
+            cls.instances[session_id] = FailedSyncAgent(session_id)
+        return cls.instances[session_id]
 
 
 class FakeCatalog:
@@ -303,20 +331,22 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert send.status_code == 200
         assert send.json()["reply"] == "reply:go"
 
-        retry = client.post(
-            "/agent/v1/chat/turns/1/retry",
+        reload_history = client.post(
+            "/agent/v1/chat/session/reload-history",
             json={"session_id": "s1"},
         )
-        assert retry.status_code == 200
-        assert retry.json()["reply"] == "retry:1"
+        assert reload_history.status_code == 200
+        assert reload_history.json()["status"] == "reloaded"
+        assert FakeAgentManager.instances["s1"].history[0].content == "reloaded"
 
-        update = client.patch(
-            "/agent/v1/chat/messages/1",
-            json={"session_id": "s1", "content": "edited"},
+        truncate = client.post(
+            "/agent/v1/chat/session/turns/1/truncate",
+            json={"session_id": "s1"},
         )
-        assert update.status_code == 200
-        assert update.json()["status"] == "updated"
-        assert update.json()["message_id"] == 1
+        assert truncate.status_code == 200
+        assert truncate.json()["status"] == "truncated"
+        assert truncate.json()["turn_id"] == 1
+        assert truncate.json()["removed"] == 1
 
         delete = client.delete(
             "/agent/v1/chat/messages/1",
@@ -357,3 +387,23 @@ def test_agent_service_history_rejects_invalid_turn_metadata(monkeypatch) -> Non
 
     assert history.status_code == 409
     assert "history[1]" in history.json()["detail"]
+
+
+def test_agent_service_drops_cached_agent_when_truncate_sync_fails(monkeypatch) -> None:
+    monkeypatch.setattr(service_main, "AgentManager", FailedSyncAgentManager)
+    monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
+    monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
+    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
+    FakeCatalog.reset()
+    FailedSyncAgentManager.reset()
+
+    with TestClient(service_main.app) as client:
+        response = client.post(
+            "/agent/v1/chat/session/turns/1/truncate",
+            json={"session_id": "s1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "truncated"
+    assert response.json()["agent_sync_status"] == "failed"
+    assert "s1" not in FailedSyncAgentManager.instances

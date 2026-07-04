@@ -26,20 +26,10 @@ export function getSessionHistory(sessionId: string) {
   return playApiFetch<Turn[]>(`/sessions/${encodeURIComponent(sessionId)}/history`)
 }
 
-export function retrySessionTurn(sessionId: string, turnId: number) {
-  return playApiFetch<{ status: string }>(
-    `/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/retry`,
+export function truncateSessionTurn(sessionId: string, turnId: number) {
+  return playApiFetch<{ status: string; turnId: number; removed: number }>(
+    `/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/truncate`,
     { method: 'POST' },
-  )
-}
-
-export function updateSessionMessage(sessionId: string, messageId: number, content: string) {
-  return playApiFetch<{ status: string }>(
-    `/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({ content }),
-    },
   )
 }
 

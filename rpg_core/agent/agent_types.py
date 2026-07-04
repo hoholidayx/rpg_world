@@ -227,6 +227,8 @@ class QueueKind(StrEnum):
     """``send_stream()`` 请求。"""
     COMMAND = "command"
     """``execute_command()`` 请求。"""
+    TRUNCATE_HISTORY = "truncate_history"
+    """截断当前会话历史。"""
 
 
 @dataclass
@@ -243,12 +245,15 @@ class QueueItem:
         用于返回结果的 Future。send → ``Future[AgentReply]``，command → ``Future[CommandResult]``。
     event_queue:
         仅 ``send_stream`` 使用：消费者向此队列推入事件，主协程从中读取并 yield。
+    turn_id:
+        仅历史截断工作项使用。
     """
 
     kind: QueueKind
     user_input: str
     future: Future
     event_queue: AsyncQueue | None = None
+    turn_id: int | None = None
 
 
 class _StreamSentinel:

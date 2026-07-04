@@ -82,6 +82,26 @@ async def test_client_send_uses_standard_payload() -> None:
     )
 
 
+async def test_client_reload_history_uses_standard_payload() -> None:
+    result = await AgentClient(base_url="http://agent").reload_history("s1")
+    assert result == {"reply": "ok"}
+    assert FakeAsyncClient.calls[-1] == (
+        "POST",
+        "http://agent/chat/session/reload-history",
+        {"json": {"session_id": "s1"}},
+    )
+
+
+async def test_client_truncate_turn_uses_standard_payload() -> None:
+    result = await AgentClient(base_url="http://agent").truncate_turn("s1", 2)
+    assert result == {"reply": "ok"}
+    assert FakeAsyncClient.calls[-1] == (
+        "POST",
+        "http://agent/chat/session/turns/2/truncate",
+        {"json": {"session_id": "s1"}},
+    )
+
+
 async def test_client_session_crud_uses_agent_service_contract() -> None:
     client = AgentClient(base_url="http://agent")
     await client.ensure_session("ws", 1, session_id="s1", title="Default")

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from agent_service.client import AgentClientError
 from play_api import agent_client
 from play_api.main import app
 from play_api.delete_tokens import reset_delete_confirmation_tokens
-from play_api.routers.sessions import _turns_from_history
+from play_api.routers.sessions import _agent_call, _turns_from_history
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 
 
@@ -68,9 +70,20 @@ def test_history_api_source_rejects_missing_turn_metadata() -> None:
         )
 
 
+async def test_agent_call_preserves_agent_validation_status() -> None:
+    async def fail() -> None:
+        raise AgentClientError("invalid turn", status_code=422)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _agent_call(fail())
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "invalid turn"
+
+
 class _FakeAgentClient:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, str]] = []
+        self.calls: list[tuple[str, ...]] = []
 
     async def get_history(self, session_id: str) -> dict[str, object]:
         self.calls.append(("history", session_id))
@@ -137,13 +150,19 @@ class _FakeAgentClient:
         self.calls.append(("send", session_id))
         return {"reply": f"agent reply: {text}"}
 
-    async def retry_turn(self, session_id: str, turn_id: int) -> dict[str, object]:
-        self.calls.append(("retry", session_id, str(turn_id)))
-        return {"reply": f"retry:{turn_id}"}
+    async def reload_history(self, session_id: str) -> dict[str, object]:
+        self.calls.append(("reload-history", session_id))
+        return {"status": "reloaded"}
 
-    async def update_message(self, session_id: str, message_id: int, content: str) -> dict[str, object]:
-        self.calls.append(("update-message", session_id, str(message_id)))
-        return {"status": "updated", "content": content}
+    async def truncate_turn(self, session_id: str, turn_id: int) -> dict[str, object]:
+        self.calls.append(("truncate-turn", session_id, str(turn_id)))
+        return {
+            "status": "truncated",
+            "session_id": session_id,
+            "turn_id": turn_id,
+            "removed": 2,
+            "agent_sync_status": "synced",
+        }
 
     async def delete_message(self, session_id: str, message_id: int) -> dict[str, object]:
         self.calls.append(("delete-message", session_id, str(message_id)))
@@ -317,17 +336,11 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert turn.json()["status"] == "completed"
     assert "hello" in turn.json()["reply"]
 
-    retry = client.post(f"/play-api/v1/sessions/{demo_session_id}/turns/1/retry")
-    assert retry.status_code == 200
-    assert retry.json()["status"] == "completed"
-    assert retry.json()["turnId"] == 1
-
-    update_message = client.patch(
-        f"/play-api/v1/sessions/{demo_session_id}/messages/1",
-        json={"content": "edited"},
-    )
-    assert update_message.status_code == 200
-    assert update_message.json()["status"] == "updated"
+    truncate = client.post(f"/play-api/v1/sessions/{demo_session_id}/turns/2/truncate")
+    assert truncate.status_code == 200
+    assert truncate.json()["status"] == "truncated"
+    assert truncate.json()["turnId"] == 2
+    assert truncate.json()["removed"] == 2
 
     delete_message = client.delete(f"/play-api/v1/sessions/{demo_session_id}/messages/1")
     assert delete_message.status_code == 200
@@ -336,8 +349,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert ("commands", demo_session_id) in fake_agent.calls
     assert ("context-preview", demo_session_id) in fake_agent.calls
     assert ("send", demo_session_id) in fake_agent.calls
-    assert ("retry", demo_session_id, "1") in fake_agent.calls
-    assert ("update-message", demo_session_id, "1") in fake_agent.calls
+    assert ("truncate-turn", demo_session_id, "2") in fake_agent.calls
     assert ("delete-message", demo_session_id, "1") in fake_agent.calls
 
     characters = client.get("/play-api/v1/workspaces/demo_workspace/characters")

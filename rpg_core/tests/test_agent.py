@@ -63,6 +63,57 @@ async def test_queue_consumer_surfaces_stream_errors(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_queue_consumer_serializes_truncate_after_send() -> None:
+    agent = object.__new__(RPGGameAgent)
+    agent._queue = asyncio.Queue()
+    agent._cmd_dispatcher = None
+    order: list[str] = []
+    release_send = asyncio.Event()
+
+    async def send_impl(_text: str) -> AgentReply:
+        order.append("send-start")
+        await release_send.wait()
+        order.append("send-end")
+        return AgentReply(text="ok")
+
+    def truncate_impl(turn_id: int) -> dict[str, object]:
+        order.append(f"truncate-{turn_id}")
+        return {"status": "truncated", "turn_id": turn_id, "removed": 1}
+
+    agent._send_impl = send_impl
+    agent._send_stream_impl = AsyncMock()
+    agent._truncate_history_from_turn_impl = truncate_impl
+
+    send_future = asyncio.get_running_loop().create_future()
+    truncate_future = asyncio.get_running_loop().create_future()
+    await agent._queue.put(QueueItem(kind=QueueKind.SEND, user_input="go", future=send_future))
+    await agent._queue.put(
+        QueueItem(
+            kind=QueueKind.TRUNCATE_HISTORY,
+            user_input="",
+            future=truncate_future,
+            turn_id=2,
+        )
+    )
+
+    consumer_task = asyncio.create_task(agent._queue_consumer())
+    try:
+        while order != ["send-start"]:
+            await asyncio.sleep(0)
+        assert not truncate_future.done()
+
+        release_send.set()
+        await asyncio.wait_for(truncate_future, timeout=1)
+
+        assert order == ["send-start", "send-end", "truncate-2"]
+        assert truncate_future.result()["status"] == "truncated"
+    finally:
+        consumer_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer_task
+
+
+@pytest.mark.asyncio
 async def test_send_impl_rejects_invalid_loaded_turn_metadata_before_new_turn():
     session = SessionManager(history_enabled=False)
     session.replace_history(

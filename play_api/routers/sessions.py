@@ -9,6 +9,7 @@ from typing import Literal, TypeVar
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_service.client import AgentClientError, AgentServiceUnavailable
@@ -91,10 +92,6 @@ class PlayChatRequest(BaseModel):
     mode: str = "ic"
 
 
-class PlayMessageUpdateRequest(BaseModel):
-    content: str
-
-
 class PlayScene(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -152,8 +149,8 @@ async def _agent_call(awaitable: Awaitable[T]) -> T:
     except AgentServiceUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AgentClientError as exc:
-        if exc.status_code == 409:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if exc.status_code in {404, 409, 422}:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -405,40 +402,27 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
     }
 
 
-@router.post("/{session_id}/turns/{turn_id}/retry")
-async def retry_turn(session_id: str, turn_id: int) -> dict[str, object]:
+@router.post("/{session_id}/turns/{turn_id}/truncate")
+async def truncate_turn(session_id: str, turn_id: int) -> dict[str, object]:
     session = await resolve_session_or_404(session_id)
     workspace, story_id, agent_session_id = _session_context(session)
     result = await _agent_call(
-        get_agent_backend().retry_turn(workspace, story_id, agent_session_id, turn_id)
+        get_agent_backend().truncate_turn(workspace, story_id, agent_session_id, turn_id)
+    )
+    logger.info(
+        "[PlayAPI] session truncate result: session_id={}, turn_id={}, removed={}, sync_status={}",
+        agent_session_id,
+        turn_id,
+        result.get("removed"),
+        result.get("agent_sync_status"),
     )
     return {
-        "status": "completed",
+        "status": "truncated",
         "workspace": workspace,
         "storyId": story_id,
         "sessionId": agent_session_id,
         "turnId": turn_id,
-        "agent": result,
-    }
-
-
-@router.patch("/{session_id}/messages/{message_id}")
-async def update_message(
-    session_id: str,
-    message_id: int,
-    payload: PlayMessageUpdateRequest,
-) -> dict[str, object]:
-    session = await resolve_session_or_404(session_id)
-    workspace, story_id, agent_session_id = _session_context(session)
-    result = await _agent_call(
-        get_agent_backend().update_message(workspace, story_id, agent_session_id, message_id, payload.content)
-    )
-    return {
-        "status": "updated",
-        "workspace": workspace,
-        "storyId": story_id,
-        "sessionId": agent_session_id,
-        "messageId": message_id,
+        "removed": int(result.get("removed") or 0),
         "agent": result,
     }
 

@@ -166,27 +166,26 @@ class AgentClient:
         )
         return cast(AgentReplyPayload, result)
 
-    async def retry_turn(
+    async def reload_history(
+        self,
+        session_id: str,
+    ) -> JsonObject:
+        result = await self._post(
+            "/chat/session/reload-history",
+            json={"session_id": session_id},
+        )
+        return result
+
+    async def truncate_turn(
         self,
         session_id: str,
         turn_id: int,
-    ) -> AgentReplyPayload:
+    ) -> JsonObject:
         result = await self._post(
-            f"/chat/turns/{int(turn_id)}/retry",
+            f"/chat/session/turns/{int(turn_id)}/truncate",
             json={"session_id": session_id},
         )
-        return cast(AgentReplyPayload, result)
-
-    async def update_message(
-        self,
-        session_id: str,
-        message_id: int,
-        content: str,
-    ) -> JsonObject:
-        return await self._patch(
-            f"/chat/messages/{int(message_id)}",
-            json={"session_id": session_id, "content": content},
-        )
+        return result
 
     async def delete_message(
         self,
@@ -252,19 +251,6 @@ class AgentClient:
         client = self._request_http_client()
         try:
             response = await client.post(self._url(path), json=json)
-            response.raise_for_status()
-            return _json_response(response)
-        except httpx.ConnectError as exc:
-            raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
-        except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
-        except httpx.HTTPError as exc:
-            raise AgentClientError(str(exc)) from exc
-
-    async def _patch(self, path: str, *, json: JsonObject) -> JsonObject:
-        client = self._request_http_client()
-        try:
-            response = await client.patch(self._url(path), json=json)
             response.raise_for_status()
             return _json_response(response)
         except httpx.ConnectError as exc:

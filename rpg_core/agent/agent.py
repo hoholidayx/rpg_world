@@ -178,6 +178,11 @@ class RPGGameAgent:
                     case QueueKind.COMMAND:
                         cmd_result = await self._cmd_dispatcher.dispatch(item.user_input)
                         item.future.set_result(cmd_result)
+                    case QueueKind.TRUNCATE_HISTORY:
+                        if item.turn_id is None:
+                            raise ValueError("turn_id is required")
+                        result = self._truncate_history_from_turn_impl(item.turn_id)
+                        item.future.set_result(result)
             except Exception as e:
                 logger.warning(_TAG + " consumer error on kind={}: {}", item.kind, e)
                 if item.kind == QueueKind.SEND_STREAM and item.event_queue is not None:
@@ -563,49 +568,84 @@ class RPGGameAgent:
         await self._queue.join()
         self._session.load()
 
-    async def retry_turn(self, turn_id: int) -> AgentReply:
-        """Truncate from *turn_id* and regenerate from that turn's user message."""
+    async def truncate_history_from_turn(self, turn_id: int) -> dict[str, object]:
+        """Queue a history truncation behind any active send/stream work."""
         await self._ensure_initialized()
-        await self._queue.join()
-        source_message = self._session.first_user_message_for_turn(turn_id)
-        if source_message is None:
-            raise FileNotFoundError(f"user message not found for turn: {turn_id}")
-        source_text = source_message.content
-        self._session.truncate_from_turn(turn_id)
-        return await self.send(source_text)
+        future: Future[dict[str, object]] = self._create_future()
+        await self._queue.put(
+            QueueItem(
+                kind=QueueKind.TRUNCATE_HISTORY,
+                user_input="",
+                future=future,
+                turn_id=int(turn_id),
+            )
+        )
+        logger.debug(
+            _TAG + " truncate_history_from_turn() enqueued: session_id={}, turn_id={}",
+            self._session_id,
+            turn_id,
+        )
+        return await future
 
-    async def update_message_content(self, message_id: int, content: str) -> dict[str, object]:
-        """Update one history message.
+    def _truncate_history_from_turn_impl(self, turn_id: int) -> dict[str, object]:
+        boundary_turn = int(turn_id)
+        if boundary_turn <= 0:
+            raise ValueError("turn_id must be positive")
+        if self._session.first_user_message_for_turn(boundary_turn) is None:
+            logger.warning(
+                _TAG + " truncate rejected: user message not found, session_id={}, turn_id={}",
+                self._session_id,
+                boundary_turn,
+            )
+            raise ValueError(f"user message not found for turn: {boundary_turn}")
 
-        User-message edits branch the story from the affected turn and then
-        regenerate through the normal send path. Non-user edits are persisted
-        directly and only reload the in-memory history.
-        """
-        await self._ensure_initialized()
-        await self._queue.join()
-        current = self._session.get_message(message_id)
-        if current is None:
-            raise FileNotFoundError(f"session message not found: {message_id}")
-        if current.is_user() and current.turn_id > 0:
-            self._session.truncate_from_turn(current.turn_id)
-            reply = await self.send(content)
+        before_count = len(self._session.history)
+        logger.info(
+            _TAG + " truncate starting: session_id={}, turn_id={}, history_count={}",
+            self._session_id,
+            boundary_turn,
+            before_count,
+        )
+        try:
+            removed = self._session.truncate_from_turn(boundary_turn)
+        except Exception as exc:
+            remaining_rows = self._history_rows()
+            if any(int(row.turn_id) == boundary_turn for row in remaining_rows):
+                raise
+            logger.warning(
+                _TAG + " truncate persisted but agent reload failed: session_id={}, turn_id={}, error={}",
+                self._session_id,
+                boundary_turn,
+                exc,
+            )
             return {
-                "regenerated": True,
-                "affected_turn_id": current.turn_id,
-                "reply": reply.text,
+                "status": "truncated",
+                "session_id": self._session_id,
+                "turn_id": boundary_turn,
+                "removed": max(0, before_count - len(remaining_rows)),
+                "agent_sync_status": "failed",
+                "agent_sync_error": str(exc),
             }
-        latest_turn_id = self._session.latest_turn_id(self._session.history)
-        updated = self._session.update_message_content(message_id, content)
-        truncated_from_turn = None
-        if updated.turn_id > 0 and updated.turn_id < latest_turn_id:
-            truncated_from_turn = updated.turn_id + 1
-            self._session.truncate_from_turn(truncated_from_turn)
+
+        logger.info(
+            _TAG + " truncate completed: session_id={}, turn_id={}, removed={}, remaining_count={}",
+            self._session_id,
+            boundary_turn,
+            removed,
+            len(self._session.history),
+        )
         return {
-            "regenerated": False,
-            "affected_turn_id": updated.turn_id,
-            "message_id": updated.uid,
-            "truncated_from_turn": truncated_from_turn,
+            "status": "truncated",
+            "session_id": self._session_id,
+            "turn_id": boundary_turn,
+            "removed": removed,
+            "agent_sync_status": "synced",
         }
+
+    def _history_rows(self):
+        from rpg_data.services import get_data_service_gateway
+
+        return get_data_service_gateway().messages.list(self._session_id)
 
     async def delete_message(self, message_id: int) -> Message:
         """Delete one history message and reload this cached agent."""

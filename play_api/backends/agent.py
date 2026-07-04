@@ -34,20 +34,13 @@ class AgentBackend:
         del workspace, story_id
         return await agent_client.get_agent_client().send(session_id, text)
 
-    async def retry_turn(self, workspace: str, story_id: int, session_id: str, turn_id: int) -> dict[str, object]:
+    async def reload_history(self, workspace: str, story_id: int, session_id: str) -> dict[str, object]:
         del workspace, story_id
-        return await agent_client.get_agent_client().retry_turn(session_id, turn_id)
+        return await agent_client.get_agent_client().reload_history(session_id)
 
-    async def update_message(
-        self,
-        workspace: str,
-        story_id: int,
-        session_id: str,
-        message_id: int,
-        content: str,
-    ) -> dict[str, object]:
+    async def truncate_turn(self, workspace: str, story_id: int, session_id: str, turn_id: int) -> dict[str, object]:
         del workspace, story_id
-        return await agent_client.get_agent_client().update_message(session_id, message_id, content)
+        return await agent_client.get_agent_client().truncate_turn(session_id, turn_id)
 
     async def delete_message(self, workspace: str, story_id: int, session_id: str, message_id: int) -> dict[str, object]:
         del workspace, story_id
