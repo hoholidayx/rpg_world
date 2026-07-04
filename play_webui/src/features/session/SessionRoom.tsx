@@ -54,13 +54,6 @@ const narrativeStyles: NarrativeStyle[] = [
   { id: 'options', label: '多给选项', prompt: '请在回应末尾给出多个可选择的行动方向。' },
 ]
 
-const quickActions = [
-  '我仔细观察周围最异常的细节，并判断它是否会带来危险。',
-  '我向在场角色追问刚才那句话里被刻意回避的部分。',
-  '我放慢动作，先确认随身物品、线索和当前处境。',
-  '我主动推进到下一处关键地点，留意途中是否有人跟踪。',
-]
-
 type DragState = {
   side: 'left' | 'right'
   startX: number
@@ -457,13 +450,6 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     })
   }, [requestConfirm, showToast])
 
-  const insertComposerText = useCallback((text: string) => {
-    setComposerText((current) => {
-      const prefix = current.trim() ? '\n' : ''
-      return `${current}${prefix}${text}`
-    })
-  }, [])
-
   const appendStreamEvent = useCallback((event: CurrentAgentStreamEvent, assistantMessageId: string, turnId: number) => {
     if (event.kind === 'text') {
       setLocalMessages((current) =>
@@ -714,7 +700,6 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
         <SessionTimeline
           messages={visibleMessages}
-          quickActions={quickActions}
           editingMessageId={editingMessageId}
           editDraft={editDraft}
           onEditDraftChange={setEditDraft}
@@ -728,7 +713,6 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             showToast('已取消编辑')
           }}
           onEditSend={handleSendEdit}
-          onInsertQuickAction={insertComposerText}
         />
 
         <SessionComposer

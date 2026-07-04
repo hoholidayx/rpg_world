@@ -1,4 +1,4 @@
-import { Copy, MoreHorizontal, Pencil, RotateCcw, Trash2, WandSparkles } from 'lucide-react'
+import { Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils/cn'
 import { SessionAvatar } from './SessionAvatar'
@@ -222,40 +222,8 @@ function TimelineMessage({
   )
 }
 
-function Suggestions({
-  quickActions,
-  onInsert,
-}: {
-  quickActions: string[]
-  onInsert: (text: string) => void
-}) {
-  return (
-    <section className="ml-[54px] max-w-3xl rounded-lg border border-amber-200 bg-amber-50 px-5 py-4">
-      <div className="flex items-center gap-2">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-amber-700">
-          <WandSparkles size={16} />
-        </span>
-        <h3 className="text-sm font-black text-slate-950">快捷行动</h3>
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {quickActions.map((action) => (
-          <button
-            key={action}
-            type="button"
-            onClick={() => onInsert(action)}
-            className="min-h-11 rounded-lg border border-amber-300 bg-white/80 px-3 py-2 text-left text-sm font-bold leading-5 text-amber-900 transition hover:border-amber-400 hover:bg-white"
-          >
-            {action}
-          </button>
-        ))}
-      </div>
-    </section>
-  )
-}
-
 export function SessionTimeline({
   messages,
-  quickActions,
   editingMessageId,
   editDraft,
   onEditDraftChange,
@@ -265,10 +233,8 @@ export function SessionTimeline({
   onDelete,
   onEditCancel,
   onEditSend,
-  onInsertQuickAction,
 }: {
   messages: SessionTimelineMessage[]
-  quickActions: string[]
   editingMessageId: string | null
   editDraft: string
   onEditDraftChange: (value: string) => void
@@ -278,7 +244,6 @@ export function SessionTimeline({
   onDelete: (message: SessionTimelineMessage) => void
   onEditCancel: () => void
   onEditSend: (message: SessionTimelineMessage) => void
-  onInsertQuickAction: (text: string) => void
 }) {
   const [openMoreId, setOpenMoreId] = useState<string | null>(null)
 
@@ -313,7 +278,6 @@ export function SessionTimeline({
                 onEditSend={() => onEditSend(message)}
               />
             ))}
-            <Suggestions quickActions={quickActions} onInsert={onInsertQuickAction} />
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-slate-200 bg-white px-6 py-12 text-center">
