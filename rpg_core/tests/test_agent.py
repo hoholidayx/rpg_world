@@ -131,6 +131,14 @@ async def test_send_impl_rejects_invalid_loaded_turn_metadata_before_new_turn():
         await agent._send_impl("go")
 
 
+def test_compose_stored_user_input_places_user_text_after_scene_close_tag() -> None:
+    scene_ctx = "[scene]\n位置: 北境森林\n[/scene]"
+
+    assert RPGGameAgent._compose_stored_user_input(scene_ctx, "我观察四周") == (
+        "[scene]\n位置: 北境森林\n[/scene]\n我观察四周"
+    )
+
+
 @pytest.mark.asyncio
 async def test_ensure_initialized_is_idempotent(monkeypatch):
     class FakeFixedLayerComposer:

@@ -47,6 +47,10 @@ export function formatMessageTime(value?: string | null) {
   return normalized.length >= 16 ? normalized.slice(11, 16) : normalized
 }
 
+export function stripLeadingSceneBlock(content: string) {
+  return content.replace(/^\s*\[scene\][\s\S]*?\[\/scene\][\t ]*(?:\r?\n)*/i, '')
+}
+
 export function sceneRows(scene?: Scene | null) {
   if (!scene) return []
   return [

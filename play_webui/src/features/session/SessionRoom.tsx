@@ -29,6 +29,7 @@ import {
   formatDateTime,
   getCharacterAvatarUrl,
   pickPlayerCharacter,
+  stripLeadingSceneBlock,
 } from './sessionRoomHelpers'
 import type {
   ConfirmRequest,
@@ -179,6 +180,7 @@ function mapHistoryToMessages({
       const role = timelineRole(message.role)
       const persistent = Boolean(message.messageId)
       const turnActionRole = role === 'user' || role === 'assistant'
+      const content = role === 'user' ? stripLeadingSceneBlock(message.content) : message.content
 
       return {
         id: message.messageId ? `history-${message.messageId}` : `history-${turn.turnId || turnIndex + 1}-${messageIndex}`,
@@ -186,12 +188,12 @@ function mapHistoryToMessages({
         turnId: message.turnId || turn.turnId || turnIndex + 1,
         seqInTurn: message.seqInTurn || messageIndex + 1,
         role,
-        content: message.content,
+        content,
         metadata: message.metadata,
         createdAt: message.createdAt,
         speaker: makeHistorySpeaker(message, playerCharacter),
         status: message.role === 'assistant' ? 'done' : undefined,
-        canCopy: Boolean(message.content.trim()),
+        canCopy: Boolean(content.trim()),
         canRetry: persistent && role === 'user',
         canEdit: persistent && role === 'user',
         canDelete: persistent && turnActionRole,

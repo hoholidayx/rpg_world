@@ -259,10 +259,7 @@ class RPGGameAgent:
 
             # Build scene context and embed into stored user message
             scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
-            if scene_ctx:
-                stored_input = f"{scene_ctx}\n\n{user_input}"
-            else:
-                stored_input = user_input
+            stored_input = self._compose_stored_user_input(scene_ctx, user_input)
 
             self._session.append(Role.USER, stored_input, turn_id=turn_id)
 
@@ -428,10 +425,7 @@ class RPGGameAgent:
 
             # ── Build scene context and embed into stored user message ──
             scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
-            if scene_ctx:
-                stored_input = f"{scene_ctx}\n\n{user_input}"
-            else:
-                stored_input = user_input
+            stored_input = self._compose_stored_user_input(scene_ctx, user_input)
 
             self._session.append(Role.USER, stored_input, turn_id=turn_id)
 
@@ -765,12 +759,7 @@ class RPGGameAgent:
 
         test_messages: list[Message] = list(self._session.history)
         if user_input or scene_ctx:
-            parts = []
-            if scene_ctx:
-                parts.append(scene_ctx)
-            if user_input:
-                parts.append(user_input)
-            stored_input = "\n\n".join(parts)
+            stored_input = self._compose_stored_user_input(scene_ctx, user_input)
             test_messages.append(Message(role=Role.USER, content=stored_input))
         elif not test_messages:
             test_messages.append(Message(role=Role.USER, content="(no input)"))
@@ -785,6 +774,12 @@ class RPGGameAgent:
             rp_module_sections=self._get_rp_module_runtime_sections(user_input=user_input),
         )
         return ctx
+
+    @staticmethod
+    def _compose_stored_user_input(scene_ctx: str | None, user_input: str) -> str:
+        if scene_ctx and user_input:
+            return f"{scene_ctx}\n{user_input}"
+        return scene_ctx or user_input
 
     # ── internals — context & tools ────────────────────────────────────
 
