@@ -11,12 +11,12 @@ import type { SessionSpeaker } from './sessionRoomTypes'
 function Brand({ collapsed }: { collapsed: boolean }) {
   return (
     <Link href="/" className="flex min-w-0 items-center gap-3">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-lg shadow-violet-200">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-lg shadow-violet-200 dark:shadow-violet-950/40">
         <Sparkles size={21} fill="currentColor" />
       </span>
       <span className={cn('min-w-0 leading-tight transition lg:block', collapsed ? 'lg:hidden' : '')}>
-        <strong className="block truncate text-sm font-black text-slate-950">RPG World Play</strong>
-        <span className="block truncate text-xs font-semibold text-slate-400">immersive session</span>
+        <strong className="block truncate text-sm font-black text-slate-950 dark:text-slate-100">RPG World Play</strong>
+        <span className="block truncate text-xs font-semibold text-slate-400 dark:text-slate-300">immersive session</span>
       </span>
     </Link>
   )
@@ -24,7 +24,7 @@ function Brand({ collapsed }: { collapsed: boolean }) {
 
 function EmptyState({ children }: { children: string }) {
   return (
-    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm font-semibold text-slate-400">
+    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm font-semibold text-slate-400 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300">
       {children}
     </div>
   )
@@ -42,10 +42,10 @@ function Panel({
   collapsed: boolean
 }) {
   return (
-    <section className={cn('overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm', collapsed ? 'lg:border-0 lg:bg-transparent lg:shadow-none' : '')}>
-      <header className={cn('flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3', collapsed ? 'lg:hidden' : '')}>
-        <h2 className="text-sm font-black text-slate-950">{title}</h2>
-        {meta ? <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-black text-teal-700">{meta}</span> : null}
+    <section className={cn('overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/25', collapsed ? 'lg:border-0 lg:bg-transparent lg:dark:bg-transparent lg:shadow-none' : '')}>
+      <header className={cn('flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800', collapsed ? 'lg:hidden' : '')}>
+        <h2 className="text-sm font-black text-slate-950 dark:text-slate-100">{title}</h2>
+        {meta ? <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-black text-teal-700 dark:bg-teal-500/15 dark:text-teal-200">{meta}</span> : null}
       </header>
       <div className={cn(collapsed ? 'lg:p-0' : '')}>{children}</div>
     </section>
@@ -67,7 +67,7 @@ function ScenePanel({
     <Panel title="当前场景" meta="scene" collapsed={collapsed}>
       {collapsed ? (
         <div className="hidden justify-center py-2 lg:flex">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-teal-50 text-xs font-black text-teal-700 ring-4 ring-teal-100">景</span>
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-teal-50 text-xs font-black text-teal-700 ring-4 ring-teal-100 dark:bg-teal-500/15 dark:text-teal-200 dark:ring-teal-500/20">景</span>
         </div>
       ) : (
         <div className="px-4 py-4">
@@ -77,8 +77,8 @@ function ScenePanel({
             <dl className="space-y-3 text-sm">
               {rows.map(([label, value]) => (
                 <div key={`${label}-${value}`} className="grid grid-cols-[48px_minmax(0,1fr)] gap-3">
-                  <dt className="text-slate-400">{label}</dt>
-                  <dd className="min-w-0 break-words font-semibold text-slate-800">{value}</dd>
+                  <dt className="text-slate-400 dark:text-slate-300">{label}</dt>
+                  <dd className="min-w-0 break-words font-semibold text-slate-800 dark:text-slate-200">{value}</dd>
                 </div>
               ))}
             </dl>
@@ -111,7 +111,7 @@ function CharacterPanel({
             }
             return <SessionAvatar key={character.id} speaker={speaker} className="mx-auto" />
           })}
-          {!characters.length ? <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-xs font-black text-slate-400">空</span> : null}
+          {!characters.length ? <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-xs font-black text-slate-400 dark:bg-slate-800 dark:text-slate-300">空</span> : null}
         </div>
       </Panel>
     )
@@ -131,11 +131,11 @@ function CharacterPanel({
           }
 
           return (
-            <article key={character.id} className="flex gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3">
+            <article key={character.id} className="flex gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 dark:border-slate-700 dark:bg-slate-950/50">
               <SessionAvatar speaker={speaker} className="h-12 w-12 rounded-lg ring-0" />
               <div className="min-w-0">
-                <h3 className="truncate text-sm font-black text-slate-950">{character.name}</h3>
-                <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-slate-500">{characterSummary(character)}</p>
+                <h3 className="truncate text-sm font-black text-slate-950 dark:text-slate-100">{character.name}</h3>
+                <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-slate-500 dark:text-slate-300">{characterSummary(character)}</p>
               </div>
             </article>
           )
@@ -147,19 +147,19 @@ function CharacterPanel({
 
 function StatusTableCard({ table }: { table: StatusTable }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <header className="border-b border-slate-100 bg-slate-50 px-3 py-2">
-        <h3 className="truncate text-sm font-black text-slate-950">{table.name}</h3>
-        {table.description ? <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">{table.description}</p> : null}
+    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950/50">
+      <header className="border-b border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="truncate text-sm font-black text-slate-950 dark:text-slate-100">{table.name}</h3>
+        {table.description ? <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400 dark:text-slate-300">{table.description}</p> : null}
       </header>
-      <div className="divide-y divide-slate-100">
+      <div className="divide-y divide-slate-100 dark:divide-slate-800">
         {table.rows.length ? table.rows.map((row) => (
           <dl key={`${table.id}-${row.key}`} className="grid grid-cols-[82px_minmax(0,1fr)] gap-3 px-3 py-2 text-sm leading-5">
-            <dt className="truncate text-slate-400">{row.key}</dt>
-            <dd className="min-w-0 break-words font-semibold text-slate-700">{row.value}</dd>
+            <dt className="truncate text-slate-400 dark:text-slate-300">{row.key}</dt>
+            <dd className="min-w-0 break-words font-semibold text-slate-700 dark:text-slate-200">{row.value}</dd>
           </dl>
         )) : (
-          <p className="px-3 py-4 text-sm font-semibold text-slate-400">暂无行</p>
+          <p className="px-3 py-4 text-sm font-semibold text-slate-400 dark:text-slate-300">暂无行</p>
         )}
       </div>
     </section>
@@ -178,14 +178,14 @@ function StatusTablesPanel({
   if (collapsed) {
     return (
       <section className="hidden py-2 lg:flex lg:justify-center">
-        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-50 text-xs font-black text-sky-700 ring-4 ring-sky-100">表</span>
+        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-50 text-xs font-black text-sky-700 ring-4 ring-sky-100 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/20">表</span>
       </section>
     )
   }
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-black text-slate-950">状态表</h2>
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/25">
+      <h2 className="text-sm font-black text-slate-950 dark:text-slate-100">状态表</h2>
       <div className="mt-4 space-y-3">
         {loading ? <EmptyState>正在加载状态表</EmptyState> : null}
         {!loading && tables.length === 0 ? <EmptyState>暂无状态表</EmptyState> : null}
@@ -217,18 +217,18 @@ export function SessionLeftRail({
   return (
     <aside
       className={cn(
-        'fixed inset-y-0 left-0 z-40 flex w-[min(340px,88vw)] flex-col border-r border-slate-200 bg-white/95 shadow-2xl shadow-slate-950/10 backdrop-blur transition-transform lg:static lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none',
+        'fixed inset-y-0 left-0 z-40 flex w-[min(340px,88vw)] flex-col border-r border-slate-200 bg-white/95 shadow-2xl shadow-slate-950/10 backdrop-blur transition-transform dark:border-slate-800 dark:bg-slate-950/95 dark:shadow-black/40 lg:static lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
         collapsed ? 'lg:px-3' : '',
       )}
     >
-      <header className={cn('flex h-[73px] shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5', collapsed ? 'lg:px-0 lg:justify-center' : '')}>
+      <header className={cn('flex h-[73px] shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800', collapsed ? 'lg:px-0 lg:justify-center' : '')}>
         <Brand collapsed={collapsed} />
         <div className={cn('flex items-center gap-2', collapsed ? 'lg:hidden' : '')}>
           <button
             type="button"
             onClick={onToggleCollapsed}
-            className="hidden h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:flex"
+            className="hidden h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:flex"
             aria-label="收起左侧栏"
             title="收起左侧栏"
           >
@@ -237,7 +237,7 @@ export function SessionLeftRail({
           <button
             type="button"
             onClick={onCloseMobile}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 lg:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 lg:hidden"
             aria-label="关闭场景栏"
           >
             <X size={17} />
@@ -248,7 +248,7 @@ export function SessionLeftRail({
         <button
           type="button"
           onClick={onToggleCollapsed}
-          className="mx-auto mt-4 hidden h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:flex"
+          className="mx-auto mt-4 hidden h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:flex"
           aria-label="展开左侧栏"
           title="展开左侧栏"
         >
@@ -281,21 +281,21 @@ export function SessionRightRail({
   return (
     <aside
       className={cn(
-        'fixed inset-y-0 right-0 z-40 flex w-[min(360px,88vw)] flex-col border-l border-slate-200 bg-white/95 shadow-2xl shadow-slate-950/10 backdrop-blur transition-transform lg:static lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none',
+        'fixed inset-y-0 right-0 z-40 flex w-[min(360px,88vw)] flex-col border-l border-slate-200 bg-white/95 shadow-2xl shadow-slate-950/10 backdrop-blur transition-transform dark:border-slate-800 dark:bg-slate-950/95 dark:shadow-black/40 lg:static lg:z-auto lg:h-screen lg:w-auto lg:translate-x-0 lg:shadow-none',
         mobileOpen ? 'translate-x-0' : 'translate-x-full',
         collapsed ? 'lg:px-3' : '',
       )}
     >
-      <header className={cn('flex h-[73px] shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5', collapsed ? 'lg:px-0 lg:justify-center' : '')}>
+      <header className={cn('flex h-[73px] shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800', collapsed ? 'lg:px-0 lg:justify-center' : '')}>
         <div className={cn('min-w-0', collapsed ? 'lg:hidden' : '')}>
-          <strong className="block truncate text-sm font-black text-slate-950">状态表</strong>
-          <span className="mt-1 block truncate text-xs font-semibold text-slate-400">runtime tables</span>
+          <strong className="block truncate text-sm font-black text-slate-950 dark:text-slate-100">状态表</strong>
+          <span className="mt-1 block truncate text-xs font-semibold text-slate-400 dark:text-slate-300">runtime tables</span>
         </div>
         <div className={cn('flex items-center gap-2', collapsed ? 'lg:hidden' : '')}>
           <button
             type="button"
             onClick={onToggleCollapsed}
-            className="hidden h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:flex"
+            className="hidden h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:flex"
             aria-label="收起右侧栏"
             title="收起右侧栏"
           >
@@ -304,7 +304,7 @@ export function SessionRightRail({
           <button
             type="button"
             onClick={onCloseMobile}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 lg:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 lg:hidden"
             aria-label="关闭状态栏"
           >
             <X size={17} />
@@ -315,7 +315,7 @@ export function SessionRightRail({
         <button
           type="button"
           onClick={onToggleCollapsed}
-          className="mx-auto mt-4 hidden h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:flex"
+          className="mx-auto mt-4 hidden h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:flex"
           aria-label="展开右侧栏"
           title="展开右侧栏"
         >

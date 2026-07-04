@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
+import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { listStoryCharacters } from '@/lib/api/characters'
 import { getCurrentScene } from '@/lib/api/scene'
 import {
@@ -711,14 +712,14 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       data-workspace={session?.workspace ?? ''}
       data-story-id={session?.storyId ?? ''}
       data-session-id={sessionId}
-      className="min-h-screen bg-[#f7f8fc] text-slate-900 lg:grid lg:h-screen lg:min-h-0 lg:grid-cols-[var(--session-grid-columns)] lg:overflow-hidden"
+      className="min-h-screen bg-[#f7f8fc] text-slate-900 dark:bg-[#0b1020] dark:text-slate-100 lg:grid lg:h-screen lg:min-h-0 lg:grid-cols-[var(--session-grid-columns)] lg:overflow-hidden"
     >
       {mobilePanel ? (
         <button
           type="button"
           aria-label="关闭侧栏"
           onClick={() => setMobilePanel(null)}
-          className="fixed inset-0 z-30 bg-slate-950/20 backdrop-blur-[1px] lg:hidden"
+          className="fixed inset-0 z-30 bg-slate-950/20 backdrop-blur-[1px] dark:bg-slate-950/60 lg:hidden"
         />
       ) : null}
 
@@ -737,21 +738,21 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         aria-label="调整左侧栏宽度"
         onPointerDown={startDrag('left')}
         disabled={leftCollapsed}
-        className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 disabled:cursor-default disabled:opacity-40 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
+        className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 disabled:cursor-default disabled:opacity-40 dark:bg-slate-800 dark:hover:bg-violet-500/10 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
       >
-        <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400" />
+        <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400 dark:bg-slate-600 dark:group-hover:bg-violet-400" />
       </button>
 
       <section className="flex min-h-screen min-w-0 flex-col lg:h-screen lg:min-h-0">
-        <header className="flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+        <header className="flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-black text-slate-950 sm:text-xl">{session?.title ?? '加载会话中'}</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-400">
+            <h1 className="truncate text-lg font-black text-slate-950 dark:text-slate-100 sm:text-xl">{session?.title ?? '加载会话中'}</h1>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-400 dark:text-slate-400">
               <span>
-                story <code className="font-mono text-slate-600">#{session?.storyId ?? '-'}</code>
+                story <code className="font-mono text-slate-600 dark:text-slate-300">#{session?.storyId ?? '-'}</code>
               </span>
               <span>
-                session <code className="font-mono text-slate-600">{session?.id ?? sessionId}</code>
+                session <code className="font-mono text-slate-600 dark:text-slate-300">{session?.id ?? sessionId}</code>
               </span>
               {session?.updatedAt ? <span>更新 {formatDateTime(session.updatedAt)}</span> : null}
             </div>
@@ -760,7 +761,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             <button
               type="button"
               onClick={() => setMobilePanel('left')}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:hidden"
               aria-label="打开场景栏"
             >
               <AlignJustify size={18} />
@@ -768,15 +769,16 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             <button
               type="button"
               onClick={() => setMobilePanel('right')}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 lg:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:hidden"
               aria-label="打开状态栏"
             >
               <TableProperties size={18} />
             </button>
+            <ThemeSwitcher menuAlign="right" menuSide="bottom" triggerSize="compact" />
             <button
               type="button"
               onClick={() => router.push('/sessions')}
-              className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+              className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
             >
               <LogOut size={16} />
               退出

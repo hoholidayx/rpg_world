@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Check, Monitor, Moon, Sun } from 'lucide-react'
+import { cn } from '@/lib/utils/cn'
 import { useThemeStore } from '@/stores/themeStore'
 import type { ThemePreference } from '@/stores/themeStore'
 
@@ -11,7 +12,17 @@ const themeOptions: Array<{ value: ThemePreference; label: string; description: 
   { value: 'system', label: '跟随系统', description: '自动匹配设备外观', icon: Monitor },
 ]
 
-export function ThemeSwitcher({ menuAlign = 'left' }: { menuAlign?: 'left' | 'right' }) {
+type ThemeSwitcherProps = {
+  menuAlign?: 'left' | 'right'
+  menuSide?: 'top' | 'bottom'
+  triggerSize?: 'default' | 'compact'
+}
+
+export function ThemeSwitcher({
+  menuAlign = 'left',
+  menuSide = 'top',
+  triggerSize = 'default',
+}: ThemeSwitcherProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const theme = useThemeStore((state) => state.theme)
@@ -33,7 +44,10 @@ export function ThemeSwitcher({ menuAlign = 'left' }: { menuAlign?: 'left' | 'ri
       <button
         type="button"
         onClick={() => setOpen((isOpen) => !isOpen)}
-        className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+        className={cn(
+          'flex items-center justify-center border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200',
+          triggerSize === 'compact' ? 'h-10 w-10 rounded-lg' : 'h-11 w-11 rounded-xl',
+        )}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="切换主题"
@@ -43,9 +57,9 @@ export function ThemeSwitcher({ menuAlign = 'left' }: { menuAlign?: 'left' | 'ri
       </button>
       {open ? (
         <div
-          className={`absolute bottom-full z-50 mb-3 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-200/70 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40 ${
+          className={`absolute z-50 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-200/70 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40 ${
             menuAlign === 'right' ? 'right-0' : 'left-0'
-          }`}
+          } ${menuSide === 'bottom' ? 'top-full mt-3' : 'bottom-full mb-3'}`}
           role="menu"
         >
           <p className="px-3 pb-2 pt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">主题模式</p>
