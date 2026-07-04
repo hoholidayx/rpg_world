@@ -144,7 +144,13 @@ function MessageBubble({
   }
 
   return (
-    <div className={cn('rounded-lg border px-5 py-4 text-sm leading-7', toneClass, isUser ? 'font-semibold' : '')}>
+    <div
+      className={cn(
+        'rounded-lg border px-5 py-4 text-sm leading-7 break-words whitespace-pre-wrap',
+        toneClass,
+        isUser ? 'ml-auto w-fit max-w-full text-left font-semibold' : '',
+      )}
+    >
       {message.content || (message.status === 'streaming' ? '正在生成回应...' : '')}
     </div>
   )
