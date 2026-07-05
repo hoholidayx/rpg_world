@@ -3,7 +3,11 @@
 from rpg_core.context.builder import RPGContextBuilder
 from rpg_core.context.config import RPGContextConfig
 from rpg_core.context.factory import build_rpg_context
-from rpg_core.context.fixed_layer import FixedLayerComposer, FixedLayerSection
+from rpg_core.context.fixed_layer import (
+    FixedLayerAssembler,
+    FixedLayerContributor,
+    FixedLayerSection,
+)
 from rpg_core.context.inspector import ContextInspector, LayerInfo
 from rpg_core.context.renderer import ContextRenderer
 from rpg_core.context.rpg_context import (
@@ -22,7 +26,8 @@ from rpg_core.context.rpg_context import (
 )
 
 __all__ = [
-    "FixedLayerComposer",
+    "FixedLayerAssembler",
+    "FixedLayerContributor",
     "FixedLayerData",
     "FixedLayerSection",
     "HotHistoryLayer",

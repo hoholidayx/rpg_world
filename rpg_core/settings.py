@@ -30,7 +30,7 @@ from llm_service.keys import (
     MEMORY_QUERY_PLANNER_BIZ_KEY,
     MEMORY_RERANK_BIZ_KEY,
 )
-from rpg_core.rp_module_constants import RP_MODULE_DICE_NAME, RP_MODULE_TEXT_OUTPUT_FORMAT_NAME
+from rpg_core.rp_module_constants import RP_MODULE_DICE_NAME
 from rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
 
 # Location of rpg_core process/business settings.
@@ -204,19 +204,11 @@ class DiceModuleSettings:
 
 
 @dataclass(frozen=True)
-class TextOutputFormatModuleSettings:
-    """Assistant text output format RP module settings."""
-
-    enabled: bool = True
-
-
-@dataclass(frozen=True)
 class RPModuleSettings:
     """RP Modules business settings."""
 
     enabled: bool = True
     dice: DiceModuleSettings = field(default_factory=DiceModuleSettings)
-    text_output_format: TextOutputFormatModuleSettings = field(default_factory=TextOutputFormatModuleSettings)
 
 
 class Settings(ProfiledYamlSettings):
@@ -299,9 +291,6 @@ class Settings(ProfiledYamlSettings):
         dice_raw = modules.get(RP_MODULE_DICE_NAME, {})
         if not isinstance(dice_raw, dict):
             dice_raw = {}
-        text_output_format_raw = modules.get(RP_MODULE_TEXT_OUTPUT_FORMAT_NAME, {})
-        if not isinstance(text_output_format_raw, dict):
-            text_output_format_raw = {}
 
         return RPModuleSettings(
             enabled=bool(raw.get("enabled", True)),
@@ -311,9 +300,6 @@ class Settings(ProfiledYamlSettings):
                 default_dc=int(dice_raw.get("default_dc", 12)),
                 max_dice_count=int(dice_raw.get("max_dice_count", 100)),
                 max_die_sides=int(dice_raw.get("max_die_sides", 1000)),
-            ),
-            text_output_format=TextOutputFormatModuleSettings(
-                enabled=bool(text_output_format_raw.get("enabled", True)),
             ),
         )
 

@@ -10,6 +10,7 @@ from rpg_core.context.config import ExtensionModuleDef, RPGContextConfig
 from rpg_core.context.fixed_layer import FixedLayerSection
 from rpg_core.context.rpg_context import (
     FixedLayerData,
+    LayerType,
     Message,
     RPGContext,
     RPModuleRuntimeSection,
@@ -17,19 +18,7 @@ from rpg_core.context.rpg_context import (
     Role,
     StatusTablesLayer,
     UserMessageLayer,
-    LayerType,
 )
-
-
-class FakeManager:
-    def __init__(self, entries) -> None:
-        self.entries = entries
-
-    def list_enabled_entries(self):
-        return list(self.entries)
-
-    def list_enabled_characters(self):
-        return list(self.entries)
 
 
 class FakePersistentStore:
@@ -71,7 +60,7 @@ class FakeStatusTracker:
 def _fake_render(template_name: str, **context: object) -> str:
     if template_name == "layers/fixed_layer.jinja":
         section_ids = ",".join(section.id for section in context["fixed_sections"])
-        return f"fixed|{section_ids}|{len(context['lorebook_entries'])}|{len(context['characters'])}"
+        return f"fixed|{section_ids}"
     if template_name == "modules/persistent_memory.jinja":
         return "pm|" + ",".join(section["content"] for section in context["persistent_memory"])
     if template_name == "modules/overall_summary.jinja":
@@ -133,10 +122,13 @@ def test_build_context_layers_and_user_extensions():
     ]
 
     ctx = builder.build(
-        fixed_sections=[FixedLayerSection(id="core", title="核心", content="prompt", priority=0)],
+        fixed_layer=FixedLayerData(
+            world_name="Test World",
+            sections=[FixedLayerSection(id="core", title="核心", content="prompt", priority=0)],
+            lorebook_entries=[{"name": "Lore"}],
+            characters=[{"name": "Alice"}],
+        ),
         messages=messages,
-        character_mgr=FakeManager([{"name": "Alice"}]),
-        lorebook_mgr=FakeManager([{"name": "Lore"}]),
         status_mgr=SimpleNamespace(
             list_context_tables=lambda: [{
                 "name": "世界状态",
@@ -158,7 +150,7 @@ def test_build_context_layers_and_user_extensions():
     assert [table["name"] for table in ctx.status_tables.tables] == ["世界状态"]
     assert ctx.user_message.before[0].template == "modules/user_reply_prefix.jinja"
     assert ctx.user_message.after[0].template == "modules/user_reply_suffix.jinja"
-    assert ctx.render_layer(LayerType.FIXED) == "fixed|core|1|1"
+    assert ctx.render_layer(LayerType.FIXED) == "fixed|core"
     assert ctx.render_layer(LayerType.PERSISTENT_MEMORY) == "pm|p1,p2"
     assert ctx.render_layer(LayerType.STATUS_TABLES) == "tables|世界状态"
 
@@ -176,7 +168,7 @@ def test_context_to_message_objects_renders_required_layers():
     rendered = ctx.to_message_objects()
 
     assert [m.role for m in rendered] == [Role.SYSTEM, Role.USER]
-    assert rendered[0].content == "fixed|core|0|0"
+    assert rendered[0].content == "fixed|core"
     assert rendered[1].content == "hi"
 
 

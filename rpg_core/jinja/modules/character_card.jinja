@@ -1,7 +1,4 @@
 {% if characters %}
-[character_card]
-## 角色卡
-
 {% for char in characters %}
 ### {{ char.name }}
 {% if char.personality %}
@@ -18,5 +15,4 @@
 {% endif %}
 
 {% endfor %}
-[/character_card]
 {% endif %}

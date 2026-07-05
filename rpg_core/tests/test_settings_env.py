@@ -230,7 +230,6 @@ def test_rp_module_settings_defaults(tmp_path: Path, monkeypatch) -> None:
     assert rp_modules.enabled is True
     assert rp_modules.dice.enabled is True
     assert rp_modules.dice.default_dc == 12
-    assert rp_modules.text_output_format.enabled is True
 
 
 def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> None:
@@ -252,8 +251,6 @@ def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> Non
         default_dc: 15
         max_dice_count: 8
         max_die_sides: 100
-      text_output_format:
-        enabled: false
   memory:\n""",
         ),
         encoding="utf-8",
@@ -270,7 +267,6 @@ def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> Non
     assert rp_modules.dice.default_dc == 15
     assert rp_modules.dice.max_dice_count == 8
     assert rp_modules.dice.max_die_sides == 100
-    assert rp_modules.text_output_format.enabled is False
 
 
 def test_memory_settings_merge_shared_openai_and_resolve_nested_llama_paths(tmp_path: Path, monkeypatch) -> None:

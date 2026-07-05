@@ -11,11 +11,8 @@ from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
 from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
-    RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
-    RP_OUTPUT_FORMAT_XML_TAGS,
 )
 from rpg_core.rp_modules.dice import DiceModule
-from rpg_core.rp_modules.text_output_format import TextOutputFormatModule
 from rpg_core.rp_modules.models import ModuleCommand, ModuleContextRequest, ModuleStatus
 from rpg_core.settings import RPModuleSettings
 
@@ -120,16 +117,6 @@ class RPModuleRegistry:
                     "max_die_sides": self.settings.dice.max_die_sides,
                 },
             )
-        if self.settings.text_output_format.enabled:
-            self._modules[RP_MODULE_TEXT_OUTPUT_FORMAT_NAME] = TextOutputFormatModule(
-                settings=self.settings.text_output_format,
-            )
-        else:
-            self._disabled_status[RP_MODULE_TEXT_OUTPUT_FORMAT_NAME] = ModuleStatus(
-                name=RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
-                enabled=False,
-                config_summary={"format": RP_OUTPUT_FORMAT_XML_TAGS},
-            )
         self._validate_tool_names()
 
     def _validate_tool_names(self) -> None:
@@ -184,5 +171,4 @@ class RPModuleRegistry:
     def _known_module_names(self) -> set[str]:
         return {
             RP_MODULE_DICE_NAME,
-            RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
         }

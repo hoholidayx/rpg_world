@@ -14,7 +14,13 @@ Usage::
 
 from __future__ import annotations
 
-from rpg_core.context.rendering import render_jinja_template
+from rpg_core.context.fixed_layer.contributors import (
+    build_character_section,
+    build_lorebook_section,
+)
+from rpg_core.context.fixed_layer.rendering import (
+    render_fixed_layer_sections,
+)
 
 
 class SubAgentContext:
@@ -70,19 +76,11 @@ class SubAgentContext:
     # ── internal renderers ────────────────────────────────────────────
 
     def _render_lorebook(self) -> str:
-        """渲染世界书段落（复用 builder.py 的 Jinja 模板）。"""
-        if not self._lorebook_entries:
-            return ""
-        return render_jinja_template(
-            "modules/lorebook.jinja",
-            lorebook_entries=self._lorebook_entries,
-        )
+        """渲染世界书段落。"""
+        section = build_lorebook_section(self._lorebook_entries)
+        return render_fixed_layer_sections([section]) if section is not None else ""
 
     def _render_characters(self) -> str:
-        """渲染角色卡段落（复用 builder.py 的 Jinja 模板）。"""
-        if not self._characters:
-            return ""
-        return render_jinja_template(
-            "modules/character_card.jinja",
-            characters=self._characters,
-        )
+        """渲染角色卡段落。"""
+        section = build_character_section(self._characters)
+        return render_fixed_layer_sections([section]) if section is not None else ""

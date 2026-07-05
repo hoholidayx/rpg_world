@@ -1,7 +1,4 @@
 {% if lorebook_entries %}
-[lorebook]
-## 世界书
-
 {% for entry in lorebook_entries %}
 ### {{ entry.name }}
 {% if entry.description %}
@@ -14,5 +11,4 @@
 {{ entry.content }}
 
 {% endfor %}
-[/lorebook]
 {% endif %}

@@ -8,12 +8,14 @@ import pytest
 import rpg_core.agent.agent as agent_module
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.context.rpg_context import LayerType
+from rpg_core.context.fixed_layer.contributors import (
+    RP_OUTPUT_TAG_NARRATION,
+    TEXT_OUTPUT_FORMAT_NAME,
+    TEXT_OUTPUT_FORMAT_SECTION_ID,
+)
 from rpg_core.rp_module_constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_DICE_SECTION_ID,
-    RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
-    RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID,
-    RP_OUTPUT_TAG_NARRATION,
 )
 from rpg_core.tests.integration.conftest import _ensure_integration_session
 from rpg_core.utils.watcher import get_watcher
@@ -70,7 +72,7 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
         ctx = agent._build_ctx_for_inspection("inspect dice")
         fixed_content = ctx.render_layer(LayerType.FIXED) or ""
         assert f"[{RP_MODULE_DICE_SECTION_ID}]" in fixed_content
-        assert f"[{RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID}]" in fixed_content
+        assert f"[{TEXT_OUTPUT_FORMAT_SECTION_ID}]" in fixed_content
         assert "rp_dice_roll" in fixed_content
         assert f"<{RP_OUTPUT_TAG_NARRATION}>" in fixed_content
         assert ctx.rp_modules.active is False
@@ -82,7 +84,7 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
 
         assert modules_result.handled is True
         assert RP_MODULE_DICE_NAME in modules_result.reply
-        assert RP_MODULE_TEXT_OUTPUT_FORMAT_NAME in modules_result.reply
+        assert TEXT_OUTPUT_FORMAT_NAME not in modules_result.reply
         assert module_result.handled is True
         assert f"RP Module: {RP_MODULE_DICE_NAME}" in module_result.reply
         assert "/check_dc" in module_result.reply

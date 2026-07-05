@@ -11,13 +11,14 @@ import rpg_core.agent.agent as agent_module
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.command import CommandDispatcher
 from rpg_core.agent.tools import BaseTool
-from rpg_core.context.rpg_context import HotHistoryLayer, Message, RPGContext, Role
+from rpg_core.context.rpg_context import FixedLayerData, HotHistoryLayer, Message, RPGContext, Role
+from rpg_core.context.fixed_layer import FixedLayerSection
 from rpg_core.session.manager import SessionManager
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from llm_service.manager import ProviderOverrides
+from rpg_core.context.fixed_layer.contributors import TEXT_OUTPUT_FORMAT_SECTION_ID
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_SECTION_ID,
-    RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID,
 )
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.settings import RPModuleSettings
@@ -171,9 +172,16 @@ def test_compose_stored_user_input_places_user_text_after_scene_close_tag() -> N
 
 @pytest.mark.asyncio
 async def test_ensure_initialized_is_idempotent(monkeypatch):
-    class FakeFixedLayerComposer:
+    class FakeCoreRPContractContributor:
+        name = "core"
+
         def __init__(self, _world_name: str) -> None:
             self.sections = []
+
+        def get_fixed_contribution(self):
+            from rpg_core.context.fixed_layer import FixedLayerContribution
+
+            return FixedLayerContribution(sections=self.sections)
 
     class FakeSubAgent:
         def __init__(self, *args, **kwargs) -> None:
@@ -205,7 +213,7 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
         def get_provider(self, biz_key):  # noqa: ANN001
             return object()
 
-    monkeypatch.setattr(agent_module, "FixedLayerComposer", FakeFixedLayerComposer)
+    monkeypatch.setattr(agent_module, "CoreRPContractContributor", FakeCoreRPContractContributor)
     monkeypatch.setattr(agent_module, "StatusSubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "MemorySubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "SummaryCompressor", FakeCompressor)
@@ -309,14 +317,17 @@ def test_setup_rp_module_registry_adds_dice_fixed_section():
     agent = object.__new__(RPGGameAgent)
     agent._session_id = "s1"
     agent._world_name = "world"
+    agent._builder = SimpleNamespace(config=SimpleNamespace(enable_lorebook=True, enable_character=True))
     agent._status_mgr = None
     agent._scene_tracker = None
+    agent._character_mgr = None
+    agent._lorebook_mgr = None
 
     agent._setup_rp_module_registry()
 
     assert agent._rp_module_registry is not None
-    assert any(section.id == RP_MODULE_DICE_SECTION_ID for section in agent._fixed_sections)
-    assert any(section.id == RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID for section in agent._fixed_sections)
+    assert any(section.id == RP_MODULE_DICE_SECTION_ID for section in agent._fixed_layer.sections)
+    assert any(section.id == TEXT_OUTPUT_FORMAT_SECTION_ID for section in agent._fixed_layer.sections)
 
 
 def test_register_rp_module_commands_exposes_check_dc():
@@ -355,16 +366,16 @@ async def test_get_context_json_does_not_mutate_history(fake_token_counter):
     agent._session_id = "s_json"
     agent._token_counter = fake_token_counter
     agent._builder = builder
-    agent._fixed_sections = []
+    agent._fixed_layer = FixedLayerData()
+    agent._refresh_fixed_layer_snapshot = MagicMock()
     agent._session = SimpleNamespace(history=history)
-    agent._character_mgr = None
-    agent._lorebook_mgr = None
     agent._status_mgr = None
     agent._scene_tracker = None
     agent._rp_module_registry = None
 
     payload = json.loads(await agent.get_context_json("preview"))
 
+    agent._refresh_fixed_layer_snapshot.assert_called_once()
     assert [message.content for message in history] == ["old"]
     assert builder.last_messages is not history
     assert [message.content for message in builder.last_messages] == ["old", "preview"]
@@ -408,11 +419,103 @@ def test_setup_tool_registry_registers_rp_module_tools(tmp_path, monkeypatch):
     assert "rp_fake_tool" in agent._tool_registry
 
 
+def test_build_transformed_context_rebuilds_fixed_layer_each_time() -> None:
+    class FakeBuilder:
+        config = SimpleNamespace(hot_history_rounds=2)
+
+        def __init__(self) -> None:
+            self.fixed_layer = None
+
+        def build(self, *, fixed_layer, **_kwargs):  # noqa: ANN001
+            self.fixed_layer = fixed_layer
+            return RPGContext(fixed_layer=fixed_layer)
+
+    first_layer = FixedLayerData(
+        sections=[FixedLayerSection(id="fresh", title="Fresh", content="fresh fixed")]
+    )
+    second_layer = FixedLayerData(
+        sections=[FixedLayerSection(id="fresher", title="Fresher", content="fresher fixed")]
+    )
+    builder = FakeBuilder()
+    agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s1"
+    agent._builder = builder
+    agent._fixed_layer = FixedLayerData()
+    agent._assemble_fixed_layer = MagicMock(side_effect=[first_layer, second_layer])
+    agent._refresh_sub_agent_contexts = MagicMock()
+    agent._session = SimpleNamespace(history=[Message(Role.USER, "hello")])
+    agent._status_mgr = None
+    agent._scene_tracker = None
+    agent._rp_module_registry = None
+
+    first_messages = agent._build_transformed_context()
+    second_messages = agent._build_transformed_context()
+
+    assert agent._assemble_fixed_layer.call_count == 2
+    assert agent._refresh_sub_agent_contexts.call_count == 2
+    assert agent._fixed_layer is second_layer
+    assert builder.fixed_layer is second_layer
+    assert first_messages[0].is_system()
+    assert "fresh fixed" in first_messages[0].content
+    assert "fresher fixed" in second_messages[0].content
+
+
+def test_context_inspection_rebuilds_fixed_layer_each_time() -> None:
+    class FakeBuilder:
+        config = SimpleNamespace(hot_history_rounds=2)
+
+        def __init__(self) -> None:
+            self.fixed_layer = None
+
+        def build(self, *, fixed_layer, messages, **_kwargs):  # noqa: ANN001
+            self.fixed_layer = fixed_layer
+            return RPGContext(
+                fixed_layer=fixed_layer,
+                hot_history=HotHistoryLayer(messages=list(messages)),
+            )
+
+    first_layer = FixedLayerData(
+        sections=[FixedLayerSection(id="fresh", title="Fresh", content="fresh fixed")]
+    )
+    second_layer = FixedLayerData(
+        sections=[FixedLayerSection(id="fresher", title="Fresher", content="fresher fixed")]
+    )
+    builder = FakeBuilder()
+    agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s1"
+    agent._builder = builder
+    agent._fixed_layer = FixedLayerData()
+    agent._assemble_fixed_layer = MagicMock(side_effect=[first_layer, second_layer])
+    agent._refresh_sub_agent_contexts = MagicMock()
+    agent._session = SimpleNamespace(history=[])
+    agent._status_mgr = None
+    agent._scene_tracker = None
+    agent._rp_module_registry = None
+
+    first_ctx = agent._build_ctx_for_inspection("preview")
+    second_ctx = agent._build_ctx_for_inspection("preview")
+
+    assert agent._assemble_fixed_layer.call_count == 2
+    assert agent._refresh_sub_agent_contexts.call_count == 2
+    assert agent._fixed_layer is second_layer
+    assert builder.fixed_layer is second_layer
+    assert first_ctx.fixed_layer is first_layer
+    assert second_ctx.fixed_layer is second_layer
+    assert second_ctx.hot_history.messages[-1].content == "preview"
+
+
 @pytest.mark.asyncio
 async def test_ensure_initialized_populates_model_from_provider(monkeypatch):
-    class FakeFixedLayerComposer:
+    class FakeCoreRPContractContributor:
+        name = "core"
+
         def __init__(self, _world_name: str) -> None:
             self.sections = []
+
+        def get_fixed_contribution(self):
+            from rpg_core.context.fixed_layer import FixedLayerContribution
+
+            return FixedLayerContribution(sections=self.sections)
 
     class FakeSubAgent:
         def __init__(self, *args, **kwargs) -> None:
@@ -446,7 +549,7 @@ async def test_ensure_initialized_populates_model_from_provider(monkeypatch):
         coro.close()
         return MagicMock()
 
-    monkeypatch.setattr(agent_module, "FixedLayerComposer", FakeFixedLayerComposer)
+    monkeypatch.setattr(agent_module, "CoreRPContractContributor", FakeCoreRPContractContributor)
     monkeypatch.setattr(agent_module, "StatusSubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "MemorySubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "SummaryCompressor", FakeCompressor)

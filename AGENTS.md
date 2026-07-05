@@ -39,8 +39,8 @@
 - memory rerank 使用统一的 `PointwiseMemoryReranker`，不要恢复旧的 provider-specific reranker/factory。
 - 上下文主流程保持结构化，最终发送给 LLM 前由 `ContextRenderer` 渲染；调试 markdown/token 概览放在 `ContextInspector`，不要回流到 `RPGContext` 数据模型。
 - `当前场景` 是高优先级 scene 状态，应作为 user prefix 进入最终用户消息；不要把它当普通状态表放入 `STATUS_TABLES`。在 `rpg_data` 状态表架构中，scene 是 `status_kind="scene"` 的状态表，仍必须挂载到 story 才能被 session 感知。
-- RP Modules 是 RP 业务模块占位，不是通用 skill 体系；骰子、战斗、物品、输出格式等能力应围绕 RP 工具流程、受控状态读写或稳定 fixed layer 提示词设计。
-- `text_output_format` 是默认启用的 prompt-only RP Module，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文。带标签全文是 assistant `content` 真源，必须原样进入 SSE、历史和数据库；不要把旁白/角色分段写入 message metadata，也不要恢复 `metadata.messageDisplay`。
+- RP Modules 是 RP 业务模块占位，不是通用 skill 体系；骰子、战斗、物品等能力应围绕 RP 工具流程和受控状态读写设计。
+- `text_output_format` 是默认启用的 fixed layer 输出格式约束，不进入 `RPModuleRegistry`，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文。带标签全文是 assistant `content` 真源，必须原样进入 SSE、历史和数据库；不要把旁白/角色分段写入 message metadata，也不要恢复 `metadata.messageDisplay`。
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
 - Story 主数据字段保持：`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词；`story_prompt` 目前只存储和经 API 返回，待后续集成入 fix layer，本次不要把它接入上下文渲染。
 - 玩家角色绑定状态只对外暴露 `bound | invalid`。缺失绑定、角色不存在、未挂载、snapshot 损坏或 snapshot mount/story 不匹配都视为 `invalid`；WebUI 进入 SessionRoom 后用不可取消弹窗补选，Agent 在普通 send/send_stream 进入 LLM 前强校验，invalid 时只返回固定编号角色列表，不写 user history、不调用 LLM。绑定成功且 main history 为空时，`SessionRoleService` 追加 story `first_message` 到 main 和 backup，且只追加一次。

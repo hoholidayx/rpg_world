@@ -7,7 +7,6 @@ from rpg_core.rp_modules.models import (
     ModuleStatus,
 )
 from rpg_core.rp_modules.registry import RPModuleRegistry
-from rpg_core.rp_modules.text_output_format import TextOutputFormatModule
 
 __all__ = [
     "ModuleCommand",
@@ -15,5 +14,4 @@ __all__ = [
     "ModuleStatus",
     "RPModule",
     "RPModuleRegistry",
-    "TextOutputFormatModule",
 ]

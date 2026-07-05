@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 
 import rpg_core.context.renderer as renderer_module
-from rpg_core.context.fixed_layer import FixedLayerComposer, FixedLayerSection
+from rpg_core.context.fixed_layer import FixedLayerSection
+from rpg_core.context.fixed_layer.contributors import CoreRPContractContributor, StaticFixedLayerContributor
 from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.rpg_context import (
     FixedLayerData,
@@ -20,7 +21,7 @@ from rpg_core.rp_module_constants import RP_MODULE_DICE_SECTION_ID, RP_MODULE_DI
 def _fake_render(template_name: str, **context: object) -> str:
     if template_name == "layers/fixed_layer.jinja":
         section_ids = ",".join(section.id for section in context["fixed_sections"])
-        return f"fixed|{section_ids}|{len(context['lorebook_entries'])}|{len(context['characters'])}"
+        return f"fixed|{section_ids}"
     if template_name == "layers/user_message.jinja":
         return context["user_input"]
     return template_name
@@ -33,7 +34,11 @@ def _patch_renderer(monkeypatch):
 
 def test_context_inspector_markdown_includes_history_stats(fake_token_counter):
     ctx = RPGContext(
-        fixed_layer=FixedLayerData(sections=[FixedLayerSection(id="core", title="核心", content="fixed")]),
+        fixed_layer=FixedLayerData(
+            sections=[FixedLayerSection(id="core", title="核心", content="fixed")],
+            lorebook_entries=[{"name": "Lore"}],
+            characters=[{"name": "Alice"}],
+        ),
         hot_history=HotHistoryLayer(messages=[
             Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
             Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
@@ -50,6 +55,8 @@ def test_context_inspector_markdown_includes_history_stats(fake_token_counter):
     assert "历史轮数: **2** 轮" in md
     assert "历史窗口: **5** 轮" in md
     assert "user 2, assistant 1, tool 0, system 0" in md
+    assert "1 条世界书" in md
+    assert "1 张角色卡" in md
 
 
 def test_context_inspector_handles_hot_history_without_user_anchor(fake_token_counter):
@@ -88,7 +95,7 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
     assert payload["totals"] == {
         "layerCount": 9,
         "activeLayers": 3,
-        "tokenCount": 6,
+        "tokenCount": 5,
         "messageCount": 4,
     }
 
@@ -98,7 +105,7 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
     assert fixed["type"] == LayerType.FIXED
     assert fixed["role"] == Role.SYSTEM.value
     assert fixed["status"] == "active"
-    assert fixed["content"] == "fixed|core|0|0"
+    assert fixed["content"] == "fixed|core"
 
     summary = layers[2]
     assert summary["type"] == LayerType.SUMMARY
@@ -113,15 +120,15 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
 
     messages = payload["messages"]
     assert messages == [
-        {"role": "system", "content": "fixed|core|0|0"},
+        {"role": "system", "content": "fixed|core"},
         {"role": "user", "content": "u1", "turn_id": 1, "seq_in_turn": 1},
         {"role": "assistant", "content": "a1", "turn_id": 1, "seq_in_turn": 2},
         {"role": "user", "content": "inspect"},
     ]
 
 
-def test_fixed_layer_composer_accepts_static_module_sections():
-    composer = FixedLayerComposer("测试世界").with_module_sections([
+def test_core_contributor_can_be_combined_with_static_module_sections():
+    static_contributor = StaticFixedLayerContributor([
         FixedLayerSection(
             id=RP_MODULE_DICE_SECTION_ID,
             title="骰子模块",
@@ -131,7 +138,11 @@ def test_fixed_layer_composer_accepts_static_module_sections():
         )
     ])
 
-    sections = composer.sections
+    sections = [
+        *CoreRPContractContributor("测试世界").get_fixed_contribution().sections,
+        *static_contributor.get_fixed_contribution().sections,
+    ]
+    sections = sorted(sections, key=lambda section: (section.priority, section.id))
 
     assert [section.id for section in sections] == ["core_rp_contract", RP_MODULE_DICE_SECTION_ID]
     assert "测试世界" in sections[0].content

@@ -49,8 +49,6 @@ class ContextRenderer:
                 fixed_sections=self._ctx.fixed_layer.sections,
                 sections=self._ctx.fixed_layer.sections,
                 world_name=self._ctx.fixed_layer.world_name,
-                lorebook_entries=self._ctx.fixed_layer.lorebook_entries,
-                characters=self._ctx.fixed_layer.characters,
             )
         if type_ == LayerType.PERSISTENT_MEMORY and self._ctx.persistent_memory.active:
             return render_jinja_template(

@@ -37,9 +37,16 @@ from rpg_core.agent.tools import (
     WriteFileTool,
 )
 from rpg_core.context import RPGContextBuilder
-from rpg_core.context.fixed_layer import FixedLayerComposer
+from rpg_core.context.fixed_layer import FixedLayerAssembler
+from rpg_core.context.fixed_layer.contributors import (
+    CharacterFixedLayerContributor,
+    CoreRPContractContributor,
+    LorebookFixedLayerContributor,
+    StaticFixedLayerContributor,
+    TextOutputFormatFixedLayerContributor,
+)
 from rpg_core.context.inspector import ContextInspector
-from rpg_core.context.rpg_context import Role, Message
+from rpg_core.context.rpg_context import FixedLayerData, Role, Message
 from llm_service.base_provider import LLMProvider
 from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
@@ -117,7 +124,7 @@ class RPGGameAgent:
         self._status_mgr: StatusManager | None = None
         self._scene_tracker: SceneTracker | None = None
         self._provider: LLMProvider | None = None
-        self._fixed_sections = []
+        self._fixed_layer = FixedLayerData(world_name=self._world_name)
         self._session = SessionManager(
             session_id=self._session_id,
             history_enabled=self._history_enabled,
@@ -834,6 +841,8 @@ class RPGGameAgent:
         """Build context for inspection (no _history mutation, no LLM call)."""
         from rpg_core.context.rpg_context import RPGContext
 
+        self._refresh_fixed_layer_snapshot()
+
         # Build scene context same way as send()
         scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
 
@@ -845,10 +854,8 @@ class RPGGameAgent:
             test_messages.append(Message(role=Role.USER, content="(no input)"))
 
         ctx: RPGContext = self._builder.build(
-            fixed_sections=self._fixed_sections,
+            fixed_layer=self._fixed_layer,
             messages=test_messages,
-            character_mgr=self._character_mgr,
-            lorebook_mgr=self._lorebook_mgr,
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
             rp_module_sections=self._get_rp_module_runtime_sections(user_input=user_input),
@@ -880,19 +887,50 @@ class RPGGameAgent:
         self._scene_tracker = self._rpg_ctx.get("scene_tracker")
         self._memory_manager = self._rpg_ctx.get("memory_manager")
 
-        # 刷新 SubAgentContext——每个子 Agent 独立实例避免系统提示互相覆盖
+        self._refresh_sub_agent_contexts(refresh_status_tool_providers=True)
+        if self._rp_module_registry is not None:
+            self._setup_rp_module_registry()
+        else:
+            self._fixed_layer = self._assemble_fixed_layer()
+
+    def _refresh_sub_agent_contexts(self, *, refresh_status_tool_providers: bool = False) -> None:
+        """Refresh sub-agent fixed-layer prompts from current character/lorebook managers."""
         if self._status_sub_agent is not None:
             _sub_ctx_status = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
             self._status_sub_agent.bind_context(_sub_ctx_status)
-            # 刷新 SceneTracker 工具引用，确保切换 session 后写入当前 session 状态表。
-            if self._scene_tracker is not None:
+            # Session switches rebuild SceneTracker; refresh tool references only on full context reload.
+            if refresh_status_tool_providers and self._scene_tracker is not None:
                 self._status_sub_agent._tool_providers.clear()
                 self._status_sub_agent.add_tool_provider(self._scene_tracker)
         if self._memory_sub_agent is not None:
             _sub_ctx_memory = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
             self._memory_sub_agent.bind_context(_sub_ctx_memory)
+
+    def _assemble_fixed_layer(self) -> FixedLayerData:
+        builder = self._builder
+        builder_config = getattr(builder, "config", None)
+        enable_lorebook = getattr(builder_config, "enable_lorebook", True)
+        enable_character = getattr(builder_config, "enable_character", True)
+        assembler = FixedLayerAssembler(
+            world_name=self._world_name,
+            contributors=[
+                CoreRPContractContributor(self._world_name),
+                TextOutputFormatFixedLayerContributor(),
+                LorebookFixedLayerContributor(
+                    self._lorebook_mgr,
+                    enabled=enable_lorebook,
+                ),
+                CharacterFixedLayerContributor(
+                    self._character_mgr,
+                    enabled=enable_character,
+                ),
+            ],
+        )
         if self._rp_module_registry is not None:
-            self._setup_rp_module_registry()
+            assembler = assembler.with_contributor(
+                StaticFixedLayerContributor(self._rp_module_registry.get_fixed_sections())
+            )
+        return assembler.assemble()
 
     def _setup_rp_module_registry(self) -> None:
         """Build the session-scoped RP Module registry and fixed sections."""
@@ -906,13 +944,7 @@ class RPGGameAgent:
             scene_tracker=self._scene_tracker,
             settings=rp_settings,
         )
-
-        module_sections = self._rp_module_registry.get_fixed_sections()
-        composer = FixedLayerComposer(self._world_name)
-        if module_sections and hasattr(composer, "with_module_sections"):
-            self._fixed_sections = composer.with_module_sections(module_sections).sections
-        else:
-            self._fixed_sections = [*composer.sections, *module_sections]
+        self._fixed_layer = self._assemble_fixed_layer()
 
     def _register_rp_module_commands(self) -> None:
         """Expose RP Module slash commands through the existing dispatcher."""
@@ -940,13 +972,17 @@ class RPGGameAgent:
             ModuleContextRequest(session_id=self._session_id, user_input=user_input),
         )
 
+    def _refresh_fixed_layer_snapshot(self) -> None:
+        """Rebuild fixed-layer sections from the latest character/lorebook data."""
+        self._fixed_layer = self._assemble_fixed_layer()
+        self._refresh_sub_agent_contexts()
+
     def _build_transformed_context(self) -> list[Message]:
         """Build the 5-layer RPG context as Message objects."""
+        self._refresh_fixed_layer_snapshot()
         ctx = self._builder.build(
-            fixed_sections=self._fixed_sections,
+            fixed_layer=self._fixed_layer,
             messages=self._session.history,
-            character_mgr=self._character_mgr,
-            lorebook_mgr=self._lorebook_mgr,
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
             rp_module_sections=self._get_rp_module_runtime_sections(),

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from rpg_core.context.config import RPGContextConfig
-from rpg_core.context.fixed_layer import FixedLayerSection
 from rpg_core.context.rpg_context import (
     FixedLayerData,
     HotHistoryLayer,
@@ -26,8 +25,6 @@ from rpg_core.context.rpg_context import (
 from rpg_core.session.turns import count_turns, slice_recent_turns
 
 if TYPE_CHECKING:
-    from rpg_core.character.manager import CharacterManager
-    from rpg_core.lorebook.manager import LorebookManager
     from rp_memory.persist_memory import PersistentMemoryStore
     from rp_memory.recalled_memory import RecalledMemoryStore
     from rp_memory.story_memory import StoryMemoryStore
@@ -122,10 +119,8 @@ class RPGContextBuilder:
 
     def build(
         self,
-        fixed_sections: list[FixedLayerSection] | None = None,
+        fixed_layer: FixedLayerData | None = None,
         messages: list[Message] | None = None,
-        character_mgr: CharacterManager | None = None,
-        lorebook_mgr: LorebookManager | None = None,
         status_mgr: StatusManager | None = None,
         scene_tracker: SceneTracker | None = None,
         rp_module_sections: list[RPModuleRuntimeSection] | None = None,
@@ -133,12 +128,10 @@ class RPGContextBuilder:
         """构建 5 层 RPGContext。
 
         Args:
-            fixed_sections: 固定层稳定片段，由 FixedLayerComposer/RP modules 提供。
+            fixed_layer: 预组装好的固定层快照，包含 sections 及角色卡/世界书结构化数据。
             messages: 原始消息列表。仅用于提取历史记录和当前用户输入。
-            character_mgr: 角色卡管理器，为 None 时固定层跳过角色卡模块。
-            lorebook_mgr: 世界书管理器，为 None 时固定层跳过世界书模块。
             status_mgr: 状态管理器，为 None 时动态层跳过状态表格模块。
-            rp_module_sections: 可选 RP module 运行态；静态契约应放在 fixed_sections。
+            rp_module_sections: 可选 RP module 运行态；静态契约应放在 fixed_layer.sections。
         """
         if not messages:
             messages = []
@@ -150,20 +143,8 @@ class RPGContextBuilder:
         current_user_msg = messages[-1] if messages and messages[-1].is_user() else None
         user_text = current_user_msg.content if current_user_msg else ""
 
-        # ── 2. Build Fixed Layer ────────────────────────────────────
-        lorebook_entries: list[dict] = []
-        if lorebook_mgr and self.config.enable_lorebook:
-            try:
-                lorebook_entries = lorebook_mgr.list_enabled_entries()
-            except Exception as exc:
-                logger.debug("[RPGContextBuilder] lorebook layer skipped: {}", exc)
-
-        characters: list[dict] = []
-        if character_mgr and self.config.enable_character:
-            try:
-                characters = character_mgr.list_enabled_characters()
-            except Exception as exc:
-                logger.debug("[RPGContextBuilder] character layer skipped: {}", exc)
+        # ── 2. Fixed Layer 已在 builder 外完成装配 ─────────────────
+        resolved_fixed_layer = fixed_layer or FixedLayerData(world_name=self.world_name)
 
         # ── 3. Build Persistent Memory Layer ─────────────────────────
         persistent_sections: list[dict[str, str]] = []
@@ -224,12 +205,7 @@ class RPGContextBuilder:
 
         # ── 8. Assemble into RPGContext (stable-first for prefix cache) ─
         return RPGContext(
-            fixed_layer=FixedLayerData(
-                world_name=self.world_name,
-                sections=list(fixed_sections or []),
-                lorebook_entries=lorebook_entries,
-                characters=characters,
-            ),
+            fixed_layer=resolved_fixed_layer,
             persistent_memory=PersistentMemoryLayer(sections=persistent_sections),
             summary=SummaryLayer(text=summary_text),
             hot_history=HotHistoryLayer(messages=hot_history),
