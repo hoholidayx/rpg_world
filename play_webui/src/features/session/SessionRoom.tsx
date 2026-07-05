@@ -20,6 +20,7 @@ import { consumeChatStream } from '@/lib/stream/sse'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
+import { STATUS_KIND } from '@/types/statusTables'
 import { SessionComposer } from './SessionComposer'
 import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
@@ -31,11 +32,12 @@ import {
   getCharacterAvatarUrl,
   stripLeadingSceneBlock,
 } from './sessionRoomHelpers'
-import type { SessionPlayerCharacter } from '@/types/session'
-import type {
+import { HISTORY_MESSAGE_ROLE, PLAYER_CHARACTER_STATUS, type SessionPlayerCharacter } from '@/types/session'
+import {
   ConfirmRequest,
   NarrativeStyle,
   NarrativeStyleId,
+  SESSION_TIMELINE_ROLE,
   SessionInputMode,
   SessionSpeaker,
   SessionTimelineMessage,
@@ -71,6 +73,8 @@ type DragState = {
 
 type MobilePanel = 'left' | 'right' | null
 type HistoryMessage = Awaited<ReturnType<typeof getSessionHistory>>[number]['messages'][number]
+type UserTimelineMessage = SessionTimelineMessage & { role: typeof SESSION_TIMELINE_ROLE.USER }
+type PersistedUserTimelineMessage = UserTimelineMessage & { messageId: number }
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -126,7 +130,7 @@ function streamPlaceholder(turnId: number): SessionTimelineMessage {
     id: `local-stream-${turnId}-${crypto.randomUUID()}`,
     turnId,
     seqInTurn: 2,
-    role: 'assistant',
+    role: SESSION_TIMELINE_ROLE.ASSISTANT,
     content: '',
     createdAt: new Date().toISOString(),
     speaker: makeAssistantSpeaker(),
@@ -139,8 +143,13 @@ function streamPlaceholder(turnId: number): SessionTimelineMessage {
 }
 
 function timelineRole(role: HistoryMessage['role']): SessionTimelineMessage['role'] {
-  if (role === 'user' || role === 'assistant' || role === 'tool' || role === 'system') return role
-  return 'assistant'
+  if (
+    role === HISTORY_MESSAGE_ROLE.USER
+    || role === HISTORY_MESSAGE_ROLE.ASSISTANT
+    || role === HISTORY_MESSAGE_ROLE.TOOL
+    || role === HISTORY_MESSAGE_ROLE.SYSTEM
+  ) return role
+  return SESSION_TIMELINE_ROLE.ASSISTANT
 }
 
 function makeHistorySpeaker(
@@ -149,15 +158,15 @@ function makeHistorySpeaker(
 ): SessionSpeaker {
   const role = timelineRole(message.role)
 
-  if (role === 'user') {
+  if (role === HISTORY_MESSAGE_ROLE.USER) {
     return makePlayerSpeaker(playerCharacter)
   }
 
-  if (role === 'assistant') {
+  if (role === HISTORY_MESSAGE_ROLE.ASSISTANT) {
     return makeAssistantSpeaker()
   }
 
-  if (role === 'tool') return toolSpeaker()
+  if (role === HISTORY_MESSAGE_ROLE.TOOL) return toolSpeaker()
   return systemSpeaker()
 }
 
@@ -172,8 +181,8 @@ function mapHistoryToMessages({
     return turn.messages.map((message, messageIndex) => {
       const role = timelineRole(message.role)
       const persistent = Boolean(message.messageId)
-      const turnActionRole = role === 'user' || role === 'assistant'
-      const content = role === 'user' ? stripLeadingSceneBlock(message.content) : message.content
+      const turnActionRole = role === HISTORY_MESSAGE_ROLE.USER || role === HISTORY_MESSAGE_ROLE.ASSISTANT
+      const content = role === HISTORY_MESSAGE_ROLE.USER ? stripLeadingSceneBlock(message.content) : message.content
 
       return {
         id: message.messageId ? `history-${message.messageId}` : `history-${turn.turnId || turnIndex + 1}-${messageIndex}`,
@@ -185,22 +194,22 @@ function mapHistoryToMessages({
         metadata: message.metadata,
         createdAt: message.createdAt,
         speaker: makeHistorySpeaker(message, playerCharacter),
-        status: message.role === 'assistant' ? 'done' : undefined,
+        status: message.role === HISTORY_MESSAGE_ROLE.ASSISTANT ? 'done' : undefined,
         canCopy: Boolean(content.trim()),
-        canRetry: persistent && role === 'user',
-        canEdit: persistent && role === 'user',
+        canRetry: persistent && role === HISTORY_MESSAGE_ROLE.USER,
+        canEdit: persistent && role === HISTORY_MESSAGE_ROLE.USER,
         canDelete: persistent && turnActionRole,
       }
     })
   })
 }
 
-function canEditMessage(message: SessionTimelineMessage): message is SessionTimelineMessage & { messageId: number; role: 'user' } {
-  return Boolean(message.canEdit && message.messageId && message.role === 'user')
+function canEditMessage(message: SessionTimelineMessage): message is PersistedUserTimelineMessage {
+  return Boolean(message.canEdit && message.messageId && message.role === SESSION_TIMELINE_ROLE.USER)
 }
 
-function canRetryMessage(message: SessionTimelineMessage): message is SessionTimelineMessage & { messageId: number; role: 'user' } {
-  return Boolean(message.canRetry && message.messageId && message.role === 'user')
+function canRetryMessage(message: SessionTimelineMessage): message is PersistedUserTimelineMessage {
+  return Boolean(message.canRetry && message.messageId && message.role === SESSION_TIMELINE_ROLE.USER)
 }
 
 function Toast({ message }: { message: string }) {
@@ -417,8 +426,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   })
 
   const statusTablesQuery = useQuery({
-    queryKey: ['play-session-status-tables', sessionId, 'normal'],
-    queryFn: () => listSessionStatusTables(sessionId, 'normal'),
+    queryKey: ['play-session-status-tables', sessionId, STATUS_KIND.NORMAL],
+    queryFn: () => listSessionStatusTables(sessionId, STATUS_KIND.NORMAL),
   })
 
   const charactersQuery = useQuery({
@@ -429,7 +438,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   const characters = charactersQuery.data ?? []
   const playerCharacter = session?.playerCharacter ?? null
-  const playerCharacterInvalid = session?.playerCharacterStatus === 'invalid'
+  const playerCharacterInvalid = session?.playerCharacterStatus === PLAYER_CHARACTER_STATUS.INVALID
   const roleSelectionBlocked = !session || playerCharacterInvalid || bindingRole
 
   const baseMessages = useMemo(
@@ -475,7 +484,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (!session) return
-    if (session.playerCharacterStatus === 'invalid') {
+    if (session.playerCharacterStatus === PLAYER_CHARACTER_STATUS.INVALID) {
       setRoleDialogRequired(true)
       setRoleDialogOpen(true)
       setSelectedRoleCharacterId((current) => current ?? characters[0]?.id ?? null)
@@ -628,13 +637,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     void bindPlayerRole(characterId)
   }, [bindPlayerRole, characters, playerCharacter, requestConfirm, roleDialogRequired, selectedRoleCharacterId, showToast])
 
-  const showRegenerationPreview = useCallback((message: SessionTimelineMessage & { role: 'user' }, text: string) => {
+  const showRegenerationPreview = useCallback((message: UserTimelineMessage, text: string) => {
     const turnId = message.turnId
     const previewUserMessage: SessionTimelineMessage = {
       id: `local-regenerate-user-${turnId}-${crypto.randomUUID()}`,
       turnId,
       seqInTurn: 1,
-      role: 'user',
+      role: SESSION_TIMELINE_ROLE.USER,
       content: text,
       createdAt: new Date().toISOString(),
       speaker: message.speaker,
@@ -698,7 +707,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           id: `local-tool-${turnId}-${crypto.randomUUID()}`,
           turnId,
           seqInTurn: 4,
-          role: 'tool',
+          role: SESSION_TIMELINE_ROLE.TOOL,
           content: toolText,
           createdAt: new Date().toISOString(),
           speaker: toolSpeaker(),
@@ -739,7 +748,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           id: `local-error-${turnId}-${crypto.randomUUID()}`,
           turnId,
           seqInTurn: 5,
-          role: 'error',
+          role: SESSION_TIMELINE_ROLE.ERROR,
           content: errorText,
           createdAt: new Date().toISOString(),
           speaker: errorSpeaker(),
@@ -760,7 +769,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     successToast,
     failureToast,
   }: {
-    message: SessionTimelineMessage & { messageId: number; role: 'user' }
+    message: PersistedUserTimelineMessage
     text: string
     pendingToast: string
     successToast: string
@@ -971,7 +980,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       id: `local-user-${turnId}-${crypto.randomUUID()}`,
       turnId,
       seqInTurn: 1,
-      role: 'user',
+      role: SESSION_TIMELINE_ROLE.USER,
       content: text,
       createdAt: new Date().toISOString(),
       speaker: { ...playerSpeaker, label: inputMode.toUpperCase() },
@@ -1032,7 +1041,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               id: `local-error-${turnId}-${crypto.randomUUID()}`,
               turnId,
               seqInTurn: 5,
-              role: 'error',
+              role: SESSION_TIMELINE_ROLE.ERROR,
               content: errorText,
               createdAt: new Date().toISOString(),
               speaker: errorSpeaker(),

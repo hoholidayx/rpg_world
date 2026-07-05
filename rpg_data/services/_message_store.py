@@ -17,8 +17,6 @@ MessageRecord: TypeAlias = records.SessionMessageRecord | records.SessionBackupM
 MessageRecordModel: TypeAlias = type[records.SessionMessageRecord] | type[records.SessionBackupMessageRecord]
 MessageInput: TypeAlias = models.SessionMessage | Mapping[str, object]
 
-_VALID_ROLES = frozenset({"system", "user", "assistant", "tool"})
-
 
 class BaseSessionMessageStore:
     """Common implementation for the main and backup message tables."""
@@ -253,7 +251,7 @@ class BaseSessionMessageStore:
 
 def _validate_role(role: str) -> str:
     normalized = str(role)
-    if normalized not in _VALID_ROLES:
+    if normalized not in models.MESSAGE_ROLES:
         raise ValueError(f"invalid session message role: {normalized}")
     return normalized
 

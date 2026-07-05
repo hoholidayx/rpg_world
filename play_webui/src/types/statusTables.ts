@@ -1,6 +1,16 @@
-export type StatusKind = 'scene' | 'normal'
+export const STATUS_KIND = {
+  SCENE: 'scene',
+  NORMAL: 'normal',
+} as const
 
-export type StatusOrigin = 'template_copy' | 'session_native'
+export type StatusKind = (typeof STATUS_KIND)[keyof typeof STATUS_KIND]
+
+export const STATUS_ORIGIN = {
+  TEMPLATE_COPY: 'template_copy',
+  SESSION_NATIVE: 'session_native',
+} as const
+
+export type StatusOrigin = (typeof STATUS_ORIGIN)[keyof typeof STATUS_ORIGIN]
 
 export type StatusRow = {
   key: string

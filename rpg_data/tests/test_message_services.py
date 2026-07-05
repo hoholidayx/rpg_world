@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from peewee import SqliteDatabase
 
-from rpg_data import db
+from rpg_data import db, models
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.repositories.records import (
     SessionBackupMessageRecord,
@@ -51,10 +51,10 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         backup = BackupService(database)
         session_id = _create_test_session(database, "s_message_crud")
 
-        first = messages.append(session_id, "user", "hello", turn_id=1, seq_in_turn=1)
+        first = messages.append(session_id, models.MESSAGE_ROLE_USER, "hello", turn_id=1, seq_in_turn=1)
         second = messages.append(
             session_id,
-            "assistant",
+            models.MESSAGE_ROLE_ASSISTANT,
             "world",
             turn_id=1,
             seq_in_turn=2,
@@ -75,7 +75,7 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         mapped = messages.append_mapping(
             session_id,
             {
-                "role": "assistant",
+                "role": models.MESSAGE_ROLE_ASSISTANT,
                 "content": "uses tool",
                 "turn_id": 2,
                 "seq_in_turn": 1,
@@ -87,13 +87,13 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         assert messages.delete(first.id)
         assert messages.get(first.id) is None
 
-        backup.messages.append(session_id, "user", "cold copy", turn_id=1, seq_in_turn=1)
+        backup.messages.append(session_id, models.MESSAGE_ROLE_USER, "cold copy", turn_id=1, seq_in_turn=1)
         replacement = messages.replace(
             session_id,
             [
-                {"role": "user", "content": "u1", "turn_id": 10, "seq_in_turn": 1},
-                {"role": "assistant", "content": "a1", "turn_id": 10, "seq_in_turn": 2},
-                {"role": "user", "content": "u2", "turn_id": 11, "seq_in_turn": 1},
+                {"role": models.MESSAGE_ROLE_USER, "content": "u1", "turn_id": 10, "seq_in_turn": 1},
+                {"role": models.MESSAGE_ROLE_ASSISTANT, "content": "a1", "turn_id": 10, "seq_in_turn": 2},
+                {"role": models.MESSAGE_ROLE_USER, "content": "u2", "turn_id": 11, "seq_in_turn": 1},
             ],
         )
 
@@ -166,11 +166,11 @@ def test_message_service_truncate_from_turn_keeps_backup_append_only(tmp_path: P
         session_id = _create_test_session(database, "s_message_truncate_from_turn")
 
         for turn_id, role, content, seq in [
-            (1, "user", "u1", 1),
-            (1, "assistant", "a1", 2),
-            (2, "user", "u2", 1),
-            (2, "assistant", "a2", 2),
-            (3, "user", "u3", 1),
+            (1, models.MESSAGE_ROLE_USER, "u1", 1),
+            (1, models.MESSAGE_ROLE_ASSISTANT, "a1", 2),
+            (2, models.MESSAGE_ROLE_USER, "u2", 1),
+            (2, models.MESSAGE_ROLE_ASSISTANT, "a2", 2),
+            (3, models.MESSAGE_ROLE_USER, "u3", 1),
         ]:
             messages.append(session_id, role, content, turn_id=turn_id, seq_in_turn=seq)
             backup.messages.append(session_id, role, content, turn_id=turn_id, seq_in_turn=seq)
@@ -193,17 +193,17 @@ def test_backup_messages_are_append_only_and_independent(tmp_path: Path) -> None
         backup = BackupService(database)
         session_id = _create_test_session(database, "s_message_backup")
 
-        main = messages.append(session_id, "user", "main", turn_id=1, seq_in_turn=1)
+        main = messages.append(session_id, models.MESSAGE_ROLE_USER, "main", turn_id=1, seq_in_turn=1)
         cold = backup.messages.append_mapping(
             session_id,
             {
-                "role": "user",
+                "role": models.MESSAGE_ROLE_USER,
                 "content": "main",
                 "turn_id": main.turn_id,
                 "seq_in_turn": main.seq_in_turn,
             },
         )
-        backup.messages.append(session_id, "assistant", "cold-only", turn_id=1, seq_in_turn=2)
+        backup.messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, "cold-only", turn_id=1, seq_in_turn=2)
 
         assert [row.content for row in messages.list(session_id)] == ["main"]
         assert [row.content for row in backup.messages.list(session_id)] == ["main", "cold-only"]

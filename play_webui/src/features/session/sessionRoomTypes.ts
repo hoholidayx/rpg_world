@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { HISTORY_MESSAGE_ROLE } from '@/types/session'
 
 export type SessionInputMode = 'ic' | 'ooc' | 'gm'
 
@@ -11,6 +12,14 @@ export type NarrativeStyle = {
 }
 
 export type SpeakerTone = 'player' | 'assistant' | 'tool' | 'system' | 'thinking' | 'error'
+
+export const SESSION_TIMELINE_ROLE = {
+  ...HISTORY_MESSAGE_ROLE,
+  THINKING: 'thinking',
+  ERROR: 'error',
+} as const
+
+export type SessionTimelineRole = (typeof SESSION_TIMELINE_ROLE)[keyof typeof SESSION_TIMELINE_ROLE]
 
 export type SessionSpeaker = {
   name: string
@@ -25,7 +34,7 @@ export type SessionTimelineMessage = {
   messageId?: number
   turnId: number
   seqInTurn?: number
-  role: 'user' | 'assistant' | 'tool' | 'system' | 'thinking' | 'error'
+  role: SessionTimelineRole
   content: string
   metadata?: Record<string, unknown>
   createdAt?: string | null

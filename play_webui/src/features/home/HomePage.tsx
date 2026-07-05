@@ -18,8 +18,8 @@ import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import { createSession, listSessions } from '@/lib/api/sessions'
 import { listStories } from '@/lib/api/stories'
 import { cn } from '@/lib/utils/cn'
-import type { SessionSummary } from '@/types/session'
-import type { StoryComputedStatus, StorySummary } from '@/types/story'
+import { SESSION_ACTIVITY, type SessionComputedActivity, type SessionSummary } from '@/types/session'
+import { STORY_COMPUTED_STATUS, type StoryComputedStatus, type StorySummary } from '@/types/story'
 
 type StoryHomeItem = StorySummary & {
   sessions: SessionSummary[]
@@ -33,7 +33,7 @@ type SessionHomeItem = SessionSummary & {
   storyTitle: string
   storySummary: string
   latestAt: number
-  computedActivity: 'recent' | 'stale'
+  computedActivity: SessionComputedActivity
 }
 
 const RECENT_WINDOW_DAYS = 7
@@ -48,12 +48,12 @@ const coverClasses = [
 ]
 
 const statusMeta: Record<StoryComputedStatus, { label: string; badgeClass: string; dotClass: string }> = {
-  live: {
+  [STORY_COMPUTED_STATUS.LIVE]: {
     label: '进行中',
     badgeClass: 'bg-teal-100 text-teal-700',
     dotClass: 'bg-teal-500',
   },
-  draft: {
+  [STORY_COMPUTED_STATUS.DRAFT]: {
     label: '未开始',
     badgeClass: 'bg-amber-100 text-amber-700',
     dotClass: 'bg-amber-500',
@@ -61,12 +61,12 @@ const statusMeta: Record<StoryComputedStatus, { label: string; badgeClass: strin
 }
 
 const activityMeta: Record<SessionHomeItem['computedActivity'], { label: string; badgeClass: string; dotClass: string }> = {
-  recent: {
+  [SESSION_ACTIVITY.RECENT]: {
     label: '最近活跃',
     badgeClass: 'bg-teal-100 text-teal-700',
     dotClass: 'bg-teal-500',
   },
-  stale: {
+  [SESSION_ACTIVITY.STALE]: {
     label: '较久未更新',
     badgeClass: 'bg-sky-100 text-sky-700',
     dotClass: 'bg-sky-500',
@@ -116,7 +116,7 @@ function toStoryHomeItem(
     sessions: sortedSessions,
     latestSession,
     latestAt,
-    computedStatus: sortedSessions.length ? 'live' : 'draft',
+    computedStatus: sortedSessions.length ? STORY_COMPUTED_STATUS.LIVE : STORY_COMPUTED_STATUS.DRAFT,
     sessionsError,
   }
 }
@@ -129,7 +129,7 @@ function toSessionHomeItem(session: SessionSummary, story: StorySummary, now: nu
     storyTitle: story.title,
     storySummary: story.summary ?? '',
     latestAt,
-    computedActivity: latestAt && now - latestAt <= RECENT_WINDOW_MS ? 'recent' : 'stale',
+    computedActivity: latestAt && now - latestAt <= RECENT_WINDOW_MS ? SESSION_ACTIVITY.RECENT : SESSION_ACTIVITY.STALE,
   }
 }
 
@@ -371,8 +371,8 @@ function HomeContent() {
 
   const recentStories = storyItems.slice(0, 6)
   const recentSessions = sessionItems.slice(0, 6)
-  const liveStoryCount = storyItems.filter((item) => item.computedStatus === 'live').length
-  const recentSessionCount = sessionItems.filter((item) => item.computedActivity === 'recent').length
+  const liveStoryCount = storyItems.filter((item) => item.computedStatus === STORY_COMPUTED_STATUS.LIVE).length
+  const recentSessionCount = sessionItems.filter((item) => item.computedActivity === SESSION_ACTIVITY.RECENT).length
   const sessionErrors = storyItems.filter((item) => item.sessionsError)
   const sessionsLoading = sessionQueries.some((query) => query.isLoading)
   const initialLoading = storiesQuery.isLoading || (sessionsLoading && storyItems.length === 0)

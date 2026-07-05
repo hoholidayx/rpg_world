@@ -73,9 +73,20 @@ export type StreamStatus =
   | 'done'
   | 'error'
 
+export const TIMELINE_ITEM_TYPE = {
+  USER: 'user',
+  ASSISTANT: 'assistant',
+  THINKING: 'thinking',
+  TOOL: 'tool',
+  ERROR: 'error',
+  SYSTEM: 'system',
+} as const
+
+export type TimelineItemType = (typeof TIMELINE_ITEM_TYPE)[keyof typeof TIMELINE_ITEM_TYPE]
+
 export type TimelineItem = {
   id: string
-  type: 'user' | 'assistant' | 'thinking' | 'tool' | 'error' | 'system'
+  type: TimelineItemType
   content: string
   createdAt: string
   metadata?: Record<string, unknown>

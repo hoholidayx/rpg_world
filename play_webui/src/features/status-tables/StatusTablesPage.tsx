@@ -32,7 +32,7 @@ import {
 import { listStories } from '@/lib/api/stories'
 import type { SessionSummary } from '@/types/session'
 import type { StorySummary } from '@/types/story'
-import type { StatusKind, StatusOrigin, StatusRow, StatusTable } from '@/types/statusTables'
+import { STATUS_KIND, STATUS_ORIGIN, type StatusKind, type StatusOrigin, type StatusRow, type StatusTable } from '@/types/statusTables'
 
 type ViewMode = 'templates' | 'runtime'
 
@@ -61,16 +61,16 @@ function formatDate(value?: string | null) {
 }
 
 function statusKindLabel(kind: StatusKind) {
-  return kind === 'scene' ? '场景' : '普通状态'
+  return kind === STATUS_KIND.SCENE ? '场景' : '普通状态'
 }
 
 function statusKindHint(kind: StatusKind) {
-  return kind === 'scene' ? '场景前缀' : '结构化上下文'
+  return kind === STATUS_KIND.SCENE ? '场景前缀' : '结构化上下文'
 }
 
 function originLabel(origin?: StatusOrigin | null) {
-  if (origin === 'template_copy') return '模板副本'
-  if (origin === 'session_native') return '会话新建'
+  if (origin === STATUS_ORIGIN.TEMPLATE_COPY) return '模板副本'
+  if (origin === STATUS_ORIGIN.SESSION_NATIVE) return '会话新建'
   return '未知来源'
 }
 
@@ -144,7 +144,7 @@ function Chip({ children, tone = 'violet' }: { children: ReactNode; tone?: 'viol
 function KindField({ kind, hint }: { kind: StatusKind; hint?: string }) {
   return (
     <div className="grid min-h-10 grid-cols-[10px_auto_minmax(0,1fr)] items-center gap-2 rounded-[10px] border border-slate-200 bg-slate-50 px-3">
-      <span className={`h-2.5 w-2.5 rounded-full ${kind === 'scene' ? 'bg-sky-600' : 'bg-violet-600'}`} />
+      <span className={`h-2.5 w-2.5 rounded-full ${kind === STATUS_KIND.SCENE ? 'bg-sky-600' : 'bg-violet-600'}`} />
       <strong className="text-sm text-slate-950">{statusKindLabel(kind)}</strong>
       <em className="truncate text-right text-xs not-italic text-slate-500">{hint ?? statusKindHint(kind)}</em>
     </div>
@@ -211,14 +211,14 @@ function StatusTableCard({
       {active ? <span className="absolute bottom-3 left-0 top-3 w-1 rounded-r-full bg-violet-600" /> : null}
       <div className="flex items-start justify-between gap-3">
         <h3 className="min-w-0 truncate text-sm font-bold text-slate-950">{table.name}</h3>
-        <Chip tone={table.statusKind === 'scene' ? 'sky' : 'violet'}>{statusKindLabel(table.statusKind)}</Chip>
+        <Chip tone={table.statusKind === STATUS_KIND.SCENE ? 'sky' : 'violet'}>{statusKindLabel(table.statusKind)}</Chip>
       </div>
       <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">
-        {table.description || (table.statusKind === 'scene' ? '场景状态表。' : '普通状态表进入结构化上下文。')}
+        {table.description || (table.statusKind === STATUS_KIND.SCENE ? '场景状态表。' : '普通状态表进入结构化上下文。')}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         {typeof mounted === 'boolean' ? <Chip tone={mounted ? 'green' : 'gray'}>{mounted ? '已挂载' : '未挂载'}</Chip> : null}
-        {table.origin ? <Chip tone={table.origin === 'template_copy' ? 'amber' : 'green'}>{originLabel(table.origin)}</Chip> : null}
+        {table.origin ? <Chip tone={table.origin === STATUS_ORIGIN.TEMPLATE_COPY ? 'amber' : 'green'}>{originLabel(table.origin)}</Chip> : null}
         <Chip tone="gray">{table.rows.length} key</Chip>
       </div>
     </button>
@@ -339,7 +339,7 @@ function StatusKindCreateDialog({
   onClose: () => void
   onCreate: (kind: StatusKind) => void
 }) {
-  const [kind, setKind] = useState<StatusKind>('normal')
+  const [kind, setKind] = useState<StatusKind>(STATUS_KIND.NORMAL)
 
   return (
     <Dialog title={title} onClose={onClose} size="xl">
@@ -351,8 +351,8 @@ function StatusKindCreateDialog({
             onChange={(event) => setKind(event.target.value as StatusKind)}
             className="h-10 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
           >
-            <option value="normal">普通状态</option>
-            <option value="scene">场景</option>
+            <option value={STATUS_KIND.NORMAL}>普通状态</option>
+            <option value={STATUS_KIND.SCENE}>场景</option>
           </select>
         </label>
       </div>
@@ -609,7 +609,7 @@ function StatusTablesContent() {
     mutationFn: (kind: StatusKind) => {
       if (!currentWorkspace) throw new Error('workspace missing')
       return createStatusTemplate(currentWorkspace, {
-        name: kind === 'scene' ? '未命名场景' : '未命名状态表',
+        name: kind === STATUS_KIND.SCENE ? '未命名场景' : '未命名状态表',
         statusKind: kind,
         description: '',
         keyColumn: DEFAULT_KEY_COLUMN,
@@ -727,7 +727,7 @@ function StatusTablesContent() {
       if (!selectedSessionId) throw new Error('session missing')
       const nextSortOrder = runtimeTables.reduce((max, table) => Math.max(max, table.sortOrder), 0) + 10
       return createSessionStatusTable(selectedSessionId, {
-        name: kind === 'scene' ? '未命名场景' : '未命名状态表',
+        name: kind === STATUS_KIND.SCENE ? '未命名场景' : '未命名状态表',
         statusKind: kind,
         description: '',
         keyColumn: DEFAULT_KEY_COLUMN,
@@ -1098,7 +1098,7 @@ function StatusTablesContent() {
                     <label>
                       <FieldLabel label="来源" note="只读" />
                       <ReadOnlyField
-                        dotClass={selectedRuntimeTable.origin === 'template_copy' ? 'bg-amber-500' : 'bg-emerald-500'}
+                        dotClass={selectedRuntimeTable.origin === STATUS_ORIGIN.TEMPLATE_COPY ? 'bg-amber-500' : 'bg-emerald-500'}
                         title={originLabel(selectedRuntimeTable.origin)}
                         hint={originLabel(selectedRuntimeTable.origin)}
                       />

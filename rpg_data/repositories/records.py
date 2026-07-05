@@ -17,6 +17,7 @@ from peewee import (
     TextField,
 )
 
+from rpg_data.models import STATUS_KIND_NORMAL
 from rpg_data.settings import resolve_database_path
 
 __all__ = [
@@ -353,7 +354,7 @@ class StatusTableTemplateRecord(BaseRecord):
         on_delete="CASCADE",
     )
     name = TextField()
-    status_kind = TextField(default="normal")
+    status_kind = TextField(default=STATUS_KIND_NORMAL)
     description = TextField(default="")
     document_json = TextField()
     sort_order = IntegerField(default=0)
@@ -419,7 +420,7 @@ class SessionStatusTableRecord(BaseRecord):
     source_table_id = IntegerField(null=True)
     origin = TextField()
     name = TextField()
-    status_kind = TextField(default="normal")
+    status_kind = TextField(default=STATUS_KIND_NORMAL)
     description = TextField(default="")
     document_json = TextField()
     sort_order = IntegerField(default=0)

@@ -26,8 +26,8 @@ import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import type { LorebookEntry } from '@/types/lorebook'
 import type { SessionSummary } from '@/types/session'
-import type { StoryStatusMount } from '@/types/statusTables'
-import type { StoryComputedStatus, StoryLibraryItem, StorySummary } from '@/types/story'
+import { STATUS_KIND, type StoryStatusMount } from '@/types/statusTables'
+import { STORY_COMPUTED_STATUS, type StoryComputedStatus, type StoryLibraryItem, type StorySummary } from '@/types/story'
 
 type StoryFilter = 'all' | StoryComputedStatus
 type StorySort = 'active' | 'updated' | 'title' | 'sessions'
@@ -55,12 +55,12 @@ const coverClasses = [
 ]
 
 const statusMeta: Record<StoryComputedStatus, { label: string; badgeClass: string; dotClass: string }> = {
-  live: {
+  [STORY_COMPUTED_STATUS.LIVE]: {
     label: '进行中',
     badgeClass: 'bg-teal-100 text-teal-700',
     dotClass: 'bg-teal-500',
   },
-  draft: {
+  [STORY_COMPUTED_STATUS.DRAFT]: {
     label: '未开始',
     badgeClass: 'bg-amber-100 text-amber-700',
     dotClass: 'bg-amber-500',
@@ -141,8 +141,8 @@ function toLibraryItem(story: StorySummary, aggregate: StoryAggregate): StoryLib
     getTimestamp(story.createdAt),
     ...sortedSessions.map((session) => Math.max(getTimestamp(session.updatedAt), getTimestamp(session.createdAt))),
   )
-  const computedStatus: StoryComputedStatus = sortedSessions.length ? 'live' : 'draft'
-  const sceneStatusCount = aggregate.statusMounts.filter((mount) => mount.statusKind === 'scene').length
+  const computedStatus: StoryComputedStatus = sortedSessions.length ? STORY_COMPUTED_STATUS.LIVE : STORY_COMPUTED_STATUS.DRAFT
+  const sceneStatusCount = aggregate.statusMounts.filter((mount) => mount.statusKind === STATUS_KIND.SCENE).length
 
   return {
     ...story,
@@ -348,8 +348,8 @@ function StoriesContent() {
 
   const aggregatesLoading = aggregateQueries.some((query) => query.isLoading)
 
-  const liveCount = libraryItems.filter((item) => item.computedStatus === 'live').length
-  const draftCount = libraryItems.filter((item) => item.computedStatus === 'draft').length
+  const liveCount = libraryItems.filter((item) => item.computedStatus === STORY_COMPUTED_STATUS.LIVE).length
+  const draftCount = libraryItems.filter((item) => item.computedStatus === STORY_COMPUTED_STATUS.DRAFT).length
   const totalCharacters = libraryItems.reduce((sum, item) => sum + item.characterCount, 0)
   const totalLorebook = libraryItems.reduce((sum, item) => sum + item.lorebookCount, 0)
   const totalStatus = libraryItems.reduce((sum, item) => sum + item.statusTableCount, 0)
@@ -423,8 +423,8 @@ function StoriesContent() {
         <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm" role="tablist" aria-label="故事状态">
           {[
             ['all', '全部'],
-            ['live', '进行中'],
-            ['draft', '未开始'],
+            [STORY_COMPUTED_STATUS.LIVE, '进行中'],
+            [STORY_COMPUTED_STATUS.DRAFT, '未开始'],
           ].map(([value, label]) => (
             <button
               key={value}

@@ -1,4 +1,4 @@
-import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent, type StreamStatus, type TimelineItem } from '@/types/stream'
+import { PLAY_STREAM_EVENT_TYPE, TIMELINE_ITEM_TYPE, type PlayStreamEvent, type StreamStatus, type TimelineItem } from '@/types/stream'
 
 type StreamState = {
   timeline: TimelineItem[]
@@ -12,10 +12,10 @@ function now() {
 
 function appendAssistantText(items: TimelineItem[], content: string): TimelineItem[] {
   const last = items.at(-1)
-  if (last?.type === 'assistant') {
+  if (last?.type === TIMELINE_ITEM_TYPE.ASSISTANT) {
     return [...items.slice(0, -1), { ...last, content: `${last.content}${content}` }]
   }
-  return [...items, { id: crypto.randomUUID(), type: 'assistant', content, createdAt: now() }]
+  return [...items, { id: crypto.randomUUID(), type: TIMELINE_ITEM_TYPE.ASSISTANT, content, createdAt: now() }]
 }
 
 export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent): StreamState {
@@ -39,7 +39,7 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
           ...state.timeline,
           {
             id: crypto.randomUUID(),
-            type: 'tool',
+            type: TIMELINE_ITEM_TYPE.TOOL,
             content: toolContent,
             createdAt: now(),
             metadata: { event },
@@ -53,7 +53,7 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
       return {
         timeline: state.timeline.length > 0
           ? state.timeline.map((item, index) =>
-              index === state.timeline.length - 1 && item.type === 'assistant'
+              index === state.timeline.length - 1 && item.type === TIMELINE_ITEM_TYPE.ASSISTANT
                 ? { ...item, content: item.content || event.payload.text, metadata: event.payload.metadata }
                 : item,
             )
@@ -65,7 +65,7 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
       return {
         timeline: [
           ...state.timeline,
-          { id: crypto.randomUUID(), type: 'error', content: event.payload.message || '流式请求失败', createdAt: now() },
+          { id: crypto.randomUUID(), type: TIMELINE_ITEM_TYPE.ERROR, content: event.payload.message || '流式请求失败', createdAt: now() },
         ],
         status: 'error',
         debugEvents,

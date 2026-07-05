@@ -252,7 +252,7 @@ class SessionRoleService:
         metadata_json = json.dumps({"source": "story_first_message"}, ensure_ascii=False)
         self._messages.append(
             session_id,
-            "assistant",
+            models.MESSAGE_ROLE_ASSISTANT,
             first_message,
             turn_id=1,
             seq_in_turn=1,
@@ -260,7 +260,7 @@ class SessionRoleService:
         )
         self._backup.messages.append(
             session_id,
-            "assistant",
+            models.MESSAGE_ROLE_ASSISTANT,
             first_message,
             turn_id=1,
             seq_in_turn=1,

@@ -27,13 +27,12 @@ import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { listStories } from '@/lib/api/stories'
 import { cn } from '@/lib/utils/cn'
 import type { Scene } from '@/types/scene'
-import type { SessionSummary, Turn } from '@/types/session'
-import type { StatusTable } from '@/types/statusTables'
+import { SESSION_ACTIVITY, type SessionComputedActivity, type SessionSummary, type Turn } from '@/types/session'
+import { STATUS_KIND, STATUS_ORIGIN, type StatusTable } from '@/types/statusTables'
 import type { StorySummary } from '@/types/story'
 
-type ActivityFilter = 'all' | 'recent' | 'stale'
+type ActivityFilter = 'all' | SessionComputedActivity
 type SortMode = 'active' | 'created' | 'title' | 'story'
-type ComputedActivity = 'recent' | 'stale'
 
 type StorySessionAggregate = {
   story: StorySummary
@@ -46,7 +45,7 @@ type SessionCenterItem = SessionSummary & {
   storySummary: string
   latestAt: number
   createdAtMs: number
-  computedActivity: ComputedActivity
+  computedActivity: SessionComputedActivity
   searchText: string
 }
 
@@ -61,13 +60,13 @@ const coverClasses = [
   'from-zinc-900 via-stone-700 to-rose-100',
 ]
 
-const activityMeta: Record<ComputedActivity, { label: string; badgeClass: string; dotClass: string }> = {
-  recent: {
+const activityMeta: Record<SessionComputedActivity, { label: string; badgeClass: string; dotClass: string }> = {
+  [SESSION_ACTIVITY.RECENT]: {
     label: '最近活跃',
     badgeClass: 'bg-teal-100 text-teal-700',
     dotClass: 'bg-teal-500',
   },
-  stale: {
+  [SESSION_ACTIVITY.STALE]: {
     label: '较久未更新',
     badgeClass: 'bg-sky-100 text-sky-700',
     dotClass: 'bg-sky-500',
@@ -116,7 +115,7 @@ function toSessionCenterItem(
 ): SessionCenterItem {
   const latestAt = latestTimestamp(session)
   const createdAtMs = getTimestamp(session.createdAt)
-  const computedActivity: ComputedActivity = latestAt && now - latestAt <= RECENT_WINDOW_MS ? 'recent' : 'stale'
+  const computedActivity: SessionComputedActivity = latestAt && now - latestAt <= RECENT_WINDOW_MS ? SESSION_ACTIVITY.RECENT : SESSION_ACTIVITY.STALE
   const storySummary = story.summary ?? ''
   const searchText = [
     session.id,
@@ -162,8 +161,8 @@ function latestTurnSummary(turns?: Turn[] | null) {
 
 function tableOriginSummary(tables?: StatusTable[] | null) {
   if (!tables?.length) return '暂无状态表'
-  const templateCopy = tables.filter((table) => table.origin === 'template_copy').length
-  const sessionNative = tables.filter((table) => table.origin === 'session_native').length
+  const templateCopy = tables.filter((table) => table.origin === STATUS_ORIGIN.TEMPLATE_COPY).length
+  const sessionNative = tables.filter((table) => table.origin === STATUS_ORIGIN.SESSION_NATIVE).length
   const unknown = tables.length - templateCopy - sessionNative
   return [
     templateCopy ? `模板副本 ${templateCopy}` : '',
@@ -230,7 +229,7 @@ function SessionArtwork({ item, className = 'h-28' }: { item: Pick<SessionCenter
   )
 }
 
-function ActivityBadge({ activity }: { activity: ComputedActivity }) {
+function ActivityBadge({ activity }: { activity: SessionComputedActivity }) {
   const meta = activityMeta[activity]
   return (
     <span className={cn('inline-flex h-7 items-center gap-2 rounded-full px-3 text-xs font-black', meta.badgeClass)}>
@@ -330,7 +329,7 @@ function SessionRow({
       )}
       aria-label={`选择会话 ${item.title || item.id}`}
     >
-      <span className={cn('flex h-10 w-10 items-center justify-center rounded-lg text-sm font-black', item.computedActivity === 'recent' ? 'bg-teal-100 text-teal-700' : 'bg-sky-100 text-sky-700')}>
+      <span className={cn('flex h-10 w-10 items-center justify-center rounded-lg text-sm font-black', item.computedActivity === SESSION_ACTIVITY.RECENT ? 'bg-teal-100 text-teal-700' : 'bg-sky-100 text-sky-700')}>
         S
       </span>
       <span className="min-w-0">
@@ -401,8 +400,8 @@ function SessionInspector({
     )
   }
 
-  const sceneCount = statusTables?.filter((table) => table.statusKind === 'scene').length ?? 0
-  const normalCount = statusTables?.filter((table) => table.statusKind === 'normal').length ?? 0
+  const sceneCount = statusTables?.filter((table) => table.statusKind === STATUS_KIND.SCENE).length ?? 0
+  const normalCount = statusTables?.filter((table) => table.statusKind === STATUS_KIND.NORMAL).length ?? 0
 
   return (
     <aside className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg shadow-slate-200/70">
@@ -640,7 +639,7 @@ function SessionCenterContent() {
   const aggregatesLoading = sessionQueries.some((query) => query.isLoading)
   const initialSessionsLoading = aggregatesLoading && allItems.length === 0
   const aggregateErrors = aggregates.filter((aggregate) => aggregate.error)
-  const recentCount = allItems.filter((item) => item.computedActivity === 'recent').length
+  const recentCount = allItems.filter((item) => item.computedActivity === SESSION_ACTIVITY.RECENT).length
   const storyCountWithSessions = new Set(allItems.map((item) => item.storyId)).size
   const createdThisWeek = allItems.filter((item) => isThisWeek(item.createdAtMs)).length
   const continueItems = allItems.slice(0, 3)
@@ -730,8 +729,8 @@ function SessionCenterContent() {
         <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm" role="tablist" aria-label="会话活跃度">
           {[
             ['all', '全部'],
-            ['recent', '最近活跃'],
-            ['stale', '较久未更新'],
+            [SESSION_ACTIVITY.RECENT, '最近活跃'],
+            [SESSION_ACTIVITY.STALE, '较久未更新'],
           ].map(([value, label]) => (
             <button
               key={value}

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils/cn'
 import { SessionAvatar } from './SessionAvatar'
 import { formatMessageTime } from './sessionRoomHelpers'
-import type { SessionTimelineMessage } from './sessionRoomTypes'
+import { SESSION_TIMELINE_ROLE, type SessionTimelineMessage } from './sessionRoomTypes'
 
 function MiniButton({
   label,
@@ -104,7 +104,7 @@ function MessageBubble({
   onEditCancel: () => void
   onEditSend: () => void
 }) {
-  const isUser = message.role === 'user'
+  const isUser = message.role === SESSION_TIMELINE_ROLE.USER
   const toneClass = {
     user: 'border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-100 dark:shadow-violet-950/30',
     assistant: 'border-slate-200 bg-white text-slate-950 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:shadow-black/25',
@@ -183,7 +183,7 @@ function TimelineMessage({
   onEditCancel: () => void
   onEditSend: () => void
 }) {
-  const isUser = message.role === 'user'
+  const isUser = message.role === SESSION_TIMELINE_ROLE.USER
 
   return (
     <article

@@ -18,7 +18,12 @@ export type StoryInput = {
   firstMessage: string
 }
 
-export type StoryComputedStatus = 'live' | 'draft'
+export const STORY_COMPUTED_STATUS = {
+  LIVE: 'live',
+  DRAFT: 'draft',
+} as const
+
+export type StoryComputedStatus = (typeof STORY_COMPUTED_STATUS)[keyof typeof STORY_COMPUTED_STATUS]
 
 export type StoryLibraryItem = StorySummary & {
   characterCount: number

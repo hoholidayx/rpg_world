@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import type { LorebookEntry } from '@/types/lorebook'
 import type { SessionSummary } from '@/types/session'
-import type { StoryStatusMount } from '@/types/statusTables'
+import { STATUS_KIND, type StoryStatusMount } from '@/types/statusTables'
 import type { StoryInput, StorySummary } from '@/types/story'
 
 type DraftState = StoryInput
@@ -289,7 +289,7 @@ function StoryEditContent({
   const lorebookEntries = lorebookQuery.data ?? []
   const statusMounts = statusMountsQuery.data ?? []
   const sessions = useMemo(() => sortSessions(sessionsQuery.data ?? []), [sessionsQuery.data])
-  const sceneMountCount = statusMounts.filter((mount) => mount.statusKind === 'scene').length
+  const sceneMountCount = statusMounts.filter((mount) => mount.statusKind === STATUS_KIND.SCENE).length
   const dirty = isCreate
     ? Boolean(draft.title.trim() || draft.summary || draft.firstMessage || draft.storyPrompt)
     : isDirty(story, draft)
@@ -605,7 +605,7 @@ function StoryEditContent({
                           name={mount.tableName}
                           meta={`status_kind ${mount.statusKind} · 创建 session 时复制 document_json`}
                           chip={mount.statusKind}
-                          tone={mount.statusKind === 'scene' ? 'teal' : 'amber'}
+                          tone={mount.statusKind === STATUS_KIND.SCENE ? 'teal' : 'amber'}
                           pending={unmountStatusMutation.isPending && unmountStatusMutation.variables === mount.id}
                           onRemove={() => unmountStatusMutation.mutate(mount.id)}
                         />

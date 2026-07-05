@@ -149,8 +149,8 @@ class ContextInspector:
             lines.append(f"- 历史轮数: **{SessionManager.count_turns(self._ctx.hot_history.messages)}** 轮")
             lines.append(
                 "- 角色分布: "
-                f"user {role_counts['user']}, assistant {role_counts['assistant']}, "
-                f"tool {role_counts['tool']}, system {role_counts['system']}"
+                f"user {_role_count(role_counts, Role.USER)}, assistant {_role_count(role_counts, Role.ASSISTANT)}, "
+                f"tool {_role_count(role_counts, Role.TOOL)}, system {_role_count(role_counts, Role.SYSTEM)}"
             )
 
         if self._hot_history_rounds is not None:
@@ -236,11 +236,15 @@ class ContextInspector:
             "tokenCount": self._token_counter.count_messages(self._ctx.hot_history.messages),
             "description": (
                 f"{turn_count} 轮 / {len(self._ctx.hot_history.messages)} 条 "
-                f"(user={role_counts['user']}, assistant={role_counts['assistant']}, "
-                f"tool={role_counts['tool']}, system={role_counts['system']})"
+                f"(user={_role_count(role_counts, Role.USER)}, assistant={_role_count(role_counts, Role.ASSISTANT)}, "
+                f"tool={_role_count(role_counts, Role.TOOL)}, system={_role_count(role_counts, Role.SYSTEM)})"
             ),
             "content": _render_hot_history_content(self._ctx.hot_history.messages),
         })
+
+
+def _role_count(role_counts: dict[str, int], role: Role) -> int:
+    return role_counts[role.value]
 
 
 def _layer_display_name(type_: str) -> str:

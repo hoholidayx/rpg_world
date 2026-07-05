@@ -6,6 +6,7 @@ import { Loader2, RefreshCw } from 'lucide-react'
 import { getContextPreview } from '@/lib/api/contextPreview'
 import { listSessions } from '@/lib/api/sessions'
 import { listStories } from '@/lib/api/stories'
+import { HISTORY_MESSAGE_ROLE } from '@/types/session'
 import type { ContextPreviewLayer, ContextPreviewPayload } from '@/types/contextPreview'
 
 type PreviewView = 'layer' | 'messages' | 'json'
@@ -36,9 +37,9 @@ function queryErrorMessage(error: unknown) {
 }
 
 function roleBadgeClass(role: string) {
-  if (role === 'user') return 'bg-teal-50 text-teal-700 ring-teal-100'
-  if (role === 'assistant') return 'bg-amber-50 text-amber-700 ring-amber-100'
-  if (role === 'tool') return 'bg-rose-50 text-rose-700 ring-rose-100'
+  if (role === HISTORY_MESSAGE_ROLE.USER) return 'bg-teal-50 text-teal-700 ring-teal-100'
+  if (role === HISTORY_MESSAGE_ROLE.ASSISTANT) return 'bg-amber-50 text-amber-700 ring-amber-100'
+  if (role === HISTORY_MESSAGE_ROLE.TOOL) return 'bg-rose-50 text-rose-700 ring-rose-100'
   return 'bg-sky-50 text-sky-700 ring-sky-100'
 }
 
