@@ -1,13 +1,34 @@
 import { createStreamRequest } from '@/lib/api/chat'
 import type { SendMessagePayload } from '@/types/command'
-import type { CurrentAgentStreamEvent } from '@/types/stream'
-import { parseAgentEvent } from './parseAgentEvent'
+import { PLAY_STREAM_EVENT_TYPE, PLAY_STREAM_SCHEMA_VERSION, type PlayStreamEvent } from '@/types/stream'
+import { parsePlayStreamEvent } from './parsePlayStreamEvent'
+
+function sseDataPayload(chunk: string): string | null {
+  const dataLines = chunk
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5))
+
+  if (dataLines.length > 0) return dataLines.join('\n')
+  return null
+}
+
+function rawTextEvent(raw: string, sessionId: string, eventId: number): PlayStreamEvent {
+  return {
+    schemaVersion: PLAY_STREAM_SCHEMA_VERSION,
+    eventId,
+    sessionId,
+    turnId: `raw_${sessionId}`,
+    type: PLAY_STREAM_EVENT_TYPE.TEXT_DELTA,
+    payload: { text: raw },
+  }
+}
 
 export async function consumeChatStream(
   payload: SendMessagePayload,
   handlers: {
     signal?: AbortSignal
-    onEvent: (event: CurrentAgentStreamEvent) => void
+    onEvent: (event: PlayStreamEvent) => void
   },
 ) {
   const response = await createStreamRequest(payload, handlers.signal)
@@ -16,6 +37,19 @@ export async function consumeChatStream(
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let rawEventId = -1
+
+  function emitChunk(chunk: string) {
+    const data = sseDataPayload(chunk)
+    const parseTarget = data ?? chunk
+    if (!parseTarget || parseTarget.trim() === '[DONE]') return
+    try {
+      const event = parsePlayStreamEvent(parseTarget)
+      if (event) handlers.onEvent(event)
+    } catch {
+      handlers.onEvent(rawTextEvent(chunk, payload.sessionId, rawEventId--))
+    }
+  }
 
   while (true) {
     const { done, value } = await reader.read()
@@ -24,13 +58,9 @@ export async function consumeChatStream(
     const chunks = buffer.split('\n\n')
     buffer = chunks.pop() ?? ''
     for (const chunk of chunks) {
-      const data = chunk
-        .split('\n')
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.slice(5).trim())
-        .join('\n')
-      const event = parseAgentEvent(data)
-      if (event) handlers.onEvent(event)
+      emitChunk(chunk)
     }
   }
+
+  if (buffer) emitChunk(buffer)
 }

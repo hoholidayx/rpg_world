@@ -1,9 +1,9 @@
-import type { CurrentAgentStreamEvent, StreamStatus, TimelineItem } from '@/types/stream'
+import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent, type StreamStatus, type TimelineItem } from '@/types/stream'
 
 type StreamState = {
   timeline: TimelineItem[]
   status: StreamStatus
-  debugEvents: CurrentAgentStreamEvent[]
+  debugEvents: PlayStreamEvent[]
 }
 
 function now() {
@@ -18,33 +18,29 @@ function appendAssistantText(items: TimelineItem[], content: string): TimelineIt
   return [...items, { id: crypto.randomUUID(), type: 'assistant', content, createdAt: now() }]
 }
 
-export function reduceAgentEvent(state: StreamState, event: CurrentAgentStreamEvent): StreamState {
+export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent): StreamState {
   const debugEvents = [...state.debugEvents, event]
-  switch (event.kind) {
-    case 'text':
+  switch (event.type) {
+    case PLAY_STREAM_EVENT_TYPE.TURN_STARTED:
+      return { ...state, status: 'connecting', debugEvents }
+    case PLAY_STREAM_EVENT_TYPE.TEXT_DELTA:
       return {
-        timeline: appendAssistantText(state.timeline, event.content ?? ''),
+        timeline: appendAssistantText(state.timeline, event.payload.text),
         status: 'streaming',
         debugEvents,
       }
-    case 'thinking':
-      return {
-        timeline: [
-          ...state.timeline,
-          { id: crypto.randomUUID(), type: 'thinking', content: event.content ?? '思考中...', createdAt: now() },
-        ],
-        status: 'thinking',
-        debugEvents,
-      }
-    case 'tool_call':
-    case 'tool_result':
+    case PLAY_STREAM_EVENT_TYPE.TOOL_CALL:
+    case PLAY_STREAM_EVENT_TYPE.TOOL_RESULT: {
+      const toolContent = event.type === PLAY_STREAM_EVENT_TYPE.TOOL_RESULT
+        ? event.payload.resultPreview ?? event.payload.toolResult ?? event.payload.toolName ?? '工具事件'
+        : event.payload.toolArguments ?? event.payload.toolName ?? '工具事件'
       return {
         timeline: [
           ...state.timeline,
           {
             id: crypto.randomUUID(),
             type: 'tool',
-            content: event.tool_result_preview ?? event.tool_name ?? '工具事件',
+            content: toolContent,
             createdAt: now(),
             metadata: { event },
           },
@@ -52,19 +48,28 @@ export function reduceAgentEvent(state: StreamState, event: CurrentAgentStreamEv
         status: 'tool_running',
         debugEvents,
       }
-    case 'done':
-      return { ...state, status: 'done', debugEvents }
-    case 'error':
+    }
+    case PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED:
+      return {
+        timeline: state.timeline.length > 0
+          ? state.timeline.map((item, index) =>
+              index === state.timeline.length - 1 && item.type === 'assistant'
+                ? { ...item, content: item.content || event.payload.text, metadata: event.payload.metadata }
+                : item,
+            )
+          : appendAssistantText(state.timeline, event.payload.text || '已完成。'),
+        status: 'done',
+        debugEvents,
+      }
+    case PLAY_STREAM_EVENT_TYPE.ERROR:
       return {
         timeline: [
           ...state.timeline,
-          { id: crypto.randomUUID(), type: 'error', content: event.content ?? '流式请求失败', createdAt: now() },
+          { id: crypto.randomUUID(), type: 'error', content: event.payload.message || '流式请求失败', createdAt: now() },
         ],
         status: 'error',
         debugEvents,
       }
-    default:
-      return { ...state, debugEvents }
   }
 }
 

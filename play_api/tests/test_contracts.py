@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -9,8 +11,30 @@ from play_api import agent_client
 from play_api.main import app
 from play_api.delete_tokens import reset_delete_confirmation_tokens
 from play_api.routers.sessions import _agent_call, _turns_from_history
+from play_api.sse_protocol import AgentEventKind, PLAY_SSE_SCHEMA_VERSION, PlaySSEType
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data.services import get_data_service_gateway
+
+
+def _sse_payloads(body: str) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for block in body.split("\n\n"):
+        for line in block.splitlines():
+            if line.startswith("data:"):
+                raw = line.removeprefix("data:").strip()
+                if raw:
+                    payload = json.loads(raw)
+                    assert isinstance(payload, dict)
+                    payloads.append(payload)
+    return payloads
+
+
+class _FakeStreamEvent:
+    def __init__(self, **payload: object) -> None:
+        self._payload = payload
+
+    def to_dict(self) -> dict[str, object]:
+        return dict(self._payload)
 
 
 def test_history_fallback_groups_legacy_messages_by_user_anchor() -> None:
@@ -191,6 +215,27 @@ class _InvalidHistoryAgentClient(_FakeAgentClient):
         }
 
 
+class _StreamingAgentClient(_FakeAgentClient):
+    async def stream(self, session_id: str, text: str):
+        self.calls.append(("stream", session_id, text))
+        yield _FakeStreamEvent(kind=AgentEventKind.TEXT.value, content="你推开门")
+        yield _FakeStreamEvent(kind=AgentEventKind.TOOL_CALL.value, tool_name="roll", tool_arguments="1d20")
+        yield _FakeStreamEvent(kind=AgentEventKind.TOOL_RESULT.value, tool_name="roll", tool_result_preview="18")
+        yield _FakeStreamEvent(
+            kind=AgentEventKind.DONE.value,
+            content="你推开门。",
+            usage={
+                "prompt_tokens": 3,
+                "completion_tokens": 4,
+                "total_tokens": 7,
+                "cached_tokens": 1,
+            },
+            model="test-model",
+            finish_reason="stop",
+            duration_ms=12.3,
+        )
+
+
 def test_history_endpoint_rejects_invalid_turn_metadata(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
@@ -202,6 +247,60 @@ def test_history_endpoint_rejects_invalid_turn_metadata(tmp_path, monkeypatch) -
 
     assert response.status_code == 409
     assert "history[1]" in response.json()["detail"]
+
+
+def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    fake_agent = _StreamingAgentClient()
+    monkeypatch.setattr(agent_client, "_client", fake_agent)
+    reset_delete_confirmation_tokens()
+
+    with TestClient(app) as client:
+        with client.stream(
+            "POST",
+            "/play-api/v1/sessions/s_forest001/stream",
+            json={"text": "hello"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    events = _sse_payloads(body)
+    assert [event["type"] for event in events] == [
+        PlaySSEType.TURN_STARTED.value,
+        PlaySSEType.TEXT_DELTA.value,
+        PlaySSEType.TOOL_CALL.value,
+        PlaySSEType.TOOL_RESULT.value,
+        PlaySSEType.TURN_COMPLETED.value,
+    ]
+    assert [event["eventId"] for event in events] == [1, 2, 3, 4, 5]
+    assert {event["schemaVersion"] for event in events} == {PLAY_SSE_SCHEMA_VERSION}
+    assert {event["sessionId"] for event in events} == {"s_forest001"}
+    assert len({event["turnId"] for event in events}) == 1
+    assert str(events[0]["turnId"]).startswith("turn_s_forest001_")
+    assert events[0]["payload"] == {"mode": "ic"}
+    assert events[1]["payload"] == {"text": "你推开门"}
+    assert events[2]["payload"] == {"toolName": "roll", "toolArguments": "1d20"}
+    assert events[3]["payload"] == {"toolName": "roll", "resultPreview": "18"}
+    assert events[4]["payload"] == {
+        "text": "你推开门。",
+        "metadata": {
+            "messageDisplay": {
+                "schemaVersion": "v1",
+                "segments": [],
+            }
+        },
+        "usage": {
+            "prompt_tokens": 3,
+            "completion_tokens": 4,
+            "total_tokens": 7,
+            "cached_tokens": 1,
+        },
+        "model": "test-model",
+        "finishReason": "stop",
+        "durationMs": 12.3,
+    }
+    assert ("stream", "s_forest001", "hello") in fake_agent.calls
 
 
 def test_play_api_contracts(tmp_path, monkeypatch) -> None:

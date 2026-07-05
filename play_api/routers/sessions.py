@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Literal, TypeVar
@@ -15,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent_service.client import AgentClientError, AgentServiceUnavailable
 from play_api.backends import get_agent_backend, get_data_manager_backend
 from play_api.routers._locator import resolve_session_or_404
+from play_api.sse_protocol import PlaySSEStream, SSE_MEDIA_TYPE, agent_event_kind
 from rpg_core.session.turn_metadata import (
     InvalidTurnMetadataError,
     has_trustworthy_turn_metadata,
@@ -183,10 +183,6 @@ async def _agent_call(awaitable: Awaitable[T]) -> T:
         if exc.status_code in {404, 409, 422}:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-def _agent_error_event(exc: AgentClientError) -> dict[str, object]:
-    return {"kind": "error", "content": str(exc)}
 
 
 _SCENE_TIME_KEYS = ("time", "时间")
@@ -509,9 +505,10 @@ async def delete_message(session_id: str, message_id: int) -> dict[str, object]:
 @router.post("/{session_id}/stream")
 async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingResponse:
     workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    stream = PlaySSEStream(agent_session_id)
 
     async def event_generator():
-        # SSE 事件保持 Agent 服务原始结构，Play API 这里只负责转发与 session 解析。
+        yield stream.turn_started(mode=payload.mode)
         try:
             async for event in get_agent_backend().stream(
                 workspace,
@@ -520,8 +517,16 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
                 payload.text,
                 payload.mode,
             ):
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                encoded = stream.agent_event(event)
+                if encoded is None:
+                    logger.debug(
+                        "[PlayAPI] ignored unsupported agent stream event: session_id={}, kind={}",
+                        agent_session_id,
+                        agent_event_kind(event),
+                    )
+                    continue
+                yield encoded
         except (AgentServiceUnavailable, AgentClientError) as exc:
-            yield f"data: {json.dumps(_agent_error_event(exc), ensure_ascii=False)}\n\n"
+            yield stream.error(str(exc), status_code=exc.status_code)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(event_generator(), media_type=SSE_MEDIA_TYPE)

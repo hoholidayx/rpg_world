@@ -19,7 +19,7 @@ import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { consumeChatStream } from '@/lib/stream/sse'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
-import type { CurrentAgentStreamEvent } from '@/types/stream'
+import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
 import { SessionComposer } from './SessionComposer'
 import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
@@ -102,14 +102,6 @@ function toolSpeaker(): SessionSpeaker {
     name: '工具结果',
     fallback: '⚒',
     tone: 'tool',
-  }
-}
-
-function thinkingSpeaker(): SessionSpeaker {
-  return {
-    name: '思考中',
-    fallback: '…',
-    tone: 'thinking',
   }
 }
 
@@ -677,16 +669,18 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setEditDraft('')
   }, [])
 
-  const appendStreamEvent = useCallback((event: CurrentAgentStreamEvent, assistantMessageId: string, turnId: number) => {
-    if (event.kind === 'text') {
+  const appendStreamEvent = useCallback((event: PlayStreamEvent, assistantMessageId: string, turnId: number) => {
+    if (event.type === PLAY_STREAM_EVENT_TYPE.TURN_STARTED) return
+
+    if (event.type === PLAY_STREAM_EVENT_TYPE.TEXT_DELTA) {
       setLocalMessages((current) =>
         current.map((message) =>
           message.id === assistantMessageId
             ? {
                 ...message,
-                content: `${message.content}${event.content ?? ''}`,
+                content: `${message.content}${event.payload.text}`,
                 status: 'streaming',
-                canCopy: Boolean(`${message.content}${event.content ?? ''}`.trim()),
+                canCopy: Boolean(`${message.content}${event.payload.text}`.trim()),
               }
             : message,
         ),
@@ -694,28 +688,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       return
     }
 
-    if (event.kind === 'thinking') {
-      setLocalMessages((current) => [
-        ...current,
-        {
-          id: `local-thinking-${turnId}-${crypto.randomUUID()}`,
-          turnId,
-          seqInTurn: 3,
-          role: 'thinking',
-          content: event.content ?? '思考中...',
-          createdAt: new Date().toISOString(),
-          speaker: thinkingSpeaker(),
-          status: 'local',
-          canCopy: Boolean((event.content ?? '思考中...').trim()),
-          canRetry: false,
-          canEdit: false,
-          canDelete: false,
-        },
-      ])
-      return
-    }
-
-    if (event.kind === 'tool_call' || event.kind === 'tool_result') {
+    if (event.type === PLAY_STREAM_EVENT_TYPE.TOOL_CALL || event.type === PLAY_STREAM_EVENT_TYPE.TOOL_RESULT) {
+      const toolText = event.type === PLAY_STREAM_EVENT_TYPE.TOOL_RESULT
+        ? event.payload.resultPreview ?? event.payload.toolResult ?? event.payload.toolName ?? '工具事件'
+        : event.payload.toolArguments ?? event.payload.toolName ?? '工具事件'
       setLocalMessages((current) => [
         ...current,
         {
@@ -723,11 +699,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           turnId,
           seqInTurn: 4,
           role: 'tool',
-          content: event.tool_result_preview ?? event.tool_name ?? '工具事件',
+          content: toolText,
           createdAt: new Date().toISOString(),
           speaker: toolSpeaker(),
           status: 'local',
-          canCopy: Boolean((event.tool_result_preview ?? event.tool_name ?? '工具事件').trim()),
+          canCopy: Boolean(toolText.trim()),
           canRetry: false,
           canEdit: false,
           canDelete: false,
@@ -736,18 +712,25 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       return
     }
 
-    if (event.kind === 'done') {
+    if (event.type === PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED) {
       setLocalMessages((current) =>
         current.map((message) =>
           message.id === assistantMessageId
-            ? { ...message, status: 'done', content: message.content || '已完成。', canCopy: Boolean((message.content || '已完成。').trim()) }
+            ? {
+                ...message,
+                status: 'done',
+                content: message.content || event.payload.text || '已完成。',
+                metadata: event.payload.metadata ?? message.metadata,
+                canCopy: Boolean((message.content || event.payload.text || '已完成。').trim()),
+              }
             : message,
         ),
       )
       return
     }
 
-    if (event.kind === 'error') {
+    if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) {
+      const errorText = event.payload.message || '流式请求失败'
       setLocalMessages((current) => [
         ...current.map((message) =>
           message.id === assistantMessageId ? { ...message, status: 'error' as const } : message,
@@ -757,11 +740,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           turnId,
           seqInTurn: 5,
           role: 'error',
-          content: event.content ?? '流式请求失败',
+          content: errorText,
           createdAt: new Date().toISOString(),
           speaker: errorSpeaker(),
           status: 'error',
-          canCopy: Boolean((event.content ?? '流式请求失败').trim()),
+          canCopy: Boolean(errorText.trim()),
           canRetry: false,
           canEdit: false,
           canDelete: false,
@@ -809,7 +792,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           signal: controller.signal,
           onEvent: (event) => {
             appendStreamEvent(event, assistantMessage.id, message.turnId)
-            if (event.kind === 'error') streamFailure = event.content ?? failureToast
+            if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = event.payload.message || failureToast
           },
         },
       )
@@ -1006,6 +989,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setSending(true)
     setLocalMessages((current) => [...current, userMessage, assistantMessage])
 
+    let streamFailure: string | null = null
     try {
       // 叙事风格目前只保存在本地 message metadata；待后端支持独立 prompt 字段后再随 payload 发送。
       await consumeChatStream(
@@ -1016,9 +1000,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         },
         {
           signal: controller.signal,
-          onEvent: (event) => appendStreamEvent(event, assistantMessage.id, turnId),
+          onEvent: (event) => {
+            appendStreamEvent(event, assistantMessage.id, turnId)
+            if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = event.payload.message || '未知流式错误'
+          },
         },
       )
+      if (streamFailure) throw new Error(streamFailure)
     } catch (error) {
       if (controller.signal.aborted) {
         setLocalMessages((current) =>
@@ -1034,25 +1022,29 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           ),
         )
       } else {
-        setLocalMessages((current) => [
-          ...current.map((message) =>
-            message.id === assistantMessage.id ? { ...message, status: 'error' as const } : message,
-          ),
-          {
-            id: `local-error-${turnId}-${crypto.randomUUID()}`,
-            turnId,
-            seqInTurn: 5,
-            role: 'error',
-            content: error instanceof Error ? error.message : '未知流式错误',
-            createdAt: new Date().toISOString(),
-            speaker: errorSpeaker(),
-            status: 'error',
-            canCopy: Boolean((error instanceof Error ? error.message : '未知流式错误').trim()),
-            canRetry: false,
-            canEdit: false,
-            canDelete: false,
-          },
-        ])
+        const errorText = error instanceof Error ? error.message : '未知流式错误'
+        if (!streamFailure) {
+          setLocalMessages((current) => [
+            ...current.map((message) =>
+              message.id === assistantMessage.id ? { ...message, status: 'error' as const } : message,
+            ),
+            {
+              id: `local-error-${turnId}-${crypto.randomUUID()}`,
+              turnId,
+              seqInTurn: 5,
+              role: 'error',
+              content: errorText,
+              createdAt: new Date().toISOString(),
+              speaker: errorSpeaker(),
+              status: 'error',
+              canCopy: Boolean(errorText.trim()),
+              canRetry: false,
+              canEdit: false,
+              canDelete: false,
+            },
+          ])
+        }
+        showToast(errorText)
       }
     } finally {
       setSending(false)

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from agent_service.client import AgentClientError, AgentServiceUnavailable
 from play_api import agent_client
 from play_api.main import app
+from play_api.sse_protocol import PLAY_SSE_SCHEMA_VERSION, PlaySSEType
 
 
 class _FailingHistoryClient:
@@ -99,5 +100,7 @@ def test_stream_maps_agent_client_error_to_sse_error(tmp_path, monkeypatch) -> N
             body = "".join(response.iter_text())
 
     assert response.status_code == 200
-    assert '"kind": "error"' in body
+    assert f'"schemaVersion": "{PLAY_SSE_SCHEMA_VERSION}"' in body
+    assert f'"type": "{PlaySSEType.TURN_STARTED.value}"' in body
+    assert f'"type": "{PlaySSEType.ERROR.value}"' in body
     assert "stream failed" in body
