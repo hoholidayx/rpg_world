@@ -114,6 +114,28 @@ async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
     return f"[已切换到会话: {sid}]"
 
 
+async def _cmd_role_bind(agent: RPGGameAgent, args: list[str]) -> str:
+    """Bind or switch the player-controlled role for the current session."""
+    if agent is None:
+        return "角色绑定不可用。"
+    if not args:
+        return agent.render_role_bind_prompt()
+    try:
+        index = int(args[0])
+    except ValueError:
+        return agent.render_role_bind_prompt(error=f"无效角色序号: {args[0]}")
+    try:
+        result = agent.bind_player_character_by_index(index)
+    except ValueError as exc:
+        return agent.render_role_bind_prompt(error=str(exc))
+    player = result.state.player
+    if result.first_message:
+        return result.first_message
+    if player is None:
+        return agent.render_role_bind_prompt()
+    return f"已切换扮演角色：{player.name}。后续消息将使用该身份。"
+
+
 def _current_catalog_session(agent: RPGGameAgent):
     from rpg_data.services import get_data_service_gateway
 
@@ -233,6 +255,10 @@ class CommandDispatcher:
         self.register_builtin(
             "/memory_reindex", "手动触发 memory 全量重建",
             "用法：/memory_reindex。会重建 memory 的 FTS/向量索引，不会自动在启动时执行。", _cmd_memory_reindex,
+        )
+        self.register_builtin(
+            "/role_bind", "绑定或切换玩家扮演角色",
+            "用法：/role_bind <序号>。序号来自当前故事已挂载角色列表；绑定前普通消息不会进入 LLM。", _cmd_role_bind,
         )
 
     # ── 查询 ──────────────────────────────────────────────────────────

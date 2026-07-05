@@ -77,6 +77,16 @@ def to_session(row: records.SessionRecord) -> models.Session:
         updated_at=str(row.updated_at),
         title=str(profile.title or "") if profile is not None else "",
         description=str(profile.description or "") if profile is not None else "",
+        player_character_id=(
+            int(profile.player_character_id)
+            if profile is not None and profile.player_character_id is not None
+            else None
+        ),
+        player_character_snapshot_json=(
+            str(profile.player_character_snapshot_json or "{}")
+            if profile is not None
+            else "{}"
+        ),
         profile_metadata_json=str(profile.metadata_json or "{}") if profile is not None else "{}",
         profile_created_at=str(profile.created_at) if profile is not None else "",
         profile_updated_at=str(profile.updated_at) if profile is not None else "",
@@ -88,6 +98,8 @@ def to_session_profile(row: records.SessionProfileRecord) -> models.SessionProfi
         session_id=str(row.session_id),
         title=str(row.title or ""),
         description=str(row.description or ""),
+        player_character_id=int(row.player_character_id) if row.player_character_id is not None else None,
+        player_character_snapshot_json=str(row.player_character_snapshot_json or "{}"),
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),
         created_at=str(row.created_at),

@@ -129,10 +129,20 @@ class AgentClient:
         params = {"workspace_id": workspace_id, "story_id": story_id}
         return cast(AgentSessionsPayload, await self._get("/chat/sessions", params=params))
 
-    async def create_session(self, workspace_id: str, story_id: int, *, title: str = "") -> AgentSessionCreatePayload:
+    async def create_session(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        title: str = "",
+        player_character_id: int | None = None,
+    ) -> AgentSessionCreatePayload:
+        payload: dict[str, object] = {"workspace_id": workspace_id, "story_id": story_id, "title": title}
+        if player_character_id is not None:
+            payload["player_character_id"] = player_character_id
         result = await self._post(
             "/chat/sessions",
-            json={"workspace_id": workspace_id, "story_id": story_id, "title": title},
+            json=payload,
         )
         return cast(AgentSessionCreatePayload, result)
 
@@ -143,15 +153,19 @@ class AgentClient:
         *,
         session_id: str | None = None,
         title: str = "",
+        player_character_id: int | None = None,
     ) -> AgentSessionPayloadDict:
+        payload: dict[str, object] = {
+            "workspace_id": workspace_id,
+            "story_id": story_id,
+            "session_id": session_id,
+            "title": title,
+        }
+        if player_character_id is not None:
+            payload["player_character_id"] = player_character_id
         result = await self._post(
             "/chat/session/ensure",
-            json={
-                "workspace_id": workspace_id,
-                "story_id": story_id,
-                "session_id": session_id,
-                "title": title,
-            },
+            json=payload,
         )
         return cast(AgentSessionPayloadDict, result)
 
@@ -173,6 +187,17 @@ class AgentClient:
         result = await self._post(
             "/chat/session/reload-history",
             json={"session_id": session_id},
+        )
+        return result
+
+    async def bind_player_character(
+        self,
+        session_id: str,
+        player_character_id: int,
+    ) -> JsonObject:
+        result = await self._post(
+            "/chat/session/player-character",
+            json={"session_id": session_id, "player_character_id": int(player_character_id)},
         )
         return result
 

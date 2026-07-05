@@ -1,0 +1,1209 @@
+<!--
+  Changelog:
+  - 新增“玩家扮演角色选择”需求文档，补齐 Play WebUI 当前缺失的 session 级玩家角色绑定流程。
+  - 明确三个入口：新建会话时选择、进入旧会话时补选、会话内设置中查看与切换。
+  - 约束角色来源先使用 story 已挂载角色；一个 session 同时只绑定一个玩家扮演角色。
+  - 新增异常数据策略：绑定缺失、角色不存在、角色未挂载到当前故事、snapshot 与主数据冲突时，强制进入扮演角色选择页，不做静默兜底。
+  - 新增 Agent 侧强校验要求：进入 send/stream 前必须确认 session 已设置有效玩家扮演角色；缺失绑定返回固定选角文本，异常绑定返回业务错误。
+  - 更新其他渠道策略：允许 CLI / Telegram / Agent API 建立空 session，但必须先返回固定编号角色列表；用户回复 /role_bind 序号后绑定或切换玩家角色，再发送 story first_message。
+  - 明确本页只做静态需求与交互预览，不新增后端契约，不改变当前 Agent 或 SessionRoom 运行逻辑。
+  - 标注后续 API/data 能力：playerCharacterId、playerCharacterName、playerCharacterSnapshot，以及创建/查询/修改绑定接口。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play WebUI 玩家扮演角色选择需求</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --soft: #f1f5f9;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --line: #dbe3ef;
+      --line-strong: #cbd5e1;
+      --violet: #4f46e5;
+      --violet-strong: #5b21b6;
+      --violet-soft: #eef2ff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --sky: #0369a1;
+      --sky-soft: #e0f2fe;
+      --rose: #be123c;
+      --rose-soft: #ffe4e6;
+      --shadow: 0 16px 44px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    input:focus-visible {
+      outline: 3px solid rgba(79, 70, 229, 0.22);
+      outline-offset: 2px;
+    }
+
+    .page {
+      width: min(1440px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+
+    .page-bar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 0;
+      font-size: 34px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 14px;
+      font-size: 20px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      font-size: 15px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 820px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--ink);
+      padding: 0 14px;
+      font-weight: 900;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    }
+
+    .button.primary {
+      border-color: var(--violet);
+      background: var(--violet);
+      color: white;
+    }
+
+    .button.danger {
+      border-color: var(--rose-soft);
+      background: var(--rose-soft);
+      color: var(--rose);
+    }
+
+    .button:disabled {
+      cursor: not-allowed;
+      border-color: var(--line);
+      background: #f8fafc;
+      color: var(--faint);
+      box-shadow: none;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .section {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: var(--shadow);
+    }
+
+    .section + .section {
+      margin-top: 18px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 58px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-body {
+      padding: 18px;
+    }
+
+    .muted {
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 0 9px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .badge.required {
+      background: var(--violet-soft);
+      color: var(--violet-strong);
+    }
+
+    .badge.ready {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .badge.warn {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .fact {
+      min-height: 118px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      padding: 14px;
+    }
+
+    .fact strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .flow-shell {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: 660px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .flow-nav {
+      border-right: 1px solid var(--line);
+      background: #fbfdff;
+      padding: 12px;
+    }
+
+    .flow-tab {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 44px;
+      margin-bottom: 6px;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      background: transparent;
+      color: var(--muted);
+      padding: 0 10px;
+      text-align: left;
+      font-weight: 900;
+    }
+
+    .flow-tab.active {
+      border-color: #c7d2fe;
+      background: var(--violet-soft);
+      color: var(--violet-strong);
+    }
+
+    .flow-content {
+      min-width: 0;
+      padding: 18px;
+    }
+
+    .flow-panel {
+      display: none;
+    }
+
+    .flow-panel.active {
+      display: block;
+    }
+
+    .mock-window {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #f8fafc;
+    }
+
+    .mock-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 54px;
+      border-bottom: 1px solid var(--line);
+      background: white;
+      padding: 0 14px;
+    }
+
+    .mock-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 14px;
+      padding: 14px;
+    }
+
+    .story-card,
+    .preview-card,
+    .role-card,
+    .step-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+    }
+
+    .story-card {
+      min-height: 250px;
+      padding: 14px;
+    }
+
+    .cover {
+      height: 88px;
+      margin-bottom: 12px;
+      border-radius: var(--radius);
+      background:
+        linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(15, 118, 110, 0.82)),
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.12) 0 2px, transparent 2px 7px);
+    }
+
+    .role-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .role-card {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      width: 100%;
+      padding: 12px;
+      text-align: left;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+    }
+
+    .role-card:hover {
+      border-color: #c7d2fe;
+      transform: translateY(-1px);
+    }
+
+    .role-card.selected {
+      border-color: var(--violet);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+    }
+
+    .avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.92) 0 14%, transparent 15%),
+        radial-gradient(circle at 50% 82%, rgba(255, 255, 255, 0.8) 0 25%, transparent 26%),
+        linear-gradient(135deg, #4338ca, #0f766e);
+      color: white;
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .avatar.alt {
+      background:
+        radial-gradient(circle at 50% 30%, #fef3c7 0 14%, transparent 15%),
+        radial-gradient(circle at 50% 82%, #f8fafc 0 25%, transparent 26%),
+        linear-gradient(135deg, #7c2d12, #0f766e);
+    }
+
+    .avatar.third {
+      background:
+        radial-gradient(circle at 50% 30%, #e0f2fe 0 14%, transparent 15%),
+        radial-gradient(circle at 50% 82%, #f8fafc 0 25%, transparent 26%),
+        linear-gradient(135deg, #1e3a8a, #7c3aed);
+    }
+
+    .radio {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--line-strong);
+      border-radius: 999px;
+      background: white;
+    }
+
+    .role-card.selected .radio {
+      border-color: var(--violet);
+      background: radial-gradient(circle, var(--violet) 0 38%, transparent 40%);
+    }
+
+    .preview-card {
+      padding: 14px;
+    }
+
+    .identity-strip {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid #c7d2fe;
+      border-radius: var(--radius);
+      background: var(--violet-soft);
+    }
+
+    .message-preview {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 12px;
+    }
+
+    .bubble {
+      max-width: 86%;
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      background: var(--violet);
+      color: white;
+      line-height: 1.6;
+      font-size: 14px;
+    }
+
+    .bubble.narrator {
+      margin-top: 10px;
+      background: #ffffff;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    .step-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .step-card {
+      padding: 12px;
+      min-height: 120px;
+    }
+
+    .step-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      background: var(--violet-soft);
+      color: var(--violet-strong);
+      font-weight: 950;
+      margin-bottom: 10px;
+    }
+
+    .code {
+      margin: 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 14px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .checklist {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .checklist li {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .check {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      background: var(--teal-soft);
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .empty-state {
+      display: none;
+      min-height: 250px;
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      background: #fbfdff;
+      padding: 28px;
+      text-align: center;
+    }
+
+    .empty .role-list,
+    .empty .selection-footer {
+      display: none;
+    }
+
+    .empty .empty-state {
+      display: block;
+    }
+
+    .selection-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .toggle-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .side-panel {
+      position: sticky;
+      top: 24px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .mini-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .mini-table th,
+    .mini-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 0;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .mini-table th {
+      width: 118px;
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.34);
+      padding: 24px;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal {
+      width: min(440px, 100%);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: 0 26px 80px rgba(15, 23, 42, 0.22);
+      padding: 18px;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    @media (max-width: 1080px) {
+      .grid,
+      .mock-main {
+        grid-template-columns: 1fr;
+      }
+
+      .side-panel {
+        position: static;
+      }
+
+      .split,
+      .step-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        width: min(100vw - 24px, 720px);
+        padding-top: 20px;
+      }
+
+      .page-bar {
+        grid-template-columns: 1fr;
+      }
+
+      .actions {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      .flow-shell,
+      .split,
+      .step-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-nav {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-bar">
+      <div>
+        <p class="eyebrow"><span class="dot"></span>Play WebUI 需求文档</p>
+        <h1>玩家扮演角色选择</h1>
+        <p class="subtitle">
+          当前会话页会从故事角色中 fallback 出一个“你”的头像与名称，但缺少明确的“本局你扮演谁”绑定流程。本需求定义 session 级玩家角色选择，让新建会话、进入旧会话和会话内设置形成闭环。
+        </p>
+      </div>
+      <div class="actions">
+        <button class="button" id="show-empty" type="button">切换空状态</button>
+        <button class="button primary" id="reset-demo" type="button">重置预览</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div>
+        <section class="section">
+          <div class="section-header">
+            <div>
+              <h2>问题背景</h2>
+              <p class="small">现状是“显示层猜测”，目标是“session 明确绑定”。</p>
+            </div>
+            <span class="badge required">必须补齐</span>
+          </div>
+          <div class="section-body">
+            <div class="split">
+              <div class="fact">
+                <strong>当前缺口</strong>
+                <p class="small">SessionRoom 使用故事角色 fallback 作为玩家身份，用户没有机会选择本局扮演角色。</p>
+              </div>
+              <div class="fact">
+                <strong>用户感知</strong>
+                <p class="small">“你”的头像、名称和 IC 身份可能与真实想扮演的角色不一致，刷新后仍不可解释。</p>
+              </div>
+              <div class="fact">
+                <strong>后续影响</strong>
+                <p class="small">后续 IC prompt、历史展示、角色视角记忆都需要稳定的玩家角色绑定。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <div>
+              <h2>目标体验</h2>
+              <p class="small">在开始游玩前确认“我是谁”，会话中保持身份稳定。</p>
+            </div>
+            <span class="badge ready">体验闭环</span>
+          </div>
+          <div class="section-body">
+            <ul class="checklist">
+              <li><span class="check">1</span><span>新建会话时，故事有已挂载角色则必须选择一个玩家扮演角色，确认后才进入 SessionRoom。</span></li>
+              <li><span class="check">2</span><span>进入旧会话时，若已经绑定有效玩家角色则直接进入；若绑定缺失或数据异常，则强制进入角色选择页，不做静默兜底。</span></li>
+              <li><span class="check">3</span><span>会话内设置菜单展示当前扮演角色，允许切换，但需要二次确认；切换只影响后续消息，不重写历史。</span></li>
+              <li><span class="check">4</span><span>Agent 端在 send/stream 前也必须强校验玩家角色绑定，避免绕过 WebUI 入口后生成无身份消息。</span></li>
+              <li><span class="check">5</span><span>其他渠道允许先创建空 session，但普通消息不会进入 LLM；Agent 固定返回编号角色列表，用户按格式选择后再开始剧情。</span></li>
+              <li><span class="check">6</span><span>assistant 仍统一显示“旁白”，不会因为玩家选择了某个角色就拆分或冒充角色发言。</span></li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <div>
+              <h2>核心流程静态预览</h2>
+              <p class="small">点击左侧流程和角色卡可预览基础交互。</p>
+            </div>
+            <span class="badge">静态 HTML</span>
+          </div>
+          <div class="section-body">
+            <div class="flow-shell" id="flow-demo">
+              <nav class="flow-nav" aria-label="流程预览">
+                <button class="flow-tab active" type="button" data-flow="new-session">新建会话 <span>01</span></button>
+                <button class="flow-tab" type="button" data-flow="existing-session">进入旧会话 <span>02</span></button>
+                <button class="flow-tab" type="button" data-flow="settings">会话内设置 <span>03</span></button>
+                <button class="flow-tab" type="button" data-flow="other-channels">其他渠道 <span>04</span></button>
+              </nav>
+
+              <div class="flow-content">
+                <section class="flow-panel active" data-panel="new-session">
+                  <div class="mock-window">
+                    <div class="mock-topbar">
+                      <strong>新建会话</strong>
+                      <span class="badge required">选择扮演角色</span>
+                    </div>
+                    <div class="mock-main">
+                      <div class="story-card">
+                        <div class="cover"></div>
+                        <h3>北境森林 Demo</h3>
+                        <p class="small">你将从当前故事已挂载角色中选择本局扮演身份。选择结果会绑定到 session。</p>
+                        <table class="mini-table">
+                          <tr><th>角色来源</th><td>story mounted characters</td></tr>
+                          <tr><th>选择规则</th><td>单选，必选</td></tr>
+                          <tr><th>进入条件</th><td>已创建 session 且绑定有效 playerCharacterId</td></tr>
+                          <tr><th>异常策略</th><td>阻断进入，要求重新选择扮演角色</td></tr>
+                        </table>
+                      </div>
+                      <div class="preview-card" id="selection-area">
+                        <div class="identity-strip">
+                          <span class="avatar" id="selected-avatar">?</span>
+                          <div>
+                            <strong id="selected-name">尚未选择角色</strong>
+                            <p class="small" id="selected-desc">请选择一个你要扮演的角色。</p>
+                          </div>
+                        </div>
+
+                        <div class="role-list">
+                          <button class="role-card" type="button" data-character="Bob" data-desc="沉稳的调查者，擅长观察与现场判断。" data-avatar="B">
+                            <span class="avatar">B</span>
+                            <span>
+                              <strong>Bob</strong>
+                              <span class="small">调查者，适合第一人称行动。</span>
+                            </span>
+                            <span class="radio" aria-hidden="true"></span>
+                          </button>
+                          <button class="role-card" type="button" data-character="Alice" data-desc="记录员与符号学研究者，适合知识与线索整理。" data-avatar="A">
+                            <span class="avatar alt">A</span>
+                            <span>
+                              <strong>Alice</strong>
+                              <span class="small">记录员，适合谨慎推进。</span>
+                            </span>
+                            <span class="radio" aria-hidden="true"></span>
+                          </button>
+                          <button class="role-card" type="button" data-character="守夜人伊凡" data-desc="熟悉旧路与夜间巡逻，适合本地人视角。" data-avatar="伊">
+                            <span class="avatar third">伊</span>
+                            <span>
+                              <strong>守夜人伊凡</strong>
+                              <span class="small">本地向导，适合环境探索。</span>
+                            </span>
+                            <span class="radio" aria-hidden="true"></span>
+                          </button>
+                        </div>
+
+                        <div class="empty-state">
+                          <h3>当前故事还没有可扮演角色</h3>
+                          <p class="small">需要先在角色库创建角色，并在故事编辑页挂载到当前故事。没有挂载角色时不应自动猜测玩家身份。</p>
+                          <button class="button" type="button">前往故事编辑</button>
+                        </div>
+
+                        <div class="selection-footer">
+                          <span class="small" id="selection-hint">未选择时不能开始会话。</span>
+                          <button class="button primary" id="confirm-selection" type="button" disabled>确认并开始</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="flow-panel" data-panel="existing-session">
+                  <div class="mock-window">
+                    <div class="mock-topbar">
+                      <strong>进入已有会话</strong>
+                      <span class="badge warn">兼容旧数据</span>
+                    </div>
+                    <div class="section-body">
+                      <div class="step-grid">
+                        <div class="step-card">
+                          <span class="step-number">1</span>
+                          <h3>读取 session</h3>
+                          <p class="small">进入前读取 session summary 与 playerCharacter 绑定字段。</p>
+                        </div>
+                        <div class="step-card">
+                          <span class="step-number">2</span>
+                          <h3>已绑定</h3>
+                          <p class="small">直接进入 SessionRoom，顶部与 user 消息显示已绑定角色。</p>
+                        </div>
+                        <div class="step-card">
+                          <span class="step-number">3</span>
+                          <h3>缺失或异常</h3>
+                          <p class="small">绑定缺失、角色不存在、角色未挂载或 snapshot 冲突时，强制进入角色选择页。</p>
+                        </div>
+                        <div class="step-card">
+                          <span class="step-number">4</span>
+                          <h3>绑定后进入</h3>
+                          <p class="small">保存 playerCharacterId 后进入会话，历史不被改写。</p>
+                        </div>
+                      </div>
+                      <div class="message-preview">
+                        <div class="identity-strip">
+                          <span class="avatar alt">A</span>
+                          <div>
+                            <strong>当前扮演：Alice</strong>
+                            <p class="small">该身份来自 session 绑定，而不是前端 fallback。</p>
+                          </div>
+                        </div>
+                        <div class="bubble">我让 Bob 观察北侧立石，自己记录海潮声。</div>
+                        <div class="bubble narrator">旁白：Alice 的笔尖停在“海潮声”三个字旁，石缝里传来的湿冷气息忽然变得更重。</div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="flow-panel" data-panel="settings">
+                  <div class="mock-window">
+                    <div class="mock-topbar">
+                      <strong>SessionRoom 设置</strong>
+                      <button class="button danger" id="switch-role" type="button">切换角色</button>
+                    </div>
+                    <div class="mock-main">
+                      <div class="preview-card">
+                        <h3>当前玩家身份</h3>
+                        <div class="identity-strip">
+                          <span class="avatar" id="settings-avatar">B</span>
+                          <div>
+                            <strong id="settings-name">Bob</strong>
+                            <p class="small">切换只影响后续 user 消息头像、名称和未来 prompt 语义，不重写已存在历史。</p>
+                          </div>
+                        </div>
+                        <div class="role-list">
+                          <button class="role-card selected" type="button">
+                            <span class="avatar">B</span>
+                            <span><strong>Bob</strong><span class="small">当前绑定角色</span></span>
+                            <span class="radio"></span>
+                          </button>
+                          <button class="role-card" type="button">
+                            <span class="avatar alt">A</span>
+                            <span><strong>Alice</strong><span class="small">可切换角色</span></span>
+                            <span class="radio"></span>
+                          </button>
+                        </div>
+                      </div>
+                      <div class="preview-card">
+                        <h3>切换确认文案</h3>
+                        <p class="small">切换玩家角色会影响之后所有 IC user 消息的展示身份。历史消息保持原样；assistant 仍显示为旁白。</p>
+                        <table class="mini-table">
+                          <tr><th>需要确认</th><td>是</td></tr>
+                          <tr><th>影响范围</th><td>后续消息与后续 prompt 语义</td></tr>
+                          <tr><th>不做事项</th><td>不重写历史，不拆分 assistant 发言</td></tr>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="flow-panel" data-panel="other-channels">
+                  <div class="mock-window">
+                    <div class="mock-topbar">
+                      <strong>CLI / Telegram / Agent API</strong>
+                      <span class="badge warn">强校验下的补选协议</span>
+                    </div>
+                    <div class="section-body">
+                      <p class="muted">
+                        非 Web 渠道可以建立空 session，但空 session 只能处于“等待选择扮演角色”状态。任何普通输入在绑定前都不进入 LLM；Agent 固定返回当前故事已挂载角色的编号文本，用户回复 <strong>/role_bind 序号</strong> 后绑定或切换玩家角色，再发送 story first_message。
+                      </p>
+                      <div class="step-grid">
+                        <div class="step-card">
+                          <span class="step-number">1</span>
+                          <h3>允许空 session</h3>
+                          <p class="small">CLI、Telegram、Agent API create/ensure 都可以不传 playerCharacterId；session 创建成功，但状态是 player role required。</p>
+                        </div>
+                        <div class="step-card">
+                          <span class="step-number">2</span>
+                          <h3>固定返回角色列表</h3>
+                          <p class="small">首次普通输入或 /start_play 时返回所有 story mounted characters，带 1-based 序号、名称、简短摘要；该回复不经过 LLM。</p>
+                        </div>
+                        <div class="step-card">
+                          <span class="step-number">3</span>
+                          <h3>用户选择格式</h3>
+                          <p class="small">只接受 /role_bind 1 这种明确格式。无效序号、非数字、角色已取消挂载时，重复返回角色列表和错误提示。</p>
+                        </div>
+                        <div class="step-card">
+                          <span class="step-number">4</span>
+                          <h3>绑定并开场</h3>
+                          <p class="small">绑定成功后写入 playerCharacterId 与 snapshot，然后发送 story first_message；之后普通消息才允许进入 LLM。</p>
+                        </div>
+                      </div>
+                      <div class="message-preview">
+                        <pre class="code">请选择你要扮演的角色（回复 /role_bind 序号）：
+1. Bob
+   沉稳的调查者，擅长观察与现场判断。
+2. Alice
+   记录员与符号学研究者，适合知识与线索整理。
+3. 守夜人伊凡
+   熟悉旧路与夜间巡逻，适合本地人视角。
+
+示例：/role_bind 2</pre>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <div>
+              <h2>数据结构与 API 后续计划</h2>
+              <p class="small">正式实现时建议作为 session 级绑定，而不是 UI 本地状态。</p>
+            </div>
+            <span class="badge warn">后续实现</span>
+          </div>
+          <div class="section-body">
+            <pre class="code">SessionSummary {
+  id: string
+  workspace: string
+  storyId: number
+  title?: string
+  playerCharacterId?: number
+  playerCharacterName?: string
+  playerCharacterSnapshot?: {
+    name: string
+    avatarUrl?: string
+    roleLabel?: string
+  }
+}
+
+POST /sessions
+body: { workspaceId, storyId, title?, playerCharacterId }
+allow: playerCharacterId 缺省时创建空 session，状态为 player_role_required
+
+Agent ensure/create session
+body: { workspace_id, story_id, session_id?, title?, player_character_id? }
+allow: player_character_id 缺省；返回 player_role_required
+
+Telegram pending selection
+state: chat_id -> { session_id, candidateCharacterIds[], awaitingRoleSelection: true }
+
+CLI startup
+config: workspace_id + story_id + optional session_id + optional player_character_id
+
+PATCH /sessions/{session_id}/player-character
+body: { playerCharacterId }
+
+Agent send/stream guard
+require: session.playerCharacterId 指向当前 story 已挂载角色
+missing: 固定返回编号角色列表文本，不调用 LLM
+bind command: /role_bind {index}
+shared behavior: WebUI 设置面板选择角色与 /role_bind 走同一条绑定/切换业务能力
+after bind: 写入 playerCharacterId + snapshot，并发送 story first_message
+invalid binding: 409 player character invalid</pre>
+          </div>
+        </section>
+      </div>
+
+      <aside class="side-panel">
+        <section class="section">
+          <div class="section-header">
+            <h2>需求边界</h2>
+            <span class="badge">v1</span>
+          </div>
+          <div class="section-body">
+            <table class="mini-table">
+              <tr><th>角色来源</th><td>当前故事已挂载角色</td></tr>
+              <tr><th>选择方式</th><td>单选</td></tr>
+              <tr><th>绑定范围</th><td>session 级</td></tr>
+              <tr><th>空 session</th><td>其他渠道允许创建，但只可进入选角状态</td></tr>
+              <tr><th>异常策略</th><td>强制选择，不静默兜底</td></tr>
+              <tr><th>Agent 校验</th><td>未设置有效角色则返回固定角色列表，不进 LLM</td></tr>
+              <tr><th>assistant</th><td>继续显示旁白</td></tr>
+              <tr><th>历史消息</th><td>切换角色不重写历史</td></tr>
+            </table>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <h2>验收标准</h2>
+            <span class="badge ready">可验证</span>
+          </div>
+          <div class="section-body">
+            <ul class="checklist">
+              <li><span class="check">A</span><span>本页能说明为什么需要玩家角色选择。</span></li>
+              <li><span class="check">B</span><span>角色卡选择为单选，未选择时确认按钮禁用。</span></li>
+              <li><span class="check">C</span><span>空状态说明需要先创建并挂载角色。</span></li>
+              <li><span class="check">D</span><span>绑定缺失或异常时，文档要求强制进入角色选择页，而不是 fallback 第一个角色。</span></li>
+              <li><span class="check">E</span><span>文档明确其他渠道可创建空 session，但绑定前只返回固定编号角色列表，不调用 LLM。</span></li>
+              <li><span class="check">F</span><span>文档明确 /role_bind 序号 是绑定或切换玩家角色的渠道文本协议，绑定成功后才发送 first_message。</span></li>
+              <li><span class="check">G</span><span>文档明确本页不实现后端能力。</span></li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <h2>落地阶段</h2>
+            <span class="badge required">建议</span>
+          </div>
+          <div class="section-body">
+            <div class="step-card">
+              <span class="step-number">1</span>
+              <h3>数据绑定</h3>
+              <p class="small">session 表增加玩家角色绑定，API 返回与修改该字段。</p>
+            </div>
+            <div class="step-card" style="margin-top: 10px;">
+              <span class="step-number">2</span>
+              <h3>WebUI 接入</h3>
+              <p class="small">SessionCenter 和 SessionRoom 使用真实绑定角色，不再 fallback 猜测。</p>
+            </div>
+            <div class="step-card" style="margin-top: 10px;">
+              <span class="step-number">3</span>
+              <h3>渠道选角协议</h3>
+              <p class="small">为空 session 增加固定角色列表回复与 /role_bind 序号 绑定逻辑；该步骤不调用 LLM。</p>
+            </div>
+            <div class="step-card" style="margin-top: 10px;">
+              <span class="step-number">4</span>
+              <h3>Agent 强校验</h3>
+              <p class="small">send/stream 前校验 session 已绑定有效玩家角色；缺失返回选角列表，异常返回业务错误。</p>
+            </div>
+            <div class="step-card" style="margin-top: 10px;">
+              <span class="step-number">5</span>
+              <h3>Agent 语义</h3>
+              <p class="small">通过强校验后，再将角色身份用于 IC prompt；不在本静态需求页实现。</p>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <div class="modal-backdrop" id="confirm-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h2 id="modal-title">确认切换扮演角色</h2>
+      <p class="muted">切换后只影响后续 IC user 消息的显示身份和未来 prompt 语义。已有历史消息不会重写。</p>
+      <div class="modal-actions">
+        <button class="button" id="cancel-modal" type="button">取消</button>
+        <button class="button danger" id="confirm-modal-button" type="button">确认切换</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const flowTabs = document.querySelectorAll('.flow-tab');
+    const panels = document.querySelectorAll('.flow-panel');
+    const roleCards = document.querySelectorAll('#selection-area .role-card');
+    const confirmButton = document.getElementById('confirm-selection');
+    const selectedName = document.getElementById('selected-name');
+    const selectedDesc = document.getElementById('selected-desc');
+    const selectedAvatar = document.getElementById('selected-avatar');
+    const selectionHint = document.getElementById('selection-hint');
+    const selectionArea = document.getElementById('selection-area');
+    const emptyToggle = document.getElementById('show-empty');
+    const resetButton = document.getElementById('reset-demo');
+    const modal = document.getElementById('confirm-modal');
+    const switchRole = document.getElementById('switch-role');
+    const cancelModal = document.getElementById('cancel-modal');
+    const confirmModalButton = document.getElementById('confirm-modal-button');
+
+    function activateFlow(flow) {
+      flowTabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.flow === flow));
+      panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === flow));
+    }
+
+    function clearSelection() {
+      roleCards.forEach((card) => card.classList.remove('selected'));
+      selectedName.textContent = '尚未选择角色';
+      selectedDesc.textContent = '请选择一个你要扮演的角色。';
+      selectedAvatar.textContent = '?';
+      confirmButton.disabled = true;
+      selectionHint.textContent = '未选择时不能开始会话。';
+    }
+
+    flowTabs.forEach((tab) => {
+      tab.addEventListener('click', () => activateFlow(tab.dataset.flow));
+    });
+
+    roleCards.forEach((card) => {
+      card.addEventListener('click', () => {
+        roleCards.forEach((item) => item.classList.remove('selected'));
+        card.classList.add('selected');
+        selectedName.textContent = `将扮演：${card.dataset.character}`;
+        selectedDesc.textContent = card.dataset.desc;
+        selectedAvatar.textContent = card.dataset.avatar;
+        confirmButton.disabled = false;
+        selectionHint.textContent = '确认后创建 session 并写入玩家角色绑定。';
+      });
+    });
+
+    confirmButton.addEventListener('click', () => {
+      if (confirmButton.disabled) return;
+      confirmButton.textContent = '已选择，进入 SessionRoom';
+      selectionHint.textContent = '静态预览：正式实现时这里会跳转到会话页。';
+    });
+
+    emptyToggle.addEventListener('click', () => {
+      selectionArea.classList.toggle('empty');
+      clearSelection();
+    });
+
+    resetButton.addEventListener('click', () => {
+      selectionArea.classList.remove('empty');
+      clearSelection();
+      activateFlow('new-session');
+      confirmButton.textContent = '确认并开始';
+    });
+
+    switchRole.addEventListener('click', () => {
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+    });
+
+    function closeModal() {
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    cancelModal.addEventListener('click', closeModal);
+    confirmModalButton.addEventListener('click', () => {
+      closeModal();
+      switchRole.textContent = '已确认切换预览';
+    });
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) closeModal();
+    });
+  </script>
+</body>
+</html>

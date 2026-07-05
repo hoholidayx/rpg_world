@@ -26,16 +26,6 @@ export function characterSummary(character: CharacterCard) {
   return content ? content.slice(0, 72) : '已挂载到当前故事。'
 }
 
-export function findCharacterByName(characters: CharacterCard[], name?: string | null) {
-  const target = name?.trim()
-  if (!target) return null
-  return characters.find((character) => character.name === target || character.name.includes(target) || target.includes(character.name)) ?? null
-}
-
-export function pickPlayerCharacter(characters: CharacterCard[]) {
-  return characters[0] ?? null
-}
-
 export function formatDateTime(value?: string | null) {
   if (!value) return ''
   return value.replace('T', ' ').slice(0, 16)

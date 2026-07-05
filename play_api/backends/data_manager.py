@@ -93,7 +93,7 @@ class DataManagerBackend:
         sessions = self._gateway.catalog.list_sessions(workspace, story_id)
         if sessions is None:
             return None
-        return [_session_summary(session) for session in sessions]
+        return [_session_summary(session, self._gateway) for session in sessions]
 
     async def create_session(
         self,
@@ -111,7 +111,7 @@ class DataManagerBackend:
         )
         if session is None:
             return None
-        return _session_summary(session)
+        return _session_summary(session, self._gateway)
 
     async def get_session(
         self,
@@ -120,7 +120,7 @@ class DataManagerBackend:
         session = self._gateway.catalog.get_session(session_id)
         if session is None:
             return None
-        return _session_summary(session)
+        return _session_summary(session, self._gateway)
 
     async def scan_unindexed_runtime(self, workspace: str) -> dict[str, list[dict[str, str]]] | None:
         return scan_unindexed_runtime_data(self._gateway.database, workspace)
@@ -616,15 +616,43 @@ def _story_summary(story: models.Story) -> dict[str, object]:
     }
 
 
-def _session_summary(session: models.Session) -> dict[str, object]:
+def _session_summary(session: models.Session, gateway: DataServiceGateway | None = None) -> dict[str, object]:
+    player_state = _player_character_state(session, gateway)
     return {
         "id": str(session.id),
         "workspace": str(session.workspace_id),
         "story_id": int(session.story_id),
         "title": str(session.title or session.id),
         "description": str(session.description or "") or None,
+        "player_character": player_state["player"],
+        "player_character_status": player_state["status"],
         "created_at": str(session.created_at),
         "updated_at": str(session.updated_at),
+    }
+
+
+def _player_character_state(session: models.Session, gateway: DataServiceGateway | None) -> dict[str, object]:
+    if gateway is None or not hasattr(gateway, "session_roles"):
+        return {"status": models.PLAYER_CHARACTER_STATUS_INVALID, "player": None}
+    try:
+        state = gateway.session_roles.get_state(str(session.id))
+    except Exception:
+        return {"status": models.PLAYER_CHARACTER_STATUS_INVALID, "player": None}
+    return {
+        "status": state.status,
+        "player": _player_character_summary(state.player) if state.player is not None else None,
+    }
+
+
+def _player_character_summary(snapshot: models.SessionPlayerCharacterSnapshot) -> dict[str, object]:
+    return {
+        "character_id": int(snapshot.character_id),
+        "mount_id": int(snapshot.mount_id),
+        "story_id": int(snapshot.story_id),
+        "name": str(snapshot.name),
+        "avatar_url": str(snapshot.avatar_url or ""),
+        "role_label": str(snapshot.role_label or ""),
+        "updated_at": str(snapshot.updated_at or ""),
     }
 
 

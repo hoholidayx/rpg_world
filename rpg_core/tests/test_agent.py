@@ -131,6 +131,32 @@ async def test_send_impl_rejects_invalid_loaded_turn_metadata_before_new_turn():
         await agent._send_impl("go")
 
 
+@pytest.mark.asyncio
+async def test_send_stream_command_reply_emits_text_before_done():
+    event_queue: asyncio.Queue = asyncio.Queue()
+    fake_agent = SimpleNamespace()
+    dispatcher = CommandDispatcher(agent=fake_agent)
+    dispatcher.register_default_builtins()
+    fake_agent.list_commands = dispatcher.list_commands
+    agent = object.__new__(RPGGameAgent)
+    agent._cmd_dispatcher = dispatcher
+    agent._model = "test-model"
+
+    await agent._send_stream_impl("/help", event_queue)
+
+    first = await event_queue.get()
+    second = await event_queue.get()
+    third = await event_queue.get()
+
+    assert isinstance(first, AgentStreamEvent)
+    assert first.kind == StreamEventKind.TEXT
+    assert "可用命令:" in first.content
+    assert isinstance(second, AgentStreamEvent)
+    assert second.kind == StreamEventKind.DONE
+    assert second.content == first.content
+    assert isinstance(third, _StreamSentinel)
+
+
 def test_compose_stored_user_input_places_user_text_after_scene_close_tag() -> None:
     scene_ctx = "[scene]\n位置: 北境森林\n[/scene]"
 

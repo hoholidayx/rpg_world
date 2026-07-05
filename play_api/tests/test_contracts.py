@@ -10,6 +10,7 @@ from play_api.main import app
 from play_api.delete_tokens import reset_delete_confirmation_tokens
 from play_api.routers.sessions import _agent_call, _turns_from_history
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
+from rpg_data.services import get_data_service_gateway
 
 
 def test_history_fallback_groups_legacy_messages_by_user_anchor() -> None:
@@ -154,6 +155,16 @@ class _FakeAgentClient:
         self.calls.append(("reload-history", session_id))
         return {"status": "reloaded"}
 
+    async def bind_player_character(self, session_id: str, player_character_id: int) -> dict[str, object]:
+        self.calls.append(("bind-player-character", session_id, str(player_character_id)))
+        try:
+            get_data_service_gateway().session_roles.bind_player_character(session_id, player_character_id)
+        except ValueError as exc:
+            raise AgentClientError(str(exc), status_code=422) from exc
+        except FileNotFoundError as exc:
+            raise AgentClientError(str(exc), status_code=404) from exc
+        return {"status": "bound", "session_id": session_id, "player_character_id": player_character_id}
+
     async def truncate_turn(self, session_id: str, turn_id: int) -> dict[str, object]:
         self.calls.append(("truncate-turn", session_id, str(turn_id)))
         return {
@@ -210,7 +221,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert stories.status_code == 200
     assert stories.json()[0]["title"] == "北境森林 Demo"
     assert stories.json()[0]["storyPrompt"] == "用于验证 workspace、story、session、角色卡与 lorebook 挂载关系的演示故事。"
-    assert stories.json()[0]["firstMessage"] == ""
+    assert "北境森林的霜雾" in stories.json()[0]["firstMessage"]
     assert "description" not in stories.json()[0]
     assert client.get("/play-api/v1/workspaces/missing/stories").status_code == 404
     new_story = client.post(
@@ -273,10 +284,14 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert sessions.json()[0]["workspace"] == "demo_workspace"
     assert sessions.json()[0]["storyId"] == 1
     assert sessions.json()[0]["id"] == demo_session_id
+    assert sessions.json()[0]["playerCharacterStatus"] == "bound"
+    assert sessions.json()[0]["playerCharacter"]["name"] == "Bob"
 
     session = client.get(f"/play-api/v1/sessions/{demo_session_id}")
     assert session.status_code == 200
     assert session.json()["title"] == "北境森林主线"
+    assert session.json()["playerCharacterStatus"] == "bound"
+    assert session.json()["playerCharacter"]["name"] == "Bob"
 
     history = client.get(f"/play-api/v1/sessions/{demo_session_id}/history")
     assert history.status_code == 200
@@ -300,6 +315,8 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert len(created.json()["id"]) == 12
     assert created.json()["id"][2:].isalnum()
     assert created.json()["title"] == "新会话"
+    assert created.json()["playerCharacterStatus"] == "invalid"
+    assert created.json()["playerCharacter"] is None
 
     scene = client.get(
         f"/play-api/v1/sessions/{demo_session_id}/scene",
@@ -422,6 +439,20 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert story_characters.status_code == 200
     assert story_characters.json()[0]["mountId"] is not None
     assert client.get("/play-api/v1/workspaces/demo_workspace/stories/999/characters").status_code == 404
+    bob = next(character for character in story_characters.json() if character["name"] == "Bob")
+    bound_created = client.patch(
+        f"/play-api/v1/sessions/{created.json()['id']}/player-character",
+        json={"playerCharacterId": bob["id"]},
+    )
+    assert bound_created.status_code == 200
+    assert bound_created.json()["playerCharacterStatus"] == "bound"
+    assert bound_created.json()["playerCharacter"]["name"] == "Bob"
+    assert ("bind-player-character", created.json()["id"], str(bob["id"])) in agent_client.get_agent_client().calls
+    invalid_bind = client.patch(
+        f"/play-api/v1/sessions/{created.json()['id']}/player-character",
+        json={"playerCharacterId": 99999},
+    )
+    assert invalid_bind.status_code == 422
 
     mounted_character = client.post(
         f"/play-api/v1/workspaces/demo_workspace/stories/1/characters/{new_character.json()['id']}/mount"

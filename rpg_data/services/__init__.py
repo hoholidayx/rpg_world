@@ -10,6 +10,12 @@ from rpg_data.services.gateway import (
 )
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
 from rpg_data.services.message import MessageService
+from rpg_data.services.session_role import (
+    PlayerCharacterOption,
+    SessionPlayerCharacterBindResult,
+    SessionPlayerCharacterState,
+    SessionRoleService,
+)
 from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
 
@@ -23,6 +29,10 @@ __all__ = [
     "LorebookManagementService",
     "LorebookReadService",
     "MessageService",
+    "PlayerCharacterOption",
+    "SessionPlayerCharacterBindResult",
+    "SessionPlayerCharacterState",
+    "SessionRoleService",
     "StoryMemoryService",
     "StatusTableService",
     "get_data_service_gateway",

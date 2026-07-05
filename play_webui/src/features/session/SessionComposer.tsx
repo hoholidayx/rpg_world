@@ -17,6 +17,7 @@ export function SessionComposer({
   narrativeStyleId,
   narrativeStyles,
   sending,
+  disabled = false,
   onTextChange,
   onModeChange,
   onNarrativeStyleChange,
@@ -29,6 +30,7 @@ export function SessionComposer({
   narrativeStyleId: NarrativeStyleId
   narrativeStyles: NarrativeStyle[]
   sending: boolean
+  disabled?: boolean
   onTextChange: (value: string) => void
   onModeChange: (mode: SessionInputMode) => void
   onNarrativeStyleChange: (styleId: NarrativeStyleId) => void
@@ -38,6 +40,7 @@ export function SessionComposer({
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
+      if (disabled) return
       if (sending) onStop()
       else onSend()
     }
@@ -72,14 +75,17 @@ export function SessionComposer({
             value={text}
             onChange={(event) => onTextChange(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="min-h-24 resize-none border-0 bg-transparent pt-2 text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
-            placeholder="输入你的行动、台词或 GM 指令..."
+            disabled={disabled}
+            className="min-h-24 resize-none border-0 bg-transparent pt-2 text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:text-slate-500"
+            placeholder={disabled ? '请先选择你要扮演的角色' : '输入你的行动、台词或 GM 指令...'}
           />
           <button
             type="button"
             onClick={sending ? onStop : onSend}
+            disabled={disabled}
             className={cn(
               'my-1 flex min-h-20 items-center justify-center gap-2 rounded-lg px-5 text-base font-black text-white shadow-lg transition sm:min-h-24',
+              disabled ? 'cursor-not-allowed bg-slate-300 shadow-none dark:bg-slate-700' :
               sending
                 ? 'bg-rose-500 shadow-rose-100 hover:bg-rose-600 dark:shadow-rose-950/30'
                 : 'bg-violet-600 shadow-violet-200 hover:bg-violet-700 dark:shadow-violet-950/40',

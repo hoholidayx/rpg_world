@@ -10,8 +10,20 @@ export type SessionSummary = {
   storyId: number
   title?: string | null
   description?: string | null
+  playerCharacter?: SessionPlayerCharacter | null
+  playerCharacterStatus: 'bound' | 'invalid'
   createdAt?: string | null
   updatedAt?: string | null
+}
+
+export type SessionPlayerCharacter = {
+  characterId: number
+  mountId: number
+  storyId: number
+  name: string
+  avatarUrl: string
+  roleLabel: string
+  updatedAt: string
 }
 
 export type Turn = {

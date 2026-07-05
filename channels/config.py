@@ -25,6 +25,7 @@ class TelegramBotSettings:
     story_id: int = 0
     session_id: str = ""
     session_title: str = ""
+    player_character_id: int = 0
     allow_from: list[str] | None = None
     streaming: bool = True
     proxy: str = ""
@@ -42,6 +43,7 @@ class CliChannelSettings:
     story_id: int = 0
     session_id: str = ""
     session_title: str = "CLI"
+    player_character_id: int = 0
     streaming: bool = True
 
 
@@ -105,6 +107,10 @@ class ChannelsSettings(ProfiledYamlSettings):
         return self.cli_channel.session_title
 
     @property
+    def cli_player_character_id(self) -> int:
+        return self.cli_channel.player_character_id
+
+    @property
     def cli_streaming(self) -> bool:
         return self.cli_channel.streaming
 
@@ -121,6 +127,7 @@ class ChannelsSettings(ProfiledYamlSettings):
             story_id=self._int(raw, "channels.cli", "story_id", 0),
             session_id=session_id,
             session_title=str(raw.get("session_title", "CLI") or "CLI"),
+            player_character_id=self._int(raw, "channels.cli", "player_character_id", 0),
             streaming=self._bool(raw, "channels.cli", "streaming", True),
         )
 
@@ -165,6 +172,7 @@ class ChannelsSettings(ProfiledYamlSettings):
             story_id=self._int(bot, "channels.telegram.bots", "story_id", 0),
             session_id=session_id,
             session_title=str(bot.get("session_title", str(name)) or str(name)),
+            player_character_id=self._int(bot, "channels.telegram.bots", "player_character_id", 0),
             allow_from=[str(item) for item in allow_from],
             streaming=self._bool(bot, "channels.telegram.bots", "streaming", True),
             proxy=str(bot.get("proxy", "") or ""),

@@ -22,6 +22,13 @@ export function createSession(workspace: string, storyId: number, title?: string
   })
 }
 
+export function bindSessionPlayerCharacter(sessionId: string, playerCharacterId: number) {
+  return playApiFetch<SessionSummary>(`/sessions/${encodeURIComponent(sessionId)}/player-character`, {
+    method: 'PATCH',
+    body: JSON.stringify({ playerCharacterId }),
+  })
+}
+
 export function getSessionHistory(sessionId: string) {
   return playApiFetch<Turn[]>(`/sessions/${encodeURIComponent(sessionId)}/history`)
 }

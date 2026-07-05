@@ -35,11 +35,16 @@ class AgentCommandRequest(AgentRequestBase):
     command: str
 
 
+class AgentPlayerCharacterBindRequest(AgentRequestBase):
+    player_character_id: int
+
+
 class AgentSessionEnsureRequest(_BaseSchema):
     workspace_id: str
     story_id: int
     session_id: str | None = None
     title: str = ""
+    player_character_id: int | None = None
 
     @field_validator("session_id")
     @classmethod
@@ -53,6 +58,7 @@ class AgentSessionCreateRequest(_BaseSchema):
     workspace_id: str
     story_id: int
     title: str = ""
+    player_character_id: int | None = None
 
 
 class AgentHealthResponse(_BaseSchema):

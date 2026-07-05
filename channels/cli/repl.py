@@ -40,11 +40,15 @@ def _configure_standard_logging() -> None:
 async def main() -> int:
     _configure_standard_logging()
     client = AgentClient()
+    ensure_kwargs = {}
+    if channels_settings.cli_player_character_id > 0:
+        ensure_kwargs["player_character_id"] = channels_settings.cli_player_character_id
     session = await client.ensure_session(
         channels_settings.cli_workspace_id,
         channels_settings.cli_story_id,
         session_id=channels_settings.cli_session_id or None,
         title=channels_settings.cli_session_title,
+        **ensure_kwargs,
     )
     adapter = CLIAdapter(
         streaming=channels_settings.cli_streaming,

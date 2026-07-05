@@ -30,6 +30,8 @@ class SessionRepository:
         description: str = "",
         state_json: str = "{}",
         story_memory_last_turn_id: int = 0,
+        player_character_id: int | None = None,
+        player_character_snapshot_json: str = "{}",
         metadata_json: str = "{}",
     ) -> models.Session:
         created_id = session_id or _new_session_id()
@@ -47,6 +49,8 @@ class SessionRepository:
                         session=created_id,
                         title=title,
                         description=description,
+                        player_character_id=player_character_id,
+                        player_character_snapshot_json=player_character_snapshot_json,
                         metadata_json=metadata_json,
                     )
                 break
@@ -110,6 +114,36 @@ class SessionRepository:
         )
         if not updated:
             return None
+        return self.get(session_id)
+
+    def update_player_character(
+        self,
+        session_id: str,
+        *,
+        player_character_id: int | None,
+        player_character_snapshot_json: str,
+    ) -> models.Session | None:
+        with self._database.atomic():
+            if not SessionRecord.select().where(SessionRecord.id == session_id).exists():
+                return None
+            SessionProfileRecord.get_or_create(session=session_id)
+            (
+                SessionProfileRecord
+                .update(
+                    player_character_id=player_character_id,
+                    player_character_snapshot_json=player_character_snapshot_json,
+                    version=SessionProfileRecord.version + 1,
+                    updated_at=SQL("CURRENT_TIMESTAMP"),
+                )
+                .where(SessionProfileRecord.session == session_id)
+                .execute()
+            )
+            (
+                SessionRecord
+                .update(updated_at=SQL("CURRENT_TIMESTAMP"))
+                .where(SessionRecord.id == session_id)
+                .execute()
+            )
         return self.get(session_id)
 
 

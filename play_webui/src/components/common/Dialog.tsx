@@ -17,15 +17,17 @@ export function Dialog({
   children,
   size = '3xl',
   className,
+  overlayClassName,
 }: {
   title: string
   onClose: () => void
   children: ReactNode
   size?: DialogSize
   className?: string
+  overlayClassName?: string
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/20 px-4 py-8 backdrop-blur-sm">
+    <div className={cn('fixed inset-0 flex items-center justify-center bg-slate-950/20 px-4 py-8 backdrop-blur-sm', overlayClassName ?? 'z-50')}>
       <section
         className={cn(
           'w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-300/70',
@@ -72,7 +74,7 @@ export function ConfirmDialog({
   onConfirm: () => void
 }) {
   return (
-    <Dialog title={title} onClose={onClose} size="xl">
+    <Dialog title={title} onClose={onClose} size="xl" overlayClassName="z-[70]">
       <div className="px-6 py-5">
         <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-4">
           <h3 className="text-sm font-bold text-rose-700">{heading}</h3>

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
@@ -45,6 +47,8 @@ class FakeAgent:
         parts = command.split()
         if parts[:1] == ["/session_switch"] and len(parts) > 1:
             self._session_id = parts[1]
+        if parts[:1] == ["/role_bind"] and len(parts) > 1:
+            FakeGateway.session_roles.bind_by_index(self._session_id, int(parts[1]))
         return CommandResult(reply=f"cmd:{command}", handled=True)
 
     async def get_context_payload(self) -> dict[str, object]:
@@ -187,6 +191,38 @@ class FakeMessages:
         ]
 
 
+class FakeSessionRoles:
+    state: dict[str, SimpleNamespace] = {}
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.state = {}
+
+    @staticmethod
+    def list_options(session_id: str) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(snapshot=SimpleNamespace(character_id=101, name="Bob")),
+            SimpleNamespace(snapshot=SimpleNamespace(character_id=102, name="Alice")),
+        ]
+
+    @classmethod
+    def bind_by_index(cls, session_id: str, index: int) -> SimpleNamespace:
+        options = cls.list_options(session_id)
+        option = options[index - 1]
+        cls.state[session_id] = option.snapshot
+        return SimpleNamespace(
+            state=SimpleNamespace(status=models.PLAYER_CHARACTER_STATUS_BOUND, player=option.snapshot),
+            first_message="",
+        )
+
+    @classmethod
+    def get_state(cls, session_id: str) -> SimpleNamespace:
+        player = cls.state.get(session_id)
+        if player is None:
+            return SimpleNamespace(status=models.PLAYER_CHARACTER_STATUS_INVALID, player=None)
+        return SimpleNamespace(status=models.PLAYER_CHARACTER_STATUS_BOUND, player=player)
+
+
 class InvalidTurnMessages:
     @staticmethod
     def list(session_id: str) -> list[models.SessionMessage]:
@@ -213,6 +249,7 @@ class InvalidTurnMessages:
 class FakeGateway:
     catalog = FakeCatalog
     messages = FakeMessages
+    session_roles = FakeSessionRoles
 
 
 class InvalidHistoryGateway:
@@ -234,6 +271,7 @@ def test_agent_service_contracts(monkeypatch) -> None:
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
     monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
     FakeCatalog.reset()
+    FakeSessionRoles.reset()
 
     with TestClient(service_main.app) as client:
         assert client.get("/agent/v1/health").json() == {"status": "ok"}
@@ -338,6 +376,21 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert reload_history.status_code == 200
         assert reload_history.json()["status"] == "reloaded"
         assert FakeAgentManager.instances["s1"].history[0].content == "reloaded"
+
+        bind_player = client.post(
+            "/agent/v1/chat/session/player-character",
+            json={"session_id": "s1", "player_character_id": 101},
+        )
+        assert bind_player.status_code == 200
+        assert bind_player.json()["status"] == "bound"
+        assert bind_player.json()["reply"] == "cmd:/role_bind 1"
+        assert FakeSessionRoles.state["s1"].character_id == 101
+
+        invalid_bind = client.post(
+            "/agent/v1/chat/session/player-character",
+            json={"session_id": "s1", "player_character_id": 999},
+        )
+        assert invalid_bind.status_code == 422
 
         truncate = client.post(
             "/agent/v1/chat/session/turns/1/truncate",

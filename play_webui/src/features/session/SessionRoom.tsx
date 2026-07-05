@@ -9,6 +9,7 @@ import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { listStoryCharacters } from '@/lib/api/characters'
 import { getCurrentScene } from '@/lib/api/scene'
 import {
+  bindSessionPlayerCharacter,
   deleteSessionMessage,
   getSession,
   getSessionHistory,
@@ -24,13 +25,13 @@ import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
 import { SessionTimeline } from './SessionTimeline'
 import {
-  findCharacterByName,
+  characterSummary,
   firstLetter,
   formatDateTime,
   getCharacterAvatarUrl,
-  pickPlayerCharacter,
   stripLeadingSceneBlock,
 } from './sessionRoomHelpers'
+import type { SessionPlayerCharacter } from '@/types/session'
 import type {
   ConfirmRequest,
   NarrativeStyle,
@@ -75,11 +76,11 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function makePlayerSpeaker(character: CharacterCard | null): SessionSpeaker {
+function makePlayerSpeaker(character: SessionPlayerCharacter | null): SessionSpeaker {
   return {
     name: character?.name ?? '你',
     label: 'IC',
-    avatarUrl: getCharacterAvatarUrl(character),
+    avatarUrl: character?.avatarUrl ?? '',
     fallback: firstLetter(character?.name ?? '你'),
     tone: 'player',
   }
@@ -152,7 +153,7 @@ function timelineRole(role: HistoryMessage['role']): SessionTimelineMessage['rol
 
 function makeHistorySpeaker(
   message: HistoryMessage,
-  playerCharacter: CharacterCard | null,
+  playerCharacter: SessionPlayerCharacter | null,
 ): SessionSpeaker {
   const role = timelineRole(message.role)
 
@@ -173,7 +174,7 @@ function mapHistoryToMessages({
   playerCharacter,
 }: {
   turns: Awaited<ReturnType<typeof getSessionHistory>> | undefined
-  playerCharacter: CharacterCard | null
+  playerCharacter: SessionPlayerCharacter | null
 }): SessionTimelineMessage[] {
   return (turns ?? []).flatMap((turn, turnIndex) => {
     return turn.messages.map((message, messageIndex) => {
@@ -225,6 +226,159 @@ function Toast({ message }: { message: string }) {
   )
 }
 
+function PlayerCharacterDialog({
+  open,
+  required,
+  characters,
+  loading,
+  currentPlayer,
+  selectedCharacterId,
+  pending,
+  error,
+  onSelect,
+  onSubmit,
+  onClose,
+}: {
+  open: boolean
+  required: boolean
+  characters: CharacterCard[]
+  loading: boolean
+  currentPlayer: SessionPlayerCharacter | null
+  selectedCharacterId: number | null
+  pending: boolean
+  error: string | null
+  onSelect: (characterId: number) => void
+  onSubmit: () => void
+  onClose: () => void
+}) {
+  if (!open) return null
+
+  const currentCharacterId = currentPlayer?.characterId ?? null
+  const canSubmit = Boolean(selectedCharacterId) && (required || selectedCharacterId !== currentCharacterId) && !pending
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-8 backdrop-blur-sm">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="player-character-title"
+        className="flex max-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-800 dark:bg-slate-900">
+          <div>
+            <h2 id="player-character-title" className="text-xl font-black text-slate-950 dark:text-slate-100">
+              {required ? '选择你要扮演的角色' : '切换扮演角色'}
+            </h2>
+            <p className="mt-1 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+              角色选择会影响后续 user 消息的头像、名称和后续 prompt 语义，不重写已有历史。
+            </p>
+          </div>
+          {!required ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50"
+              aria-label="关闭"
+            >
+              ×
+            </button>
+          ) : null}
+        </header>
+
+        <div className="overflow-y-auto px-6 py-5">
+          {error ? (
+            <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+              {error}
+            </p>
+          ) : null}
+
+          {loading ? (
+            <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
+              <h3 className="text-lg font-black text-slate-950 dark:text-slate-100">正在加载可扮演角色</h3>
+              <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                角色列表加载完成后即可选择。绑定完成前本会话不能发送消息。
+              </p>
+            </section>
+          ) : characters.length ? (
+            <div className="grid gap-3 md:grid-cols-3">
+              {characters.map((character) => {
+                const avatarUrl = getCharacterAvatarUrl(character)
+                const selected = selectedCharacterId === character.id
+                const current = currentCharacterId === character.id
+                return (
+                  <button
+                    key={character.id}
+                    type="button"
+                    onClick={() => onSelect(character.id)}
+                    className={cn(
+                      'grid min-h-44 gap-3 rounded-lg border p-4 text-left transition',
+                      selected
+                        ? 'border-violet-400 bg-violet-50 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.18)] dark:border-violet-500/60 dark:bg-violet-500/15'
+                        : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/40 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10',
+                    )}
+                  >
+                    <span className="flex items-center justify-between gap-3">
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt="" className="h-11 w-11 rounded-full object-cover" />
+                      ) : (
+                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-teal-50 text-base font-black text-teal-700 dark:bg-teal-500/15 dark:text-teal-200">
+                          {firstLetter(character.name)}
+                        </span>
+                      )}
+                      <span className={cn('h-5 w-5 rounded-full border-2', selected ? 'border-[6px] border-violet-600' : 'border-slate-300 dark:border-slate-600')} />
+                    </span>
+                    <span className="min-w-0">
+                      <strong className="block truncate text-base font-black text-slate-950 dark:text-slate-100">{character.name}</strong>
+                      <span className="mt-1 line-clamp-3 block text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                        {characterSummary(character)}
+                      </span>
+                    </span>
+                    <span className={cn('w-fit rounded-full px-2.5 py-1 text-xs font-black', current ? 'bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300')}>
+                      {current ? '当前绑定' : '可选择'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
+              <h3 className="text-lg font-black text-slate-950 dark:text-slate-100">当前故事还没有可扮演角色</h3>
+              <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                请先到角色库创建角色，并将角色挂载到当前故事。绑定完成前本会话不能发送消息。
+              </p>
+            </section>
+          )}
+        </div>
+
+        <footer className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
+          <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">
+            {required ? '必须选择角色后才能开始。' : '切换只影响后续消息。'}
+          </p>
+          <div className="flex items-center gap-2">
+            {!required ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-200 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200"
+              >
+                取消
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={!canSubmit}
+              className="h-10 rounded-lg bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none dark:shadow-violet-950/40 dark:disabled:bg-slate-700"
+            >
+              {pending ? '绑定中...' : required ? '确认角色' : '切换角色'}
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
 export function SessionRoom({ sessionId }: { sessionId: string }) {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -243,6 +397,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false)
+  const [roleDialogRequired, setRoleDialogRequired] = useState(false)
+  const [selectedRoleCharacterId, setSelectedRoleCharacterId] = useState<number | null>(null)
+  const [roleBindError, setRoleBindError] = useState<string | null>(null)
+  const [bindingRole, setBindingRole] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
   const [sending, setSending] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -277,12 +436,9 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   })
 
   const characters = charactersQuery.data ?? []
-  const playerCharacter = useMemo(() => {
-    const scenePlayer = sceneQuery.data?.presentCharacters
-      ?.map((name) => findCharacterByName(characters, name))
-      .find((character): character is CharacterCard => Boolean(character))
-    return scenePlayer ?? pickPlayerCharacter(characters)
-  }, [characters, sceneQuery.data?.presentCharacters])
+  const playerCharacter = session?.playerCharacter ?? null
+  const playerCharacterInvalid = session?.playerCharacterStatus === 'invalid'
+  const roleSelectionBlocked = !session || playerCharacterInvalid || bindingRole
 
   const baseMessages = useMemo(
     () => mapHistoryToMessages({ turns: historyQuery.data, playerCharacter }),
@@ -319,7 +475,26 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setComposerText('')
     setMobilePanel(null)
     setSettingsOpen(false)
+    setRoleDialogOpen(false)
+    setRoleDialogRequired(false)
+    setSelectedRoleCharacterId(null)
+    setRoleBindError(null)
   }, [sessionId])
+
+  useEffect(() => {
+    if (!session) return
+    if (session.playerCharacterStatus === 'invalid') {
+      setRoleDialogRequired(true)
+      setRoleDialogOpen(true)
+      setSelectedRoleCharacterId((current) => current ?? characters[0]?.id ?? null)
+      return
+    }
+    if (roleDialogRequired) {
+      setRoleDialogRequired(false)
+      setRoleDialogOpen(false)
+      setRoleBindError(null)
+    }
+  }, [characters, roleDialogRequired, session])
 
   useEffect(() => {
     return () => {
@@ -381,6 +556,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const refreshSessionData = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['play-session', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-history', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-scene', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-status-tables', sessionId] }),
@@ -399,6 +575,66 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const requestConfirm = useCallback((request: ConfirmRequest) => {
     setConfirmRequest(request)
   }, [])
+
+  const openRoleDialog = useCallback(() => {
+    setSettingsOpen(false)
+    setRoleDialogRequired(false)
+    setRoleDialogOpen(true)
+    setRoleBindError(null)
+    setSelectedRoleCharacterId(playerCharacter?.characterId ?? characters[0]?.id ?? null)
+  }, [characters, playerCharacter])
+
+  const closeRoleDialog = useCallback(() => {
+    if (roleDialogRequired) return
+    setRoleDialogOpen(false)
+    setRoleBindError(null)
+    setSelectedRoleCharacterId(null)
+  }, [roleDialogRequired])
+
+  const bindPlayerRole = useCallback(async (characterId: number) => {
+    setBindingRole(true)
+    setRoleBindError(null)
+    try {
+      const updated = await bindSessionPlayerCharacter(sessionId, characterId)
+      await refreshSessionData({ silent: true })
+      setRoleDialogOpen(false)
+      setRoleDialogRequired(false)
+      setSelectedRoleCharacterId(null)
+      showToast(`已切换为 ${updated.playerCharacter?.name ?? '所选角色'}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '角色绑定失败'
+      setRoleBindError(message)
+      showToast(message)
+    } finally {
+      setBindingRole(false)
+    }
+  }, [refreshSessionData, sessionId, showToast])
+
+  const submitRoleDialog = useCallback(() => {
+    const characterId = selectedRoleCharacterId
+    if (!characterId) {
+      setRoleBindError('请选择一个角色')
+      return
+    }
+    if (!roleDialogRequired && playerCharacter?.characterId === characterId) {
+      showToast('已经是当前扮演角色')
+      return
+    }
+    if (!roleDialogRequired && playerCharacter) {
+      const next = characters.find((character) => character.id === characterId)
+      requestConfirm({
+        title: '确认切换角色',
+        heading: '切换玩家扮演角色',
+        body: `将当前扮演角色从 ${playerCharacter.name} 切换为 ${next?.name ?? '所选角色'}。历史消息保持原样，只影响后续 user 身份。`,
+        confirmLabel: '确认切换',
+        onConfirm: () => {
+          void bindPlayerRole(characterId)
+        },
+      })
+      return
+    }
+    void bindPlayerRole(characterId)
+  }, [bindPlayerRole, characters, playerCharacter, requestConfirm, roleDialogRequired, selectedRoleCharacterId, showToast])
 
   const showRegenerationPreview = useCallback((message: SessionTimelineMessage & { role: 'user' }, text: string) => {
     const turnId = message.turnId
@@ -729,6 +965,16 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   }, [performDelete, requestConfirm, showToast])
 
   const handleSend = useCallback(async () => {
+    if (!session) {
+      showToast('会话加载中，请稍后再试')
+      return
+    }
+    if (playerCharacterInvalid) {
+      setRoleDialogRequired(true)
+      setRoleDialogOpen(true)
+      showToast('请先选择你要扮演的角色')
+      return
+    }
     const text = composerText.trim()
     if (!text) {
       showToast('请输入内容后再发送')
@@ -814,7 +1060,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       const refreshed = await refreshSessionData({ silent: true })
       if (!refreshed) showToast('发送完成，但刷新失败，请手动刷新页面')
     }
-  }, [appendStreamEvent, composerText, currentNarrativeStyle, inputMode, lastTurnId, playerCharacter, refreshSessionData, sessionId, showToast])
+  }, [appendStreamEvent, composerText, currentNarrativeStyle, inputMode, lastTurnId, playerCharacter, playerCharacterInvalid, refreshSessionData, session, sessionId, showToast])
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort()
@@ -908,11 +1154,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               open={settingsOpen}
               leftCollapsed={leftCollapsed}
               rightCollapsed={rightCollapsed}
+              playerCharacter={playerCharacter}
               onToggleOpen={() => setSettingsOpen((current) => !current)}
               onToggleSide={(side) => {
                 if (side === 'left') setLeftCollapsed((current) => !current)
                 else setRightCollapsed((current) => !current)
               }}
+              onOpenRoleDialog={openRoleDialog}
             />
           </div>
         </header>
@@ -941,6 +1189,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           narrativeStyleId={narrativeStyleId}
           narrativeStyles={narrativeStyles}
           sending={sending}
+          disabled={roleSelectionBlocked}
           onTextChange={setComposerText}
           onModeChange={setInputMode}
           onNarrativeStyleChange={setNarrativeStyleId}
@@ -978,6 +1227,19 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           onConfirm={handleConfirm}
         />
       ) : null}
+      <PlayerCharacterDialog
+        open={roleDialogOpen}
+        required={roleDialogRequired}
+        characters={characters}
+        loading={charactersQuery.isLoading}
+        currentPlayer={playerCharacter}
+        selectedCharacterId={selectedRoleCharacterId}
+        pending={bindingRole}
+        error={roleBindError}
+        onSelect={setSelectedRoleCharacterId}
+        onSubmit={submitRoleDialog}
+        onClose={closeRoleDialog}
+      />
       <Toast message={toastMessage} />
     </main>
   )

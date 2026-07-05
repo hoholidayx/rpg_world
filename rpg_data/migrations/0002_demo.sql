@@ -26,7 +26,7 @@ VALUES (
     '北境森林 Demo',
     'Bob 与 Alice 在北境森林追查幽蓝封印。',
     '用于验证 workspace、story、session、角色卡与 lorebook 挂载关系的演示故事。',
-    '',
+    '北境森林的霜雾刚漫过石林入口，幽蓝封印在远处一明一暗。Alice 收紧斗篷，看向你：“Bob，祭坛那边又有潮声了。”',
     '{"kind":"demo","order":1}'
 );
 
@@ -43,7 +43,7 @@ VALUES (
     '奥术学院 Demo',
     'Alice 返回学院调查炎心之木的旧档案。',
     '用于验证同一角色卡和 lorebook entry 可挂载到多个 story。',
-    '',
+    '旧档案馆的铜铃在午后轻响，管理员莫兰把一叠封蜡破损的登记簿推到桌边：“Alice，如果你真要查炎心之木，就从这一本开始。”',
     '{"kind":"demo","order":2}'
 );
 
@@ -306,6 +306,52 @@ JOIN rpg_characters ON rpg_characters.workspace_id = rpg_stories.workspace_id
 WHERE rpg_stories.workspace_id = 'demo_workspace'
   AND rpg_stories.title IN ('北境森林 Demo', '奥术学院 Demo')
   AND rpg_characters.name IN ('Bob', 'Alice');
+
+UPDATE rpg_session_profiles
+SET
+    player_character_id = (
+        SELECT rpg_characters.id
+        FROM rpg_characters
+        WHERE rpg_characters.workspace_id = 'demo_workspace'
+          AND rpg_characters.name = 'Bob'
+    ),
+    player_character_snapshot_json = (
+        SELECT
+            '{"characterId":' || rpg_characters.id
+            || ',"mountId":' || rpg_story_characters.id
+            || ',"storyId":' || rpg_stories.id
+            || ',"name":"Bob","avatarUrl":"","roleLabel":"","updatedAt":"' || rpg_characters.updated_at || '"}'
+        FROM rpg_story_characters
+        JOIN rpg_characters ON rpg_characters.id = rpg_story_characters.character_id
+        JOIN rpg_stories ON rpg_stories.id = rpg_story_characters.story_id
+        WHERE rpg_story_characters.workspace_id = 'demo_workspace'
+          AND rpg_stories.title = '北境森林 Demo'
+          AND rpg_characters.name = 'Bob'
+    )
+WHERE session_id = 's_forest001';
+
+UPDATE rpg_session_profiles
+SET
+    player_character_id = (
+        SELECT rpg_characters.id
+        FROM rpg_characters
+        WHERE rpg_characters.workspace_id = 'demo_workspace'
+          AND rpg_characters.name = 'Alice'
+    ),
+    player_character_snapshot_json = (
+        SELECT
+            '{"characterId":' || rpg_characters.id
+            || ',"mountId":' || rpg_story_characters.id
+            || ',"storyId":' || rpg_stories.id
+            || ',"name":"Alice","avatarUrl":"","roleLabel":"","updatedAt":"' || rpg_characters.updated_at || '"}'
+        FROM rpg_story_characters
+        JOIN rpg_characters ON rpg_characters.id = rpg_story_characters.character_id
+        JOIN rpg_stories ON rpg_stories.id = rpg_story_characters.story_id
+        WHERE rpg_story_characters.workspace_id = 'demo_workspace'
+          AND rpg_stories.title = '奥术学院 Demo'
+          AND rpg_characters.name = 'Alice'
+    )
+WHERE session_id = 's_academy01';
 
 INSERT OR IGNORE INTO rpg_story_lorebook_entries (
     workspace_id,

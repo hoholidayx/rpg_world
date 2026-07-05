@@ -234,6 +234,16 @@ class RPGGameAgent:
                     stats=_turn_stats,
                 )
 
+        role_guard_reply = self._player_character_guard_reply()
+        if role_guard_reply:
+            logger.info(
+                _TAG + " blocked send because player character is invalid: session_id={}",
+                self._session_id,
+            )
+            _turn_stats = TurnStats(started_at=_time.monotonic())
+            _turn_stats.finished_at = _time.monotonic()
+            return AgentReply(text=role_guard_reply, stats=_turn_stats)
+
         # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
         self._session.validate_loaded_turn_metadata(label="history")
         turn_stats = TurnStats(started_at=_time.monotonic())
@@ -378,6 +388,12 @@ class RPGGameAgent:
         if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
             cmd_result = await self._cmd_dispatcher.dispatch(user_input)
             if cmd_result.handled:
+                if cmd_result.reply:
+                    await event_queue.put(AgentStreamEvent(
+                        kind=StreamEventKind.TEXT,
+                        content=cmd_result.reply,
+                        model=self._model,
+                    ))
                 await event_queue.put(AgentStreamEvent(
                     kind=StreamEventKind.DONE,
                     content=cmd_result.reply,
@@ -385,6 +401,25 @@ class RPGGameAgent:
                 ))
                 await event_queue.put(_StreamSentinel())
                 return
+
+        role_guard_reply = self._player_character_guard_reply()
+        if role_guard_reply:
+            logger.info(
+                _TAG + " blocked stream because player character is invalid: session_id={}",
+                self._session_id,
+            )
+            await event_queue.put(AgentStreamEvent(
+                kind=StreamEventKind.TEXT,
+                content=role_guard_reply,
+                model=self._model,
+            ))
+            await event_queue.put(AgentStreamEvent(
+                kind=StreamEventKind.DONE,
+                content=role_guard_reply,
+                model=self._model,
+            ))
+            await event_queue.put(_StreamSentinel())
+            return
 
         # ── TurnStats 聚合器 ───────────────────────────────────────
         self._session.validate_loaded_turn_metadata(label="history")
@@ -550,6 +585,51 @@ class RPGGameAgent:
         if self._cmd_dispatcher is None:
             return []
         return self._cmd_dispatcher.list_commands()
+
+    def render_role_bind_prompt(self, *, error: str = "") -> str:
+        from rpg_data.services import get_data_service_gateway
+
+        return get_data_service_gateway().session_roles.render_role_bind_prompt(
+            self._session_id,
+            error=error,
+        )
+
+    def bind_player_character_by_index(self, index: int):
+        from rpg_data.services import get_data_service_gateway
+
+        logger.info(_TAG + " binding player character by index: session_id={}, index={}", self._session_id, index)
+        result = get_data_service_gateway().session_roles.bind_by_index(self._session_id, int(index))
+        self._session.load()
+        logger.info(
+            _TAG + " player character binding loaded history: session_id={}, index={}, first_message_appended={}, history_len={}",
+            self._session_id,
+            index,
+            bool(result.first_message),
+            len(self._session.history),
+        )
+        return result
+
+    def _player_character_guard_reply(self) -> str:
+        from rpg_data import models
+        from rpg_data.services import get_data_service_gateway
+
+        session_id = str(getattr(self, "_session_id", "") or "")
+        if not session_id:
+            return ""
+        service = get_data_service_gateway().session_roles
+        try:
+            state = service.get_state(session_id)
+        except FileNotFoundError:
+            logger.warning(_TAG + " player character guard skipped missing session: session_id={}", session_id)
+            return ""
+        if state.status == models.PLAYER_CHARACTER_STATUS_BOUND:
+            return ""
+        logger.info(
+            _TAG + " player character guard requires binding: session_id={}, status={}",
+            session_id,
+            state.status,
+        )
+        return service.render_role_bind_prompt(session_id)
 
     @property
     def history(self) -> list[Message]:

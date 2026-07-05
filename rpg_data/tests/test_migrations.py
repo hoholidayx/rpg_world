@@ -81,7 +81,13 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "session_key" not in session_columns
         assert {"story_prompt", "first_message"}.issubset(story_columns)
         assert "description" not in story_columns
-        assert {"session_id", "title", "description"}.issubset(profile_columns)
+        assert {
+            "session_id",
+            "title",
+            "description",
+            "player_character_id",
+            "player_character_snapshot_json",
+        }.issubset(profile_columns)
         assert {
             "session_id",
             "role",

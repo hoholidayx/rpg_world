@@ -116,6 +116,7 @@ class TelegramAdapter(ChannelAdapter):
         workspace: str | None = None,
         workspace_id: str | None = None,
         story_id: int | None = None,
+        player_character_id: int = 0,
         session_id: str | None = None,
         session_title: str | None = None,
     ) -> None:
@@ -131,6 +132,7 @@ class TelegramAdapter(ChannelAdapter):
         self._workspace_override = (workspace or "").strip() or None
         self._workspace_id = (workspace_id or "").strip()
         self._story_id = int(story_id or 0)
+        self._player_character_id = int(player_character_id or 0)
         self._default_session_id = (session_id or "").strip()
         self._session_title = (session_title or bot_name or "Telegram").strip()
         self._app: Application | None = None
@@ -501,10 +503,14 @@ class TelegramAdapter(ChannelAdapter):
         if not self._agent_client:
             await self.send_text(chat_id, "会话创建暂不可用。")
             return
+        create_kwargs = {}
+        if self._player_character_id > 0:
+            create_kwargs["player_character_id"] = self._player_character_id
         result = await self._agent_client.create_session(
             self._workspace_id,
             self._story_id,
             title=(title or self._session_title or "").strip(),
+            **create_kwargs,
         )
         session_id = str(result.get("session_id") or "")
         if not session_id:

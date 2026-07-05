@@ -36,6 +36,18 @@ class PlaySessionCreateRequest(BaseModel):
     description: str = ""
 
 
+class PlayPlayerCharacterSnapshot(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    character_id: int = Field(alias="characterId")
+    mount_id: int = Field(alias="mountId")
+    story_id: int = Field(alias="storyId")
+    name: str
+    avatar_url: str = Field(default="", alias="avatarUrl")
+    role_label: str = Field(default="", alias="roleLabel")
+    updated_at: str = Field(default="", alias="updatedAt")
+
+
 class PlaySessionSummary(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -44,8 +56,16 @@ class PlaySessionSummary(BaseModel):
     story_id: int = Field(alias="storyId")
     title: str | None = None
     description: str | None = None
+    player_character: PlayPlayerCharacterSnapshot | None = Field(default=None, alias="playerCharacter")
+    player_character_status: Literal["bound", "invalid"] = Field(default="invalid", alias="playerCharacterStatus")
     created_at: str | None = Field(default=None, alias="createdAt")
     updated_at: str | None = Field(default=None, alias="updatedAt")
+
+
+class PlayPlayerCharacterBindRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    player_character_id: int = Field(alias="playerCharacterId")
 
 
 class PlayCommand(BaseModel):
@@ -123,12 +143,23 @@ class PlayTurn(BaseModel):
 
 def _session_summary(session: dict[str, object]) -> PlaySessionSummary:
     now = datetime.now(UTC).isoformat()
+    player = session.get("player_character")
     return PlaySessionSummary(
         id=str(session["id"]),
         workspace=str(session["workspace"]),
         story_id=int(session["story_id"]),
         title=str(session["title"]) if session.get("title") is not None else None,
         description=str(session["description"]) if session.get("description") is not None else None,
+        player_character=(
+            PlayPlayerCharacterSnapshot.model_validate(player)
+            if isinstance(player, dict)
+            else None
+        ),
+        player_character_status=(
+            "bound"
+            if str(session.get("player_character_status") or "") == "bound"
+            else "invalid"
+        ),
         created_at=str(session.get("created_at") or now),
         updated_at=str(session.get("updated_at") or now),
     )
@@ -329,6 +360,37 @@ async def create_session(payload: PlaySessionCreateRequest) -> PlaySessionSummar
 @router.get("/{session_id}", response_model=PlaySessionSummary)
 async def get_session(session_id: str) -> PlaySessionSummary:
     return _session_summary(await resolve_session_or_404(session_id))
+
+
+@router.patch("/{session_id}/player-character", response_model=PlaySessionSummary)
+async def bind_player_character(session_id: str, payload: PlayPlayerCharacterBindRequest) -> PlaySessionSummary:
+    session = await resolve_session_or_404(session_id)
+    workspace, story_id, agent_session_id = _session_context(session)
+    logger.info(
+        "[PlayAPI] player character bind requested: session_id={}, workspace={}, story_id={}, character_id={}",
+        agent_session_id,
+        workspace,
+        story_id,
+        payload.player_character_id,
+    )
+    await _agent_call(
+        get_agent_backend().bind_player_character(
+            workspace,
+            story_id,
+            agent_session_id,
+            payload.player_character_id,
+        )
+    )
+    updated = await get_data_manager_backend().get_session(agent_session_id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    logger.info(
+        "[PlayAPI] player character bind summary refreshed: session_id={}, status={}, bound_character_id={}",
+        agent_session_id,
+        updated.get("player_character_status"),
+        (updated.get("player_character") or {}).get("character_id") if isinstance(updated.get("player_character"), dict) else None,
+    )
+    return _session_summary(updated)
 
 
 @router.get("/{session_id}/history", response_model=list[PlayTurn])

@@ -46,11 +46,15 @@ async def _start_enabled_bots(
 
     for bot in enabled_bots:
         client = AgentClient()
+        ensure_kwargs = {}
+        if bot.player_character_id > 0:
+            ensure_kwargs["player_character_id"] = bot.player_character_id
         session = await client.ensure_session(
             bot.workspace_id,
             bot.story_id,
             session_id=bot.session_id or None,
             title=bot.session_title,
+            **ensure_kwargs,
         )
         adapter = TelegramAdapter(
             bot_name=bot.name,
@@ -64,6 +68,7 @@ async def _start_enabled_bots(
             workspace=str(session["workspace"]),
             workspace_id=bot.workspace_id,
             story_id=bot.story_id,
+            player_character_id=bot.player_character_id,
             session_id=str(session["session_id"]),
             session_title=str(session.get("title") or bot.session_title),
             agent_client=client,

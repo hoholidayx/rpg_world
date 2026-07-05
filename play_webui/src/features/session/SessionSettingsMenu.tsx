@@ -1,5 +1,6 @@
-import { PanelLeftClose, PanelRightClose, Settings } from 'lucide-react'
+import { PanelLeftClose, PanelRightClose, Settings, UserRound } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
+import type { SessionPlayerCharacter } from '@/types/session'
 
 export function SessionSettingsMenu({
   open,
@@ -7,12 +8,16 @@ export function SessionSettingsMenu({
   rightCollapsed,
   onToggleOpen,
   onToggleSide,
+  playerCharacter,
+  onOpenRoleDialog,
 }: {
   open: boolean
   leftCollapsed: boolean
   rightCollapsed: boolean
   onToggleOpen: () => void
   onToggleSide: (side: 'left' | 'right') => void
+  playerCharacter?: SessionPlayerCharacter | null
+  onOpenRoleDialog: () => void
 }) {
   return (
     <div className="relative">
@@ -34,6 +39,32 @@ export function SessionSettingsMenu({
             <span className="mt-1 block text-xs font-semibold text-slate-400 dark:text-slate-300">布局与输入偏好</span>
           </div>
           <div className="p-2">
+            <button
+              type="button"
+              onClick={onOpenRoleDialog}
+              className="mb-1 grid w-full grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-violet-50 dark:hover:bg-violet-500/10"
+            >
+              {playerCharacter?.avatarUrl ? (
+                <img
+                  src={playerCharacter.avatarUrl}
+                  alt=""
+                  className="h-8 w-8 rounded-full object-cover"
+                />
+              ) : (
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-50 text-sm font-black text-teal-700 dark:bg-teal-500/15 dark:text-teal-200">
+                  {playerCharacter?.name?.slice(0, 1).toUpperCase() || <UserRound size={16} />}
+                </span>
+              )}
+              <span className="min-w-0">
+                <strong className="block truncate text-sm font-black text-slate-900 dark:text-slate-100">
+                  当前扮演：{playerCharacter?.name ?? '未选择'}
+                </strong>
+                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">切换玩家角色</span>
+              </span>
+              <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+                切换
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => onToggleSide('left')}

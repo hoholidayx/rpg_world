@@ -1,0 +1,1218 @@
+<!--
+  Changelog:
+  - 新增 SessionRoom 玩家扮演角色切换交互设计稿，聚焦新增交互，不完整复刻会话页。
+  - 将文本渠道命令统一为 /role_bind，明确它是“绑定/切换玩家扮演角色”的操作。
+  - WebUI 右上“设置”菜单新增当前扮演角色入口；点击后弹出角色列表，确认后调用与 /role_bind 共用的绑定/切换逻辑。
+  - 角色切换需要二次确认；切换只影响后续 user 消息展示和后续 prompt 语义，不重写历史，不拆分 assistant 旁白消息。
+  - 数据异常或缺失绑定时，WebUI 强制进入角色选择；其他渠道允许空 session，但绑定前只返回固定编号角色列表，不进入 LLM。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SessionRoom 玩家角色切换交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --soft: #f1f5f9;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --line: #dbe3ef;
+      --line-strong: #cbd5e1;
+      --violet: #4f46e5;
+      --violet-strong: #5b21b6;
+      --violet-soft: #eef2ff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --rose: #be123c;
+      --rose-soft: #ffe4e6;
+      --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button {
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:focus-visible {
+      outline: 3px solid rgba(79, 70, 229, 0.22);
+      outline-offset: 2px;
+    }
+
+    .page {
+      width: min(1280px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    .page-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 0;
+      font-size: 30px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 12px;
+      font-size: 18px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      font-size: 15px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    code,
+    pre {
+      font-family: var(--mono);
+    }
+
+    .subtitle {
+      max-width: 860px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 0 9px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .badge.required {
+      background: var(--violet-soft);
+      color: var(--violet-strong);
+    }
+
+    .badge.ready {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .badge.warn {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .section {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: var(--shadow);
+    }
+
+    .section + .section {
+      margin-top: 16px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 56px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-header p,
+    .muted,
+    .small {
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .section-header p {
+      margin: 4px 0 0;
+      font-size: 13px;
+    }
+
+    .section-body {
+      padding: 16px;
+    }
+
+    .small {
+      font-size: 13px;
+    }
+
+    .session-shell {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .topbar {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 68px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.92);
+    }
+
+    .session-title strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 16px;
+    }
+
+    .session-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .top-actions {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .button,
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--ink);
+      font-weight: 900;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    }
+
+    .button {
+      min-height: 38px;
+      gap: 8px;
+      padding: 0 13px;
+    }
+
+    .button.primary {
+      border-color: var(--violet);
+      background: var(--violet);
+      color: white;
+    }
+
+    .button.ghost {
+      background: var(--surface-soft);
+      color: var(--muted);
+    }
+
+    .button.danger {
+      border-color: var(--rose-soft);
+      background: var(--rose-soft);
+      color: var(--rose);
+    }
+
+    .button:disabled {
+      cursor: not-allowed;
+      border-color: var(--line);
+      background: var(--surface-soft);
+      color: var(--faint);
+      box-shadow: none;
+    }
+
+    .icon-button {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      font-size: 17px;
+    }
+
+    .settings-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      z-index: 20;
+      display: none;
+      width: min(340px, calc(100vw - 40px));
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 18px 44px rgba(15, 23, 42, 0.14);
+    }
+
+    .settings-menu.open {
+      display: block;
+    }
+
+    .settings-head {
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .settings-head strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .menu-list {
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+    }
+
+    .menu-item {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      background: transparent;
+      padding: 9px;
+      color: inherit;
+      text-align: left;
+    }
+
+    .menu-item:hover {
+      border-color: var(--line);
+      background: var(--surface-soft);
+    }
+
+    .menu-icon,
+    .avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: var(--violet-soft);
+      color: var(--violet-strong);
+      font-size: 13px;
+      font-weight: 950;
+      flex: 0 0 auto;
+    }
+
+    .avatar.alice {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .avatar.ivan {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .avatar.narrator {
+      background: var(--soft);
+      color: var(--muted);
+    }
+
+    .menu-copy {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .menu-copy strong {
+      font-size: 13px;
+    }
+
+    .menu-copy span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .switch {
+      width: 34px;
+      height: 20px;
+      border-radius: 999px;
+      background: var(--line-strong);
+      padding: 2px;
+    }
+
+    .switch::after {
+      display: block;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: white;
+      content: "";
+      transform: translateX(0);
+    }
+
+    .switch.on {
+      background: var(--violet);
+    }
+
+    .switch.on::after {
+      transform: translateX(14px);
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: 500px;
+    }
+
+    .rail {
+      border-right: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      padding: 14px;
+    }
+
+    .rail-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 12px;
+    }
+
+    .rail-card + .rail-card {
+      margin-top: 10px;
+    }
+
+    .identity-strip {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .identity-strip .avatar {
+      width: 38px;
+      height: 38px;
+    }
+
+    .timeline {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      padding: 18px;
+      background: var(--bg);
+    }
+
+    .notice {
+      border: 1px solid var(--amber-soft);
+      border-radius: var(--radius);
+      background: #fffbeb;
+      color: var(--amber);
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      max-width: 760px;
+    }
+
+    .message.user {
+      grid-template-columns: minmax(0, 1fr) 38px;
+      margin-left: auto;
+    }
+
+    .message.user .avatar {
+      grid-column: 2;
+    }
+
+    .message.user .bubble-wrap {
+      grid-row: 1;
+      grid-column: 1;
+      justify-items: end;
+      text-align: right;
+    }
+
+    .bubble-wrap {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .message-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .message.user .message-meta {
+      justify-content: flex-end;
+    }
+
+    .bubble {
+      width: fit-content;
+      max-width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 11px 12px;
+      color: #1f2937;
+      line-height: 1.72;
+      text-align: left;
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+    }
+
+    .message.user .bubble {
+      border-color: #c7d2fe;
+      background: var(--violet);
+      color: white;
+    }
+
+    .composer {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 12px;
+    }
+
+    .composer-input {
+      min-height: 70px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      padding: 10px;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .side-stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    .rule-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .rule-list li {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 9px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .check {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: var(--teal-soft);
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 12px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+    }
+
+    .tab {
+      min-height: 34px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .tab.active {
+      border-color: var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    }
+
+    .panel {
+      display: none;
+    }
+
+    .panel.active {
+      display: block;
+    }
+
+    .code {
+      overflow: auto;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    .mini-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .mini-table th,
+    .mini-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 0;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .mini-table th {
+      width: 94px;
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    .mini-table td {
+      color: var(--ink);
+      line-height: 1.55;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.46);
+    }
+
+    .overlay.open {
+      display: flex;
+    }
+
+    .dialog {
+      width: min(720px, 100%);
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 28px 80px rgba(15, 23, 42, 0.22);
+    }
+
+    .dialog.small-dialog {
+      width: min(480px, 100%);
+    }
+
+    .dialog-head {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .dialog-head h2 {
+      margin-bottom: 4px;
+    }
+
+    .dialog-body {
+      padding: 16px;
+    }
+
+    .dialog-foot {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .role-list {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .role-card {
+      display: grid;
+      gap: 10px;
+      min-height: 156px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 12px;
+      color: inherit;
+      text-align: left;
+    }
+
+    .role-card:hover {
+      border-color: var(--line-strong);
+      background: var(--surface-soft);
+    }
+
+    .role-card.selected {
+      border-color: #a5b4fc;
+      background: var(--violet-soft);
+      box-shadow: inset 0 0 0 1px #c7d2fe;
+    }
+
+    .role-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .radio {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--line-strong);
+      border-radius: 999px;
+      background: white;
+    }
+
+    .role-card.selected .radio {
+      border: 5px solid var(--violet);
+    }
+
+    .role-name {
+      display: grid;
+      gap: 3px;
+    }
+
+    .role-name strong {
+      font-size: 15px;
+    }
+
+    .toast {
+      position: fixed;
+      right: 22px;
+      bottom: 22px;
+      z-index: 70;
+      display: none;
+      min-width: 240px;
+      max-width: min(420px, calc(100vw - 44px));
+      border: 1px solid rgba(15, 118, 110, 0.22);
+      border-radius: var(--radius);
+      background: #f0fdfa;
+      color: var(--teal);
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 850;
+      box-shadow: 0 14px 36px rgba(15, 23, 42, 0.12);
+    }
+
+    .toast.show {
+      display: block;
+    }
+
+    @media (max-width: 960px) {
+      .page {
+        width: min(100vw - 24px, 720px);
+        padding-top: 18px;
+      }
+
+      .page-head,
+      .grid,
+      .stage {
+        grid-template-columns: 1fr;
+      }
+
+      .badge-row {
+        justify-content: flex-start;
+      }
+
+      .rail {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .topbar {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .top-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      .role-list {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <div>
+        <p class="eyebrow"><span class="dot"></span>Play WebUI / SessionRoom interaction draft</p>
+        <h1>玩家扮演角色切换交互稿</h1>
+        <p class="subtitle">
+          本稿只展示新增交互：右上“设置”菜单里查看和切换当前扮演角色；WebUI 面板选择与其他渠道 <code>/role_bind</code> 文本命令共用同一套绑定/切换逻辑。
+        </p>
+      </div>
+      <div class="badge-row">
+        <span class="badge required">设置入口</span>
+        <span class="badge warn">二次确认</span>
+        <span class="badge ready">/role_bind</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2>SessionRoom 设置入口</h2>
+            <p>保留当前沉浸式会话页结构，只在右上设置菜单里新增玩家角色入口。</p>
+          </div>
+          <span class="badge">静态预览</span>
+        </div>
+        <div class="section-body">
+          <div class="session-shell">
+            <header class="topbar">
+              <div class="session-title">
+                <strong>北境森林：封印祭坛的潮声</strong>
+                <div class="session-meta">
+                  <span>story <code>#2</code></span>
+                  <span>session <code>s_forest01</code></span>
+                  <span>当前扮演 <code id="topRoleName">Bob</code></span>
+                </div>
+              </div>
+              <div class="top-actions">
+                <button class="button ghost" type="button">退出</button>
+                <button class="icon-button" id="settingsButton" type="button" aria-expanded="false" aria-label="设置" title="设置">⚙</button>
+
+                <section class="settings-menu" id="settingsMenu" aria-label="会话设置菜单">
+                  <div class="settings-head">
+                    <strong>会话设置</strong>
+                    <span class="small">布局、输入偏好与玩家身份</span>
+                  </div>
+                  <div class="menu-list">
+                    <button class="menu-item" type="button">
+                      <span class="menu-icon">◧</span>
+                      <span class="menu-copy"><strong>左侧栏</strong><span>场景与角色信息</span></span>
+                      <span class="switch on"></span>
+                    </button>
+                    <button class="menu-item" type="button">
+                      <span class="menu-icon">◨</span>
+                      <span class="menu-copy"><strong>右侧栏</strong><span>状态表</span></span>
+                      <span class="switch on"></span>
+                    </button>
+                    <button class="menu-item" id="openRoleDialog" type="button">
+                      <span class="avatar" id="menuAvatar">B</span>
+                      <span class="menu-copy">
+                        <strong>当前扮演：<span id="menuRoleName">Bob</span></strong>
+                        <span>切换玩家角色，只影响后续消息</span>
+                      </span>
+                      <span class="badge required">切换</span>
+                    </button>
+                  </div>
+                </section>
+              </div>
+            </header>
+
+            <div class="stage">
+              <aside class="rail">
+                <div class="rail-card">
+                  <h3>当前玩家身份</h3>
+                  <div class="identity-strip">
+                    <span class="avatar" id="railAvatar">B</span>
+                    <div>
+                      <strong id="railRoleName">Bob</strong>
+                      <p class="small">来自 session 级绑定，不再使用前端 fallback 猜测。</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="rail-card">
+                  <h3>在场角色</h3>
+                  <p class="small">只展示故事已挂载角色；assistant 仍统一显示旁白，不按角色拆消息。</p>
+                </div>
+              </aside>
+
+              <section class="timeline">
+                <div class="notice">
+                  若 session 缺失绑定或绑定角色不属于当前故事，WebUI 进入强制选择状态，不允许静默 fallback 到第一个角色。
+                </div>
+                <article class="message">
+                  <span class="avatar narrator">旁</span>
+                  <div class="bubble-wrap">
+                    <div class="message-meta"><strong>旁白</strong><span>assistant</span></div>
+                    <div class="bubble">北侧立石的裂缝里传来潮声，祭坛圆盘下方的幽蓝光像呼吸一样收缩。</div>
+                  </div>
+                </article>
+                <article class="message user">
+                  <span class="avatar" id="messageAvatar">B</span>
+                  <div class="bubble-wrap">
+                    <div class="message-meta"><span>IC</span><strong id="messageRoleName">Bob</strong></div>
+                    <div class="bubble">我让 Alice 记录海潮声，然后准备撬开北侧立石外层的碎片。</div>
+                  </div>
+                </article>
+                <div class="composer">
+                  <strong>输入器展示</strong>
+                  <div class="composer-input">切换角色后，下一条 user 消息会使用新的角色名称与头像。历史气泡保持原样。</div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side-stack">
+        <section class="section">
+          <div class="section-header">
+            <h2>交互规则</h2>
+            <span class="badge required">核心</span>
+          </div>
+          <div class="section-body">
+            <ul class="rule-list">
+              <li><span class="check">1</span><span>入口放在 SessionRoom 右上“设置”菜单，不新增顶栏独立按钮。</span></li>
+              <li><span class="check">2</span><span>角色列表只来自当前 story mounted characters，且是单选。</span></li>
+              <li><span class="check">3</span><span>选择当前角色时确认按钮禁用；选择不同角色后需要二次确认。</span></li>
+              <li><span class="check">4</span><span>切换不重写历史消息，只影响后续 user 身份和后续 prompt 语义。</span></li>
+              <li><span class="check">5</span><span>WebUI 面板选择与 <code>/role_bind</code> 命令共用后端绑定/切换能力。</span></li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <h2>渠道协议</h2>
+            <span class="badge ready">共用逻辑</span>
+          </div>
+          <div class="section-body">
+            <div class="tabs">
+              <button class="tab active" type="button" data-tab="web">WebUI</button>
+              <button class="tab" type="button" data-tab="channel">CLI / Telegram</button>
+            </div>
+            <div class="panel active" data-panel="web">
+              <table class="mini-table">
+                <tr><th>入口</th><td>设置菜单 -> 当前扮演角色 -> 切换</td></tr>
+                <tr><th>动作</th><td>选择角色后调用 player role bind/switch 能力</td></tr>
+                <tr><th>异常</th><td>缺失、未挂载、角色删除时强制进入选择弹窗</td></tr>
+                <tr><th>结果</th><td>更新 session 绑定和 snapshot，刷新 SessionRoom 展示</td></tr>
+              </table>
+            </div>
+            <div class="panel" data-panel="channel">
+              <pre class="code">请选择你要扮演的角色（回复 /role_bind 序号）：
+1. Bob
+   沉稳的调查者，擅长观察与现场判断。
+2. Alice
+   记录员与符号学研究者，适合知识与线索整理。
+3. 守夜人伊凡
+   熟悉旧路与夜间巡逻，适合本地人视角。
+
+示例：/role_bind 2</pre>
+              <p class="small" style="margin: 10px 0 0;">
+                绑定前普通输入不进 LLM。绑定成功后写入玩家角色并发送 story first_message；之后普通消息才进入 Agent 正常流程。
+              </p>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <div class="overlay" id="roleOverlay" aria-hidden="true">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="roleDialogTitle">
+      <div class="dialog-head">
+        <div>
+          <h2 id="roleDialogTitle">切换扮演角色</h2>
+          <p class="small">选择一个当前故事已挂载角色。切换不会改写已有历史，assistant 仍显示为旁白。</p>
+        </div>
+        <button class="icon-button" id="closeRoleDialog" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="dialog-body">
+        <div class="notice">
+          这个选择与文本渠道 <code>/role_bind 序号</code> 使用同一条后端能力；WebUI 只是把序号选择换成了角色卡选择。
+        </div>
+        <div class="role-list" id="roleList">
+          <button class="role-card selected" type="button" data-role="Bob" data-avatar="B" data-class="">
+            <span class="role-top"><span class="avatar">B</span><span class="radio"></span></span>
+            <span class="role-name"><strong>Bob</strong><span class="small">沉稳的调查者，擅长观察与现场判断。</span></span>
+            <span class="badge ready">当前绑定</span>
+          </button>
+          <button class="role-card" type="button" data-role="Alice" data-avatar="A" data-class="alice">
+            <span class="role-top"><span class="avatar alice">A</span><span class="radio"></span></span>
+            <span class="role-name"><strong>Alice</strong><span class="small">记录员与符号学研究者，适合知识与线索整理。</span></span>
+            <span class="badge">可切换</span>
+          </button>
+          <button class="role-card" type="button" data-role="守夜人伊凡" data-avatar="伊" data-class="ivan">
+            <span class="role-top"><span class="avatar ivan">伊</span><span class="radio"></span></span>
+            <span class="role-name"><strong>守夜人伊凡</strong><span class="small">熟悉旧路与夜间巡逻，适合本地人视角。</span></span>
+            <span class="badge">可切换</span>
+          </button>
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <button class="button ghost" id="cancelRoleDialog" type="button">取消</button>
+        <button class="button primary" id="confirmRoleButton" type="button" disabled>继续确认</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="overlay" id="confirmOverlay" aria-hidden="true">
+    <section class="dialog small-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <div class="dialog-head">
+        <div>
+          <h2 id="confirmTitle">确认切换玩家角色</h2>
+          <p class="small">这会改变后续 user 消息的身份展示和后续 prompt 语义。</p>
+        </div>
+      </div>
+      <div class="dialog-body">
+        <p class="muted" id="confirmCopy">将当前扮演角色从 Bob 切换为 Alice。历史消息保持原样。</p>
+      </div>
+      <div class="dialog-foot">
+        <button class="button ghost" id="backToRoleDialog" type="button">返回选择</button>
+        <button class="button danger" id="applyRoleButton" type="button">确认切换</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast">已切换玩家扮演角色</div>
+
+  <script>
+    const roles = {
+      Bob: { avatar: "B", className: "" },
+      Alice: { avatar: "A", className: "alice" },
+      "守夜人伊凡": { avatar: "伊", className: "ivan" }
+    };
+
+    let currentRole = "Bob";
+    let selectedRole = "Bob";
+    let toastTimer = null;
+
+    const settingsButton = document.getElementById("settingsButton");
+    const settingsMenu = document.getElementById("settingsMenu");
+    const roleOverlay = document.getElementById("roleOverlay");
+    const confirmOverlay = document.getElementById("confirmOverlay");
+    const roleList = document.getElementById("roleList");
+    const confirmRoleButton = document.getElementById("confirmRoleButton");
+    const confirmCopy = document.getElementById("confirmCopy");
+    const toast = document.getElementById("toast");
+
+    function setOverlay(element, open) {
+      element.classList.toggle("open", open);
+      element.setAttribute("aria-hidden", open ? "false" : "true");
+    }
+
+    function updateAvatar(element, role) {
+      const data = roles[role];
+      element.textContent = data.avatar;
+      element.className = "avatar" + (data.className ? " " + data.className : "");
+    }
+
+    function updateRoleViews() {
+      document.getElementById("topRoleName").textContent = currentRole;
+      document.getElementById("menuRoleName").textContent = currentRole;
+      document.getElementById("railRoleName").textContent = currentRole;
+      document.getElementById("messageRoleName").textContent = currentRole;
+      updateAvatar(document.getElementById("menuAvatar"), currentRole);
+      updateAvatar(document.getElementById("railAvatar"), currentRole);
+      updateAvatar(document.getElementById("messageAvatar"), currentRole);
+    }
+
+    function updateRoleCards() {
+      const cards = roleList.querySelectorAll(".role-card");
+      cards.forEach((card) => {
+        const role = card.dataset.role;
+        card.classList.toggle("selected", role === selectedRole);
+        const badge = card.querySelector(".badge");
+        badge.textContent = role === currentRole ? "当前绑定" : "可切换";
+        badge.className = role === currentRole ? "badge ready" : "badge";
+      });
+      confirmRoleButton.disabled = selectedRole === currentRole;
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2200);
+    }
+
+    settingsButton.addEventListener("click", () => {
+      const next = !settingsMenu.classList.contains("open");
+      settingsMenu.classList.toggle("open", next);
+      settingsButton.setAttribute("aria-expanded", next ? "true" : "false");
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!settingsMenu.contains(event.target) && !settingsButton.contains(event.target)) {
+        settingsMenu.classList.remove("open");
+        settingsButton.setAttribute("aria-expanded", "false");
+      }
+    });
+
+    document.getElementById("openRoleDialog").addEventListener("click", () => {
+      selectedRole = currentRole;
+      updateRoleCards();
+      settingsMenu.classList.remove("open");
+      settingsButton.setAttribute("aria-expanded", "false");
+      setOverlay(roleOverlay, true);
+    });
+
+    document.getElementById("closeRoleDialog").addEventListener("click", () => setOverlay(roleOverlay, false));
+    document.getElementById("cancelRoleDialog").addEventListener("click", () => setOverlay(roleOverlay, false));
+
+    roleList.addEventListener("click", (event) => {
+      const card = event.target.closest(".role-card");
+      if (!card) return;
+      selectedRole = card.dataset.role;
+      updateRoleCards();
+    });
+
+    confirmRoleButton.addEventListener("click", () => {
+      confirmCopy.textContent = `将当前扮演角色从 ${currentRole} 切换为 ${selectedRole}。历史消息保持原样，assistant 仍显示为旁白。`;
+      setOverlay(roleOverlay, false);
+      setOverlay(confirmOverlay, true);
+    });
+
+    document.getElementById("backToRoleDialog").addEventListener("click", () => {
+      setOverlay(confirmOverlay, false);
+      setOverlay(roleOverlay, true);
+    });
+
+    document.getElementById("applyRoleButton").addEventListener("click", () => {
+      currentRole = selectedRole;
+      updateRoleViews();
+      updateRoleCards();
+      setOverlay(confirmOverlay, false);
+      showToast(`已切换为 ${currentRole}，后续 user 消息会使用该身份`);
+    });
+
+    document.querySelectorAll("[data-tab]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const name = tab.dataset.tab;
+        document.querySelectorAll("[data-tab]").forEach((item) => {
+          item.classList.toggle("active", item === tab);
+        });
+        document.querySelectorAll("[data-panel]").forEach((panel) => {
+          panel.classList.toggle("active", panel.dataset.panel === name);
+        });
+      });
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      setOverlay(roleOverlay, false);
+      setOverlay(confirmOverlay, false);
+      settingsMenu.classList.remove("open");
+      settingsButton.setAttribute("aria-expanded", "false");
+    });
+  </script>
+</body>
+</html>

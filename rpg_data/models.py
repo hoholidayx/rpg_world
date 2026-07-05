@@ -15,6 +15,7 @@ __all__ = [
     "SessionCharacterDetail",
     "SessionLorebookEntry",
     "SessionMessage",
+    "SessionPlayerCharacterSnapshot",
     "SessionProfile",
     "SessionStoryMemory",
     "SessionStatusTable",
@@ -36,6 +37,8 @@ __all__ = [
     "STATUS_TABLE_KIND",
     "STATUS_TABLE_MODE_KEY_VALUE",
     "STATUS_VALUE_COLUMN",
+    "PLAYER_CHARACTER_STATUS_BOUND",
+    "PLAYER_CHARACTER_STATUS_INVALID",
     "Workspace",
     "parse_status_document",
     "serialize_status_document",
@@ -44,6 +47,8 @@ __all__ = [
 
 STATUS_TABLE_KIND = "status_table"
 STATUS_TABLE_MODE_KEY_VALUE = "key_value"
+PLAYER_CHARACTER_STATUS_BOUND = "bound"
+PLAYER_CHARACTER_STATUS_INVALID = "invalid"
 STATUS_KIND_SCENE = "scene"
 STATUS_KIND_NORMAL = "normal"
 STATUS_ORIGIN_TEMPLATE_COPY = "template_copy"
@@ -92,6 +97,8 @@ class Session:
     updated_at: str = ""
     title: str = ""
     description: str = ""
+    player_character_id: int | None = None
+    player_character_snapshot_json: str = "{}"
     profile_metadata_json: str = "{}"
     profile_created_at: str = ""
     profile_updated_at: str = ""
@@ -102,9 +109,22 @@ class SessionProfile:
     session_id: str
     title: str = ""
     description: str = ""
+    player_character_id: int | None = None
+    player_character_snapshot_json: str = "{}"
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionPlayerCharacterSnapshot:
+    character_id: int
+    mount_id: int
+    story_id: int
+    name: str
+    avatar_url: str = ""
+    role_label: str = ""
     updated_at: str = ""
 
 

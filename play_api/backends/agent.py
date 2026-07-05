@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from loguru import logger
+
 from agent_service.client import ContextPreviewPayload
 from play_api import agent_client
 
@@ -37,6 +39,28 @@ class AgentBackend:
     async def reload_history(self, workspace: str, story_id: int, session_id: str) -> dict[str, object]:
         del workspace, story_id
         return await agent_client.get_agent_client().reload_history(session_id)
+
+    async def bind_player_character(
+        self,
+        workspace: str,
+        story_id: int,
+        session_id: str,
+        player_character_id: int,
+    ) -> dict[str, object]:
+        del workspace, story_id
+        logger.info(
+            "[PlayAPI] forwarding player character bind to Agent service: session_id={}, character_id={}",
+            session_id,
+            player_character_id,
+        )
+        result = await agent_client.get_agent_client().bind_player_character(session_id, player_character_id)
+        logger.info(
+            "[PlayAPI] Agent service player character bind completed: session_id={}, character_id={}, status={}",
+            session_id,
+            player_character_id,
+            result.get("status"),
+        )
+        return result
 
     async def truncate_turn(self, workspace: str, story_id: int, session_id: str, turn_id: int) -> dict[str, object]:
         del workspace, story_id

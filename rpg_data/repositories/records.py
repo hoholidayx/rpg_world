@@ -146,6 +146,8 @@ class SessionProfileRecord(BaseRecord):
     )
     title = TextField(default="")
     description = TextField(default="")
+    player_character_id = IntegerField(null=True)
+    player_character_snapshot_json = TextField(default="{}")
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
     created_at = TextField()

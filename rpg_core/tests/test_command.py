@@ -121,6 +121,68 @@ class TestCommandDispatcher:
         fake_agent.get_context_markdown.assert_not_awaited()
         fake_agent.get_context_json.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_role_bind_lists_options_without_llm(self):
+        fake_agent = SimpleNamespace(
+            render_role_bind_prompt=lambda error="": f"角色列表 {error}".strip(),
+            bind_player_character_by_index=lambda index: None,
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/role_bind")
+
+        assert result.handled is True
+        assert result.reply == "角色列表"
+
+    @pytest.mark.asyncio
+    async def test_role_bind_rejects_invalid_index_text(self):
+        fake_agent = SimpleNamespace(
+            render_role_bind_prompt=lambda error="": f"角色列表 {error}".strip(),
+            bind_player_character_by_index=lambda index: None,
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/role_bind Alice")
+
+        assert result.handled is True
+        assert "无效角色序号: Alice" in result.reply
+
+    @pytest.mark.asyncio
+    async def test_role_bind_returns_first_message_when_appended(self):
+        fake_agent = SimpleNamespace(
+            render_role_bind_prompt=lambda error="": "角色列表",
+            bind_player_character_by_index=lambda index: SimpleNamespace(
+                state=SimpleNamespace(player=SimpleNamespace(name="Alice")),
+                first_message="开场白",
+            ),
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/role_bind 1")
+
+        assert result.handled is True
+        assert result.reply == "开场白"
+
+    @pytest.mark.asyncio
+    async def test_role_bind_returns_switch_confirmation(self):
+        fake_agent = SimpleNamespace(
+            render_role_bind_prompt=lambda error="": "角色列表",
+            bind_player_character_by_index=lambda index: SimpleNamespace(
+                state=SimpleNamespace(player=SimpleNamespace(name="Bob")),
+                first_message="",
+            ),
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/role_bind 2")
+
+        assert result.handled is True
+        assert result.reply == "已切换扮演角色：Bob。后续消息将使用该身份。"
+
     def test_session_id_validation_has_length_limit(self):
         from rpg_core.session import SessionManager
 

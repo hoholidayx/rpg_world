@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS rpg_session_profiles (
     session_id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
+    player_character_id INTEGER,
+    player_character_snapshot_json TEXT NOT NULL DEFAULT '{}',
     metadata_json TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

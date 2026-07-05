@@ -137,6 +137,8 @@ class CatalogService:
         session_id: str | None = None,
         title: str = "",
         description: str = "",
+        player_character_id: int | None = None,
+        player_character_snapshot_json: str = "{}",
     ) -> models.Session | None:
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
@@ -150,6 +152,8 @@ class CatalogService:
                 session_id=session_id,
                 title=title,
                 description=description,
+                player_character_id=player_character_id,
+                player_character_snapshot_json=player_character_snapshot_json,
             )
             if self._status is not None:
                 tables = self._status.initialize_session_tables(session.id)

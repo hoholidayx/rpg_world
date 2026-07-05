@@ -30,6 +30,8 @@ base:
           session_id: ""
           # 自动创建默认 session 时使用的标题。
           session_title: main
+          # 可选：启动时直接绑定玩家扮演角色 ID；留空/0 时由 /role_bind 选择。
+          player_character_id: 0
           # 单 bot 访问控制；["*"] 表示不限制。
           allow_from: ["*"]
           # 是否使用流式增量编辑回复。
@@ -54,6 +56,8 @@ base:
       session_id: ""
       # 自动创建 session 时使用的标题。
       session_title: CLI
+      # 可选：启动时直接绑定玩家扮演角色 ID；留空/0 时由 /role_bind 选择。
+      player_character_id: 0
       # 是否使用流式输出。
       streaming: true
 

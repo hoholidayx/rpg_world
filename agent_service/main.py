@@ -26,6 +26,7 @@ from agent_service.schemas import (
     AgentHistoryResponse,
     AgentHealthResponse,
     AgentMessageRequest,
+    AgentPlayerCharacterBindRequest,
     AgentReplyPayload,
     AgentSessionCreatePayload,
     AgentSessionCreateRequest,
@@ -144,6 +145,7 @@ async def create_session(body: AgentSessionCreateRequest) -> AgentSessionCreateP
         int(body.story_id),
         title=str(body.title or ""),
     )
+    await _bind_session_player_character_if_present(session.id, body.player_character_id)
     return {"status": "created", **_session_payload(session)}
 
 
@@ -168,6 +170,7 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayload
         if session is None:
             raise HTTPException(status_code=404, detail="story not found in workspace")
 
+    await _bind_session_player_character_if_present(session.id, body.player_character_id)
     return _session_payload(session)
 
 
@@ -197,6 +200,42 @@ async def reload_history(body: AgentSessionMutationRequest) -> JsonObject:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"History reload failed: {exc}") from exc
     return {"status": "reloaded", "session_id": body.session_id}
+
+
+@app.post(f"{_service_prefix()}/chat/session/player-character")
+async def bind_player_character(body: AgentPlayerCharacterBindRequest) -> JsonObject:
+    logger.info(
+        "[AgentService] player character bind requested: session_id={}, character_id={}",
+        body.session_id,
+        body.player_character_id,
+    )
+    try:
+        result = await _bind_agent_player_character(body.session_id, body.player_character_id)
+    except HTTPException:
+        raise
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        logger.warning(
+            "[AgentService] player character bind rejected: session_id={}, character_id={}, error={}",
+            body.session_id,
+            body.player_character_id,
+            exc,
+        )
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "[AgentService] player character bind failed: session_id={}, character_id={}",
+            body.session_id,
+            body.player_character_id,
+        )
+        raise HTTPException(status_code=400, detail=f"Player character bind failed: {exc}") from exc
+    return {
+        "status": "bound",
+        "session_id": body.session_id,
+        "player_character_id": int(body.player_character_id),
+        "reply": result.reply,
+    }
 
 
 @app.post(f"{_service_prefix()}/chat/session/turns/{{turn_id}}/truncate")
@@ -308,6 +347,90 @@ def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> 
     if session is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return session
+
+
+async def _bind_session_player_character_if_present(session_id: str, player_character_id: int | None) -> None:
+    if player_character_id is None:
+        logger.debug("[AgentService] skip optional player character bind: session_id={}", session_id)
+        return
+    logger.info(
+        "[AgentService] optional player character bind requested: session_id={}, character_id={}",
+        session_id,
+        player_character_id,
+    )
+    try:
+        await _bind_agent_player_character(session_id, int(player_character_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def _bind_agent_player_character(session_id: str, player_character_id: int) -> CommandResult:
+    session_id = _require_session_id(session_id)
+    character_id = int(player_character_id)
+    command = _role_bind_command_for_character_id(session_id, character_id)
+    logger.debug(
+        "[AgentService] resolved player character bind command: session_id={}, character_id={}, command={}",
+        session_id,
+        character_id,
+        command,
+    )
+    agent = _get_agent(session_id)
+    result = await agent.execute_command(command)
+    if not result.handled:
+        logger.error(
+            "[AgentService] role bind command not handled: session_id={}, character_id={}, command={}, reply={}",
+            session_id,
+            character_id,
+            command,
+            result.reply,
+        )
+        raise ValueError(f"role bind command was not handled: {command}")
+
+    state = get_data_service_gateway().session_roles.get_state(session_id)
+    if (
+        state.status != models.PLAYER_CHARACTER_STATUS_BOUND
+        or state.player is None
+        or int(state.player.character_id) != character_id
+    ):
+        logger.error(
+            "[AgentService] player character bind post-check failed: session_id={}, requested_character_id={}, status={}, bound_character_id={}, reply={}",
+            session_id,
+            character_id,
+            state.status,
+            getattr(state.player, "character_id", None),
+            result.reply,
+        )
+        raise ValueError(result.reply or f"player character binding failed: {character_id}")
+    logger.info(
+        "[AgentService] player character bound via command: session_id={}, character_id={}, command={}, reply_chars={}",
+        session_id,
+        character_id,
+        command,
+        len(result.reply or ""),
+    )
+    return result
+
+
+def _role_bind_command_for_character_id(session_id: str, player_character_id: int) -> str:
+    options = get_data_service_gateway().session_roles.list_options(session_id)
+    logger.debug(
+        "[AgentService] resolving role bind index: session_id={}, character_id={}, option_count={}",
+        session_id,
+        player_character_id,
+        len(options),
+    )
+    for index, option in enumerate(options, start=1):
+        if int(option.snapshot.character_id) == int(player_character_id):
+            return f"/role_bind {index}"
+    logger.warning(
+        "[AgentService] role bind index not found: session_id={}, character_id={}, option_count={}",
+        session_id,
+        player_character_id,
+        len(options),
+    )
+    raise ValueError(f"player character is not mounted to this session story: {int(player_character_id)}")
 
 
 def _session_payload(session: models.Session) -> AgentSessionPayloadDict:
