@@ -7,6 +7,7 @@
 - 根目录聚合 supervisor 入口已移除；各进程必须通过独立入口启动。只有 `run_agent.py` 持有 `AgentManager` / `RPGGameAgent` / `rp_memory` / llama lazy worker，其它进程只能通过 `agent_service.client.AgentClient` 访问 Agent 服务。
 - 保持 `play_api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
 - Play WebUI 会话内链路只使用全局短 `session_id` 定位；创建 session 时在 `rpg_data` 绑定 `workspace_id + story_id`，之后由 Play API 反查上下文并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
+- 玩家扮演角色是 session 级绑定，保存在 `rpg_session_profiles.player_character_id` 和 `player_character_snapshot_json`。WebUI 的选择/切换和 CLI/Telegram 文本渠道都必须统一走 Agent 服务的 `/role_bind <序号>` 命令链路；Play API 只能转发到 Agent service 后刷新 summary，不要直接在 Play API/DataManager 中写绑定。
 - CLI / Telegram 也必须通过 `rpg_data` catalog 解析会话：配置使用 `workspace_id + story_id + optional session_id + session_title`；未配置 `session_id` 时由 Agent service 创建系统生成 ID 的 session，配置了则只校验并加载既有 session。不要恢复 `workspace` 字段、`cli_direct` 默认 ID 或用户自定义 session ID 创建入口。
 - `AgentManager` 只按全局 `session_id` 缓存 agent；`api_key` 不再作为 Agent service schema、AgentClient 参数或缓存键。LLM key/provider 选择只走 `llm_service` 配置。
 - `data/` 是运行数据目录。会话历史、摘要、向量索引、SQLite WAL/SHM 等文件默认不纳入提交。
@@ -41,10 +42,11 @@
 - RP Modules 是 RP 业务模块占位，不是通用 skill 体系；骰子、战斗、物品等能力应围绕 RP 工具流程和受控状态读写设计。
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
 - Story 主数据字段保持：`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词；`story_prompt` 目前只存储和经 API 返回，待后续集成入 fix layer，本次不要把它接入上下文渲染。
+- 玩家角色绑定状态只对外暴露 `bound | invalid`。缺失绑定、角色不存在、未挂载、snapshot 损坏或 snapshot mount/story 不匹配都视为 `invalid`；WebUI 进入 SessionRoom 后用不可取消弹窗补选，Agent 在普通 send/send_stream 进入 LLM 前强校验，invalid 时只返回固定编号角色列表，不写 user history、不调用 LLM。绑定成功且 main history 为空时，`SessionRoleService` 追加 story `first_message` 到 main 和 backup，且只追加一次。
 - `rpg_data` 状态表采用 SQLite document 真源：模板表与会话表都在 SQL 行内保存封装后的 `document_json`，`status_kind` 只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。`rpg_data` 对外返回 `StatusTableDocument` / `StatusTableRow` 等 dataclass，不暴露原始 JSON 字符串作为正文数据。
 - 状态表模板通过 `rpg_story_status_tables` 挂载到 story。创建 session 时由 `CatalogService` 触发复制已挂载模板的 `document_json` 到 `rpg_session_status_tables`，`origin="template_copy"`；后续模板修改不影响已有 session 副本。会话原生运行时表直接写入 `rpg_session_status_tables`，`origin="session_native"`。
 - `rpg_data` bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；不要在 bootstrap 代码中硬编码 demo 或业务数据。默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，并确保日志能清楚输出删除/跳过结果。
-- Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|scene|commands|turn|stream`；workspace、characters、lorebook、status-tables、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
+- Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|scene|commands|turn|stream|player-character`；workspace、characters、lorebook、status-tables、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
 
 ## 测试要求
 - 所有外部调用使用 mock，避免真实 LLM、Telegram 或网络依赖。
