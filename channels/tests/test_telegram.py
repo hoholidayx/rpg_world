@@ -604,6 +604,14 @@ class TestTelegramAdapter:
         assert '<a href="https://example.com/map">地图</a>' in rendered
         assert "<code>help</code>" in rendered
 
+    async def test_render_escapes_rp_output_xml_tags(self):
+        text = '<rp-narration>风声停了。</rp-narration>\n<rp-character name="Alice">走吧。</rp-character>'
+
+        rendered = render_markdown_to_telegram_html(text)
+
+        assert "&lt;rp-narration&gt;风声停了。&lt;/rp-narration&gt;" in rendered
+        assert "&lt;rp-character name=\"Alice\"&gt;走吧。&lt;/rp-character&gt;" in rendered
+
     async def test_send_text_long(self, adapter: TelegramAdapter):
         """超过 4096 字符的文本应自动分块发送。"""
         adapter._app.bot.send_message = AsyncMock()

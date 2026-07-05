@@ -49,9 +49,6 @@ function validatePayload(type: PlayStreamEventType, payload: Record<string, unkn
       return
     case PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED:
       assertRequiredString(payload, 'text', type, raw)
-      if (payload.metadata !== undefined && !isRecord(payload.metadata)) {
-        throw parseError(`Play SSE ${type}.payload.metadata 必须是 object`, raw)
-      }
       assertOptionalString(payload, 'model', type, raw)
       assertOptionalString(payload, 'finishReason', type, raw)
       if (payload.durationMs !== undefined && typeof payload.durationMs !== 'number') {

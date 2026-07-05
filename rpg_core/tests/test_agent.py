@@ -15,6 +15,10 @@ from rpg_core.context.rpg_context import HotHistoryLayer, Message, RPGContext, R
 from rpg_core.session.manager import SessionManager
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from llm_service.manager import ProviderOverrides
+from rpg_core.rp_modules.constants import (
+    RP_MODULE_DICE_SECTION_ID,
+    RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID,
+)
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.settings import RPModuleSettings
 from rpg_core.agent.agent_types import (
@@ -311,7 +315,8 @@ def test_setup_rp_module_registry_adds_dice_fixed_section():
     agent._setup_rp_module_registry()
 
     assert agent._rp_module_registry is not None
-    assert any(section.id == "rp_module_dice" for section in agent._fixed_sections)
+    assert any(section.id == RP_MODULE_DICE_SECTION_ID for section in agent._fixed_sections)
+    assert any(section.id == RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID for section in agent._fixed_sections)
 
 
 def test_register_rp_module_commands_exposes_check_dc():

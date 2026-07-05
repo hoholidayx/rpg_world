@@ -54,7 +54,7 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
         timeline: state.timeline.length > 0
           ? state.timeline.map((item, index) =>
               index === state.timeline.length - 1 && item.type === TIMELINE_ITEM_TYPE.ASSISTANT
-                ? { ...item, content: item.content || event.payload.text, metadata: event.payload.metadata }
+                ? { ...item, content: item.content || event.payload.text }
                 : item,
             )
           : appendAssistantText(state.timeline, event.payload.text || '已完成。'),

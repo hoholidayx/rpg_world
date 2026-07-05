@@ -44,7 +44,6 @@ export type PlayToolResultPayload = {
 
 export type PlayTurnCompletedPayload = {
   text: string
-  metadata?: Record<string, unknown>
   usage?: unknown
   model?: string
   finishReason?: string

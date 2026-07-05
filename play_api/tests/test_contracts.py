@@ -284,12 +284,6 @@ def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
     assert events[3]["payload"] == {"toolName": "roll", "resultPreview": "18"}
     assert events[4]["payload"] == {
         "text": "你推开门。",
-        "metadata": {
-            "messageDisplay": {
-                "schemaVersion": "v1",
-                "segments": [],
-            }
-        },
         "usage": {
             "prompt_tokens": 3,
             "completion_tokens": 4,

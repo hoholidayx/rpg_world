@@ -6,6 +6,11 @@ import random
 
 from rpg_core.context import FixedLayerSection
 from rpg_core.rp_modules.base import RPModule
+from rpg_core.rp_modules.constants import (
+    RP_MODULE_DICE_NAME,
+    RP_MODULE_DICE_SECTION_ID,
+    RP_MODULE_DICE_SOURCE,
+)
 from rpg_core.rp_modules.dice.parser import DiceParseError
 from rpg_core.rp_modules.dice.tools import (
     DiceCheckDCTool,
@@ -20,7 +25,7 @@ from rpg_core.settings import DiceModuleSettings
 class DiceModule(RPModule):
     """Dice and random adjudication module."""
 
-    name = "dice"
+    name = RP_MODULE_DICE_NAME
 
     def __init__(
         self,
@@ -37,9 +42,9 @@ class DiceModule(RPModule):
     def get_fixed_sections(self) -> list[FixedLayerSection]:
         return [
             FixedLayerSection(
-                id="rp_module_dice",
+                id=RP_MODULE_DICE_SECTION_ID,
                 title="骰子与随机裁定",
-                source="rp_module:dice",
+                source=RP_MODULE_DICE_SOURCE,
                 priority=80,
                 content=(
                     "- 用户明确要求掷骰、检定或随机裁定时，必须调用 "

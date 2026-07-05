@@ -14,6 +14,7 @@ from rpg_core.context.rpg_context import (
     Role,
     UserMessageLayer,
 )
+from rpg_core.rp_module_constants import RP_MODULE_DICE_SECTION_ID, RP_MODULE_DICE_SOURCE
 
 
 def _fake_render(template_name: str, **context: object) -> str:
@@ -122,16 +123,16 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
 def test_fixed_layer_composer_accepts_static_module_sections():
     composer = FixedLayerComposer("测试世界").with_module_sections([
         FixedLayerSection(
-            id="rp_module_dice",
+            id=RP_MODULE_DICE_SECTION_ID,
             title="骰子模块",
             content="遇到需要随机裁定的结果时，使用 rp_dice_roll 工具。",
             priority=50,
-            source="rp_module:dice",
+            source=RP_MODULE_DICE_SOURCE,
         )
     ])
 
     sections = composer.sections
 
-    assert [section.id for section in sections] == ["core_rp_contract", "rp_module_dice"]
+    assert [section.id for section in sections] == ["core_rp_contract", RP_MODULE_DICE_SECTION_ID]
     assert "测试世界" in sections[0].content
     assert "rp_dice_roll" in sections[1].content

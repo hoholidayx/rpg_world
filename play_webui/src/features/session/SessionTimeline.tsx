@@ -2,6 +2,11 @@ import { Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils/cn'
 import { SessionAvatar } from './SessionAvatar'
+import {
+  ASSISTANT_TEXT_SEGMENT_KIND,
+  parseAssistantTextSegments,
+  type AssistantTextSegment,
+} from './assistantTextSegments'
 import { formatMessageTime } from './sessionRoomHelpers'
 import { SESSION_TIMELINE_ROLE, type SessionTimelineMessage } from './sessionRoomTypes'
 
@@ -105,6 +110,7 @@ function MessageBubble({
   onEditSend: () => void
 }) {
   const isUser = message.role === SESSION_TIMELINE_ROLE.USER
+  const isAssistant = message.role === SESSION_TIMELINE_ROLE.ASSISTANT
   const toneClass = {
     user: 'border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-100 dark:shadow-violet-950/30',
     assistant: 'border-slate-200 bg-white text-slate-950 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:shadow-black/25',
@@ -143,6 +149,8 @@ function MessageBubble({
     )
   }
 
+  const content = message.content || (message.status === 'streaming' ? '正在生成回应...' : '')
+
   return (
     <div
       className={cn(
@@ -151,9 +159,44 @@ function MessageBubble({
         isUser ? 'ml-auto w-fit max-w-full text-left font-semibold' : '',
       )}
     >
-      {message.content || (message.status === 'streaming' ? '正在生成回应...' : '')}
+      {isAssistant && message.content ? <AssistantTaggedText content={message.content} /> : content}
     </div>
   )
+}
+
+function AssistantTaggedText({ content }: { content: string }) {
+  const result = parseAssistantTextSegments(content)
+  if (!result.structured) return <>{content}</>
+
+  return (
+    <div className="space-y-3 whitespace-normal">
+      {result.segments.map((segment, index) => (
+        <AssistantSegment key={`${segment.kind}-${index}`} segment={segment} />
+      ))}
+    </div>
+  )
+}
+
+function AssistantSegment({ segment }: { segment: AssistantTextSegment }) {
+  if (segment.kind === ASSISTANT_TEXT_SEGMENT_KIND.NARRATION) {
+    return (
+      <section className="space-y-1.5">
+        <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500">旁白</div>
+        <div className="whitespace-pre-wrap text-slate-800 dark:text-slate-100">{segment.text}</div>
+      </section>
+    )
+  }
+
+  if (segment.kind === ASSISTANT_TEXT_SEGMENT_KIND.CHARACTER) {
+    return (
+      <section className="space-y-1.5 border-l-2 border-violet-300 pl-3 dark:border-violet-500/70">
+        <div className="text-[11px] font-bold text-violet-600 dark:text-violet-300">{segment.speakerName}</div>
+        <div className="whitespace-pre-wrap text-slate-950 dark:text-slate-50">{segment.text}</div>
+      </section>
+    )
+  }
+
+  return <span className="whitespace-pre-wrap">{segment.text}</span>
 }
 
 function TimelineMessage({

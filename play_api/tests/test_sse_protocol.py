@@ -4,7 +4,6 @@ import json
 
 from play_api.sse_protocol import (
     AgentEventKind,
-    MESSAGE_DISPLAY_SCHEMA_VERSION,
     PLAY_SSE_SCHEMA_VERSION,
     PlaySSEStream,
     PlaySSEType,
@@ -69,19 +68,13 @@ def test_map_agent_event_accepts_agent_field_variants() -> None:
     }
 
 
-def test_turn_completed_payload_reserves_message_display_metadata() -> None:
+def test_turn_completed_payload_keeps_text_as_source_of_truth() -> None:
     mapped = map_agent_event({"kind": AgentEventKind.DONE.value, "content": "reply", "finish_reason": "stop"})
 
     assert mapped is not None
     assert mapped.type is PlaySSEType.TURN_COMPLETED
     assert mapped.payload == {
         "text": "reply",
-        "metadata": {
-            "messageDisplay": {
-                "schemaVersion": MESSAGE_DISPLAY_SCHEMA_VERSION,
-                "segments": [],
-            }
-        },
         "finishReason": "stop",
     }
 

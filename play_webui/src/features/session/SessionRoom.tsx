@@ -729,7 +729,6 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
                 ...message,
                 status: 'done',
                 content: message.content || event.payload.text || '已完成。',
-                metadata: event.payload.metadata ?? message.metadata,
                 canCopy: Boolean((message.content || event.payload.text || '已完成。').trim()),
               }
             : message,

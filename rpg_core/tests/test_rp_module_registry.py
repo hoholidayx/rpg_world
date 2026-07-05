@@ -6,11 +6,18 @@ import pytest
 
 from rpg_core.agent.tools import BaseTool
 from rpg_core.rp_modules import registry as registry_module
+from rpg_core.rp_modules.constants import (
+    RP_MODULE_DICE_NAME,
+    RP_MODULE_DICE_SECTION_ID,
+    RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
+    RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID,
+    RP_OUTPUT_FORMAT_XML_TAGS,
+)
 from rpg_core.rp_modules.registry import RPModuleRegistry
-from rpg_core.settings import DiceModuleSettings, RPModuleSettings
+from rpg_core.settings import DiceModuleSettings, RPModuleSettings, TextOutputFormatModuleSettings
 
 
-def test_registry_loads_dice_by_default():
+def test_registry_loads_default_modules():
     registry = RPModuleRegistry(
         session_id="s1",
         world_name="world",
@@ -18,8 +25,14 @@ def test_registry_loads_dice_by_default():
         rng_factory=lambda: random.Random(0),
     )
 
-    assert [module.name for module in registry.enabled_modules()] == ["dice"]
-    assert [section.id for section in registry.get_fixed_sections()] == ["rp_module_dice"]
+    assert [module.name for module in registry.enabled_modules()] == [
+        RP_MODULE_DICE_NAME,
+        RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
+    ]
+    assert [section.id for section in registry.get_fixed_sections()] == [
+        RP_MODULE_DICE_SECTION_ID,
+        RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID,
+    ]
     assert [tool.name for tool in registry.get_tools()] == ["rp_dice_roll", "rp_dice_check_dc"]
     assert registry.get_runtime_sections() == []
     assert [command.name for command in registry.get_commands()] == [
@@ -51,11 +64,29 @@ def test_registry_keeps_framework_commands_when_dice_disabled():
         settings=RPModuleSettings(dice=DiceModuleSettings(enabled=False)),
     )
 
-    assert registry.enabled_modules() == []
+    assert [module.name for module in registry.enabled_modules()] == [RP_MODULE_TEXT_OUTPUT_FORMAT_NAME]
+    assert [section.id for section in registry.get_fixed_sections()] == [RP_MODULE_TEXT_OUTPUT_FORMAT_SECTION_ID]
     assert [command.name for command in registry.get_commands()] == ["/rp_modules", "/rp_module"]
-    status = registry.module_status("dice")
+    status = registry.module_status(RP_MODULE_DICE_NAME)
     assert status.enabled is False
     assert status.config_summary["default_dc"] == 12
+
+
+def test_registry_can_disable_text_output_format_module():
+    registry = RPModuleRegistry(
+        session_id="s1",
+        world_name="world",
+        settings=RPModuleSettings(
+            text_output_format=TextOutputFormatModuleSettings(enabled=False),
+        ),
+        rng_factory=lambda: random.Random(0),
+    )
+
+    assert [module.name for module in registry.enabled_modules()] == [RP_MODULE_DICE_NAME]
+    assert [section.id for section in registry.get_fixed_sections()] == [RP_MODULE_DICE_SECTION_ID]
+    status = registry.module_status(RP_MODULE_TEXT_OUTPUT_FORMAT_NAME)
+    assert status.enabled is False
+    assert status.config_summary["format"] == RP_OUTPUT_FORMAT_XML_TAGS
 
 
 def test_registry_rejects_duplicate_public_tool_names(monkeypatch):
@@ -70,7 +101,7 @@ def test_registry_rejects_duplicate_public_tool_names(monkeypatch):
             return "ok"
 
     class DuplicateDiceModule:
-        name = "dice"
+        name = RP_MODULE_DICE_NAME
 
         def __init__(self, *args, **kwargs) -> None:
             pass

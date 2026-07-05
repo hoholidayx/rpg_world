@@ -9,7 +9,6 @@ from uuid import uuid4
 
 
 PLAY_SSE_SCHEMA_VERSION = "play_sse_v1"
-MESSAGE_DISPLAY_SCHEMA_VERSION = "v1"
 SSE_MEDIA_TYPE = "text/event-stream"
 TURN_ID_PREFIX = "turn"
 TURN_ID_RANDOM_HEX_LENGTH = 12
@@ -131,12 +130,6 @@ def _tool_result_payload(event: dict[str, object]) -> dict[str, object]:
 def _turn_completed_payload(event: dict[str, object]) -> dict[str, object]:
     payload: dict[str, object] = {
         "text": str(event.get("content") or ""),
-        "metadata": {
-            "messageDisplay": {
-                "schemaVersion": MESSAGE_DISPLAY_SCHEMA_VERSION,
-                "segments": [],
-            }
-        },
     }
     usage = event.get("usage")
     if isinstance(usage, dict):

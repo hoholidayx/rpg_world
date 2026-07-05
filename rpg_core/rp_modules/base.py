@@ -10,6 +10,7 @@ from rpg_core.rp_modules.models import (
     ModuleActivationEvent,
     ModuleCommand,
     ModuleContextRequest,
+    ModuleStatus,
     ModuleToolResultEvent,
 )
 
@@ -35,6 +36,14 @@ class RPModule(ABC):
 
     def get_commands(self) -> list[ModuleCommand]:
         return []
+
+    def status(self) -> ModuleStatus:
+        return ModuleStatus(
+            name=self.name,
+            enabled=True,
+            tools=tuple(tool.name for tool in self.get_tools()),
+            fixed_section_ids=tuple(section.id for section in self.get_fixed_sections()),
+        )
 
     def on_module_activated(self, event: ModuleActivationEvent) -> None:
         del event

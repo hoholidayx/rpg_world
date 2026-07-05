@@ -9,7 +9,13 @@ from typing import TYPE_CHECKING
 from rpg_core.agent.tools import BaseTool
 from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
 from rpg_core.rp_modules.base import RPModule
+from rpg_core.rp_modules.constants import (
+    RP_MODULE_DICE_NAME,
+    RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
+    RP_OUTPUT_FORMAT_XML_TAGS,
+)
 from rpg_core.rp_modules.dice import DiceModule
+from rpg_core.rp_modules.text_output_format import TextOutputFormatModule
 from rpg_core.rp_modules.models import ModuleCommand, ModuleContextRequest, ModuleStatus
 from rpg_core.settings import RPModuleSettings
 
@@ -39,6 +45,7 @@ class RPModuleRegistry:
         self._rng_factory = rng_factory or random.Random
         self._modules: dict[str, RPModule] = {}
         self._tool_to_module: dict[str, str] = {}
+        self._disabled_status: dict[str, ModuleStatus] = {}
         self._load_modules()
 
     def enabled_modules(self) -> list[RPModule]:
@@ -80,7 +87,7 @@ class RPModuleRegistry:
             ModuleCommand(
                 name="/rp_module",
                 description="查看 RP Module 状态",
-                detail="用法：/rp_module <name>。例如 /rp_module dice。",
+                detail=f"用法：/rp_module <name>。例如 /rp_module {RP_MODULE_DICE_NAME}。",
                 handler=self._cmd_rp_module,
             ),
         ]
@@ -90,11 +97,21 @@ class RPModuleRegistry:
 
     def module_status(self, name: str) -> ModuleStatus:
         module = self._modules.get(name)
-        if isinstance(module, DiceModule):
+        if module is not None:
             return module.status()
-        if name == "dice":
-            return ModuleStatus(
-                name="dice",
+        return self._disabled_status.get(name) or ModuleStatus(name=name, enabled=False)
+
+    def _load_modules(self) -> None:
+        if not self.settings.enabled:
+            return
+        if self.settings.dice.enabled:
+            self._modules[RP_MODULE_DICE_NAME] = DiceModule(
+                settings=self.settings.dice,
+                rng=self._rng_factory(),
+            )
+        else:
+            self._disabled_status[RP_MODULE_DICE_NAME] = ModuleStatus(
+                name=RP_MODULE_DICE_NAME,
                 enabled=False,
                 config_summary={
                     "allow_auto_checks": self.settings.dice.allow_auto_checks,
@@ -103,15 +120,15 @@ class RPModuleRegistry:
                     "max_die_sides": self.settings.dice.max_die_sides,
                 },
             )
-        return ModuleStatus(name=name, enabled=False)
-
-    def _load_modules(self) -> None:
-        if not self.settings.enabled:
-            return
-        if self.settings.dice.enabled:
-            self._modules["dice"] = DiceModule(
-                settings=self.settings.dice,
-                rng=self._rng_factory(),
+        if self.settings.text_output_format.enabled:
+            self._modules[RP_MODULE_TEXT_OUTPUT_FORMAT_NAME] = TextOutputFormatModule(
+                settings=self.settings.text_output_format,
+            )
+        else:
+            self._disabled_status[RP_MODULE_TEXT_OUTPUT_FORMAT_NAME] = ModuleStatus(
+                name=RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
+                enabled=False,
+                config_summary={"format": RP_OUTPUT_FORMAT_XML_TAGS},
             )
         self._validate_tool_names()
 
@@ -147,7 +164,7 @@ class RPModuleRegistry:
 
         name = args[0].strip().lower()
         status = self.module_status(name)
-        if name != "dice" and not status.enabled:
+        if name not in self._known_module_names() and not status.enabled:
             return f"[错误] 未知 RP Module: {name}"
 
         lines = [
@@ -159,7 +176,13 @@ class RPModuleRegistry:
         if status.config_summary:
             config = ", ".join(f"{key}={value}" for key, value in status.config_summary.items())
             lines.append(f"配置: {config}")
-        if name == "dice":
+        if name == RP_MODULE_DICE_NAME:
             lines.append("策略: 自然 RP 中遇到关键不确定节点可调用骰子；/roll 与 /check_dc 仅作手动入口。")
             lines.append("审计: MVP 不落盘记录最近 rolls。")
         return "\n".join(lines)
+
+    def _known_module_names(self) -> set[str]:
+        return {
+            RP_MODULE_DICE_NAME,
+            RP_MODULE_TEXT_OUTPUT_FORMAT_NAME,
+        }

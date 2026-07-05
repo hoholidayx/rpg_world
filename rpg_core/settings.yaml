@@ -48,6 +48,8 @@ base:
         default_dc: 12
         max_dice_count: 100
         max_die_sides: 1000
+      text_output_format:
+        enabled: true
 
   # ── 记忆检索与索引业务参数 ────────────────────────────────────────
   memory:
