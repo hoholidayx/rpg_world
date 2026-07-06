@@ -1,21 +1,34 @@
-import { PanelLeftClose, PanelRightClose, Settings, UserRound } from 'lucide-react'
+import { CaseSensitive, PanelLeftClose, PanelRightClose, Settings, UserRound } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
+import {
+  SESSION_FONT_SCALE_DEFAULT,
+  SESSION_FONT_SCALE_MAX,
+  SESSION_FONT_SCALE_MIN,
+  SESSION_FONT_SCALE_STEP,
+  type SessionFontScale,
+} from '@/stores/sessionUiStore'
 import type { SessionPlayerCharacter } from '@/types/session'
 
 export function SessionSettingsMenu({
   open,
   leftCollapsed,
   rightCollapsed,
+  fontScale,
   onToggleOpen,
   onToggleSide,
+  onFontScaleChange,
+  onResetFontScale,
   playerCharacter,
   onOpenRoleDialog,
 }: {
   open: boolean
   leftCollapsed: boolean
   rightCollapsed: boolean
+  fontScale: SessionFontScale
   onToggleOpen: () => void
   onToggleSide: (side: 'left' | 'right') => void
+  onFontScaleChange: (fontScale: number) => void
+  onResetFontScale: () => void
   playerCharacter?: SessionPlayerCharacter | null
   onOpenRoleDialog: () => void
 }) {
@@ -65,6 +78,40 @@ export function SessionSettingsMenu({
                 切换
               </span>
             </button>
+            <div className="mb-1 rounded-lg px-3 py-3">
+              <div className="grid grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+                  <CaseSensitive size={17} />
+                </span>
+                <span className="min-w-0">
+                  <strong className="block text-sm font-black text-slate-900 dark:text-slate-100">字体大小</strong>
+                  <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">时间线与输入区</span>
+                </span>
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                  {fontScale}%
+                </span>
+              </div>
+              <div className="mt-3 flex items-center gap-3">
+                <input
+                  type="range"
+                  aria-label="调整字体大小"
+                  min={SESSION_FONT_SCALE_MIN}
+                  max={SESSION_FONT_SCALE_MAX}
+                  step={SESSION_FONT_SCALE_STEP}
+                  value={fontScale}
+                  onChange={(event) => onFontScaleChange(Number(event.target.value))}
+                  className="h-2 min-w-0 flex-1 cursor-pointer accent-violet-600"
+                />
+                <button
+                  type="button"
+                  onClick={onResetFontScale}
+                  disabled={fontScale === SESSION_FONT_SCALE_DEFAULT}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:text-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200 dark:disabled:text-slate-600"
+                >
+                  默认
+                </button>
+              </div>
+            </div>
             <button
               type="button"
               onClick={() => onToggleSide('left')}

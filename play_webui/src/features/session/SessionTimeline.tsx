@@ -1,5 +1,5 @@
 import { Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils/cn'
 import { SessionAvatar } from './SessionAvatar'
 import {
@@ -126,7 +126,7 @@ function MessageBubble({
         <textarea
           value={editDraft}
           onChange={(event) => onEditDraftChange(event.target.value)}
-          className="min-h-28 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm leading-7 text-slate-900 outline-none transition focus:border-violet-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-violet-500"
+          className="min-h-28 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-3 text-[length:var(--session-message-font-size)] leading-[var(--session-message-line-height)] text-slate-900 outline-none transition focus:border-violet-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-violet-500"
           autoFocus
         />
         <div className="mt-3 flex justify-end gap-2">
@@ -154,7 +154,7 @@ function MessageBubble({
   return (
     <div
       className={cn(
-        'rounded-lg border px-5 py-4 text-sm leading-7 break-words whitespace-pre-wrap',
+        'rounded-lg border px-5 py-4 text-[length:var(--session-message-font-size)] leading-[var(--session-message-line-height)] break-words whitespace-pre-wrap',
         toneClass,
         isUser ? 'ml-auto w-fit max-w-full text-left font-semibold' : '',
       )}
@@ -181,7 +181,7 @@ function AssistantSegment({ segment }: { segment: AssistantTextSegment }) {
   if (segment.kind === ASSISTANT_TEXT_SEGMENT_KIND.NARRATION) {
     return (
       <section className="space-y-1.5">
-        <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500">旁白</div>
+        <div className="text-[length:var(--session-segment-label-font-size)] font-bold text-slate-400 dark:text-slate-500">叙事者</div>
         <div className="whitespace-pre-wrap text-slate-800 dark:text-slate-100">{segment.text}</div>
       </section>
     )
@@ -190,7 +190,7 @@ function AssistantSegment({ segment }: { segment: AssistantTextSegment }) {
   if (segment.kind === ASSISTANT_TEXT_SEGMENT_KIND.CHARACTER) {
     return (
       <section className="space-y-1.5 border-l-2 border-violet-300 pl-3 dark:border-violet-500/70">
-        <div className="text-[11px] font-bold text-violet-600 dark:text-violet-300">{segment.speakerName}</div>
+        <div className="text-[length:var(--session-segment-label-font-size)] font-bold text-violet-600 dark:text-violet-300">{segment.speakerName}</div>
         <div className="whitespace-pre-wrap text-slate-950 dark:text-slate-50">{segment.text}</div>
       </section>
     )
@@ -288,7 +288,9 @@ function TimelineMessage({
 }
 
 export function SessionTimeline({
+  sessionId,
   messages,
+  forceScrollKey,
   editingMessageId,
   editDraft,
   onEditDraftChange,
@@ -299,7 +301,9 @@ export function SessionTimeline({
   onEditCancel,
   onEditSend,
 }: {
+  sessionId: string
   messages: SessionTimelineMessage[]
+  forceScrollKey: number
   editingMessageId: string | null
   editDraft: string
   onEditDraftChange: (value: string) => void
@@ -311,9 +315,61 @@ export function SessionTimeline({
   onEditSend: (message: SessionTimelineMessage) => void
 }) {
   const [openMoreId, setOpenMoreId] = useState<string | null>(null)
+  const scrollContainerRef = useRef<HTMLElement | null>(null)
+  const bottomAnchorRef = useRef<HTMLDivElement | null>(null)
+  const shouldStickToBottomRef = useRef(true)
+  const initialScrollDoneRef = useRef(false)
+  const lastMessageFingerprint = useMemo(() => {
+    const lastMessage = messages[messages.length - 1]
+    return lastMessage ? `${lastMessage.id}:${lastMessage.content.length}:${lastMessage.status ?? ''}` : ''
+  }, [messages])
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+    requestAnimationFrame(() => {
+      bottomAnchorRef.current?.scrollIntoView({ behavior, block: 'end' })
+    })
+  }, [])
+
+  const updateStickToBottom = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    shouldStickToBottomRef.current = distanceFromBottom < 160
+  }, [])
+
+  useEffect(() => {
+    initialScrollDoneRef.current = false
+    shouldStickToBottomRef.current = true
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!messages.length) {
+      initialScrollDoneRef.current = false
+      shouldStickToBottomRef.current = true
+      return
+    }
+
+    if (!initialScrollDoneRef.current) {
+      scrollToBottom('auto')
+      initialScrollDoneRef.current = true
+      return
+    }
+
+    if (shouldStickToBottomRef.current) scrollToBottom('smooth')
+  }, [lastMessageFingerprint, messages.length, scrollToBottom])
+
+  useEffect(() => {
+    if (!forceScrollKey) return
+    shouldStickToBottomRef.current = true
+    scrollToBottom('smooth')
+  }, [forceScrollKey, scrollToBottom])
 
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto bg-[#f7f8fc] px-4 py-7 dark:bg-[#0b1020] sm:px-6">
+    <section
+      ref={scrollContainerRef}
+      onScroll={updateStickToBottom}
+      className="min-h-0 flex-1 overflow-y-auto bg-[#f7f8fc] px-4 py-7 dark:bg-[#0b1020] sm:px-6"
+    >
       <div className="mx-auto max-w-5xl">
         <div className="mb-7 flex items-center justify-center gap-4 text-xs font-bold uppercase text-slate-400 dark:text-slate-300">
           <span className="h-px w-24 bg-slate-200 dark:bg-slate-700 sm:w-44" />
@@ -350,6 +406,7 @@ export function SessionTimeline({
             <p className="mt-2 text-sm font-semibold text-slate-400 dark:text-slate-300">发送第一条行动后，故事会从这里展开。</p>
           </div>
         )}
+        <div ref={bottomAnchorRef} aria-hidden="true" className="h-px" />
       </div>
     </section>
   )

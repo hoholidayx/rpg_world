@@ -19,6 +19,7 @@ import {
 import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { consumeChatStream } from '@/lib/stream/sse'
 import { cn } from '@/lib/utils/cn'
+import { SESSION_FONT_SCALE_DEFAULT, useSessionUiStore } from '@/stores/sessionUiStore'
 import type { CharacterCard } from '@/types/characters'
 import { fromContextPreviewEstimate, fromTurnUsage, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
@@ -96,9 +97,9 @@ function makeAssistantSpeaker(): SessionSpeaker {
   // Assistant output is currently one mixed narrative block. Character-level
   // avatars need a future structured segments layer instead of speaker metadata.
   return {
-    name: '旁白',
+    name: '叙事者',
     avatarUrl: '',
-    fallback: '旁',
+    fallback: '叙',
     tone: 'assistant',
   }
 }
@@ -408,8 +409,12 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [toastMessage, setToastMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [accurateUsageOverride, setAccurateUsageOverride] = useState<ContextUsageSnapshot | null>(null)
+  const [forceScrollKey, setForceScrollKey] = useState(0)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const fontScale = useSessionUiStore((state) => state.fontScale)
+  const setFontScale = useSessionUiStore((state) => state.setFontScale)
+  const syncFontScale = useSessionUiStore((state) => state.syncFontScale)
 
   const sessionQuery = useQuery({
     queryKey: ['play-session', sessionId],
@@ -489,6 +494,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   }, [])
 
   useEffect(() => {
+    syncFontScale()
+  }, [syncFontScale])
+
+  useEffect(() => {
     setLocalMessages([])
     setOptimisticTruncateFromTurn(null)
     setEditingMessageId(null)
@@ -563,6 +572,18 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         }px`,
       }) as CSSProperties,
     [leftCollapsed, leftWidth, rightCollapsed, rightWidth],
+  )
+
+  const sessionExperienceStyle = useMemo(
+    () =>
+      ({
+        '--session-message-font-size': `${14 * (fontScale / 100)}px`,
+        '--session-message-line-height': `${28 * (fontScale / 100)}px`,
+        '--session-segment-label-font-size': `${11 * (fontScale / 100)}px`,
+        '--session-composer-font-size': `${16 * (fontScale / 100)}px`,
+        '--session-composer-line-height': `${28 * (fontScale / 100)}px`,
+      }) as CSSProperties,
+    [fontScale],
   )
 
   const startDrag = (side: 'left' | 'right') => (event: PointerEvent<HTMLButtonElement>) => {
@@ -690,6 +711,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       previewUserMessage,
       assistantMessage,
     ])
+    setForceScrollKey((current) => current + 1)
     setEditingMessageId(null)
     setEditDraft('')
     return assistantMessage
@@ -1033,6 +1055,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setComposerText('')
     setSending(true)
     setLocalMessages((current) => [...current, userMessage, assistantMessage])
+    setForceScrollKey((current) => current + 1)
 
     let streamFailure: string | null = null
     let completedTurn = false
@@ -1149,7 +1172,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400 dark:bg-slate-600 dark:group-hover:bg-violet-400" />
       </button>
 
-      <section className="flex min-h-screen min-w-0 flex-col lg:h-screen lg:min-h-0">
+      <section
+        style={sessionExperienceStyle}
+        className="flex min-h-screen min-w-0 flex-col lg:h-screen lg:min-h-0"
+      >
         <header className="flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
           <div className="min-w-0">
             <h1 className="truncate text-lg font-black text-slate-950 dark:text-slate-100 sm:text-xl">{session?.title ?? '加载会话中'}</h1>
@@ -1193,19 +1219,24 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               open={settingsOpen}
               leftCollapsed={leftCollapsed}
               rightCollapsed={rightCollapsed}
+              fontScale={fontScale}
               playerCharacter={playerCharacter}
               onToggleOpen={() => setSettingsOpen((current) => !current)}
               onToggleSide={(side) => {
                 if (side === 'left') setLeftCollapsed((current) => !current)
                 else setRightCollapsed((current) => !current)
               }}
+              onFontScaleChange={setFontScale}
+              onResetFontScale={() => setFontScale(SESSION_FONT_SCALE_DEFAULT)}
               onOpenRoleDialog={openRoleDialog}
             />
           </div>
         </header>
 
         <SessionTimeline
+          sessionId={sessionId}
           messages={visibleMessages}
+          forceScrollKey={forceScrollKey}
           editingMessageId={editingMessageId}
           editDraft={editDraft}
           onEditDraftChange={setEditDraft}

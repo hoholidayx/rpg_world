@@ -82,7 +82,7 @@ export function SessionComposer({
             onChange={(event) => onTextChange(event.target.value)}
             onKeyDown={handleKeyDown}
             disabled={disabled}
-            className="min-h-24 resize-none border-0 bg-transparent pt-2 text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:text-slate-500"
+            className="min-h-24 resize-none border-0 bg-transparent pt-2 text-[length:var(--session-composer-font-size)] leading-[var(--session-composer-line-height)] text-slate-900 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:text-slate-500"
             placeholder={disabled ? '请先选择你要扮演的角色' : '输入你的行动、台词或 GM 指令...'}
           />
           <button

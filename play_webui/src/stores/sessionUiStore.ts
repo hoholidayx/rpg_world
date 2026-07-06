@@ -1,14 +1,47 @@
+'use client'
+
 import { create } from 'zustand'
+
+export type SessionFontScale = 90 | 95 | 100 | 105 | 110 | 115 | 120 | 125
+
+export const SESSION_FONT_SCALE_MIN = 90
+export const SESSION_FONT_SCALE_MAX = 125
+export const SESSION_FONT_SCALE_STEP = 5
+export const SESSION_FONT_SCALE_DEFAULT: SessionFontScale = 100
+
+const SESSION_FONT_SCALE_STORAGE_KEY = 'rpg-world-session-font-scale'
+
+function normalizeSessionFontScale(value: number): SessionFontScale {
+  const rounded = Math.round(value / SESSION_FONT_SCALE_STEP) * SESSION_FONT_SCALE_STEP
+  const clamped = Math.min(SESSION_FONT_SCALE_MAX, Math.max(SESSION_FONT_SCALE_MIN, rounded))
+  return clamped as SessionFontScale
+}
+
+function readStoredFontScale(): SessionFontScale {
+  if (typeof window === 'undefined') return SESSION_FONT_SCALE_DEFAULT
+
+  const stored = Number(window.localStorage.getItem(SESSION_FONT_SCALE_STORAGE_KEY))
+  if (!Number.isFinite(stored)) return SESSION_FONT_SCALE_DEFAULT
+  return normalizeSessionFontScale(stored)
+}
+
+function storeFontScale(fontScale: SessionFontScale) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(SESSION_FONT_SCALE_STORAGE_KEY, String(fontScale))
+}
 
 type SessionUiState = {
   workspace: string | null
   storyId: number | null
   sessionId: string | null
   draft: string
+  fontScale: SessionFontScale
   setWorkspace: (workspace: string | null) => void
   setStoryId: (storyId: number | null) => void
   setSessionId: (sessionId: string | null) => void
   setDraft: (draft: string) => void
+  setFontScale: (fontScale: number) => void
+  syncFontScale: () => void
 }
 
 export const useSessionUiStore = create<SessionUiState>((set) => ({
@@ -16,8 +49,15 @@ export const useSessionUiStore = create<SessionUiState>((set) => ({
   storyId: null,
   sessionId: null,
   draft: '',
+  fontScale: SESSION_FONT_SCALE_DEFAULT,
   setWorkspace: (workspace) => set({ workspace }),
   setStoryId: (storyId) => set({ storyId }),
   setSessionId: (sessionId) => set({ sessionId }),
   setDraft: (draft) => set({ draft }),
+  setFontScale: (value) => {
+    const fontScale = normalizeSessionFontScale(value)
+    storeFontScale(fontScale)
+    set({ fontScale })
+  },
+  syncFontScale: () => set({ fontScale: readStoredFontScale() }),
 }))
