@@ -43,7 +43,7 @@ from agent_service.settings import settings as process_settings
 from commons.types import JsonObject, JsonValue
 from llm_service.client import configure_llama_client_from_runtime_config
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
-from rpg_core.context.usage import usage_payload_from_records
+from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload, usage_payload_from_records
 from rpg_core.agent.command import CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.agent.manager import AgentManager
@@ -122,6 +122,7 @@ async def get_context_preview(
         payload = await agent.get_context_payload()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Context preview failed: {exc}") from exc
+    _log_context_preview_payload(body_session_id=session_id, payload=payload)
     return AgentContextPreviewResponse.model_validate(payload)
 
 
@@ -184,7 +185,7 @@ async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
         raise _turn_metadata_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Chat send failed: {exc}") from exc
-    return _reply_to_dict(reply)
+    return _reply_to_dict(reply, session_id=body.session_id)
 
 
 @app.post(f"{_service_prefix()}/chat/session/reload-history")
@@ -464,7 +465,7 @@ def _turn_metadata_http_error(exc: InvalidTurnMetadataError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
 
 
-def _reply_to_dict(reply: AgentReply) -> AgentReplyPayload:
+def _reply_to_dict(reply: AgentReply, *, session_id: str = "-") -> AgentReplyPayload:
     result: AgentReplyPayload = {"reply": reply.text}
     if reply.tool_records:
         result["tool_records"] = [
@@ -482,7 +483,42 @@ def _reply_to_dict(reply: AgentReply) -> AgentReplyPayload:
         usage = usage_payload_from_records(reply.stats.calls, duration_ms=reply.stats.total_duration_ms)
         if usage is not None:
             result["usage"] = cast(JsonObject, usage)
+            usage_view = TurnUsageWirePayload.from_payload(usage)
+            logger.debug(
+                "[AgentService] send usage attached: session_id={}, prompt={}, completion={}, total={}, cached={}, call_count={}",
+                session_id,
+                usage_view.prompt_tokens if usage_view else None,
+                usage_view.completion_tokens if usage_view else None,
+                usage_view.total_tokens if usage_view else None,
+                usage_view.cached_tokens if usage_view else None,
+                len(reply.stats.calls),
+            )
+        elif reply.stats.calls:
+            logger.warning(
+                "[AgentService] send completed without provider usage: session_id={}, call_count={}, duration_ms={:.1f}",
+                session_id,
+                len(reply.stats.calls),
+                reply.stats.total_duration_ms,
+            )
+        else:
+            logger.debug("[AgentService] send completed with no LLM calls: session_id={}", session_id)
     return result
+
+
+def _log_context_preview_payload(*, body_session_id: str, payload: dict[str, object]) -> None:
+    usage = ContextPreviewUsagePayload.from_payload(payload)
+    if usage is None:
+        logger.warning("[AgentService] context preview missing usageEstimate: session_id={}", body_session_id)
+        return
+    logger.debug(
+        "[AgentService] context preview usage estimate: session_id={}, used_tokens={}, context_limit={}, source={}, accuracy={}, token_count={}",
+        body_session_id,
+        usage.used_tokens,
+        usage.context_limit,
+        usage.source,
+        usage.accuracy,
+        usage.token_count,
+    )
 
 
 def _message_payload(row: models.SessionMessage) -> JsonObject:

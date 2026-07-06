@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from loguru import logger
+
 from rpg_core.context.usage import ContextUsageSnapshot
 from rpg_core.context.rpg_context import LayerType, Message, RPGContext, Role
 from rpg_core.session.turns import count_roles
@@ -72,13 +74,31 @@ class ContextInspector:
             "layers": layers,
             "messages": messages,
         }
-        payload["usageEstimate"] = ContextUsageSnapshot(
+        usage_estimate = ContextUsageSnapshot(
             used_tokens=token_count,
             context_limit=self._context_limit,
             source="fallback_estimate" if self._estimation_error else "context_preview",
             accuracy="unknown" if self._estimation_error else "estimated",
             error_reason=self._estimation_error,
-        ).to_camel_payload()
+        )
+        payload["usageEstimate"] = usage_estimate.to_camel_payload()
+        if self._estimation_error:
+            logger.warning(
+                "[ContextInspector] usage estimate fallback: session_id={}, used_tokens={}, context_limit={}, error={}",
+                session_id or "-",
+                token_count,
+                self._context_limit,
+                self._estimation_error,
+            )
+        else:
+            logger.debug(
+                "[ContextInspector] usage estimate built: session_id={}, used_tokens={}, context_limit={}, layers={}, messages={}",
+                session_id or "-",
+                token_count,
+                self._context_limit,
+                len(layers),
+                len(messages),
+            )
         return payload
 
     def _layer_payloads(self) -> list[dict[str, object]]:

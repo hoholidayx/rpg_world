@@ -15,6 +15,7 @@ from rpg_core.context.rpg_context import (
     Role,
     UserMessageLayer,
 )
+from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload
 from rpg_core.rp_module_constants import RP_MODULE_DICE_SECTION_ID, RP_MODULE_DICE_SOURCE
 
 
@@ -131,6 +132,46 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
         {"role": "assistant", "content": "a1", "turn_id": 1, "seq_in_turn": 2},
         {"role": "user", "content": "inspect"},
     ]
+
+
+def test_usage_payload_views_normalize_transport_shapes():
+    turn_usage = TurnUsageWirePayload.from_payload({
+        "prompt_tokens": "12",
+        "completionTokens": 4,
+        "total_tokens": 16,
+        "cachedTokens": "3",
+        "source": "provider_usage",
+        "accuracy": "accurate",
+        "model": "deepseek-test",
+    })
+
+    assert turn_usage is not None
+    assert turn_usage.prompt_tokens == 12
+    assert turn_usage.completion_tokens == 4
+    assert turn_usage.total_tokens == 16
+    assert turn_usage.cached_tokens == 3
+    assert turn_usage.source == "provider_usage"
+    assert turn_usage.accuracy == "accurate"
+    assert turn_usage.model == "deepseek-test"
+
+    preview_usage = ContextPreviewUsagePayload.from_payload({
+        "usageEstimate": {
+            "usedTokens": "128",
+            "contextLimit": 1000000,
+            "source": "context_preview",
+            "accuracy": "estimated",
+        },
+        "totals": {"tokenCount": "128"},
+    })
+
+    assert preview_usage is not None
+    assert preview_usage.used_tokens == 128
+    assert preview_usage.context_limit == 1000000
+    assert preview_usage.token_count == 128
+    assert preview_usage.source == "context_preview"
+    assert preview_usage.accuracy == "estimated"
+    assert TurnUsageWirePayload.from_payload(None) is None
+    assert ContextPreviewUsagePayload.from_payload({}) is None
 
 
 def test_core_contributor_can_be_combined_with_static_module_sections():

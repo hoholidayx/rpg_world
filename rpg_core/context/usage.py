@@ -7,9 +7,12 @@ the current session history shape.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, Protocol, Sequence
+
+from loguru import logger
 
 from llm_service.types import LLMUsage
 
@@ -69,12 +72,72 @@ class ContextUsageSnapshot:
         }
 
 
+@dataclass(frozen=True)
+class TurnUsageWirePayload:
+    """Structured view of a provider usage payload already shaped for transport."""
+
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    cached_tokens: int | None
+    source: str
+    accuracy: str
+    model: str | None = None
+
+    @classmethod
+    def from_payload(cls, payload: object) -> "TurnUsageWirePayload | None":
+        data = _mapping(payload)
+        if data is None:
+            return None
+        return cls(
+            prompt_tokens=_optional_int(_first_present(data, "prompt_tokens", "promptTokens")),
+            completion_tokens=_optional_int(_first_present(data, "completion_tokens", "completionTokens")),
+            total_tokens=_optional_int(_first_present(data, "total_tokens", "totalTokens")),
+            cached_tokens=_optional_int(_first_present(data, "cached_tokens", "cachedTokens")),
+            source=_raw_string(data.get("source")) or "provider_usage",
+            accuracy=_raw_string(data.get("accuracy")) or "accurate",
+            model=_raw_string(data.get("model")) or None,
+        )
+
+
+@dataclass(frozen=True)
+class ContextPreviewUsagePayload:
+    """Structured view of the usageEstimate section in a context-preview payload."""
+
+    used_tokens: int | None
+    context_limit: int | None
+    source: str
+    accuracy: str
+    token_count: int | None = None
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, object]) -> "ContextPreviewUsagePayload | None":
+        usage = _mapping(payload.get("usageEstimate"))
+        if usage is None:
+            return None
+        totals = _mapping(payload.get("totals"))
+        token_count = _optional_int(_first_present(totals, "tokenCount", "token_count")) if totals else None
+        return cls(
+            used_tokens=_optional_int(_first_present(usage, "usedTokens", "used_tokens")),
+            context_limit=_optional_int(_first_present(usage, "contextLimit", "context_limit")),
+            source=_raw_string(usage.get("source")) or "context_preview",
+            accuracy=_raw_string(usage.get("accuracy")) or "estimated",
+            token_count=token_count,
+        )
+
+
 def aggregate_usage_records(calls: Sequence[UsageCallRecord]) -> LLMUsage | None:
     """Aggregate provider usage records collected during one turn."""
     if not calls:
+        logger.debug("[ContextUsage] skip aggregation: no LLM call records")
         return None
     usages = [call.usage for call in calls if call.usage is not None]
     if not usages:
+        logger.warning(
+            "[ContextUsage] provider usage unavailable: call_count={}, models={}",
+            len(calls),
+            _models_summary(calls),
+        )
         return None
 
     total_prompt = sum(usage.prompt_tokens for usage in usages)
@@ -82,9 +145,15 @@ def aggregate_usage_records(calls: Sequence[UsageCallRecord]) -> LLMUsage | None
     total_cached = sum(usage.cached_tokens for usage in usages)
     total_missed = sum(usage.prompt_cache_miss_tokens for usage in usages)
     if total_prompt <= 0 and total_completion <= 0 and total_cached <= 0:
+        logger.warning(
+            "[ContextUsage] provider usage empty: call_count={}, usage_count={}, models={}",
+            len(calls),
+            len(usages),
+            _models_summary(calls),
+        )
         return None
 
-    return LLMUsage(
+    usage = LLMUsage(
         prompt_tokens=total_prompt,
         completion_tokens=total_completion,
         total_tokens=total_prompt + total_completion,
@@ -92,6 +161,16 @@ def aggregate_usage_records(calls: Sequence[UsageCallRecord]) -> LLMUsage | None
         prompt_cache_hit_tokens=total_cached,
         prompt_cache_miss_tokens=total_missed,
     )
+    logger.debug(
+        "[ContextUsage] aggregated provider usage: call_count={}, usage_count={}, prompt={}, completion={}, total={}, cached={}",
+        len(calls),
+        len(usages),
+        usage.prompt_tokens,
+        usage.completion_tokens,
+        usage.total_tokens,
+        usage.cached_tokens,
+    )
+    return usage
 
 
 def usage_to_wire_payload(
@@ -155,3 +234,35 @@ def _raw_string(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _mapping(value: object) -> Mapping[str, object] | None:
+    if isinstance(value, Mapping):
+        return value
+    return None
+
+
+def _first_present(data: Mapping[str, object], *keys: str) -> object | None:
+    for key in keys:
+        value = data.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _models_summary(calls: Sequence[UsageCallRecord]) -> str:
+    models: list[str] = []
+    for call in calls:
+        model = str(call.model or "").strip()
+        if model and model not in models:
+            models.append(model)
+    return ",".join(models) if models else "-"

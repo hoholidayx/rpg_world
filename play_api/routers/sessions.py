@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent_service.client import AgentClientError, AgentServiceUnavailable
 from play_api.backends import get_agent_backend, get_data_manager_backend
 from play_api.routers._locator import resolve_session_or_404
-from play_api.sse_protocol import PlaySSEStream, SSE_MEDIA_TYPE, agent_event_kind
+from play_api.sse_protocol import AgentEventKind, PlaySSEStream, SSE_MEDIA_TYPE, agent_event_kind
+from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload
 from rpg_core.session.turn_metadata import (
     InvalidTurnMetadataError,
     has_trustworthy_turn_metadata,
@@ -433,6 +434,7 @@ async def get_context_preview(session_id: str) -> ContextPreviewPayload:
     preview = await _agent_call(
         get_agent_backend().get_context_preview(workspace, story_id, agent_session_id)
     )
+    _log_context_preview_usage(session_id=agent_session_id, preview=preview)
     return ContextPreviewPayload.model_validate(preview)
 
 
@@ -449,6 +451,7 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
             payload.mode,
         )
     )
+    _log_turn_usage(session_id=agent_session_id, usage=result.get("usage"), mode=payload.mode)
     return {
         "turnId": f"turn_{agent_session_id}",
         "status": "completed",
@@ -519,16 +522,71 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
                 payload.text,
                 payload.mode,
             ):
+                kind = agent_event_kind(event)
                 encoded = stream.agent_event(event)
                 if encoded is None:
                     logger.debug(
                         "[PlayAPI] ignored unsupported agent stream event: session_id={}, kind={}",
                         agent_session_id,
-                        agent_event_kind(event),
+                        kind,
                     )
                     continue
+                if kind == AgentEventKind.DONE.value:
+                    _log_stream_done_usage(session_id=agent_session_id, usage=event.get("usage"), mode=payload.mode)
                 yield encoded
         except (AgentServiceUnavailable, AgentClientError) as exc:
             yield stream.error(str(exc), status_code=exc.status_code)
 
     return StreamingResponse(event_generator(), media_type=SSE_MEDIA_TYPE)
+
+
+def _log_context_preview_usage(*, session_id: str, preview: dict[str, object]) -> None:
+    usage = ContextPreviewUsagePayload.from_payload(preview)
+    if usage is None:
+        logger.warning("[PlayAPI] context preview missing usageEstimate: session_id={}", session_id)
+        return
+    logger.debug(
+        "[PlayAPI] context preview usage estimate: session_id={}, used_tokens={}, context_limit={}, source={}, accuracy={}, token_count={}",
+        session_id,
+        usage.used_tokens,
+        usage.context_limit,
+        usage.source,
+        usage.accuracy,
+        usage.token_count,
+    )
+
+
+def _log_turn_usage(*, session_id: str, usage: object, mode: str) -> None:
+    usage_view = TurnUsageWirePayload.from_payload(usage)
+    if usage_view is None:
+        logger.warning("[PlayAPI] turn completed without usage: session_id={}, mode={}", session_id, mode)
+        return
+    logger.debug(
+        "[PlayAPI] turn usage forwarded: session_id={}, mode={}, prompt={}, completion={}, total={}, cached={}, source={}, accuracy={}",
+        session_id,
+        mode,
+        usage_view.prompt_tokens,
+        usage_view.completion_tokens,
+        usage_view.total_tokens,
+        usage_view.cached_tokens,
+        usage_view.source,
+        usage_view.accuracy,
+    )
+
+
+def _log_stream_done_usage(*, session_id: str, usage: object, mode: str) -> None:
+    usage_view = TurnUsageWirePayload.from_payload(usage)
+    if usage_view is None:
+        logger.warning("[PlayAPI] stream completed without usage: session_id={}, mode={}", session_id, mode)
+        return
+    logger.debug(
+        "[PlayAPI] stream usage forwarded: session_id={}, mode={}, prompt={}, completion={}, total={}, cached={}, source={}, accuracy={}",
+        session_id,
+        mode,
+        usage_view.prompt_tokens,
+        usage_view.completion_tokens,
+        usage_view.total_tokens,
+        usage_view.cached_tokens,
+        usage_view.source,
+        usage_view.accuracy,
+    )
