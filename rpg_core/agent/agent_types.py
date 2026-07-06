@@ -195,12 +195,14 @@ class AgentStreamEvent:
         if self.round_index:
             d["round_index"] = self.round_index
         if self.usage:
-            d["usage"] = {
-                "prompt_tokens": self.usage.prompt_tokens,
-                "completion_tokens": self.usage.completion_tokens,
-                "total_tokens": self.usage.total_tokens,
-                "cached_tokens": self.usage.cached_tokens,
-            }
+            from rpg_core.context.usage import usage_to_wire_payload
+
+            d["usage"] = usage_to_wire_payload(
+                self.usage,
+                model=self.model,
+                finish_reason=self.finish_reason,
+                duration_ms=self.duration_ms or None,
+            )
         if self.duration_ms:
             d["duration_ms"] = round(self.duration_ms, 1)
         if self.model:

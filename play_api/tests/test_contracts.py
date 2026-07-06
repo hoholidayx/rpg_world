@@ -156,6 +156,12 @@ class _FakeAgentClient:
                 "tokenCount": 3,
                 "messageCount": 1,
             },
+            "usageEstimate": {
+                "usedTokens": 3,
+                "contextLimit": 100,
+                "source": "context_preview",
+                "accuracy": "estimated",
+            },
             "layers": [
                 {
                     "index": 0,
@@ -173,7 +179,18 @@ class _FakeAgentClient:
 
     async def send(self, session_id: str, text: str) -> dict[str, object]:
         self.calls.append(("send", session_id))
-        return {"reply": f"agent reply: {text}"}
+        return {
+            "reply": f"agent reply: {text}",
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 5,
+                "total_tokens": 14,
+                "cached_tokens": 2,
+                "source": "provider_usage",
+                "accuracy": "accurate",
+                "createdAt": "2026-01-01T00:00:00+00:00",
+            },
+        }
 
     async def reload_history(self, session_id: str) -> dict[str, object]:
         self.calls.append(("reload-history", session_id))
@@ -229,6 +246,9 @@ class _StreamingAgentClient(_FakeAgentClient):
                 "completion_tokens": 4,
                 "total_tokens": 7,
                 "cached_tokens": 1,
+                "source": "provider_usage",
+                "accuracy": "accurate",
+                "createdAt": "2026-01-01T00:00:00+00:00",
             },
             model="test-model",
             finish_reason="stop",
@@ -289,6 +309,9 @@ def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
             "completion_tokens": 4,
             "total_tokens": 7,
             "cached_tokens": 1,
+            "source": "provider_usage",
+            "accuracy": "accurate",
+            "createdAt": "2026-01-01T00:00:00+00:00",
         },
         "model": "test-model",
         "finishReason": "stop",
@@ -433,6 +456,8 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert context_preview.json()["formatVersion"] == "context-preview.v1"
     assert context_preview.json()["sessionId"] == demo_session_id
     assert context_preview.json()["totals"]["tokenCount"] == 3
+    assert context_preview.json()["usageEstimate"]["usedTokens"] == 3
+    assert context_preview.json()["usageEstimate"]["contextLimit"] == 100
     assert context_preview.json()["layers"][0]["content"] == "## Fixed"
     assert context_preview.json()["messages"][0]["content"] == "## Fixed"
 
@@ -443,6 +468,8 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         },
     )
     assert turn.status_code == 200
+    assert turn.json()["usage"]["prompt_tokens"] == 9
+    assert turn.json()["usage"]["source"] == "provider_usage"
     assert turn.json()["status"] == "completed"
     assert "hello" in turn.json()["reply"]
 

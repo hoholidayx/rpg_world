@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_service.config import reload_llm_settings, resolve_biz_config
+from llm_service.config import reload_llm_settings, resolve_biz_config, resolve_context_window
 from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
     MEMORY_RERANK_BIZ_KEY,
@@ -49,6 +49,7 @@ def test_resolve_biz_config_deep_merges_shared_chain(tmp_path: Path, monkeypatch
       openai:
         model: base-model
         api_key: base-key
+        context_window: 64000
         max_tokens: 777
         temperature: 0.1
     agent.main:
@@ -67,7 +68,42 @@ def test_resolve_biz_config_deep_merges_shared_chain(tmp_path: Path, monkeypatch
     assert cfg.openai_model == "base-model"
     assert cfg.openai_api_key == "child-key"
     assert cfg.openai_max_tokens == 777
+    assert cfg.openai_context_window == 64000
+    assert resolve_context_window(AGENT_MAIN_BIZ_KEY) == 64000
     assert cfg.openai_temperature == 0.5
+
+
+def test_resolve_context_window_uses_llama_n_ctx(tmp_path: Path, monkeypatch) -> None:
+    _write_llm_config(
+        tmp_path / "llm.yaml",
+        """
+    agent.main:
+      kind: chat
+      provider: llama
+      llama:
+        model_path: data/models/chat.gguf
+        n_ctx: 32768
+""",
+    )
+    _use_llm(tmp_path / "llm.yaml", monkeypatch)
+
+    assert resolve_context_window(AGENT_MAIN_BIZ_KEY) == 32768
+
+
+def test_resolve_context_window_returns_none_for_openai_without_context_window(tmp_path: Path, monkeypatch) -> None:
+    _write_llm_config(
+        tmp_path / "llm.yaml",
+        """
+    agent.main:
+      kind: chat
+      provider: openai
+      openai:
+        model: test-model
+""",
+    )
+    _use_llm(tmp_path / "llm.yaml", monkeypatch)
+
+    assert resolve_context_window(AGENT_MAIN_BIZ_KEY) is None
 
 
 def test_resolve_biz_config_raises_when_shared_source_missing(tmp_path: Path, monkeypatch) -> None:

@@ -34,6 +34,8 @@ base:
         api_key_env: OPENAI_API_KEY_LOCAL
         # OpenAI-compatible base_url；官方 OpenAI 可留空。
         base_url: https://api.deepseek.com
+        # 模型上下文窗口；用于 WebUI context 用量估算，不参与 provider 请求参数。
+        context_window: 1000000
         # 最大输出 token；null 表示使用 provider 默认值。
         max_tokens: null
         # 采样温度；null 表示使用 provider 默认值。

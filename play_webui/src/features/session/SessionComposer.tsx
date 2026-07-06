@@ -2,6 +2,8 @@ import { KeyboardEvent } from 'react'
 import { Plane, Square } from 'lucide-react'
 import { CommandPaletteDialog } from '@/components/input/CommandPaletteDialog'
 import { cn } from '@/lib/utils/cn'
+import type { ContextUsageSnapshot } from '@/types/contextUsage'
+import { SessionContextUsageIndicator } from './SessionContextUsageIndicator'
 import type { NarrativeStyle, NarrativeStyleId, SessionInputMode } from './sessionRoomTypes'
 
 const inputModes: Array<{ id: SessionInputMode; label: string }> = [
@@ -18,6 +20,8 @@ export function SessionComposer({
   narrativeStyles,
   sending,
   disabled = false,
+  contextUsage,
+  contextUsageLoading = false,
   onTextChange,
   onModeChange,
   onNarrativeStyleChange,
@@ -31,6 +35,8 @@ export function SessionComposer({
   narrativeStyles: NarrativeStyle[]
   sending: boolean
   disabled?: boolean
+  contextUsage?: ContextUsageSnapshot | null
+  contextUsageLoading?: boolean
   onTextChange: (value: string) => void
   onModeChange: (mode: SessionInputMode) => void
   onNarrativeStyleChange: (styleId: NarrativeStyleId) => void
@@ -48,7 +54,7 @@ export function SessionComposer({
 
   return (
     <section className="border-t border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6">
-      <div className="mx-auto max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
+      <div className="mx-auto max-w-6xl overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2 dark:border-slate-800">
           <div className="flex rounded-lg bg-slate-100 p-1 dark:bg-slate-800" role="tablist" aria-label="输入模式">
             {inputModes.map((item) => (
@@ -96,7 +102,7 @@ export function SessionComposer({
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-2 dark:bg-slate-950/60">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-b-lg bg-slate-50 px-4 py-2 dark:bg-slate-950/60">
           <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="叙事风格">
             <span className="text-xs font-black text-slate-400 dark:text-slate-300">叙事风格</span>
             {narrativeStyles.map((style) => (
@@ -121,7 +127,10 @@ export function SessionComposer({
               </label>
             ))}
           </div>
-          <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">Enter 发送 / Shift+Enter 换行</p>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+            <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">Enter 发送 / Shift+Enter 换行</p>
+            <SessionContextUsageIndicator usage={contextUsage} loading={contextUsageLoading} />
+          </div>
         </div>
       </div>
     </section>

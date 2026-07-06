@@ -105,6 +105,7 @@ class ContextPreviewPayload(BaseModel):
     totals: ContextPreviewTotals
     layers: list[ContextPreviewLayer] = Field(default_factory=list)
     messages: list[dict[str, object]] = Field(default_factory=list)
+    usage_estimate: dict[str, object] | None = Field(default=None, alias="usageEstimate")
 
 
 class PlayChatRequest(BaseModel):
@@ -456,6 +457,7 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
         "sessionId": agent_session_id,
         "mode": payload.mode,
         "reply": result.get("reply", ""),
+        "usage": result.get("usage"),
         "agent": result,
     }
 

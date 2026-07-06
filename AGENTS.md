@@ -38,6 +38,7 @@
 - `memory.raw_md_mode` 语义保持：`disabled` 关闭，`always` 主召回，`fallback_only` 仅在主召回不足或失败时补候选。
 - memory rerank 使用统一的 `PointwiseMemoryReranker`，不要恢复旧的 provider-specific reranker/factory。
 - 上下文主流程保持结构化，最终发送给 LLM 前由 `ContextRenderer` 渲染；调试 markdown/token 概览放在 `ContextInspector`，不要回流到 `RPGContext` 数据模型。
+- SessionRoom context 用量只通过两路数据展示：`context-preview` 提供估算摘要，正常 `/turn` 或 `/stream` 的完成事件携带 provider usage 作为准确值；不要新增独立 usage 获取接口，不要持久化 usage。后端只传 token/context window/cache 等元数据，比例、阈值和 K/M 展示由 Play WebUI 计算。
 - `当前场景` 是高优先级 scene 状态，应作为 user prefix 进入最终用户消息；不要把它当普通状态表放入 `STATUS_TABLES`。在 `rpg_data` 状态表架构中，scene 是 `status_kind="scene"` 的状态表，仍必须挂载到 story 才能被 session 感知。
 - RP Modules 是 RP 业务模块占位，不是通用 skill 体系；骰子、战斗、物品等能力应围绕 RP 工具流程和受控状态读写设计。
 - `text_output_format` 是默认启用的 fixed layer 输出格式约束，不进入 `RPModuleRegistry`，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文。带标签全文是 assistant `content` 真源，必须原样进入 SSE、历史和数据库；不要把旁白/角色分段写入 message metadata，也不要恢复 `metadata.messageDisplay`。

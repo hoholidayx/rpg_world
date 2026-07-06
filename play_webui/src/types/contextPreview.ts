@@ -33,6 +33,7 @@ export type ContextPreviewPayload = {
   sessionId: string
   hotHistoryRounds?: number | null
   totals: ContextPreviewTotals
+  usageEstimate?: Record<string, unknown> | null
   layers: ContextPreviewLayer[]
   messages: ContextPreviewMessage[]
   [key: string]: unknown

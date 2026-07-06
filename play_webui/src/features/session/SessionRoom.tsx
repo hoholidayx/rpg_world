@@ -7,6 +7,7 @@ import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { listStoryCharacters } from '@/lib/api/characters'
+import { getContextPreview } from '@/lib/api/contextPreview'
 import { getCurrentScene } from '@/lib/api/scene'
 import {
   bindSessionPlayerCharacter,
@@ -19,6 +20,7 @@ import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { consumeChatStream } from '@/lib/stream/sse'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
+import { fromContextPreviewEstimate, fromTurnUsage, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
 import { STATUS_KIND } from '@/types/statusTables'
 import { SessionComposer } from './SessionComposer'
@@ -405,6 +407,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [bindingRole, setBindingRole] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
   const [sending, setSending] = useState(false)
+  const [accurateUsageOverride, setAccurateUsageOverride] = useState<ContextUsageSnapshot | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -441,6 +444,18 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const playerCharacterInvalid = session?.playerCharacterStatus === PLAYER_CHARACTER_STATUS.INVALID
   const roleSelectionBlocked = !session || playerCharacterInvalid || bindingRole
 
+  const contextPreviewQuery = useQuery({
+    queryKey: ['play-session-context-preview', sessionId],
+    enabled: Boolean(session && !playerCharacterInvalid),
+    queryFn: () => getContextPreview(sessionId),
+  })
+
+  const contextPreviewUsage = useMemo(
+    () => fromContextPreviewEstimate(contextPreviewQuery.data),
+    [contextPreviewQuery.data],
+  )
+  const contextUsage = roleSelectionBlocked ? null : accurateUsageOverride ?? contextPreviewUsage
+
   const baseMessages = useMemo(
     () => mapHistoryToMessages({ turns: historyQuery.data, playerCharacter }),
     [historyQuery.data, playerCharacter],
@@ -468,6 +483,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     toastTimerRef.current = setTimeout(() => setToastMessage(''), 2200)
   }, [])
 
+  const handleComposerTextChange = useCallback((value: string) => {
+    setComposerText(value)
+    setAccurateUsageOverride(null)
+  }, [])
+
   useEffect(() => {
     setLocalMessages([])
     setOptimisticTruncateFromTurn(null)
@@ -480,6 +500,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setRoleDialogRequired(false)
     setSelectedRoleCharacterId(null)
     setRoleBindError(null)
+    setAccurateUsageOverride(null)
   }, [sessionId])
 
   useEffect(() => {
@@ -554,18 +575,26 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     })
   }
 
-  const refreshSessionData = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+  const refreshSessionData = useCallback(async ({
+    silent = false,
+    clearAccurateUsage = true,
+  }: {
+    silent?: boolean
+    clearAccurateUsage?: boolean
+  } = {}) => {
     try {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['play-session', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-history', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-scene', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-status-tables', sessionId] }),
+        queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] }),
       ])
       setLocalMessages([])
       setOptimisticTruncateFromTurn(null)
       setEditingMessageId(null)
       setEditDraft('')
+      if (clearAccurateUsage) setAccurateUsageOverride(null)
       return true
     } catch {
       if (!silent) showToast('刷新失败，请手动刷新页面')
@@ -722,6 +751,12 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     }
 
     if (event.type === PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED) {
+      const usage = fromTurnUsage(event.payload.usage, contextPreviewUsage, {
+        model: event.payload.model,
+        finishReason: event.payload.finishReason,
+        durationMs: event.payload.durationMs,
+      })
+      if (usage) setAccurateUsageOverride(usage)
       setLocalMessages((current) =>
         current.map((message) =>
           message.id === assistantMessageId
@@ -759,7 +794,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         },
       ])
     }
-  }, [])
+  }, [contextPreviewUsage])
 
   const performRegeneration = useCallback(async ({
     message,
@@ -784,6 +819,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     let truncated = false
     let streamFailure: string | null = null
     abortRef.current = controller
+    setAccurateUsageOverride(null)
     setSending(true)
     showToast(pendingToast)
 
@@ -805,7 +841,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         },
       )
       if (streamFailure) throw new Error(streamFailure)
-      const refreshed = await refreshSessionData({ silent: true })
+      const refreshed = await refreshSessionData({ silent: true, clearAccurateUsage: false })
       showToast(refreshed ? successToast : `${successToast}，但刷新失败，请手动刷新页面`)
     } catch (error) {
       if (!truncated) {
@@ -993,11 +1029,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     const assistantMessage = streamPlaceholder(turnId)
     const controller = new AbortController()
     abortRef.current = controller
+    setAccurateUsageOverride(null)
     setComposerText('')
     setSending(true)
     setLocalMessages((current) => [...current, userMessage, assistantMessage])
 
     let streamFailure: string | null = null
+    let completedTurn = false
     try {
       // 叙事风格目前只保存在本地 message metadata；待后端支持独立 prompt 字段后再随 payload 发送。
       await consumeChatStream(
@@ -1015,6 +1053,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         },
       )
       if (streamFailure) throw new Error(streamFailure)
+      completedTurn = true
     } catch (error) {
       if (controller.signal.aborted) {
         setLocalMessages((current) =>
@@ -1057,7 +1096,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     } finally {
       setSending(false)
       abortRef.current = null
-      const refreshed = await refreshSessionData({ silent: true })
+      const refreshed = await refreshSessionData({ silent: true, clearAccurateUsage: !completedTurn })
       if (!refreshed) showToast('发送完成，但刷新失败，请手动刷新页面')
     }
   }, [appendStreamEvent, composerText, currentNarrativeStyle, inputMode, lastTurnId, playerCharacter, playerCharacterInvalid, refreshSessionData, session, sessionId, showToast])
@@ -1190,7 +1229,9 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           narrativeStyles={narrativeStyles}
           sending={sending}
           disabled={roleSelectionBlocked}
-          onTextChange={setComposerText}
+          contextUsage={contextUsage}
+          contextUsageLoading={contextPreviewQuery.isLoading || contextPreviewQuery.isFetching}
+          onTextChange={handleComposerTextChange}
           onModeChange={setInputMode}
           onNarrativeStyleChange={setNarrativeStyleId}
           onSend={handleSend}

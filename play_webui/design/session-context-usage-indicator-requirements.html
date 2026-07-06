@@ -1,0 +1,1285 @@
+<!--
+  Changelog:
+  - 新增 SessionRoom context 用量状态位需求文档。
+  - 在输入框底部增加可点击圆圈进度条，用于显示当前 context token 占用。
+  - 明确准确 token usage、context-preview 估算、兜底估算、异常未知态的显示策略。
+  - 明确 context 上限来自 llm_service 配置封装，不允许前端硬编码。
+  - 本页只做静态需求与交互预览，不改动真实 Play WebUI / Play API / Agent service 运行逻辑。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SessionRoom Context 用量状态位需求</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --soft: #f1f5f9;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --line: #dbe3ef;
+      --line-strong: #cbd5e1;
+      --violet: #4f46e5;
+      --violet-soft: #eef2ff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --sky: #0369a1;
+      --sky-soft: #e0f2fe;
+      --amber: #b45309;
+      --amber-soft: #fef3c7;
+      --rose: #be123c;
+      --rose-soft: #ffe4e6;
+      --slate-soft: #e2e8f0;
+      --shadow: 0 16px 44px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    textarea:focus-visible {
+      outline: 3px solid rgba(79, 70, 229, 0.22);
+      outline-offset: 2px;
+    }
+
+    .page {
+      width: min(1360px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+
+    .page-bar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 0;
+      font-size: 34px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 14px;
+      font-size: 20px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      font-size: 15px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 860px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .meta-pills,
+    .state-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      padding: 0 11px;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .pill.strong {
+      border-color: #c7d2fe;
+      background: var(--violet-soft);
+      color: #3730a3;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .panel.pad {
+      padding: 18px;
+    }
+
+    .panel.soft {
+      background: var(--surface-soft);
+      box-shadow: none;
+    }
+
+    .section {
+      margin-top: 18px;
+    }
+
+    .copy {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .copy strong {
+      color: var(--ink);
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .list li {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .check {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: var(--teal-soft);
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .token-flow {
+      display: grid;
+      gap: 10px;
+    }
+
+    .flow-step {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 12px;
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .flow-step span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .state-tabs {
+      margin: 18px 0 12px;
+    }
+
+    .state-tab {
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: white;
+      color: var(--muted);
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .state-tab.active {
+      border-color: #c7d2fe;
+      background: var(--violet-soft);
+      color: #3730a3;
+    }
+
+    .mock-window {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: var(--shadow);
+    }
+
+    .mock-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+      padding: 12px 16px;
+    }
+
+    .mock-title {
+      display: grid;
+      gap: 2px;
+    }
+
+    .mock-title strong {
+      font-size: 14px;
+    }
+
+    .mock-title span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .mock-body {
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr) 230px;
+      min-height: 430px;
+      background: var(--surface-soft);
+    }
+
+    .rail {
+      border-right: 1px solid var(--line);
+      background: white;
+      padding: 14px;
+    }
+
+    .rail.right {
+      border-right: 0;
+      border-left: 1px solid var(--line);
+    }
+
+    .rail h3 {
+      margin-bottom: 10px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .rail-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      padding: 10px;
+    }
+
+    .rail-card + .rail-card {
+      margin-top: 10px;
+    }
+
+    .rail-card strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+
+    .rail-card span,
+    .rail-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .session-main {
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      min-width: 0;
+    }
+
+    .timeline {
+      overflow: hidden;
+      padding: 18px;
+    }
+
+    .message {
+      max-width: 720px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      padding: 14px;
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+    }
+
+    .message + .message {
+      margin-top: 12px;
+    }
+
+    .message.user {
+      margin-left: auto;
+      border-color: #ddd6fe;
+      background: #fafaff;
+    }
+
+    .message-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .message p {
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .composer {
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
+      padding: 12px 18px 14px;
+    }
+
+    .composer-shell {
+      width: min(920px, 100%);
+      margin: 0 auto;
+      overflow: visible;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: 0 12px 34px rgba(15, 23, 42, 0.08);
+    }
+
+    .composer-top,
+    .composer-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      background: var(--surface-soft);
+    }
+
+    .composer-top {
+      border-bottom: 1px solid var(--line);
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+
+    .composer-bottom {
+      position: relative;
+      border-top: 1px solid var(--line);
+      border-radius: 0 0 var(--radius) var(--radius);
+    }
+
+    .segmented {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+    }
+
+    .segment {
+      min-height: 30px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .segment.active {
+      background: var(--ink);
+      color: white;
+    }
+
+    .mini-button {
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      color: var(--muted);
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .composer-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 116px;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 86px;
+      resize: vertical;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      padding: 6px 0;
+      outline: none;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    textarea::placeholder {
+      color: var(--faint);
+    }
+
+    .send-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 86px;
+      border: 0;
+      border-radius: var(--radius);
+      background: var(--violet);
+      color: white;
+      padding: 0 16px;
+      font-size: 15px;
+      font-weight: 950;
+      box-shadow: 0 12px 24px rgba(79, 70, 229, 0.18);
+    }
+
+    .style-radio {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .style-label,
+    .hint {
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .radio-pill {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: white;
+      color: var(--muted);
+      padding: 0 11px;
+      font-size: 12px;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .radio-pill.active {
+      border-color: #c7d2fe;
+      background: var(--violet-soft);
+      color: #3730a3;
+    }
+
+    .composer-meta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-left: auto;
+    }
+
+    .context-anchor {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .context-button {
+      --progress: 58;
+      --ring-color: var(--teal);
+      --ring-bg: #e2e8f0;
+      position: relative;
+      display: inline-grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      padding: 0;
+    }
+
+    .context-button::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background:
+        conic-gradient(var(--ring-color) calc(var(--progress) * 1%), var(--ring-bg) 0);
+    }
+
+    .context-button::after {
+      content: "";
+      position: absolute;
+      inset: 5px;
+      border-radius: 999px;
+      background: white;
+      box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+    }
+
+    .context-value {
+      position: relative;
+      z-index: 1;
+      color: var(--ink);
+      font-size: 11px;
+      font-weight: 950;
+      line-height: 1;
+    }
+
+    .context-button.estimated {
+      --ring-color: var(--sky);
+    }
+
+    .context-button.warning {
+      --ring-color: var(--amber);
+    }
+
+    .context-button.danger {
+      --ring-color: var(--rose);
+    }
+
+    .context-button.unknown {
+      --ring-color: #64748b;
+    }
+
+    .context-button.unknown::before {
+      background:
+        repeating-conic-gradient(#64748b 0deg 12deg, #e2e8f0 12deg 24deg);
+    }
+
+    .context-button.is-open {
+      box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.13);
+    }
+
+    .source-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      background: var(--teal-soft);
+      color: var(--teal);
+      padding: 0 8px;
+      font-size: 11px;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .source-badge.estimated {
+      background: var(--sky-soft);
+      color: var(--sky);
+    }
+
+    .source-badge.warning {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .source-badge.danger {
+      background: var(--rose-soft);
+      color: var(--rose);
+    }
+
+    .source-badge.unknown {
+      background: var(--slate-soft);
+      color: #475569;
+    }
+
+    .context-popover {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 12px);
+      z-index: 10;
+      display: none;
+      width: min(330px, calc(100vw - 56px));
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: 0 22px 58px rgba(15, 23, 42, 0.18);
+      padding: 14px;
+    }
+
+    .context-popover.open {
+      display: block;
+    }
+
+    .context-popover::after {
+      content: "";
+      position: absolute;
+      right: 14px;
+      bottom: -7px;
+      width: 12px;
+      height: 12px;
+      border-right: 1px solid var(--line-strong);
+      border-bottom: 1px solid var(--line-strong);
+      background: white;
+      transform: rotate(45deg);
+    }
+
+    .popover-head {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .popover-head strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .popover-head span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .usage-meter {
+      overflow: hidden;
+      height: 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      margin-bottom: 12px;
+    }
+
+    .usage-meter span {
+      display: block;
+      width: calc(var(--progress) * 1%);
+      max-width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--ring-color);
+    }
+
+    .usage-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .usage-cell {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      padding: 9px;
+    }
+
+    .usage-cell span {
+      display: block;
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .usage-cell strong {
+      display: block;
+      margin-top: 3px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .popover-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .matrix {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: white;
+      font-size: 13px;
+    }
+
+    .matrix th,
+    .matrix td {
+      border-bottom: 1px solid var(--line);
+      padding: 11px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .matrix th {
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .matrix tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .code {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #334155;
+    }
+
+    .callout {
+      border: 1px solid #bae6fd;
+      border-radius: var(--radius);
+      background: var(--sky-soft);
+      color: #075985;
+      padding: 13px 14px;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    @media (max-width: 1100px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .mock-body {
+        grid-template-columns: 170px minmax(0, 1fr);
+      }
+
+      .rail.right {
+        display: none;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        width: min(100% - 24px, 1360px);
+        padding-top: 18px;
+      }
+
+      .page-bar {
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      .mock-body {
+        grid-template-columns: 1fr;
+      }
+
+      .rail {
+        display: none;
+      }
+
+      .composer-main {
+        grid-template-columns: 1fr;
+      }
+
+      .send-button {
+        min-height: 48px;
+      }
+
+      .composer-bottom {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .composer-meta {
+        width: 100%;
+        justify-content: space-between;
+        margin-left: 0;
+      }
+
+      .context-popover {
+        right: auto;
+        left: 0;
+      }
+
+      .context-popover::after {
+        right: auto;
+        left: 16px;
+      }
+
+      .usage-details {
+        grid-template-columns: 1fr;
+      }
+
+      .matrix {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-bar">
+      <div>
+        <p class="eyebrow"><span class="dot"></span>Play WebUI / SessionRoom requirement draft</p>
+        <h1>Context 用量状态位</h1>
+        <p class="subtitle">在 SessionRoom 输入框底部增加一个可点击的圆圈进度条，帮助玩家在发送前理解当前 context 占用。状态位优先展示 LLM provider 返回的准确 token usage；无法获取准确数据时使用后端 context-preview 或兜底估算，并清楚标注数据来源。</p>
+      </div>
+      <div class="meta-pills" aria-label="文档元信息">
+        <span class="pill strong">静态 HTML</span>
+        <span class="pill">不改运行逻辑</span>
+        <span class="pill">SessionRoom composer</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <article class="panel pad">
+        <h2>需求摘要</h2>
+        <ul class="list">
+          <li><span class="check">1</span><span>状态位固定出现在 composer bottom 区域，靠近快捷键提示；底栏空间不足时换行显示，不挤压叙事风格控件。</span></li>
+          <li><span class="check">2</span><span>圆圈主视觉表达“当前 prompt/context token 占模型 context 上限的百分比”，中心显示百分比；未知或异常时显示问号。</span></li>
+          <li><span class="check">3</span><span>点击圆圈后在圆圈上方弹出详情，说明使用量、上限、数据来源、更新时间和异常/兜底原因。</span></li>
+          <li><span class="check">4</span><span>context 上限必须从 llm_service 的 typed config 暴露给 Play API / WebUI，不允许前端写死模型窗口。</span></li>
+          <li><span class="check">5</span><span>如果 provider 返回准确 usage，按准确值显示；否则用 context-preview 估算；再失败时使用兜底 token 估算并标明不精确。</span></li>
+        </ul>
+      </article>
+
+      <article class="panel pad soft">
+        <h2>数据优先级</h2>
+        <div class="token-flow">
+          <div class="flow-step">
+            <strong>1. Provider accurate usage</strong>
+            <span>LLM provider 返回 <span class="code">prompt_tokens</span> / <span class="code">total_tokens</span> 时优先使用。流式请求完成后可刷新为准确状态。</span>
+          </div>
+          <div class="flow-step">
+            <strong>2. Context-preview estimate</strong>
+            <span>未拿到 provider usage 时，使用现有 <span class="code">context-preview.v1 totals.tokenCount</span> 作为后端估算来源。</span>
+          </div>
+          <div class="flow-step">
+            <strong>3. Fallback estimate</strong>
+            <span>context-preview 失败、token counter 异常或服务不可用时，使用兜底字符估算，并在 UI 上标记为“估算/异常”。</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="section">
+      <div class="panel pad">
+        <h2>交互原型</h2>
+        <p class="copy">切换下面的状态按钮可以查看圆圈进度、badge 与弹窗文案。点击 composer 底栏右侧圆圈会在上方打开详情浮层。</p>
+        <div class="state-tabs" role="tablist" aria-label="Context 状态示例">
+          <button class="state-tab active" type="button" data-state="accurate">准确 58%</button>
+          <button class="state-tab" type="button" data-state="estimated">估算 65%</button>
+          <button class="state-tab" type="button" data-state="warning">告警 82%</button>
+          <button class="state-tab" type="button" data-state="danger">危险 94%</button>
+          <button class="state-tab" type="button" data-state="unknown">异常兜底</button>
+        </div>
+
+        <div class="mock-window" aria-label="SessionRoom 输入框 context 状态位静态原型">
+          <div class="mock-topbar">
+            <div class="mock-title">
+              <strong>雾港钟楼 / session_A7K2</strong>
+              <span>SessionRoom 当前游玩界面局部预览</span>
+            </div>
+            <span class="pill">仅展示新增交互</span>
+          </div>
+
+          <div class="mock-body">
+            <aside class="rail">
+              <h3>当前场景</h3>
+              <div class="rail-card">
+                <strong>码头仓库外</strong>
+                <p>夜雾贴着石板路，钟楼仍在远处发出低沉回响。</p>
+              </div>
+              <div class="rail-card">
+                <strong>在场角色</strong>
+                <span>艾琳、伊凡、守夜人</span>
+              </div>
+            </aside>
+
+            <section class="session-main">
+              <div class="timeline">
+                <article class="message">
+                  <div class="message-meta"><span>narrator</span><span>刚刚</span></div>
+                  <p>守夜人把铜钥匙放在掌心，钥匙边缘刻着一行几乎被磨平的小字。</p>
+                </article>
+                <article class="message user">
+                  <div class="message-meta"><span>ic</span><span>艾琳</span></div>
+                  <p>我接过钥匙，借着油灯仔细看那行字。</p>
+                </article>
+              </div>
+
+              <section class="composer">
+                <div class="composer-shell">
+                  <div class="composer-top">
+                    <div class="segmented" role="tablist" aria-label="输入模式">
+                      <button class="segment active" type="button">IC</button>
+                      <button class="segment" type="button">OOC</button>
+                      <button class="segment" type="button">GM</button>
+                    </div>
+                    <button class="mini-button" type="button">命令面板</button>
+                  </div>
+
+                  <div class="composer-main">
+                    <textarea placeholder="输入你的行动、台词或 GM 指令...">我把钥匙翻到背面，确认是否还有被刻意划掉的符号。</textarea>
+                    <button class="send-button" type="button">发送</button>
+                  </div>
+
+                  <div class="composer-bottom">
+                    <div class="style-radio" role="radiogroup" aria-label="叙事风格">
+                      <span class="style-label">叙事风格</span>
+                      <span class="radio-pill active">默认</span>
+                      <span class="radio-pill">细腻描写</span>
+                      <span class="radio-pill">快速推进</span>
+                    </div>
+
+                    <div class="composer-meta">
+                      <span class="hint">Enter 发送 / Shift+Enter 换行</span>
+                      <div class="context-anchor">
+                        <button
+                          class="context-button"
+                          id="contextButton"
+                          type="button"
+                          aria-label="查看 context 用量详情"
+                          aria-expanded="false"
+                          aria-controls="contextPopover"
+                          style="--progress: 58"
+                        >
+                          <span class="context-value" id="contextValue">58%</span>
+                        </button>
+                        <div class="context-popover" id="contextPopover" role="dialog" aria-label="Context 用量详情">
+                          <div class="popover-head">
+                            <div>
+                              <strong id="popoverTitle">Context 用量正常</strong>
+                              <span id="popoverSubtitle">来自 provider usage，已按准确 token 显示。</span>
+                            </div>
+                            <span class="source-badge" id="sourceBadge">准确</span>
+                          </div>
+                          <div class="usage-meter" id="usageMeter" style="--progress: 58; --ring-color: var(--teal)"><span></span></div>
+                          <div class="usage-details">
+                            <div class="usage-cell">
+                              <span>当前使用</span>
+                              <strong id="usedTokens">74,240</strong>
+                            </div>
+                            <div class="usage-cell">
+                              <span>Context 上限</span>
+                              <strong id="limitTokens">1,000,000</strong>
+                            </div>
+                            <div class="usage-cell">
+                              <span>使用比例</span>
+                              <strong id="ratioText">58%</strong>
+                            </div>
+                            <div class="usage-cell">
+                              <span>更新时间</span>
+                              <strong id="updatedAt">刚刚</strong>
+                            </div>
+                          </div>
+                          <p class="popover-note" id="popoverNote">本状态表示最近一次 LLM 调用返回了准确 token usage；下一次发送前可先展示 context-preview 估算，完成后再刷新为准确值。</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <aside class="rail right">
+              <h3>状态表</h3>
+              <div class="rail-card">
+                <strong>线索</strong>
+                <span>铜钥匙、旧地图、银币</span>
+              </div>
+              <div class="rail-card">
+                <strong>风险</strong>
+                <span>守夜人可能隐瞒 North Gate 的含义</span>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section grid">
+      <article class="panel pad">
+        <h2>状态矩阵</h2>
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th>状态</th>
+              <th>触发条件</th>
+              <th>圆圈表现</th>
+              <th>详情浮层</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>准确</strong></td>
+              <td>provider 返回准确 token usage。</td>
+              <td>绿色或青色进度，中心显示百分比。</td>
+              <td>标明 <span class="code">provider usage</span>，展示 prompt/total token。</td>
+            </tr>
+            <tr>
+              <td><strong>估算</strong></td>
+              <td>没有 provider usage，但 context-preview 可用。</td>
+              <td>蓝色进度，badge 标记“估算”。</td>
+              <td>标明 <span class="code">context-preview estimate</span>，提示非 provider 账单口径。</td>
+            </tr>
+            <tr>
+              <td><strong>告警</strong></td>
+              <td>用量进入 70%-90% 区间。</td>
+              <td>琥珀色进度。</td>
+              <td>提示继续长对话可能触发压缩、裁剪或生成失败。</td>
+            </tr>
+            <tr>
+              <td><strong>危险</strong></td>
+              <td>用量达到或超过 90%。</td>
+              <td>红色进度。</td>
+              <td>建议缩短输入、回滚分支或等待摘要压缩策略介入。</td>
+            </tr>
+            <tr>
+              <td><strong>异常兜底</strong></td>
+              <td>context-preview 失败、配置缺失、token counter 异常。</td>
+              <td>灰色虚线圆圈，中心显示问号。</td>
+              <td>展示兜底估算值或未知原因，明确“无法获取准确数据”。</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article class="panel pad">
+        <h2>实现约束</h2>
+        <div class="callout">
+          主实现不应让 Play WebUI 直接解析 YAML，也不能硬编码模型窗口。context 上限应由 llm_service 配置封装读取后，经 Agent service / Play API 暴露给 SessionRoom。
+        </div>
+        <p class="copy" style="margin-top: 14px;">建议后续后端契约包含这些字段：<span class="code">usedTokens</span>、<span class="code">contextLimit</span>、<span class="code">ratio</span>、<span class="code">source</span>、<span class="code">accuracy</span>、<span class="code">updatedAt</span>、<span class="code">errorReason</span>。接口可以新增在会话内链路下，也可以扩展现有 <span class="code">context-preview.v1</span> payload。</p>
+        <p class="copy">显示口径以“发送给 LLM 的 prompt/context token 占模型 context 上限”为主。completion token、cached token 和 provider 原始 usage 可放在详情里，不进入圆圈主百分比。</p>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const states = {
+      accurate: {
+        progress: 58,
+        value: '58%',
+        ringClass: '',
+        ringColor: 'var(--teal)',
+        title: 'Context 用量正常',
+        subtitle: '来自 provider usage，已按准确 token 显示。',
+        badge: '准确',
+        badgeClass: '',
+        used: '580,000',
+        limit: '1,000,000',
+        ratio: '58%',
+        updated: '刚刚',
+        note: '本状态表示最近一次 LLM 调用返回了准确 token usage；下一次发送前可先展示 context-preview 估算，完成后再刷新为准确值。'
+      },
+      estimated: {
+        progress: 65,
+        value: '65%',
+        ringClass: 'estimated',
+        ringColor: 'var(--sky)',
+        title: 'Context 用量为估算值',
+        subtitle: '未获得 provider usage，当前使用 context-preview tokenCount。',
+        badge: '估算',
+        badgeClass: 'estimated',
+        used: '650,000',
+        limit: '1,000,000',
+        ratio: '65%',
+        updated: '12 秒前',
+        note: '估算值来自渲染后 context-preview，不等同于 provider 最终计费口径，但足以提示玩家当前上下文压力。'
+      },
+      warning: {
+        progress: 82,
+        value: '82%',
+        ringClass: 'warning',
+        ringColor: 'var(--amber)',
+        title: 'Context 接近上限',
+        subtitle: '当前用量较高，继续长输入可能触发压缩或裁剪。',
+        badge: '告警',
+        badgeClass: 'warning',
+        used: '820,000',
+        limit: '1,000,000',
+        ratio: '82%',
+        updated: '刚刚',
+        note: '建议将下一条输入保持简短；如果剧情需要长篇总结，应优先使用已有摘要/回滚/调试入口处理历史。'
+      },
+      danger: {
+        progress: 94,
+        value: '94%',
+        ringClass: 'danger',
+        ringColor: 'var(--rose)',
+        title: 'Context 即将达到上限',
+        subtitle: '继续推进可能导致 provider 拒绝、上下文裁剪或生成质量下降。',
+        badge: '危险',
+        badgeClass: 'danger',
+        used: '940,000',
+        limit: '1,000,000',
+        ratio: '94%',
+        updated: '刚刚',
+        note: '此状态下 UI 不强制禁止发送，但应明确提示风险。后续若有自动压缩能力，可在这里展示压缩状态。'
+      },
+      unknown: {
+        progress: 41,
+        value: '?',
+        ringClass: 'unknown',
+        ringColor: '#64748b',
+        title: '无法获取准确 context 用量',
+        subtitle: 'context-preview 或 llm_service 上限配置不可用，已使用兜底估算。',
+        badge: '兜底',
+        badgeClass: 'unknown',
+        used: '约 52,000',
+        limit: '未知',
+        ratio: '无法计算',
+        updated: '读取失败',
+        note: '兜底估算只能表达大致规模。实现时应记录错误原因，并避免把未知态伪装成准确百分比。'
+      }
+    }
+
+    const contextButton = document.getElementById('contextButton')
+    const contextValue = document.getElementById('contextValue')
+    const popover = document.getElementById('contextPopover')
+    const popoverTitle = document.getElementById('popoverTitle')
+    const popoverSubtitle = document.getElementById('popoverSubtitle')
+    const sourceBadge = document.getElementById('sourceBadge')
+    const usageMeter = document.getElementById('usageMeter')
+    const usedTokens = document.getElementById('usedTokens')
+    const limitTokens = document.getElementById('limitTokens')
+    const ratioText = document.getElementById('ratioText')
+    const updatedAt = document.getElementById('updatedAt')
+    const popoverNote = document.getElementById('popoverNote')
+    const stateTabs = Array.from(document.querySelectorAll('.state-tab'))
+
+    function setState(name) {
+      const state = states[name] || states.accurate
+      contextButton.className = ['context-button', state.ringClass, contextButton.classList.contains('is-open') ? 'is-open' : ''].filter(Boolean).join(' ')
+      contextButton.style.setProperty('--progress', state.progress)
+      contextValue.textContent = state.value
+      usageMeter.style.setProperty('--progress', state.progress)
+      usageMeter.style.setProperty('--ring-color', state.ringColor)
+      popoverTitle.textContent = state.title
+      popoverSubtitle.textContent = state.subtitle
+      sourceBadge.className = ['source-badge', state.badgeClass].filter(Boolean).join(' ')
+      sourceBadge.textContent = state.badge
+      usedTokens.textContent = state.used
+      limitTokens.textContent = state.limit
+      ratioText.textContent = state.ratio
+      updatedAt.textContent = state.updated
+      popoverNote.textContent = state.note
+
+      stateTabs.forEach((button) => {
+        button.classList.toggle('active', button.dataset.state === name)
+      })
+    }
+
+    function setPopover(open) {
+      popover.classList.toggle('open', open)
+      contextButton.classList.toggle('is-open', open)
+      contextButton.setAttribute('aria-expanded', String(open))
+    }
+
+    stateTabs.forEach((button) => {
+      button.addEventListener('click', () => {
+        setState(button.dataset.state)
+        setPopover(true)
+      })
+    })
+
+    contextButton.addEventListener('click', (event) => {
+      event.stopPropagation()
+      setPopover(!popover.classList.contains('open'))
+    })
+
+    document.addEventListener('click', (event) => {
+      if (!popover.contains(event.target) && !contextButton.contains(event.target)) {
+        setPopover(false)
+      }
+    })
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') setPopover(false)
+    })
+  </script>
+</body>
+</html>

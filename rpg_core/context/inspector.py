@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from rpg_core.context.usage import ContextUsageSnapshot
 from rpg_core.context.rpg_context import LayerType, Message, RPGContext, Role
 from rpg_core.session.turns import count_roles
 from rpg_core.utils.tokenizer import TokenCounter
@@ -33,20 +34,23 @@ class ContextInspector:
         ctx: RPGContext,
         token_counter: TokenCounter,
         hot_history_rounds: int | None = None,
+        context_limit: int | None = None,
     ) -> None:
         self._ctx = ctx
         self._token_counter = token_counter
         self._hot_history_rounds = hot_history_rounds
+        self._context_limit = context_limit
+        self._estimation_error: str | None = None
 
     def layer_summary(self) -> list[LayerInfo]:
         return [
             LayerInfo(
-                type=str(layer["type"]),
-                role=str(layer["role"]),
-                status=str(layer["status"]),
-                char_count=int(layer["charCount"]),
-                token_count=int(layer["tokenCount"]),
-                description=str(layer["description"]),
+                type=str(layer.get("type", "")),
+                role=str(layer.get("role", "")),
+                status=str(layer.get("status", "")),
+                char_count=_int_value(layer.get("charCount")),
+                token_count=_int_value(layer.get("tokenCount")),
+                description=str(layer.get("description", "")),
             )
             for layer in self._layer_payloads()
         ]
@@ -54,19 +58,28 @@ class ContextInspector:
     def to_payload(self, session_id: str = "") -> dict[str, object]:
         layers = self._layer_payloads()
         messages = [message.to_dict() for message in self._ctx.to_message_objects()]
-        return {
+        token_count = sum(_int_value(layer.get("tokenCount")) for layer in layers)
+        payload: dict[str, object] = {
             "formatVersion": "context-preview.v1",
             "sessionId": session_id,
             "hotHistoryRounds": self._hot_history_rounds,
             "totals": {
                 "layerCount": len(layers),
-                "activeLayers": sum(1 for layer in layers if layer["status"] == "active"),
-                "tokenCount": sum(int(layer["tokenCount"]) for layer in layers),
+                "activeLayers": sum(1 for layer in layers if layer.get("status") == "active"),
+                "tokenCount": token_count,
                 "messageCount": len(messages),
             },
             "layers": layers,
             "messages": messages,
         }
+        payload["usageEstimate"] = ContextUsageSnapshot(
+            used_tokens=token_count,
+            context_limit=self._context_limit,
+            source="fallback_estimate" if self._estimation_error else "context_preview",
+            accuracy="unknown" if self._estimation_error else "estimated",
+            error_reason=self._estimation_error,
+        ).to_camel_payload()
+        return payload
 
     def _layer_payloads(self) -> list[dict[str, object]]:
         layers: list[dict[str, object]] = []
@@ -193,7 +206,7 @@ class ContextInspector:
                 "role": role,
                 "status": "active",
                 "charCount": len(content),
-                "tokenCount": self._token_counter.count(content),
+                "tokenCount": self._count_text(content),
                 "description": description,
                 "content": content,
             })
@@ -233,7 +246,7 @@ class ContextInspector:
             "role": "mixed",
             "status": "active",
             "charCount": sum(len(m.content) for m in self._ctx.hot_history.messages),
-            "tokenCount": self._token_counter.count_messages(self._ctx.hot_history.messages),
+            "tokenCount": self._count_messages(self._ctx.hot_history.messages),
             "description": (
                 f"{turn_count} 轮 / {len(self._ctx.hot_history.messages)} 条 "
                 f"(user={_role_count(role_counts, Role.USER)}, assistant={_role_count(role_counts, Role.ASSISTANT)}, "
@@ -242,9 +255,38 @@ class ContextInspector:
             "content": _render_hot_history_content(self._ctx.hot_history.messages),
         })
 
+    def _count_text(self, content: str) -> int:
+        try:
+            return self._token_counter.count(content)
+        except Exception as exc:
+            self._estimation_error = str(exc) or exc.__class__.__name__
+            return max(0, len(content) // 4)
+
+    def _count_messages(self, messages: list[Message]) -> int:
+        try:
+            return self._token_counter.count_messages(messages)
+        except Exception as exc:
+            self._estimation_error = str(exc) or exc.__class__.__name__
+            return sum(max(0, len(message.content) // 4) for message in messages)
+
 
 def _role_count(role_counts: dict[str, int], role: Role) -> int:
     return role_counts[role.value]
+
+
+def _int_value(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
 
 
 def _layer_display_name(type_: str) -> str:

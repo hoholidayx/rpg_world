@@ -87,7 +87,7 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
         user_message=UserMessageLayer(user_input="inspect"),
     )
 
-    payload = ContextInspector(ctx, fake_token_counter, hot_history_rounds=3).to_payload(session_id="s1")
+    payload = ContextInspector(ctx, fake_token_counter, hot_history_rounds=3, context_limit=10).to_payload(session_id="s1")
 
     assert payload["formatVersion"] == "context-preview.v1"
     assert payload["sessionId"] == "s1"
@@ -98,6 +98,12 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
         "tokenCount": 5,
         "messageCount": 4,
     }
+    assert payload["usageEstimate"]["usedTokens"] == 5
+    assert payload["usageEstimate"]["contextLimit"] == 10
+    assert payload["usageEstimate"]["source"] == "context_preview"
+    assert payload["usageEstimate"]["accuracy"] == "estimated"
+    assert "ratio" not in payload["usageEstimate"]
+    assert "status" not in payload["usageEstimate"]
 
     layers = payload["layers"]
     fixed = layers[0]

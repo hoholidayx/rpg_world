@@ -43,6 +43,7 @@ from agent_service.settings import settings as process_settings
 from commons.types import JsonObject, JsonValue
 from llm_service.client import configure_llama_client_from_runtime_config
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
+from rpg_core.context.usage import usage_payload_from_records
 from rpg_core.agent.command import CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.agent.manager import AgentManager
@@ -478,6 +479,9 @@ def _reply_to_dict(reply: AgentReply) -> AgentReplyPayload:
         result["status_sub_agent_records"] = cast(list[JsonObject], reply.status_sub_agent_records)
     if reply.stats:
         result["stats"] = _stats_to_dict(reply.stats)
+        usage = usage_payload_from_records(reply.stats.calls, duration_ms=reply.stats.total_duration_ms)
+        if usage is not None:
+            result["usage"] = cast(JsonObject, usage)
     return result
 
 

@@ -48,7 +48,9 @@ from rpg_core.context.fixed_layer.contributors import (
 )
 from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.rpg_context import FixedLayerData, Role, Message
+from rpg_core.context.usage import aggregate_usage_records
 from llm_service.base_provider import LLMProvider
+from llm_service.config import resolve_context_window
 from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
@@ -541,23 +543,7 @@ class RPGGameAgent:
                 self._session.append(Role.ASSISTANT, final_content, turn_id=turn_id)
 
             # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
-            # Compute aggregate usage across all LLM calls (main loop + sub-agents)
-            from rpg_core.agent.agent_types import LLMUsage
-
-            total_pt = turn_stats.total_prompt_tokens
-            total_ct = turn_stats.total_completion_tokens
-            total_cached = turn_stats.total_cached_tokens
-            total_missed = sum(
-                c.usage.prompt_cache_miss_tokens for c in turn_stats.calls if c.usage
-            )
-            aggregate_usage = LLMUsage(
-                prompt_tokens=total_pt,
-                completion_tokens=total_ct,
-                total_tokens=total_pt + total_ct,
-                prompt_tokens_details={"cached_tokens": total_cached} if total_cached else None,
-                prompt_cache_hit_tokens=total_cached,
-                prompt_cache_miss_tokens=total_missed,
-            )
+            aggregate_usage = aggregate_usage_records(turn_stats.calls)
 
             if final_event is not None:
                 final_event.duration_ms = turn_stats.total_duration_ms
@@ -806,6 +792,7 @@ class RPGGameAgent:
             ctx,
             self._token_counter,
             hot_history_rounds=self._builder.config.hot_history_rounds,
+            context_limit=resolve_context_window(AGENT_MAIN_BIZ_KEY),
         ).layer_summary()
 
     async def get_context_markdown(self, user_input: str = "") -> str:
@@ -821,6 +808,7 @@ class RPGGameAgent:
             ctx,
             self._token_counter,
             hot_history_rounds=self._builder.config.hot_history_rounds,
+            context_limit=resolve_context_window(AGENT_MAIN_BIZ_KEY),
         ).to_markdown()
 
     async def get_context_payload(self, user_input: str = "") -> dict[str, object]:
@@ -831,6 +819,7 @@ class RPGGameAgent:
             ctx,
             self._token_counter,
             hot_history_rounds=self._builder.config.hot_history_rounds,
+            context_limit=resolve_context_window(AGENT_MAIN_BIZ_KEY),
         ).to_payload(session_id=self._session_id)
 
     async def get_context_json(self, user_input: str = "") -> str:

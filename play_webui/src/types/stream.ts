@@ -44,7 +44,19 @@ export type PlayToolResultPayload = {
 
 export type PlayTurnCompletedPayload = {
   text: string
-  usage?: unknown
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    cached_tokens?: number
+    source?: string
+    accuracy?: string
+    createdAt?: string
+    model?: string
+    finishReason?: string
+    durationMs?: number
+    [key: string]: unknown
+  }
   model?: string
   finishReason?: string
   durationMs?: number

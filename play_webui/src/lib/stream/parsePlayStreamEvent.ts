@@ -54,6 +54,9 @@ function validatePayload(type: PlayStreamEventType, payload: Record<string, unkn
       if (payload.durationMs !== undefined && typeof payload.durationMs !== 'number') {
         throw parseError(`Play SSE ${type}.payload.durationMs 必须是 number`, raw)
       }
+      if (payload.usage !== undefined && !isRecord(payload.usage)) {
+        throw parseError(`Play SSE ${type}.payload.usage 必须是 object`, raw)
+      }
       return
     case PLAY_STREAM_EVENT_TYPE.ERROR:
       assertRequiredString(payload, 'message', type, raw)

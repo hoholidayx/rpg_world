@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
-from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
+from llm_service.types import LLMUsage
+from rpg_core.agent.agent_types import AgentStreamEvent, CallRecord, StreamEventKind, TurnStats
 from rpg_core.agent.command import CommandDef, CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.context.rpg_context import Message, Role
@@ -21,7 +22,14 @@ class FakeAgent:
         return None
 
     async def send(self, message: str) -> AgentReply:
-        return AgentReply(text=f"reply:{message}")
+        stats = TurnStats(started_at=0.0, finished_at=0.0123)
+        stats.add_call(CallRecord(
+            source="chat_loop",
+            model="fake-model",
+            usage=LLMUsage(prompt_tokens=11, completion_tokens=7, total_tokens=18, prompt_cache_hit_tokens=3),
+            duration_ms=12.3,
+        ))
+        return AgentReply(text=f"reply:{message}", stats=stats)
 
     async def reload_history(self) -> None:
         self.history = [Message(Role.USER, "reloaded", turn_id=1, seq_in_turn=1)]
@@ -41,7 +49,14 @@ class FakeAgent:
 
     async def send_stream(self, message: str):
         yield AgentStreamEvent(kind=StreamEventKind.TEXT, content=f"stream:{message}")
-        yield AgentStreamEvent(kind=StreamEventKind.DONE, content=f"stream:{message}")
+        yield AgentStreamEvent(
+            kind=StreamEventKind.DONE,
+            content=f"stream:{message}",
+            usage=LLMUsage(prompt_tokens=13, completion_tokens=5, total_tokens=18, prompt_cache_hit_tokens=2),
+            model="stream-model",
+            finish_reason="stop",
+            duration_ms=9.5,
+        )
 
     async def execute_command(self, command: str) -> CommandResult:
         parts = command.split()
@@ -61,6 +76,12 @@ class FakeAgent:
                 "activeLayers": 1,
                 "tokenCount": 3,
                 "messageCount": 1,
+            },
+            "usageEstimate": {
+                "usedTokens": 3,
+                "contextLimit": 100,
+                "source": "context_preview",
+                "accuracy": "estimated",
             },
             "layers": [
                 {
@@ -301,6 +322,8 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert context_preview.json()["sessionId"] == "s1"
         assert context_preview.json()["layers"][0]["content"] == "## Fixed"
         assert context_preview.json()["messages"][0]["content"] == "## Fixed"
+        assert context_preview.json()["usageEstimate"]["usedTokens"] == 3
+        assert context_preview.json()["usageEstimate"]["contextLimit"] == 100
 
         sessions = client.get(
             "/agent/v1/chat/sessions",
@@ -368,6 +391,11 @@ def test_agent_service_contracts(monkeypatch) -> None:
         )
         assert send.status_code == 200
         assert send.json()["reply"] == "reply:go"
+        assert send.json()["usage"]["prompt_tokens"] == 11
+        assert send.json()["usage"]["completion_tokens"] == 7
+        assert send.json()["usage"]["cached_tokens"] == 3
+        assert send.json()["usage"]["source"] == "provider_usage"
+        assert send.json()["usage"]["accuracy"] == "accurate"
 
         reload_history = client.post(
             "/agent/v1/chat/session/reload-history",
@@ -423,6 +451,8 @@ def test_agent_service_contracts(monkeypatch) -> None:
             body = "".join(stream.iter_text())
         assert '"kind": "text"' in body
         assert '"kind": "done"' in body
+        assert '"prompt_tokens": 13' in body
+        assert '"source": "provider_usage"' in body
 
 
 def test_agent_service_history_rejects_invalid_turn_metadata(monkeypatch) -> None:

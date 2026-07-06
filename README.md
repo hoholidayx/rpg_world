@@ -162,6 +162,7 @@ Telegram 渠道当前支持：
 - `FixedLayerAssembler` 通过 contributors 统一装配固定层 section，例如核心 RP 指令、文本输出格式、世界书、角色卡和已启用 RP Module 的静态契约。
 - `ContextRenderer` 只在 LLM 请求边界把结构化层渲染为 message objects。
 - `ContextInspector` 只服务 `/context`、日志和调试输出，不进入主业务数据模型。
+- `context/usage.py` 封装 context/token 用量快照和 provider usage 归一化。`context-preview` 只返回估算摘要；准确 usage 只来自正常 `/turn` 返回或 `/stream` 的 `turn_completed.payload.usage`，当前不落库。
 - `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。当前 `dice` 模块通过 `RPModuleRegistry` 注册固定层契约、工具和斜杠命令；`text_output_format` 由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
 - `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Dice MVP 默认不注入动态运行态，只在固定层声明稳定规则。
 

@@ -62,6 +62,7 @@ class ContextPreviewPayload(TypedDict):
     totals: ContextPreviewTotals
     layers: list[ContextPreviewLayer]
     messages: list[JsonObject]
+    usageEstimate: JsonObject | None
 
 
 @dataclass(frozen=True)
@@ -345,6 +346,8 @@ def _event_from_dict(data: JsonObject) -> AgentStreamEvent:
             completion_tokens=int(usage.get("completion_tokens", 0) or 0),
             total_tokens=int(usage.get("total_tokens", 0) or 0),
             prompt_tokens_details={"cached_tokens": int(usage.get("cached_tokens", 0) or 0)},
+            prompt_cache_hit_tokens=int(usage.get("cached_tokens", 0) or 0),
+            raw_usage=usage,
         )
     kind = StreamEventKind(str(data.get("kind") or "text"))
     return AgentStreamEvent(

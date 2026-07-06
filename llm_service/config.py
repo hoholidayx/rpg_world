@@ -60,6 +60,7 @@ class AgentLLMDefaults:
     llama: ConfigDict
     base_url: str | None = None
     max_tokens: int | None = None
+    context_window: int | None = None
     temperature: float | None = None
 
 
@@ -150,6 +151,7 @@ def resolve_agent_defaults(biz_key: str) -> AgentLLMDefaults:
             llama=dict(cfg.llama_cfg),
             base_url=cfg.openai_base_url or None,
             max_tokens=cfg.openai_max_tokens,
+            context_window=cfg.openai_context_window,
             temperature=cfg.openai_temperature,
         )
     return AgentLLMDefaults(
@@ -157,6 +159,7 @@ def resolve_agent_defaults(biz_key: str) -> AgentLLMDefaults:
         model=cfg.llama_model_path,
         openai=dict(cfg.openai_cfg),
         llama=dict(cfg.llama_cfg),
+        context_window=cfg.llama_n_ctx,
     )
 
 
@@ -248,6 +251,10 @@ class BizConfig:
     @property
     def openai_max_tokens(self) -> int | None:
         return optional_int(self._openai_sub.get("max_tokens"), None)
+
+    @property
+    def openai_context_window(self) -> int | None:
+        return optional_int(self._openai_sub.get("context_window"), None)
 
     @property
     def openai_temperature(self) -> float | None:
@@ -407,3 +414,13 @@ def resolve_biz_config(biz_key: str) -> BizConfig:
     """Like :func:`get_biz_config` but follows ``shared_from`` chains."""
     merged = _resolve_shared_chain(biz_key, seen=())
     return BizConfig(biz_key, merged)
+
+
+def resolve_context_window(biz_key: str) -> int | None:
+    """Return the configured context window for a chat biz key, if known."""
+    cfg = resolve_biz_config(biz_key)
+    if cfg.provider == PROVIDER_OPENAI:
+        return cfg.openai_context_window
+    if cfg.provider == PROVIDER_LLAMA:
+        return cfg.llama_n_ctx
+    return None

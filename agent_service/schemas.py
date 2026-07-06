@@ -125,6 +125,7 @@ class AgentContextPreviewResponse(BaseModel):
     totals: AgentContextPreviewTotals
     layers: list[AgentContextPreviewLayer] = Field(default_factory=list)
     messages: list[JsonObject] = Field(default_factory=list)
+    usage_estimate: JsonObject | None = Field(default=None, alias="usageEstimate")
 
 
 class AgentHealthPayload(TypedDict):
@@ -183,6 +184,7 @@ class AgentReplyPayload(AgentReplyPayloadBase, total=False):
     tool_records: list[AgentToolRecordPayload]
     status_sub_agent_records: list[JsonObject]
     stats: AgentStatsPayload
+    usage: JsonObject
 
 
 class AgentCommandResultPayloadBase(TypedDict):
