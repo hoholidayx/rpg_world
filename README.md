@@ -98,7 +98,7 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 
 - 1 个 workspace 下可以有多个 story。
 - 1 个 story 下可以有多个 session。
-- Story 主数据中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词。`story_prompt` 当前只存储和通过 Play API 返回，待后续集成入 fix layer，本次不参与上下文渲染。当前 schema 变更直接体现在 `0001_initial.sql` 与 `0002_demo.sql`，不新增迁移版本。
+- Story 主数据中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。当前 schema 变更直接体现在 `0001_initial.sql` 与 `0002_demo.sql`，不新增迁移版本。
 - 角色卡和世界书条目属于 workspace，通过挂载表关联到 story；同一个角色卡或世界书条目可以挂载到多个 story。
 - 状态表模板属于 workspace，通过 `rpg_story_status_tables` 挂载到 story；创建 session 时会把已挂载模板复制为该 session 独立副本。
 - Play 侧公开 `session_id` 是全局唯一短 ID，创建入口由 `rpg_data` 生成，当前生成格式为 `s_` + 10 位小写字母/数字；创建 session 时绑定 `workspace_id + story_id`，之后会话内接口只传 `session_id`。

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from rpg_core.context.fixed_layer import (
     FIXED_LAYER_CHARACTER_SECTION_ID,
     FIXED_LAYER_CORE_SECTION_ID,
@@ -15,6 +17,8 @@ from rpg_core.context.fixed_layer.contributors import (
     CoreRPContractContributor,
     LorebookFixedLayerContributor,
     StaticFixedLayerContributor,
+    STORY_PROMPT_SECTION_ID,
+    StoryPromptFixedLayerContributor,
     TEXT_OUTPUT_FORMAT_SECTION_ID,
     TextOutputFormatFixedLayerContributor,
 )
@@ -34,6 +38,16 @@ class FakeCharacterManager:
 
     def list_enabled_characters(self) -> list[dict[str, object]]:
         return list(self._characters)
+
+
+class FakeStoryCatalog:
+    def __init__(self, story_prompt: str | None) -> None:
+        self._story_prompt = story_prompt
+
+    def get_session_story(self, _session_id: str):  # noqa: ANN201
+        if self._story_prompt is None:
+            return None
+        return SimpleNamespace(story_prompt=self._story_prompt)
 
 
 class BrokenContributor(FixedLayerContributor):
@@ -70,24 +84,35 @@ def test_fixed_layer_assembler_merges_core_knowledge_and_module_sections():
         world_name="测试世界",
         contributors=[
             CoreRPContractContributor("测试世界"),
-            TextOutputFormatFixedLayerContributor(),
+            StoryPromptFixedLayerContributor("s1", catalog=FakeStoryCatalog("故事只发生在雾港。")),
             LorebookFixedLayerContributor(FakeLorebookManager(lorebook_entries)),
             CharacterFixedLayerContributor(FakeCharacterManager(characters)),
             StaticFixedLayerContributor([module_section]),
+            TextOutputFormatFixedLayerContributor(),
         ],
     ).assemble()
 
     assert [section.id for section in fixed_layer.sections] == [
         FIXED_LAYER_CORE_SECTION_ID,
+        STORY_PROMPT_SECTION_ID,
         FIXED_LAYER_LOREBOOK_SECTION_ID,
         FIXED_LAYER_CHARACTER_SECTION_ID,
         "module_hint",
         TEXT_OUTPUT_FORMAT_SECTION_ID,
     ]
-    assert fixed_layer.sections[1].item_count == 1
+    assert fixed_layer.sections[1].content == "故事只发生在雾港。"
     assert fixed_layer.sections[2].item_count == 1
+    assert fixed_layer.sections[3].item_count == 1
     assert fixed_layer.lorebook_entries == lorebook_entries
     assert fixed_layer.characters == characters
+
+
+def test_story_prompt_contributor_skips_blank_or_missing_story():
+    blank = StoryPromptFixedLayerContributor("s1", catalog=FakeStoryCatalog("  ")).get_fixed_contribution()
+    missing = StoryPromptFixedLayerContributor("s1", catalog=FakeStoryCatalog(None)).get_fixed_contribution()
+
+    assert blank.sections == []
+    assert missing.sections == []
 
 
 def test_fixed_layer_assembler_keeps_domain_structure_when_contributor_disabled():

@@ -43,6 +43,7 @@ from rpg_core.context.fixed_layer.contributors import (
     CoreRPContractContributor,
     LorebookFixedLayerContributor,
     StaticFixedLayerContributor,
+    StoryPromptFixedLayerContributor,
     TextOutputFormatFixedLayerContributor,
 )
 from rpg_core.context.inspector import ContextInspector
@@ -915,7 +916,7 @@ class RPGGameAgent:
             world_name=self._world_name,
             contributors=[
                 CoreRPContractContributor(self._world_name),
-                TextOutputFormatFixedLayerContributor(),
+                StoryPromptFixedLayerContributor(self._session_id),
                 LorebookFixedLayerContributor(
                     self._lorebook_mgr,
                     enabled=enable_lorebook,
@@ -924,6 +925,7 @@ class RPGGameAgent:
                     self._character_mgr,
                     enabled=enable_character,
                 ),
+                TextOutputFormatFixedLayerContributor(),
             ],
         )
         if self._rp_module_registry is not None:

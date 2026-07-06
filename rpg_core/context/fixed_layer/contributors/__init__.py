@@ -11,6 +11,11 @@ from rpg_core.context.fixed_layer.contributors.lorebook import (
     build_lorebook_section,
     render_lorebook_section_body,
 )
+from rpg_core.context.fixed_layer.contributors.story_prompt import (
+    STORY_PROMPT_SECTION_ID,
+    STORY_PROMPT_SOURCE,
+    StoryPromptFixedLayerContributor,
+)
 from rpg_core.context.fixed_layer.contributors.static_sections import StaticFixedLayerContributor
 from rpg_core.context.fixed_layer.contributors.text_output_format import (
     RP_OUTPUT_ATTR_CHARACTER_NAME,
@@ -29,7 +34,10 @@ __all__ = [
     "RP_OUTPUT_ATTR_CHARACTER_NAME",
     "RP_OUTPUT_TAG_CHARACTER",
     "RP_OUTPUT_TAG_NARRATION",
+    "STORY_PROMPT_SECTION_ID",
+    "STORY_PROMPT_SOURCE",
     "StaticFixedLayerContributor",
+    "StoryPromptFixedLayerContributor",
     "TEXT_OUTPUT_FORMAT_NAME",
     "TEXT_OUTPUT_FORMAT_SECTION_ID",
     "TEXT_OUTPUT_FORMAT_SOURCE",

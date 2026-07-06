@@ -58,6 +58,10 @@ def test_gateway_initializes_migrations_and_exposes_services(
     assert [table.name for table in context_tables] == ["世界线索"]
     assert scene_table is not None
     assert scene_table.name == "北境森林当前场景"
+    story = gateway.catalog.get_session_story("s_forest001")
+    assert story is not None
+    assert "演示故事" in story.story_prompt
+    assert gateway.catalog.get_session_story("missing_session") is None
     assert not (
         tmp_path
         / "data/demo_workspace/template_status/场景/北境森林当前场景.status.json"

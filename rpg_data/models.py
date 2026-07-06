@@ -91,7 +91,7 @@ class Story:
     workspace_id: str
     title: str
     summary: str = ""
-    # Story-level fixed system prompt; planned to be integrated into fix layer later.
+    # Story-level fixed system prompt injected through the fixed layer.
     story_prompt: str = ""
     first_message: str = ""
     metadata_json: str = "{}"

@@ -181,6 +181,31 @@ class CatalogService:
         )
         return session
 
+    def get_session_story(
+        self,
+        session_id: str,
+    ) -> models.Story | None:
+        session = self._sessions.get(session_id)
+        if session is None:
+            logger.debug("session story not found session_id=%s", session_id)
+            return None
+        story = self._stories.get(session.story_id)
+        if story is None or story.workspace_id != session.workspace_id:
+            logger.warning(
+                "session story rejected inconsistent catalog session_id=%s workspace_id=%s story_id=%s",
+                session_id,
+                session.workspace_id,
+                session.story_id,
+            )
+            return None
+        logger.debug(
+            "loaded session story session_id=%s workspace_id=%s story_id=%s",
+            session_id,
+            story.workspace_id,
+            story.id,
+        )
+        return story
+
     def get_workspace_runtime_dir(self, workspace_id: str) -> Path:
         """Return the resolved catalog workspace root directory."""
 

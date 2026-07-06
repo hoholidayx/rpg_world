@@ -12,11 +12,15 @@ from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.command import CommandDispatcher
 from rpg_core.agent.tools import BaseTool
 from rpg_core.context.rpg_context import FixedLayerData, HotHistoryLayer, Message, RPGContext, Role
-from rpg_core.context.fixed_layer import FixedLayerSection
+from rpg_core.context.fixed_layer import FIXED_LAYER_CORE_SECTION_ID, FixedLayerSection
 from rpg_core.session.manager import SessionManager
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from llm_service.manager import ProviderOverrides
-from rpg_core.context.fixed_layer.contributors import TEXT_OUTPUT_FORMAT_SECTION_ID
+from rpg_core.context.fixed_layer.contributors import (
+    STORY_PROMPT_SECTION_ID,
+    STORY_PROMPT_SOURCE,
+    TEXT_OUTPUT_FORMAT_SECTION_ID,
+)
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_SECTION_ID,
 )
@@ -29,6 +33,32 @@ from rpg_core.agent.agent_types import (
     StreamEventKind,
     _StreamSentinel,
 )
+
+
+def _patch_story_prompt_contributor(monkeypatch, content: str = "") -> None:
+    class FakeStoryPromptContributor:
+        name = STORY_PROMPT_SOURCE
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def get_fixed_contribution(self):
+            from rpg_core.context.fixed_layer import FixedLayerContribution
+
+            sections = []
+            if content:
+                sections.append(FixedLayerSection(
+                    id=STORY_PROMPT_SECTION_ID,
+                    title="故事固定提示词",
+                    content=content,
+                    priority=10,
+                    source=STORY_PROMPT_SOURCE,
+                    source_kind=STORY_PROMPT_SOURCE,
+                    item_count=1,
+                ))
+            return FixedLayerContribution(sections=sections)
+
+    monkeypatch.setattr(agent_module, "StoryPromptFixedLayerContributor", FakeStoryPromptContributor)
 
 
 @pytest.mark.asyncio
@@ -213,6 +243,7 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
         def get_provider(self, biz_key):  # noqa: ANN001
             return object()
 
+    _patch_story_prompt_contributor(monkeypatch)
     monkeypatch.setattr(agent_module, "CoreRPContractContributor", FakeCoreRPContractContributor)
     monkeypatch.setattr(agent_module, "StatusSubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "MemorySubAgent", FakeSubAgent)
@@ -313,7 +344,9 @@ def test_rpg_game_agent_default_model_no_longer_forces_gpt4o(monkeypatch):
     assert agent._provider_overrides == ProviderOverrides()
 
 
-def test_setup_rp_module_registry_adds_dice_fixed_section():
+def test_setup_rp_module_registry_adds_fixed_sections(monkeypatch):
+    _patch_story_prompt_contributor(monkeypatch, "故事固定约束。")
+
     agent = object.__new__(RPGGameAgent)
     agent._session_id = "s1"
     agent._world_name = "world"
@@ -326,8 +359,40 @@ def test_setup_rp_module_registry_adds_dice_fixed_section():
     agent._setup_rp_module_registry()
 
     assert agent._rp_module_registry is not None
+    assert any(section.id == STORY_PROMPT_SECTION_ID for section in agent._fixed_layer.sections)
     assert any(section.id == RP_MODULE_DICE_SECTION_ID for section in agent._fixed_layer.sections)
     assert any(section.id == TEXT_OUTPUT_FORMAT_SECTION_ID for section in agent._fixed_layer.sections)
+
+
+def test_assemble_fixed_layer_reads_story_prompt_from_data_service(monkeypatch):
+    class FakeCatalog:
+        def get_session_story(self, session_id: str):  # noqa: ANN201
+            assert session_id == "s1"
+            return SimpleNamespace(story_prompt="雾港故事固定提示词。")
+
+    class FakeGateway:
+        catalog = FakeCatalog()
+
+    import rpg_data.services as data_services
+
+    monkeypatch.setattr(data_services, "get_data_service_gateway", lambda: FakeGateway())
+
+    agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s1"
+    agent._world_name = "world"
+    agent._builder = SimpleNamespace(config=SimpleNamespace(enable_lorebook=True, enable_character=True))
+    agent._character_mgr = None
+    agent._lorebook_mgr = None
+    agent._rp_module_registry = None
+
+    fixed_layer = agent._assemble_fixed_layer()
+
+    story_section = next(section for section in fixed_layer.sections if section.id == STORY_PROMPT_SECTION_ID)
+    assert story_section.content == "雾港故事固定提示词。"
+    assert [section.id for section in fixed_layer.sections][:2] == [
+        FIXED_LAYER_CORE_SECTION_ID,
+        STORY_PROMPT_SECTION_ID,
+    ]
 
 
 def test_register_rp_module_commands_exposes_check_dc():
@@ -549,6 +614,7 @@ async def test_ensure_initialized_populates_model_from_provider(monkeypatch):
         coro.close()
         return MagicMock()
 
+    _patch_story_prompt_contributor(monkeypatch)
     monkeypatch.setattr(agent_module, "CoreRPContractContributor", FakeCoreRPContractContributor)
     monkeypatch.setattr(agent_module, "StatusSubAgent", FakeSubAgent)
     monkeypatch.setattr(agent_module, "MemorySubAgent", FakeSubAgent)

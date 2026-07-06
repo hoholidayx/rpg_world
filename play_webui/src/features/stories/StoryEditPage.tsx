@@ -513,7 +513,7 @@ function StoryEditContent({
 
               <Panel
                 title="开场与固定提示词"
-                description="first_message 用于新会话开场模板；story_prompt 当前只存储和经 API 返回，后续再接入 fix layer。"
+                description="first_message 用于新会话开场模板；story_prompt 会作为故事固定提示词进入 fixed layer。"
                 action={<Chip tone="violet">rpg_stories</Chip>}
               >
                 <div className="grid gap-4">
@@ -530,7 +530,7 @@ function StoryEditContent({
                       onChange={(event) => setDraft((current) => ({ ...current, storyPrompt: event.target.value }))}
                       className="min-h-44 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-sm leading-7 text-slate-800 outline-none transition focus:border-teal-300 focus:ring-4 focus:ring-teal-100"
                     />
-                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">落地注意：不要在本次设计里假设 story_prompt 已参与 ContextRenderer。</p>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">保存后会在下一次上下文构建或预览时生效。</p>
                   </FieldShell>
                 </div>
               </Panel>
