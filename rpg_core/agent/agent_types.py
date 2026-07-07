@@ -11,6 +11,7 @@ Streaming types:
 Queue types:
   - ``QueueItem`` — 消息队列工作项
   - ``_StreamSentinel`` — send_stream 事件流结束标记
+  - ``TurnCancelResult`` — active/queued turn cancellation result
 """
 
 from __future__ import annotations
@@ -233,6 +234,35 @@ class QueueKind(StrEnum):
     """截断当前会话历史。"""
 
 
+class TurnCancelStatus(StrEnum):
+    """Result status for best-effort turn cancellation."""
+
+    CANCELLED = "cancelled"
+    """An active or queued stream request was cancelled."""
+    NOT_RUNNING = "not_running"
+    """No matching active or queued stream request exists."""
+    STALE = "stale"
+    """The supplied request id does not match the active stream request."""
+
+
+@dataclass(frozen=True)
+class TurnCancelResult:
+    """Best-effort cancellation outcome for one agent turn."""
+
+    status: TurnCancelStatus
+    session_id: str
+    request_id: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        data: dict[str, object] = {
+            "status": self.status.value,
+            "session_id": self.session_id,
+        }
+        if self.request_id:
+            data["request_id"] = self.request_id
+        return data
+
+
 @dataclass
 class QueueItem:
     """消息队列工作项——send / send_stream / command 的入队单元。
@@ -249,6 +279,8 @@ class QueueItem:
         仅 ``send_stream`` 使用：消费者向此队列推入事件，主协程从中读取并 yield。
     turn_id:
         仅历史截断工作项使用。
+    request_id:
+        仅 ``send_stream`` 使用：前端/调用方生成的单次请求 ID，用于精准 stop。
     """
 
     kind: QueueKind
@@ -256,6 +288,7 @@ class QueueItem:
     future: Future
     event_queue: AsyncQueue | None = None
     turn_id: int | None = None
+    request_id: str | None = None
 
 
 class _StreamSentinel:

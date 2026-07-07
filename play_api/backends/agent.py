@@ -77,7 +77,18 @@ class AgentBackend:
         session_id: str,
         text: str,
         mode: str,
+        request_id: str | None = None,
     ) -> AsyncIterator[dict[str, object]]:
-        del workspace, story_id
-        async for event in agent_client.get_agent_client().stream(session_id, text):
+        del workspace, story_id, mode
+        async for event in agent_client.get_agent_client().stream(session_id, text, request_id=request_id):
             yield event.to_dict()
+
+    async def stop(
+        self,
+        workspace: str,
+        story_id: int,
+        session_id: str,
+        request_id: str | None = None,
+    ) -> dict[str, object]:
+        del workspace, story_id
+        return await agent_client.get_agent_client().stop(session_id, request_id=request_id)

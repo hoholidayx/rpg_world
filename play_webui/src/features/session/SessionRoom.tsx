@@ -7,6 +7,7 @@ import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { listStoryCharacters } from '@/lib/api/characters'
+import { stopSessionStream } from '@/lib/api/chat'
 import { getContextPreview } from '@/lib/api/contextPreview'
 import { getCurrentScene } from '@/lib/api/scene'
 import {
@@ -24,6 +25,7 @@ import type { CharacterCard } from '@/types/characters'
 import { fromContextPreviewEstimate, fromTurnUsage, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
 import { STATUS_KIND } from '@/types/statusTables'
+import { TURN_CANCEL_STATUS } from '@/types/command'
 import { SessionComposer } from './SessionComposer'
 import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
@@ -40,9 +42,12 @@ import {
   ConfirmRequest,
   NarrativeStyle,
   NarrativeStyleId,
+  SESSION_MESSAGE_STATUS,
+  SESSION_STREAM_SOURCE,
   SESSION_TIMELINE_ROLE,
   SessionInputMode,
   SessionSpeaker,
+  SessionStreamSource,
   SessionTimelineMessage,
 } from './sessionRoomTypes'
 
@@ -74,10 +79,19 @@ type DragState = {
   startRight: number
 }
 
+type ActiveStream = {
+  controller: AbortController
+  requestId: string
+  source: SessionStreamSource
+  assistantMessageId: string
+  turnId: number
+}
+
 type MobilePanel = 'left' | 'right' | null
+
+const stoppedStreamText = '已停止当前流式响应。'
 type HistoryMessage = Awaited<ReturnType<typeof getSessionHistory>>[number]['messages'][number]
 type UserTimelineMessage = SessionTimelineMessage & { role: typeof SESSION_TIMELINE_ROLE.USER }
-type PersistedUserTimelineMessage = UserTimelineMessage & { messageId: number }
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -137,7 +151,7 @@ function streamPlaceholder(turnId: number): SessionTimelineMessage {
     content: '',
     createdAt: new Date().toISOString(),
     speaker: makeAssistantSpeaker(),
-    status: 'streaming',
+    status: SESSION_MESSAGE_STATUS.STREAMING,
     canCopy: false,
     canRetry: false,
     canEdit: false,
@@ -197,7 +211,7 @@ function mapHistoryToMessages({
         metadata: message.metadata,
         createdAt: message.createdAt,
         speaker: makeHistorySpeaker(message, playerCharacter),
-        status: message.role === HISTORY_MESSAGE_ROLE.ASSISTANT ? 'done' : undefined,
+        status: message.role === HISTORY_MESSAGE_ROLE.ASSISTANT ? SESSION_MESSAGE_STATUS.DONE : undefined,
         canCopy: Boolean(content.trim()),
         canRetry: persistent && role === HISTORY_MESSAGE_ROLE.USER,
         canEdit: persistent && role === HISTORY_MESSAGE_ROLE.USER,
@@ -207,12 +221,12 @@ function mapHistoryToMessages({
   })
 }
 
-function canEditMessage(message: SessionTimelineMessage): message is PersistedUserTimelineMessage {
-  return Boolean(message.canEdit && message.messageId && message.role === SESSION_TIMELINE_ROLE.USER)
+function canEditMessage(message: SessionTimelineMessage): message is UserTimelineMessage {
+  return Boolean(message.canEdit && message.role === SESSION_TIMELINE_ROLE.USER)
 }
 
-function canRetryMessage(message: SessionTimelineMessage): message is PersistedUserTimelineMessage {
-  return Boolean(message.canRetry && message.messageId && message.role === SESSION_TIMELINE_ROLE.USER)
+function canRetryMessage(message: SessionTimelineMessage): message is UserTimelineMessage {
+  return Boolean(message.canRetry && message.role === SESSION_TIMELINE_ROLE.USER)
 }
 
 function Toast({ message }: { message: string }) {
@@ -408,10 +422,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [bindingRole, setBindingRole] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
   const [sending, setSending] = useState(false)
+  const [stoppingRequestId, setStoppingRequestId] = useState<string | null>(null)
   const [accurateUsageOverride, setAccurateUsageOverride] = useState<ContextUsageSnapshot | null>(null)
   const [forceScrollKey, setForceScrollKey] = useState(0)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  const activeStreamRef = useRef<ActiveStream | null>(null)
+  const stoppingRequestIdRef = useRef<string | null>(null)
+  const stopSettledRequestIdsRef = useRef<Set<string>>(new Set())
   const fontScale = useSessionUiStore((state) => state.fontScale)
   const setFontScale = useSessionUiStore((state) => state.setFontScale)
   const syncFontScale = useSessionUiStore((state) => state.syncFontScale)
@@ -466,6 +483,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     [historyQuery.data, playerCharacter],
   )
 
+  const lastPersistedTurnId = useMemo(
+    () => Math.max(0, ...baseMessages.map((message) => message.turnId)),
+    [baseMessages],
+  )
+
   const visibleMessages = useMemo(() => {
     const historyMessages = optimisticTruncateFromTurn === null
       ? baseMessages
@@ -509,6 +531,9 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setRoleDialogRequired(false)
     setSelectedRoleCharacterId(null)
     setRoleBindError(null)
+    setStoppingRequestId(null)
+    stoppingRequestIdRef.current = null
+    stopSettledRequestIdsRef.current.clear()
     setAccurateUsageOverride(null)
   }, [sessionId])
 
@@ -530,9 +555,22 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-      abortRef.current?.abort()
+      const active = activeStreamRef.current
+      if (active) {
+        console.info('[SessionRoom] stopping active stream on cleanup', {
+          sessionId,
+          requestId: active.requestId,
+          source: active.source,
+          turnId: active.turnId,
+        })
+        active.controller.abort()
+        activeStreamRef.current = null
+        void stopSessionStream(sessionId, active.requestId).catch((error) => {
+          console.warn('failed to stop active stream on session cleanup', error)
+        })
+      }
     }
-  }, [])
+  }, [sessionId])
 
   useEffect(() => {
     if (!dragState) return
@@ -687,46 +725,47 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     void bindPlayerRole(characterId)
   }, [bindPlayerRole, characters, playerCharacter, requestConfirm, roleDialogRequired, selectedRoleCharacterId, showToast])
 
-  const showRegenerationPreview = useCallback((message: UserTimelineMessage, text: string) => {
-    const turnId = message.turnId
-    const previewUserMessage: SessionTimelineMessage = {
-      id: `local-regenerate-user-${turnId}-${crypto.randomUUID()}`,
-      turnId,
-      seqInTurn: 1,
-      role: SESSION_TIMELINE_ROLE.USER,
-      content: text,
-      createdAt: new Date().toISOString(),
-      speaker: message.speaker,
-      status: 'local',
-      canCopy: true,
-      canRetry: false,
-      canEdit: false,
-      canDelete: false,
-    }
-    const assistantMessage = streamPlaceholder(turnId)
+  const markStreamStopped = useCallback((assistantMessageId: string, turnId: number) => {
+    setLocalMessages((current) =>
+      current.map((message) =>
+        message.id === assistantMessageId
+          ? {
+              ...message,
+              status: SESSION_MESSAGE_STATUS.DONE,
+              content: message.content || stoppedStreamText,
+              canCopy: Boolean((message.content || stoppedStreamText).trim()),
+            }
+          : message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.USER
+            ? {
+                ...message,
+                canRetry: true,
+                canEdit: true,
+              }
+          : message,
+      ),
+    )
+  }, [])
 
-    setOptimisticTruncateFromTurn(turnId)
+  const appendLocalStreamError = useCallback((assistantMessageId: string, turnId: number, errorText: string) => {
     setLocalMessages((current) => [
-      ...current.filter((item) => item.turnId < turnId),
-      previewUserMessage,
-      assistantMessage,
+      ...current.map((message) =>
+        message.id === assistantMessageId ? { ...message, status: SESSION_MESSAGE_STATUS.ERROR } : message,
+      ),
+      {
+        id: `local-error-${turnId}-${crypto.randomUUID()}`,
+        turnId,
+        seqInTurn: 5,
+        role: SESSION_TIMELINE_ROLE.ERROR,
+        content: errorText,
+        createdAt: new Date().toISOString(),
+        speaker: errorSpeaker(),
+        status: SESSION_MESSAGE_STATUS.ERROR,
+        canCopy: Boolean(errorText.trim()),
+        canRetry: false,
+        canEdit: false,
+        canDelete: false,
+      },
     ])
-    setForceScrollKey((current) => current + 1)
-    setEditingMessageId(null)
-    setEditDraft('')
-    return assistantMessage
-  }, [])
-
-  const restoreRegenerationPreview = useCallback(() => {
-    setOptimisticTruncateFromTurn(null)
-    setLocalMessages([])
-  }, [])
-
-  const clearRegenerationPreviewAfterTruncate = useCallback((turnId: number) => {
-    setOptimisticTruncateFromTurn(turnId)
-    setLocalMessages([])
-    setEditingMessageId(null)
-    setEditDraft('')
   }, [])
 
   const appendStreamEvent = useCallback((event: PlayStreamEvent, assistantMessageId: string, turnId: number) => {
@@ -739,7 +778,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             ? {
                 ...message,
                 content: `${message.content}${event.payload.text}`,
-                status: 'streaming',
+                status: SESSION_MESSAGE_STATUS.STREAMING,
                 canCopy: Boolean(`${message.content}${event.payload.text}`.trim()),
               }
             : message,
@@ -762,7 +801,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           content: toolText,
           createdAt: new Date().toISOString(),
           speaker: toolSpeaker(),
-          status: 'local',
+          status: SESSION_MESSAGE_STATUS.LOCAL,
           canCopy: Boolean(toolText.trim()),
           canRetry: false,
           canEdit: false,
@@ -784,7 +823,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           message.id === assistantMessageId
             ? {
                 ...message,
-                status: 'done',
+                status: SESSION_MESSAGE_STATUS.DONE,
                 content: message.content || event.payload.text || '已完成。',
                 canCopy: Boolean((message.content || event.payload.text || '已完成。').trim()),
               }
@@ -798,7 +837,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       const errorText = event.payload.message || '流式请求失败'
       setLocalMessages((current) => [
         ...current.map((message) =>
-          message.id === assistantMessageId ? { ...message, status: 'error' as const } : message,
+          message.id === assistantMessageId ? { ...message, status: SESSION_MESSAGE_STATUS.ERROR } : message,
         ),
         {
           id: `local-error-${turnId}-${crypto.randomUUID()}`,
@@ -808,7 +847,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           content: errorText,
           createdAt: new Date().toISOString(),
           speaker: errorSpeaker(),
-          status: 'error',
+          status: SESSION_MESSAGE_STATUS.ERROR,
           canCopy: Boolean(errorText.trim()),
           canRetry: false,
           canEdit: false,
@@ -818,75 +857,188 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     }
   }, [contextPreviewUsage])
 
-  const performRegeneration = useCallback(async ({
-    message,
+  const streamLocalTurn = useCallback(async ({
     text,
+    turnId,
+    userMessage,
+    assistantMessage,
+    source,
     pendingToast,
     successToast,
     failureToast,
+    clearComposer = false,
   }: {
-    message: PersistedUserTimelineMessage
     text: string
-    pendingToast: string
+    turnId: number
+    userMessage: SessionTimelineMessage
+    assistantMessage: SessionTimelineMessage
+    source: SessionStreamSource
+    pendingToast?: string
     successToast: string
     failureToast: string
+    clearComposer?: boolean
   }) => {
-    if (sending) {
-      showToast('当前仍在生成，请稍后再试')
-      return
-    }
-
-    const assistantMessage = showRegenerationPreview(message, text)
     const controller = new AbortController()
-    let truncated = false
-    let streamFailure: string | null = null
-    abortRef.current = controller
+    const requestId = crypto.randomUUID()
+    stoppingRequestIdRef.current = null
+    stopSettledRequestIdsRef.current.clear()
+    setStoppingRequestId(null)
+    activeStreamRef.current = {
+      controller,
+      requestId,
+      source,
+      assistantMessageId: assistantMessage.id,
+      turnId,
+    }
     setAccurateUsageOverride(null)
+    if (clearComposer) setComposerText('')
     setSending(true)
-    showToast(pendingToast)
+    setLocalMessages((current) => [...current, userMessage, assistantMessage])
+    setForceScrollKey((current) => current + 1)
+    if (pendingToast) showToast(pendingToast)
 
+    let streamFailure: string | null = null
+    let completedTurn = false
     try {
-      await truncateSessionTurn(sessionId, message.turnId)
-      truncated = true
       await consumeChatStream(
         {
           sessionId,
           text,
           mode: inputMode,
+          requestId,
         },
         {
           signal: controller.signal,
           onEvent: (event) => {
-            appendStreamEvent(event, assistantMessage.id, message.turnId)
+            appendStreamEvent(event, assistantMessage.id, turnId)
             if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = event.payload.message || failureToast
           },
         },
       )
+      if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) return
       if (streamFailure) throw new Error(streamFailure)
+      completedTurn = true
       const refreshed = await refreshSessionData({ silent: true, clearAccurateUsage: false })
       showToast(refreshed ? successToast : `${successToast}，但刷新失败，请手动刷新页面`)
     } catch (error) {
-      if (!truncated) {
-        restoreRegenerationPreview()
+      if (controller.signal.aborted) {
+        markStreamStopped(assistantMessage.id, turnId)
+      } else if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) {
+        // Stop API is responsible for deciding whether this stream is actually stopped.
       } else {
-        clearRegenerationPreviewAfterTruncate(message.turnId)
-        await refreshSessionData({ silent: true })
+        const errorText = error instanceof Error ? error.message : failureToast
+        if (!streamFailure) appendLocalStreamError(assistantMessage.id, turnId, errorText)
+        showToast(errorText)
       }
-      showToast(error instanceof Error ? error.message : failureToast)
     } finally {
       setSending(false)
-      abortRef.current = null
+      if (activeStreamRef.current?.requestId === requestId) activeStreamRef.current = null
+      stopSettledRequestIdsRef.current.delete(requestId)
+      if (!completedTurn) setAccurateUsageOverride(null)
     }
   }, [
+    appendLocalStreamError,
     appendStreamEvent,
-    clearRegenerationPreviewAfterTruncate,
     inputMode,
+    markStreamStopped,
     refreshSessionData,
-    restoreRegenerationPreview,
-    sending,
     sessionId,
-    showRegenerationPreview,
     showToast,
+  ])
+
+  const performRegeneration = useCallback(async ({
+    message,
+    text,
+    source,
+    pendingToast,
+    successToast,
+    failureToast,
+  }: {
+    message: UserTimelineMessage
+    text: string
+    source: SessionStreamSource
+    pendingToast: string
+    successToast: string
+    failureToast: string
+  }) => {
+    if (!session) {
+      showToast('会话加载中，请稍后再试')
+      return
+    }
+    if (playerCharacterInvalid) {
+      setRoleDialogRequired(true)
+      setRoleDialogOpen(true)
+      showToast('请先选择你要扮演的角色')
+      return
+    }
+    if (sending) {
+      showToast('当前仍在生成，请稍后再试')
+      return
+    }
+    if (stoppingRequestIdRef.current) {
+      showToast('正在停止当前生成，请稍后再试')
+      return
+    }
+
+    const trimmedText = text.trim()
+    if (!trimmedText) {
+      showToast('发送内容不能为空')
+      return
+    }
+
+    const replacingLastTurn = Boolean(message.messageId) && message.turnId === lastPersistedTurnId
+    const turnId = replacingLastTurn ? message.turnId : lastTurnId + 1
+    const style = currentNarrativeStyle
+    const playerSpeaker = makePlayerSpeaker(playerCharacter)
+    const userMessage: SessionTimelineMessage = {
+      id: `local-${source}-user-${turnId}-${crypto.randomUUID()}`,
+      turnId,
+      seqInTurn: 1,
+      role: SESSION_TIMELINE_ROLE.USER,
+      content: trimmedText,
+      createdAt: new Date().toISOString(),
+      speaker: { ...playerSpeaker, label: inputMode.toUpperCase() },
+      hiddenPrompt: style.prompt,
+      status: style.prompt ? SESSION_MESSAGE_STATUS.LOCAL : undefined,
+      canCopy: true,
+      canRetry: false,
+      canEdit: false,
+      canDelete: false,
+    }
+    const assistantMessage = streamPlaceholder(turnId)
+    setEditingMessageId(null)
+    setEditDraft('')
+    if (replacingLastTurn) {
+      try {
+        await truncateSessionTurn(sessionId, message.turnId)
+        setOptimisticTruncateFromTurn(message.turnId)
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : failureToast)
+        return
+      }
+    }
+    await streamLocalTurn({
+      text: trimmedText,
+      turnId,
+      userMessage,
+      assistantMessage,
+      source,
+      pendingToast,
+      successToast,
+      failureToast,
+    })
+  }, [
+    currentNarrativeStyle,
+    inputMode,
+    lastPersistedTurnId,
+    lastTurnId,
+    playerCharacter,
+    playerCharacterInvalid,
+    sending,
+    session,
+    sessionId,
+    showToast,
+    streamLocalTurn,
   ])
 
   const performRetry = useCallback(async (message: SessionTimelineMessage) => {
@@ -897,6 +1049,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     await performRegeneration({
       message,
       text: message.content,
+      source: SESSION_STREAM_SOURCE.RETRY,
       pendingToast: `正在重试 turn #${message.turnId}`,
       successToast: `已重试 turn #${message.turnId}`,
       failureToast: '重试失败',
@@ -908,20 +1061,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       showToast('当前回合不可重试')
       return
     }
-    if (message.turnId >= lastTurnId) {
-      void performRetry(message)
-      return
-    }
-    requestConfirm({
-      title: '确认重试',
-      heading: '该操作会影响后续回合',
-      body: `重试 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn，并重新生成回应。`,
-      confirmLabel: '确认重试',
-      onConfirm: () => {
-        void performRetry(message)
-      },
-    })
-  }, [lastTurnId, performRetry, requestConfirm, showToast])
+    void performRetry(message)
+  }, [performRetry, showToast])
 
   const handleCopy = useCallback((message: SessionTimelineMessage) => {
     if (!message.content.trim()) {
@@ -951,6 +1092,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     await performRegeneration({
       message,
       text,
+      source: SESSION_STREAM_SOURCE.EDIT,
       pendingToast: '正在发送编辑',
       successToast: '已发送编辑',
       failureToast: '编辑失败',
@@ -967,20 +1109,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       showToast('编辑内容不能为空')
       return
     }
-    if (message.turnId < lastTurnId) {
-      requestConfirm({
-        title: '确认发送编辑',
-        heading: '该操作会影响后续回合',
-        body: `发送编辑后的 turn #${message.turnId} 会删除该 turn 以及之后更新的所有 turn，并从这条用户消息重新生成回应。`,
-        confirmLabel: '确认发送',
-        onConfirm: () => {
-          void performSendEdited(message, text)
-        },
-      })
-      return
-    }
     void performSendEdited(message, text)
-  }, [editDraft, lastTurnId, performSendEdited, requestConfirm, showToast])
+  }, [editDraft, performSendEdited, showToast])
 
   const performDelete = useCallback(async (message: SessionTimelineMessage) => {
     if (!message.canDelete || !message.messageId) {
@@ -1029,6 +1159,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       showToast('请输入内容后再发送')
       return
     }
+    if (stoppingRequestIdRef.current) {
+      showToast('正在停止当前生成，请稍后再试')
+      return
+    }
 
     const turnId = lastTurnId + 1
     const style = currentNarrativeStyle
@@ -1042,92 +1176,130 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       createdAt: new Date().toISOString(),
       speaker: { ...playerSpeaker, label: inputMode.toUpperCase() },
       hiddenPrompt: style.prompt,
-      status: style.prompt ? 'local' : undefined,
+      status: style.prompt ? SESSION_MESSAGE_STATUS.LOCAL : undefined,
       canCopy: true,
       canRetry: false,
       canEdit: false,
       canDelete: false,
     }
     const assistantMessage = streamPlaceholder(turnId)
-    const controller = new AbortController()
-    abortRef.current = controller
-    setAccurateUsageOverride(null)
-    setComposerText('')
-    setSending(true)
-    setLocalMessages((current) => [...current, userMessage, assistantMessage])
-    setForceScrollKey((current) => current + 1)
+    // 叙事风格目前只保存在本地 message metadata；待后端支持独立 prompt 字段后再随 payload 发送。
+    await streamLocalTurn({
+      text,
+      turnId,
+      userMessage,
+      assistantMessage,
+      source: SESSION_STREAM_SOURCE.SEND,
+      successToast: '发送完成',
+      failureToast: '未知流式错误',
+      clearComposer: true,
+    })
+  }, [
+    composerText,
+    currentNarrativeStyle,
+    inputMode,
+    lastTurnId,
+    playerCharacter,
+    playerCharacterInvalid,
+    session,
+    showToast,
+    streamLocalTurn,
+  ])
 
-    let streamFailure: string | null = null
-    let completedTurn = false
-    try {
-      // 叙事风格目前只保存在本地 message metadata；待后端支持独立 prompt 字段后再随 payload 发送。
-      await consumeChatStream(
-        {
-          sessionId,
-          text,
-          mode: inputMode,
-        },
-        {
-          signal: controller.signal,
-          onEvent: (event) => {
-            appendStreamEvent(event, assistantMessage.id, turnId)
-            if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = event.payload.message || '未知流式错误'
-          },
-        },
-      )
-      if (streamFailure) throw new Error(streamFailure)
-      completedTurn = true
-    } catch (error) {
-      if (controller.signal.aborted) {
-        setLocalMessages((current) =>
-          current.map((message) =>
-            message.id === assistantMessage.id
-              ? {
-                  ...message,
-                  status: 'done',
-                  content: message.content || '已停止当前流式响应。',
-                  canCopy: Boolean((message.content || '已停止当前流式响应。').trim()),
-                }
-              : message,
-          ),
-        )
-      } else {
-        const errorText = error instanceof Error ? error.message : '未知流式错误'
-        if (!streamFailure) {
-          setLocalMessages((current) => [
-            ...current.map((message) =>
-              message.id === assistantMessage.id ? { ...message, status: 'error' as const } : message,
-            ),
-            {
-              id: `local-error-${turnId}-${crypto.randomUUID()}`,
-              turnId,
-              seqInTurn: 5,
-              role: SESSION_TIMELINE_ROLE.ERROR,
-              content: errorText,
-              createdAt: new Date().toISOString(),
-              speaker: errorSpeaker(),
-              status: 'error',
-              canCopy: Boolean(errorText.trim()),
-              canRetry: false,
-              canEdit: false,
-              canDelete: false,
-            },
-          ])
-        }
-        showToast(errorText)
-      }
-    } finally {
-      setSending(false)
-      abortRef.current = null
-      const refreshed = await refreshSessionData({ silent: true, clearAccurateUsage: !completedTurn })
-      if (!refreshed) showToast('发送完成，但刷新失败，请手动刷新页面')
+  const stopActiveStream = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    const active = activeStreamRef.current
+    if (!active) return false
+
+    if (stoppingRequestIdRef.current === active.requestId) {
+      console.info('[SessionRoom] duplicate stop ignored', {
+        sessionId,
+        requestId: active.requestId,
+        source: active.source,
+        turnId: active.turnId,
+      })
+      return false
     }
-  }, [appendStreamEvent, composerText, currentNarrativeStyle, inputMode, lastTurnId, playerCharacter, playerCharacterInvalid, refreshSessionData, session, sessionId, showToast])
+    stoppingRequestIdRef.current = active.requestId
+    setStoppingRequestId(active.requestId)
+    console.info('[SessionRoom] stop requested', {
+      sessionId,
+      requestId: active.requestId,
+      source: active.source,
+      turnId: active.turnId,
+    })
+
+    try {
+      const result = await stopSessionStream(sessionId, active.requestId)
+      console.info('[SessionRoom] stop result received', {
+        sessionId,
+        requestId: active.requestId,
+        resultStatus: result.status,
+        resultRequestId: result.requestId,
+      })
+      if (result.status === TURN_CANCEL_STATUS.CANCELLED) {
+        stopSettledRequestIdsRef.current.add(active.requestId)
+        if (activeStreamRef.current?.requestId === active.requestId) activeStreamRef.current = null
+        active.controller.abort()
+        markStreamStopped(active.assistantMessageId, active.turnId)
+        if (!silent) showToast('已停止当前流式响应')
+        return true
+      }
+      if (result.status === TURN_CANCEL_STATUS.NOT_RUNNING) {
+        stopSettledRequestIdsRef.current.add(active.requestId)
+        await refreshSessionData({ silent: true })
+        if (!silent) showToast('生成已结束，已刷新状态')
+        return false
+      }
+      if (!silent) showToast('当前生成状态已变化，未停止')
+      return false
+    } catch (error) {
+      const stillActive = activeStreamRef.current?.requestId === active.requestId
+      console.warn('[SessionRoom] failed to stop active stream', {
+        sessionId,
+        requestId: active.requestId,
+        source: active.source,
+        turnId: active.turnId,
+        stillActive,
+        error,
+      })
+      if (stillActive) {
+        if (!silent) showToast('停止失败，生成仍在继续')
+      } else {
+        await refreshSessionData({ silent: true })
+        if (!silent) showToast('停止失败，已刷新状态')
+      }
+      return false
+    } finally {
+      if (stoppingRequestIdRef.current === active.requestId) {
+        stoppingRequestIdRef.current = null
+        setStoppingRequestId((current) => (current === active.requestId ? null : current))
+      }
+    }
+  }, [markStreamStopped, refreshSessionData, sessionId, showToast])
 
   const handleStop = useCallback(() => {
-    abortRef.current?.abort()
-    showToast('已停止当前流式响应')
-  }, [showToast])
+    void stopActiveStream()
+  }, [stopActiveStream])
+
+  const handleExitSession = useCallback(() => {
+    const active = activeStreamRef.current
+    if (active) {
+      console.info('[SessionRoom] stopping active stream on exit', {
+        sessionId,
+        requestId: active.requestId,
+        source: active.source,
+        turnId: active.turnId,
+      })
+      activeStreamRef.current = null
+      stoppingRequestIdRef.current = null
+      setStoppingRequestId(null)
+      active.controller.abort()
+      void stopSessionStream(sessionId, active.requestId).catch((error) => {
+        console.warn('failed to stop active stream on session exit', error)
+      })
+    }
+    router.push('/sessions')
+  }, [router, sessionId])
 
   const handleConfirm = () => {
     const action = confirmRequest?.onConfirm
@@ -1209,7 +1381,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             <ThemeSwitcher menuAlign="right" menuSide="bottom" triggerSize="compact" />
             <button
               type="button"
-              onClick={() => router.push('/sessions')}
+              onClick={handleExitSession}
               className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
             >
               <LogOut size={16} />
@@ -1262,6 +1434,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           disabled={roleSelectionBlocked}
           contextUsage={contextUsage}
           contextUsageLoading={contextPreviewQuery.isLoading || contextPreviewQuery.isFetching}
+          stopping={Boolean(stoppingRequestId)}
           onTextChange={handleComposerTextChange}
           onModeChange={setInputMode}
           onNarrativeStyleChange={setNarrativeStyleId}

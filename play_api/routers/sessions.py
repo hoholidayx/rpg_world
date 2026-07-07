@@ -110,8 +110,17 @@ class ContextPreviewPayload(BaseModel):
 
 
 class PlayChatRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     text: str
     mode: str = "ic"
+    request_id: str | None = Field(default=None, alias="requestId")
+
+
+class PlayStopRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    request_id: str | None = Field(default=None, alias="requestId")
 
 
 class PlayScene(BaseModel):
@@ -521,6 +530,7 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
                 agent_session_id,
                 payload.text,
                 payload.mode,
+                request_id=payload.request_id,
             ):
                 kind = agent_event_kind(event)
                 encoded = stream.agent_event(event)
@@ -538,6 +548,28 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
             yield stream.error(str(exc), status_code=exc.status_code)
 
     return StreamingResponse(event_generator(), media_type=SSE_MEDIA_TYPE)
+
+
+@router.post("/{session_id}/stop")
+async def stop_turn(session_id: str, payload: PlayStopRequest | None = None) -> dict[str, object]:
+    session = await resolve_session_or_404(session_id)
+    workspace, story_id, agent_session_id = _session_context(session)
+    result = await _agent_call(
+        get_agent_backend().stop(
+            workspace,
+            story_id,
+            agent_session_id,
+            request_id=payload.request_id if payload else None,
+        )
+    )
+    return {
+        "status": result.get("status", "not_running"),
+        "workspace": workspace,
+        "storyId": story_id,
+        "sessionId": agent_session_id,
+        "requestId": result.get("request_id"),
+        "agent": result,
+    }
 
 
 def _log_context_preview_usage(*, session_id: str, preview: dict[str, object]) -> None:

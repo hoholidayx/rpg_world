@@ -19,6 +19,7 @@ export function SessionComposer({
   narrativeStyleId,
   narrativeStyles,
   sending,
+  stopping = false,
   disabled = false,
   contextUsage,
   contextUsageLoading = false,
@@ -34,6 +35,7 @@ export function SessionComposer({
   narrativeStyleId: NarrativeStyleId
   narrativeStyles: NarrativeStyle[]
   sending: boolean
+  stopping?: boolean
   disabled?: boolean
   contextUsage?: ContextUsageSnapshot | null
   contextUsageLoading?: boolean
@@ -47,10 +49,15 @@ export function SessionComposer({
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       if (disabled) return
+      if (stopping) return
       if (sending) onStop()
       else onSend()
     }
   }
+
+  const actionDisabled = disabled || stopping
+  const actionStopping = stopping
+  const actionSending = sending || stopping
 
   return (
     <section className="border-t border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6">
@@ -88,17 +95,18 @@ export function SessionComposer({
           <button
             type="button"
             onClick={sending ? onStop : onSend}
-            disabled={disabled}
+            disabled={actionDisabled}
             className={cn(
               'my-1 flex min-h-20 items-center justify-center gap-2 rounded-lg px-5 text-base font-black text-white shadow-lg transition sm:min-h-24',
-              disabled ? 'cursor-not-allowed bg-slate-300 shadow-none dark:bg-slate-700' :
-              sending
+              actionDisabled
+                ? 'cursor-not-allowed bg-slate-300 shadow-none dark:bg-slate-700'
+                : sending
                 ? 'bg-rose-500 shadow-rose-100 hover:bg-rose-600 dark:shadow-rose-950/30'
                 : 'bg-violet-600 shadow-violet-200 hover:bg-violet-700 dark:shadow-violet-950/40',
             )}
           >
-            {sending ? <Square size={16} fill="currentColor" /> : <Plane size={17} fill="currentColor" />}
-            {sending ? '停止' : '发送'}
+            {actionSending ? <Square size={16} fill="currentColor" /> : <Plane size={17} fill="currentColor" />}
+            {actionStopping ? '停止中' : sending ? '停止' : '发送'}
           </button>
         </div>
 

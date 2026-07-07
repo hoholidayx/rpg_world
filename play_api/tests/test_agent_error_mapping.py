@@ -29,7 +29,8 @@ class _UnavailableSendClient:
 
 
 class _FailingStreamClient:
-    async def stream(self, session_id: str, text: str):
+    async def stream(self, session_id: str, text: str, request_id: str | None = None):
+        del request_id
         if False:
             yield None
         raise AgentClientError("stream failed")

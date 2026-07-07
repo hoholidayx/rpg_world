@@ -4,7 +4,7 @@ import pytest
 
 import agent_service.client as client_module
 from agent_service.client import AgentClient
-from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
 
 
 class FakeResponse:
@@ -56,6 +56,12 @@ class FakeAsyncClient:
 
     async def post(self, url: str, json=None):
         self.calls.append(("POST", url, {"json": json}))
+        if url.endswith("/chat/stop"):
+            return FakeResponse({
+                "status": TurnCancelStatus.CANCELLED.value,
+                "session_id": json["session_id"],
+                "request_id": json.get("request_id"),
+            })
         return FakeResponse({"reply": "ok"})
 
     def stream(self, method: str, url: str, json=None):
@@ -144,7 +150,23 @@ async def test_client_get_context_preview_uses_agent_service_contract() -> None:
 async def test_client_stream_parses_sse_events() -> None:
     events = [
         event
-        async for event in AgentClient(base_url="http://agent").stream("s1", "hello")
+        async for event in AgentClient(base_url="http://agent").stream("s1", "hello", request_id="req1")
     ]
     assert [event.kind for event in events] == [StreamEventKind.TEXT, StreamEventKind.DONE]
     assert events[-1].content == "hi"
+    assert FakeAsyncClient.calls[-1] == (
+        "POST",
+        "http://agent/chat/stream",
+        {"json": {"session_id": "s1", "message": "hello", "request_id": "req1"}},
+    )
+
+
+async def test_client_stop_uses_request_id_payload() -> None:
+    result = await AgentClient(base_url="http://agent").stop("s1", request_id="req1")
+
+    assert result == {"status": TurnCancelStatus.CANCELLED.value, "session_id": "s1", "request_id": "req1"}
+    assert FakeAsyncClient.calls[-1] == (
+        "POST",
+        "http://agent/chat/stop",
+        {"json": {"session_id": "s1", "request_id": "req1"}},
+    )

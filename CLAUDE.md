@@ -278,6 +278,7 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
 - `StatusSubAgent` 使用 scratch 版 scene/status 工具；context builder 读取 scratch 后的 history 与状态，让主 LLM 能看到本轮预更新状态。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
+- WebUI 停止生成通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 到 Agent service `/chat/stop`；取消成功的 stream turn 丢弃 scratch，不发 DONE，不提交消息、状态或 usage。
 - 持久化 session 的 commit 使用 `rpg_data` database atomic；`history_enabled=False` 仅作为测试/内存模式，不承诺补偿回滚已写入的外部 status manager。
 - summary compression 和 story memory extraction 是 commit 后副作用，失败只记录 warning，不回滚已提交 turn。
 
@@ -467,7 +468,7 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 | 模块 | 路由文件 | 职责 |
 |---|---|---|
 | workspace | `play_api/routers/workspace.py` | 工作区列表 |
-| sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取，以及 `history/scene/commands/turn/stream` 子资源 |
+| sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取，以及 `history/scene/commands/turn/stream/stop` 子资源 |
 | characters | `play_api/routers/characters.py` | workspace 角色库、角色详情、story 挂载 |
 | lorebook | `play_api/routers/lorebook.py` | workspace 世界书条目、story 挂载 |
 | status-tables | `play_api/routers/status_tables.py` | 状态表模板、story 挂载、session 运行表 |
@@ -480,6 +481,7 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 - `/sessions/{session_id}/context-preview` 可透传估算 `usageEstimate`；它不是 provider usage。
 - `/sessions/{session_id}/turn` 在正常 turn 返回中携带本轮 `usage`；流式只在 `turn_completed.payload.usage` 携带，不额外发 usage 事件或请求。
 - SSE 流式格式：`data: {json}\n\n`。`turn_completed.payload.text` 承载完整 assistant 原文；旁白/角色分离由正文标签表达，不通过 `metadata.messageDisplay` 传输。
+- `/sessions/{session_id}/stop` 只取消带 `requestId` 的活动或队列 stream turn，返回 `cancelled | not_running | stale`；前端只有收到 `cancelled` 才展示“已停止”。
 
 ### 对话历史持久化
 

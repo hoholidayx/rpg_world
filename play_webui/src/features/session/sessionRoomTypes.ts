@@ -13,6 +13,23 @@ export type NarrativeStyle = {
 
 export type SpeakerTone = 'player' | 'assistant' | 'tool' | 'system' | 'thinking' | 'error'
 
+export const SESSION_MESSAGE_STATUS = {
+  DONE: 'done',
+  STREAMING: 'streaming',
+  LOCAL: 'local',
+  ERROR: 'error',
+} as const
+
+export type SessionMessageStatus = (typeof SESSION_MESSAGE_STATUS)[keyof typeof SESSION_MESSAGE_STATUS]
+
+export const SESSION_STREAM_SOURCE = {
+  SEND: 'send',
+  RETRY: 'retry',
+  EDIT: 'edit',
+} as const
+
+export type SessionStreamSource = (typeof SESSION_STREAM_SOURCE)[keyof typeof SESSION_STREAM_SOURCE]
+
 export const SESSION_TIMELINE_ROLE = {
   ...HISTORY_MESSAGE_ROLE,
   THINKING: 'thinking',
@@ -39,7 +56,7 @@ export type SessionTimelineMessage = {
   metadata?: Record<string, unknown>
   createdAt?: string | null
   speaker: SessionSpeaker
-  status?: 'done' | 'streaming' | 'local' | 'error'
+  status?: SessionMessageStatus
   hiddenPrompt?: string
   canCopy?: boolean
   canRetry?: boolean

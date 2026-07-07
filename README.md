@@ -113,7 +113,7 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - 绑定与切换统一走 Agent 命令 `/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 会转发到 Agent service，由 Agent service 将角色 ID 映射为当前 story 已挂载角色序号并执行同一命令；不要在 Play API/DataManager 中直接写绑定。
 - 绑定成功且 main history 为空、story `first_message` 非空时，`SessionRoleService` 会追加一条 assistant 开场消息到 main 和 backup history；已有 history 时不会重复追加。
 
-Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`scene`、`commands`、`turn`、`stream`、`player-character`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
+Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream`、`/chat/stop` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`scene`、`commands`、`turn`、`stream`、`stop`、`player-character`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
 
 状态表在 `rpg_data` 中采用 SQLite document 真源：
 
@@ -162,6 +162,7 @@ Telegram 渠道当前支持：
 - `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。
 - 上下文构建读取 scratch 后的 history 与 scene/status，因此主 LLM 能看到本轮预更新状态。
 - LLM 完整成功后，事务一次性提交 staged user message、assistant message 和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
+- WebUI 停止生成走 `requestId` 精准取消：Play API `/sessions/{session_id}/stop` 转发到 Agent service `/chat/stop`，被取消的 stream turn 只丢弃 scratch，不发送 DONE，也不提交消息、状态或 usage。
 - 持久化 session 的 commit 在 `rpg_data` database atomic 中执行，不跨 LLM 调用持有数据库事务；`history_enabled=False` 是测试/内存模式，只回滚内存 history，不承诺补偿已写入的外部 status manager。
 - summary compression 和 story memory extraction 是 commit 后副作用；失败只记录 warning，不回滚已提交 turn。
 

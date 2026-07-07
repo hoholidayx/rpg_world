@@ -6,7 +6,14 @@ from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
 from llm_service.types import LLMUsage
-from rpg_core.agent.agent_types import AgentStreamEvent, CallRecord, StreamEventKind, TurnStats
+from rpg_core.agent.agent_types import (
+    AgentStreamEvent,
+    CallRecord,
+    StreamEventKind,
+    TurnCancelResult,
+    TurnCancelStatus,
+    TurnStats,
+)
 from rpg_core.agent.command import CommandDef, CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.context.rpg_context import Message, Role
@@ -17,6 +24,7 @@ class FakeAgent:
     def __init__(self, session_id: str) -> None:
         self._session_id = session_id
         self.history = [Message(Role.USER, "hello"), Message(Role.ASSISTANT, "hi")]
+        self.last_stream_request_id: str | None = None
 
     async def _ensure_initialized(self) -> None:
         return None
@@ -47,7 +55,8 @@ class FakeAgent:
     async def delete_message(self, message_id: int) -> Message:
         return Message(Role.USER, "deleted", uid=message_id, turn_id=1, seq_in_turn=1)
 
-    async def send_stream(self, message: str):
+    async def send_stream(self, message: str, *, request_id: str | None = None):
+        self.last_stream_request_id = request_id
         yield AgentStreamEvent(kind=StreamEventKind.TEXT, content=f"stream:{message}")
         yield AgentStreamEvent(
             kind=StreamEventKind.DONE,
@@ -56,6 +65,13 @@ class FakeAgent:
             model="stream-model",
             finish_reason="stop",
             duration_ms=9.5,
+        )
+
+    async def cancel_current_turn(self, request_id: str | None = None) -> TurnCancelResult:
+        return TurnCancelResult(
+            status=TurnCancelStatus.CANCELLED,
+            session_id=self._session_id,
+            request_id=request_id,
         )
 
     async def execute_command(self, command: str) -> CommandResult:
@@ -436,6 +452,17 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert delete.status_code == 200
         assert delete.json()["status"] == "deleted"
 
+        stop = client.post(
+            "/agent/v1/chat/stop",
+            json={"session_id": "s1", "request_id": "req-stop"},
+        )
+        assert stop.status_code == 200
+        assert stop.json() == {
+            "status": TurnCancelStatus.CANCELLED.value,
+            "session_id": "s1",
+            "request_id": "req-stop",
+        }
+
         command = client.post(
             "/agent/v1/chat/command",
             json={"session_id": "s1", "command": "/session_switch s2"},
@@ -446,13 +473,14 @@ def test_agent_service_contracts(monkeypatch) -> None:
         with client.stream(
             "POST",
             "/agent/v1/chat/stream",
-            json={"session_id": "s1", "message": "go"},
+            json={"session_id": "s1", "message": "go", "request_id": "req-stream"},
         ) as stream:
             body = "".join(stream.iter_text())
         assert '"kind": "text"' in body
         assert '"kind": "done"' in body
         assert '"prompt_tokens": 13' in body
         assert '"source": "provider_usage"' in body
+        assert FakeAgentManager.instances["s1"].last_stream_request_id == "req-stream"
 
 
 def test_agent_service_history_rejects_invalid_turn_metadata(monkeypatch) -> None:

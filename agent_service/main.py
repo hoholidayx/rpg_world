@@ -38,6 +38,8 @@ from agent_service.schemas import (
     AgentSessionsPayload,
     AgentSessionsResponse,
     AgentStatsPayload,
+    AgentStopRequest,
+    AgentTurnCancelResponse,
 )
 from agent_service.settings import settings as process_settings
 from commons.types import JsonObject, JsonValue
@@ -319,7 +321,7 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
 
     async def event_generator() -> AsyncIterator[str]:
         try:
-            async for event in agent.send_stream(body.message):
+            async for event in agent.send_stream(body.message, request_id=body.request_id):
                 yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except Exception as exc:
             event = AgentStreamEvent(kind=StreamEventKind.ERROR, content=str(exc))
@@ -334,6 +336,13 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post(f"{_service_prefix()}/chat/stop", response_model=AgentTurnCancelResponse)
+async def chat_stop(body: AgentStopRequest) -> AgentTurnCancelResponse:
+    agent = _get_agent(body.session_id)
+    result = await agent.cancel_current_turn(request_id=body.request_id)
+    return AgentTurnCancelResponse.model_validate(result.to_dict())
 
 
 def _get_agent(session_id: str):

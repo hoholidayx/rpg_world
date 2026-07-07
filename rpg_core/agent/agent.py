@@ -17,6 +17,8 @@ from rpg_core.agent.agent_types import (
     QueueItem,
     QueueKind,
     StreamEventKind,
+    TurnCancelResult,
+    TurnCancelStatus,
     TurnStats,
     _StreamSentinel,
 )
@@ -151,6 +153,10 @@ class RPGGameAgent:
         # 消息队列（初始化时创建，_ensure_initialized 末尾启动消费者）
         self._queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         self._consumer_task: asyncio.Task | None = None
+        self._active_stream_task: asyncio.Task | None = None
+        self._active_stream_request_id: str | None = None
+        self._queued_stream_request_ids: set[str] = set()
+        self._cancelled_request_ids: set[str] = set()
 
     def _create_future(self) -> asyncio.Future:
         """在当前运行中的事件循环里创建 Future。
@@ -185,8 +191,7 @@ class RPGGameAgent:
                         result = await self._send_impl(item.user_input)
                         item.future.set_result(result)
                     case QueueKind.SEND_STREAM:
-                        await self._send_stream_impl(item.user_input, item.event_queue)
-                        item.future.set_result(None)
+                        await self._run_stream_queue_item(item)
                     case QueueKind.COMMAND:
                         cmd_result = await self._cmd_dispatcher.dispatch(item.user_input)
                         item.future.set_result(cmd_result)
@@ -205,6 +210,57 @@ class RPGGameAgent:
                     item.future.set_exception(e)
             finally:
                 self._queue.task_done()
+
+    async def _run_stream_queue_item(self, item: QueueItem) -> None:
+        """Run one queued stream request in a cancellable task."""
+        if item.event_queue is None:
+            raise ValueError("event_queue is required for send_stream")
+
+        request_id = item.request_id
+        if request_id:
+            self._queued_stream_request_ids.discard(request_id)
+            if request_id in self._cancelled_request_ids:
+                self._cancelled_request_ids.discard(request_id)
+                logger.info(
+                    _TAG + " skipping cancelled queued stream: session_id={}, request_id={}",
+                    self._session_id,
+                    request_id,
+                )
+                await item.event_queue.put(_StreamSentinel())
+                if not item.future.done():
+                    item.future.set_result(None)
+                return
+
+        task = asyncio.create_task(self._send_stream_impl(item.user_input, item.event_queue))
+        self._active_stream_task = task
+        self._active_stream_request_id = request_id
+        logger.debug(
+            _TAG + " stream task started: session_id={}, request_id={}",
+            self._session_id,
+            request_id,
+        )
+        try:
+            await task
+        except asyncio.CancelledError:
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
+                raise
+            logger.info(
+                _TAG + " stream task cancelled: session_id={}, request_id={}",
+                self._session_id,
+                request_id,
+            )
+            await item.event_queue.put(_StreamSentinel())
+            if not item.future.done():
+                item.future.set_result(None)
+            return
+        finally:
+            if self._active_stream_task is task:
+                self._active_stream_task = None
+                self._active_stream_request_id = None
+
+        if not item.future.done():
+            item.future.set_result(None)
 
     # ── public API ─────────────────────────────────────────────────────
 
@@ -371,7 +427,12 @@ class RPGGameAgent:
         finally:
             tx.close()
 
-    async def send_stream(self, user_input: str) -> AsyncIterator[AgentStreamEvent]:
+    async def send_stream(
+        self,
+        user_input: str,
+        *,
+        request_id: str | None = None,
+    ) -> AsyncIterator[AgentStreamEvent]:
         """Streaming variant of ``send()``, goes through the message queue.
 
         Enqueues the request and streams events from a per-request event queue
@@ -382,20 +443,109 @@ class RPGGameAgent:
         await self._ensure_initialized()
         event_queue: asyncio.Queue[AgentStreamEvent | BaseException | _StreamSentinel] = asyncio.Queue()
         future: Future[None] = self._create_future()
+        if request_id:
+            self._queued_stream_request_ids.add(request_id)
         await self._queue.put(QueueItem(
-            kind=QueueKind.SEND_STREAM, user_input=user_input, future=future, event_queue=event_queue,
+            kind=QueueKind.SEND_STREAM,
+            user_input=user_input,
+            future=future,
+            event_queue=event_queue,
+            request_id=request_id,
         ))
-        logger.debug(_TAG + " send_stream() enqueued: input={!r:.60}", user_input)
-        while True:
-            item = await event_queue.get()
-            if isinstance(item, _StreamSentinel):
-                break
-            if isinstance(item, BaseException):
-                raise item
-            yield item
+        logger.debug(
+            _TAG + " send_stream() enqueued: request_id={}, input={!r:.60}",
+            request_id,
+            user_input,
+        )
+        stream_completed = False
+        try:
+            while True:
+                item = await event_queue.get()
+                if isinstance(item, _StreamSentinel):
+                    stream_completed = True
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            if request_id and not stream_completed and not future.done():
+                logger.info(
+                    _TAG + " stream consumer closed before completion; cancelling turn: session_id={}, request_id={}",
+                    self._session_id,
+                    request_id,
+                )
+                try:
+                    await self.cancel_current_turn(request_id=request_id)
+                except Exception as exc:
+                    logger.opt(exception=exc).warning(
+                        _TAG + " stream close cancellation failed: session_id={}, request_id={}",
+                        self._session_id,
+                        request_id,
+                    )
         # 如果消费者侧有未预期的异常，在此处传播
         if future.done() and future.exception():
             raise future.exception()
+
+    async def cancel_current_turn(self, request_id: str | None = None) -> TurnCancelResult:
+        """Best-effort cancellation for an active or queued stream turn."""
+        active_task = self._active_stream_task
+        active_request_id = self._active_stream_request_id
+
+        if active_task is not None and active_task.done():
+            self._active_stream_task = None
+            self._active_stream_request_id = None
+            active_task = None
+            active_request_id = None
+
+        if request_id and request_id in self._queued_stream_request_ids:
+            self._cancelled_request_ids.add(request_id)
+            logger.info(
+                _TAG + " queued stream cancel requested: session_id={}, request_id={}",
+                self._session_id,
+                request_id,
+            )
+            return TurnCancelResult(
+                status=TurnCancelStatus.CANCELLED,
+                session_id=self._session_id,
+                request_id=request_id,
+            )
+
+        if active_task is None:
+            logger.info(
+                _TAG + " stream cancel requested but no active turn: session_id={}, request_id={}",
+                self._session_id,
+                request_id,
+            )
+            return TurnCancelResult(
+                status=TurnCancelStatus.NOT_RUNNING,
+                session_id=self._session_id,
+                request_id=request_id,
+            )
+
+        if request_id and active_request_id != request_id:
+            logger.info(
+                _TAG + " stale stream cancel ignored: session_id={}, request_id={}, active_request_id={}",
+                self._session_id,
+                request_id,
+                active_request_id,
+            )
+            return TurnCancelResult(
+                status=TurnCancelStatus.STALE,
+                session_id=self._session_id,
+                request_id=request_id,
+            )
+
+        active_task.cancel()
+        logger.info(
+            _TAG + " active stream cancel requested: session_id={}, request_id={}",
+            self._session_id,
+            active_request_id,
+        )
+        return TurnCancelResult(
+            status=TurnCancelStatus.CANCELLED,
+            session_id=self._session_id,
+            request_id=active_request_id or request_id,
+        )
 
     async def _send_stream_impl(self, user_input: str, event_queue: asyncio.Queue) -> None:
         """Internal send_stream implementation — runs inside the queue consumer.
@@ -574,8 +724,8 @@ class RPGGameAgent:
                 ))
             await event_queue.put(_StreamSentinel())
             await self._run_post_commit_side_effects()
-        except asyncio.CancelledError as exc:
-            logger.opt(exception=exc).warning(
+        except asyncio.CancelledError:
+            logger.info(
                 _TAG + " send_stream cancelled: session_id={}",
                 self._session_id,
             )

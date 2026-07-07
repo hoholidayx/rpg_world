@@ -7,6 +7,7 @@ from typing import Literal, NotRequired, TypedDict
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from commons.types import JsonObject, JsonValue
+from rpg_core.agent.agent_types import TurnCancelStatus
 from rpg_core.session.manager import DEFAULT_SESSION_ID, SessionManager
 
 
@@ -25,6 +26,11 @@ class AgentRequestBase(_BaseSchema):
 
 class AgentMessageRequest(AgentRequestBase):
     message: str
+    request_id: str | None = None
+
+
+class AgentStopRequest(AgentRequestBase):
+    request_id: str | None = None
 
 
 class AgentSessionMutationRequest(AgentRequestBase):
@@ -94,6 +100,12 @@ class AgentSessionCreateResponse(AgentSessionPayload):
     status: Literal["created"] = "created"
 
 
+class AgentTurnCancelResponse(_BaseSchema):
+    status: TurnCancelStatus
+    session_id: str
+    request_id: str | None = None
+
+
 class AgentContextPreviewTotals(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
@@ -159,6 +171,15 @@ class AgentSessionPayloadDict(TypedDict):
 
 class AgentSessionCreatePayload(AgentSessionPayloadDict):
     status: Literal["created"]
+
+
+class AgentTurnCancelPayloadBase(TypedDict):
+    status: TurnCancelStatus
+    session_id: str
+
+
+class AgentTurnCancelPayload(AgentTurnCancelPayloadBase, total=False):
+    request_id: str
 
 
 class AgentStatsPayload(TypedDict):

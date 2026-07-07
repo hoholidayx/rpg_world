@@ -33,8 +33,17 @@ from rpg_core.agent.agent_types import (
     QueueItem,
     QueueKind,
     StreamEventKind,
+    TurnCancelStatus,
     _StreamSentinel,
 )
+
+
+def _init_stream_cancel_state(agent: RPGGameAgent, *, session_id: str = "s_cancel") -> None:
+    agent._session_id = session_id
+    agent._active_stream_task = None
+    agent._active_stream_request_id = None
+    agent._queued_stream_request_ids = set()
+    agent._cancelled_request_ids = set()
 
 
 def _patch_story_prompt_contributor(monkeypatch, content: str = "") -> None:
@@ -66,6 +75,7 @@ def _patch_story_prompt_contributor(monkeypatch, content: str = "") -> None:
 @pytest.mark.asyncio
 async def test_queue_consumer_surfaces_stream_errors(monkeypatch):
     agent = object.__new__(RPGGameAgent)
+    _init_stream_cancel_state(agent)
     agent._queue = asyncio.Queue()
     agent._cmd_dispatcher = None
     agent._send_impl = AsyncMock()
@@ -144,6 +154,87 @@ async def test_queue_consumer_serializes_truncate_after_send() -> None:
 
         assert order == ["send-start", "send-end", "truncate-2"]
         assert truncate_future.result()["status"] == "truncated"
+    finally:
+        consumer_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer_task
+
+
+@pytest.mark.asyncio
+async def test_cancel_current_turn_cancels_active_stream_request() -> None:
+    agent = object.__new__(RPGGameAgent)
+    _init_stream_cancel_state(agent)
+    started = asyncio.Event()
+
+    async def active_stream() -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(active_stream())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    agent._active_stream_task = task
+    agent._active_stream_request_id = "req-active"
+
+    result = await agent.cancel_current_turn(request_id="req-active")
+
+    assert result.status == TurnCancelStatus.CANCELLED
+    assert result.request_id == "req-active"
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_cancel_current_turn_ignores_stale_request_id() -> None:
+    agent = object.__new__(RPGGameAgent)
+    _init_stream_cancel_state(agent)
+    task = asyncio.create_task(asyncio.Event().wait())
+    agent._active_stream_task = task
+    agent._active_stream_request_id = "req-new"
+
+    try:
+        result = await agent.cancel_current_turn(request_id="req-old")
+
+        assert result.status == TurnCancelStatus.STALE
+        assert not task.cancelled()
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_queue_consumer_skips_cancelled_queued_stream() -> None:
+    agent = object.__new__(RPGGameAgent)
+    _init_stream_cancel_state(agent)
+    agent._queue = asyncio.Queue()
+    agent._cmd_dispatcher = None
+    agent._send_impl = AsyncMock()
+    agent._send_stream_impl = AsyncMock()
+
+    future = asyncio.get_running_loop().create_future()
+    event_queue: asyncio.Queue = asyncio.Queue()
+    request_id = "req-queued"
+    agent._queued_stream_request_ids.add(request_id)
+    await agent._queue.put(
+        QueueItem(
+            kind=QueueKind.SEND_STREAM,
+            user_input="hello",
+            future=future,
+            event_queue=event_queue,
+            request_id=request_id,
+        )
+    )
+
+    cancel_result = await agent.cancel_current_turn(request_id=request_id)
+    consumer_task = asyncio.create_task(agent._queue_consumer())
+    try:
+        sentinel = await asyncio.wait_for(event_queue.get(), timeout=1)
+
+        assert cancel_result.status == TurnCancelStatus.CANCELLED
+        assert isinstance(sentinel, _StreamSentinel)
+        assert future.done()
+        assert future.result() is None
+        agent._send_stream_impl.assert_not_awaited()
     finally:
         consumer_task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -447,6 +538,43 @@ async def test_send_stream_commits_before_done_event(monkeypatch):
     assert first.kind == StreamEventKind.TEXT
     assert second.kind == StreamEventKind.DONE
     assert isinstance(third, _StreamSentinel)
+
+
+@pytest.mark.asyncio
+async def test_send_stream_cancellation_discards_turn_scratch(monkeypatch):
+    status_mgr = _FakeStatusManager()
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "old", turn_id=1, seq_in_turn=1)],
+        status_mgr=status_mgr,
+        scene_tracker=_scene_tracker_for(status_mgr),
+    )
+    agent._status_sub_agent = _ScratchWritingStatusSubAgent()
+    release_stream = asyncio.Event()
+
+    async def fake_run_chat_loop_stream(**_kwargs):  # noqa: ANN001
+        yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="part")
+        await release_stream.wait()
+        yield AgentStreamEvent(kind=StreamEventKind.DONE, content="final")
+
+    monkeypatch.setattr(agent_module, "run_chat_loop_stream", fake_run_chat_loop_stream)
+
+    event_queue: asyncio.Queue = asyncio.Queue()
+    task = asyncio.create_task(agent._send_stream_impl("go", event_queue))
+    events = [await asyncio.wait_for(event_queue.get(), timeout=1) for _ in range(3)]
+
+    assert [event.kind for event in events] == [
+        StreamEventKind.TOOL_CALL,
+        StreamEventKind.TOOL_RESULT,
+        StreamEventKind.TEXT,
+    ]
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert [message.content for message in agent._session.history] == ["old"]
+    assert status_mgr.get_scene_attrs()["位置"] == "旧地"
 
 
 @pytest.mark.asyncio

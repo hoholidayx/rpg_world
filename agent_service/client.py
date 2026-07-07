@@ -18,6 +18,7 @@ from agent_service.schemas import (
     AgentSessionCreatePayload,
     AgentSessionPayloadDict,
     AgentSessionsPayload,
+    AgentTurnCancelPayload,
 )
 from agent_service.settings import settings
 from commons.types import JsonObject
@@ -234,12 +235,26 @@ class AgentClient:
         )
         return cast(AgentCommandResultPayload, result)
 
+    async def stop(
+        self,
+        session_id: str,
+        request_id: str | None = None,
+    ) -> AgentTurnCancelPayload:
+        payload: JsonObject = {"session_id": session_id}
+        if request_id:
+            payload["request_id"] = request_id
+        result = await self._post("/chat/stop", json=payload)
+        return cast(AgentTurnCancelPayload, result)
+
     async def stream(
         self,
         session_id: str,
         message: str,
+        request_id: str | None = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         payload: JsonObject = {"session_id": session_id, "message": message}
+        if request_id:
+            payload["request_id"] = request_id
         client = self._stream_http_client()
         try:
             async with client.stream("POST", self._url("/chat/stream"), json=payload) as response:

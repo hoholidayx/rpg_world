@@ -12,6 +12,7 @@ from play_api.main import app
 from play_api.delete_tokens import reset_delete_confirmation_tokens
 from play_api.routers.sessions import _agent_call, _turns_from_history
 from play_api.sse_protocol import AgentEventKind, PLAY_SSE_SCHEMA_VERSION, PlaySSEType
+from rpg_core.agent.agent_types import TurnCancelStatus
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data.services import get_data_service_gateway
 
@@ -220,6 +221,10 @@ class _FakeAgentClient:
         self.calls.append(("delete-message", session_id, str(message_id)))
         return {"status": "deleted"}
 
+    async def stop(self, session_id: str, request_id: str | None = None) -> dict[str, object]:
+        self.calls.append(("stop", session_id, request_id or ""))
+        return {"status": TurnCancelStatus.CANCELLED.value, "session_id": session_id, "request_id": request_id}
+
 
 class _InvalidHistoryAgentClient(_FakeAgentClient):
     async def get_history(self, session_id: str) -> dict[str, object]:
@@ -233,8 +238,8 @@ class _InvalidHistoryAgentClient(_FakeAgentClient):
 
 
 class _StreamingAgentClient(_FakeAgentClient):
-    async def stream(self, session_id: str, text: str):
-        self.calls.append(("stream", session_id, text))
+    async def stream(self, session_id: str, text: str, request_id: str | None = None):
+        self.calls.append(("stream", session_id, text, request_id or ""))
         yield _FakeStreamEvent(kind=AgentEventKind.TEXT.value, content="你推开门")
         yield _FakeStreamEvent(kind=AgentEventKind.TOOL_CALL.value, tool_name="roll", tool_arguments="1d20")
         yield _FakeStreamEvent(kind=AgentEventKind.TOOL_RESULT.value, tool_name="roll", tool_result_preview="18")
@@ -280,7 +285,7 @@ def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
         with client.stream(
             "POST",
             "/play-api/v1/sessions/s_forest001/stream",
-            json={"text": "hello"},
+            json={"text": "hello", "requestId": "req-play"},
         ) as response:
             body = "".join(response.iter_text())
 
@@ -317,7 +322,26 @@ def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
         "finishReason": "stop",
         "durationMs": 12.3,
     }
-    assert ("stream", "s_forest001", "hello") in fake_agent.calls
+    assert ("stream", "s_forest001", "hello", "req-play") in fake_agent.calls
+
+
+def test_stop_endpoint_forwards_request_id(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    fake_agent = _FakeAgentClient()
+    monkeypatch.setattr(agent_client, "_client", fake_agent)
+    reset_delete_confirmation_tokens()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/play-api/v1/sessions/s_forest001/stop",
+            json={"requestId": "req-play"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == TurnCancelStatus.CANCELLED.value
+    assert response.json()["requestId"] == "req-play"
+    assert ("stop", "s_forest001", "req-play") in fake_agent.calls
 
 
 def test_play_api_contracts(tmp_path, monkeypatch) -> None:

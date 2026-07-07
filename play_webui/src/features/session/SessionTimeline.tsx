@@ -8,7 +8,7 @@ import {
   type AssistantTextSegment,
 } from './assistantTextSegments'
 import { formatMessageTime } from './sessionRoomHelpers'
-import { SESSION_TIMELINE_ROLE, type SessionTimelineMessage } from './sessionRoomTypes'
+import { SESSION_MESSAGE_STATUS, SESSION_TIMELINE_ROLE, type SessionTimelineMessage } from './sessionRoomTypes'
 
 function MiniButton({
   label,
@@ -149,7 +149,7 @@ function MessageBubble({
     )
   }
 
-  const content = message.content || (message.status === 'streaming' ? '正在生成回应...' : '')
+  const content = message.content || (message.status === SESSION_MESSAGE_STATUS.STREAMING ? '正在生成回应...' : '')
 
   return (
     <div
@@ -250,10 +250,10 @@ function TimelineMessage({
             <span
               className={cn(
                 'rounded-full px-2 py-0.5 text-[11px] font-black',
-                message.status === 'streaming' ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200' : '',
-                message.status === 'done' ? 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200' : '',
-                message.status === 'local' ? 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200' : '',
-                message.status === 'error' ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200' : '',
+                message.status === SESSION_MESSAGE_STATUS.STREAMING ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200' : '',
+                message.status === SESSION_MESSAGE_STATUS.DONE ? 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200' : '',
+                message.status === SESSION_MESSAGE_STATUS.LOCAL ? 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200' : '',
+                message.status === SESSION_MESSAGE_STATUS.ERROR ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200' : '',
               )}
             >
               {message.status}
