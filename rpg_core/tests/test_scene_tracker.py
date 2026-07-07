@@ -48,6 +48,27 @@ def test_scene_tracker_existing_table_round_trip():
     assert "大厅" in context
 
 
+def test_scene_tracker_exports_and_restores_time_state():
+    source = SceneTracker()
+    source.set_time(year=3, month=6, day=15, hour=14, minute=30)
+
+    mgr = FakeStatusManager(
+        {
+            "id": 8,
+            "status_kind": "scene",
+            "name": "当前场景",
+            "headers": ["属性", "值"],
+            "rows": [],
+        }
+    )
+    cloned = SceneTracker()
+    cloned.bind_status_manager(mgr)
+    assert cloned.load_from_status_table() is True
+    cloned.set_time_state(source.get_time_state())
+
+    assert cloned.set_time(hour=16)["时间"] == "第 3 年 6 月 15 日 16 时 30 分"
+
+
 def test_scene_tracker_does_not_create_unmounted_scene():
     mgr = FakeStatusManager()
     tracker = SceneTracker()

@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import rpg_core.agent.agent as agent_module
+import rpg_core.agent.transaction.transaction as transaction_module
+from rpg_data.models import StatusTableDocument
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.command import CommandDispatcher
 from rpg_core.agent.tools import BaseTool
@@ -164,6 +166,321 @@ async def test_send_impl_rejects_invalid_loaded_turn_metadata_before_new_turn():
 
     with pytest.raises(InvalidTurnMetadataError, match=r"history\[1\]"):
         await agent._send_impl("go")
+
+
+def _make_transaction_agent(
+    monkeypatch,
+    *,
+    history: list[Message] | None = None,
+    status_mgr=None,
+    scene_tracker=None,
+):
+    class FakeBuiltContext:
+        def __init__(self, messages):
+            self._messages = list(messages)
+
+        def to_message_objects(self):
+            return list(self._messages)
+
+    class FakeBuilder:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def build(self, *, messages, status_mgr=None, scene_tracker=None, **kwargs):  # noqa: ANN001
+            self.calls.append({
+                "messages": list(messages),
+                "status_mgr": status_mgr,
+                "scene_tracker": scene_tracker,
+                "kwargs": kwargs,
+            })
+            return FakeBuiltContext(messages)
+
+    monkeypatch.setattr(
+        agent_module,
+        "settings",
+        SimpleNamespace(verbose_logging=False, include_tool_records=True),
+    )
+
+    session = SessionManager(history_enabled=False)
+    session.replace_history(list(history or []), persist=False)
+
+    agent = object.__new__(RPGGameAgent)
+    agent._cmd_dispatcher = None
+    agent._player_character_guard_reply = lambda: ""
+    agent._session_id = "s_tx"
+    agent._model = "test-model"
+    agent._session = session
+    agent._status_mgr = status_mgr
+    agent._scene_tracker = scene_tracker
+    agent._status_sub_agent = None
+    agent._memory_manager = None
+    agent._memory_sub_agent = None
+    agent._compressor = None
+    agent._builder = FakeBuilder()
+    agent._fixed_layer = FixedLayerData()
+    agent._refresh_fixed_layer_snapshot = MagicMock()
+    agent._rp_module_registry = None
+    agent._tool_registry = agent_module.ToolRegistry()
+    agent._provider = object()
+    agent._last_tool_records = None
+    return agent
+
+
+def test_turn_transaction_begin_failure_clears_active_turn(monkeypatch):
+    session = SessionManager(history_enabled=False)
+    tx = transaction_module.AgentTurnTransaction(
+        session=session,
+        status_mgr=None,
+        scene_tracker=None,
+    )
+
+    def fail_message_scratch(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("scratch failed")
+
+    monkeypatch.setattr(transaction_module, "MessageScratch", fail_message_scratch)
+
+    with pytest.raises(RuntimeError, match="scratch failed"):
+        tx.begin(SimpleNamespace())
+
+    assert session.begin_turn() == 1
+    session.end_turn(1)
+
+
+@pytest.mark.asyncio
+async def test_send_impl_commits_history_only_after_llm_success(monkeypatch):
+    history = [
+        Message(Role.USER, "old", turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "old reply", turn_id=1, seq_in_turn=2),
+    ]
+    agent = _make_transaction_agent(monkeypatch, history=history)
+    post_commit = SimpleNamespace(maybe_auto_extract=AsyncMock())
+    agent._memory_sub_agent = post_commit
+    seen_messages: list[Message] = []
+
+    async def fake_run_chat_loop(**kwargs):  # noqa: ANN001
+        assert [message.content for message in agent._session.history] == ["old", "old reply"]
+        seen_messages.extend(kwargs["messages"])
+        return "new reply", []
+
+    monkeypatch.setattr(agent_module, "run_chat_loop", fake_run_chat_loop)
+
+    reply = await agent._send_impl("look around")
+
+    assert reply.text == "new reply"
+    assert [message.content for message in seen_messages] == ["old", "old reply", "look around"]
+    assert [(message.content, message.turn_id, message.seq_in_turn) for message in agent._session.history] == [
+        ("old", 1, 1),
+        ("old reply", 1, 2),
+        ("look around", 2, 1),
+        ("new reply", 2, 2),
+    ]
+    post_commit.maybe_auto_extract.assert_awaited_once_with(agent._session)
+
+
+@pytest.mark.asyncio
+async def test_send_impl_discards_turn_scratch_when_llm_fails(monkeypatch):
+    history = [Message(Role.USER, "old", turn_id=1, seq_in_turn=1)]
+    agent = _make_transaction_agent(monkeypatch, history=history)
+    post_commit = SimpleNamespace(maybe_auto_extract=AsyncMock())
+    agent._memory_sub_agent = post_commit
+
+    async def fake_run_chat_loop(**_kwargs):  # noqa: ANN001
+        assert [message.content for message in agent._session.history] == ["old"]
+        raise RuntimeError("llm failed")
+
+    monkeypatch.setattr(agent_module, "run_chat_loop", fake_run_chat_loop)
+
+    with pytest.raises(RuntimeError, match="llm failed"):
+        await agent._send_impl("do it")
+
+    assert [(message.content, message.turn_id, message.seq_in_turn) for message in agent._session.history] == [
+        ("old", 1, 1),
+    ]
+    post_commit.maybe_auto_extract.assert_not_awaited()
+
+
+class _FakeStatusManager:
+    session_id = "s_tx"
+
+    def __init__(self, *, fail_commit: bool = False) -> None:
+        self.fail_commit = fail_commit
+        self.document = StatusTableDocument.from_data(
+            SimpleNamespace(headers=("key", "value"), rows=(("位置", "旧地"),))
+        )
+
+    def _table(self):
+        return {
+            "id": 1,
+            "name": "当前场景",
+            "status_kind": "scene",
+            "headers": list(self.document.headers),
+            "rows": [list(row) for row in self.document.data_rows],
+            "document": self.document.to_json_dict(),
+        }
+
+    def list_context_tables(self):
+        return []
+
+    def get_active_scene_table_ref(self):
+        return 1, ("scene", "当前场景")
+
+    def get_active_scene_table(self):
+        return self.get_table_by_id(1)
+
+    def get_table_by_id(self, table_id: int):
+        assert int(table_id) == 1
+        return self._table()
+
+    def get_table_document_by_id(self, table_id: int):
+        assert int(table_id) == 1
+        return self.document
+
+    def save_table_document(self, table_id: int, document):
+        assert int(table_id) == 1
+        if self.fail_commit:
+            raise RuntimeError("status commit failed")
+        self.document = document
+        return self._table()
+
+    def get_scene_attrs(self):
+        return {row.key: row.value for row in self.document.rows}
+
+    def runtime_set_key_value(self, table_id: int, key: str, value: str, **_kwargs):
+        if self.fail_commit:
+            raise RuntimeError("status commit failed")
+        self.document = self.document.with_key_value(key, value)
+        return self._table()
+
+    def runtime_delete_key_value(self, table_id: int, key: str, **_kwargs):
+        if self.fail_commit:
+            raise RuntimeError("status commit failed")
+        self.document = self.document.without_key(key)
+        return self._table()
+
+
+class _ScratchWritingStatusSubAgent:
+    def __init__(self) -> None:
+        self._tool_registry = agent_module.ToolRegistry()
+        self._schemas = []
+
+    def clear_tools(self) -> None:
+        self._tool_registry = agent_module.ToolRegistry()
+        self._schemas = []
+
+    def register_tools(self, tools) -> None:  # noqa: ANN001
+        self._tool_registry.register_all(tools)
+        self._schemas = self._tool_registry.get_openai_schemas()
+
+    async def update(self, *, history, state_context, user_input, turn_stats):  # noqa: ANN001
+        assert [message.content for message in history] == ["old"]
+        assert "位置: 旧地" in state_context
+        await self._tool_registry.execute("scene_attr", '{"key":"位置","value":"新地"}')
+        return SimpleNamespace(
+            updated=True,
+            records=[{"tool_name": "scene_attr", "arguments": "{}", "result": "ok"}],
+        )
+
+
+def _scene_tracker_for(status_mgr):
+    from rpg_core.scene import SceneTracker
+
+    tracker = SceneTracker()
+    tracker.bind_status_manager(status_mgr)
+    tracker.load_from_status_table()
+    return tracker
+
+
+@pytest.mark.asyncio
+async def test_status_sub_agent_writes_status_scratch_before_commit(monkeypatch):
+    status_mgr = _FakeStatusManager()
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "old", turn_id=1, seq_in_turn=1)],
+        status_mgr=status_mgr,
+        scene_tracker=_scene_tracker_for(status_mgr),
+    )
+    agent._status_sub_agent = _ScratchWritingStatusSubAgent()
+    seen_user_content = ""
+
+    async def fake_run_chat_loop(**kwargs):  # noqa: ANN001
+        nonlocal seen_user_content
+        assert status_mgr.get_scene_attrs()["位置"] == "旧地"
+        seen_user_content = kwargs["messages"][-1].content
+        return "done", []
+
+    monkeypatch.setattr(agent_module, "run_chat_loop", fake_run_chat_loop)
+
+    await agent._send_impl("go")
+
+    assert "位置: 新地" in seen_user_content
+    assert status_mgr.get_scene_attrs()["位置"] == "新地"
+
+
+@pytest.mark.asyncio
+async def test_send_stream_commits_before_done_event(monkeypatch):
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "old", turn_id=1, seq_in_turn=1)],
+    )
+    done_history_snapshots: list[list[str]] = []
+
+    class InspectQueue(asyncio.Queue):
+        async def put(self, item):  # noqa: ANN001
+            if isinstance(item, AgentStreamEvent) and item.kind == StreamEventKind.DONE:
+                done_history_snapshots.append([message.content for message in agent._session.history])
+            await super().put(item)
+
+    async def fake_run_chat_loop_stream(**_kwargs):  # noqa: ANN001
+        assert [message.content for message in agent._session.history] == ["old"]
+        yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="part")
+        yield AgentStreamEvent(kind=StreamEventKind.DONE, content="final")
+
+    monkeypatch.setattr(agent_module, "run_chat_loop_stream", fake_run_chat_loop_stream)
+
+    event_queue: asyncio.Queue = InspectQueue()
+    await agent._send_stream_impl("go", event_queue)
+
+    assert done_history_snapshots == [["old", "go", "final"]]
+    first = await event_queue.get()
+    second = await event_queue.get()
+    third = await event_queue.get()
+    assert first.kind == StreamEventKind.TEXT
+    assert second.kind == StreamEventKind.DONE
+    assert isinstance(third, _StreamSentinel)
+
+
+@pytest.mark.asyncio
+async def test_send_stream_commit_failure_emits_error_without_done(monkeypatch):
+    status_mgr = _FakeStatusManager(fail_commit=True)
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "old", turn_id=1, seq_in_turn=1)],
+        status_mgr=status_mgr,
+        scene_tracker=_scene_tracker_for(status_mgr),
+    )
+    agent._status_sub_agent = _ScratchWritingStatusSubAgent()
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    async def fake_run_chat_loop_stream(**kwargs):  # noqa: ANN001
+        assert [message.content for message in agent._session.history] == ["old"]
+        yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="part")
+        yield AgentStreamEvent(kind=StreamEventKind.DONE, content="final")
+
+    monkeypatch.setattr(agent_module, "run_chat_loop_stream", fake_run_chat_loop_stream)
+
+    await agent._send_stream_impl("go", event_queue)
+
+    events = [await event_queue.get(), await event_queue.get(), await event_queue.get(), await event_queue.get()]
+    assert [getattr(event, "kind", None) for event in events] == [
+        StreamEventKind.TOOL_CALL,
+        StreamEventKind.TOOL_RESULT,
+        StreamEventKind.TEXT,
+        StreamEventKind.ERROR,
+    ]
+    assert isinstance(await event_queue.get(), _StreamSentinel)
+    assert "status commit failed" in events[-1].content
+    assert [message.content for message in agent._session.history] == ["old"]
+    assert status_mgr.get_scene_attrs()["位置"] == "旧地"
 
 
 @pytest.mark.asyncio

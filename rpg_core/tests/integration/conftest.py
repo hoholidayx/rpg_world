@@ -153,12 +153,16 @@ async def integration_status_agent(integration_settings, integration_workspace, 
 
 
 def _ensure_integration_session(gateway, integration_workspace, session_id: str) -> None:
+    from rpg_data.repositories.character_repo import CharacterRepository
     from rpg_data.repositories.session_repo import SessionRepository
     from rpg_data.repositories.story_repo import StoryRepository
+    from rpg_data.repositories.story_character_repo import StoryCharacterRepository
     from rpg_data.repositories.workspace_repo import WorkspaceRepository
 
     workspace_id = "integration_workspace"
     database = gateway.database
+    characters = CharacterRepository(database)
+    story_characters = StoryCharacterRepository(database)
     workspaces = WorkspaceRepository(database)
     stories = StoryRepository(database)
     sessions = SessionRepository(database)
@@ -174,15 +178,27 @@ def _ensure_integration_session(gateway, integration_workspace, session_id: str)
             story = stories.create(workspace_id, "Integration Story")
         if sessions.get(session_id) is None:
             sessions.create(workspace_id, story.id, session_id=session_id, title=session_id)
+        _ensure_test_role(
+            characters=characters,
+            story_characters=story_characters,
+            workspace_id=workspace_id,
+            story_id=story.id,
+        )
+
+    gateway.session_roles.bind_by_index(session_id, 1)
 
 
 def _ensure_integration_session_with_status(gateway, integration_workspace, session_id: str) -> None:
+    from rpg_data.repositories.character_repo import CharacterRepository
     from rpg_data.repositories.session_repo import SessionRepository
     from rpg_data.repositories.story_repo import StoryRepository
+    from rpg_data.repositories.story_character_repo import StoryCharacterRepository
     from rpg_data.repositories.workspace_repo import WorkspaceRepository
 
     workspace_id = "integration_workspace"
     database = gateway.database
+    characters = CharacterRepository(database)
+    story_characters = StoryCharacterRepository(database)
     workspaces = WorkspaceRepository(database)
     stories = StoryRepository(database)
     sessions = SessionRepository(database)
@@ -221,5 +237,31 @@ def _ensure_integration_session_with_status(gateway, integration_workspace, sess
 
         if sessions.get(session_id) is None:
             sessions.create(workspace_id, story.id, session_id=session_id, title=session_id)
+        _ensure_test_role(
+            characters=characters,
+            story_characters=story_characters,
+            workspace_id=workspace_id,
+            story_id=story.id,
+        )
 
     gateway.status.initialize_session_tables(session_id)
+    gateway.session_roles.bind_by_index(session_id, 1)
+
+
+def _ensure_test_role(*, characters, story_characters, workspace_id: str, story_id: int) -> None:
+    character = next(
+        (
+            candidate
+            for candidate in characters.list(workspace_id)
+            if candidate.name == "Integration Tester"
+        ),
+        None,
+    )
+    if character is None:
+        character = characters.create(
+            workspace_id,
+            "Integration Tester",
+            personality="A concise test role used by integration tests.",
+            content="You are the player-controlled role for integration tests.",
+        )
+    story_characters.mount(workspace_id, story_id, character.id)

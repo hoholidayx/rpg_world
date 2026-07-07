@@ -271,6 +271,16 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 
 三种工作类型常量：`QueueKind.SEND` / `QueueKind.SEND_STREAM` / `QueueKind.COMMAND`。
 
+### Agent Turn Transaction
+
+`send()` / `send_stream()` 的普通 RP turn 通过 `AgentTurnTransaction` 管理写入一致性。事务边界是内存 scratch 加最终短 commit 点，不跨 LLM 调用打开数据库事务。
+
+- turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
+- `StatusSubAgent` 使用 scratch 版 scene/status 工具；context builder 读取 scratch 后的 history 与状态，让主 LLM 能看到本轮预更新状态。
+- LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
+- 持久化 session 的 commit 使用 `rpg_data` database atomic；`history_enabled=False` 仅作为测试/内存模式，不承诺补偿回滚已写入的外部 status manager。
+- summary compression 和 story memory extraction 是 commit 后副作用，失败只记录 warning，不回滚已提交 turn。
+
 ## 关键设计
 
 ### 记忆 `meta` 字段

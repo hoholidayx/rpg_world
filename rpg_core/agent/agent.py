@@ -7,6 +7,7 @@ import json
 import time as _time
 from asyncio import Future
 from collections.abc import AsyncIterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -22,6 +23,7 @@ from rpg_core.agent.agent_types import (
 from rpg_core.agent.command import CommandResult
 from rpg_core.agent.command import CommandDispatcher
 from rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
+from rpg_core.agent.transaction import AgentTurnTransaction, SCENE_TOOL_NAMES
 from rpg_core.agent.sub_agents import (
     MemorySubAgent,
     StatusSubAgent,
@@ -257,19 +259,25 @@ class RPGGameAgent:
         # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
         self._session.validate_loaded_turn_metadata(label="history")
         turn_stats = TurnStats(started_at=_time.monotonic())
-        turn_id = self._session.begin_turn()
+        tx = AgentTurnTransaction(
+            session=self._session,
+            status_mgr=self._status_mgr,
+            scene_tracker=self._scene_tracker,
+        )
+        turn_scratch = tx.begin(turn_stats)
 
         try:
             # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ──────
             status_records = None
-            if self._status_sub_agent and self._scene_tracker:
-                scene_ctx_before = self._scene_tracker.get_context()
-                sub_result = await self._status_sub_agent.update(
-                    history=self._session.history,
-                    state_context=scene_ctx_before,
-                    user_input=user_input,
-                    turn_stats=turn_stats,
-                )
+            if self._status_sub_agent and turn_scratch.scene_tracker:
+                scene_ctx_before = turn_scratch.scene_tracker.get_context()
+                with self._status_sub_agent_scene_tools(turn_scratch.scene_tracker):
+                    sub_result = await self._status_sub_agent.update(
+                        history=turn_scratch.base_history,
+                        state_context=scene_ctx_before,
+                        user_input=user_input,
+                        turn_stats=turn_stats,
+                    )
                 if sub_result.updated:
                     logger.info(
                         _TAG + " StatusSubAgent updated scene via {}",
@@ -278,38 +286,24 @@ class RPGGameAgent:
                     status_records = sub_result.records
 
             # Build scene context and embed into stored user message
-            scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
+            scene_ctx = turn_scratch.scene_tracker.get_context() if turn_scratch.scene_tracker else None
             stored_input = self._compose_stored_user_input(scene_ctx, user_input)
 
-            self._session.append(Role.USER, stored_input, turn_id=turn_id)
+            tx.stage_user_message(stored_input)
 
             # ── 记忆检索 ────────────────────────────────────────────────
             if self._memory_manager:
                 try:
                     self._memory_manager.recall(user_input)
                 except Exception as exc:
-                    logger.warning(_TAG + " memory recall failed: {}", exc)
+                    logger.opt(exception=exc).warning(_TAG + " memory recall failed")
 
-            # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
-            if self._memory_sub_agent:
-                await self._memory_sub_agent.maybe_auto_extract(self._session)
-
-            # ── 自动压缩 ──────────────────────────────────────────────────
-            if self._compressor:
-                try:
-                    compress_result = await self._compressor.maybe_compress(
-                        self._session
-                    )
-                    if compress_result.triggered:
-                        logger.info(
-                            _TAG + " auto-compressed: {} turns, {} batches",
-                            compress_result.user_rounds_compressed,
-                            len(compress_result.batch_files or []),
-                        )
-                except Exception as exc:
-                    logger.warning(_TAG + " auto-compress failed: {}", exc)
-
-            messages = self._build_transformed_context()
+            messages = self._build_transformed_context(
+                messages=turn_scratch.history_for_context(),
+                status_mgr=turn_scratch.status_manager,
+                scene_tracker=turn_scratch.scene_tracker,
+                user_input=user_input,
+            )
             if settings.verbose_logging:
                 sys_msgs = sum(1 for m in messages if m.is_system())
                 user_msgs = sum(1 for m in messages if m.is_user())
@@ -320,11 +314,12 @@ class RPGGameAgent:
                     len(messages), sys_msgs, user_msgs, asst_msgs, total_chars,
                 )
 
-            schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
+            tool_registry = self._tool_registry_for_turn(turn_scratch.scene_tracker)
+            schemas = tool_registry.get_openai_schemas() if tool_registry else None
 
             reply_text, records = await run_chat_loop(
                 provider=self._provider,
-                tool_registry=self._tool_registry,
+                tool_registry=tool_registry,
                 messages=messages,
                 schemas=schemas,
                 turn_stats=turn_stats,
@@ -355,10 +350,26 @@ class RPGGameAgent:
                     stats=turn_stats,
                 )
 
-            self._session.append(Role.ASSISTANT, reply_text, turn_id=turn_id)
+            tx.stage_assistant_message(reply_text)
+            tx.commit()
+            await self._run_post_commit_side_effects()
             return result
+        except asyncio.CancelledError as exc:
+            logger.opt(exception=exc).warning(
+                _TAG + " send cancelled: session_id={}",
+                self._session_id,
+            )
+            tx.discard()
+            raise
+        except Exception as exc:
+            logger.opt(exception=exc).error(
+                _TAG + " send failed: session_id={}",
+                self._session_id,
+            )
+            tx.discard()
+            raise
         finally:
-            self._session.end_turn(turn_id)
+            tx.close()
 
     async def send_stream(self, user_input: str) -> AsyncIterator[AgentStreamEvent]:
         """Streaming variant of ``send()``, goes through the message queue.
@@ -434,19 +445,25 @@ class RPGGameAgent:
         # ── TurnStats 聚合器 ───────────────────────────────────────
         self._session.validate_loaded_turn_metadata(label="history")
         turn_stats = TurnStats(started_at=_time.monotonic())
-        turn_id = self._session.begin_turn()
+        tx = AgentTurnTransaction(
+            session=self._session,
+            status_mgr=self._status_mgr,
+            scene_tracker=self._scene_tracker,
+        )
+        turn_scratch = tx.begin(turn_stats)
 
         try:
             # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ────
             status_records = None
-            if self._status_sub_agent and self._scene_tracker:
-                scene_ctx_before = self._scene_tracker.get_context()
-                sub_result = await self._status_sub_agent.update(
-                    history=self._session.history,
-                    state_context=scene_ctx_before,
-                    user_input=user_input,
-                    turn_stats=turn_stats,
-                )
+            if self._status_sub_agent and turn_scratch.scene_tracker:
+                scene_ctx_before = turn_scratch.scene_tracker.get_context()
+                with self._status_sub_agent_scene_tools(turn_scratch.scene_tracker):
+                    sub_result = await self._status_sub_agent.update(
+                        history=turn_scratch.base_history,
+                        state_context=scene_ctx_before,
+                        user_input=user_input,
+                        turn_stats=turn_stats,
+                    )
                 if sub_result.updated:
                     logger.info(
                         _TAG + " StatusSubAgent updated scene via {}",
@@ -469,39 +486,26 @@ class RPGGameAgent:
                         ))
 
             # ── Build scene context and embed into stored user message ──
-            scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
+            scene_ctx = turn_scratch.scene_tracker.get_context() if turn_scratch.scene_tracker else None
             stored_input = self._compose_stored_user_input(scene_ctx, user_input)
 
-            self._session.append(Role.USER, stored_input, turn_id=turn_id)
+            tx.stage_user_message(stored_input)
 
             # ── 记忆检索 ────────────────────────────────────────────────
             if self._memory_manager:
                 try:
                     self._memory_manager.recall(user_input)
                 except Exception as exc:
-                    logger.warning(_TAG + " memory recall failed: {}", exc)
+                    logger.opt(exception=exc).warning(_TAG + " memory recall failed")
 
-            # ── 剧情记忆自动触发（内部判断条件，后台异步执行） ──────────
-            if self._memory_sub_agent:
-                await self._memory_sub_agent.maybe_auto_extract(self._session)
-
-            # ── 自动压缩 ──────────────────────────────────────────────────
-            if self._compressor:
-                try:
-                    compress_result = await self._compressor.maybe_compress(
-                        self._session
-                    )
-                    if compress_result.triggered:
-                        logger.info(
-                            _TAG + " auto-compressed: {} turns, {} batches",
-                            compress_result.user_rounds_compressed,
-                            len(compress_result.batch_files or []),
-                        )
-                except Exception as exc:
-                    logger.warning(_TAG + " auto-compress failed: {}", exc)
-
-            messages = self._build_transformed_context()
-            schemas = self._tool_registry.get_openai_schemas() if self._tool_registry else None
+            messages = self._build_transformed_context(
+                messages=turn_scratch.history_for_context(),
+                status_mgr=turn_scratch.status_manager,
+                scene_tracker=turn_scratch.scene_tracker,
+                user_input=user_input,
+            )
+            tool_registry = self._tool_registry_for_turn(turn_scratch.scene_tracker)
+            schemas = tool_registry.get_openai_schemas() if tool_registry else None
 
             # ── Stream loop ────────────────────────────────────────────
             final_content = ""
@@ -510,7 +514,7 @@ class RPGGameAgent:
             try:
                 async for event in run_chat_loop_stream(
                         provider=self._provider,
-                        tool_registry=self._tool_registry,
+                        tool_registry=tool_registry,
                         messages=messages,
                         schemas=schemas,
                         turn_stats=turn_stats,
@@ -521,7 +525,7 @@ class RPGGameAgent:
                     else:
                         await event_queue.put(event)
             except Exception as exc:
-                logger.error("{} send_stream error: {}", _TAG, exc)
+                logger.opt(exception=exc).error(_TAG + " send_stream error")
                 await event_queue.put(AgentStreamEvent(
                     kind=StreamEventKind.ERROR,
                     content=str(exc),
@@ -538,12 +542,22 @@ class RPGGameAgent:
                     turn_stats.summary(),
                 )
 
-            # Only persist to history if we got valid content
-            if final_content:
-                self._session.append(Role.ASSISTANT, final_content, turn_id=turn_id)
-
             # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
             aggregate_usage = aggregate_usage_records(turn_stats.calls)
+
+            if final_content:
+                tx.stage_assistant_message(final_content)
+
+            try:
+                tx.commit()
+            except Exception as exc:
+                logger.opt(exception=exc).error(_TAG + " send_stream commit error")
+                await event_queue.put(AgentStreamEvent(
+                    kind=StreamEventKind.ERROR,
+                    content=str(exc),
+                ))
+                await event_queue.put(_StreamSentinel())
+                return
 
             if final_event is not None:
                 final_event.duration_ms = turn_stats.total_duration_ms
@@ -559,8 +573,23 @@ class RPGGameAgent:
                     model=self._model,
                 ))
             await event_queue.put(_StreamSentinel())
+            await self._run_post_commit_side_effects()
+        except asyncio.CancelledError as exc:
+            logger.opt(exception=exc).warning(
+                _TAG + " send_stream cancelled: session_id={}",
+                self._session_id,
+            )
+            tx.discard()
+            raise
+        except Exception as exc:
+            logger.opt(exception=exc).error(
+                _TAG + " send_stream failed: session_id={}",
+                self._session_id,
+            )
+            tx.discard()
+            raise
         finally:
-            self._session.end_turn(turn_id)
+            tx.close()
 
     async def execute_command(self, command: str) -> CommandResult:
         """将斜杠命令入队执行，返回执行结果。
@@ -968,17 +997,77 @@ class RPGGameAgent:
         self._fixed_layer = self._assemble_fixed_layer()
         self._refresh_sub_agent_contexts()
 
-    def _build_transformed_context(self) -> list[Message]:
+    def _build_transformed_context(
+        self,
+        *,
+        messages: list[Message] | None = None,
+        status_mgr: "StatusManager | None" = None,
+        scene_tracker: SceneTracker | None = None,
+        user_input: str = "",
+    ) -> list[Message]:
         """Build the 5-layer RPG context as Message objects."""
         self._refresh_fixed_layer_snapshot()
+        resolved_messages = self._session.history if messages is None else messages
+        resolved_status_mgr = self._status_mgr if status_mgr is None else status_mgr
+        resolved_scene_tracker = self._scene_tracker if scene_tracker is None else scene_tracker
         ctx = self._builder.build(
             fixed_layer=self._fixed_layer,
-            messages=self._session.history,
-            status_mgr=self._status_mgr,
-            scene_tracker=self._scene_tracker,
-            rp_module_sections=self._get_rp_module_runtime_sections(),
+            messages=resolved_messages,
+            status_mgr=resolved_status_mgr,
+            scene_tracker=resolved_scene_tracker,
+            rp_module_sections=self._get_rp_module_runtime_sections(user_input=user_input),
         )
         return ctx.to_message_objects()
+
+    def _tool_registry_for_turn(self, scene_tracker: SceneTracker | None) -> ToolRegistry | None:
+        """Return a per-turn registry with scene tools bound to the turn scratch."""
+        registry = ToolRegistry()
+        if self._tool_registry:
+            for tool in self._tool_registry:
+                if tool.name in SCENE_TOOL_NAMES:
+                    continue
+                registry.register(tool)
+        if scene_tracker is not None:
+            registry.register_all(scene_tracker.get_tools())
+        return registry if len(registry) else None
+
+    @contextmanager
+    def _status_sub_agent_scene_tools(self, scene_tracker: SceneTracker | None):
+        """Temporarily bind StatusSubAgent scene tools to the turn scratch."""
+        sub_agent = self._status_sub_agent
+        if sub_agent is None or scene_tracker is None:
+            yield
+            return
+
+        previous_registry = sub_agent._tool_registry
+        previous_schemas = sub_agent._schemas
+        try:
+            sub_agent.clear_tools()
+            sub_agent.register_tools(scene_tracker.get_tools())
+            yield
+        finally:
+            sub_agent._tool_registry = previous_registry
+            sub_agent._schemas = previous_schemas
+
+    async def _run_post_commit_side_effects(self) -> None:
+        """Run turn side effects that must not participate in the turn commit."""
+        if self._memory_sub_agent:
+            try:
+                await self._memory_sub_agent.maybe_auto_extract(self._session)
+            except Exception as exc:
+                logger.opt(exception=exc).warning(_TAG + " post-commit story memory extraction failed")
+
+        if self._compressor:
+            try:
+                compress_result = await self._compressor.maybe_compress(self._session)
+                if compress_result.triggered:
+                    logger.info(
+                        _TAG + " auto-compressed: {} turns, {} batches",
+                        compress_result.user_rounds_compressed,
+                        len(compress_result.batch_files or []),
+                    )
+            except Exception as exc:
+                logger.opt(exception=exc).warning(_TAG + " post-commit auto-compress failed")
 
     def _setup_tool_registry(self) -> None:
         """Create and populate the ToolRegistry with built-in file tools."""

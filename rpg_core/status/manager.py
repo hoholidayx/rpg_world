@@ -8,7 +8,7 @@ from rpg_data.models import STATUS_KEY_COLUMN, STATUS_KIND_NORMAL, STATUS_KIND_S
 from rpg_data.services import get_data_service_gateway
 
 if TYPE_CHECKING:
-    from rpg_data.models import SessionStatusTable
+    from rpg_data.models import SessionStatusTable, StatusTableDocument
     from rpg_data.services.status import StatusTableService
 
 
@@ -47,6 +47,12 @@ class StatusManager:
 
     def get_table_by_id(self, table_id: int) -> dict[str, object]:
         return _table_to_dict(self._service.get_table_by_id(table_id))
+
+    def get_table_document_by_id(self, table_id: int) -> "StatusTableDocument":
+        return self._service.get_table_by_id(table_id).document
+
+    def save_table_document(self, table_id: int, document: "StatusTableDocument") -> dict[str, object]:
+        return _table_to_dict(self._service.save_table(table_id, document))
 
     # ------------------------------------------------------------------
     # Generic table writes

@@ -154,6 +154,19 @@ Telegram 渠道当前支持：
 
 顶层 `rp_memory/` 是独立记忆系统包，负责检索、索引、规划、召回和 rerank；顶层 `llm_service/` 是统一 LLM 服务包，负责 provider 路由、配置解析、OpenAI-compatible provider 与本地 llama.cpp runtime。
 
+### Agent turn 事务
+
+`send()` 和 `send_stream()` 的 RP 主链路通过 `AgentTurnTransaction` 管理本轮写入。这里的事务不是长数据库事务，而是“一轮 Agent turn 的内存 scratch + 短 commit 点”：
+
+- 进入 LLM 前，user message 不直接写入 `SessionManager.append()`，而是暂存在 `MessageScratch`。
+- `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。
+- 上下文构建读取 scratch 后的 history 与 scene/status，因此主 LLM 能看到本轮预更新状态。
+- LLM 完整成功后，事务一次性提交 staged user message、assistant message 和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
+- 持久化 session 的 commit 在 `rpg_data` database atomic 中执行，不跨 LLM 调用持有数据库事务；`history_enabled=False` 是测试/内存模式，只回滚内存 history，不承诺补偿已写入的外部 status manager。
+- summary compression 和 story memory extraction 是 commit 后副作用；失败只记录 warning，不回滚已提交 turn。
+
+事务生命周期有日志覆盖：begin 构建失败、send/send_stream 异常、commit 失败、commit 成功摘要和 post-commit 副作用失败都会记录，便于排查 turn 是否进入 scratch、是否提交、是否在副作用阶段失败。
+
 ### 上下文与 RP 模块
 
 `rpg_core/context/` 的主流程保持结构化数据，直到发送给 LLM 前才由 Jinja2 模板统一渲染：

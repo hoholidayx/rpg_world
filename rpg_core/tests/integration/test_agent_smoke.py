@@ -5,6 +5,7 @@ import re
 
 import pytest
 
+from rpg_data import models
 from rpg_core.agent.agent_types import StreamEventKind
 from rpg_core.context.rpg_context import LayerType, Role
 
@@ -147,6 +148,8 @@ async def test_session_create_and_switch_isolate_history(integration_agent, inte
         int(current_session.story_id),
     )
     assert sorted(session.id for session in sessions or []) == sorted([created_session_id, "integration_smoke"])
+    bound = integration_data_gateway.session_roles.bind_by_index(created_session_id, 1)
+    assert bound.state.status == models.PLAYER_CHARACTER_STATUS_BOUND
 
     first_reply = await asyncio.wait_for(
         integration_agent.send("Reply in one short sentence."),

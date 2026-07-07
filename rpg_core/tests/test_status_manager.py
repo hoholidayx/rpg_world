@@ -65,6 +65,27 @@ class FakeStatusService:
         self.calls.append(("get_table_by_id", table_id))
         return self.scene_table if table_id == 2 else self.normal_table
 
+    def save_table(self, table_id: int, document: StatusTableDocument):
+        self.calls.append(("save_table", table_id, document))
+        table = self.scene_table if table_id == 2 else self.normal_table
+        return SessionStatusTable(
+            id=table.id,
+            session_id=table.session_id,
+            workspace_id=table.workspace_id,
+            story_id=table.story_id,
+            source_table_id=table.source_table_id,
+            origin=table.origin,
+            name=table.name,
+            status_kind=table.status_kind,
+            description=table.description,
+            document=document,
+            sort_order=table.sort_order,
+            metadata_json=table.metadata_json,
+            version=table.version,
+            created_at=table.created_at,
+            updated_at=table.updated_at,
+        )
+
     def set_key_value(self, table_id: int, key: str, value: str, **kwargs):
         self.calls.append(("set_key_value", table_id, key, value, kwargs))
         return self.scene_table
@@ -124,6 +145,21 @@ def test_status_manager_delegates_selector_writes() -> None:
     assert service.calls == [
         ("set_key_value", 2, "位置", "城堡", {"key_column": "属性", "value_column": "值"}),
         ("delete_key_value", 2, "天气", {"key_column": "属性"}),
+    ]
+
+
+def test_status_manager_exposes_document_cow_helpers() -> None:
+    service = FakeStatusService()
+    manager = StatusManager("s_main", service=service)
+
+    document = manager.get_table_document_by_id(2)
+    updated = document.with_key_value("位置", "城堡")
+    table = manager.save_table_document(2, updated)
+
+    assert table["rows"] == [["位置", "城堡"]]
+    assert service.calls == [
+        ("get_table_by_id", 2),
+        ("save_table", 2, updated),
     ]
 
 

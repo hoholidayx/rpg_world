@@ -10,7 +10,7 @@ MemorySubAgent 过滤 system 角色消息，场景信息必须在 user 消息中
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
 
 if TYPE_CHECKING:
     from rpg_core.status.manager import StatusManager
@@ -22,6 +22,7 @@ class SceneTracker:
     TIME_ATTR = "时间"
     LOCATION_ATTR = "位置"
     PRESENT_CHARACTERS_ATTR = "在场人物"
+    TIME_STATE_FIELDS = ("year", "month", "day", "hour", "minute")
     DEFAULT_ATTRS: dict[str, str] = {
         TIME_ATTR: "第 1 年 1 月 1 日 6 时",
         LOCATION_ATTR: "",
@@ -88,6 +89,22 @@ class SceneTracker:
             parts.append(f"{self._minute} 分")
         return " ".join(parts)
 
+    def get_time_state(self) -> dict[str, int]:
+        """Return the structured scene time fields for scratch tracker cloning."""
+        return {
+            "year": self._year,
+            "month": self._month,
+            "day": self._day,
+            "hour": self._hour,
+            "minute": self._minute,
+        }
+
+    def set_time_state(self, state: Mapping[str, int]) -> None:
+        """Restore structured scene time fields from another tracker."""
+        for field in self.TIME_STATE_FIELDS:
+            if field in state:
+                setattr(self, f"_{field}", int(state[field]))
+
     def set_time(self, **kwargs: int) -> dict[str, str]:
         """直接设置绝对时间值（非增量推进）。
 
@@ -99,10 +116,9 @@ class SceneTracker:
 
         其余关键字参数直接写入状态表（不参与 _format_time）。
         """
-        STRUCT_FIELDS = {"year", "month", "day", "hour", "minute"}
         pending_attrs: dict[str, str] = {}
         for k, v in kwargs.items():
-            if k in STRUCT_FIELDS:
+            if k in self.TIME_STATE_FIELDS:
                 setattr(self, f"_{k}", v)
             else:
                 pending_attrs[k] = str(v)
