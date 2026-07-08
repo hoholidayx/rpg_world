@@ -1,5 +1,6 @@
-import { Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { ChevronDown, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { HistoryPage } from '@/types/session'
 import { cn } from '@/lib/utils/cn'
 import { SessionAvatar } from './SessionAvatar'
 import {
@@ -8,7 +9,35 @@ import {
   type AssistantTextSegment,
 } from './assistantTextSegments'
 import { formatMessageTime } from './sessionRoomHelpers'
-import { SESSION_MESSAGE_STATUS, SESSION_TIMELINE_ROLE, type SessionTimelineMessage } from './sessionRoomTypes'
+import {
+  HISTORY_LOAD_DIRECTION,
+  SESSION_MESSAGE_STATUS,
+  SESSION_TIMELINE_ROLE,
+  type HistoryLoadDirection,
+  type SessionTimelineMessage,
+} from './sessionRoomTypes'
+
+const BOUNDARY_LOAD_SOURCE = {
+  AUTO: 'auto',
+  MANUAL: 'manual',
+} as const
+
+type BoundaryLoadSource = (typeof BOUNDARY_LOAD_SOURCE)[keyof typeof BOUNDARY_LOAD_SOURCE]
+
+const USER_SCROLL_DIRECTION = {
+  UP: 'up',
+  DOWN: 'down',
+} as const
+
+type UserScrollDirection = (typeof USER_SCROLL_DIRECTION)[keyof typeof USER_SCROLL_DIRECTION]
+
+const TIMELINE_SCROLL = {
+  programmaticGuardMs: 600,
+  boundaryCooldownMs: 350,
+  overflowTolerancePx: 24,
+  stickToBottomDistancePx: 160,
+  userScrollDeltaThresholdPx: 2,
+} as const
 
 function MiniButton({
   label,
@@ -290,6 +319,14 @@ function TimelineMessage({
 export function SessionTimeline({
   sessionId,
   messages,
+  historyPage,
+  loadingBefore,
+  loadingAfter,
+  showJumpToLatest,
+  jumpingToLatest,
+  onTopBoundaryVisible,
+  onBottomBoundaryVisible,
+  onJumpToLatest,
   forceScrollKey,
   editingMessageId,
   editDraft,
@@ -303,6 +340,14 @@ export function SessionTimeline({
 }: {
   sessionId: string
   messages: SessionTimelineMessage[]
+  historyPage: HistoryPage | null
+  loadingBefore: boolean
+  loadingAfter: boolean
+  showJumpToLatest: boolean
+  jumpingToLatest: boolean
+  onTopBoundaryVisible: () => void | Promise<unknown>
+  onBottomBoundaryVisible: () => void | Promise<unknown>
+  onJumpToLatest: () => void | Promise<unknown>
   forceScrollKey: number
   editingMessageId: string | null
   editDraft: string
@@ -315,32 +360,129 @@ export function SessionTimeline({
   onEditSend: (message: SessionTimelineMessage) => void
 }) {
   const [openMoreId, setOpenMoreId] = useState<string | null>(null)
-  const scrollContainerRef = useRef<HTMLElement | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const topBoundaryRef = useRef<HTMLDivElement | null>(null)
+  const bottomBoundaryRef = useRef<HTMLDivElement | null>(null)
   const bottomAnchorRef = useRef<HTMLDivElement | null>(null)
   const shouldStickToBottomRef = useRef(true)
   const initialScrollDoneRef = useRef(false)
+  const previousPageRef = useRef<HistoryPage | null>(null)
+  const boundaryInFlightRef = useRef<HistoryLoadDirection | null>(null)
+  const boundaryCooldownRef = useRef(false)
+  const boundaryCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const programmaticScrollRef = useRef(false)
+  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastScrollTopRef = useRef(0)
+  const userScrollDirectionRef = useRef<UserScrollDirection | null>(null)
   const lastMessageFingerprint = useMemo(() => {
     const lastMessage = messages[messages.length - 1]
     return lastMessage ? `${lastMessage.id}:${lastMessage.content.length}:${lastMessage.status ?? ''}` : ''
   }, [messages])
+  const pageFingerprint = historyPage
+    ? `${historyPage.startTurnId ?? 'empty'}:${historyPage.endTurnId ?? 'empty'}:${historyPage.latestTurnId}`
+    : 'empty'
+
+  const markProgrammaticScroll = useCallback(() => {
+    programmaticScrollRef.current = true
+    userScrollDirectionRef.current = null
+    if (programmaticScrollTimerRef.current) clearTimeout(programmaticScrollTimerRef.current)
+    programmaticScrollTimerRef.current = setTimeout(() => {
+      programmaticScrollRef.current = false
+      programmaticScrollTimerRef.current = null
+      const container = scrollContainerRef.current
+      if (container) lastScrollTopRef.current = container.scrollTop
+    }, TIMELINE_SCROLL.programmaticGuardMs)
+  }, [])
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+    markProgrammaticScroll()
     requestAnimationFrame(() => {
       bottomAnchorRef.current?.scrollIntoView({ behavior, block: 'end' })
     })
+  }, [markProgrammaticScroll])
+
+  const scrollToTop = useCallback((behavior: ScrollBehavior) => {
+    markProgrammaticScroll()
+    requestAnimationFrame(() => {
+      scrollContainerRef.current?.scrollTo({ top: 0, behavior })
+    })
+  }, [markProgrammaticScroll])
+
+  const startBoundaryCooldown = useCallback(() => {
+    boundaryCooldownRef.current = true
+    if (boundaryCooldownTimerRef.current) clearTimeout(boundaryCooldownTimerRef.current)
+    boundaryCooldownTimerRef.current = setTimeout(() => {
+      boundaryCooldownRef.current = false
+      boundaryCooldownTimerRef.current = null
+    }, TIMELINE_SCROLL.boundaryCooldownMs)
   }, [])
+
+  const hasScrollableOverflow = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) return false
+    return container.scrollHeight > container.clientHeight + TIMELINE_SCROLL.overflowTolerancePx
+  }, [])
+
+  const triggerBoundaryLoad = useCallback((direction: HistoryLoadDirection, source: BoundaryLoadSource = BOUNDARY_LOAD_SOURCE.AUTO) => {
+    if (boundaryCooldownRef.current || boundaryInFlightRef.current) return
+    if (source === BOUNDARY_LOAD_SOURCE.AUTO) {
+      if (!hasScrollableOverflow()) return
+      if (
+        direction === HISTORY_LOAD_DIRECTION.BEFORE
+        && userScrollDirectionRef.current !== USER_SCROLL_DIRECTION.UP
+      ) return
+      if (
+        direction === HISTORY_LOAD_DIRECTION.AFTER
+        && userScrollDirectionRef.current !== USER_SCROLL_DIRECTION.DOWN
+      ) return
+    }
+    const action = direction === HISTORY_LOAD_DIRECTION.BEFORE ? onTopBoundaryVisible : onBottomBoundaryVisible
+    boundaryInFlightRef.current = direction
+    Promise.resolve(action()).finally(() => {
+      boundaryInFlightRef.current = null
+      userScrollDirectionRef.current = null
+      startBoundaryCooldown()
+    })
+  }, [hasScrollableOverflow, onBottomBoundaryVisible, onTopBoundaryVisible, startBoundaryCooldown])
 
   const updateStickToBottom = useCallback(() => {
     const container = scrollContainerRef.current
     if (!container) return
+    const nextScrollTop = container.scrollTop
+    const scrollDelta = nextScrollTop - lastScrollTopRef.current
+    if (!programmaticScrollRef.current && Math.abs(scrollDelta) > TIMELINE_SCROLL.userScrollDeltaThresholdPx) {
+      userScrollDirectionRef.current = scrollDelta < 0 ? USER_SCROLL_DIRECTION.UP : USER_SCROLL_DIRECTION.DOWN
+    }
+    lastScrollTopRef.current = nextScrollTop
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    shouldStickToBottomRef.current = distanceFromBottom < 160
+    shouldStickToBottomRef.current = distanceFromBottom < TIMELINE_SCROLL.stickToBottomDistancePx
   }, [])
 
   useEffect(() => {
     initialScrollDoneRef.current = false
     shouldStickToBottomRef.current = true
+    previousPageRef.current = null
+    boundaryInFlightRef.current = null
+    boundaryCooldownRef.current = false
+    programmaticScrollRef.current = false
+    lastScrollTopRef.current = 0
+    userScrollDirectionRef.current = null
+    if (boundaryCooldownTimerRef.current) {
+      clearTimeout(boundaryCooldownTimerRef.current)
+      boundaryCooldownTimerRef.current = null
+    }
+    if (programmaticScrollTimerRef.current) {
+      clearTimeout(programmaticScrollTimerRef.current)
+      programmaticScrollTimerRef.current = null
+    }
   }, [sessionId])
+
+  useEffect(() => {
+    return () => {
+      if (boundaryCooldownTimerRef.current) clearTimeout(boundaryCooldownTimerRef.current)
+      if (programmaticScrollTimerRef.current) clearTimeout(programmaticScrollTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!messages.length) {
@@ -359,55 +501,172 @@ export function SessionTimeline({
   }, [lastMessageFingerprint, messages.length, scrollToBottom])
 
   useEffect(() => {
+    const previousPage = previousPageRef.current
+    previousPageRef.current = historyPage
+    if (!previousPage || !historyPage) return
+
+    const movedBefore = (
+      historyPage.endTurnId !== null
+      && previousPage.startTurnId !== null
+      && historyPage.endTurnId < previousPage.startTurnId
+    )
+    const movedAfter = (
+      historyPage.startTurnId !== null
+      && previousPage.endTurnId !== null
+      && historyPage.startTurnId > previousPage.endTurnId
+    )
+
+    if (movedBefore) {
+      startBoundaryCooldown()
+      shouldStickToBottomRef.current = true
+      scrollToBottom('auto')
+      return
+    }
+
+    if (movedAfter) {
+      startBoundaryCooldown()
+      shouldStickToBottomRef.current = false
+      scrollToTop('auto')
+    }
+  }, [historyPage, pageFingerprint, scrollToBottom, scrollToTop, startBoundaryCooldown])
+
+  useEffect(() => {
     if (!forceScrollKey) return
     shouldStickToBottomRef.current = true
     scrollToBottom('smooth')
   }, [forceScrollKey, scrollToBottom])
 
-  return (
-    <section
-      ref={scrollContainerRef}
-      onScroll={updateStickToBottom}
-      className="min-h-0 flex-1 overflow-y-auto bg-[#f7f8fc] px-4 py-7 dark:bg-[#0b1020] sm:px-6"
-    >
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-7 flex items-center justify-center gap-4 text-xs font-bold uppercase text-slate-400 dark:text-slate-300">
-          <span className="h-px w-24 bg-slate-200 dark:bg-slate-700 sm:w-44" />
-          时间线 / Timeline
-          <span className="h-px w-24 bg-slate-200 dark:bg-slate-700 sm:w-44" />
-        </div>
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    if (!hasScrollableOverflow()) return
 
-        {messages.length ? (
-          <div className="space-y-7">
-            {messages.map((message) => (
-              <TimelineMessage
-                key={message.id}
-                message={message}
-                isEditing={editingMessageId === message.id}
-                editDraft={editDraft}
-                moreOpen={openMoreId === message.id}
-                onToggleMore={() => setOpenMoreId((current) => (current === message.id ? null : message.id))}
-                onCopy={onCopy}
-                onRetry={onRetry}
-                onEdit={onEdit}
-                onDelete={(item) => {
-                  setOpenMoreId(null)
-                  onDelete(item)
-                }}
-                onEditDraftChange={onEditDraftChange}
-                onEditCancel={onEditCancel}
-                onEditSend={() => onEditSend(message)}
-              />
-            ))}
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        if (entry.target === topBoundaryRef.current && historyPage?.hasBefore && !loadingBefore) {
+          triggerBoundaryLoad(HISTORY_LOAD_DIRECTION.BEFORE, BOUNDARY_LOAD_SOURCE.AUTO)
+        }
+        if (entry.target === bottomBoundaryRef.current && historyPage?.hasAfter && !loadingAfter) {
+          triggerBoundaryLoad(HISTORY_LOAD_DIRECTION.AFTER, BOUNDARY_LOAD_SOURCE.AUTO)
+        }
+      }
+    }, { root: container, threshold: 0.1 })
+
+    if (historyPage?.hasBefore && topBoundaryRef.current) observer.observe(topBoundaryRef.current)
+    if (historyPage?.hasAfter && bottomBoundaryRef.current) observer.observe(bottomBoundaryRef.current)
+
+    return () => observer.disconnect()
+  }, [
+    historyPage?.hasAfter,
+    historyPage?.hasBefore,
+    loadingAfter,
+    loadingBefore,
+    pageFingerprint,
+    hasScrollableOverflow,
+    triggerBoundaryLoad,
+  ])
+
+  return (
+    <section className="relative min-h-0 flex-1 bg-[#f7f8fc] dark:bg-[#0b1020]">
+      <div
+        ref={scrollContainerRef}
+        onScroll={updateStickToBottom}
+        className="h-full overflow-y-auto px-4 py-7 sm:px-6"
+      >
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-7 flex items-center justify-center gap-4 text-xs font-bold uppercase text-slate-400 dark:text-slate-300">
+            <span className="h-px w-24 bg-slate-200 dark:bg-slate-700 sm:w-44" />
+            时间线 / Timeline
+            <span className="h-px w-24 bg-slate-200 dark:bg-slate-700 sm:w-44" />
           </div>
-        ) : (
-          <div className="rounded-lg border border-dashed border-slate-200 bg-white px-6 py-12 text-center dark:border-slate-700 dark:bg-slate-900/80">
-            <h2 className="text-base font-black text-slate-950 dark:text-slate-100">暂无回合记录</h2>
-            <p className="mt-2 text-sm font-semibold text-slate-400 dark:text-slate-300">发送第一条行动后，故事会从这里展开。</p>
-          </div>
-        )}
-        <div ref={bottomAnchorRef} aria-hidden="true" className="h-px" />
+
+          {historyPage?.hasBefore || loadingBefore ? (
+            <div
+              ref={topBoundaryRef}
+              className="mb-5 flex min-h-8 items-center justify-center text-xs font-bold text-slate-400 dark:text-slate-400"
+            >
+              {loadingBefore ? (
+                '加载更早记录...'
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => triggerBoundaryLoad(HISTORY_LOAD_DIRECTION.BEFORE, BOUNDARY_LOAD_SOURCE.MANUAL)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+                >
+                  加载更早记录
+                </button>
+              )}
+            </div>
+          ) : null}
+
+          {messages.length ? (
+            <div className="space-y-7">
+              {messages.map((message) => (
+                <TimelineMessage
+                  key={message.id}
+                  message={message}
+                  isEditing={editingMessageId === message.id}
+                  editDraft={editDraft}
+                  moreOpen={openMoreId === message.id}
+                  onToggleMore={() => setOpenMoreId((current) => (current === message.id ? null : message.id))}
+                  onCopy={onCopy}
+                  onRetry={onRetry}
+                  onEdit={onEdit}
+                  onDelete={(item) => {
+                    setOpenMoreId(null)
+                    onDelete(item)
+                  }}
+                  onEditDraftChange={onEditDraftChange}
+                  onEditCancel={onEditCancel}
+                  onEditSend={() => onEditSend(message)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-white px-6 py-12 text-center dark:border-slate-700 dark:bg-slate-900/80">
+              <h2 className="text-base font-black text-slate-950 dark:text-slate-100">暂无回合记录</h2>
+              <p className="mt-2 text-sm font-semibold text-slate-400 dark:text-slate-300">发送第一条行动后，故事会从这里展开。</p>
+            </div>
+          )}
+
+          {historyPage?.hasAfter || loadingAfter ? (
+            <div
+              ref={bottomBoundaryRef}
+              className="mt-5 flex min-h-8 items-center justify-center text-xs font-bold text-slate-400 dark:text-slate-400"
+            >
+              {loadingAfter ? (
+                '加载更新记录...'
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => triggerBoundaryLoad(HISTORY_LOAD_DIRECTION.AFTER, BOUNDARY_LOAD_SOURCE.MANUAL)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-500 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+                >
+                  加载更新记录
+                </button>
+              )}
+            </div>
+          ) : null}
+          <div ref={bottomAnchorRef} aria-hidden="true" className="h-px" />
+        </div>
       </div>
+      {showJumpToLatest ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-5 z-20 flex justify-center px-4">
+          <button
+            type="button"
+            aria-label="返回最新记录"
+            title="返回最新记录"
+            disabled={jumpingToLatest}
+            onClick={() => {
+              void onJumpToLatest()
+            }}
+            className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full border border-violet-200 bg-white text-violet-700 shadow-xl shadow-slate-300/40 transition hover:border-violet-300 hover:bg-violet-50 disabled:cursor-wait disabled:opacity-70 dark:border-violet-500/50 dark:bg-slate-950 dark:text-violet-200 dark:shadow-black/40 dark:hover:border-violet-400 dark:hover:bg-violet-500/10"
+          >
+            <ChevronDown size={20} className={jumpingToLatest ? 'animate-pulse' : ''} />
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }

@@ -30,6 +30,31 @@ export const SESSION_STREAM_SOURCE = {
 
 export type SessionStreamSource = (typeof SESSION_STREAM_SOURCE)[keyof typeof SESSION_STREAM_SOURCE]
 
+export const HISTORY_LOAD_DIRECTION = {
+  BEFORE: 'before',
+  AFTER: 'after',
+} as const
+
+export type HistoryLoadDirection = (typeof HISTORY_LOAD_DIRECTION)[keyof typeof HISTORY_LOAD_DIRECTION]
+
+export const HISTORY_REFRESH_MODE = {
+  ACTIVE: 'active',
+  LATEST: 'latest',
+} as const
+
+export type HistoryRefreshMode = (typeof HISTORY_REFRESH_MODE)[keyof typeof HISTORY_REFRESH_MODE]
+
+export type RefreshSessionDataOptions = {
+  silent?: boolean
+  clearAccurateUsage?: boolean
+  historyMode?: HistoryRefreshMode
+  scrollToBottom?: boolean
+}
+
+export const SESSION_HISTORY_MESSAGES = {
+  LATEST_LOAD_FAILED: '加载最新历史失败，请稍后再试',
+} as const
+
 export const SESSION_TIMELINE_ROLE = {
   ...HISTORY_MESSAGE_ROLE,
   THINKING: 'thinking',

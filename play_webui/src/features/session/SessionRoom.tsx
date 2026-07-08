@@ -288,6 +288,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     stopping: stream.stopping,
     streamLocalTurn: stream.streamLocalTurn,
     setOptimisticTruncateFromTurn: data.setOptimisticTruncateFromTurn,
+    jumpToLatestHistoryBottom: data.jumpToLatestHistoryBottom,
     refreshSessionData: data.refreshSessionData,
     requestConfirm,
     requireRoleSelection: role.requireRoleSelection,
@@ -402,6 +403,14 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         <SessionTimeline
           sessionId={sessionId}
           messages={data.visibleMessages}
+          historyPage={data.historyPage}
+          loadingBefore={data.historyLoadingBefore}
+          loadingAfter={data.historyLoadingAfter}
+          showJumpToLatest={data.showJumpToLatestHistory}
+          jumpingToLatest={data.jumpingToLatestHistory}
+          onTopBoundaryVisible={data.loadPreviousHistoryPage}
+          onBottomBoundaryVisible={data.loadNextHistoryPage}
+          onJumpToLatest={data.jumpToLatestHistoryBottom}
           forceScrollKey={data.forceScrollKey}
           editingMessageId={timelineActions.editingMessageId}
           editDraft={timelineActions.editDraft}

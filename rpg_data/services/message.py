@@ -59,6 +59,27 @@ class MessageService:
     ) -> list[models.SessionMessage]:
         return self._store.list(session_id, limit=limit, offset=offset)
 
+    def list_turn_window(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        before_turn_id: int | None = None,
+        after_turn_id: int | None = None,
+    ) -> list[models.SessionMessage]:
+        return self._store.list_turn_window(
+            session_id,
+            limit=limit,
+            before_turn_id=before_turn_id,
+            after_turn_id=after_turn_id,
+        )
+
+    def has_turn_before(self, session_id: str, turn_id: int) -> bool:
+        return self._store.has_turn_before(session_id, turn_id)
+
+    def has_turn_after(self, session_id: str, turn_id: int) -> bool:
+        return self._store.has_turn_after(session_id, turn_id)
+
     def get(self, message_id: int) -> models.SessionMessage | None:
         return self._store.get(message_id)
 

@@ -178,6 +178,7 @@ def test_run_migrations_is_idempotent() -> None:
         assert [(row["version"], row["name"]) for row in rows] == [
             ("0001", "0001_initial.sql"),
             ("0002", "0002_demo.sql"),
+            ("0003", "0003_pagination_demo.sql"),
         ]
     finally:
         conn.close()
@@ -493,18 +494,113 @@ def test_demo_migration_creates_demo_workspace_data() -> None:
             "name": "Demo Workspace",
             "root_path": "data/demo_workspace",
         }
-        assert story_count == 2
-        assert session_count == 2
-        assert profile_count == 2
+        assert story_count == 3
+        assert session_count == 3
+        assert profile_count == 3
         assert character_count == 2
         assert character_detail_count == 2
         assert lorebook_count == 2
-        assert character_mount_count == 4
+        assert character_mount_count == 5
         assert lorebook_mount_count == 4
         assert status_template_count == 3
         assert status_mount_count == 4
         assert scene_template["status_kind"] == "scene"
         assert '"runtimeKeyLocked":true' in scene_template["document_json"]
         assert '"_bootstrap_csv"' not in scene_template["metadata_json"]
+    finally:
+        conn.close()
+
+
+def test_pagination_demo_migration_creates_long_history_session() -> None:
+    conn = db.connect(":memory:")
+    try:
+        run_migrations(conn)
+
+        story = conn.execute(
+            """
+            SELECT id, title, story_prompt, first_message, metadata_json
+            FROM rpg_stories
+            WHERE workspace_id = 'demo_workspace'
+              AND title = '分页压力测试 Demo'
+            """
+        ).fetchone()
+        session = conn.execute(
+            """
+            SELECT id, story_id, state_json
+            FROM rpg_sessions
+            WHERE id = 's_pagination001'
+            """
+        ).fetchone()
+        profile = conn.execute(
+            """
+            SELECT title, player_character_id, player_character_snapshot_json
+            FROM rpg_session_profiles
+            WHERE session_id = 's_pagination001'
+            """
+        ).fetchone()
+        main_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM rpg_session_messages
+            WHERE session_id = 's_pagination001'
+            """
+        ).fetchone()["count"]
+        backup_count = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM rpg_session_backup_messages
+            WHERE session_id = 's_pagination001'
+            """
+        ).fetchone()["count"]
+        turn_count = conn.execute(
+            """
+            SELECT COUNT(DISTINCT turn_id) AS count
+            FROM rpg_session_messages
+            WHERE session_id = 's_pagination001'
+            """
+        ).fetchone()["count"]
+        first_messages = conn.execute(
+            """
+            SELECT role, content, turn_id, seq_in_turn
+            FROM rpg_session_messages
+            WHERE session_id = 's_pagination001'
+            ORDER BY turn_id, seq_in_turn
+            LIMIT 2
+            """
+        ).fetchall()
+        latest_messages = conn.execute(
+            """
+            SELECT role, content, turn_id, seq_in_turn
+            FROM rpg_session_messages
+            WHERE session_id = 's_pagination001'
+              AND turn_id = 160
+            ORDER BY seq_in_turn
+            """
+        ).fetchall()
+
+        assert story is not None
+        assert story["metadata_json"] == '{"kind":"pagination_demo","order":99,"purpose":"history_pagination"}'
+        assert "分页测试专用背景" in story["story_prompt"]
+        assert "分页" in story["first_message"]
+        assert dict(session) == {
+            "id": "s_pagination001",
+            "story_id": story["id"],
+            "state_json": '{"scene":"分页测试·长历史记录","time":"分页测试第 1 页"}',
+        }
+        assert profile["title"] == "分页压力测试长历史"
+        assert profile["player_character_id"] is not None
+        assert '"name":"Bob"' in profile["player_character_snapshot_json"]
+        assert f'"storyId":{story["id"]}' in profile["player_character_snapshot_json"]
+        assert main_count == 320
+        assert backup_count == 320
+        assert turn_count == 160
+        assert [dict(row) for row in first_messages] == [
+            {"role": "user", "content": "分页测试 user turn 001", "turn_id": 1, "seq_in_turn": 1},
+            {"role": "assistant", "content": "分页测试 assistant turn 001", "turn_id": 1, "seq_in_turn": 2},
+        ]
+        assert [dict(row) for row in latest_messages] == [
+            {"role": "user", "content": "分页测试 user turn 160", "turn_id": 160, "seq_in_turn": 1},
+            {"role": "assistant", "content": "分页测试 assistant turn 160", "turn_id": 160, "seq_in_turn": 2},
+        ]
     finally:
         conn.close()

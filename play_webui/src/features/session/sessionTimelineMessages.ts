@@ -1,5 +1,4 @@
-import type { getSessionHistory } from '@/lib/api/sessions'
-import { HISTORY_MESSAGE_ROLE, type SessionPlayerCharacter } from '@/types/session'
+import { HISTORY_MESSAGE_ROLE, type SessionPlayerCharacter, type Turn } from '@/types/session'
 import {
   firstLetter,
   stripLeadingSceneBlock,
@@ -13,7 +12,7 @@ import {
 
 export const stoppedStreamText = '已停止当前流式响应。'
 
-type HistoryMessage = Awaited<ReturnType<typeof getSessionHistory>>[number]['messages'][number]
+type HistoryMessage = Turn['messages'][number]
 
 export type UserTimelineMessage = SessionTimelineMessage & { role: typeof SESSION_TIMELINE_ROLE.USER }
 
@@ -111,7 +110,7 @@ export function mapHistoryToMessages({
   turns,
   playerCharacter,
 }: {
-  turns: Awaited<ReturnType<typeof getSessionHistory>> | undefined
+  turns: Turn[] | undefined
   playerCharacter: SessionPlayerCharacter | null
 }): SessionTimelineMessage[] {
   return (turns ?? []).flatMap((turn, turnIndex) => {

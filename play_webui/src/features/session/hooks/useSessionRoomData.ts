@@ -3,14 +3,20 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { listStoryCharacters } from '@/lib/api/characters'
 import { getContextPreview } from '@/lib/api/contextPreview'
 import { getCurrentScene } from '@/lib/api/scene'
-import { getSession, getSessionHistory } from '@/lib/api/sessions'
+import { getSession } from '@/lib/api/sessions'
 import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { fromContextPreviewEstimate, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { PLAYER_CHARACTER_STATUS } from '@/types/session'
 import { STATUS_KIND } from '@/types/statusTables'
 import type { SessionRoomLogger } from '../sessionRoomLogger'
 import { mapHistoryToMessages } from '../sessionTimelineMessages'
-import type { SessionTimelineMessage } from '../sessionRoomTypes'
+import {
+  HISTORY_REFRESH_MODE,
+  SESSION_HISTORY_MESSAGES,
+  type RefreshSessionDataOptions,
+  type SessionTimelineMessage,
+} from '../sessionRoomTypes'
+import { useSessionHistoryWindow } from './useSessionHistoryWindow'
 
 export function useSessionRoomData({
   sessionId,
@@ -34,11 +40,19 @@ export function useSessionRoomData({
   })
 
   const session = sessionQuery.data
-
-  const historyQuery = useQuery({
-    queryKey: ['play-session-history', sessionId],
-    queryFn: () => getSessionHistory(sessionId),
-  })
+  const {
+    historyQuery,
+    activePage: historyPage,
+    loadingBefore: historyLoadingBefore,
+    loadingAfter: historyLoadingAfter,
+    showJumpToLatest: showJumpToLatestHistory,
+    jumpingToLatest: jumpingToLatestHistory,
+    latestTurnId,
+    loadPreviousPage: loadPreviousHistoryPage,
+    loadNextPage: loadNextHistoryPage,
+    refreshHistoryWindow,
+    jumpToLatestPage,
+  } = useSessionHistoryWindow({ sessionId, logger })
 
   const sceneQuery = useQuery({
     queryKey: ['play-session-scene', sessionId],
@@ -72,14 +86,11 @@ export function useSessionRoomData({
   )
 
   const baseMessages = useMemo(
-    () => mapHistoryToMessages({ turns: historyQuery.data, playerCharacter }),
-    [historyQuery.data, playerCharacter],
+    () => mapHistoryToMessages({ turns: historyPage?.turns, playerCharacter }),
+    [historyPage?.turns, playerCharacter],
   )
 
-  const lastPersistedTurnId = useMemo(
-    () => Math.max(0, ...baseMessages.map((message) => message.turnId)),
-    [baseMessages],
-  )
+  const lastPersistedTurnId = latestTurnId
 
   const visibleMessages = useMemo(() => {
     const historyMessages = optimisticTruncateFromTurn === null
@@ -91,8 +102,8 @@ export function useSessionRoomData({
   }, [baseMessages, localMessages, optimisticTruncateFromTurn])
 
   const lastTurnId = useMemo(
-    () => Math.max(0, ...visibleMessages.map((message) => message.turnId)),
-    [visibleMessages],
+    () => Math.max(lastPersistedTurnId, ...localMessages.map((message) => message.turnId)),
+    [lastPersistedTurnId, localMessages],
   )
 
   useEffect(() => {
@@ -103,37 +114,65 @@ export function useSessionRoomData({
     logger.info('session data reset', { status: 'session_changed' })
   }, [logger, sessionId])
 
+  const jumpToLatestHistoryBottom = useCallback(async ({
+    silent = false,
+  }: {
+    silent?: boolean
+  } = {}) => {
+    const latestTurnIdFromJump = await jumpToLatestPage()
+    if (latestTurnIdFromJump === null) {
+      if (!silent) showToast(SESSION_HISTORY_MESSAGES.LATEST_LOAD_FAILED)
+      return null
+    }
+    setForceScrollKey((current) => current + 1)
+    return latestTurnIdFromJump
+  }, [jumpToLatestPage, showToast])
+
   const refreshSessionData = useCallback(async ({
     silent = false,
     clearAccurateUsage = true,
-  }: {
-    silent?: boolean
-    clearAccurateUsage?: boolean
-  } = {}) => {
+    historyMode = HISTORY_REFRESH_MODE.ACTIVE,
+    scrollToBottom = false,
+  }: RefreshSessionDataOptions = {}) => {
     try {
-      await Promise.all([
+      const [, historyRefreshed] = await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['play-session', sessionId] }),
-        queryClient.invalidateQueries({ queryKey: ['play-session-history', sessionId] }),
+        refreshHistoryWindow({ mode: historyMode }),
         queryClient.invalidateQueries({ queryKey: ['play-session-scene', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-status-tables', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] }),
       ])
+      if (!historyRefreshed) throw new Error('history page refresh failed')
       setLocalMessages([])
       setOptimisticTruncateFromTurn(null)
       setTimelineResetKey((current) => current + 1)
+      if (scrollToBottom) setForceScrollKey((current) => current + 1)
       if (clearAccurateUsage) setAccurateUsageOverride(null)
-      logger.info('session data refreshed', { status: 'success', clearAccurateUsage })
+      logger.info('session data refreshed', {
+        status: 'success',
+        clearAccurateUsage,
+        historyMode,
+        scrollToBottom,
+      })
       return true
     } catch (error) {
       logger.warn('session data refresh failed', { status: 'error', error })
       if (!silent) showToast('刷新失败，请手动刷新页面')
       return false
     }
-  }, [logger, queryClient, sessionId, showToast])
+  }, [logger, queryClient, refreshHistoryWindow, sessionId, showToast])
 
   return {
     sessionQuery,
     historyQuery,
+    historyPage,
+    historyLoadingBefore,
+    historyLoadingAfter,
+    showJumpToLatestHistory,
+    jumpingToLatestHistory,
+    loadPreviousHistoryPage,
+    loadNextHistoryPage,
+    jumpToLatestHistoryBottom,
     sceneQuery,
     statusTablesQuery,
     charactersQuery,

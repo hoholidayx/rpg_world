@@ -92,6 +92,63 @@ class BaseSessionMessageStore:
             query = query.limit(limit)
         return [to_session_message(row) for row in query]
 
+    def list_turn_window(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        before_turn_id: int | None = None,
+        after_turn_id: int | None = None,
+    ) -> list[models.SessionMessage]:
+        turn_ids = self._turn_window_ids(
+            session_id,
+            limit=limit,
+            before_turn_id=before_turn_id,
+            after_turn_id=after_turn_id,
+        )
+        if not turn_ids:
+            return []
+
+        query = (
+            self._record_model
+            .select()
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.turn_id.in_(turn_ids))
+            )
+            .order_by(
+                self._record_model.turn_id,
+                self._record_model.seq_in_turn,
+                self._record_model.id,
+            )
+        )
+        return [to_session_message(row) for row in query]
+
+    def has_turn_before(self, session_id: str, turn_id: int) -> bool:
+        return bool(
+            self._record_model
+            .select(self._record_model.id)
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.turn_id > 0)
+                & (self._record_model.turn_id < int(turn_id))
+            )
+            .limit(1)
+            .first()
+        )
+
+    def has_turn_after(self, session_id: str, turn_id: int) -> bool:
+        return bool(
+            self._record_model
+            .select(self._record_model.id)
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.turn_id > int(turn_id))
+            )
+            .limit(1)
+            .first()
+        )
+
     def get(self, message_id: int) -> models.SessionMessage | None:
         row = get_or_none(self._record_model, message_id)
         return to_session_message(row) if row is not None else None
@@ -128,6 +185,49 @@ class BaseSessionMessageStore:
         if row is None:
             return 0
         return max(0, int(row.turn_id))
+
+    def _turn_window_ids(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        before_turn_id: int | None,
+        after_turn_id: int | None,
+    ) -> list[int]:
+        normalized_limit = max(1, int(limit))
+        query = (
+            self._record_model
+            .select(self._record_model.turn_id)
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.turn_id > 0)
+            )
+            .group_by(self._record_model.turn_id)
+        )
+        if before_turn_id is not None:
+            query = (
+                query
+                .where(self._record_model.turn_id < int(before_turn_id))
+                .order_by(self._record_model.turn_id.desc())
+                .limit(normalized_limit)
+            )
+            return sorted(int(row.turn_id) for row in query)
+
+        if after_turn_id is not None:
+            query = (
+                query
+                .where(self._record_model.turn_id > int(after_turn_id))
+                .order_by(self._record_model.turn_id)
+                .limit(normalized_limit)
+            )
+            return [int(row.turn_id) for row in query]
+
+        query = (
+            query
+            .order_by(self._record_model.turn_id.desc())
+            .limit(normalized_limit)
+        )
+        return sorted(int(row.turn_id) for row in query)
 
     def update(
         self,

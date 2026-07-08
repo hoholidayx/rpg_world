@@ -12,8 +12,10 @@ import {
   SESSION_MESSAGE_STATUS,
   SESSION_STREAM_SOURCE,
   SESSION_TIMELINE_ROLE,
+  SESSION_HISTORY_MESSAGES,
   type ConfirmRequest,
   type NarrativeStyle,
+  type RefreshSessionDataOptions,
   type SessionInputMode,
   type SessionStreamSource,
   type SessionTimelineMessage,
@@ -37,6 +39,7 @@ export function useSessionTimelineActions({
   stopping,
   streamLocalTurn,
   setOptimisticTruncateFromTurn,
+  jumpToLatestHistoryBottom,
   refreshSessionData,
   requestConfirm,
   requireRoleSelection,
@@ -57,7 +60,8 @@ export function useSessionTimelineActions({
   stopping: boolean
   streamLocalTurn: (options: StreamLocalTurnOptions) => Promise<void>
   setOptimisticTruncateFromTurn: (turnId: number | null) => void
-  refreshSessionData: (options?: { silent?: boolean; clearAccurateUsage?: boolean }) => Promise<boolean>
+  jumpToLatestHistoryBottom: (options?: { silent?: boolean }) => Promise<number | null>
+  refreshSessionData: (options?: RefreshSessionDataOptions) => Promise<boolean>
   requestConfirm: (request: ConfirmRequest) => void
   requireRoleSelection: () => void
   showToast: (message: string) => void
@@ -116,8 +120,15 @@ export function useSessionTimelineActions({
       return
     }
 
-    const replacingLastTurn = Boolean(message?.messageId) && message?.turnId === lastPersistedTurnId
-    const turnId = replacingLastTurn && message ? message.turnId : lastTurnId + 1
+    const ensuredLatestTurnId = await jumpToLatestHistoryBottom({ silent: true })
+    if (ensuredLatestTurnId === null) {
+      showToast(SESSION_HISTORY_MESSAGES.LATEST_LOAD_FAILED)
+      return
+    }
+
+    const persistedLastTurnId = Math.max(lastPersistedTurnId, ensuredLatestTurnId)
+    const replacingLastTurn = Boolean(message?.messageId) && message?.turnId === persistedLastTurnId
+    const turnId = replacingLastTurn && message ? message.turnId : Math.max(lastTurnId, persistedLastTurnId) + 1
     const playerSpeaker = makePlayerSpeaker(playerCharacter)
     const userMessage: SessionTimelineMessage = {
       id: `local-${source}-user-${turnId}-${crypto.randomUUID()}`,
@@ -186,6 +197,7 @@ export function useSessionTimelineActions({
     currentNarrativeStyle,
     ensureCanStartTurn,
     inputMode,
+    jumpToLatestHistoryBottom,
     lastPersistedTurnId,
     lastTurnId,
     logger,

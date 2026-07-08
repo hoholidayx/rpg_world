@@ -1,0 +1,8 @@
+{
+  "session": {
+    "historyPagination": {
+      "pageTurnLimit": 50,
+      "maxCachedPages": 2
+    }
+  }
+}

@@ -13,6 +13,7 @@ import {
 import {
   SESSION_MESSAGE_STATUS,
   SESSION_TIMELINE_ROLE,
+  type RefreshSessionDataOptions,
   type SessionInputMode,
   type SessionStreamSource,
   type SessionTimelineMessage,
@@ -58,7 +59,7 @@ export function useSessionStreamTurn({
   setComposerText: Dispatch<SetStateAction<string>>
   setLocalMessages: Dispatch<SetStateAction<SessionTimelineMessage[]>>
   setForceScrollKey: Dispatch<SetStateAction<number>>
-  refreshSessionData: (options?: { silent?: boolean; clearAccurateUsage?: boolean }) => Promise<boolean>
+  refreshSessionData: (options?: RefreshSessionDataOptions) => Promise<boolean>
   showToast: (message: string) => void
   logger: SessionRoomLogger
   onExit: () => void

@@ -1,4 +1,4 @@
-import type { SessionSummary, Turn, WorkspaceSummary } from '@/types/session'
+import type { HistoryPage, SessionSummary, Turn, WorkspaceSummary } from '@/types/session'
 import { playApiFetch, withWorkspace } from './client'
 
 export function listWorkspaces() {
@@ -31,6 +31,24 @@ export function bindSessionPlayerCharacter(sessionId: string, playerCharacterId:
 
 export function getSessionHistory(sessionId: string) {
   return playApiFetch<Turn[]>(`/sessions/${encodeURIComponent(sessionId)}/history`)
+}
+
+export function getSessionHistoryPage(
+  sessionId: string,
+  options: {
+    limit?: number
+    beforeTurnId?: number
+    afterTurnId?: number
+  } = {},
+) {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.beforeTurnId !== undefined) params.set('beforeTurnId', String(options.beforeTurnId))
+  if (options.afterTurnId !== undefined) params.set('afterTurnId', String(options.afterTurnId))
+  const query = params.toString()
+  return playApiFetch<HistoryPage>(
+    `/sessions/${encodeURIComponent(sessionId)}/history-page${query ? `?${query}` : ''}`,
+  )
 }
 
 export function truncateSessionTurn(sessionId: string, turnId: number) {

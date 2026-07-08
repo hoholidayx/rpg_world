@@ -117,6 +117,50 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         database.close()
 
 
+def test_message_service_turn_window_pagination(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        session_id = _create_test_session(database, "s_message_turn_window")
+
+        for turn_id in range(1, 6):
+            messages.append(session_id, models.MESSAGE_ROLE_USER, f"u{turn_id}", turn_id=turn_id, seq_in_turn=1)
+            messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, f"a{turn_id}", turn_id=turn_id, seq_in_turn=2)
+
+        latest = messages.list_turn_window(session_id, limit=2)
+        before = messages.list_turn_window(session_id, limit=2, before_turn_id=4)
+        after = messages.list_turn_window(session_id, limit=2, after_turn_id=2)
+
+        assert [(row.turn_id, row.content) for row in latest] == [
+            (4, "u4"),
+            (4, "a4"),
+            (5, "u5"),
+            (5, "a5"),
+        ]
+        assert [(row.turn_id, row.content) for row in before] == [
+            (2, "u2"),
+            (2, "a2"),
+            (3, "u3"),
+            (3, "a3"),
+        ]
+        assert [(row.turn_id, row.content) for row in after] == [
+            (3, "u3"),
+            (3, "a3"),
+            (4, "u4"),
+            (4, "a4"),
+        ]
+        assert messages.has_turn_before(session_id, 2)
+        assert not messages.has_turn_before(session_id, 1)
+        assert messages.has_turn_after(session_id, 4)
+        assert not messages.has_turn_after(session_id, 5)
+
+        empty_session_id = _create_test_session(database, "s_message_turn_window_empty")
+        assert messages.list_turn_window(empty_session_id, limit=50) == []
+        assert messages.latest_turn_id(empty_session_id) == 0
+    finally:
+        database.close()
+
+
 def test_story_memory_service_crud(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:

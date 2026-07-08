@@ -54,6 +54,16 @@ export type Turn = {
   messages: HistoryMessage[]
 }
 
+export type HistoryPage = {
+  turns: Turn[]
+  startTurnId: number | null
+  endTurnId: number | null
+  latestTurnId: number
+  hasBefore: boolean
+  hasAfter: boolean
+  limit: number
+}
+
 export type HistoryMessage = {
   messageId: number
   turnId: number

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { bindSessionPlayerCharacter, type getSession } from '@/lib/api/sessions'
 import type { CharacterCard } from '@/types/characters'
 import { PLAYER_CHARACTER_STATUS, type SessionPlayerCharacter } from '@/types/session'
-import type { ConfirmRequest } from '../sessionRoomTypes'
+import type { ConfirmRequest, RefreshSessionDataOptions } from '../sessionRoomTypes'
 import type { SessionRoomLogger } from '../sessionRoomLogger'
 
 type SessionPayload = Awaited<ReturnType<typeof getSession>>
@@ -22,7 +22,7 @@ export function useSessionRoleBinding({
   session: SessionPayload | undefined
   characters: CharacterCard[]
   playerCharacter: SessionPlayerCharacter | null
-  refreshSessionData: (options?: { silent?: boolean; clearAccurateUsage?: boolean }) => Promise<boolean>
+  refreshSessionData: (options?: RefreshSessionDataOptions) => Promise<boolean>
   requestConfirm: (request: ConfirmRequest) => void
   showToast: (message: string) => void
   logger: SessionRoomLogger

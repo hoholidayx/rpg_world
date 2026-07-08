@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Literal, TypeVar
@@ -150,6 +151,18 @@ class PlayTurn(BaseModel):
 
     turn_id: int = Field(alias="turnId")
     messages: list[PlayHistoryMessage] = Field(default_factory=list)
+
+
+class PlayHistoryPage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    turns: list[PlayTurn] = Field(default_factory=list)
+    start_turn_id: int | None = Field(default=None, alias="startTurnId")
+    end_turn_id: int | None = Field(default=None, alias="endTurnId")
+    latest_turn_id: int = Field(alias="latestTurnId")
+    has_before: bool = Field(alias="hasBefore")
+    has_after: bool = Field(alias="hasAfter")
+    limit: int
 
 
 def _session_summary(session: dict[str, object]) -> PlaySessionSummary:
@@ -307,6 +320,30 @@ def _turns_from_history(
     return turns
 
 
+def _history_payload_from_row(row: object) -> dict[str, object]:
+    metadata = _json_dict_from_text(str(getattr(row, "metadata_json", "") or "{}"))
+    payload: dict[str, object] = {
+        "messageId": int(getattr(row, "id", 0) or 0),
+        "turnId": int(getattr(row, "turn_id", 0) or 0),
+        "seqInTurn": int(getattr(row, "seq_in_turn", 0) or 0),
+        "role": str(getattr(row, "role", "") or "assistant"),
+        "content": str(getattr(row, "content", "") or ""),
+        "metadata": metadata,
+    }
+    created_at = str(getattr(row, "created_at", "") or "")
+    if created_at:
+        payload["createdAt"] = created_at
+    return payload
+
+
+def _json_dict_from_text(raw: str) -> dict[str, object]:
+    try:
+        payload: object = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _scene_from_attrs(attrs: dict[str, str] | None) -> PlayScene:
     if not attrs:
         return PlayScene()
@@ -412,6 +449,45 @@ async def get_session_history(
         return _turns_from_history(history, source="api")
     except InvalidTurnMetadataError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/{session_id}/history-page", response_model=PlayHistoryPage)
+async def get_session_history_page(
+    session_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    before_turn_id: int | None = Query(default=None, alias="beforeTurnId", gt=0),
+    after_turn_id: int | None = Query(default=None, alias="afterTurnId", gt=0),
+) -> PlayHistoryPage:
+    if before_turn_id is not None and after_turn_id is not None:
+        raise HTTPException(status_code=400, detail="beforeTurnId and afterTurnId are mutually exclusive")
+
+    _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    messages = get_data_service_gateway().messages
+
+    rows = messages.list_turn_window(
+        agent_session_id,
+        limit=limit,
+        before_turn_id=before_turn_id,
+        after_turn_id=after_turn_id,
+    )
+    raw_history = [_history_payload_from_row(row) for row in rows]
+    try:
+        turns = _turns_from_history(raw_history, source="api")
+    except InvalidTurnMetadataError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    start_turn_id = turns[0].turn_id if turns else None
+    end_turn_id = turns[-1].turn_id if turns else None
+    latest_turn_id = messages.latest_turn_id(agent_session_id)
+    return PlayHistoryPage(
+        turns=turns,
+        startTurnId=start_turn_id,
+        endTurnId=end_turn_id,
+        latestTurnId=latest_turn_id,
+        hasBefore=bool(start_turn_id and messages.has_turn_before(agent_session_id, start_turn_id)),
+        hasAfter=bool(end_turn_id and messages.has_turn_after(agent_session_id, end_turn_id)),
+        limit=limit,
+    )
 
 
 @router.get("/{session_id}/scene", response_model=PlayScene)
