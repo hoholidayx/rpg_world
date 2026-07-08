@@ -1,69 +1,35 @@
 'use client'
 
-import { CSSProperties, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
-import { listStoryCharacters } from '@/lib/api/characters'
-import { stopSessionStream } from '@/lib/api/chat'
-import { getContextPreview } from '@/lib/api/contextPreview'
-import { getCurrentScene } from '@/lib/api/scene'
-import {
-  bindSessionPlayerCharacter,
-  deleteSessionMessage,
-  getSession,
-  getSessionHistory,
-  truncateSessionTurn,
-} from '@/lib/api/sessions'
-import { listSessionStatusTables } from '@/lib/api/statusTables'
-import { consumeChatStream } from '@/lib/stream/sse'
 import { cn } from '@/lib/utils/cn'
-import { SESSION_FONT_SCALE_DEFAULT, useSessionUiStore } from '@/stores/sessionUiStore'
 import type { CharacterCard } from '@/types/characters'
-import { fromContextPreviewEstimate, fromTurnUsage, type ContextUsageSnapshot } from '@/types/contextUsage'
-import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
-import { STATUS_KIND } from '@/types/statusTables'
-import { TURN_CANCEL_STATUS } from '@/types/command'
+import type { SessionPlayerCharacter } from '@/types/session'
 import { SessionComposer } from './SessionComposer'
 import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
 import { SessionTimeline } from './SessionTimeline'
+import { useSessionRoomData } from './hooks/useSessionRoomData'
+import { useSessionRoomLayout } from './hooks/useSessionRoomLayout'
+import { useSessionRoleBinding } from './hooks/useSessionRoleBinding'
+import { useSessionStreamTurn } from './hooks/useSessionStreamTurn'
+import { useSessionTimelineActions } from './hooks/useSessionTimelineActions'
+import { createSessionRoomLogger } from './sessionRoomLogger'
 import {
   characterSummary,
   firstLetter,
   formatDateTime,
   getCharacterAvatarUrl,
-  stripLeadingSceneBlock,
 } from './sessionRoomHelpers'
-import { HISTORY_MESSAGE_ROLE, PLAYER_CHARACTER_STATUS, type SessionPlayerCharacter } from '@/types/session'
 import {
-  ConfirmRequest,
-  NarrativeStyle,
-  NarrativeStyleId,
-  SESSION_MESSAGE_STATUS,
-  SESSION_STREAM_SOURCE,
-  SESSION_TIMELINE_ROLE,
-  SessionInputMode,
-  SessionSpeaker,
-  SessionStreamSource,
-  SessionTimelineMessage,
+  type ConfirmRequest,
+  type NarrativeStyle,
+  type NarrativeStyleId,
+  type SessionInputMode,
 } from './sessionRoomTypes'
-
-const defaultSidebarSizes = {
-  left: 300,
-  right: 340,
-}
-
-const collapsedSidebarSize = 72
-
-const sidebarLimits = {
-  leftMin: 260,
-  leftMax: 460,
-  rightMin: 280,
-  rightMax: 500,
-}
 
 const narrativeStyles: NarrativeStyle[] = [
   { id: 'default', label: '默认', prompt: '' },
@@ -71,163 +37,6 @@ const narrativeStyles: NarrativeStyle[] = [
   { id: 'fast', label: '快速推进', prompt: '请快速推进到下一个关键选择。' },
   { id: 'options', label: '多给选项', prompt: '请在回应末尾给出多个可选择的行动方向。' },
 ]
-
-type DragState = {
-  side: 'left' | 'right'
-  startX: number
-  startLeft: number
-  startRight: number
-}
-
-type ActiveStream = {
-  controller: AbortController
-  requestId: string
-  source: SessionStreamSource
-  assistantMessageId: string
-  turnId: number
-}
-
-type MobilePanel = 'left' | 'right' | null
-
-const stoppedStreamText = '已停止当前流式响应。'
-type HistoryMessage = Awaited<ReturnType<typeof getSessionHistory>>[number]['messages'][number]
-type UserTimelineMessage = SessionTimelineMessage & { role: typeof SESSION_TIMELINE_ROLE.USER }
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}
-
-function makePlayerSpeaker(character: SessionPlayerCharacter | null): SessionSpeaker {
-  return {
-    name: character?.name ?? '你',
-    label: 'IC',
-    avatarUrl: character?.avatarUrl ?? '',
-    fallback: firstLetter(character?.name ?? '你'),
-    tone: 'player',
-  }
-}
-
-function makeAssistantSpeaker(): SessionSpeaker {
-  // Assistant output is currently one mixed narrative block. Character-level
-  // avatars need a future structured segments layer instead of speaker metadata.
-  return {
-    name: '叙事者',
-    avatarUrl: '',
-    fallback: '叙',
-    tone: 'assistant',
-  }
-}
-
-function toolSpeaker(): SessionSpeaker {
-  return {
-    name: '工具结果',
-    fallback: '⚒',
-    tone: 'tool',
-  }
-}
-
-function errorSpeaker(): SessionSpeaker {
-  return {
-    name: '错误',
-    fallback: '!',
-    tone: 'error',
-  }
-}
-
-function systemSpeaker(): SessionSpeaker {
-  return {
-    name: '系统',
-    fallback: 'S',
-    tone: 'system',
-  }
-}
-
-function streamPlaceholder(turnId: number): SessionTimelineMessage {
-  return {
-    id: `local-stream-${turnId}-${crypto.randomUUID()}`,
-    turnId,
-    seqInTurn: 2,
-    role: SESSION_TIMELINE_ROLE.ASSISTANT,
-    content: '',
-    createdAt: new Date().toISOString(),
-    speaker: makeAssistantSpeaker(),
-    status: SESSION_MESSAGE_STATUS.STREAMING,
-    canCopy: false,
-    canRetry: false,
-    canEdit: false,
-    canDelete: false,
-  }
-}
-
-function timelineRole(role: HistoryMessage['role']): SessionTimelineMessage['role'] {
-  if (
-    role === HISTORY_MESSAGE_ROLE.USER
-    || role === HISTORY_MESSAGE_ROLE.ASSISTANT
-    || role === HISTORY_MESSAGE_ROLE.TOOL
-    || role === HISTORY_MESSAGE_ROLE.SYSTEM
-  ) return role
-  return SESSION_TIMELINE_ROLE.ASSISTANT
-}
-
-function makeHistorySpeaker(
-  message: HistoryMessage,
-  playerCharacter: SessionPlayerCharacter | null,
-): SessionSpeaker {
-  const role = timelineRole(message.role)
-
-  if (role === HISTORY_MESSAGE_ROLE.USER) {
-    return makePlayerSpeaker(playerCharacter)
-  }
-
-  if (role === HISTORY_MESSAGE_ROLE.ASSISTANT) {
-    return makeAssistantSpeaker()
-  }
-
-  if (role === HISTORY_MESSAGE_ROLE.TOOL) return toolSpeaker()
-  return systemSpeaker()
-}
-
-function mapHistoryToMessages({
-  turns,
-  playerCharacter,
-}: {
-  turns: Awaited<ReturnType<typeof getSessionHistory>> | undefined
-  playerCharacter: SessionPlayerCharacter | null
-}): SessionTimelineMessage[] {
-  return (turns ?? []).flatMap((turn, turnIndex) => {
-    return turn.messages.map((message, messageIndex) => {
-      const role = timelineRole(message.role)
-      const persistent = Boolean(message.messageId)
-      const turnActionRole = role === HISTORY_MESSAGE_ROLE.USER || role === HISTORY_MESSAGE_ROLE.ASSISTANT
-      const content = role === HISTORY_MESSAGE_ROLE.USER ? stripLeadingSceneBlock(message.content) : message.content
-
-      return {
-        id: message.messageId ? `history-${message.messageId}` : `history-${turn.turnId || turnIndex + 1}-${messageIndex}`,
-        messageId: message.messageId || undefined,
-        turnId: message.turnId || turn.turnId || turnIndex + 1,
-        seqInTurn: message.seqInTurn || messageIndex + 1,
-        role,
-        content,
-        metadata: message.metadata,
-        createdAt: message.createdAt,
-        speaker: makeHistorySpeaker(message, playerCharacter),
-        status: message.role === HISTORY_MESSAGE_ROLE.ASSISTANT ? SESSION_MESSAGE_STATUS.DONE : undefined,
-        canCopy: Boolean(content.trim()),
-        canRetry: persistent && role === HISTORY_MESSAGE_ROLE.USER,
-        canEdit: persistent && role === HISTORY_MESSAGE_ROLE.USER,
-        canDelete: persistent && turnActionRole,
-      }
-    })
-  })
-}
-
-function canEditMessage(message: SessionTimelineMessage): message is UserTimelineMessage {
-  return Boolean(message.canEdit && message.role === SESSION_TIMELINE_ROLE.USER)
-}
-
-function canRetryMessage(message: SessionTimelineMessage): message is UserTimelineMessage {
-  return Boolean(message.canRetry && message.role === SESSION_TIMELINE_ROLE.USER)
-}
 
 function Toast({ message }: { message: string }) {
   return (
@@ -399,110 +208,13 @@ function PlayerCharacterDialog({
 
 export function SessionRoom({ sessionId }: { sessionId: string }) {
   const router = useRouter()
-  const queryClient = useQueryClient()
-  const [leftWidth, setLeftWidth] = useState(defaultSidebarSizes.left)
-  const [rightWidth, setRightWidth] = useState(defaultSidebarSizes.right)
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
-  const [rightCollapsed, setRightCollapsed] = useState(false)
-  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [dragState, setDragState] = useState<DragState | null>(null)
+  const logger = useMemo(() => createSessionRoomLogger(sessionId), [sessionId])
   const [inputMode, setInputMode] = useState<SessionInputMode>('ic')
   const [narrativeStyleId, setNarrativeStyleId] = useState<NarrativeStyleId>('default')
   const [composerText, setComposerText] = useState('')
-  const [localMessages, setLocalMessages] = useState<SessionTimelineMessage[]>([])
-  const [optimisticTruncateFromTurn, setOptimisticTruncateFromTurn] = useState<number | null>(null)
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState('')
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
-  const [roleDialogOpen, setRoleDialogOpen] = useState(false)
-  const [roleDialogRequired, setRoleDialogRequired] = useState(false)
-  const [selectedRoleCharacterId, setSelectedRoleCharacterId] = useState<number | null>(null)
-  const [roleBindError, setRoleBindError] = useState<string | null>(null)
-  const [bindingRole, setBindingRole] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
-  const [sending, setSending] = useState(false)
-  const [stoppingRequestId, setStoppingRequestId] = useState<string | null>(null)
-  const [accurateUsageOverride, setAccurateUsageOverride] = useState<ContextUsageSnapshot | null>(null)
-  const [forceScrollKey, setForceScrollKey] = useState(0)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const activeStreamRef = useRef<ActiveStream | null>(null)
-  const stoppingRequestIdRef = useRef<string | null>(null)
-  const stopSettledRequestIdsRef = useRef<Set<string>>(new Set())
-  const fontScale = useSessionUiStore((state) => state.fontScale)
-  const setFontScale = useSessionUiStore((state) => state.setFontScale)
-  const syncFontScale = useSessionUiStore((state) => state.syncFontScale)
-
-  const sessionQuery = useQuery({
-    queryKey: ['play-session', sessionId],
-    queryFn: () => getSession(sessionId),
-  })
-
-  const session = sessionQuery.data
-
-  const historyQuery = useQuery({
-    queryKey: ['play-session-history', sessionId],
-    queryFn: () => getSessionHistory(sessionId),
-  })
-
-  const sceneQuery = useQuery({
-    queryKey: ['play-session-scene', sessionId],
-    queryFn: () => getCurrentScene(sessionId),
-  })
-
-  const statusTablesQuery = useQuery({
-    queryKey: ['play-session-status-tables', sessionId, STATUS_KIND.NORMAL],
-    queryFn: () => listSessionStatusTables(sessionId, STATUS_KIND.NORMAL),
-  })
-
-  const charactersQuery = useQuery({
-    queryKey: ['play-story-characters', session?.workspace, session?.storyId],
-    enabled: Boolean(session?.workspace && session?.storyId),
-    queryFn: () => listStoryCharacters(session?.workspace ?? '', session?.storyId ?? 0),
-  })
-
-  const characters = charactersQuery.data ?? []
-  const playerCharacter = session?.playerCharacter ?? null
-  const playerCharacterInvalid = session?.playerCharacterStatus === PLAYER_CHARACTER_STATUS.INVALID
-  const roleSelectionBlocked = !session || playerCharacterInvalid || bindingRole
-
-  const contextPreviewQuery = useQuery({
-    queryKey: ['play-session-context-preview', sessionId],
-    enabled: Boolean(session && !playerCharacterInvalid),
-    queryFn: () => getContextPreview(sessionId),
-  })
-
-  const contextPreviewUsage = useMemo(
-    () => fromContextPreviewEstimate(contextPreviewQuery.data),
-    [contextPreviewQuery.data],
-  )
-  const contextUsage = roleSelectionBlocked ? null : accurateUsageOverride ?? contextPreviewUsage
-
-  const baseMessages = useMemo(
-    () => mapHistoryToMessages({ turns: historyQuery.data, playerCharacter }),
-    [historyQuery.data, playerCharacter],
-  )
-
-  const lastPersistedTurnId = useMemo(
-    () => Math.max(0, ...baseMessages.map((message) => message.turnId)),
-    [baseMessages],
-  )
-
-  const visibleMessages = useMemo(() => {
-    const historyMessages = optimisticTruncateFromTurn === null
-      ? baseMessages
-      : baseMessages.filter((message) => message.turnId < optimisticTruncateFromTurn)
-
-    return [...historyMessages, ...localMessages]
-      .sort((first, second) => first.turnId - second.turnId || (first.seqInTurn ?? 0) - (second.seqInTurn ?? 0))
-  }, [baseMessages, localMessages, optimisticTruncateFromTurn])
-
-  const lastTurnId = useMemo(
-    () => Math.max(0, ...visibleMessages.map((message) => message.turnId)),
-    [visibleMessages],
-  )
-
-  const currentNarrativeStyle = narrativeStyles.find((style) => style.id === narrativeStyleId) ?? narrativeStyles[0]
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message)
@@ -510,796 +222,78 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     toastTimerRef.current = setTimeout(() => setToastMessage(''), 2200)
   }, [])
 
-  const handleComposerTextChange = useCallback((value: string) => {
-    setComposerText(value)
-    setAccurateUsageOverride(null)
-  }, [])
-
   useEffect(() => {
-    syncFontScale()
-  }, [syncFontScale])
-
-  useEffect(() => {
-    setLocalMessages([])
-    setOptimisticTruncateFromTurn(null)
-    setEditingMessageId(null)
-    setEditDraft('')
     setComposerText('')
-    setMobilePanel(null)
-    setSettingsOpen(false)
-    setRoleDialogOpen(false)
-    setRoleDialogRequired(false)
-    setSelectedRoleCharacterId(null)
-    setRoleBindError(null)
-    setStoppingRequestId(null)
-    stoppingRequestIdRef.current = null
-    stopSettledRequestIdsRef.current.clear()
-    setAccurateUsageOverride(null)
-  }, [sessionId])
-
-  useEffect(() => {
-    if (!session) return
-    if (session.playerCharacterStatus === PLAYER_CHARACTER_STATUS.INVALID) {
-      setRoleDialogRequired(true)
-      setRoleDialogOpen(true)
-      setSelectedRoleCharacterId((current) => current ?? characters[0]?.id ?? null)
-      return
-    }
-    if (roleDialogRequired) {
-      setRoleDialogRequired(false)
-      setRoleDialogOpen(false)
-      setRoleBindError(null)
-    }
-  }, [characters, roleDialogRequired, session])
+    logger.info('session room entered', { status: 'session_changed' })
+  }, [logger, sessionId])
 
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-      const active = activeStreamRef.current
-      if (active) {
-        console.info('[SessionRoom] stopping active stream on cleanup', {
-          sessionId,
-          requestId: active.requestId,
-          source: active.source,
-          turnId: active.turnId,
-        })
-        active.controller.abort()
-        activeStreamRef.current = null
-        void stopSessionStream(sessionId, active.requestId).catch((error) => {
-          console.warn('failed to stop active stream on session cleanup', error)
-        })
-      }
     }
-  }, [sessionId])
+  }, [])
 
-  useEffect(() => {
-    if (!dragState) return
-
-    const handlePointerMove = (event: globalThis.PointerEvent) => {
-      if (dragState.side === 'left') {
-        setLeftWidth(clamp(dragState.startLeft + event.clientX - dragState.startX, sidebarLimits.leftMin, sidebarLimits.leftMax))
-        return
-      }
-      setRightWidth(clamp(dragState.startRight - (event.clientX - dragState.startX), sidebarLimits.rightMin, sidebarLimits.rightMax))
-    }
-
-    const stopDragging = () => {
-      setDragState(null)
-    }
-
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', stopDragging)
-    window.addEventListener('pointercancel', stopDragging)
-
-    return () => {
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', stopDragging)
-      window.removeEventListener('pointercancel', stopDragging)
-    }
-  }, [dragState])
-
-  const gridStyle = useMemo(
-    () =>
-      ({
-        '--session-grid-columns': `${leftCollapsed ? collapsedSidebarSize : leftWidth}px 8px minmax(0,1fr) 8px ${
-          rightCollapsed ? collapsedSidebarSize : rightWidth
-        }px`,
-      }) as CSSProperties,
-    [leftCollapsed, leftWidth, rightCollapsed, rightWidth],
-  )
-
-  const sessionExperienceStyle = useMemo(
-    () =>
-      ({
-        '--session-message-font-size': `${14 * (fontScale / 100)}px`,
-        '--session-message-line-height': `${28 * (fontScale / 100)}px`,
-        '--session-segment-label-font-size': `${11 * (fontScale / 100)}px`,
-        '--session-composer-font-size': `${16 * (fontScale / 100)}px`,
-        '--session-composer-line-height': `${28 * (fontScale / 100)}px`,
-      }) as CSSProperties,
-    [fontScale],
-  )
-
-  const startDrag = (side: 'left' | 'right') => (event: PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault()
-    setDragState({
-      side,
-      startX: event.clientX,
-      startLeft: leftWidth,
-      startRight: rightWidth,
-    })
-  }
-
-  const refreshSessionData = useCallback(async ({
-    silent = false,
-    clearAccurateUsage = true,
-  }: {
-    silent?: boolean
-    clearAccurateUsage?: boolean
-  } = {}) => {
-    try {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['play-session', sessionId] }),
-        queryClient.invalidateQueries({ queryKey: ['play-session-history', sessionId] }),
-        queryClient.invalidateQueries({ queryKey: ['play-session-scene', sessionId] }),
-        queryClient.invalidateQueries({ queryKey: ['play-session-status-tables', sessionId] }),
-        queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] }),
-      ])
-      setLocalMessages([])
-      setOptimisticTruncateFromTurn(null)
-      setEditingMessageId(null)
-      setEditDraft('')
-      if (clearAccurateUsage) setAccurateUsageOverride(null)
-      return true
-    } catch {
-      if (!silent) showToast('刷新失败，请手动刷新页面')
-      return false
-    }
-  }, [queryClient, sessionId, showToast])
-
+  const layout = useSessionRoomLayout({ sessionId, logger })
+  const data = useSessionRoomData({ sessionId, showToast, logger })
   const requestConfirm = useCallback((request: ConfirmRequest) => {
     setConfirmRequest(request)
   }, [])
-
-  const openRoleDialog = useCallback(() => {
-    setSettingsOpen(false)
-    setRoleDialogRequired(false)
-    setRoleDialogOpen(true)
-    setRoleBindError(null)
-    setSelectedRoleCharacterId(playerCharacter?.characterId ?? characters[0]?.id ?? null)
-  }, [characters, playerCharacter])
-
-  const closeRoleDialog = useCallback(() => {
-    if (roleDialogRequired) return
-    setRoleDialogOpen(false)
-    setRoleBindError(null)
-    setSelectedRoleCharacterId(null)
-  }, [roleDialogRequired])
-
-  const bindPlayerRole = useCallback(async (characterId: number) => {
-    setBindingRole(true)
-    setRoleBindError(null)
-    try {
-      const updated = await bindSessionPlayerCharacter(sessionId, characterId)
-      await refreshSessionData({ silent: true })
-      setRoleDialogOpen(false)
-      setRoleDialogRequired(false)
-      setSelectedRoleCharacterId(null)
-      showToast(`已切换为 ${updated.playerCharacter?.name ?? '所选角色'}`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '角色绑定失败'
-      setRoleBindError(message)
-      showToast(message)
-    } finally {
-      setBindingRole(false)
-    }
-  }, [refreshSessionData, sessionId, showToast])
-
-  const submitRoleDialog = useCallback(() => {
-    const characterId = selectedRoleCharacterId
-    if (!characterId) {
-      setRoleBindError('请选择一个角色')
-      return
-    }
-    if (!roleDialogRequired && playerCharacter?.characterId === characterId) {
-      showToast('已经是当前扮演角色')
-      return
-    }
-    if (!roleDialogRequired && playerCharacter) {
-      const next = characters.find((character) => character.id === characterId)
-      requestConfirm({
-        title: '确认切换角色',
-        heading: '切换玩家扮演角色',
-        body: `将当前扮演角色从 ${playerCharacter.name} 切换为 ${next?.name ?? '所选角色'}。历史消息保持原样，只影响后续 user 身份。`,
-        confirmLabel: '确认切换',
-        onConfirm: () => {
-          void bindPlayerRole(characterId)
-        },
-      })
-      return
-    }
-    void bindPlayerRole(characterId)
-  }, [bindPlayerRole, characters, playerCharacter, requestConfirm, roleDialogRequired, selectedRoleCharacterId, showToast])
-
-  const markStreamStopped = useCallback((assistantMessageId: string, turnId: number) => {
-    setLocalMessages((current) =>
-      current.map((message) =>
-        message.id === assistantMessageId
-          ? {
-              ...message,
-              status: SESSION_MESSAGE_STATUS.DONE,
-              content: message.content || stoppedStreamText,
-              canCopy: Boolean((message.content || stoppedStreamText).trim()),
-            }
-          : message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.USER
-            ? {
-                ...message,
-                canRetry: true,
-                canEdit: true,
-              }
-          : message,
-      ),
-    )
-  }, [])
-
-  const appendLocalStreamError = useCallback((assistantMessageId: string, turnId: number, errorText: string) => {
-    setLocalMessages((current) => [
-      ...current.map((message) =>
-        message.id === assistantMessageId ? { ...message, status: SESSION_MESSAGE_STATUS.ERROR } : message,
-      ),
-      {
-        id: `local-error-${turnId}-${crypto.randomUUID()}`,
-        turnId,
-        seqInTurn: 5,
-        role: SESSION_TIMELINE_ROLE.ERROR,
-        content: errorText,
-        createdAt: new Date().toISOString(),
-        speaker: errorSpeaker(),
-        status: SESSION_MESSAGE_STATUS.ERROR,
-        canCopy: Boolean(errorText.trim()),
-        canRetry: false,
-        canEdit: false,
-        canDelete: false,
-      },
-    ])
-  }, [])
-
-  const appendStreamEvent = useCallback((event: PlayStreamEvent, assistantMessageId: string, turnId: number) => {
-    if (event.type === PLAY_STREAM_EVENT_TYPE.TURN_STARTED) return
-
-    if (event.type === PLAY_STREAM_EVENT_TYPE.TEXT_DELTA) {
-      setLocalMessages((current) =>
-        current.map((message) =>
-          message.id === assistantMessageId
-            ? {
-                ...message,
-                content: `${message.content}${event.payload.text}`,
-                status: SESSION_MESSAGE_STATUS.STREAMING,
-                canCopy: Boolean(`${message.content}${event.payload.text}`.trim()),
-              }
-            : message,
-        ),
-      )
-      return
-    }
-
-    if (event.type === PLAY_STREAM_EVENT_TYPE.TOOL_CALL || event.type === PLAY_STREAM_EVENT_TYPE.TOOL_RESULT) {
-      const toolText = event.type === PLAY_STREAM_EVENT_TYPE.TOOL_RESULT
-        ? event.payload.resultPreview ?? event.payload.toolResult ?? event.payload.toolName ?? '工具事件'
-        : event.payload.toolArguments ?? event.payload.toolName ?? '工具事件'
-      setLocalMessages((current) => [
-        ...current,
-        {
-          id: `local-tool-${turnId}-${crypto.randomUUID()}`,
-          turnId,
-          seqInTurn: 4,
-          role: SESSION_TIMELINE_ROLE.TOOL,
-          content: toolText,
-          createdAt: new Date().toISOString(),
-          speaker: toolSpeaker(),
-          status: SESSION_MESSAGE_STATUS.LOCAL,
-          canCopy: Boolean(toolText.trim()),
-          canRetry: false,
-          canEdit: false,
-          canDelete: false,
-        },
-      ])
-      return
-    }
-
-    if (event.type === PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED) {
-      const usage = fromTurnUsage(event.payload.usage, contextPreviewUsage, {
-        model: event.payload.model,
-        finishReason: event.payload.finishReason,
-        durationMs: event.payload.durationMs,
-      })
-      if (usage) setAccurateUsageOverride(usage)
-      setLocalMessages((current) =>
-        current.map((message) =>
-          message.id === assistantMessageId
-            ? {
-                ...message,
-                status: SESSION_MESSAGE_STATUS.DONE,
-                content: message.content || event.payload.text || '已完成。',
-                canCopy: Boolean((message.content || event.payload.text || '已完成。').trim()),
-              }
-            : message,
-        ),
-      )
-      return
-    }
-
-    if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) {
-      const errorText = event.payload.message || '流式请求失败'
-      setLocalMessages((current) => [
-        ...current.map((message) =>
-          message.id === assistantMessageId ? { ...message, status: SESSION_MESSAGE_STATUS.ERROR } : message,
-        ),
-        {
-          id: `local-error-${turnId}-${crypto.randomUUID()}`,
-          turnId,
-          seqInTurn: 5,
-          role: SESSION_TIMELINE_ROLE.ERROR,
-          content: errorText,
-          createdAt: new Date().toISOString(),
-          speaker: errorSpeaker(),
-          status: SESSION_MESSAGE_STATUS.ERROR,
-          canCopy: Boolean(errorText.trim()),
-          canRetry: false,
-          canEdit: false,
-          canDelete: false,
-        },
-      ])
-    }
-  }, [contextPreviewUsage])
-
-  const streamLocalTurn = useCallback(async ({
-    text,
-    turnId,
-    userMessage,
-    assistantMessage,
-    source,
-    pendingToast,
-    successToast,
-    failureToast,
-    clearComposer = false,
-  }: {
-    text: string
-    turnId: number
-    userMessage: SessionTimelineMessage
-    assistantMessage: SessionTimelineMessage
-    source: SessionStreamSource
-    pendingToast?: string
-    successToast: string
-    failureToast: string
-    clearComposer?: boolean
-  }) => {
-    const controller = new AbortController()
-    const requestId = crypto.randomUUID()
-    stoppingRequestIdRef.current = null
-    stopSettledRequestIdsRef.current.clear()
-    setStoppingRequestId(null)
-    activeStreamRef.current = {
-      controller,
-      requestId,
-      source,
-      assistantMessageId: assistantMessage.id,
-      turnId,
-    }
-    setAccurateUsageOverride(null)
-    if (clearComposer) setComposerText('')
-    setSending(true)
-    setLocalMessages((current) => [...current, userMessage, assistantMessage])
-    setForceScrollKey((current) => current + 1)
-    if (pendingToast) showToast(pendingToast)
-
-    let streamFailure: string | null = null
-    let completedTurn = false
-    try {
-      await consumeChatStream(
-        {
-          sessionId,
-          text,
-          mode: inputMode,
-          requestId,
-        },
-        {
-          signal: controller.signal,
-          onEvent: (event) => {
-            appendStreamEvent(event, assistantMessage.id, turnId)
-            if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = event.payload.message || failureToast
-          },
-        },
-      )
-      if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) return
-      if (streamFailure) throw new Error(streamFailure)
-      completedTurn = true
-      const refreshed = await refreshSessionData({ silent: true, clearAccurateUsage: false })
-      showToast(refreshed ? successToast : `${successToast}，但刷新失败，请手动刷新页面`)
-    } catch (error) {
-      if (controller.signal.aborted) {
-        markStreamStopped(assistantMessage.id, turnId)
-      } else if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) {
-        // Stop API is responsible for deciding whether this stream is actually stopped.
-      } else {
-        const errorText = error instanceof Error ? error.message : failureToast
-        if (!streamFailure) appendLocalStreamError(assistantMessage.id, turnId, errorText)
-        showToast(errorText)
-      }
-    } finally {
-      setSending(false)
-      if (activeStreamRef.current?.requestId === requestId) activeStreamRef.current = null
-      stopSettledRequestIdsRef.current.delete(requestId)
-      if (!completedTurn) setAccurateUsageOverride(null)
-    }
-  }, [
-    appendLocalStreamError,
-    appendStreamEvent,
-    inputMode,
-    markStreamStopped,
-    refreshSessionData,
+  const role = useSessionRoleBinding({
     sessionId,
+    session: data.session,
+    characters: data.characters,
+    playerCharacter: data.playerCharacter,
+    refreshSessionData: data.refreshSessionData,
+    requestConfirm,
     showToast,
-  ])
+    logger,
+    closeSettings: () => layout.setSettingsOpen(false),
+  })
 
-  const performRegeneration = useCallback(async ({
-    message,
-    text,
-    source,
-    pendingToast,
-    successToast,
-    failureToast,
-  }: {
-    message: UserTimelineMessage
-    text: string
-    source: SessionStreamSource
-    pendingToast: string
-    successToast: string
-    failureToast: string
-  }) => {
-    if (!session) {
-      showToast('会话加载中，请稍后再试')
-      return
-    }
-    if (playerCharacterInvalid) {
-      setRoleDialogRequired(true)
-      setRoleDialogOpen(true)
-      showToast('请先选择你要扮演的角色')
-      return
-    }
-    if (sending) {
-      showToast('当前仍在生成，请稍后再试')
-      return
-    }
-    if (stoppingRequestIdRef.current) {
-      showToast('正在停止当前生成，请稍后再试')
-      return
-    }
+  const currentNarrativeStyle = narrativeStyles.find((style) => style.id === narrativeStyleId) ?? narrativeStyles[0]
+  const roleSelectionBlocked = !data.session || data.playerCharacterInvalid || role.bindingRole
+  const contextUsage = roleSelectionBlocked ? null : data.accurateUsageOverride ?? data.contextPreviewUsage
 
-    const trimmedText = text.trim()
-    if (!trimmedText) {
-      showToast('发送内容不能为空')
-      return
-    }
+  const handleComposerTextChange = useCallback((value: string) => {
+    setComposerText(value)
+    data.setAccurateUsageOverride(null)
+  }, [data])
 
-    const replacingLastTurn = Boolean(message.messageId) && message.turnId === lastPersistedTurnId
-    const turnId = replacingLastTurn ? message.turnId : lastTurnId + 1
-    const style = currentNarrativeStyle
-    const playerSpeaker = makePlayerSpeaker(playerCharacter)
-    const userMessage: SessionTimelineMessage = {
-      id: `local-${source}-user-${turnId}-${crypto.randomUUID()}`,
-      turnId,
-      seqInTurn: 1,
-      role: SESSION_TIMELINE_ROLE.USER,
-      content: trimmedText,
-      createdAt: new Date().toISOString(),
-      speaker: { ...playerSpeaker, label: inputMode.toUpperCase() },
-      hiddenPrompt: style.prompt,
-      status: style.prompt ? SESSION_MESSAGE_STATUS.LOCAL : undefined,
-      canCopy: true,
-      canRetry: false,
-      canEdit: false,
-      canDelete: false,
-    }
-    const assistantMessage = streamPlaceholder(turnId)
-    setEditingMessageId(null)
-    setEditDraft('')
-    if (replacingLastTurn) {
-      try {
-        await truncateSessionTurn(sessionId, message.turnId)
-        setOptimisticTruncateFromTurn(message.turnId)
-      } catch (error) {
-        showToast(error instanceof Error ? error.message : failureToast)
-        return
-      }
-    }
-    await streamLocalTurn({
-      text: trimmedText,
-      turnId,
-      userMessage,
-      assistantMessage,
-      source,
-      pendingToast,
-      successToast,
-      failureToast,
-    })
-  }, [
+  const stream = useSessionStreamTurn({
+    sessionId,
+    inputMode,
+    contextPreviewUsage: data.contextPreviewUsage,
+    setAccurateUsageOverride: data.setAccurateUsageOverride,
+    setComposerText,
+    setLocalMessages: data.setLocalMessages,
+    setForceScrollKey: data.setForceScrollKey,
+    refreshSessionData: data.refreshSessionData,
+    showToast,
+    logger,
+    onExit: () => router.push('/sessions'),
+  })
+
+  const timelineActions = useSessionTimelineActions({
+    sessionId,
+    session: data.session,
+    playerCharacter: data.playerCharacter,
+    playerCharacterInvalid: data.playerCharacterInvalid,
+    inputMode,
     currentNarrativeStyle,
-    inputMode,
-    lastPersistedTurnId,
-    lastTurnId,
-    playerCharacter,
-    playerCharacterInvalid,
-    sending,
-    session,
-    sessionId,
-    showToast,
-    streamLocalTurn,
-  ])
-
-  const performRetry = useCallback(async (message: SessionTimelineMessage) => {
-    if (!canRetryMessage(message)) {
-      showToast('当前回合不可重试')
-      return
-    }
-    await performRegeneration({
-      message,
-      text: message.content,
-      source: SESSION_STREAM_SOURCE.RETRY,
-      pendingToast: `正在重试 turn #${message.turnId}`,
-      successToast: `已重试 turn #${message.turnId}`,
-      failureToast: '重试失败',
-    })
-  }, [performRegeneration, showToast])
-
-  const handleRetry = useCallback((message: SessionTimelineMessage) => {
-    if (!canRetryMessage(message)) {
-      showToast('当前回合不可重试')
-      return
-    }
-    void performRetry(message)
-  }, [performRetry, showToast])
-
-  const handleCopy = useCallback((message: SessionTimelineMessage) => {
-    if (!message.content.trim()) {
-      showToast('当前消息没有可复制内容')
-      return
-    }
-    navigator.clipboard?.writeText(message.content).then(
-      () => showToast('已复制当前消息'),
-      () => showToast('复制失败，请手动选择文本'),
-    )
-  }, [showToast])
-
-  const handleStartEdit = useCallback((message: SessionTimelineMessage) => {
-    if (!canEditMessage(message)) {
-      showToast('当前消息不可编辑')
-      return
-    }
-    setEditingMessageId(message.id)
-    setEditDraft(message.content)
-  }, [showToast])
-
-  const performSendEdited = useCallback(async (message: SessionTimelineMessage, text: string) => {
-    if (!canEditMessage(message)) {
-      showToast('当前消息不可编辑')
-      return
-    }
-    await performRegeneration({
-      message,
-      text,
-      source: SESSION_STREAM_SOURCE.EDIT,
-      pendingToast: '正在发送编辑',
-      successToast: '已发送编辑',
-      failureToast: '编辑失败',
-    })
-  }, [performRegeneration, showToast])
-
-  const handleSendEdit = useCallback((message: SessionTimelineMessage) => {
-    if (!canEditMessage(message)) {
-      showToast('当前消息不可编辑')
-      return
-    }
-    const text = editDraft.trim()
-    if (!text) {
-      showToast('编辑内容不能为空')
-      return
-    }
-    void performSendEdited(message, text)
-  }, [editDraft, performSendEdited, showToast])
-
-  const performDelete = useCallback(async (message: SessionTimelineMessage) => {
-    if (!message.canDelete || !message.messageId) {
-      showToast('当前消息不可删除')
-      return
-    }
-    showToast('正在删除消息')
-    try {
-      await deleteSessionMessage(sessionId, message.messageId)
-      const refreshed = await refreshSessionData({ silent: true })
-      showToast(refreshed ? '已删除消息' : '删除已提交，但刷新失败，请手动刷新页面')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '删除失败')
-    }
-  }, [refreshSessionData, sessionId, showToast])
-
-  const handleDelete = useCallback((message: SessionTimelineMessage) => {
-    if (!message.canDelete) {
-      showToast('当前消息不可删除')
-      return
-    }
-    requestConfirm({
-      title: '确认删除',
-      heading: '删除当前消息',
-      body: '删除会从当前会话历史中移除这条消息。',
-      confirmLabel: '确认删除',
-      onConfirm: () => {
-        void performDelete(message)
-      },
-    })
-  }, [performDelete, requestConfirm, showToast])
-
-  const handleSend = useCallback(async () => {
-    if (!session) {
-      showToast('会话加载中，请稍后再试')
-      return
-    }
-    if (playerCharacterInvalid) {
-      setRoleDialogRequired(true)
-      setRoleDialogOpen(true)
-      showToast('请先选择你要扮演的角色')
-      return
-    }
-    const text = composerText.trim()
-    if (!text) {
-      showToast('请输入内容后再发送')
-      return
-    }
-    if (stoppingRequestIdRef.current) {
-      showToast('正在停止当前生成，请稍后再试')
-      return
-    }
-
-    const turnId = lastTurnId + 1
-    const style = currentNarrativeStyle
-    const playerSpeaker = makePlayerSpeaker(playerCharacter)
-    const userMessage: SessionTimelineMessage = {
-      id: `local-user-${turnId}-${crypto.randomUUID()}`,
-      turnId,
-      seqInTurn: 1,
-      role: SESSION_TIMELINE_ROLE.USER,
-      content: text,
-      createdAt: new Date().toISOString(),
-      speaker: { ...playerSpeaker, label: inputMode.toUpperCase() },
-      hiddenPrompt: style.prompt,
-      status: style.prompt ? SESSION_MESSAGE_STATUS.LOCAL : undefined,
-      canCopy: true,
-      canRetry: false,
-      canEdit: false,
-      canDelete: false,
-    }
-    const assistantMessage = streamPlaceholder(turnId)
-    // 叙事风格目前只保存在本地 message metadata；待后端支持独立 prompt 字段后再随 payload 发送。
-    await streamLocalTurn({
-      text,
-      turnId,
-      userMessage,
-      assistantMessage,
-      source: SESSION_STREAM_SOURCE.SEND,
-      successToast: '发送完成',
-      failureToast: '未知流式错误',
-      clearComposer: true,
-    })
-  }, [
     composerText,
-    currentNarrativeStyle,
-    inputMode,
-    lastTurnId,
-    playerCharacter,
-    playerCharacterInvalid,
-    session,
+    timelineResetKey: data.timelineResetKey,
+    lastTurnId: data.lastTurnId,
+    lastPersistedTurnId: data.lastPersistedTurnId,
+    sending: stream.sending,
+    stopping: stream.stopping,
+    streamLocalTurn: stream.streamLocalTurn,
+    setOptimisticTruncateFromTurn: data.setOptimisticTruncateFromTurn,
+    refreshSessionData: data.refreshSessionData,
+    requestConfirm,
+    requireRoleSelection: role.requireRoleSelection,
     showToast,
-    streamLocalTurn,
-  ])
-
-  const stopActiveStream = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    const active = activeStreamRef.current
-    if (!active) return false
-
-    if (stoppingRequestIdRef.current === active.requestId) {
-      console.info('[SessionRoom] duplicate stop ignored', {
-        sessionId,
-        requestId: active.requestId,
-        source: active.source,
-        turnId: active.turnId,
-      })
-      return false
-    }
-    stoppingRequestIdRef.current = active.requestId
-    setStoppingRequestId(active.requestId)
-    console.info('[SessionRoom] stop requested', {
-      sessionId,
-      requestId: active.requestId,
-      source: active.source,
-      turnId: active.turnId,
-    })
-
-    try {
-      const result = await stopSessionStream(sessionId, active.requestId)
-      console.info('[SessionRoom] stop result received', {
-        sessionId,
-        requestId: active.requestId,
-        resultStatus: result.status,
-        resultRequestId: result.requestId,
-      })
-      if (result.status === TURN_CANCEL_STATUS.CANCELLED) {
-        stopSettledRequestIdsRef.current.add(active.requestId)
-        if (activeStreamRef.current?.requestId === active.requestId) activeStreamRef.current = null
-        active.controller.abort()
-        markStreamStopped(active.assistantMessageId, active.turnId)
-        if (!silent) showToast('已停止当前流式响应')
-        return true
-      }
-      if (result.status === TURN_CANCEL_STATUS.NOT_RUNNING) {
-        stopSettledRequestIdsRef.current.add(active.requestId)
-        await refreshSessionData({ silent: true })
-        if (!silent) showToast('生成已结束，已刷新状态')
-        return false
-      }
-      if (!silent) showToast('当前生成状态已变化，未停止')
-      return false
-    } catch (error) {
-      const stillActive = activeStreamRef.current?.requestId === active.requestId
-      console.warn('[SessionRoom] failed to stop active stream', {
-        sessionId,
-        requestId: active.requestId,
-        source: active.source,
-        turnId: active.turnId,
-        stillActive,
-        error,
-      })
-      if (stillActive) {
-        if (!silent) showToast('停止失败，生成仍在继续')
-      } else {
-        await refreshSessionData({ silent: true })
-        if (!silent) showToast('停止失败，已刷新状态')
-      }
-      return false
-    } finally {
-      if (stoppingRequestIdRef.current === active.requestId) {
-        stoppingRequestIdRef.current = null
-        setStoppingRequestId((current) => (current === active.requestId ? null : current))
-      }
-    }
-  }, [markStreamStopped, refreshSessionData, sessionId, showToast])
-
-  const handleStop = useCallback(() => {
-    void stopActiveStream()
-  }, [stopActiveStream])
-
-  const handleExitSession = useCallback(() => {
-    const active = activeStreamRef.current
-    if (active) {
-      console.info('[SessionRoom] stopping active stream on exit', {
-        sessionId,
-        requestId: active.requestId,
-        source: active.source,
-        turnId: active.turnId,
-      })
-      activeStreamRef.current = null
-      stoppingRequestIdRef.current = null
-      setStoppingRequestId(null)
-      active.controller.abort()
-      void stopSessionStream(sessionId, active.requestId).catch((error) => {
-        console.warn('failed to stop active stream on session exit', error)
-      })
-    }
-    router.push('/sessions')
-  }, [router, sessionId])
+    logger,
+  })
 
   const handleConfirm = () => {
     const action = confirmRequest?.onConfirm
@@ -1309,62 +303,62 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   return (
     <main
-      style={gridStyle}
-      data-workspace={session?.workspace ?? ''}
-      data-story-id={session?.storyId ?? ''}
+      style={layout.gridStyle}
+      data-workspace={data.session?.workspace ?? ''}
+      data-story-id={data.session?.storyId ?? ''}
       data-session-id={sessionId}
       className="min-h-screen bg-[#f7f8fc] text-slate-900 dark:bg-[#0b1020] dark:text-slate-100 lg:grid lg:h-screen lg:min-h-0 lg:grid-cols-[var(--session-grid-columns)] lg:overflow-hidden"
     >
-      {mobilePanel ? (
+      {layout.mobilePanel ? (
         <button
           type="button"
           aria-label="关闭侧栏"
-          onClick={() => setMobilePanel(null)}
+          onClick={() => layout.setMobilePanel(null)}
           className="fixed inset-0 z-30 bg-slate-950/20 backdrop-blur-[1px] dark:bg-slate-950/60 lg:hidden"
         />
       ) : null}
 
       <SessionLeftRail
-        scene={sceneQuery.data}
-        sceneLoading={sceneQuery.isLoading}
-        characters={characters}
-        charactersLoading={charactersQuery.isLoading}
-        collapsed={leftCollapsed}
-        mobileOpen={mobilePanel === 'left'}
-        onCloseMobile={() => setMobilePanel(null)}
-        onToggleCollapsed={() => setLeftCollapsed((current) => !current)}
+        scene={data.sceneQuery.data}
+        sceneLoading={data.sceneQuery.isLoading}
+        characters={data.characters}
+        charactersLoading={data.charactersQuery.isLoading}
+        collapsed={layout.leftCollapsed}
+        mobileOpen={layout.mobilePanel === 'left'}
+        onCloseMobile={() => layout.setMobilePanel(null)}
+        onToggleCollapsed={layout.toggleLeftCollapsed}
       />
       <button
         type="button"
         aria-label="调整左侧栏宽度"
-        onPointerDown={startDrag('left')}
-        disabled={leftCollapsed}
+        onPointerDown={layout.startDrag('left')}
+        disabled={layout.leftCollapsed}
         className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 disabled:cursor-default disabled:opacity-40 dark:bg-slate-800 dark:hover:bg-violet-500/10 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
       >
         <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400 dark:bg-slate-600 dark:group-hover:bg-violet-400" />
       </button>
 
       <section
-        style={sessionExperienceStyle}
+        style={layout.sessionExperienceStyle}
         className="flex min-h-screen min-w-0 flex-col lg:h-screen lg:min-h-0"
       >
         <header className="flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-black text-slate-950 dark:text-slate-100 sm:text-xl">{session?.title ?? '加载会话中'}</h1>
+            <h1 className="truncate text-lg font-black text-slate-950 dark:text-slate-100 sm:text-xl">{data.session?.title ?? '加载会话中'}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-400 dark:text-slate-400">
               <span>
-                story <code className="font-mono text-slate-600 dark:text-slate-300">#{session?.storyId ?? '-'}</code>
+                story <code className="font-mono text-slate-600 dark:text-slate-300">#{data.session?.storyId ?? '-'}</code>
               </span>
               <span>
-                session <code className="font-mono text-slate-600 dark:text-slate-300">{session?.id ?? sessionId}</code>
+                session <code className="font-mono text-slate-600 dark:text-slate-300">{data.session?.id ?? sessionId}</code>
               </span>
-              {session?.updatedAt ? <span>更新 {formatDateTime(session.updatedAt)}</span> : null}
+              {data.session?.updatedAt ? <span>更新 {formatDateTime(data.session.updatedAt)}</span> : null}
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setMobilePanel('left')}
+              onClick={() => layout.setMobilePanel('left')}
               className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:hidden"
               aria-label="打开场景栏"
             >
@@ -1372,7 +366,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             </button>
             <button
               type="button"
-              onClick={() => setMobilePanel('right')}
+              onClick={() => layout.setMobilePanel('right')}
               className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:hidden"
               aria-label="打开状态栏"
             >
@@ -1381,47 +375,43 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             <ThemeSwitcher menuAlign="right" menuSide="bottom" triggerSize="compact" />
             <button
               type="button"
-              onClick={handleExitSession}
+              onClick={stream.handleExitSession}
               className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
             >
               <LogOut size={16} />
               退出
             </button>
             <SessionSettingsMenu
-              open={settingsOpen}
-              leftCollapsed={leftCollapsed}
-              rightCollapsed={rightCollapsed}
-              fontScale={fontScale}
-              playerCharacter={playerCharacter}
-              onToggleOpen={() => setSettingsOpen((current) => !current)}
+              open={layout.settingsOpen}
+              leftCollapsed={layout.leftCollapsed}
+              rightCollapsed={layout.rightCollapsed}
+              fontScale={layout.fontScale}
+              playerCharacter={data.playerCharacter}
+              onToggleOpen={() => layout.setSettingsOpen((current) => !current)}
               onToggleSide={(side) => {
-                if (side === 'left') setLeftCollapsed((current) => !current)
-                else setRightCollapsed((current) => !current)
+                if (side === 'left') layout.toggleLeftCollapsed()
+                else layout.toggleRightCollapsed()
               }}
-              onFontScaleChange={setFontScale}
-              onResetFontScale={() => setFontScale(SESSION_FONT_SCALE_DEFAULT)}
-              onOpenRoleDialog={openRoleDialog}
+              onFontScaleChange={layout.setFontScale}
+              onResetFontScale={layout.resetFontScale}
+              onOpenRoleDialog={role.openRoleDialog}
             />
           </div>
         </header>
 
         <SessionTimeline
           sessionId={sessionId}
-          messages={visibleMessages}
-          forceScrollKey={forceScrollKey}
-          editingMessageId={editingMessageId}
-          editDraft={editDraft}
-          onEditDraftChange={setEditDraft}
-          onCopy={handleCopy}
-          onRetry={handleRetry}
-          onEdit={handleStartEdit}
-          onDelete={handleDelete}
-          onEditCancel={() => {
-            setEditingMessageId(null)
-            setEditDraft('')
-            showToast('已取消编辑')
-          }}
-          onEditSend={handleSendEdit}
+          messages={data.visibleMessages}
+          forceScrollKey={data.forceScrollKey}
+          editingMessageId={timelineActions.editingMessageId}
+          editDraft={timelineActions.editDraft}
+          onEditDraftChange={timelineActions.setEditDraft}
+          onCopy={timelineActions.handleCopy}
+          onRetry={timelineActions.handleRetry}
+          onEdit={timelineActions.handleStartEdit}
+          onDelete={timelineActions.handleDelete}
+          onEditCancel={timelineActions.cancelEdit}
+          onEditSend={timelineActions.handleSendEdit}
         />
 
         <SessionComposer
@@ -1430,35 +420,37 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           mode={inputMode}
           narrativeStyleId={narrativeStyleId}
           narrativeStyles={narrativeStyles}
-          sending={sending}
+          sending={stream.sending}
           disabled={roleSelectionBlocked}
           contextUsage={contextUsage}
-          contextUsageLoading={contextPreviewQuery.isLoading || contextPreviewQuery.isFetching}
-          stopping={Boolean(stoppingRequestId)}
+          contextUsageLoading={data.contextPreviewQuery.isLoading || data.contextPreviewQuery.isFetching}
+          stopping={stream.stopping}
           onTextChange={handleComposerTextChange}
           onModeChange={setInputMode}
           onNarrativeStyleChange={setNarrativeStyleId}
-          onSend={handleSend}
-          onStop={handleStop}
+          onSend={timelineActions.handleSend}
+          onStop={() => {
+            void stream.stopActiveStream()
+          }}
         />
       </section>
 
       <button
         type="button"
         aria-label="调整右侧栏宽度"
-        onPointerDown={startDrag('right')}
-        disabled={rightCollapsed}
+        onPointerDown={layout.startDrag('right')}
+        disabled={layout.rightCollapsed}
         className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 disabled:cursor-default disabled:opacity-40 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
       >
         <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400" />
       </button>
       <SessionRightRail
-        tables={statusTablesQuery.data ?? []}
-        loading={statusTablesQuery.isLoading}
-        collapsed={rightCollapsed}
-        mobileOpen={mobilePanel === 'right'}
-        onCloseMobile={() => setMobilePanel(null)}
-        onToggleCollapsed={() => setRightCollapsed((current) => !current)}
+        tables={data.statusTablesQuery.data ?? []}
+        loading={data.statusTablesQuery.isLoading}
+        collapsed={layout.rightCollapsed}
+        mobileOpen={layout.mobilePanel === 'right'}
+        onCloseMobile={() => layout.setMobilePanel(null)}
+        onToggleCollapsed={layout.toggleRightCollapsed}
       />
 
       {confirmRequest ? (
@@ -1473,17 +465,17 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         />
       ) : null}
       <PlayerCharacterDialog
-        open={roleDialogOpen}
-        required={roleDialogRequired}
-        characters={characters}
-        loading={charactersQuery.isLoading}
-        currentPlayer={playerCharacter}
-        selectedCharacterId={selectedRoleCharacterId}
-        pending={bindingRole}
-        error={roleBindError}
-        onSelect={setSelectedRoleCharacterId}
-        onSubmit={submitRoleDialog}
-        onClose={closeRoleDialog}
+        open={role.roleDialogOpen}
+        required={role.roleDialogRequired}
+        characters={data.characters}
+        loading={data.charactersQuery.isLoading}
+        currentPlayer={data.playerCharacter}
+        selectedCharacterId={role.selectedRoleCharacterId}
+        pending={role.bindingRole}
+        error={role.roleBindError}
+        onSelect={role.setSelectedRoleCharacterId}
+        onSubmit={role.submitRoleDialog}
+        onClose={role.closeRoleDialog}
       />
       <Toast message={toastMessage} />
     </main>
