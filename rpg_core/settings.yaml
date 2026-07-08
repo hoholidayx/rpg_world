@@ -26,7 +26,7 @@ base:
         # 压缩后保留的最近对话轮数。
         keep_rounds: 5
         # 是否启用自动摘要压缩。
-        compression_enabled: true
+        compression_enabled: false
       recall:
         # 每次上下文召回最多注入的记忆条数。
         max_items: 5
