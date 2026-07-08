@@ -55,7 +55,7 @@ def test_append_persists_messages_backup_and_unique_uids(
     assert reloaded.begin_turn() == turn_id + 1
 
 
-def test_story_cursor_uses_turn_ids(make_data_session, workspace):
+def test_story_memory_progress_uses_message_flags(make_data_session, workspace):
     make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
@@ -69,14 +69,14 @@ def test_story_cursor_uses_turn_ids(make_data_session, workspace):
     mgr.append(Role.ASSISTANT, "a2", turn_id=t2)
     mgr.end_turn(t2)
 
-    mgr.set_story_memory_last_turn_id(t1)
+    mgr.mark_story_messages_processed(mgr.turn_messages(t1))
 
     assert [m.content for m in mgr.story_messages_since_last_extraction()] == ["u2", "a2"]
     assert mgr.count_new_turns_since_story() == 1
 
     mgr.mark_story_messages_processed(mgr.story_messages_since_last_extraction())
-    assert mgr.story_memory_last_turn_id == t2
     assert mgr.story_messages_since_last_extraction() == []
+    assert mgr.count_new_turns_since_story() == 0
 
 
 def test_iter_turn_groups_uses_two_message_fallback_without_user_anchor():
@@ -110,7 +110,7 @@ def test_message_from_dict_ignores_legacy_hid_key():
     assert msg.to_dict() == {"role": "user", "content": "hello"}
 
 
-def test_story_cursor_survives_restart(make_data_session, workspace):
+def test_story_memory_progress_survives_restart(make_data_session, workspace):
     make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     mgr.load()
@@ -123,7 +123,7 @@ def test_story_cursor_survives_restart(make_data_session, workspace):
     mgr.append(Role.USER, "u2", turn_id=t2)
     mgr.append(Role.ASSISTANT, "a2", turn_id=t2)
     mgr.end_turn(t2)
-    mgr.set_story_memory_last_turn_id(t1)
+    mgr.mark_story_messages_processed(mgr.turn_messages(t1))
 
     reloaded = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
     reloaded.load()
@@ -132,7 +132,7 @@ def test_story_cursor_survives_restart(make_data_session, workspace):
     assert reloaded.count_new_turns_since_story() == 1
 
     reloaded.mark_story_messages_processed(reloaded.story_messages_since_last_extraction())
-    assert reloaded.story_memory_last_turn_id == t2
+    assert reloaded.story_messages_since_last_extraction() == []
 
 
 def test_rebuild_turn_state_after_history_compaction(make_data_session, workspace):
@@ -192,7 +192,7 @@ def test_clear_and_truncate_update_main_history_only(
     assert rpg_data_gateway.backup.messages.count("s1") == 4
 
 
-def test_history_mutations_reload_and_rewind_story_cursor(
+def test_history_mutations_reload_and_reset_processing_flags(
     make_data_session,
     rpg_data_gateway,
     workspace,
@@ -212,26 +212,27 @@ def test_history_mutations_reload_and_rewind_story_cursor(
     t3 = mgr.begin_turn()
     mgr.append(Role.USER, "u3", turn_id=t3)
     mgr.end_turn(t3)
-    mgr.set_story_memory_last_turn_id(t3)
+    mgr.mark_story_messages_processed(mgr.story_messages_since_last_extraction())
+    assert mgr.count_new_turns_since_story() == 0
 
     second_turn_user = next(message for message in mgr.history if message.content == "u2")
     updated = mgr.update_message_content(second_turn_user.uid, "u2 edited")
     assert updated.content == "u2 edited"
     assert [message.content for message in mgr.history] == ["u1", "a1", "u2 edited", "a2", "u3"]
-    assert mgr.story_memory_last_turn_id == t1
+    assert [message.content for message in mgr.story_messages_since_last_extraction()] == ["u2 edited"]
 
     deleted = mgr.delete_message(next(message.uid for message in mgr.history if message.content == "a2"))
     assert deleted.content == "a2"
     assert [message.content for message in mgr.history] == ["u1", "a1", "u2 edited", "u3"]
     assert rpg_data_gateway.backup.messages.count("s1") == 5
+    assert [message.content for message in mgr.story_messages_since_last_extraction()] == ["u2 edited"]
 
-    mgr.set_story_memory_last_turn_id(t3)
     removed = mgr.truncate_from_turn(t2)
     assert removed == 2
     assert [message.content for message in mgr.history] == ["u1", "a1"]
     assert [row.content for row in rpg_data_gateway.messages.list("s1")] == ["u1", "a1"]
     assert rpg_data_gateway.backup.messages.count("s1") == 5
-    assert mgr.story_memory_last_turn_id == t1
+    assert mgr.story_messages_since_last_extraction() == []
 
 
 def test_switch_to_reload_history(make_data_session, workspace):
@@ -247,7 +248,7 @@ def test_switch_to_reload_history(make_data_session, workspace):
 
     mgr.switch_to("s2")
     assert [m.content for m in mgr.history] == ["world"]
-    assert mgr.meta["story_memory_last_turn_id"] == 0
+    assert "story_memory_last_turn_id" not in mgr.meta
 
 
 def test_history_snapshot_is_read_only(make_data_session, workspace):

@@ -4,7 +4,7 @@
 1. 当历史对话超出保留窗口时触发压缩
 2. 选择需要压缩的历史段（保留窗口之前的旧内容）
 3. 委托 MemorySubAgent 按批次生成摘要并写入 BatchSummaryStore
-4. 从历史中移除已压缩的轮次
+4. 在主消息表上标记已写入摘要的消息行
 
 Architecture::
 
@@ -19,11 +19,11 @@ Architecture::
         ├─▶ BatchSummaryStore   ── 持久层（批次 md 文件 + overall.md）
         └─▶ MemorySubAgent      ── 执行层（batch pipeline + overall pipeline）
 
-触发规则（纯实时判断，不维护轮次状态）:
+触发规则（基于 rpg_session_messages 的 summary_processed 标记）:
 
-    总用户轮次 > keep_recent_rounds + compression_threshold  → 触发
-    压缩段     = history 中保留窗口之前的部分
-    压缩后     = 原地截断 history，批次摘要写入 BatchSummaryStore
+    基于完整非 system 历史计算最近 keep_recent_rounds 窗口
+    窗口外仍有未处理消息的 turn 数 > compression_threshold → 触发
+    压缩后     = 批次摘要写入 BatchSummaryStore，消息行标记为已处理
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from rpg_core.context.rpg_context import Message
 from rpg_core.session.manager import SessionManager
 
 from rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
@@ -50,7 +49,7 @@ class CompressResult:
     """本轮是否触发了压缩。"""
 
     user_rounds_compressed: int = 0
-    """被压缩并移除的用户轮次数。"""
+    """被压缩并标记为已处理的用户轮次数。"""
 
     batch_files: list[str] | None = None
     """生成的批次摘要文件名列表。"""
@@ -115,8 +114,8 @@ class SummaryCompressor:
     async def maybe_compress(self, session: "SessionManager") -> CompressResult:
         """检查是否需要压缩，是则执行分批压缩。
 
-        当压缩触发时，session 的历史会通过 ``replace_history()`` 回写，
-        已压缩的旧消息被移除，只保留最近 ``keep_recent_rounds`` 轮的内容。
+        当压缩触发时，session 的历史不会被截断；成功写入 batch summary
+        的消息会被标记为 ``summary_processed``。
 
         多次调用是安全的 —— 如果历史不够长，直接返回 ``triggered=False``。
         """
@@ -126,43 +125,22 @@ class SummaryCompressor:
         if self._memory_sub_agent is None or self._batch_store is None:
             return CompressResult()
 
-        history = session.history
-
-        # Keep leading system messages untouched.
-        prefix_end = 0
-        while prefix_end < len(history) and history[prefix_end].is_system():
-            prefix_end += 1
-        prefix = history[:prefix_end]
-        working_history = history[prefix_end:]
-
-        # 1. 统计 turn 数
-        total_turns = SessionManager.count_turns(working_history)
-
-        # 2. 判断触发条件
-        if (
-            total_turns
-            <= self._keep_recent_rounds + self._compression_threshold
-        ):
-            return CompressResult()
-
-        # 3. 确定压缩范围
-        groups = SessionManager.iter_turn_groups(working_history)
-        if len(groups) <= self._keep_recent_rounds:
-            return CompressResult()
-
-        compress_groups = groups[:-self._keep_recent_rounds]
-        keep_groups = groups[-self._keep_recent_rounds:]
-        compress_portion = [msg for group in compress_groups for msg in group]
+        compress_groups = session.summary_turn_groups_for_compression(
+            self._keep_recent_rounds
+        )
         user_rounds_in_compress = len(compress_groups)
-
-        if user_rounds_in_compress == 0:
+        if user_rounds_in_compress <= self._compression_threshold:
             return CompressResult()
 
-        # 4. 分批处理
+        compress_portion = [msg for group in compress_groups for msg in group]
         batches = SessionManager.split_into_turn_batches(compress_portion, self._compress_batch_size)
 
         batch_files: list[str] = []
-        for batch_id, batch_messages, batch_user_rounds in batches:
+        processed_turns = 0
+        processed_batch_ids: list[int] = []
+        next_batch_id = self._batch_store._next_batch_id()
+        for offset, (_, batch_messages, batch_user_rounds) in enumerate(batches):
+            batch_id = next_batch_id + offset
             try:
                 result = await self._memory_sub_agent._pipeline_batch_summary(
                     conv=batch_messages, batch_id=batch_id, user_rounds=batch_user_rounds
@@ -177,7 +155,10 @@ class SummaryCompressor:
                         location=result.get("location", ""),
                         characters=result.get("characters", []),
                     )
+                    session.mark_summary_messages_processed(batch_messages, batch_id=batch_id)
                     batch_files.append(path.name)
+                    processed_turns += batch_user_rounds
+                    processed_batch_ids.append(batch_id)
                     logger.info(
                         "[Compressor] batch #{}: {} turns -> {}",
                         batch_id, batch_user_rounds, path.name,
@@ -191,7 +172,7 @@ class SummaryCompressor:
         overall_file: str | None = None
         if not batch_files:
             logger.warning(
-                "[Compressor] all batches failed; history will still be truncated"
+                "[Compressor] all batches failed; summary processed flags unchanged"
             )
         else:
             try:
@@ -207,7 +188,7 @@ class SummaryCompressor:
                         new_batches, existing_overall
                     )
                     if overall_result:
-                        max_batch_id = self._batch_store._next_batch_id() - 1
+                        max_batch_id = max(processed_batch_ids)
                         overall_path = self._batch_store.save_overall(
                             content=overall_result.get("summary_text", ""),
                             title=overall_result.get("title", ""),
@@ -222,22 +203,15 @@ class SummaryCompressor:
             except Exception as exc:
                 logger.warning("[Compressor] overall summary failed: {}", exc)
 
-        # 6. 一次性截断历史
-        session.replace_history(
-            prefix + [msg for group in keep_groups for msg in group],
-            persist=session.history_enabled,
-        )
-
         logger.info(
-            "[Compressor] compressed {} turns ({} remaining), {} batch files",
-            user_rounds_in_compress,
-            total_turns - user_rounds_in_compress,
+            "[Compressor] compressed {} turns, {} batch files",
+            processed_turns,
             len(batch_files),
         )
 
         return CompressResult(
             triggered=True,
-            user_rounds_compressed=user_rounds_in_compress,
+            user_rounds_compressed=processed_turns,
             batch_files=batch_files or None,
             overall_file=overall_file,
             summary_generated=len(batch_files) > 0,

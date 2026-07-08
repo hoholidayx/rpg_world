@@ -438,7 +438,7 @@ class MemorySubAgent(BaseSubAgent):
         )
         if batch_files:
             msg += f"\n\n批次文件：{' '.join(batch_files)}"
-        msg += f"\n\n历史消息：{result['previous_history_msgs']} → {result['history_after_msgs']}"
+        msg += f"\n\n历史消息保留：{result['history_after_msgs']} 条"
         if overall_content:
             msg += f"\n\n## 整体剧情摘要\n\n{overall_content[:1000]}"
         return {"reply": msg, "stats": None}
@@ -451,10 +451,10 @@ class MemorySubAgent(BaseSubAgent):
     ) -> dict[str, int | str | bool]:
         """压缩最老的对话轮次为批次摘要 + 整体归纳。
 
-        保留最近 *keep_rounds* 轮用户消息不动，将其余历史按 *compress_rounds*
+        保留最近 *keep_rounds* 轮用户消息不动，将其余未处理历史按 *compress_rounds*
         为批次大小拆分，逐批调用 LLM 生成批次 md 文件（记忆唯一真源）。
         所有批次完成后，调用 LLM 生成/更新 overall.md（注入 context 的聚合概览）。
-        最后一次性截断历史。
+        成功写入批次后标记对应消息为已处理，不截断历史。
 
         Returns:
             包含 ``compress_rounds``、``kept_rounds``、``batch_files``、
@@ -469,25 +469,16 @@ class MemorySubAgent(BaseSubAgent):
         if self._batch_store is None:
             return {"skipped": True, "reason": "no batch_store configured"}
 
-        history = agent._session.history
-        prefix_end = 0
-        while prefix_end < len(history) and history[prefix_end].is_system():
-            prefix_end += 1
-        prefix = history[:prefix_end]
-        working_history = history[prefix_end:]
-        groups = SessionManager.iter_turn_groups(working_history)
-        total = len(groups)
-        available = total - keep_rounds
-        if available <= 0:
+        candidate_groups = agent._session.summary_turn_groups_for_compression(keep_rounds)
+        total = len(SessionManager.iter_turn_groups(agent._session.history))
+        if not candidate_groups:
             logger.info(
-                _TAG + " compact skipped: history too short ({} turns <= {} keep)",
+                _TAG + " compact skipped: no unprocessed turns outside keep window (total={}, keep={})",
                 total, keep_rounds,
             )
-            return {"skipped": True, "reason": f"history too short ({total} <= {keep_rounds})"}
+            return {"skipped": True, "reason": "no unprocessed turns outside keep window"}
 
-        keep_groups = groups[-keep_rounds:] if keep_rounds > 0 else []
-        old_groups = groups[:-keep_rounds] if keep_rounds > 0 else groups
-        old_slice = [msg for group in old_groups for msg in group]
+        old_slice = [msg for group in candidate_groups for msg in group]
 
         # 拆分为批次
         batches = SessionManager.split_into_turn_batches(old_slice, compress_batch_size)
@@ -503,7 +494,10 @@ class MemorySubAgent(BaseSubAgent):
         batch_files: list[str] = []
         total_compressed = 0
         call_stats: list[CallRecord] = []
-        for batch_id, batch_slice, user_rounds_in_batch in batches:
+        processed_batch_ids: list[int] = []
+        next_batch_id = self._batch_store._next_batch_id()
+        for offset, (_, batch_slice, user_rounds_in_batch) in enumerate(batches):
+            batch_id = next_batch_id + offset
             try:
                 result = await self._pipeline_batch_summary(
                     conv=batch_slice,
@@ -522,45 +516,44 @@ class MemorySubAgent(BaseSubAgent):
                         characters=result.get("characters", []),
                     )
                     batch_files.append(file_path.name)
+                    agent._session.mark_summary_messages_processed(batch_slice, batch_id=batch_id)
                     total_compressed += user_rounds_in_batch
+                    processed_batch_ids.append(batch_id)
             except Exception as exc:
                 logger.warning(_TAG + " batch #{} failed: {}", batch_id, exc)
 
         # 整体归纳（仅传入新增批次）
         overall_file = ""
-        try:
-            existing_overall, last_batch_id = self._batch_store.load_overall()
-            new_batches = self._batch_store.get_new_content(last_batch_id)
-            if new_batches:
-                overall_result = await self._pipeline_overall_summary(
-                    new_batches, existing_overall, call_stats=call_stats,
-                )
-                if overall_result:
-                    max_batch_id = self._batch_store._next_batch_id() - 1
-                    overall_path = self._batch_store.save_overall(
-                        content=overall_result.get("summary_text", ""),
-                        title=overall_result.get("title", ""),
-                        key_events=overall_result.get("key_events", []),
-                        last_batch_id=max_batch_id,
+        if not batch_files:
+            logger.warning(_TAG + " compact skipped overall: no batch summary written")
+        else:
+            try:
+                existing_overall, last_batch_id = self._batch_store.load_overall()
+                new_batches = self._batch_store.get_new_content(last_batch_id)
+                if new_batches:
+                    overall_result = await self._pipeline_overall_summary(
+                        new_batches, existing_overall, call_stats=call_stats,
                     )
-                    overall_file = overall_path.name
-                    logger.info(_TAG + " overall updated: {} (last_batch_id={})", overall_file, max_batch_id)
-            else:
-                logger.info(_TAG + " overall skipped: no new batches since last_batch_id={}", last_batch_id)
-        except Exception as exc:
-            logger.warning(_TAG + " overall summary failed: {}", exc)
+                    if overall_result:
+                        max_batch_id = max(processed_batch_ids)
+                        overall_path = self._batch_store.save_overall(
+                            content=overall_result.get("summary_text", ""),
+                            title=overall_result.get("title", ""),
+                            key_events=overall_result.get("key_events", []),
+                            last_batch_id=max_batch_id,
+                        )
+                        overall_file = overall_path.name
+                        logger.info(_TAG + " overall updated: {} (last_batch_id={})", overall_file, max_batch_id)
+                else:
+                    logger.info(_TAG + " overall skipped: no new batches since last_batch_id={}", last_batch_id)
+            except Exception as exc:
+                logger.warning(_TAG + " overall summary failed: {}", exc)
 
-        # 一次性截断历史
         before_len = len(agent._session.history)
-        agent._session.replace_history(
-            prefix + [msg for group in keep_groups for msg in group],
-            persist=agent._session.history_enabled,
-        )
-        after_len = len(agent._session.history)
 
         logger.info(
-            _TAG + " compact: {} msgs deleted, history now {} msgs",
-            before_len - after_len, after_len,
+            _TAG + " compact: {} turns summarized, history remains {} msgs",
+            total_compressed, before_len,
         )
 
         return {
@@ -568,7 +561,7 @@ class MemorySubAgent(BaseSubAgent):
             "compress_rounds": total_compressed,
             "kept_rounds": keep_rounds,
             "previous_history_msgs": before_len,
-            "history_after_msgs": after_len,
+            "history_after_msgs": before_len,
             "batch_files": batch_files,
             "batches": len(batch_files),
             "overall_file": overall_file,

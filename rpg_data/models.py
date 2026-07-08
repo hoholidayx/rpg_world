@@ -106,7 +106,6 @@ class Session:
     workspace_id: str
     story_id: int
     state_json: str = "{}"
-    story_memory_last_turn_id: int = 0
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
@@ -154,6 +153,11 @@ class SessionMessage:
     tool_call_id: str = ""
     tool_calls_json: str = ""
     metadata_json: str = "{}"
+    summary_processed: bool = False
+    summary_batch_id: int | None = None
+    summary_processed_at: str = ""
+    story_memory_processed: bool = False
+    story_memory_processed_at: str = ""
     version: int = 1
     created_at: str = ""
     updated_at: str = ""

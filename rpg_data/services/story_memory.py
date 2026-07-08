@@ -10,18 +10,16 @@ from peewee import Database, SQL
 from rpg_data import models
 from rpg_data.repositories._utils import get_or_none, to_session_story_memory
 from rpg_data.repositories.records import SessionRecord, SessionStoryMemoryRecord, bind_database
-from rpg_data.repositories.session_repo import SessionRepository
 
 __all__ = ["StoryMemoryService"]
 
 
 class StoryMemoryService:
-    """Manage session story memories and their extraction cursor."""
+    """Manage persisted story-memory details for sessions."""
 
     def __init__(self, database: Database) -> None:
         self._database = database
         bind_database(database)
-        self._sessions = SessionRepository(database)
 
     def list(
         self,
@@ -100,18 +98,6 @@ class StoryMemoryService:
             .where(SessionStoryMemoryRecord.id.in_(ids))
             .execute()
         )
-
-    def get_last_turn_id(self, session_id: str) -> int:
-        session = self._sessions.get(session_id)
-        if session is None:
-            raise FileNotFoundError(f"Session not found: {session_id}")
-        return max(0, int(session.story_memory_last_turn_id))
-
-    def set_last_turn_id(self, session_id: str, turn_id: int) -> models.Session:
-        session = self._sessions.update_story_memory_last_turn_id(session_id, turn_id)
-        if session is None:
-            raise FileNotFoundError(f"Session not found: {session_id}")
-        return session
 
     def require_session(self, session_id: str) -> None:
         if not SessionRecord.select().where(SessionRecord.id == session_id).exists():

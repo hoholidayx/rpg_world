@@ -505,7 +505,7 @@ Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace_id + story_
 ### 会话历史字段
 
 会话消息写入 `rpg_session_messages`，冷备份写入 `rpg_session_backup_messages`。数据库自增 `id` 映射为 `Message.uid`；`turn_id` 和 `seq_in_turn` 由 `SessionManager` 管理。
-剧情记忆写入 `rpg_session_story_memories`，续提游标保存在 `rpg_sessions.story_memory_last_turn_id`。
+summary 和剧情记忆提取进度标记在 `rpg_session_messages` 对应消息行上；剧情记忆条目写入 `rpg_session_story_memories`。summary 的 `keep_recent_rounds` 和批次切分仍按 turn/round 分组；显式 turn 元数据异常时降级为 user-anchor / pair 分组并记录 warning，降级只影响窗口形状，不作为处理进度正确性依据。
 
 ## 测试
 

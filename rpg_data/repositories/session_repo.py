@@ -29,7 +29,6 @@ class SessionRepository:
         title: str = "",
         description: str = "",
         state_json: str = "{}",
-        story_memory_last_turn_id: int = 0,
         player_character_id: int | None = None,
         player_character_snapshot_json: str = "{}",
         metadata_json: str = "{}",
@@ -43,7 +42,6 @@ class SessionRepository:
                         workspace=workspace_id,
                         story=story_id,
                         state_json=state_json,
-                        story_memory_last_turn_id=story_memory_last_turn_id,
                     )
                     SessionProfileRecord.create(
                         session=created_id,
@@ -97,24 +95,6 @@ class SessionRepository:
     def update_timestamp(self, session_id: str) -> models.Session | None:
         row = update_timestamp(SessionRecord, session_id)
         return to_session(row) if row is not None else None
-
-    def update_story_memory_last_turn_id(
-        self,
-        session_id: str,
-        turn_id: int,
-    ) -> models.Session | None:
-        updated = (
-            SessionRecord
-            .update(
-                story_memory_last_turn_id=max(0, int(turn_id)),
-                updated_at=SQL("CURRENT_TIMESTAMP"),
-            )
-            .where(SessionRecord.id == session_id)
-            .execute()
-        )
-        if not updated:
-            return None
-        return self.get(session_id)
 
     def update_player_character(
         self,

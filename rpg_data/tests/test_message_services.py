@@ -117,7 +117,7 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         database.close()
 
 
-def test_story_memory_service_crud_and_cursor(tmp_path: Path) -> None:
+def test_story_memory_service_crud(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
         story_memory = StoryMemoryService(database)
@@ -136,10 +136,6 @@ def test_story_memory_service_crud_and_cursor(tmp_path: Path) -> None:
         assert story_memory.get(first.id).to_context_dict()["turn_id"] == 2
         assert story_memory.get(second.id).to_context_dict()["metadata"] == {"kind": "test"}
 
-        assert story_memory.get_last_turn_id("s_forest001") == 0
-        story_memory.set_last_turn_id("s_forest001", 3)
-        assert story_memory.get_last_turn_id("s_forest001") == 3
-
         assert story_memory.set_dream_processed([first.id], dream_processed=True) == 1
         assert {row.id for row in story_memory.list("s_forest001", dream_processed=True)} == {
             first.id,
@@ -154,6 +150,160 @@ def test_story_memory_service_crud_and_cursor(tmp_path: Path) -> None:
         )
         assert [row.text for row in replacement] == ["replacement"]
         assert story_memory.list("s_forest001")[0].to_context_dict()["metadata"] == {"kind": "unit"}
+    finally:
+        database.close()
+
+
+def test_message_service_processing_flags(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        backup = BackupService(database)
+        session_id = _create_test_session(database, "s_message_processing_flags")
+
+        rows = []
+        for turn_id, role, content, seq in [
+            (1, models.MESSAGE_ROLE_USER, "u1", 1),
+            (1, models.MESSAGE_ROLE_ASSISTANT, "a1", 2),
+            (2, models.MESSAGE_ROLE_USER, "u2", 1),
+            (2, models.MESSAGE_ROLE_ASSISTANT, "a2", 2),
+            (3, models.MESSAGE_ROLE_USER, "u3", 1),
+            (3, models.MESSAGE_ROLE_ASSISTANT, "a3", 2),
+        ]:
+            rows.append(messages.append(session_id, role, content, turn_id=turn_id, seq_in_turn=seq))
+            backup.messages.append(session_id, role, content, turn_id=turn_id, seq_in_turn=seq)
+
+        assert [
+            [row.content for row in group]
+            for group in messages.list_summary_candidate_turn_groups(session_id, keep_recent_turns=1)
+        ] == [["u1", "a1"], ["u2", "a2"]]
+        assert messages.count_summary_candidate_turns(session_id, keep_recent_turns=1) == 2
+
+        first_turn_ids = [row.id for row in rows[:2]]
+        assert messages.mark_summary_processed(session_id, first_turn_ids, batch_id=7) == 2
+        marked = [messages.get(row_id) for row_id in first_turn_ids]
+        assert all(row is not None and row.summary_processed for row in marked)
+        assert {row.summary_batch_id for row in marked if row is not None} == {7}
+        assert [
+            [row.content for row in group]
+            for group in messages.list_summary_candidate_turn_groups(session_id, keep_recent_turns=1)
+        ] == [["u2", "a2"]]
+
+        assert messages.count_story_memory_unprocessed_turns(session_id) == 3
+        assert messages.mark_story_memory_processed(session_id, [row.id for row in rows[:4]]) == 4
+        assert [
+            [row.content for row in group]
+            for group in messages.list_story_memory_unprocessed_turn_groups(session_id)
+        ] == [["u3", "a3"]]
+
+        updated = messages.update(first_turn_ids[0], content="u1 edited")
+        assert updated is not None
+        assert updated.content == "u1 edited"
+        edited = messages.get(first_turn_ids[0])
+        untouched = messages.get(first_turn_ids[1])
+        assert edited is not None and not edited.summary_processed
+        assert edited.summary_batch_id is None
+        assert not edited.story_memory_processed
+        assert untouched is not None and untouched.summary_processed
+        assert untouched.summary_batch_id == 7
+        assert untouched.story_memory_processed
+
+        cold = backup.messages.list(session_id)[0]
+        assert cold.summary_processed is False
+        assert cold.story_memory_processed is False
+    finally:
+        database.close()
+
+
+def test_message_service_fallback_groups_invalid_turn_metadata(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        session_id = _create_test_session(database, "s_message_fallback_turns")
+
+        messages.append(session_id, models.MESSAGE_ROLE_USER, "legacy u", turn_id=0, seq_in_turn=0)
+        messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, "legacy a", turn_id=0, seq_in_turn=0)
+        messages.append(session_id, models.MESSAGE_ROLE_USER, "bad seq u", turn_id=1, seq_in_turn=1)
+        messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, "bad seq a", turn_id=1, seq_in_turn=1)
+
+        assert [
+            [row.content for row in group]
+            for group in messages.list_summary_candidate_turn_groups(session_id, keep_recent_turns=0)
+        ] == [["legacy u", "legacy a"], ["bad seq u", "bad seq a"]]
+        assert [
+            [row.content for row in group]
+            for group in messages.list_story_memory_unprocessed_turn_groups(session_id)
+        ] == [["legacy u", "legacy a"], ["bad seq u", "bad seq a"]]
+    finally:
+        database.close()
+
+
+def test_summary_candidates_keep_window_uses_full_history(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        session_id = _create_test_session(database, "s_message_summary_keep_window")
+
+        rows = []
+        for turn_id in range(1, 5):
+            rows.append(
+                messages.append(
+                    session_id,
+                    models.MESSAGE_ROLE_USER,
+                    f"u{turn_id}",
+                    turn_id=turn_id,
+                    seq_in_turn=1,
+                )
+            )
+            rows.append(
+                messages.append(
+                    session_id,
+                    models.MESSAGE_ROLE_ASSISTANT,
+                    f"a{turn_id}",
+                    turn_id=turn_id,
+                    seq_in_turn=2,
+                )
+            )
+
+        assert messages.mark_summary_processed(session_id, [row.id for row in rows], batch_id=1) == len(rows)
+
+        edited_old = messages.update(rows[0].id, content="u1 edited")
+        assert edited_old is not None
+        assert [
+            [row.content for row in group]
+            for group in messages.list_summary_candidate_turn_groups(session_id, keep_recent_turns=2)
+        ] == [["u1 edited"]]
+
+        assert messages.mark_summary_processed(session_id, [edited_old.id], batch_id=2) == 1
+        edited_recent = messages.update(rows[-2].id, content="u4 edited")
+        assert edited_recent is not None
+        assert messages.list_summary_candidate_turn_groups(session_id, keep_recent_turns=2) == []
+    finally:
+        database.close()
+
+
+def test_message_service_replace_preserves_processing_flags_by_uid(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        session_id = _create_test_session(database, "s_message_replace_flags")
+
+        first = messages.append(session_id, models.MESSAGE_ROLE_USER, "u1", turn_id=1, seq_in_turn=1)
+        second = messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, "a1", turn_id=1, seq_in_turn=2)
+        assert messages.mark_summary_processed(session_id, [first.id], batch_id=3) == 1
+        assert messages.mark_story_memory_processed(session_id, [second.id]) == 1
+
+        replacement = messages.replace(
+            session_id,
+            [row.to_message_dict() for row in messages.list(session_id)],
+        )
+
+        assert [row.content for row in replacement] == ["u1", "a1"]
+        assert replacement[0].summary_processed
+        assert replacement[0].summary_batch_id == 3
+        assert not replacement[0].story_memory_processed
+        assert not replacement[1].summary_processed
+        assert replacement[1].story_memory_processed
     finally:
         database.close()
 

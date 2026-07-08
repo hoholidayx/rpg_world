@@ -53,7 +53,8 @@ class SessionManager:
         self.__history: list[Message] = []
         self._active_turn_id: int | None = None
         self._turn_seq_by_turn: dict[int, int] = {}
-        self._story_memory_last_turn_id = 0
+        self._story_memory_processed_message_keys: set[int] = set()
+        self._summary_processed_message_keys: set[int] = set()
 
     # ── Public API — history ───────────────────────────────────────────
 
@@ -83,7 +84,6 @@ class SessionManager:
             Message.from_dict(row.to_message_dict())
             for row in gateway.messages.list(self._session_id)
         ]
-        self._story_memory_last_turn_id = gateway.story_memory.get_last_turn_id(self._session_id)
         self._rebuild_turn_state()
         logger.debug(_TAG + " loaded {} message(s) for session '{}'", len(self.__history), self._session_id)
 
@@ -308,9 +308,7 @@ class SessionManager:
     def truncate_from_turn(self, turn_id: int) -> int:
         """Remove *turn_id* and all following turns from mutable history.
 
-        The backup message table remains append-only. If story-memory extraction
-        has already processed the affected turn, its cursor is rewound to the
-        turn immediately before the deletion boundary.
+        The backup message table remains append-only.
         """
         boundary_turn = int(turn_id)
         if boundary_turn <= 0:
@@ -320,14 +318,12 @@ class SessionManager:
         before = len(self.__history)
         if self._history_enabled:
             gateway = self._require_data_session()
-            with gateway.database.atomic():
-                removed = gateway.messages.truncate_from_turn(self._session_id, boundary_turn)
-                self._rewind_story_memory_cursor(boundary_turn)
+            removed = gateway.messages.truncate_from_turn(self._session_id, boundary_turn)
             self.load()
             return removed
 
         self.__history = [message for message in self.__history if message.turn_id < boundary_turn]
-        self._rewind_story_memory_cursor(boundary_turn)
+        self._intersect_in_memory_processing_keys()
         self._rebuild_turn_state()
         return before - len(self.__history)
 
@@ -338,6 +334,7 @@ class SessionManager:
         if not self._history_enabled:
             for index, message in enumerate(self.__history):
                 if message.uid == target_id:
+                    self._discard_in_memory_processing_key(message)
                     updated = Message(
                         message.role,
                         str(content),
@@ -348,7 +345,6 @@ class SessionManager:
                         tool_calls=message.tool_calls,
                     )
                     self.__history[index] = updated
-                    self._rewind_story_memory_cursor(updated.turn_id)
                     self._rebuild_turn_state()
                     return updated
             raise FileNotFoundError(f"session message not found: {message_id}")
@@ -361,7 +357,6 @@ class SessionManager:
             updated_row = gateway.messages.update(target_id, content=str(content))
             if updated_row is None:
                 raise FileNotFoundError(f"session message not found: {message_id}")
-            self._rewind_story_memory_cursor(int(current.turn_id))
         self.load()
         return Message.from_dict(updated_row.to_message_dict())
 
@@ -373,7 +368,7 @@ class SessionManager:
             for index, message in enumerate(self.__history):
                 if message.uid == target_id:
                     deleted = self.__history.pop(index)
-                    self._rewind_story_memory_cursor(deleted.turn_id)
+                    self._discard_in_memory_processing_key(deleted)
                     self._rebuild_turn_state()
                     return deleted
             raise FileNotFoundError(f"session message not found: {message_id}")
@@ -385,7 +380,6 @@ class SessionManager:
                 raise FileNotFoundError(f"session message not found: {message_id}")
             if not gateway.messages.delete_for_session(self._session_id, target_id):
                 raise FileNotFoundError(f"session message not found: {message_id}")
-            self._rewind_story_memory_cursor(int(current.turn_id))
         self.load()
         return Message.from_dict(current.to_message_dict())
 
@@ -396,7 +390,8 @@ class SessionManager:
         self.validate_session_id(session_id)
         self._session_id = session_id
         self.replace_history([], persist=False)
-        self._story_memory_last_turn_id = 0
+        self._story_memory_processed_message_keys.clear()
+        self._summary_processed_message_keys.clear()
         if self._history_enabled:
             self.load()
         logger.debug(_TAG + " switched to session '{}'", session_id)
@@ -406,7 +401,7 @@ class SessionManager:
     @property
     def meta(self) -> dict[str, object]:
         if not self._history_enabled:
-            return {"story_memory_last_turn_id": self._story_memory_last_turn_id}
+            return {}
 
         gateway = self._require_data_session()
         session = gateway.catalog.get_session(self._session_id)
@@ -420,50 +415,117 @@ class SessionManager:
             "description": str(session.description or ""),
             "created_at": str(session.created_at),
             "updated_at": str(session.updated_at),
-            "story_memory_last_turn_id": gateway.story_memory.get_last_turn_id(self._session_id),
         }
 
-    # ── Story memory progress tracking ──────────────────────────────────
+    # ── Summary and story-memory progress tracking ─────────────────────
 
-    @property
-    def story_memory_last_turn_id(self) -> int:
-        """Last processed conversation ``turn_id`` for story memory extraction."""
-        if not self._history_enabled:
-            return self._story_memory_last_turn_id
-        self._story_memory_last_turn_id = self._require_data_session().story_memory.get_last_turn_id(self._session_id)
-        return self._story_memory_last_turn_id
+    def summary_turn_groups_for_compression(self, keep_recent_turns: int) -> list[list[Message]]:
+        """Return unprocessed message groups eligible for summary compression.
 
-    def set_story_memory_last_turn_id(self, turn_id: int) -> None:
-        """Persist the last processed story-memory ``turn_id``."""
-        normalized = max(0, int(turn_id))
+        Processing progress is message-level. Turn grouping is only used for
+        the recent keep window and batch sizing.
+        """
         if self._history_enabled:
-            self._require_data_session().story_memory.set_last_turn_id(self._session_id, normalized)
-        self._story_memory_last_turn_id = normalized
+            groups = self._require_data_session().messages.list_summary_candidate_turn_groups(
+                self._session_id,
+                keep_recent_turns=keep_recent_turns,
+            )
+            return [
+                [Message.from_dict(row.to_message_dict()) for row in group]
+                for group in groups
+            ]
+
+        conversation = [
+            message
+            for message in self.__history
+            if not message.is_system()
+        ]
+        if not any(
+            self._in_memory_message_key(message) not in self._summary_processed_message_keys
+            for message in conversation
+        ):
+            return []
+
+        groups = self._conversation_turn_groups(conversation, purpose="summary")
+        keep = max(0, int(keep_recent_turns))
+        eligible_groups = groups if keep <= 0 else groups[:-keep]
+        return [
+            [
+                message
+                for message in group
+                if self._in_memory_message_key(message) not in self._summary_processed_message_keys
+            ]
+            for group in eligible_groups
+            if any(
+                self._in_memory_message_key(message) not in self._summary_processed_message_keys
+                for message in group
+            )
+        ]
+
+    def count_summary_turns_for_compression(self, keep_recent_turns: int) -> int:
+        return len(self.summary_turn_groups_for_compression(keep_recent_turns))
+
+    def mark_summary_messages_processed(self, messages: list[Message], *, batch_id: int) -> None:
+        """Mark messages included in a successfully written summary batch."""
+        if not messages:
+            return
+        if self._history_enabled:
+            self._require_data_session().messages.mark_summary_processed(
+                self._session_id,
+                self._message_ids(messages),
+                batch_id=batch_id,
+            )
+            return
+        self._summary_processed_message_keys.update(
+            self._in_memory_message_key(msg) for msg in messages
+        )
 
     def story_turn_groups_since_last_extraction(self) -> list[list[Message]]:
-        """Return logical turn groups with ``turn_id`` greater than the story cursor."""
-        cursor = self.story_memory_last_turn_id
+        """Return logical turn groups not yet processed for story memory."""
+        if self._history_enabled:
+            groups = self._require_data_session().messages.list_story_memory_unprocessed_turn_groups(
+                self._session_id
+            )
+            return [
+                [Message.from_dict(row.to_message_dict()) for row in group]
+                for group in groups
+            ]
         return [
             group
-            for group in self.iter_turn_groups(self.__history)
-            if self.latest_turn_id(group) > cursor
+            for group in self._conversation_turn_groups([
+                message
+                for message in self.__history
+                if not message.is_system()
+                and self._in_memory_message_key(message) not in self._story_memory_processed_message_keys
+            ], purpose="story_memory")
         ]
 
     def story_messages_since_last_extraction(self) -> list[Message]:
-        """Return messages with turn ids not yet processed for story memory."""
+        """Return messages not yet processed for story memory."""
         groups = self.story_turn_groups_since_last_extraction()
         return [msg for group in groups for msg in group]
 
     def mark_story_messages_processed(self, messages: list[Message]) -> None:
-        """Advance the story-memory cursor to the newest processed ``turn_id``."""
-        turn_id = self.latest_turn_id(messages)
-        if turn_id > self.story_memory_last_turn_id:
-            self.set_story_memory_last_turn_id(turn_id)
+        """Mark messages examined by story-memory extraction."""
+        if not messages:
+            return
+        if self._history_enabled:
+            self._require_data_session().messages.mark_story_memory_processed(
+                self._session_id,
+                self._message_ids(messages),
+            )
+            return
+        self._story_memory_processed_message_keys.update(
+            self._in_memory_message_key(msg) for msg in messages
+        )
 
     def count_new_turns_since_story(self) -> int:
-        """Count new explicit conversation turn ids since the last story extraction."""
-        cursor = self.story_memory_last_turn_id
-        return len({msg.turn_id for msg in self.__history if msg.turn_id > cursor})
+        """Count conversation turns not yet processed for story memory."""
+        if self._history_enabled:
+            return self._require_data_session().messages.count_story_memory_unprocessed_turns(
+                self._session_id
+            )
+        return len(self.story_turn_groups_since_last_extraction())
 
     # ── History-enabled flag ───────────────────────────────────────────
 
@@ -489,6 +551,7 @@ class SessionManager:
             self.__history = [Message.from_dict(row.to_message_dict()) for row in rows]
 
         self._rebuild_turn_state()
+        self._intersect_in_memory_processing_keys()
 
     def _rebuild_turn_state(self) -> None:
         """Reconstruct turn sequence counters from the current in-memory history."""
@@ -500,18 +563,57 @@ class SessionManager:
         self._turn_seq_by_turn = {turn_id: seq + 1 for turn_id, seq in seq_by_turn.items()}
         self._active_turn_id = None
 
-    def _rewind_story_memory_cursor(self, affected_turn_id: int) -> None:
-        if affected_turn_id <= 0:
-            return
-        target = max(0, int(affected_turn_id) - 1)
-        if self._history_enabled:
-            current = self._require_data_session().story_memory.get_last_turn_id(self._session_id)
-            if current >= int(affected_turn_id):
-                self._require_data_session().story_memory.set_last_turn_id(self._session_id, target)
-                self._story_memory_last_turn_id = target
-            return
-        if self._story_memory_last_turn_id >= int(affected_turn_id):
-            self._story_memory_last_turn_id = target
+    @staticmethod
+    def _message_ids(messages: list[Message]) -> list[int]:
+        return sorted({msg.uid for msg in messages if msg.uid > 0})
+
+    def _conversation_turn_groups(
+        self,
+        messages: list[Message],
+        *,
+        purpose: str,
+    ) -> list[list[Message]]:
+        conversation_messages = [msg for msg in messages if not msg.is_system()]
+        if self._uses_fallback_grouping(conversation_messages):
+            invalid_count = sum(
+                1
+                for msg in conversation_messages
+                if msg.turn_id <= 0 or msg.seq_in_turn <= 0
+            )
+            logger.warning(
+                _TAG + " fallback round grouping for {}: session_id={}, rows={}, invalid_turn_metadata={}; message processed keys remain authoritative",
+                purpose,
+                self._session_id,
+                len(conversation_messages),
+                invalid_count,
+            )
+        return self.iter_turn_groups(conversation_messages)
+
+    @classmethod
+    def _uses_fallback_grouping(cls, messages: list[Message]) -> bool:
+        if not messages:
+            return False
+        first_explicit = next(
+            (i for i, msg in enumerate(messages) if msg.turn_id > 0 and msg.seq_in_turn > 0),
+            len(messages),
+        )
+        if first_explicit >= len(messages):
+            return True
+        return first_explicit > 0 or not cls.has_trustworthy_turn_ids(messages[first_explicit:])
+
+    @staticmethod
+    def _in_memory_message_key(message: Message) -> int:
+        return id(message)
+
+    def _discard_in_memory_processing_key(self, message: Message) -> None:
+        key = self._in_memory_message_key(message)
+        self._story_memory_processed_message_keys.discard(key)
+        self._summary_processed_message_keys.discard(key)
+
+    def _intersect_in_memory_processing_keys(self) -> None:
+        current_keys = {self._in_memory_message_key(message) for message in self.__history}
+        self._story_memory_processed_message_keys.intersection_update(current_keys)
+        self._summary_processed_message_keys.intersection_update(current_keys)
 
     def _require_data_session(self):
         from rpg_data.services import get_data_service_gateway

@@ -63,7 +63,11 @@ def test_run_migrations_creates_initial_tables() -> None:
 
         session_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_sessions)")}
         story_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_stories)")}
-        session_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_messages)")}
+        session_message_info = {
+            row["name"]: row
+            for row in conn.execute("PRAGMA table_info(rpg_session_messages)")
+        }
+        session_message_columns = set(session_message_info)
         backup_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_backup_messages)")}
         story_memory_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_story_memories)")}
         character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_characters)")}
@@ -76,7 +80,7 @@ def test_run_migrations_creates_initial_tables() -> None:
 
         profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_profiles)")}
 
-        assert "story_memory_last_turn_id" in session_columns
+        assert "story_memory_last_turn_id" not in session_columns
         assert "last_story_turn_index" not in session_columns
         assert "session_key" not in session_columns
         assert {"story_prompt", "first_message"}.issubset(story_columns)
@@ -97,7 +101,22 @@ def test_run_migrations_creates_initial_tables() -> None:
             "tool_call_id",
             "tool_calls_json",
         }.issubset(session_message_columns)
-        assert session_message_columns == backup_message_columns
+        assert {
+            "summary_processed",
+            "summary_batch_id",
+            "summary_processed_at",
+            "story_memory_processed",
+            "story_memory_processed_at",
+        }.issubset(session_message_columns)
+        assert session_message_info["summary_processed_at"]["type"].upper() == "TEXT"
+        assert session_message_info["story_memory_processed_at"]["type"].upper() == "TEXT"
+        assert {
+            "summary_processed",
+            "summary_batch_id",
+            "summary_processed_at",
+            "story_memory_processed",
+            "story_memory_processed_at",
+        }.isdisjoint(backup_message_columns)
         assert "hid" not in session_message_columns
         assert {
             "session_id",
@@ -134,6 +153,8 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert {
             "idx_rpg_session_messages_session_id_id",
             "idx_rpg_session_messages_turn",
+            "idx_rpg_session_messages_summary_cursor",
+            "idx_rpg_session_messages_story_cursor",
             "idx_rpg_session_backup_messages_session_id_id",
             "idx_rpg_session_backup_messages_turn",
             "idx_rpg_session_story_memories_session_id_id",

@@ -71,7 +71,6 @@ def to_session(row: records.SessionRecord) -> models.Session:
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
         state_json=str(row.state_json or "{}"),
-        story_memory_last_turn_id=int(row.story_memory_last_turn_id),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),
@@ -120,6 +119,15 @@ def to_session_message(
         tool_call_id=str(row.tool_call_id or ""),
         tool_calls_json=str(row.tool_calls_json or ""),
         metadata_json=str(row.metadata_json or "{}"),
+        summary_processed=bool(getattr(row, "summary_processed", False)),
+        summary_batch_id=(
+            int(getattr(row, "summary_batch_id"))
+            if getattr(row, "summary_batch_id", None) is not None
+            else None
+        ),
+        summary_processed_at=str(getattr(row, "summary_processed_at", "") or ""),
+        story_memory_processed=bool(getattr(row, "story_memory_processed", False)),
+        story_memory_processed_at=str(getattr(row, "story_memory_processed_at", "") or ""),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),

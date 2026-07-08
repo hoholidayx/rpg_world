@@ -32,7 +32,6 @@ CREATE TABLE IF NOT EXISTS rpg_sessions (
     workspace_id TEXT NOT NULL,
     story_id INTEGER NOT NULL,
     state_json TEXT NOT NULL DEFAULT '{}',
-    story_memory_last_turn_id INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -65,6 +64,11 @@ CREATE TABLE IF NOT EXISTS rpg_session_messages (
     tool_call_id TEXT NOT NULL DEFAULT '',
     tool_calls_json TEXT NOT NULL DEFAULT '',
     metadata_json TEXT NOT NULL DEFAULT '{}',
+    summary_processed INTEGER NOT NULL DEFAULT 0 CHECK (summary_processed IN (0, 1)),
+    summary_batch_id INTEGER,
+    summary_processed_at TEXT,
+    story_memory_processed INTEGER NOT NULL DEFAULT 0 CHECK (story_memory_processed IN (0, 1)),
+    story_memory_processed_at TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -240,6 +244,8 @@ CREATE INDEX IF NOT EXISTS idx_rpg_sessions_workspace_id ON rpg_sessions(workspa
 CREATE INDEX IF NOT EXISTS idx_rpg_sessions_story_id ON rpg_sessions(story_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_session_id_id ON rpg_session_messages(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_turn ON rpg_session_messages(session_id, turn_id, seq_in_turn, id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_summary_cursor ON rpg_session_messages(session_id, summary_processed, turn_id, id);
+CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_story_cursor ON rpg_session_messages(session_id, story_memory_processed, turn_id, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_backup_messages_session_id_id ON rpg_session_backup_messages(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_backup_messages_turn ON rpg_session_backup_messages(session_id, turn_id, seq_in_turn, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_story_memories_session_id_id ON rpg_session_story_memories(session_id, id);

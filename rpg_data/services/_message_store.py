@@ -37,18 +37,32 @@ class BaseSessionMessageStore:
         tool_call_id: str = "",
         tool_calls_json: str = "",
         metadata_json: str = "{}",
+        summary_processed: bool = False,
+        summary_batch_id: int | None = None,
+        summary_processed_at: str = "",
+        story_memory_processed: bool = False,
+        story_memory_processed_at: str = "",
     ) -> models.SessionMessage:
         role = _validate_role(role)
-        row = self._record_model.create(
-            session=session_id,
-            role=role,
-            content=str(content or ""),
-            turn_id=int(turn_id or 0),
-            seq_in_turn=int(seq_in_turn or 0),
-            tool_call_id=str(tool_call_id or ""),
-            tool_calls_json=str(tool_calls_json or ""),
-            metadata_json=str(metadata_json or "{}"),
-        )
+        fields: dict[str, object] = {
+            "session": session_id,
+            "role": role,
+            "content": str(content or ""),
+            "turn_id": int(turn_id or 0),
+            "seq_in_turn": int(seq_in_turn or 0),
+            "tool_call_id": str(tool_call_id or ""),
+            "tool_calls_json": str(tool_calls_json or ""),
+            "metadata_json": str(metadata_json or "{}"),
+        }
+        if _supports_processing_fields(self._record_model):
+            fields.update(
+                summary_processed=bool(summary_processed),
+                summary_batch_id=summary_batch_id,
+                summary_processed_at=str(summary_processed_at or "") or None,
+                story_memory_processed=bool(story_memory_processed),
+                story_memory_processed_at=str(story_memory_processed_at or "") or None,
+            )
+        row = self._record_model.create(**fields)
         return to_session_message(row)
 
     def append_mapping(
@@ -248,12 +262,92 @@ class BaseSessionMessageStore:
             .execute()
         )
 
+    def mark_summary_processed(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+        *,
+        batch_id: int,
+    ) -> int:
+        ids = _normalize_ids(message_ids)
+        if not ids:
+            return 0
+        return int(
+            self._record_model
+            .update(
+                summary_processed=True,
+                summary_batch_id=int(batch_id),
+                summary_processed_at=SQL("CURRENT_TIMESTAMP"),
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.id.in_(ids))
+            )
+            .execute()
+        )
+
+    def mark_story_memory_processed(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+    ) -> int:
+        ids = _normalize_ids(message_ids)
+        if not ids:
+            return 0
+        return int(
+            self._record_model
+            .update(
+                story_memory_processed=True,
+                story_memory_processed_at=SQL("CURRENT_TIMESTAMP"),
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.id.in_(ids))
+            )
+            .execute()
+        )
+
+    def reset_processing_for_messages(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+    ) -> int:
+        ids = _normalize_ids(message_ids)
+        if not ids:
+            return 0
+        return int(
+            self._record_model
+            .update(
+                summary_processed=False,
+                summary_batch_id=None,
+                summary_processed_at=None,
+                story_memory_processed=False,
+                story_memory_processed_at=None,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.id.in_(ids))
+            )
+            .execute()
+        )
+
 
 def _validate_role(role: str) -> str:
     normalized = str(role)
     if normalized not in models.MESSAGE_ROLES:
         raise ValueError(f"invalid session message role: {normalized}")
     return normalized
+
+
+def _normalize_ids(message_ids: Iterable[int]) -> list[int]:
+    return sorted({int(message_id) for message_id in message_ids if int(message_id) > 0})
+
+
+def _supports_processing_fields(record_model: MessageRecordModel) -> bool:
+    return hasattr(record_model, "summary_processed")
 
 
 def _coerce_message_input(values: MessageInput) -> dict[str, object]:
@@ -266,6 +360,11 @@ def _coerce_message_input(values: MessageInput) -> dict[str, object]:
             "tool_call_id": values.tool_call_id,
             "tool_calls_json": values.tool_calls_json,
             "metadata_json": values.metadata_json,
+            "summary_processed": values.summary_processed,
+            "summary_batch_id": values.summary_batch_id,
+            "summary_processed_at": values.summary_processed_at,
+            "story_memory_processed": values.story_memory_processed,
+            "story_memory_processed_at": values.story_memory_processed_at,
         }
 
     tool_calls_json = values.get("tool_calls_json", "")
@@ -279,4 +378,15 @@ def _coerce_message_input(values: MessageInput) -> dict[str, object]:
         "tool_call_id": str(values.get("tool_call_id", "") or ""),
         "tool_calls_json": str(tool_calls_json or ""),
         "metadata_json": str(values.get("metadata_json", "{}") or "{}"),
+        "summary_processed": bool(values.get("summary_processed", False)),
+        "summary_batch_id": _optional_int(values.get("summary_batch_id")),
+        "summary_processed_at": str(values.get("summary_processed_at", "") or ""),
+        "story_memory_processed": bool(values.get("story_memory_processed", False)),
+        "story_memory_processed_at": str(values.get("story_memory_processed_at", "") or ""),
     }
+
+
+def _optional_int(value: object | None) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)

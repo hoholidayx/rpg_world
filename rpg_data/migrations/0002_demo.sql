@@ -51,8 +51,7 @@ INSERT OR IGNORE INTO rpg_sessions (
     id,
     workspace_id,
     story_id,
-    state_json,
-    story_memory_last_turn_id
+    state_json
 )
 VALUES (
     's_forest001',
@@ -62,8 +61,7 @@ VALUES (
         FROM rpg_stories
         WHERE workspace_id = 'demo_workspace' AND title = '北境森林 Demo'
     ),
-    '{"scene":"北境森林·石林·圆形封印祭坛","time":"第 1 年 1 月 1 日 8 时 30 分"}',
-    0
+    '{"scene":"北境森林·石林·圆形封印祭坛","time":"第 1 年 1 月 1 日 8 时 30 分"}'
 );
 
 INSERT OR IGNORE INTO rpg_session_profiles (
@@ -81,8 +79,7 @@ INSERT OR IGNORE INTO rpg_sessions (
     id,
     workspace_id,
     story_id,
-    state_json,
-    story_memory_last_turn_id
+    state_json
 )
 VALUES (
     's_academy01',
@@ -92,8 +89,7 @@ VALUES (
         FROM rpg_stories
         WHERE workspace_id = 'demo_workspace' AND title = '奥术学院 Demo'
     ),
-    '{"scene":"奥术学院·旧档案馆","time":"第 1 年 1 月 3 日 14 时"}',
-    0
+    '{"scene":"奥术学院·旧档案馆","time":"第 1 年 1 月 3 日 14 时"}'
 );
 
 INSERT OR IGNORE INTO rpg_session_profiles (

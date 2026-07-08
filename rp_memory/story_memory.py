@@ -49,14 +49,6 @@ class StoryMemoryStore:
         """清空全部剧情记忆（提炼到常驻记忆后调用）。"""
         self._service().clear(self._session_id)
 
-    def last_processed_turn_id(self) -> int:
-        """Return the story-memory extraction cursor."""
-        return self._service().get_last_turn_id(self._session_id)
-
-    def set_last_processed_turn_id(self, turn_id: int) -> None:
-        """Persist the story-memory extraction cursor."""
-        self._service().set_last_turn_id(self._session_id, turn_id)
-
     def _service(self):
         from rpg_data.services import get_data_service_gateway
 
