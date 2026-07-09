@@ -65,6 +65,9 @@ function validatePayload(type: PlayStreamEventType, payload: Record<string, unkn
     case PLAY_STREAM_EVENT_TYPE.TURN_STARTED:
       assertOptionalString(payload, 'mode', type, raw)
       return
+    case PLAY_STREAM_EVENT_TYPE.THINKING_DELTA:
+      assertRequiredString(payload, 'text', type, raw)
+      return
     case PLAY_STREAM_EVENT_TYPE.TEXT_DELTA:
       assertRequiredString(payload, 'text', type, raw)
       return

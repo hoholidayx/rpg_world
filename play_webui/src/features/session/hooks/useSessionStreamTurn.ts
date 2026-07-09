@@ -9,6 +9,7 @@ import type { SessionRoomLogger } from '../sessionRoomLogger'
 import {
   errorSpeaker,
   stoppedStreamText,
+  thinkingSpeaker,
   toolSpeaker,
 } from '../sessionTimelineMessages'
 import {
@@ -45,6 +46,7 @@ export function useSessionStreamTurn({
   inputMode,
   contextPreviewUsage,
   setAccurateUsageOverride,
+  setLocalTurnUsageByTurn,
   setComposerText,
   setLocalMessages,
   setForceScrollKey,
@@ -57,6 +59,7 @@ export function useSessionStreamTurn({
   inputMode: SessionInputMode
   contextPreviewUsage: ContextUsageSnapshot | null
   setAccurateUsageOverride: Dispatch<SetStateAction<ContextUsageSnapshot | null>>
+  setLocalTurnUsageByTurn: Dispatch<SetStateAction<Record<number, ContextUsageSnapshot>>>
   setComposerText: Dispatch<SetStateAction<string>>
   setLocalMessages: Dispatch<SetStateAction<SessionTimelineMessage[]>>
   setForceScrollKey: Dispatch<SetStateAction<number>>
@@ -142,8 +145,55 @@ export function useSessionStreamTurn({
     ])
   }, [setLocalMessages])
 
-  const appendStreamEvent = useCallback((event: PlayStreamEvent, assistantMessageId: string, turnId: number) => {
+  const appendStreamEvent = useCallback((
+    event: PlayStreamEvent,
+    assistantMessageId: string,
+    turnId: number,
+    usageFallback: ContextUsageSnapshot | null,
+  ) => {
     if (event.type === PLAY_STREAM_EVENT_TYPE.TURN_STARTED) return
+
+    if (event.type === PLAY_STREAM_EVENT_TYPE.THINKING_DELTA) {
+      setLocalMessages((current) => {
+        const existingThinking = current.find((message) =>
+          message.turnId === turnId
+          && message.role === SESSION_TIMELINE_ROLE.THINKING
+          && message.metadata?.streamKind === 'thinking',
+        )
+        if (existingThinking) {
+          return current.map((message) =>
+            message.id === existingThinking.id
+              ? {
+                  ...message,
+                  content: `${message.content}${event.payload.text}`,
+                  status: SESSION_MESSAGE_STATUS.STREAMING,
+                  canCopy: Boolean(`${message.content}${event.payload.text}`.trim()),
+                }
+              : message,
+          )
+        }
+
+        return [
+          ...current,
+          {
+            id: `local-thinking-${turnId}-${crypto.randomUUID()}`,
+            turnId,
+            seqInTurn: 3,
+            role: SESSION_TIMELINE_ROLE.THINKING,
+            content: event.payload.text,
+            metadata: { streamKind: 'thinking' },
+            createdAt: new Date().toISOString(),
+            speaker: thinkingSpeaker(),
+            status: SESSION_MESSAGE_STATUS.STREAMING,
+            canCopy: Boolean(event.payload.text.trim()),
+            canRetry: false,
+            canEdit: false,
+            canDelete: false,
+          },
+        ]
+      })
+      return
+    }
 
     if (event.type === PLAY_STREAM_EVENT_TYPE.TEXT_DELTA) {
       setLocalMessages((current) =>
@@ -186,11 +236,12 @@ export function useSessionStreamTurn({
     }
 
     if (event.type === PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED) {
-      const usage = fromTurnUsage(event.payload.usage, contextPreviewUsage, {
+      const usage = fromTurnUsage(event.payload.usage, usageFallback, {
         model: event.payload.model,
         finishReason: event.payload.finishReason,
         durationMs: event.payload.durationMs,
       })
+      const displayUsage = usage ?? usageFallback
       logger.info('stream turn completed', {
         turnId,
         status: 'done',
@@ -200,6 +251,15 @@ export function useSessionStreamTurn({
         hasUsage: Boolean(usage),
       })
       if (usage) setAccurateUsageOverride(usage)
+      if (displayUsage) {
+        setLocalTurnUsageByTurn((current) => ({ ...current, [turnId]: displayUsage }))
+      } else {
+        setLocalTurnUsageByTurn((current) => {
+          const next = { ...current }
+          delete next[turnId]
+          return next
+        })
+      }
       setLocalMessages((current) =>
         current.map((message) =>
           message.id === assistantMessageId
@@ -207,8 +267,11 @@ export function useSessionStreamTurn({
                 ...message,
                 status: SESSION_MESSAGE_STATUS.DONE,
                 content: message.content || event.payload.text || '已完成。',
+                usage: displayUsage,
                 canCopy: Boolean((message.content || event.payload.text || '已完成。').trim()),
               }
+            : message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.THINKING
+              ? { ...message, status: SESSION_MESSAGE_STATUS.DONE }
             : message,
         ),
       )
@@ -247,7 +310,7 @@ export function useSessionStreamTurn({
         },
       ])
     }
-  }, [contextPreviewUsage, logger, setAccurateUsageOverride, setLocalMessages])
+  }, [logger, setAccurateUsageOverride, setLocalMessages, setLocalTurnUsageByTurn])
 
   const streamLocalTurn = useCallback(async ({
     text,
@@ -262,6 +325,7 @@ export function useSessionStreamTurn({
   }: StreamLocalTurnOptions) => {
     const controller = new AbortController()
     const requestId = crypto.randomUUID()
+    const turnUsageFallback = contextPreviewUsage
     stoppingRequestIdRef.current = null
     stopSettledRequestIdsRef.current.clear()
     setStoppingRequestId(null)
@@ -273,9 +337,18 @@ export function useSessionStreamTurn({
       turnId,
     }
     setAccurateUsageOverride(null)
+    setLocalTurnUsageByTurn((current) => {
+      const next = { ...current }
+      delete next[turnId]
+      return next
+    })
     if (clearComposer) setComposerText('')
     setSending(true)
-    setLocalMessages((current) => [...current, userMessage, assistantMessage])
+    setLocalMessages((current) => [
+      ...current.filter((message) => message.turnId !== turnId),
+      userMessage,
+      assistantMessage,
+    ])
     setForceScrollKey((current) => current + 1)
     logger.info('stream started', {
       requestId,
@@ -300,7 +373,7 @@ export function useSessionStreamTurn({
         {
           signal: controller.signal,
           onEvent: (event) => {
-            appendStreamEvent(event, assistantMessage.id, turnId)
+            appendStreamEvent(event, assistantMessage.id, turnId, turnUsageFallback)
             if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = formatStreamErrorText(event.payload) || failureToast
           },
         },
@@ -308,7 +381,11 @@ export function useSessionStreamTurn({
       if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) return
       if (streamFailure) throw new Error(streamFailure)
       completedTurn = true
-      const refreshed = await refreshSessionData({ silent: true, clearAccurateUsage: false })
+      const refreshed = await refreshSessionData({
+        silent: true,
+        clearAccurateUsage: false,
+        preserveDiagnostics: true,
+      })
       logger.info('stream refresh after completion', {
         requestId,
         source,
@@ -342,12 +419,14 @@ export function useSessionStreamTurn({
   }, [
     appendLocalStreamError,
     appendStreamEvent,
+    contextPreviewUsage,
     inputMode,
     logger,
     markStreamStopped,
     refreshSessionData,
     sessionId,
     setAccurateUsageOverride,
+    setLocalTurnUsageByTurn,
     setComposerText,
     setForceScrollKey,
     setLocalMessages,

@@ -42,29 +42,34 @@ function formatCacheHitRate(usage: ContextUsageSnapshot | null | undefined) {
 
 function sourceLabel(usage: ContextUsageSnapshot | null | undefined) {
   if (!usage) return '未知'
-  if (usage.source === 'provider_usage') return '准确'
-  if (usage.source === 'context_preview') return '估算'
-  if (usage.source === 'fallback_estimate') return '兜底'
+  if (usage.source === 'provider_usage') return '实际'
+  if (usage.source === 'context_preview') return '主上下文估算'
+  if (usage.source === 'fallback_estimate') return '兜底估算'
   return '未知'
 }
 
 function titleFor(usage: ContextUsageSnapshot | null | undefined, loading: boolean) {
-  if (loading && !usage) return '正在估算 context 用量'
-  if (!usage) return '暂无 context 用量'
-  if (usage.accuracy === 'accurate') return 'Context 用量已按本轮返回值更新'
-  if (usage.status === 'unknown') return '无法获取准确 context 用量'
-  if (usage.status === 'danger') return 'Context 即将达到上限'
-  if (usage.status === 'warning') return 'Context 接近上限'
-  return 'Context 用量估算正常'
+  if (loading && !usage) return '正在估算主上下文窗口'
+  if (!usage) return '暂无主上下文估算'
+  if (usage.source === 'provider_usage') return '最近一轮实际总消耗'
+  if (usage.status === 'unknown') return '无法估算主上下文窗口'
+  if (usage.status === 'danger') return '主上下文即将达到窗口上限'
+  if (usage.status === 'warning') return '主上下文接近窗口上限'
+  return '主上下文估算正常'
 }
 
 function detailFor(usage: ContextUsageSnapshot | null | undefined, loading: boolean) {
-  if (loading && !usage) return '正在读取 context-preview 估算。'
-  if (!usage) return '尚未取得 context-preview 或 provider usage。'
-  if (usage.source === 'provider_usage') return '数据来自正常 turn 返回的 provider usage；不会额外请求 usage。'
-  if (usage.source === 'context_preview') return '数据来自 context-preview 估算，不等同于 provider 最终 usage。'
-  if (usage.source === 'fallback_estimate') return '无法获取完整 context-preview，当前为兜底估算。'
-  return usage.errorReason || 'context 上限或 token 估算不可用。'
+  if (loading && !usage) return '正在读取 context-preview；它只估算主 LLM 的最终上下文。'
+  if (!usage) return '尚未取得 context-preview 或本轮 provider usage。'
+  if (usage.source === 'provider_usage') return '来自 completed turn 的 provider usage，包含主回复与子 Agent 调用；用于回合复盘，不代表下一次主上下文估算。'
+  if (usage.source === 'context_preview') return '来自 context-preview，只估算下一次主 LLM 上下文，不包含 status/memory 子 Agent 的动态开销。'
+  if (usage.source === 'fallback_estimate') return '无法获取完整 context-preview，当前为兜底估算；不包含动态子 Agent 开销。'
+  return usage.errorReason || '主上下文窗口或 token 估算不可用。'
+}
+
+function primaryUsageLabel(usage: ContextUsageSnapshot | null | undefined) {
+  if (usage?.source === 'provider_usage') return '实际 Prompt'
+  return '主上下文估算'
 }
 
 export function SessionContextUsageIndicator({
@@ -105,7 +110,7 @@ export function SessionContextUsageIndicator({
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
-        aria-label="查看 context 用量"
+        aria-label="查看主上下文和本轮 usage"
         className={cn(
           'relative grid h-11 w-11 place-items-center rounded-full transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-200 dark:focus-visible:ring-violet-500/30',
           open ? 'ring-4 ring-violet-100 dark:ring-violet-500/20' : '',
@@ -125,7 +130,7 @@ export function SessionContextUsageIndicator({
       {open ? (
         <div
           role="dialog"
-          aria-label="Context 用量详情"
+          aria-label="主上下文和本轮 usage 详情"
           className="absolute bottom-[calc(100%+12px)] right-0 z-30 w-[min(330px,calc(100vw-32px))] rounded-lg border border-slate-200 bg-white p-4 text-left shadow-2xl shadow-slate-900/15 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40"
         >
           <div className="flex items-start justify-between gap-3">
@@ -154,9 +159,9 @@ export function SessionContextUsageIndicator({
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <UsageCell label="当前使用" value={formatToken(usage?.usedTokens)} />
-            <UsageCell label="Context 上限" value={formatToken(usage?.contextLimit)} />
-            <UsageCell label="使用比例" value={formatRatio(usage?.ratio)} />
+            <UsageCell label={primaryUsageLabel(usage)} value={formatToken(usage?.usedTokens)} />
+            <UsageCell label="模型窗口" value={formatToken(usage?.contextLimit)} />
+            <UsageCell label="窗口占比" value={formatRatio(usage?.ratio)} />
             <UsageCell label="更新时间" value={usage?.createdAt ? new Date(usage.createdAt).toLocaleTimeString() : '-'} />
             <UsageCell label="Prompt" value={formatToken(usage?.promptTokens)} />
             <UsageCell label="Completion" value={formatToken(usage?.completionTokens)} />

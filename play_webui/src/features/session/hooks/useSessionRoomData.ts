@@ -13,6 +13,7 @@ import { mapHistoryToMessages } from '../sessionTimelineMessages'
 import {
   HISTORY_REFRESH_MODE,
   SESSION_HISTORY_MESSAGES,
+  SESSION_TIMELINE_ROLE,
   type RefreshSessionDataOptions,
   type SessionTimelineMessage,
 } from '../sessionRoomTypes'
@@ -29,6 +30,7 @@ export function useSessionRoomData({
 }) {
   const queryClient = useQueryClient()
   const [localMessages, setLocalMessages] = useState<SessionTimelineMessage[]>([])
+  const [localTurnUsageByTurn, setLocalTurnUsageByTurn] = useState<Record<number, ContextUsageSnapshot>>({})
   const [optimisticTruncateFromTurn, setOptimisticTruncateFromTurn] = useState<number | null>(null)
   const [accurateUsageOverride, setAccurateUsageOverride] = useState<ContextUsageSnapshot | null>(null)
   const [forceScrollKey, setForceScrollKey] = useState(0)
@@ -86,8 +88,13 @@ export function useSessionRoomData({
   )
 
   const baseMessages = useMemo(
-    () => mapHistoryToMessages({ turns: historyPage?.turns, playerCharacter }),
-    [historyPage?.turns, playerCharacter],
+    () => mapHistoryToMessages({ turns: historyPage?.turns, playerCharacter })
+      .map((message) => (
+        message.role === SESSION_TIMELINE_ROLE.ASSISTANT && localTurnUsageByTurn[message.turnId]
+          ? { ...message, usage: localTurnUsageByTurn[message.turnId] }
+          : message
+      )),
+    [historyPage?.turns, localTurnUsageByTurn, playerCharacter],
   )
 
   const lastPersistedTurnId = latestTurnId
@@ -98,7 +105,7 @@ export function useSessionRoomData({
       : baseMessages.filter((message) => message.turnId < optimisticTruncateFromTurn)
 
     return [...historyMessages, ...localMessages]
-      .sort((first, second) => first.turnId - second.turnId || (first.seqInTurn ?? 0) - (second.seqInTurn ?? 0))
+      .sort(compareTimelineMessages)
   }, [baseMessages, localMessages, optimisticTruncateFromTurn])
 
   const lastTurnId = useMemo(
@@ -108,6 +115,7 @@ export function useSessionRoomData({
 
   useEffect(() => {
     setLocalMessages([])
+    setLocalTurnUsageByTurn({})
     setOptimisticTruncateFromTurn(null)
     setAccurateUsageOverride(null)
     setTimelineResetKey((current) => current + 1)
@@ -131,6 +139,7 @@ export function useSessionRoomData({
   const refreshSessionData = useCallback(async ({
     silent = false,
     clearAccurateUsage = true,
+    preserveDiagnostics = false,
     historyMode = HISTORY_REFRESH_MODE.ACTIVE,
     scrollToBottom = false,
   }: RefreshSessionDataOptions = {}) => {
@@ -143,7 +152,15 @@ export function useSessionRoomData({
         queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] }),
       ])
       if (!historyRefreshed) throw new Error('history page refresh failed')
-      setLocalMessages([])
+      setLocalMessages((current) => (
+        preserveDiagnostics
+          ? current.filter((message) =>
+              message.role === SESSION_TIMELINE_ROLE.THINKING
+              || message.role === SESSION_TIMELINE_ROLE.TOOL,
+            )
+          : []
+      ))
+      if (!preserveDiagnostics) setLocalTurnUsageByTurn({})
       setOptimisticTruncateFromTurn(null)
       setTimelineResetKey((current) => current + 1)
       if (scrollToBottom) setForceScrollKey((current) => current + 1)
@@ -151,6 +168,7 @@ export function useSessionRoomData({
       logger.info('session data refreshed', {
         status: 'success',
         clearAccurateUsage,
+        preserveDiagnostics,
         historyMode,
         scrollToBottom,
       })
@@ -184,6 +202,7 @@ export function useSessionRoomData({
     contextPreviewUsage,
     accurateUsageOverride,
     setAccurateUsageOverride,
+    setLocalTurnUsageByTurn,
     localMessages,
     setLocalMessages,
     optimisticTruncateFromTurn,
@@ -196,4 +215,21 @@ export function useSessionRoomData({
     timelineResetKey,
     refreshSessionData,
   }
+}
+
+function compareTimelineMessages(first: SessionTimelineMessage, second: SessionTimelineMessage) {
+  return (
+    first.turnId - second.turnId
+    || timelineDisplayOrder(first) - timelineDisplayOrder(second)
+    || (first.seqInTurn ?? 0) - (second.seqInTurn ?? 0)
+  )
+}
+
+function timelineDisplayOrder(message: SessionTimelineMessage) {
+  if (message.role === SESSION_TIMELINE_ROLE.USER) return 10
+  if (message.role === SESSION_TIMELINE_ROLE.THINKING) return 20
+  if (message.role === SESSION_TIMELINE_ROLE.TOOL) return 30
+  if (message.role === SESSION_TIMELINE_ROLE.ASSISTANT) return 40
+  if (message.role === SESSION_TIMELINE_ROLE.ERROR) return 90
+  return 80
 }

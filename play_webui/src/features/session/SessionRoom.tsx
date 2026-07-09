@@ -264,6 +264,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     inputMode,
     contextPreviewUsage: data.contextPreviewUsage,
     setAccurateUsageOverride: data.setAccurateUsageOverride,
+    setLocalTurnUsageByTurn: data.setLocalTurnUsageByTurn,
     setComposerText,
     setLocalMessages: data.setLocalMessages,
     setForceScrollKey: data.setForceScrollKey,
@@ -387,6 +388,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               leftCollapsed={layout.leftCollapsed}
               rightCollapsed={layout.rightCollapsed}
               fontScale={layout.fontScale}
+              showThinking={layout.showThinking}
+              showTools={layout.showTools}
               playerCharacter={data.playerCharacter}
               onToggleOpen={() => layout.setSettingsOpen((current) => !current)}
               onToggleSide={(side) => {
@@ -395,6 +398,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               }}
               onFontScaleChange={layout.setFontScale}
               onResetFontScale={layout.resetFontScale}
+              onShowThinkingChange={layout.setShowThinking}
+              onShowToolsChange={layout.setShowTools}
               onOpenRoleDialog={role.openRoleDialog}
             />
           </div>
@@ -403,6 +408,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         <SessionTimeline
           sessionId={sessionId}
           messages={data.visibleMessages}
+          showThinking={layout.showThinking}
+          showTools={layout.showTools}
           historyPage={data.historyPage}
           loadingBefore={data.historyLoadingBefore}
           loadingAfter={data.historyLoadingAfter}

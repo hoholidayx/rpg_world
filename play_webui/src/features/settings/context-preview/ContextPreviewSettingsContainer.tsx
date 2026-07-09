@@ -604,9 +604,9 @@ export function ContextPreviewSettingsContainer({ workspaceId }: { workspaceId: 
 
       <div className="grid border-b border-slate-200 bg-slate-50 md:grid-cols-4">
         <div className="border-b border-slate-200 px-4 py-4 md:border-b-0 md:border-r">
-          <span className="text-xs font-bold text-slate-500">总 token</span>
+          <span className="text-xs font-bold text-slate-500">主上下文估算 token</span>
           <strong className="mt-2 block text-2xl font-bold text-slate-950">{formatNumber(preview?.totals.tokenCount)}</strong>
-          <em className="mt-1 block text-xs font-semibold not-italic text-slate-400">历史窗口 {preview?.hotHistoryRounds ?? '-'} 轮</em>
+          <em className="mt-1 block text-xs font-semibold not-italic text-slate-400">历史窗口 {preview?.hotHistoryRounds ?? '-'} 轮，不含子 Agent</em>
         </div>
         <div className="border-b border-slate-200 px-4 py-4 md:border-b-0 md:border-r">
           <span className="text-xs font-bold text-slate-500">活跃层</span>
@@ -619,7 +619,7 @@ export function ContextPreviewSettingsContainer({ workspaceId }: { workspaceId: 
           <em className="mt-1 block text-xs font-semibold not-italic text-slate-400">final boundary</em>
         </div>
         <div className="px-4 py-4">
-          <span className="text-xs font-bold text-slate-500">选中层 token</span>
+          <span className="text-xs font-bold text-slate-500">选中层估算 token</span>
           <strong className="mt-2 block text-2xl font-bold text-slate-950">{formatNumber(selectedLayer?.tokenCount)}</strong>
           <em className="mt-1 block truncate text-xs font-semibold not-italic text-slate-400">{selectedLayer?.type ?? '-'}</em>
         </div>

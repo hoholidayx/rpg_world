@@ -44,12 +44,18 @@ export function useSessionRoomLayout({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [dragState, setDragState] = useState<DragState | null>(null)
   const fontScale = useSessionUiStore((state) => state.fontScale)
+  const showThinking = useSessionUiStore((state) => state.showThinking)
+  const showTools = useSessionUiStore((state) => state.showTools)
   const setFontScale = useSessionUiStore((state) => state.setFontScale)
+  const setShowThinking = useSessionUiStore((state) => state.setShowThinking)
+  const setShowTools = useSessionUiStore((state) => state.setShowTools)
   const syncFontScale = useSessionUiStore((state) => state.syncFontScale)
+  const syncDiagnosticsDisplay = useSessionUiStore((state) => state.syncDiagnosticsDisplay)
 
   useEffect(() => {
     syncFontScale()
-  }, [syncFontScale])
+    syncDiagnosticsDisplay()
+  }, [syncDiagnosticsDisplay, syncFontScale])
 
   useEffect(() => {
     setMobilePanel(null)
@@ -129,7 +135,11 @@ export function useSessionRoomLayout({
     settingsOpen,
     setSettingsOpen,
     fontScale,
+    showThinking,
+    showTools,
     setFontScale,
+    setShowThinking,
+    setShowTools,
     resetFontScale: () => setFontScale(SESSION_FONT_SCALE_DEFAULT),
     toggleLeftCollapsed: () => setLeftCollapsed((current) => !current),
     toggleRightCollapsed: () => setRightCollapsed((current) => !current),

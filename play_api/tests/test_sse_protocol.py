@@ -39,6 +39,10 @@ def test_play_sse_stream_encodes_stable_envelope_and_event_ids() -> None:
 
 
 def test_map_agent_event_accepts_agent_field_variants() -> None:
+    thinking = map_agent_event({
+        "kind": AgentEventKind.THINKING.value,
+        "content": "checking state",
+    })
     tool_call = map_agent_event({
         "kind": AgentEventKind.TOOL_CALL.value,
         "toolName": "roll",
@@ -52,6 +56,9 @@ def test_map_agent_event_accepts_agent_field_variants() -> None:
         "tool_result_preview": "18",
     })
 
+    assert thinking is not None
+    assert thinking.type is PlaySSEType.THINKING_DELTA
+    assert thinking.payload == {"text": "checking state"}
     assert tool_call is not None
     assert tool_call.type is PlaySSEType.TOOL_CALL
     assert tool_call.payload == {

@@ -2,6 +2,7 @@ export const PLAY_STREAM_SCHEMA_VERSION = 'play_sse_v1'
 
 export const PLAY_STREAM_EVENT_TYPE = {
   TURN_STARTED: 'turn_started',
+  THINKING_DELTA: 'thinking_delta',
   TEXT_DELTA: 'text_delta',
   TOOL_CALL: 'tool_call',
   TOOL_RESULT: 'tool_result',
@@ -24,6 +25,10 @@ export type PlayStreamEnvelope<TType extends PlayStreamEventType, TPayload exten
 
 export type PlayTurnStartedPayload = {
   mode?: string
+}
+
+export type PlayThinkingDeltaPayload = {
+  text: string
 }
 
 export type PlayTextDeltaPayload = {
@@ -70,6 +75,7 @@ export type PlayStreamErrorPayload = {
 
 export type PlayStreamEvent =
   | PlayStreamEnvelope<typeof PLAY_STREAM_EVENT_TYPE.TURN_STARTED, PlayTurnStartedPayload>
+  | PlayStreamEnvelope<typeof PLAY_STREAM_EVENT_TYPE.THINKING_DELTA, PlayThinkingDeltaPayload>
   | PlayStreamEnvelope<typeof PLAY_STREAM_EVENT_TYPE.TEXT_DELTA, PlayTextDeltaPayload>
   | PlayStreamEnvelope<typeof PLAY_STREAM_EVENT_TYPE.TOOL_CALL, PlayToolCallPayload>
   | PlayStreamEnvelope<typeof PLAY_STREAM_EVENT_TYPE.TOOL_RESULT, PlayToolResultPayload>

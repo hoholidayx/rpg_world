@@ -1,6 +1,7 @@
 import { ChevronDown, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { HistoryPage } from '@/types/session'
+import type { ContextUsageSnapshot } from '@/types/contextUsage'
 import { cn } from '@/lib/utils/cn'
 import { SessionAvatar } from './SessionAvatar'
 import {
@@ -38,6 +39,39 @@ const TIMELINE_SCROLL = {
   stickToBottomDistancePx: 160,
   userScrollDeltaThresholdPx: 2,
 } as const
+
+function formatUsageToken(value: number | null | undefined) {
+  if (value === null || value === undefined) return '-'
+  const rounded = Math.round(value)
+  if (rounded >= 1_000_000) return `${formatCompactNumber(rounded / 1_000_000)}M`
+  if (rounded >= 1_000) return `${formatCompactNumber(rounded / 1_000)}K`
+  return rounded.toLocaleString()
+}
+
+function formatCompactNumber(value: number) {
+  const fixed = value >= 10 ? value.toFixed(1) : value.toFixed(2)
+  return fixed.replace(/\.0+$|(\.\d*[1-9])0+$/, '$1')
+}
+
+function usageSourceLabel(usage: ContextUsageSnapshot) {
+  if (usage.source === 'provider_usage') return 'provider 返回'
+  if (usage.source === 'fallback_estimate') return '兜底估算，不含子 Agent'
+  if (usage.source === 'unavailable') return '未知'
+  return '主上下文估算，不含子 Agent'
+}
+
+function usageLineTitle(usage: ContextUsageSnapshot) {
+  if (usage.source === 'provider_usage') return '本轮实际总消耗（含子 Agent）'
+  return '主上下文估算兜底'
+}
+
+function AssistantUsageLine({ usage }: { usage: ContextUsageSnapshot }) {
+  return (
+    <div className="mt-3 border-t border-slate-200/80 pt-2 text-[11px] font-bold leading-5 text-slate-400 dark:border-slate-700/80 dark:text-slate-500">
+      {usageLineTitle(usage)}：{formatUsageToken(usage.totalTokens)} total / prompt {formatUsageToken(usage.promptTokens ?? usage.usedTokens)} / completion {formatUsageToken(usage.completionTokens)} / cache {formatUsageToken(usage.cachedTokens)} · {usageSourceLabel(usage)}
+    </div>
+  )
+}
 
 function MiniButton({
   label,
@@ -140,6 +174,7 @@ function MessageBubble({
 }) {
   const isUser = message.role === SESSION_TIMELINE_ROLE.USER
   const isAssistant = message.role === SESSION_TIMELINE_ROLE.ASSISTANT
+  const isThinking = message.role === SESSION_TIMELINE_ROLE.THINKING
   const toneClass = {
     user: 'border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-100 dark:shadow-violet-950/30',
     assistant: 'border-slate-200 bg-white text-slate-950 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:shadow-black/25',
@@ -180,6 +215,25 @@ function MessageBubble({
 
   const content = message.content || (message.status === SESSION_MESSAGE_STATUS.STREAMING ? '正在生成回应...' : '')
 
+  if (isThinking) {
+    return (
+      <details
+        className={cn(
+          'group rounded-lg border px-4 py-3 text-sm leading-6 break-words whitespace-normal',
+          toneClass,
+        )}
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-black marker:hidden">
+          <span>{message.status === SESSION_MESSAGE_STATUS.STREAMING ? '正在思考...' : '思考过程'}</span>
+          <ChevronDown size={16} className="shrink-0 transition group-open:rotate-180" />
+        </summary>
+        <div className="mt-3 whitespace-pre-wrap border-t border-amber-200/70 pt-3 text-xs font-semibold leading-6 text-amber-900 dark:border-amber-500/20 dark:text-amber-100">
+          {content || '暂无思考内容'}
+        </div>
+      </details>
+    )
+  }
+
   return (
     <div
       className={cn(
@@ -189,6 +243,7 @@ function MessageBubble({
       )}
     >
       {isAssistant && message.content ? <AssistantTaggedText content={message.content} /> : content}
+      {isAssistant && message.usage ? <AssistantUsageLine usage={message.usage} /> : null}
     </div>
   )
 }
@@ -319,6 +374,8 @@ function TimelineMessage({
 export function SessionTimeline({
   sessionId,
   messages,
+  showThinking,
+  showTools,
   historyPage,
   loadingBefore,
   loadingAfter,
@@ -340,6 +397,8 @@ export function SessionTimeline({
 }: {
   sessionId: string
   messages: SessionTimelineMessage[]
+  showThinking: boolean
+  showTools: boolean
   historyPage: HistoryPage | null
   loadingBefore: boolean
   loadingAfter: boolean
@@ -374,10 +433,21 @@ export function SessionTimeline({
   const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastScrollTopRef = useRef(0)
   const userScrollDirectionRef = useRef<UserScrollDirection | null>(null)
+  const displayMessages = useMemo(
+    () => messages.filter((message) => {
+      if (!showThinking && message.role === SESSION_TIMELINE_ROLE.THINKING) return false
+      if (!showTools && message.role === SESSION_TIMELINE_ROLE.TOOL) return false
+      return true
+    }),
+    [messages, showThinking, showTools],
+  )
   const lastMessageFingerprint = useMemo(() => {
-    const lastMessage = messages[messages.length - 1]
-    return lastMessage ? `${lastMessage.id}:${lastMessage.content.length}:${lastMessage.status ?? ''}` : ''
-  }, [messages])
+    const lastMessage = displayMessages[displayMessages.length - 1]
+    const usageStamp = lastMessage?.usage
+      ? `${lastMessage.usage.source}:${lastMessage.usage.totalTokens ?? ''}:${lastMessage.usage.promptTokens ?? ''}`
+      : ''
+    return lastMessage ? `${lastMessage.id}:${lastMessage.content.length}:${lastMessage.status ?? ''}:${usageStamp}` : ''
+  }, [displayMessages])
   const pageFingerprint = historyPage
     ? `${historyPage.startTurnId ?? 'empty'}:${historyPage.endTurnId ?? 'empty'}:${historyPage.latestTurnId}`
     : 'empty'
@@ -485,7 +555,7 @@ export function SessionTimeline({
   }, [])
 
   useEffect(() => {
-    if (!messages.length) {
+    if (!displayMessages.length) {
       initialScrollDoneRef.current = false
       shouldStickToBottomRef.current = true
       return
@@ -498,7 +568,7 @@ export function SessionTimeline({
     }
 
     if (shouldStickToBottomRef.current) scrollToBottom('smooth')
-  }, [lastMessageFingerprint, messages.length, scrollToBottom])
+  }, [displayMessages.length, lastMessageFingerprint, scrollToBottom])
 
   useEffect(() => {
     const previousPage = previousPageRef.current
@@ -600,9 +670,9 @@ export function SessionTimeline({
             </div>
           ) : null}
 
-          {messages.length ? (
+          {displayMessages.length ? (
             <div className="space-y-7">
-              {messages.map((message) => (
+              {displayMessages.map((message) => (
                 <TimelineMessage
                   key={message.id}
                   message={message}

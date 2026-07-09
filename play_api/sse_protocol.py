@@ -17,6 +17,7 @@ DEFAULT_AGENT_ERROR_MESSAGE = "Agent stream failed"
 
 class PlaySSEType(StrEnum):
     TURN_STARTED = "turn_started"
+    THINKING_DELTA = "thinking_delta"
     TEXT_DELTA = "text_delta"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
@@ -25,6 +26,7 @@ class PlaySSEType(StrEnum):
 
 
 class AgentEventKind(StrEnum):
+    THINKING = "thinking"
     TEXT = "text"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
@@ -85,6 +87,8 @@ def agent_event_kind(event: dict[str, object]) -> str:
 
 def map_agent_event(event: dict[str, object]) -> PlaySSEMapping | None:
     kind = agent_event_kind(event)
+    if kind == AgentEventKind.THINKING:
+        return PlaySSEMapping(PlaySSEType.THINKING_DELTA, {"text": str(event.get("content") or "")})
     if kind == AgentEventKind.TEXT:
         return PlaySSEMapping(PlaySSEType.TEXT_DELTA, {"text": str(event.get("content") or "")})
     if kind == AgentEventKind.TOOL_CALL:

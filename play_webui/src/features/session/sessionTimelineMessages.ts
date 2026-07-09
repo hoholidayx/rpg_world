@@ -45,6 +45,14 @@ export function toolSpeaker(): SessionSpeaker {
   }
 }
 
+export function thinkingSpeaker(): SessionSpeaker {
+  return {
+    name: '思考',
+    fallback: '思',
+    tone: 'thinking',
+  }
+}
+
 export function errorSpeaker(): SessionSpeaker {
   return {
     name: '错误',

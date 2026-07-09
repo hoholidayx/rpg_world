@@ -1,4 +1,5 @@
-import { CaseSensitive, PanelLeftClose, PanelRightClose, Settings, UserRound } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Brain, CaseSensitive, PanelLeftClose, PanelRightClose, Settings, UserRound, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import {
   SESSION_FONT_SCALE_DEFAULT,
@@ -9,15 +10,50 @@ import {
 } from '@/stores/sessionUiStore'
 import type { SessionPlayerCharacter } from '@/types/session'
 
+function ToggleSetting({
+  icon,
+  title,
+  description,
+  checked,
+  onChange,
+}: {
+  icon: ReactNode
+  title: string
+  description: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className="grid w-full grid-cols-[34px_minmax(0,1fr)_42px] items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+    >
+      {icon}
+      <span className="min-w-0">
+        <strong className="block text-sm font-black text-slate-900 dark:text-slate-100">{title}</strong>
+        <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">{description}</span>
+      </span>
+      <span className={cn('h-5 w-10 rounded-full p-0.5 transition', checked ? 'bg-teal-500' : 'bg-slate-200 dark:bg-slate-700')}>
+        <span className={cn('block h-4 w-4 rounded-full bg-white transition', checked ? 'translate-x-5' : 'translate-x-0')} />
+      </span>
+    </button>
+  )
+}
+
 export function SessionSettingsMenu({
   open,
   leftCollapsed,
   rightCollapsed,
   fontScale,
+  showThinking,
+  showTools,
   onToggleOpen,
   onToggleSide,
   onFontScaleChange,
   onResetFontScale,
+  onShowThinkingChange,
+  onShowToolsChange,
   playerCharacter,
   onOpenRoleDialog,
 }: {
@@ -25,10 +61,14 @@ export function SessionSettingsMenu({
   leftCollapsed: boolean
   rightCollapsed: boolean
   fontScale: SessionFontScale
+  showThinking: boolean
+  showTools: boolean
   onToggleOpen: () => void
   onToggleSide: (side: 'left' | 'right') => void
   onFontScaleChange: (fontScale: number) => void
   onResetFontScale: () => void
+  onShowThinkingChange: (show: boolean) => void
+  onShowToolsChange: (show: boolean) => void
   playerCharacter?: SessionPlayerCharacter | null
   onOpenRoleDialog: () => void
 }) {
@@ -144,6 +184,32 @@ export function SessionSettingsMenu({
                 <span className={cn('block h-4 w-4 rounded-full bg-white transition', rightCollapsed ? 'translate-x-0' : 'translate-x-5')} />
               </span>
             </button>
+            <div className="my-2 border-t border-slate-200 dark:border-slate-800" />
+            <div className="px-3 pb-1 pt-2">
+              <strong className="block text-xs font-black uppercase text-slate-400 dark:text-slate-500">诊断显示</strong>
+            </div>
+            <ToggleSetting
+              title="展示思考"
+              description="显示当前流式思考"
+              checked={showThinking}
+              onChange={onShowThinkingChange}
+              icon={(
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+                  <Brain size={16} />
+                </span>
+              )}
+            />
+            <ToggleSetting
+              title="展示工具"
+              description="显示工具调用记录"
+              checked={showTools}
+              onChange={onShowToolsChange}
+              icon={(
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-200">
+                  <Wrench size={16} />
+                </span>
+              )}
+            />
           </div>
         </section>
       ) : null}

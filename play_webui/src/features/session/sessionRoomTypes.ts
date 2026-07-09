@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { ContextUsageSnapshot } from '@/types/contextUsage'
 import { HISTORY_MESSAGE_ROLE } from '@/types/session'
 
 export type SessionInputMode = 'ic' | 'ooc' | 'gm'
@@ -47,6 +48,7 @@ export type HistoryRefreshMode = (typeof HISTORY_REFRESH_MODE)[keyof typeof HIST
 export type RefreshSessionDataOptions = {
   silent?: boolean
   clearAccurateUsage?: boolean
+  preserveDiagnostics?: boolean
   historyMode?: HistoryRefreshMode
   scrollToBottom?: boolean
 }
@@ -78,6 +80,7 @@ export type SessionTimelineMessage = {
   seqInTurn?: number
   role: SessionTimelineRole
   content: string
+  usage?: ContextUsageSnapshot | null
   metadata?: Record<string, unknown>
   createdAt?: string | null
   speaker: SessionSpeaker

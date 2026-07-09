@@ -24,6 +24,21 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
   switch (event.type) {
     case PLAY_STREAM_EVENT_TYPE.TURN_STARTED:
       return { ...state, status: 'connecting', debugEvents }
+    case PLAY_STREAM_EVENT_TYPE.THINKING_DELTA:
+      return {
+        timeline: [
+          ...state.timeline,
+          {
+            id: crypto.randomUUID(),
+            type: TIMELINE_ITEM_TYPE.THINKING,
+            content: event.payload.text,
+            createdAt: now(),
+            metadata: { event },
+          },
+        ],
+        status: 'thinking',
+        debugEvents,
+      }
     case PLAY_STREAM_EVENT_TYPE.TEXT_DELTA:
       return {
         timeline: appendAssistantText(state.timeline, event.payload.text),
