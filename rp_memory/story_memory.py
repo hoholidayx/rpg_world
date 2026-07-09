@@ -29,7 +29,7 @@ class StoryMemoryStore:
         text: str,
         metadata: dict[str, object] | None = None,
         *,
-        turn_id: int = 0,
+        turn_id: int,
         dream_processed: bool = False,
     ) -> None:
         """追加一条剧情细节。"""

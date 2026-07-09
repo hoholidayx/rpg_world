@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from loguru import logger
 from peewee import Database
 
+from commons.errors import InvalidTurnMetadataError
 from rpg_data import models
 from rpg_data.repositories.records import SessionMessageRecord
 from rpg_data.services._message_store import BaseSessionMessageStore, MessageInput
@@ -26,8 +26,8 @@ class MessageService:
         role: str,
         content: str = "",
         *,
-        turn_id: int = 0,
-        seq_in_turn: int = 0,
+        turn_id: int | None = None,
+        seq_in_turn: int | None = None,
         tool_call_id: str = "",
         tool_calls_json: str = "",
         metadata_json: str = "{}",
@@ -98,6 +98,8 @@ class MessageService:
         tool_calls_json: str | None = None,
         metadata_json: str | None = None,
     ) -> models.SessionMessage | None:
+        if turn_id is not None or seq_in_turn is not None:
+            raise InvalidTurnMetadataError("turn_id and seq_in_turn are immutable; use a dedicated repair flow")
         updated = self._store.update(
             message_id,
             role=role,
@@ -165,13 +167,7 @@ class MessageService:
         *,
         keep_recent_turns: int,
     ) -> list[list[models.SessionMessage]]:
-        """Return unprocessed message groups eligible for summary compression.
-
-        Message-level ``summary_processed`` is the correctness cursor.  Turn
-        grouping is only used to apply ``keep_recent_turns`` and batch windows:
-        explicit metadata is used when trustworthy, otherwise user/pair fallback
-        grouping is used and a warning is emitted.
-        """
+        """Return unprocessed message groups eligible for summary compression."""
         rows = [
             row
             for row in self.list(session_id)
@@ -219,11 +215,7 @@ class MessageService:
         self,
         session_id: str,
     ) -> list[list[models.SessionMessage]]:
-        """Return unprocessed message groups for story-memory extraction.
-
-        Story memory has no keep window.  The processed flag remains the
-        correctness cursor; grouping is only the extraction window shape.
-        """
+        """Return unprocessed message groups for story-memory extraction."""
         rows = [
             row
             for row in self.list(session_id)
@@ -314,24 +306,9 @@ def _conversation_turn_groups(
     if not conversation_rows:
         return []
 
-    first_explicit = next(
-        (
-            index
-            for index, row in enumerate(conversation_rows)
-            if row.turn_id > 0 and row.seq_in_turn > 0
-        ),
-        len(conversation_rows),
-    )
-    if first_explicit < len(conversation_rows):
-        prefix = conversation_rows[:first_explicit]
-        suffix = conversation_rows[first_explicit:]
-        if _has_trustworthy_turn_metadata(suffix):
-            if prefix:
-                _warn_fallback_grouping(session_id, purpose, prefix, reason="missing explicit turn metadata prefix")
-            return _legacy_groups(prefix) + _explicit_turn_groups(suffix)
-
-    _warn_fallback_grouping(session_id, purpose, conversation_rows, reason="untrustworthy turn metadata")
-    return _legacy_groups(conversation_rows)
+    if not _has_trustworthy_turn_metadata(conversation_rows):
+        raise InvalidTurnMetadataError(f"invalid turn metadata for {purpose}: session_id={session_id}")
+    return _explicit_turn_groups(conversation_rows)
 
 
 def _has_trustworthy_turn_metadata(rows: list[models.SessionMessage]) -> bool:
@@ -368,49 +345,3 @@ def _explicit_turn_groups(rows: list[models.SessionMessage]) -> list[list[models
     if current_group:
         groups.append(current_group)
     return groups
-
-
-def _legacy_groups(rows: list[models.SessionMessage]) -> list[list[models.SessionMessage]]:
-    if not rows:
-        return []
-    if any(row.role == models.MESSAGE_ROLE_USER for row in rows):
-        return _user_anchor_groups(rows)
-    return _pair_groups(rows)
-
-
-def _user_anchor_groups(rows: list[models.SessionMessage]) -> list[list[models.SessionMessage]]:
-    user_indices = [
-        index
-        for index, row in enumerate(rows)
-        if row.role == models.MESSAGE_ROLE_USER
-    ]
-    groups: list[list[models.SessionMessage]] = []
-    for index, user_index in enumerate(user_indices):
-        start = 0 if index == 0 else user_index
-        end = user_indices[index + 1] if index + 1 < len(user_indices) else len(rows)
-        groups.append(rows[start:end])
-    return groups
-
-
-def _pair_groups(rows: list[models.SessionMessage]) -> list[list[models.SessionMessage]]:
-    return [rows[index:index + 2] for index in range(0, len(rows), 2)]
-
-
-def _warn_fallback_grouping(
-    session_id: str,
-    purpose: str,
-    rows: list[models.SessionMessage],
-    *,
-    reason: str,
-) -> None:
-    if not rows:
-        return
-    invalid_count = sum(1 for row in rows if row.turn_id <= 0 or row.seq_in_turn <= 0)
-    logger.warning(
-        "[MessageService] fallback round grouping for {}: session_id={}, reason={}, rows={}, invalid_turn_metadata={}; message processed flags remain authoritative",
-        purpose,
-        session_id,
-        reason,
-        len(rows),
-        invalid_count,
-    )

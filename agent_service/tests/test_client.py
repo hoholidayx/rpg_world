@@ -161,6 +161,26 @@ async def test_client_stream_parses_sse_events() -> None:
     )
 
 
+async def test_client_stream_ignores_invalid_event_status_code(monkeypatch) -> None:
+    def stream_with_invalid_status_code(self, method: str, url: str, json=None):  # noqa: ANN001
+        self.calls.append((method, url, {"json": json}))
+        return FakeStreamResponse([
+            'data: {"kind": "error", "content": "bad", "error_code": "TURN_METADATA_INVALID", "status_code": "not-a-number"}',
+        ])
+
+    monkeypatch.setattr(FakeAsyncClient, "stream", stream_with_invalid_status_code)
+
+    events = [
+        event
+        async for event in AgentClient(base_url="http://agent").stream("s1", "hello")
+    ]
+
+    assert [event.kind for event in events] == [StreamEventKind.ERROR]
+    assert events[0].content == "bad"
+    assert events[0].error_code == "TURN_METADATA_INVALID"
+    assert events[0].status_code is None
+
+
 async def test_client_stop_uses_request_id_payload() -> None:
     result = await AgentClient(base_url="http://agent").stop("s1", request_id="req1")
 

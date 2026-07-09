@@ -7,6 +7,7 @@ from collections.abc import Iterable
 
 from peewee import Database, SQL
 
+from commons.errors import InvalidTurnMetadataError
 from rpg_data import models
 from rpg_data.repositories._utils import get_or_none, to_session_story_memory
 from rpg_data.repositories.records import SessionRecord, SessionStoryMemoryRecord, bind_database
@@ -47,13 +48,14 @@ class StoryMemoryService:
         session_id: str,
         text: str,
         *,
-        turn_id: int = 0,
+        turn_id: int,
         dream_processed: bool = False,
         metadata_json: str = "{}",
     ) -> models.SessionStoryMemory:
+        normalized_turn_id = _required_positive_int(turn_id, "turn_id")
         row = SessionStoryMemoryRecord.create(
             session=session_id,
-            turn_id=max(0, int(turn_id)),
+            turn_id=normalized_turn_id,
             text=str(text or ""),
             dream_processed=bool(dream_processed),
             metadata_json=str(metadata_json or "{}"),
@@ -65,11 +67,12 @@ class StoryMemoryService:
         session_id: str,
         details: Iterable[models.SessionStoryMemory | dict[str, object]],
     ) -> list[models.SessionStoryMemory]:
+        payloads = [_coerce_detail(detail) for detail in details]
         with self._database.atomic():
             self.clear(session_id)
             return [
-                self.add_detail(session_id, **_coerce_detail(detail))
-                for detail in details
+                self.add_detail(session_id, **payload)
+                for payload in payloads
             ]
 
     def clear(self, session_id: str) -> int:
@@ -120,7 +123,19 @@ def _coerce_detail(
         metadata_json = json.dumps(detail.get("metadata") or {}, ensure_ascii=False)
     return {
         "text": str(detail.get("text", "") or ""),
-        "turn_id": int(detail.get("turn_id", 0) or 0),
+        "turn_id": _required_positive_int(detail.get("turn_id"), "turn_id"),
         "dream_processed": bool(detail.get("dream_processed", False)),
         "metadata_json": str(metadata_json or "{}"),
     }
+
+
+def _required_positive_int(value: object | None, field_name: str) -> int:
+    if value is None or value == "" or isinstance(value, bool):
+        raise InvalidTurnMetadataError(f"{field_name} must be a positive integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise InvalidTurnMetadataError(f"{field_name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise InvalidTurnMetadataError(f"{field_name} must be a positive integer")
+    return parsed

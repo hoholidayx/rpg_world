@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from peewee import SqliteDatabase
 
+from commons.errors import InvalidTurnMetadataError
 from rpg_data import db, models
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.repositories.records import (
@@ -161,6 +162,56 @@ def test_message_service_turn_window_pagination(tmp_path: Path) -> None:
         database.close()
 
 
+def test_message_service_requires_valid_turn_metadata(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        backup = BackupService(database)
+        session_id = _create_test_session(database, "s_message_turn_constraints")
+
+        messages.append(session_id, models.MESSAGE_ROLE_USER, "u1", turn_id=1, seq_in_turn=1)
+
+        for kwargs in (
+            {},
+            {"turn_id": 0, "seq_in_turn": 1},
+            {"turn_id": 1, "seq_in_turn": 0},
+            {"turn_id": -1, "seq_in_turn": 1},
+        ):
+            with pytest.raises(InvalidTurnMetadataError):
+                messages.append(session_id, models.MESSAGE_ROLE_USER, "invalid", **kwargs)
+            with pytest.raises(InvalidTurnMetadataError):
+                backup.messages.append(session_id, models.MESSAGE_ROLE_USER, "invalid", **kwargs)
+
+        with pytest.raises(InvalidTurnMetadataError):
+            messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, "duplicate seq", turn_id=1, seq_in_turn=1)
+
+        backup.messages.append(session_id, models.MESSAGE_ROLE_USER, "cold 1", turn_id=1, seq_in_turn=1)
+        backup.messages.append(session_id, models.MESSAGE_ROLE_USER, "cold 1 retry", turn_id=1, seq_in_turn=1)
+        assert [row.content for row in backup.messages.list(session_id)] == ["cold 1", "cold 1 retry"]
+    finally:
+        database.close()
+
+
+def test_message_service_replace_validates_before_clear(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        session_id = _create_test_session(database, "s_message_replace_invalid")
+        messages.append(session_id, models.MESSAGE_ROLE_USER, "kept", turn_id=1, seq_in_turn=1)
+
+        with pytest.raises(InvalidTurnMetadataError):
+            messages.replace(
+                session_id,
+                [
+                    {"role": models.MESSAGE_ROLE_USER, "content": "invalid"},
+                ],
+            )
+
+        assert [row.content for row in messages.list(session_id)] == ["kept"]
+    finally:
+        database.close()
+
+
 def test_story_memory_service_crud(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
@@ -194,6 +245,12 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         )
         assert [row.text for row in replacement] == ["replacement"]
         assert story_memory.list("s_forest001")[0].to_context_dict()["metadata"] == {"kind": "unit"}
+
+        with pytest.raises(InvalidTurnMetadataError):
+            story_memory.add_detail("s_forest001", "missing turn", turn_id=0)
+        with pytest.raises(InvalidTurnMetadataError):
+            story_memory.set_details("s_forest001", [{"text": "invalid"}])
+        assert [row.text for row in story_memory.list("s_forest001")] == ["replacement"]
     finally:
         database.close()
 
@@ -259,25 +316,19 @@ def test_message_service_processing_flags(tmp_path: Path) -> None:
         database.close()
 
 
-def test_message_service_fallback_groups_invalid_turn_metadata(tmp_path: Path) -> None:
+def test_message_service_rejects_turn_metadata_update(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
         messages = MessageService(database)
-        session_id = _create_test_session(database, "s_message_fallback_turns")
+        session_id = _create_test_session(database, "s_message_turn_update")
+        row = messages.append(session_id, models.MESSAGE_ROLE_USER, "u1", turn_id=1, seq_in_turn=1)
 
-        messages.append(session_id, models.MESSAGE_ROLE_USER, "legacy u", turn_id=0, seq_in_turn=0)
-        messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, "legacy a", turn_id=0, seq_in_turn=0)
-        messages.append(session_id, models.MESSAGE_ROLE_USER, "bad seq u", turn_id=1, seq_in_turn=1)
-        messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, "bad seq a", turn_id=1, seq_in_turn=1)
-
-        assert [
-            [row.content for row in group]
-            for group in messages.list_summary_candidate_turn_groups(session_id, keep_recent_turns=0)
-        ] == [["legacy u", "legacy a"], ["bad seq u", "bad seq a"]]
-        assert [
-            [row.content for row in group]
-            for group in messages.list_story_memory_unprocessed_turn_groups(session_id)
-        ] == [["legacy u", "legacy a"], ["bad seq u", "bad seq a"]]
+        with pytest.raises(InvalidTurnMetadataError):
+            messages.update(row.id, turn_id=2)
+        with pytest.raises(InvalidTurnMetadataError):
+            messages.update(row.id, seq_in_turn=2)
+        assert messages.get(row.id).turn_id == 1
+        assert messages.get(row.id).seq_in_turn == 1
     finally:
         database.close()
 

@@ -59,8 +59,8 @@ CREATE TABLE IF NOT EXISTS rpg_session_messages (
     session_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
     content TEXT NOT NULL DEFAULT '',
-    turn_id INTEGER NOT NULL DEFAULT 0,
-    seq_in_turn INTEGER NOT NULL DEFAULT 0,
+    turn_id INTEGER NOT NULL CHECK (turn_id > 0),
+    seq_in_turn INTEGER NOT NULL CHECK (seq_in_turn > 0),
     tool_call_id TEXT NOT NULL DEFAULT '',
     tool_calls_json TEXT NOT NULL DEFAULT '',
     metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -80,8 +80,8 @@ CREATE TABLE IF NOT EXISTS rpg_session_backup_messages (
     session_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
     content TEXT NOT NULL DEFAULT '',
-    turn_id INTEGER NOT NULL DEFAULT 0,
-    seq_in_turn INTEGER NOT NULL DEFAULT 0,
+    turn_id INTEGER NOT NULL CHECK (turn_id > 0),
+    seq_in_turn INTEGER NOT NULL CHECK (seq_in_turn > 0),
     tool_call_id TEXT NOT NULL DEFAULT '',
     tool_calls_json TEXT NOT NULL DEFAULT '',
     metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS rpg_session_backup_messages (
 CREATE TABLE IF NOT EXISTS rpg_session_story_memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
-    turn_id INTEGER NOT NULL DEFAULT 0,
+    turn_id INTEGER NOT NULL CHECK (turn_id > 0),
     text TEXT NOT NULL DEFAULT '',
     dream_processed INTEGER NOT NULL DEFAULT 0 CHECK (dream_processed IN (0, 1)),
     metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -244,6 +244,7 @@ CREATE INDEX IF NOT EXISTS idx_rpg_sessions_workspace_id ON rpg_sessions(workspa
 CREATE INDEX IF NOT EXISTS idx_rpg_sessions_story_id ON rpg_sessions(story_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_session_id_id ON rpg_session_messages(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_turn ON rpg_session_messages(session_id, turn_id, seq_in_turn, id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_rpg_session_messages_turn_seq ON rpg_session_messages(session_id, turn_id, seq_in_turn);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_summary_cursor ON rpg_session_messages(session_id, summary_processed, turn_id, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_messages_story_cursor ON rpg_session_messages(session_id, story_memory_processed, turn_id, id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_backup_messages_session_id_id ON rpg_session_backup_messages(session_id, id);

@@ -42,6 +42,11 @@ from agent_service.schemas import (
     AgentTurnCancelResponse,
 )
 from agent_service.settings import settings as process_settings
+from commons.errors import (
+    TURN_METADATA_INVALID_ERROR_CODE,
+    TURN_METADATA_INVALID_STATUS_CODE,
+    format_turn_metadata_error_message,
+)
 from commons.types import JsonObject, JsonValue
 from llm_service.client import configure_llama_client_from_runtime_config
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
@@ -323,6 +328,9 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
         try:
             async for event in agent.send_stream(body.message, request_id=body.request_id):
                 yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+        except InvalidTurnMetadataError as exc:
+            event = _turn_metadata_stream_error(exc)
+            yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except Exception as exc:
             event = AgentStreamEvent(kind=StreamEventKind.ERROR, content=str(exc))
             yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
@@ -471,7 +479,16 @@ def _require_session_id(session_id: str) -> str:
 
 
 def _turn_metadata_http_error(exc: InvalidTurnMetadataError) -> HTTPException:
-    return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=TURN_METADATA_INVALID_STATUS_CODE, detail=str(exc))
+
+
+def _turn_metadata_stream_error(exc: InvalidTurnMetadataError) -> AgentStreamEvent:
+    return AgentStreamEvent(
+        kind=StreamEventKind.ERROR,
+        content=format_turn_metadata_error_message(exc),
+        error_code=TURN_METADATA_INVALID_ERROR_CODE,
+        status_code=TURN_METADATA_INVALID_STATUS_CODE,
+    )
 
 
 def _reply_to_dict(reply: AgentReply, *, session_id: str = "-") -> AgentReplyPayload:

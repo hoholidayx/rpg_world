@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
+from commons.errors import TURN_METADATA_INVALID_ERROR_CODE, TURN_METADATA_INVALID_STATUS_CODE
 from llm_service.types import LLMUsage
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
@@ -17,6 +18,7 @@ from rpg_core.agent.agent_types import (
 from rpg_core.agent.command import CommandDef, CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data import models
 
 
@@ -154,6 +156,28 @@ class FailedSyncAgentManager(FakeAgentManager):
     def get_or_create(cls, session_id: str):
         if session_id not in cls.instances:
             cls.instances[session_id] = FailedSyncAgent(session_id)
+        return cls.instances[session_id]
+
+
+class InvalidTurnAgent(FakeAgent):
+    async def send(self, message: str) -> AgentReply:
+        del message
+        raise InvalidTurnMetadataError("invalid persisted turn metadata")
+
+    async def send_stream(self, message: str, *, request_id: str | None = None):
+        del message, request_id
+        if False:
+            yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="")
+        raise InvalidTurnMetadataError("invalid persisted turn metadata")
+
+
+class InvalidTurnAgentManager(FakeAgentManager):
+    instances: dict[str, FakeAgent] = {}
+
+    @classmethod
+    def get_or_create(cls, session_id: str):
+        if session_id not in cls.instances:
+            cls.instances[session_id] = InvalidTurnAgent(session_id)
         return cls.instances[session_id]
 
 
@@ -498,6 +522,34 @@ def test_agent_service_history_rejects_invalid_turn_metadata(monkeypatch) -> Non
 
     assert history.status_code == 409
     assert "history[1]" in history.json()["detail"]
+
+
+def test_agent_service_send_and_stream_map_turn_metadata_error(monkeypatch) -> None:
+    monkeypatch.setattr(service_main, "AgentManager", InvalidTurnAgentManager)
+    monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
+    monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
+    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
+    FakeCatalog.reset()
+    InvalidTurnAgentManager.reset()
+
+    with TestClient(service_main.app) as client:
+        send = client.post(
+            "/agent/v1/chat/send",
+            json={"session_id": "s1", "message": "go"},
+        )
+        with client.stream(
+            "POST",
+            "/agent/v1/chat/stream",
+            json={"session_id": "s1", "message": "go"},
+        ) as stream:
+            body = "".join(stream.iter_text())
+
+    assert send.status_code == TURN_METADATA_INVALID_STATUS_CODE
+    assert "invalid persisted turn metadata" in send.json()["detail"]
+    assert f'"error_code": "{TURN_METADATA_INVALID_ERROR_CODE}"' in body
+    assert f'"status_code": {TURN_METADATA_INVALID_STATUS_CODE}' in body
+    assert '"content": "invalid persisted turn metadata"' in body
+    assert f"{TURN_METADATA_INVALID_ERROR_CODE}: invalid persisted turn metadata" not in body
 
 
 def test_agent_service_drops_cached_agent_when_truncate_sync_fails(monkeypatch) -> None:

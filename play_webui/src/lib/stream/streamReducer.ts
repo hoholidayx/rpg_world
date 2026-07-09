@@ -1,4 +1,5 @@
 import { PLAY_STREAM_EVENT_TYPE, TIMELINE_ITEM_TYPE, type PlayStreamEvent, type StreamStatus, type TimelineItem } from '@/types/stream'
+import { formatStreamErrorText } from './formatStreamError'
 
 type StreamState = {
   timeline: TimelineItem[]
@@ -65,7 +66,16 @@ export function reducePlayStreamEvent(state: StreamState, event: PlayStreamEvent
       return {
         timeline: [
           ...state.timeline,
-          { id: crypto.randomUUID(), type: TIMELINE_ITEM_TYPE.ERROR, content: event.payload.message || '流式请求失败', createdAt: now() },
+          {
+            id: crypto.randomUUID(),
+            type: TIMELINE_ITEM_TYPE.ERROR,
+            content: formatStreamErrorText(event.payload),
+            createdAt: now(),
+            metadata: {
+              errorCode: event.payload.errorCode,
+              errorMessage: event.payload.message,
+            },
+          },
         ],
         status: 'error',
         debugEvents,

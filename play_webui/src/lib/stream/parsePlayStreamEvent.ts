@@ -5,6 +5,7 @@ import {
   type PlayStreamEvent,
   type PlayStreamEventType,
 } from '@/types/stream'
+import { DEFAULT_STREAM_ERROR_MESSAGE } from './formatStreamError'
 
 const PLAY_EVENT_TYPES = new Set<PlayStreamEventType>(PLAY_STREAM_EVENT_TYPES)
 
@@ -27,6 +28,36 @@ function assertRequiredString(payload: Record<string, unknown>, key: string, typ
   if (typeof payload[key] !== 'string') {
     throw parseError(`Play SSE ${type}.payload.${key} 缺失或无效`, raw)
   }
+}
+
+function normalizeStatusCode(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function normalizePayload(type: PlayStreamEventType, payload: Record<string, unknown>): Record<string, unknown> {
+  if (type !== PLAY_STREAM_EVENT_TYPE.ERROR) return payload
+
+  const normalized: Record<string, unknown> = { ...payload }
+  normalized.message = String(payload.message ?? DEFAULT_STREAM_ERROR_MESSAGE)
+
+  if (payload.errorCode !== undefined && payload.errorCode !== null && payload.errorCode !== '') {
+    normalized.errorCode = String(payload.errorCode)
+  } else {
+    delete normalized.errorCode
+  }
+
+  const statusCode = normalizeStatusCode(payload.statusCode)
+  if (statusCode !== undefined) {
+    normalized.statusCode = statusCode
+  } else {
+    delete normalized.statusCode
+  }
+  return normalized
 }
 
 function validatePayload(type: PlayStreamEventType, payload: Record<string, unknown>, raw: string) {
@@ -60,9 +91,7 @@ function validatePayload(type: PlayStreamEventType, payload: Record<string, unkn
       return
     case PLAY_STREAM_EVENT_TYPE.ERROR:
       assertRequiredString(payload, 'message', type, raw)
-      if (payload.statusCode !== undefined && typeof payload.statusCode !== 'number') {
-        throw parseError(`Play SSE ${type}.payload.statusCode 必须是 number`, raw)
-      }
+      assertOptionalString(payload, 'errorCode', type, raw)
       return
   }
 }
@@ -89,7 +118,9 @@ export function parsePlayStreamEvent(raw: string): PlayStreamEvent | null {
     throw parseError('Play SSE type 缺失或无效', raw)
   }
   if (!isRecord(parsed.payload)) throw parseError('Play SSE payload 缺失或无效', raw)
-  validatePayload(parsed.type as PlayStreamEventType, parsed.payload, raw)
+  const type = parsed.type as PlayStreamEventType
+  const payload = normalizePayload(type, parsed.payload)
+  validatePayload(type, payload, raw)
 
-  return parsed as PlayStreamEvent
+  return { ...parsed, type, payload } as PlayStreamEvent
 }

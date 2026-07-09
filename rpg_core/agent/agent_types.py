@@ -160,6 +160,8 @@ class AgentStreamEvent:
 
     kind: StreamEventKind
     content: str = ""
+    error_code: str | None = None
+    status_code: int | None = None
 
     # ── TOOL_CALL 字段 ─────────────────────────────────────────────
     tool_name: str | None = None
@@ -187,6 +189,10 @@ class AgentStreamEvent:
         d: dict[str, object] = {"kind": self.kind.value}
         if self.content:
             d["content"] = self.content
+        if self.error_code:
+            d["error_code"] = self.error_code
+        if self.status_code:
+            d["status_code"] = int(self.status_code)
         if self.tool_name:
             d["tool_name"] = self.tool_name
         if self.tool_arguments:

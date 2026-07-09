@@ -108,6 +108,10 @@ def test_run_migrations_creates_initial_tables() -> None:
             "story_memory_processed",
             "story_memory_processed_at",
         }.issubset(session_message_columns)
+        assert session_message_info["turn_id"]["notnull"] == 1
+        assert session_message_info["seq_in_turn"]["notnull"] == 1
+        assert session_message_info["turn_id"]["dflt_value"] is None
+        assert session_message_info["seq_in_turn"]["dflt_value"] is None
         assert session_message_info["summary_processed_at"]["type"].upper() == "TEXT"
         assert session_message_info["story_memory_processed_at"]["type"].upper() == "TEXT"
         assert {
@@ -153,6 +157,7 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert {
             "idx_rpg_session_messages_session_id_id",
             "idx_rpg_session_messages_turn",
+            "ux_rpg_session_messages_turn_seq",
             "idx_rpg_session_messages_summary_cursor",
             "idx_rpg_session_messages_story_cursor",
             "idx_rpg_session_backup_messages_session_id_id",
@@ -221,14 +226,14 @@ def test_initial_schema_enforces_foreign_keys() -> None:
         with db.transaction(conn):
             conn.execute(
                 """
-                INSERT INTO rpg_session_messages (session_id, role, content)
-                VALUES ('s_forest001', 'user', 'hello')
+                INSERT INTO rpg_session_messages (session_id, role, content, turn_id, seq_in_turn)
+                VALUES ('s_forest001', 'user', 'hello', 100, 1)
                 """
             )
             conn.execute(
                 """
-                INSERT INTO rpg_session_backup_messages (session_id, role, content)
-                VALUES ('s_forest001', 'assistant', 'world')
+                INSERT INTO rpg_session_backup_messages (session_id, role, content, turn_id, seq_in_turn)
+                VALUES ('s_forest001', 'assistant', 'world', 100, 2)
                 """
             )
 
@@ -237,7 +242,41 @@ def test_initial_schema_enforces_foreign_keys() -> None:
                 conn.execute(
                     """
                     INSERT INTO rpg_session_messages (session_id, role, content)
-                    VALUES ('s_forest001', 'bad_role', 'hello')
+                    VALUES ('s_forest001', 'user', 'missing turn')
+                    """
+                )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            raise AssertionError("expected missing turn metadata to fail")
+
+        try:
+            with db.transaction(conn):
+                conn.execute(
+                    """
+                    INSERT INTO rpg_session_messages (session_id, role, content, turn_id, seq_in_turn)
+                    VALUES ('s_forest001', 'user', 'duplicate turn seq', 100, 1)
+                    """
+                )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            raise AssertionError("expected duplicate main turn seq to fail")
+
+        with db.transaction(conn):
+            conn.execute(
+                """
+                INSERT INTO rpg_session_backup_messages (session_id, role, content, turn_id, seq_in_turn)
+                VALUES ('s_forest001', 'user', 'backup duplicate turn seq', 100, 2)
+                """
+            )
+
+        try:
+            with db.transaction(conn):
+                conn.execute(
+                    """
+                    INSERT INTO rpg_session_messages (session_id, role, content, turn_id, seq_in_turn)
+                    VALUES ('s_forest001', 'bad_role', 'hello', 101, 1)
                     """
                 )
         except sqlite3.IntegrityError:
@@ -249,8 +288,8 @@ def test_initial_schema_enforces_foreign_keys() -> None:
             with db.transaction(conn):
                 conn.execute(
                     """
-                    INSERT INTO rpg_session_backup_messages (session_id, role, content)
-                    VALUES ('missing_session', 'user', 'hello')
+                    INSERT INTO rpg_session_backup_messages (session_id, role, content, turn_id, seq_in_turn)
+                    VALUES ('missing_session', 'user', 'hello', 1, 1)
                     """
                 )
         except sqlite3.IntegrityError:

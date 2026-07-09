@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-
-class InvalidTurnMetadataError(ValueError):
-    """Raised when explicit ``turn_id`` / ``seq_in_turn`` metadata is invalid."""
+from commons.errors import InvalidTurnMetadataError
 
 
 def validate_turn_metadata(records: Sequence[object], *, label: str = "history") -> None:

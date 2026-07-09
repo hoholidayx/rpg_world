@@ -9,6 +9,7 @@ from loguru import logger
 
 from rpg_core.agent.transaction.message_scratch import MessageScratch
 from rpg_core.agent.transaction.status_scratch import StatusDocumentChange, StatusDocumentScratch
+from rpg_core.session import InvalidTurnMetadataError
 
 if TYPE_CHECKING:
     from rpg_core.session import SessionManager
@@ -41,7 +42,14 @@ class TurnCommitPlan:
                 self._append_messages()
                 changes = self.status_scratch.commit(self.status_mgr)
         except Exception as exc:
-            logger.opt(exception=exc).error(_TAG + " commit failed; restoring in-memory history")
+            if isinstance(exc, InvalidTurnMetadataError):
+                logger.opt(exception=exc).error(
+                    _TAG + " commit rejected invalid turn metadata; restoring in-memory history: session_id={}, staged={}",
+                    getattr(self.session, "_session_id", ""),
+                    self._staged_turn_metadata(),
+                )
+            else:
+                logger.opt(exception=exc).error(_TAG + " commit failed; restoring in-memory history")
             self.session.replace_history(snapshot, persist=False)
             raise
         return changes
@@ -54,3 +62,13 @@ class TurnCommitPlan:
                 turn_id=message.turn_id,
                 seq_in_turn=message.seq_in_turn,
             )
+
+    def _staged_turn_metadata(self) -> list[dict[str, object]]:
+        return [
+            {
+                "role": str(message.role),
+                "turn_id": int(message.turn_id),
+                "seq_in_turn": int(message.seq_in_turn),
+            }
+            for message in self.message_scratch.staged_messages
+        ]

@@ -8,6 +8,7 @@ from peewee import (
     AutoField,
     BooleanField,
     CharField,
+    Check,
     Database,
     DatabaseProxy,
     ForeignKeyField,
@@ -167,8 +168,8 @@ class SessionMessageRecord(BaseRecord):
     )
     role = TextField()
     content = TextField(default="")
-    turn_id = IntegerField(default=0)
-    seq_in_turn = IntegerField(default=0)
+    turn_id = IntegerField(constraints=[Check("turn_id > 0")])
+    seq_in_turn = IntegerField(constraints=[Check("seq_in_turn > 0")])
     tool_call_id = TextField(default="")
     tool_calls_json = TextField(default="")
     metadata_json = TextField(default="{}")
@@ -195,8 +196,8 @@ class SessionBackupMessageRecord(BaseRecord):
     )
     role = TextField()
     content = TextField(default="")
-    turn_id = IntegerField(default=0)
-    seq_in_turn = IntegerField(default=0)
+    turn_id = IntegerField(constraints=[Check("turn_id > 0")])
+    seq_in_turn = IntegerField(constraints=[Check("seq_in_turn > 0")])
     tool_call_id = TextField(default="")
     tool_calls_json = TextField(default="")
     metadata_json = TextField(default="{}")
@@ -216,7 +217,7 @@ class SessionStoryMemoryRecord(BaseRecord):
         column_name="session_id",
         on_delete="CASCADE",
     )
-    turn_id = IntegerField(default=0)
+    turn_id = IntegerField(constraints=[Check("turn_id > 0")])
     text = TextField(default="")
     dream_processed = BooleanField(default=False)
     metadata_json = TextField(default="{}")

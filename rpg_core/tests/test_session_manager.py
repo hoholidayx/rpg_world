@@ -4,6 +4,25 @@ import pytest
 
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session.manager import SessionManager
+from rpg_core.session.turn_metadata import InvalidTurnMetadataError
+
+
+class _HistoryRow:
+    def __init__(self, *, role: str, content: str, turn_id: int, seq_in_turn: int, uid: int) -> None:
+        self.role = role
+        self.content = content
+        self.turn_id = turn_id
+        self.seq_in_turn = seq_in_turn
+        self.id = uid
+
+    def to_message_dict(self) -> dict[str, object]:
+        return {
+            "uid": self.id,
+            "role": self.role,
+            "content": self.content,
+            "turn_id": self.turn_id,
+            "seq_in_turn": self.seq_in_turn,
+        }
 
 
 @pytest.fixture
@@ -22,6 +41,27 @@ def test_load_requires_rpg_data_session(rpg_data_gateway):  # noqa: ARG001
 
     with pytest.raises(FileNotFoundError):
         mgr.load()
+
+
+def test_load_rejects_invalid_persisted_turn_metadata(monkeypatch):
+    class FakeMessages:
+        @staticmethod
+        def list(_session_id: str):
+            return [
+                _HistoryRow(role="user", content="u1", turn_id=1, seq_in_turn=1, uid=1),
+                _HistoryRow(role="assistant", content="bad", turn_id=1, seq_in_turn=0, uid=2),
+            ]
+
+    class FakeGateway:
+        messages = FakeMessages()
+
+    mgr = SessionManager(session_id="s_bad_history", history_enabled=True)
+    monkeypatch.setattr(mgr, "_require_data_session", lambda: FakeGateway())
+
+    with pytest.raises(InvalidTurnMetadataError, match=r"history\[1\]"):
+        mgr.load()
+
+    assert mgr.history == []
 
 
 def test_append_persists_messages_backup_and_unique_uids(

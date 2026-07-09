@@ -8,6 +8,7 @@ from loguru import logger
 
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session.turn_metadata import (
+    InvalidTurnMetadataError,
     has_trustworthy_turn_metadata,
     validate_turn_metadata,
 )
@@ -80,9 +81,21 @@ class SessionManager:
             return
 
         gateway = self._require_data_session()
+        rows = gateway.messages.list(self._session_id)
+        try:
+            validate_turn_metadata(rows, label="history")
+        except InvalidTurnMetadataError as exc:
+            logger.opt(exception=exc).error(
+                _TAG + " invalid persisted turn metadata while loading history: session_id={}, rows={}, error={}",
+                self._session_id,
+                len(rows),
+                exc,
+            )
+            raise
+
         self.__history = [
             Message.from_dict(row.to_message_dict())
-            for row in gateway.messages.list(self._session_id)
+            for row in rows
         ]
         self._rebuild_turn_state()
         logger.debug(_TAG + " loaded {} message(s) for session '{}'", len(self.__history), self._session_id)
@@ -194,6 +207,25 @@ class SessionManager:
         turn_ids = [msg.turn_id for msg in messages if msg.turn_id > 0]
         return max(turn_ids, default=0)
 
+    def _validate_append_turn_metadata(self, message: Message) -> None:
+        """Validate one append against the loaded turn sequence state."""
+        if message.turn_id <= 0 or message.seq_in_turn <= 0:
+            raise InvalidTurnMetadataError(
+                "invalid turn metadata for append: turn_id and seq_in_turn must be positive integers"
+            )
+
+        latest = self.latest_turn_id(self.__history)
+        if message.turn_id < latest:
+            raise InvalidTurnMetadataError(
+                "invalid turn metadata for append: turn_id must be nondecreasing"
+            )
+
+        next_seq = self._turn_seq_by_turn.get(message.turn_id)
+        if next_seq is not None and message.seq_in_turn < next_seq:
+            raise InvalidTurnMetadataError(
+                "invalid turn metadata for append: seq_in_turn must increase inside the same turn"
+            )
+
     def append(
         self,
         role: Role | str,
@@ -210,8 +242,9 @@ class SessionManager:
 
         text = str(content or "")
         pending = Message(role_value, text, turn_id=turn_id, seq_in_turn=seq_in_turn)
-        self.validate_turn_metadata([*self.__history, pending], label="history")
-        self._turn_seq_by_turn[turn_id] = seq_in_turn + 1
+        self._validate_append_turn_metadata(pending)
+        turn_id = pending.turn_id
+        seq_in_turn = pending.seq_in_turn
 
         uid = 0
         if self._history_enabled:
@@ -233,6 +266,7 @@ class SessionManager:
                 )
             uid = row.id
 
+        self._turn_seq_by_turn[turn_id] = seq_in_turn + 1
         self.__history.append(
             Message(
                 role_value,
@@ -296,7 +330,6 @@ class SessionManager:
 
     def turn_messages(self, turn_id: int) -> list[Message]:
         """Return loaded messages for one explicit turn id."""
-        self.validate_loaded_turn_metadata(label="history")
         target_turn = int(turn_id)
         return [message for message in self.__history if message.turn_id == target_turn]
 
@@ -313,7 +346,6 @@ class SessionManager:
         boundary_turn = int(turn_id)
         if boundary_turn <= 0:
             raise ValueError("turn_id must be positive")
-        self.validate_loaded_turn_metadata(label="history")
 
         before = len(self.__history)
         if self._history_enabled:
@@ -330,7 +362,6 @@ class SessionManager:
     def update_message_content(self, message_id: int, content: str) -> Message:
         """Update a persisted message body and reload in-memory history."""
         target_id = int(message_id)
-        self.validate_loaded_turn_metadata(label="history")
         if not self._history_enabled:
             for index, message in enumerate(self.__history):
                 if message.uid == target_id:
@@ -363,7 +394,6 @@ class SessionManager:
     def delete_message(self, message_id: int) -> Message:
         """Delete one message from mutable history and reload memory."""
         target_id = int(message_id)
-        self.validate_loaded_turn_metadata(label="history")
         if not self._history_enabled:
             for index, message in enumerate(self.__history):
                 if message.uid == target_id:

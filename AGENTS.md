@@ -46,11 +46,14 @@
 - Story 主数据字段保持：`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。
 - 玩家角色绑定状态只对外暴露 `bound | invalid`。缺失绑定、角色不存在、未挂载、snapshot 损坏或 snapshot mount/story 不匹配都视为 `invalid`；WebUI 进入 SessionRoom 后用不可取消弹窗补选，Agent 在普通 send/send_stream 进入 LLM 前强校验，invalid 时只返回固定编号角色列表，不写 user history、不调用 LLM。绑定成功且 main history 为空时，`SessionRoleService` 追加 story `first_message` 到 main 和 backup，且只追加一次。
 - Agent 普通 RP turn 使用 `AgentTurnTransaction`：`send/send_stream` 内的 user/assistant message 与 scene/status document 写入先进入内存 scratch，LLM 完整成功后在短 commit 点统一写 main history、backup history 和状态表；不要在 LLM 前直接 append user history 或直接写 runtime scene/status。summary compression 和 story memory extraction 只作为 commit 后副作用运行，失败只记录 warning。
+- 持久化会话消息必须写入正数 `turn_id` 和 `seq_in_turn`；主消息表唯一约束 `(session_id, turn_id, seq_in_turn)`，冷备份表保持 append-only、不做唯一约束。新增写入路径必须让非法 turn metadata 在写入或加载边界失败，不要恢复 summary/story memory/history pagination 的降级分组。
+- summary/story memory 的续处理进度只使用 `rpg_session_messages.summary_processed` / `story_memory_processed` 行标记，不恢复 last-turn 游标，不通过截断主历史表示已处理范围。
+- Agent/Play SSE 业务错误码走 `error_code` / `errorCode` 字段；`content` / `message` 保持底层错误文本，不把错误码前缀写入正文，也不要把业务错误码和 HTTP `statusCode` 混用。
 - WebUI 停止生成必须通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 和 Agent service `/chat/stop`；取消成功只丢弃当前 stream turn scratch，不补偿回滚已完成 turn，前端只有收到 `cancelled` 才展示 stopped。
 - `rpg_data` 状态表采用 SQLite document 真源：模板表与会话表都在 SQL 行内保存封装后的 `document_json`，`status_kind` 只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。`rpg_data` 对外返回 `StatusTableDocument` / `StatusTableRow` 等 dataclass，不暴露原始 JSON 字符串作为正文数据。
 - 状态表模板通过 `rpg_story_status_tables` 挂载到 story。创建 session 时由 `CatalogService` 触发复制已挂载模板的 `document_json` 到 `rpg_session_status_tables`，`origin="template_copy"`；后续模板修改不影响已有 session 副本。会话原生运行时表直接写入 `rpg_session_status_tables`，`origin="session_native"`。
 - `rpg_data` bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；不要在 bootstrap 代码中硬编码 demo 或业务数据。默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，并确保日志能清楚输出删除/跳过结果。
-- Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|scene|commands|turn|stream|stop|player-character`；workspace、characters、lorebook、status-tables、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
+- Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|history-page|scene|commands|turn|stream|stop|player-character`；workspace、characters、lorebook、status-tables、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
 
 ## 测试要求
 - 所有外部调用使用 mock，避免真实 LLM、Telegram 或网络依赖。
@@ -65,6 +68,7 @@
 
 ## 配置与数据
 - 配置按进程/模块拆分：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听与日志。
+- Play WebUI 通用配置入口是 `play_webui/play_webui.config.json`，前端通过 typed loader 读取；历史分页配置位于 `session.historyPagination`。
 - `llm_service/llm.yaml` 管 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。
 - 它们都支持 `base + profiles`；`local` / `test` / `prod` 是固定 profile 名称，同级 `settings.local.yaml` / `llm.local.yaml` 等覆盖文件会自动加载。
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。

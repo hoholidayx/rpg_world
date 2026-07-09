@@ -95,7 +95,11 @@ def map_agent_event(event: dict[str, object]) -> PlaySSEMapping | None:
         return PlaySSEMapping(PlaySSEType.TURN_COMPLETED, _turn_completed_payload(event))
     if kind == AgentEventKind.ERROR:
         message = str(event.get("content") or DEFAULT_AGENT_ERROR_MESSAGE)
-        return PlaySSEMapping(PlaySSEType.ERROR, {"message": message})
+        payload: dict[str, object] = {"message": message}
+        error_code = _camel_or_snake(event, "errorCode", "error_code")
+        if error_code:
+            payload["errorCode"] = str(error_code)
+        return PlaySSEMapping(PlaySSEType.ERROR, payload)
     return None
 
 

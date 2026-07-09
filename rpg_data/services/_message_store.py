@@ -6,8 +6,9 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import TypeAlias
 
-from peewee import Database, SQL
+from peewee import Database, IntegrityError, SQL
 
+from commons.errors import InvalidTurnMetadataError
 from rpg_data import models
 from rpg_data.repositories import records
 from rpg_data.repositories._utils import get_or_none, to_session_message
@@ -32,8 +33,8 @@ class BaseSessionMessageStore:
         role: str,
         content: str = "",
         *,
-        turn_id: int = 0,
-        seq_in_turn: int = 0,
+        turn_id: int | None = None,
+        seq_in_turn: int | None = None,
         tool_call_id: str = "",
         tool_calls_json: str = "",
         metadata_json: str = "{}",
@@ -44,6 +45,7 @@ class BaseSessionMessageStore:
         story_memory_processed_at: str = "",
     ) -> models.SessionMessage:
         role = _validate_role(role)
+        turn_id, seq_in_turn = _validate_turn_metadata_fields(turn_id, seq_in_turn)
         fields: dict[str, object] = {
             "session": session_id,
             "role": role,
@@ -62,7 +64,15 @@ class BaseSessionMessageStore:
                 story_memory_processed=bool(story_memory_processed),
                 story_memory_processed_at=str(story_memory_processed_at or "") or None,
             )
-        row = self._record_model.create(**fields)
+        try:
+            row = self._record_model.create(**fields)
+        except IntegrityError as exc:
+            if _is_turn_metadata_integrity_error(exc):
+                raise InvalidTurnMetadataError(
+                    f"invalid turn metadata for session message append: session_id={session_id}, "
+                    f"turn_id={turn_id}, seq_in_turn={seq_in_turn}: {exc}"
+                ) from exc
+            raise
         return to_session_message(row)
 
     def append_mapping(
@@ -84,8 +94,15 @@ class BaseSessionMessageStore:
             self._record_model
             .select()
             .where(self._record_model.session == session_id)
-            .order_by(self._record_model.id)
         )
+        if _supports_processing_fields(self._record_model):
+            query = query.order_by(
+                self._record_model.turn_id,
+                self._record_model.seq_in_turn,
+                self._record_model.id,
+            )
+        else:
+            query = query.order_by(self._record_model.id)
         if offset > 0:
             query = query.offset(offset)
         if limit is not None:
@@ -241,6 +258,8 @@ class BaseSessionMessageStore:
         tool_calls_json: str | None = None,
         metadata_json: str | None = None,
     ) -> models.SessionMessage | None:
+        if turn_id is not None or seq_in_turn is not None:
+            raise InvalidTurnMetadataError("turn_id and seq_in_turn are immutable; use a dedicated repair flow")
         fields: dict[str, object] = {}
         if role is not None:
             fields["role"] = _validate_role(role)
@@ -303,9 +322,10 @@ class BaseSessionMessageStore:
         session_id: str,
         messages: Iterable[MessageInput],
     ) -> list[models.SessionMessage]:
+        payloads = [_coerce_message_input(message) for message in messages]
         with self._database.atomic():
             self.clear(session_id)
-            return [self.append_mapping(session_id, message) for message in messages]
+            return [self.append(session_id, **payload) for payload in payloads]
 
     def truncate_before_id(self, session_id: str, boundary_id: int) -> int:
         boundary = (
@@ -442,6 +462,41 @@ def _validate_role(role: str) -> str:
     return normalized
 
 
+def _validate_turn_metadata_fields(
+    turn_id: object | None,
+    seq_in_turn: object | None,
+) -> tuple[int, int]:
+    return (
+        _required_positive_int(turn_id, "turn_id"),
+        _required_positive_int(seq_in_turn, "seq_in_turn"),
+    )
+
+
+def _required_positive_int(value: object | None, field_name: str) -> int:
+    if value is None or value == "" or isinstance(value, bool):
+        raise InvalidTurnMetadataError(f"{field_name} must be a positive integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise InvalidTurnMetadataError(f"{field_name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise InvalidTurnMetadataError(f"{field_name} must be a positive integer")
+    return parsed
+
+
+def _is_turn_metadata_integrity_error(exc: IntegrityError) -> bool:
+    message = str(exc)
+    return any(
+        marker in message
+        for marker in (
+            "turn_id",
+            "seq_in_turn",
+            "ux_rpg_session_messages_turn_seq",
+            "rpg_session_messages.session_id, rpg_session_messages.turn_id, rpg_session_messages.seq_in_turn",
+        )
+    )
+
+
 def _normalize_ids(message_ids: Iterable[int]) -> list[int]:
     return sorted({int(message_id) for message_id in message_ids if int(message_id) > 0})
 
@@ -473,8 +528,11 @@ def _coerce_message_input(values: MessageInput) -> dict[str, object]:
     return {
         "role": str(values["role"]),
         "content": str(values.get("content", "") or ""),
-        "turn_id": int(values.get("turn_id", 0) or 0),
-        "seq_in_turn": int(values.get("seq_in_turn", 0) or 0),
+        "turn_id": _required_positive_int(values.get("turn_id", values.get("turnId")), "turn_id"),
+        "seq_in_turn": _required_positive_int(
+            values.get("seq_in_turn", values.get("seqInTurn")),
+            "seq_in_turn",
+        ),
         "tool_call_id": str(values.get("tool_call_id", "") or ""),
         "tool_calls_json": str(tool_calls_json or ""),
         "metadata_json": str(values.get("metadata_json", "{}") or "{}"),

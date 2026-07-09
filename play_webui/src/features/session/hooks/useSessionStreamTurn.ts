@@ -1,5 +1,6 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react'
 import { stopSessionStream } from '@/lib/api/chat'
+import { formatStreamErrorText } from '@/lib/stream/formatStreamError'
 import { consumeChatStream } from '@/lib/stream/sse'
 import { fromTurnUsage, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { TURN_CANCEL_STATUS } from '@/types/command'
@@ -215,11 +216,12 @@ export function useSessionStreamTurn({
     }
 
     if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) {
-      const errorText = event.payload.message || '流式请求失败'
+      const errorText = formatStreamErrorText(event.payload)
       logger.warn('stream sse error event', {
         turnId,
         status: 'error',
-        statusCode: event.payload.statusCode,
+        transportStatusCode: event.payload.statusCode,
+        errorCode: event.payload.errorCode,
       })
       setLocalMessages((current) => [
         ...current.map((message) =>
@@ -231,6 +233,10 @@ export function useSessionStreamTurn({
           seqInTurn: 5,
           role: SESSION_TIMELINE_ROLE.ERROR,
           content: errorText,
+          metadata: {
+            errorCode: event.payload.errorCode,
+            errorMessage: event.payload.message,
+          },
           createdAt: new Date().toISOString(),
           speaker: errorSpeaker(),
           status: SESSION_MESSAGE_STATUS.ERROR,
@@ -295,7 +301,7 @@ export function useSessionStreamTurn({
           signal: controller.signal,
           onEvent: (event) => {
             appendStreamEvent(event, assistantMessage.id, turnId)
-            if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = event.payload.message || failureToast
+            if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = formatStreamErrorText(event.payload) || failureToast
           },
         },
       )

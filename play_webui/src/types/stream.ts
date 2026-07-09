@@ -65,6 +65,7 @@ export type PlayTurnCompletedPayload = {
 export type PlayStreamErrorPayload = {
   message: string
   statusCode?: number
+  errorCode?: string
 }
 
 export type PlayStreamEvent =

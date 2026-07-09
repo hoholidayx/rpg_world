@@ -9,6 +9,10 @@ import pytest
 
 import rpg_core.agent.agent as agent_module
 import rpg_core.agent.transaction.transaction as transaction_module
+from commons.errors import TURN_METADATA_INVALID_ERROR_CODE, TURN_METADATA_INVALID_STATUS_CODE
+from rpg_core.agent.transaction.commit_plan import TurnCommitPlan
+from rpg_core.agent.transaction.message_scratch import MessageScratch
+from rpg_core.agent.transaction.status_scratch import StatusDocumentScratch
 from rpg_data.models import StatusTableDocument
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.command import CommandDispatcher
@@ -100,6 +104,45 @@ async def test_queue_consumer_surfaces_stream_errors(monkeypatch):
         assert isinstance(first, AgentStreamEvent)
         assert first.kind == StreamEventKind.ERROR
         assert first.content == "boom"
+        assert isinstance(second, _StreamSentinel)
+        assert future.done()
+        assert future.result() is None
+    finally:
+        consumer_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer_task
+
+
+@pytest.mark.asyncio
+async def test_queue_consumer_surfaces_turn_metadata_stream_error(monkeypatch):
+    agent = object.__new__(RPGGameAgent)
+    _init_stream_cancel_state(agent)
+    agent._queue = asyncio.Queue()
+    agent._cmd_dispatcher = None
+    agent._send_impl = AsyncMock()
+    agent._send_stream_impl = AsyncMock(side_effect=InvalidTurnMetadataError("bad turn metadata"))
+
+    future = asyncio.get_running_loop().create_future()
+    event_queue: asyncio.Queue = asyncio.Queue()
+    await agent._queue.put(
+        QueueItem(
+            kind=QueueKind.SEND_STREAM,
+            user_input="hello",
+            future=future,
+            event_queue=event_queue,
+        )
+    )
+
+    consumer_task = asyncio.create_task(agent._queue_consumer())
+    try:
+        first = await asyncio.wait_for(event_queue.get(), timeout=1)
+        second = await asyncio.wait_for(event_queue.get(), timeout=1)
+
+        assert isinstance(first, AgentStreamEvent)
+        assert first.kind == StreamEventKind.ERROR
+        assert first.error_code == TURN_METADATA_INVALID_ERROR_CODE
+        assert first.status_code == TURN_METADATA_INVALID_STATUS_CODE
+        assert first.content == "bad turn metadata"
         assert isinstance(second, _StreamSentinel)
         assert future.done()
         assert future.result() is None
@@ -241,24 +284,6 @@ async def test_queue_consumer_skips_cancelled_queued_stream() -> None:
             await consumer_task
 
 
-@pytest.mark.asyncio
-async def test_send_impl_rejects_invalid_loaded_turn_metadata_before_new_turn():
-    session = SessionManager(history_enabled=False)
-    session.replace_history(
-        [
-            Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
-            Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=0),
-        ],
-        persist=False,
-    )
-    agent = object.__new__(RPGGameAgent)
-    agent._cmd_dispatcher = None
-    agent._session = session
-
-    with pytest.raises(InvalidTurnMetadataError, match=r"history\[1\]"):
-        await agent._send_impl("go")
-
-
 def _make_transaction_agent(
     monkeypatch,
     *,
@@ -335,6 +360,30 @@ def test_turn_transaction_begin_failure_clears_active_turn(monkeypatch):
 
     assert session.begin_turn() == 1
     session.end_turn(1)
+
+
+def test_turn_commit_plan_restores_history_on_turn_metadata_error() -> None:
+    session = SessionManager(history_enabled=False)
+    session.append(Role.USER, "base", turn_id=1, seq_in_turn=1)
+    scratch = MessageScratch(
+        turn_id=2,
+        base_history=session.history,
+        staged_messages=[
+            Message(Role.USER, "u2", turn_id=2, seq_in_turn=1),
+            Message(Role.ASSISTANT, "duplicate", turn_id=2, seq_in_turn=1),
+        ],
+    )
+    plan = TurnCommitPlan(
+        session=session,
+        status_mgr=None,
+        message_scratch=scratch,
+        status_scratch=StatusDocumentScratch(None),
+    )
+
+    with pytest.raises(InvalidTurnMetadataError, match="seq_in_turn must increase"):
+        plan.commit()
+
+    assert [message.content for message in session.history] == ["base"]
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from commons.errors import (
+    TURN_METADATA_INVALID_ERROR_CODE,
+    TURN_METADATA_INVALID_STATUS_CODE,
+    format_turn_metadata_error_message,
+)
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     QueueItem,
@@ -61,7 +66,7 @@ from llm_service.keys import (
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
 )
 from rpg_core.scene import SceneTracker
-from rpg_core.session import SessionManager
+from rpg_core.session import InvalidTurnMetadataError, SessionManager
 from rpg_core.settings import settings
 from rpg_core.utils.watcher import get_watcher
 from rpg_core.summary.compressor import SummaryCompressor
@@ -167,11 +172,19 @@ class RPGGameAgent:
 
     async def _emit_stream_error(self, event_queue: asyncio.Queue, error: BaseException) -> None:
         """把流式失败转换成可消费的 ERROR 事件并结束队列。"""
-        await event_queue.put(AgentStreamEvent(
-            kind=StreamEventKind.ERROR,
-            content=str(error),
-        ))
+        await event_queue.put(self._stream_error_event(error))
         await event_queue.put(_StreamSentinel())
+
+    @staticmethod
+    def _stream_error_event(error: BaseException) -> AgentStreamEvent:
+        if isinstance(error, InvalidTurnMetadataError):
+            return AgentStreamEvent(
+                kind=StreamEventKind.ERROR,
+                content=format_turn_metadata_error_message(error),
+                error_code=TURN_METADATA_INVALID_ERROR_CODE,
+                status_code=TURN_METADATA_INVALID_STATUS_CODE,
+            )
+        return AgentStreamEvent(kind=StreamEventKind.ERROR, content=str(error))
 
     # ── 消息队列消费者 ─────────────────────────────────────────────────
 
@@ -313,7 +326,6 @@ class RPGGameAgent:
             return AgentReply(text=role_guard_reply, stats=_turn_stats)
 
         # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
-        self._session.validate_loaded_turn_metadata(label="history")
         turn_stats = TurnStats(started_at=_time.monotonic())
         tx = AgentTurnTransaction(
             session=self._session,
@@ -593,7 +605,6 @@ class RPGGameAgent:
             return
 
         # ── TurnStats 聚合器 ───────────────────────────────────────
-        self._session.validate_loaded_turn_metadata(label="history")
         turn_stats = TurnStats(started_at=_time.monotonic())
         tx = AgentTurnTransaction(
             session=self._session,
@@ -676,11 +687,7 @@ class RPGGameAgent:
                         await event_queue.put(event)
             except Exception as exc:
                 logger.opt(exception=exc).error(_TAG + " send_stream error")
-                await event_queue.put(AgentStreamEvent(
-                    kind=StreamEventKind.ERROR,
-                    content=str(exc),
-                ))
-                await event_queue.put(_StreamSentinel())
+                await self._emit_stream_error(event_queue, exc)
                 return
 
             # ── Agent-level cleanup（流结束后执行） ────────────────────
@@ -702,11 +709,7 @@ class RPGGameAgent:
                 tx.commit()
             except Exception as exc:
                 logger.opt(exception=exc).error(_TAG + " send_stream commit error")
-                await event_queue.put(AgentStreamEvent(
-                    kind=StreamEventKind.ERROR,
-                    content=str(exc),
-                ))
-                await event_queue.put(_StreamSentinel())
+                await self._emit_stream_error(event_queue, exc)
                 return
 
             if final_event is not None:

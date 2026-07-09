@@ -368,6 +368,8 @@ def _event_from_dict(data: JsonObject) -> AgentStreamEvent:
     return AgentStreamEvent(
         kind=kind,
         content=str(data.get("content", "") or ""),
+        error_code=_optional_string(data.get("error_code")),
+        status_code=_optional_int(data.get("status_code")),
         tool_name=_optional_string(data.get("tool_name")),
         tool_arguments=_optional_string(data.get("tool_arguments")),
         tool_result_preview=_optional_string(data.get("tool_result_preview")),
@@ -383,3 +385,12 @@ def _optional_string(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

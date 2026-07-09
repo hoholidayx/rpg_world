@@ -319,7 +319,7 @@ def test_history_page_endpoint_returns_turn_window(tmp_path, monkeypatch) -> Non
     assert after.json()["hasAfter"] is True
 
 
-def test_history_page_endpoint_validates_query_and_turn_metadata(tmp_path, monkeypatch) -> None:
+def test_history_page_endpoint_validates_query_and_rejects_dirty_writes(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     reset_data_service_gateways()
@@ -329,7 +329,6 @@ def test_history_page_endpoint_validates_query_and_turn_metadata(tmp_path, monke
     gateway.messages.clear(session_id)
     first = gateway.messages.append(session_id, "user", "u1", turn_id=1, seq_in_turn=1)
     gateway.messages.append(session_id, "assistant", "a1", turn_id=1, seq_in_turn=2)
-    gateway.messages.update(first.id, seq_in_turn=0)
 
     client = TestClient(app)
 
@@ -338,41 +337,11 @@ def test_history_page_endpoint_validates_query_and_turn_metadata(tmp_path, monke
         params={"beforeTurnId": 3, "afterTurnId": 1},
     )
     too_large = client.get(f"/play-api/v1/sessions/{session_id}/history-page", params={"limit": 201})
-    invalid_history = client.get(f"/play-api/v1/sessions/{session_id}/history-page")
 
     assert both.status_code == 400
     assert too_large.status_code == 422
-    assert invalid_history.status_code == 409
-    assert "history[0]" in invalid_history.json()["detail"]
-
-
-def test_history_page_endpoint_ignores_invalid_metadata_outside_window(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
-    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
-    reset_data_service_gateways()
-    reset_delete_confirmation_tokens()
-    gateway = get_data_service_gateway()
-    session_id = "s_forest001"
-    gateway.messages.clear(session_id)
-    dirty = gateway.messages.append(session_id, "user", "u1", turn_id=1, seq_in_turn=1)
-    gateway.messages.append(session_id, "assistant", "a1", turn_id=1, seq_in_turn=2)
-    for turn_id in range(2, 6):
-        gateway.messages.append(session_id, "user", f"u{turn_id}", turn_id=turn_id, seq_in_turn=1)
-        gateway.messages.append(session_id, "assistant", f"a{turn_id}", turn_id=turn_id, seq_in_turn=2)
-    gateway.messages.update(dirty.id, seq_in_turn=0)
-
-    client = TestClient(app)
-
-    latest = client.get(f"/play-api/v1/sessions/{session_id}/history-page", params={"limit": 2})
-    dirty_page = client.get(
-        f"/play-api/v1/sessions/{session_id}/history-page",
-        params={"limit": 2, "beforeTurnId": 3},
-    )
-
-    assert latest.status_code == 200
-    assert [turn["turnId"] for turn in latest.json()["turns"]] == [4, 5]
-    assert dirty_page.status_code == 409
-    assert "history[0]" in dirty_page.json()["detail"]
+    with pytest.raises(ValueError):
+        gateway.messages.update(first.id, seq_in_turn=0)
 
 
 def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:

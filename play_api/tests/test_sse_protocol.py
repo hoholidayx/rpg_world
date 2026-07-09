@@ -79,6 +79,22 @@ def test_turn_completed_payload_keeps_text_as_source_of_truth() -> None:
     }
 
 
+def test_error_payload_preserves_business_error_code_without_http_status() -> None:
+    mapped = map_agent_event({
+        "kind": AgentEventKind.ERROR.value,
+        "content": "bad",
+        "error_code": "TURN_METADATA_INVALID",
+        "status_code": 409,
+    })
+
+    assert mapped is not None
+    assert mapped.type is PlaySSEType.ERROR
+    assert mapped.payload == {
+        "message": "bad",
+        "errorCode": "TURN_METADATA_INVALID",
+    }
+
+
 def test_unknown_agent_event_is_ignored() -> None:
     assert agent_event_kind({"kind": "round_start"}) == "round_start"
     assert map_agent_event({"kind": "round_start"}) is None
