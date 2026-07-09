@@ -1,4 +1,12 @@
-import type { StatusKind, StatusTable, StatusTableInput, StatusTablePatch, StoryStatusMount } from '@/types/statusTables'
+import type {
+  StatusKind,
+  StatusTable,
+  StatusTableInput,
+  StatusTablePatch,
+  StoryStatusMount,
+  StoryStatusMountPatch,
+  StoryStatusTemplateInput,
+} from '@/types/statusTables'
 import { getPlayApiBaseUrl } from '@/lib/config/env'
 import { playApiFetch } from './client'
 import { readApiError } from './errors'
@@ -39,12 +47,42 @@ export function listStoryStatusMounts(workspace: string, storyId: number) {
   )
 }
 
-export function mountStatusTemplate(workspace: string, storyId: number, templateId: number, sortOrder = 0) {
+export function mountStatusTemplate(
+  workspace: string,
+  storyId: number,
+  templateId: number,
+  sortOrder = 0,
+  characterMountId?: number | null,
+) {
   return playApiFetch<StoryStatusMount>(
     `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-mounts`,
     {
       method: 'POST',
-      body: JSON.stringify({ templateId, sortOrder }),
+      body: JSON.stringify({
+        templateId,
+        sortOrder,
+        ...(characterMountId === undefined ? {} : { characterMountId }),
+      }),
+    },
+  )
+}
+
+export function createStoryStatusTemplate(workspace: string, storyId: number, input: StoryStatusTemplateInput) {
+  return playApiFetch<StoryStatusMount>(
+    `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-templates`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  )
+}
+
+export function updateStoryStatusMount(workspace: string, storyId: number, mountId: number, input: StoryStatusMountPatch) {
+  return playApiFetch<StoryStatusMount>(
+    `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-mounts/${encodeURIComponent(mountId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
     },
   )
 }
@@ -52,6 +90,14 @@ export function mountStatusTemplate(workspace: string, storyId: number, template
 export async function unmountStatusTemplate(workspace: string, storyId: number, mountId: number) {
   const response = await fetch(
     `${getPlayApiBaseUrl()}/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-mounts/${encodeURIComponent(mountId)}`,
+    { method: 'DELETE' },
+  )
+  if (!response.ok) throw new Error(await readApiError(response))
+}
+
+export async function deleteStoryStatusTemplate(workspace: string, storyId: number, mountId: number) {
+  const response = await fetch(
+    `${getPlayApiBaseUrl()}/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-templates/${encodeURIComponent(mountId)}`,
     { method: 'DELETE' },
   )
   if (!response.ok) throw new Error(await readApiError(response))

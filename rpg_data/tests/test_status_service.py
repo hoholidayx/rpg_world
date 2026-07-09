@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from rpg_data import models
@@ -119,6 +121,106 @@ def test_story_mount_controls_session_copy_visibility(tmp_path) -> None:
     assert session_table.source_table_id == template.id
     assert session_table.workspace_id == workspace_id
     assert session_table.story_id == forest_story.id
+
+
+def test_story_status_mount_character_binding_and_session_metadata(tmp_path) -> None:
+    gateway, workspace_id, _workspace_root, forest_story = _workspace(tmp_path, "role_mount_ws")
+    academy_story = StoryRepository(gateway.database).create(workspace_id, "学院旧梦")
+    status = gateway.status
+    characters = gateway.character_management
+
+    alice = characters.create_character(workspace_id, name="Alice")
+    bob = characters.create_character(workspace_id, name="Bob")
+    outsider = characters.create_character(workspace_id, name="Outsider")
+    assert alice is not None and bob is not None and outsider is not None
+    alice_mount = characters.mount_character(workspace_id, forest_story.id, alice.id)
+    bob_mount = characters.mount_character(workspace_id, forest_story.id, bob.id)
+    outsider_mount = characters.mount_character(workspace_id, academy_story.id, outsider.id)
+    assert alice_mount is not None and bob_mount is not None and outsider_mount is not None
+
+    first_template = status.create_template(workspace_id, "Alice 状态", rows=[["心情", "平静"]])
+    second_template = status.create_template(workspace_id, "Alice 装备", rows=[["手部", "长剑"]])
+    first_mount = status.mount_template(
+        workspace_id,
+        forest_story.id,
+        first_template.id,
+        character_mount_id=alice_mount.mount.id,
+    )
+    second_mount = status.mount_template(
+        workspace_id,
+        forest_story.id,
+        second_template.id,
+        character_mount_id=alice_mount.mount.id,
+    )
+
+    assert first_mount.story_character_mount_id == alice_mount.mount.id
+    assert second_mount.story_character_mount_id == alice_mount.mount.id
+
+    rebound = status.update_story_mount_character(
+        workspace_id,
+        forest_story.id,
+        first_mount.id,
+        character_mount_id=bob_mount.mount.id,
+    )
+    assert rebound.story_character_mount_id == bob_mount.mount.id
+
+    unbound = status.update_story_mount_character(
+        workspace_id,
+        forest_story.id,
+        first_mount.id,
+        character_mount_id=None,
+    )
+    assert unbound.story_character_mount_id is None
+
+    with pytest.raises(FileNotFoundError):
+        status.update_story_mount_character(
+            workspace_id,
+            forest_story.id,
+            first_mount.id,
+            character_mount_id=outsider_mount.mount.id,
+        )
+
+    session = gateway.catalog.create_session(workspace_id, forest_story.id, title="Role Metadata")
+    assert session is not None
+    copied = status.get_table(str(session.id), "Alice 装备")
+    metadata = json.loads(copied.metadata_json)
+    assert metadata["storyStatusMount"] == {
+        "mountId": second_mount.id,
+        "mountOrigin": models.STORY_STATUS_MOUNT_ORIGIN_SYSTEM,
+        "characterMountId": alice_mount.mount.id,
+        "characterId": alice.id,
+    }
+
+
+def test_story_owned_status_template_can_be_deleted_by_mount(tmp_path) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "story_owned_ws")
+    characters = gateway.character_management
+    status = gateway.status
+
+    character = characters.create_character(workspace_id, name="Keeper")
+    assert character is not None
+    character_mount = characters.mount_character(workspace_id, story.id, character.id)
+    assert character_mount is not None
+
+    owned_mount = status.create_story_template(
+        workspace_id,
+        story.id,
+        "Keeper 状态",
+        character_mount_id=character_mount.mount.id,
+        rows=[["姿态", "警戒"]],
+    )
+    assert owned_mount.mount_origin == models.STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE
+    assert owned_mount.story_character_mount_id == character_mount.mount.id
+    assert status.get_template(owned_mount.status_table_id) is not None
+
+    status.delete_story_template_mount(workspace_id, story.id, owned_mount.id)
+    assert status.get_template(owned_mount.status_table_id) is None
+
+    system_template = status.create_template(workspace_id, "系统模板", rows=[["旗帜", "亮起"]])
+    system_mount = status.mount_template(workspace_id, story.id, system_template.id)
+    with pytest.raises(ValueError):
+        status.delete_story_template_mount(workspace_id, story.id, system_mount.id)
+    assert status.get_template(system_template.id) is not None
 
 
 def test_session_copy_is_independent_from_template_and_other_sessions(tmp_path) -> None:

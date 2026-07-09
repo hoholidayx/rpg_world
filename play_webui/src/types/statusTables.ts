@@ -12,6 +12,13 @@ export const STATUS_ORIGIN = {
 
 export type StatusOrigin = (typeof STATUS_ORIGIN)[keyof typeof STATUS_ORIGIN]
 
+export const STORY_STATUS_MOUNT_ORIGIN = {
+  SYSTEM: 'system_mount',
+  STORY_TEMPLATE: 'story_template',
+} as const
+
+export type StoryStatusMountOrigin = (typeof STORY_STATUS_MOUNT_ORIGIN)[keyof typeof STORY_STATUS_MOUNT_ORIGIN]
+
 export type StatusRow = {
   key: string
   value: string
@@ -44,6 +51,8 @@ export type StoryStatusMount = {
   workspaceId: string
   storyId: number
   statusTableId: number
+  characterMountId: number | null
+  mountOrigin: StoryStatusMountOrigin
   tableName: string
   statusKind: StatusKind
   description: string
@@ -73,4 +82,12 @@ export type StatusTablePatch = {
   rows?: StatusRow[]
   metadata?: Record<string, unknown>
   sortOrder?: number
+}
+
+export type StoryStatusTemplateInput = StatusTableInput & {
+  characterMountId?: number | null
+}
+
+export type StoryStatusMountPatch = {
+  characterMountId: number | null
 }

@@ -847,14 +847,43 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     status_mounts = client.get("/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts")
     assert status_mounts.status_code == 200
     assert {item["statusKind"] for item in status_mounts.json()} == {"scene", "normal"}
+    assert {item["mountOrigin"] for item in status_mounts.json()} == {"system_mount"}
+    assert all("characterMountId" in item for item in status_mounts.json())
     new_status_mount = client.post(
         "/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts",
-        json={"templateId": new_status_template.json()["id"], "sortOrder": 30},
+        json={"templateId": new_status_template.json()["id"], "characterMountId": bob["mountId"], "sortOrder": 30},
     )
     assert new_status_mount.status_code == 200
     assert new_status_mount.json()["tableName"] == "测试状态表"
+    assert new_status_mount.json()["mountOrigin"] == "system_mount"
+    assert new_status_mount.json()["characterMountId"] == bob["mountId"]
+    patched_status_mount = client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts/{new_status_mount.json()['id']}",
+        json={"characterMountId": None},
+    )
+    assert patched_status_mount.status_code == 200
+    assert patched_status_mount.json()["characterMountId"] is None
     assert client.delete(
         f"/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts/{new_status_mount.json()['id']}"
+    ).status_code == 204
+
+    story_status_template = client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories/1/status-templates",
+        json={
+            "name": "角色私有状态",
+            "statusKind": "normal",
+            "rows": [{"key": "姿态", "value": "观察"}],
+            "characterMountId": bob["mountId"],
+        },
+    )
+    assert story_status_template.status_code == 200
+    assert story_status_template.json()["mountOrigin"] == "story_template"
+    assert story_status_template.json()["characterMountId"] == bob["mountId"]
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts/{story_status_template.json()['id']}"
+    ).status_code == 409
+    assert client.delete(
+        f"/play-api/v1/workspaces/demo_workspace/stories/1/status-templates/{story_status_template.json()['id']}"
     ).status_code == 204
 
     session_status_tables = client.get(f"/play-api/v1/sessions/{demo_session_id}/status-tables")

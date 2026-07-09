@@ -76,6 +76,7 @@ def test_run_migrations_creates_initial_tables() -> None:
         story_character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_story_characters)")}
         story_lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_story_lorebook_entries)")}
         status_template_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_status_table_templates)")}
+        story_status_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_story_status_tables)")}
         session_status_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_status_tables)")}
 
         profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_profiles)")}
@@ -136,6 +137,7 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "enabled" not in story_character_columns
         assert "enabled" not in story_lorebook_columns
         assert {"status_kind", "document_json"}.issubset(status_template_columns)
+        assert {"story_character_mount_id", "mount_origin"}.issubset(story_status_columns)
         assert {"status_kind", "document_json", "origin", "source_table_id"}.issubset(session_status_columns)
         assert "relative_path" not in status_template_columns
         assert "relative_path" not in session_status_columns
@@ -166,6 +168,16 @@ def test_run_migrations_creates_initial_tables() -> None:
             "idx_rpg_session_story_memories_turn",
             "idx_rpg_session_story_memories_dream",
         }.issubset(indexes)
+
+        story_status_indexes = conn.execute("PRAGMA index_list(rpg_story_status_tables)").fetchall()
+        for index in story_status_indexes:
+            if not index["unique"]:
+                continue
+            columns = {
+                row["name"]
+                for row in conn.execute(f"PRAGMA index_info({index['name']})")
+            }
+            assert "story_character_mount_id" not in columns
     finally:
         conn.close()
 

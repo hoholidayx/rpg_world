@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Callable, Iterable, Mapping
 
@@ -12,6 +13,7 @@ from rpg_data.repositories.records import (
     SessionRecord,
     SessionStatusTableRecord,
     StatusTableTemplateRecord,
+    StoryCharacterRecord,
     StoryRecord,
     StoryStatusTableRecord,
     WorkspaceRecord,
@@ -184,6 +186,8 @@ class StatusTableService:
         story_id: int,
         template_id: int,
         *,
+        character_mount_id: int | None = None,
+        mount_origin: str = models.STORY_STATUS_MOUNT_ORIGIN_SYSTEM,
         sort_order: int = 0,
         metadata_json: str = "{}",
     ) -> models.StoryStatusTable:
@@ -193,11 +197,15 @@ class StatusTableService:
         template = self._get_template_row(template_id)
         if str(template.workspace_id) != workspace_id:
             raise FileNotFoundError(f"Status template not found in workspace: {workspace_id}/{template_id}")
+        origin = models.validate_story_status_mount_origin(mount_origin)
+        character_mount = self._get_story_character_mount(workspace_id, story_id, character_mount_id)
         try:
             row = StoryStatusTableRecord.create(
                 workspace=workspace_id,
                 story=story_id,
                 status_table=template_id,
+                story_character=None if character_mount is None else int(character_mount.id),
+                mount_origin=origin,
                 sort_order=sort_order,
                 metadata_json=metadata_json,
             )
@@ -206,10 +214,81 @@ class StatusTableService:
         logger.info("mounted status template mount_id=%s workspace_id=%s story_id=%s template_id=%s", row.id, workspace_id, story_id, template_id)
         return _to_story_mount(self._get_story_mount_row(int(row.id)))
 
+    def create_story_template(
+        self,
+        workspace_id: str,
+        story_id: int,
+        name: str,
+        *,
+        status_kind: str = models.STATUS_KIND_NORMAL,
+        character_mount_id: int | None = None,
+        document: models.StatusTableDocument | None = None,
+        headers: Iterable[str] = (),
+        rows: Iterable[Iterable[str]] = (),
+        description: str = "",
+        sort_order: int = 0,
+        metadata_json: str = "{}",
+    ) -> models.StoryStatusTable:
+        with self._database.atomic():
+            template = self.create_template(
+                workspace_id,
+                name,
+                status_kind=status_kind,
+                document=document,
+                headers=headers,
+                rows=rows,
+                description=description,
+                sort_order=sort_order,
+                metadata_json=metadata_json,
+            )
+            return self.mount_template(
+                workspace_id,
+                story_id,
+                template.id,
+                character_mount_id=character_mount_id,
+                mount_origin=models.STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE,
+                sort_order=sort_order,
+                metadata_json=metadata_json,
+            )
+
+    def update_story_mount_character(
+        self,
+        workspace_id: str,
+        story_id: int,
+        mount_id: int,
+        *,
+        character_mount_id: int | None,
+    ) -> models.StoryStatusTable:
+        row = self._get_story_mount_row(mount_id)
+        if str(row.workspace_id) != workspace_id or int(row.story_id) != int(story_id):
+            raise FileNotFoundError(f"Story status table mount not found: {workspace_id}/{story_id}/{mount_id}")
+        character_mount = self._get_story_character_mount(workspace_id, story_id, character_mount_id)
+        row.story_character = None if character_mount is None else int(character_mount.id)
+        row.updated_at = SQL("CURRENT_TIMESTAMP")
+        row.save()
+        logger.info(
+            "updated story status mount character mount_id=%s character_mount_id=%s",
+            mount_id,
+            character_mount_id,
+        )
+        return _to_story_mount(self._get_story_mount_row(mount_id))
+
     def unmount_template(self, mount_id: int) -> None:
         row = self._get_story_mount_row(mount_id)
         row.delete_instance()
         logger.info("unmounted status template mount_id=%s", mount_id)
+
+    def delete_story_template_mount(self, workspace_id: str, story_id: int, mount_id: int) -> None:
+        row = self._get_story_mount_row(mount_id)
+        if str(row.workspace_id) != workspace_id or int(row.story_id) != int(story_id):
+            raise FileNotFoundError(f"Story status table mount not found: {workspace_id}/{story_id}/{mount_id}")
+        if str(row.mount_origin) != models.STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE:
+            raise ValueError(f"Story status mount is not story-owned: {mount_id}")
+        template_id = int(row.status_table_id)
+        with self._database.atomic():
+            row.delete_instance()
+            self.delete_template(template_id)
+        logger.info("deleted story status template mount_id=%s template_id=%s", mount_id, template_id)
 
     # ------------------------------------------------------------------
     # Session tables
@@ -245,7 +324,7 @@ class StatusTableService:
                     description=str(template.description or ""),
                     document_json=str(template.document_json),
                     sort_order=int(mount.sort_order),
-                    metadata_json=str(template.metadata_json or "{}"),
+                    metadata_json=_session_metadata_for_mount(str(template.metadata_json or "{}"), mount),
                 )
         tables = self.list_tables(session_id)
         logger.info("initialized session status tables session_id=%s table_count=%s", session_id, len(tables))
@@ -573,6 +652,19 @@ class StatusTableService:
             raise FileNotFoundError(f"Story status table mount not found: {mount_id}")
         return row
 
+    def _get_story_character_mount(
+        self,
+        workspace_id: str,
+        story_id: int,
+        mount_id: int | None,
+    ) -> StoryCharacterRecord | None:
+        if mount_id is None:
+            return None
+        row = StoryCharacterRecord.get_or_none(StoryCharacterRecord.id == mount_id)
+        if row is None or str(row.workspace_id) != workspace_id or int(row.story_id) != int(story_id):
+            raise FileNotFoundError(f"Story character mount not found: {workspace_id}/{story_id}/{mount_id}")
+        return row
+
     def _get_session_row(self, session_id: str) -> SessionRecord:
         try:
             return SessionRecord.get_by_id(session_id)
@@ -624,7 +716,9 @@ def _to_story_mount(row: StoryStatusTableRecord) -> models.StoryStatusTable:
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
         status_table_id=int(row.status_table_id),
+        story_character_mount_id=_story_character_mount_id(row),
         table_name=str(template.name),
+        mount_origin=models.validate_story_status_mount_origin(str(row.mount_origin)),
         status_kind=str(template.status_kind),
         description=str(template.description or ""),
         sort_order=int(row.sort_order),
@@ -658,6 +752,37 @@ def _to_session_table(row: SessionStatusTableRecord) -> models.SessionStatusTabl
 
 def _parse_row_document(row: object) -> models.StatusTableDocument:
     return models.parse_status_document(str(getattr(row, "document_json", "")))
+
+
+def _session_metadata_for_mount(template_metadata_json: str, mount: StoryStatusTableRecord) -> str:
+    metadata = _parse_metadata_json(template_metadata_json)
+    character_mount_id = _story_character_mount_id(mount)
+    character_id = None
+    if character_mount_id is not None:
+        try:
+            character_id = int(mount.story_character.character_id)
+        except DoesNotExist:
+            character_id = None
+    metadata["storyStatusMount"] = {
+        "mountId": int(mount.id),
+        "mountOrigin": models.validate_story_status_mount_origin(str(mount.mount_origin)),
+        "characterMountId": character_mount_id,
+        "characterId": character_id,
+    }
+    return json.dumps(metadata, ensure_ascii=False)
+
+
+def _story_character_mount_id(row: StoryStatusTableRecord) -> int | None:
+    raw_value = row.__data__.get("story_character")
+    return None if raw_value is None else int(raw_value)
+
+
+def _parse_metadata_json(raw: str) -> dict[str, object]:
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _document_from_inputs(

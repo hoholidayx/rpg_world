@@ -18,7 +18,7 @@ from peewee import (
     TextField,
 )
 
-from rpg_data.models import STATUS_KIND_NORMAL
+from rpg_data.models import STATUS_KIND_NORMAL, STORY_STATUS_MOUNT_ORIGIN_SYSTEM
 from rpg_data.settings import resolve_database_path
 
 __all__ = [
@@ -392,6 +392,14 @@ class StoryStatusTableRecord(BaseRecord):
         column_name="status_table_id",
         on_delete="CASCADE",
     )
+    story_character = ForeignKeyField(
+        StoryCharacterRecord,
+        backref="status_table_mounts",
+        column_name="story_character_mount_id",
+        on_delete="SET NULL",
+        null=True,
+    )
+    mount_origin = TextField(default=STORY_STATUS_MOUNT_ORIGIN_SYSTEM)
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)

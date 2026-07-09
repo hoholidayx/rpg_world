@@ -503,19 +503,84 @@ class DataManagerBackend:
         story_id: int,
         template_id: int,
         *,
+        character_mount_id: int | None = None,
         sort_order: int = 0,
     ) -> dict[str, object] | None:
         try:
-            mount = self._gateway.status.mount_template(workspace, story_id, template_id, sort_order=sort_order)
+            mount = self._gateway.status.mount_template(
+                workspace,
+                story_id,
+                template_id,
+                character_mount_id=character_mount_id,
+                sort_order=sort_order,
+            )
+        except FileNotFoundError:
+            return None
+        return _status_mount_summary(mount)
+
+    async def create_story_status_template(
+        self,
+        workspace: str,
+        story_id: int,
+        *,
+        name: str,
+        status_kind: str,
+        document: models.StatusTableDocument,
+        character_mount_id: int | None = None,
+        description: str = "",
+        sort_order: int = 0,
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        try:
+            mount = self._gateway.status.create_story_template(
+                workspace,
+                story_id,
+                name,
+                status_kind=status_kind,
+                document=document,
+                character_mount_id=character_mount_id,
+                description=description,
+                sort_order=sort_order,
+                metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+            )
+        except FileNotFoundError:
+            return None
+        return _status_mount_summary(mount)
+
+    async def update_story_status_mount(
+        self,
+        workspace: str,
+        story_id: int,
+        mount_id: int,
+        *,
+        character_mount_id: int | None,
+    ) -> dict[str, object] | None:
+        try:
+            mount = self._gateway.status.update_story_mount_character(
+                workspace,
+                story_id,
+                mount_id,
+                character_mount_id=character_mount_id,
+            )
         except FileNotFoundError:
             return None
         return _status_mount_summary(mount)
 
     async def unmount_status_template(self, workspace: str, story_id: int, mount_id: int) -> bool | None:
         mounts = self._gateway.status.list_story_mounts(workspace, story_id)
-        if not any(int(mount.id) == int(mount_id) for mount in mounts):
+        mount = next((item for item in mounts if int(item.id) == int(mount_id)), None)
+        if mount is None:
             return None
+        if mount.mount_origin == models.STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE:
+            raise ValueError(f"Story-owned status template must be deleted through story template endpoint: {mount_id}")
         self._gateway.status.unmount_template(mount_id)
+        return True
+
+    async def delete_story_status_template(self, workspace: str, story_id: int, mount_id: int) -> bool | None:
+        try:
+            self._gateway.status.delete_story_template_mount(workspace, story_id, mount_id)
+        except FileNotFoundError:
+            return None
         return True
 
     async def list_session_status_tables(
@@ -768,6 +833,8 @@ def _status_mount_summary(mount: models.StoryStatusTable) -> dict[str, object]:
         "workspace_id": str(mount.workspace_id),
         "story_id": int(mount.story_id),
         "status_table_id": int(mount.status_table_id),
+        "character_mount_id": mount.story_character_mount_id,
+        "mount_origin": str(mount.mount_origin),
         "table_name": str(mount.table_name),
         "status_kind": str(mount.status_kind),
         "description": str(mount.description or ""),

@@ -91,7 +91,18 @@ class StoryStatusMountPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     template_id: int = Field(alias="templateId")
+    character_mount_id: int | None = Field(default=None, alias="characterMountId")
     sort_order: int = Field(default=0, alias="sortOrder")
+
+
+class StoryStatusTemplatePayload(StatusTemplatePayload):
+    character_mount_id: int | None = Field(default=None, alias="characterMountId")
+
+
+class StoryStatusMountPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    character_mount_id: int | None = Field(default=None, alias="characterMountId")
 
 
 class SessionStatusTablePayload(StatusDocumentPayload):
@@ -148,6 +159,8 @@ class StoryStatusMountResponse(BaseModel):
     workspace_id: str = Field(alias="workspaceId")
     story_id: int = Field(alias="storyId")
     status_table_id: int = Field(alias="statusTableId")
+    character_mount_id: int | None = Field(default=None, alias="characterMountId")
+    mount_origin: str = Field(alias="mountOrigin")
     table_name: str = Field(alias="tableName")
     status_kind: str = Field(alias="statusKind")
     description: str
@@ -195,6 +208,8 @@ def _mount_response(item: dict[str, object]) -> StoryStatusMountResponse:
         workspace_id=str(item["workspace_id"]),
         story_id=int(item["story_id"]),
         status_table_id=int(item["status_table_id"]),
+        character_mount_id=int(item["character_mount_id"]) if item.get("character_mount_id") is not None else None,
+        mount_origin=str(item.get("mount_origin") or models.STORY_STATUS_MOUNT_ORIGIN_SYSTEM),
         table_name=str(item["table_name"]),
         status_kind=str(item["status_kind"]),
         description=str(item.get("description") or ""),
@@ -303,6 +318,7 @@ async def mount_status_template(workspace_id: str, story_id: int, payload: Story
             workspace_id,
             story_id,
             payload.template_id,
+            character_mount_id=payload.character_mount_id,
             sort_order=payload.sort_order,
         )
     except ValueError as exc:
@@ -312,11 +328,58 @@ async def mount_status_template(workspace_id: str, story_id: int, payload: Story
     return _mount_response(item)
 
 
+@router.post("/workspaces/{workspace_id}/stories/{story_id}/status-templates", response_model=StoryStatusMountResponse)
+async def create_story_status_template(workspace_id: str, story_id: int, payload: StoryStatusTemplatePayload) -> StoryStatusMountResponse:
+    try:
+        item = await get_data_manager_backend().create_story_status_template(
+            workspace_id,
+            story_id,
+            name=payload.name,
+            status_kind=payload.status_kind,
+            document=payload.to_document(),
+            character_mount_id=payload.character_mount_id,
+            description=payload.description,
+            sort_order=payload.sort_order,
+            metadata=payload.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="story or character not found")
+    return _mount_response(item)
+
+
+@router.patch("/workspaces/{workspace_id}/stories/{story_id}/status-mounts/{mount_id}", response_model=StoryStatusMountResponse)
+async def update_story_status_mount(workspace_id: str, story_id: int, mount_id: int, payload: StoryStatusMountPatch) -> StoryStatusMountResponse:
+    item = await get_data_manager_backend().update_story_status_mount(
+        workspace_id,
+        story_id,
+        mount_id,
+        character_mount_id=payload.character_mount_id,
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="status mount or character mount not found")
+    return _mount_response(item)
+
+
 @router.delete("/workspaces/{workspace_id}/stories/{story_id}/status-mounts/{mount_id}", status_code=204)
 async def unmount_status_template(workspace_id: str, story_id: int, mount_id: int) -> None:
-    removed = await get_data_manager_backend().unmount_status_template(workspace_id, story_id, mount_id)
+    try:
+        removed = await get_data_manager_backend().unmount_status_template(workspace_id, story_id, mount_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if removed is None:
         raise HTTPException(status_code=404, detail="status mount not found")
+
+
+@router.delete("/workspaces/{workspace_id}/stories/{story_id}/status-templates/{mount_id}", status_code=204)
+async def delete_story_status_template(workspace_id: str, story_id: int, mount_id: int) -> None:
+    try:
+        removed = await get_data_manager_backend().delete_story_status_template(workspace_id, story_id, mount_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if removed is None:
+        raise HTTPException(status_code=404, detail="story status template not found")
 
 
 @router.get("/sessions/{session_id}/status-tables", response_model=list[StatusTableResponse])

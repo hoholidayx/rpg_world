@@ -34,6 +34,8 @@ __all__ = [
     "STATUS_ORIGIN_SESSION_NATIVE",
     "STATUS_ORIGIN_TEMPLATE_COPY",
     "STATUS_KEY_COLUMN",
+    "STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE",
+    "STORY_STATUS_MOUNT_ORIGIN_SYSTEM",
     "STATUS_TABLE_KIND",
     "STATUS_TABLE_MODE_KEY_VALUE",
     "STATUS_VALUE_COLUMN",
@@ -47,6 +49,7 @@ __all__ = [
     "Workspace",
     "parse_status_document",
     "serialize_status_document",
+    "validate_story_status_mount_origin",
     "validate_status_kind",
 ]
 
@@ -58,6 +61,8 @@ STATUS_KIND_SCENE = "scene"
 STATUS_KIND_NORMAL = "normal"
 STATUS_ORIGIN_TEMPLATE_COPY = "template_copy"
 STATUS_ORIGIN_SESSION_NATIVE = "session_native"
+STORY_STATUS_MOUNT_ORIGIN_SYSTEM = "system_mount"
+STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE = "story_template"
 STATUS_KEY_COLUMN = "属性"
 STATUS_VALUE_COLUMN = "值"
 MESSAGE_ROLE_SYSTEM = "system"
@@ -694,6 +699,13 @@ def validate_status_kind(value: str) -> str:
     return kind
 
 
+def validate_story_status_mount_origin(value: str) -> str:
+    origin = str(value or STORY_STATUS_MOUNT_ORIGIN_SYSTEM)
+    if origin not in {STORY_STATUS_MOUNT_ORIGIN_SYSTEM, STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE}:
+        raise ValueError(f"Unsupported story status mount origin: {origin}")
+    return origin
+
+
 @dataclass(frozen=True)
 class StatusTableTemplate:
     id: int
@@ -730,7 +742,9 @@ class StoryStatusTable:
     workspace_id: str
     story_id: int
     status_table_id: int
+    story_character_mount_id: int | None
     table_name: str
+    mount_origin: str = STORY_STATUS_MOUNT_ORIGIN_SYSTEM
     status_kind: str = STATUS_KIND_NORMAL
     description: str = ""
     sort_order: int = 0

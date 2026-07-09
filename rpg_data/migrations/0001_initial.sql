@@ -205,6 +205,8 @@ CREATE TABLE IF NOT EXISTS rpg_story_status_tables (
     workspace_id TEXT NOT NULL,
     story_id INTEGER NOT NULL,
     status_table_id INTEGER NOT NULL,
+    story_character_mount_id INTEGER,
+    mount_origin TEXT NOT NULL DEFAULT 'system_mount' CHECK (mount_origin IN ('system_mount', 'story_template')),
     sort_order INTEGER NOT NULL DEFAULT 0,
     metadata_json TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
@@ -213,6 +215,7 @@ CREATE TABLE IF NOT EXISTS rpg_story_status_tables (
     FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
     FOREIGN KEY (story_id, workspace_id) REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
     FOREIGN KEY (status_table_id, workspace_id) REFERENCES rpg_status_table_templates(id, workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (story_character_mount_id) REFERENCES rpg_story_characters(id) ON DELETE SET NULL,
     UNIQUE (story_id, status_table_id)
 );
 
@@ -266,5 +269,6 @@ CREATE INDEX IF NOT EXISTS idx_rpg_status_table_templates_kind ON rpg_status_tab
 CREATE INDEX IF NOT EXISTS idx_rpg_story_status_tables_workspace_id ON rpg_story_status_tables(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_story_status_tables_story_id ON rpg_story_status_tables(story_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_story_status_tables_status_table_id ON rpg_story_status_tables(status_table_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_story_status_tables_character_mount_id ON rpg_story_status_tables(story_character_mount_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_status_tables_session_id ON rpg_session_status_tables(session_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_session_status_tables_kind ON rpg_session_status_tables(session_id, status_kind);

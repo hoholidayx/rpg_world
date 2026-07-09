@@ -429,6 +429,7 @@ INSERT OR IGNORE INTO rpg_story_status_tables (
     workspace_id,
     story_id,
     status_table_id,
+    mount_origin,
     sort_order,
     metadata_json
 )
@@ -436,6 +437,7 @@ SELECT
     'demo_workspace',
     rpg_stories.id,
     rpg_status_table_templates.id,
+    'system_mount',
     0,
     '{"kind":"demo"}'
 FROM rpg_stories
@@ -449,6 +451,7 @@ INSERT OR IGNORE INTO rpg_story_status_tables (
     workspace_id,
     story_id,
     status_table_id,
+    mount_origin,
     sort_order,
     metadata_json
 )
@@ -456,6 +459,7 @@ SELECT
     'demo_workspace',
     rpg_stories.id,
     rpg_status_table_templates.id,
+    'system_mount',
     0,
     '{"kind":"demo"}'
 FROM rpg_stories
@@ -469,6 +473,7 @@ INSERT OR IGNORE INTO rpg_story_status_tables (
     workspace_id,
     story_id,
     status_table_id,
+    mount_origin,
     sort_order,
     metadata_json
 )
@@ -476,6 +481,7 @@ SELECT
     'demo_workspace',
     rpg_stories.id,
     rpg_status_table_templates.id,
+    'system_mount',
     10,
     '{"kind":"demo"}'
 FROM rpg_stories
