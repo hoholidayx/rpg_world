@@ -51,8 +51,11 @@
 - Agent/Play SSE 业务错误码走 `error_code` / `errorCode` 字段；`content` / `message` 保持底层错误文本，不把错误码前缀写入正文，也不要把业务错误码和 HTTP `statusCode` 混用。
 - WebUI 停止生成必须通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 和 Agent service `/chat/stop`；取消成功只丢弃当前 stream turn scratch，不补偿回滚已完成 turn，前端只有收到 `cancelled` 才展示 stopped。
 - `rpg_data` 状态表采用 SQLite document 真源：模板表与会话表都在 SQL 行内保存封装后的 `document_json`，`status_kind` 只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。`rpg_data` 对外返回 `StatusTableDocument` / `StatusTableRow` 等 dataclass，不暴露原始 JSON 字符串作为正文数据。
+- 普通状态表上下文只展示 session 运行时表 ID、表名、作为“用途与更新规则”的 `description` 和完整 KV；角色绑定表单独按 `characterName` 分组，不向 LLM 展示模板来源或通用挂载范围。普通表统一工具 `status_table_set_values` 只能修改当前 session 表中已有 key 的 value，不能增删改 key；工具必须绑定 turn scratch，同时提供给 `StatusSubAgent` 和主 Agent。
+- 状态表绑定角色时必须保证角色 name 非空。旧 session 缺少 `characterName` 时由 data context 读取路径优先通过 `characterMountId` 反查，必要时由状态表 `mountId` 回退到 `story_character_mount_id`，成功后回填；反查失败的角色状态表必须记录 warning 并从 LLM 上下文排除，不要使用共享的“未知角色”降级分组。
 - 状态表模板通过 `rpg_story_status_tables` 挂载到 story 后才能被 session 感知；该挂载记录可选绑定同一 story 的一个角色挂载 `story_character_mount_id`。一个角色可绑定多张状态表，但一张 story 状态表挂载最多绑定一个角色；不要给 `story_character_mount_id` 增加唯一约束。
 - `rpg_story_status_tables.mount_origin` 区分 `system_mount` 与 `story_template`。系统模板只能解除挂载；故事内创建的状态模板可删除挂载及其底层模板，删除前必须确认没有其它 story 仍在使用该模板。创建 session 时由 `CatalogService` 触发复制已挂载模板的 `document_json` 到 `rpg_session_status_tables`，`origin="template_copy"`，并把 story mount/角色绑定信息写入 session 表 metadata；后续模板修改不影响已有 session 副本。会话原生运行时表直接写入 `rpg_session_status_tables`，`origin="session_native"`。
+- session 状态表并发写入当前采用 last-write-wins，不使用 `version`/CAS；Agent 提交发现持久化 document 已偏离 scratch 基线时，data 层记录 warning 后继续覆盖。不要把 warning 改成冲突回滚，除非产品重新决定并发策略。
 - `rpg_data` bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；不要在 bootstrap 代码中硬编码 demo 或业务数据。默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，并确保日志能清楚输出删除/跳过结果。
 - Play API 会话内接口集中在 `/play-api/v1/sessions/{session_id}/history|history-page|scene|commands|turn|stream|stop|player-character`；workspace、characters、lorebook、status-tables、ops 等管理接口也归 Play API；旧 `chat.py`、`scene.py`、`commands.py` router 仅作占位，不要把它们恢复为主入口。
 

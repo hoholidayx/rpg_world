@@ -19,8 +19,9 @@ Usage::
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from loguru import logger
 
@@ -47,7 +48,8 @@ SYSTEM_PROMPT = (
     "你是 RPG 游戏世界的状态表更新器。\n\n"
     "可用操作及其修改的状态表：\n"
     "- scene_time / scene_attr / scene_del_attr：更新当前场景状态"
-    "（时间、地点、天气、氛围、在场的 NPC 等）\n\n"
+    "（时间、地点、天气、氛围、在场的 NPC 等）\n"
+    "- status_table_set_values：批量更新普通状态表中已有键的值\n\n"
     "规则：\n"
     "1. 仅当用户的行为明确或隐式改变了某项状态时，才调用对应的工具。\n"
     "2. 不要修改没有发生变化的属性。\n"
@@ -55,7 +57,8 @@ SYSTEM_PROMPT = (
     "4. 主动清理：如果某个属性不再与当前场景相关"
     "（例如角色离开了、某种天气效果消失了），"
     "使用 scene_del_attr 将其移除。只保留活跃属性可以防止上下文膨胀。\n"
-    "5. 属性键和值使用中文。"
+    "5. 普通状态表不得新增、删除或重命名键；角色状态表只追踪对应角色。\n"
+    "6. 属性键和值使用状态表已有语言和格式。"
 )
 
 # ── result type ───────────────────────────────────────────────────────
@@ -106,6 +109,7 @@ class StatusSubAgent(BaseSubAgent):
         # ── 可扩展工具集 ──────────────────────────────────────────────
         self._tool_registry = ToolRegistry()
         self._schemas: list[dict[str, object]] = []
+        self._mutation_probe: Callable[[], object] | None = None
 
     # ── 工具注册（可多次调用追加） ─────────────────────────────────────
 
@@ -118,6 +122,9 @@ class StatusSubAgent(BaseSubAgent):
             len(tools),
             [t.name for t in tools],
         )
+
+    def set_mutation_probe(self, probe: Callable[[], object] | None) -> None:
+        self._mutation_probe = probe
 
     # ── Context 绑定（覆盖基类） ─────────────────────────────────────
 
@@ -224,12 +231,26 @@ class StatusSubAgent(BaseSubAgent):
                     logger.info(_TAG + " calling tool: {}({})", name, args)
 
                 try:
+                    before = self._mutation_probe() if self._mutation_probe is not None else None
                     tool_result = await self._tool_registry.execute(name, args)
+                    after = self._mutation_probe() if self._mutation_probe is not None else None
+                    success = _tool_result_succeeded(str(tool_result))
+                    changed = (
+                        before != after
+                        if self._mutation_probe is not None
+                        else _tool_result_reports_change(str(tool_result), success=success)
+                    )
+                    changed = success and changed
+                    status = "error" if not success else ("changed" if changed else "no_op")
                     result.records.append({
                         "tool_name": name,
                         "arguments": args,
                         "result": str(tool_result),
+                        "success": success,
+                        "changed": changed,
+                        "status": status,
                     })
+                    result.updated = result.updated or changed
                     if settings.verbose_logging:
                         logger.info(
                             _TAG + " tool result: {} -> {}",
@@ -245,14 +266,19 @@ class StatusSubAgent(BaseSubAgent):
                         "tool_name": name,
                         "arguments": args,
                         "result": f"Error: {exc}",
+                        "success": False,
+                        "changed": False,
+                        "status": "error",
                     })
 
-            result.updated = True
-            logger.info(
-                _TAG + " updated state via {} tool call(s): {}",
-                len(result.records),
-                [r["tool_name"] for r in result.records],
-            )
+            if result.updated:
+                logger.info(
+                    _TAG + " updated state via {} tool call(s): {}",
+                    len(result.records),
+                    [r["tool_name"] for r in result.records if r.get("changed")],
+                )
+            else:
+                logger.info(_TAG + " state tool calls produced no staged changes")
             return result
 
         except Exception as exc:
@@ -319,3 +345,27 @@ class StatusSubAgent(BaseSubAgent):
             lines.append(f"{label}: {content[:500]}")
 
         return "\n\n".join(lines) if lines else "(no recent conversation)"
+
+
+def _tool_result_succeeded(tool_result: str) -> bool:
+    if tool_result.startswith("Error:") or tool_result.startswith("Error executing"):
+        return False
+    try:
+        payload = json.loads(tool_result)
+    except (TypeError, ValueError):
+        return not tool_result.startswith("设置失败：")
+    if isinstance(payload, dict) and isinstance(payload.get("ok"), bool):
+        return bool(payload["ok"])
+    return True
+
+
+def _tool_result_reports_change(tool_result: str, *, success: bool) -> bool:
+    if not success:
+        return False
+    try:
+        payload = json.loads(tool_result)
+    except (TypeError, ValueError):
+        return True
+    if isinstance(payload, dict) and isinstance(payload.get("changed"), bool):
+        return bool(payload["changed"])
+    return True

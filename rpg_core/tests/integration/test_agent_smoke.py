@@ -124,8 +124,10 @@ async def test_status_tables_and_scene_enter_agent_context(integration_status_ag
 
     assert [table["name"] for table in ctx.status_tables.tables] == ["集成线索"]
     assert status_content is not None
-    assert "## 状态表格" in status_content
+    assert "## 状态表" in status_content
     assert "### 集成线索" in status_content
+    assert "运行时表 ID：" in status_content
+    assert "用途与更新规则：" in status_content
     assert "状态表已挂载" in status_content
     assert "集成当前场景" not in status_content
 

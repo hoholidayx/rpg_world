@@ -351,12 +351,15 @@ async def create_story_status_template(workspace_id: str, story_id: int, payload
 
 @router.patch("/workspaces/{workspace_id}/stories/{story_id}/status-mounts/{mount_id}", response_model=StoryStatusMountResponse)
 async def update_story_status_mount(workspace_id: str, story_id: int, mount_id: int, payload: StoryStatusMountPatch) -> StoryStatusMountResponse:
-    item = await get_data_manager_backend().update_story_status_mount(
-        workspace_id,
-        story_id,
-        mount_id,
-        character_mount_id=payload.character_mount_id,
-    )
+    try:
+        item = await get_data_manager_backend().update_story_status_mount(
+            workspace_id,
+            story_id,
+            mount_id,
+            character_mount_id=payload.character_mount_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="status mount or character mount not found")
     return _mount_response(item)

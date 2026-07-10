@@ -116,9 +116,10 @@ class CharacterManagementService:
     ) -> models.Character | None:
         if self._workspaces.get(workspace_id) is None:
             return None
+        target_name = _required_character_name(name)
         character = self._characters.create(
             workspace_id,
-            name.strip(),
+            target_name,
             personality=personality,
             content=content,
             metadata_json=_dump_metadata(metadata),
@@ -139,9 +140,10 @@ class CharacterManagementService:
         character = self._characters.get(character_id)
         if character is None or character.workspace_id != workspace_id:
             return None
+        target_name = _required_character_name(name) if name is not None else None
         updated = self._characters.update(
             character_id,
-            name=name.strip() if name is not None else None,
+            name=target_name,
             personality=personality,
             content=content,
             metadata_json=_dump_metadata(metadata) if metadata is not None else None,
@@ -296,6 +298,7 @@ class CharacterManagementService:
         character = self._characters.get(character_id)
         if character is None or character.workspace_id != workspace_id:
             return None
+        _required_character_name(character.name)
         with self._database.atomic():
             mount = self._mounts.mount(workspace_id, story_id, character_id)
         logger.info(
@@ -449,3 +452,9 @@ def _dump_tags(tags: list[str] | tuple[str, ...]) -> str:
 
 def _dump_metadata(metadata: dict[str, object] | None) -> str:
     return json.dumps(metadata or {}, ensure_ascii=False)
+
+
+def _required_character_name(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Character name must not be empty")
+    return value.strip()

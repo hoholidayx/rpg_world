@@ -6,7 +6,7 @@ import pytest
 
 from rpg_data import models
 from rpg_data.models import StatusRowRef
-from rpg_data.repositories.records import StatusTableTemplateRecord
+from rpg_data.repositories.records import CharacterRecord, SessionStatusTableRecord, StatusTableTemplateRecord
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
@@ -123,7 +123,7 @@ def test_story_mount_controls_session_copy_visibility(tmp_path) -> None:
     assert session_table.story_id == forest_story.id
 
 
-def test_story_status_mount_character_binding_and_session_metadata(tmp_path) -> None:
+def test_story_status_mount_character_binding_and_session_metadata(tmp_path, caplog) -> None:
     gateway, workspace_id, _workspace_root, forest_story = _workspace(tmp_path, "role_mount_ws")
     academy_story = StoryRepository(gateway.database).create(workspace_id, "学院旧梦")
     status = gateway.status
@@ -189,7 +189,138 @@ def test_story_status_mount_character_binding_and_session_metadata(tmp_path) -> 
         "mountOrigin": models.STORY_STATUS_MOUNT_ORIGIN_SYSTEM,
         "characterMountId": alice_mount.mount.id,
         "characterId": alice.id,
+        "characterName": "Alice",
     }
+
+    del metadata["storyStatusMount"]["characterName"]
+    SessionStatusTableRecord.update(
+        metadata_json=json.dumps(metadata, ensure_ascii=False)
+    ).where(SessionStatusTableRecord.id == copied.id).execute()
+
+    with caplog.at_level("WARNING", logger="rpg_data.status"):
+        context_table = next(
+            table for table in status.list_context_tables(str(session.id))
+            if table.id == copied.id
+        )
+
+    repaired_metadata = json.loads(context_table.metadata_json)
+    assert repaired_metadata["storyStatusMount"]["characterName"] == "Alice"
+    assert "backfilled missing status table character name" in caplog.text
+    persisted = status.get_table_by_id(copied.id)
+    assert json.loads(persisted.metadata_json)["storyStatusMount"]["characterName"] == "Alice"
+
+    fallback_metadata = json.loads(persisted.metadata_json)
+    fallback_metadata["storyStatusMount"]["characterName"] = None
+    fallback_metadata["storyStatusMount"]["characterMountId"] = None
+    SessionStatusTableRecord.update(
+        metadata_json=json.dumps(fallback_metadata, ensure_ascii=False)
+    ).where(SessionStatusTableRecord.id == copied.id).execute()
+    caplog.clear()
+
+    with caplog.at_level("WARNING", logger="rpg_data.status"):
+        fallback_context_table = next(
+            table for table in status.list_context_tables(str(session.id))
+            if table.id == copied.id
+        )
+
+    fallback_repaired = json.loads(fallback_context_table.metadata_json)["storyStatusMount"]
+    assert fallback_repaired["characterMountId"] == alice_mount.mount.id
+    assert fallback_repaired["characterName"] == "Alice"
+    assert "backfilled missing status table character name" in caplog.text
+
+    fallback_repaired["characterName"] = None
+    fallback_repaired["characterMountId"] = None
+    SessionStatusTableRecord.update(
+        metadata_json=json.dumps({"storyStatusMount": fallback_repaired}, ensure_ascii=False)
+    ).where(SessionStatusTableRecord.id == copied.id).execute()
+    status.update_story_mount_character(
+        workspace_id,
+        forest_story.id,
+        second_mount.id,
+        character_mount_id=bob_mount.mount.id,
+    )
+    caplog.clear()
+
+    with caplog.at_level("WARNING", logger="rpg_data.status"):
+        context_tables = status.list_context_tables(str(session.id))
+
+    assert copied.id not in {table.id for table in context_tables}
+    assert "excluded character-bound status table from context" in caplog.text
+
+
+def test_unresolved_character_bound_table_is_excluded_from_context(tmp_path, caplog) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "unresolved_role_status_ws")
+    status = gateway.status
+    characters = gateway.character_management
+    character = characters.create_character(workspace_id, name="Alice")
+    assert character is not None
+    character_mount = characters.mount_character(workspace_id, story.id, character.id)
+    assert character_mount is not None
+    template = status.create_template(workspace_id, "Alice 状态", rows=[["生命", "10"]])
+    status.mount_template(
+        workspace_id,
+        story.id,
+        template.id,
+        character_mount_id=character_mount.mount.id,
+    )
+    session = gateway.catalog.create_session(workspace_id, story.id, title="Unresolved Role")
+    assert session is not None
+    copied = status.get_table(str(session.id), "Alice 状态")
+    metadata = json.loads(copied.metadata_json)
+    metadata["storyStatusMount"]["characterName"] = None
+    metadata["storyStatusMount"]["characterMountId"] = 999999
+    metadata["storyStatusMount"]["mountId"] = 999999
+    SessionStatusTableRecord.update(
+        metadata_json=json.dumps(metadata, ensure_ascii=False)
+    ).where(SessionStatusTableRecord.id == copied.id).execute()
+
+    with caplog.at_level("WARNING", logger="rpg_data.status"):
+        context_tables = status.list_context_tables(str(session.id))
+
+    assert copied.id not in {table.id for table in context_tables}
+    assert "excluded character-bound status table from context" in caplog.text
+
+
+def test_status_character_binding_requires_non_empty_character_name(tmp_path) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "empty_role_name_ws")
+    status = gateway.status
+    characters = gateway.character_management
+    character = characters.create_character(workspace_id, name="Alice")
+    assert character is not None
+    character_mount = characters.mount_character(workspace_id, story.id, character.id)
+    assert character_mount is not None
+    template = status.create_template(workspace_id, "角色状态", rows=[["生命", "10"]])
+
+    CharacterRecord.update(name="").where(CharacterRecord.id == character.id).execute()
+    with pytest.raises(ValueError, match="non-empty character name"):
+        status.mount_template(
+            workspace_id,
+            story.id,
+            template.id,
+            character_mount_id=character_mount.mount.id,
+        )
+
+
+def test_session_creation_rejects_bound_character_that_lost_name(tmp_path) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "lost_role_name_ws")
+    status = gateway.status
+    characters = gateway.character_management
+    character = characters.create_character(workspace_id, name="Alice")
+    assert character is not None
+    character_mount = characters.mount_character(workspace_id, story.id, character.id)
+    assert character_mount is not None
+    template = status.create_template(workspace_id, "角色状态", rows=[["生命", "10"]])
+    status.mount_template(
+        workspace_id,
+        story.id,
+        template.id,
+        character_mount_id=character_mount.mount.id,
+    )
+
+    CharacterRecord.update(name="").where(CharacterRecord.id == character.id).execute()
+    with pytest.raises(ValueError, match="non-empty character name"):
+        gateway.catalog.create_session(workspace_id, story.id, title="Should Roll Back")
+    assert all(session.title != "Should Roll Back" for session in gateway.catalog.list_sessions(workspace_id, story.id))
 
 
 def test_story_owned_status_template_can_be_deleted_by_mount(tmp_path) -> None:
@@ -250,6 +381,50 @@ def test_session_copy_is_independent_from_template_and_other_sessions(tmp_path) 
 
     assert service.get_table_by_id(first_table.id).rows == (("封印", "已修复"),)
     assert service.get_table_by_id(second_table.id).rows == (("封印", "破裂"),)
+
+
+def test_session_scoped_save_warns_and_keeps_last_write(tmp_path, caplog) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "scoped_save_ws")
+    service = gateway.status
+    template = service.create_template(workspace_id, "旗帜", rows=[["封印", "完整"]])
+    service.mount_template(workspace_id, story.id, template.id)
+    first = gateway.catalog.create_session(workspace_id, story.id, title="First")
+    second = gateway.catalog.create_session(workspace_id, story.id, title="Second")
+    assert first is not None and second is not None
+
+    table = service.get_table(str(first.id), "旗帜")
+    base_document = table.document
+    service.save_table(table.id, _document(("封印", "破裂")))
+
+    with caplog.at_level("WARNING", logger="rpg_data.status"):
+        saved = service.save_table_for_session(
+            str(first.id),
+            table.id,
+            _document(("封印", "已修复")),
+            expected_status_kind=models.STATUS_KIND_NORMAL,
+            base_document=base_document,
+            write_source="agent_turn",
+        )
+
+    assert saved.rows == (("封印", "已修复"),)
+    assert "last-write-wins" in caplog.text
+
+    with pytest.raises(FileNotFoundError, match="unavailable"):
+        service.get_table_for_session(str(second.id), table.id)
+    with pytest.raises(FileNotFoundError, match="unavailable"):
+        service.save_table_for_session(
+            str(second.id),
+            table.id,
+            _document(("封印", "越权")),
+            expected_status_kind=models.STATUS_KIND_NORMAL,
+        )
+    with pytest.raises(ValueError, match="kind changed"):
+        service.save_table_for_session(
+            str(first.id),
+            table.id,
+            _document(("封印", "错误类型")),
+            expected_status_kind=models.STATUS_KIND_SCENE,
+        )
 
 
 def test_table_id_selector_writes_are_visible_from_document(tmp_path) -> None:

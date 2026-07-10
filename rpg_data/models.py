@@ -608,6 +608,43 @@ class StatusTableDocument:
             metadata=dict(self.metadata),
         ).validated()
 
+    def with_existing_values(
+        self,
+        updates: list[tuple[str, str]] | tuple[tuple[str, str], ...],
+    ) -> "StatusTableDocument":
+        """Return a copy with values replaced for existing keys only."""
+        materialized = [(str(key), str(value)) for key, value in updates]
+        if not materialized:
+            raise ValueError("Status table value updates must not be empty")
+
+        keys = [key for key, _value in materialized]
+        if len(set(keys)) != len(keys):
+            raise ValueError("Status table value updates contain duplicate keys")
+
+        existing_keys = {row.key for row in self.rows}
+        missing = [key for key in keys if key not in existing_keys]
+        if missing:
+            raise FileNotFoundError(f"Status table key not found: {missing[0]}")
+
+        values_by_key = dict(materialized)
+        return StatusTableDocument(
+            schema_version=self.schema_version,
+            kind=self.kind,
+            mode=self.mode,
+            key_column=self.key_column,
+            value_column=self.value_column,
+            rows=tuple(
+                StatusTableRow(
+                    row.key,
+                    values_by_key.get(row.key, row.value),
+                    row.runtime_key_locked,
+                    dict(row.metadata),
+                )
+                for row in self.rows
+            ),
+            metadata=dict(self.metadata),
+        ).validated()
+
     def without_key(self, key: str) -> "StatusTableDocument":
         expected = str(key)
         if expected not in {row.key for row in self.rows}:

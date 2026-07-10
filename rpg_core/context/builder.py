@@ -23,6 +23,7 @@ from rpg_core.context.rpg_context import (
     UserMessageLayer,
 )
 from rpg_core.session.turns import count_turns, slice_recent_turns
+from rpg_core.status.context import prepare_status_context_tables
 
 if TYPE_CHECKING:
     from rp_memory.persist_memory import PersistentMemoryStore
@@ -42,7 +43,7 @@ def _flatten_status_tables(
     if status_mgr is None:
         return []
     try:
-        return list(status_mgr.list_context_tables())
+        return prepare_status_context_tables(status_mgr.list_context_tables())
     except Exception as exc:
         logger.debug("[RPGContextBuilder] flatten status tables failed: {}", exc)
         return []

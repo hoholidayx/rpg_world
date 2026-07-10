@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from typing import Callable, Iterable, Mapping
 
 from peewee import Database, DoesNotExist, IntegrityError, SQL
 
 from rpg_data import models
 from rpg_data.repositories.records import (
+    CharacterRecord,
     SessionRecord,
     SessionStatusTableRecord,
     StatusTableTemplateRecord,
@@ -352,7 +354,12 @@ class StatusTableService:
         return result
 
     def list_context_tables(self, session_id: str) -> list[models.SessionStatusTable]:
-        return self.list_tables(session_id, include_scene=False)
+        result: list[models.SessionStatusTable] = []
+        for table in self.list_tables(session_id, include_scene=False):
+            prepared = self._prepare_context_table_character_name(table)
+            if prepared is not None:
+                result.append(prepared)
+        return result
 
     def get_table(
         self,
@@ -367,6 +374,24 @@ class StatusTableService:
 
     def get_table_by_id(self, table_id: int) -> models.SessionStatusTable:
         return _to_session_table(self._get_session_table_row(table_id))
+
+    def get_table_for_session(
+        self,
+        session_id: str,
+        table_id: int,
+    ) -> models.SessionStatusTable:
+        row = self._get_session_table_row(table_id)
+        if str(row.session_id) != str(session_id):
+            logger.warning(
+                "rejected cross-session status table access session_id=%s table_id=%s actual_session_id=%s",
+                session_id,
+                table_id,
+                row.session_id,
+            )
+            raise FileNotFoundError(
+                f"Session status table is unavailable: {session_id}/{table_id}"
+            )
+        return _to_session_table(row)
 
     def create_table(
         self,
@@ -411,6 +436,62 @@ class StatusTableService:
     ) -> models.SessionStatusTable:
         row = self._get_session_table_row(table_id)
         row.document_json = models.serialize_status_document(_document_for_kind(str(row.status_kind), document))
+        row.updated_at = SQL("CURRENT_TIMESTAMP")
+        row.save()
+        return _to_session_table(row)
+
+    def save_table_for_session(
+        self,
+        session_id: str,
+        table_id: int,
+        document: models.StatusTableDocument,
+        *,
+        expected_status_kind: str,
+        base_document: models.StatusTableDocument | None = None,
+        write_source: str = "runtime",
+    ) -> models.SessionStatusTable:
+        """Save a runtime document after repeating session and kind checks."""
+        row = self._get_session_table_row(table_id)
+        if str(row.session_id) != str(session_id):
+            logger.warning(
+                "rejected cross-session status table write session_id=%s table_id=%s actual_session_id=%s source=%s",
+                session_id,
+                table_id,
+                row.session_id,
+                write_source,
+            )
+            raise FileNotFoundError(
+                f"Session status table is unavailable: {session_id}/{table_id}"
+            )
+
+        expected_kind = models.validate_status_kind(expected_status_kind)
+        actual_kind = models.validate_status_kind(str(row.status_kind))
+        if actual_kind != expected_kind:
+            logger.warning(
+                "rejected status table kind mismatch session_id=%s table_id=%s expected_kind=%s actual_kind=%s source=%s",
+                session_id,
+                table_id,
+                expected_kind,
+                actual_kind,
+                write_source,
+            )
+            raise ValueError(
+                f"Status table kind changed before write: expected {expected_kind}, got {actual_kind}"
+            )
+
+        current_document = _parse_row_document(row)
+        if base_document is not None and current_document != base_document:
+            logger.warning(
+                "overwriting concurrently changed status table with last-write-wins session_id=%s table_id=%s table_name=%s source=%s",
+                session_id,
+                table_id,
+                row.name,
+                write_source,
+            )
+
+        row.document_json = models.serialize_status_document(
+            _document_for_kind(actual_kind, document)
+        )
         row.updated_at = SQL("CURRENT_TIMESTAMP")
         row.save()
         return _to_session_table(row)
@@ -663,7 +744,124 @@ class StatusTableService:
         row = StoryCharacterRecord.get_or_none(StoryCharacterRecord.id == mount_id)
         if row is None or str(row.workspace_id) != workspace_id or int(row.story_id) != int(story_id):
             raise FileNotFoundError(f"Story character mount not found: {workspace_id}/{story_id}/{mount_id}")
+        _required_story_character_identity(row)
         return row
+
+    def _prepare_context_table_character_name(
+        self,
+        table: models.SessionStatusTable,
+    ) -> models.SessionStatusTable | None:
+        if table.origin != models.STATUS_ORIGIN_TEMPLATE_COPY:
+            return table
+        metadata = _parse_metadata_json(table.metadata_json)
+        mount = metadata.get("storyStatusMount")
+        if not isinstance(mount, dict):
+            return table
+
+        character_mount_id = _optional_positive_int(mount.get("characterMountId"))
+        expected_character_id = _optional_positive_int(mount.get("characterId"))
+        has_character_binding = (
+            mount.get("characterMountId") is not None
+            or mount.get("characterId") is not None
+            or bool(str(mount.get("characterName") or "").strip())
+        )
+        if not has_character_binding:
+            return table
+
+        character_name = str(mount.get("characterName") or "").strip()
+        if character_name:
+            return table
+
+        character_mount = self._find_context_character_mount(
+            table,
+            character_mount_id=character_mount_id,
+        )
+        if character_mount is None and expected_character_id is not None:
+            status_mount_id = _optional_positive_int(mount.get("mountId"))
+            status_mount = None
+            if status_mount_id is not None:
+                status_mount = (
+                    StoryStatusTableRecord
+                    .select()
+                    .where(
+                        (StoryStatusTableRecord.id == status_mount_id)
+                        & (StoryStatusTableRecord.workspace == table.workspace_id)
+                        & (StoryStatusTableRecord.story == table.story_id)
+                    )
+                    .first()
+                )
+            fallback_character_mount_id = (
+                _story_character_mount_id(status_mount)
+                if status_mount is not None
+                else None
+            )
+            if fallback_character_mount_id is not None:
+                character_mount_id = fallback_character_mount_id
+                character_mount = self._find_context_character_mount(
+                    table,
+                    character_mount_id=character_mount_id,
+                )
+
+        if character_mount is not None:
+            character_id = None
+            try:
+                character_id, character_name = _required_story_character_identity(character_mount)
+            except ValueError:
+                character_name = ""
+            if (
+                expected_character_id is not None
+                and character_id != expected_character_id
+            ):
+                character_name = ""
+            if character_name and character_id is not None:
+                mount["characterMountId"] = character_mount_id
+                mount["characterId"] = character_id
+                mount["characterName"] = character_name
+                repaired_metadata_json = json.dumps(metadata, ensure_ascii=False)
+                SessionStatusTableRecord.update(
+                    metadata_json=repaired_metadata_json,
+                    updated_at=SQL("CURRENT_TIMESTAMP"),
+                ).where(
+                    (SessionStatusTableRecord.id == table.id)
+                    & (SessionStatusTableRecord.session == table.session_id)
+                ).execute()
+                logger.warning(
+                    "backfilled missing status table character name session_id=%s table_id=%s character_mount_id=%s character_name=%s",
+                    table.session_id,
+                    table.id,
+                    character_mount_id,
+                    character_name,
+                )
+                return replace(table, metadata_json=repaired_metadata_json)
+
+        logger.warning(
+            "excluded character-bound status table from context because character name is unresolved session_id=%s table_id=%s character_mount_id=%s character_id=%s",
+            table.session_id,
+            table.id,
+            mount.get("characterMountId"),
+            mount.get("characterId"),
+        )
+        return None
+
+    @staticmethod
+    def _find_context_character_mount(
+        table: models.SessionStatusTable,
+        *,
+        character_mount_id: int | None,
+    ) -> StoryCharacterRecord | None:
+        if character_mount_id is None:
+            return None
+        return (
+            StoryCharacterRecord
+            .select(StoryCharacterRecord, CharacterRecord)
+            .join(CharacterRecord)
+            .where(
+                (StoryCharacterRecord.id == character_mount_id)
+                & (StoryCharacterRecord.workspace == table.workspace_id)
+                & (StoryCharacterRecord.story == table.story_id)
+            )
+            .first()
+        )
 
     def _get_session_row(self, session_id: str) -> SessionRecord:
         try:
@@ -758,16 +956,20 @@ def _session_metadata_for_mount(template_metadata_json: str, mount: StoryStatusT
     metadata = _parse_metadata_json(template_metadata_json)
     character_mount_id = _story_character_mount_id(mount)
     character_id = None
+    character_name = None
     if character_mount_id is not None:
         try:
-            character_id = int(mount.story_character.character_id)
-        except DoesNotExist:
-            character_id = None
+            character_id, character_name = _required_story_character_identity(mount.story_character)
+        except DoesNotExist as exc:
+            raise ValueError(
+                f"Story character mount cannot resolve a named character: {character_mount_id}"
+            ) from exc
     metadata["storyStatusMount"] = {
         "mountId": int(mount.id),
         "mountOrigin": models.validate_story_status_mount_origin(str(mount.mount_origin)),
         "characterMountId": character_mount_id,
         "characterId": character_id,
+        "characterName": character_name,
     }
     return json.dumps(metadata, ensure_ascii=False)
 
@@ -775,6 +977,31 @@ def _session_metadata_for_mount(template_metadata_json: str, mount: StoryStatusT
 def _story_character_mount_id(row: StoryStatusTableRecord) -> int | None:
     raw_value = row.__data__.get("story_character")
     return None if raw_value is None else int(raw_value)
+
+
+def _required_story_character_identity(row: StoryCharacterRecord) -> tuple[int, str]:
+    try:
+        character = row.character
+    except DoesNotExist as exc:
+        raise ValueError(
+            f"Story character mount cannot resolve character: {int(row.id)}"
+        ) from exc
+    character_name = str(character.name or "").strip()
+    if not character_name:
+        raise ValueError(
+            f"Story character mount requires a non-empty character name: {int(row.id)}"
+        )
+    return int(character.id), character_name
+
+
+def _optional_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _parse_metadata_json(raw: str) -> dict[str, object]:

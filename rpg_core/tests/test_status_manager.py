@@ -65,8 +65,39 @@ class FakeStatusService:
         self.calls.append(("get_table_by_id", table_id))
         return self.scene_table if table_id == 2 else self.normal_table
 
+    def get_table_for_session(self, session_id: str, table_id: int):
+        self.calls.append(("get_table_for_session", session_id, table_id))
+        return self.scene_table if table_id == 2 else self.normal_table
+
     def save_table(self, table_id: int, document: StatusTableDocument):
         self.calls.append(("save_table", table_id, document))
+        table = self.scene_table if table_id == 2 else self.normal_table
+        return SessionStatusTable(
+            id=table.id,
+            session_id=table.session_id,
+            workspace_id=table.workspace_id,
+            story_id=table.story_id,
+            source_table_id=table.source_table_id,
+            origin=table.origin,
+            name=table.name,
+            status_kind=table.status_kind,
+            description=table.description,
+            document=document,
+            sort_order=table.sort_order,
+            metadata_json=table.metadata_json,
+            version=table.version,
+            created_at=table.created_at,
+            updated_at=table.updated_at,
+        )
+
+    def save_table_for_session(
+        self,
+        session_id: str,
+        table_id: int,
+        document: StatusTableDocument,
+        **kwargs,
+    ):
+        self.calls.append(("save_table_for_session", session_id, table_id, document, kwargs))
         table = self.scene_table if table_id == 2 else self.normal_table
         return SessionStatusTable(
             id=table.id,
@@ -158,8 +189,19 @@ def test_status_manager_exposes_document_cow_helpers() -> None:
 
     assert table["rows"] == [["位置", "城堡"]]
     assert service.calls == [
-        ("get_table_by_id", 2),
-        ("save_table", 2, updated),
+        ("get_table_for_session", "s_main", 2),
+        ("get_table_for_session", "s_main", 2),
+        (
+            "save_table_for_session",
+            "s_main",
+            2,
+            updated,
+            {
+                "expected_status_kind": STATUS_KIND_SCENE,
+                "base_document": None,
+                "write_source": "agent_turn",
+            },
+        ),
     ]
 
 

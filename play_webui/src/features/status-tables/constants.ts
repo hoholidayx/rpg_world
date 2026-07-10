@@ -18,6 +18,7 @@ export type StatusTableView = (typeof STATUS_TABLE_VIEW)[keyof typeof STATUS_TAB
 export const DEFAULT_KEY_COLUMN = '属性'
 export const DEFAULT_VALUE_COLUMN = '值'
 export const DEFAULT_TEMPLATE_METADATA = { ui: {} } as const
+export const STATUS_DESCRIPTION_PLACEHOLDER = '例如：追踪角色生命与法力；仅在受伤、治疗、施法或恢复时更新。'
 
 export const STATUS_TABLE_NAMES: Record<StatusKind, string> = {
   [STATUS_KIND.SCENE]: '未命名场景',

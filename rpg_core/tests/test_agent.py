@@ -475,7 +475,7 @@ class _FakeStatusManager:
         assert int(table_id) == 1
         return self.document
 
-    def save_table_document(self, table_id: int, document):
+    def save_table_document(self, table_id: int, document, **_kwargs):
         assert int(table_id) == 1
         if self.fail_commit:
             raise RuntimeError("status commit failed")
@@ -521,6 +521,82 @@ class _ScratchWritingStatusSubAgent:
         )
 
 
+class _FakeNormalStatusManager:
+    session_id = "s_tx"
+
+    def __init__(self) -> None:
+        self.document = StatusTableDocument.from_data(
+            SimpleNamespace(headers=("属性", "值"), rows=(("生命", "10"),))
+        )
+
+    def _table(self):
+        return {
+            "id": 7,
+            "name": "角色状态",
+            "status_kind": "normal",
+            "description": "追踪生命",
+            "headers": list(self.document.headers),
+            "rows": [list(row) for row in self.document.data_rows],
+            "document": self.document.to_json_dict(),
+            "metadata_json": "{}",
+        }
+
+    def list_context_tables(self):
+        return [self._table()]
+
+    def get_active_scene_table_ref(self):
+        return None
+
+    def get_table_by_id(self, table_id: int):
+        assert table_id == 7
+        return self._table()
+
+    def get_table_document_by_id(self, table_id: int):
+        assert table_id == 7
+        return self.document
+
+    def save_table_document(self, table_id: int, document, **_kwargs):
+        assert table_id == 7
+        self.document = document
+        return self._table()
+
+
+class _NormalScratchWritingStatusSubAgent(_ScratchWritingStatusSubAgent):
+    async def update(self, *, history, state_context, user_input, turn_stats):  # noqa: ANN001
+        assert "运行时表 ID：7" in state_context
+        result = await self._tool_registry.execute(
+            "status_table_set_values",
+            '{"table_id":7,"updates":[{"key":"生命","value":"8"}]}',
+        )
+        return SimpleNamespace(
+            updated=True,
+            records=[{
+                "tool_name": "status_table_set_values",
+                "arguments": "{}",
+                "result": result,
+                "changed": True,
+            }],
+        )
+
+
+class _NormalNoOpStatusSubAgent(_ScratchWritingStatusSubAgent):
+    async def update(self, *, history, state_context, user_input, turn_stats):  # noqa: ANN001
+        result = await self._tool_registry.execute(
+            "status_table_set_values",
+            '{"table_id":7,"updates":[{"key":"生命","value":"10"}]}',
+        )
+        return SimpleNamespace(
+            updated=False,
+            records=[{
+                "tool_name": "status_table_set_values",
+                "arguments": "{}",
+                "result": result,
+                "changed": False,
+                "status": "no_op",
+            }],
+        )
+
+
 def _scene_tracker_for(status_mgr):
     from rpg_core.scene import SceneTracker
 
@@ -554,6 +630,62 @@ async def test_status_sub_agent_writes_status_scratch_before_commit(monkeypatch)
 
     assert "位置: 新地" in seen_user_content
     assert status_mgr.get_scene_attrs()["位置"] == "新地"
+
+
+@pytest.mark.asyncio
+async def test_status_sub_agent_updates_normal_table_without_scene(monkeypatch):
+    status_mgr = _FakeNormalStatusManager()
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "old", turn_id=1, seq_in_turn=1)],
+        status_mgr=status_mgr,
+        scene_tracker=None,
+    )
+    agent._status_sub_agent = _NormalScratchWritingStatusSubAgent()
+
+    async def fake_run_chat_loop(**kwargs):  # noqa: ANN001
+        assert status_mgr.document.data_rows == (("生命", "10"),)
+        scratch_manager = agent._builder.calls[-1]["status_mgr"]
+        assert scratch_manager.list_context_tables()[0]["rows"] == [["生命", "8"]]
+        assert "status_table_set_values" in kwargs["tool_registry"]
+        return "done", []
+
+    monkeypatch.setattr(agent_module, "run_chat_loop", fake_run_chat_loop)
+
+    await agent._send_impl("受伤")
+
+    assert status_mgr.document.data_rows == (("生命", "8"),)
+
+
+@pytest.mark.asyncio
+async def test_send_stream_emits_status_sub_agent_no_op_records(monkeypatch):
+    status_mgr = _FakeNormalStatusManager()
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "old", turn_id=1, seq_in_turn=1)],
+        status_mgr=status_mgr,
+        scene_tracker=None,
+    )
+    agent._status_sub_agent = _NormalNoOpStatusSubAgent()
+
+    async def fake_run_chat_loop_stream(**_kwargs):  # noqa: ANN001
+        yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="done")
+        yield AgentStreamEvent(kind=StreamEventKind.DONE, content="done")
+
+    monkeypatch.setattr(agent_module, "run_chat_loop_stream", fake_run_chat_loop_stream)
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    await agent._send_stream_impl("保持状态", event_queue)
+
+    events = [await event_queue.get() for _ in range(5)]
+    assert [getattr(event, "kind", None) for event in events[:4]] == [
+        StreamEventKind.TOOL_CALL,
+        StreamEventKind.TOOL_RESULT,
+        StreamEventKind.TEXT,
+        StreamEventKind.DONE,
+    ]
+    assert isinstance(events[-1], _StreamSentinel)
+    assert status_mgr.document.data_rows == (("生命", "10"),)
 
 
 @pytest.mark.asyncio

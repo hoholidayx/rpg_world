@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from rpg_data.models import STATUS_KEY_COLUMN, STATUS_VALUE_COLUMN, StatusTableDocument
+from rpg_data.models import (
+    STATUS_KEY_COLUMN,
+    STATUS_KIND_NORMAL,
+    STATUS_VALUE_COLUMN,
+    StatusTableDocument,
+    parse_status_document,
+    serialize_status_document,
+)
+from rpg_core.status.manager import StatusValueUpdateResult, collect_value_changes
 
 if TYPE_CHECKING:
     from rpg_core.status.manager import StatusManager
@@ -16,6 +25,8 @@ class StatusDocumentChange:
     """One status table document staged by a turn."""
 
     table_id: int
+    status_kind: str
+    base_document: StatusTableDocument
     document: StatusTableDocument
 
 
@@ -61,17 +72,35 @@ class StatusDocumentScratch:
     @property
     def staged_changes(self) -> list[StatusDocumentChange]:
         return [
-            StatusDocumentChange(table_id, document)
+            StatusDocumentChange(
+                table_id=table_id,
+                status_kind=str(self._base_table(table_id).get("status_kind", "")),
+                base_document=self._base_document(table_id),
+                document=document,
+            )
             for table_id, document in self._staged_documents.items()
         ]
+
+    @property
+    def change_token(self) -> tuple[tuple[int, str], ...]:
+        return tuple(
+            (table_id, serialize_status_document(document))
+            for table_id, document in sorted(self._staged_documents.items())
+        )
 
     def list_context_tables(self) -> list[dict[str, object]]:
         if self._real_status_mgr is None:
             return []
-        return [
-            self._table_with_staged_document(table)
-            for table in self._real_status_mgr.list_context_tables()
-        ]
+        tables = self._real_status_mgr.list_context_tables()
+        snapshot_tables: list[dict[str, object]] = []
+        for table in tables:
+            table_id = int(table.get("id", 0))
+            if table_id > 0:
+                self._cache_base_table(table_id, table)
+                snapshot_tables.append(self._base_tables[table_id])
+            else:
+                snapshot_tables.append(table)
+        return [self._table_with_staged_document(table) for table in snapshot_tables]
 
     def get_active_scene_table(self) -> dict[str, object] | None:
         if self._active_scene_id is None:
@@ -105,7 +134,7 @@ class StatusDocumentScratch:
         table_id = int(table_id)
         document = self._current_document(table_id)
         _validate_key_value_columns(document, key_column=key_column, value_column=value_column)
-        self._staged_documents[table_id] = document.with_key_value(key, value)
+        self._stage_document(table_id, document.with_key_value(key, value))
         return self.get_table_by_id(table_id)
 
     def runtime_delete_key_value(
@@ -123,8 +152,31 @@ class StatusDocumentScratch:
             raise FileNotFoundError(f"Status table key not found: {key}")
         if document_row.runtime_key_locked:
             raise PermissionError(f"Status key is runtime locked: {key}")
-        self._staged_documents[table_id] = document.without_key(key)
+        self._stage_document(table_id, document.without_key(key))
         return self.get_table_by_id(table_id)
+
+    def runtime_set_existing_values(
+        self,
+        table_id: int,
+        updates: list[tuple[str, str]],
+    ) -> StatusValueUpdateResult:
+        table_id = int(table_id)
+        table = self._base_table(table_id)
+        if str(table.get("status_kind", "")) != STATUS_KIND_NORMAL:
+            raise PermissionError("Generic status table updates only support normal tables")
+        current = self._current_document(table_id)
+        try:
+            updated = current.with_existing_values(updates)
+        except FileNotFoundError as exc:
+            raise KeyError(str(exc)) from exc
+        changes = collect_value_changes(current, updated, updates)
+        if changes:
+            self._stage_document(table_id, updated)
+        return StatusValueUpdateResult(
+            table_id=table_id,
+            table_name=str(table.get("name", "")),
+            changes=changes,
+        )
 
     def commit(self, real_status_mgr: "StatusManager | None" = None) -> list[StatusDocumentChange]:
         mgr = real_status_mgr or self._real_status_mgr
@@ -132,8 +184,20 @@ class StatusDocumentScratch:
             return []
         changes = self.staged_changes
         for change in changes:
-            mgr.save_table_document(change.table_id, change.document)
+            mgr.save_table_document(
+                change.table_id,
+                change.document,
+                expected_status_kind=change.status_kind,
+                base_document=change.base_document,
+                write_source="agent_turn",
+            )
         return changes
+
+    def _stage_document(self, table_id: int, document: StatusTableDocument) -> None:
+        if document == self._base_document(table_id):
+            self._staged_documents.pop(table_id, None)
+            return
+        self._staged_documents[table_id] = document
 
     def _table_with_staged_document(self, table: dict[str, object]) -> dict[str, object]:
         table_id = int(table.get("id", 0))
@@ -146,8 +210,18 @@ class StatusDocumentScratch:
         if table_id not in self._base_tables:
             if self._real_status_mgr is None:
                 raise FileNotFoundError(f"Status table not found: {table_id}")
-            self._base_tables[table_id] = self._real_status_mgr.get_table_by_id(table_id)
+            self._cache_base_table(table_id, self._real_status_mgr.get_table_by_id(table_id))
         return self._base_tables[table_id]
+
+    def _cache_base_table(self, table_id: int, table: dict[str, object]) -> None:
+        if table_id in self._base_tables:
+            return
+        self._base_tables[table_id] = table
+        raw_document = table.get("document")
+        if isinstance(raw_document, dict):
+            self._base_documents[table_id] = parse_status_document(
+                json.dumps(raw_document, ensure_ascii=False)
+            )
 
     def _base_document(self, table_id: int) -> StatusTableDocument:
         if table_id not in self._base_documents:
@@ -224,6 +298,13 @@ class ScratchStatusManager:
         key_column: int | str = STATUS_KEY_COLUMN,
     ) -> dict[str, object]:
         return self._scratch.runtime_delete_key_value(table_id, key, key_column=key_column)
+
+    def runtime_set_existing_values(
+        self,
+        table_id: int,
+        updates: list[tuple[str, str]],
+    ) -> StatusValueUpdateResult:
+        return self._scratch.runtime_set_existing_values(table_id, updates)
 
     set_key_value = runtime_set_key_value
     delete_key_value = runtime_delete_key_value

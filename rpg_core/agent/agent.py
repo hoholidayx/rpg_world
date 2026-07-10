@@ -68,6 +68,8 @@ from llm_service.keys import (
 from rpg_core.scene import SceneTracker
 from rpg_core.session import InvalidTurnMetadataError, SessionManager
 from rpg_core.settings import settings
+from rpg_core.status.context import render_status_tables_context
+from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME, StatusTableToolProvider
 from rpg_core.utils.watcher import get_watcher
 from rpg_core.summary.compressor import SummaryCompressor
 from llm_service.manager import LLMManager, ProviderOverrides
@@ -337,20 +339,31 @@ class RPGGameAgent:
         try:
             # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ──────
             status_records = None
-            if self._status_sub_agent and turn_scratch.scene_tracker:
-                scene_ctx_before = turn_scratch.scene_tracker.get_context()
-                with self._status_sub_agent_scene_tools(turn_scratch.scene_tracker):
+            state_tools = self._turn_state_tools(
+                turn_scratch.scene_tracker,
+                turn_scratch.status_manager,
+            )
+            if self._status_sub_agent and state_tools:
+                state_ctx_before = self._status_sub_agent_state_context(
+                    turn_scratch.scene_tracker,
+                    turn_scratch.status_manager,
+                )
+                with self._status_sub_agent_turn_tools(
+                    state_tools,
+                    lambda: turn_scratch.status_scratch.change_token,
+                ):
                     sub_result = await self._status_sub_agent.update(
                         history=turn_scratch.base_history,
-                        state_context=scene_ctx_before,
+                        state_context=state_ctx_before,
                         user_input=user_input,
                         turn_stats=turn_stats,
                     )
                 if sub_result.updated:
                     logger.info(
-                        _TAG + " StatusSubAgent updated scene via {}",
+                        _TAG + " StatusSubAgent updated state via {}",
                         [r["tool_name"] for r in sub_result.records],
                     )
+                if sub_result.records:
                     status_records = sub_result.records
 
             # Build scene context and embed into stored user message
@@ -382,7 +395,10 @@ class RPGGameAgent:
                     len(messages), sys_msgs, user_msgs, asst_msgs, total_chars,
                 )
 
-            tool_registry = self._tool_registry_for_turn(turn_scratch.scene_tracker)
+            tool_registry = self._tool_registry_for_turn(
+                turn_scratch.scene_tracker,
+                turn_scratch.status_manager,
+            )
             schemas = tool_registry.get_openai_schemas() if tool_registry else None
 
             reply_text, records = await run_chat_loop(
@@ -616,20 +632,31 @@ class RPGGameAgent:
         try:
             # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ────
             status_records = None
-            if self._status_sub_agent and turn_scratch.scene_tracker:
-                scene_ctx_before = turn_scratch.scene_tracker.get_context()
-                with self._status_sub_agent_scene_tools(turn_scratch.scene_tracker):
+            state_tools = self._turn_state_tools(
+                turn_scratch.scene_tracker,
+                turn_scratch.status_manager,
+            )
+            if self._status_sub_agent and state_tools:
+                state_ctx_before = self._status_sub_agent_state_context(
+                    turn_scratch.scene_tracker,
+                    turn_scratch.status_manager,
+                )
+                with self._status_sub_agent_turn_tools(
+                    state_tools,
+                    lambda: turn_scratch.status_scratch.change_token,
+                ):
                     sub_result = await self._status_sub_agent.update(
                         history=turn_scratch.base_history,
-                        state_context=scene_ctx_before,
+                        state_context=state_ctx_before,
                         user_input=user_input,
                         turn_stats=turn_stats,
                     )
                 if sub_result.updated:
                     logger.info(
-                        _TAG + " StatusSubAgent updated scene via {}",
+                        _TAG + " StatusSubAgent updated state via {}",
                         [r["tool_name"] for r in sub_result.records],
                     )
+                if sub_result.records:
                     status_records = sub_result.records
                     # 将 sub-agent 工具调用作为流事件发射，让 CLI 实时显示
                     for r in status_records:
@@ -665,7 +692,10 @@ class RPGGameAgent:
                 scene_tracker=turn_scratch.scene_tracker,
                 user_input=user_input,
             )
-            tool_registry = self._tool_registry_for_turn(turn_scratch.scene_tracker)
+            tool_registry = self._tool_registry_for_turn(
+                turn_scratch.scene_tracker,
+                turn_scratch.status_manager,
+            )
             schemas = tool_registry.get_openai_schemas() if tool_registry else None
 
             # ── Stream loop ────────────────────────────────────────────
@@ -1172,35 +1202,74 @@ class RPGGameAgent:
         )
         return ctx.to_message_objects()
 
-    def _tool_registry_for_turn(self, scene_tracker: SceneTracker | None) -> ToolRegistry | None:
-        """Return a per-turn registry with scene tools bound to the turn scratch."""
+    def _tool_registry_for_turn(
+        self,
+        scene_tracker: SceneTracker | None,
+        status_manager: StatusManager | None,
+    ) -> ToolRegistry | None:
+        """Return a per-turn registry with state tools bound to the turn scratch."""
         registry = ToolRegistry()
         if self._tool_registry:
             for tool in self._tool_registry:
-                if tool.name in SCENE_TOOL_NAMES:
+                if tool.name in SCENE_TOOL_NAMES or tool.name == STATUS_TABLE_SET_VALUES_TOOL_NAME:
                     continue
                 registry.register(tool)
-        if scene_tracker is not None:
-            registry.register_all(scene_tracker.get_tools())
+        registry.register_all(self._turn_state_tools(scene_tracker, status_manager))
         return registry if len(registry) else None
 
+    @staticmethod
+    def _turn_state_tools(
+        scene_tracker: SceneTracker | None,
+        status_manager: StatusManager | None,
+    ) -> list[BaseTool]:
+        tools: list[BaseTool] = []
+        if scene_tracker is not None:
+            tools.extend(scene_tracker.get_tools())
+        if status_manager is not None:
+            tools.extend(StatusTableToolProvider(status_manager).get_tools())
+        return tools
+
+    @staticmethod
+    def _status_sub_agent_state_context(
+        scene_tracker: SceneTracker | None,
+        status_manager: StatusManager | None,
+    ) -> str:
+        sections: list[str] = []
+        if scene_tracker is not None:
+            sections.append(scene_tracker.get_context())
+        if status_manager is not None:
+            try:
+                status_context = render_status_tables_context(status_manager.list_context_tables())
+            except Exception as exc:
+                logger.warning(_TAG + " failed to render status context for sub-agent: {}", exc)
+                status_context = ""
+            if status_context:
+                sections.append(status_context)
+        return "\n\n".join(sections)
+
     @contextmanager
-    def _status_sub_agent_scene_tools(self, scene_tracker: SceneTracker | None):
-        """Temporarily bind StatusSubAgent scene tools to the turn scratch."""
+    def _status_sub_agent_turn_tools(self, tools: list[BaseTool], mutation_probe):
+        """Temporarily bind StatusSubAgent tools to the current turn scratch."""
         sub_agent = self._status_sub_agent
-        if sub_agent is None or scene_tracker is None:
+        if sub_agent is None or not tools:
             yield
             return
 
         previous_registry = sub_agent._tool_registry
         previous_schemas = sub_agent._schemas
+        previous_probe = getattr(sub_agent, "_mutation_probe", None)
+        set_mutation_probe = getattr(sub_agent, "set_mutation_probe", None)
         try:
             sub_agent.clear_tools()
-            sub_agent.register_tools(scene_tracker.get_tools())
+            sub_agent.register_tools(tools)
+            if set_mutation_probe is not None:
+                set_mutation_probe(mutation_probe)
             yield
         finally:
             sub_agent._tool_registry = previous_registry
             sub_agent._schemas = previous_schemas
+            if set_mutation_probe is not None:
+                set_mutation_probe(previous_probe)
 
     async def _run_post_commit_side_effects(self) -> None:
         """Run turn side effects that must not participate in the turn commit."""

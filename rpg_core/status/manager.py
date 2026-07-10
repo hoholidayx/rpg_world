@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable
 
 from rpg_data.models import STATUS_KEY_COLUMN, STATUS_KIND_NORMAL, STATUS_KIND_SCENE, STATUS_VALUE_COLUMN, StatusRowRef
@@ -10,6 +11,24 @@ from rpg_data.services import get_data_service_gateway
 if TYPE_CHECKING:
     from rpg_data.models import SessionStatusTable, StatusTableDocument
     from rpg_data.services.status import StatusTableService
+
+
+@dataclass(frozen=True)
+class StatusValueChange:
+    key: str
+    old_value: str
+    new_value: str
+
+
+@dataclass(frozen=True)
+class StatusValueUpdateResult:
+    table_id: int
+    table_name: str
+    changes: tuple[StatusValueChange, ...]
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.changes)
 
 
 class StatusManager:
@@ -46,13 +65,31 @@ class StatusManager:
         return _table_to_dict(self._service.get_table(self.session_id, table_name, status_kind))
 
     def get_table_by_id(self, table_id: int) -> dict[str, object]:
-        return _table_to_dict(self._service.get_table_by_id(table_id))
+        return _table_to_dict(self._service.get_table_for_session(self.session_id, table_id))
 
     def get_table_document_by_id(self, table_id: int) -> "StatusTableDocument":
-        return self._service.get_table_by_id(table_id).document
+        return self._service.get_table_for_session(self.session_id, table_id).document
 
-    def save_table_document(self, table_id: int, document: "StatusTableDocument") -> dict[str, object]:
-        return _table_to_dict(self._service.save_table(table_id, document))
+    def save_table_document(
+        self,
+        table_id: int,
+        document: "StatusTableDocument",
+        *,
+        expected_status_kind: str | None = None,
+        base_document: "StatusTableDocument | None" = None,
+        write_source: str = "agent_turn",
+    ) -> dict[str, object]:
+        table = self._service.get_table_for_session(self.session_id, table_id)
+        return _table_to_dict(
+            self._service.save_table_for_session(
+                self.session_id,
+                table_id,
+                document,
+                expected_status_kind=expected_status_kind or table.status_kind,
+                base_document=base_document,
+                write_source=write_source,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Generic table writes
@@ -161,6 +198,30 @@ class StatusManager:
             )
         )
 
+    def runtime_set_existing_values(
+        self,
+        table_id: int,
+        updates: list[tuple[str, str]],
+    ) -> StatusValueUpdateResult:
+        table = self._service.get_table_for_session(self.session_id, table_id)
+        if table.status_kind != STATUS_KIND_NORMAL:
+            raise PermissionError("Generic status table updates only support normal tables")
+        try:
+            updated_document = table.document.with_existing_values(updates)
+        except FileNotFoundError as exc:
+            raise KeyError(str(exc)) from exc
+        changes = collect_value_changes(table.document, updated_document, updates)
+        if changes:
+            self._service.save_table_for_session(
+                self.session_id,
+                table_id,
+                updated_document,
+                expected_status_kind=STATUS_KIND_NORMAL,
+                base_document=table.document,
+                write_source="runtime_tool",
+            )
+        return StatusValueUpdateResult(table.id, table.name, changes)
+
     # ------------------------------------------------------------------
     # Scene helpers
     # ------------------------------------------------------------------
@@ -181,3 +242,17 @@ class StatusManager:
 
 def _table_to_dict(table: "SessionStatusTable") -> dict[str, object]:
     return table.to_dict()
+
+
+def collect_value_changes(
+    current: "StatusTableDocument",
+    updated: "StatusTableDocument",
+    requested_updates: list[tuple[str, str]],
+) -> tuple[StatusValueChange, ...]:
+    current_by_key = {row.key: row.value for row in current.rows}
+    updated_by_key = {row.key: row.value for row in updated.rows}
+    return tuple(
+        StatusValueChange(key, current_by_key[key], updated_by_key[key])
+        for key, _value in requested_updates
+        if current_by_key[key] != updated_by_key[key]
+    )

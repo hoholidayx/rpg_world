@@ -207,7 +207,7 @@ agent = AgentManager.get_or_create(session_id="mygame_01")
 
 Story 主数据字段中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。当前硬切换 schema 变更直接体现在 `0001_initial.sql`，demo 与分页测试数据分别放在 `0002_demo.sql`、`0003_pagination_demo.sql`。
 
-状态表也由 `rpg_data` 管理。SQLite 中的 `document_json` 是模板表和会话表的正文真源，SQL 同时保存模板、story 挂载、session 副本、来源关系、排序和 `status_kind`。`status_kind` 当前只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。状态表必须先通过 `rpg_story_status_tables` 挂载到 story，才能可选绑定到该 story 的一个角色挂载 `story_character_mount_id`；一个角色允许绑定多张状态表，一张 story 状态表挂载最多绑定一个角色，不要给 `story_character_mount_id` 增加唯一约束。`mount_origin` 区分 `system_mount` 与 `story_template`：系统模板只能解除挂载，故事内创建模板可删除挂载及其底层模板，但模板仍被其它 story 使用时必须拒绝删除。创建 session 时 `CatalogService` 调用 `StatusTableService.initialize_session_tables()`，把当前 story 已挂载模板的 document 复制到 `rpg_session_status_tables`，并把 story mount/角色绑定信息写入 session 表 metadata；模板后续修改不影响已有 session 副本。`DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；bootstrap 代码不要硬编码 demo 或业务数据。Bootstrap 默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，日志必须输出删除/跳过明细和汇总计数。
+状态表也由 `rpg_data` 管理。SQLite 中的 `document_json` 是模板表和会话表的正文真源，SQL 同时保存模板、story 挂载、session 副本、来源关系、排序和 `status_kind`。`status_kind` 当前只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。状态表必须先通过 `rpg_story_status_tables` 挂载到 story，才能可选绑定到该 story 的一个角色挂载 `story_character_mount_id`；一个角色允许绑定多张状态表，一张 story 状态表挂载最多绑定一个角色，不要给 `story_character_mount_id` 增加唯一约束。`mount_origin` 区分 `system_mount` 与 `story_template`：系统模板只能解除挂载，故事内创建模板可删除挂载及其底层模板，但模板仍被其它 story 使用时必须拒绝删除。创建 session 时 `CatalogService` 调用 `StatusTableService.initialize_session_tables()`，把当前 story 已挂载模板的 document 复制到 `rpg_session_status_tables`，并把 story mount、角色绑定和 `characterName` 快照写入 session 表 metadata；模板后续修改不影响已有 session 副本。`DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；bootstrap 代码不要硬编码 demo 或业务数据。Bootstrap 默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，日志必须输出删除/跳过明细和汇总计数。
 
 `当前场景` 是 `status_kind="scene"` 的特殊状态表，展示名可以自定义，但仍必须挂载到 story 才会被 session 感知。多张 scene 表存在时，v1 消费排序第一张 active scene。
 
@@ -277,10 +277,12 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
 - `StatusSubAgent` 使用 scratch 版 scene/status 工具；context builder 读取 scratch 后的 history 与状态，让主 LLM 能看到本轮预更新状态。
+- 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
 - WebUI 停止生成通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 到 Agent service `/chat/stop`；取消成功的 stream turn 丢弃 scratch，不发 DONE，不提交消息、状态或 usage。
 - 持久化 session 的 commit 使用 `rpg_data` database atomic；`history_enabled=False` 仅作为测试/内存模式，不承诺补偿回滚已写入的外部 status manager。
 - summary compression 和 story memory extraction 是 commit 后副作用，失败只记录 warning，不回滚已提交 turn。
+- session 状态表并发暂采用 last-write-wins，不使用 `version`/CAS；提交发现 document 已偏离 scratch 基线时在 data 层记录 warning 后继续覆盖。
 
 ## 关键设计
 
@@ -379,6 +381,13 @@ LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache
 `rpg_data` 状态表 service 用 `status_kind="scene"` 表达这一类特殊状态，且仍由 story
 挂载关系决定 session 是否可见；未挂载 scene 时，Agent 不注入 `[scene]`，也不注册 scene 工具。
 
+普通 `STATUS_TABLES` 层只展示 session 运行时表 ID、表名、作为“用途与更新规则”的
+`description` 和完整 KV，不展示模板来源或通用作用范围。绑定角色的普通表进入独立的
+“角色状态表”段落并按 `characterName` 分组；当前角色绑定不触发额外工具或业务行为。
+角色绑定入库必须校验角色 name 非空；旧 session 缺 name 时优先通过 `characterMountId`
+反查，必要时由状态表 `mountId` 回退到 `story_character_mount_id`，成功后回填。仍无法解析
+的表记录 warning 并从 LLM 上下文排除，不得合并到“未知角色”分组。
+
 上下文基于 Jinja2 模板（`rpg_core/jinja/`），通过 `RPGContext.to_message_objects()`
 展平为 OpenAI-compatible 消息列表。不要在 builder 或 dataclass 中提前拼接最终 prompt，
 也不要把 markdown 诊断输出放回主业务数据模型。
@@ -423,7 +432,7 @@ agent.send(user_input)
   → RPModuleRegistry 收集模块 runtime sections（Dice MVP 为空）
   → _build_transformed_context() → builder.build() → RPGContext.to_message_objects()
   → run_chat_loop(provider, tool_registry, messages)
-    → LLM 可能调工具（scene tools / RP module tools / file tools）
+    → LLM 可能调工具（scene tools / status_table_set_values / RP module tools / file tools）
     → 每轮记录 TurnStats + CallRecord
   → 回复写入 _history + rpg_data 主消息表 + backup 消息表
   → 返回 AgentReply（含 text + tool_records + stats）
@@ -517,7 +526,8 @@ character/lorebook/status 是例外：`rpg_core.character.CharacterManager`、
 
 `rpg_data.services.status.StatusTableService` 是状态表管理入口：SQL row 内的
 `document_json` 是正文真源；service 不通过目录扫描发现状态表。通用写操作以 session table id
-为入口，支持 header 名称、行匹配和 key/value selector；key/value 写入操作以
+为入口，支持 header 名称、行匹配和 key/value selector；LLM 的普通表工具只能更新已有 key 的
+value，不能增删改 key。key/value 写入操作以
 `StatusTableDocument` 的逻辑 key/value 为准，不依赖 UI 列标题。外部代码应通过
 `get_data_service_gateway().status` 取得 service，不要新增 per-service 全局 getter。
 gateway/bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session

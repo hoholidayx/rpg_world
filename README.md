@@ -121,7 +121,8 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 - SQLite 同时记录模板、story 挂载、session 副本、来源关系、排序、`metadata_json` 和 `status_kind`；`status_kind` 当前只允许 `scene` / `normal`。
 - 状态表模板属于 workspace，通过 `rpg_story_status_tables` 挂载到 story 后才可绑定角色；绑定字段是 nullable `story_character_mount_id`，只校验角色挂载属于同一 story，不限制同一角色绑定的状态表数量。
 - `rpg_story_status_tables.mount_origin` 区分 `system_mount` 与 `story_template`。系统模板挂载只能解除挂载；故事内创建的状态模板可删除挂载及其底层模板，若模板仍被其它 story 使用则拒绝删除。
-- 创建 session 时会把当时已挂载模板的 `document_json` 复制到 `rpg_session_status_tables`，`origin="template_copy"`，并把 story mount/角色绑定信息写入 session 表 metadata；这些 metadata 不改变 LLM 上下文渲染文本。
+- 创建 session 时会把当时已挂载模板的 `document_json` 复制到 `rpg_session_status_tables`，`origin="template_copy"`，并把 story mount、角色绑定和 `characterName` 快照写入 session 表 metadata；角色名只用于在 LLM 上下文中分组角色状态表。
+- 角色绑定要求挂载角色具有非空 name。旧 session 缺少 `characterName` 时，context 读取优先通过 `characterMountId -> rpg_story_characters -> rpg_characters` 反查；缺少直接角色挂载 ID 时可由状态表 `mountId -> rpg_story_status_tables.story_character_mount_id` 回退解析，成功后回填快照。无法解析的角色状态表会记录 warning 并从 LLM 上下文排除。
 - 模板后续修改不影响已有 session 副本；运行时直接新建的会话表写入 `rpg_session_status_tables`，`origin="session_native"`。
 - `DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；service 不扫描目录补业务索引，也不维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。
 - Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
@@ -164,6 +165,7 @@ Telegram 渠道当前支持：
 
 - 进入 LLM 前，user message 不直接写入 `SessionManager.append()`，而是暂存在 `MessageScratch`。
 - `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。
+- 普通状态表通过同一 scratch 注册 `status_table_set_values`，只允许按 session 运行时表 ID 批量修改已有 key 的 value；工具同时提供给 `StatusSubAgent` 和主 Agent，no-op 不进入 staged changes。
 - 上下文构建读取 scratch 后的 history 与 scene/status，因此主 LLM 能看到本轮预更新状态。
 - LLM 完整成功后，事务一次性提交 staged user message、assistant message 和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
 - WebUI 停止生成走 `requestId` 精准取消：Play API `/sessions/{session_id}/stop` 转发到 Agent service `/chat/stop`，被取消的 stream turn 只丢弃 scratch，不发送 DONE，也不提交消息、状态或 usage。
@@ -171,6 +173,7 @@ Telegram 渠道当前支持：
 - 持久化消息必须带正数 `turn_id` 和 `seq_in_turn`；主消息表通过 `(session_id, turn_id, seq_in_turn)` 唯一约束保护同一 turn 内顺序，冷备份表 append-only 但同样拒绝非正 turn metadata。
 - 持久化 session 的 commit 在 `rpg_data` database atomic 中执行，不跨 LLM 调用持有数据库事务；`history_enabled=False` 是测试/内存模式，只回滚内存 history，不承诺补偿已写入的外部 status manager。
 - summary compression 和 story memory extraction 是 commit 后副作用；失败只记录 warning，不回滚已提交 turn。
+- session 状态表并发写入暂采用 last-write-wins，不使用 version/CAS；Agent 提交发现持久化 document 已偏离 scratch 基线时由 `rpg_data` 记录 warning 后继续覆盖。
 
 事务生命周期有日志覆盖：begin 构建失败、send/send_stream 异常、commit 失败、commit 成功摘要和 post-commit 副作用失败都会记录，便于排查 turn 是否进入 scratch、是否提交、是否在副作用阶段失败。
 
@@ -195,6 +198,8 @@ Telegram 渠道当前支持：
 5. User Message。
 
 `当前场景` 不作为普通状态表进入 `STATUS_TABLES`。它由 `SceneTracker` 作为高优先级 user prefix 合入最终用户消息，确保故事时间、地点和场景状态被模型重点关注，并随 user message 进入历史用于后续有序归纳。`rpg_data` 用 `status_kind="scene"` 表达这一类特殊状态；未挂载到 story 时 session 不会感知 scene，也不会注册 scene 工具。
+
+普通 `STATUS_TABLES` 层展示 session 运行时表 ID、表名、`description`（用途与更新规则）和完整 KV，不展示模板来源或通用挂载范围。绑定角色的表单独进入“角色状态表”段落并按角色名分组；当前只用角色绑定辅助模型理解所属角色，不扩展其它行为。
 
 RP Modules 采用上下文分层策略：
 

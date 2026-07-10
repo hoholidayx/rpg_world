@@ -1,5 +1,5 @@
 import { STORY_STATUS_MOUNT_ORIGIN } from '@/types/statusTables'
-import { statusKindLabel, storyMountOriginLabel } from '../constants'
+import { STATUS_DESCRIPTION_PLACEHOLDER, statusKindLabel, storyMountOriginLabel } from '../constants'
 import { characterLabelByMountId, formatDate } from '../helpers'
 import type { StatusTablesController } from '../useStatusTablesController'
 import { Chip, FieldLabel, KindField, Panel, PanelHead, ReadOnlyField } from '../components/FormBits'
@@ -137,10 +137,11 @@ export function StoryTemplatesView({ controller }: { controller: StatusTablesCon
                 </label>
               </div>
               <label className="block">
-                <FieldLabel label="描述" note="可选" />
+                <FieldLabel label="用途与更新规则" note="可选" />
                 <textarea
                   value={storyTemplateDraft.description}
                   onChange={(event) => setStoryTemplateDraft({ ...storyTemplateDraft, description: event.target.value })}
+                  placeholder={STATUS_DESCRIPTION_PLACEHOLDER}
                   className="min-h-24 w-full resize-none rounded-[10px] border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-950 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                 />
               </label>

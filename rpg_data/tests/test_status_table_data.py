@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_data.models import StatusRowRef, StatusTableData
+from rpg_data.models import StatusRowRef, StatusTableData, StatusTableDocument, StatusTableRow
 
 
 def test_status_table_data_resolves_columns_and_rows_by_name() -> None:
@@ -61,3 +61,28 @@ def test_status_table_data_key_value_helpers_update_append_and_delete() -> None:
     assert updated.rows == (("位置", "城堡"),)
     assert appended.rows == (("位置", "城堡"), ("天气", "雨"))
     assert deleted.rows == (("天气", "雨"),)
+
+
+def test_status_document_updates_existing_values_without_changing_structure() -> None:
+    document = StatusTableDocument.from_rows(
+        rows=[
+            StatusTableRow("生命", "10", True, {"format": "integer"}),
+            StatusTableRow("法力", "5", False, {"format": "integer"}),
+        ],
+        metadata={"ui": {"compact": True}},
+    )
+
+    updated = document.with_existing_values([("法力", "3"), ("生命", "8")])
+
+    assert updated.data_rows == (("生命", "8"), ("法力", "3"))
+    assert updated.rows[0].runtime_key_locked is True
+    assert updated.rows[0].metadata == {"format": "integer"}
+    assert updated.metadata == {"ui": {"compact": True}}
+    assert document.data_rows == (("生命", "10"), ("法力", "5"))
+
+    with pytest.raises(FileNotFoundError, match="不存在"):
+        document.with_existing_values([("不存在", "1")])
+    with pytest.raises(ValueError, match="duplicate"):
+        document.with_existing_values([("生命", "9"), ("生命", "8")])
+    with pytest.raises(ValueError, match="empty"):
+        document.with_existing_values([])

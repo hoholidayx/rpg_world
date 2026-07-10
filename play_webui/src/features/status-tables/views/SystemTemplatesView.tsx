@@ -1,5 +1,5 @@
 import { Copy, Loader2, TableProperties, Trash2 } from 'lucide-react'
-import { statusKindLabel } from '../constants'
+import { STATUS_DESCRIPTION_PLACEHOLDER, statusKindLabel } from '../constants'
 import { formatDate } from '../helpers'
 import type { StatusTablesController } from '../useStatusTablesController'
 import { FieldLabel, KindField, Panel, PanelHead } from '../components/FormBits'
@@ -70,10 +70,11 @@ export function SystemTemplatesView({ controller }: { controller: StatusTablesCo
                 </label>
               </div>
               <label className="block">
-                <FieldLabel label="描述" note="可选" />
+                <FieldLabel label="用途与更新规则" note="可选" />
                 <textarea
                   value={templateDraft.description}
                   onChange={(event) => setTemplateDraft({ ...templateDraft, description: event.target.value })}
+                  placeholder={STATUS_DESCRIPTION_PLACEHOLDER}
                   className="min-h-24 w-full resize-none rounded-[10px] border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-950 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                 />
               </label>

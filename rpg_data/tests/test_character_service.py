@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from peewee import SqliteDatabase
 
 from rpg_data import db
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.repositories.character_detail_repo import CharacterDetailRepository
 from rpg_data.repositories.character_repo import CharacterRepository
+from rpg_data.repositories.records import CharacterRecord
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_character_repo import StoryCharacterRepository
 from rpg_data.repositories.story_repo import StoryRepository
@@ -192,5 +194,31 @@ def test_character_management_service_manages_cards_details_and_mounts(tmp_path:
         assert service.list_characters("main_ws") == []
         assert service.list_story_characters("main_ws", story.id) == []
         assert service.delete_detail("main_ws", int(created.id), int(detail.id)) is False
+    finally:
+        database.close()
+
+
+def test_character_management_requires_non_empty_names(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        workspaces = WorkspaceRepository(database)
+        stories = StoryRepository(database)
+        with database.atomic():
+            workspaces.create("main_ws", "Main", "data/main_ws")
+            story = stories.create("main_ws", "Main Story")
+
+        service = CharacterManagementService(database)
+        with pytest.raises(ValueError, match="name must not be empty"):
+            service.create_character("main_ws", name="   ")
+
+        character = service.create_character("main_ws", name="Named Character")
+        assert character is not None
+        with pytest.raises(ValueError, match="name must not be empty"):
+            service.update_character("main_ws", int(character.id), name="\t")
+        assert service.list_characters("main_ws")[0].name == "Named Character"
+
+        CharacterRecord.update(name="").where(CharacterRecord.id == character.id).execute()
+        with pytest.raises(ValueError, match="name must not be empty"):
+            service.mount_character("main_ws", story.id, int(character.id))
     finally:
         database.close()
