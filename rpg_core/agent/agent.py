@@ -377,7 +377,7 @@ class RPGGameAgent:
             scene_ctx = turn_scratch.scene_tracker.get_context() if turn_scratch.scene_tracker else None
             stored_input = self._compose_stored_user_input(scene_ctx, user_input)
 
-            tx.stage_user_message(stored_input)
+            current_user_message = tx.stage_user_message(stored_input)
 
             # ── 记忆检索 ────────────────────────────────────────────────
             if self._memory_manager:
@@ -387,7 +387,7 @@ class RPGGameAgent:
                     logger.opt(exception=exc).warning(_TAG + " memory recall failed")
 
             messages = self._build_transformed_context(
-                messages=turn_scratch.history_for_context(),
+                current_user_message=current_user_message,
                 status_mgr=turn_scratch.status_manager,
                 scene_tracker=turn_scratch.scene_tracker,
                 user_input=user_input,
@@ -686,7 +686,7 @@ class RPGGameAgent:
             scene_ctx = turn_scratch.scene_tracker.get_context() if turn_scratch.scene_tracker else None
             stored_input = self._compose_stored_user_input(scene_ctx, user_input)
 
-            tx.stage_user_message(stored_input)
+            current_user_message = tx.stage_user_message(stored_input)
 
             # ── 记忆检索 ────────────────────────────────────────────────
             if self._memory_manager:
@@ -696,7 +696,7 @@ class RPGGameAgent:
                     logger.opt(exception=exc).warning(_TAG + " memory recall failed")
 
             messages = self._build_transformed_context(
-                messages=turn_scratch.history_for_context(),
+                current_user_message=current_user_message,
                 status_mgr=turn_scratch.status_manager,
                 scene_tracker=turn_scratch.scene_tracker,
                 user_input=user_input,
@@ -1094,28 +1094,19 @@ class RPGGameAgent:
 
     def _build_ctx_for_inspection(self, user_input: str = "") -> "RPGContext":
         """Build context for inspection (no _history mutation, no LLM call)."""
-        from rpg_core.context.rpg_context import RPGContext
-
-        self._refresh_fixed_layer_snapshot()
-
         # Build scene context same way as send()
         scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
-
-        test_messages: list[Message] = list(self._session.history)
+        current_user_message: Message | None = None
         if user_input or scene_ctx:
             stored_input = self._compose_stored_user_input(scene_ctx, user_input)
-            test_messages.append(Message(role=Role.USER, content=stored_input))
-        elif not test_messages:
-            test_messages.append(Message(role=Role.USER, content="(no input)"))
+            current_user_message = Message(role=Role.USER, content=stored_input)
 
-        ctx: RPGContext = self._builder.build(
-            fixed_layer=self._fixed_layer,
-            messages=test_messages,
+        return self._build_main_context(
+            current_user_message=current_user_message,
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
-            rp_module_sections=self._get_rp_module_runtime_sections(user_input=user_input),
+            user_input=user_input,
         )
-        return ctx
 
     @staticmethod
     def _compose_stored_user_input(scene_ctx: str | None, user_input: str) -> str:
@@ -1236,24 +1227,44 @@ class RPGGameAgent:
     def _build_transformed_context(
         self,
         *,
-        messages: list[Message] | None = None,
+        current_user_message: Message | None = None,
         status_mgr: "StatusManager | None" = None,
         scene_tracker: SceneTracker | None = None,
         user_input: str = "",
     ) -> list[Message]:
         """Build the 5-layer RPG context as Message objects."""
+        return self._build_main_context(
+            current_user_message=current_user_message,
+            status_mgr=status_mgr,
+            scene_tracker=scene_tracker,
+            user_input=user_input,
+        ).to_message_objects()
+
+    def _build_main_context(
+        self,
+        *,
+        current_user_message: Message | None = None,
+        status_mgr: "StatusManager | None" = None,
+        scene_tracker: SceneTracker | None = None,
+        user_input: str = "",
+    ) -> "RPGContext":
+        """Build the shared main-Agent context used by turns and inspection."""
+        from rpg_core.context.rpg_context import RPGContext
+
         self._refresh_fixed_layer_snapshot()
-        resolved_messages = self._session.history if messages is None else messages
+        history = self._session.context_history()
         resolved_status_mgr = self._status_mgr if status_mgr is None else status_mgr
         resolved_scene_tracker = self._scene_tracker if scene_tracker is None else scene_tracker
-        ctx = self._builder.build(
+        ctx: RPGContext = self._builder.build(
             fixed_layer=self._fixed_layer,
-            messages=resolved_messages,
+            history_messages=list(history.messages),
+            current_user_message=current_user_message,
+            summarized_message_count=history.filtered_message_count,
             status_mgr=resolved_status_mgr,
             scene_tracker=resolved_scene_tracker,
             rp_module_sections=self._get_rp_module_runtime_sections(user_input=user_input),
         )
-        return ctx.to_message_objects()
+        return ctx
 
     def _tool_registry_for_turn(
         self,

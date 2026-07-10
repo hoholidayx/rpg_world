@@ -276,7 +276,7 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 `send()` / `send_stream()` 的普通 RP turn 通过 `AgentTurnTransaction` 管理写入一致性。事务边界是内存 scratch 加最终短 commit 点，不跨 LLM 调用打开数据库事务。
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
-- `StatusSubAgent` 使用 scratch 版 scene/status 工具；context builder 读取 scratch 后的 history 与状态，让主 LLM 能看到本轮预更新状态。
+- `StatusSubAgent` 使用 scratch 版 scene/status 工具；主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message 与 scratch 后的状态，让主 LLM 能看到本轮预更新状态。
 - 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
 - WebUI 停止生成通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 到 Agent service `/chat/stop`；取消成功的 stream turn 丢弃 scratch，不发 DONE，不提交消息、状态或 usage。
@@ -354,7 +354,7 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 | 模块 | 职责 |
 |---|---|
 | `fixed_layer/` | `FixedLayerContributor` / `FixedLayerAssembler` 与 `FixedLayerSection`，统一装配稳定固定层 |
-| `builder.py` | 消费预组装 fixed layer，并读取摘要、记忆、状态表、用户扩展块，构建结构化 `RPGContext` |
+| `builder.py` | 消费预组装 fixed layer、已投影历史和当前 user message，并读取摘要、记忆、状态表、用户扩展块，构建结构化 `RPGContext` |
 | `rpg_context.py` | 只保留上下文层数据结构和薄委托方法 |
 | `renderer.py` | LLM 请求边界渲染，将结构化层转成 OpenAI-compatible messages |
 | `inspector.py` | `/context`、日志和调试用 markdown / token 诊断 |
@@ -374,6 +374,19 @@ LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache
 | [N+3] Status Tables | system | 普通状态表，不包含 `status_kind="scene"` 的当前场景 | ★★★★ 高频变化 |
 | [N+4] RP Modules | system | RP 模块动态运行态；Dice MVP 默认为空 | ★★★★ 动态 |
 | [N+5] User Message | user | `[scene]` + 用户输入 + 前后缀 | 总是新的 |
+
+主 Agent Context 与历史展示分离。`SessionManager.context_history()` 是主 Agent 的历史投影入口：
+持久化 session 每次构建 Context 都重新读取 `rpg_session_messages.summary_processed`，仅把
+`summary_processed=false` 的消息交给 builder；`summary_processed=true` 的消息逐条排除。
+该投影不校验 `summary_batch_id`、summary batch 文件、`overall.md` 或 turn 完整性，也不影响
+Play/Agent history 接口返回完整未删除历史。`send()`、`send_stream()`、`context-preview` 和
+`/context` 都使用同一个主 Context 构建入口；`StatusSubAgent`、`MemorySubAgent` 等独立处理链路
+继续使用各自原有历史输入，不套用这层过滤。
+
+Summary Layer 只把“本次投影过滤过至少一条消息”作为尝试加载 `overall.md` 的条件。`overall.md`
+缺失或为空时摘要层为空，但已标记 processed 的消息仍不进入主 Agent Context。`context-preview`
+的 `messages`、`totals.tokenCount` 和 `usageEstimate.usedTokens` 以最终渲染出的主 Agent messages
+为准，不用完整历史估算。
 
 `当前场景` 是 `status_kind="scene"` 的特殊状态表，不走普通 `STATUS_TABLES` 层。`SceneTracker.get_context()`
 会将它作为 user prefix 注入最终用户消息：一方面提高模型对当前时空、地点、场景属性的注意力，
@@ -502,7 +515,7 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 - `rpg_summaries.json` / `summaries/` — 对话摘要文件
 - `memory_vectors.db*` — memory SQLite / WAL / SHM 索引文件
 
-会话层的 turn / rounds 统一由 `SessionManager` 负责。持久化消息必须有正数 `turn_id` 和 `seq_in_turn`：主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一，冷备份表保持 append-only 但同样要求正数 turn metadata。非法 turn metadata 在写入或加载边界失败，不再为 summary、剧情记忆或 history pagination 做 legacy 降级分组。summary 和故事记忆续提进度按主消息表行标记持久化，进程重启后从 rpg_data 继续。
+会话层的 turn / rounds 统一由 `SessionManager` 负责。持久化消息必须有正数 `turn_id` 和 `seq_in_turn`：主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一，冷备份表保持 append-only 但同样要求正数 turn metadata。非法 turn metadata 在写入或加载边界失败，不再为 summary、剧情记忆或 history pagination 做 legacy 降级分组。summary 和故事记忆续提进度按主消息表行标记持久化，进程重启后从 rpg_data 继续。历史删除、清空、编辑回滚和 turn truncate 只直接修改主历史，不清理摘要文件、不重置其它消息标记，也不自动重新归纳；主 Agent Context 下次构建时只按剩余行各自的 `summary_processed` 值重新投影。
 
 Agent runtime 会话消息和剧情记忆由 `rpg_data` 管理；摘要、persistent memory 和 memory 文件集中在
 `CatalogService.get_session_runtime_dir(session_id)` 返回的 `{workspace_root}/stories/{story_id}/{session_id}/` 下。

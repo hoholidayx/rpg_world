@@ -22,7 +22,7 @@ from rpg_core.context.rpg_context import (
     UserExtensionBlock,
     UserMessageLayer,
 )
-from rpg_core.session.turns import count_turns, slice_recent_turns
+from rpg_core.session.turns import slice_recent_turns
 from rpg_core.status.context import prepare_status_context_tables
 
 if TYPE_CHECKING:
@@ -121,7 +121,9 @@ class RPGContextBuilder:
     def build(
         self,
         fixed_layer: FixedLayerData | None = None,
-        messages: list[Message] | None = None,
+        history_messages: list[Message] | None = None,
+        current_user_message: Message | None = None,
+        summarized_message_count: int = 0,
         status_mgr: StatusManager | None = None,
         scene_tracker: SceneTracker | None = None,
         rp_module_sections: list[RPModuleRuntimeSection] | None = None,
@@ -130,19 +132,18 @@ class RPGContextBuilder:
 
         Args:
             fixed_layer: 预组装好的固定层快照，包含 sections 及角色卡/世界书结构化数据。
-            messages: 原始消息列表。仅用于提取历史记录和当前用户输入。
+            history_messages: 已投影的主 Agent 历史，不包含当前用户消息。
+            current_user_message: 当前 turn 的用户消息；预览时可以为空。
+            summarized_message_count: 被 ``summary_processed`` 排除的消息数。
             status_mgr: 状态管理器，为 None 时动态层跳过状态表格模块。
             rp_module_sections: 可选 RP module 运行态；静态契约应放在 fixed_layer.sections。
         """
-        if not messages:
-            messages = []
-
-        # ── 1. Parse sources ────────────────────────────────────────
-        history_messages = messages[:-1]  # exclude current user message
-        total_rounds = count_turns(history_messages)
-
-        current_user_msg = messages[-1] if messages and messages[-1].is_user() else None
-        user_text = current_user_msg.content if current_user_msg else ""
+        resolved_history = list(history_messages or [])
+        user_text = (
+            current_user_message.content
+            if current_user_message is not None and current_user_message.is_user()
+            else ""
+        )
 
         # ── 2. Fixed Layer 已在 builder 外完成装配 ─────────────────
         resolved_fixed_layer = fixed_layer or FixedLayerData(world_name=self.world_name)
@@ -159,7 +160,7 @@ class RPGContextBuilder:
         summary_text: str | None = None
         if (
             self.config.enable_summaries
-            and total_rounds > self.config.hot_history_rounds
+            and summarized_message_count > 0
             and self._batch_summary_store
         ):
             try:
@@ -171,7 +172,7 @@ class RPGContextBuilder:
 
         # ── 5. Extract Hot History ──────────────────────────────────
         # Filter to keep only the most recent turns.
-        hot_history = slice_recent_turns(history_messages, self.config.hot_history_rounds)
+        hot_history = slice_recent_turns(resolved_history, self.config.hot_history_rounds)
 
         # ── 6. Build Dynamic Layer modules ──────────────────────────
         # Ordered by change frequency (low → high) for prefix cache efficiency:

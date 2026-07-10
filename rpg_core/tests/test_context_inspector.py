@@ -134,6 +134,28 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
     ]
 
 
+def test_context_preview_token_estimate_counts_final_messages():
+    class FinalMessageCounter:
+        def count(self, text: str) -> int:
+            return len(text)
+
+        def count_messages(self, messages: list[Message]) -> int:
+            assert [message.content for message in messages] == ["fixed|core", "u1"]
+            return 123
+
+    ctx = RPGContext(
+        fixed_layer=FixedLayerData(
+            sections=[FixedLayerSection(id="core", title="核心", content="fixed")]
+        ),
+        user_message=UserMessageLayer(user_input="u1"),
+    )
+
+    payload = ContextInspector(ctx, FinalMessageCounter()).to_payload(session_id="s1")
+
+    assert payload["totals"]["tokenCount"] == 123
+    assert payload["usageEstimate"]["usedTokens"] == 123
+
+
 def test_usage_payload_views_normalize_transport_shapes():
     turn_usage = TurnUsageWirePayload.from_payload({
         "prompt_tokens": "12",

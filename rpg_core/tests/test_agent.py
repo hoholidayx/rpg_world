@@ -17,7 +17,14 @@ from rpg_data.models import StatusTableDocument
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.command import CommandDispatcher
 from rpg_core.agent.tools import BaseTool
-from rpg_core.context.rpg_context import FixedLayerData, HotHistoryLayer, Message, RPGContext, Role
+from rpg_core.context.rpg_context import (
+    FixedLayerData,
+    HotHistoryLayer,
+    Message,
+    RPGContext,
+    Role,
+    UserMessageLayer,
+)
 from rpg_core.context.fixed_layer import FIXED_LAYER_CORE_SECTION_ID, FixedLayerSection
 from rpg_core.session.manager import SessionManager
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
@@ -302,7 +309,19 @@ def _make_transaction_agent(
         def __init__(self) -> None:
             self.calls = []
 
-        def build(self, *, messages, status_mgr=None, scene_tracker=None, **kwargs):  # noqa: ANN001
+        def build(
+            self,
+            *,
+            history_messages,
+            current_user_message,
+            status_mgr=None,
+            scene_tracker=None,
+            **kwargs,
+        ):  # noqa: ANN001
+            messages = [
+                *history_messages,
+                *([current_user_message] if current_user_message else []),
+            ]
             self.calls.append({
                 "messages": list(messages),
                 "status_mgr": status_mgr,
@@ -1170,9 +1189,14 @@ async def test_get_context_json_does_not_mutate_history(fake_token_counter):
         def __init__(self) -> None:
             self.last_messages = None
 
-        def build(self, *, messages, **_kwargs):  # noqa: ANN001
-            self.last_messages = messages
-            return RPGContext(hot_history=HotHistoryLayer(messages=list(messages)))
+        def build(self, *, history_messages, current_user_message, **_kwargs):  # noqa: ANN001
+            self.last_messages = history_messages
+            return RPGContext(
+                hot_history=HotHistoryLayer(messages=list(history_messages)),
+                user_message=UserMessageLayer(
+                    user_input=current_user_message.content if current_user_message else ""
+                ),
+            )
 
     history = [Message(Role.USER, "old", turn_id=1, seq_in_turn=1)]
     builder = FakeBuilder()
@@ -1183,7 +1207,13 @@ async def test_get_context_json_does_not_mutate_history(fake_token_counter):
     agent._builder = builder
     agent._fixed_layer = FixedLayerData()
     agent._refresh_fixed_layer_snapshot = MagicMock()
-    agent._session = SimpleNamespace(history=history)
+    agent._session = SimpleNamespace(
+        history=history,
+        context_history=lambda: SimpleNamespace(
+            messages=tuple(history),
+            filtered_message_count=0,
+        ),
+    )
     agent._status_mgr = None
     agent._scene_tracker = None
     agent._rp_module_registry = None
@@ -1196,7 +1226,7 @@ async def test_get_context_json_does_not_mutate_history(fake_token_counter):
     agent._refresh_fixed_layer_snapshot.assert_called_once()
     assert [message.content for message in history] == ["old"]
     assert builder.last_messages is not history
-    assert [message.content for message in builder.last_messages] == ["old", "preview"]
+    assert [message.content for message in builder.last_messages] == ["old"]
     assert payload["sessionId"] == "s_json"
     assert payload["messages"] == [
         {"role": "user", "content": "old", "turn_id": 1, "seq_in_turn": 1},
@@ -1261,7 +1291,14 @@ def test_build_transformed_context_rebuilds_fixed_layer_each_time() -> None:
     agent._fixed_layer = FixedLayerData()
     agent._assemble_fixed_layer = MagicMock(side_effect=[first_layer, second_layer])
     agent._refresh_sub_agent_contexts = MagicMock()
-    agent._session = SimpleNamespace(history=[Message(Role.USER, "hello")])
+    history = [Message(Role.USER, "hello")]
+    agent._session = SimpleNamespace(
+        history=history,
+        context_history=lambda: SimpleNamespace(
+            messages=tuple(history),
+            filtered_message_count=0,
+        ),
+    )
     agent._status_mgr = None
     agent._scene_tracker = None
     agent._rp_module_registry = None
@@ -1285,11 +1322,21 @@ def test_context_inspection_rebuilds_fixed_layer_each_time() -> None:
         def __init__(self) -> None:
             self.fixed_layer = None
 
-        def build(self, *, fixed_layer, messages, **_kwargs):  # noqa: ANN001
+        def build(
+            self,
+            *,
+            fixed_layer,
+            history_messages,
+            current_user_message,
+            **_kwargs,
+        ):  # noqa: ANN001
             self.fixed_layer = fixed_layer
             return RPGContext(
                 fixed_layer=fixed_layer,
-                hot_history=HotHistoryLayer(messages=list(messages)),
+                hot_history=HotHistoryLayer(messages=[
+                    *history_messages,
+                    *([current_user_message] if current_user_message else []),
+                ]),
             )
 
     first_layer = FixedLayerData(
@@ -1305,7 +1352,13 @@ def test_context_inspection_rebuilds_fixed_layer_each_time() -> None:
     agent._fixed_layer = FixedLayerData()
     agent._assemble_fixed_layer = MagicMock(side_effect=[first_layer, second_layer])
     agent._refresh_sub_agent_contexts = MagicMock()
-    agent._session = SimpleNamespace(history=[])
+    agent._session = SimpleNamespace(
+        history=[],
+        context_history=lambda: SimpleNamespace(
+            messages=(),
+            filtered_message_count=0,
+        ),
+    )
     agent._status_mgr = None
     agent._scene_tracker = None
     agent._rp_module_registry = None

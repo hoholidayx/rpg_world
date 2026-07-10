@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -21,6 +22,14 @@ _DEFAULT_SESSION_ID = "default"
 DEFAULT_SESSION_ID = _DEFAULT_SESSION_ID
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 _SESSION_ID_MAX_LENGTH = 64
+
+
+@dataclass(frozen=True)
+class ContextHistorySnapshot:
+    """Main-Agent history projection derived from ``summary_processed``."""
+
+    messages: tuple[Message, ...]
+    filtered_message_count: int
 
 
 class SessionManager:
@@ -99,6 +108,44 @@ class SessionManager:
         ]
         self._rebuild_turn_state()
         logger.debug(_TAG + " loaded {} message(s) for session '{}'", len(self.__history), self._session_id)
+
+    def context_history(self) -> ContextHistorySnapshot:
+        """Return the history visible to the main Agent context.
+
+        Persisted sessions read the current SQLite flags on every call so a
+        completed compaction takes effect without reloading the cached Agent.
+        Frontend/history callers continue to use :attr:`history` or the data
+        service's unfiltered list methods.
+        """
+        if self._history_enabled:
+            projection = self._require_data_session().messages.list_for_agent_context(
+                self._session_id
+            )
+            messages = tuple(
+                Message.from_dict(row.to_message_dict())
+                for row in projection.messages
+            )
+            logger.debug(
+                _TAG + " context history projected: session_id={}, kept={}, filtered={}",
+                self._session_id,
+                len(messages),
+                projection.filtered_message_count,
+            )
+            return ContextHistorySnapshot(
+                messages=messages,
+                filtered_message_count=projection.filtered_message_count,
+            )
+
+        messages = tuple(
+            message
+            for message in self.__history
+            if self._in_memory_message_key(message)
+            not in self._summary_processed_message_keys
+        )
+        return ContextHistorySnapshot(
+            messages=messages,
+            filtered_message_count=len(self.__history) - len(messages),
+        )
 
     def begin_turn(self) -> int:
         """Allocate and activate the next turn id."""

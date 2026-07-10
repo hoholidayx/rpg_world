@@ -316,6 +316,57 @@ def test_message_service_processing_flags(tmp_path: Path) -> None:
         database.close()
 
 
+def test_agent_context_projection_uses_summary_processed_only(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        session_id = _create_test_session(database, "s_message_context_projection")
+        first_user = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "u1",
+            turn_id=1,
+            seq_in_turn=1,
+        )
+        first_assistant = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "a1",
+            turn_id=1,
+            seq_in_turn=2,
+        )
+        second_user = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "u2",
+            turn_id=2,
+            seq_in_turn=1,
+        )
+
+        messages.mark_summary_processed(session_id, [first_user.id], batch_id=7)
+        (
+            SessionMessageRecord
+            .update(summary_batch_id=None)
+            .where(SessionMessageRecord.id == first_user.id)
+            .execute()
+        )
+
+        projection = messages.list_for_agent_context(session_id)
+
+        assert [row.content for row in messages.list(session_id)] == ["u1", "a1", "u2"]
+        assert [row.content for row in projection.messages] == ["a1", "u2"]
+        assert projection.filtered_message_count == 1
+        assert first_assistant.summary_processed is False
+        assert second_user.summary_processed is False
+
+        assert messages.delete_for_session(session_id, first_user.id) is True
+        after_delete = messages.list_for_agent_context(session_id)
+        assert [row.content for row in after_delete.messages] == ["a1", "u2"]
+        assert after_delete.filtered_message_count == 0
+    finally:
+        database.close()
+
+
 def test_message_service_rejects_turn_metadata_update(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:

@@ -166,7 +166,7 @@ Telegram 渠道当前支持：
 - 进入 LLM 前，user message 不直接写入 `SessionManager.append()`，而是暂存在 `MessageScratch`。
 - `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。
 - 普通状态表通过同一 scratch 注册 `status_table_set_values`，只允许按 session 运行时表 ID 批量修改已有 key 的 value；工具同时提供给 `StatusSubAgent` 和主 Agent，no-op 不进入 staged changes。
-- 上下文构建读取 scratch 后的 history 与 scene/status，因此主 LLM 能看到本轮预更新状态。
+- 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status，因此主 LLM 能看到本轮预更新状态。
 - LLM 完整成功后，事务一次性提交 staged user message、assistant message 和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
 - WebUI 停止生成走 `requestId` 精准取消：Play API `/sessions/{session_id}/stop` 转发到 Agent service `/chat/stop`，被取消的 stream turn 只丢弃 scratch，不发送 DONE，也不提交消息、状态或 usage。
 - WebUI `retry/edit` 保持历史语义可预期：如果目标是最后一个已持久化 turn，先截断该 turn 再用同一 turn id 重新流式发送；如果目标不是最后一轮，不改写旧历史，而是追加一个新的 turn。
@@ -182,6 +182,7 @@ Telegram 渠道当前支持：
 `rpg_core/context/` 的主流程保持结构化数据，直到发送给 LLM 前才由 Jinja2 模板统一渲染：
 
 - `RPGContextBuilder` 消费预组装的 `FixedLayerData`，并负责摘要、记忆、状态表和用户扩展块，产出结构化 `RPGContext`。
+- 主 Agent 的 `send()`、`send_stream()` 和 `context-preview` 统一通过 `SessionManager.context_history()` 读取历史投影：仅排除 `summary_processed=true` 的单条消息，不校验 `summary_batch_id`、batch 文件、`overall.md` 或 turn 完整性；当前 turn 的 user message 仍来自事务 scratch。
 - `FixedLayerAssembler` 通过 contributors 统一装配固定层 section，例如核心 RP 指令、文本输出格式、世界书、角色卡和已启用 RP Module 的静态契约。
 - `ContextRenderer` 只在 LLM 请求边界把结构化层渲染为 message objects。
 - `ContextInspector` 只服务 `/context`、日志和调试输出，不进入主业务数据模型。
@@ -520,6 +521,8 @@ Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace_id + story_
 会话消息写入 `rpg_session_messages`，冷备份写入 `rpg_session_backup_messages`。数据库自增 `id` 映射为 `Message.uid`；`turn_id` 和 `seq_in_turn` 由 `SessionManager` 管理，持久化路径必须写入正数。主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一；冷备份表保持追加语义，不做唯一约束。
 
 summary 和剧情记忆提取进度标记在 `rpg_session_messages` 对应消息行上；剧情记忆条目写入 `rpg_session_story_memories`，且必须关联正数 `turn_id`。summary 的 `keep_recent_rounds` 和批次切分仍按显式 turn/round 分组；异常 turn metadata 在写入或加载边界失败，不再恢复 user-anchor / pair 降级分组。
+
+Agent Context 与历史展示分离：Play/Agent 的 `history` / `history-page` 接口始终返回完整未删除历史；主 Agent Context 则按 `summary_processed` 字段逐条过滤，`true` 不进入 Context，`false` 进入。只要本次投影中过滤过消息，Summary Layer 可以尝试加载现有 `overall.md`；文件不存在或为空时摘要层为空，但已处理消息仍不回流 Context。删除、清空、编辑回滚和 turn truncate 只直接修改历史，不删除摘要文件、不重置其它消息标记，也不自动重新归纳。
 
 ## 测试
 

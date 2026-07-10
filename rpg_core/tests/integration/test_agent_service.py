@@ -63,6 +63,12 @@ async def test_agent_service_send_history_and_context_preview_use_real_runtime(
         "/agent/v1/chat/send",
         json={"session_id": session_id, "message": "hello service"},
     )
+    persisted = integration_data_gateway.messages.list(session_id)
+    integration_data_gateway.messages.mark_summary_processed(
+        session_id,
+        [next(row.id for row in persisted if row.role == "user")],
+        batch_id=404,
+    )
     history = await agent_service_client.get(
         "/agent/v1/chat/history",
         params={"session_id": session_id},
@@ -83,6 +89,9 @@ async def test_agent_service_send_history_and_context_preview_use_real_runtime(
     assert preview.status_code == 200
     assert preview.json()["sessionId"] == session_id
     assert preview.json()["usageEstimate"]["contextLimit"] == 128_000
+    preview_contents = [row["content"] for row in preview.json()["messages"]]
+    assert all("hello service" not in content for content in preview_contents)
+    assert "config-model response" in preview_contents
 
 
 @pytest.mark.asyncio

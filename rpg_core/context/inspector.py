@@ -59,8 +59,9 @@ class ContextInspector:
 
     def to_payload(self, session_id: str = "") -> dict[str, object]:
         layers = self._layer_payloads()
-        messages = [message.to_dict() for message in self._ctx.to_message_objects()]
-        token_count = sum(_int_value(layer.get("tokenCount")) for layer in layers)
+        message_objects = self._ctx.to_message_objects()
+        messages = [message.to_dict() for message in message_objects]
+        token_count = self._count_messages(message_objects)
         payload: dict[str, object] = {
             "formatVersion": "context-preview.v1",
             "sessionId": session_id,
@@ -165,7 +166,7 @@ class ContextInspector:
 
     def to_markdown(self) -> str:
         layers = self.layer_summary()
-        total_tokens = sum(l.token_count for l in layers)
+        total_tokens = self._count_messages(self._ctx.to_message_objects())
         active_layers = sum(1 for l in layers if l.status == "active")
 
         lines = [

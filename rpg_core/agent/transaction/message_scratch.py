@@ -24,6 +24,3 @@ class MessageScratch:
         )
         self.staged_messages.append(message)
         return message
-
-    def history_for_context(self) -> list[Message]:
-        return [*self.base_history, *self.staged_messages]

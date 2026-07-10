@@ -128,7 +128,9 @@ def test_build_context_layers_and_user_extensions():
             lorebook_entries=[{"name": "Lore"}],
             characters=[{"name": "Alice"}],
         ),
-        messages=messages,
+        history_messages=messages[:-1],
+        current_user_message=messages[-1],
+        summarized_message_count=1,
         status_mgr=SimpleNamespace(
             list_context_tables=lambda: [{
                 "name": "世界状态",
@@ -159,6 +161,41 @@ def test_build_context_layers_and_user_extensions():
     assert "prefix" in rendered[-1].content
     assert "current" in rendered[-1].content
     assert "suffix" in rendered[-1].content
+
+
+def test_build_keeps_last_assistant_when_current_user_is_absent():
+    builder = RPGContextBuilder(
+        config=RPGContextConfig(hot_history_rounds=5),
+        world_name="Test World",
+    )
+    history = [
+        Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
+    ]
+
+    ctx = builder.build(history_messages=history)
+
+    assert [message.content for message in ctx.hot_history.messages] == ["u1", "a1"]
+
+
+def test_summary_layer_depends_on_filtered_message_count_only():
+    builder = RPGContextBuilder(
+        config=RPGContextConfig(hot_history_rounds=50),
+        world_name="Test World",
+    )
+    builder.set_batch_summary_store(FakeSummaryStore(("overall summary", 999)))
+
+    inactive = builder.build(
+        history_messages=[Message(Role.ASSISTANT, "latest")],
+        summarized_message_count=0,
+    )
+    active = builder.build(
+        history_messages=[Message(Role.ASSISTANT, "latest")],
+        summarized_message_count=1,
+    )
+
+    assert inactive.summary.text is None
+    assert active.summary.text == "overall summary"
 
 def test_context_to_message_objects_renders_required_layers():
     ctx = RPGContext(

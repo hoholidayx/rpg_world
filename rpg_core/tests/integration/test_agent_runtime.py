@@ -231,6 +231,65 @@ async def test_story_memory_extraction_runs_after_commit_and_marks_message_rows(
 
 
 @pytest.mark.asyncio
+async def test_main_context_and_preview_filter_summary_processed_rows_only(
+    integration_agent_factory,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    session_id = "integration_context_projection"
+    agent = await integration_agent_factory(session_id)
+
+    await agent.send("第一轮用户输入")
+    before = await agent.get_context_payload()
+    first_rows = integration_data_gateway.messages.list(session_id)
+    first_user = next(row for row in first_rows if row.role == "user")
+    integration_data_gateway.messages.mark_summary_processed(
+        session_id,
+        [first_user.id],
+        batch_id=999,
+    )
+
+    after = await agent.get_context_payload()
+    after_contents = [str(message["content"]) for message in after["messages"]]
+
+    assert [row.content for row in integration_data_gateway.messages.list(session_id)] == [
+        "第一轮用户输入",
+        "config-model response",
+    ]
+    assert all("第一轮用户输入" not in content for content in after_contents)
+    assert "config-model response" in after_contents
+    assert after["usageEstimate"]["usedTokens"] < before["usageEstimate"]["usedTokens"]
+    assert after["usageEstimate"]["usedTokens"] == after["totals"]["tokenCount"]
+
+    await agent.send("第二轮用户输入")
+    send_call = scripted_llm_manager.main_provider().calls[-1]
+    send_contents = [str(message.get("content") or "") for message in send_call.messages]
+    assert all("第一轮用户输入" not in content for content in send_contents)
+    assert "config-model response" in send_contents
+    assert any("第二轮用户输入" in content for content in send_contents)
+
+    second_user = next(
+        row
+        for row in integration_data_gateway.messages.list(session_id)
+        if row.role == "user" and row.content == "第二轮用户输入"
+    )
+    integration_data_gateway.messages.mark_summary_processed(
+        session_id,
+        [second_user.id],
+        batch_id=1000,
+    )
+
+    events = [event async for event in agent.send_stream("第三轮用户输入")]
+    stream_call = scripted_llm_manager.main_provider().calls[-1]
+    stream_contents = [str(message.get("content") or "") for message in stream_call.messages]
+    assert events[-1].kind == StreamEventKind.DONE
+    assert stream_call.stream is True
+    assert all("第一轮用户输入" not in content for content in stream_contents)
+    assert all("第二轮用户输入" not in content for content in stream_contents)
+    assert any("第三轮用户输入" in content for content in stream_contents)
+
+
+@pytest.mark.asyncio
 async def test_summary_compression_writes_batches_and_flags_without_truncating_history(
     integration_agent_factory,
     integration_data_gateway,

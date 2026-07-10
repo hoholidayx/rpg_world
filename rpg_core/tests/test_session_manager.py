@@ -95,6 +95,33 @@ def test_append_persists_messages_backup_and_unique_uids(
     assert reloaded.begin_turn() == turn_id + 1
 
 
+def test_context_history_filters_processed_rows_without_changing_full_history(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
+    make_data_session("s1")
+    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr.load()
+
+    turn_id = mgr.begin_turn()
+    mgr.append(Role.USER, "u1", turn_id=turn_id)
+    mgr.append(Role.ASSISTANT, "a1", turn_id=turn_id)
+    mgr.end_turn(turn_id)
+    user_message = next(message for message in mgr.history if message.is_user())
+    rpg_data_gateway.messages.mark_summary_processed(
+        "s1",
+        [user_message.uid],
+        batch_id=99,
+    )
+
+    projected = mgr.context_history()
+
+    assert [message.content for message in mgr.history] == ["u1", "a1"]
+    assert [message.content for message in projected.messages] == ["a1"]
+    assert projected.filtered_message_count == 1
+
+
 def test_story_memory_progress_uses_message_flags(make_data_session, workspace):
     make_data_session("s1")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)

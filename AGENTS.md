@@ -48,6 +48,7 @@
 - Agent 普通 RP turn 使用 `AgentTurnTransaction`：`send/send_stream` 内的 user/assistant message 与 scene/status document 写入先进入内存 scratch，LLM 完整成功后在短 commit 点统一写 main history、backup history 和状态表；不要在 LLM 前直接 append user history 或直接写 runtime scene/status。summary compression 和 story memory extraction 只作为 commit 后副作用运行，失败只记录 warning。
 - 持久化会话消息必须写入正数 `turn_id` 和 `seq_in_turn`；主消息表唯一约束 `(session_id, turn_id, seq_in_turn)`，冷备份表保持 append-only、不做唯一约束。新增写入路径必须让非法 turn metadata 在写入或加载边界失败，不要恢复 summary/story memory/history pagination 的降级分组。
 - summary/story memory 的续处理进度只使用 `rpg_session_messages.summary_processed` / `story_memory_processed` 行标记，不恢复 last-turn 游标，不通过截断主历史表示已处理范围。
+- 主 Agent Context 的历史投影只以 `summary_processed` 为真源：`true` 的单条消息不进入主 Agent Context，`false` 的消息进入；不要校验 `summary_batch_id`、batch 文件、`overall.md` 或 turn 完整性。Play/Agent history 接口继续返回完整未删除历史，StatusSubAgent/MemorySubAgent 等独立链路不套用该过滤；`context-preview` token 估算必须基于实际渲染的过滤后 messages。
 - Agent/Play SSE 业务错误码走 `error_code` / `errorCode` 字段；`content` / `message` 保持底层错误文本，不把错误码前缀写入正文，也不要把业务错误码和 HTTP `statusCode` 混用。
 - WebUI 停止生成必须通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 和 Agent service `/chat/stop`；取消成功只丢弃当前 stream turn scratch，不补偿回滚已完成 turn，前端只有收到 `cancelled` 才展示 stopped。
 - `rpg_data` 状态表采用 SQLite document 真源：模板表与会话表都在 SQL 行内保存封装后的 `document_json`，`status_kind` 只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。`rpg_data` 对外返回 `StatusTableDocument` / `StatusTableRow` 等 dataclass，不暴露原始 JSON 字符串作为正文数据。

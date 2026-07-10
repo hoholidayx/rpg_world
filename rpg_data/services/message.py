@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 
 from peewee import Database
 
@@ -11,7 +12,19 @@ from rpg_data import models
 from rpg_data.repositories.records import SessionMessageRecord
 from rpg_data.services._message_store import BaseSessionMessageStore, MessageInput
 
-__all__ = ["MessageService"]
+__all__ = ["AgentContextMessageProjection", "MessageService"]
+
+
+@dataclass(frozen=True)
+class AgentContextMessageProjection:
+    """Messages eligible for the main Agent context.
+
+    ``summary_processed`` is the sole projection rule.  The complete mutable
+    history remains available through :meth:`MessageService.list`.
+    """
+
+    messages: tuple[models.SessionMessage, ...]
+    filtered_message_count: int
 
 
 class MessageService:
@@ -58,6 +71,15 @@ class MessageService:
         offset: int = 0,
     ) -> list[models.SessionMessage]:
         return self._store.list(session_id, limit=limit, offset=offset)
+
+    def list_for_agent_context(self, session_id: str) -> AgentContextMessageProjection:
+        """Return current messages after applying ``summary_processed`` only."""
+        rows = self.list(session_id)
+        messages = tuple(row for row in rows if not row.summary_processed)
+        return AgentContextMessageProjection(
+            messages=messages,
+            filtered_message_count=len(rows) - len(messages),
+        )
 
     def list_turn_window(
         self,

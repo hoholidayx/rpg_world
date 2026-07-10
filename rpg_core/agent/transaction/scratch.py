@@ -39,6 +39,3 @@ class TurnScratch:
 
     def stage_message(self, role: Role | str, content: str) -> Message:
         return self.message_scratch.stage(role, content)
-
-    def history_for_context(self) -> list[Message]:
-        return self.message_scratch.history_for_context()
