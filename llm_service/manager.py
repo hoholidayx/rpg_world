@@ -24,7 +24,6 @@ from llm_service.keys import (
     LLM_KIND_RERANK,
     PROVIDER_LLAMA,
     PROVIDER_OPENAI,
-    PROVIDER_SHARED,
     PROVIDER_KINDS,
     RERANK_MODEL_TYPE_CHAT_POINTWISE,
     RERANK_MODEL_TYPE_QWEN3_LOGIT,
@@ -408,10 +407,6 @@ class LLMManager:
         cfg = self._resolve_cfg(biz_key)
         backend = cfg.provider
 
-        if backend == PROVIDER_SHARED:
-            shared_from = self._require_shared_from(cfg, biz_key)
-            return self.get_provider(shared_from, overrides=overrides)
-
         if backend not in PROVIDER_KINDS:
             raise ValueError(
                 f"{biz_key} config invalid: provider must be "
@@ -423,7 +418,7 @@ class LLMManager:
         if cfg.kind == LLM_KIND_RERANK:
             return self._build_rerank_provider(cfg, biz_key, backend, overrides=overrides)
 
-        # chat / rerank / planner — all go through the same chat construction
+        # Chat and planner use the same provider construction path.
         return self._build_chat_provider_inner(cfg, biz_key, backend, overrides=overrides)
 
     def _build_chat_provider_inner(
@@ -436,7 +431,7 @@ class LLMManager:
     ) -> LLMProvider:
         if backend == PROVIDER_OPENAI:
             return self._build_openai_provider(
-                scope=biz_key,
+                scope=cfg.provider_key,
                 model=self._openai_model(cfg, overrides),
                 api_key=self._openai_api_key(cfg, overrides),
                 base_url=self._openai_base_url(cfg, overrides),
@@ -445,7 +440,7 @@ class LLMManager:
             )
         if backend == PROVIDER_LLAMA:
             return self._build_llama_provider(
-                scope=biz_key,
+                scope=cfg.provider_key,
                 model_path=cfg.llama_model_path,
                 n_ctx=cfg.llama_n_ctx,
                 n_gpu_layers=cfg.llama_n_gpu_layers,
@@ -465,14 +460,14 @@ class LLMManager:
     ) -> LLMProvider:
         if backend == PROVIDER_OPENAI:
             return self._build_openai_provider(
-                scope=biz_key,
+                scope=cfg.provider_key,
                 model=self._openai_model(cfg, overrides),
                 api_key=self._openai_api_key(cfg, overrides),
                 base_url=self._openai_base_url(cfg, overrides),
             )
         if backend == PROVIDER_LLAMA:
             return self._build_llama_embedding_provider(
-                scope=biz_key,
+                scope=cfg.provider_key,
                 model_path=cfg.llama_model_path,
                 n_ctx=cfg.llama_n_ctx,
                 n_gpu_layers=cfg.llama_n_gpu_layers,
@@ -497,7 +492,7 @@ class LLMManager:
                     f"{biz_key} config invalid: rerank_model_type={rerank_model_type!r} requires provider={PROVIDER_OPENAI!r}"
                 )
             return self._build_openai_provider(
-                scope=biz_key,
+                scope=cfg.provider_key,
                 model=self._openai_model(cfg, overrides),
                 api_key=self._openai_api_key(cfg, overrides),
                 base_url=self._openai_base_url(cfg, overrides),
@@ -510,7 +505,7 @@ class LLMManager:
                     f"{biz_key} config invalid: rerank_model_type={rerank_model_type!r} requires provider={PROVIDER_LLAMA!r}"
                 )
             return self._build_llama_logit_rerank_provider(
-                scope=biz_key,
+                scope=cfg.provider_key,
                 model_path=cfg.llama_model_path,
                 n_ctx=cfg.llama_n_ctx,
                 n_gpu_layers=cfg.llama_n_gpu_layers,
@@ -523,13 +518,6 @@ class LLMManager:
     @staticmethod
     def _resolve_cfg(biz_key: str) -> BizConfig:
         return resolve_biz_config(biz_key)
-
-    @staticmethod
-    def _require_shared_from(cfg: BizConfig, biz_key: str) -> str:
-        shared_from = cfg.shared_from
-        if not shared_from:
-            raise ValueError(f"{biz_key} config invalid: shared_from is required for shared provider")
-        return shared_from
 
     @staticmethod
     def _effective_overrides(overrides: ProviderOverrides | None) -> ProviderOverrides | None:

@@ -44,9 +44,8 @@ base:
     llama_request_timeout_ms: 60000
     llama_startup_timeout_ms: 120000
     llama_max_parallel_models: 2
-  biz:
-    agent.main:
-      kind: chat
+  providers:
+    agent_chat:
       provider: openai
       openai:
         model: test-model
@@ -55,8 +54,7 @@ base:
         base_url: null
         max_tokens: null
         temperature: null
-    memory.embed:
-      kind: embedding
+    memory_embedding:
       provider: llama
       llama:
         model_path: data/models/Qwen3-Embedding-0.6B-f16.gguf
@@ -65,8 +63,7 @@ base:
         n_threads: 4
         verbose: false
         request_timeout_ms: 60000
-    memory.query_planner:
-      kind: planner
+    memory_query_planner:
       provider: llama
       llama:
         model_path: data/models/planner.gguf
@@ -75,10 +72,8 @@ base:
         temperature: 0.0
         max_tokens: 512
         request_timeout_ms: 60000
-    memory.rerank:
-      kind: rerank
+    memory_rerank:
       provider: llama
-      rerank_model_type: qwen3_logit
       llama:
         model_path: data/models/rerank.gguf
         n_ctx: 4096
@@ -86,6 +81,20 @@ base:
         temperature: 0.0
         request_timeout_ms: 60000
         verbose: false
+  biz:
+    agent.main:
+      kind: chat
+      provider_key: agent_chat
+    memory.embed:
+      kind: embedding
+      provider_key: memory_embedding
+    memory.query_planner:
+      kind: planner
+      provider_key: memory_query_planner
+    memory.rerank:
+      kind: rerank
+      provider_key: memory_rerank
+      rerank_model_type: qwen3_logit
 {llm_extra}
 profiles:
 {llm_profiles}
@@ -147,9 +156,8 @@ base:
     llama_request_timeout_ms: 60000
     llama_startup_timeout_ms: 120000
     llama_max_parallel_models: 2
-  biz:
-    agent.main:
-      kind: chat
+  providers:
+    agent_chat:
       provider: openai
       openai:
         model: base-model
@@ -158,6 +166,10 @@ base:
         base_url: null
         max_tokens: null
         temperature: null
+  biz:
+    agent.main:
+      kind: chat
+      provider_key: agent_chat
 profiles:
   local: {}
   test: {}
@@ -167,8 +179,8 @@ profiles:
     )
     (tmp_path / "llm.local.yaml").write_text(
         """
-biz:
-  agent.main:
+providers:
+  agent_chat:
     openai:
       api_key: local-key
 """,
@@ -176,8 +188,8 @@ biz:
     )
     (tmp_path / "llm.test.yaml").write_text(
         """
-biz:
-  agent.main:
+providers:
+  agent_chat:
     openai:
       api_key_env: TEST_KEY
 """,
@@ -269,7 +281,7 @@ def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> Non
     assert rp_modules.dice.max_die_sides == 100
 
 
-def test_memory_settings_merge_shared_openai_and_resolve_nested_llama_paths(tmp_path: Path, monkeypatch) -> None:
+def test_memory_settings_resolve_provider_pool_entries(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "settings.yaml"
     cfg.write_text(
         """
@@ -297,9 +309,8 @@ base:
     llama_request_timeout_ms: 60000
     llama_startup_timeout_ms: 120000
     llama_max_parallel_models: 2
-  biz:
-    agent.main:
-      kind: chat
+  providers:
+    agent_chat:
       provider: openai
       openai:
         model: test-model
@@ -308,8 +319,7 @@ base:
         base_url: null
         max_tokens: null
         temperature: null
-    memory.embed:
-      kind: embedding
+    memory_embedding:
       provider: openai
       openai:
         model: embed-model
@@ -318,8 +328,7 @@ base:
         base_url: https://memory.example
         max_tokens: null
         temperature: null
-    memory.query_planner:
-      kind: planner
+    memory_query_planner:
       provider: llama
       llama:
         model_path: data/models/planner.gguf
@@ -328,6 +337,16 @@ base:
         temperature: 0.0
         max_tokens: 512
         request_timeout_ms: 60000
+  biz:
+    agent.main:
+      kind: chat
+      provider_key: agent_chat
+    memory.embed:
+      kind: embedding
+      provider_key: memory_embedding
+    memory.query_planner:
+      kind: planner
+      provider_key: memory_query_planner
 profiles:
   local: {}
 """,
@@ -401,14 +420,12 @@ base:
     llama_request_timeout_ms: 60000
     llama_startup_timeout_ms: 120000
     llama_max_parallel_models: 2
-  biz:
-    agent.main:
-      kind: chat
+  providers:
+    llama_chat:
       provider: llama
       llama:
         model_path: data/models/llama-main.gguf
-    memory.embed:
-      kind: embedding
+    memory_embedding:
       provider: llama
       llama:
         model_path: data/models/Qwen3-Embedding-0.6B-f16.gguf
@@ -417,6 +434,13 @@ base:
         n_threads: 4
         verbose: false
         request_timeout_ms: 60000
+  biz:
+    agent.main:
+      kind: chat
+      provider_key: llama_chat
+    memory.embed:
+      kind: embedding
+      provider_key: memory_embedding
 profiles:
   local: {}
   test: {}
@@ -430,7 +454,7 @@ profiles:
     assert settings_module.Settings().agent_model == "data/models/llama-main.gguf"
 
 
-def test_agent_model_and_openai_overrides_follow_shared_chain(tmp_path: Path, monkeypatch) -> None:
+def test_agent_model_and_biz_output_overrides_use_provider_pool(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "settings.yaml"
     _write_settings(cfg)
     llm_path = tmp_path / "llm.yaml"
@@ -442,9 +466,8 @@ base:
     llama_request_timeout_ms: 60000
     llama_startup_timeout_ms: 120000
     llama_max_parallel_models: 2
-  biz:
-    agent.shared:
-      kind: chat
+  providers:
+    shared_chat:
       provider: openai
       openai:
         model: shared-model
@@ -452,16 +475,7 @@ base:
         base_url: https://shared.example
         max_tokens: 321
         temperature: 0.2
-    agent.main:
-      kind: chat
-      provider: shared
-      shared_from: agent.shared
-      openai:
-        api_key: child-key
-        base_url: https://child.example
-        temperature: 0.9
-    memory.embed:
-      kind: embedding
+    memory_embedding:
       provider: llama
       llama:
         model_path: data/models/Qwen3-Embedding-0.6B-f16.gguf
@@ -470,6 +484,15 @@ base:
         n_threads: 4
         verbose: false
         request_timeout_ms: 60000
+  biz:
+    agent.main:
+      kind: chat
+      provider_key: shared_chat
+      max_tokens: 654
+      temperature: 0.9
+    memory.embed:
+      kind: embedding
+      provider_key: memory_embedding
 profiles:
   local: {}
   test: {}
@@ -482,12 +505,12 @@ profiles:
 
     local_settings = settings_module.Settings()
     assert local_settings.agent_model == "shared-model"
-    assert local_settings.agent_base_url == "https://child.example"
-    assert local_settings.agent_max_tokens == 321
+    assert local_settings.agent_base_url == "https://shared.example"
+    assert local_settings.agent_max_tokens == 654
     assert local_settings.agent_temperature == 0.9
 
 
-def test_get_openai_api_key_follows_shared_biz_chain(tmp_path: Path, monkeypatch) -> None:
+def test_get_openai_api_key_uses_selected_provider(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "settings.yaml"
     _write_settings(
         cfg,
@@ -502,17 +525,16 @@ base:
     llama_request_timeout_ms: 60000
     llama_startup_timeout_ms: 120000
     llama_max_parallel_models: 2
-  biz:
-    agent.shared:
-      kind: chat
+  providers:
+    shared_chat:
       provider: openai
       openai:
         model: shared-model
         api_key: shared-key
+  biz:
     agent.main:
       kind: chat
-      provider: shared
-      shared_from: agent.shared
+      provider_key: shared_chat
 profiles:
   local: {}
 """,

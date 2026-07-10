@@ -12,19 +12,27 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from commons.settings import ConfigDict, ConfigValue, PROFILE_ENV, load_profiled_yaml, load_yaml_mapping, resolve_profile_name
+from commons.settings import (
+    PROFILE_ENV,
+    ConfigDict,
+    ConfigValue,
+    load_profiled_yaml,
+    load_yaml_mapping,
+    optional_bool,
+    optional_float,
+    optional_int,
+    resolve_profile_name,
+)
 from llm_service.keys import (
+    LLMConfigKey,
     LLM_KIND_CHAT,
     LLM_KIND_RERANK,
     LLM_KINDS,
-    PROVIDER_DEFAULT,
     PROVIDER_KINDS,
     PROVIDER_LLAMA,
     PROVIDER_OPENAI,
-    PROVIDER_SHARED,
     RERANK_MODEL_TYPES,
 )
-from commons.settings import deep_merge_dicts, optional_bool, optional_float, optional_int
 
 _LLM_SETTINGS_PATH = Path(__file__).resolve().parent / "llm.yaml"
 _PROFILE_ENV = PROFILE_ENV
@@ -45,15 +53,16 @@ class LLMRuntimeConfig:
 
 @dataclass(frozen=True)
 class ResolvedLLMConfig:
+    provider_key: str
     provider: str
     kind: str
     openai: ConfigDict
     llama: ConfigDict
-    shared_from: str = ""
 
 
 @dataclass(frozen=True)
 class AgentLLMDefaults:
+    provider_key: str
     provider: str
     model: str
     openai: ConfigDict
@@ -116,14 +125,16 @@ def get_active_profile() -> str:
 def get_runtime_config() -> LLMRuntimeConfig:
     """Return typed runtime settings from ``llm_service/llm.yaml``."""
     raw = load_llm_settings()
-    runtime = raw.get("runtime", {})
+    runtime = raw.get(LLMConfigKey.RUNTIME, {})
     if not isinstance(runtime, dict):
         runtime = {}
     return LLMRuntimeConfig(
-        llama_process_enabled=optional_bool(runtime.get("llama_process_enabled"), True),
-        llama_request_timeout_ms=optional_int(runtime.get("llama_request_timeout_ms"), 60000) or 60000,
-        llama_startup_timeout_ms=optional_int(runtime.get("llama_startup_timeout_ms"), 120000) or 120000,
-        llama_max_parallel_models=optional_int(runtime.get("llama_max_parallel_models"), 2) or 2,
+        llama_process_enabled=optional_bool(runtime.get(LLMConfigKey.LLAMA_PROCESS_ENABLED), True),
+        llama_request_timeout_ms=optional_int(runtime.get(LLMConfigKey.LLAMA_REQUEST_TIMEOUT_MS), 60000)
+        or 60000,
+        llama_startup_timeout_ms=optional_int(runtime.get(LLMConfigKey.LLAMA_STARTUP_TIMEOUT_MS), 120000)
+        or 120000,
+        llama_max_parallel_models=optional_int(runtime.get(LLMConfigKey.LLAMA_MAX_PARALLEL_MODELS), 2) or 2,
     )
 
 
@@ -131,11 +142,11 @@ def resolve_llm_config(biz_key: str) -> ResolvedLLMConfig:
     """Return a provider-neutral typed config view for *biz_key*."""
     cfg = resolve_biz_config(biz_key)
     return ResolvedLLMConfig(
+        provider_key=cfg.provider_key,
         provider=cfg.provider,
         kind=cfg.kind,
         openai=dict(cfg.openai_cfg),
         llama=dict(cfg.llama_cfg),
-        shared_from=cfg.shared_from,
     )
 
 
@@ -145,6 +156,7 @@ def resolve_agent_defaults(biz_key: str) -> AgentLLMDefaults:
     provider = cfg.provider
     if provider == PROVIDER_OPENAI:
         return AgentLLMDefaults(
+            provider_key=cfg.provider_key,
             provider=provider,
             model=cfg.openai_model,
             openai=dict(cfg.openai_cfg),
@@ -155,6 +167,7 @@ def resolve_agent_defaults(biz_key: str) -> AgentLLMDefaults:
             temperature=cfg.openai_temperature,
         )
     return AgentLLMDefaults(
+        provider_key=cfg.provider_key,
         provider=provider,
         model=cfg.llama_model_path,
         openai=dict(cfg.openai_cfg),
@@ -173,10 +186,11 @@ class BizConfig:
     hard-coded string keys.
     """
 
-    __slots__ = ("_key", "_raw")
+    __slots__ = ("_key", "_provider_key", "_raw")
 
-    def __init__(self, biz_key: str, raw: ConfigDict) -> None:
+    def __init__(self, biz_key: str, provider_key: str, raw: ConfigDict) -> None:
         self._key = biz_key
+        self._provider_key = provider_key
         self._raw = raw
 
     # -- identity --------------------------------------------------------
@@ -186,39 +200,41 @@ class BizConfig:
         return self._key
 
     @property
+    def provider_key(self) -> str:
+        return self._provider_key
+
+    @property
     def provider(self) -> str:
-        """``"openai"`` / ``"llama"`` / ``"shared"``."""
-        raw_value = self._raw.get("provider", PROVIDER_DEFAULT)
-        value = str(raw_value).strip()
+        """``"openai"`` / ``"llama"``."""
+        label = (
+            f"{LLMConfigKey.PROVIDERS}.{self._provider_key}."
+            f"{LLMConfigKey.PROVIDER}"
+        )
+        value = self._require_non_empty(self._raw.get(LLMConfigKey.PROVIDER), label)
         provider = value.lower()
         if provider not in PROVIDER_KINDS:
             raise ValueError(
-                f"{self._key}.provider must be one of {', '.join(sorted(PROVIDER_KINDS))}; got {provider!r}"
+                f"{label} must be one of {', '.join(sorted(PROVIDER_KINDS))}; got {provider!r}"
             )
         return provider
 
     @property
     def kind(self) -> str:
         """``"chat"`` / ``"embedding"`` / ``"planner"`` / ``"rerank"``."""
-        raw_value = self._raw.get("kind", LLM_KIND_CHAT)
-        value = str(raw_value).strip()
+        label = f"{self._key}.{LLMConfigKey.KIND}"
+        value = self._require_non_empty(self._raw.get(LLMConfigKey.KIND), label)
         kind = value.lower()
         if kind not in LLM_KINDS:
             raise ValueError(
-                f"{self._key}.kind must be one of {', '.join(sorted(LLM_KINDS))}; got {kind!r}"
+                f"{label} must be one of {', '.join(sorted(LLM_KINDS))}; got {kind!r}"
             )
         return kind
 
     @property
-    def shared_from(self) -> str:
-        """Biz key to delegate to when ``provider == "shared"``."""
-        return str(self._raw.get("shared_from") or "").strip()
-
-    @property
     def rerank_model_type(self) -> str:
         """Explicit rerank scoring protocol for ``kind: rerank`` configs."""
-        label = f"{self._key}.rerank_model_type"
-        raw_value = self._raw.get("rerank_model_type")
+        label = f"{self._key}.{LLMConfigKey.RERANK_MODEL_TYPE}"
+        raw_value = self._raw.get(LLMConfigKey.RERANK_MODEL_TYPE)
         if self.kind != LLM_KIND_RERANK:
             return self._optional_str(raw_value)
         value = self._require_non_empty(raw_value, label).lower()
@@ -233,7 +249,8 @@ class BizConfig:
     @property
     def openai_model(self) -> str:
         return self._require_non_empty(
-            self._openai_sub.get("model"), f"{self._key}.openai.model"
+            self._openai_sub.get(LLMConfigKey.MODEL),
+            f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.MODEL}",
         )
 
     @property
@@ -246,19 +263,22 @@ class BizConfig:
 
     @property
     def openai_base_url(self) -> str:
-        return self._optional_str(self._openai_sub.get("base_url"))
+        return self._optional_str(self._openai_sub.get(LLMConfigKey.BASE_URL))
 
     @property
     def openai_max_tokens(self) -> int | None:
-        return optional_int(self._openai_sub.get("max_tokens"), None)
+        return optional_int(self._openai_sub.get(LLMConfigKey.MAX_TOKENS), None)
 
     @property
     def openai_context_window(self) -> int | None:
-        return optional_int(self._openai_sub.get("context_window"), None)
+        return optional_int(self._openai_sub.get(LLMConfigKey.CONTEXT_WINDOW), None)
 
     @property
     def openai_temperature(self) -> float | None:
-        return self._optional_float(self._openai_sub.get("temperature"), f"{self._key}.openai.temperature")
+        return self._optional_float(
+            self._openai_sub.get(LLMConfigKey.TEMPERATURE),
+            f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.TEMPERATURE}",
+        )
 
     @property
     def _openai_sub(self) -> ConfigDict:
@@ -266,7 +286,7 @@ class BizConfig:
         if value is None:
             return {}
         if not isinstance(value, dict):
-            raise ValueError(f"{self._key}.openai must be a mapping")
+            raise ValueError(f"{self._key}.{PROVIDER_OPENAI} must be a mapping")
         return value
 
     # -- llama -----------------------------------------------------------
@@ -274,7 +294,8 @@ class BizConfig:
     @property
     def llama_model_path(self) -> str:
         return self._require_non_empty(
-            self._llama_sub.get("model_path"), f"{self._key}.llama.model_path"
+            self._llama_sub.get(LLMConfigKey.MODEL_PATH),
+            f"{self._key}.{PROVIDER_LLAMA}.{LLMConfigKey.MODEL_PATH}",
         )
 
     @property
@@ -283,35 +304,35 @@ class BizConfig:
 
     @property
     def llama_n_ctx(self) -> int:
-        return optional_int(self._llama_sub.get("n_ctx"), 2048) or 2048
+        return optional_int(self._llama_sub.get(LLMConfigKey.N_CTX), 2048) or 2048
 
     @property
     def llama_max_length(self) -> int:
-        return optional_int(self._llama_sub.get("max_length"), self.llama_n_ctx) or self.llama_n_ctx
+        return optional_int(self._llama_sub.get(LLMConfigKey.MAX_LENGTH), self.llama_n_ctx) or self.llama_n_ctx
 
     @property
     def llama_n_gpu_layers(self) -> int:
-        return optional_int(self._llama_sub.get("n_gpu_layers"), 0) or 0
+        return optional_int(self._llama_sub.get(LLMConfigKey.N_GPU_LAYERS), 0) or 0
 
     @property
     def llama_n_threads(self) -> int:
-        return optional_int(self._llama_sub.get("n_threads"), 4) or 4
+        return optional_int(self._llama_sub.get(LLMConfigKey.N_THREADS), 4) or 4
 
     @property
     def llama_verbose(self) -> bool:
-        return optional_bool(self._llama_sub.get("verbose"), False)
+        return optional_bool(self._llama_sub.get(LLMConfigKey.VERBOSE), False)
 
     @property
     def llama_request_timeout_ms(self) -> int:
-        return optional_int(self._llama_sub.get("request_timeout_ms"), 60000) or 60000
+        return optional_int(self._llama_sub.get(LLMConfigKey.REQUEST_TIMEOUT_MS), 60000) or 60000
 
     @property
     def llama_max_tokens(self) -> int:
-        return optional_int(self._llama_sub.get("max_tokens"), 512) or 512
+        return optional_int(self._llama_sub.get(LLMConfigKey.MAX_TOKENS), 512) or 512
 
     @property
     def llama_temperature(self) -> float:
-        return optional_float(self._llama_sub.get("temperature"), 0.0) or 0.0
+        return optional_float(self._llama_sub.get(LLMConfigKey.TEMPERATURE), 0.0) or 0.0
 
     @property
     def _llama_sub(self) -> ConfigDict:
@@ -319,14 +340,14 @@ class BizConfig:
         if value is None:
             return {}
         if not isinstance(value, dict):
-            raise ValueError(f"{self._key}.llama must be a mapping")
+            raise ValueError(f"{self._key}.{PROVIDER_LLAMA} must be a mapping")
         return value
 
     # -- helpers ---------------------------------------------------------
 
     @property
     def raw(self) -> ConfigDict:
-        """Raw merged config dict (escape hatch for legacy consumers)."""
+        """Effective provider config after applying biz-level overrides."""
         return self._raw
 
     @staticmethod
@@ -355,10 +376,10 @@ class BizConfig:
 
     @staticmethod
     def _resolve_api_key(openai_cfg: ConfigDict) -> str | None:
-        api_key = BizConfig._optional_str(openai_cfg.get("api_key"))
+        api_key = BizConfig._optional_str(openai_cfg.get(LLMConfigKey.API_KEY))
         if api_key:
             return api_key
-        api_key_env = BizConfig._optional_str(openai_cfg.get("api_key_env"))
+        api_key_env = BizConfig._optional_str(openai_cfg.get(LLMConfigKey.API_KEY_ENV))
         if api_key_env:
             env_value = os.environ.get(api_key_env)
             if env_value:
@@ -369,51 +390,103 @@ class BizConfig:
 # ── public API ──────────────────────────────────────────────────────────
 
 
-def get_biz_config(biz_key: str) -> BizConfig | None:
-    """Return the typed config block for *biz_key*, or ``None`` if absent."""
-    raw = load_llm_settings()
-    biz = raw.get("biz", {})
-    if not isinstance(biz, dict):
-        return None
-    cfg = biz.get(biz_key)
-    if not isinstance(cfg, dict):
-        return None
-    return BizConfig(biz_key, cfg)
+_BIZ_FIELDS = frozenset(
+    {
+        LLMConfigKey.KIND,
+        LLMConfigKey.PROVIDER_KEY,
+        LLMConfigKey.CONTEXT_WINDOW,
+        LLMConfigKey.MAX_TOKENS,
+        LLMConfigKey.TEMPERATURE,
+        LLMConfigKey.RERANK_MODEL_TYPE,
+    }
+)
+_BIZ_PROVIDER_OVERRIDES = frozenset(
+    {
+        LLMConfigKey.CONTEXT_WINDOW,
+        LLMConfigKey.MAX_TOKENS,
+        LLMConfigKey.TEMPERATURE,
+    }
+)
 
 
-def _resolve_shared_chain(
-    biz_key: str,
-    *,
-    seen: tuple[str, ...],
-) -> ConfigDict:
-    """Resolve one shared chain branch with loop prevention."""
-    cfg = get_biz_config(biz_key)
-    if cfg is None:
-        raise ValueError(f"llm biz config not found: {biz_key}")
-
-    if cfg.provider != PROVIDER_SHARED:
-        return dict(cfg.raw)
-
-    shared_from = cfg.shared_from
-    if not shared_from:
+def _resolve_biz_entry(biz_key: str, biz_cfg: ConfigDict) -> BizConfig:
+    unknown_fields = sorted(set(biz_cfg) - _BIZ_FIELDS)
+    if unknown_fields:
         raise ValueError(
-            f"{biz_key} config invalid: shared_from is required for shared provider"
+            f"{biz_key} config has unsupported fields: {', '.join(unknown_fields)}"
         )
 
-    if shared_from in seen:
-        chain = " -> ".join((*seen, shared_from))
-        raise ValueError(f"llm biz shared_from cycle detected: {chain}")
+    provider_key = BizConfig._require_non_empty(
+        biz_cfg.get(LLMConfigKey.PROVIDER_KEY),
+        f"{biz_key}.{LLMConfigKey.PROVIDER_KEY}",
+    )
+    raw = load_llm_settings()
+    providers = raw.get(LLMConfigKey.PROVIDERS)
+    if not isinstance(providers, dict):
+        raise ValueError(f"llm {LLMConfigKey.PROVIDERS} must be a mapping")
+    provider_cfg = providers.get(provider_key)
+    if provider_cfg is None:
+        raise ValueError(f"llm provider config not found: {provider_key}")
+    if not isinstance(provider_cfg, dict):
+        raise ValueError(
+            f"{LLMConfigKey.PROVIDERS}.{provider_key} must be a mapping"
+        )
 
-    parent_raw = _resolve_shared_chain(shared_from, seen=(*seen, biz_key))
-    merged = deep_merge_dicts(parent_raw, cfg.raw)
-    merged["provider"] = str(parent_raw.get("provider") or PROVIDER_DEFAULT).strip().lower() or PROVIDER_DEFAULT
-    return merged
+    effective = dict(provider_cfg)
+    effective[LLMConfigKey.PROVIDER_KEY] = provider_key
+    effective[LLMConfigKey.KIND] = biz_cfg.get(LLMConfigKey.KIND)
+    cfg = BizConfig(biz_key, provider_key, effective)
+    backend = cfg.provider
+    kind = cfg.kind
+
+    backend_cfg = effective.get(backend)
+    if not isinstance(backend_cfg, dict):
+        raise ValueError(
+            f"{LLMConfigKey.PROVIDERS}.{provider_key}.{backend} must be a mapping"
+        )
+    merged_backend_cfg = dict(backend_cfg)
+    for field in _BIZ_PROVIDER_OVERRIDES:
+        if field not in biz_cfg:
+            continue
+        target_field = (
+            LLMConfigKey.N_CTX
+            if backend == PROVIDER_LLAMA and field == LLMConfigKey.CONTEXT_WINDOW
+            else field
+        )
+        merged_backend_cfg[target_field] = biz_cfg[field]
+    effective[backend] = merged_backend_cfg
+
+    if LLMConfigKey.RERANK_MODEL_TYPE in biz_cfg:
+        effective[LLMConfigKey.RERANK_MODEL_TYPE] = biz_cfg[LLMConfigKey.RERANK_MODEL_TYPE]
+
+    resolved = BizConfig(biz_key, provider_key, effective)
+    if kind == LLM_KIND_RERANK:
+        resolved.rerank_model_type
+    return resolved
+
+
+def get_biz_config(biz_key: str) -> BizConfig | None:
+    """Return the resolved config for *biz_key*, or ``None`` if absent."""
+    raw = load_llm_settings()
+    biz = raw.get(LLMConfigKey.BIZ)
+    if biz is None:
+        return None
+    if not isinstance(biz, dict):
+        raise ValueError(f"llm {LLMConfigKey.BIZ} must be a mapping")
+    biz_cfg = biz.get(biz_key)
+    if biz_cfg is None:
+        return None
+    if not isinstance(biz_cfg, dict):
+        raise ValueError(f"{biz_key} config must be a mapping")
+    return _resolve_biz_entry(biz_key, biz_cfg)
 
 
 def resolve_biz_config(biz_key: str) -> BizConfig:
-    """Like :func:`get_biz_config` but follows ``shared_from`` chains."""
-    merged = _resolve_shared_chain(biz_key, seen=())
-    return BizConfig(biz_key, merged)
+    """Resolve a biz entry against the configured provider pool."""
+    cfg = get_biz_config(biz_key)
+    if cfg is None:
+        raise ValueError(f"llm biz config not found: {biz_key}")
+    return cfg
 
 
 def resolve_context_window(biz_key: str) -> int | None:

@@ -19,11 +19,10 @@ base:
     # 子进程内最多同时保留/调度的模型实例数。
     llama_max_parallel_models: 2
 
-  # ── 业务键到 LLM provider 的路由 ────────────────────────────────
-  biz:
-    # 主 Agent 对话模型。
-    agent.main:
-      kind: chat
+  # ── 可供业务选择的 LLM provider 池 ───────────────────────────────
+  providers:
+    # 主 Agent 与子 Agent 共用的 OpenAI-compatible 模型。
+    deepseek_v4_flash:
       provider: openai
       openai:
         # OpenAI-compatible 模型名。
@@ -41,21 +40,8 @@ base:
         # 采样温度；null 表示使用 provider 默认值。
         temperature: null
 
-    # 状态子 Agent 默认复用主 Agent。
-    agent.status_sub_agent:
-      kind: chat
-      provider: shared
-      shared_from: agent.main
-
-    # 记忆子 Agent 默认复用主 Agent。
-    agent.memory_sub_agent:
-      kind: chat
-      provider: shared
-      shared_from: agent.main
-
     # 记忆向量嵌入模型。
-    memory.embed:
-      kind: embedding
+    qwen_embedding_0_6b:
       provider: llama
       llama:
         # GGUF 模型路径，相对项目根目录解析。
@@ -72,8 +58,7 @@ base:
         request_timeout_ms: 60000
 
     # 记忆查询规划模型。
-    memory.query_planner:
-      kind: planner
+    memory_query_planner:
       provider: llama
       llama:
         # GGUF 模型路径；留空表示回退规则规划器。
@@ -90,11 +75,8 @@ base:
         request_timeout_ms: 60000
 
     # 记忆重排模型。
-    memory.rerank:
-      kind: rerank
+    memory_rerank:
       provider: llama
-      # 必填：rerank 模型/评分协议，允许 qwen3_logit / chat_pointwise。
-      rerank_model_type: qwen3_logit
       llama:
         # GGUF rerank 模型路径；留空表示该能力不可用。
         model_path: ""
@@ -110,6 +92,40 @@ base:
         request_timeout_ms: 60000
         # 是否输出 llama.cpp verbose 日志。
         verbose: false
+
+  # ── 业务键到 provider 池的路由 ───────────────────────────────────
+  biz:
+    # 主 Agent 对话模型。
+    agent.main:
+      kind: chat
+      provider_key: deepseek_v4_flash
+
+    # 状态子 Agent 复用主 Agent provider。
+    agent.status_sub_agent:
+      kind: chat
+      provider_key: deepseek_v4_flash
+
+    # 记忆子 Agent 复用主 Agent provider。
+    agent.memory_sub_agent:
+      kind: chat
+      provider_key: deepseek_v4_flash
+
+    # 记忆向量嵌入模型。
+    memory.embed:
+      kind: embedding
+      provider_key: qwen_embedding_0_6b
+
+    # 记忆查询规划模型。
+    memory.query_planner:
+      kind: planner
+      provider_key: memory_query_planner
+
+    # 记忆重排模型。
+    memory.rerank:
+      kind: rerank
+      provider_key: memory_rerank
+      # 必填：rerank 模型/评分协议，允许 qwen3_logit / chat_pointwise。
+      rerank_model_type: qwen3_logit
 
 # 固定 profile 名称；覆盖文件无需在这里声明 file。
 profiles:

@@ -347,10 +347,10 @@ def test_memory_manager_reranker_uses_settings_rerank_score_weight(monkeypatch):
 
 def test_llm_manager_builds_logit_provider_for_llama_rerank(monkeypatch):
     class FakeCfg:
+        provider_key = "memory_rerank"
         provider = "llama"
         kind = "rerank"
         rerank_model_type = RERANK_MODEL_TYPE_QWEN3_LOGIT
-        shared_from = ""
         llama_model_path = "/tmp/qwen-rerank.gguf"
         llama_n_ctx = 512
         llama_max_length = 256
@@ -377,10 +377,10 @@ def test_llm_manager_builds_logit_provider_for_llama_rerank(monkeypatch):
 
 def test_llm_manager_builds_chat_score_provider_for_openai_rerank(monkeypatch):
     class FakeCfg:
+        provider_key = "memory_rerank"
         provider = "openai"
         kind = "rerank"
         rerank_model_type = RERANK_MODEL_TYPE_CHAT_POINTWISE
-        shared_from = ""
         openai_model = "rerank-model"
         openai_api_key = "rerank-key"
         openai_base_url = "https://rerank.example"
@@ -401,10 +401,10 @@ def test_llm_manager_builds_chat_score_provider_for_openai_rerank(monkeypatch):
 
 def test_llm_manager_rejects_rerank_model_type_backend_mismatch(monkeypatch):
     class FakeCfg:
+        provider_key = "memory_rerank"
         provider = "openai"
         kind = "rerank"
         rerank_model_type = RERANK_MODEL_TYPE_QWEN3_LOGIT
-        shared_from = ""
 
     monkeypatch.setattr("llm_service.manager.resolve_biz_config", lambda _key: FakeCfg())
 
