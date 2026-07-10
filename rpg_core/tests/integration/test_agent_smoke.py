@@ -21,13 +21,20 @@ async def test_send_persists_history_and_turn_metadata(integration_agent, integr
 
     assert reply.stats is not None
     assert reply.stats.total_tokens > 0
+    assert reply.text == "config-model response"
+    assert [call.model for call in reply.stats.calls] == ["config-model"]
     assert [m.role for m in integration_agent.history] == [Role.USER, Role.ASSISTANT]
     assert [m.turn_id for m in integration_agent.history] == [1, 1]
 
     rows = integration_data_gateway.messages.list("integration_smoke")
+    backup_rows = integration_data_gateway.backup.messages.list("integration_smoke")
     assert len(rows) == 2
     assert [row.turn_id for row in rows] == [1, 1]
+    assert [row.seq_in_turn for row in rows] == [1, 2]
     assert [row.id for row in rows] == [message.uid for message in integration_agent.history]
+    assert [(row.role, row.content, row.turn_id, row.seq_in_turn) for row in backup_rows] == [
+        (row.role, row.content, row.turn_id, row.seq_in_turn) for row in rows
+    ]
 
 
 @pytest.mark.asyncio

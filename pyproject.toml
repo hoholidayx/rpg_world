@@ -81,5 +81,6 @@ rpg_data = ["migrations/*.sql"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = [
-    "integration: tests that require INTEGRATION_TEST=1 and may call real LLM APIs",
+    "integration: backend integration tests gated by INTEGRATION_TEST=1",
+    "live_llm: opt-in real-provider smoke tests gated by LIVE_LLM_TEST=1",
 ]

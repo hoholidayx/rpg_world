@@ -710,6 +710,7 @@ class RPGGameAgent:
             # ── Stream loop ────────────────────────────────────────────
             final_content = ""
             final_event: AgentStreamEvent | None = None
+            stream_failed = False
 
             try:
                 async for event in run_chat_loop_stream(
@@ -723,10 +724,23 @@ class RPGGameAgent:
                         final_content = event.content
                         final_event = event
                     else:
+                        if event.kind == StreamEventKind.ERROR:
+                            stream_failed = True
                         await event_queue.put(event)
             except Exception as exc:
                 logger.opt(exception=exc).error(_TAG + " send_stream error")
                 await self._emit_stream_error(event_queue, exc)
+                return
+
+            if stream_failed or final_event is None:
+                tx.discard()
+                if stream_failed:
+                    await event_queue.put(_StreamSentinel())
+                else:
+                    await self._emit_stream_error(
+                        event_queue,
+                        RuntimeError("LLM stream ended without a DONE event"),
+                    )
                 return
 
             # ── Agent-level cleanup（流结束后执行） ────────────────────
@@ -741,8 +755,7 @@ class RPGGameAgent:
             # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
             aggregate_usage = aggregate_usage_records(turn_stats.calls)
 
-            if final_content:
-                tx.stage_assistant_message(final_content)
+            tx.stage_assistant_message(final_content)
 
             try:
                 tx.commit()
@@ -751,19 +764,10 @@ class RPGGameAgent:
                 await self._emit_stream_error(event_queue, exc)
                 return
 
-            if final_event is not None:
-                final_event.duration_ms = turn_stats.total_duration_ms
-                final_event.usage = aggregate_usage
-                final_event.stats = turn_stats
-                await event_queue.put(final_event)
-            else:
-                await event_queue.put(AgentStreamEvent(
-                    kind=StreamEventKind.DONE,
-                    content=final_content,
-                    usage=aggregate_usage,
-                    duration_ms=turn_stats.total_duration_ms,
-                    model=self._model,
-                ))
+            final_event.duration_ms = turn_stats.total_duration_ms
+            final_event.usage = aggregate_usage
+            final_event.stats = turn_stats
+            await event_queue.put(final_event)
             await event_queue.put(_StreamSentinel())
             await self._run_post_commit_side_effects()
         except asyncio.CancelledError:
