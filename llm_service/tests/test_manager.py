@@ -136,3 +136,33 @@ def test_provider_overrides_keep_provider_instances_isolated(monkeypatch) -> Non
     assert base._max_tokens == 256
     assert overridden._max_tokens == 1024
     assert overridden._temperature == 0.8
+
+
+def test_switching_provider_key_reuses_cached_provider_when_switching_back(monkeypatch) -> None:
+    configs = {
+        "chat_a": _openai_cfg("chat_a", max_tokens=256),
+        "chat_b": _openai_cfg("chat_b", max_tokens=512),
+    }
+    resolved_keys: list[str] = []
+
+    def resolve(_biz_key: str, *, provider_key: str | None = None):  # noqa: ANN202
+        selected = provider_key or "chat_a"
+        resolved_keys.append(selected)
+        return configs[selected]
+
+    _DummyAsyncOpenAI.instances.clear()
+    monkeypatch.setattr("llm_service.manager.AsyncOpenAI", _DummyAsyncOpenAI)
+    monkeypatch.setattr("llm_service.manager.resolve_biz_config", resolve)
+
+    manager = LLMManager()
+    first = manager.get_provider("agent.main", provider_key="chat_a")
+    second = manager.get_provider("agent.main", provider_key="chat_b")
+    switched_back = manager.get_provider("agent.main", provider_key="chat_a")
+
+    assert first is switched_back
+    assert first is not second
+    assert first._client is not second._client
+    assert first._max_tokens == 256
+    assert second._max_tokens == 512
+    assert resolved_keys == ["chat_a", "chat_b", "chat_a"]
+    assert len(_DummyAsyncOpenAI.instances) == 2

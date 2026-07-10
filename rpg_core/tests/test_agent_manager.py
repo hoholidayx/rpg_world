@@ -23,19 +23,6 @@ class FakeAgent:
 def _reset_manager(monkeypatch):
     AgentManager.reset()
     monkeypatch.setattr(agent_manager_module, "RPGGameAgent", FakeAgent)
-    class FakeProvider:
-        def get_default_model(self) -> str:
-            return "default-model"
-
-    class FakeLLMManager:
-        def get_provider(self, biz_key):  # noqa: ANN001
-            return FakeProvider()
-
-    monkeypatch.setattr(
-        agent_manager_module.LLMManager,
-        "get",
-        classmethod(lambda cls: FakeLLMManager()),
-    )
     yield
     AgentManager.reset()
     FakeAgent.instances.clear()
@@ -59,28 +46,10 @@ def test_get_or_create_separates_by_session_only():
     assert len(AgentManager._instances) == 2
 
 
-def test_get_or_create_uses_default_provider(monkeypatch):
-    calls: list[str] = []
-
-    class FakeProvider:
-        def get_default_model(self) -> str:
-            return "override-model"
-
-    class FakeLLMManager:
-        def get_provider(self, biz_key):  # noqa: ANN001
-            calls.append(biz_key)
-            return FakeProvider()
-
-    monkeypatch.setattr(
-        agent_manager_module.LLMManager,
-        "get",
-        classmethod(lambda cls: FakeLLMManager()),
-    )
-
+def test_get_or_create_leaves_main_provider_resolution_to_agent():
     agent = AgentManager.get_or_create(session_id="s1")
 
-    assert agent.kwargs["model"] == "override-model"
-    assert calls[0] == "agent.main"
+    assert agent.kwargs == {"session_id": "s1"}
 
 
 @pytest.mark.asyncio

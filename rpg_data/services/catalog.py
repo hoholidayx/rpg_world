@@ -80,6 +80,16 @@ class CatalogService:
         )
         return stories
 
+    def get_story(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> models.Story | None:
+        story = self._stories.get(story_id)
+        if story is None or story.workspace_id != workspace_id:
+            return None
+        return story
+
     def create_story(
         self,
         workspace_id: str,
@@ -128,6 +138,18 @@ class CatalogService:
                 story_prompt=story_prompt,
                 first_message=first_message,
             )
+
+    def set_story_main_llm_provider_key(
+        self,
+        workspace_id: str,
+        story_id: int,
+        provider_key: str | None,
+    ) -> models.Story | None:
+        story = self.get_story(workspace_id, story_id)
+        if story is None:
+            return None
+        with self._database.atomic():
+            return self._stories.set_main_llm_provider_key(story_id, provider_key)
 
     def create_session(
         self,
@@ -180,6 +202,15 @@ class CatalogService:
             session.story_id,
         )
         return session
+
+    def set_session_main_llm_provider_key(
+        self,
+        session_id: str,
+        provider_key: str | None,
+    ) -> models.Session | None:
+        if self._sessions.get(session_id) is None:
+            return None
+        return self._sessions.set_main_llm_provider_key(session_id, provider_key)
 
     def get_session_story(
         self,

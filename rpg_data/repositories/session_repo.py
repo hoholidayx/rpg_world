@@ -96,6 +96,33 @@ class SessionRepository:
         row = update_timestamp(SessionRecord, session_id)
         return to_session(row) if row is not None else None
 
+    def set_main_llm_provider_key(
+        self,
+        session_id: str,
+        provider_key: str | None,
+    ) -> models.Session | None:
+        with self._database.atomic():
+            if not SessionRecord.select().where(SessionRecord.id == session_id).exists():
+                return None
+            SessionProfileRecord.get_or_create(session=session_id)
+            (
+                SessionProfileRecord
+                .update(
+                    main_llm_provider_key=provider_key,
+                    version=SessionProfileRecord.version + 1,
+                    updated_at=SQL("CURRENT_TIMESTAMP"),
+                )
+                .where(SessionProfileRecord.session == session_id)
+                .execute()
+            )
+            (
+                SessionRecord
+                .update(updated_at=SQL("CURRENT_TIMESTAMP"))
+                .where(SessionRecord.id == session_id)
+                .execute()
+            )
+        return self.get(session_id)
+
     def update_player_character(
         self,
         session_id: str,

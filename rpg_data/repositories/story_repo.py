@@ -75,3 +75,23 @@ class StoryRepository:
     def update_timestamp(self, story_id: int) -> models.Story | None:
         row = update_timestamp(StoryRecord, story_id)
         return to_story(row) if row is not None else None
+
+    def set_main_llm_provider_key(
+        self,
+        story_id: int,
+        provider_key: str | None,
+    ) -> models.Story | None:
+        updated = (
+            StoryRecord
+            .update(
+                main_llm_provider_key=provider_key,
+                version=StoryRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(StoryRecord.id == story_id)
+            .execute()
+        )
+        if not updated:
+            return None
+        row = get_or_none(StoryRecord, story_id)
+        return to_story(row) if row is not None else None

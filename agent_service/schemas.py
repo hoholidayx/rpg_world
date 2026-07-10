@@ -45,6 +45,16 @@ class AgentPlayerCharacterBindRequest(AgentRequestBase):
     player_character_id: int
 
 
+class AgentMainLLMStoryUpdateRequest(_BaseSchema):
+    workspace_id: str
+    story_id: int
+    provider_key: str | None
+
+
+class AgentMainLLMSessionUpdateRequest(AgentRequestBase):
+    provider_key: str | None
+
+
 class AgentSessionEnsureRequest(_BaseSchema):
     workspace_id: str
     story_id: int
@@ -140,6 +150,33 @@ class AgentContextPreviewResponse(BaseModel):
     usage_estimate: JsonObject | None = Field(default=None, alias="usageEstimate")
 
 
+class AgentMainLLMProviderOptionResponse(_BaseSchema):
+    provider_key: str
+    backend: str
+    model: str
+    context_window: int | None = None
+
+
+class AgentMainLLMInvalidOverrideResponse(_BaseSchema):
+    source: Literal["story", "session"]
+    provider_key: str
+
+
+class AgentMainLLMProviderCatalogResponse(_BaseSchema):
+    config_default_provider_key: str
+    options: list[AgentMainLLMProviderOptionResponse] = Field(default_factory=list)
+
+
+class AgentMainLLMSelectionResponse(_BaseSchema):
+    config_default_provider_key: str
+    story_provider_key: str | None = None
+    session_provider_key: str | None = None
+    effective_provider_key: str
+    effective_source: Literal["config", "story", "session"]
+    effective: AgentMainLLMProviderOptionResponse
+    invalid_overrides: list[AgentMainLLMInvalidOverrideResponse] = Field(default_factory=list)
+
+
 class AgentHealthPayload(TypedDict):
     status: str
 
@@ -171,6 +208,33 @@ class AgentSessionPayloadDict(TypedDict):
 
 class AgentSessionCreatePayload(AgentSessionPayloadDict):
     status: Literal["created"]
+
+
+class AgentMainLLMProviderOptionPayload(TypedDict):
+    provider_key: str
+    backend: str
+    model: str
+    context_window: int | None
+
+
+class AgentMainLLMInvalidOverridePayload(TypedDict):
+    source: Literal["story", "session"]
+    provider_key: str
+
+
+class AgentMainLLMProviderCatalogPayload(TypedDict):
+    config_default_provider_key: str
+    options: list[AgentMainLLMProviderOptionPayload]
+
+
+class AgentMainLLMSelectionPayload(TypedDict):
+    config_default_provider_key: str
+    story_provider_key: str | None
+    session_provider_key: str | None
+    effective_provider_key: str
+    effective_source: Literal["config", "story", "session"]
+    effective: AgentMainLLMProviderOptionPayload
+    invalid_overrides: list[AgentMainLLMInvalidOverridePayload]
 
 
 class AgentTurnCancelPayloadBase(TypedDict):

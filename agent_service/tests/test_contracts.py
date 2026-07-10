@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -182,11 +183,16 @@ class InvalidTurnAgentManager(FakeAgentManager):
 
 
 class FakeCatalog:
+    stories: dict[int, models.Story] = {}
     sessions: dict[str, models.Session] = {}
     created_count = 0
 
     @classmethod
     def reset(cls) -> None:
+        cls.stories = {
+            1: models.Story(1, "ws", "Main Story"),
+            2: models.Story(2, "other", "Foreign Story"),
+        }
         cls.sessions = {
             "s1": models.Session("s1", "ws", 1, title="Existing"),
             "foreign": models.Session("foreign", "other", 2, title="Foreign"),
@@ -196,6 +202,47 @@ class FakeCatalog:
     @classmethod
     def get_session(cls, session_id: str) -> models.Session | None:
         return cls.sessions.get(session_id)
+
+    @classmethod
+    def get_story(cls, workspace_id: str, story_id: int) -> models.Story | None:
+        story = cls.stories.get(story_id)
+        if story is None or story.workspace_id != workspace_id:
+            return None
+        return story
+
+    @classmethod
+    def get_session_story(cls, session_id: str) -> models.Story | None:
+        session = cls.get_session(session_id)
+        if session is None:
+            return None
+        return cls.get_story(session.workspace_id, session.story_id)
+
+    @classmethod
+    def set_story_main_llm_provider_key(
+        cls,
+        workspace_id: str,
+        story_id: int,
+        provider_key: str | None,
+    ) -> models.Story | None:
+        story = cls.get_story(workspace_id, story_id)
+        if story is None:
+            return None
+        updated = replace(story, main_llm_provider_key=provider_key)
+        cls.stories[story_id] = updated
+        return updated
+
+    @classmethod
+    def set_session_main_llm_provider_key(
+        cls,
+        session_id: str,
+        provider_key: str | None,
+    ) -> models.Session | None:
+        session = cls.get_session(session_id)
+        if session is None:
+            return None
+        updated = replace(session, main_llm_provider_key=provider_key)
+        cls.sessions[session_id] = updated
+        return updated
 
     @classmethod
     def create_session(
@@ -364,6 +411,94 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert context_preview.json()["messages"][0]["content"] == "## Fixed"
         assert context_preview.json()["usageEstimate"]["usedTokens"] == 3
         assert context_preview.json()["usageEstimate"]["contextLimit"] == 100
+
+        main_llm_options = client.get("/agent/v1/chat/main-llm/options")
+        assert main_llm_options.status_code == 200
+        assert main_llm_options.json()["config_default_provider_key"] == "deepseek_v4_flash"
+        assert [item["provider_key"] for item in main_llm_options.json()["options"]] == [
+            "deepseek_v4_flash"
+        ]
+        assert set(main_llm_options.json()["options"][0]) == {
+            "provider_key",
+            "backend",
+            "model",
+            "context_window",
+        }
+
+        story_main_llm = client.get(
+            "/agent/v1/chat/main-llm/story",
+            params={"workspace_id": "ws", "story_id": 1},
+        )
+        assert story_main_llm.status_code == 200
+        assert story_main_llm.json()["effective_source"] == "config"
+
+        story_selected = client.post(
+            "/agent/v1/chat/main-llm/story",
+            json={
+                "workspace_id": "ws",
+                "story_id": 1,
+                "provider_key": "deepseek_v4_flash",
+            },
+        )
+        assert story_selected.status_code == 200
+        assert story_selected.json()["story_provider_key"] == "deepseek_v4_flash"
+        assert story_selected.json()["effective_source"] == "story"
+
+        session_inherits_story = client.get(
+            "/agent/v1/chat/main-llm/session",
+            params={"session_id": "s1"},
+        )
+        assert session_inherits_story.status_code == 200
+        assert session_inherits_story.json()["effective_source"] == "story"
+
+        session_selected = client.post(
+            "/agent/v1/chat/main-llm/session",
+            json={"session_id": "s1", "provider_key": "deepseek_v4_flash"},
+        )
+        assert session_selected.status_code == 200
+        assert session_selected.json()["session_provider_key"] == "deepseek_v4_flash"
+        assert session_selected.json()["effective_source"] == "session"
+
+        session_cleared = client.post(
+            "/agent/v1/chat/main-llm/session",
+            json={"session_id": "s1", "provider_key": None},
+        )
+        assert session_cleared.status_code == 200
+        assert session_cleared.json()["session_provider_key"] is None
+        assert session_cleared.json()["effective_source"] == "story"
+
+        story_cleared = client.post(
+            "/agent/v1/chat/main-llm/story",
+            json={"workspace_id": "ws", "story_id": 1, "provider_key": None},
+        )
+        assert story_cleared.status_code == 200
+        assert story_cleared.json()["story_provider_key"] is None
+        assert story_cleared.json()["effective_source"] == "config"
+
+        assert client.get(
+            "/agent/v1/chat/main-llm/story",
+            params={"workspace_id": "missing", "story_id": 1},
+        ).status_code == 404
+        assert client.get(
+            "/agent/v1/chat/main-llm/session",
+            params={"session_id": "missing_session"},
+        ).status_code == 404
+        assert client.get(
+            "/agent/v1/chat/main-llm/session",
+            params={"session_id": "bad/session"},
+        ).status_code == 422
+        assert client.get(
+            "/agent/v1/chat/main-llm/story",
+            params={"workspace_id": " ", "story_id": 1},
+        ).status_code == 422
+        assert client.post(
+            "/agent/v1/chat/main-llm/session",
+            json={"session_id": "s1", "provider_key": "not_selectable"},
+        ).status_code == 422
+        assert client.post(
+            "/agent/v1/chat/main-llm/session",
+            json={"session_id": "s1"},
+        ).status_code == 422
 
         sessions = client.get(
             "/agent/v1/chat/sessions",

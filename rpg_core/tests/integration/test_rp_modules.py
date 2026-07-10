@@ -36,7 +36,14 @@ class _NoLLMProvider:
 
 
 class _NoLLMManager:
-    def get_provider(self, _biz_key, overrides=None):  # noqa: ANN001
+    def get_provider(
+        self,
+        _biz_key,
+        overrides=None,
+        *,
+        provider_key=None,
+    ):  # noqa: ANN001
+        del overrides, provider_key
         return _NoLLMProvider()
 
 

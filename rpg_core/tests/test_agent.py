@@ -338,6 +338,7 @@ def _make_transaction_agent(
     agent._rp_module_registry = None
     agent._tool_registry = agent_module.ToolRegistry()
     agent._provider = object()
+    agent._refresh_main_provider = lambda: agent._provider
     agent._last_tool_records = None
     return agent
 
@@ -437,6 +438,109 @@ async def test_send_impl_discards_turn_scratch_when_llm_fails(monkeypatch):
         ("old", 1, 1),
     ]
     post_commit.maybe_auto_extract.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_main_provider_switch_applies_next_turn_and_is_fixed_for_current_turn(monkeypatch):
+    agent = _make_transaction_agent(monkeypatch)
+
+    class FakeProvider:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def get_default_model(self) -> str:
+            return self.name
+
+    providers = {
+        "chat_a": FakeProvider("model-a"),
+        "chat_b": FakeProvider("model-b"),
+    }
+    current_key = {"value": "chat_a"}
+    manager_calls: list[str] = []
+
+    def selection():
+        key = current_key["value"]
+        return SimpleNamespace(
+            effective_provider_key=key,
+            effective_source="session",
+            effective=SimpleNamespace(context_window=64000),
+        )
+
+    class FakeManager:
+        def get_provider(self, biz_key, overrides=None, *, provider_key=None):  # noqa: ANN001
+            assert biz_key == "agent.main"
+            assert overrides == ProviderOverrides()
+            manager_calls.append(provider_key)
+            return providers[provider_key]
+
+    agent._main_llm_selection_service = SimpleNamespace(
+        resolve_session=lambda _session_id: selection()
+    )
+    agent._main_llm_selection = None
+    agent._provider_overrides = ProviderOverrides()
+    agent._provider = None
+    agent._refresh_main_provider = RPGGameAgent._refresh_main_provider.__get__(
+        agent,
+        RPGGameAgent,
+    )
+    monkeypatch.setattr(agent_module.LLMManager, "get", classmethod(lambda cls: FakeManager()))
+
+    providers_seen_by_turn: list[FakeProvider] = []
+
+    async def fake_run_chat_loop(**kwargs):  # noqa: ANN001
+        providers_seen_by_turn.append(kwargs["provider"])
+        if len(providers_seen_by_turn) == 1:
+            current_key["value"] = "chat_b"
+        return f"reply-{len(providers_seen_by_turn)}", []
+
+    monkeypatch.setattr(agent_module, "run_chat_loop", fake_run_chat_loop)
+
+    await agent._send_impl("first")
+    await agent._send_impl("second")
+
+    assert providers_seen_by_turn == [providers["chat_a"], providers["chat_b"]]
+    assert manager_calls == ["chat_a", "chat_b"]
+    assert agent._provider is providers["chat_b"]
+    assert agent._model == "model-b"
+
+
+@pytest.mark.asyncio
+async def test_context_preview_uses_latest_effective_main_llm_window(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeInspector:
+        def __init__(self, ctx, token_counter, *, hot_history_rounds, context_limit):  # noqa: ANN001
+            captured.update(
+                ctx=ctx,
+                token_counter=token_counter,
+                hot_history_rounds=hot_history_rounds,
+                context_limit=context_limit,
+            )
+
+        def to_payload(self, *, session_id: str) -> dict[str, object]:
+            return {"sessionId": session_id, "contextLimit": captured["context_limit"]}
+
+    monkeypatch.setattr(agent_module, "ContextInspector", FakeInspector)
+
+    agent = object.__new__(RPGGameAgent)
+    agent._ensure_initialized = AsyncMock()
+    agent._build_ctx_for_inspection = MagicMock(return_value="ctx")
+    agent._resolve_main_llm_selection = lambda: SimpleNamespace(
+        effective=SimpleNamespace(context_window=8192)
+    )
+    agent._token_counter = "counter"
+    agent._builder = SimpleNamespace(config=SimpleNamespace(hot_history_rounds=7))
+    agent._session_id = "s_preview"
+
+    payload = await agent.get_context_payload()
+
+    assert payload == {"sessionId": "s_preview", "contextLimit": 8192}
+    assert captured == {
+        "ctx": "ctx",
+        "token_counter": "counter",
+        "hot_history_rounds": 7,
+        "context_limit": 8192,
+    }
 
 
 class _FakeStatusManager:
@@ -840,7 +944,10 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
             return FixedLayerContribution(sections=self.sections)
 
     class FakeSubAgent:
+        calls: list[dict[str, object]] = []
+
         def __init__(self, *args, **kwargs) -> None:
+            self.calls.append(dict(kwargs))
             self.enabled = kwargs.get("enabled", True)
             self.add_tool_provider = MagicMock()
             self.bind_context = MagicMock()
@@ -865,9 +972,16 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
         coro.close()
         return MagicMock()
 
+    class FakeProvider:
+        def get_default_model(self) -> str:
+            return "selected-model"
+
     class FakeManager:
-        def get_provider(self, biz_key):  # noqa: ANN001
-            return object()
+        def get_provider(self, biz_key, overrides=None, *, provider_key=None):  # noqa: ANN001
+            assert biz_key == "agent.main"
+            assert overrides == ProviderOverrides(openai_model="gpt-4o")
+            assert provider_key == "main_chat"
+            return FakeProvider()
 
     _patch_story_prompt_contributor(monkeypatch)
     monkeypatch.setattr(agent_module, "CoreRPContractContributor", FakeCoreRPContractContributor)
@@ -900,6 +1014,14 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
     agent._base_url = None
     agent._max_tokens = None
     agent._temperature = None
+    agent._provider_overrides = ProviderOverrides(openai_model="gpt-4o")
+    agent._main_llm_selection_service = SimpleNamespace(
+        resolve_session=lambda _session_id: SimpleNamespace(
+            effective_provider_key="main_chat",
+            effective_source="config",
+        )
+    )
+    agent._main_llm_selection = None
     agent._session = SimpleNamespace(load=MagicMock())
     agent._memory_manager = None
     agent._builder = SimpleNamespace(
@@ -930,6 +1052,8 @@ async def test_ensure_initialized_is_idempotent(monkeypatch):
     fake_watcher.start.assert_called_once()
     assert agent._consumer_task is not None
     assert agent._initialized is True
+    assert len(FakeSubAgent.calls) == 2
+    assert all("provider_overrides" not in kwargs for kwargs in FakeSubAgent.calls)
 
 
 @pytest.mark.asyncio
@@ -1063,6 +1187,9 @@ async def test_get_context_json_does_not_mutate_history(fake_token_counter):
     agent._status_mgr = None
     agent._scene_tracker = None
     agent._rp_module_registry = None
+    agent._resolve_main_llm_selection = lambda: SimpleNamespace(
+        effective=SimpleNamespace(context_window=64000)
+    )
 
     payload = json.loads(await agent.get_context_json("preview"))
 
@@ -1232,7 +1359,9 @@ async def test_ensure_initialized_populates_model_from_provider(monkeypatch):
             return "provider-model"
 
     class FakeManager:
-        def get_provider(self, _biz_key):  # noqa: ANN001
+        def get_provider(self, _biz_key, overrides=None, *, provider_key=None):  # noqa: ANN001
+            assert overrides == ProviderOverrides()
+            assert provider_key == "main_chat"
             return FakeProvider()
 
     fake_watcher = FakeWatcher()
@@ -1271,6 +1400,14 @@ async def test_ensure_initialized_populates_model_from_provider(monkeypatch):
     agent._base_url = None
     agent._max_tokens = None
     agent._temperature = None
+    agent._provider_overrides = ProviderOverrides()
+    agent._main_llm_selection_service = SimpleNamespace(
+        resolve_session=lambda _session_id: SimpleNamespace(
+            effective_provider_key="main_chat",
+            effective_source="config",
+        )
+    )
+    agent._main_llm_selection = None
     agent._session = SimpleNamespace(load=MagicMock())
     agent._memory_manager = None
     agent._builder = SimpleNamespace(

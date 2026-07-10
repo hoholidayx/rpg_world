@@ -84,12 +84,13 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "story_memory_last_turn_id" not in session_columns
         assert "last_story_turn_index" not in session_columns
         assert "session_key" not in session_columns
-        assert {"story_prompt", "first_message"}.issubset(story_columns)
+        assert {"story_prompt", "first_message", "main_llm_provider_key"}.issubset(story_columns)
         assert "description" not in story_columns
         assert {
             "session_id",
             "title",
             "description",
+            "main_llm_provider_key",
             "player_character_id",
             "player_character_snapshot_json",
         }.issubset(profile_columns)
@@ -196,6 +197,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0001", "0001_initial.sql"),
             ("0002", "0002_demo.sql"),
             ("0003", "0003_pagination_demo.sql"),
+            ("0004", "0004_main_llm_selection.sql"),
         ]
     finally:
         conn.close()

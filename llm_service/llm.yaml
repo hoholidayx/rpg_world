@@ -99,13 +99,16 @@ base:
     agent.main:
       kind: chat
       provider_key: deepseek_v4_flash
+      # Web/API 可为主 Agent 选择的 provider 白名单，顺序即展示顺序。
+      provider_option_keys:
+        - deepseek_v4_flash
 
-    # 状态子 Agent 复用主 Agent provider。
+    # 状态子 Agent 独立绑定；当前引用同一池项，但不跟随主 Agent 动态切换。
     agent.status_sub_agent:
       kind: chat
       provider_key: deepseek_v4_flash
 
-    # 记忆子 Agent 复用主 Agent provider。
+    # 记忆子 Agent 独立绑定；当前引用同一池项，但不跟随主 Agent 动态切换。
     agent.memory_sub_agent:
       kind: chat
       provider_key: deepseek_v4_flash

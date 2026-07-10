@@ -59,12 +59,12 @@ from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.rpg_context import FixedLayerData, Role, Message
 from rpg_core.context.usage import aggregate_usage_records
 from llm_service.base_provider import LLMProvider
-from llm_service.config import resolve_context_window
 from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
 )
+from rpg_core.main_llm import MainLLMSelection, MainLLMSelectionService
 from rpg_core.scene import SceneTracker
 from rpg_core.session import InvalidTurnMetadataError, SessionManager
 from rpg_core.settings import settings
@@ -91,7 +91,7 @@ class RPGGameAgent:
     Owns the full lifecycle:
       1. RPG context (builder + managers + stores from ``build_rpg_context``)
       2. Conversation history (in-memory)
-      3. OpenAI provider
+      3. Main LLM provider
 
     Usage::
 
@@ -112,6 +112,7 @@ class RPGGameAgent:
         history_enabled: bool = True,
         tools: list[BaseTool] | None = None,
         token_counter: TokenCounter | None = None,
+        main_llm_selection_service: MainLLMSelectionService | None = None,
     ) -> None:
         self._session_id = session_id
         self._world_name = world_name
@@ -130,6 +131,10 @@ class RPGGameAgent:
         self._history_enabled = history_enabled
         self._extra_tools = tools or []
         self._token_counter = token_counter or TiktokenTokenCounter()
+        self._main_llm_selection_service = (
+            main_llm_selection_service or MainLLMSelectionService()
+        )
+        self._main_llm_selection: MainLLMSelection | None = None
 
         self._initialized: bool = False
         self._builder: RPGContextBuilder | None = None
@@ -327,6 +332,8 @@ class RPGGameAgent:
             _turn_stats.finished_at = _time.monotonic()
             return AgentReply(text=role_guard_reply, stats=_turn_stats)
 
+        main_provider = self._refresh_main_provider()
+
         # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
         turn_stats = TurnStats(started_at=_time.monotonic())
         tx = AgentTurnTransaction(
@@ -402,7 +409,7 @@ class RPGGameAgent:
             schemas = tool_registry.get_openai_schemas() if tool_registry else None
 
             reply_text, records = await run_chat_loop(
-                provider=self._provider,
+                provider=main_provider,
                 tool_registry=tool_registry,
                 messages=messages,
                 schemas=schemas,
@@ -620,6 +627,8 @@ class RPGGameAgent:
             await event_queue.put(_StreamSentinel())
             return
 
+        main_provider = self._refresh_main_provider()
+
         # ── TurnStats 聚合器 ───────────────────────────────────────
         turn_stats = TurnStats(started_at=_time.monotonic())
         tx = AgentTurnTransaction(
@@ -704,7 +713,7 @@ class RPGGameAgent:
 
             try:
                 async for event in run_chat_loop_stream(
-                        provider=self._provider,
+                        provider=main_provider,
                         tool_registry=tool_registry,
                         messages=messages,
                         schemas=schemas,
@@ -987,6 +996,46 @@ class RPGGameAgent:
 
     # ── context inspection (no LLM call) ─────────────────────────────
 
+    def _resolve_main_llm_selection(self) -> MainLLMSelection:
+        selection = self._main_llm_selection_service.resolve_session(self._session_id)
+        if selection is None:
+            raise FileNotFoundError(
+                f"Main LLM selection context not found for session: {self._session_id}"
+            )
+        return selection
+
+    def _refresh_main_provider(self) -> LLMProvider:
+        selection = self._resolve_main_llm_selection()
+        if (
+            self._provider is not None
+            and self._main_llm_selection is not None
+            and self._main_llm_selection.effective_provider_key
+            == selection.effective_provider_key
+        ):
+            self._main_llm_selection = selection
+            return self._provider
+
+        self._provider = LLMManager.get().get_provider(
+            AGENT_MAIN_BIZ_KEY,
+            overrides=self._provider_overrides,
+            provider_key=selection.effective_provider_key,
+        )
+        self._model = self._provider.get_default_model()
+        previous_key = (
+            self._main_llm_selection.effective_provider_key
+            if self._main_llm_selection is not None
+            else None
+        )
+        self._main_llm_selection = selection
+        logger.info(
+            _TAG + " main provider selected: session_id={}, previous={}, current={}, source={}",
+            self._session_id,
+            previous_key,
+            selection.effective_provider_key,
+            selection.effective_source,
+        )
+        return self._provider
+
     async def get_context_info(self, user_input: str = "") -> list["LayerInfo"]:
         """Build the full 5-layer context and return structured layer metadata.
 
@@ -1004,7 +1053,7 @@ class RPGGameAgent:
             ctx,
             self._token_counter,
             hot_history_rounds=self._builder.config.hot_history_rounds,
-            context_limit=resolve_context_window(AGENT_MAIN_BIZ_KEY),
+            context_limit=self._resolve_main_llm_selection().effective.context_window,
         ).layer_summary()
 
     async def get_context_markdown(self, user_input: str = "") -> str:
@@ -1020,7 +1069,7 @@ class RPGGameAgent:
             ctx,
             self._token_counter,
             hot_history_rounds=self._builder.config.hot_history_rounds,
-            context_limit=resolve_context_window(AGENT_MAIN_BIZ_KEY),
+            context_limit=self._resolve_main_llm_selection().effective.context_window,
         ).to_markdown()
 
     async def get_context_payload(self, user_input: str = "") -> dict[str, object]:
@@ -1031,7 +1080,7 @@ class RPGGameAgent:
             ctx,
             self._token_counter,
             hot_history_rounds=self._builder.config.hot_history_rounds,
-            context_limit=resolve_context_window(AGENT_MAIN_BIZ_KEY),
+            context_limit=self._resolve_main_llm_selection().effective.context_window,
         ).to_payload(session_id=self._session_id)
 
     async def get_context_json(self, user_input: str = "") -> str:
@@ -1330,23 +1379,12 @@ class RPGGameAgent:
             if self._memory_manager:
                 self._memory_manager.init()
 
-            provider_overrides = getattr(self, "_provider_overrides", None)
-            manager = LLMManager.get()
-            if provider_overrides is None:
-                self._provider = manager.get_provider(AGENT_MAIN_BIZ_KEY)
-            else:
-                self._provider = manager.get_provider(
-                    AGENT_MAIN_BIZ_KEY,
-                    overrides=provider_overrides,
-                )
-            if self._model is None:
-                self._model = self._provider.get_default_model()
+            self._refresh_main_provider()
 
             # ── StatusSubAgent ────────────────────────────────────────────
             status_cfg = settings.status_sub_agent_config
             self._status_sub_agent = StatusSubAgent(
                 provider_biz_key=AGENT_STATUS_SUB_AGENT_BIZ_KEY,
-                provider_overrides=provider_overrides,
                 enabled=status_cfg.get("enabled", True),
             )
             if self._scene_tracker:
@@ -1358,7 +1396,6 @@ class RPGGameAgent:
             memory_cfg = settings.memory_sub_agent_config
             self._memory_sub_agent = MemorySubAgent(
                 provider_biz_key=AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
-                provider_overrides=provider_overrides,
                 enabled=memory_cfg.get("enabled", True),
                 summary_store=self._builder._summary_store if self._builder else None,
                 story_store=self._builder._story_memory if self._builder else None,

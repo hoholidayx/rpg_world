@@ -182,6 +182,48 @@ def test_repositories_create_workspace_story_session_and_query_sessions(
         database.close()
 
 
+def test_story_and_session_repositories_set_and_clear_main_llm_provider_key(
+    tmp_path: Path,
+) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        workspaces = WorkspaceRepository(database)
+        stories = StoryRepository(database)
+        sessions = SessionRepository(database)
+
+        with database.atomic():
+            workspaces.create("llm_selection", "LLM Selection", "data/llm_selection")
+            story = stories.create("llm_selection", "Provider Story")
+            session = sessions.create(
+                "llm_selection",
+                story.id,
+                session_id="s_provider",
+                title="Provider Session",
+            )
+
+        story_selected = stories.set_main_llm_provider_key(story.id, "chat_b")
+        session_selected = sessions.set_main_llm_provider_key(session.id, "chat_c")
+
+        assert story_selected is not None
+        assert story_selected.main_llm_provider_key == "chat_b"
+        assert story_selected.version == story.version + 1
+        assert session_selected is not None
+        assert session_selected.main_llm_provider_key == "chat_c"
+
+        story_cleared = stories.set_main_llm_provider_key(story.id, None)
+        session_cleared = sessions.set_main_llm_provider_key(session.id, None)
+
+        assert story_cleared is not None
+        assert story_cleared.main_llm_provider_key is None
+        assert story_cleared.version == story.version + 2
+        assert session_cleared is not None
+        assert session_cleared.main_llm_provider_key is None
+        assert stories.set_main_llm_provider_key(-1, "chat_b") is None
+        assert sessions.set_main_llm_provider_key("missing", "chat_b") is None
+    finally:
+        database.close()
+
+
 def test_character_lorebook_and_mount_repositories(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:

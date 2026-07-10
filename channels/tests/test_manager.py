@@ -26,20 +26,6 @@ class FakeAgent:
 def _fake_agent_runtime(monkeypatch):
     AgentManager.reset()
     monkeypatch.setattr(agent_manager_module, "RPGGameAgent", FakeAgent)
-
-    class FakeProvider:
-        def get_default_model(self) -> str:
-            return "default-model"
-
-    class FakeLLMManager:
-        def get_provider(self, biz_key):  # noqa: ANN001
-            return FakeProvider()
-
-    monkeypatch.setattr(
-        agent_manager_module.LLMManager,
-        "get",
-        classmethod(lambda cls: FakeLLMManager()),
-    )
     yield
     AgentManager.reset()
 
@@ -59,6 +45,7 @@ class TestAgentManager:
     def test_get_or_create_default(self):
         agent = AgentManager.get_or_create()
         assert agent._session_id == "default"
+        assert agent.kwargs == {"session_id": "default"}
         assert AgentManager._instances["default"] is agent
 
     def test_get_or_create_twice_returns_same(self):

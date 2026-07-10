@@ -99,6 +99,7 @@ class Story:
     # Story-level fixed system prompt injected through the fixed layer.
     story_prompt: str = ""
     first_message: str = ""
+    main_llm_provider_key: str | None = None
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""
@@ -116,6 +117,7 @@ class Session:
     updated_at: str = ""
     title: str = ""
     description: str = ""
+    main_llm_provider_key: str | None = None
     player_character_id: int | None = None
     player_character_snapshot_json: str = "{}"
     profile_metadata_json: str = "{}"
@@ -128,6 +130,7 @@ class SessionProfile:
     session_id: str
     title: str = ""
     description: str = ""
+    main_llm_provider_key: str | None = None
     player_character_id: int | None = None
     player_character_snapshot_json: str = "{}"
     metadata_json: str = "{}"

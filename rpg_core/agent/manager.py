@@ -15,8 +15,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rpg_core.agent.agent import RPGGameAgent
-from llm_service.manager import LLMManager
-from llm_service.keys import AGENT_MAIN_BIZ_KEY
 
 if TYPE_CHECKING:
     pass
@@ -55,12 +53,7 @@ class AgentManager:
         """
         key = cls._cache_key(session_id)
         if key not in cls._instances:
-            manager = LLMManager.get()
-            provider = manager.get_provider(AGENT_MAIN_BIZ_KEY)
-            cls._instances[key] = RPGGameAgent(
-                session_id=session_id,
-                model=provider.get_default_model(),
-            )
+            cls._instances[key] = RPGGameAgent(session_id=session_id)
         return cls._instances[key]
 
     @classmethod

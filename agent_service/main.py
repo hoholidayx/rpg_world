@@ -25,6 +25,13 @@ from agent_service.schemas import (
     AgentHistoryPayload,
     AgentHistoryResponse,
     AgentHealthResponse,
+    AgentMainLLMProviderCatalogPayload,
+    AgentMainLLMProviderCatalogResponse,
+    AgentMainLLMProviderOptionPayload,
+    AgentMainLLMSelectionPayload,
+    AgentMainLLMSelectionResponse,
+    AgentMainLLMSessionUpdateRequest,
+    AgentMainLLMStoryUpdateRequest,
     AgentMessageRequest,
     AgentPlayerCharacterBindRequest,
     AgentReplyPayload,
@@ -54,6 +61,12 @@ from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayl
 from rpg_core.agent.command import CommandResult
 from rpg_core.agent.loop import AgentReply
 from rpg_core.agent.manager import AgentManager
+from rpg_core.main_llm import (
+    InvalidMainLLMProviderKey,
+    MainLLMProviderCatalog,
+    MainLLMSelection,
+    MainLLMSelectionService,
+)
 from rpg_core.session import InvalidTurnMetadataError, SessionManager, validate_turn_metadata
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway
@@ -131,6 +144,83 @@ async def get_context_preview(
         raise HTTPException(status_code=400, detail=f"Context preview failed: {exc}") from exc
     _log_context_preview_payload(body_session_id=session_id, payload=payload)
     return AgentContextPreviewResponse.model_validate(payload)
+
+
+@app.get(
+    f"{_service_prefix()}/chat/main-llm/options",
+    response_model=AgentMainLLMProviderCatalogResponse,
+)
+async def get_main_llm_options() -> AgentMainLLMProviderCatalogPayload:
+    return _main_llm_catalog_payload(_main_llm_selection_service().get_provider_catalog())
+
+
+@app.get(
+    f"{_service_prefix()}/chat/main-llm/story",
+    response_model=AgentMainLLMSelectionResponse,
+)
+async def get_story_main_llm(
+    workspace_id: str = Query(...),
+    story_id: int = Query(...),
+) -> AgentMainLLMSelectionPayload:
+    workspace_id = _require_workspace(workspace_id)
+    selection = _main_llm_selection_service().resolve_story(workspace_id, story_id)
+    if selection is None:
+        raise HTTPException(status_code=404, detail="story not found in workspace")
+    return _main_llm_selection_payload(selection)
+
+
+@app.post(
+    f"{_service_prefix()}/chat/main-llm/story",
+    response_model=AgentMainLLMSelectionResponse,
+)
+async def set_story_main_llm(
+    body: AgentMainLLMStoryUpdateRequest,
+) -> AgentMainLLMSelectionPayload:
+    workspace_id = _require_workspace(body.workspace_id)
+    try:
+        selection = _main_llm_selection_service().set_story_provider_key(
+            workspace_id,
+            body.story_id,
+            body.provider_key,
+        )
+    except InvalidMainLLMProviderKey as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if selection is None:
+        raise HTTPException(status_code=404, detail="story not found in workspace")
+    return _main_llm_selection_payload(selection)
+
+
+@app.get(
+    f"{_service_prefix()}/chat/main-llm/session",
+    response_model=AgentMainLLMSelectionResponse,
+)
+async def get_session_main_llm(
+    session_id: str = Query(...),
+) -> AgentMainLLMSelectionPayload:
+    session_id = _require_session_id(session_id)
+    selection = _main_llm_selection_service().resolve_session(session_id)
+    if selection is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return _main_llm_selection_payload(selection)
+
+
+@app.post(
+    f"{_service_prefix()}/chat/main-llm/session",
+    response_model=AgentMainLLMSelectionResponse,
+)
+async def set_session_main_llm(
+    body: AgentMainLLMSessionUpdateRequest,
+) -> AgentMainLLMSelectionPayload:
+    try:
+        selection = _main_llm_selection_service().set_session_provider_key(
+            body.session_id,
+            body.provider_key,
+        )
+    except InvalidMainLLMProviderKey as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if selection is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return _main_llm_selection_payload(selection)
 
 
 @app.get(f"{_service_prefix()}/chat/sessions", response_model=AgentSessionsResponse)
@@ -458,6 +548,45 @@ def _session_payload(session: models.Session) -> AgentSessionPayloadDict:
         "story_id": int(session.story_id),
         "session_id": str(session.id),
         "title": str(session.title or session.id),
+    }
+
+
+def _main_llm_option_payload(option) -> AgentMainLLMProviderOptionPayload:  # noqa: ANN001
+    return {
+        "provider_key": option.provider_key,
+        "backend": option.backend,
+        "model": option.model,
+        "context_window": option.context_window,
+    }
+
+
+def _main_llm_selection_service() -> MainLLMSelectionService:
+    return MainLLMSelectionService(get_data_service_gateway())
+
+
+def _main_llm_catalog_payload(
+    catalog: MainLLMProviderCatalog,
+) -> AgentMainLLMProviderCatalogPayload:
+    return {
+        "config_default_provider_key": catalog.config_default_provider_key,
+        "options": [_main_llm_option_payload(option) for option in catalog.options],
+    }
+
+
+def _main_llm_selection_payload(
+    selection: MainLLMSelection,
+) -> AgentMainLLMSelectionPayload:
+    return {
+        "config_default_provider_key": selection.config_default_provider_key,
+        "story_provider_key": selection.story_provider_key,
+        "session_provider_key": selection.session_provider_key,
+        "effective_provider_key": selection.effective_provider_key,
+        "effective_source": selection.effective_source,
+        "effective": _main_llm_option_payload(selection.effective),
+        "invalid_overrides": [
+            {"source": item.source, "provider_key": item.provider_key}
+            for item in selection.invalid_overrides
+        ],
     }
 
 

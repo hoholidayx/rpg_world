@@ -52,6 +52,11 @@ def to_story(row: records.StoryRecord) -> models.Story:
         summary=str(row.summary or ""),
         story_prompt=str(row.story_prompt or ""),
         first_message=str(row.first_message or ""),
+        main_llm_provider_key=(
+            str(row.main_llm_provider_key)
+            if row.main_llm_provider_key is not None
+            else None
+        ),
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),
         created_at=str(row.created_at),
@@ -76,6 +81,11 @@ def to_session(row: records.SessionRecord) -> models.Session:
         updated_at=str(row.updated_at),
         title=str(profile.title or "") if profile is not None else "",
         description=str(profile.description or "") if profile is not None else "",
+        main_llm_provider_key=(
+            str(profile.main_llm_provider_key)
+            if profile is not None and profile.main_llm_provider_key is not None
+            else None
+        ),
         player_character_id=(
             int(profile.player_character_id)
             if profile is not None and profile.player_character_id is not None
@@ -97,6 +107,11 @@ def to_session_profile(row: records.SessionProfileRecord) -> models.SessionProfi
         session_id=str(row.session_id),
         title=str(row.title or ""),
         description=str(row.description or ""),
+        main_llm_provider_key=(
+            str(row.main_llm_provider_key)
+            if row.main_llm_provider_key is not None
+            else None
+        ),
         player_character_id=int(row.player_character_id) if row.player_character_id is not None else None,
         player_character_snapshot_json=str(row.player_character_snapshot_json or "{}"),
         metadata_json=str(row.metadata_json or "{}"),

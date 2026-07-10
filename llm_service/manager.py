@@ -116,7 +116,7 @@ class LLMManager:
         self._llama_completion_model_cache: dict[LlamaCompletionModelCacheKey, LlamaCompletionModel] = {}
         self._llama_embedding_model_cache: dict[LlamaEmbeddingModelCacheKey, LlamaEmbeddingModel] = {}
         self._llama_rerank_model_cache: dict[LlamaRerankModelCacheKey, LlamaRerankModel] = {}
-        self._provider_cache: dict[tuple[str, ProviderOverrides | None], ManagedProvider] = {}
+        self._provider_cache: dict[tuple[str, str, ProviderOverrides | None], ManagedProvider] = {}
         self._lock = RLock()
 
     @classmethod
@@ -378,6 +378,8 @@ class LLMManager:
         self,
         biz_key: str,
         overrides: ProviderOverrides | None = None,
+        *,
+        provider_key: str | None = None,
     ) -> ManagedProvider:
         """Return a fully constructed provider for *biz_key*.
 
@@ -386,11 +388,16 @@ class LLMManager:
         llama / chat / embedding / rerank) are handled internally.
         """
         with self._lock:
-            cache_key = (biz_key, self._effective_overrides(overrides))
+            cfg = self._resolve_cfg(biz_key, provider_key=provider_key)
+            cache_key = (
+                biz_key,
+                cfg.provider_key,
+                self._effective_overrides(overrides),
+            )
             cached = self._provider_cache.get(cache_key)
             if cached is not None:
                 return cached
-            provider = self._build_provider(biz_key, overrides=overrides)
+            provider = self._build_provider(cfg, biz_key, overrides=overrides)
             self._provider_cache[cache_key] = provider
             return provider
 
@@ -400,11 +407,11 @@ class LLMManager:
 
     def _build_provider(
         self,
+        cfg: BizConfig,
         biz_key: str,
         *,
         overrides: ProviderOverrides | None = None,
     ) -> ManagedProvider:
-        cfg = self._resolve_cfg(biz_key)
         backend = cfg.provider
 
         if backend not in PROVIDER_KINDS:
@@ -516,8 +523,14 @@ class LLMManager:
         raise ValueError(f"{biz_key} config invalid: unsupported rerank_model_type {rerank_model_type!r}")
 
     @staticmethod
-    def _resolve_cfg(biz_key: str) -> BizConfig:
-        return resolve_biz_config(biz_key)
+    def _resolve_cfg(
+        biz_key: str,
+        *,
+        provider_key: str | None = None,
+    ) -> BizConfig:
+        if provider_key is None:
+            return resolve_biz_config(biz_key)
+        return resolve_biz_config(biz_key, provider_key=provider_key)
 
     @staticmethod
     def _effective_overrides(overrides: ProviderOverrides | None) -> ProviderOverrides | None:

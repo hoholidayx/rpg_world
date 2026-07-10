@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from commons.settings import (
     PROFILE_ENV,
@@ -49,6 +49,14 @@ class LLMRuntimeConfig:
     llama_request_timeout_ms: int = 60000
     llama_startup_timeout_ms: int = 120000
     llama_max_parallel_models: int = 2
+
+
+@dataclass(frozen=True)
+class LLMProviderOption:
+    provider_key: str
+    backend: str
+    model: str
+    context_window: int | None
 
 
 @dataclass(frozen=True)
@@ -138,9 +146,13 @@ def get_runtime_config() -> LLMRuntimeConfig:
     )
 
 
-def resolve_llm_config(biz_key: str) -> ResolvedLLMConfig:
+def resolve_llm_config(
+    biz_key: str,
+    *,
+    provider_key: str | None = None,
+) -> ResolvedLLMConfig:
     """Return a provider-neutral typed config view for *biz_key*."""
-    cfg = resolve_biz_config(biz_key)
+    cfg = resolve_biz_config(biz_key, provider_key=provider_key)
     return ResolvedLLMConfig(
         provider_key=cfg.provider_key,
         provider=cfg.provider,
@@ -150,9 +162,13 @@ def resolve_llm_config(biz_key: str) -> ResolvedLLMConfig:
     )
 
 
-def resolve_agent_defaults(biz_key: str) -> AgentLLMDefaults:
+def resolve_agent_defaults(
+    biz_key: str,
+    *,
+    provider_key: str | None = None,
+) -> AgentLLMDefaults:
     """Return the default agent-facing LLM settings for *biz_key*."""
-    cfg = resolve_biz_config(biz_key)
+    cfg = resolve_biz_config(biz_key, provider_key=provider_key)
     provider = cfg.provider
     if provider == PROVIDER_OPENAI:
         return AgentLLMDefaults(
@@ -186,11 +202,18 @@ class BizConfig:
     hard-coded string keys.
     """
 
-    __slots__ = ("_key", "_provider_key", "_raw")
+    __slots__ = ("_key", "_provider_key", "_provider_option_keys", "_raw")
 
-    def __init__(self, biz_key: str, provider_key: str, raw: ConfigDict) -> None:
+    def __init__(
+        self,
+        biz_key: str,
+        provider_key: str,
+        provider_option_keys: tuple[str, ...],
+        raw: ConfigDict,
+    ) -> None:
         self._key = biz_key
         self._provider_key = provider_key
+        self._provider_option_keys = provider_option_keys
         self._raw = raw
 
     # -- identity --------------------------------------------------------
@@ -202,6 +225,10 @@ class BizConfig:
     @property
     def provider_key(self) -> str:
         return self._provider_key
+
+    @property
+    def provider_option_keys(self) -> tuple[str, ...]:
+        return self._provider_option_keys
 
     @property
     def provider(self) -> str:
@@ -394,6 +421,7 @@ _BIZ_FIELDS = frozenset(
     {
         LLMConfigKey.KIND,
         LLMConfigKey.PROVIDER_KEY,
+        LLMConfigKey.PROVIDER_OPTION_KEYS,
         LLMConfigKey.CONTEXT_WINDOW,
         LLMConfigKey.MAX_TOKENS,
         LLMConfigKey.TEMPERATURE,
@@ -409,21 +437,80 @@ _BIZ_PROVIDER_OVERRIDES = frozenset(
 )
 
 
-def _resolve_biz_entry(biz_key: str, biz_cfg: ConfigDict) -> BizConfig:
+def _resolve_provider_option_keys(
+    biz_key: str,
+    biz_cfg: ConfigDict,
+    default_provider_key: str,
+) -> tuple[str, ...]:
+    raw_options = biz_cfg.get(LLMConfigKey.PROVIDER_OPTION_KEYS)
+    if raw_options is None:
+        return (default_provider_key,)
+    if not isinstance(raw_options, list):
+        raise ValueError(
+            f"{biz_key}.{LLMConfigKey.PROVIDER_OPTION_KEYS} must be a list"
+        )
+
+    option_keys: list[str] = []
+    for index, raw_key in enumerate(raw_options):
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            raise ValueError(
+                f"{biz_key}.{LLMConfigKey.PROVIDER_OPTION_KEYS}[{index}] must be a non-empty string"
+            )
+        option_keys.append(raw_key.strip())
+    if not option_keys:
+        raise ValueError(
+            f"{biz_key}.{LLMConfigKey.PROVIDER_OPTION_KEYS} must not be empty"
+        )
+    if len(set(option_keys)) != len(option_keys):
+        raise ValueError(
+            f"{biz_key}.{LLMConfigKey.PROVIDER_OPTION_KEYS} must not contain duplicates"
+        )
+    if default_provider_key not in option_keys:
+        raise ValueError(
+            f"{biz_key}.{LLMConfigKey.PROVIDER_OPTION_KEYS} must include default provider_key "
+            f"{default_provider_key!r}"
+        )
+    return tuple(option_keys)
+
+
+def _resolve_biz_entry(
+    biz_key: str,
+    biz_cfg: ConfigDict,
+    *,
+    selected_provider_key: str | None = None,
+) -> BizConfig:
     unknown_fields = sorted(set(biz_cfg) - _BIZ_FIELDS)
     if unknown_fields:
         raise ValueError(
             f"{biz_key} config has unsupported fields: {', '.join(unknown_fields)}"
         )
 
-    provider_key = BizConfig._require_non_empty(
+    default_provider_key = BizConfig._require_non_empty(
         biz_cfg.get(LLMConfigKey.PROVIDER_KEY),
         f"{biz_key}.{LLMConfigKey.PROVIDER_KEY}",
     )
+    provider_option_keys = _resolve_provider_option_keys(
+        biz_key,
+        biz_cfg,
+        default_provider_key,
+    )
+    provider_key = (
+        default_provider_key
+        if selected_provider_key is None
+        else selected_provider_key
+    )
+    if provider_key not in provider_option_keys:
+        raise ValueError(
+            f"{biz_key} provider_key {provider_key!r} is not in "
+            f"{LLMConfigKey.PROVIDER_OPTION_KEYS}"
+        )
     raw = load_llm_settings()
     providers = raw.get(LLMConfigKey.PROVIDERS)
     if not isinstance(providers, dict):
         raise ValueError(f"llm {LLMConfigKey.PROVIDERS} must be a mapping")
+    for option_key in provider_option_keys:
+        if option_key not in providers:
+            raise ValueError(f"llm provider config not found: {option_key}")
     provider_cfg = providers.get(provider_key)
     if provider_cfg is None:
         raise ValueError(f"llm provider config not found: {provider_key}")
@@ -435,7 +522,7 @@ def _resolve_biz_entry(biz_key: str, biz_cfg: ConfigDict) -> BizConfig:
     effective = dict(provider_cfg)
     effective[LLMConfigKey.PROVIDER_KEY] = provider_key
     effective[LLMConfigKey.KIND] = biz_cfg.get(LLMConfigKey.KIND)
-    cfg = BizConfig(biz_key, provider_key, effective)
+    cfg = BizConfig(biz_key, provider_key, provider_option_keys, effective)
     backend = cfg.provider
     kind = cfg.kind
 
@@ -459,7 +546,7 @@ def _resolve_biz_entry(biz_key: str, biz_cfg: ConfigDict) -> BizConfig:
     if LLMConfigKey.RERANK_MODEL_TYPE in biz_cfg:
         effective[LLMConfigKey.RERANK_MODEL_TYPE] = biz_cfg[LLMConfigKey.RERANK_MODEL_TYPE]
 
-    resolved = BizConfig(biz_key, provider_key, effective)
+    resolved = BizConfig(biz_key, provider_key, provider_option_keys, effective)
     if kind == LLM_KIND_RERANK:
         resolved.rerank_model_type
     return resolved
@@ -481,17 +568,60 @@ def get_biz_config(biz_key: str) -> BizConfig | None:
     return _resolve_biz_entry(biz_key, biz_cfg)
 
 
-def resolve_biz_config(biz_key: str) -> BizConfig:
+def resolve_biz_config(
+    biz_key: str,
+    *,
+    provider_key: str | None = None,
+) -> BizConfig:
     """Resolve a biz entry against the configured provider pool."""
-    cfg = get_biz_config(biz_key)
-    if cfg is None:
+    raw = load_llm_settings()
+    biz = raw.get(LLMConfigKey.BIZ)
+    if biz is None:
         raise ValueError(f"llm biz config not found: {biz_key}")
-    return cfg
+    if not isinstance(biz, dict):
+        raise ValueError(f"llm {LLMConfigKey.BIZ} must be a mapping")
+    biz_cfg = biz.get(biz_key)
+    if biz_cfg is None:
+        raise ValueError(f"llm biz config not found: {biz_key}")
+    if not isinstance(biz_cfg, dict):
+        raise ValueError(f"{biz_key} config must be a mapping")
+    return _resolve_biz_entry(
+        biz_key,
+        biz_cfg,
+        selected_provider_key=provider_key,
+    )
 
 
-def resolve_context_window(biz_key: str) -> int | None:
+def list_provider_options(biz_key: str) -> tuple[LLMProviderOption, ...]:
+    """Return the ordered, safe-to-expose provider options for one biz."""
+    default_cfg = resolve_biz_config(biz_key)
+    options: list[LLMProviderOption] = []
+    for provider_key in default_cfg.provider_option_keys:
+        cfg = resolve_biz_config(biz_key, provider_key=provider_key)
+        if cfg.provider == PROVIDER_OPENAI:
+            model = cfg.openai_model
+            context_window = cfg.openai_context_window
+        else:
+            model = PureWindowsPath(cfg.llama_model_path).name
+            context_window = cfg.llama_n_ctx
+        options.append(
+            LLMProviderOption(
+                provider_key=provider_key,
+                backend=cfg.provider,
+                model=model,
+                context_window=context_window,
+            )
+        )
+    return tuple(options)
+
+
+def resolve_context_window(
+    biz_key: str,
+    *,
+    provider_key: str | None = None,
+) -> int | None:
     """Return the configured context window for a chat biz key, if known."""
-    cfg = resolve_biz_config(biz_key)
+    cfg = resolve_biz_config(biz_key, provider_key=provider_key)
     if cfg.provider == PROVIDER_OPENAI:
         return cfg.openai_context_window
     if cfg.provider == PROVIDER_LLAMA:

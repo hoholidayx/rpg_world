@@ -11,6 +11,50 @@ from play_api import agent_client
 
 
 class AgentBackend:
+    async def get_main_llm_options(self) -> dict[str, object]:
+        return dict(await agent_client.get_agent_client().get_main_llm_options())
+
+    async def get_story_main_llm(
+        self,
+        workspace: str,
+        story_id: int,
+    ) -> dict[str, object]:
+        return dict(
+            await agent_client.get_agent_client().get_story_main_llm(
+                workspace,
+                story_id,
+            )
+        )
+
+    async def set_story_main_llm(
+        self,
+        workspace: str,
+        story_id: int,
+        provider_key: str | None,
+    ) -> dict[str, object]:
+        return dict(
+            await agent_client.get_agent_client().set_story_main_llm(
+                workspace,
+                story_id,
+                provider_key,
+            )
+        )
+
+    async def get_session_main_llm(self, session_id: str) -> dict[str, object]:
+        return dict(await agent_client.get_agent_client().get_session_main_llm(session_id))
+
+    async def set_session_main_llm(
+        self,
+        session_id: str,
+        provider_key: str | None,
+    ) -> dict[str, object]:
+        return dict(
+            await agent_client.get_agent_client().set_session_main_llm(
+                session_id,
+                provider_key,
+            )
+        )
+
     async def get_history(self, workspace: str, story_id: int, session_id: str) -> list[dict[str, object]]:
         del workspace, story_id
         result = await agent_client.get_agent_client().get_history(session_id)

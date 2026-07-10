@@ -147,6 +147,52 @@ async def test_client_get_context_preview_uses_agent_service_contract() -> None:
     )
 
 
+async def test_client_main_llm_selection_uses_agent_service_contract() -> None:
+    client = AgentClient(base_url="http://agent")
+
+    await client.get_main_llm_options()
+    await client.get_story_main_llm("ws", 7)
+    await client.set_story_main_llm("ws", 7, "chat_b")
+    await client.set_story_main_llm("ws", 7, None)
+    await client.get_session_main_llm("s1")
+    await client.set_session_main_llm("s1", "chat_c")
+    await client.set_session_main_llm("s1", None)
+
+    assert FakeAsyncClient.calls[-7:] == [
+        ("GET", "http://agent/chat/main-llm/options", {"params": None}),
+        (
+            "GET",
+            "http://agent/chat/main-llm/story",
+            {"params": {"workspace_id": "ws", "story_id": 7}},
+        ),
+        (
+            "POST",
+            "http://agent/chat/main-llm/story",
+            {"json": {"workspace_id": "ws", "story_id": 7, "provider_key": "chat_b"}},
+        ),
+        (
+            "POST",
+            "http://agent/chat/main-llm/story",
+            {"json": {"workspace_id": "ws", "story_id": 7, "provider_key": None}},
+        ),
+        (
+            "GET",
+            "http://agent/chat/main-llm/session",
+            {"params": {"session_id": "s1"}},
+        ),
+        (
+            "POST",
+            "http://agent/chat/main-llm/session",
+            {"json": {"session_id": "s1", "provider_key": "chat_c"}},
+        ),
+        (
+            "POST",
+            "http://agent/chat/main-llm/session",
+            {"json": {"session_id": "s1", "provider_key": None}},
+        ),
+    ]
+
+
 async def test_client_stream_parses_sse_events() -> None:
     events = [
         event

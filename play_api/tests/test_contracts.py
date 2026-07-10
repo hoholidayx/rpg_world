@@ -110,6 +110,77 @@ async def test_agent_call_preserves_agent_validation_status() -> None:
 class _FakeAgentClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
+        self.story_main_llm_provider_key: str | None = None
+        self.session_main_llm_provider_key: str | None = None
+
+    @staticmethod
+    def _main_llm_option(provider_key: str) -> dict[str, object]:
+        return {
+            "provider_key": provider_key,
+            "backend": "openai",
+            "model": f"{provider_key}-model",
+            "context_window": 64000,
+        }
+
+    def _main_llm_selection(self) -> dict[str, object]:
+        effective_key = "config_chat"
+        effective_source = "config"
+        if self.story_main_llm_provider_key is not None:
+            effective_key = self.story_main_llm_provider_key
+            effective_source = "story"
+        if self.session_main_llm_provider_key is not None:
+            effective_key = self.session_main_llm_provider_key
+            effective_source = "session"
+        return {
+            "config_default_provider_key": "config_chat",
+            "story_provider_key": self.story_main_llm_provider_key,
+            "session_provider_key": self.session_main_llm_provider_key,
+            "effective_provider_key": effective_key,
+            "effective_source": effective_source,
+            "effective": self._main_llm_option(effective_key),
+            "invalid_overrides": [],
+        }
+
+    async def get_main_llm_options(self) -> dict[str, object]:
+        self.calls.append(("main-llm-options",))
+        return {
+            "config_default_provider_key": "config_chat",
+            "options": [
+                self._main_llm_option("config_chat"),
+                self._main_llm_option("alternate_chat"),
+            ],
+        }
+
+    async def get_story_main_llm(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> dict[str, object]:
+        self.calls.append(("get-story-main-llm", workspace_id, str(story_id)))
+        return self._main_llm_selection()
+
+    async def set_story_main_llm(
+        self,
+        workspace_id: str,
+        story_id: int,
+        provider_key: str | None,
+    ) -> dict[str, object]:
+        self.calls.append(("set-story-main-llm", workspace_id, str(story_id), provider_key or ""))
+        self.story_main_llm_provider_key = provider_key
+        return self._main_llm_selection()
+
+    async def get_session_main_llm(self, session_id: str) -> dict[str, object]:
+        self.calls.append(("get-session-main-llm", session_id))
+        return self._main_llm_selection()
+
+    async def set_session_main_llm(
+        self,
+        session_id: str,
+        provider_key: str | None,
+    ) -> dict[str, object]:
+        self.calls.append(("set-session-main-llm", session_id, provider_key or ""))
+        self.session_main_llm_provider_key = provider_key
+        return self._main_llm_selection()
 
     async def get_history(self, session_id: str) -> dict[str, object]:
         self.calls.append(("history", session_id))
@@ -237,6 +308,16 @@ class _InvalidHistoryAgentClient(_FakeAgentClient):
         }
 
 
+class _RejectingMainLLMAgentClient(_FakeAgentClient):
+    async def set_session_main_llm(
+        self,
+        session_id: str,
+        provider_key: str | None,
+    ) -> dict[str, object]:
+        del session_id, provider_key
+        raise AgentClientError("provider is not selectable", status_code=422)
+
+
 class _StreamingAgentClient(_FakeAgentClient):
     async def stream(self, session_id: str, text: str, request_id: str | None = None):
         self.calls.append(("stream", session_id, text, request_id or ""))
@@ -272,6 +353,97 @@ def test_history_endpoint_rejects_invalid_turn_metadata(tmp_path, monkeypatch) -
 
     assert response.status_code == 409
     assert "history[1]" in response.json()["detail"]
+
+
+def test_main_llm_endpoints_expose_camel_case_and_forward_selection(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    fake_agent = _FakeAgentClient()
+    monkeypatch.setattr(agent_client, "_client", fake_agent)
+
+    with TestClient(app) as client:
+        options = client.get("/play-api/v1/llm/main-agent/options")
+        story_default = client.get(
+            "/play-api/v1/workspaces/demo_workspace/stories/1/main-llm"
+        )
+        story_selected = client.patch(
+            "/play-api/v1/workspaces/demo_workspace/stories/1/main-llm",
+            json={"providerKey": "alternate_chat"},
+        )
+        session_inherits = client.get(
+            "/play-api/v1/sessions/s_forest001/main-llm"
+        )
+        session_selected = client.patch(
+            "/play-api/v1/sessions/s_forest001/main-llm",
+            json={"providerKey": "config_chat"},
+        )
+        session_cleared = client.patch(
+            "/play-api/v1/sessions/s_forest001/main-llm",
+            json={"providerKey": None},
+        )
+        empty_update = client.patch(
+            "/play-api/v1/sessions/s_forest001/main-llm",
+            json={},
+        )
+        missing_session = client.get(
+            "/play-api/v1/sessions/missing/main-llm"
+        )
+
+    assert options.status_code == 200
+    assert options.json()["configDefaultProviderKey"] == "config_chat"
+    assert [item["providerKey"] for item in options.json()["options"]] == [
+        "config_chat",
+        "alternate_chat",
+    ]
+    assert set(options.json()["options"][0]) == {
+        "providerKey",
+        "backend",
+        "model",
+        "contextWindow",
+    }
+    assert story_default.status_code == 200
+    assert story_default.json()["effectiveSource"] == "config"
+    assert story_selected.status_code == 200
+    assert story_selected.json()["storyProviderKey"] == "alternate_chat"
+    assert story_selected.json()["effectiveSource"] == "story"
+    assert session_inherits.status_code == 200
+    assert session_inherits.json()["effectiveSource"] == "story"
+    assert session_selected.status_code == 200
+    assert session_selected.json()["sessionProviderKey"] == "config_chat"
+    assert session_selected.json()["effectiveSource"] == "session"
+    assert session_cleared.status_code == 200
+    assert session_cleared.json()["sessionProviderKey"] is None
+    assert session_cleared.json()["effectiveSource"] == "story"
+    assert empty_update.status_code == 422
+    assert missing_session.status_code == 404
+    assert fake_agent.calls == [
+        ("main-llm-options",),
+        ("get-story-main-llm", "demo_workspace", "1"),
+        ("set-story-main-llm", "demo_workspace", "1", "alternate_chat"),
+        ("get-session-main-llm", "s_forest001"),
+        ("set-session-main-llm", "s_forest001", "config_chat"),
+        ("set-session-main-llm", "s_forest001", ""),
+    ]
+
+
+def test_main_llm_endpoint_preserves_agent_validation_status(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    monkeypatch.setattr(agent_client, "_client", _RejectingMainLLMAgentClient())
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/play-api/v1/sessions/s_forest001/main-llm",
+            json={"providerKey": "removed_chat"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "provider is not selectable"
 
 
 def test_history_page_endpoint_returns_turn_window(tmp_path, monkeypatch) -> None:

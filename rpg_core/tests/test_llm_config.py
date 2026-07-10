@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from llm_service.config import (
+    list_provider_options,
     reload_llm_settings,
     resolve_agent_defaults,
     resolve_biz_config,
@@ -475,3 +476,171 @@ def test_resolved_models_include_provider_key(tmp_path: Path, monkeypatch) -> No
 
     assert resolve_llm_config(AGENT_MAIN_BIZ_KEY).provider_key == "chat"
     assert resolve_agent_defaults(AGENT_MAIN_BIZ_KEY).provider_key == "chat"
+
+
+def test_provider_options_are_ordered_selectable_and_safe_to_expose(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    remote_chat:
+      provider: openai
+      openai:
+        model: remote-model
+        api_key: secret-key
+        api_key_env: SECRET_ENV
+        base_url: https://llm.example
+        context_window: 64000
+    local_chat:
+      provider: llama
+      llama:
+        model_path: C:\\private\\models\\local-chat.gguf
+        n_ctx: 8192
+""",
+        biz="""
+    agent.main:
+      kind: chat
+      provider_key: remote_chat
+      provider_option_keys:
+        - local_chat
+        - remote_chat
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    selected = resolve_biz_config(AGENT_MAIN_BIZ_KEY, provider_key="local_chat")
+    options = list_provider_options(AGENT_MAIN_BIZ_KEY)
+
+    assert selected.provider_key == "local_chat"
+    assert selected.provider == "llama"
+    assert resolve_context_window(AGENT_MAIN_BIZ_KEY, provider_key="local_chat") == 8192
+    assert resolve_llm_config(
+        AGENT_MAIN_BIZ_KEY,
+        provider_key="local_chat",
+    ).provider_key == "local_chat"
+    assert resolve_agent_defaults(
+        AGENT_MAIN_BIZ_KEY,
+        provider_key="local_chat",
+    ).provider_key == "local_chat"
+    assert [option.provider_key for option in options] == ["local_chat", "remote_chat"]
+    assert options[0].model == "local-chat.gguf"
+    assert options[0].context_window == 8192
+    assert options[1].model == "remote-model"
+    assert options[1].context_window == 64000
+    assert not hasattr(options[1], "api_key")
+    assert not hasattr(options[1], "base_url")
+
+
+@pytest.mark.parametrize(
+    ("options_yaml", "error"),
+    [
+        ("      provider_option_keys: remote_chat\n", "must be a list"),
+        ("      provider_option_keys: []\n", "must not be empty"),
+        (
+            "      provider_option_keys:\n"
+            "        - remote_chat\n"
+            "        - remote_chat\n",
+            "must not contain duplicates",
+        ),
+        (
+            "      provider_option_keys:\n"
+            "        - remote_chat\n"
+            "        - ' '\n",
+            "must be a non-empty string",
+        ),
+        (
+            "      provider_option_keys:\n"
+            "        - other_chat\n",
+            "must include default provider_key",
+        ),
+    ],
+)
+def test_provider_options_reject_invalid_whitelists(
+    tmp_path: Path,
+    monkeypatch,
+    options_yaml: str,
+    error: str,
+) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    remote_chat:
+      provider: openai
+      openai:
+        model: remote-model
+    other_chat:
+      provider: openai
+      openai:
+        model: other-model
+""",
+        biz=(
+            "\n    agent.main:\n"
+            "      kind: chat\n"
+            "      provider_key: remote_chat\n"
+            f"{options_yaml}"
+        ),
+    )
+    _use_llm(path, monkeypatch)
+
+    with pytest.raises(ValueError, match=error):
+        resolve_biz_config(AGENT_MAIN_BIZ_KEY)
+
+
+def test_provider_options_reject_unknown_pool_key(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    remote_chat:
+      provider: openai
+      openai:
+        model: remote-model
+""",
+        biz="""
+    agent.main:
+      kind: chat
+      provider_key: remote_chat
+      provider_option_keys:
+        - remote_chat
+        - removed_chat
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    with pytest.raises(ValueError, match="provider config not found: removed_chat"):
+        resolve_biz_config(AGENT_MAIN_BIZ_KEY)
+
+
+def test_explicit_provider_selection_must_be_whitelisted(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    remote_chat:
+      provider: openai
+      openai:
+        model: remote-model
+    hidden_chat:
+      provider: openai
+      openai:
+        model: hidden-model
+""",
+        biz="""
+    agent.main:
+      kind: chat
+      provider_key: remote_chat
+      provider_option_keys:
+        - remote_chat
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    with pytest.raises(ValueError, match="not in provider_option_keys"):
+        resolve_biz_config(AGENT_MAIN_BIZ_KEY, provider_key="hidden_chat")
+
+    with pytest.raises(ValueError, match="not in provider_option_keys"):
+        resolve_biz_config(AGENT_MAIN_BIZ_KEY, provider_key="")

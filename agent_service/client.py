@@ -14,6 +14,8 @@ from agent_service.schemas import (
     AgentCommandsPayload,
     AgentHealthPayload,
     AgentHistoryPayload,
+    AgentMainLLMProviderCatalogPayload,
+    AgentMainLLMSelectionPayload,
     AgentReplyPayload,
     AgentSessionCreatePayload,
     AgentSessionPayloadDict,
@@ -122,6 +124,68 @@ class AgentClient:
     ) -> ContextPreviewPayload:
         params = {"session_id": session_id}
         return cast(ContextPreviewPayload, await self._get("/chat/context-preview", params=params))
+
+    async def get_main_llm_options(self) -> AgentMainLLMProviderCatalogPayload:
+        return cast(
+            AgentMainLLMProviderCatalogPayload,
+            await self._get("/chat/main-llm/options"),
+        )
+
+    async def get_story_main_llm(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> AgentMainLLMSelectionPayload:
+        return cast(
+            AgentMainLLMSelectionPayload,
+            await self._get(
+                "/chat/main-llm/story",
+                params={"workspace_id": workspace_id, "story_id": story_id},
+            ),
+        )
+
+    async def set_story_main_llm(
+        self,
+        workspace_id: str,
+        story_id: int,
+        provider_key: str | None,
+    ) -> AgentMainLLMSelectionPayload:
+        return cast(
+            AgentMainLLMSelectionPayload,
+            await self._post(
+                "/chat/main-llm/story",
+                json={
+                    "workspace_id": workspace_id,
+                    "story_id": story_id,
+                    "provider_key": provider_key,
+                },
+            ),
+        )
+
+    async def get_session_main_llm(
+        self,
+        session_id: str,
+    ) -> AgentMainLLMSelectionPayload:
+        return cast(
+            AgentMainLLMSelectionPayload,
+            await self._get(
+                "/chat/main-llm/session",
+                params={"session_id": session_id},
+            ),
+        )
+
+    async def set_session_main_llm(
+        self,
+        session_id: str,
+        provider_key: str | None,
+    ) -> AgentMainLLMSelectionPayload:
+        return cast(
+            AgentMainLLMSelectionPayload,
+            await self._post(
+                "/chat/main-llm/session",
+                json={"session_id": session_id, "provider_key": provider_key},
+            ),
+        )
 
     async def list_sessions(
         self,

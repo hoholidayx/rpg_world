@@ -20,6 +20,7 @@ class LLMConfigKey:
 
     PROVIDER = "provider"
     PROVIDER_KEY = "provider_key"
+    PROVIDER_OPTION_KEYS = "provider_option_keys"
     KIND = "kind"
     RERANK_MODEL_TYPE = "rerank_model_type"
 
