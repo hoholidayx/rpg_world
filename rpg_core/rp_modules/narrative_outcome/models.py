@@ -25,28 +25,36 @@ NARRATIVE_OUTCOME_DEFINITIONS = (
     NarrativeOutcomeDefinition(
         code="critical_success",
         label="大成功",
-        narrative_guidance="超额达成目标，并获得一个额外机会、信息或优势。",
+        narrative_guidance=(
+            "完整且超额达成 reason 描述的整体目标，并获得一个额外机会、信息或优势。"
+        ),
     ),
     NarrativeOutcomeDefinition(
         code="success",
         label="成功",
-        narrative_guidance="达成目标，不附加重大代价。",
+        narrative_guidance="完整达成 reason 描述的整体目标，不附加重大代价。",
     ),
     NarrativeOutcomeDefinition(
         code="success_with_cost",
         label="成功但有代价",
-        narrative_guidance="达成目标，同时引入一个与行动相称的代价或复杂化。",
+        narrative_guidance=(
+            "完整达成 reason 描述的整体目标，同时引入一个与行动相称的代价或复杂化；"
+            "不得只完成子步骤，代价不得抵消整体目标已经达成。"
+        ),
     ),
     NarrativeOutcomeDefinition(
         code="setback",
         label="失败但推进",
-        narrative_guidance="未达成目标，但必须提供新信息、替代路径或明确的下一步行动。",
+        narrative_guidance=(
+            "未达成 reason 描述的整体目标，但必须提供新信息、替代路径或明确的下一步行动。"
+        ),
     ),
     NarrativeOutcomeDefinition(
         code="critical_failure",
         label="重大失败",
         narrative_guidance=(
-            "引入严重后果，但不得自动死亡、硬停剧情或永久剥夺玩家角色主权。"
+            "未达成 reason 描述的整体目标，并引入严重后果，但不得自动死亡、"
+            "硬停剧情或永久剥夺玩家角色主权。"
         ),
     ),
 )

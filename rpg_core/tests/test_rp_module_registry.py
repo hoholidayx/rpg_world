@@ -102,6 +102,9 @@ def test_narrative_fixed_contract_uses_semantic_scene_gate():
     assert "必须先调用 rp_story_outcome" in content
     assert "表达式、DC、修正值" in content
     assert "不得只建议" in content
+    assert "reason 必须完整描述本次裁定的整体目标边界" in content
+    assert "reason 是不可缩小的整体目标" in content
+    assert "当前 scene 与普通状态表" not in content
 
 
 def test_narrative_fixed_contract_disables_only_implicit_auto_adjudication():

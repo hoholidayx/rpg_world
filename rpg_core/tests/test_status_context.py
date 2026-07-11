@@ -43,6 +43,10 @@ def test_status_context_separates_regular_and_character_tables() -> None:
 
     assert "## 状态表" in rendered
     assert "status_table_set_values" in rendered
+    assert "本轮回复前的普通状态表快照" in rendered
+    assert "遵循核心状态同步协议" in rendered
+    assert "只能修改已有键的值" in rendered
+    assert "只有核验后确认无变化" not in rendered
     assert "### 世界状态" in rendered
     assert "运行时表 ID：1" in rendered
     assert "用途与更新规则：追踪世界事实。" in rendered

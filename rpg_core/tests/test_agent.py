@@ -33,6 +33,7 @@ from rpg_core.context.rpg_context import (
     FixedLayerData,
     HotHistoryLayer,
     Message,
+    RPModuleRuntimeSection,
     RPGContext,
     Role,
     UserMessageLayer,
@@ -1514,6 +1515,96 @@ def test_build_transformed_context_rebuilds_fixed_layer_each_time() -> None:
     assert first_messages[0].is_system()
     assert "fresh fixed" in first_messages[0].content
     assert "fresher fixed" in second_messages[0].content
+
+
+@pytest.mark.parametrize(
+    ("section_id", "title", "content", "include_staged_turn"),
+    [
+        (
+            "narrative_outcome_turn",
+            "本轮已生效的剧情预裁定",
+            "staged outcome runtime",
+            True,
+        ),
+        (
+            "narrative_outcome_turn",
+            "本轮剧情裁定指令",
+            "explicit random runtime",
+            False,
+        ),
+    ],
+)
+def test_rp_runtime_sections_log_full_content_when_verbose(
+    monkeypatch,
+    section_id: str,
+    title: str,
+    content: str,
+    include_staged_turn: bool,
+) -> None:
+    class FakeRegistry:
+        def get_runtime_sections(self, request):  # noqa: ANN001
+            assert request.session_id == "s_runtime_log"
+            assert request.include_staged_turn is include_staged_turn
+            return [
+                RPModuleRuntimeSection(
+                    id=section_id,
+                    title=title,
+                    source="rp_module:narrative_outcome",
+                    priority=80,
+                    content=content,
+                )
+            ]
+
+    debug = MagicMock()
+    monkeypatch.setattr(agent_module, "settings", SimpleNamespace(verbose_logging=True))
+    monkeypatch.setattr(agent_module, "logger", SimpleNamespace(debug=debug))
+    agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s_runtime_log"
+    agent._rp_module_registry = FakeRegistry()
+
+    sections = agent._get_rp_module_runtime_sections(
+        "明确随机意图",
+        include_staged_turn=include_staged_turn,
+    )
+
+    assert [section.content for section in sections] == [content]
+    assert debug.call_count == 2
+    summary_call = debug.call_args_list[0]
+    assert summary_call.args[1:] == ("s_runtime_log", include_staged_turn, 1)
+    section_call = debug.call_args_list[1]
+    assert section_call.args[1:] == (
+        "s_runtime_log",
+        section_id,
+        title,
+        "rp_module:narrative_outcome",
+        80,
+        content,
+    )
+
+
+def test_rp_runtime_sections_log_empty_summary_when_verbose(monkeypatch) -> None:
+    debug = MagicMock()
+    monkeypatch.setattr(agent_module, "settings", SimpleNamespace(verbose_logging=True))
+    monkeypatch.setattr(agent_module, "logger", SimpleNamespace(debug=debug))
+    agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s_runtime_empty"
+    agent._rp_module_registry = None
+
+    assert agent._get_rp_module_runtime_sections() == []
+    assert debug.call_count == 1
+    assert debug.call_args.args[1:] == ("s_runtime_empty", False, 0)
+
+
+def test_rp_runtime_sections_do_not_log_when_verbose_disabled(monkeypatch) -> None:
+    debug = MagicMock()
+    monkeypatch.setattr(agent_module, "settings", SimpleNamespace(verbose_logging=False))
+    monkeypatch.setattr(agent_module, "logger", SimpleNamespace(debug=debug))
+    agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s_runtime_quiet"
+    agent._rp_module_registry = None
+
+    assert agent._get_rp_module_runtime_sections() == []
+    debug.assert_not_called()
 
 
 def test_context_inspection_rebuilds_fixed_layer_each_time() -> None:

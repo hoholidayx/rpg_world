@@ -482,7 +482,10 @@ def test_narrative_outcome_config_inheritance_validation_and_history_page(
         assert turn_one["outcome"] == {
             "outcomeCode": "success_with_cost",
             "label": "成功但有代价",
-            "narrativeGuidance": "达成目标，同时引入一个与行动相称的代价或复杂化。",
+            "narrativeGuidance": (
+                "完整达成 reason 描述的整体目标，同时引入一个与行动相称的代价或复杂化；"
+                "不得只完成子步骤，代价不得抵消整体目标已经达成。"
+            ),
             "reason": "穿越霜藤",
             "actor": "Bob",
         }

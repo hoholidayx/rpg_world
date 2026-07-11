@@ -9,6 +9,9 @@ from rpg_core.rp_modules.narrative_outcome import (
     NarrativeOutcomeModule,
     NarrativeOutcomeSampler,
 )
+from rpg_core.rp_modules.narrative_outcome.models import (
+    NARRATIVE_OUTCOME_DEFINITION_BY_CODE,
+)
 from rpg_core.rp_modules.models import ModuleContextRequest
 from rpg_core.settings import NarrativeOutcomeModuleSettings
 from rpg_data import models
@@ -50,6 +53,21 @@ def test_zero_weight_tiers_are_skipped() -> None:
     )
     assert NarrativeOutcomeSampler.definition_for_sample(1, weights).code == "success_with_cost"
     assert NarrativeOutcomeSampler.definition_for_sample(100, weights).code == "success_with_cost"
+
+
+def test_outcome_guidance_preserves_whole_goal_boundaries() -> None:
+    critical_success = NARRATIVE_OUTCOME_DEFINITION_BY_CODE["critical_success"].narrative_guidance
+    success = NARRATIVE_OUTCOME_DEFINITION_BY_CODE["success"].narrative_guidance
+    success_with_cost = NARRATIVE_OUTCOME_DEFINITION_BY_CODE["success_with_cost"].narrative_guidance
+    setback = NARRATIVE_OUTCOME_DEFINITION_BY_CODE["setback"].narrative_guidance
+    critical_failure = NARRATIVE_OUTCOME_DEFINITION_BY_CODE["critical_failure"].narrative_guidance
+
+    assert "完整且超额达成 reason 描述的整体目标" in critical_success
+    assert "完整达成 reason 描述的整体目标" in success
+    assert "不得只完成子步骤" in success_with_cost
+    assert "代价不得抵消整体目标已经达成" in success_with_cost
+    assert "未达成 reason 描述的整体目标" in setback
+    assert "未达成 reason 描述的整体目标" in critical_failure
 
 
 class _SequenceRng:
@@ -102,7 +120,10 @@ async def test_same_turn_reuses_staged_result_and_hides_random_details() -> None
     assert payload == {
         "outcomeCode": "success_with_cost",
         "label": "成功但有代价",
-        "narrativeGuidance": "达成目标，同时引入一个与行动相称的代价或复杂化。",
+        "narrativeGuidance": (
+            "完整达成 reason 描述的整体目标，同时引入一个与行动相称的代价或复杂化；"
+            "不得只完成子步骤，代价不得抵消整体目标已经达成。"
+        ),
         "reason": "潜过守卫",
         "actor": "Alice",
     }
@@ -154,6 +175,11 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
     assert '"reason":"能否说服守门人"' in content
     assert '"actor":"Alice"' in content
     assert "不得改判" in content
-    assert "允许零状态工具" in content
+    assert "reason 是本次裁定不可缩小的整体目标边界" in content
+    assert "输出任何 RP 正文前调用" in content
+    assert "工具调用轮不得夹带 RP 正文" in content
+    assert "状态同步无需玩家确认" in content
+    assert "不得询问是否需要标记、记录或更新状态" in content
+    assert "StatusSubAgent" not in content
     assert "sample" not in content
     assert "weights" not in content

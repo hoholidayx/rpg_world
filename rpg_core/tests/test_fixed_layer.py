@@ -105,6 +105,12 @@ def test_fixed_layer_assembler_merges_core_knowledge_and_module_sections():
     assert fixed_layer.sections[3].item_count == 1
     assert fixed_layer.lorebook_entries == lorebook_entries
     assert fixed_layer.characters == characters
+    core_content = fixed_layer.sections[0].content
+    assert "本轮回复前的权威运行时快照" in core_content
+    assert "输出任何 RP 正文前调用对应状态工具" in core_content
+    assert "工具调用轮不得夹带 RP 正文" in core_content
+    assert "不得询问玩家是否需要标记、记录或更新状态" in core_content
+    assert "状态表、当前场景和既有历史都是权威事实" not in core_content
 
 
 def test_story_prompt_contributor_skips_blank_or_missing_story():

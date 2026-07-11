@@ -162,7 +162,7 @@ class SceneTracker:
     def get_context(self) -> str:
         """渲染 ``[scene]...[/scene]``，用于注入到用户消息 user_before。
 
-        末尾附带简短引导提示，指引 LLM 使用场景工具更新数据。
+        末尾只保留指向核心状态同步协议的简短提示。
         """
         lines = ["[scene]"]
         for k, v in self._current_attrs().items():
@@ -172,10 +172,8 @@ class SceneTracker:
                 lines.append(f"{k}: ")
         lines.append("")
         lines.append(
-            "（StatusSubAgent 只会预处理无需随机裁定的确定性变化。请检查剧情结果；"
-            "仅当时间、地点或活跃场景属性实际、持久且已经确定地改变时，才使用 "
-            "scene_time / scene_attr / scene_del_attr，并及时清理过期属性。允许零工具，"
-            "不要制造 no-op；裁定派生变化必须在结果生效后写入。）"
+            "（这是本轮回复前的场景快照；核对本轮结束后的时间、地点和活跃属性，"
+            "并遵循核心状态同步协议。）"
         )
         lines.append("[/scene]")
         return "\n".join(lines)

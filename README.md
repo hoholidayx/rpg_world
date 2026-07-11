@@ -169,7 +169,7 @@ Telegram 渠道当前支持：
 - `StatusSubAgent` 返回 tool calls 后由编排层按整批处理：只要同批出现 `rp_story_outcome`，就只执行一次裁定，所有 scene/status 预写无论调用顺序都标记为 `skipped_due_to_outcome`；没有裁定时才执行确定性状态预更新。
 - `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。状态工具批次失败会恢复本轮内存 checkpoint，由主 Agent 使用现有工具链回退；这不是持久化 journal。
 - 普通状态表通过同一 scratch 注册 `status_table_set_values`，只允许按 session 运行时表 ID 批量修改已有 key 的 value；工具同时提供给 `StatusSubAgent` 和主 Agent，no-op 不进入 staged changes。
-- 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status；若已预裁定，`RP_MODULES` runtime section 还会在主 Agent 首次调用前注入 `outcomeCode`、标签、叙事指导、reason 和可选 actor。主 Agent 不得改判或重抽，并只在结果实际造成持久状态变化后调用状态工具；允许零状态工具。
+- 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status；若已预裁定，`RP_MODULES` runtime section 还会在主 Agent 首次调用前注入 `outcomeCode`、标签、叙事指导、reason 和可选 actor。主 Agent 不得改判或重抽，并只在结果实际造成持久状态变化后调用状态工具；有变化时工具调用轮不得夹带 RP 正文，工具返回后再输出与状态一致的最终正文，确认无变化时允许零状态工具。
 - LLM 完整成功后，事务一次性提交 staged user message、assistant message、Narrative Outcome 裁定和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
 - WebUI 停止生成走 `requestId` 精准取消：Play API `/sessions/{session_id}/stop` 转发到 Agent service `/chat/stop`，被取消的 stream turn 只丢弃 scratch，不发送 DONE，也不提交消息、状态或 usage。
 - WebUI `retry/edit` 保持历史语义可预期：如果目标是最后一个已持久化 turn，先截断该 turn 再用同一 turn id 重新流式发送；如果目标不是最后一轮，不改写旧历史，而是追加一个新的 turn。
@@ -179,7 +179,7 @@ Telegram 渠道当前支持：
 - summary compression 和 story memory extraction 是 commit 后副作用；失败只记录 warning，不回滚已提交 turn。
 - session 状态表并发写入暂采用 last-write-wins，不使用 version/CAS；Agent 提交发现持久化 document 已偏离 scratch 基线时由 `rpg_data` 记录 warning 后继续覆盖。
 
-事务生命周期有日志覆盖：begin 构建失败、send/send_stream 异常、commit 失败、commit 成功摘要和 post-commit 副作用失败都会记录；预裁定摘要额外输出 `preflightOutcome=staged|none|fallback`、`statePrewritesSkipped`、`mainStateCorrections` 和 `outcomeReusedByMain`，便于排查裁定来源、跳过的预写及主 Agent 修正。
+事务生命周期有日志覆盖：begin 构建失败、send/send_stream 异常、commit 失败、commit 成功摘要和 post-commit 副作用失败都会记录；预裁定摘要额外输出 `preflightOutcome=staged|none|fallback`、`statePrewritesSkipped`、`mainStateCorrections` 和 `outcomeReusedByMain`，便于排查裁定来源、跳过的预写及主 Agent 修正。`verbose_logging=true` 时还会记录 RP runtime section 总数、metadata 和完整公开 content，空 runtime 也记录 `count=0`；不输出 sample 或权重。
 
 ### 上下文与 RP 模块
 
@@ -223,11 +223,11 @@ RP Modules 采用上下文分层策略：
 
 | code | 展示名 | 默认比例 | 叙事约束 |
 |---|---|---:|---|
-| `critical_success` | 大成功 | 5% | 超额达成，并获得额外机会、信息或优势 |
-| `success` | 成功 | 25% | 达成目标，不附加重大代价 |
-| `success_with_cost` | 成功但有代价 | 40% | 达成目标，同时引入相称代价或复杂化 |
-| `setback` | 失败但推进 | 25% | 未达成目标，但提供新信息、替代路径或下一步行动 |
-| `critical_failure` | 重大失败 | 5% | 引入严重后果，但不自动死亡、硬停局或永久剥夺玩家角色主权 |
+| `critical_success` | 大成功 | 5% | 完整且超额达成 reason 的整体目标，并获得额外机会、信息或优势 |
+| `success` | 成功 | 25% | 完整达成 reason 的整体目标，不附加重大代价 |
+| `success_with_cost` | 成功但有代价 | 40% | 完整达成 reason 的整体目标并引入相称代价；代价不得抵消成功 |
+| `setback` | 失败但推进 | 25% | 未达成 reason 的整体目标，但提供新信息、替代路径或下一步行动 |
+| `critical_failure` | 重大失败 | 5% | 未达成 reason 的整体目标并引入严重后果，但不自动死亡、硬停局或永久剥夺玩家角色主权 |
 
 正常链路如下：
 
@@ -237,7 +237,7 @@ RP Modules 采用上下文分层策略：
   → 需要裁定时只调用 rp_story_outcome(reason, actor?)，同批状态预写全部延后
   → 模块内部按本轮有效五档权重抽取结果
   → 主 Agent 首次调用前读取等级、叙事指导、reason 和可选 actor
-  → 主 Agent 依据结果继续剧情，并仅在真实持久状态变化时补写 scene/status
+  → 主 Agent 依据整体目标与结果继续剧情；真实持久变化先写 scene/status，再输出 RP 正文
   → StatusSubAgent 漏判时主 Agent 可调用同一工具补判；重复调用幂等复用
 ```
 

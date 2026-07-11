@@ -351,6 +351,11 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
     assert '"outcomeCode":"success_with_cost"' in first_main_context
     assert '"reason":"能否潜过巡逻守卫"' in first_main_context
     assert "不得改判" in first_main_context
+    assert "reason 是本次裁定不可缩小的整体目标边界" in first_main_context
+    assert "输出任何 RP 正文前调用" in first_main_context
+    assert "工具调用轮不得夹带 RP 正文" in first_main_context
+    assert "不得询问是否需要标记、记录或更新状态" in first_main_context
+    assert "StatusSubAgent 已完成本轮剧情预裁定" not in first_main_context
     assert [call.source for call in reply.stats.calls] == [
         "status_sub_agent",
         "chat_loop",
@@ -361,6 +366,71 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
     )
     assert persisted is not None
     assert persisted.outcome_code == "success_with_cost"
+
+
+@pytest.mark.asyncio
+async def test_main_agent_syncs_scene_and_normal_status_after_preadjudication(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    rng = _set_outcome_rng(integration_status_agent, 71)
+    table = integration_status_agent._status_mgr.list_context_tables()[0]
+    table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"能否找到地下入口","actor":"Integration Tester"}',
+                )
+            ],
+        )
+    )
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[
+                tool_call(
+                    "scene_attr",
+                    '{"key":"位置","value":"地下裂隙"}',
+                    call_id="call_scene_correction",
+                ),
+                tool_call(
+                    "status_table_set_values",
+                    f'{{"table_id":{table_id},"updates":[{{"key":"线索","value":"地下入口已确认"}}]}}',
+                    call_id="call_status_correction",
+                ),
+            ],
+        ),
+        response("裁定结果已落实到场景与线索状态。", model="config-model"),
+    )
+
+    reply = await integration_status_agent.send("我寻找通往地下的入口")
+
+    assert reply.text == "裁定结果已落实到场景与线索状态。"
+    assert rng.calls == 1
+    assert reply.status_sub_agent_records
+    assert reply.status_sub_agent_records[0]["status"] == "outcome_staged"
+    assert len(provider.calls) == 2
+    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    assert scene_attrs is not None
+    assert scene_attrs["位置"] == "地下裂隙"
+    persisted_table = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    assert persisted_table.document.row_for_key("线索").value == "地下入口已确认"
+    persisted_outcome = integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_status",
+        1,
+    )
+    assert persisted_outcome is not None
+    assert persisted_outcome.outcome_code == "setback"
 
 
 @pytest.mark.asyncio
@@ -531,6 +601,105 @@ async def test_stream_emits_preadjudication_card_before_main_narration(
     assert events[1].tool_name == "rp_story_outcome"
     assert '"outcomeCode"' in (events[1].tool_result or "")
     assert events[-1].kind == StreamEventKind.DONE
+
+
+@pytest.mark.asyncio
+async def test_stream_syncs_state_before_success_with_cost_narration(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    _set_outcome_rng(integration_status_agent, 31)
+    table = integration_status_agent._status_mgr.list_context_tables()[0]
+    table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"Bob 和 Alice 离开祭坛并返回北境镇","actor":"Bob"}',
+                )
+            ],
+        )
+    )
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_stream(
+        (
+            ProviderChunk(
+                tool_calls=[
+                    {
+                        "index": 0,
+                        **tool_call(
+                            "scene_attr",
+                            '{"key":"位置","value":"北境镇·旅店"}',
+                            call_id="call_scene_town",
+                        ),
+                    },
+                    {
+                        "index": 1,
+                        **tool_call(
+                            "status_table_set_values",
+                            f'{{"table_id":{table_id},"updates":[{{"key":"线索","value":"封印脉冲已释放，黑羽持续发热"}}]}}',
+                            call_id="call_status_cost",
+                        ),
+                    },
+                ],
+                finish_reason="tool_calls",
+                model="config-model",
+            ),
+        ),
+        (
+            ProviderChunk(
+                content=(
+                    "<rp-narration>Bob 和 Alice 已经回到北境镇的旅店，"
+                    "但黑羽在途中一直发热，并留下了醒目的灼痕。</rp-narration>"
+                )
+            ),
+            ProviderChunk(finish_reason="stop", model="config-model"),
+        ),
+    )
+
+    events = [
+        event
+        async for event in integration_status_agent.send_stream(
+            "已经有足够多的线索了，回镇子上再做打算吧。"
+        )
+    ]
+
+    state_tool_indices = [
+        index
+        for index, event in enumerate(events)
+        if event.kind == StreamEventKind.TOOL_CALL
+        and event.tool_name in {"scene_attr", "status_table_set_values"}
+    ]
+    text_indices = [
+        index
+        for index, event in enumerate(events)
+        if event.kind == StreamEventKind.TEXT and event.content
+    ]
+    assert len(state_tool_indices) == 2
+    assert text_indices
+    assert max(state_tool_indices) < min(text_indices)
+    final = events[-1]
+    assert final.kind == StreamEventKind.DONE
+    assert "回到北境镇" in final.content
+    assert "需要我标记" not in final.content
+    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    assert scene_attrs is not None
+    assert scene_attrs["位置"] == "北境镇·旅店"
+    persisted_table = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    assert persisted_table.document.row_for_key("线索").value == "封印脉冲已释放，黑羽持续发热"
+    persisted_outcome = integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_status",
+        1,
+    )
+    assert persisted_outcome is not None
+    assert persisted_outcome.outcome_code == "success_with_cost"
 
 
 @pytest.mark.asyncio

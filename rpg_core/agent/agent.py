@@ -1304,17 +1304,39 @@ class RPGGameAgent:
         include_staged_turn: bool = False,
     ):
         """Collect dynamic RP module sections for the current user input."""
-        if self._rp_module_registry is None:
-            return []
-        from rpg_core.rp_modules.models import ModuleContextRequest
+        sections = []
+        if self._rp_module_registry is not None:
+            from rpg_core.rp_modules.models import ModuleContextRequest
 
-        return self._rp_module_registry.get_runtime_sections(
-            ModuleContextRequest(
-                session_id=self._session_id,
-                user_input=user_input,
-                include_staged_turn=include_staged_turn,
-            ),
-        )
+            sections = self._rp_module_registry.get_runtime_sections(
+                ModuleContextRequest(
+                    session_id=self._session_id,
+                    user_input=user_input,
+                    include_staged_turn=include_staged_turn,
+                ),
+            )
+
+        if settings.verbose_logging:
+            logger.debug(
+                _TAG
+                + " RP runtime sections prepared: session_id={} include_staged_turn={} count={}",
+                self._session_id,
+                include_staged_turn,
+                len(sections),
+            )
+            for section in sections:
+                logger.debug(
+                    _TAG
+                    + " RP runtime section: session_id={} id={} title={!r} source={} "
+                    "priority={} content=\n{}",
+                    self._session_id,
+                    section.id,
+                    section.title,
+                    section.source,
+                    section.priority,
+                    section.content,
+                )
+        return sections
 
     def _refresh_fixed_layer_snapshot(self) -> None:
         """Rebuild fixed-layer sections from the latest character/lorebook data."""

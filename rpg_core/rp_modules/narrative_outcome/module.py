@@ -128,12 +128,11 @@ class NarrativeOutcomeModule(RPModule):
                     f"{trigger_rule}\n"
                     "- 用户明确要求掷骰、检定、碰碰运气、看能不能或随机决定外部结果时，"
                     "不得只建议、询问或口头模拟，必须在决定结果前调用 rp_story_outcome。\n"
-                    "- 每个 turn 最多裁定一个最关键的外部变数；reason 只描述要裁定的问题，"
-                    "actor 仅在明确时填写。工具返回结果后，必须把该等级和叙事指导作为本轮事实，"
-                    "不得改判、弱化、重复抽取或向玩家透露内部随机细节。\n"
-                    "- 每次获得剧情裁定后，都必须检查当前 scene 与普通状态表。只有裁定结果已经"
-                    "造成实际、持久、确定的追踪值变化时，才在获得结果后调用对应状态工具；允许"
-                    "零状态工具，不得制造 no-op 或提前写入尚未裁定的后果。\n"
+                    "- 每个 turn 最多裁定一个最关键的外部变数；reason 必须完整描述本次裁定的整体目标边界，"
+                    "不得只写其中一个子步骤；actor 仅在明确时填写。\n"
+                    "- 工具返回结果后，reason 是不可缩小的整体目标，必须把 outcomeCode 和 "
+                    "narrativeGuidance 作为本轮事实；不得为匹配结果等级而改写为局部子目标，"
+                    "也不得改判、弱化、重复抽取或向玩家透露内部随机细节。\n"
                     "- 确定会发生的动作、无关紧要的细节、纯角色表达，以及玩家角色的内心、选择或台词"
                     "不裁定。裁定世界后果，不替玩家角色做决定。"
                 ),
@@ -159,14 +158,17 @@ class NarrativeOutcomeModule(RPModule):
                     source=RP_MODULE_NARRATIVE_OUTCOME_SOURCE,
                     priority=80,
                     content=(
-                        "StatusSubAgent 已完成本轮剧情预裁定，以下结果在你首次生成前就已生效：\n"
+                        "以下剧情裁定结果在本轮首次生成前就已生效：\n"
                         f"{public_result}\n"
                         "必须直接遵循 outcomeCode、label 与 narrativeGuidance 推进叙事；不得改判、"
                         "弱化、重新抽取或先写出相反结果，也不需要再次调用 rp_story_outcome。若仍"
                         "重复调用，该工具只会幂等返回同一结果。\n"
-                        "叙事前必须检查当前 scene 和普通状态表。只有结果实际造成持久且已经确定的"
-                        "追踪值变化时，才在结果生效后调用 scene_time、scene_attr、scene_del_attr "
-                        "或 status_table_set_values；允许零状态工具，没有变化时不要制造 no-op。"
+                        "reason 是本次裁定不可缩小的整体目标边界，不得用子步骤代替整体目标。\n"
+                        "先在内部确定该结果造成的叙事后果和最终状态。凡实际、持久且已经确定的"
+                        "裁定派生变化，必须在输出任何 RP 正文前调用 scene_time、scene_attr、"
+                        "scene_del_attr 或 status_table_set_values；工具调用轮不得夹带 RP 正文，"
+                        "工具返回后再输出与已同步状态一致的正文。状态同步无需玩家确认，"
+                        "不得询问是否需要标记、记录或更新状态。"
                     ),
                 )
             ]
