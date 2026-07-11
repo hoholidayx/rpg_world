@@ -12,7 +12,11 @@ from peewee import SQL
 
 from rpg_data import models
 from rpg_data.repositories.records import SessionProfileRecord, SessionRecord, bind_database
-from rpg_data.repositories._utils import to_session, update_timestamp
+from rpg_data.repositories._utils import (
+    serialize_narrative_outcome_weights,
+    to_session,
+    update_timestamp,
+)
 
 
 class SessionRepository:
@@ -139,6 +143,33 @@ class SessionRepository:
                 .update(
                     player_character_id=player_character_id,
                     player_character_snapshot_json=player_character_snapshot_json,
+                    version=SessionProfileRecord.version + 1,
+                    updated_at=SQL("CURRENT_TIMESTAMP"),
+                )
+                .where(SessionProfileRecord.session == session_id)
+                .execute()
+            )
+            (
+                SessionRecord
+                .update(updated_at=SQL("CURRENT_TIMESTAMP"))
+                .where(SessionRecord.id == session_id)
+                .execute()
+            )
+        return self.get(session_id)
+
+    def set_narrative_outcome_weights(
+        self,
+        session_id: str,
+        weights: models.NarrativeOutcomeWeights | None,
+    ) -> models.Session | None:
+        with self._database.atomic():
+            if not SessionRecord.select().where(SessionRecord.id == session_id).exists():
+                return None
+            SessionProfileRecord.get_or_create(session=session_id)
+            (
+                SessionProfileRecord
+                .update(
+                    narrative_outcome_weights_json=serialize_narrative_outcome_weights(weights),
                     version=SessionProfileRecord.version + 1,
                     updated_at=SQL("CURRENT_TIMESTAMP"),
                 )

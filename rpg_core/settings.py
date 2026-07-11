@@ -30,8 +30,12 @@ from llm_service.keys import (
     MEMORY_QUERY_PLANNER_BIZ_KEY,
     MEMORY_RERANK_BIZ_KEY,
 )
-from rpg_core.rp_module_constants import RP_MODULE_DICE_NAME
+from rpg_core.rp_module_constants import (
+    RP_MODULE_DICE_NAME,
+    RP_MODULE_NARRATIVE_OUTCOME_NAME,
+)
 from rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
+from rpg_data.models import NarrativeOutcomeWeights
 
 # Location of rpg_core process/business settings.
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
@@ -204,11 +208,25 @@ class DiceModuleSettings:
 
 
 @dataclass(frozen=True)
+class NarrativeOutcomeModuleSettings:
+    """High-level narrative branch adjudication settings."""
+
+    enabled: bool = True
+    auto_adjudication_enabled: bool = True
+    default_weights: NarrativeOutcomeWeights = field(
+        default_factory=NarrativeOutcomeWeights
+    )
+
+
+@dataclass(frozen=True)
 class RPModuleSettings:
     """RP Modules business settings."""
 
     enabled: bool = True
     dice: DiceModuleSettings = field(default_factory=DiceModuleSettings)
+    narrative_outcome: NarrativeOutcomeModuleSettings = field(
+        default_factory=NarrativeOutcomeModuleSettings
+    )
 
 
 class Settings(ProfiledYamlSettings):
@@ -291,6 +309,26 @@ class Settings(ProfiledYamlSettings):
         dice_raw = modules.get(RP_MODULE_DICE_NAME, {})
         if not isinstance(dice_raw, dict):
             dice_raw = {}
+        narrative_raw = modules.get(RP_MODULE_NARRATIVE_OUTCOME_NAME, {})
+        if not isinstance(narrative_raw, dict):
+            narrative_raw = {}
+
+        default_weights_raw = narrative_raw.get("default_weights")
+        if default_weights_raw is None:
+            default_weights = NarrativeOutcomeWeights()
+        elif isinstance(default_weights_raw, dict):
+            default_weights = NarrativeOutcomeWeights.from_mapping(default_weights_raw)
+        else:
+            raise ValueError(
+                "rp_modules.modules.narrative_outcome.default_weights must be a mapping"
+            )
+
+        # One-version compatibility: old deployments may still only declare
+        # dice.allow_auto_checks. The canonical switch lives on narrative_outcome.
+        legacy_auto_checks = bool(dice_raw.get("allow_auto_checks", True))
+        auto_adjudication_enabled = bool(
+            narrative_raw.get("auto_adjudication_enabled", legacy_auto_checks)
+        )
 
         return RPModuleSettings(
             enabled=bool(raw.get("enabled", True)),
@@ -301,11 +339,19 @@ class Settings(ProfiledYamlSettings):
                 max_dice_count=int(dice_raw.get("max_dice_count", 100)),
                 max_die_sides=int(dice_raw.get("max_die_sides", 1000)),
             ),
+            narrative_outcome=NarrativeOutcomeModuleSettings(
+                enabled=bool(narrative_raw.get("enabled", True)),
+                auto_adjudication_enabled=auto_adjudication_enabled,
+                default_weights=default_weights,
+            ),
         )
 
     def _validate_settings(self) -> None:
         self._validate_agent_llm_settings()
         self._validate_context_window_reject_threshold()
+        # Materialize typed RP module settings at startup so malformed weight
+        # distributions fail fast instead of surfacing during a player turn.
+        self.rp_module_settings
 
     def _validate_agent_llm_settings(self) -> None:
         legacy_model = self._first_non_empty(self.agent_settings.get("model"))

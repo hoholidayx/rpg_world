@@ -27,6 +27,7 @@ __all__ = [
     "LorebookEntryRecord",
     "SessionBackupMessageRecord",
     "SessionMessageRecord",
+    "SessionNarrativeOutcomeRecord",
     "SessionProfileRecord",
     "SessionRecord",
     "SessionStoryMemoryRecord",
@@ -106,6 +107,7 @@ class StoryRecord(BaseRecord):
     story_prompt = TextField(default="")
     first_message = TextField(default="")
     main_llm_provider_key = TextField(null=True)
+    narrative_outcome_weights_json = TextField(null=True)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
     created_at = TextField()
@@ -149,6 +151,7 @@ class SessionProfileRecord(BaseRecord):
     title = TextField(default="")
     description = TextField(default="")
     main_llm_provider_key = TextField(null=True)
+    narrative_outcome_weights_json = TextField(null=True)
     player_character_id = IntegerField(null=True)
     player_character_snapshot_json = TextField(default="{}")
     metadata_json = TextField(default="{}")
@@ -229,6 +232,30 @@ class SessionStoryMemoryRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_session_story_memories"
+
+
+class SessionNarrativeOutcomeRecord(BaseRecord):
+    id = AutoField()
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="narrative_outcomes",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    turn_id = IntegerField(constraints=[Check("turn_id > 0")])
+    outcome_code = TextField()
+    reason = TextField(default="")
+    actor = TextField(default="")
+    sample_value = IntegerField()
+    effective_weights_json = TextField()
+    effective_source = TextField()
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_narrative_outcomes"
+        indexes = ((('session', 'turn_id'), True),)
 
 
 class CharacterRecord(BaseRecord):
@@ -456,6 +483,7 @@ RECORD_MODELS = (
     SessionMessageRecord,
     SessionBackupMessageRecord,
     SessionStoryMemoryRecord,
+    SessionNarrativeOutcomeRecord,
     CharacterRecord,
     CharacterDetailRecord,
     LorebookEntryRecord,

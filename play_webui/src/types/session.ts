@@ -1,3 +1,5 @@
+import type { NarrativeOutcome } from './narrativeOutcome'
+
 export const PLAYER_CHARACTER_STATUS = {
   BOUND: 'bound',
   INVALID: 'invalid',
@@ -52,6 +54,7 @@ export type SessionPlayerCharacter = {
 export type Turn = {
   turnId: number
   messages: HistoryMessage[]
+  outcome?: NarrativeOutcome | null
 }
 
 export type HistoryPage = {

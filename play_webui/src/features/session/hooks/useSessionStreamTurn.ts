@@ -16,6 +16,8 @@ import {
   stoppedStreamText,
   thinkingSpeaker,
   toolSpeaker,
+  outcomeSpeaker,
+  parseNarrativeOutcomeToolResult,
 } from '../sessionTimelineMessages'
 import {
   SESSION_MESSAGE_STATUS,
@@ -114,7 +116,9 @@ export function useSessionStreamTurn({
 
   const markStreamStopped = useCallback((assistantMessageId: string, turnId: number) => {
     setLocalMessages((current) =>
-      current.map((message) =>
+      current.filter((message) => !(
+        message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.OUTCOME
+      )).map((message) =>
         message.id === assistantMessageId
           ? {
               ...message,
@@ -135,7 +139,9 @@ export function useSessionStreamTurn({
 
   const appendLocalStreamError = useCallback((assistantMessageId: string, turnId: number, errorText: string) => {
     setLocalMessages((current) => [
-      ...current.map((message) =>
+      ...current.filter((message) => !(
+        message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.OUTCOME
+      )).map((message) =>
         message.id === assistantMessageId ? { ...message, status: SESSION_MESSAGE_STATUS.ERROR } : message,
       ),
       {
@@ -223,6 +229,38 @@ export function useSessionStreamTurn({
     }
 
     if (event.type === PLAY_STREAM_EVENT_TYPE.TOOL_CALL || event.type === PLAY_STREAM_EVENT_TYPE.TOOL_RESULT) {
+      if (event.payload.toolName === 'rp_story_outcome') {
+        if (event.type === PLAY_STREAM_EVENT_TYPE.TOOL_CALL) return
+        const outcome = parseNarrativeOutcomeToolResult(
+          event.payload.toolResult ?? event.payload.resultPreview,
+        )
+        if (!outcome) {
+          logger.warn('narrative outcome tool result could not be parsed', { turnId })
+          return
+        }
+        setLocalMessages((current) => [
+          ...current.filter((message) => !(
+            message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.OUTCOME
+          )),
+          {
+            id: `local-outcome-${turnId}`,
+            turnId,
+            seqInTurn: 2,
+            role: SESSION_TIMELINE_ROLE.OUTCOME,
+            content: outcome.reason,
+            outcome,
+            metadata: { toolName: 'rp_story_outcome' },
+            createdAt: new Date().toISOString(),
+            speaker: outcomeSpeaker(),
+            status: SESSION_MESSAGE_STATUS.LOCAL,
+            canCopy: false,
+            canRetry: false,
+            canEdit: false,
+            canDelete: false,
+          },
+        ])
+        return
+      }
       const toolText = event.type === PLAY_STREAM_EVENT_TYPE.TOOL_RESULT
         ? event.payload.resultPreview ?? event.payload.toolResult ?? event.payload.toolName ?? '工具事件'
         : event.payload.toolArguments ?? event.payload.toolName ?? '工具事件'
@@ -299,7 +337,9 @@ export function useSessionStreamTurn({
         errorCode: event.payload.errorCode,
       })
       setLocalMessages((current) => [
-        ...current.map((message) =>
+        ...current.filter((message) => !(
+          message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.OUTCOME
+        )).map((message) =>
           message.id === assistantMessageId ? { ...message, status: SESSION_MESSAGE_STATUS.ERROR } : message,
         ),
         {

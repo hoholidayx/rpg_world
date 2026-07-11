@@ -199,6 +199,8 @@ class AgentStreamEvent:
             d["tool_arguments"] = self.tool_arguments
         if self.tool_result_preview:
             d["tool_result_preview"] = self.tool_result_preview
+        if self.tool_result:
+            d["tool_result"] = self.tool_result
         if self.round_index:
             d["round_index"] = self.round_index
         if self.usage:

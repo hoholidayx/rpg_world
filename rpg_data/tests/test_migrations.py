@@ -31,6 +31,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_session_messages",
             "rpg_session_backup_messages",
             "rpg_session_story_memories",
+            "rpg_session_narrative_outcomes",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -49,6 +50,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_session_messages",
             "rpg_session_backup_messages",
             "rpg_session_story_memories",
+            "rpg_session_narrative_outcomes",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -70,6 +72,10 @@ def test_run_migrations_creates_initial_tables() -> None:
         session_message_columns = set(session_message_info)
         backup_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_backup_messages)")}
         story_memory_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_story_memories)")}
+        narrative_outcome_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(rpg_session_narrative_outcomes)")
+        }
         character_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_characters)")}
         character_detail_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_character_details)")}
         lorebook_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_lorebook_entries)")}
@@ -84,7 +90,12 @@ def test_run_migrations_creates_initial_tables() -> None:
         assert "story_memory_last_turn_id" not in session_columns
         assert "last_story_turn_index" not in session_columns
         assert "session_key" not in session_columns
-        assert {"story_prompt", "first_message", "main_llm_provider_key"}.issubset(story_columns)
+        assert {
+            "story_prompt",
+            "first_message",
+            "main_llm_provider_key",
+            "narrative_outcome_weights_json",
+        }.issubset(story_columns)
         assert "description" not in story_columns
         assert {
             "session_id",
@@ -93,6 +104,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "main_llm_provider_key",
             "player_character_id",
             "player_character_snapshot_json",
+            "narrative_outcome_weights_json",
         }.issubset(profile_columns)
         assert {
             "session_id",
@@ -131,6 +143,16 @@ def test_run_migrations_creates_initial_tables() -> None:
             "dream_processed",
             "metadata_json",
         }.issubset(story_memory_columns)
+        assert {
+            "session_id",
+            "turn_id",
+            "outcome_code",
+            "reason",
+            "actor",
+            "sample_value",
+            "effective_weights_json",
+            "effective_source",
+        }.issubset(narrative_outcome_columns)
         assert "last_story_rp_his_id" not in session_columns
         assert "enabled" not in character_columns
         assert "enabled" not in character_detail_columns
@@ -168,6 +190,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "idx_rpg_session_story_memories_session_id_id",
             "idx_rpg_session_story_memories_turn",
             "idx_rpg_session_story_memories_dream",
+            "idx_rpg_session_narrative_outcomes_session_turn",
         }.issubset(indexes)
 
         story_status_indexes = conn.execute("PRAGMA index_list(rpg_story_status_tables)").fetchall()
@@ -198,6 +221,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0002", "0002_demo.sql"),
             ("0003", "0003_pagination_demo.sql"),
             ("0004", "0004_main_llm_selection.sql"),
+            ("0005", "0005_narrative_outcome.sql"),
         ]
     finally:
         conn.close()

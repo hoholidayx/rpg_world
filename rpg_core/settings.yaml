@@ -44,9 +44,17 @@ base:
   rp_modules:
     enabled: true
     modules:
+      narrative_outcome:
+        enabled: true
+        auto_adjudication_enabled: true
+        default_weights:
+          critical_success: 5
+          success: 25
+          success_with_cost: 40
+          setback: 25
+          critical_failure: 5
       dice:
         enabled: true
-        allow_auto_checks: true
         default_dc: 12
         max_dice_count: 100
         max_die_sides: 1000

@@ -7,7 +7,6 @@ import json
 import time as _time
 from asyncio import Future
 from collections.abc import AsyncIterator
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -37,6 +36,8 @@ from rpg_core.agent.transaction import AgentTurnTransaction, SCENE_TOOL_NAMES
 from rpg_core.agent.sub_agents import (
     MemorySubAgent,
     StatusSubAgent,
+    StatusSubAgentPreflightOutcome,
+    StatusSubAgentResult,
     SubAgentContext,
 )
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
@@ -68,6 +69,7 @@ from llm_service.keys import (
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
 )
 from rpg_core.main_llm import MainLLMSelection, MainLLMSelectionService
+from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SceneTracker
 from rpg_core.session import InvalidTurnMetadataError, SessionManager
 from rpg_core.settings import settings
@@ -82,6 +84,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.command import CommandDef
     from rpg_core.lorebook.manager import LorebookManager
     from rpg_core.rp_modules import RPModuleRegistry
+    from rpg_core.agent.transaction import TurnScratch
     from rp_memory.memory_manager import MemoryManager
     from rpg_core.status.manager import StatusManager
 
@@ -356,34 +359,23 @@ class RPGGameAgent:
         turn_scratch = tx.begin(turn_stats)
 
         try:
-            # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ──────
-            status_records = None
-            state_tools = self._turn_state_tools(
-                turn_scratch.scene_tracker,
-                turn_scratch.status_manager,
+            if self._rp_module_registry is not None:
+                self._rp_module_registry.bind_turn(turn_scratch)
+            # ── 可选剧情预裁定 / 确定性状态预更新 ──────────────────────
+            sub_result = await self._run_status_preflight(
+                turn_scratch=turn_scratch,
+                user_input=user_input,
+                turn_stats=turn_stats,
             )
-            if self._status_sub_agent and state_tools:
-                state_ctx_before = self._status_sub_agent_state_context(
-                    turn_scratch.scene_tracker,
-                    turn_scratch.status_manager,
-                )
-                with self._status_sub_agent_turn_tools(
-                    state_tools,
-                    lambda: turn_scratch.status_scratch.change_token,
-                ):
-                    sub_result = await self._status_sub_agent.update(
-                        history=turn_scratch.base_history,
-                        state_context=state_ctx_before,
-                        user_input=user_input,
-                        turn_stats=turn_stats,
-                    )
-                if sub_result.updated:
-                    logger.info(
-                        _TAG + " StatusSubAgent updated state via {}",
-                        [r["tool_name"] for r in sub_result.records],
-                    )
-                if sub_result.records:
-                    status_records = sub_result.records
+            status_records = (
+                sub_result.record_payloads()
+                if sub_result is not None and sub_result.records
+                else None
+            )
+            preflight_outcome = self._preflight_outcome_state(
+                turn_scratch,
+                sub_result,
+            )
 
             # Build scene context and embed into stored user message
             scene_ctx = turn_scratch.scene_tracker.get_context() if turn_scratch.scene_tracker else None
@@ -428,6 +420,16 @@ class RPGGameAgent:
                 turn_stats=turn_stats,
             )
             self._last_tool_records = records
+            self._log_turn_preflight_diagnostics(
+                turn_scratch=turn_scratch,
+                preflight_outcome=preflight_outcome,
+                state_prewrites_skipped=(
+                    sub_result.state_prewrites_skipped
+                    if sub_result is not None
+                    else 0
+                ),
+                main_tool_names=self._tool_names_from_records(records),
+            )
 
             turn_stats.finished_at = _time.monotonic()
 
@@ -472,6 +474,8 @@ class RPGGameAgent:
             tx.discard()
             raise
         finally:
+            if self._rp_module_registry is not None:
+                self._rp_module_registry.unbind_turn(turn_scratch)
             tx.close()
 
     async def send_stream(
@@ -653,48 +657,36 @@ class RPGGameAgent:
         turn_scratch = tx.begin(turn_stats)
 
         try:
-            # ── 状态表预更新（~1-2K tokens，避免主 loop round-trip） ────
-            status_records = None
-            state_tools = self._turn_state_tools(
-                turn_scratch.scene_tracker,
-                turn_scratch.status_manager,
+            if self._rp_module_registry is not None:
+                self._rp_module_registry.bind_turn(turn_scratch)
+            # ── 可选剧情预裁定 / 确定性状态预更新 ────────────────────
+            sub_result = await self._run_status_preflight(
+                turn_scratch=turn_scratch,
+                user_input=user_input,
+                turn_stats=turn_stats,
             )
-            if self._status_sub_agent and state_tools:
-                state_ctx_before = self._status_sub_agent_state_context(
-                    turn_scratch.scene_tracker,
-                    turn_scratch.status_manager,
-                )
-                with self._status_sub_agent_turn_tools(
-                    state_tools,
-                    lambda: turn_scratch.status_scratch.change_token,
-                ):
-                    sub_result = await self._status_sub_agent.update(
-                        history=turn_scratch.base_history,
-                        state_context=state_ctx_before,
-                        user_input=user_input,
-                        turn_stats=turn_stats,
-                    )
-                if sub_result.updated:
-                    logger.info(
-                        _TAG + " StatusSubAgent updated state via {}",
-                        [r["tool_name"] for r in sub_result.records],
-                    )
-                if sub_result.records:
-                    status_records = sub_result.records
-                    # 将 sub-agent 工具调用作为流事件发射，让 CLI 实时显示
-                    for r in status_records:
-                        await event_queue.put(AgentStreamEvent(
-                            kind=StreamEventKind.TOOL_CALL,
-                            tool_name=r["tool_name"],
-                            tool_arguments=str(r.get("arguments", "")),
-                            content="",
-                        ))
-                        await event_queue.put(AgentStreamEvent(
-                            kind=StreamEventKind.TOOL_RESULT,
-                            tool_name=r["tool_name"],
-                            tool_result=str(r.get("result", "")),
-                            tool_result_preview=str(r.get("result", ""))[:200],
-                        ))
+            preflight_outcome = self._preflight_outcome_state(
+                turn_scratch,
+                sub_result,
+            )
+            if sub_result is not None and sub_result.records:
+                # skipped/rolled-back calls stay in buffered diagnostics only;
+                # they must never look like successful state writes in SSE.
+                for record in sub_result.records:
+                    if not record.status.emits_tool_event:
+                        continue
+                    await event_queue.put(AgentStreamEvent(
+                        kind=StreamEventKind.TOOL_CALL,
+                        tool_name=record.tool_name,
+                        tool_arguments=record.arguments,
+                        content="",
+                    ))
+                    await event_queue.put(AgentStreamEvent(
+                        kind=StreamEventKind.TOOL_RESULT,
+                        tool_name=record.tool_name,
+                        tool_result=record.result,
+                        tool_result_preview=record.result[:200],
+                    ))
 
             # ── Build scene context and embed into stored user message ──
             scene_ctx = turn_scratch.scene_tracker.get_context() if turn_scratch.scene_tracker else None
@@ -725,6 +717,7 @@ class RPGGameAgent:
             final_content = ""
             final_event: AgentStreamEvent | None = None
             stream_failed = False
+            main_tool_names: list[str] = []
 
             try:
                 async for event in run_chat_loop_stream(
@@ -738,6 +731,8 @@ class RPGGameAgent:
                         final_content = event.content
                         final_event = event
                     else:
+                        if event.kind == StreamEventKind.TOOL_CALL and event.tool_name:
+                            main_tool_names.append(event.tool_name)
                         if event.kind == StreamEventKind.ERROR:
                             stream_failed = True
                         await event_queue.put(event)
@@ -756,6 +751,17 @@ class RPGGameAgent:
                         RuntimeError("LLM stream ended without a DONE event"),
                     )
                 return
+
+            self._log_turn_preflight_diagnostics(
+                turn_scratch=turn_scratch,
+                preflight_outcome=preflight_outcome,
+                state_prewrites_skipped=(
+                    sub_result.state_prewrites_skipped
+                    if sub_result is not None
+                    else 0
+                ),
+                main_tool_names=main_tool_names,
+            )
 
             # ── Agent-level cleanup（流结束后执行） ────────────────────
             turn_stats.finished_at = _time.monotonic()
@@ -799,6 +805,8 @@ class RPGGameAgent:
             tx.discard()
             raise
         finally:
+            if self._rp_module_registry is not None:
+                self._rp_module_registry.unbind_turn(turn_scratch)
             tx.close()
 
     async def execute_command(self, command: str) -> CommandResult:
@@ -1289,14 +1297,23 @@ class RPGGameAgent:
                 command.handler,
             )
 
-    def _get_rp_module_runtime_sections(self, user_input: str = ""):
-        """Collect dynamic RP module sections. Dice MVP returns an empty list."""
+    def _get_rp_module_runtime_sections(
+        self,
+        user_input: str = "",
+        *,
+        include_staged_turn: bool = False,
+    ):
+        """Collect dynamic RP module sections for the current user input."""
         if self._rp_module_registry is None:
             return []
         from rpg_core.rp_modules.models import ModuleContextRequest
 
         return self._rp_module_registry.get_runtime_sections(
-            ModuleContextRequest(session_id=self._session_id, user_input=user_input),
+            ModuleContextRequest(
+                session_id=self._session_id,
+                user_input=user_input,
+                include_staged_turn=include_staged_turn,
+            ),
         )
 
     def _refresh_fixed_layer_snapshot(self) -> None:
@@ -1318,6 +1335,7 @@ class RPGGameAgent:
             status_mgr=status_mgr,
             scene_tracker=scene_tracker,
             user_input=user_input,
+            include_staged_turn_runtime=True,
         ).to_message_objects()
 
     def _build_main_context(
@@ -1327,6 +1345,7 @@ class RPGGameAgent:
         status_mgr: "StatusManager | None" = None,
         scene_tracker: SceneTracker | None = None,
         user_input: str = "",
+        include_staged_turn_runtime: bool = False,
     ) -> "RPGContext":
         """Build the shared main-Agent context used by turns and inspection."""
         from rpg_core.context.rpg_context import RPGContext
@@ -1342,7 +1361,10 @@ class RPGGameAgent:
             summarized_message_count=history.filtered_message_count,
             status_mgr=resolved_status_mgr,
             scene_tracker=resolved_scene_tracker,
-            rp_module_sections=self._get_rp_module_runtime_sections(user_input=user_input),
+            rp_module_sections=self._get_rp_module_runtime_sections(
+                user_input=user_input,
+                include_staged_turn=include_staged_turn_runtime,
+            ),
         )
         return ctx
 
@@ -1359,6 +1381,13 @@ class RPGGameAgent:
                     continue
                 registry.register(tool)
         registry.register_all(self._turn_state_tools(scene_tracker, status_manager))
+        if settings.verbose_logging:
+            tool_names = [tool.name for tool in registry]
+            logger.debug(
+                _TAG + " turn tool registry prepared: count={}, names={}",
+                len(tool_names),
+                tool_names,
+            )
         return registry if len(registry) else None
 
     @staticmethod
@@ -1372,6 +1401,150 @@ class RPGGameAgent:
         if status_manager is not None:
             tools.extend(StatusTableToolProvider(status_manager).get_tools())
         return tools
+
+    def _turn_narrative_outcome_tools(self, user_input: str) -> list[BaseTool]:
+        registry = self._rp_module_registry
+        if registry is None:
+            return []
+        return [
+            tool
+            for tool in registry.get_status_preflight_tools(user_input)
+            if tool.name == NARRATIVE_OUTCOME_TOOL_NAME
+        ]
+
+    async def _run_status_preflight(
+        self,
+        *,
+        turn_scratch: "TurnScratch",
+        user_input: str,
+        turn_stats: TurnStats,
+    ) -> StatusSubAgentResult | None:
+        """Run optional outcome adjudication or deterministic state prewrites."""
+        sub_agent = self._status_sub_agent
+        if sub_agent is None:
+            return None
+
+        # Outcome comes first in the schema to make the decision boundary
+        # prominent. The sub-agent still batch-scans returned calls before any
+        # execution, so provider call order cannot leak a premature state write.
+        tools = [
+            *self._turn_narrative_outcome_tools(user_input),
+            *self._turn_state_tools(
+                turn_scratch.scene_tracker,
+                turn_scratch.status_manager,
+            ),
+        ]
+        if not tools:
+            return None
+
+        state_context = self._status_sub_agent_state_context(
+            turn_scratch.scene_tracker,
+            turn_scratch.status_manager,
+        )
+
+        def create_checkpoint() -> object:
+            scene_time = (
+                turn_scratch.scene_tracker.get_time_state()
+                if turn_scratch.scene_tracker is not None
+                else None
+            )
+            return (
+                turn_scratch.status_scratch.create_checkpoint(),
+                scene_time,
+            )
+
+        def restore_checkpoint(checkpoint: object) -> None:
+            status_checkpoint, scene_time = checkpoint  # type: ignore[misc]
+            turn_scratch.status_scratch.restore_checkpoint(status_checkpoint)
+            if turn_scratch.scene_tracker is not None and scene_time is not None:
+                turn_scratch.scene_tracker.set_time_state(scene_time)
+
+        with sub_agent.use_turn_tools(
+            tools,
+            mutation_probe=lambda: turn_scratch.status_scratch.change_token,
+            create_checkpoint=create_checkpoint,
+            restore_checkpoint=restore_checkpoint,
+        ):
+            result = await sub_agent.update(
+                history=turn_scratch.base_history,
+                state_context=state_context,
+                user_input=user_input,
+                turn_stats=turn_stats,
+            )
+
+        if result.updated:
+            logger.info(
+                _TAG + " StatusSubAgent updated state via {}",
+                [
+                    record.tool_name
+                    for record in result.records
+                    if record.changed
+                ],
+            )
+        return result
+
+    @staticmethod
+    def _preflight_outcome_state(
+        turn_scratch: "TurnScratch",
+        sub_result: StatusSubAgentResult | None,
+    ) -> StatusSubAgentPreflightOutcome:
+        if turn_scratch.narrative_outcome is not None:
+            return StatusSubAgentPreflightOutcome.STAGED
+        if sub_result is not None and (
+            sub_result.failed or sub_result.outcome_requested
+        ):
+            return StatusSubAgentPreflightOutcome.FALLBACK
+        return StatusSubAgentPreflightOutcome.NONE
+
+    @staticmethod
+    def _tool_names_from_records(records: list[ToolCallRecord]) -> list[str]:
+        names: list[str] = []
+        for record in records:
+            tool_calls = record.assistant_message.get("tool_calls", [])
+            if not isinstance(tool_calls, list):
+                continue
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function")
+                if not isinstance(function, dict):
+                    continue
+                name = str(function.get("name", "") or "")
+                if name:
+                    names.append(name)
+        return names
+
+    @staticmethod
+    def _log_turn_preflight_diagnostics(
+        *,
+        turn_scratch: "TurnScratch",
+        preflight_outcome: StatusSubAgentPreflightOutcome,
+        state_prewrites_skipped: int,
+        main_tool_names: list[str],
+    ) -> None:
+        effective_preflight_outcome = preflight_outcome
+        if (
+            effective_preflight_outcome is StatusSubAgentPreflightOutcome.NONE
+            and turn_scratch.narrative_outcome is not None
+        ):
+            effective_preflight_outcome = StatusSubAgentPreflightOutcome.FALLBACK
+        state_tool_names = SCENE_TOOL_NAMES | {STATUS_TABLE_SET_VALUES_TOOL_NAME}
+        main_state_corrections = sum(
+            name in state_tool_names for name in main_tool_names
+        )
+        outcome_reused_by_main = (
+            preflight_outcome is StatusSubAgentPreflightOutcome.STAGED
+            and NARRATIVE_OUTCOME_TOOL_NAME in main_tool_names
+        )
+        logger.info(
+            _TAG
+            + " preflightOutcome={} statePrewritesSkipped={} "
+            "mainStateCorrections={} outcomeReusedByMain={}",
+            effective_preflight_outcome.value,
+            int(state_prewrites_skipped),
+            int(main_state_corrections),
+            outcome_reused_by_main,
+        )
 
     @staticmethod
     def _status_sub_agent_state_context(
@@ -1390,30 +1563,6 @@ class RPGGameAgent:
             if status_context:
                 sections.append(status_context)
         return "\n\n".join(sections)
-
-    @contextmanager
-    def _status_sub_agent_turn_tools(self, tools: list[BaseTool], mutation_probe):
-        """Temporarily bind StatusSubAgent tools to the current turn scratch."""
-        sub_agent = self._status_sub_agent
-        if sub_agent is None or not tools:
-            yield
-            return
-
-        previous_registry = sub_agent._tool_registry
-        previous_schemas = sub_agent._schemas
-        previous_probe = getattr(sub_agent, "_mutation_probe", None)
-        set_mutation_probe = getattr(sub_agent, "set_mutation_probe", None)
-        try:
-            sub_agent.clear_tools()
-            sub_agent.register_tools(tools)
-            if set_mutation_probe is not None:
-                set_mutation_probe(mutation_probe)
-            yield
-        finally:
-            sub_agent._tool_registry = previous_registry
-            sub_agent._schemas = previous_schemas
-            if set_mutation_probe is not None:
-                set_mutation_probe(previous_probe)
 
     async def _run_post_commit_side_effects(self) -> None:
         """Run turn side effects that must not participate in the turn commit."""
@@ -1455,6 +1604,12 @@ class RPGGameAgent:
             self._tool_registry.register_all(self._rp_module_registry.get_tools())
         if self._extra_tools:
             self._tool_registry.register_all(self._extra_tools)
+        tool_names = [tool.name for tool in self._tool_registry]
+        logger.info(
+            _TAG + " registered {} main tool(s): {}",
+            len(tool_names),
+            tool_names,
+        )
 
     async def _ensure_initialized(self) -> None:
         if self._initialized:

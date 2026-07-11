@@ -7,6 +7,7 @@ import pytest
 import rpg_core.agent.agent as agent_module
 from llm_service.types import ProviderChunk
 from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
+from rpg_core.agent.transaction.status_scratch import StatusDocumentScratch
 from rpg_core.tests.integration.scripted_llm import response, tool_call
 
 pytestmark = pytest.mark.integration
@@ -240,7 +241,7 @@ async def test_post_commit_side_effect_failure_does_not_undo_successful_turn(
 
 
 @pytest.mark.asyncio
-async def test_main_agent_tool_round_trip_uses_real_registry_but_persists_only_final_messages(
+async def test_main_agent_story_outcome_round_trip_commits_record_and_only_final_messages(
     integration_agent,
     integration_data_gateway,
     scripted_llm_manager,
@@ -250,24 +251,461 @@ async def test_main_agent_tool_round_trip_uses_real_registry_but_persists_only_f
         response(
             "",
             model="config-model",
-            tool_calls=[tool_call("rp_dice_roll", '{"expression":"1d2"}')],
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"潜过巡逻守卫","actor":"Alice"}',
+                )
+            ],
         ),
-        response("骰子已经落定。", model="config-model"),
+        response("Alice 依照裁定结果行动。", model="config-model"),
     )
 
-    reply = await integration_agent.send("掷一个骰子")
+    reply = await integration_agent.send("我碰碰运气潜过巡逻守卫")
 
-    assert reply.text == "骰子已经落定。"
+    assert reply.text == "Alice 依照裁定结果行动。"
     assert reply.tool_records and len(reply.tool_records) == 1
     assert len(provider.calls) == 2
     second_messages = provider.calls[1].messages
-    assert any(
-        message.get("role") == "tool" and "骰子结果" in message.get("content", "")
-        for message in second_messages
-    )
+    tool_messages = [
+        message for message in second_messages if message.get("role") == "tool"
+    ]
+    assert len(tool_messages) == 1
+    assert '\"outcomeCode\"' in tool_messages[0].get("content", "")
+    assert "sample" not in tool_messages[0].get("content", "")
+    rp_tool_names = {
+        schema["function"]["name"]
+        for schema in provider.calls[0].tools or []
+        if str(schema["function"]["name"]).startswith("rp_")
+    }
+    assert rp_tool_names == {"rp_story_outcome"}
     rows = integration_data_gateway.messages.list("integration_smoke")
     assert [(row.role, row.content) for row in rows] == [
-        ("user", "掷一个骰子"),
-        ("assistant", "骰子已经落定。"),
+        ("user", "我碰碰运气潜过巡逻守卫"),
+        ("assistant", "Alice 依照裁定结果行动。"),
     ]
     assert integration_data_gateway.backup.messages.count("integration_smoke") == 2
+    outcome = integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    )
+    assert outcome is not None
+    assert outcome.reason == "潜过巡逻守卫"
+    assert outcome.actor == "Alice"
+
+
+class _SequenceRng:
+    def __init__(self, *values: int) -> None:
+        self.values = list(values)
+        self.calls = 0
+
+    def randint(self, lower: int, upper: int) -> int:
+        assert (lower, upper) == (1, 100)
+        self.calls += 1
+        return self.values.pop(0)
+
+
+def _set_outcome_rng(agent, *values: int) -> _SequenceRng:
+    module = agent._rp_module_registry._modules["narrative_outcome"]
+    rng = _SequenceRng(*values)
+    module._sampler._rng = rng
+    return rng
+
+
+@pytest.mark.asyncio
+async def test_status_sub_agent_preadjudicates_before_first_main_call(
+    integration_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    rng = _set_outcome_rng(integration_agent, 31)
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"能否潜过巡逻守卫","actor":"Alice"}',
+                )
+            ],
+        )
+    )
+
+    reply = await integration_agent.send("我趁阴影潜过巡逻守卫")
+
+    assert rng.calls == 1
+    assert reply.status_sub_agent_records
+    assert reply.status_sub_agent_records[0]["status"] == "outcome_staged"
+    assert len(scripted_llm_manager.status.calls) == 1
+    assert len(scripted_llm_manager.main_provider().calls) == 1
+    status_schema_names = {
+        schema["function"]["name"]
+        for schema in scripted_llm_manager.status.calls[0].tools or []
+    }
+    assert status_schema_names == {"rp_story_outcome"}
+    first_main_context = "\n".join(
+        str(message.get("content", ""))
+        for message in scripted_llm_manager.main_provider().calls[0].messages
+    )
+    assert '"outcomeCode":"success_with_cost"' in first_main_context
+    assert '"reason":"能否潜过巡逻守卫"' in first_main_context
+    assert "不得改判" in first_main_context
+    assert [call.source for call in reply.stats.calls] == [
+        "status_sub_agent",
+        "chat_loop",
+    ]
+    persisted = integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    )
+    assert persisted is not None
+    assert persisted.outcome_code == "success_with_cost"
+
+
+@pytest.mark.asyncio
+async def test_status_sub_agent_outcome_skips_mixed_state_prewrites(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    table = integration_status_agent._status_mgr.list_context_tables()[0]
+    table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call(
+                    "status_table_set_values",
+                    f'{{"table_id":{table_id},"updates":[{{"key":"线索","value":"不应预写"}}]}}',
+                    call_id="call_state",
+                ),
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"能否找到隐藏线索"}',
+                    call_id="call_outcome",
+                ),
+            ],
+        )
+    )
+
+    reply = await integration_status_agent.send("我搜索隐藏线索")
+
+    assert reply.status_sub_agent_records
+    assert [record["status"] for record in reply.status_sub_agent_records] == [
+        "skipped_due_to_outcome",
+        "outcome_staged",
+    ]
+    persisted_table = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    assert persisted_table.document.row_for_key("线索").value == "状态表已挂载"
+    main_context = "\n".join(
+        str(message.get("content", ""))
+        for message in scripted_llm_manager.main_provider().calls[0].messages
+    )
+    assert "状态表已挂载" in main_context
+    assert "不应预写" not in main_context
+    assert integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_status",
+        1,
+    ) is not None
+
+
+@pytest.mark.asyncio
+async def test_main_agent_reuses_status_sub_agent_preadjudication(
+    integration_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    rng = _set_outcome_rng(integration_agent, 96)
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call("rp_story_outcome", '{"reason":"撬开封印"}')
+            ],
+        )
+    )
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"主 Agent 重复请求，不应重抽"}',
+                )
+            ],
+        ),
+        response("封印引发了严重反噬，但留下了继续调查的路径。", model="config-model"),
+    )
+
+    reply = await integration_agent.send("撬开封印")
+
+    assert reply.text == "封印引发了严重反噬，但留下了继续调查的路径。"
+    assert rng.calls == 1
+    assert len(provider.calls) == 2
+    assert reply.tool_records and len(reply.tool_records) == 1
+    reused_tool_result = reply.tool_records[0].tool_results[0]["content"]
+    assert '"outcomeCode":"critical_failure"' in reused_tool_result
+    assert '"reason":"撬开封印"' in reused_tool_result
+    persisted = integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    )
+    assert persisted is not None
+    assert persisted.reason == "撬开封印"
+
+
+@pytest.mark.asyncio
+async def test_main_agent_fallback_adjudicates_after_status_sub_agent_failure(
+    integration_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    scripted_llm_manager.status.queue_chat(
+        RuntimeError("status preflight unavailable")
+    )
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"能否避开守卫"}',
+                )
+            ],
+        ),
+        response("你避开了第一道视线，但脚步声引来了新的巡逻。", model="config-model"),
+    )
+
+    reply = await integration_agent.send("我碰碰运气避开守卫")
+
+    assert reply.text == "你避开了第一道视线，但脚步声引来了新的巡逻。"
+    assert reply.status_sub_agent_records is None
+    assert len(provider.calls) == 2
+    persisted = integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    )
+    assert persisted is not None
+    assert persisted.reason == "能否避开守卫"
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_preadjudication_card_before_main_narration(
+    integration_agent,
+    scripted_llm_manager,
+):
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call(
+                    "rp_story_outcome",
+                    '{"reason":"能否及时跃过断桥","actor":"Alice"}',
+                )
+            ],
+        )
+    )
+
+    events = [
+        event
+        async for event in integration_agent.send_stream("我冲刺跃过断桥")
+    ]
+
+    assert [event.kind for event in events[:3]] == [
+        StreamEventKind.TOOL_CALL,
+        StreamEventKind.TOOL_RESULT,
+        StreamEventKind.ROUND_START,
+    ]
+    assert events[0].tool_name == "rp_story_outcome"
+    assert events[1].tool_name == "rp_story_outcome"
+    assert '"outcomeCode"' in (events[1].tool_result or "")
+    assert events[-1].kind == StreamEventKind.DONE
+
+
+@pytest.mark.asyncio
+async def test_outcome_commit_failure_rolls_back_record_messages_and_backup(
+    integration_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+    monkeypatch,
+):
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call("rp_story_outcome", '{"reason":"撬开封印"}')
+            ],
+        )
+    )
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response("不会提交。", model="config-model"),
+    )
+
+    def fail_status_commit(*_args, **_kwargs):
+        raise RuntimeError("forced final commit failure")
+
+    monkeypatch.setattr(StatusDocumentScratch, "commit", fail_status_commit)
+
+    with pytest.raises(RuntimeError, match="forced final commit failure"):
+        await integration_agent.send("尝试撬开封印")
+
+    assert integration_data_gateway.messages.count("integration_smoke") == 0
+    assert integration_data_gateway.backup.messages.count("integration_smoke") == 0
+    assert integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_main_provider_failure_discards_status_preadjudication(
+    integration_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call("rp_story_outcome", '{"reason":"穿过不稳定传送门"}')
+            ],
+        )
+    )
+    scripted_llm_manager.main_provider().queue_chat(
+        RuntimeError("main failed after preadjudication")
+    )
+
+    with pytest.raises(RuntimeError, match="main failed after preadjudication"):
+        await integration_agent.send("我穿过不稳定传送门")
+
+    assert integration_data_gateway.messages.count("integration_smoke") == 0
+    assert integration_data_gateway.backup.messages.count("integration_smoke") == 0
+    assert integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    ) is None
+
+
+async def _gated_stream(started: asyncio.Event, release: asyncio.Event):
+    started.set()
+    await release.wait()
+    return (
+        ProviderChunk(content="too late"),
+        ProviderChunk(finish_reason="stop", model="config-model"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_cancel_after_outcome_tool_discards_staged_record(
+    integration_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    provider = scripted_llm_manager.main_provider()
+    second_round_started = asyncio.Event()
+    release = asyncio.Event()
+    provider.queue_stream(
+        (
+            ProviderChunk(
+                tool_calls=[
+                    {
+                        "index": 0,
+                        **tool_call(
+                            "rp_story_outcome",
+                            '{"reason":"跃过断桥","actor":"Alice"}',
+                        ),
+                    }
+                ],
+                finish_reason="tool_calls",
+                model="config-model",
+            ),
+        ),
+        lambda _messages, _tools: _gated_stream(
+            second_round_started,
+            release,
+        ),
+    )
+    events = []
+
+    async def consume() -> None:
+        async for event in integration_agent.send_stream(
+            "跃过断桥",
+            request_id="req_outcome_cancel",
+        ):
+            events.append(event)
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(second_round_started.wait(), timeout=2)
+    result = await integration_agent.cancel_current_turn(
+        request_id="req_outcome_cancel"
+    )
+    await asyncio.wait_for(task, timeout=2)
+
+    assert result.status == TurnCancelStatus.CANCELLED
+    assert any(event.kind == StreamEventKind.TOOL_RESULT for event in events)
+    assert integration_data_gateway.messages.count("integration_smoke") == 0
+    assert integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_retry_truncate_deletes_outcome_and_draws_again(
+    integration_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    _set_outcome_rng(integration_agent, 1, 100)
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[tool_call("rp_story_outcome", '{"reason":"寻找密道"}')],
+        ),
+        response("第一次。", model="config-model"),
+    )
+    await integration_agent.send("寻找密道")
+    first = integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    )
+    assert first is not None
+    assert first.outcome_code == "critical_success"
+
+    await integration_agent.truncate_history_from_turn(1)
+    assert integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    ) is None
+
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[tool_call("rp_story_outcome", '{"reason":"寻找密道"}')],
+        ),
+        response("第二次。", model="config-model"),
+    )
+    await integration_agent.send("寻找密道")
+    second = integration_data_gateway.narrative_outcomes.get_for_turn(
+        "integration_smoke",
+        1,
+    )
+    assert second is not None
+    assert second.outcome_code == "critical_failure"

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
 import { HISTORY_MESSAGE_ROLE } from '@/types/session'
+import type { NarrativeOutcome } from '@/types/narrativeOutcome'
 
 export type SessionInputMode = 'ic' | 'ooc' | 'gm'
 
@@ -12,7 +13,7 @@ export type NarrativeStyle = {
   prompt: string
 }
 
-export type SpeakerTone = 'player' | 'assistant' | 'tool' | 'system' | 'thinking' | 'error'
+export type SpeakerTone = 'player' | 'assistant' | 'tool' | 'outcome' | 'system' | 'thinking' | 'error'
 
 export const SESSION_MESSAGE_STATUS = {
   DONE: 'done',
@@ -67,6 +68,7 @@ export const SESSION_HISTORY_MESSAGES = {
 export const SESSION_TIMELINE_ROLE = {
   ...HISTORY_MESSAGE_ROLE,
   THINKING: 'thinking',
+  OUTCOME: 'outcome',
   ERROR: 'error',
 } as const
 
@@ -88,6 +90,7 @@ export type SessionTimelineMessage = {
   role: SessionTimelineRole
   content: string
   usage?: ContextUsageSnapshot | null
+  outcome?: NarrativeOutcome
   metadata?: Record<string, unknown>
   createdAt?: string | null
   speaker: SessionSpeaker

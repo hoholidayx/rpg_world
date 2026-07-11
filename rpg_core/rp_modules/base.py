@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC
+from typing import TYPE_CHECKING
 
 from rpg_core.agent.tools import BaseTool
 from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
@@ -13,6 +14,9 @@ from rpg_core.rp_modules.models import (
     ModuleStatus,
     ModuleToolResultEvent,
 )
+
+if TYPE_CHECKING:
+    from rpg_core.agent.transaction import TurnScratch
 
 
 class RPModule(ABC):
@@ -44,6 +48,12 @@ class RPModule(ABC):
             tools=tuple(tool.name for tool in self.get_tools()),
             fixed_section_ids=tuple(section.id for section in self.get_fixed_sections()),
         )
+
+    def bind_turn(self, scratch: "TurnScratch") -> None:
+        del scratch
+
+    def unbind_turn(self, scratch: "TurnScratch") -> None:
+        del scratch
 
     def on_module_activated(self, event: ModuleActivationEvent) -> None:
         del event

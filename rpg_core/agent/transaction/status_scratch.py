@@ -88,6 +88,17 @@ class StatusDocumentScratch:
             for table_id, document in sorted(self._staged_documents.items())
         )
 
+    def create_checkpoint(self) -> dict[int, StatusTableDocument]:
+        """Snapshot staged documents for an in-memory tool batch rollback."""
+        return dict(self._staged_documents)
+
+    def restore_checkpoint(
+        self,
+        checkpoint: dict[int, StatusTableDocument],
+    ) -> None:
+        """Restore a checkpoint without touching persistent status data."""
+        self._staged_documents = dict(checkpoint)
+
     def list_context_tables(self) -> list[dict[str, object]]:
         if self._real_status_mgr is None:
             return []

@@ -14,7 +14,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from play_api.backends import close_data_manager_backend, get_data_manager_backend
 from play_api.settings import play_settings
-from play_api.routers import characters, lorebook, main_llm, ops, sessions, status_tables, workspace
+from play_api.routers import (
+    characters,
+    lorebook,
+    main_llm,
+    narrative_outcome,
+    ops,
+    sessions,
+    status_tables,
+    workspace,
+)
 
 
 @asynccontextmanager
@@ -42,6 +51,7 @@ app.include_router(workspace.router, prefix=_PLAY_API_PREFIX)
 app.include_router(characters.router, prefix=_PLAY_API_PREFIX)
 app.include_router(lorebook.router, prefix=_PLAY_API_PREFIX)
 app.include_router(main_llm.router, prefix=_PLAY_API_PREFIX)
+app.include_router(narrative_outcome.router, prefix=_PLAY_API_PREFIX)
 app.include_router(ops.router, prefix=_PLAY_API_PREFIX)
 app.include_router(sessions.router, prefix=_PLAY_API_PREFIX)
 app.include_router(status_tables.router, prefix=_PLAY_API_PREFIX)

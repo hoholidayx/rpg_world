@@ -80,7 +80,9 @@ async def test_agent_service_send_history_and_context_preview_use_real_runtime(
 
     assert sent.status_code == 200
     assert sent.json()["reply"] == "config-model response"
-    assert sent.json()["usage"]["total_tokens"] == 18
+    # Narrative Outcome preflight makes the normal path two LLM calls:
+    # StatusSubAgent decision + main Agent narration.
+    assert sent.json()["usage"]["total_tokens"] == 36
     assert history.status_code == 200
     assert [(row["role"], row["content"], row["turnId"], row["seqInTurn"]) for row in history.json()["history"]] == [
         ("user", "hello service", 1, 1),
@@ -120,7 +122,7 @@ async def test_agent_service_stream_success_and_failure_preserve_transaction_sem
         "done",
     ]
     assert success_events[-1]["content"] == "config-model streamed"
-    assert success_events[-1]["usage"]["total_tokens"] == 18
+    assert success_events[-1]["usage"]["total_tokens"] == 36
     assert integration_data_gateway.messages.count(success_id) == 2
     assert integration_data_gateway.backup.messages.count(success_id) == 2
 

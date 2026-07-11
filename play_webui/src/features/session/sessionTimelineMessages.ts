@@ -1,5 +1,10 @@
 import { HISTORY_MESSAGE_ROLE, type SessionPlayerCharacter, type Turn } from '@/types/session'
 import {
+  NARRATIVE_OUTCOME_CODES,
+  type NarrativeOutcome,
+  type NarrativeOutcomeCode,
+} from '@/types/narrativeOutcome'
+import {
   firstLetter,
   stripLeadingSceneBlock,
 } from './sessionRoomHelpers'
@@ -42,6 +47,14 @@ export function toolSpeaker(): SessionSpeaker {
     name: '工具结果',
     fallback: '⚒',
     tone: 'tool',
+  }
+}
+
+export function outcomeSpeaker(): SessionSpeaker {
+  return {
+    name: '剧情裁定',
+    fallback: '分',
+    tone: 'outcome',
   }
 }
 
@@ -130,7 +143,7 @@ export function mapHistoryToMessages({
   playerCharacter: SessionPlayerCharacter | null
 }): SessionTimelineMessage[] {
   return (turns ?? []).flatMap((turn, turnIndex) => {
-    return turn.messages.map((message, messageIndex) => {
+    const messages = turn.messages.map((message, messageIndex) => {
       const role = timelineRole(message.role)
       const persistent = Boolean(message.messageId)
       const turnActionRole = role === HISTORY_MESSAGE_ROLE.USER || role === HISTORY_MESSAGE_ROLE.ASSISTANT
@@ -153,7 +166,53 @@ export function mapHistoryToMessages({
         canDelete: persistent && turnActionRole,
       }
     })
+    if (!turn.outcome) return messages
+    const outcomeCreatedAt = turn.messages.find(
+      (message) => message.role === HISTORY_MESSAGE_ROLE.ASSISTANT,
+    )?.createdAt ?? turn.messages[0]?.createdAt
+    return [
+      ...messages,
+      {
+        id: `history-outcome-${turn.turnId}`,
+        turnId: turn.turnId,
+        seqInTurn: 2,
+        role: SESSION_TIMELINE_ROLE.OUTCOME,
+        content: turn.outcome.reason,
+        outcome: turn.outcome,
+        createdAt: outcomeCreatedAt,
+        speaker: outcomeSpeaker(),
+        status: SESSION_MESSAGE_STATUS.DONE,
+        canCopy: false,
+        canRetry: false,
+        canEdit: false,
+        canDelete: false,
+      },
+    ]
   })
+}
+
+export function parseNarrativeOutcomeToolResult(raw: string | undefined): NarrativeOutcome | null {
+  if (!raw) return null
+  try {
+    const payload = JSON.parse(raw) as Record<string, unknown>
+    const outcomeCode = payload.outcomeCode
+    if (
+      typeof outcomeCode !== 'string'
+      || !NARRATIVE_OUTCOME_CODES.includes(outcomeCode as NarrativeOutcomeCode)
+      || typeof payload.label !== 'string'
+      || typeof payload.narrativeGuidance !== 'string'
+      || typeof payload.reason !== 'string'
+    ) return null
+    return {
+      outcomeCode: outcomeCode as NarrativeOutcomeCode,
+      label: payload.label,
+      narrativeGuidance: payload.narrativeGuidance,
+      reason: payload.reason,
+      actor: typeof payload.actor === 'string' && payload.actor ? payload.actor : null,
+    }
+  } catch {
+    return null
+  }
 }
 
 export function canEditMessage(message: SessionTimelineMessage): message is UserTimelineMessage {

@@ -22,7 +22,14 @@ async def test_send_persists_history_and_turn_metadata(integration_agent, integr
     assert reply.stats is not None
     assert reply.stats.total_tokens > 0
     assert reply.text == "config-model response"
-    assert [call.model for call in reply.stats.calls] == ["config-model"]
+    assert [call.model for call in reply.stats.calls] == [
+        "status-model",
+        "config-model",
+    ]
+    assert [call.source for call in reply.stats.calls] == [
+        "status_sub_agent",
+        "chat_loop",
+    ]
     assert [m.role for m in integration_agent.history] == [Role.USER, Role.ASSISTANT]
     assert [m.turn_id for m in integration_agent.history] == [1, 1]
 

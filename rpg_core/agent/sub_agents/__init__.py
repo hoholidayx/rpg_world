@@ -13,6 +13,12 @@ from rpg_core.agent.sub_agents.memory_sub_agent import (
     MemorySubAgent,
 )
 from rpg_core.agent.sub_agents.status_sub_agent import StatusSubAgent
+from rpg_core.agent.sub_agents.status_sub_agent_models import (
+    StatusSubAgentPreflightOutcome,
+    StatusSubAgentRecordStatus,
+    StatusSubAgentResult,
+    StatusSubAgentToolRecord,
+)
 
 __all__ = [
     "BaseSubAgent",
@@ -20,4 +26,8 @@ __all__ = [
     "MemoryAgentResult",
     "MemorySubAgent",
     "StatusSubAgent",
+    "StatusSubAgentPreflightOutcome",
+    "StatusSubAgentRecordStatus",
+    "StatusSubAgentResult",
+    "StatusSubAgentToolRecord",
 ]

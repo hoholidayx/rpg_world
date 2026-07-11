@@ -153,7 +153,7 @@ Telegram 渠道当前支持：
 | `character/` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `lorebook/` | 世界书只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `status/` | 状态表薄适配，通过 `rpg_data` 按 session 读取 SQLite document 真源 |
-| `rp_modules/` | RP 玩法模块框架，当前包含 Dice 骰子模块 |
+| `rp_modules/` | RP 玩法模块框架，当前包含 Narrative Outcome 剧情裁定与 Dice 低层随机模块 |
 | `summary/` | 对话摘要压缩 |
 | 顶层 `llm_service/` | LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析与本地 llama runtime |
 
@@ -165,18 +165,21 @@ Telegram 渠道当前支持：
 
 - 进入 LLM 前，user message 不直接写入 `SessionManager.append()`，而是暂存在 `MessageScratch`。
 - 斜杠命令和玩家角色校验先行；普通正文会在创建 transaction 前按当前主 Agent Context 占用执行窗口门禁，不把本次待发送 input 计入估算。达到 Core 配置阈值时不调用主/子 Agent、不写历史，并提示手动 `/compact`。
-- `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。
+- turn 开始时 Narrative Outcome 先形成有效权重快照；`rp_story_outcome` 与 scene/status 工具一起注册给 `StatusSubAgent`。子 Agent 先判断外部实质变数，再决定“预裁定”或“确定性状态预更新”。
+- `StatusSubAgent` 返回 tool calls 后由编排层按整批处理：只要同批出现 `rp_story_outcome`，就只执行一次裁定，所有 scene/status 预写无论调用顺序都标记为 `skipped_due_to_outcome`；没有裁定时才执行确定性状态预更新。
+- `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。状态工具批次失败会恢复本轮内存 checkpoint，由主 Agent 使用现有工具链回退；这不是持久化 journal。
 - 普通状态表通过同一 scratch 注册 `status_table_set_values`，只允许按 session 运行时表 ID 批量修改已有 key 的 value；工具同时提供给 `StatusSubAgent` 和主 Agent，no-op 不进入 staged changes。
-- 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status，因此主 LLM 能看到本轮预更新状态。
-- LLM 完整成功后，事务一次性提交 staged user message、assistant message 和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
+- 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status；若已预裁定，`RP_MODULES` runtime section 还会在主 Agent 首次调用前注入 `outcomeCode`、标签、叙事指导、reason 和可选 actor。主 Agent 不得改判或重抽，并只在结果实际造成持久状态变化后调用状态工具；允许零状态工具。
+- LLM 完整成功后，事务一次性提交 staged user message、assistant message、Narrative Outcome 裁定和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
 - WebUI 停止生成走 `requestId` 精准取消：Play API `/sessions/{session_id}/stop` 转发到 Agent service `/chat/stop`，被取消的 stream turn 只丢弃 scratch，不发送 DONE，也不提交消息、状态或 usage。
 - WebUI `retry/edit` 保持历史语义可预期：如果目标是最后一个已持久化 turn，先截断该 turn 再用同一 turn id 重新流式发送；如果目标不是最后一轮，不改写旧历史，而是追加一个新的 turn。
+- retry/edit/truncate 会删除对应消息与 Narrative Outcome 并重新抽取，但不会回滚已经提交的状态表；状态分支回滚是独立的后续能力，本链路不新增 `status_turn_journal`。
 - 持久化消息必须带正数 `turn_id` 和 `seq_in_turn`；主消息表通过 `(session_id, turn_id, seq_in_turn)` 唯一约束保护同一 turn 内顺序，冷备份表 append-only 但同样拒绝非正 turn metadata。
 - 持久化 session 的 commit 在 `rpg_data` database atomic 中执行，不跨 LLM 调用持有数据库事务；`history_enabled=False` 是测试/内存模式，只回滚内存 history，不承诺补偿已写入的外部 status manager。
 - summary compression 和 story memory extraction 是 commit 后副作用；失败只记录 warning，不回滚已提交 turn。
 - session 状态表并发写入暂采用 last-write-wins，不使用 version/CAS；Agent 提交发现持久化 document 已偏离 scratch 基线时由 `rpg_data` 记录 warning 后继续覆盖。
 
-事务生命周期有日志覆盖：begin 构建失败、send/send_stream 异常、commit 失败、commit 成功摘要和 post-commit 副作用失败都会记录，便于排查 turn 是否进入 scratch、是否提交、是否在副作用阶段失败。
+事务生命周期有日志覆盖：begin 构建失败、send/send_stream 异常、commit 失败、commit 成功摘要和 post-commit 副作用失败都会记录；预裁定摘要额外输出 `preflightOutcome=staged|none|fallback`、`statePrewritesSkipped`、`mainStateCorrections` 和 `outcomeReusedByMain`，便于排查裁定来源、跳过的预写及主 Agent 修正。
 
 ### 上下文与 RP 模块
 
@@ -189,8 +192,8 @@ Telegram 渠道当前支持：
 - `ContextInspector` 只服务 `/context`、日志和调试输出，不进入主业务数据模型。
 - `context/usage.py` 封装最终渲染 messages 的共享 token 估算和 provider usage 归一化。`context-preview` 只返回下一轮主 Context 估算并驱动圆环/正文门禁；准确 usage 只来自正常 `/turn` 返回或 `/stream` 的 `turn_completed.payload.usage`，仅用于回复气泡和详情复盘，当前不落库。
 - 主 Agent LLM 选择使用 `config default < story override < session override`：Story 详情编辑页立即保存故事默认，SessionRoom context 圆环左侧设置会话覆盖；生成中切换只影响下一 turn，不触发自动压缩。
-- `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。当前 `dice` 模块通过 `RPModuleRegistry` 注册固定层契约、工具和斜杠命令；`text_output_format` 由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
-- `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Dice MVP 默认不注入动态运行态，只在固定层声明稳定规则。
+- `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。`narrative_outcome` 负责主 Agent 的剧情分支随机裁定；`dice` 只保留表达式解析和手动调试命令；`text_output_format` 仍由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
+- `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Narrative Outcome 平时依靠 fixed contract 判断隐式变数；检测到明确随机意图时加入本轮强制裁定指令；若 StatusSubAgent 已预裁定，则该层改为注入已生效结果和裁定后状态检查边界。
 
 当前发送顺序按缓存稳定性和 RP 注意力组织：
 
@@ -206,11 +209,105 @@ Telegram 渠道当前支持：
 
 RP Modules 采用上下文分层策略：
 
-- 稳定、低频变化的规则只放进 fixed layer，例如 dice 的“何时掷骰、必须调用工具、不得替玩家做选择”。
+- 稳定、低频变化的规则只放进 fixed layer，例如 Narrative Outcome 的“何时裁定、必须调用工具、不得替玩家做选择”。
 - 文本输出格式是默认启用的 fixed layer 约束；RP 正文使用 `<rp-narration>` 和 `<rp-character name="...">` 标签区分旁白与角色发言。
-- 高频或临时模块状态才进入 `RP_MODULES` 动态层；Dice MVP 没有动态层内容。
-- 工具 schema 常驻注册，但骰子点数只在 LLM 调用 `rp_dice_roll` / `rp_dice_check_dc` 或用户显式输入 `/roll` / `/check_dc` 时产生。
-- `/rp_modules`、`/rp_module dice`、`/roll`、`/check_dc` 都由 `CommandDispatcher` 在 LLM 前拦截，不进入对话历史。
+- 高频或临时模块状态才进入 `RP_MODULES` 动态层；Narrative Outcome 为明确随机意图加入本轮强制指令，并把 StatusSubAgent 已暂存的裁定结果注入主 Agent 首次调用。
+- 主 LLM 的 RP schema 只暴露 `rp_story_outcome(reason, actor?)`，不暴露表达式、DC、随机数、权重或低层 Dice 工具。
+- `/rp_modules`、`/rp_module narrative_outcome`、`/rp_module dice`、`/roll`、`/check_dc` 都由 `CommandDispatcher` 在 LLM 前拦截，不进入对话历史。
+
+#### Narrative Outcome：五级剧情分支随机机制
+
+当前产品需要的是剧情方向上的受控随机，而不是完整 TRPG 数值系统。主 Agent 每轮结合用户完整语义、当前场景和状态判断是否存在“外部实质变数”：同一行动或场景反应存在两个以上合理结果、结果尚未被上下文唯一确定，并受未知信息、能力、阻力、风险、时机、环境或 NPC/世界反应影响，而且不同结果会实质改变剧情、信息、风险或代价。满足这些条件时，即使用户没有提骰子，也应在叙事结果前调用一次 `rp_story_outcome`。
+
+五档定义与系统默认比例为：
+
+| code | 展示名 | 默认比例 | 叙事约束 |
+|---|---|---:|---|
+| `critical_success` | 大成功 | 5% | 超额达成，并获得额外机会、信息或优势 |
+| `success` | 成功 | 25% | 达成目标，不附加重大代价 |
+| `success_with_cost` | 成功但有代价 | 40% | 达成目标，同时引入相称代价或复杂化 |
+| `setback` | 失败但推进 | 25% | 未达成目标，但提供新信息、替代路径或下一步行动 |
+| `critical_failure` | 重大失败 | 5% | 引入严重后果，但不自动死亡、硬停局或永久剥夺玩家角色主权 |
+
+正常链路如下：
+
+```text
+用户行动
+  → StatusSubAgent 结合历史、当前场景、状态和输入判断外部实质变数
+  → 需要裁定时只调用 rp_story_outcome(reason, actor?)，同批状态预写全部延后
+  → 模块内部按本轮有效五档权重抽取结果
+  → 主 Agent 首次调用前读取等级、叙事指导、reason 和可选 actor
+  → 主 Agent 依据结果继续剧情，并仅在真实持久状态变化时补写 scene/status
+  → StatusSubAgent 漏判时主 Agent 可调用同一工具补判；重复调用幂等复用
+```
+
+适合触发剧情裁定的情况：
+
+- 玩家明确把结果交给运气，例如“我想碰碰运气，看能不能找到其它线索”。
+- 用户没有提骰子，但行动明显受未知信息、能力、阻力、风险、时机或环境影响，例如趁守卫转身潜行、在火势蔓延前寻找出口。
+- NPC 或世界的反应存在多个合理分支，当前人物动机和场景不足以唯一决定结果，而且不同分支会实质影响剧情。
+
+不应触发剧情裁定的情况：
+
+- 替玩家决定“我要不要做”“我是否原谅”“我真实喜欢谁”等角色主权选择或内心感受。
+- 上下文已经确定结果、行动没有有效阻力，或只是没有实质代价的日常动作。
+- 纯台词、情绪表达和不会改变剧情的信息重复确认。
+
+自然语言是主要使用方式：
+
+| 玩家输入 | 预期行为 |
+|---|---|
+| `我想碰碰运气，看能不能在附近找到其他线索` | 调用一次 `rp_story_outcome`，再按五级结果叙事 |
+| `我趁守卫看向别处时溜进档案室` | 即使没有骰子关键词，只要当前场景仍有被发现的风险，就进行剧情裁定 |
+| `我向 Alice 点头问好` | 没有实质变数，直接继续叙事 |
+| `我很犹豫，但还是没有决定是否原谅他` | 不替玩家作出内心选择 |
+| `这轮不要掷骰，直接继续叙事` | 尊重明确否定，不注入本轮强制裁定指令 |
+
+每个自动剧情 turn 最多产生一条裁定；同一 turn 重复工具调用复用第一次结果。常见的“预裁定但无状态变化”turn 只需要 StatusSubAgent 与主 Agent 两次 LLM 调用；只有主 Agent 漏判补裁定或确有状态写入时才增加工具 round。权重在 turn 开始时形成快照，生成中修改只影响下一 turn。裁定与 user/assistant message、状态表在同一个短数据库事务中提交；取消、provider 失败或 commit 失败都不留记录。retry/edit 截断原 turn 时同时删除旧裁定并重新抽取，但不回滚已提交状态表。
+
+权重优先级是 `系统配置 < Story 覆盖 < Session 覆盖`，每层都是完整五项，不逐字段继承。五项必须是 `0..100` 整数且总和严格等于 `100`。Story 编辑页和 Session 设置菜单可以直接编辑比例；Session 开启覆盖时复制当前有效比例，也可清除覆盖并继续继承 Story。接口为：
+
+- `GET/PATCH /play-api/v1/workspaces/{workspace_id}/stories/{story_id}/narrative-outcome`
+- `GET/PATCH /play-api/v1/sessions/{session_id}/narrative-outcome`
+
+`rpg_core/settings.yaml` 的 canonical 配置是：
+
+```yaml
+rp_modules:
+  enabled: true
+  modules:
+    narrative_outcome:
+      enabled: true
+      auto_adjudication_enabled: true
+      default_weights:
+        critical_success: 5
+        success: 25
+        success_with_cost: 40
+        setback: 25
+        critical_failure: 5
+    dice:
+      enabled: true
+      default_dc: 12
+```
+
+- `auto_adjudication_enabled=true`：允许按语义、当前场景和状态主动裁定隐式变数；关闭后只响应明确随机请求。
+- 旧 `dice.allow_auto_checks` 仅作为一版兼容 fallback；新配置应写到 `narrative_outcome`。
+
+#### Dice：低层随机与手动调试
+
+Dice 不再向主 LLM 暴露 `rp_dice_roll` 或 `rp_dice_check_dc`，也不再提供剧情判定提示。表达式解析、随机源和 DC 计算仍保留给手动调试及未来模块复用；`default_dc` 只服务 `/check_dc` 手动命令，`max_dice_count` / `max_die_sides` 只是输入安全限制。
+
+手动命令主要用于调试、兜底或用户明确想自己指定骰子时，不是正常游玩的必需步骤：
+
+```text
+/roll 1d20                 # 只取得随机点数
+/roll 2d6+1 随机天气       # 指定表达式与原因
+/check_dc 1d20 dc=12 搜索  # 手动指定一次 DC 检定；省略 dc 时用 default_dc
+/rp_module narrative_outcome # 查看剧情裁定模块
+/rp_module dice              # 查看 Dice 调试模块
+```
+
+当前阶段明确不做：角色属性/技能面板、复杂难度表、装备或状态加值、优势/劣势、对抗检定、战斗骰，以及要求玩家频繁输入数值。Narrative Outcome 是当前剧情分支机制；底层 Dice 不应反向推动产品走向重数值玩法。
 
 Assistant 回复的 `content` 是唯一真源：带标签全文会原样进入 SSE、历史和数据库，不再通过 `metadata.messageDisplay` 保存旁白/角色分段。Play WebUI 只在展示层做容错解析；解析失败、半截标签或非标准流内容必须原文展示，不丢消息。
 

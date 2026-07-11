@@ -11,7 +11,9 @@ from rpg_core.agent.transaction.status_scratch import ScratchStatusManager, Stat
 
 if TYPE_CHECKING:
     from rpg_core.agent.agent_types import TurnStats
+    from rpg_core.rp_modules.narrative_outcome.models import StagedNarrativeOutcome
     from rpg_core.scene import SceneTracker
+    from rpg_data.models import NarrativeOutcomeSelection
 
 
 @dataclass
@@ -24,6 +26,8 @@ class TurnScratch:
     scene_tracker: "SceneTracker | None"
     turn_stats: "TurnStats"
     tool_records: list[object] = field(default_factory=list)
+    narrative_outcome_selection: "NarrativeOutcomeSelection | None" = None
+    narrative_outcome: "StagedNarrativeOutcome | None" = None
 
     @property
     def turn_id(self) -> int:

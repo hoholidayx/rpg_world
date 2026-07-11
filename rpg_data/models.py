@@ -10,6 +10,9 @@ __all__ = [
     "Character",
     "CharacterDetail",
     "LorebookEntry",
+    "NarrativeOutcomeRecord",
+    "NarrativeOutcomeSelection",
+    "NarrativeOutcomeWeights",
     "Session",
     "SessionCharacter",
     "SessionCharacterDetail",
@@ -44,6 +47,10 @@ __all__ = [
     "MESSAGE_ROLE_TOOL",
     "MESSAGE_ROLE_USER",
     "MESSAGE_ROLES",
+    "NARRATIVE_OUTCOME_CODES",
+    "NARRATIVE_OUTCOME_SOURCE_CONFIG",
+    "NARRATIVE_OUTCOME_SOURCE_SESSION",
+    "NARRATIVE_OUTCOME_SOURCE_STORY",
     "PLAYER_CHARACTER_STATUS_BOUND",
     "PLAYER_CHARACTER_STATUS_INVALID",
     "Workspace",
@@ -75,6 +82,150 @@ MESSAGE_ROLES = frozenset({
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_TOOL,
 })
+NARRATIVE_OUTCOME_CODES = (
+    "critical_success",
+    "success",
+    "success_with_cost",
+    "setback",
+    "critical_failure",
+)
+NARRATIVE_OUTCOME_SOURCE_CONFIG = "config"
+NARRATIVE_OUTCOME_SOURCE_STORY = "story"
+NARRATIVE_OUTCOME_SOURCE_SESSION = "session"
+
+
+@dataclass(frozen=True)
+class NarrativeOutcomeWeights:
+    critical_success: int = 5
+    success: int = 25
+    success_with_cost: int = 40
+    setback: int = 25
+    critical_failure: int = 5
+
+    def __post_init__(self) -> None:
+        values = self.values()
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+            raise ValueError("narrative outcome weights must be integers")
+        if any(value < 0 or value > 100 for value in values):
+            raise ValueError("narrative outcome weights must be within [0, 100]")
+        if sum(values) != 100:
+            raise ValueError("narrative outcome weights must sum to 100")
+
+    def values(self) -> tuple[int, int, int, int, int]:
+        return (
+            self.critical_success,
+            self.success,
+            self.success_with_cost,
+            self.setback,
+            self.critical_failure,
+        )
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "critical_success": self.critical_success,
+            "success": self.success,
+            "success_with_cost": self.success_with_cost,
+            "setback": self.setback,
+            "critical_failure": self.critical_failure,
+        }
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, object]) -> "NarrativeOutcomeWeights":
+        keys = set(raw)
+        expected = set(NARRATIVE_OUTCOME_CODES)
+        if keys != expected:
+            missing = sorted(expected - keys)
+            unexpected = sorted(keys - expected)
+            raise ValueError(
+                "narrative outcome weights must contain exactly five codes; "
+                f"missing={missing}, unexpected={unexpected}"
+            )
+        return cls(
+            critical_success=_weight_int(raw.get("critical_success"), "critical_success"),
+            success=_weight_int(raw.get("success"), "success"),
+            success_with_cost=_weight_int(raw.get("success_with_cost"), "success_with_cost"),
+            setback=_weight_int(raw.get("setback"), "setback"),
+            critical_failure=_weight_int(raw.get("critical_failure"), "critical_failure"),
+        )
+
+
+@dataclass(frozen=True)
+class NarrativeOutcomeSelection:
+    config_default: NarrativeOutcomeWeights
+    story_weights: NarrativeOutcomeWeights | None
+    session_weights: NarrativeOutcomeWeights | None
+    effective_weights: NarrativeOutcomeWeights
+    effective_source: str
+
+    def __post_init__(self) -> None:
+        if self.effective_source not in {
+            NARRATIVE_OUTCOME_SOURCE_CONFIG,
+            NARRATIVE_OUTCOME_SOURCE_STORY,
+            NARRATIVE_OUTCOME_SOURCE_SESSION,
+        }:
+            raise ValueError(
+                f"invalid narrative outcome source: {self.effective_source}"
+            )
+        if self.effective_source == NARRATIVE_OUTCOME_SOURCE_CONFIG:
+            if self.story_weights is not None or self.session_weights is not None:
+                raise ValueError(
+                    "config narrative outcome source cannot ignore an override"
+                )
+            expected = self.config_default
+        elif self.effective_source == NARRATIVE_OUTCOME_SOURCE_STORY:
+            if self.story_weights is None:
+                raise ValueError("story narrative outcome source requires story weights")
+            if self.session_weights is not None:
+                raise ValueError(
+                    "story narrative outcome source cannot ignore a session override"
+                )
+            expected = self.story_weights
+        else:
+            if self.session_weights is None:
+                raise ValueError("session narrative outcome source requires session weights")
+            expected = self.session_weights
+        if self.effective_weights != expected:
+            raise ValueError(
+                "effective narrative outcome weights do not match effective source"
+            )
+
+
+@dataclass(frozen=True)
+class NarrativeOutcomeRecord:
+    id: int
+    session_id: str
+    turn_id: int
+    outcome_code: str
+    reason: str
+    actor: str
+    sample_value: int
+    effective_weights: NarrativeOutcomeWeights
+    effective_source: str
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.outcome_code not in NARRATIVE_OUTCOME_CODES:
+            raise ValueError(f"invalid narrative outcome code: {self.outcome_code}")
+        if self.turn_id <= 0:
+            raise ValueError("turn_id must be positive")
+        if not 1 <= self.sample_value <= 100:
+            raise ValueError("sample_value must be within [1, 100]")
+        if self.effective_source not in {
+            NARRATIVE_OUTCOME_SOURCE_CONFIG,
+            NARRATIVE_OUTCOME_SOURCE_STORY,
+            NARRATIVE_OUTCOME_SOURCE_SESSION,
+        }:
+            raise ValueError(
+                f"invalid narrative outcome source: {self.effective_source}"
+            )
+
+
+def _weight_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"narrative outcome weight {name} must be an integer")
+    return value
 
 
 @dataclass(frozen=True)
@@ -100,6 +251,7 @@ class Story:
     story_prompt: str = ""
     first_message: str = ""
     main_llm_provider_key: str | None = None
+    narrative_outcome_weights: NarrativeOutcomeWeights | None = None
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""
@@ -118,6 +270,7 @@ class Session:
     title: str = ""
     description: str = ""
     main_llm_provider_key: str | None = None
+    narrative_outcome_weights: NarrativeOutcomeWeights | None = None
     player_character_id: int | None = None
     player_character_snapshot_json: str = "{}"
     profile_metadata_json: str = "{}"
@@ -131,6 +284,7 @@ class SessionProfile:
     title: str = ""
     description: str = ""
     main_llm_provider_key: str | None = None
+    narrative_outcome_weights: NarrativeOutcomeWeights | None = None
     player_character_id: int | None = None
     player_character_snapshot_json: str = "{}"
     metadata_json: str = "{}"

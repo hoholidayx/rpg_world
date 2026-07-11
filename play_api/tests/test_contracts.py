@@ -14,6 +14,7 @@ from play_api.routers.sessions import _agent_call, _turns_from_history
 from play_api.sse_protocol import AgentEventKind, PLAY_SSE_SCHEMA_VERSION, PlaySSEType
 from rpg_core.agent.agent_types import TurnCancelStatus
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
+from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
 
 
@@ -361,6 +362,134 @@ def test_history_endpoint_rejects_invalid_turn_metadata(tmp_path, monkeypatch) -
 
     assert response.status_code == 409
     assert "history[1]" in response.json()["detail"]
+
+
+def test_narrative_outcome_config_inheritance_validation_and_history_page(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    monkeypatch.setattr(agent_client, "_client", _FakeAgentClient())
+
+    story_weights = {
+        "critical_success": 10,
+        "success": 30,
+        "success_with_cost": 30,
+        "setback": 25,
+        "critical_failure": 5,
+    }
+    session_weights = {
+        "critical_success": 0,
+        "success": 20,
+        "success_with_cost": 50,
+        "setback": 25,
+        "critical_failure": 5,
+    }
+
+    with TestClient(app) as client:
+        story_default = client.get(
+            "/play-api/v1/workspaces/demo_workspace/stories/1/narrative-outcome"
+        )
+        assert story_default.status_code == 200
+        assert story_default.json()["effectiveSource"] == "config"
+        assert story_default.json()["effectiveWeights"] == {
+            "critical_success": 5,
+            "success": 25,
+            "success_with_cost": 40,
+            "setback": 25,
+            "critical_failure": 5,
+        }
+        assert [item["code"] for item in story_default.json()["definitions"]] == [
+            "critical_success",
+            "success",
+            "success_with_cost",
+            "setback",
+            "critical_failure",
+        ]
+
+        story_override = client.patch(
+            "/play-api/v1/workspaces/demo_workspace/stories/1/narrative-outcome",
+            json={"weights": story_weights},
+        )
+        assert story_override.status_code == 200
+        assert story_override.json()["storyOverride"] == story_weights
+        assert story_override.json()["effectiveSource"] == "story"
+
+        inherited = client.get(
+            "/play-api/v1/sessions/s_forest001/narrative-outcome"
+        )
+        assert inherited.status_code == 200
+        assert inherited.json()["sessionOverride"] is None
+        assert inherited.json()["effectiveWeights"] == story_weights
+        assert inherited.json()["effectiveSource"] == "story"
+
+        session_override = client.patch(
+            "/play-api/v1/sessions/s_forest001/narrative-outcome",
+            json={"weights": session_weights},
+        )
+        assert session_override.status_code == 200
+        assert session_override.json()["effectiveSource"] == "session"
+        assert session_override.json()["effectiveWeights"] == session_weights
+
+        cleared = client.patch(
+            "/play-api/v1/sessions/s_forest001/narrative-outcome",
+            json={"weights": None},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["sessionOverride"] is None
+        assert cleared.json()["effectiveSource"] == "story"
+
+        invalid = client.patch(
+            "/play-api/v1/sessions/s_forest001/narrative-outcome",
+            json={"weights": {**session_weights, "success": 19}},
+        )
+        assert invalid.status_code == 422
+
+        cleared_story = client.patch(
+            "/play-api/v1/workspaces/demo_workspace/stories/1/narrative-outcome",
+            json={"weights": None},
+        )
+        assert cleared_story.status_code == 200
+        assert cleared_story.json()["storyOverride"] is None
+        assert cleared_story.json()["effectiveSource"] == "config"
+
+        gateway = get_data_service_gateway()
+        selection = gateway.narrative_outcomes.get_session_selection(
+            "s_forest001",
+            models.NarrativeOutcomeWeights(),
+        )
+        assert selection is not None
+        gateway.narrative_outcomes.record(
+            session_id="s_forest001",
+            turn_id=1,
+            outcome_code="success_with_cost",
+            reason="穿越霜藤",
+            actor="Bob",
+            sample_value=50,
+            effective_weights=selection.effective_weights,
+            effective_source=selection.effective_source,
+        )
+
+        history_page = client.get(
+            "/play-api/v1/sessions/s_forest001/history-page?limit=50"
+        )
+        assert history_page.status_code == 200
+        turn_one = next(
+            turn for turn in history_page.json()["turns"] if turn["turnId"] == 1
+        )
+        assert turn_one["outcome"] == {
+            "outcomeCode": "success_with_cost",
+            "label": "成功但有代价",
+            "narrativeGuidance": "达成目标，同时引入一个与行动相称的代价或复杂化。",
+            "reason": "穿越霜藤",
+            "actor": "Bob",
+        }
+
+        history = client.get("/play-api/v1/sessions/s_forest001/history")
+        assert history.status_code == 200
+        assert history.json()[0]["outcome"]["outcomeCode"] == "success_with_cost"
 
 
 def test_main_llm_endpoints_expose_camel_case_and_forward_selection(

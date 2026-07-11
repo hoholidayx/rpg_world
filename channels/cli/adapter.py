@@ -20,6 +20,7 @@ from rich.panel import Panel
 
 from channels.base import ChannelAdapter
 from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.agent.sub_agents import StatusSubAgentRecordStatus
 from rpg_core.utils.stats_formatter import format_event_stats
 
 _HISTORY_PATH = Path.home() / ".rpg_world_cli_history"
@@ -198,8 +199,20 @@ class CLIAdapter(ChannelAdapter):
             )
             self._console.print(f"[cyan]  ── StatusSubAgent: {tools_str}[/cyan]")
             for r in status_records:
-                preview = r["result"][:120]
-                self._console.print(f"[green]     → {preview}[/green]")
+                preview = str(r.get("result", ""))[:120]
+                raw_status = str(r.get("status", ""))
+                try:
+                    status = StatusSubAgentRecordStatus(raw_status)
+                except ValueError:
+                    status = None
+                if status is not None and status.is_diagnostic_only:
+                    self._console.print(
+                        f"[yellow]     ↷ [{status.value}] {preview}[/yellow]"
+                    )
+                elif r.get("success") is False:
+                    self._console.print(f"[red]     × {preview}[/red]")
+                else:
+                    self._console.print(f"[green]     → {preview}[/green]")
             self._console.print("")
 
         # ── Tool call records ───────────────────────────────

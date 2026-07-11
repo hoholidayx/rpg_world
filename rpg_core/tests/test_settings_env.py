@@ -242,6 +242,15 @@ def test_rp_module_settings_defaults(tmp_path: Path, monkeypatch) -> None:
     assert rp_modules.enabled is True
     assert rp_modules.dice.enabled is True
     assert rp_modules.dice.default_dc == 12
+    assert rp_modules.narrative_outcome.enabled is True
+    assert rp_modules.narrative_outcome.auto_adjudication_enabled is True
+    assert rp_modules.narrative_outcome.default_weights.to_dict() == {
+        "critical_success": 5,
+        "success": 25,
+        "success_with_cost": 40,
+        "setback": 25,
+        "critical_failure": 5,
+    }
 
 
 def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> None:
@@ -279,6 +288,52 @@ def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> Non
     assert rp_modules.dice.default_dc == 15
     assert rp_modules.dice.max_dice_count == 8
     assert rp_modules.dice.max_die_sides == 100
+    assert rp_modules.narrative_outcome.auto_adjudication_enabled is False
+
+
+def test_narrative_outcome_settings_read_canonical_weights(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    original = cfg.read_text(encoding="utf-8")
+    cfg.write_text(
+        original.replace(
+            "  memory:\n",
+            """  rp_modules:
+    modules:
+      narrative_outcome:
+        enabled: true
+        auto_adjudication_enabled: false
+        default_weights:
+          critical_success: 0
+          success: 20
+          success_with_cost: 50
+          setback: 25
+          critical_failure: 5
+      dice:
+        enabled: true
+        allow_auto_checks: true
+  memory:
+""",
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    outcome = settings_module.Settings().rp_module_settings.narrative_outcome
+
+    assert outcome.auto_adjudication_enabled is False
+    assert outcome.default_weights.to_dict() == {
+        "critical_success": 0,
+        "success": 20,
+        "success_with_cost": 50,
+        "setback": 25,
+        "critical_failure": 5,
+    }
 
 
 def test_memory_settings_resolve_provider_pool_entries(tmp_path: Path, monkeypatch) -> None:

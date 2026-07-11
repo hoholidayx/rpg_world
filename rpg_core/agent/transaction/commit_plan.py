@@ -12,6 +12,7 @@ from rpg_core.agent.transaction.status_scratch import StatusDocumentChange, Stat
 from rpg_core.session import InvalidTurnMetadataError
 
 if TYPE_CHECKING:
+    from rpg_core.rp_modules.narrative_outcome.models import StagedNarrativeOutcome
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager
 
@@ -26,6 +27,7 @@ class TurnCommitPlan:
     status_mgr: "StatusManager | None"
     message_scratch: MessageScratch
     status_scratch: StatusDocumentScratch
+    narrative_outcome: "StagedNarrativeOutcome | None" = None
 
     def commit(self) -> list[StatusDocumentChange]:
         snapshot = self.session.history
@@ -34,6 +36,7 @@ class TurnCommitPlan:
                 gateway = self.session._require_data_session()
                 with gateway.database.atomic():
                     self._append_messages()
+                    self._commit_narrative_outcome(gateway)
                     changes = self.status_scratch.commit(self.status_mgr)
             else:
                 # Non-persistent sessions are test/in-memory mode. They restore
@@ -62,6 +65,21 @@ class TurnCommitPlan:
                 turn_id=message.turn_id,
                 seq_in_turn=message.seq_in_turn,
             )
+
+    def _commit_narrative_outcome(self, gateway) -> None:
+        staged = self.narrative_outcome
+        if staged is None:
+            return
+        gateway.narrative_outcomes.record(
+            session_id=self.session.session_id,
+            turn_id=self.message_scratch.turn_id,
+            outcome_code=staged.outcome_code,
+            reason=staged.reason,
+            actor=staged.actor,
+            sample_value=staged.sample_value,
+            effective_weights=staged.effective_weights,
+            effective_source=staged.effective_source,
+        )
 
     def _staged_turn_metadata(self) -> list[dict[str, object]]:
         return [

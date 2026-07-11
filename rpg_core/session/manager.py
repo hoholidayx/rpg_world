@@ -326,7 +326,12 @@ class SessionManager:
 
     def clear(self) -> None:
         """Clear in-memory history and the mutable rpg_data message table."""
-        self.replace_history([], persist=self._history_enabled)
+        if self._history_enabled:
+            gateway = self._require_data_session()
+            with gateway.database.atomic():
+                gateway.messages.clear(self._session_id)
+                gateway.narrative_outcomes.clear(self._session_id)
+        self.replace_history([], persist=False)
         logger.debug(_TAG + " cleared history for session '{}'", self._session_id)
 
     def truncate(self, keep_from_index: int) -> int:
@@ -340,16 +345,31 @@ class SessionManager:
 
         if keep_from_index >= before:
             if self._history_enabled:
-                self._require_data_session().messages.clear(self._session_id)
+                gateway = self._require_data_session()
+                with gateway.database.atomic():
+                    gateway.messages.clear(self._session_id)
+                    gateway.narrative_outcomes.clear(self._session_id)
             self.__history = []
             self._rebuild_turn_state()
             return before
 
         remaining = self.__history[keep_from_index:]
         if self._history_enabled:
+            removed_turn_ids = {
+                message.turn_id
+                for message in self.__history[:keep_from_index]
+                if message.turn_id > 0
+            }
             boundary_uid = self.__history[keep_from_index].uid
             if boundary_uid > 0:
-                self._require_data_session().messages.truncate_before_id(self._session_id, boundary_uid)
+                gateway = self._require_data_session()
+                with gateway.database.atomic():
+                    gateway.messages.truncate_before_id(self._session_id, boundary_uid)
+                    for turn_id in removed_turn_ids:
+                        gateway.narrative_outcomes.delete_for_turn(
+                            self._session_id,
+                            turn_id,
+                        )
             else:
                 self.replace_history(remaining, persist=True)
                 return before - len(self.__history)
@@ -397,7 +417,15 @@ class SessionManager:
         before = len(self.__history)
         if self._history_enabled:
             gateway = self._require_data_session()
-            removed = gateway.messages.truncate_from_turn(self._session_id, boundary_turn)
+            with gateway.database.atomic():
+                removed = gateway.messages.truncate_from_turn(
+                    self._session_id,
+                    boundary_turn,
+                )
+                gateway.narrative_outcomes.delete_from_turn(
+                    self._session_id,
+                    boundary_turn,
+                )
             self.load()
             return removed
 
@@ -435,6 +463,11 @@ class SessionManager:
             updated_row = gateway.messages.update(target_id, content=str(content))
             if updated_row is None:
                 raise FileNotFoundError(f"session message not found: {message_id}")
+            if current.role == "user":
+                gateway.narrative_outcomes.delete_for_turn(
+                    self._session_id,
+                    current.turn_id,
+                )
         self.load()
         return Message.from_dict(updated_row.to_message_dict())
 
@@ -457,6 +490,10 @@ class SessionManager:
                 raise FileNotFoundError(f"session message not found: {message_id}")
             if not gateway.messages.delete_for_session(self._session_id, target_id):
                 raise FileNotFoundError(f"session message not found: {message_id}")
+            gateway.narrative_outcomes.delete_for_turn(
+                self._session_id,
+                current.turn_id,
+            )
         self.load()
         return Message.from_dict(current.to_message_dict())
 
@@ -610,6 +647,10 @@ class SessionManager:
     def history_enabled(self) -> bool:
         return self._history_enabled
 
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
     def set_history_enabled(self, enabled: bool) -> None:
         self._history_enabled = enabled
 
@@ -621,10 +662,16 @@ class SessionManager:
 
         if persist and self._history_enabled:
             self.validate_loaded_turn_metadata(label="history")
-            rows = self._require_data_session().messages.replace(
-                self._session_id,
-                (msg.to_dict() for msg in self.__history),
-            )
+            gateway = self._require_data_session()
+            with gateway.database.atomic():
+                rows = gateway.messages.replace(
+                    self._session_id,
+                    (msg.to_dict() for msg in self.__history),
+                )
+                gateway.narrative_outcomes.retain_turns(
+                    self._session_id,
+                    (message.turn_id for message in self.__history),
+                )
             self.__history = [Message.from_dict(row.to_message_dict()) for row in rows]
 
         self._rebuild_turn_state()

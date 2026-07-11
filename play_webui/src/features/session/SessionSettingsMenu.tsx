@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Brain, CaseSensitive, PanelLeftClose, PanelRightClose, Settings, UserRound, Wrench } from 'lucide-react'
+import { Brain, CaseSensitive, GitBranch, PanelLeftClose, PanelRightClose, Settings, UserRound, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import {
   SESSION_FONT_SCALE_DEFAULT,
@@ -56,6 +56,7 @@ export function SessionSettingsMenu({
   onShowToolsChange,
   playerCharacter,
   onOpenRoleDialog,
+  onOpenNarrativeOutcomeDialog,
 }: {
   open: boolean
   leftCollapsed: boolean
@@ -71,6 +72,7 @@ export function SessionSettingsMenu({
   onShowToolsChange: (show: boolean) => void
   playerCharacter?: SessionPlayerCharacter | null
   onOpenRoleDialog: () => void
+  onOpenNarrativeOutcomeDialog: () => void
 }) {
   return (
     <div className="relative">
@@ -116,6 +118,22 @@ export function SessionSettingsMenu({
               </span>
               <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
                 切换
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenNarrativeOutcomeDialog}
+              className="mb-1 grid w-full grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-violet-50 dark:hover:bg-violet-500/10"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+                <GitBranch size={16} />
+              </span>
+              <span className="min-w-0">
+                <strong className="block text-sm font-black text-slate-900 dark:text-slate-100">剧情结果分布</strong>
+                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">设置本会话五档覆盖比例</span>
+              </span>
+              <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+                编辑
               </span>
             </button>
             <div className="mb-1 rounded-lg px-3 py-3">

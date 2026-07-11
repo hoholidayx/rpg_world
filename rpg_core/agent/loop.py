@@ -135,6 +135,19 @@ async def run_chat_loop(
             # Handle legacy dict responses gracefully
             content = result.get("content", "")
             tool_calls = result.get("tool_calls")
+            finish_reason = result.get("finish_reason")
+            if settings.verbose_logging:
+                tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls or []]
+                logger.info(
+                    _TAG + " LLM round {} completed: finish_reason={}, tool_calls={}",
+                    tool_call_count + 1,
+                    finish_reason,
+                    tool_names,
+                )
+            if finish_reason == "tool_calls" and not tool_calls:
+                raise RuntimeError(
+                    "LLM reported finish_reason=tool_calls but returned no tool-call payload"
+                )
             if not tool_calls:
                 return content, records
             tool_call_count += 1
@@ -163,12 +176,23 @@ async def run_chat_loop(
                 reasoning_content=result.reasoning_content,
             ))
 
+        tool_names = [tc.get("function", {}).get("name", "") for tc in result.tool_calls or []]
+        if settings.verbose_logging:
+            logger.info(
+                _TAG + " LLM round {} completed: finish_reason={}, tool_calls={}",
+                tool_call_count + 1,
+                result.finish_reason,
+                tool_names,
+            )
+        if result.finish_reason == "tool_calls" and not result.tool_calls:
+            raise RuntimeError(
+                "LLM reported finish_reason=tool_calls but returned no tool-call payload"
+            )
         if not result.tool_calls:
             return result.content, records
 
         tool_call_count += 1
         if settings.verbose_logging:
-            tool_names = [tc["function"]["name"] for tc in result.tool_calls]
             logger.info(
                 _TAG + " round {}: {} tool call(s): {}",
                 tool_call_count, len(tool_names), tool_names,
@@ -316,6 +340,24 @@ async def run_chat_loop_stream(
             for tc in tool_calls:
                 if not tc.get("id"):
                     tc["id"] = f"call_stream_{id(tc)}"
+
+        tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls or []]
+        if settings.verbose_logging:
+            logger.info(
+                _TAG + " stream LLM round {} completed: finish_reason={}, tool_calls={}",
+                tool_call_count + 1,
+                finish_reason,
+                tool_names,
+            )
+
+        if finish_reason == "tool_calls" and not tool_calls:
+            msg = "LLM reported finish_reason=tool_calls but returned no tool-call payload"
+            logger.error(_TAG + " {}", msg)
+            yield AgentStreamEvent(
+                kind=StreamEventKind.ERROR,
+                content=msg,
+            )
+            return
 
         # ── No tool calls → final answer ───────────────────────────
         if not tool_calls:

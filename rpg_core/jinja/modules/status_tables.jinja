@@ -1,6 +1,6 @@
 {% if status_tables %}
 {% set writable_tables = status_tables | selectattr('rows') | list %}
-状态表记录当前会话中的运行时状态。仅在剧情事实明确改变已有项目时更新；{% if writable_tables %}需要更新时调用 status_table_set_values，并使用对应的运行时表 ID。{% endif %}只能修改已有键的值，不得新增、删除或重命名键。不确定时保持原值。
+状态表记录当前会话中的运行时状态。每轮都要检查，但仅在剧情事实已经确定、变化实际且需要持续追踪时更新；{% if writable_tables %}需要更新时调用 status_table_set_values，并使用对应的运行时表 ID。{% endif %}允许零状态工具，不得制造 no-op。剧情裁定派生的变化必须在获得结果后写入。只能修改已有键的值，不得新增、删除或重命名键；不确定时保持原值。
 
 {% set regular_tables = status_tables | rejectattr('character_name') | list %}
 {% if regular_tables %}

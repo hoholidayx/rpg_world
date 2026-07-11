@@ -20,18 +20,26 @@ Usage::
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from loguru import logger
 
 from rpg_core.agent.agent_types import CallRecord, TurnStats
 from rpg_core.agent.sub_agents.base import BaseSubAgent
+from rpg_core.agent.sub_agents.status_sub_agent_models import (
+    StatusSubAgentRecordStatus,
+    StatusSubAgentResult,
+    StatusSubAgentToolRecord,
+)
 from rpg_core.agent.tools import BaseTool
 from rpg_core.agent.tools.registry import ToolRegistry
+from rpg_core.agent.transaction.constants import SCENE_TOOL_NAMES
 from rpg_core.context.rpg_context import Message, Role
+from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
+from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
 
 if TYPE_CHECKING:
     from llm_service.manager import ProviderOverrides
@@ -41,40 +49,39 @@ if TYPE_CHECKING:
 # ── constants ──────────────────────────────────────────────────────────
 
 _TAG = "[StatusSubAgent]"
+_STATE_TOOL_NAMES = frozenset(
+    (*SCENE_TOOL_NAMES, STATUS_TABLE_SET_VALUES_TOOL_NAME)
+)
+
+
+class _StatusPrewriteRollbackError(RuntimeError):
+    """Fatal guard: continuing could expose a partially restored scratch."""
 
 # ── system prompt ─────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = (
-    "你是 RPG 游戏世界的状态表更新器。\n\n"
+    "你是 RPG 游戏世界的剧情预裁定与状态表预处理器。\n\n"
     "可用操作及其修改的状态表：\n"
+    "- rp_story_outcome：对存在外部实质变数的行动或场景决策进行一次五级剧情裁定\n"
     "- scene_time / scene_attr / scene_del_attr：更新当前场景状态"
     "（时间、地点、天气、氛围、在场的 NPC 等）\n"
     "- status_table_set_values：批量更新普通状态表中已有键的值\n\n"
-    "规则：\n"
-    "1. 仅当用户的行为明确或隐式改变了某项状态时，才调用对应的工具。\n"
-    "2. 不要修改没有发生变化的属性。\n"
-    "3. 如果没有任何变化，不要调用任何工具。\n"
-    "4. 主动清理：如果某个属性不再与当前场景相关"
+    "决策顺序与边界：\n"
+    "1. 先结合最近历史、当前场景、普通状态表和用户输入，判断本轮是否存在外部实质变数："
+    "同一行动或场景反应仍有两个或以上合理结果，受未知信息、能力、阻力、风险、时机、环境或 "
+    "NPC/世界反应影响，而且不同结果会实质改变剧情、信息、风险或代价。\n"
+    "2. 只要需要裁定，就只调用一次 rp_story_outcome。不得同时调用任何状态工具，也不得提前假设"
+    "成功、失败、发现、伤害、NPC 反应或位置抵达；混合行动中的确定性子动作也交给主 Agent 延后处理。\n"
+    "3. 只有不需要裁定时，才可依据既有 assistant 已确认事实、用户对既有事实的明确纠正，或没有"
+    "随机分支的确定性动作更新状态。用户单方面宣称的未决外部结果不是已确认事实。\n"
+    "4. 仅当实际、持久、已经确定的追踪值发生变化时调用状态工具；不要修改没有变化的属性，"
+    "不要制造 no-op。没有裁定且没有状态变化时，不调用任何工具。\n"
+    "5. 主动清理：如果某个属性不再与当前场景相关"
     "（例如角色离开了、某种天气效果消失了），"
     "使用 scene_del_attr 将其移除。只保留活跃属性可以防止上下文膨胀。\n"
-    "5. 普通状态表不得新增、删除或重命名键；角色状态表只追踪对应角色。\n"
-    "6. 属性键和值使用状态表已有语言和格式。"
+    "6. 普通状态表不得新增、删除或重命名键；角色状态表只追踪对应角色。\n"
+    "7. 属性键和值使用状态表已有语言和格式。"
 )
-
-# ── result type ───────────────────────────────────────────────────────
-
-
-@dataclass
-class StatusSubAgentResult:
-    """StatusSubAgent 一次 ``update()`` 的执行结果。"""
-
-    updated: bool = False
-    """是否有状态表被修改。"""
-    records: list[dict[str, object]] = field(default_factory=list)
-    """工具调用记录，每项含 ``tool_name`` / ``arguments`` / ``result``。"""
-    call_stats: list[CallRecord] = field(default_factory=list)
-    """此更新涉及的 LLM 调用记录（usage / timing）。"""
-
 
 # ── sub-agent ─────────────────────────────────────────────────────────
 
@@ -110,6 +117,8 @@ class StatusSubAgent(BaseSubAgent):
         self._tool_registry = ToolRegistry()
         self._schemas: list[dict[str, object]] = []
         self._mutation_probe: Callable[[], object] | None = None
+        self._mutation_checkpoint: Callable[[], object] | None = None
+        self._mutation_restore: Callable[[object], None] | None = None
 
     # ── 工具注册（可多次调用追加） ─────────────────────────────────────
 
@@ -125,6 +134,42 @@ class StatusSubAgent(BaseSubAgent):
 
     def set_mutation_probe(self, probe: Callable[[], object] | None) -> None:
         self._mutation_probe = probe
+
+    def set_mutation_boundary(
+        self,
+        checkpoint: Callable[[], object] | None,
+        restore: Callable[[object], None] | None,
+    ) -> None:
+        """Bind an in-memory rollback boundary for one status prewrite batch."""
+        self._mutation_checkpoint = checkpoint
+        self._mutation_restore = restore
+
+    @contextmanager
+    def use_turn_tools(
+        self,
+        tools: list[BaseTool],
+        *,
+        mutation_probe: Callable[[], object] | None,
+        create_checkpoint: Callable[[], object] | None,
+        restore_checkpoint: Callable[[object], None] | None,
+    ) -> Iterator[None]:
+        """Temporarily bind tools and rollback callbacks for one turn."""
+        previous_registry = self._tool_registry
+        previous_schemas = self._schemas
+        previous_probe = self._mutation_probe
+        previous_checkpoint = self._mutation_checkpoint
+        previous_restore = self._mutation_restore
+        try:
+            self.clear_tools()
+            self.register_tools(tools)
+            self.set_mutation_probe(mutation_probe)
+            self.set_mutation_boundary(create_checkpoint, restore_checkpoint)
+            yield
+        finally:
+            self._tool_registry = previous_registry
+            self._schemas = previous_schemas
+            self.set_mutation_probe(previous_probe)
+            self.set_mutation_boundary(previous_checkpoint, previous_restore)
 
     # ── Context 绑定（覆盖基类） ─────────────────────────────────────
 
@@ -224,68 +269,190 @@ class StatusSubAgent(BaseSubAgent):
                     len(tool_calls),
                 )
 
-            for tc in tool_calls:
-                name = tc["function"]["name"]
-                args = tc["function"]["arguments"]
-                if settings.verbose_logging:
-                    logger.info(_TAG + " calling tool: {}({})", name, args)
+            normalized_calls = [_normalize_tool_call(tc) for tc in tool_calls]
+            result.outcome_requested = any(
+                name == NARRATIVE_OUTCOME_TOOL_NAME
+                for name, _args in normalized_calls
+            )
 
-                try:
-                    before = self._mutation_probe() if self._mutation_probe is not None else None
-                    tool_result = await self._tool_registry.execute(name, args)
-                    after = self._mutation_probe() if self._mutation_probe is not None else None
-                    success = _tool_result_succeeded(str(tool_result))
-                    changed = (
-                        before != after
-                        if self._mutation_probe is not None
-                        else _tool_result_reports_change(str(tool_result), success=success)
-                    )
-                    changed = success and changed
-                    status = "error" if not success else ("changed" if changed else "no_op")
-                    result.records.append({
-                        "tool_name": name,
-                        "arguments": args,
-                        "result": str(tool_result),
-                        "success": success,
-                        "changed": changed,
-                        "status": status,
-                    })
-                    result.updated = result.updated or changed
-                    if settings.verbose_logging:
-                        logger.info(
-                            _TAG + " tool result: {} -> {}",
-                            name,
-                            str(tool_result)[:200],
+            # The decision is batch-wide, not order-dependent. Once an outcome
+            # is requested, no state mutation from the same response may enter
+            # scratch, including deterministic-looking parts of a mixed action.
+            if result.outcome_requested:
+                outcome_executed = False
+                for name, args in normalized_calls:
+                    if name in _STATE_TOOL_NAMES:
+                        result.state_prewrites_skipped += 1
+                        result.records.append(
+                            StatusSubAgentToolRecord.skipped_due_to_outcome(
+                                tool_name=name,
+                                arguments=args,
+                                state_prewrite=True,
+                            )
                         )
-                except Exception as exc:
-                    logger.warning(
-                        _TAG + " tool {}({}) failed: {}",
-                        name, args, exc,
+                        continue
+                    if name != NARRATIVE_OUTCOME_TOOL_NAME:
+                        result.records.append(
+                            StatusSubAgentToolRecord.skipped_due_to_outcome(
+                                tool_name=name,
+                                arguments=args,
+                                state_prewrite=False,
+                            )
+                        )
+                        continue
+                    if outcome_executed:
+                        result.records.append(
+                            StatusSubAgentToolRecord.skipped_duplicate_outcome(
+                                tool_name=name,
+                                arguments=args,
+                            )
+                        )
+                        continue
+
+                    outcome_executed = True
+                    record = await self._execute_tool_call(
+                        name,
+                        args,
+                        track_mutation=False,
+                        success_status=StatusSubAgentRecordStatus.OUTCOME_STAGED,
                     )
-                    result.records.append({
-                        "tool_name": name,
-                        "arguments": args,
-                        "result": f"Error: {exc}",
-                        "success": False,
-                        "changed": False,
-                        "status": "error",
-                    })
+                    result.records.append(record)
+                    result.outcome_staged = record.success
+                    result.failed = not result.outcome_staged
+
+                if result.outcome_staged:
+                    logger.info(
+                        _TAG + " staged narrative outcome; skipped {} state prewrite(s)",
+                        result.state_prewrites_skipped,
+                    )
+                else:
+                    logger.warning(
+                        _TAG + " outcome preflight failed; main Agent will decide via fallback"
+                    )
+                return result
+
+            checkpoint = (
+                self._mutation_checkpoint()
+                if self._mutation_checkpoint is not None
+                else None
+            )
+            for name, args in normalized_calls:
+                record = await self._execute_tool_call(
+                    name,
+                    args,
+                    track_mutation=True,
+                )
+                result.records.append(record)
+                result.updated = result.updated or record.changed
+                result.failed = result.failed or not record.success
+
+            if result.failed and checkpoint is not None and self._mutation_restore is not None:
+                try:
+                    self._mutation_restore(checkpoint)
+                except Exception as exc:
+                    logger.opt(exception=exc).error(
+                        _TAG + " failed to restore status prewrite checkpoint"
+                    )
+                    raise _StatusPrewriteRollbackError(
+                        "failed to restore status prewrite checkpoint"
+                    ) from exc
+                for record in result.records:
+                    record.mark_rolled_back()
+                result.updated = False
+                logger.warning(
+                    _TAG + " state prewrite batch failed and was restored; main Agent will fallback"
+                )
 
             if result.updated:
                 logger.info(
                     _TAG + " updated state via {} tool call(s): {}",
                     len(result.records),
-                    [r["tool_name"] for r in result.records if r.get("changed")],
+                    [record.tool_name for record in result.records if record.changed],
                 )
             else:
                 logger.info(_TAG + " state tool calls produced no staged changes")
             return result
 
+        except _StatusPrewriteRollbackError:
+            raise
         except Exception as exc:
+            result.failed = True
             logger.warning(_TAG + " update failed: {}", exc)
             return result
         finally:
             self._busy = False
+
+    async def _execute_tool_call(
+        self,
+        name: str,
+        args: str,
+        *,
+        track_mutation: bool,
+        success_status: StatusSubAgentRecordStatus | None = None,
+    ) -> StatusSubAgentToolRecord:
+        if settings.verbose_logging:
+            logger.info(_TAG + " calling tool: {}({})", name, args)
+
+        try:
+            before = (
+                self._mutation_probe()
+                if track_mutation and self._mutation_probe is not None
+                else None
+            )
+            tool_result = await self._tool_registry.execute(name, args)
+            after = (
+                self._mutation_probe()
+                if track_mutation and self._mutation_probe is not None
+                else None
+            )
+            result_text = str(tool_result)
+            success = _tool_result_succeeded(result_text)
+            if not track_mutation:
+                changed = False
+            elif self._mutation_probe is not None:
+                changed = before != after
+            else:
+                changed = _tool_result_reports_change(result_text, success=success)
+            changed = success and changed
+            status = (
+                StatusSubAgentRecordStatus.ERROR
+                if not success
+                else success_status
+                or (
+                    StatusSubAgentRecordStatus.CHANGED
+                    if changed
+                    else StatusSubAgentRecordStatus.NO_OP
+                )
+            )
+            if settings.verbose_logging:
+                logger.info(
+                    _TAG + " tool result: {} -> {}",
+                    name,
+                    result_text[:200],
+                )
+            return StatusSubAgentToolRecord(
+                tool_name=name,
+                arguments=args,
+                result=result_text,
+                success=success,
+                changed=changed,
+                status=status,
+            )
+        except Exception as exc:
+            logger.warning(
+                _TAG + " tool {}({}) failed: {}",
+                name,
+                args,
+                exc,
+            )
+            return StatusSubAgentToolRecord(
+                tool_name=name,
+                arguments=args,
+                result=f"Error: {exc}",
+                success=False,
+                changed=False,
+                status=StatusSubAgentRecordStatus.ERROR,
+            )
 
     def clear_tools(self) -> None:
         """清空已注册的工具集（重新注册前调用避免重复）。"""
@@ -311,6 +478,12 @@ class StatusSubAgent(BaseSubAgent):
                 kept, total_turns, max_rounds,
             )
         system_content = self._build_system_context()
+        outcome_instruction = (
+            "先判断是否存在外部实质变数；需要裁定时只调用 "
+            "rp_story_outcome，且不要同时调用状态工具。"
+            if NARRATIVE_OUTCOME_TOOL_NAME in self._tool_registry
+            else "本轮未提供剧情裁定工具；不要虚构随机结果。"
+        )
         return [
             Message(role=Role.SYSTEM, content=system_content).to_dict(),
             Message(
@@ -319,8 +492,8 @@ class StatusSubAgent(BaseSubAgent):
                     f"## Current State\n\n{state_context}\n\n"
                     f"## Recent Conversation\n\n{recent}\n\n"
                     f"## User action\n{user_input}\n\n"
-                    f"Update the state tables if the user's action changes "
-                    f"any tracked state. If nothing changes, call no tools."
+                    f"{outcome_instruction}只有不需要裁定时，才预更新已经确定且实际改变的"
+                    f"追踪状态；没有变化就不调用工具。"
                 ),
             ).to_dict(),
         ]
@@ -357,6 +530,19 @@ def _tool_result_succeeded(tool_result: str) -> bool:
     if isinstance(payload, dict) and isinstance(payload.get("ok"), bool):
         return bool(payload["ok"])
     return True
+
+
+def _normalize_tool_call(tool_call: object) -> tuple[str, str]:
+    if not isinstance(tool_call, dict):
+        return "", "{}"
+    function = tool_call.get("function")
+    if not isinstance(function, dict):
+        return "", "{}"
+    name = str(function.get("name", "") or "")
+    arguments = function.get("arguments", "{}")
+    if isinstance(arguments, str):
+        return name, arguments
+    return name, json.dumps(arguments, ensure_ascii=False)
 
 
 def _tool_result_reports_change(tool_result: str, *, success: bool) -> bool:

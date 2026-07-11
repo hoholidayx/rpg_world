@@ -436,6 +436,7 @@ def _event_from_dict(data: JsonObject) -> AgentStreamEvent:
         status_code=_optional_int(data.get("status_code")),
         tool_name=_optional_string(data.get("tool_name")),
         tool_arguments=_optional_string(data.get("tool_arguments")),
+        tool_result=_optional_string(data.get("tool_result")),
         tool_result_preview=_optional_string(data.get("tool_result_preview")),
         round_index=int(data.get("round_index", 0) or 0),
         usage=usage_obj,

@@ -171,7 +171,12 @@ class SceneTracker:
             else:
                 lines.append(f"{k}: ")
         lines.append("")
-        lines.append("（场景状态已由 StatusSubAgent 自动预处理。需要手动调整时可使用 scene_time / scene_attr / scene_del_attr 工具。注意及时清理已过期的属性，避免堆积。）")
+        lines.append(
+            "（StatusSubAgent 只会预处理无需随机裁定的确定性变化。请检查剧情结果；"
+            "仅当时间、地点或活跃场景属性实际、持久且已经确定地改变时，才使用 "
+            "scene_time / scene_attr / scene_del_attr，并及时清理过期属性。允许零工具，"
+            "不要制造 no-op；裁定派生变化必须在结果生效后写入。）"
+        )
         lines.append("[/scene]")
         return "\n".join(lines)
 

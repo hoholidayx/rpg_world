@@ -1,7 +1,8 @@
-import { ChevronDown, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { ChevronDown, Copy, GitBranch, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { HistoryPage } from '@/types/session'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
+import type { NarrativeOutcomeCode } from '@/types/narrativeOutcome'
 import { cn } from '@/lib/utils/cn'
 import { SessionAvatar } from './SessionAvatar'
 import {
@@ -179,6 +180,7 @@ function MessageBubble({
     user: 'border-violet-600 bg-violet-600 text-white shadow-lg shadow-violet-100 dark:shadow-violet-950/30',
     assistant: 'border-slate-200 bg-white text-slate-950 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:shadow-black/25',
     tool: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200',
+    outcome: 'border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200',
     system: 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300',
     thinking: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
     error: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200',
@@ -310,6 +312,9 @@ function TimelineMessage({
   onEditCancel: () => void
   onEditSend: () => void
 }) {
+  if (message.role === SESSION_TIMELINE_ROLE.OUTCOME && message.outcome) {
+    return <NarrativeOutcomeCard message={message} />
+  }
   const isUser = message.role === SESSION_TIMELINE_ROLE.USER
 
   return (
@@ -367,6 +372,41 @@ function TimelineMessage({
         ) : null}
       </div>
       {isUser ? <SessionAvatar speaker={message.speaker} /> : null}
+    </article>
+  )
+}
+
+const OUTCOME_TONE: Record<NarrativeOutcomeCode, string> = {
+  critical_success: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100',
+  success: 'border-teal-300 bg-teal-50 text-teal-800 dark:border-teal-500/40 dark:bg-teal-500/10 dark:text-teal-100',
+  success_with_cost: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100',
+  setback: 'border-orange-300 bg-orange-50 text-orange-900 dark:border-orange-500/40 dark:bg-orange-500/10 dark:text-orange-100',
+  critical_failure: 'border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100',
+}
+
+function NarrativeOutcomeCard({ message }: { message: SessionTimelineMessage }) {
+  const outcome = message.outcome!
+  return (
+    <article
+      data-turn-index={message.turnId}
+      data-narrative-outcome={outcome.outcomeCode}
+      className={cn(
+        'mx-auto max-w-2xl rounded-lg border px-4 py-3 shadow-sm',
+        OUTCOME_TONE[outcome.outcomeCode],
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-black">
+          <GitBranch size={16} />
+          剧情裁定 · {outcome.label}
+        </span>
+        {outcome.actor ? (
+          <span className="rounded-full bg-white/70 px-2.5 py-1 text-xs font-black dark:bg-slate-950/30">
+            actor · {outcome.actor}
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-2 text-sm font-semibold leading-6">{outcome.reason}</p>
     </article>
   )
 }

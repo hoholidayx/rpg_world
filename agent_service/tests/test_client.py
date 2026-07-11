@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import agent_service.client as client_module
@@ -225,6 +227,43 @@ async def test_client_stream_ignores_invalid_event_status_code(monkeypatch) -> N
     assert events[0].content == "bad"
     assert events[0].error_code == "TURN_METADATA_INVALID"
     assert events[0].status_code is None
+
+
+async def test_client_stream_preserves_full_tool_result(monkeypatch) -> None:
+    result = json.dumps(
+        {
+            "outcomeCode": "success_with_cost",
+            "label": "成功但有代价",
+            "narrativeGuidance": "达成目标并引入代价。",
+            "reason": "穿过吊桥",
+        },
+        ensure_ascii=False,
+    )
+    event_line = "data: " + json.dumps(
+        {
+            "kind": "tool_result",
+            "tool_name": "rp_story_outcome",
+            "tool_result": result,
+            "tool_result_preview": result[:20],
+        },
+        ensure_ascii=False,
+    )
+
+    def stream_with_tool_result(self, method: str, url: str, json=None):  # noqa: ANN001
+        self.calls.append((method, url, {"json": json}))
+        return FakeStreamResponse([event_line])
+
+    monkeypatch.setattr(FakeAsyncClient, "stream", stream_with_tool_result)
+
+    events = [
+        event
+        async for event in AgentClient(base_url="http://agent").stream("s1", "hello")
+    ]
+
+    assert len(events) == 1
+    assert events[0].kind == StreamEventKind.TOOL_RESULT
+    assert events[0].tool_name == "rp_story_outcome"
+    assert events[0].tool_result == result
 
 
 async def test_client_stop_uses_request_id_payload() -> None:

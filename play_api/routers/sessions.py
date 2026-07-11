@@ -17,6 +17,9 @@ from play_api.backends import get_agent_backend, get_data_manager_backend
 from play_api.routers._locator import resolve_session_or_404
 from play_api.sse_protocol import AgentEventKind, PlaySSEStream, SSE_MEDIA_TYPE, agent_event_kind
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload
+from rpg_core.rp_modules.narrative_outcome import (
+    NARRATIVE_OUTCOME_DEFINITIONS,
+)
 from rpg_core.session.turn_metadata import (
     InvalidTurnMetadataError,
     has_trustworthy_turn_metadata,
@@ -152,6 +155,17 @@ class PlayTurn(BaseModel):
 
     turn_id: int = Field(alias="turnId")
     messages: list[PlayHistoryMessage] = Field(default_factory=list)
+    outcome: "PlayNarrativeOutcome | None" = None
+
+
+class PlayNarrativeOutcome(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    outcome_code: str = Field(alias="outcomeCode")
+    label: str
+    narrative_guidance: str = Field(alias="narrativeGuidance")
+    reason: str
+    actor: str | None = None
 
 
 class PlayHistoryPage(BaseModel):
@@ -346,6 +360,35 @@ def _turns_from_history(
     return turns
 
 
+def _attach_narrative_outcomes(
+    session_id: str,
+    turns: list[PlayTurn],
+) -> list[PlayTurn]:
+    if not turns:
+        return turns
+    definitions = {
+        definition.code: definition for definition in NARRATIVE_OUTCOME_DEFINITIONS
+    }
+    records = get_data_service_gateway().narrative_outcomes.list_for_turns(
+        session_id,
+        (turn.turn_id for turn in turns),
+    )
+    records_by_turn = {record.turn_id: record for record in records}
+    for turn in turns:
+        record = records_by_turn.get(turn.turn_id)
+        if record is None:
+            continue
+        definition = definitions[record.outcome_code]
+        turn.outcome = PlayNarrativeOutcome(
+            outcomeCode=record.outcome_code,
+            label=definition.label,
+            narrativeGuidance=definition.narrative_guidance,
+            reason=record.reason,
+            actor=record.actor or None,
+        )
+    return turns
+
+
 def _history_payload_from_row(row: object) -> dict[str, object]:
     metadata = _json_dict_from_text(str(getattr(row, "metadata_json", "") or "{}"))
     payload: dict[str, object] = {
@@ -472,7 +515,10 @@ async def get_session_history(
         get_agent_backend().get_history(workspace, story_id, agent_session_id)
     )
     try:
-        return _turns_from_history(history, source="api")
+        return _attach_narrative_outcomes(
+            agent_session_id,
+            _turns_from_history(history, source="api"),
+        )
     except InvalidTurnMetadataError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -498,7 +544,10 @@ async def get_session_history_page(
     )
     raw_history = [_history_payload_from_row(row) for row in rows]
     try:
-        turns = _turns_from_history(raw_history, source="api")
+        turns = _attach_narrative_outcomes(
+            agent_session_id,
+            _turns_from_history(raw_history, source="api"),
+        )
     except InvalidTurnMetadataError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

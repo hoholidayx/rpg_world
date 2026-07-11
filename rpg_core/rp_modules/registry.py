@@ -11,12 +11,15 @@ from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
 from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
+    RP_MODULE_NARRATIVE_OUTCOME_NAME,
 )
 from rpg_core.rp_modules.dice import DiceModule
+from rpg_core.rp_modules.narrative_outcome import NarrativeOutcomeModule
 from rpg_core.rp_modules.models import ModuleCommand, ModuleContextRequest, ModuleStatus
 from rpg_core.settings import RPModuleSettings
 
 if TYPE_CHECKING:
+    from rpg_core.agent.transaction import TurnScratch
     from rpg_core.scene import SceneTracker
     from rpg_core.status.manager import StatusManager
 
@@ -70,6 +73,15 @@ class RPModuleRegistry:
             tools.extend(module.get_tools())
         return tools
 
+    def get_status_preflight_tools(self, user_input: str) -> list[BaseTool]:
+        """Return high-level tools that StatusSubAgent may use this turn."""
+        module = self._modules.get(RP_MODULE_NARRATIVE_OUTCOME_NAME)
+        if not isinstance(module, NarrativeOutcomeModule):
+            return []
+        if not module.should_offer_status_preflight(user_input):
+            return []
+        return module.get_tools()
+
     def get_commands(self) -> list[ModuleCommand]:
         if not self.settings.enabled:
             return []
@@ -84,7 +96,10 @@ class RPModuleRegistry:
             ModuleCommand(
                 name="/rp_module",
                 description="查看 RP Module 状态",
-                detail=f"用法：/rp_module <name>。例如 /rp_module {RP_MODULE_DICE_NAME}。",
+                detail=(
+                    f"用法：/rp_module <name>。例如 /rp_module "
+                    f"{RP_MODULE_NARRATIVE_OUTCOME_NAME}。"
+                ),
                 handler=self._cmd_rp_module,
             ),
         ]
@@ -98,9 +113,36 @@ class RPModuleRegistry:
             return module.status()
         return self._disabled_status.get(name) or ModuleStatus(name=name, enabled=False)
 
+    def bind_turn(self, scratch: "TurnScratch") -> None:
+        for module in self.enabled_modules():
+            module.bind_turn(scratch)
+
+    def unbind_turn(self, scratch: "TurnScratch") -> None:
+        for module in reversed(self.enabled_modules()):
+            module.unbind_turn(scratch)
+
     def _load_modules(self) -> None:
         if not self.settings.enabled:
             return
+        if self.settings.narrative_outcome.enabled:
+            self._modules[RP_MODULE_NARRATIVE_OUTCOME_NAME] = NarrativeOutcomeModule(
+                session_id=self.session_id,
+                settings=self.settings.narrative_outcome,
+                rng=self._rng_factory(),
+            )
+        else:
+            self._disabled_status[RP_MODULE_NARRATIVE_OUTCOME_NAME] = ModuleStatus(
+                name=RP_MODULE_NARRATIVE_OUTCOME_NAME,
+                enabled=False,
+                config_summary={
+                    "auto_adjudication_enabled": (
+                        self.settings.narrative_outcome.auto_adjudication_enabled
+                    ),
+                    "default_weights": (
+                        self.settings.narrative_outcome.default_weights.to_dict()
+                    ),
+                },
+            )
         if self.settings.dice.enabled:
             self._modules[RP_MODULE_DICE_NAME] = DiceModule(
                 settings=self.settings.dice,
@@ -111,7 +153,6 @@ class RPModuleRegistry:
                 name=RP_MODULE_DICE_NAME,
                 enabled=False,
                 config_summary={
-                    "allow_auto_checks": self.settings.dice.allow_auto_checks,
                     "default_dc": self.settings.dice.default_dc,
                     "max_dice_count": self.settings.dice.max_dice_count,
                     "max_die_sides": self.settings.dice.max_die_sides,
@@ -164,11 +205,15 @@ class RPModuleRegistry:
             config = ", ".join(f"{key}={value}" for key, value in status.config_summary.items())
             lines.append(f"配置: {config}")
         if name == RP_MODULE_DICE_NAME:
-            lines.append("策略: 自然 RP 中遇到关键不确定节点可调用骰子；/roll 与 /check_dc 仅作手动入口。")
-            lines.append("审计: MVP 不落盘记录最近 rolls。")
+            lines.append("策略: 仅提供 /roll 与 /check_dc 手动调试，不向主 LLM 暴露低层骰子工具。")
+            lines.append("审计: 手动 rolls 不落盘。")
+        if name == RP_MODULE_NARRATIVE_OUTCOME_NAME:
+            lines.append("策略: 主 LLM 只通过 rp_story_outcome 进行五级剧情分支裁定。")
+            lines.append("审计: 每个成功 turn 最多持久化一条裁定。")
         return "\n".join(lines)
 
     def _known_module_names(self) -> set[str]:
         return {
             RP_MODULE_DICE_NAME,
+            RP_MODULE_NARRATIVE_OUTCOME_NAME,
         }

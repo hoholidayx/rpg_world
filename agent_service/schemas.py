@@ -287,6 +287,7 @@ class AgentStreamEventPayload(TypedDict):
     content: NotRequired[str]
     tool_name: NotRequired[str]
     tool_arguments: NotRequired[str]
+    tool_result: NotRequired[str]
     tool_result_preview: NotRequired[str]
     round_index: NotRequired[int]
     usage: NotRequired[JsonObject]

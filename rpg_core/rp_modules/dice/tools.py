@@ -9,6 +9,8 @@ from rpg_core.rp_modules.dice.models import DiceRollResult
 from rpg_core.rp_modules.dice.parser import parse_dice_expression
 from rpg_core.settings import DiceModuleSettings
 
+DEFAULT_DICE_EXPRESSION = "1d20"
+
 
 class DiceRoller:
     """Reusable dice roller with injectable RNG for tests."""
@@ -88,7 +90,10 @@ def format_roll_result(result: DiceRollResult) -> str:
 
 class DiceRollTool(BaseTool):
     name = "rp_dice_roll"
-    description = "执行一次骰子掷骰。用户明确要求掷骰或随机裁定时使用，不要伪造点数。"
+    description = (
+        "底层骰子随机能力，供手动调试或其它 RP Module 内部复用。"
+        "本工具不应注册到主 LLM 的自然剧情工具 schema。"
+    )
 
     def __init__(self, roller: DiceRoller) -> None:
         self._roller = roller
@@ -99,24 +104,25 @@ class DiceRollTool(BaseTool):
             "properties": {
                 "expression": {
                     "type": "string",
-                    "description": "骰子表达式，例如 d20、1d20、2d6+3。",
+                    "description": "骰子表达式，例如 d20、1d20、2d6+3；省略时使用 1d20。",
+                    "default": DEFAULT_DICE_EXPRESSION,
                 },
                 "reason": {
                     "type": "string",
-                    "description": "本次掷骰的叙事原因。",
+                    "description": "本次随机取值的唯一叙事原因。",
                 },
                 "actor": {
                     "type": "string",
                     "description": "执行行动的角色或对象。",
                 },
             },
-            "required": ["expression"],
             "additionalProperties": False,
         }
 
     async def execute(self, **kwargs: object) -> str:
+        expression = str(kwargs.get("expression", "") or "").strip() or DEFAULT_DICE_EXPRESSION
         result = self._roller.roll(
-            str(kwargs.get("expression", "")),
+            expression,
             reason=str(kwargs.get("reason", "") or ""),
             actor=str(kwargs.get("actor", "") or ""),
         )
@@ -125,10 +131,18 @@ class DiceRollTool(BaseTool):
 
 class DiceCheckDCTool(BaseTool):
     name = "rp_dice_check_dc"
-    description = "执行一次 DC 检定，返回 success 或 failure。"
+    description = ""
 
-    def __init__(self, roller: DiceRoller) -> None:
+    def __init__(self, roller: DiceRoller, *, default_dc: int = 12) -> None:
+        if default_dc < 0:
+            raise ValueError("默认 DC 不能为负数")
         self._roller = roller
+        self._default_dc = int(default_dc)
+        self.description = (
+            "底层 DC 计算能力，供手动调试或其它 RP Module 内部复用。"
+            "本工具不应注册到主 LLM 的自然剧情工具 schema。未给出数值时，"
+            f"工具会使用 {DEFAULT_DICE_EXPRESSION} 和默认 DC {self._default_dc}。"
+        )
 
     def parameters(self) -> dict[str, object]:
         return {
@@ -136,15 +150,19 @@ class DiceCheckDCTool(BaseTool):
             "properties": {
                 "expression": {
                     "type": "string",
-                    "description": "骰子表达式，例如 d20、1d20、2d6+3。",
+                    "description": (
+                        "完整骰子表达式及唯一修正值，例如 d20、1d20+2；"
+                        "省略时使用 1d20。"
+                    ),
+                    "default": DEFAULT_DICE_EXPRESSION,
                 },
                 "dc": {
                     "type": "integer",
-                    "description": "检定难度，total >= dc 为成功。",
-                },
-                "modifier": {
-                    "type": "integer",
-                    "description": "表达式之外的额外修正值。",
+                    "description": (
+                        f"仅在当前规则或上下文明确给出难度时填写；否则省略并使用默认 DC {self._default_dc}。"
+                        "total >= dc 为成功。"
+                    ),
+                    "default": self._default_dc,
                 },
                 "reason": {
                     "type": "string",
@@ -155,14 +173,16 @@ class DiceCheckDCTool(BaseTool):
                     "description": "执行行动的角色或对象。",
                 },
             },
-            "required": ["expression", "dc"],
             "additionalProperties": False,
         }
 
     async def execute(self, **kwargs: object) -> str:
+        expression = str(kwargs.get("expression", "") or "").strip() or DEFAULT_DICE_EXPRESSION
+        raw_dc = kwargs.get("dc")
+        dc = self._default_dc if raw_dc is None or str(raw_dc).strip() == "" else int(raw_dc)
         result = self._roller.check_dc(
-            str(kwargs.get("expression", "")),
-            dc=int(kwargs.get("dc", 0)),
+            expression,
+            dc=dc,
             modifier=int(kwargs.get("modifier", 0) or 0),
             reason=str(kwargs.get("reason", "") or ""),
             actor=str(kwargs.get("actor", "") or ""),

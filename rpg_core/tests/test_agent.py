@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -22,6 +23,11 @@ from rpg_core.agent.transaction.status_scratch import StatusDocumentScratch
 from rpg_data.models import StatusTableDocument
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.command import CommandDispatcher
+from rpg_core.agent.sub_agents import (
+    StatusSubAgentRecordStatus,
+    StatusSubAgentResult,
+    StatusSubAgentToolRecord,
+)
 from rpg_core.agent.tools import BaseTool
 from rpg_core.context.rpg_context import (
     FixedLayerData,
@@ -41,7 +47,7 @@ from rpg_core.context.fixed_layer.contributors import (
     TEXT_OUTPUT_FORMAT_SECTION_ID,
 )
 from rpg_core.rp_modules.constants import (
-    RP_MODULE_DICE_SECTION_ID,
+    RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
 )
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.settings import RPModuleSettings
@@ -760,13 +766,32 @@ class _ScratchWritingStatusSubAgent:
         self._tool_registry.register_all(tools)
         self._schemas = self._tool_registry.get_openai_schemas()
 
+    @contextmanager
+    def use_turn_tools(self, tools, **_kwargs):  # noqa: ANN001
+        previous_registry = self._tool_registry
+        previous_schemas = self._schemas
+        try:
+            self.clear_tools()
+            self.register_tools(tools)
+            yield
+        finally:
+            self._tool_registry = previous_registry
+            self._schemas = previous_schemas
+
     async def update(self, *, history, state_context, user_input, turn_stats):  # noqa: ANN001
         assert [message.content for message in history] == ["old"]
         assert "位置: 旧地" in state_context
         await self._tool_registry.execute("scene_attr", '{"key":"位置","value":"新地"}')
-        return SimpleNamespace(
+        return StatusSubAgentResult(
             updated=True,
-            records=[{"tool_name": "scene_attr", "arguments": "{}", "result": "ok"}],
+            records=[StatusSubAgentToolRecord(
+                tool_name="scene_attr",
+                arguments="{}",
+                result="ok",
+                success=True,
+                changed=True,
+                status=StatusSubAgentRecordStatus.CHANGED,
+            )],
         )
 
 
@@ -817,14 +842,16 @@ class _NormalScratchWritingStatusSubAgent(_ScratchWritingStatusSubAgent):
             "status_table_set_values",
             '{"table_id":7,"updates":[{"key":"生命","value":"8"}]}',
         )
-        return SimpleNamespace(
+        return StatusSubAgentResult(
             updated=True,
-            records=[{
-                "tool_name": "status_table_set_values",
-                "arguments": "{}",
-                "result": result,
-                "changed": True,
-            }],
+            records=[StatusSubAgentToolRecord(
+                tool_name="status_table_set_values",
+                arguments="{}",
+                result=result,
+                success=True,
+                changed=True,
+                status=StatusSubAgentRecordStatus.CHANGED,
+            )],
         )
 
 
@@ -834,15 +861,32 @@ class _NormalNoOpStatusSubAgent(_ScratchWritingStatusSubAgent):
             "status_table_set_values",
             '{"table_id":7,"updates":[{"key":"生命","value":"10"}]}',
         )
-        return SimpleNamespace(
+        return StatusSubAgentResult(
             updated=False,
-            records=[{
-                "tool_name": "status_table_set_values",
-                "arguments": "{}",
-                "result": result,
-                "changed": False,
-                "status": "no_op",
-            }],
+            records=[StatusSubAgentToolRecord(
+                tool_name="status_table_set_values",
+                arguments="{}",
+                result=result,
+                success=True,
+                changed=False,
+                status=StatusSubAgentRecordStatus.NO_OP,
+            )],
+        )
+
+
+class _SkippedStatusSubAgent(_ScratchWritingStatusSubAgent):
+    async def update(self, *, history, state_context, user_input, turn_stats):  # noqa: ANN001
+        return StatusSubAgentResult(
+            updated=False,
+            outcome_requested=True,
+            outcome_staged=False,
+            failed=True,
+            state_prewrites_skipped=1,
+            records=[StatusSubAgentToolRecord.skipped_due_to_outcome(
+                tool_name="status_table_set_values",
+                arguments="{}",
+                state_prewrite=True,
+            )],
         )
 
 
@@ -935,6 +979,34 @@ async def test_send_stream_emits_status_sub_agent_no_op_records(monkeypatch):
     ]
     assert isinstance(events[-1], _StreamSentinel)
     assert status_mgr.document.data_rows == (("生命", "10"),)
+
+
+@pytest.mark.asyncio
+async def test_send_stream_does_not_emit_skipped_status_prewrites(monkeypatch):
+    status_mgr = _FakeNormalStatusManager()
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "old", turn_id=1, seq_in_turn=1)],
+        status_mgr=status_mgr,
+        scene_tracker=None,
+    )
+    agent._status_sub_agent = _SkippedStatusSubAgent()
+
+    async def fake_run_chat_loop_stream(**_kwargs):  # noqa: ANN001
+        yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="done")
+        yield AgentStreamEvent(kind=StreamEventKind.DONE, content="done")
+
+    monkeypatch.setattr(agent_module, "run_chat_loop_stream", fake_run_chat_loop_stream)
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    await agent._send_stream_impl("存在变数的行动", event_queue)
+
+    events = [await event_queue.get() for _ in range(3)]
+    assert [getattr(event, "kind", None) for event in events[:2]] == [
+        StreamEventKind.TEXT,
+        StreamEventKind.DONE,
+    ]
+    assert isinstance(events[-1], _StreamSentinel)
 
 
 @pytest.mark.asyncio
@@ -1255,7 +1327,10 @@ def test_setup_rp_module_registry_adds_fixed_sections(monkeypatch):
 
     assert agent._rp_module_registry is not None
     assert any(section.id == STORY_PROMPT_SECTION_ID for section in agent._fixed_layer.sections)
-    assert any(section.id == RP_MODULE_DICE_SECTION_ID for section in agent._fixed_layer.sections)
+    assert any(
+        section.id == RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+        for section in agent._fixed_layer.sections
+    )
     assert any(section.id == TEXT_OUTPUT_FORMAT_SECTION_ID for section in agent._fixed_layer.sections)
 
 

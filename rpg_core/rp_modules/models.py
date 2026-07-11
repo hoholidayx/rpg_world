@@ -16,6 +16,8 @@ class ModuleContextRequest:
 
     session_id: str
     user_input: str = ""
+    include_staged_turn: bool = False
+    """Whether runtime sections may expose scratch data from the active turn."""
 
 
 @dataclass(frozen=True)

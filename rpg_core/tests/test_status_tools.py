@@ -6,8 +6,14 @@ import pytest
 
 from rpg_data.models import STATUS_KIND_NORMAL, STATUS_KIND_SCENE, StatusTableDocument, StatusTableRow
 from rpg_core.agent.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
-from rpg_core.agent.sub_agents import StatusSubAgent, SubAgentContext
+from rpg_core.agent.sub_agents import (
+    StatusSubAgent,
+    StatusSubAgentRecordStatus,
+    SubAgentContext,
+)
+from rpg_core.agent.tools import BaseTool
 from rpg_core.context.rpg_context import Message, Role
+from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.status.tools import StatusTableSetValuesTool, StatusTableToolProvider
 
 
@@ -176,16 +182,16 @@ def test_status_scratch_keeps_first_read_snapshot_during_turn() -> None:
 @pytest.mark.parametrize(
     ("key", "value", "expected_updated", "expected_status"),
     [
-        ("生命", "10", False, "no_op"),
-        ("生命", "8", True, "changed"),
-        ("不存在", "8", False, "error"),
+        ("生命", "10", False, StatusSubAgentRecordStatus.NO_OP),
+        ("生命", "8", True, StatusSubAgentRecordStatus.CHANGED),
+        ("不存在", "8", False, StatusSubAgentRecordStatus.ERROR),
     ],
 )
 async def test_status_sub_agent_updated_tracks_actual_scratch_change(
     key: str,
     value: str,
     expected_updated: bool,
-    expected_status: str,
+    expected_status: StatusSubAgentRecordStatus,
 ) -> None:
     manager = FakeRuntimeStatusManager()
     scratch, runtime = _scratch_runtime(manager)
@@ -219,6 +225,199 @@ async def test_status_sub_agent_updated_tracks_actual_scratch_change(
     )
 
     assert result.updated is expected_updated
-    assert result.records[0]["changed"] is expected_updated
-    assert result.records[0]["status"] == expected_status
-    assert result.records[0]["success"] is (expected_status != "error")
+    assert result.records[0].changed is expected_updated
+    assert result.records[0].status is expected_status
+    assert result.records[0].success is (
+        expected_status is not StatusSubAgentRecordStatus.ERROR
+    )
+
+
+class _OutcomeTool(BaseTool):
+    name = NARRATIVE_OUTCOME_TOOL_NAME
+    description = "test outcome"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def parameters(self) -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {"reason": {"type": "string"}},
+            "required": ["reason"],
+        }
+
+    async def execute(self, **kwargs: object) -> str:
+        self.calls += 1
+        return json.dumps(
+            {
+                "outcomeCode": "success_with_cost",
+                "label": "成功但有代价",
+                "narrativeGuidance": "达成目标并引入代价。",
+                "reason": str(kwargs["reason"]),
+            },
+            ensure_ascii=False,
+        )
+
+
+def test_status_sub_agent_turn_tool_scope_restores_owned_bindings() -> None:
+    manager = FakeRuntimeStatusManager()
+    _scratch, runtime = _scratch_runtime(manager)
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    original_tool = _OutcomeTool()
+    sub_agent.register_tools([original_tool])
+    original_probe = lambda: "original"  # noqa: E731
+    original_checkpoint = lambda: "checkpoint"  # noqa: E731
+    original_restore = lambda _checkpoint: None  # noqa: E731
+    sub_agent.set_mutation_probe(original_probe)
+    sub_agent.set_mutation_boundary(original_checkpoint, original_restore)
+
+    turn_probe = lambda: "turn"  # noqa: E731
+    turn_checkpoint = lambda: "turn-checkpoint"  # noqa: E731
+    turn_restore = lambda _checkpoint: None  # noqa: E731
+    with pytest.raises(RuntimeError, match="leave turn scope"):
+        with sub_agent.use_turn_tools(
+            [StatusTableSetValuesTool(runtime)],
+            mutation_probe=turn_probe,
+            create_checkpoint=turn_checkpoint,
+            restore_checkpoint=turn_restore,
+        ):
+            assert [
+                schema["function"]["name"] for schema in sub_agent._schemas
+            ] == ["status_table_set_values"]
+            assert sub_agent._mutation_probe is turn_probe
+            assert sub_agent._mutation_checkpoint is turn_checkpoint
+            assert sub_agent._mutation_restore is turn_restore
+            raise RuntimeError("leave turn scope")
+
+    assert [schema["function"]["name"] for schema in sub_agent._schemas] == [
+        NARRATIVE_OUTCOME_TOOL_NAME
+    ]
+    assert sub_agent._mutation_probe is original_probe
+    assert sub_agent._mutation_checkpoint is original_checkpoint
+    assert sub_agent._mutation_restore is original_restore
+
+
+@pytest.mark.asyncio
+async def test_status_sub_agent_outcome_batch_skips_all_state_prewrites() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+    outcome_tool = _OutcomeTool()
+
+    class Provider:
+        async def chat(self, _messages, *, tools):  # noqa: ANN001
+            assert {schema["function"]["name"] for schema in tools} == {
+                NARRATIVE_OUTCOME_TOOL_NAME,
+                "status_table_set_values",
+            }
+            return {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "status_table_set_values",
+                            "arguments": json.dumps({
+                                "table_id": 1,
+                                "updates": [{"key": "生命", "value": "1"}],
+                            }),
+                        },
+                    },
+                    {
+                        "function": {
+                            "name": NARRATIVE_OUTCOME_TOOL_NAME,
+                            "arguments": json.dumps({"reason": "能否脱离伏击"}),
+                        },
+                    },
+                    {
+                        "function": {
+                            "name": "scene_attr",
+                            "arguments": json.dumps({"key": "位置", "value": "安全屋"}),
+                        },
+                    },
+                ],
+            }
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([
+        outcome_tool,
+        StatusTableSetValuesTool(runtime),
+    ])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+
+    result = await sub_agent.update(
+        history=[Message(Role.ASSISTANT, "伏击仍未解决")],
+        state_context="status",
+        user_input="我冲出去并抵达安全屋",
+    )
+
+    assert result.outcome_requested is True
+    assert result.outcome_staged is True
+    assert result.updated is False
+    assert result.failed is False
+    assert result.state_prewrites_skipped == 2
+    assert [record.status for record in result.records] == [
+        StatusSubAgentRecordStatus.SKIPPED_DUE_TO_OUTCOME,
+        StatusSubAgentRecordStatus.OUTCOME_STAGED,
+        StatusSubAgentRecordStatus.SKIPPED_DUE_TO_OUTCOME,
+    ]
+    assert outcome_tool.calls == 1
+    assert scratch.staged_changes == []
+    assert manager.documents[1].row_for_key("生命").value == "10"
+
+
+@pytest.mark.asyncio
+async def test_status_sub_agent_failed_state_batch_restores_all_prewrites() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        async def chat(self, _messages, *, tools):  # noqa: ANN001
+            assert tools[0]["function"]["name"] == "status_table_set_values"
+            return {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "status_table_set_values",
+                            "arguments": json.dumps({
+                                "table_id": 1,
+                                "updates": [{"key": "生命", "value": "8"}],
+                            }),
+                        },
+                    },
+                    {
+                        "function": {
+                            "name": "status_table_set_values",
+                            "arguments": json.dumps({
+                                "table_id": 1,
+                                "updates": [{"key": "不存在", "value": "x"}],
+                            }),
+                        },
+                    },
+                ],
+            }
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent.set_mutation_boundary(
+        scratch.create_checkpoint,
+        scratch.restore_checkpoint,
+    )
+    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+
+    result = await sub_agent.update(
+        history=[],
+        state_context="status",
+        user_input="更新两个值",
+    )
+
+    assert result.failed is True
+    assert result.updated is False
+    assert (
+        result.records[0].status
+        is StatusSubAgentRecordStatus.ROLLED_BACK_DUE_TO_FAILURE
+    )
+    assert result.records[1].status is StatusSubAgentRecordStatus.ERROR
+    assert scratch.staged_changes == []
+    assert manager.documents[1].row_for_key("生命").value == "10"

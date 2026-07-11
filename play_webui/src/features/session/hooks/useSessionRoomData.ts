@@ -150,7 +150,14 @@ export function useSessionRoomData({
       ? baseMessages
       : baseMessages.filter((message) => message.turnId < optimisticTruncateFromTurn)
 
+    const outcomeTurns = new Set<number>()
     return [...historyMessages, ...localMessages]
+      .filter((message) => {
+        if (message.role !== SESSION_TIMELINE_ROLE.OUTCOME) return true
+        if (outcomeTurns.has(message.turnId)) return false
+        outcomeTurns.add(message.turnId)
+        return true
+      })
       .sort(compareTimelineMessages)
   }, [baseMessages, localMessages, optimisticTruncateFromTurn])
 
@@ -289,6 +296,7 @@ function compareTimelineMessages(first: SessionTimelineMessage, second: SessionT
 function timelineDisplayOrder(message: SessionTimelineMessage) {
   if (message.role === SESSION_TIMELINE_ROLE.USER) return 10
   if (message.role === SESSION_TIMELINE_ROLE.THINKING) return 20
+  if (message.role === SESSION_TIMELINE_ROLE.OUTCOME) return 15
   if (message.role === SESSION_TIMELINE_ROLE.TOOL) return 30
   if (message.role === SESSION_TIMELINE_ROLE.ASSISTANT) return 40
   if (message.role === SESSION_TIMELINE_ROLE.ERROR) return 90
