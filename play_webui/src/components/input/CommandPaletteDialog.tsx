@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, Command, Loader2, Search, X } from 'lucide-react'
 import { listCommands } from '@/lib/api/commands'
@@ -17,6 +17,7 @@ type CommandGroup = {
 
 const PLAY_COMMAND_ORDER = ['/roll', '/check_dc', '/rp_modules', '/rp_module']
 const CONTEXT_COMMAND_ORDER = ['/compact', '/extract_story_memory', '/context', '/memory_reindex']
+const DIALOG_TRANSITION_MS = 200
 
 function commandGroupId(command: PlayCommand): CommandGroupId {
   if (PLAY_COMMAND_ORDER.includes(command.name) || command.name.startsWith('/rp_')) return 'play'
@@ -64,33 +65,60 @@ export function CommandPaletteDialog({
   disabled?: boolean
   onSelectCommand: (command: string) => void
 }) {
+  const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [systemOpen, setSystemOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const openFrameRef = useRef<number | null>(null)
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const titleId = `command-palette-title-${sessionId}`
   const descriptionId = `command-palette-description-${sessionId}`
   const commandsQuery = useQuery({
     queryKey: ['play-session-commands', sessionId],
     queryFn: () => listCommands(sessionId),
-    enabled: open && !disabled,
+    enabled: mounted && !disabled,
   })
 
+  const finishClose = useCallback((returnFocus: boolean) => {
+    setMounted(false)
+    if (returnFocus) requestAnimationFrame(() => triggerRef.current?.focus())
+  }, [])
+
+  const closeDialog = useCallback(({ returnFocus = true }: { returnFocus?: boolean } = {}) => {
+    if (openFrameRef.current !== null) {
+      cancelAnimationFrame(openFrameRef.current)
+      openFrameRef.current = null
+    }
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    setOpen(false)
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null
+      finishClose(returnFocus)
+    }, DIALOG_TRANSITION_MS)
+  }, [finishClose])
+
   useEffect(() => {
-    if (!open) return
+    if (!mounted) return
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return
-      setOpen(false)
-      requestAnimationFrame(() => triggerRef.current?.focus())
+      closeDialog()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [open])
+  }, [closeDialog, mounted])
 
   useEffect(() => {
-    if (!disabled || !open) return
-    setOpen(false)
-  }, [disabled, open])
+    if (!disabled || !mounted) return
+    closeDialog()
+  }, [closeDialog, disabled, mounted])
+
+  useEffect(() => {
+    return () => {
+      if (openFrameRef.current !== null) cancelAnimationFrame(openFrameRef.current)
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    }
+  }, [])
 
   const groupedCommands = useMemo(() => {
     const filtered = (commandsQuery.data ?? []).filter((command) => matchesSearch(command, search))
@@ -100,19 +128,26 @@ export function CommandPaletteDialog({
   const hasSearch = Boolean(search.trim())
 
   const openDialog = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+    if (openFrameRef.current !== null) cancelAnimationFrame(openFrameRef.current)
     setSearch('')
     setSystemOpen(false)
-    setOpen(true)
-  }
-
-  const closeDialog = () => {
     setOpen(false)
-    requestAnimationFrame(() => triggerRef.current?.focus())
+    setMounted(true)
+    openFrameRef.current = requestAnimationFrame(() => {
+      openFrameRef.current = requestAnimationFrame(() => {
+        openFrameRef.current = null
+        setOpen(true)
+      })
+    })
   }
 
   const selectCommand = (command: string) => {
     onSelectCommand(command)
-    setOpen(false)
+    closeDialog({ returnFocus: false })
   }
 
   return (
@@ -123,6 +158,8 @@ export function CommandPaletteDialog({
         data-session-id={sessionId}
         disabled={disabled}
         onClick={openDialog}
+        aria-expanded={open}
+        aria-haspopup="dialog"
         className={cn(
           'flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:shadow-black/30 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-100',
           disabled ? 'cursor-not-allowed opacity-60' : '',
@@ -132,10 +169,13 @@ export function CommandPaletteDialog({
         命令
       </button>
 
-      {open ? (
+      {mounted ? (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/35 px-3 py-4 sm:items-center sm:px-4"
-          onClick={closeDialog}
+          className={cn(
+            'fixed inset-0 z-50 flex items-end justify-center bg-slate-950/35 px-3 py-4 transition-opacity duration-200 ease-out motion-reduce:transition-none sm:items-center sm:px-4',
+            open ? 'opacity-100' : 'pointer-events-none opacity-0',
+          )}
+          onClick={() => closeDialog()}
         >
           <section
             role="dialog"
@@ -144,7 +184,10 @@ export function CommandPaletteDialog({
             aria-describedby={descriptionId}
             data-session-id={sessionId}
             onClick={(event) => event.stopPropagation()}
-            className="flex max-h-[min(78vh,680px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50"
+            className={cn(
+              'flex max-h-[min(78vh,680px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 transition duration-200 ease-out motion-reduce:transition-none dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50',
+              open ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-4 scale-[0.98] opacity-0',
+            )}
           >
             <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
               <div>
@@ -155,7 +198,7 @@ export function CommandPaletteDialog({
               </div>
               <button
                 type="button"
-                onClick={closeDialog}
+                onClick={() => closeDialog()}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100"
                 aria-label="关闭命令面板"
               >

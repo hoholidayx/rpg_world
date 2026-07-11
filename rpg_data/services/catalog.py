@@ -247,6 +247,23 @@ class CatalogService:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def resolve_session_runtime_dir(self, session_id: str) -> Path:
+        """Resolve a session runtime path without creating any directories."""
+
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise FileNotFoundError(f"Session not found in rpg_data: {session_id}")
+        workspace = self._workspaces.get(session.workspace_id)
+        if workspace is None:
+            raise FileNotFoundError(
+                f"Workspace not found in rpg_data: {session.workspace_id}"
+            )
+        workspace_root = resolve_workspace_root(workspace.root_path)
+        return resolve_workspace_relative_path(
+            workspace_root,
+            _session_runtime_relative_path(int(session.story_id), str(session.id)),
+        )
+
     def get_session_workspace_dir(self, session_id: str) -> Path:
         """Return the resolved workspace root for the session's workspace."""
 
@@ -262,14 +279,7 @@ class CatalogService:
         ``{workspace_root}/stories/{story_id}/{session_id}``.
         """
 
-        session = self._sessions.get(session_id)
-        if session is None:
-            raise FileNotFoundError(f"Session not found in rpg_data: {session_id}")
-        workspace_root = self.get_workspace_runtime_dir(session.workspace_id)
-        path = resolve_workspace_relative_path(
-            workspace_root,
-            _session_runtime_relative_path(int(session.story_id), str(session.id)),
-        )
+        path = self.resolve_session_runtime_dir(session_id)
         path.mkdir(parents=True, exist_ok=True)
         return path
 

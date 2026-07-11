@@ -1,45 +1,53 @@
 <!--
-  Changelog:
-  - 移除会话页右上角“调试事件”入口；保留“设置”弹出菜单能力，菜单只承载布局控制与输入偏好。
-  - 将 SessionRoom 收敛为沉浸式游玩工作台：左侧聚焦当前场景/在场角色，中间聚焦剧情时间线与输入器，右侧暂时只保留状态表。
-  - 补齐基础交互预览：左右侧栏收起、拖拽调宽、设置菜单、顶部退出按钮、命令面板、输入模式切换、叙事风格单选（含默认）、快捷行动完整文本填入、发送/停止状态、消息图标操作与重试/编辑发送/删除确认。
-  - 字段展示仅使用当前 Play WebUI 已有模型可表达的信息：session_id、story_id、title、description、scene、history、status tables；去掉不必要的硬编码调试事件列表。
-  - Composer 对齐现有输入架构：IC/OOC/GM 模式、命令面板、Send/Stop、可插入快捷命令；叙事风格作为隐式提示词模式，不直接写入输入框。
-  - 对话与在场角色按“已配置头像优先”的形态展示；玩家 IC 也显示为已选角色身份。
+  Session Room 双侧栏静态重设计
+
+  设计边界：
+  - 中央会话时间线与输入器仅保留代表性静态内容，不模拟发送、编辑、重试或命令流程。
+  - 左栏承载场景状态和已固定普通状态表；故事角色与状态表管理使用向右浮层。
+  - 右栏承载会话速览、overall 短版和 batch 短版；全文使用向左阅读抽屉。
+  - ?summary=empty 展示无归纳状态；?summary=batch-only 展示 batch 已存在但 overall 缺失的状态。
+  - pin、Turn 范围与段落 Turn 标签均为设计稿状态，不代表新的持久化接口。
 -->
 <!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Play WebUI Session Room Mockup</title>
+  <title>Play WebUI · Session Room 双侧栏重设计</title>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f8fc;
+      --page: #f4f5f8;
       --surface: #ffffff;
-      --surface-soft: #f8fafc;
-      --soft: #f1f5f9;
-      --ink: #0f172a;
-      --muted: #64748b;
-      --faint: #94a3b8;
-      --line: #dbe3ef;
-      --line-strong: #cbd5e1;
-      --violet: #4f46e5;
-      --violet-strong: #5b21b6;
-      --violet-soft: #eef2ff;
-      --teal: #0f766e;
-      --teal-soft: #ccfbf1;
-      --amber: #b45309;
-      --amber-soft: #fef3c7;
-      --sky: #0369a1;
-      --sky-soft: #e0f2fe;
-      --rose: #be123c;
-      --rose-soft: #ffe4e6;
-      --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
-      --radius: 8px;
-      --left: 300px;
-      --right: 340px;
+      --surface-soft: #f8f9fb;
+      --surface-muted: #f0f2f6;
+      --ink: #181a20;
+      --muted: #666c78;
+      --faint: #9399a6;
+      --line: #e1e4ea;
+      --line-strong: #ced3dc;
+      --violet: #5b50d6;
+      --violet-deep: #4037aa;
+      --violet-soft: #eeecff;
+      --teal: #0f7c70;
+      --teal-soft: #ddf5f0;
+      --amber: #a96013;
+      --amber-soft: #fff0d8;
+      --sky: #226a9c;
+      --sky-soft: #e5f2fb;
+      --rose: #a74359;
+      --rose-soft: #fae8ed;
+      --shadow-sm: 0 1px 2px rgba(20, 24, 33, 0.05);
+      --shadow-md: 0 18px 48px rgba(20, 24, 33, 0.12);
+      --shadow-lg: 0 28px 80px rgba(20, 24, 33, 0.2);
+      --radius-sm: 8px;
+      --radius: 12px;
+      --radius-lg: 18px;
+      --topbar-height: 73px;
+      --left-width: 300px;
+      --right-width: 340px;
+      --resize-width: 8px;
+      --collapsed-width: 72px;
       --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
 
@@ -47,18 +55,24 @@
       box-sizing: border-box;
     }
 
+    [hidden] {
+      display: none !important;
+    }
+
     html,
     body {
       margin: 0;
-      min-height: 100vh;
-      background: var(--bg);
+      height: 100%;
+      min-height: 100%;
+      overflow: hidden;
+      background: var(--page);
       color: var(--ink);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
     }
 
     button,
-    textarea,
-    input {
+    textarea {
       font: inherit;
     }
 
@@ -68,41 +82,34 @@
 
     button:focus-visible,
     textarea:focus-visible,
-    input:focus-visible {
-      outline: 3px solid rgba(79, 70, 229, 0.22);
+    summary:focus-visible {
+      outline: 3px solid rgba(91, 80, 214, 0.24);
       outline-offset: 2px;
     }
 
     .session-room {
       display: grid;
-      grid-template-columns: var(--left) 8px minmax(0, 1fr) 8px var(--right);
+      grid-template-columns:
+        var(--left-width)
+        var(--resize-width)
+        minmax(0, 1fr)
+        var(--resize-width)
+        var(--right-width);
+      width: 100vw;
       height: 100vh;
-      min-height: 720px;
+      min-height: 680px;
       overflow: hidden;
-      background: var(--bg);
-    }
-
-    .session-room.left-collapsed {
-      --left: 72px;
-    }
-
-    .session-room.right-collapsed {
-      --right: 72px;
+      background: var(--page);
     }
 
     .side {
+      position: relative;
+      z-index: 3;
       min-width: 0;
       min-height: 0;
       overflow: hidden;
-      border-color: var(--line);
-      background: rgba(255, 255, 255, 0.88);
-    }
-
-    .side-inner {
-      display: flex;
-      height: 100%;
-      min-height: 0;
-      flex-direction: column;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(18px);
     }
 
     .left-rail {
@@ -113,328 +120,573 @@
       border-left: 1px solid var(--line);
     }
 
+    .side-inner {
+      display: flex;
+      height: 100%;
+      min-height: 0;
+      flex-direction: column;
+    }
+
     .rail-header {
       display: flex;
+      flex: 0 0 var(--topbar-height);
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      min-height: 64px;
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--line);
-      background: white;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      min-width: 0;
       gap: 10px;
-      color: var(--ink);
-      text-decoration: none;
+      height: var(--topbar-height);
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
     }
 
-    .brand-mark,
-    .avatar,
-    .tool-avatar {
-      display: inline-flex;
+    .rail-identity {
+      display: flex;
+      min-width: 0;
       align-items: center;
-      justify-content: center;
-      flex: 0 0 auto;
+      gap: 10px;
+    }
+
+    .rail-mark {
+      display: inline-flex;
       width: 38px;
       height: 38px;
-      border-radius: var(--radius);
-      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      border-radius: 11px;
+      background: linear-gradient(145deg, #675ce5, #4b42bd);
       color: white;
+      font-size: 15px;
       font-weight: 950;
-      box-shadow: 0 10px 22px rgba(79, 70, 229, 0.18);
+      box-shadow: 0 10px 24px rgba(91, 80, 214, 0.22);
     }
 
-    .avatar {
-      position: relative;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.88);
-      background:
-        radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.94) 0 13%, transparent 14%),
-        radial-gradient(circle at 50% 78%, rgba(255, 255, 255, 0.82) 0 24%, transparent 25%),
-        linear-gradient(135deg, #4f46e5, #0f766e);
-      color: white;
-      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+    .rail-mark.summary-mark {
+      background: linear-gradient(145deg, #2b877c, #12695f);
+      box-shadow: 0 10px 24px rgba(15, 124, 112, 0.2);
     }
 
-    .avatar::after {
-      content: attr(data-fallback);
-      position: absolute;
-      inset: auto 0 4px;
-      color: rgba(255, 255, 255, 0.92);
-      font-size: 10px;
-      font-weight: 950;
-      text-align: center;
-      text-shadow: 0 1px 3px rgba(15, 23, 42, 0.24);
-    }
-
-    .avatar.player {
-      background:
-        radial-gradient(circle at 50% 32%, #fef3c7 0 14%, transparent 15%),
-        radial-gradient(circle at 50% 81%, #f8fafc 0 25%, transparent 26%),
-        linear-gradient(135deg, #4338ca, #0891b2);
-    }
-
-    .avatar.ivan {
-      background:
-        radial-gradient(circle at 50% 33%, #fed7aa 0 14%, transparent 15%),
-        radial-gradient(circle at 50% 82%, #334155 0 25%, transparent 26%),
-        linear-gradient(135deg, #1e293b, #92400e);
-    }
-
-    .avatar.lamplighter {
-      background:
-        radial-gradient(circle at 50% 33%, #fde68a 0 14%, transparent 15%),
-        radial-gradient(circle at 50% 82%, #facc15 0 24%, transparent 25%),
-        linear-gradient(135deg, #0f172a, #0369a1);
-    }
-
-    .avatar.narrator {
-      background:
-        radial-gradient(circle at 50% 34%, #e2e8f0 0 14%, transparent 15%),
-        radial-gradient(circle at 50% 81%, #cbd5e1 0 25%, transparent 26%),
-        linear-gradient(135deg, #64748b, #334155);
-    }
-
-    .brand-title,
-    .rail-title-text {
+    .rail-copy {
       min-width: 0;
     }
 
-    .brand-title strong,
-    .rail-title-text strong {
+    .rail-copy strong,
+    .section-heading strong {
       display: block;
       overflow: hidden;
       color: var(--ink);
-      font-size: 14px;
-      font-weight: 950;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: -0.01em;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .brand-title span,
-    .rail-title-text span {
+    .rail-copy span {
       display: block;
-      margin-top: 2px;
+      margin-top: 3px;
       overflow: hidden;
       color: var(--faint);
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 750;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .rail-actions {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 6px;
     }
 
     .icon-button {
       display: inline-flex;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 auto;
       align-items: center;
       justify-content: center;
-      flex: 0 0 auto;
-      width: 38px;
-      height: 38px;
       border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
+      border-radius: 9px;
+      background: var(--surface);
       color: var(--muted);
-      transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+      font-size: 14px;
+      font-weight: 900;
+      transition: 150ms ease;
     }
 
     .icon-button:hover {
-      border-color: #c4b5fd;
+      border-color: #c4bdf3;
       background: var(--violet-soft);
-      color: var(--violet-strong);
+      color: var(--violet-deep);
     }
 
-    .rail-scroll,
-    .timeline {
+    .mobile-close,
+    .mobile-rail-trigger {
+      display: none;
+    }
+
+    .rail-content {
       min-height: 0;
+      flex: 1 1 auto;
       overflow-y: auto;
-    }
-
-    .rail-scroll {
+      overscroll-behavior: contain;
       padding: 14px;
+      scrollbar-width: thin;
+      scrollbar-color: #cfd3dc transparent;
     }
 
-    .panel {
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    .rail-section + .rail-section {
+      margin-top: 18px;
     }
 
-    .panel + .panel {
-      margin-top: 12px;
-    }
-
-    .panel-head {
+    .section-heading {
       display: flex;
+      min-height: 32px;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      min-height: 44px;
-      border-bottom: 1px solid var(--line);
-      padding: 10px 12px;
-      background: var(--surface-soft);
-    }
-
-    .panel-head h2,
-    .panel-head h3 {
-      margin: 0;
-      font-size: 13px;
-      font-weight: 950;
-    }
-
-    .panel-head small {
-      color: var(--faint);
-      font-weight: 850;
-    }
-
-    .scene-list,
-    .status-list {
-      margin: 0;
-    }
-
-    .scene-list div,
-    .status-row {
-      display: grid;
-      grid-template-columns: 74px minmax(0, 1fr);
       gap: 10px;
-      padding: 9px 12px;
-      border-top: 1px solid #eef2f7;
-      font-size: 13px;
-      line-height: 1.45;
+      margin-bottom: 8px;
+      padding: 0 2px;
     }
 
-    .scene-list div:first-child,
-    .status-row:first-child {
-      border-top: 0;
-    }
-
-    dt {
-      color: var(--faint);
-      font-weight: 800;
-    }
-
-    dd {
-      margin: 0;
-      min-width: 0;
-      color: var(--ink);
-      font-weight: 800;
-      word-break: break-word;
-    }
-
-    .character-card {
-      padding: 12px;
-    }
-
-    .character-main {
-      display: grid;
-      grid-template-columns: 46px minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
-    }
-
-    .character-main h3,
-    .message-meta strong {
-      margin: 0;
-      color: var(--ink);
-      font-size: 14px;
-      font-weight: 950;
-    }
-
-    .character-main p {
-      margin: 4px 0 0;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.5;
-    }
-
-    .chips {
+    .section-title {
       display: flex;
-      flex-wrap: wrap;
-      gap: 7px;
-      margin-top: 10px;
-    }
-
-    .chip {
-      display: inline-flex;
+      min-width: 0;
       align-items: center;
-      min-height: 26px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: white;
-      color: var(--muted);
-      padding: 0 9px;
-      font-size: 12px;
-      font-weight: 850;
-      white-space: nowrap;
+      gap: 8px;
     }
 
-    .chip.teal {
-      border-color: #99f6e4;
+    .section-kicker {
+      display: inline-flex;
+      min-width: 24px;
+      height: 22px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 7px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .section-kicker.scene {
       background: var(--teal-soft);
       color: var(--teal);
     }
 
-    .chip.violet {
-      border-color: #c7d2fe;
+    .section-kicker.pinned {
       background: var(--violet-soft);
-      color: #3730a3;
+      color: var(--violet-deep);
     }
 
-    .chip.amber {
-      border-color: #fde68a;
-      background: var(--amber-soft);
-      color: var(--amber);
+    .section-count {
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
     }
 
-    .chip.sky {
-      border-color: #bae6fd;
+    .text-button {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--muted);
+      padding: 0 9px;
+      font-size: 11px;
+      font-weight: 850;
+      transition: 150ms ease;
+    }
+
+    .text-button:hover {
+      border-color: #c4bdf3;
+      background: var(--violet-soft);
+      color: var(--violet-deep);
+    }
+
+    .character-launcher {
+      display: grid;
+      width: 100%;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+      border: 1px solid #dcd8fb;
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 100% 0, rgba(91, 80, 214, 0.1), transparent 44%),
+        var(--surface);
+      padding: 12px;
+      text-align: left;
+      box-shadow: var(--shadow-sm);
+      transition: 160ms ease;
+    }
+
+    .character-launcher:hover {
+      border-color: #bfb7ee;
+      transform: translateY(-1px);
+      box-shadow: 0 10px 28px rgba(43, 38, 96, 0.1);
+    }
+
+    .launcher-copy {
+      min-width: 0;
+    }
+
+    .launcher-copy strong {
+      display: block;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .launcher-copy span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .launcher-visual {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .avatar-stack {
+      display: flex;
+      padding-left: 7px;
+    }
+
+    .mini-avatar {
+      display: inline-flex;
+      width: 30px;
+      height: 30px;
+      align-items: center;
+      justify-content: center;
+      margin-left: -7px;
+      border: 2px solid white;
+      border-radius: 10px;
+      background: linear-gradient(145deg, #7165e5, #4e45af);
+      color: white;
+      font-size: 10px;
+      font-weight: 950;
+      box-shadow: 0 4px 12px rgba(28, 31, 43, 0.16);
+    }
+
+    .mini-avatar.ivan {
+      background: linear-gradient(145deg, #7a5441, #374151);
+    }
+
+    .mini-avatar.keeper {
+      background: linear-gradient(145deg, #b97820, #31556f);
+    }
+
+    .mini-avatar.teal {
+      background: linear-gradient(145deg, #2d988c, #116a61);
+    }
+
+    .mini-avatar.sky {
+      background: linear-gradient(145deg, #4b8db8, #31536f);
+    }
+
+    .launcher-arrow {
+      color: var(--violet);
+      font-size: 15px;
+      font-weight: 950;
+    }
+
+    details.status-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+
+    details.status-card + details.status-card {
+      margin-top: 8px;
+    }
+
+    details.status-card[open] {
+      border-color: var(--line-strong);
+      box-shadow: 0 8px 24px rgba(21, 26, 38, 0.06);
+    }
+
+    .status-card > summary {
+      display: grid;
+      min-height: 54px;
+      list-style: none;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 10px;
+      background: var(--surface);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .status-card > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .status-card[open] > summary {
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .table-mark {
+      display: inline-flex;
+      width: 30px;
+      height: 30px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9px;
+      background: var(--violet-soft);
+      color: var(--violet-deep);
+      font-size: 11px;
+      font-weight: 950;
+    }
+
+    .table-mark.scene {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .summary-main {
+      min-width: 0;
+    }
+
+    .summary-main strong {
+      display: block;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 900;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-meta {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 5px;
+      margin-top: 4px;
+      overflow: hidden;
+    }
+
+    .binding-chip,
+    .kind-chip,
+    .state-chip {
+      display: inline-flex;
+      min-width: 0;
+      height: 21px;
+      align-items: center;
+      gap: 4px;
+      border-radius: 999px;
+      padding: 0 7px;
+      font-size: 9px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .binding-chip {
+      max-width: 126px;
       background: var(--sky-soft);
       color: var(--sky);
     }
 
-    .rail-collapsed .brand-title,
-    .rail-collapsed .rail-title-text,
-    .rail-collapsed .rail-scroll,
-    .rail-collapsed .hide-on-collapse {
+    .binding-chip.global {
+      background: var(--surface-muted);
+      color: var(--muted);
+    }
+
+    .kind-chip.scene {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .state-chip.present {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .state-chip.nearby {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .chevron {
+      color: var(--faint);
+      font-size: 14px;
+      font-weight: 950;
+      transition: transform 150ms ease;
+    }
+
+    details[open] > summary .chevron {
+      transform: rotate(180deg);
+    }
+
+    .status-description {
+      margin: 0;
+      border-bottom: 1px solid #edf0f4;
+      background: #fbfbfc;
+      color: var(--muted);
+      padding: 9px 11px;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.55;
+    }
+
+    .status-rows {
+      margin: 0;
+    }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: minmax(72px, 0.42fr) minmax(0, 1fr);
+      gap: 10px;
+      border-top: 1px solid #edf0f4;
+      padding: 8px 11px;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .status-row:first-child {
+      border-top: 0;
+    }
+
+    .status-row dt {
+      overflow: hidden;
+      color: var(--faint);
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-row dd {
+      min-width: 0;
+      margin: 0;
+      color: #333741;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .pinned-empty {
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      padding: 22px 14px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 11px;
+      font-weight: 750;
+      line-height: 1.6;
+    }
+
+    .collapsed-only {
       display: none;
     }
 
-    .rail-collapsed .rail-header {
-      justify-content: center;
-      padding-inline: 10px;
+    .rail-collapsed .expanded-only {
+      display: none !important;
+    }
+
+    .rail-collapsed .collapsed-only {
+      display: flex;
     }
 
     .rail-collapsed .rail-header {
+      justify-content: center;
+      padding: 0 10px;
+    }
+
+    .rail-collapsed .rail-mark {
+      display: none;
+    }
+
+    .compact-rail {
+      min-height: 0;
+      flex: 1 1 auto;
       flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 10px;
+    }
+
+    .compact-button {
+      display: inline-flex;
+      width: 42px;
+      height: 42px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 950;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .compact-button:hover {
+      border-color: #c4bdf3;
+      background: var(--violet-soft);
+      color: var(--violet-deep);
+    }
+
+    .compact-button.teal {
+      background: var(--teal-soft);
+      color: var(--teal);
     }
 
     .resize-handle {
+      position: relative;
+      z-index: 2;
       display: flex;
+      width: var(--resize-width);
+      min-width: 0;
+      height: 100vh;
       align-items: center;
       justify-content: center;
       border: 0;
-      background: #eef2f7;
+      background: #e9ebef;
       padding: 0;
       cursor: col-resize;
+      touch-action: none;
     }
 
-    .resize-handle span {
+    .resize-handle::after {
       width: 2px;
-      height: 72px;
-      border-radius: 999px;
-      background: #cbd5e1;
-      transition: background 0.16s ease;
+      height: 56px;
+      border-radius: 99px;
+      background: #b9bec8;
+      content: "";
+      transition: 150ms ease;
     }
 
-    .resize-handle:hover span,
-    .resize-handle.dragging span {
+    .resize-handle:hover,
+    .resize-handle:focus-visible {
+      background: var(--violet-soft);
+    }
+
+    .resize-handle:hover::after,
+    .resize-handle:focus-visible::after {
+      height: 76px;
       background: var(--violet);
+    }
+
+    .resize-handle:disabled {
+      cursor: default;
+      opacity: 0.45;
     }
 
     .center {
@@ -442,19 +694,21 @@
       min-width: 0;
       min-height: 0;
       flex-direction: column;
-      background: var(--bg);
+      background: var(--page);
     }
 
     .topbar {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 16px;
+      position: relative;
+      z-index: 2;
+      display: flex;
+      min-height: var(--topbar-height);
+      flex: 0 0 var(--topbar-height);
       align-items: center;
-      min-height: 72px;
+      justify-content: space-between;
+      gap: 14px;
       border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.94);
-      padding: 12px 18px;
-      backdrop-filter: blur(10px);
+      background: rgba(255, 255, 255, 0.96);
+      padding: 0 20px;
     }
 
     .session-title {
@@ -462,12 +716,12 @@
     }
 
     .session-title h1 {
-      margin: 0;
       overflow: hidden;
+      margin: 0;
       color: var(--ink);
-      font-size: 19px;
-      line-height: 1.2;
-      font-weight: 950;
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
@@ -475,442 +729,206 @@
     .session-meta {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px 10px;
+      gap: 4px 12px;
       margin-top: 5px;
       color: var(--faint);
-      font-size: 12px;
-      font-weight: 850;
+      font-size: 10px;
+      font-weight: 750;
     }
 
     .session-meta code {
-      font-family: var(--mono);
       color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
     }
 
     .top-actions {
-      position: relative;
       display: flex;
+      flex: 0 0 auto;
       align-items: center;
-      justify-content: flex-end;
-      gap: 8px;
+      gap: 7px;
+    }
+
+    .connection-pill {
+      display: inline-flex;
+      height: 32px;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #cfe9e3;
+      border-radius: 9px;
+      background: #f1fbf8;
+      color: var(--teal);
+      padding: 0 10px;
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .connection-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #25a493;
+      box-shadow: 0 0 0 4px rgba(37, 164, 147, 0.12);
     }
 
     .exit-button {
       display: inline-flex;
+      height: 34px;
       align-items: center;
       justify-content: center;
-      min-height: 38px;
       border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
+      border-radius: 9px;
+      background: var(--surface);
       color: var(--muted);
-      padding: 0 12px;
-      font-size: 13px;
-      font-weight: 950;
-      transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
-    }
-
-    .exit-button:hover {
-      border-color: #fecdd3;
-      background: var(--rose-soft);
-      color: var(--rose);
-    }
-
-    .settings-menu {
-      position: absolute;
-      top: calc(100% + 8px);
-      right: 0;
-      z-index: 20;
-      display: none;
-      width: 286px;
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-      box-shadow: var(--shadow);
-    }
-
-    .settings-menu.open {
-      display: block;
-    }
-
-    .settings-head {
-      padding: 13px 14px;
-      border-bottom: 1px solid var(--line);
-      background: var(--surface-soft);
-    }
-
-    .settings-head strong {
-      display: block;
-      font-size: 14px;
-      font-weight: 950;
-    }
-
-    .settings-head span {
-      display: block;
-      margin-top: 3px;
-      color: var(--faint);
-      font-size: 12px;
-      font-weight: 800;
-    }
-
-    .menu-list {
-      padding: 6px;
-    }
-
-    .menu-item {
-      display: grid;
-      width: 100%;
-      grid-template-columns: 30px minmax(0, 1fr) auto;
-      gap: 9px;
-      align-items: center;
-      border: 0;
-      border-radius: 7px;
-      background: transparent;
-      padding: 9px;
-      color: var(--ink);
-      text-align: left;
-    }
-
-    .menu-item:hover {
-      background: var(--violet-soft);
-    }
-
-    .menu-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 30px;
-      height: 30px;
-      border-radius: 7px;
-      background: var(--soft);
-      color: var(--muted);
-      font-weight: 950;
-    }
-
-    .menu-copy strong {
-      display: block;
-      font-size: 13px;
-      font-weight: 950;
-    }
-
-    .menu-copy span {
-      display: block;
-      margin-top: 2px;
-      color: var(--faint);
+      padding: 0 11px;
       font-size: 11px;
-      font-weight: 800;
-    }
-
-    .switch {
-      position: relative;
-      width: 36px;
-      height: 20px;
-      border-radius: 999px;
-      background: #cbd5e1;
-    }
-
-    .switch::after {
-      content: "";
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: white;
-      transition: transform 0.18s ease;
-    }
-
-    .switch.on {
-      background: var(--violet);
-    }
-
-    .switch.on::after {
-      transform: translateX(16px);
-    }
-
-    .timeline {
-      flex: 1;
-      padding: 26px 20px 28px;
-      background:
-        linear-gradient(180deg, rgba(248, 250, 252, 0.82), rgba(247, 248, 252, 0.9)),
-        radial-gradient(circle at 18% 0%, rgba(79, 70, 229, 0.08), transparent 34%);
-    }
-
-    .timeline-inner {
-      width: min(920px, 100%);
-      margin: 0 auto;
-    }
-
-    .day-divider {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      margin-bottom: 24px;
-      color: var(--faint);
-      font-size: 12px;
       font-weight: 850;
     }
 
-    .day-divider::before,
-    .day-divider::after {
-      content: "";
-      height: 1px;
-      flex: 1;
-      background: var(--line);
+    .timeline {
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      background:
+        radial-gradient(circle at 50% 0, rgba(91, 80, 214, 0.045), transparent 35%),
+        var(--page);
+      scrollbar-width: thin;
+      scrollbar-color: #cfd3dc transparent;
     }
 
-    .message-stack {
-      display: grid;
-      gap: 18px;
+    .timeline-inner {
+      width: min(820px, calc(100% - 34px));
+      margin: 0 auto;
+      padding: 24px 0 30px;
+    }
+
+    .turn-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 22px;
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 850;
+      text-align: center;
+    }
+
+    .turn-divider::before,
+    .turn-divider::after {
+      height: 1px;
+      flex: 1 1 auto;
+      background: var(--line);
+      content: "";
     }
 
     .message {
-      display: grid;
-      grid-template-columns: 42px minmax(0, 720px);
-      gap: 12px;
-      align-items: start;
+      display: flex;
+      max-width: 82%;
+      align-items: flex-end;
+      gap: 10px;
+      margin-top: 18px;
     }
 
     .message.user {
-      grid-template-columns: minmax(0, 540px) 42px;
-      justify-content: end;
+      margin-left: auto;
+      flex-direction: row-reverse;
     }
 
-    .message.user .bubble-wrap {
-      order: 1;
-    }
-
-    .message.user .avatar {
-      order: 2;
-    }
-
-    .message-meta {
-      display: flex;
-      flex-wrap: wrap;
+    .message-avatar {
+      display: inline-flex;
+      width: 36px;
+      height: 36px;
+      flex: 0 0 auto;
       align-items: center;
-      gap: 7px;
-      margin-bottom: 6px;
-      color: var(--faint);
-      font-size: 12px;
-      font-weight: 800;
+      justify-content: center;
+      border: 2px solid white;
+      border-radius: 11px;
+      background: linear-gradient(145deg, #6b60dc, #4d44ad);
+      color: white;
+      font-size: 10px;
+      font-weight: 950;
+      box-shadow: 0 7px 18px rgba(25, 29, 42, 0.13);
     }
 
-    .message.user .message-meta {
+    .message-avatar.ivan {
+      background: linear-gradient(145deg, #7a5441, #374151);
+    }
+
+    .message-avatar.narrator {
+      background: linear-gradient(145deg, #818794, #4a505c);
+    }
+
+    .message-body {
+      min-width: 0;
+    }
+
+    .message-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 6px 2px;
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 750;
+    }
+
+    .message.user .message-label {
       justify-content: flex-end;
+      margin-right: 2px;
+    }
+
+    .message-label strong {
+      color: var(--muted);
+      font-weight: 900;
     }
 
     .bubble {
       border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-      padding: 14px 16px;
-      color: var(--ink);
-      font-size: 15px;
+      border-radius: 7px 15px 15px 15px;
+      background: var(--surface);
+      color: #2f333c;
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 650;
       line-height: 1.75;
-      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+      box-shadow: var(--shadow-sm);
     }
 
     .message.user .bubble {
-      border-color: var(--violet);
-      background: var(--violet);
-      color: white;
-      box-shadow: 0 12px 26px rgba(79, 70, 229, 0.18);
+      border-color: #d7d3fa;
+      border-radius: 15px 7px 15px 15px;
+      background: #efedff;
+      color: #332d73;
     }
 
-    .message-actions {
-      position: relative;
-      display: flex;
-      gap: 6px;
-      margin-top: 8px;
-    }
-
-    .message.user .message-actions {
-      justify-content: flex-end;
-    }
-
-    .mini-button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 30px;
-      height: 30px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: white;
+    .narration {
+      margin-top: 14px;
+      border-left: 3px solid #c7cbd4;
       color: var(--muted);
-      padding: 0 8px;
+      padding: 4px 0 4px 13px;
       font-size: 12px;
-      font-weight: 900;
-    }
-
-    .mini-button.danger {
-      color: var(--rose);
-    }
-
-    .mini-button:hover {
-      border-color: #c4b5fd;
-      color: var(--violet-strong);
-    }
-
-    .mini-button.danger:hover {
-      border-color: #fecdd3;
-      background: var(--rose-soft);
-      color: var(--rose);
-    }
-
-    .more-menu {
-      position: absolute;
-      top: 36px;
-      left: 112px;
-      z-index: 12;
-      display: none;
-      min-width: 124px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-      padding: 6px;
-      box-shadow: var(--shadow);
-    }
-
-    .message.user .more-menu {
-      right: 0;
-      left: auto;
-    }
-
-    .more-menu.open {
-      display: block;
-    }
-
-    .more-menu button {
-      display: flex;
-      width: 100%;
-      align-items: center;
-      gap: 8px;
-      border: 0;
-      border-radius: 7px;
-      background: transparent;
-      color: var(--rose);
-      padding: 8px 9px;
-      font-size: 13px;
-      font-weight: 950;
-      text-align: left;
-    }
-
-    .more-menu button:hover {
-      background: var(--rose-soft);
-    }
-
-    .bubble.editing {
-      padding: 10px;
-    }
-
-    .bubble-editor {
-      min-height: 110px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: white;
-      color: var(--ink);
-      padding: 10px;
-    }
-
-    .message.user .bubble-editor {
-      border-color: rgba(255, 255, 255, 0.42);
-      background: rgba(255, 255, 255, 0.96);
-      color: var(--ink);
-    }
-
-    .edit-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      margin-top: 10px;
-    }
-
-    .edit-actions button {
-      min-height: 32px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: white;
-      color: var(--muted);
-      padding: 0 11px;
-      font-size: 12px;
-      font-weight: 950;
-    }
-
-    .edit-actions button[data-edit-send] {
-      border-color: var(--violet);
-      background: var(--violet);
-      color: white;
-    }
-
-    .tool-avatar {
-      background: var(--sky-soft);
-      color: var(--sky);
-      box-shadow: none;
-    }
-
-    .tool-card {
-      border: 1px solid #bae6fd;
-      border-radius: var(--radius);
-      background: var(--sky-soft);
-      padding: 12px 14px;
-      color: #075985;
-      font-size: 13px;
-      line-height: 1.6;
-      font-weight: 850;
-    }
-
-    .suggestions {
-      margin-left: 54px;
-      border: 1px solid #fde68a;
-      border-radius: var(--radius);
-      background: #fffbeb;
-      padding: 12px;
-    }
-
-    .suggestions h3 {
-      margin: 0 0 10px;
-      color: var(--ink);
-      font-size: 13px;
-      font-weight: 950;
-    }
-
-    .suggestion-grid {
-      display: grid;
-      gap: 8px;
-    }
-
-    .suggestion {
-      width: 100%;
-      min-height: 40px;
-      border: 1px solid #fcd34d;
-      border-radius: 7px;
-      background: white;
-      color: #92400e;
-      padding: 9px 11px;
-      font-size: 13px;
-      line-height: 1.55;
-      font-weight: 900;
-      text-align: left;
+      font-style: italic;
+      font-weight: 650;
+      line-height: 1.75;
     }
 
     .composer {
+      position: relative;
+      z-index: 2;
+      flex: 0 0 auto;
       border-top: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.96);
-      padding: 12px 18px 14px;
+      background: rgba(255, 255, 255, 0.97);
+      padding: 12px 16px 14px;
     }
 
     .composer-shell {
-      width: min(1040px, 100%);
+      width: min(880px, 100%);
       margin: 0 auto;
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-      box-shadow: 0 12px 34px rgba(15, 23, 42, 0.08);
+      border: 1px solid var(--line-strong);
+      border-radius: 15px;
+      background: var(--surface);
+      box-shadow: 0 12px 34px rgba(24, 27, 36, 0.08);
     }
 
     .composer-top,
@@ -919,674 +937,1268 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 10px 12px;
-      background: var(--surface-soft);
+      padding: 8px 10px;
     }
 
     .composer-top {
-      border-bottom: 1px solid var(--line);
+      border-bottom: 1px solid #edf0f4;
     }
 
     .composer-bottom {
-      border-top: 1px solid var(--line);
+      border-top: 1px solid #edf0f4;
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 750;
     }
 
-    .segmented {
+    .segments {
       display: inline-flex;
-      gap: 4px;
-      padding: 4px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
+      border-radius: 9px;
+      background: var(--surface-muted);
+      padding: 3px;
     }
 
     .segment {
-      min-height: 30px;
+      min-width: 38px;
+      height: 27px;
       border: 0;
-      border-radius: 6px;
+      border-radius: 7px;
       background: transparent;
       color: var(--muted);
-      padding: 0 10px;
-      font-size: 12px;
-      font-weight: 950;
+      font-size: 10px;
+      font-weight: 900;
     }
 
     .segment.active {
-      background: var(--ink);
-      color: white;
+      background: var(--surface);
+      color: var(--violet-deep);
+      box-shadow: 0 1px 4px rgba(24, 27, 36, 0.12);
     }
 
-    .style-radio {
-      display: inline-flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-    }
-
-    .style-label {
+    .command-static {
       color: var(--muted);
-      font-size: 12px;
-      font-weight: 950;
-    }
-
-    .radio-pill {
-      position: relative;
-      display: inline-flex;
-      align-items: center;
-      min-height: 30px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: white;
-      color: var(--muted);
-      padding: 0 11px 0 30px;
-      font-size: 12px;
-      font-weight: 950;
-      white-space: nowrap;
-    }
-
-    .radio-pill input {
-      position: absolute;
-      left: 10px;
-      width: 13px;
-      height: 13px;
-      accent-color: var(--violet);
-    }
-
-    .radio-pill:has(input:checked) {
-      border-color: #c7d2fe;
-      background: var(--violet-soft);
-      color: #3730a3;
+      font-size: 10px;
+      font-weight: 800;
     }
 
     .composer-main {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 116px;
-      gap: 12px;
-      padding: 12px;
-    }
-
-    textarea {
-      width: 100%;
-      min-height: 86px;
-      resize: vertical;
-      border: 0;
-      background: transparent;
-      color: var(--ink);
-      padding: 6px 0;
-      outline: none;
-      font-size: 15px;
-      line-height: 1.65;
-    }
-
-    textarea::placeholder {
-      color: var(--faint);
-    }
-
-    .send-button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      min-height: 86px;
-      border: 0;
-      border-radius: var(--radius);
-      background: var(--violet);
-      color: white;
-      padding: 0 16px;
-      font-size: 15px;
-      font-weight: 950;
-      box-shadow: 0 12px 24px rgba(79, 70, 229, 0.18);
-    }
-
-    .send-button.stopping {
-      background: #e11d48;
-      box-shadow: 0 12px 24px rgba(225, 29, 72, 0.14);
-    }
-
-    .hint {
-      color: var(--faint);
-      font-size: 12px;
-      font-weight: 800;
-    }
-
-    .tab-panel {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 10px;
       padding: 10px;
     }
 
-    .status-table {
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-    }
-
-    .status-table + .status-table {
-      margin-top: 10px;
-    }
-
-    .status-table h3 {
-      margin: 0;
-      border-bottom: 1px solid #eef2f7;
-      background: var(--surface-soft);
-      padding: 9px 10px;
+    .composer-main textarea {
+      width: 100%;
+      min-height: 66px;
+      max-height: 150px;
+      resize: vertical;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+      padding: 4px 5px;
       font-size: 13px;
-      font-weight: 950;
+      font-weight: 600;
+      line-height: 1.7;
     }
 
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 50;
-      display: none;
+    .composer-main textarea::placeholder {
+      color: #a0a5b0;
+    }
+
+    .send-static {
+      display: inline-flex;
+      height: 38px;
       align-items: center;
       justify-content: center;
-      padding: 24px;
-      background: rgba(15, 23, 42, 0.24);
-      backdrop-filter: blur(2px);
-    }
-
-    .modal-backdrop.open {
-      display: flex;
-    }
-
-    .modal {
-      width: min(960px, 100%);
-      max-height: min(720px, calc(100vh - 48px));
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.24);
-    }
-
-    .modal.confirm {
-      width: min(440px, 100%);
-    }
-
-    .confirm-body {
-      padding: 18px;
-    }
-
-    .confirm-body p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.65;
-      font-weight: 800;
-    }
-
-    .confirm-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      border-top: 1px solid var(--line);
-      background: var(--surface-soft);
-      padding: 12px 18px;
-    }
-
-    .confirm-actions button {
-      min-height: 36px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-      color: var(--muted);
-      padding: 0 13px;
-      font-size: 13px;
-      font-weight: 950;
-    }
-
-    .confirm-actions .danger {
-      border-color: #fda4af;
-      background: #e11d48;
+      border: 0;
+      border-radius: 10px;
+      background: var(--violet);
       color: white;
+      padding: 0 14px;
+      font-size: 11px;
+      font-weight: 900;
+      box-shadow: 0 8px 18px rgba(91, 80, 214, 0.2);
     }
 
-    .modal-head {
+    .style-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .style-pill {
+      border-radius: 999px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      padding: 4px 8px;
+    }
+
+    .style-pill.active {
+      background: var(--violet-soft);
+      color: var(--violet-deep);
+    }
+
+    .summary-rail-body {
+      display: flex;
+      min-height: 0;
+      flex: 1 1 auto;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .summary-top {
+      flex: 0 0 auto;
+      border-bottom: 1px solid var(--line);
+      padding: 12px 13px;
+    }
+
+    .snapshot-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(145deg, rgba(15, 124, 112, 0.06), transparent 54%),
+        var(--surface);
+      padding: 11px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .snapshot-head,
+    .batch-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      border-bottom: 1px solid var(--line);
-      padding: 16px 18px;
-      background: var(--surface-soft);
-    }
-
-    .modal-head h2 {
-      margin: 0;
-      font-size: 20px;
-      font-weight: 950;
-    }
-
-    .command-search {
-      display: flex;
-      align-items: center;
       gap: 10px;
-      margin: 16px 18px 0;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: white;
-      padding: 0 12px;
     }
 
-    .command-search input {
-      min-width: 0;
-      flex: 1;
-      height: 44px;
-      border: 0;
-      outline: none;
+    .snapshot-head strong,
+    .batch-head strong {
       color: var(--ink);
-      font-size: 16px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .snapshot-head span,
+    .batch-head span {
+      color: var(--faint);
+      font-size: 10px;
       font-weight: 800;
     }
 
-    .command-body {
-      max-height: 470px;
-      overflow-y: auto;
-      padding: 16px 18px 18px;
-    }
-
-    .command-group + .command-group {
-      margin-top: 16px;
-    }
-
-    .command-group h3 {
-      margin: 0 0 8px;
-      color: var(--violet-strong);
-      font-size: 13px;
-      font-weight: 950;
-    }
-
-    .command-item {
+    .snapshot-grid {
       display: grid;
-      width: 100%;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 16px;
-      align-items: center;
-      border: 0;
-      border-radius: var(--radius);
-      background: transparent;
-      padding: 12px;
-      text-align: left;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+      margin-top: 10px;
     }
 
-    .command-item:hover,
-    .command-item.active {
+    .snapshot-item {
+      min-width: 0;
+      border-radius: 9px;
       background: var(--surface-soft);
+      padding: 8px;
     }
 
-    .command-name {
-      display: inline-flex;
-      margin-right: 8px;
-      border-radius: 6px;
-      background: var(--violet-soft);
-      color: #3730a3;
-      padding: 4px 7px;
-      font-family: var(--mono);
-      font-size: 13px;
-      font-weight: 950;
+    .snapshot-item span {
+      display: block;
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 800;
     }
 
-    .command-item p {
-      margin: 8px 0 0;
+    .snapshot-item strong {
+      display: block;
+      overflow: hidden;
+      margin-top: 3px;
+      color: #343841;
+      font-size: 11px;
+      font-weight: 900;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .snapshot-progress {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 9px;
       color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+    }
+
+    .progress-track {
+      height: 5px;
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e8ebeF;
+    }
+
+    .progress-fill {
+      width: 74%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #2c9386, #5b50d6);
+    }
+
+    .overall-card {
+      display: block;
+      width: 100%;
+      margin-top: 9px;
+      border: 1px solid #d8d4f7;
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 100% 0, rgba(91, 80, 214, 0.11), transparent 46%),
+        var(--surface);
+      padding: 11px;
+      text-align: left;
+      box-shadow: var(--shadow-sm);
+      transition: 160ms ease;
+    }
+
+    .overall-card:hover {
+      border-color: #bab2ed;
+      transform: translateY(-1px);
+      box-shadow: 0 10px 26px rgba(47, 42, 96, 0.1);
+    }
+
+    .overall-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--violet-deep);
+      font-size: 9px;
+      font-weight: 950;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .overall-card-title {
+      display: block;
+      margin: 7px 0 0;
+      color: var(--ink);
       font-size: 13px;
-      line-height: 1.5;
+      font-weight: 900;
+      letter-spacing: -0.01em;
+    }
+
+    .overall-card-excerpt {
+      display: -webkit-box;
+      margin: 6px 0 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.6;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+    }
+
+    .overall-missing {
+      margin-top: 9px;
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      padding: 12px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      line-height: 1.6;
+    }
+
+    .overall-missing strong {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--ink);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .batch-section {
+      display: flex;
+      min-height: 0;
+      flex: 1 1 auto;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 12px 13px 0;
+    }
+
+    .batch-head {
+      flex: 0 0 auto;
+      padding: 0 2px 8px;
+    }
+
+    .batch-list {
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 0 1px 14px;
+      scrollbar-width: thin;
+      scrollbar-color: #cfd3dc transparent;
+    }
+
+    .batch-card {
+      position: relative;
+      display: block;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 11px 11px 11px 15px;
+      text-align: left;
+      box-shadow: var(--shadow-sm);
+      transition: 150ms ease;
+    }
+
+    .batch-card + .batch-card {
+      margin-top: 8px;
+    }
+
+    .batch-card::before {
+      position: absolute;
+      top: 13px;
+      bottom: 13px;
+      left: 0;
+      width: 3px;
+      border-radius: 0 4px 4px 0;
+      background: #aaa2e8;
+      content: "";
+    }
+
+    .batch-card:hover {
+      border-color: #c5c0ec;
+      background: #fdfcff;
+      transform: translateX(-2px);
+    }
+
+    .batch-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .batch-id {
+      color: var(--violet-deep);
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 900;
+    }
+
+    .turn-range {
+      border-radius: 999px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      padding: 3px 7px;
+      font-family: var(--mono);
+      font-size: 8px;
+      font-weight: 850;
+    }
+
+    .batch-card-title {
+      display: block;
+      margin: 7px 0 0;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.4;
+    }
+
+    .batch-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      margin-top: 5px;
+      color: var(--faint);
+      font-size: 9px;
       font-weight: 750;
     }
 
-    .shortcut {
+    .batch-card-excerpt {
+      display: -webkit-box;
+      margin: 7px 0 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 680;
+      line-height: 1.6;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+    }
+
+    .summary-empty {
+      display: flex;
+      min-height: 0;
+      flex: 1 1 auto;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 14px 28px;
+      text-align: center;
+    }
+
+    .summary-empty-inner {
+      width: 100%;
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      padding: 28px 16px;
+    }
+
+    .empty-glyph {
+      display: inline-flex;
+      width: 42px;
+      height: 42px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 13px;
+      background: var(--teal-soft);
+      color: var(--teal);
+      font-size: 16px;
+      font-weight: 950;
+    }
+
+    .summary-empty h3 {
+      margin: 11px 0 0;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .summary-empty p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.65;
+    }
+
+    .mobile-scrim {
+      position: fixed;
+      inset: 0;
+      z-index: 45;
+      border: 0;
+      background: rgba(25, 28, 38, 0.28);
+      backdrop-filter: blur(2px);
+    }
+
+    dialog.side-dialog {
+      position: fixed;
+      z-index: 100;
+      top: 18px;
+      bottom: 18px;
+      display: none;
+      width: min(520px, calc(100vw - 120px));
+      max-width: none;
+      max-height: none;
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      color: var(--ink);
+      padding: 0;
+      box-shadow: var(--shadow-lg);
+    }
+
+    dialog.side-dialog[open] {
+      display: flex;
+      flex-direction: column;
+      animation: dialog-in 180ms ease both;
+    }
+
+    dialog.side-dialog.from-left {
+      left: calc(var(--left-width) + var(--resize-width) + 14px);
+      right: auto;
+      transform-origin: left center;
+    }
+
+    dialog.side-dialog.from-right {
+      left: auto;
+      right: calc(var(--right-width) + var(--resize-width) + 14px);
+      height: calc(100vh - 36px);
+      transform-origin: right center;
+    }
+
+    dialog.side-dialog::backdrop {
+      background: rgba(23, 26, 35, 0.2);
+      backdrop-filter: blur(2px);
+    }
+
+    @keyframes dialog-in {
+      from {
+        opacity: 0;
+        transform: translateY(7px) scale(0.985);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .dialog-header {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+      padding: 16px 18px;
+    }
+
+    .dialog-title {
+      min-width: 0;
+    }
+
+    .dialog-eyebrow {
+      display: block;
+      color: var(--violet-deep);
+      font-size: 9px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .dialog-title h2 {
+      margin: 5px 0 0;
+      color: var(--ink);
+      font-size: 18px;
+      font-weight: 950;
+      letter-spacing: -0.025em;
+    }
+
+    .dialog-title p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.55;
+    }
+
+    .dialog-body {
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 17px 18px 22px;
+      scrollbar-width: thin;
+      scrollbar-color: #cfd3dc transparent;
+    }
+
+    .dialog-note {
+      margin: 0 0 13px;
+      border: 1px solid #ddd9f8;
+      border-radius: 10px;
+      background: #f6f4ff;
+      color: #5b5681;
+      padding: 9px 11px;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.6;
+    }
+
+    .character-grid {
+      display: grid;
+      gap: 11px;
+    }
+
+    .character-rich-card {
+      display: grid;
+      grid-template-columns: 104px minmax(0, 1fr);
+      gap: 14px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      padding: 11px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .portrait {
+      position: relative;
+      display: flex;
+      min-height: 132px;
+      align-items: flex-end;
+      justify-content: center;
+      overflow: hidden;
+      border-radius: 11px;
+      background:
+        radial-gradient(circle at 50% 32%, #f9dfbf 0 13%, transparent 14%),
+        radial-gradient(ellipse at 50% 91%, rgba(255, 255, 255, 0.88) 0 35%, transparent 36%),
+        linear-gradient(160deg, #4338a8, #23899a);
+      color: white;
+      padding: 8px;
+      box-shadow: inset 0 -40px 50px rgba(14, 18, 30, 0.28);
+    }
+
+    .portrait.ivan {
+      background:
+        radial-gradient(circle at 50% 32%, #ecc79f 0 13%, transparent 14%),
+        radial-gradient(ellipse at 50% 91%, #374151 0 35%, transparent 36%),
+        linear-gradient(160deg, #704633, #1f2937);
+    }
+
+    .portrait.keeper {
+      background:
+        radial-gradient(circle at 50% 32%, #f0d093 0 13%, transparent 14%),
+        radial-gradient(ellipse at 50% 91%, #cc8b24 0 35%, transparent 36%),
+        linear-gradient(160deg, #c07a20, #28506b);
+    }
+
+    .portrait::after {
+      position: absolute;
+      inset: auto 8px 8px;
+      border-radius: 8px;
+      background: rgba(16, 20, 30, 0.34);
+      content: attr(data-label);
+      padding: 5px 7px;
+      font-size: 9px;
+      font-weight: 900;
+      text-align: center;
+      backdrop-filter: blur(5px);
+    }
+
+    .character-content {
+      min-width: 0;
+      padding: 2px 2px 2px 0;
+    }
+
+    .character-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 9px;
+    }
+
+    .character-heading h3 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 950;
+    }
+
+    .character-role {
+      display: block;
+      margin-top: 3px;
+      color: var(--violet-deep);
+      font-size: 9px;
+      font-weight: 900;
+    }
+
+    .character-content > p {
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 680;
+      line-height: 1.65;
+    }
+
+    .bound-group {
+      margin-top: 10px;
+    }
+
+    .bound-group > strong {
+      display: block;
       color: var(--faint);
-      font-size: 12px;
+      font-size: 9px;
+      font-weight: 900;
+    }
+
+    .bound-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+
+    .bound-table-chip {
+      display: inline-flex;
+      min-height: 23px;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      padding: 0 8px;
+      font-size: 9px;
       font-weight: 850;
+    }
+
+    .bound-table-chip::before {
+      color: var(--faint);
+      content: "◇";
+      font-size: 9px;
+    }
+
+    .bound-table-chip.is-pinned {
+      border-color: #d7d2f6;
+      background: var(--violet-soft);
+      color: var(--violet-deep);
+    }
+
+    .bound-table-chip.is-pinned::before {
+      color: var(--violet);
+      content: "◆";
+    }
+
+    .manager-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .manager-item {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 11px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      padding: 10px;
+    }
+
+    .manager-copy {
+      min-width: 0;
+    }
+
+    .manager-copy strong {
+      display: block;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 900;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .manager-copy span {
+      display: block;
+      overflow: hidden;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 720;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pin-toggle {
+      display: inline-flex;
+      min-width: 76px;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+      color: var(--muted);
+      padding: 0 9px;
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .pin-toggle[aria-pressed="true"] {
+      border-color: #cec8f3;
+      background: var(--violet-soft);
+      color: var(--violet-deep);
+    }
+
+    .reader-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .reader-meta span {
+      border-radius: 999px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      padding: 4px 8px;
+      font-size: 9px;
+      font-weight: 850;
+    }
+
+    .markdown-prose {
+      color: #343842;
+      font-size: 12px;
+      font-weight: 620;
+      line-height: 1.85;
+    }
+
+    .markdown-prose h2 {
+      margin: 24px 0 9px;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 950;
+      letter-spacing: -0.02em;
+    }
+
+    .markdown-prose h2:first-child {
+      margin-top: 0;
+    }
+
+    .markdown-prose h3 {
+      margin: 20px 0 8px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .markdown-prose p {
+      margin: 0;
+    }
+
+    .markdown-prose p + p {
+      margin-top: 13px;
+    }
+
+    .markdown-prose ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+
+    .markdown-prose li + li {
+      margin-top: 5px;
+    }
+
+    .summary-paragraph {
+      position: relative;
+      border-radius: 10px;
+      padding: 9px 10px;
+      transition: background 150ms ease;
+    }
+
+    .summary-paragraph:hover {
+      background: var(--surface-soft);
+    }
+
+    .turn-slot {
+      display: inline-flex;
+      margin-top: 7px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 999px;
+      background: white;
+      color: var(--faint);
+      padding: 3px 7px;
+      font-family: var(--mono);
+      font-size: 8px;
+      font-style: normal;
+      font-weight: 850;
+      line-height: 1.2;
+    }
+
+    .future-note {
+      margin-top: 20px;
+      border: 1px solid #dfe2e8;
+      border-radius: 11px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      padding: 10px 12px;
+      font-size: 9px;
+      font-weight: 750;
+      line-height: 1.6;
     }
 
     .toast {
       position: fixed;
-      right: 18px;
-      bottom: 18px;
-      z-index: 80;
-      display: none;
-      max-width: 360px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: #0f172a;
+      z-index: 200;
+      bottom: 22px;
+      left: 50%;
+      max-width: min(420px, calc(100vw - 32px));
+      transform: translate(-50%, 12px);
+      border-radius: 999px;
+      background: #232630;
       color: white;
-      padding: 11px 13px;
-      font-size: 13px;
+      padding: 9px 14px;
+      font-size: 10px;
       font-weight: 850;
-      box-shadow: 0 20px 48px rgba(15, 23, 42, 0.28);
+      opacity: 0;
+      pointer-events: none;
+      box-shadow: var(--shadow-md);
+      transition: 180ms ease;
     }
 
     .toast.show {
-      display: block;
+      transform: translate(-50%, 0);
+      opacity: 1;
+    }
+
+    @media (max-width: 1280px) {
+      .connection-pill {
+        display: none;
+      }
+
+      .message {
+        max-width: 88%;
+      }
     }
 
     @media (max-width: 1100px) {
       .session-room {
-        grid-template-columns: 1fr;
-        height: auto;
-        min-height: 100vh;
-        overflow: visible;
+        display: block;
+        min-height: 0;
       }
 
+      .center {
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .side {
+        position: fixed;
+        inset-block: 0;
+        z-index: 50;
+        width: min(360px, 90vw);
+        box-shadow: var(--shadow-lg);
+        transition: transform 180ms ease;
+      }
+
+      .left-rail {
+        left: 0;
+        transform: translateX(-102%);
+      }
+
+      .right-rail {
+        right: 0;
+        transform: translateX(102%);
+      }
+
+      .side.mobile-open {
+        transform: translateX(0);
+      }
+
+      .side.rail-collapsed .expanded-only {
+        display: initial !important;
+      }
+
+      .side.rail-collapsed .rail-content.expanded-only,
+      .side.rail-collapsed .summary-rail-body.expanded-only {
+        display: flex !important;
+      }
+
+      .side.rail-collapsed .left-content.expanded-only {
+        display: block !important;
+      }
+
+      .side.rail-collapsed .collapsed-only {
+        display: none;
+      }
+
+      .side.rail-collapsed .rail-mark {
+        display: inline-flex;
+      }
+
+      .rail-header {
+        padding: 0 14px;
+      }
+
+      .desktop-collapse,
       .resize-handle {
         display: none;
       }
 
-      .side {
-        display: none;
+      .mobile-close,
+      .mobile-rail-trigger {
+        display: inline-flex;
       }
 
-      .side.open-mobile {
-        display: block;
-        position: fixed;
-        inset: 72px auto 0 0;
-        z-index: 40;
-        width: min(360px, 88vw);
-        border-right: 1px solid var(--line);
-        box-shadow: 0 22px 60px rgba(15, 23, 42, 0.2);
-      }
-
-      .right-rail.open-mobile {
-        inset: 72px 0 0 auto;
-        border-left: 1px solid var(--line);
-        border-right: 0;
-      }
-
-      .center {
-        min-height: 100vh;
-      }
-
-      .topbar {
-        position: sticky;
-        top: 0;
-        z-index: 30;
-      }
-
-      .mobile-only {
-        display: inline-flex !important;
+      dialog.side-dialog,
+      dialog.side-dialog.from-left,
+      dialog.side-dialog.from-right {
+        top: 12px;
+        right: 12px;
+        bottom: 12px;
+        left: 12px;
+        width: auto;
+        height: calc(100vh - 24px);
+        max-width: none;
       }
     }
 
-    @media (max-width: 760px) {
+    @media (max-width: 680px) {
       .topbar {
-        grid-template-columns: minmax(0, 1fr);
+        padding: 0 10px;
       }
 
-      .top-actions {
-        justify-content: flex-start;
+      .session-title h1 {
+        max-width: 54vw;
+        font-size: 14px;
       }
 
-      .message,
-      .message.user {
-        grid-template-columns: minmax(0, 1fr);
-      }
-
-      .message .avatar,
-      .message.user .avatar {
+      .session-meta span:nth-child(n + 2) {
         display: none;
       }
 
-      .message.user .bubble-wrap {
-        order: 0;
+      .exit-button {
+        display: none;
       }
 
-      .composer-main {
-        grid-template-columns: 1fr;
+      .timeline-inner {
+        width: calc(100% - 22px);
+        padding-top: 18px;
       }
 
-      .send-button {
-        min-height: 46px;
+      .message {
+        max-width: 96%;
       }
 
-      .composer-top,
-      .composer-bottom {
-        align-items: flex-start;
-        flex-direction: column;
+      .message-avatar {
+        width: 32px;
+        height: 32px;
       }
 
-      .suggestions {
-        margin-left: 0;
+      .bubble {
+        padding: 10px 11px;
+        font-size: 12px;
+      }
+
+      .composer {
+        padding: 9px;
+      }
+
+      .composer-bottom .hint {
+        display: none;
+      }
+
+      .character-rich-card {
+        grid-template-columns: 82px minmax(0, 1fr);
+        gap: 11px;
+      }
+
+      .portrait {
+        min-height: 118px;
+      }
+
+      .dialog-header,
+      .dialog-body {
+        padding-inline: 14px;
       }
     }
 
-    .mobile-only {
-      display: none;
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+      }
     }
   </style>
 </head>
 <body>
   <main class="session-room" id="sessionRoom" data-session-id="s_academy01" data-story-id="2">
-    <aside class="side left-rail" id="leftRail">
+    <aside class="side left-rail" id="leftRail" aria-label="状态与角色侧栏">
       <div class="side-inner">
         <header class="rail-header">
-          <a class="brand" href="#">
-            <span class="brand-mark">R</span>
-            <span class="brand-title">
-              <strong>RPG World Play</strong>
-              <span>immersive session</span>
+          <div class="rail-identity">
+            <span class="rail-mark" aria-hidden="true">R</span>
+            <span class="rail-copy expanded-only">
+              <strong>状态与角色</strong>
+              <span>session context</span>
             </span>
-          </a>
-          <button class="icon-button" type="button" data-toggle-side="left" aria-label="收起左侧栏" title="收起左侧栏">◀</button>
+          </div>
+          <div class="rail-actions">
+            <button class="icon-button desktop-collapse" type="button" data-collapse="left" aria-label="收起左侧栏" aria-controls="leftRail" aria-expanded="true" title="收起左侧栏">
+              <span data-collapse-glyph="left" aria-hidden="true">‹</span>
+            </button>
+            <button class="icon-button mobile-close" type="button" data-mobile-close="left" aria-label="关闭状态侧栏">×</button>
+          </div>
         </header>
 
-        <div class="rail-scroll">
-          <section class="panel">
-            <div class="panel-head">
-              <h2>当前场景</h2>
-              <span class="chip teal">scene</span>
+        <div class="rail-content left-content expanded-only">
+          <button class="character-launcher" type="button" data-dialog-open="characterDialog" aria-haspopup="dialog" aria-controls="characterDialog">
+            <span class="launcher-copy">
+              <strong>故事角色</strong>
+              <span>3 位已挂载角色 · 点击展开卡片</span>
+            </span>
+            <span class="launcher-visual" aria-hidden="true">
+              <span class="avatar-stack">
+                <span class="mini-avatar">林</span>
+                <span class="mini-avatar ivan">伊</span>
+                <span class="mini-avatar keeper">巡</span>
+              </span>
+              <span class="launcher-arrow">›</span>
+            </span>
+          </button>
+
+          <section class="rail-section" aria-labelledby="scene-section-title">
+            <div class="section-heading">
+              <span class="section-title">
+                <span class="section-kicker scene" aria-hidden="true">景</span>
+                <strong id="scene-section-title">场景状态</strong>
+              </span>
+              <span class="section-count">2 张 · 始终显示</span>
             </div>
-            <dl class="scene-list">
-              <div><dt>地点</dt><dd>雾港钟楼码头</dd></div>
-              <div><dt>时间</dt><dd>雨夜 23:40</dd></div>
-              <div><dt>氛围</dt><dd>潮湿、压抑，远处雾笛断续响起</dd></div>
-              <div><dt>在场</dt><dd>林晚、守夜人伊凡、码头巡灯员</dd></div>
-              <div><dt>风险</dt><dd><span class="chip amber">低</span></dd></div>
-            </dl>
+
+            <details class="status-card" open>
+              <summary>
+                <span class="table-mark scene" aria-hidden="true">景</span>
+                <span class="summary-main">
+                  <strong>当前场景</strong>
+                  <span class="summary-meta">
+                    <span class="kind-chip scene">主场景</span>
+                    <span class="binding-chip global">不参与 pin</span>
+                  </span>
+                </span>
+                <span class="chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <p class="status-description">当前剧情的高优先级场景状态，作为用户消息前缀进入上下文。</p>
+              <dl class="status-rows">
+                <div class="status-row"><dt>地点</dt><dd>雾港钟楼码头</dd></div>
+                <div class="status-row"><dt>时间</dt><dd>雨夜 23:40</dd></div>
+                <div class="status-row"><dt>氛围</dt><dd>潮湿、压抑，雾笛断续</dd></div>
+                <div class="status-row"><dt>在场</dt><dd>林晚、伊凡、巡灯员</dd></div>
+              </dl>
+            </details>
+
+            <details class="status-card">
+              <summary>
+                <span class="table-mark scene" aria-hidden="true">景</span>
+                <span class="summary-main">
+                  <strong>环境与威胁</strong>
+                  <span class="summary-meta">
+                    <span class="kind-chip scene">场景表</span>
+                    <span class="binding-chip global">动态环境</span>
+                  </span>
+                </span>
+                <span class="chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <p class="status-description">记录会影响行动判定的环境条件和短期风险。</p>
+              <dl class="status-rows">
+                <div class="status-row"><dt>能见度</dt><dd>低；海雾正在加重</dd></div>
+                <div class="status-row"><dt>钟楼旧门</dt><dd>锁闭；铜锁有新划痕</dd></div>
+                <div class="status-row"><dt>警戒</dt><dd>低 → 正在上升</dd></div>
+              </dl>
+            </details>
           </section>
 
-          <section class="panel">
-            <div class="panel-head">
-              <h2>在场角色</h2>
-              <small>story mounts</small>
+          <section class="rail-section" aria-labelledby="pinned-section-title">
+            <div class="section-heading">
+              <span class="section-title">
+                <span class="section-kicker pinned" aria-hidden="true">◆</span>
+                <strong id="pinned-section-title">已固定状态</strong>
+              </span>
+              <button class="text-button" type="button" data-dialog-open="statusDialog" aria-haspopup="dialog" aria-controls="statusDialog">
+                管理 <span aria-hidden="true">＋</span>
+              </button>
             </div>
-            <div class="character-card">
-              <div class="character-main">
-                <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
-                <div>
-                  <h3>林晚</h3>
-                  <p>玩家当前扮演角色，来自角色库挂载。</p>
-                </div>
-              </div>
-            </div>
-            <div class="character-card">
-              <div class="character-main">
-                <span class="avatar ivan" data-fallback="伊" aria-label="守夜人伊凡头像"></span>
-                <div>
-                  <h3>守夜人伊凡</h3>
-                  <p>谨慎、疲惫，知道钟楼旧门后的某个名字。</p>
-                </div>
-              </div>
-            </div>
-            <div class="character-card">
-              <div class="character-main">
-                <span class="avatar lamplighter" data-fallback="巡" aria-label="码头巡灯员头像"></span>
-                <div>
-                  <h3>码头巡灯员</h3>
-                  <p>正在远处巡灯，可能听见关键对话。</p>
-                </div>
-              </div>
+            <div id="pinnedTables"></div>
+            <div class="pinned-empty" id="pinnedEmpty" hidden>
+              尚未固定普通状态表。<br>点击“管理”将常用表加入侧栏。
             </div>
           </section>
+        </div>
+
+        <div class="compact-rail collapsed-only" aria-label="左侧栏快捷入口">
+          <button class="compact-button" type="button" data-dialog-open="characterDialog" aria-label="展开故事角色" aria-controls="characterDialog" title="故事角色">角</button>
+          <button class="compact-button teal" type="button" data-expand-rail="left" aria-label="展开场景状态" title="场景状态">景</button>
+          <button class="compact-button" type="button" data-dialog-open="statusDialog" aria-label="管理固定状态表" aria-controls="statusDialog" title="管理状态表">表</button>
         </div>
       </div>
     </aside>
 
-    <button class="resize-handle" type="button" data-resize="left" aria-label="调整左侧栏宽度"><span></span></button>
+    <button
+      class="resize-handle"
+      id="leftResize"
+      type="button"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整左侧栏宽度"
+      aria-valuemin="260"
+      aria-valuemax="460"
+      aria-valuenow="300"
+      data-resize="left"
+    ></button>
 
-    <section class="center">
+    <section class="center" aria-label="主会话区域">
       <header class="topbar">
         <div class="session-title">
           <h1>黑市边缘：旧灯笼里的第二把钥匙</h1>
           <div class="session-meta">
             <span>story <code>#2</code></span>
             <span>session <code>s_academy01</code></span>
-            <span>更新 2026-07-03 23:41</span>
+            <span>更新 2026-07-11 23:41</span>
           </div>
         </div>
         <div class="top-actions">
-          <button class="icon-button mobile-only" type="button" data-mobile-panel="left" aria-label="打开场景栏">☰</button>
-          <button class="icon-button mobile-only" type="button" data-mobile-panel="right" aria-label="打开状态栏">▤</button>
-          <button class="exit-button" type="button" data-toast="退出到会话中心">退出</button>
-          <button class="icon-button" id="settingsButton" type="button" aria-expanded="false" aria-label="设置" title="设置">⚙</button>
-
-          <section class="settings-menu" id="settingsMenu" aria-label="会话设置菜单">
-            <div class="settings-head">
-              <strong>会话设置</strong>
-              <span>布局与输入偏好</span>
-            </div>
-            <div class="menu-list">
-              <button class="menu-item" type="button" data-toggle-side="left">
-                <span class="menu-icon">◧</span>
-                <span class="menu-copy"><strong>左侧栏</strong><span>场景与角色信息</span></span>
-                <span class="switch on" data-switch="left"></span>
-              </button>
-              <button class="menu-item" type="button" data-toggle-side="right">
-                <span class="menu-icon">◨</span>
-                <span class="menu-copy"><strong>右侧栏</strong><span>状态表</span></span>
-                <span class="switch on" data-switch="right"></span>
-              </button>
-            </div>
-          </section>
+          <button class="icon-button mobile-rail-trigger" type="button" data-mobile-open="left" aria-label="打开状态与角色侧栏" aria-controls="leftRail" aria-expanded="false">☰</button>
+          <button class="icon-button mobile-rail-trigger" type="button" data-mobile-open="right" aria-label="打开故事归纳侧栏" aria-controls="rightRail" aria-expanded="false">归</button>
+          <span class="connection-pill"><span class="connection-dot"></span>会话在线</span>
+          <button class="exit-button" type="button">退出</button>
+          <button class="icon-button" type="button" aria-label="会话设置" title="会话设置">⚙</button>
         </div>
       </header>
 
-      <section class="timeline" id="timeline">
+      <section class="timeline" aria-label="会话时间线">
         <div class="timeline-inner">
-          <div class="day-divider">回合 12 / 雾港钟楼码头</div>
-          <div class="message-stack" id="messageStack">
-            <article class="message user" data-turn-index="10">
-              <div class="bubble-wrap">
-                <div class="message-meta"><span>23:40</span><strong>林晚（IC）</strong></div>
-                <div class="bubble">我拉紧斗篷，沿着潮湿的石阶走向码头钟楼。</div>
-                <div class="message-actions">
-                  <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
-                  <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
-                  <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
-                  <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
-                  <div class="more-menu">
-                    <button type="button" data-action="delete"><span>⌫</span>删除</button>
-                  </div>
-                </div>
-              </div>
-              <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
-            </article>
+          <div class="turn-divider">回合 12 · 雾港钟楼码头</div>
 
-            <article class="message" data-turn-index="11">
-              <span class="avatar narrator" data-fallback="旁" aria-label="Narrator 头像"></span>
-              <div class="bubble-wrap">
-                <div class="message-meta"><span>23:40</span><strong>Narrator</strong><span class="chip teal">done</span></div>
-                <div class="bubble">雾气贴着地面翻涌，钟楼二层透出一线琥珀色灯光。守夜人停下擦拭灯罩的动作，像是已经等你很久。</div>
-                <div class="message-actions">
-                  <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
-                  <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
-                  <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
-                  <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
-                  <div class="more-menu">
-                    <button type="button" data-action="delete"><span>⌫</span>删除</button>
-                  </div>
-                </div>
-              </div>
-            </article>
+          <article class="message">
+            <span class="message-avatar narrator" aria-hidden="true">旁</span>
+            <div class="message-body">
+              <div class="message-label"><strong>Narrator</strong><span>23:40</span></div>
+              <div class="bubble">雨水顺着钟楼的铜檐滴落。海雾吞掉了码头尽头，只剩那盏旧灯笼在风里摇晃。</div>
+            </div>
+          </article>
 
-            <article class="message user" data-turn-index="12" data-last-turn="true">
-              <div class="bubble-wrap">
-                <div class="message-meta"><span>23:41</span><strong>林晚（IC）</strong></div>
-                <div class="bubble">我压低声音问他：今晚是谁敲响了第十三下钟？</div>
-                <div class="message-actions">
-                  <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
-                  <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
-                  <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
-                  <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
-                  <div class="more-menu">
-                    <button type="button" data-action="delete"><span>⌫</span>删除</button>
-                  </div>
-                </div>
-              </div>
-              <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
-            </article>
+          <article class="message user">
+            <span class="message-avatar" aria-hidden="true">林</span>
+            <div class="message-body">
+              <div class="message-label"><span>23:41</span><strong>林晚（IC）</strong></div>
+              <div class="bubble">我压低声音问伊凡：今晚是谁敲响了第十三下钟？</div>
+            </div>
+          </article>
 
-            <article class="message" data-turn-index="12" data-last-turn="true">
-              <span class="avatar ivan" data-fallback="伊" aria-label="守夜人伊凡头像"></span>
-              <div class="bubble-wrap">
-                <div class="message-meta"><span>23:41</span><strong>守夜人伊凡</strong><span class="chip violet">assistant</span></div>
-                <div class="bubble">守夜人没有立刻回答。他从怀里取出一枚沾着盐霜的铜钥匙，轻轻推到你面前：“先确认你还记得门后的名字。”</div>
-                <div class="message-actions">
-                  <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
-                  <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
-                  <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
-                  <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
-                  <div class="more-menu">
-                    <button type="button" data-action="delete"><span>⌫</span>删除</button>
-                  </div>
-                </div>
-              </div>
-            </article>
+          <article class="message">
+            <span class="message-avatar ivan" aria-hidden="true">伊</span>
+            <div class="message-body">
+              <div class="message-label"><strong>守夜人伊凡</strong><span>23:41</span></div>
+              <div class="bubble">伊凡没有立刻回答。他从怀里取出一枚沾着盐霜的铜钥匙，轻轻推到你面前：“先确认你还记得门后的名字。”</div>
+              <p class="narration">远处传来巡灯员的脚步声，规律得像另一座看不见的钟。</p>
+            </div>
+          </article>
 
-            <article class="message turn-dependent" data-turn-index="12">
-              <span class="tool-avatar">⚒</span>
-              <div class="bubble-wrap">
-                <div class="message-meta"><span>23:41</span><strong>工具结果</strong><span class="chip sky">roll</span></div>
-                <div class="tool-card">线索检定（观察守夜人动作）→ 成功。难度 12，结果 14；铜钥匙边缘刻有“North Gate”。</div>
-              </div>
-            </article>
-
-            <section class="suggestions turn-dependent" data-turn-index="12" aria-label="快捷行动">
-              <h3>快捷行动</h3>
-              <div class="suggestion-grid">
-                <button class="suggestion" type="button" data-insert="我仔细观察铜钥匙上的刻痕。">我仔细观察铜钥匙上的刻痕。</button>
-                <button class="suggestion" type="button" data-insert="我询问守夜人“North Gate”指向哪里。">我询问守夜人“North Gate”指向哪里。</button>
-                <button class="suggestion" type="button" data-insert="我请伊凡带我去钟楼二层，追踪旧门后的名字。">我请伊凡带我去钟楼二层，追踪旧门后的名字。</button>
-                <button class="suggestion" type="button" data-insert="我低头确认铜钥匙、旧地图和银币是否还在身上。">我低头确认铜钥匙、旧地图和银币是否还在身上。</button>
-              </div>
-            </section>
-          </div>
+          <article class="message user">
+            <span class="message-avatar" aria-hidden="true">林</span>
+            <div class="message-body">
+              <div class="message-label"><span>23:41</span><strong>林晚（IC）</strong></div>
+              <div class="bubble">我接过钥匙，借着灯光检查边缘的刻痕，同时留意巡灯员靠近的方向。</div>
+            </div>
+          </article>
         </div>
       </section>
 
-      <section class="composer">
+      <section class="composer" aria-label="会话输入器">
         <div class="composer-shell">
           <div class="composer-top">
-            <div class="segmented" role="tablist" aria-label="输入模式">
-              <button class="segment active" type="button" data-mode="IC">IC</button>
-              <button class="segment" type="button" data-mode="OOC">OOC</button>
-              <button class="segment" type="button" data-mode="GM">GM</button>
+            <div class="segments" role="group" aria-label="输入模式">
+              <button class="segment active" type="button" aria-pressed="true">IC</button>
+              <button class="segment" type="button" aria-pressed="false">OOC</button>
+              <button class="segment" type="button" aria-pressed="false">GM</button>
             </div>
-            <button class="mini-button" type="button" id="openCommand">⌘ 命令面板</button>
+            <span class="command-static">⌘ 命令面板</span>
           </div>
           <div class="composer-main">
-            <textarea id="composerText" placeholder="输入你的行动、台词或 GM 指令..."></textarea>
-            <button class="send-button" id="sendButton" type="button">✈ 发送</button>
+            <textarea aria-label="会话输入" placeholder="输入你的行动、台词或 GM 指令..."></textarea>
+            <button class="send-static" type="button">发送 ↗</button>
           </div>
           <div class="composer-bottom">
-            <div class="style-radio" role="radiogroup" aria-label="叙事风格">
-              <span class="style-label">叙事风格</span>
-              <label class="radio-pill">
-                <input type="radio" name="narrativeStyle" value="默认" data-style-prompt="" checked>
-                默认
-              </label>
-              <label class="radio-pill">
-                <input type="radio" name="narrativeStyle" value="细腻描写" data-style-prompt="请用细腻描写推进这一幕。">
-                细腻描写
-              </label>
-              <label class="radio-pill">
-                <input type="radio" name="narrativeStyle" value="快速推进" data-style-prompt="请快速推进到下一个关键选择。">
-                快速推进
-              </label>
-              <label class="radio-pill">
-                <input type="radio" name="narrativeStyle" value="多给选项" data-style-prompt="请在回应结尾给出三个可选行动。">
-                多给选项
-              </label>
+            <div class="style-pills">
+              <span class="style-pill active">默认</span>
+              <span class="style-pill">细腻描写</span>
+              <span class="style-pill">快速推进</span>
+              <span class="style-pill">多给选项</span>
             </div>
             <span class="hint">Enter 发送 / Shift+Enter 换行</span>
           </div>
@@ -1594,564 +2206,863 @@
       </section>
     </section>
 
-    <button class="resize-handle" type="button" data-resize="right" aria-label="调整右侧栏宽度"><span></span></button>
+    <button
+      class="resize-handle"
+      id="rightResize"
+      type="button"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整右侧栏宽度"
+      aria-valuemin="280"
+      aria-valuemax="500"
+      aria-valuenow="340"
+      data-resize="right"
+    ></button>
 
-    <aside class="side right-rail" id="rightRail">
+    <aside class="side right-rail" id="rightRail" aria-label="故事归纳侧栏">
       <div class="side-inner">
         <header class="rail-header">
-          <span class="rail-title-text hide-on-collapse">
-            <strong>状态表</strong>
-            <span>session document truth</span>
-          </span>
-          <button class="icon-button" type="button" data-toggle-side="right" aria-label="收起右侧栏" title="收起右侧栏">▶</button>
+          <div class="rail-identity">
+            <span class="rail-mark summary-mark" aria-hidden="true">归</span>
+            <span class="rail-copy expanded-only">
+              <strong>故事归纳</strong>
+              <span>overall &amp; batch summaries</span>
+            </span>
+          </div>
+          <div class="rail-actions">
+            <button class="icon-button desktop-collapse" type="button" data-collapse="right" aria-label="收起右侧栏" aria-controls="rightRail" aria-expanded="true" title="收起右侧栏">
+              <span data-collapse-glyph="right" aria-hidden="true">›</span>
+            </button>
+            <button class="icon-button mobile-close" type="button" data-mobile-close="right" aria-label="关闭故事归纳侧栏">×</button>
+          </div>
         </header>
 
-        <div class="rail-scroll">
-          <section class="tab-panel">
-            <div class="status-table">
-              <h3>当前场景</h3>
-              <dl class="status-list">
-                <div class="status-row"><dt>地点</dt><dd>雾港钟楼码头</dd></div>
-                <div class="status-row"><dt>时间</dt><dd>雨夜 23:40</dd></div>
-                <div class="status-row"><dt>天气</dt><dd>海雾</dd></div>
-                <div class="status-row"><dt>氛围</dt><dd>潮湿、压抑</dd></div>
-              </dl>
+        <div class="summary-rail-body expanded-only">
+          <div class="summary-top">
+            <section class="snapshot-panel" aria-labelledby="snapshot-title">
+              <div class="snapshot-head">
+                <strong id="snapshot-title">会话速览</strong>
+                <span>实时信息</span>
+              </div>
+              <div class="snapshot-grid">
+                <div class="snapshot-item"><span>当前回合</span><strong>Turn 19</strong></div>
+                <div class="snapshot-item"><span>扮演角色</span><strong>林晚</strong></div>
+                <div class="snapshot-item"><span>在场角色</span><strong>3 位</strong></div>
+                <div class="snapshot-item"><span>最后更新</span><strong>23:41</strong></div>
+              </div>
+              <div class="snapshot-progress">
+                <span id="coverageLabel">已归纳至 Turn 18</span>
+                <span class="progress-track" aria-hidden="true"><span class="progress-fill" id="coverageFill"></span></span>
+              </div>
+            </section>
+
+            <button class="overall-card" id="overallCard" type="button" data-summary-key="overall" aria-haspopup="dialog" aria-controls="summaryDialog">
+              <span class="overall-label"><span>Overall.md</span><span>阅读全文 ›</span></span>
+              <span class="overall-card-title">雾港钟楼与第二把钥匙</span>
+              <span class="overall-card-excerpt">林晚追查第十三下钟声，在守夜人伊凡手中取得刻有 North Gate 的铜钥匙。旧门、失踪名册和码头巡灯路线逐渐指向同一个被抹去的名字。</span>
+            </button>
+
+            <div class="overall-missing" id="overallMissing" hidden>
+              <strong>整体归纳尚未生成</strong>
+              已有分段摘要仍可阅读；下一次归纳成功后，overall.md 会出现在这里。
             </div>
-            <div class="status-table">
-              <h3>线索</h3>
-              <dl class="status-list">
-                <div class="status-row"><dt>铜钥匙</dt><dd>已获得；刻有 North Gate</dd></div>
-                <div class="status-row"><dt>第十三下钟</dt><dd>待确认</dd></div>
-                <div class="status-row"><dt>门后名字</dt><dd>未知</dd></div>
-              </dl>
+          </div>
+
+          <section class="batch-section" id="batchSection" aria-labelledby="batch-title">
+            <div class="batch-head">
+              <strong id="batch-title">分段归纳</strong>
+              <span>最新优先 · 3 段</span>
             </div>
-            <div class="status-table">
-              <h3>随身物品</h3>
-              <dl class="status-list">
-                <div class="status-row"><dt>铜钥匙</dt><dd>1</dd></div>
-                <div class="status-row"><dt>旧地图</dt><dd>残页</dd></div>
-                <div class="status-row"><dt>银币</dt><dd>12</dd></div>
-              </dl>
+            <div class="batch-list" id="batchList">
+              <button class="batch-card" type="button" data-summary-key="batch3" aria-haspopup="dialog" aria-controls="summaryDialog">
+                <span class="batch-card-top">
+                  <span class="batch-id">BATCH 003</span>
+                  <span class="turn-range">Turn 13–18</span>
+                </span>
+                <span class="batch-card-title">盐霜钥匙与门后的名字</span>
+                <span class="batch-meta"><span>雨夜 23:40</span><span>雾港钟楼</span><span>林晚 / 伊凡</span></span>
+                <span class="batch-card-excerpt">伊凡交出第二把钥匙，却要求林晚先说出旧门后的名字。钥匙边缘的 North Gate 刻痕与失踪名册产生联系。</span>
+              </button>
+
+              <button class="batch-card" type="button" data-summary-key="batch2" aria-haspopup="dialog" aria-controls="summaryDialog">
+                <span class="batch-card-top">
+                  <span class="batch-id">BATCH 002</span>
+                  <span class="turn-range">Turn 7–12</span>
+                </span>
+                <span class="batch-card-title">巡灯路线上的第十三声</span>
+                <span class="batch-meta"><span>深夜 23:10</span><span>旧码头</span><span>林晚 / 巡灯员</span></span>
+                <span class="batch-card-excerpt">巡灯员承认钟楼曾在无人值守时响起第十三声，并留下了一张被海水浸坏的巡灯路线图。</span>
+              </button>
+
+              <button class="batch-card" type="button" data-summary-key="batch1" aria-haspopup="dialog" aria-controls="summaryDialog">
+                <span class="batch-card-top">
+                  <span class="batch-id">BATCH 001</span>
+                  <span class="turn-range">Turn 1–6</span>
+                </span>
+                <span class="batch-card-title">黑市里的旧灯笼</span>
+                <span class="batch-meta"><span>夜晚 22:30</span><span>雾港黑市</span><span>林晚</span></span>
+                <span class="batch-card-excerpt">林晚从黑市商人手中取得旧灯笼和第一把钥匙，并得知钟楼名册里有一个被反复刮去的名字。</span>
+              </button>
             </div>
           </section>
+
+          <section class="summary-empty" id="summaryEmpty" hidden aria-labelledby="summary-empty-title">
+            <div class="summary-empty-inner">
+              <span class="empty-glyph" aria-hidden="true">归</span>
+              <h3 id="summary-empty-title">故事归纳尚未生成</h3>
+              <p>会话积累到归纳阈值后，overall 与分段摘要会自动出现在这里。当前仍可通过左侧状态表了解场景与角色状态。</p>
+            </div>
+          </section>
+        </div>
+
+        <div class="compact-rail collapsed-only" aria-label="右侧栏快捷入口">
+          <button class="compact-button teal" type="button" data-expand-rail="right" aria-label="展开会话速览" title="会话速览">览</button>
+          <button class="compact-button" type="button" data-summary-key="overall" aria-label="阅读整体归纳" aria-controls="summaryDialog" title="整体归纳">归</button>
         </div>
       </div>
     </aside>
   </main>
 
-  <div class="modal-backdrop" id="commandModal">
-    <section class="modal" role="dialog" aria-modal="true" aria-label="命令面板">
-      <header class="modal-head">
-        <div>
-          <h2>命令面板</h2>
-          <div class="session-meta"><span>session <code>s_academy01</code></span><span>命令选择</span></div>
-        </div>
-        <button class="icon-button" type="button" id="closeCommand" aria-label="关闭命令面板">×</button>
-      </header>
-      <div class="command-search">
-        <span>⌘</span>
-        <input id="commandSearch" value="/sc" aria-label="搜索命令">
-        <span class="hint">Esc 关闭</span>
-      </div>
-      <div class="command-body">
-        <section class="command-group">
-          <h3>场景相关</h3>
-          <button class="command-item active" type="button" data-command="/scene 雾港钟楼二层 追踪旧门后的名字">
-            <span><span class="command-name">/scene</span><strong>[名称] [描述]</strong><p>切换或创建当前场景，设置场景描述与氛围。</p></span>
-            <span class="shortcut">Enter</span>
-          </button>
-        </section>
-        <section class="command-group">
-          <h3>角色与互动</h3>
-          <button class="command-item" type="button" data-command="/npc 伊凡 追问 North Gate">
-            <span><span class="command-name">/npc</span><strong>[名称] [操作]</strong><p>与 NPC 互动、查询或管理 NPC 信息。</p></span>
-            <span class="shortcut">Ctrl+2</span>
-          </button>
-        </section>
-        <section class="command-group">
-          <h3>状态与信息</h3>
-          <button class="command-item" type="button" data-command="/status">
-            <span><span class="command-name">/status</span><p>查看角色状态、属性、装备与资源。</p></span>
-            <span class="shortcut">Ctrl+3</span>
-          </button>
-        </section>
-        <section class="command-group">
-          <h3>检定与骰子</h3>
-          <button class="command-item" type="button" data-command="/roll 1d20+2 观察铜钥匙">
-            <span><span class="command-name">/roll 1d20</span><strong>[修正值] [标签]</strong><p>进行骰子检定，支持任意骰子表达式。</p></span>
-            <span class="shortcut">Ctrl+R</span>
-          </button>
-        </section>
-      </div>
-    </section>
-  </div>
+  <button class="mobile-scrim" id="mobileScrim" type="button" aria-label="关闭侧栏" hidden></button>
 
-  <div class="modal-backdrop" id="confirmModal">
-    <section class="modal confirm" role="dialog" aria-modal="true" aria-label="确认操作">
-      <header class="modal-head">
-        <h2 id="confirmTitle">确认操作</h2>
-        <button class="icon-button" type="button" id="closeConfirm" aria-label="关闭确认弹窗">×</button>
-      </header>
-      <div class="confirm-body">
-        <p id="confirmMessage">该操作需要二次确认。</p>
+  <dialog class="side-dialog from-left" id="characterDialog" aria-modal="true" aria-labelledby="character-dialog-title">
+    <header class="dialog-header">
+      <div class="dialog-title">
+        <span class="dialog-eyebrow">Story characters</span>
+        <h2 id="character-dialog-title">故事角色</h2>
+        <p>集中浏览角色卡；图片区域为后续图文混排预留。</p>
       </div>
-      <footer class="confirm-actions">
-        <button type="button" id="cancelConfirm">取消</button>
-        <button type="button" class="danger" id="confirmActionButton">确认</button>
-      </footer>
-    </section>
-  </div>
+      <button class="icon-button" type="button" data-dialog-close aria-label="关闭故事角色">×</button>
+    </header>
+    <div class="dialog-body">
+      <p class="dialog-note">状态表仍以“表”为主入口。角色卡只展示绑定关系，避免相同 KV 在两个位置重复出现。</p>
+      <div class="character-grid">
+        <article class="character-rich-card">
+          <div class="portrait" data-label="当前扮演角色" aria-label="林晚角色图片占位"></div>
+          <div class="character-content">
+            <div class="character-heading">
+              <div>
+                <h3>林晚</h3>
+                <span class="character-role">玩家角色 · 当前绑定</span>
+              </div>
+              <span class="state-chip present">在场</span>
+            </div>
+            <p>冷静的调查者，正在追查雾港名册中被抹去的名字。她持有两把来源不同的铜钥匙。</p>
+            <div class="bound-group">
+              <strong>绑定状态表</strong>
+              <div class="bound-chips">
+                <span class="bound-table-chip" data-bound-table="lin-state">林晚状态</span>
+                <span class="bound-table-chip" data-bound-table="inventory">随身物品</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="character-rich-card">
+          <div class="portrait ivan" data-label="关键 NPC" aria-label="守夜人伊凡角色图片占位"></div>
+          <div class="character-content">
+            <div class="character-heading">
+              <div>
+                <h3>守夜人伊凡</h3>
+                <span class="character-role">故事角色 · 钟楼守夜人</span>
+              </div>
+              <span class="state-chip present">在场</span>
+            </div>
+            <p>谨慎而疲惫，知道旧门后的名字，也清楚第十三下钟声为何不能被其他人听见。</p>
+            <div class="bound-group">
+              <strong>绑定状态表</strong>
+              <div class="bound-chips">
+                <span class="bound-table-chip" data-bound-table="ivan-trust">伊凡关系</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="character-rich-card">
+          <div class="portrait keeper" data-label="故事角色" aria-label="码头巡灯员角色图片占位"></div>
+          <div class="character-content">
+            <div class="character-heading">
+              <div>
+                <h3>码头巡灯员</h3>
+                <span class="character-role">故事角色 · 夜间巡逻</span>
+              </div>
+              <span class="state-chip nearby">附近</span>
+            </div>
+            <p>沿固定路线检查雾灯，手中的旧路线图可能记录了钟声异常当晚的真实动线。</p>
+            <div class="bound-group">
+              <strong>绑定状态表</strong>
+              <div class="bound-chips">
+                <span class="bound-table-chip" data-bound-table="keeper-route">巡灯路线</span>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="side-dialog from-left" id="statusDialog" aria-modal="true" aria-labelledby="status-dialog-title">
+    <header class="dialog-header">
+      <div class="dialog-title">
+        <span class="dialog-eyebrow">Pinned tables</span>
+        <h2 id="status-dialog-title">管理状态表</h2>
+        <p>只有固定的普通状态表进入左侧栏；场景表始终单独展示。</p>
+      </div>
+      <button class="icon-button" type="button" data-dialog-close aria-label="关闭状态表管理">×</button>
+    </header>
+    <div class="dialog-body">
+      <p class="dialog-note">当前 pin 只保存在本页内存中，刷新后恢复示例状态，不代表持久化设计。</p>
+      <div class="manager-list" id="statusManagerList"></div>
+    </div>
+  </dialog>
+
+  <dialog class="side-dialog from-right" id="summaryDialog" aria-modal="true" aria-labelledby="summary-dialog-title">
+    <header class="dialog-header">
+      <div class="dialog-title">
+        <span class="dialog-eyebrow" id="readerEyebrow">Summary</span>
+        <h2 id="summary-dialog-title">故事归纳</h2>
+        <div class="reader-meta" id="readerMeta"></div>
+      </div>
+      <button class="icon-button" type="button" data-dialog-close aria-label="关闭故事归纳全文">×</button>
+    </header>
+    <div class="dialog-body" id="summaryReaderBody"></div>
+  </dialog>
+
+  <template id="summary-template-overall">
+    <article class="markdown-prose">
+      <h2>当前故事脉络</h2>
+      <p class="summary-paragraph">
+        林晚从雾港黑市取得一盏来自旧钟楼的灯笼，并在夹层里找到第一把铜钥匙。黑市商人警告她，钟楼名册中曾有一个名字被反复刮去，而每次有人试图恢复它，港口都会响起不存在的第十三下钟声。
+        <span class="turn-slot">Turn 1–6 · 导航预留</span>
+      </p>
+      <p class="summary-paragraph">
+        巡灯员提供的旧路线图显示，异常钟声当晚有人绕开主路进入钟楼北门。路线、潮汐时间与名册缺页相互吻合，North Gate 因此成为当前最明确的调查方向。
+        <span class="turn-slot">Turn 7–12 · 导航预留</span>
+      </p>
+      <p class="summary-paragraph">
+        守夜人伊凡交出第二把钥匙，但拒绝直接说出门后的名字。他要求林晚先证明自己仍记得那段被抹去的历史；与此同时，巡灯脚步已经接近，安全对话窗口正在缩短。
+        <span class="turn-slot">Turn 13–18 · 导航预留</span>
+      </p>
+      <h3>关键事件</h3>
+      <ul>
+        <li>取得旧灯笼、第一把钥匙与盐霜铜钥匙。</li>
+        <li>确认第十三下钟声与钟楼北门有关。</li>
+        <li>伊凡知道门后名字，但仍未完全信任林晚。</li>
+      </ul>
+      <p class="future-note">Turn 范围由设计稿示意。正式实现可由消息的 summary_batch_id 反查批次覆盖范围，再接入时间线定位。</p>
+    </article>
+  </template>
+
+  <template id="summary-template-batch3">
+    <article class="markdown-prose">
+      <h2>盐霜钥匙与门后的名字</h2>
+      <p class="summary-paragraph">
+        林晚在钟楼码头与伊凡碰面。伊凡确认第十三下钟并非机械故障，而是有人在旧门另一侧回应。他拿出的铜钥匙覆着盐霜，边缘刻有 North Gate。
+        <span class="turn-slot">Turn 13–15 · 导航预留</span>
+      </p>
+      <p class="summary-paragraph">
+        伊凡没有直接交代门后的人名，只要求林晚先说出她记得的版本。林晚接过钥匙检查刻痕，同时发现巡灯员正在沿异常路线靠近。
+        <span class="turn-slot">Turn 16–18 · 导航预留</span>
+      </p>
+      <h3>本段变化</h3>
+      <ul>
+        <li>第二把钥匙：已获得。</li>
+        <li>伊凡信任：谨慎，略有上升。</li>
+        <li>当前风险：巡灯员即将进入可听范围。</li>
+      </ul>
+    </article>
+  </template>
+
+  <template id="summary-template-batch2">
+    <article class="markdown-prose">
+      <h2>巡灯路线上的第十三声</h2>
+      <p class="summary-paragraph">
+        林晚沿旧码头追问巡灯员。对方起初否认异常，随后承认钟楼曾在无人值守时响起第十三声，而且声音来自海雾深处而非钟室。
+        <span class="turn-slot">Turn 7–9 · 导航预留</span>
+      </p>
+      <p class="summary-paragraph">
+        一张被海水浸坏的巡灯路线图显示，钟声当晚的巡逻路径曾被临时改道，改道终点正是封闭多年的北门。
+        <span class="turn-slot">Turn 10–12 · 导航预留</span>
+      </p>
+      <h3>获得线索</h3>
+      <ul>
+        <li>浸水巡灯路线图。</li>
+        <li>第十三声并非来自主钟室。</li>
+        <li>北门在异常当晚存在人员活动。</li>
+      </ul>
+    </article>
+  </template>
+
+  <template id="summary-template-batch1">
+    <article class="markdown-prose">
+      <h2>黑市里的旧灯笼</h2>
+      <p class="summary-paragraph">
+        林晚在雾港黑市买下旧钟楼流出的灯笼。灯笼夹层藏着一把小铜钥匙，以及一张只剩半行字的名册残页。
+        <span class="turn-slot">Turn 1–3 · 导航预留</span>
+      </p>
+      <p class="summary-paragraph">
+        商人提到，名册里的名字被刮去过不止一次；每次有人试图恢复，港口就会多响一次钟。林晚决定从钟楼守夜人和夜间巡灯路线入手。
+        <span class="turn-slot">Turn 4–6 · 导航预留</span>
+      </p>
+      <h3>初始目标</h3>
+      <ul>
+        <li>确认铜钥匙对应的门。</li>
+        <li>找到完整名册或被抹去的名字。</li>
+        <li>调查第十三下钟声的来源。</li>
+      </ul>
+    </article>
+  </template>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
-    const room = document.getElementById('sessionRoom')
-    const leftRail = document.getElementById('leftRail')
-    const rightRail = document.getElementById('rightRail')
-    const settingsButton = document.getElementById('settingsButton')
-    const settingsMenu = document.getElementById('settingsMenu')
-    const toast = document.getElementById('toast')
-    const composerText = document.getElementById('composerText')
-    const sendButton = document.getElementById('sendButton')
-    const messageStack = document.getElementById('messageStack')
-    const commandModal = document.getElementById('commandModal')
-    const openCommand = document.getElementById('openCommand')
-    const closeCommand = document.getElementById('closeCommand')
-    const commandSearch = document.getElementById('commandSearch')
-    const confirmModal = document.getElementById('confirmModal')
-    const confirmTitle = document.getElementById('confirmTitle')
-    const confirmMessage = document.getElementById('confirmMessage')
-    const closeConfirm = document.getElementById('closeConfirm')
-    const cancelConfirm = document.getElementById('cancelConfirm')
-    const confirmActionButton = document.getElementById('confirmActionButton')
+    (function () {
+      "use strict";
 
-    let toastTimer = null
-    let isSending = false
-    let dragState = null
-    let pendingConfirmAction = null
+      var root = document.documentElement;
+      var leftRail = document.getElementById("leftRail");
+      var rightRail = document.getElementById("rightRail");
+      var leftResize = document.getElementById("leftResize");
+      var rightResize = document.getElementById("rightResize");
+      var mobileScrim = document.getElementById("mobileScrim");
+      var toast = document.getElementById("toast");
+      var toastTimer = null;
+      var mobileRailTrigger = null;
 
-    function showToast(message) {
-      toast.textContent = message
-      toast.classList.add('show')
-      clearTimeout(toastTimer)
-      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200)
-    }
+      var layoutState = {
+        leftWidth: 300,
+        rightWidth: 340,
+        leftCollapsed: false,
+        rightCollapsed: false,
+        dragging: null
+      };
 
-    function closeSettings() {
-      settingsMenu.classList.remove('open')
-      settingsButton.setAttribute('aria-expanded', 'false')
-    }
-
-    function toggleSide(side) {
-      const isLeft = side === 'left'
-      const className = isLeft ? 'left-collapsed' : 'right-collapsed'
-      const rail = isLeft ? leftRail : rightRail
-      room.classList.toggle(className)
-      rail.classList.toggle('rail-collapsed')
-      const collapsed = room.classList.contains(className)
-      document.querySelectorAll(`[data-switch="${side}"]`).forEach((item) => item.classList.toggle('on', !collapsed))
-    }
-
-    function insertText(text) {
-      const prefix = composerText.value.trim() ? '\n' : ''
-      composerText.value += prefix + text
-      composerText.focus()
-    }
-
-    function getNarrativeStyle() {
-      const selected = document.querySelector('input[name="narrativeStyle"]:checked')
-      return {
-        label: selected ? selected.value : '默认',
-        prompt: selected ? selected.dataset.stylePrompt : '',
-      }
-    }
-
-    function messageActions() {
-      return `
-        <div class="message-actions">
-          <button class="mini-button" type="button" data-action="copy" aria-label="复制" title="复制">⧉</button>
-          <button class="mini-button" type="button" data-action="retry" aria-label="重试" title="重试">↻</button>
-          <button class="mini-button" type="button" data-action="edit" aria-label="编辑" title="编辑">✎</button>
-          <button class="mini-button" type="button" data-action="more" aria-label="更多" title="更多">⋯</button>
-          <div class="more-menu">
-            <button type="button" data-action="delete"><span>⌫</span>删除</button>
-          </div>
-        </div>
-      `
-    }
-
-    function getTurnIndex(element) {
-      const value = Number(element?.dataset.turnIndex)
-      return Number.isFinite(value) ? value : 0
-    }
-
-    function getLastTurnIndex() {
-      return Math.max(
-        0,
-        ...[...document.querySelectorAll('.message[data-turn-index]')].map(getTurnIndex),
-      )
-    }
-
-    function closeAllMoreMenus(except) {
-      document.querySelectorAll('.more-menu.open').forEach((menu) => {
-        if (menu !== except) menu.classList.remove('open')
-      })
-    }
-
-    function closeConfirmModal() {
-      confirmModal.classList.remove('open')
-      pendingConfirmAction = null
-    }
-
-    function openConfirmModal({ title, message, actionLabel, onConfirm }) {
-      confirmTitle.textContent = title
-      confirmMessage.textContent = message
-      confirmActionButton.textContent = actionLabel
-      pendingConfirmAction = onConfirm
-      confirmModal.classList.add('open')
-    }
-
-    function deleteTurnsFrom(turnIndex) {
-      document.querySelectorAll('[data-turn-index]').forEach((item) => {
-        if (getTurnIndex(item) >= turnIndex) item.remove()
-      })
-    }
-
-    function retryTurn(turnIndex) {
-      deleteTurnsFrom(turnIndex)
-      showToast(`已删除 turn #${turnIndex} 及之后内容，并触发重试`)
-      setTimeout(() => appendAssistantPreview(turnIndex), 650)
-    }
-
-    function sendEditedTurn(message, text) {
-      const turnIndex = getTurnIndex(message)
-      deleteTurnsFrom(turnIndex)
-      showToast(`已发送编辑后的 turn #${turnIndex}，并重新生成后续内容`)
-      const article = document.createElement('article')
-      article.className = 'message user'
-      article.dataset.turnIndex = String(turnIndex)
-      article.dataset.lastTurn = 'true'
-      article.innerHTML = `
-        <div class="bubble-wrap">
-          <div class="message-meta"><span>刚刚</span><strong>林晚（IC）</strong></div>
-          <div class="bubble"></div>
-          ${messageActions()}
-        </div>
-        <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
-      `
-      article.querySelector('.bubble').textContent = text
-      messageStack.appendChild(article)
-      setTimeout(() => appendAssistantPreview(turnIndex), 650)
-    }
-
-    function requestRetryTurn(message) {
-      const turnIndex = getTurnIndex(message)
-      if (turnIndex >= getLastTurnIndex()) {
-        retryTurn(turnIndex)
-        return
-      }
-      openConfirmModal({
-        title: '确认重试',
-        message: `重试 turn #${turnIndex} 会删除该 turn 以及之后更新的所有 turn。`,
-        actionLabel: '确认重试',
-        onConfirm: () => retryTurn(turnIndex),
-      })
-    }
-
-    function confirmDeleteMessage(message) {
-      const turnIndex = getTurnIndex(message)
-      openConfirmModal({
-        title: '确认删除',
-        message: `删除当前消息会从时间线移除该内容。`,
-        actionLabel: '确认删除',
-        onConfirm: () => {
-          message.remove()
-          closeAllMoreMenus()
-          showToast(`已删除 turn #${turnIndex} 中的当前消息`)
+      var tableData = [
+        {
+          id: "clues",
+          name: "关键线索",
+          description: "记录已经确认、仍待验证以及互相矛盾的调查线索。",
+          character: null,
+          pinned: true,
+          rows: [
+            ["第二把钥匙", "已获得；边缘刻有 North Gate"],
+            ["第十三下钟", "来源不在主钟室"],
+            ["门后名字", "未知；伊凡拒绝直接说出"]
+          ]
         },
-      })
-    }
-
-    function startInlineEdit(message) {
-      const bubble = message.querySelector('.bubble')
-      if (!bubble || bubble.classList.contains('editing')) return
-      const original = bubble.textContent.trim()
-      bubble.dataset.originalText = original
-      bubble.classList.add('editing')
-      bubble.innerHTML = `
-        <textarea class="bubble-editor">${original}</textarea>
-        <div class="edit-actions">
-          <button type="button" data-edit-cancel>取消</button>
-          <button type="button" data-edit-send>发送</button>
-        </div>
-      `
-      bubble.querySelector('.bubble-editor').focus()
-    }
-
-    function finishInlineEdit(button, save) {
-      const bubble = button.closest('.bubble')
-      const message = button.closest('.message')
-      const editor = bubble.querySelector('.bubble-editor')
-      const nextText = save ? editor.value.trim() : bubble.dataset.originalText
-      if (!save) {
-        bubble.classList.remove('editing')
-        bubble.textContent = nextText || ''
-        showToast('已取消编辑')
-        return
-      }
-      const turnIndex = getTurnIndex(message)
-      const sendEdit = () => sendEditedTurn(message, nextText || bubble.dataset.originalText || '')
-      if (turnIndex < getLastTurnIndex()) {
-        openConfirmModal({
-          title: '确认发送编辑',
-          message: `发送编辑后的 turn #${turnIndex} 会删除该 turn 以及之后更新的所有 turn，并使用新的内容重新生成。`,
-          actionLabel: '确认发送',
-          onConfirm: sendEdit,
-        })
-        return
-      }
-      sendEdit()
-    }
-
-    function appendUserMessage(text) {
-      const style = getNarrativeStyle()
-      const article = document.createElement('article')
-      article.className = 'message user'
-      article.dataset.narrativeStyle = style.label
-      article.dataset.hiddenPrompt = style.prompt
-      article.dataset.turnIndex = String(getLastTurnIndex() + 1)
-      article.dataset.lastTurn = 'true'
-      article.innerHTML = `
-        <div class="bubble-wrap">
-          <div class="message-meta"><span>刚刚</span><strong>林晚（IC）</strong></div>
-          <div class="bubble"></div>
-          ${messageActions()}
-        </div>
-        <span class="avatar player" data-fallback="林" aria-label="林晚头像"></span>
-      `
-      article.querySelector('.bubble').textContent = text
-      messageStack.appendChild(article)
-      article.scrollIntoView({ behavior: 'smooth', block: 'end' })
-    }
-
-    function appendAssistantPreview(turnIndex = getLastTurnIndex()) {
-      const article = document.createElement('article')
-      article.className = 'message'
-      article.dataset.turnIndex = String(turnIndex)
-      article.dataset.lastTurn = 'true'
-      article.innerHTML = `
-        <span class="avatar narrator" data-fallback="旁" aria-label="Narrator 头像"></span>
-        <div class="bubble-wrap">
-          <div class="message-meta"><span>刚刚</span><strong>Narrator</strong><span class="chip amber">streaming</span></div>
-          <div class="bubble">雾气在钟楼二层的窗缝里凝成水珠。伊凡的目光掠过钥匙边缘：“North Gate 不是城门，是旧账本上的一个名字。”</div>
-          ${messageActions()}
-        </div>
-      `
-      messageStack.appendChild(article)
-      article.scrollIntoView({ behavior: 'smooth', block: 'end' })
-    }
-
-    settingsButton.addEventListener('click', (event) => {
-      event.stopPropagation()
-      const open = !settingsMenu.classList.contains('open')
-      settingsMenu.classList.toggle('open', open)
-      settingsButton.setAttribute('aria-expanded', String(open))
-    })
-
-    document.addEventListener('click', (event) => {
-      if (!settingsMenu.contains(event.target) && event.target !== settingsButton) {
-        closeSettings()
-      }
-      if (!event.target.closest('.message-actions')) {
-        closeAllMoreMenus()
-      }
-    })
-
-    document.querySelectorAll('[data-toggle-side]').forEach((button) => {
-      button.addEventListener('click', (event) => {
-        event.stopPropagation()
-        toggleSide(button.dataset.toggleSide)
-      })
-    })
-
-    document.querySelectorAll('[data-mobile-panel]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const rail = button.dataset.mobilePanel === 'left' ? leftRail : rightRail
-        rail.classList.toggle('open-mobile')
-      })
-    })
-
-    document.querySelectorAll('[data-toast]').forEach((button) => {
-      button.addEventListener('click', () => showToast(button.dataset.toast))
-    })
-
-    document.querySelectorAll('[data-insert]').forEach((button) => {
-      button.addEventListener('click', () => insertText(button.dataset.insert))
-    })
-
-    messageStack.addEventListener('click', (event) => {
-      const editButton = event.target.closest('[data-edit-cancel], [data-edit-send]')
-      if (editButton) {
-        finishInlineEdit(editButton, Boolean(editButton.dataset.editSend !== undefined))
-        return
-      }
-
-      const actionButton = event.target.closest('[data-action]')
-      if (!actionButton) return
-      const message = actionButton.closest('.message')
-      if (!message) return
-      const action = actionButton.dataset.action
-
-      if (action === 'more') {
-        const menu = actionButton.parentElement.querySelector('.more-menu')
-        const shouldOpen = !menu.classList.contains('open')
-        closeAllMoreMenus(menu)
-        menu.classList.toggle('open', shouldOpen)
-        return
-      }
-
-      if (action === 'delete') {
-        confirmDeleteMessage(message)
-        return
-      }
-
-      if (action === 'copy') {
-        showToast('已复制当前消息')
-        return
-      }
-
-      if (action === 'edit') {
-        startInlineEdit(message)
-        return
-      }
-
-      if (action === 'retry') {
-        requestRetryTurn(message)
-      }
-    })
-
-    document.querySelectorAll('.segment').forEach((button) => {
-      button.addEventListener('click', () => {
-        document.querySelectorAll('.segment').forEach((item) => item.classList.remove('active'))
-        button.classList.add('active')
-      })
-    })
-
-    sendButton.addEventListener('click', () => {
-      if (isSending) {
-        isSending = false
-        sendButton.classList.remove('stopping')
-        sendButton.textContent = '✈ 发送'
-        showToast('已停止当前流式响应')
-        return
-      }
-      const text = composerText.value.trim()
-      if (!text) {
-        showToast('请输入内容后再发送')
-        composerText.focus()
-        return
-      }
-      appendUserMessage(text)
-      composerText.value = ''
-      isSending = true
-      sendButton.classList.add('stopping')
-      sendButton.textContent = '■ 停止'
-      setTimeout(() => {
-        appendAssistantPreview()
-        isSending = false
-        sendButton.classList.remove('stopping')
-        sendButton.textContent = '✈ 发送'
-      }, 900)
-    })
-
-    composerText.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault()
-        sendButton.click()
-      }
-    })
-
-    function openCommandModal() {
-      commandModal.classList.add('open')
-      setTimeout(() => commandSearch.focus(), 0)
-    }
-
-    function closeCommandModal() {
-      commandModal.classList.remove('open')
-    }
-
-    openCommand.addEventListener('click', openCommandModal)
-    closeCommand.addEventListener('click', closeCommandModal)
-    closeConfirm.addEventListener('click', closeConfirmModal)
-    cancelConfirm.addEventListener('click', closeConfirmModal)
-    confirmActionButton.addEventListener('click', () => {
-      pendingConfirmAction?.()
-      closeConfirmModal()
-    })
-    commandModal.addEventListener('click', (event) => {
-      if (event.target === commandModal) closeCommandModal()
-    })
-    confirmModal.addEventListener('click', (event) => {
-      if (event.target === confirmModal) closeConfirmModal()
-    })
-
-    document.querySelectorAll('[data-command]').forEach((button) => {
-      button.addEventListener('click', () => {
-        composerText.value = button.dataset.command
-        closeCommandModal()
-        composerText.focus()
-      })
-    })
-
-    document.addEventListener('keydown', (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        openCommandModal()
-      }
-      if (event.key === 'Escape') {
-        closeCommandModal()
-        closeConfirmModal()
-        closeSettings()
-        closeAllMoreMenus()
-      }
-    })
-
-    document.querySelectorAll('[data-resize]').forEach((handle) => {
-      handle.addEventListener('pointerdown', (event) => {
-        handle.setPointerCapture(event.pointerId)
-        handle.classList.add('dragging')
-        dragState = {
-          side: handle.dataset.resize,
-          startX: event.clientX,
-          left: parseInt(getComputedStyle(room).getPropertyValue('--left'), 10),
-          right: parseInt(getComputedStyle(room).getPropertyValue('--right'), 10),
-          handle,
+        {
+          id: "lin-state",
+          name: "林晚状态",
+          description: "玩家角色的即时身心状态与剧情性资源。",
+          character: { name: "林晚", initial: "林", tone: "" },
+          pinned: true,
+          rows: [
+            ["体力", "稳定"],
+            ["压力", "2 / 5"],
+            ["当前目标", "确认北门后的名字"]
+          ]
+        },
+        {
+          id: "ivan-trust",
+          name: "伊凡关系",
+          description: "守夜人伊凡对玩家的态度、信任与未兑现承诺。",
+          character: { name: "守夜人伊凡", initial: "伊", tone: "ivan" },
+          pinned: true,
+          rows: [
+            ["信任", "谨慎；略有上升"],
+            ["承诺", "带林晚进入钟楼二层"],
+            ["隐瞒", "旧门后的真实名字"]
+          ]
+        },
+        {
+          id: "inventory",
+          name: "随身物品",
+          description: "林晚当前可直接使用或需要进一步鉴定的物品。",
+          character: { name: "林晚", initial: "林", tone: "" },
+          pinned: false,
+          rows: [
+            ["铜钥匙", "2 把"],
+            ["旧地图", "残页"],
+            ["银币", "12"]
+          ]
+        },
+        {
+          id: "keeper-route",
+          name: "巡灯路线",
+          description: "码头巡灯员的常规路线与异常改道记录。",
+          character: { name: "码头巡灯员", initial: "巡", tone: "keeper" },
+          pinned: false,
+          rows: [
+            ["常规路线", "东堤 → 钟楼 → 仓区"],
+            ["异常改道", "钟楼北门"],
+            ["下一次经过", "约 3 分钟后"]
+          ]
         }
-      })
-      handle.addEventListener('pointermove', (event) => {
-        if (!dragState || dragState.handle !== handle) return
-        const delta = event.clientX - dragState.startX
-        if (dragState.side === 'left') {
-          const next = Math.min(420, Math.max(240, dragState.left + delta))
-          room.style.setProperty('--left', `${next}px`)
-          room.classList.remove('left-collapsed')
-          leftRail.classList.remove('rail-collapsed')
+      ];
+
+      var summaryRegistry = {
+        overall: {
+          eyebrow: "Overall.md",
+          title: "雾港钟楼与第二把钥匙",
+          meta: ["整体归纳", "已覆盖 Batch 001–003", "Turn 1–18"],
+          templateId: "summary-template-overall"
+        },
+        batch3: {
+          eyebrow: "Batch 003",
+          title: "盐霜钥匙与门后的名字",
+          meta: ["雨夜 23:40", "雾港钟楼", "Turn 13–18"],
+          templateId: "summary-template-batch3"
+        },
+        batch2: {
+          eyebrow: "Batch 002",
+          title: "巡灯路线上的第十三声",
+          meta: ["深夜 23:10", "旧码头", "Turn 7–12"],
+          templateId: "summary-template-batch2"
+        },
+        batch1: {
+          eyebrow: "Batch 001",
+          title: "黑市里的旧灯笼",
+          meta: ["夜晚 22:30", "雾港黑市", "Turn 1–6"],
+          templateId: "summary-template-batch1"
+        }
+      };
+
+      function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+      }
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("show");
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(function () {
+          toast.classList.remove("show");
+        }, 1800);
+      }
+
+      function currentWidth(side) {
+        if (side === "left") {
+          return layoutState.leftCollapsed ? 72 : layoutState.leftWidth;
+        }
+        return layoutState.rightCollapsed ? 72 : layoutState.rightWidth;
+      }
+
+      function syncLayout() {
+        root.style.setProperty("--left-width", currentWidth("left") + "px");
+        root.style.setProperty("--right-width", currentWidth("right") + "px");
+        leftResize.setAttribute("aria-valuenow", String(layoutState.leftWidth));
+        rightResize.setAttribute("aria-valuenow", String(layoutState.rightWidth));
+        leftResize.disabled = layoutState.leftCollapsed;
+        rightResize.disabled = layoutState.rightCollapsed;
+      }
+
+      function setCollapsed(side, collapsed) {
+        var isLeft = side === "left";
+        var rail = isLeft ? leftRail : rightRail;
+        var button = document.querySelector('[data-collapse="' + side + '"]');
+        var glyph = document.querySelector('[data-collapse-glyph="' + side + '"]');
+        rail.classList.toggle("rail-collapsed", collapsed);
+        layoutState[side + "Collapsed"] = collapsed;
+        button.setAttribute("aria-expanded", String(!collapsed));
+        button.setAttribute("aria-label", (collapsed ? "展开" : "收起") + (isLeft ? "左" : "右") + "侧栏");
+        button.title = (collapsed ? "展开" : "收起") + (isLeft ? "左" : "右") + "侧栏";
+        glyph.textContent = isLeft ? (collapsed ? "›" : "‹") : (collapsed ? "‹" : "›");
+        syncLayout();
+      }
+
+      document.querySelectorAll("[data-collapse]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var side = button.getAttribute("data-collapse");
+          setCollapsed(side, !layoutState[side + "Collapsed"]);
+        });
+      });
+
+      document.querySelectorAll("[data-expand-rail]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          setCollapsed(button.getAttribute("data-expand-rail"), false);
+        });
+      });
+
+      function beginResize(side, clientX) {
+        layoutState.dragging = {
+          side: side,
+          startX: clientX,
+          startLeft: layoutState.leftWidth,
+          startRight: layoutState.rightWidth
+        };
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+      }
+
+      document.querySelectorAll("[data-resize]").forEach(function (handle) {
+        handle.addEventListener("pointerdown", function (event) {
+          if (handle.disabled || window.innerWidth <= 1100) return;
+          event.preventDefault();
+          handle.setPointerCapture(event.pointerId);
+          beginResize(handle.getAttribute("data-resize"), event.clientX);
+        });
+
+        handle.addEventListener("keydown", function (event) {
+          var side = handle.getAttribute("data-resize");
+          var direction = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+          if (!direction || handle.disabled) return;
+          event.preventDefault();
+          if (side === "left") {
+            layoutState.leftWidth = clamp(layoutState.leftWidth + direction * 10, 260, 460);
+          } else {
+            layoutState.rightWidth = clamp(layoutState.rightWidth - direction * 10, 280, 500);
+          }
+          syncLayout();
+        });
+      });
+
+      window.addEventListener("pointermove", function (event) {
+        var drag = layoutState.dragging;
+        if (!drag) return;
+        if (drag.side === "left") {
+          layoutState.leftWidth = clamp(drag.startLeft + event.clientX - drag.startX, 260, 460);
         } else {
-          const next = Math.min(480, Math.max(280, dragState.right - delta))
-          room.style.setProperty('--right', `${next}px`)
-          room.classList.remove('right-collapsed')
-          rightRail.classList.remove('rail-collapsed')
+          layoutState.rightWidth = clamp(drag.startRight - (event.clientX - drag.startX), 280, 500);
         }
-      })
-      handle.addEventListener('pointerup', () => {
-        handle.classList.remove('dragging')
-        dragState = null
-      })
-      handle.addEventListener('pointercancel', () => {
-        handle.classList.remove('dragging')
-        dragState = null
-      })
-    })
+        syncLayout();
+      });
+
+      function endResize() {
+        if (!layoutState.dragging) return;
+        layoutState.dragging = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+
+      window.addEventListener("pointerup", endResize);
+      window.addEventListener("pointercancel", endResize);
+
+      function setMobileTriggerState(openSide) {
+        document.querySelectorAll("[data-mobile-open]").forEach(function (button) {
+          button.setAttribute("aria-expanded", String(button.getAttribute("data-mobile-open") === openSide));
+        });
+      }
+
+      function closeMobileRails(options) {
+        var restoreFocus = !options || options.restoreFocus !== false;
+        var hadOpenRail = leftRail.classList.contains("mobile-open") || rightRail.classList.contains("mobile-open");
+        leftRail.classList.remove("mobile-open");
+        rightRail.classList.remove("mobile-open");
+        mobileScrim.hidden = true;
+        setMobileTriggerState(null);
+        if (restoreFocus && hadOpenRail && mobileRailTrigger && mobileRailTrigger.isConnected) {
+          var trigger = mobileRailTrigger;
+          window.setTimeout(function () {
+            trigger.focus();
+          }, 0);
+        }
+        mobileRailTrigger = null;
+      }
+
+      function openMobileRail(side, trigger) {
+        mobileRailTrigger = trigger || document.activeElement;
+        if (side === "left") {
+          setCollapsed("left", false);
+          rightRail.classList.remove("mobile-open");
+          leftRail.classList.add("mobile-open");
+        } else {
+          setCollapsed("right", false);
+          leftRail.classList.remove("mobile-open");
+          rightRail.classList.add("mobile-open");
+        }
+        mobileScrim.hidden = false;
+        setMobileTriggerState(side);
+        var rail = side === "left" ? leftRail : rightRail;
+        window.setTimeout(function () {
+          var closeButton = rail.querySelector('[data-mobile-close="' + side + '"]');
+          if (closeButton) closeButton.focus();
+        }, 180);
+      }
+
+      document.querySelectorAll("[data-mobile-open]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          openMobileRail(button.getAttribute("data-mobile-open"), button);
+        });
+      });
+
+      document.querySelectorAll("[data-mobile-close]").forEach(function (button) {
+        button.addEventListener("click", closeMobileRails);
+      });
+
+      mobileScrim.addEventListener("click", closeMobileRails);
+
+      var dialogs = Array.prototype.slice.call(document.querySelectorAll("dialog.side-dialog"));
+      var dialogTrigger = new WeakMap();
+
+      function closeOpenDialogs(except) {
+        dialogs.forEach(function (dialog) {
+          if (dialog.open && dialog !== except) dialog.close();
+        });
+      }
+
+      function dialogReturnTarget(trigger) {
+        if (window.innerWidth > 1100 || !trigger) return trigger;
+        if (leftRail.contains(trigger)) return document.querySelector('[data-mobile-open="left"]');
+        if (rightRail.contains(trigger)) return document.querySelector('[data-mobile-open="right"]');
+        return trigger;
+      }
+
+      function openDialog(dialog, trigger) {
+        if (!dialog) return;
+        var returnTarget = dialogReturnTarget(trigger || document.activeElement);
+        closeMobileRails({ restoreFocus: false });
+        closeOpenDialogs(dialog);
+        dialogTrigger.set(dialog, returnTarget);
+        if (!dialog.open) dialog.showModal();
+      }
+
+      function closeDialog(dialog) {
+        if (dialog && dialog.open) dialog.close();
+      }
+
+      document.querySelectorAll("[data-dialog-open]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          openDialog(document.getElementById(button.getAttribute("data-dialog-open")), button);
+        });
+      });
+
+      document.querySelectorAll("[data-dialog-close]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          closeDialog(button.closest("dialog"));
+        });
+      });
+
+      dialogs.forEach(function (dialog) {
+        dialog.addEventListener("click", function (event) {
+          var rect = dialog.getBoundingClientRect();
+          var outside = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+          if (outside) dialog.close();
+        });
+
+        dialog.addEventListener("close", function () {
+          var trigger = dialogTrigger.get(dialog);
+          if (trigger && typeof trigger.focus === "function" && trigger.isConnected) {
+            window.setTimeout(function () {
+              trigger.focus();
+            }, 0);
+          }
+        });
+      });
+
+      document.addEventListener("keydown", function (event) {
+        if (event.key !== "Escape") return;
+        var openDialogElement = dialogs.find(function (dialog) {
+          return dialog.open;
+        });
+        if (openDialogElement) {
+          event.preventDefault();
+          openDialogElement.close();
+          return;
+        }
+        if (leftRail.classList.contains("mobile-open") || rightRail.classList.contains("mobile-open")) {
+          event.preventDefault();
+          closeMobileRails();
+        }
+      });
+
+      function makeElement(tagName, className, text) {
+        var element = document.createElement(tagName);
+        if (className) element.className = className;
+        if (text !== undefined) element.textContent = text;
+        return element;
+      }
+
+      function makeMiniAvatar(character) {
+        var avatar = makeElement("span", "mini-avatar " + (character.tone || ""), character.initial);
+        avatar.setAttribute("aria-hidden", "true");
+        return avatar;
+      }
+
+      function makeBindingChip(table) {
+        var chip = makeElement("span", "binding-chip");
+        if (table.character) {
+          chip.appendChild(makeMiniAvatar(table.character));
+          chip.appendChild(document.createTextNode("角色 · " + table.character.name));
+        } else {
+          chip.classList.add("global");
+          chip.textContent = "全局状态";
+        }
+        return chip;
+      }
+
+      function makeStatusCard(table, openByDefault) {
+        var details = makeElement("details", "status-card");
+        details.open = Boolean(openByDefault);
+
+        var summary = document.createElement("summary");
+        var tableMark = makeElement("span", "table-mark", "表");
+        tableMark.setAttribute("aria-hidden", "true");
+        summary.appendChild(tableMark);
+
+        var main = makeElement("span", "summary-main");
+        main.appendChild(makeElement("strong", "", table.name));
+        var meta = makeElement("span", "summary-meta");
+        meta.appendChild(makeBindingChip(table));
+        main.appendChild(meta);
+        summary.appendChild(main);
+        var chevron = makeElement("span", "chevron", "⌄");
+        chevron.setAttribute("aria-hidden", "true");
+        summary.appendChild(chevron);
+        details.appendChild(summary);
+
+        details.appendChild(makeElement("p", "status-description", table.description));
+        var rows = makeElement("dl", "status-rows");
+        table.rows.forEach(function (row) {
+          var rowElement = makeElement("div", "status-row");
+          rowElement.appendChild(makeElement("dt", "", row[0]));
+          rowElement.appendChild(makeElement("dd", "", row[1]));
+          rows.appendChild(rowElement);
+        });
+        details.appendChild(rows);
+        return details;
+      }
+
+      function updateCharacterBindingChips() {
+        document.querySelectorAll("[data-bound-table]").forEach(function (chip) {
+          var table = tableData.find(function (item) {
+            return item.id === chip.getAttribute("data-bound-table");
+          });
+          chip.classList.toggle("is-pinned", Boolean(table && table.pinned));
+          chip.title = table && table.pinned ? "已固定到左侧栏" : "未固定到左侧栏";
+        });
+      }
+
+      function renderPinnedTables() {
+        var container = document.getElementById("pinnedTables");
+        var empty = document.getElementById("pinnedEmpty");
+        var pinned = tableData.filter(function (table) {
+          return table.pinned;
+        });
+        container.replaceChildren();
+        pinned.forEach(function (table, index) {
+          container.appendChild(makeStatusCard(table, index === 0));
+        });
+        empty.hidden = pinned.length !== 0;
+        document.querySelector("#pinned-section-title").textContent = "已固定状态 · " + pinned.length;
+        updateCharacterBindingChips();
+      }
+
+      function renderManager(focusTableId) {
+        var manager = document.getElementById("statusManagerList");
+        manager.replaceChildren();
+        tableData.forEach(function (table) {
+          var item = makeElement("article", "manager-item");
+          if (table.character) {
+            item.appendChild(makeMiniAvatar(table.character));
+          } else {
+            var managerMark = makeElement("span", "table-mark", "表");
+            managerMark.setAttribute("aria-hidden", "true");
+            item.appendChild(managerMark);
+          }
+
+          var copy = makeElement("span", "manager-copy");
+          copy.appendChild(makeElement("strong", "", table.name));
+          copy.appendChild(makeElement("span", "", table.character ? "绑定角色 · " + table.character.name : "全局状态表"));
+          item.appendChild(copy);
+
+          var toggle = makeElement("button", "pin-toggle");
+          toggle.type = "button";
+          toggle.setAttribute("data-table-toggle", table.id);
+          toggle.setAttribute("aria-pressed", String(table.pinned));
+          toggle.setAttribute("aria-label", (table.pinned ? "取消固定" : "固定") + table.name);
+          toggle.textContent = (table.pinned ? "◆ 已固定" : "◇ 固定");
+          item.appendChild(toggle);
+          manager.appendChild(item);
+        });
+
+        if (focusTableId) {
+          window.requestAnimationFrame(function () {
+            var target = manager.querySelector('[data-table-toggle="' + focusTableId + '"]');
+            if (target) target.focus();
+          });
+        }
+      }
+
+      document.getElementById("statusManagerList").addEventListener("click", function (event) {
+        var button = event.target.closest("[data-table-toggle]");
+        if (!button) return;
+        var tableId = button.getAttribute("data-table-toggle");
+        var table = tableData.find(function (item) {
+          return item.id === tableId;
+        });
+        if (!table) return;
+        table.pinned = !table.pinned;
+        renderPinnedTables();
+        renderManager(tableId);
+        showToast(table.name + (table.pinned ? " 已固定到左侧栏" : " 已从左侧栏移除"));
+      });
+
+      function openSummary(key, trigger) {
+        var summary = summaryRegistry[key];
+        if (!summary) return;
+        var dialog = document.getElementById("summaryDialog");
+        var body = document.getElementById("summaryReaderBody");
+        var template = document.getElementById(summary.templateId);
+        document.getElementById("readerEyebrow").textContent = summary.eyebrow;
+        document.getElementById("summary-dialog-title").textContent = summary.title;
+        var meta = document.getElementById("readerMeta");
+        meta.replaceChildren();
+        summary.meta.forEach(function (item) {
+          meta.appendChild(makeElement("span", "", item));
+        });
+        body.replaceChildren(template.content.cloneNode(true));
+        openDialog(dialog, trigger);
+      }
+
+      document.addEventListener("click", function (event) {
+        var button = event.target.closest("[data-summary-key]");
+        if (!button) return;
+        var state = new URLSearchParams(window.location.search).get("summary");
+        var key = button.getAttribute("data-summary-key");
+        if (key === "overall" && (state === "empty" || state === "batch-only")) {
+          showToast("当前状态没有 overall.md");
+          return;
+        }
+        openSummary(key, button);
+      });
+
+      function applySummaryState() {
+        var state = new URLSearchParams(window.location.search).get("summary") || "populated";
+        var isEmpty = state === "empty";
+        var isBatchOnly = state === "batch-only";
+        document.getElementById("overallCard").hidden = isEmpty || isBatchOnly;
+        document.getElementById("overallMissing").hidden = !isBatchOnly;
+        document.getElementById("batchSection").hidden = isEmpty;
+        document.getElementById("summaryEmpty").hidden = !isEmpty;
+
+        var coverage = document.getElementById("coverageLabel");
+        var fill = document.getElementById("coverageFill");
+        if (isEmpty) {
+          coverage.textContent = "尚未开始归纳";
+          fill.style.width = "0%";
+        } else if (isBatchOnly) {
+          coverage.textContent = "3 个批次 · overall 待生成";
+          fill.style.width = "66%";
+        } else {
+          coverage.textContent = "已归纳至 Turn 18";
+          fill.style.width = "74%";
+        }
+      }
+
+      var wasMobile = window.innerWidth <= 1100;
+      window.addEventListener("resize", function () {
+        var isMobile = window.innerWidth <= 1100;
+        if (isMobile !== wasMobile) {
+          closeMobileRails({ restoreFocus: false });
+          wasMobile = isMobile;
+        }
+      });
+
+      renderPinnedTables();
+      renderManager();
+      applySummaryState();
+      syncLayout();
+    })();
   </script>
 </body>
 </html>

@@ -5,14 +5,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from rpg_core.summary.reader import SummaryDocument, SummaryReader
 from rpg_data import models
-from rpg_data.services import DataServiceGateway, get_data_service_gateway
-from rpg_data.settings import get_database_path
 from rpg_data.bootstrap import (
     delete_unindexed_runtime_item,
     delete_unindexed_runtime_items,
     scan_unindexed_runtime_data,
 )
+from rpg_data.services import DataServiceGateway, get_data_service_gateway
+from rpg_data.settings import get_database_path
 
 
 class DataManagerBackend:
@@ -121,6 +122,48 @@ class DataManagerBackend:
         if session is None:
             return None
         return _session_summary(session, self._gateway)
+
+    async def list_session_summaries(
+        self,
+        session_id: str,
+    ) -> dict[str, object] | None:
+        if self._gateway.catalog.get_session(session_id) is None:
+            return None
+        reader = SummaryReader(
+            self._gateway.catalog.resolve_session_runtime_dir(session_id)
+        )
+        index = reader.read_index()
+        turn_ranges = self._gateway.messages.list_summary_turn_ranges(session_id)
+        return {
+            "overall": (
+                _summary_document_payload(index.overall, turn_ranges)
+                if index.overall is not None
+                else None
+            ),
+            "batches": [
+                _summary_document_payload(document, turn_ranges)
+                for document in reversed(index.batches)
+            ],
+        }
+
+    async def get_session_summary(
+        self,
+        session_id: str,
+        summary_key: str | int,
+    ) -> dict[str, object] | None:
+        if self._gateway.catalog.get_session(session_id) is None:
+            return None
+        reader = SummaryReader(
+            self._gateway.catalog.resolve_session_runtime_dir(session_id)
+        )
+        document = reader.get(summary_key)
+        if document is None:
+            return None
+        return _summary_document_payload(
+            document,
+            self._gateway.messages.list_summary_turn_ranges(session_id),
+            include_markdown=True,
+        )
 
     async def scan_unindexed_runtime(self, workspace: str) -> dict[str, list[dict[str, str]]] | None:
         return scan_unindexed_runtime_data(self._gateway.database, workspace)
@@ -662,6 +705,46 @@ def _workspace_summary(workspace: models.Workspace) -> dict[str, object]:
         "name": str(workspace.name),
         "description": description or None,
     }
+
+
+def _summary_document_payload(
+    document: SummaryDocument,
+    turn_ranges: dict[int, tuple[int, int]],
+    *,
+    include_markdown: bool = False,
+) -> dict[str, object]:
+    turn_start: int | None = None
+    turn_end: int | None = None
+    if document.batch_id is not None:
+        turn_range = turn_ranges.get(document.batch_id)
+        if turn_range is not None:
+            turn_start, turn_end = turn_range
+    elif document.kind == "overall":
+        eligible_ranges = [
+            turn_range
+            for batch_id, turn_range in turn_ranges.items()
+            if document.last_batch_id is None or batch_id <= document.last_batch_id
+        ]
+        if eligible_ranges:
+            turn_start = min(item[0] for item in eligible_ranges)
+            turn_end = max(item[1] for item in eligible_ranges)
+
+    payload: dict[str, object] = {
+        "kind": document.kind,
+        "batch_id": document.batch_id,
+        "last_batch_id": document.last_batch_id,
+        "title": document.title,
+        "excerpt": document.excerpt,
+        "time": document.time or None,
+        "location": document.location or None,
+        "characters": list(document.characters),
+        "turn_start": turn_start,
+        "turn_end": turn_end,
+        "updated_at": document.updated_at,
+    }
+    if include_markdown:
+        payload["markdown"] = document.markdown
+    return payload
 
 
 def _workspace_exists(gateway: DataServiceGateway, workspace: str) -> bool:

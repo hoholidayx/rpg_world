@@ -11,6 +11,7 @@ import {
   MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
 } from '../contextWindowGate'
 import {
+  commandSpeaker,
   errorSpeaker,
   stoppedStreamText,
   thinkingSpeaker,
@@ -338,6 +339,20 @@ export function useSessionStreamTurn({
     const requestId = crypto.randomUUID()
     const turnUsageFallback = contextPreviewUsage
     const commandInput = isSlashCommandInput(text)
+    const displayedUserMessage = commandInput
+      ? {
+          ...userMessage,
+          metadata: { ...userMessage.metadata, localCommand: true },
+          speaker: { ...userMessage.speaker, label: 'CMD' },
+        }
+      : userMessage
+    const displayedAssistantMessage = commandInput
+      ? {
+          ...assistantMessage,
+          metadata: { ...assistantMessage.metadata, localCommand: true },
+          speaker: commandSpeaker(),
+        }
+      : assistantMessage
     stoppingRequestIdRef.current = null
     stopSettledRequestIdsRef.current.clear()
     setStoppingRequestId(null)
@@ -357,8 +372,8 @@ export function useSessionStreamTurn({
     setSending(true)
     setLocalMessages((current) => [
       ...current.filter((message) => message.turnId !== turnId),
-      userMessage,
-      assistantMessage,
+      displayedUserMessage,
+      displayedAssistantMessage,
     ])
     setForceScrollKey((current) => current + 1)
     logger.info('stream started', {
@@ -403,6 +418,7 @@ export function useSessionStreamTurn({
         silent: true,
         clearLastTurnUsage: false,
         preserveDiagnostics: true,
+        preserveCommandMessages: commandInput,
       })
       logger.info('stream refresh after completion', {
         requestId,

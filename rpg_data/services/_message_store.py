@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import TypeAlias
 
-from peewee import Database, IntegrityError, SQL
+from peewee import Database, IntegrityError, SQL, fn
 
 from commons.errors import InvalidTurnMetadataError
 from rpg_data import models
@@ -202,6 +202,34 @@ class BaseSessionMessageStore:
         if row is None:
             return 0
         return max(0, int(row.turn_id))
+
+    def list_summary_turn_ranges(self, session_id: str) -> dict[int, tuple[int, int]]:
+        """Aggregate UI-only turn ranges for processed summary batches."""
+
+        if not _supports_processing_fields(self._record_model):
+            return {}
+        query = (
+            self._record_model
+            .select(
+                self._record_model.summary_batch_id,
+                fn.MIN(self._record_model.turn_id).alias("turn_start"),
+                fn.MAX(self._record_model.turn_id).alias("turn_end"),
+            )
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.summary_processed == 1)
+                & (self._record_model.summary_batch_id.is_null(False))
+                & (self._record_model.turn_id > 0)
+            )
+            .group_by(self._record_model.summary_batch_id)
+        )
+        return {
+            int(row["summary_batch_id"]): (
+                int(row["turn_start"]),
+                int(row["turn_end"]),
+            )
+            for row in query.dicts()
+        }
 
     def _turn_window_ids(
         self,

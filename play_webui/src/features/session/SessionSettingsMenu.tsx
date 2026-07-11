@@ -162,7 +162,7 @@ export function SessionSettingsMenu({
               </span>
               <span className="min-w-0">
                 <strong className="block text-sm font-black text-slate-900 dark:text-slate-100">左侧栏</strong>
-                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">场景与角色信息</span>
+                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">场景与固定状态</span>
               </span>
               <span className={cn('h-5 w-10 rounded-full p-0.5 transition', leftCollapsed ? 'bg-slate-200 dark:bg-slate-700' : 'bg-teal-500')}>
                 <span className={cn('block h-4 w-4 rounded-full bg-white transition', leftCollapsed ? 'translate-x-0' : 'translate-x-5')} />
@@ -178,7 +178,7 @@ export function SessionSettingsMenu({
               </span>
               <span className="min-w-0">
                 <strong className="block text-sm font-black text-slate-900 dark:text-slate-100">右侧栏</strong>
-                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">状态表</span>
+                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">会话速览与故事归纳</span>
               </span>
               <span className={cn('h-5 w-10 rounded-full p-0.5 transition', rightCollapsed ? 'bg-slate-200 dark:bg-slate-700' : 'bg-teal-500')}>
                 <span className={cn('block h-4 w-4 rounded-full bg-white transition', rightCollapsed ? 'translate-x-0' : 'translate-x-5')} />

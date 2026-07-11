@@ -45,6 +45,14 @@ export function toolSpeaker(): SessionSpeaker {
   }
 }
 
+export function commandSpeaker(): SessionSpeaker {
+  return {
+    name: '命令结果',
+    fallback: '⌘',
+    tone: 'system',
+  }
+}
+
 export function thinkingSpeaker(): SessionSpeaker {
   return {
     name: '思考',

@@ -285,6 +285,7 @@ def test_message_service_processing_flags(tmp_path: Path) -> None:
         marked = [messages.get(row_id) for row_id in first_turn_ids]
         assert all(row is not None and row.summary_processed for row in marked)
         assert {row.summary_batch_id for row in marked if row is not None} == {7}
+        assert messages.list_summary_turn_ranges(session_id) == {7: (1, 1)}
         assert [
             [row.content for row in group]
             for group in messages.list_summary_candidate_turn_groups(session_id, keep_recent_turns=1)
@@ -308,6 +309,7 @@ def test_message_service_processing_flags(tmp_path: Path) -> None:
         assert untouched is not None and untouched.summary_processed
         assert untouched.summary_batch_id == 7
         assert untouched.story_memory_processed
+        assert messages.list_summary_turn_ranges(session_id) == {7: (1, 1)}
 
         cold = backup.messages.list(session_id)[0]
         assert cold.summary_processed is False

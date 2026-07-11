@@ -94,12 +94,15 @@ export function useSessionRoomLayout({
   }, [dragState])
 
   const gridStyle = useMemo(
-    () =>
-      ({
-        '--session-grid-columns': `${leftCollapsed ? collapsedSidebarSize : leftWidth}px 8px minmax(0,1fr) 8px ${
-          rightCollapsed ? collapsedSidebarSize : rightWidth
-        }px`,
-      }) as CSSProperties,
+    () => {
+      const effectiveLeftWidth = leftCollapsed ? collapsedSidebarSize : leftWidth
+      const effectiveRightWidth = rightCollapsed ? collapsedSidebarSize : rightWidth
+      return ({
+        '--session-grid-columns': `${effectiveLeftWidth}px 8px minmax(0,1fr) 8px ${effectiveRightWidth}px`,
+        '--session-left-rail-width': `${effectiveLeftWidth}px`,
+        '--session-right-rail-width': `${effectiveRightWidth}px`,
+      }) as CSSProperties
+    },
     [leftCollapsed, leftWidth, rightCollapsed, rightWidth],
   )
 

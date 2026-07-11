@@ -49,9 +49,16 @@ export type RefreshSessionDataOptions = {
   silent?: boolean
   clearLastTurnUsage?: boolean
   preserveDiagnostics?: boolean
+  preserveCommandMessages?: boolean
   historyMode?: HistoryRefreshMode
   scrollToBottom?: boolean
 }
+
+export type SessionRailDrawerState =
+  | { kind: 'characters' }
+  | { kind: 'status-manager' }
+  | { kind: 'summary'; summaryKey: string }
+  | null
 
 export const SESSION_HISTORY_MESSAGES = {
   LATEST_LOAD_FAILED: '加载最新历史失败，请稍后再试',

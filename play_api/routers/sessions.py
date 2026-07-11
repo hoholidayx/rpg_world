@@ -166,6 +166,31 @@ class PlayHistoryPage(BaseModel):
     limit: int
 
 
+class PlaySummaryPreview(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: Literal["overall", "batch"]
+    batch_id: int | None = Field(default=None, alias="batchId")
+    last_batch_id: int | None = Field(default=None, alias="lastBatchId")
+    title: str
+    excerpt: str
+    time: str | None = None
+    location: str | None = None
+    characters: list[str] = Field(default_factory=list)
+    turn_start: int | None = Field(default=None, alias="turnStart")
+    turn_end: int | None = Field(default=None, alias="turnEnd")
+    updated_at: str | None = Field(default=None, alias="updatedAt")
+
+
+class PlaySummaryDetail(PlaySummaryPreview):
+    markdown: str
+
+
+class PlaySummaryIndex(BaseModel):
+    overall: PlaySummaryPreview | None = None
+    batches: list[PlaySummaryPreview] = Field(default_factory=list)
+
+
 def _session_summary(session: dict[str, object]) -> PlaySessionSummary:
     now = datetime.now(UTC).isoformat()
     player = session.get("player_character")
@@ -496,6 +521,38 @@ async def get_current_scene(session_id: str) -> PlayScene:
     _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
     attrs = get_data_service_gateway().status.get_scene_attrs(agent_session_id)
     return _scene_from_attrs(attrs)
+
+
+@router.get("/{session_id}/summaries", response_model=PlaySummaryIndex)
+async def list_session_summaries(session_id: str) -> PlaySummaryIndex:
+    await resolve_session_or_404(session_id)
+    payload = await get_data_manager_backend().list_session_summaries(session_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return PlaySummaryIndex.model_validate(payload)
+
+
+@router.get(
+    "/{session_id}/summaries/{summary_key}",
+    response_model=PlaySummaryDetail,
+)
+async def get_session_summary(
+    session_id: str,
+    summary_key: str,
+) -> PlaySummaryDetail:
+    await resolve_session_or_404(session_id)
+    if summary_key != "overall" and not summary_key.isdecimal():
+        raise HTTPException(status_code=404, detail="summary not found")
+    normalized_key: str | int = (
+        "overall" if summary_key == "overall" else int(summary_key)
+    )
+    payload = await get_data_manager_backend().get_session_summary(
+        session_id,
+        normalized_key,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="summary not found")
+    return PlaySummaryDetail.model_validate(payload)
 
 
 @router.get("/{session_id}/commands", response_model=list[PlayCommand])

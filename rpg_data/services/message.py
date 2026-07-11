@@ -162,6 +162,11 @@ class MessageService:
     def latest_turn_id(self, session_id: str) -> int:
         return self._store.latest_turn_id(session_id)
 
+    def list_summary_turn_ranges(self, session_id: str) -> dict[int, tuple[int, int]]:
+        """Return min/max turn IDs for each processed summary batch."""
+
+        return self._store.list_summary_turn_ranges(session_id)
+
     def replace(
         self,
         session_id: str,

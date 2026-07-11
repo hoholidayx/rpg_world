@@ -11,15 +11,14 @@ from typing import Callable
 
 from loguru import logger
 
+from rpg_core.summary.front_matter import parse_markdown_front_matter
+
 
 def _register_watcher(file_path: Path, callback: Callable[[], None]) -> None:
     """向 FileWatcher 注册单个文件的变更回调。"""
     from rpg_core.utils.watcher import get_watcher
 
     get_watcher().register(file_path.resolve(), callback)
-
-
-_FRONT_MATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
 class BatchSummaryStore:
@@ -160,20 +159,7 @@ class BatchSummaryStore:
 
     def _parse_front_matter(self, text: str) -> tuple[dict, str]:
         """拆分 YAML front matter 和 markdown 正文。返回 (fm_dict, body)。"""
-        m = _FRONT_MATTER_RE.match(text)
-        if not m:
-            return {}, text
-        fm_text = m.group(1)
-        body = text[m.end() :]
-        fm_dict: dict[str, object] = {}
-        for line in fm_text.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if ":" in line:
-                key, _, val = line.partition(":")
-                fm_dict[key.strip()] = val.strip().strip('"').strip("'")
-        return fm_dict, body
+        return parse_markdown_front_matter(text)
 
     def _parse_front_matter_dict(self, text: str) -> dict[str, object]:
         """仅解析 front matter 为 dict。"""

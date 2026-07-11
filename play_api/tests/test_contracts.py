@@ -524,6 +524,114 @@ def test_history_page_endpoint_validates_query_and_rejects_dirty_writes(tmp_path
         gateway.messages.update(first.id, seq_in_turn=0)
 
 
+def test_session_summary_endpoints_return_previews_and_lazy_detail(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    reset_delete_confirmation_tokens()
+    gateway = get_data_service_gateway()
+    session_id = "s_forest001"
+    session_root = gateway.catalog.get_session_runtime_dir(session_id)
+    summaries = session_root / "summaries"
+    summaries.mkdir(parents=True, exist_ok=True)
+    (summaries / "overall.md").write_text(
+        "---\ntype: overall\nlast_batch_id: 2\n---\n\n# 北境追踪\n\n线索已经汇合。",
+        encoding="utf-8",
+    )
+    (summaries / "001-start.md").write_text(
+        "---\nbatch_id: 1\ntitle: 起点\ntime: 清晨\nlocation: 林地\ncharacters:\n  - Bob\n---\n\n发现足迹。",
+        encoding="utf-8",
+    )
+    (summaries / "002-gate.md").write_text(
+        "---\nbatch_id: 2\ntitle: 石门\ntime: 正午\nlocation: 遗迹\ncharacters:\n  - Bob\n  - Alice\n---\n\n抵达石门。",
+        encoding="utf-8",
+    )
+    gateway.messages.clear(session_id)
+    rows = []
+    for turn_id in range(1, 5):
+        rows.append(
+            gateway.messages.append(
+                session_id,
+                "user",
+                f"u{turn_id}",
+                turn_id=turn_id,
+                seq_in_turn=1,
+            )
+        )
+        rows.append(
+            gateway.messages.append(
+                session_id,
+                "assistant",
+                f"a{turn_id}",
+                turn_id=turn_id,
+                seq_in_turn=2,
+            )
+        )
+    gateway.messages.mark_summary_processed(
+        session_id,
+        [row.id for row in rows[:4]],
+        batch_id=1,
+    )
+    gateway.messages.mark_summary_processed(
+        session_id,
+        [row.id for row in rows[4:]],
+        batch_id=2,
+    )
+
+    with TestClient(app) as client:
+        index_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/summaries"
+        )
+        detail_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/summaries/2"
+        )
+        overall_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/summaries/overall"
+        )
+        missing_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/summaries/999"
+        )
+        invalid_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/summaries/not-a-batch"
+        )
+        (summaries / "overall.md").unlink()
+        batch_only_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/summaries"
+        )
+        for path in summaries.glob("*.md"):
+            path.unlink()
+        empty_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/summaries"
+        )
+        missing_session_response = client.get(
+            "/play-api/v1/sessions/missing/summaries"
+        )
+
+    assert index_response.status_code == 200
+    payload = index_response.json()
+    assert payload["overall"]["title"] == "北境追踪"
+    assert payload["overall"]["lastBatchId"] == 2
+    assert payload["overall"]["turnStart"] == 1
+    assert payload["overall"]["turnEnd"] == 4
+    assert [item["batchId"] for item in payload["batches"]] == [2, 1]
+    assert payload["batches"][0]["characters"] == ["Bob", "Alice"]
+    assert payload["batches"][0]["turnStart"] == 3
+    assert payload["batches"][0]["turnEnd"] == 4
+    assert "markdown" not in payload["batches"][0]
+    assert detail_response.status_code == 200
+    assert detail_response.json()["markdown"] == "抵达石门。"
+    assert overall_response.status_code == 200
+    assert overall_response.json()["markdown"] == "线索已经汇合。"
+    assert missing_response.status_code == 404
+    assert invalid_response.status_code == 404
+    assert batch_only_response.status_code == 200
+    assert batch_only_response.json()["overall"] is None
+    assert len(batch_only_response.json()["batches"]) == 2
+    assert empty_response.status_code == 200
+    assert empty_response.json() == {"overall": None, "batches": []}
+    assert missing_session_response.status_code == 404
+
+
 def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))

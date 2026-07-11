@@ -5,6 +5,7 @@ import { getContextPreview } from '@/lib/api/contextPreview'
 import { getCurrentScene } from '@/lib/api/scene'
 import { getSession } from '@/lib/api/sessions'
 import { listSessionStatusTables } from '@/lib/api/statusTables'
+import { getSessionSummary, listSessionSummaries } from '@/lib/api/summaries'
 import { sessionContextUsageConfig } from '@/lib/config/appConfig'
 import { fromContextPreviewEstimate, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { PLAYER_CHARACTER_STATUS } from '@/types/session'
@@ -16,6 +17,7 @@ import {
   SESSION_HISTORY_MESSAGES,
   SESSION_TIMELINE_ROLE,
   type RefreshSessionDataOptions,
+  type SessionRailDrawerState,
   type SessionTimelineMessage,
 } from '../sessionRoomTypes'
 import { useSessionHistoryWindow } from './useSessionHistoryWindow'
@@ -36,6 +38,7 @@ export function useSessionRoomData({
   const [lastTurnUsage, setLastTurnUsage] = useState<ContextUsageSnapshot | null>(null)
   const [forceScrollKey, setForceScrollKey] = useState(0)
   const [timelineResetKey, setTimelineResetKey] = useState(0)
+  const [activeRailDrawer, setActiveRailDrawer] = useState<SessionRailDrawerState>(null)
 
   const sessionQuery = useQuery({
     queryKey: ['play-session', sessionId],
@@ -62,9 +65,28 @@ export function useSessionRoomData({
     queryFn: () => getCurrentScene(sessionId),
   })
 
-  const statusTablesQuery = useQuery({
+  const sceneTablesQuery = useQuery({
+    queryKey: ['play-session-status-tables', sessionId, STATUS_KIND.SCENE],
+    queryFn: () => listSessionStatusTables(sessionId, STATUS_KIND.SCENE),
+  })
+
+  const normalStatusTablesQuery = useQuery({
     queryKey: ['play-session-status-tables', sessionId, STATUS_KIND.NORMAL],
     queryFn: () => listSessionStatusTables(sessionId, STATUS_KIND.NORMAL),
+  })
+
+  const summaryIndexQuery = useQuery({
+    queryKey: ['play-session-summaries', sessionId],
+    queryFn: () => listSessionSummaries(sessionId),
+  })
+
+  const selectedSummaryKey = activeRailDrawer?.kind === 'summary'
+    ? activeRailDrawer.summaryKey
+    : null
+  const summaryDetailQuery = useQuery({
+    queryKey: ['play-session-summary', sessionId, selectedSummaryKey],
+    queryFn: () => getSessionSummary(sessionId, selectedSummaryKey ?? ''),
+    enabled: selectedSummaryKey !== null,
   })
 
   const charactersQuery = useQuery({
@@ -142,6 +164,7 @@ export function useSessionRoomData({
     setLocalTurnUsageByTurn({})
     setOptimisticTruncateFromTurn(null)
     setLastTurnUsage(null)
+    setActiveRailDrawer(null)
     setTimelineResetKey((current) => current + 1)
     logger.info('session data reset', { status: 'session_changed' })
   }, [logger, sessionId])
@@ -164,6 +187,7 @@ export function useSessionRoomData({
     silent = false,
     clearLastTurnUsage = true,
     preserveDiagnostics = false,
+    preserveCommandMessages = false,
     historyMode = HISTORY_REFRESH_MODE.ACTIVE,
     scrollToBottom = false,
   }: RefreshSessionDataOptions = {}) => {
@@ -173,16 +197,22 @@ export function useSessionRoomData({
         refreshHistoryWindow({ mode: historyMode }),
         queryClient.invalidateQueries({ queryKey: ['play-session-scene', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-status-tables', sessionId] }),
+        queryClient.invalidateQueries({ queryKey: ['play-session-summaries', sessionId] }),
+        queryClient.invalidateQueries({ queryKey: ['play-session-summary', sessionId] }),
         queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] }),
       ])
       if (!historyRefreshed) throw new Error('history page refresh failed')
       setLocalMessages((current) => (
-        preserveDiagnostics
-          ? current.filter((message) =>
+        current.filter((message) => (
+          (
+            preserveDiagnostics
+            && (
               message.role === SESSION_TIMELINE_ROLE.THINKING
-              || message.role === SESSION_TIMELINE_ROLE.TOOL,
+              || message.role === SESSION_TIMELINE_ROLE.TOOL
             )
-          : []
+          )
+          || (preserveCommandMessages && message.metadata?.localCommand === true)
+        ))
       ))
       if (!preserveDiagnostics) setLocalTurnUsageByTurn({})
       setOptimisticTruncateFromTurn(null)
@@ -193,6 +223,7 @@ export function useSessionRoomData({
         status: 'success',
         clearLastTurnUsage,
         preserveDiagnostics,
+        preserveCommandMessages,
         historyMode,
         scrollToBottom,
       })
@@ -216,7 +247,12 @@ export function useSessionRoomData({
     loadNextHistoryPage,
     jumpToLatestHistoryBottom,
     sceneQuery,
-    statusTablesQuery,
+    sceneTablesQuery,
+    normalStatusTablesQuery,
+    summaryIndexQuery,
+    summaryDetailQuery,
+    activeRailDrawer,
+    setActiveRailDrawer,
     charactersQuery,
     session,
     characters,

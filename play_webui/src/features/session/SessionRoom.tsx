@@ -337,14 +337,23 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       ) : null}
 
       <SessionLeftRail
-        scene={data.sceneQuery.data}
-        sceneLoading={data.sceneQuery.isLoading}
+        sessionId={sessionId}
+        sceneTables={data.sceneTablesQuery.data ?? []}
+        sceneTablesLoading={data.sceneTablesQuery.isLoading}
+        normalTables={data.normalStatusTablesQuery.data ?? []}
+        normalTablesLoading={data.normalStatusTablesQuery.isLoading}
+        normalTablesReady={data.normalStatusTablesQuery.isSuccess}
         characters={data.characters}
         charactersLoading={data.charactersQuery.isLoading}
+        scene={data.sceneQuery.data}
+        playerCharacter={data.playerCharacter}
         collapsed={layout.leftCollapsed}
         mobileOpen={layout.mobilePanel === 'left'}
+        activeDrawer={data.activeRailDrawer}
         onCloseMobile={() => layout.setMobilePanel(null)}
         onToggleCollapsed={layout.toggleLeftCollapsed}
+        onOpenDrawer={data.setActiveRailDrawer}
+        onCloseDrawer={() => data.setActiveRailDrawer(null)}
       />
       <button
         type="button"
@@ -378,7 +387,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               type="button"
               onClick={() => layout.setMobilePanel('left')}
               className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:hidden"
-              aria-label="打开场景栏"
+              aria-label="打开场景与固定状态栏"
             >
               <AlignJustify size={18} />
             </button>
@@ -386,7 +395,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               type="button"
               onClick={() => layout.setMobilePanel('right')}
               className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:hidden"
-              aria-label="打开状态栏"
+              aria-label="打开会话速览与故事归纳栏"
             >
               <TableProperties size={18} />
             </button>
@@ -486,12 +495,22 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400" />
       </button>
       <SessionRightRail
-        tables={data.statusTablesQuery.data ?? []}
-        loading={data.statusTablesQuery.isLoading}
+        session={data.session}
+        scene={data.sceneQuery.data}
+        lastTurnId={data.lastTurnId}
+        summaryIndex={data.summaryIndexQuery.data}
+        summariesLoading={data.summaryIndexQuery.isLoading}
+        summariesError={data.summaryIndexQuery.isError}
+        summaryDetail={data.summaryDetailQuery.data}
+        summaryDetailLoading={data.summaryDetailQuery.isLoading || data.summaryDetailQuery.isFetching}
+        summaryDetailError={data.summaryDetailQuery.isError}
         collapsed={layout.rightCollapsed}
         mobileOpen={layout.mobilePanel === 'right'}
+        activeDrawer={data.activeRailDrawer}
         onCloseMobile={() => layout.setMobilePanel(null)}
         onToggleCollapsed={layout.toggleRightCollapsed}
+        onOpenDrawer={data.setActiveRailDrawer}
+        onCloseDrawer={() => data.setActiveRailDrawer(null)}
       />
 
       {confirmRequest ? (
