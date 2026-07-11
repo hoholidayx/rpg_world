@@ -245,8 +245,16 @@ export function SessionComposer({
   onSend: () => void
   onStop: () => void
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const commandInput = isSlashCommandInput(text)
   const contextRejectsCurrentInput = contextInputBlocked && !commandInput
+  const handleCommandSelect = (command: string) => {
+    onTextChange(command)
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(command.length, command.length)
+    })
+  }
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -312,11 +320,16 @@ export function SessionComposer({
             side="bottom"
             align="left"
           />
-          <CommandPaletteDialog sessionId={sessionId} />
+          <CommandPaletteDialog
+            sessionId={sessionId}
+            disabled={disabled}
+            onSelectCommand={handleCommandSelect}
+          />
         </div>
 
         <div className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_128px]">
           <textarea
+            ref={textareaRef}
             value={text}
             onChange={(event) => onTextChange(event.target.value)}
             onKeyDown={handleKeyDown}

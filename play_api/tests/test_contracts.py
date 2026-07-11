@@ -211,8 +211,16 @@ class _FakeAgentClient:
         self.calls.append(("commands", session_id))
         return {
             "commands": [
-                {"command": "/continue", "description": "继续叙事"},
-                {"command": "/check_dc", "description": "手动 DC 检定"},
+                {
+                    "command": "/continue",
+                    "description": "继续叙事",
+                    "detail": "用法：/continue。",
+                },
+                {
+                    "command": "/check_dc",
+                    "description": "手动 DC 检定",
+                    "detail": "用法：/check_dc <expr> dc=<n> [reason]。",
+                },
             ]
         }
 
@@ -712,8 +720,20 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         f"/play-api/v1/sessions/{demo_session_id}/commands",
     )
     assert commands.status_code == 200
-    assert commands.json()[0]["name"] == "/continue"
-    assert commands.json()[1]["name"] == "/check_dc"
+    assert commands.json() == [
+        {
+            "name": "/continue",
+            "description": "继续叙事",
+            "detail": "用法：/continue。",
+            "mode": "slash",
+        },
+        {
+            "name": "/check_dc",
+            "description": "手动 DC 检定",
+            "detail": "用法：/check_dc <expr> dc=<n> [reason]。",
+            "mode": "slash",
+        },
+    ]
 
     context_preview = client.get(
         f"/play-api/v1/sessions/{demo_session_id}/context-preview",

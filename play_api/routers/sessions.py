@@ -73,6 +73,7 @@ class PlayPlayerCharacterBindRequest(BaseModel):
 class PlayCommand(BaseModel):
     name: str
     description: str
+    detail: str
     mode: str = "slash"
 
 
@@ -507,6 +508,7 @@ async def list_commands(session_id: str) -> list[PlayCommand]:
         PlayCommand(
             name=str(item.get("name", "")),
             description=str(item.get("description", "")),
+            detail=str(item.get("detail", "")),
             mode=str(item.get("mode", "slash")),
         )
         for item in commands

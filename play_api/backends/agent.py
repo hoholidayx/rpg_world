@@ -67,6 +67,7 @@ class AgentBackend:
             {
                 "name": str(item.get("command", "")),
                 "description": str(item.get("description", "")),
+                "detail": str(item.get("detail", "")),
                 "mode": "slash",
             }
             for item in result.get("commands", [])

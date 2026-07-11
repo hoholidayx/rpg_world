@@ -5,6 +5,7 @@ export type CommandMode = InputMode | 'slash'
 export type PlayCommand = {
   name: string
   description: string
+  detail: string
   mode: CommandMode
 }
 
