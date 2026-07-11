@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 
@@ -10,6 +10,8 @@ const FOCUSABLE_SELECTOR = [
   'textarea:not([disabled])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
+
+const DRAWER_TRANSITION_MS = 200
 
 export function SessionRailDrawer({
   open,
@@ -34,14 +36,58 @@ export function SessionRailDrawer({
   const panelRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const onCloseRef = useRef(onClose)
+  const returnTargetRef = useRef<HTMLElement | null>(null)
+  const openFrameRef = useRef<number | null>(null)
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [mounted, setMounted] = useState(open)
+  const [visible, setVisible] = useState(false)
   onCloseRef.current = onClose
+
+  const restoreFocus = useCallback(() => {
+    const target = returnTargetRef.current
+    returnTargetRef.current = null
+    window.requestAnimationFrame(() => {
+      if (target?.isConnected) target.focus()
+    })
+  }, [])
+
+  useEffect(() => {
+    if (openFrameRef.current !== null) {
+      window.cancelAnimationFrame(openFrameRef.current)
+      openFrameRef.current = null
+    }
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+
+    if (open) {
+      if (!returnTargetRef.current && document.activeElement instanceof HTMLElement) {
+        returnTargetRef.current = document.activeElement
+      }
+      setMounted(true)
+      setVisible(false)
+      openFrameRef.current = window.requestAnimationFrame(() => {
+        openFrameRef.current = window.requestAnimationFrame(() => {
+          openFrameRef.current = null
+          setVisible(true)
+          closeRef.current?.focus()
+        })
+      })
+      return
+    }
+
+    if (!mounted) return
+    setVisible(false)
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null
+      setMounted(false)
+      restoreFocus()
+    }, DRAWER_TRANSITION_MS)
+  }, [mounted, open, restoreFocus])
 
   useEffect(() => {
     if (!open) return
-    const returnTarget = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-    const frame = window.requestAnimationFrame(() => closeRef.current?.focus())
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -70,23 +116,28 @@ export function SessionRailDrawer({
     }
 
     document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.cancelAnimationFrame(frame)
-      document.removeEventListener('keydown', handleKeyDown)
-      window.requestAnimationFrame(() => {
-        if (returnTarget?.isConnected) returnTarget.focus()
-      })
-    }
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [open])
 
-  if (!open) return null
+  useEffect(() => {
+    return () => {
+      if (openFrameRef.current !== null) window.cancelAnimationFrame(openFrameRef.current)
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+      restoreFocus()
+    }
+  }, [restoreFocus])
+
+  if (!mounted) return null
 
   return (
     <div className="fixed inset-0 z-[70]" role="presentation">
       <div
-        className="absolute inset-0 bg-slate-950/25 backdrop-blur-[2px] dark:bg-slate-950/65"
+        className={cn(
+          'absolute inset-0 bg-slate-950/25 backdrop-blur-[2px] transition-opacity duration-200 ease-out motion-reduce:transition-none dark:bg-slate-950/65',
+          visible ? 'opacity-100' : 'opacity-0',
+        )}
         onMouseDown={(event) => {
-          if (event.currentTarget === event.target) onClose()
+          if (visible && event.currentTarget === event.target) onClose()
         }}
         aria-hidden="true"
       />
@@ -97,10 +148,15 @@ export function SessionRailDrawer({
         aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
-          'fixed bottom-3 top-3 flex w-[calc(100%-24px)] max-w-[520px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 outline-none dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/60 lg:bottom-[18px] lg:top-[18px]',
+          'fixed bottom-3 top-3 flex w-[calc(100%-24px)] max-w-[520px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 outline-none transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/60 lg:bottom-[18px] lg:top-[18px]',
           side === 'left'
             ? 'left-3 lg:left-[calc(var(--session-left-rail-width)+22px)]'
             : 'right-3 lg:right-[calc(var(--session-right-rail-width)+22px)]',
+          visible
+            ? 'translate-x-0 scale-100 opacity-100'
+            : side === 'left'
+              ? '-translate-x-4 scale-[0.985] opacity-0'
+              : 'translate-x-4 scale-[0.985] opacity-0',
         )}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/80">
