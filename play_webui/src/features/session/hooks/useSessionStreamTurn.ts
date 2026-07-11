@@ -7,6 +7,10 @@ import { TURN_CANCEL_STATUS } from '@/types/command'
 import { PLAY_STREAM_EVENT_TYPE, type PlayStreamEvent } from '@/types/stream'
 import type { SessionRoomLogger } from '../sessionRoomLogger'
 import {
+  isSlashCommandInput,
+  MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
+} from '../contextWindowGate'
+import {
   errorSpeaker,
   stoppedStreamText,
   thinkingSpeaker,
@@ -45,12 +49,13 @@ export function useSessionStreamTurn({
   sessionId,
   inputMode,
   contextPreviewUsage,
-  setAccurateUsageOverride,
+  setLastTurnUsage,
   setLocalTurnUsageByTurn,
   setComposerText,
   setLocalMessages,
   setForceScrollKey,
   refreshSessionData,
+  refreshContextPreview,
   showToast,
   logger,
   onExit,
@@ -58,12 +63,16 @@ export function useSessionStreamTurn({
   sessionId: string
   inputMode: SessionInputMode
   contextPreviewUsage: ContextUsageSnapshot | null
-  setAccurateUsageOverride: Dispatch<SetStateAction<ContextUsageSnapshot | null>>
+  setLastTurnUsage: Dispatch<SetStateAction<ContextUsageSnapshot | null>>
   setLocalTurnUsageByTurn: Dispatch<SetStateAction<Record<number, ContextUsageSnapshot>>>
   setComposerText: Dispatch<SetStateAction<string>>
   setLocalMessages: Dispatch<SetStateAction<SessionTimelineMessage[]>>
   setForceScrollKey: Dispatch<SetStateAction<number>>
   refreshSessionData: (options?: RefreshSessionDataOptions) => Promise<boolean>
+  refreshContextPreview: () => Promise<{
+    available: boolean
+    usage: ContextUsageSnapshot | null
+  }>
   showToast: (message: string) => void
   logger: SessionRoomLogger
   onExit: () => void
@@ -150,6 +159,7 @@ export function useSessionStreamTurn({
     assistantMessageId: string,
     turnId: number,
     usageFallback: ContextUsageSnapshot | null,
+    isCommand: boolean,
   ) => {
     if (event.type === PLAY_STREAM_EVENT_TYPE.TURN_STARTED) return
 
@@ -241,7 +251,6 @@ export function useSessionStreamTurn({
         finishReason: event.payload.finishReason,
         durationMs: event.payload.durationMs,
       })
-      const displayUsage = usage ?? usageFallback
       logger.info('stream turn completed', {
         turnId,
         status: 'done',
@@ -250,9 +259,10 @@ export function useSessionStreamTurn({
         durationMs: event.payload.durationMs,
         hasUsage: Boolean(usage),
       })
-      if (usage) setAccurateUsageOverride(usage)
-      if (displayUsage) {
-        setLocalTurnUsageByTurn((current) => ({ ...current, [turnId]: displayUsage }))
+      if (usage) setLastTurnUsage(usage)
+      else if (!isCommand) setLastTurnUsage(null)
+      if (usage) {
+        setLocalTurnUsageByTurn((current) => ({ ...current, [turnId]: usage }))
       } else {
         setLocalTurnUsageByTurn((current) => {
           const next = { ...current }
@@ -267,7 +277,7 @@ export function useSessionStreamTurn({
                 ...message,
                 status: SESSION_MESSAGE_STATUS.DONE,
                 content: message.content || event.payload.text || '已完成。',
-                usage: displayUsage,
+                usage,
                 canCopy: Boolean((message.content || event.payload.text || '已完成。').trim()),
               }
             : message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.THINKING
@@ -279,6 +289,7 @@ export function useSessionStreamTurn({
     }
 
     if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) {
+      if (event.payload.errorCode === MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE) return
       const errorText = formatStreamErrorText(event.payload)
       logger.warn('stream sse error event', {
         turnId,
@@ -310,7 +321,7 @@ export function useSessionStreamTurn({
         },
       ])
     }
-  }, [logger, setAccurateUsageOverride, setLocalMessages, setLocalTurnUsageByTurn])
+  }, [logger, setLastTurnUsage, setLocalMessages, setLocalTurnUsageByTurn])
 
   const streamLocalTurn = useCallback(async ({
     text,
@@ -326,6 +337,7 @@ export function useSessionStreamTurn({
     const controller = new AbortController()
     const requestId = crypto.randomUUID()
     const turnUsageFallback = contextPreviewUsage
+    const commandInput = isSlashCommandInput(text)
     stoppingRequestIdRef.current = null
     stopSettledRequestIdsRef.current.clear()
     setStoppingRequestId(null)
@@ -336,7 +348,6 @@ export function useSessionStreamTurn({
       assistantMessageId: assistantMessage.id,
       turnId,
     }
-    setAccurateUsageOverride(null)
     setLocalTurnUsageByTurn((current) => {
       const next = { ...current }
       delete next[turnId]
@@ -361,7 +372,8 @@ export function useSessionStreamTurn({
     if (pendingToast) showToast(pendingToast)
 
     let streamFailure: string | null = null
-    let completedTurn = false
+    let contextThresholdRejected = false
+    let contextThresholdMessage = ''
     try {
       await consumeChatStream(
         {
@@ -373,17 +385,23 @@ export function useSessionStreamTurn({
         {
           signal: controller.signal,
           onEvent: (event) => {
-            appendStreamEvent(event, assistantMessage.id, turnId, turnUsageFallback)
+            appendStreamEvent(event, assistantMessage.id, turnId, turnUsageFallback, commandInput)
+            if (
+              event.type === PLAY_STREAM_EVENT_TYPE.ERROR
+              && event.payload.errorCode === MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE
+            ) {
+              contextThresholdRejected = true
+              contextThresholdMessage = event.payload.message
+            }
             if (event.type === PLAY_STREAM_EVENT_TYPE.ERROR) streamFailure = formatStreamErrorText(event.payload) || failureToast
           },
         },
       )
       if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) return
       if (streamFailure) throw new Error(streamFailure)
-      completedTurn = true
       const refreshed = await refreshSessionData({
         silent: true,
-        clearAccurateUsage: false,
+        clearLastTurnUsage: false,
         preserveDiagnostics: true,
       })
       logger.info('stream refresh after completion', {
@@ -396,6 +414,18 @@ export function useSessionStreamTurn({
     } catch (error) {
       if (controller.signal.aborted) {
         markStreamStopped(assistantMessage.id, turnId)
+      } else if (contextThresholdRejected) {
+        setLocalMessages((current) => current.filter((message) => message.turnId !== turnId))
+        if (clearComposer) setComposerText(text)
+        await refreshContextPreview()
+        const errorText = contextThresholdMessage || (error instanceof Error ? error.message : failureToast)
+        logger.warn('stream rejected by context threshold', {
+          requestId,
+          source,
+          turnId,
+          status: 'rejected',
+        })
+        showToast(errorText)
       } else if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) {
         // Stop API is responsible for deciding whether this stream is actually stopped.
       } else {
@@ -414,7 +444,6 @@ export function useSessionStreamTurn({
       setSending(false)
       if (activeStreamRef.current?.requestId === requestId) activeStreamRef.current = null
       stopSettledRequestIdsRef.current.delete(requestId)
-      if (!completedTurn) setAccurateUsageOverride(null)
     }
   }, [
     appendLocalStreamError,
@@ -423,9 +452,10 @@ export function useSessionStreamTurn({
     inputMode,
     logger,
     markStreamStopped,
+    refreshContextPreview,
     refreshSessionData,
     sessionId,
-    setAccurateUsageOverride,
+    setLastTurnUsage,
     setLocalTurnUsageByTurn,
     setComposerText,
     setForceScrollKey,

@@ -15,6 +15,8 @@ from typing import Literal, Protocol, Sequence
 from loguru import logger
 
 from llm_service.types import LLMUsage
+from rpg_core.context.rpg_context import Message
+from rpg_core.utils.tokenizer import TokenCounter
 
 ContextUsageSource = Literal["provider_usage", "context_preview", "fallback_estimate", "unavailable"]
 ContextUsageAccuracy = Literal["accurate", "estimated", "unknown"]
@@ -124,6 +126,30 @@ class ContextPreviewUsagePayload:
             accuracy=_raw_string(usage.get("accuracy")) or "estimated",
             token_count=token_count,
         )
+
+
+def estimate_rendered_context_usage(
+    messages: Sequence[Message],
+    token_counter: TokenCounter,
+    *,
+    context_limit: int | None,
+) -> ContextUsageSnapshot:
+    """Estimate usage for the exact rendered main-Agent message sequence."""
+
+    error_reason: str | None = None
+    try:
+        used_tokens = token_counter.count_messages(list(messages))
+    except Exception as exc:
+        error_reason = str(exc) or exc.__class__.__name__
+        used_tokens = sum(max(0, len(message.content) // 4) for message in messages)
+
+    return ContextUsageSnapshot(
+        used_tokens=used_tokens,
+        context_limit=context_limit,
+        source="fallback_estimate" if error_reason else "context_preview",
+        accuracy="unknown" if error_reason else "estimated",
+        error_reason=error_reason,
+    )
 
 
 def aggregate_usage_records(calls: Sequence[UsageCallRecord]) -> LLMUsage | None:

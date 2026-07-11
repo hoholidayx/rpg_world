@@ -164,6 +164,7 @@ Telegram 渠道当前支持：
 `send()` 和 `send_stream()` 的 RP 主链路通过 `AgentTurnTransaction` 管理本轮写入。这里的事务不是长数据库事务，而是“一轮 Agent turn 的内存 scratch + 短 commit 点”：
 
 - 进入 LLM 前，user message 不直接写入 `SessionManager.append()`，而是暂存在 `MessageScratch`。
+- 斜杠命令和玩家角色校验先行；普通正文会在创建 transaction 前按当前主 Agent Context 占用执行窗口门禁，不把本次待发送 input 计入估算。达到 Core 配置阈值时不调用主/子 Agent、不写历史，并提示手动 `/compact`。
 - `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。
 - 普通状态表通过同一 scratch 注册 `status_table_set_values`，只允许按 session 运行时表 ID 批量修改已有 key 的 value；工具同时提供给 `StatusSubAgent` 和主 Agent，no-op 不进入 staged changes。
 - 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status，因此主 LLM 能看到本轮预更新状态。
@@ -186,7 +187,8 @@ Telegram 渠道当前支持：
 - `FixedLayerAssembler` 通过 contributors 统一装配固定层 section，例如核心 RP 指令、文本输出格式、世界书、角色卡和已启用 RP Module 的静态契约。
 - `ContextRenderer` 只在 LLM 请求边界把结构化层渲染为 message objects。
 - `ContextInspector` 只服务 `/context`、日志和调试输出，不进入主业务数据模型。
-- `context/usage.py` 封装 context/token 用量快照和 provider usage 归一化。`context-preview` 只返回估算摘要；准确 usage 只来自正常 `/turn` 返回或 `/stream` 的 `turn_completed.payload.usage`，当前不落库。
+- `context/usage.py` 封装最终渲染 messages 的共享 token 估算和 provider usage 归一化。`context-preview` 只返回下一轮主 Context 估算并驱动圆环/正文门禁；准确 usage 只来自正常 `/turn` 返回或 `/stream` 的 `turn_completed.payload.usage`，仅用于回复气泡和详情复盘，当前不落库。
+- 主 Agent LLM 选择使用 `config default < story override < session override`：Story 详情编辑页立即保存故事默认，SessionRoom context 圆环左侧设置会话覆盖；生成中切换只影响下一 turn，不触发自动压缩。
 - `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。当前 `dice` 模块通过 `RPModuleRegistry` 注册固定层契约、工具和斜杠命令；`text_output_format` 由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
 - `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Dice MVP 默认不注入动态运行态，只在固定层声明稳定规则。
 
@@ -398,12 +400,14 @@ rp_memory/
 
 | 文件 | 职责 |
 |---|---|
-| `rpg_core/settings.yaml` | 核心业务配置：Agent 行为、workspace 数据目录、memory 检索参数、核心日志 |
+| `rpg_core/settings.yaml` | 核心业务配置：Agent 行为、主 Context 正文拒绝阈值、memory 检索参数、核心日志 |
 | `agent_service/settings.yaml` | Agent 服务监听参数、非 Agent 进程访问 Agent 服务的客户端默认值、Agent 服务日志 |
 | `channels/settings.yaml` | CLI / Telegram 渠道行为、Telegram bot、渠道日志 |
 | `play_api/settings.yaml` | Play API 监听参数、Play API 日志 |
-| `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口 |
+| `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口和 context 正文门禁阈值 |
 | `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置 |
+
+正文门禁由 `play_webui` 的 `session.contextUsage.inputBlockThresholdRatio` 和 Core 的 `agent.context_window_reject_threshold_ratio` 独立控制，合法范围均为 `(0, 1]`、默认均为 `0.9`。前端非法值回退 `0.9`，Core 非法值会阻止启动；两侧都只计算不含当前待发送 input 的主 Agent Context。
 
 上述 YAML 配置使用同一套 `base + profiles` 结构，通过 `RPG_WORLD_PROFILE` 选择 profile，默认读取各文件自己的 `default_profile`。`local` / `test` / `prod` 是固定 profile 名称；不需要在 `profiles.*.file` 里声明覆盖文件。当前 profile 会自动读取同级覆盖文件，例如：
 

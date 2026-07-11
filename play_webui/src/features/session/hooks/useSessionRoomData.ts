@@ -5,6 +5,7 @@ import { getContextPreview } from '@/lib/api/contextPreview'
 import { getCurrentScene } from '@/lib/api/scene'
 import { getSession } from '@/lib/api/sessions'
 import { listSessionStatusTables } from '@/lib/api/statusTables'
+import { sessionContextUsageConfig } from '@/lib/config/appConfig'
 import { fromContextPreviewEstimate, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { PLAYER_CHARACTER_STATUS } from '@/types/session'
 import { STATUS_KIND } from '@/types/statusTables'
@@ -32,7 +33,7 @@ export function useSessionRoomData({
   const [localMessages, setLocalMessages] = useState<SessionTimelineMessage[]>([])
   const [localTurnUsageByTurn, setLocalTurnUsageByTurn] = useState<Record<number, ContextUsageSnapshot>>({})
   const [optimisticTruncateFromTurn, setOptimisticTruncateFromTurn] = useState<number | null>(null)
-  const [accurateUsageOverride, setAccurateUsageOverride] = useState<ContextUsageSnapshot | null>(null)
+  const [lastTurnUsage, setLastTurnUsage] = useState<ContextUsageSnapshot | null>(null)
   const [forceScrollKey, setForceScrollKey] = useState(0)
   const [timelineResetKey, setTimelineResetKey] = useState(0)
 
@@ -83,9 +84,32 @@ export function useSessionRoomData({
   })
 
   const contextPreviewUsage = useMemo(
-    () => fromContextPreviewEstimate(contextPreviewQuery.data),
+    () => fromContextPreviewEstimate(
+      contextPreviewQuery.data,
+      sessionContextUsageConfig.inputBlockThresholdRatio,
+    ),
     [contextPreviewQuery.data],
   )
+
+  const refreshContextPreview = useCallback(async () => {
+    try {
+      const preview = await queryClient.fetchQuery({
+        queryKey: ['play-session-context-preview', sessionId],
+        queryFn: () => getContextPreview(sessionId),
+        staleTime: 0,
+      })
+      return {
+        available: true as const,
+        usage: fromContextPreviewEstimate(
+          preview,
+          sessionContextUsageConfig.inputBlockThresholdRatio,
+        ),
+      }
+    } catch (error) {
+      logger.warn('context preview refresh failed', { status: 'error', error })
+      return { available: false as const, usage: null }
+    }
+  }, [logger, queryClient, sessionId])
 
   const baseMessages = useMemo(
     () => mapHistoryToMessages({ turns: historyPage?.turns, playerCharacter })
@@ -117,7 +141,7 @@ export function useSessionRoomData({
     setLocalMessages([])
     setLocalTurnUsageByTurn({})
     setOptimisticTruncateFromTurn(null)
-    setAccurateUsageOverride(null)
+    setLastTurnUsage(null)
     setTimelineResetKey((current) => current + 1)
     logger.info('session data reset', { status: 'session_changed' })
   }, [logger, sessionId])
@@ -138,7 +162,7 @@ export function useSessionRoomData({
 
   const refreshSessionData = useCallback(async ({
     silent = false,
-    clearAccurateUsage = true,
+    clearLastTurnUsage = true,
     preserveDiagnostics = false,
     historyMode = HISTORY_REFRESH_MODE.ACTIVE,
     scrollToBottom = false,
@@ -164,10 +188,10 @@ export function useSessionRoomData({
       setOptimisticTruncateFromTurn(null)
       setTimelineResetKey((current) => current + 1)
       if (scrollToBottom) setForceScrollKey((current) => current + 1)
-      if (clearAccurateUsage) setAccurateUsageOverride(null)
+      if (clearLastTurnUsage) setLastTurnUsage(null)
       logger.info('session data refreshed', {
         status: 'success',
-        clearAccurateUsage,
+        clearLastTurnUsage,
         preserveDiagnostics,
         historyMode,
         scrollToBottom,
@@ -200,8 +224,9 @@ export function useSessionRoomData({
     playerCharacterInvalid,
     contextPreviewQuery,
     contextPreviewUsage,
-    accurateUsageOverride,
-    setAccurateUsageOverride,
+    refreshContextPreview,
+    lastTurnUsage,
+    setLastTurnUsage,
     setLocalTurnUsageByTurn,
     localMessages,
     setLocalMessages,

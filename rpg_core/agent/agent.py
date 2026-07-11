@@ -13,8 +13,11 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from commons.errors import (
+    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
+    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
     TURN_METADATA_INVALID_ERROR_CODE,
     TURN_METADATA_INVALID_STATUS_CODE,
+    MainContextWindowThresholdExceededError,
     format_turn_metadata_error_message,
 )
 from rpg_core.agent.agent_types import (
@@ -57,7 +60,7 @@ from rpg_core.context.fixed_layer.contributors import (
 )
 from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.rpg_context import FixedLayerData, Role, Message
-from rpg_core.context.usage import aggregate_usage_records
+from rpg_core.context.usage import aggregate_usage_records, estimate_rendered_context_usage
 from llm_service.base_provider import LLMProvider
 from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
@@ -184,6 +187,13 @@ class RPGGameAgent:
 
     @staticmethod
     def _stream_error_event(error: BaseException) -> AgentStreamEvent:
+        if isinstance(error, MainContextWindowThresholdExceededError):
+            return AgentStreamEvent(
+                kind=StreamEventKind.ERROR,
+                content=str(error),
+                error_code=MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
+                status_code=MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
+            )
         if isinstance(error, InvalidTurnMetadataError):
             return AgentStreamEvent(
                 kind=StreamEventKind.ERROR,
@@ -332,7 +342,9 @@ class RPGGameAgent:
             _turn_stats.finished_at = _time.monotonic()
             return AgentReply(text=role_guard_reply, stats=_turn_stats)
 
-        main_provider = self._refresh_main_provider()
+        main_llm_selection = self._resolve_main_llm_selection()
+        self._enforce_main_context_window_threshold(main_llm_selection)
+        main_provider = self._refresh_main_provider(selection=main_llm_selection)
 
         # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
         turn_stats = TurnStats(started_at=_time.monotonic())
@@ -627,7 +639,9 @@ class RPGGameAgent:
             await event_queue.put(_StreamSentinel())
             return
 
-        main_provider = self._refresh_main_provider()
+        main_llm_selection = self._resolve_main_llm_selection()
+        self._enforce_main_context_window_threshold(main_llm_selection)
+        main_provider = self._refresh_main_provider(selection=main_llm_selection)
 
         # ── TurnStats 聚合器 ───────────────────────────────────────
         turn_stats = TurnStats(started_at=_time.monotonic())
@@ -1008,8 +1022,12 @@ class RPGGameAgent:
             )
         return selection
 
-    def _refresh_main_provider(self) -> LLMProvider:
-        selection = self._resolve_main_llm_selection()
+    def _refresh_main_provider(
+        self,
+        *,
+        selection: MainLLMSelection | None = None,
+    ) -> LLMProvider:
+        selection = selection or self._resolve_main_llm_selection()
         if (
             self._provider is not None
             and self._main_llm_selection is not None
@@ -1039,6 +1057,68 @@ class RPGGameAgent:
             selection.effective_source,
         )
         return self._provider
+
+    def _enforce_main_context_window_threshold(
+        self,
+        selection: MainLLMSelection,
+    ) -> None:
+        """Reject normal input before starting a turn when current context is full."""
+
+        context_limit = selection.effective.context_window
+        if context_limit is None or context_limit <= 0:
+            logger.warning(
+                _TAG + " context threshold skipped because window is unknown: session_id={}, provider={}",
+                self._session_id,
+                selection.effective_provider_key,
+            )
+            return
+
+        threshold_ratio = float(
+            getattr(settings, "context_window_reject_threshold_ratio", 0.9)
+        )
+        current_context = self._build_ctx_for_inspection("")
+        usage = estimate_rendered_context_usage(
+            current_context.to_message_objects(),
+            self._token_counter,
+            context_limit=context_limit,
+        )
+        used_tokens = usage.used_tokens
+        if used_tokens is None:
+            logger.warning(
+                _TAG + " context threshold skipped because usage is unknown: session_id={}, provider={}",
+                self._session_id,
+                selection.effective_provider_key,
+            )
+            return
+
+        usage_ratio = used_tokens / context_limit
+        logger.debug(
+            _TAG + " context threshold evaluated: session_id={}, provider={}, used={}, limit={}, ratio={:.4f}, threshold={:.4f}, source={}",
+            self._session_id,
+            selection.effective_provider_key,
+            used_tokens,
+            context_limit,
+            usage_ratio,
+            threshold_ratio,
+            usage.source,
+        )
+        if usage_ratio < threshold_ratio:
+            return
+
+        logger.warning(
+            _TAG + " normal input rejected by context threshold: session_id={}, provider={}, used={}, limit={}, ratio={:.4f}, threshold={:.4f}",
+            self._session_id,
+            selection.effective_provider_key,
+            used_tokens,
+            context_limit,
+            usage_ratio,
+            threshold_ratio,
+        )
+        raise MainContextWindowThresholdExceededError(
+            used_tokens=used_tokens,
+            context_limit=context_limit,
+            threshold_ratio=threshold_ratio,
+        )
 
     async def get_context_info(self, user_input: str = "") -> list["LayerInfo"]:
         """Build the full 5-layer context and return structured layer metadata.

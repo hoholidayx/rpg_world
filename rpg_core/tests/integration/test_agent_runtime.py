@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from commons.errors import MainContextWindowThresholdExceededError
 from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
@@ -287,6 +288,55 @@ async def test_main_context_and_preview_filter_summary_processed_rows_only(
     assert all("第一轮用户输入" not in content for content in stream_contents)
     assert all("第二轮用户输入" not in content for content in stream_contents)
     assert any("第三轮用户输入" in content for content in stream_contents)
+
+
+@pytest.mark.asyncio
+async def test_context_threshold_uses_filtered_current_context_and_excludes_new_input(
+    integration_agent_factory,
+    integration_data_gateway,
+    integration_settings,
+    scripted_llm_manager,
+    monkeypatch,
+):
+    session_id = "integration_context_threshold"
+    agent = await integration_agent_factory(session_id)
+    await agent.send("第一轮用于门禁的用户输入")
+    before = await agent.get_context_payload()
+    used_tokens = int(before["usageEstimate"]["usedTokens"])
+    context_limit = int(before["usageEstimate"]["contextLimit"])
+    threshold_ratio = used_tokens / context_limit
+    monkeypatch.setattr(
+        type(integration_settings),
+        "context_window_reject_threshold_ratio",
+        property(lambda self: threshold_ratio),
+    )
+    main_call_count = len(scripted_llm_manager.main_provider().calls)
+
+    with pytest.raises(MainContextWindowThresholdExceededError):
+        await agent.send("这条正文不应写入历史")
+
+    assert len(scripted_llm_manager.main_provider().calls) == main_call_count
+    assert all(
+        row.content != "这条正文不应写入历史"
+        for row in integration_data_gateway.messages.list(session_id)
+    )
+
+    first_user = next(
+        row
+        for row in integration_data_gateway.messages.list(session_id)
+        if row.role == "user"
+    )
+    integration_data_gateway.messages.mark_summary_processed(
+        session_id,
+        [first_user.id],
+        batch_id=999,
+    )
+    after = await agent.get_context_payload()
+    assert int(after["usageEstimate"]["usedTokens"]) < used_tokens
+
+    reply = await agent.send("x" * 10_000)
+
+    assert reply.text == "config-model response"
 
 
 @pytest.mark.asyncio

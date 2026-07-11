@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
+import { sessionContextUsageConfig } from '@/lib/config/appConfig'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import type { SessionPlayerCharacter } from '@/types/session'
@@ -14,10 +15,12 @@ import { SessionSettingsMenu } from './SessionSettingsMenu'
 import { SessionTimeline } from './SessionTimeline'
 import { useSessionRoomData } from './hooks/useSessionRoomData'
 import { useSessionRoomLayout } from './hooks/useSessionRoomLayout'
+import { useSessionMainLLM } from './hooks/useSessionMainLLM'
 import { useSessionRoleBinding } from './hooks/useSessionRoleBinding'
 import { useSessionStreamTurn } from './hooks/useSessionStreamTurn'
 import { useSessionTimelineActions } from './hooks/useSessionTimelineActions'
 import { createSessionRoomLogger } from './sessionRoomLogger'
+import { isContextInputBlocked } from './contextWindowGate'
 import {
   characterSummary,
   firstLetter,
@@ -252,23 +255,34 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   const currentNarrativeStyle = narrativeStyles.find((style) => style.id === narrativeStyleId) ?? narrativeStyles[0]
   const roleSelectionBlocked = !data.session || data.playerCharacterInvalid || role.bindingRole
-  const contextUsage = roleSelectionBlocked ? null : data.accurateUsageOverride ?? data.contextPreviewUsage
+  const contextPreviewUsage = roleSelectionBlocked ? null : data.contextPreviewUsage
+  const contextInputBlocked = !roleSelectionBlocked && isContextInputBlocked(
+    contextPreviewUsage,
+    sessionContextUsageConfig.inputBlockThresholdRatio,
+  )
+
+  const mainLLM = useSessionMainLLM({
+    sessionId,
+    enabled: Boolean(data.session),
+    showToast,
+    logger,
+  })
 
   const handleComposerTextChange = useCallback((value: string) => {
     setComposerText(value)
-    data.setAccurateUsageOverride(null)
-  }, [data])
+  }, [])
 
   const stream = useSessionStreamTurn({
     sessionId,
     inputMode,
     contextPreviewUsage: data.contextPreviewUsage,
-    setAccurateUsageOverride: data.setAccurateUsageOverride,
+    setLastTurnUsage: data.setLastTurnUsage,
     setLocalTurnUsageByTurn: data.setLocalTurnUsageByTurn,
     setComposerText,
     setLocalMessages: data.setLocalMessages,
     setForceScrollKey: data.setForceScrollKey,
     refreshSessionData: data.refreshSessionData,
+    refreshContextPreview: data.refreshContextPreview,
     showToast,
     logger,
     onExit: () => router.push('/sessions'),
@@ -282,6 +296,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     inputMode,
     currentNarrativeStyle,
     composerText,
+    contextInputBlockThresholdRatio: sessionContextUsageConfig.inputBlockThresholdRatio,
+    refreshContextPreview: data.refreshContextPreview,
     timelineResetKey: data.timelineResetKey,
     lastTurnId: data.lastTurnId,
     lastPersistedTurnId: data.lastPersistedTurnId,
@@ -438,12 +454,21 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           narrativeStyles={narrativeStyles}
           sending={stream.sending}
           disabled={roleSelectionBlocked}
-          contextUsage={contextUsage}
+          contextPreviewUsage={contextPreviewUsage}
+          lastTurnUsage={data.lastTurnUsage}
+          contextInputBlocked={contextInputBlocked}
+          contextInputBlockThresholdRatio={sessionContextUsageConfig.inputBlockThresholdRatio}
           contextUsageLoading={data.contextPreviewQuery.isLoading || data.contextPreviewQuery.isFetching}
+          mainLLMCatalog={mainLLM.catalog}
+          mainLLMSelection={mainLLM.selection}
+          mainLLMLoading={mainLLM.loading || mainLLM.fetching}
+          mainLLMUpdating={mainLLM.updating}
+          mainLLMError={mainLLM.error}
           stopping={stream.stopping}
           onTextChange={handleComposerTextChange}
           onModeChange={setInputMode}
           onNarrativeStyleChange={setNarrativeStyleId}
+          onMainLLMChange={mainLLM.selectProvider}
           onSend={timelineActions.handleSend}
           onStop={() => {
             void stream.stopActiveStream()

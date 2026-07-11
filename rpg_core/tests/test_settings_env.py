@@ -398,6 +398,41 @@ def test_missing_profile_raises_value_error(tmp_path: Path, monkeypatch) -> None
         settings_module.Settings()
 
 
+def test_context_window_reject_threshold_defaults_and_accepts_valid_ratio(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg, agent_extra="    context_window_reject_threshold_ratio: 0.75\n")
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    assert settings_module.Settings().context_window_reject_threshold_ratio == 0.75
+
+    _write_settings(cfg)
+    assert settings_module.Settings().context_window_reject_threshold_ratio == 0.9
+
+
+@pytest.mark.parametrize("value", ["0", "1.01", "true", "not-a-number"])
+def test_context_window_reject_threshold_rejects_invalid_values(
+    tmp_path: Path,
+    monkeypatch,
+    value: str,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(
+        cfg,
+        agent_extra=f"    context_window_reject_threshold_ratio: {value}\n",
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    with pytest.raises(ValueError, match="context_window_reject_threshold_ratio"):
+        settings_module.Settings()
+
+
 def test_agent_model_is_required(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "settings.yaml"
     _write_settings(cfg)

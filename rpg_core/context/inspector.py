@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from rpg_core.context.usage import ContextUsageSnapshot
+from rpg_core.context.usage import estimate_rendered_context_usage
 from rpg_core.context.rpg_context import LayerType, Message, RPGContext, Role
 from rpg_core.session.turns import count_roles
 from rpg_core.utils.tokenizer import TokenCounter
@@ -61,7 +61,14 @@ class ContextInspector:
         layers = self._layer_payloads()
         message_objects = self._ctx.to_message_objects()
         messages = [message.to_dict() for message in message_objects]
-        token_count = self._count_messages(message_objects)
+        usage_estimate = estimate_rendered_context_usage(
+            message_objects,
+            self._token_counter,
+            context_limit=self._context_limit,
+        )
+        token_count = int(usage_estimate.used_tokens or 0)
+        if usage_estimate.error_reason:
+            self._estimation_error = usage_estimate.error_reason
         payload: dict[str, object] = {
             "formatVersion": "context-preview.v1",
             "sessionId": session_id,
@@ -75,13 +82,6 @@ class ContextInspector:
             "layers": layers,
             "messages": messages,
         }
-        usage_estimate = ContextUsageSnapshot(
-            used_tokens=token_count,
-            context_limit=self._context_limit,
-            source="fallback_estimate" if self._estimation_error else "context_preview",
-            accuracy="unknown" if self._estimation_error else "estimated",
-            error_reason=self._estimation_error,
-        )
         payload["usageEstimate"] = usage_estimate.to_camel_payload()
         if self._estimation_error:
             logger.warning(

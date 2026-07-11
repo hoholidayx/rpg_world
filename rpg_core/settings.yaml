@@ -16,6 +16,8 @@ base:
     include_tool_records: true
     # 是否输出详细调试日志。
     verbose_logging: true
+    # 主 Agent 当前 Context 达到该窗口占比时拒绝普通正文；斜杠命令不受限。
+    context_window_reject_threshold_ratio: 0.9
 
     # 记忆子 Agent 的摘要、召回、剧情记忆触发参数。
     memory_sub_agent:

@@ -305,6 +305,7 @@ class Settings(ProfiledYamlSettings):
 
     def _validate_settings(self) -> None:
         self._validate_agent_llm_settings()
+        self._validate_context_window_reject_threshold()
 
     def _validate_agent_llm_settings(self) -> None:
         legacy_model = self._first_non_empty(self.agent_settings.get("model"))
@@ -321,6 +322,13 @@ class Settings(ProfiledYamlSettings):
             return
         raise ValueError(f"llm biz config invalid: {AGENT_MAIN_BIZ_KEY}.model is required")
 
+    def _validate_context_window_reject_threshold(self) -> None:
+        value = self.context_window_reject_threshold_ratio
+        if not 0 < value <= 1:
+            raise ValueError(
+                "agent.context_window_reject_threshold_ratio must be within (0, 1]"
+            )
+
     @property
     def jinja_dir(self) -> Path:
         """Path to the Jinja template directory (rpg_core/jinja/)."""
@@ -329,6 +337,20 @@ class Settings(ProfiledYamlSettings):
     @property
     def verbose_logging(self) -> bool:
         return self.agent_settings.get("verbose_logging", False)
+
+    @property
+    def context_window_reject_threshold_ratio(self) -> float:
+        value = self.agent_settings.get("context_window_reject_threshold_ratio", 0.9)
+        if isinstance(value, bool):
+            raise ValueError(
+                "agent.context_window_reject_threshold_ratio must be a number"
+            )
+        try:
+            return float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "agent.context_window_reject_threshold_ratio must be a number"
+            ) from exc
 
     @property
     def memory_sub_agent_config(self) -> ConfigDict:

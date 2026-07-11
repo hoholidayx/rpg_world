@@ -50,8 +50,11 @@ from agent_service.schemas import (
 )
 from agent_service.settings import settings as process_settings
 from commons.errors import (
+    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
+    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
     TURN_METADATA_INVALID_ERROR_CODE,
     TURN_METADATA_INVALID_STATUS_CODE,
+    MainContextWindowThresholdExceededError,
     format_turn_metadata_error_message,
 )
 from commons.types import JsonObject, JsonValue
@@ -278,6 +281,8 @@ async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
     agent = _get_agent(body.session_id)
     try:
         reply = await agent.send(body.message)
+    except MainContextWindowThresholdExceededError as exc:
+        raise _main_context_threshold_http_error(exc) from exc
     except InvalidTurnMetadataError as exc:
         raise _turn_metadata_http_error(exc) from exc
     except Exception as exc:
@@ -418,6 +423,9 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
         try:
             async for event in agent.send_stream(body.message, request_id=body.request_id):
                 yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+        except MainContextWindowThresholdExceededError as exc:
+            event = _main_context_threshold_stream_error(exc)
+            yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except InvalidTurnMetadataError as exc:
             event = _turn_metadata_stream_error(exc)
             yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
@@ -609,6 +617,26 @@ def _require_session_id(session_id: str) -> str:
 
 def _turn_metadata_http_error(exc: InvalidTurnMetadataError) -> HTTPException:
     return HTTPException(status_code=TURN_METADATA_INVALID_STATUS_CODE, detail=str(exc))
+
+
+def _main_context_threshold_http_error(
+    exc: MainContextWindowThresholdExceededError,
+) -> HTTPException:
+    return HTTPException(
+        status_code=MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
+        detail=str(exc),
+    )
+
+
+def _main_context_threshold_stream_error(
+    exc: MainContextWindowThresholdExceededError,
+) -> AgentStreamEvent:
+    return AgentStreamEvent(
+        kind=StreamEventKind.ERROR,
+        content=str(exc),
+        error_code=MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
+        status_code=MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
+    )
 
 
 def _turn_metadata_stream_error(exc: InvalidTurnMetadataError) -> AgentStreamEvent:

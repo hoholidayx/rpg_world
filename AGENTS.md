@@ -38,14 +38,15 @@
 - `memory.raw_md_mode` 语义保持：`disabled` 关闭，`always` 主召回，`fallback_only` 仅在主召回不足或失败时补候选。
 - memory rerank 使用统一的 `PointwiseMemoryReranker`，不要恢复旧的 provider-specific reranker/factory。
 - 上下文主流程保持结构化，最终发送给 LLM 前由 `ContextRenderer` 渲染；调试 markdown/token 概览放在 `ContextInspector`，不要回流到 `RPGContext` 数据模型。
-- SessionRoom context 用量只通过两路数据展示：`context-preview` 提供估算摘要，正常 `/turn` 或 `/stream` 的完成事件携带 provider usage 作为准确值；不要新增独立 usage 获取接口，不要持久化 usage。后端只传 token/context window/cache 等元数据，比例、阈值和 K/M 展示由 Play WebUI 计算。
+- SessionRoom context 圆环始终只使用 `context-preview` 的下一轮主 Agent Context 估算；正常 `/turn` 或 `/stream` 完成事件的 provider usage 只展示在对应回复气泡和圆环展开详情中，不得覆盖圆环或参与下一轮门禁。不要新增独立 usage 获取接口、持久化 usage 或写 localStorage；比例、阈值和 K/M 展示由 Play WebUI 计算。
+- 主 Agent LLM 选择保持 `config default < story override < session override`，只允许 `agent.main.provider_option_keys` 白名单；Story 详情页配置 story 默认，SessionRoom 配置 session 覆盖，`null` 清除当前层覆盖。生成中切换不取消当前 turn，从下一 turn 生效，不得因切换自动压缩。
 - `当前场景` 是高优先级 scene 状态，应作为 user prefix 进入最终用户消息；不要把它当普通状态表放入 `STATUS_TABLES`。在 `rpg_data` 状态表架构中，scene 是 `status_kind="scene"` 的状态表，仍必须挂载到 story 才能被 session 感知。
 - RP Modules 是 RP 业务模块占位，不是通用 skill 体系；骰子、战斗、物品等能力应围绕 RP 工具流程和受控状态读写设计。
 - `text_output_format` 是默认启用的 fixed layer 输出格式约束，不进入 `RPModuleRegistry`，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文。带标签全文是 assistant `content` 真源，必须原样进入 SSE、历史和数据库；不要把旁白/角色分段写入 message metadata，也不要恢复 `metadata.messageDisplay`。
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
 - Story 主数据字段保持：`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。
 - 玩家角色绑定状态只对外暴露 `bound | invalid`。缺失绑定、角色不存在、未挂载、snapshot 损坏或 snapshot mount/story 不匹配都视为 `invalid`；WebUI 进入 SessionRoom 后用不可取消弹窗补选，Agent 在普通 send/send_stream 进入 LLM 前强校验，invalid 时只返回固定编号角色列表，不写 user history、不调用 LLM。绑定成功且 main history 为空时，`SessionRoleService` 追加 story `first_message` 到 main 和 backup，且只追加一次。
-- Agent 普通 RP turn 使用 `AgentTurnTransaction`：`send/send_stream` 内的 user/assistant message 与 scene/status document 写入先进入内存 scratch，LLM 完整成功后在短 commit 点统一写 main history、backup history 和状态表；不要在 LLM 前直接 append user history 或直接写 runtime scene/status。summary compression 和 story memory extraction 只作为 commit 后副作用运行，失败只记录 warning。
+- Agent 普通正文在命令分发和角色校验后、创建 `AgentTurnTransaction` 前执行主 Context 窗口门禁；门禁只估算当前 Context，不计本次 input，达到 `settings.context_window_reject_threshold_ratio` 时拒绝正文但始终允许斜杠命令。通过门禁后，`send/send_stream` 的 user/assistant message 与 scene/status document 才进入内存 scratch，LLM 完整成功后在短 commit 点统一写 main history、backup history 和状态表；summary compression 和 story memory extraction 仍只作为 commit 后副作用运行，失败只记录 warning。
 - 持久化会话消息必须写入正数 `turn_id` 和 `seq_in_turn`；主消息表唯一约束 `(session_id, turn_id, seq_in_turn)`，冷备份表保持 append-only、不做唯一约束。新增写入路径必须让非法 turn metadata 在写入或加载边界失败，不要恢复 summary/story memory/history pagination 的降级分组。
 - summary/story memory 的续处理进度只使用 `rpg_session_messages.summary_processed` / `story_memory_processed` 行标记，不恢复 last-turn 游标，不通过截断主历史表示已处理范围。
 - 主 Agent Context 的历史投影只以 `summary_processed` 为真源：`true` 的单条消息不进入主 Agent Context，`false` 的消息进入；不要校验 `summary_batch_id`、batch 文件、`overall.md` 或 turn 完整性。Play/Agent history 接口继续返回完整未删除历史，StatusSubAgent/MemorySubAgent 等独立链路不套用该过滤；`context-preview` token 估算必须基于实际渲染的过滤后 messages。
@@ -73,7 +74,7 @@
 
 ## 配置与数据
 - 配置按进程/模块拆分：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听与日志。
-- Play WebUI 通用配置入口是 `play_webui/play_webui.config.json`，前端通过 typed loader 读取；历史分页配置位于 `session.historyPagination`。
+- Play WebUI 通用配置入口是 `play_webui/play_webui.config.json`，前端通过 typed loader 读取；历史分页配置位于 `session.historyPagination`，正文门禁阈值位于 `session.contextUsage.inputBlockThresholdRatio`。Core 兜底阈值独立配置在 `rpg_core/settings.yaml` 的 `agent.context_window_reject_threshold_ratio`；两者合法范围均为 `(0, 1]`、默认均为 `0.9`，WebUI 非法值回退 `0.9`，Core 非法值必须启动失败。
 - `llm_service/llm.yaml` 管 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。
 - 它们都支持 `base + profiles`；`local` / `test` / `prod` 是固定 profile 名称，同级 `settings.local.yaml` / `llm.local.yaml` 等覆盖文件会自动加载。
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。

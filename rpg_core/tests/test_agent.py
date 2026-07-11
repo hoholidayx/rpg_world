@@ -9,7 +9,13 @@ import pytest
 
 import rpg_core.agent.agent as agent_module
 import rpg_core.agent.transaction.transaction as transaction_module
-from commons.errors import TURN_METADATA_INVALID_ERROR_CODE, TURN_METADATA_INVALID_STATUS_CODE
+from commons.errors import (
+    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
+    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
+    TURN_METADATA_INVALID_ERROR_CODE,
+    TURN_METADATA_INVALID_STATUS_CODE,
+    MainContextWindowThresholdExceededError,
+)
 from rpg_core.agent.transaction.commit_plan import TurnCommitPlan
 from rpg_core.agent.transaction.message_scratch import MessageScratch
 from rpg_core.agent.transaction.status_scratch import StatusDocumentScratch
@@ -333,7 +339,11 @@ def _make_transaction_agent(
     monkeypatch.setattr(
         agent_module,
         "settings",
-        SimpleNamespace(verbose_logging=False, include_tool_records=True),
+        SimpleNamespace(
+            verbose_logging=False,
+            include_tool_records=True,
+            context_window_reject_threshold_ratio=0.9,
+        ),
     )
 
     session = SessionManager(history_enabled=False)
@@ -357,7 +367,17 @@ def _make_transaction_agent(
     agent._rp_module_registry = None
     agent._tool_registry = agent_module.ToolRegistry()
     agent._provider = object()
-    agent._refresh_main_provider = lambda: agent._provider
+    agent._main_llm_selection_service = SimpleNamespace(
+        resolve_session=lambda _session_id: SimpleNamespace(
+            effective_provider_key="test_chat",
+            effective_source="config",
+            effective=SimpleNamespace(context_window=64_000),
+        )
+    )
+    agent._token_counter = SimpleNamespace(
+        count_messages=lambda messages: sum(len(message.content) for message in messages)
+    )
+    agent._refresh_main_provider = lambda *, selection=None: agent._provider
     agent._last_tool_records = None
     return agent
 
@@ -560,6 +580,112 @@ async def test_context_preview_uses_latest_effective_main_llm_window(monkeypatch
         "hot_history_rounds": 7,
         "context_limit": 8192,
     }
+
+
+@pytest.mark.asyncio
+async def test_context_threshold_excludes_current_turn_input(monkeypatch) -> None:
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "12345678", turn_id=1, seq_in_turn=1)],
+    )
+    agent._main_llm_selection_service = SimpleNamespace(
+        resolve_session=lambda _session_id: SimpleNamespace(
+            effective_provider_key="small_chat",
+            effective_source="session",
+            effective=SimpleNamespace(context_window=10),
+        )
+    )
+    huge_input = "x" * 100
+    seen_messages: list[Message] = []
+
+    async def fake_run_chat_loop(**kwargs):  # noqa: ANN001
+        seen_messages.extend(kwargs["messages"])
+        return "accepted", []
+
+    monkeypatch.setattr(agent_module, "run_chat_loop", fake_run_chat_loop)
+
+    reply = await agent._send_impl(huge_input)
+
+    assert reply.text == "accepted"
+    assert [message.content for message in agent._builder.calls[0]["messages"]] == ["12345678"]
+    assert seen_messages[-1].content == huge_input
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history_text", ["123456789", "1234567890"])
+async def test_context_threshold_rejects_at_or_above_boundary_before_turn(
+    monkeypatch,
+    history_text: str,
+) -> None:
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, history_text, turn_id=1, seq_in_turn=1)],
+    )
+    agent._main_llm_selection_service = SimpleNamespace(
+        resolve_session=lambda _session_id: SimpleNamespace(
+            effective_provider_key="small_chat",
+            effective_source="session",
+            effective=SimpleNamespace(context_window=10),
+        )
+    )
+    agent._refresh_main_provider = MagicMock(return_value=agent._provider)
+
+    with pytest.raises(MainContextWindowThresholdExceededError) as exc_info:
+        await agent._send_impl("new body")
+
+    stream_events: asyncio.Queue = asyncio.Queue()
+    with pytest.raises(MainContextWindowThresholdExceededError):
+        await agent._send_stream_impl("new body", stream_events)
+
+    assert exc_info.value.used_tokens == len(history_text)
+    assert exc_info.value.context_limit == 10
+    assert stream_events.empty()
+    assert [message.content for message in agent._session.history] == [history_text]
+    assert agent._session._active_turn_id is None
+    agent._refresh_main_provider.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_context_threshold_always_allows_slash_commands(monkeypatch) -> None:
+    agent = _make_transaction_agent(
+        monkeypatch,
+        history=[Message(Role.USER, "1234567890", turn_id=1, seq_in_turn=1)],
+    )
+    agent._cmd_dispatcher = SimpleNamespace(
+        is_command=lambda text: text.lstrip().startswith("/"),
+        dispatch=AsyncMock(return_value=agent_module.CommandResult(reply="compacted", handled=True)),
+    )
+    agent._resolve_main_llm_selection = MagicMock()
+
+    reply = await agent._send_impl("   /compact")
+
+    stream_events: asyncio.Queue = asyncio.Queue()
+    await agent._send_stream_impl("   /compact", stream_events)
+    text_event = await stream_events.get()
+    done_event = await stream_events.get()
+
+    assert reply.text == "compacted"
+    assert text_event.kind == StreamEventKind.TEXT
+    assert text_event.content == "compacted"
+    assert done_event.kind == StreamEventKind.DONE
+    assert done_event.content == "compacted"
+    agent._resolve_main_llm_selection.assert_not_called()
+
+
+def test_context_threshold_stream_error_keeps_code_and_message_separate() -> None:
+    error = MainContextWindowThresholdExceededError(
+        used_tokens=90,
+        context_limit=100,
+        threshold_ratio=0.9,
+    )
+
+    event = RPGGameAgent._stream_error_event(error)
+
+    assert event.kind == StreamEventKind.ERROR
+    assert event.error_code == MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE
+    assert event.status_code == MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE
+    assert event.content == str(error)
+    assert MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE not in event.content
 
 
 class _FakeStatusManager:

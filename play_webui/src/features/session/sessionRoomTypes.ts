@@ -47,7 +47,7 @@ export type HistoryRefreshMode = (typeof HISTORY_REFRESH_MODE)[keyof typeof HIST
 
 export type RefreshSessionDataOptions = {
   silent?: boolean
-  clearAccurateUsage?: boolean
+  clearLastTurnUsage?: boolean
   preserveDiagnostics?: boolean
   historyMode?: HistoryRefreshMode
   scrollToBottom?: boolean

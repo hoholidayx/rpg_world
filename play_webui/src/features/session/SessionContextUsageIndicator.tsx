@@ -27,12 +27,6 @@ function formatRatio(value: number | null | undefined) {
   return `${Math.round(value * 100)}%`
 }
 
-function formatCacheTokens(usage: ContextUsageSnapshot | null | undefined) {
-  if (!usage) return '-'
-  if (usage.source !== 'provider_usage' && usage.cachedTokens <= 0) return '-'
-  return formatToken(usage.cachedTokens)
-}
-
 function formatCacheHitRate(usage: ContextUsageSnapshot | null | undefined) {
   if (!usage || usage.source !== 'provider_usage') return '-'
   const promptTokens = usage.promptTokens ?? usage.usedTokens
@@ -40,51 +34,40 @@ function formatCacheHitRate(usage: ContextUsageSnapshot | null | undefined) {
   return formatRatio(usage.cachedTokens / promptTokens)
 }
 
-function sourceLabel(usage: ContextUsageSnapshot | null | undefined) {
+function previewSourceLabel(usage: ContextUsageSnapshot | null | undefined) {
   if (!usage) return '未知'
-  if (usage.source === 'provider_usage') return '实际'
-  if (usage.source === 'context_preview') return '主上下文估算'
   if (usage.source === 'fallback_estimate') return '兜底估算'
-  return '未知'
+  if (usage.source === 'unavailable') return '不可用'
+  return 'context-preview'
 }
 
-function titleFor(usage: ContextUsageSnapshot | null | undefined, loading: boolean) {
-  if (loading && !usage) return '正在估算主上下文窗口'
-  if (!usage) return '暂无主上下文估算'
-  if (usage.source === 'provider_usage') return '最近一轮实际总消耗'
-  if (usage.status === 'unknown') return '无法估算主上下文窗口'
-  if (usage.status === 'danger') return '主上下文即将达到窗口上限'
-  if (usage.status === 'warning') return '主上下文接近窗口上限'
-  return '主上下文估算正常'
-}
-
-function detailFor(usage: ContextUsageSnapshot | null | undefined, loading: boolean) {
-  if (loading && !usage) return '正在读取 context-preview；它只估算主 LLM 的最终上下文。'
-  if (!usage) return '尚未取得 context-preview 或本轮 provider usage。'
-  if (usage.source === 'provider_usage') return '来自 completed turn 的 provider usage，包含主回复与子 Agent 调用；用于回合复盘，不代表下一次主上下文估算。'
-  if (usage.source === 'context_preview') return '来自 context-preview，只估算下一次主 LLM 上下文，不包含 status/memory 子 Agent 的动态开销。'
-  if (usage.source === 'fallback_estimate') return '无法获取完整 context-preview，当前为兜底估算；不包含动态子 Agent 开销。'
-  return usage.errorReason || '主上下文窗口或 token 估算不可用。'
-}
-
-function primaryUsageLabel(usage: ContextUsageSnapshot | null | undefined) {
-  if (usage?.source === 'provider_usage') return '实际 Prompt'
-  return '主上下文估算'
+function previewTitle(usage: ContextUsageSnapshot | null | undefined, loading: boolean) {
+  if (loading && !usage) return '正在估算下一轮主 Agent Context'
+  if (!usage || usage.status === 'unknown') return '下一轮主 Agent Context 暂不可估算'
+  if (usage.status === 'danger') return '下一轮主 Agent Context 已达到输入阈值'
+  if (usage.status === 'warning') return '下一轮主 Agent Context 接近输入阈值'
+  return '下一轮主 Agent Context 估算正常'
 }
 
 export function SessionContextUsageIndicator({
-  usage,
+  contextPreviewUsage,
+  lastTurnUsage,
+  thresholdRatio,
+  previewModel,
   loading = false,
 }: {
-  usage?: ContextUsageSnapshot | null
+  contextPreviewUsage?: ContextUsageSnapshot | null
+  lastTurnUsage?: ContextUsageSnapshot | null
+  thresholdRatio: number
+  previewModel?: string | null
   loading?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
-  const ratio = usage?.ratio ?? null
+  const ratio = contextPreviewUsage?.ratio ?? null
   const progress = ratio === null ? 0 : Math.min(100, Math.max(0, ratio * 100))
-  const ringColor = statusColor[usage?.status ?? 'unknown']
-  const ringBackground = usage?.status === 'unknown'
+  const ringColor = statusColor[contextPreviewUsage?.status ?? 'unknown']
+  const ringBackground = contextPreviewUsage?.status === 'unknown' || !contextPreviewUsage
     ? `repeating-conic-gradient(${ringColor} 0deg 12deg, #e2e8f0 12deg 24deg)`
     : `conic-gradient(${ringColor} ${progress * 3.6}deg, #e2e8f0 0deg)`
 
@@ -110,72 +93,104 @@ export function SessionContextUsageIndicator({
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
-        aria-label="查看主上下文和本轮 usage"
+        aria-label="查看 context-preview 与上一轮真实 usage"
         className={cn(
           'relative grid h-11 w-11 place-items-center rounded-full transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-200 dark:focus-visible:ring-violet-500/30',
           open ? 'ring-4 ring-violet-100 dark:ring-violet-500/20' : '',
         )}
       >
-        <span
-          aria-hidden="true"
-          className="absolute inset-0 rounded-full"
-          style={{ background: ringBackground }}
-        />
+        <span aria-hidden="true" className="absolute inset-0 rounded-full" style={{ background: ringBackground }} />
         <span aria-hidden="true" className="absolute inset-1.5 rounded-full bg-white shadow-inner dark:bg-slate-900" />
         <span className="relative text-[11px] font-black leading-none text-slate-900 dark:text-slate-100">
-          {loading && !usage ? '...' : formatRatio(ratio)}
+          {loading && !contextPreviewUsage ? '...' : formatRatio(ratio)}
         </span>
       </button>
 
       {open ? (
         <div
           role="dialog"
-          aria-label="主上下文和本轮 usage 详情"
-          className="absolute bottom-[calc(100%+12px)] right-0 z-30 w-[min(330px,calc(100vw-32px))] rounded-lg border border-slate-200 bg-white p-4 text-left shadow-2xl shadow-slate-900/15 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40"
+          aria-label="context-preview 与上一轮真实 usage 详情"
+          className="absolute bottom-[calc(100%+12px)] right-0 z-30 w-[min(380px,calc(100vw-32px))] rounded-lg border border-slate-200 bg-white p-4 text-left shadow-2xl shadow-slate-900/15 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40"
         >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <strong className="block text-sm font-black text-slate-950 dark:text-slate-50">{titleFor(usage, loading)}</strong>
-              <span className="mt-1 block text-xs font-semibold leading-5 text-slate-500 dark:text-slate-300">{detailFor(usage, loading)}</span>
-            </div>
-            <span
-              className={cn(
+          <section>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <strong className="block text-sm font-black text-slate-950 dark:text-slate-50">
+                  {previewTitle(contextPreviewUsage, loading)}
+                </strong>
+                <span className="mt-1 block text-xs font-semibold leading-5 text-slate-500 dark:text-slate-300">
+                  圆环始终来自 context-preview，不包含本次尚未发送的 input，也不使用上一轮真实 usage 覆盖。
+                </span>
+              </div>
+              <span className={cn(
                 'inline-flex h-6 shrink-0 items-center rounded-full px-2 text-[11px] font-black',
-                usage?.source === 'provider_usage'
-                  ? 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200'
-                  : usage?.status === 'danger'
-                    ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200'
-                    : usage?.status === 'warning'
-                      ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200'
-                      : 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200',
-              )}
-            >
-              {sourceLabel(usage)}
-            </span>
-          </div>
+                contextPreviewUsage?.status === 'danger'
+                  ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200'
+                  : contextPreviewUsage?.status === 'warning'
+                    ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200'
+                    : 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200',
+              )}>
+                {previewSourceLabel(contextPreviewUsage)}
+              </span>
+            </div>
 
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-            <span className="block h-full rounded-full" style={{ width: `${progress}%`, backgroundColor: ringColor }} />
-          </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+              <span className="block h-full rounded-full" style={{ width: `${progress}%`, backgroundColor: ringColor }} />
+            </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <UsageCell label={primaryUsageLabel(usage)} value={formatToken(usage?.usedTokens)} />
-            <UsageCell label="模型窗口" value={formatToken(usage?.contextLimit)} />
-            <UsageCell label="窗口占比" value={formatRatio(usage?.ratio)} />
-            <UsageCell label="更新时间" value={usage?.createdAt ? new Date(usage.createdAt).toLocaleTimeString() : '-'} />
-            <UsageCell label="Prompt" value={formatToken(usage?.promptTokens)} />
-            <UsageCell label="Completion" value={formatToken(usage?.completionTokens)} />
-            <UsageCell label="Cache 命中" value={formatCacheTokens(usage)} />
-            <UsageCell label="Cache 命中率" value={formatCacheHitRate(usage)} />
-          </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <UsageCell label="Context 估算" value={formatToken(contextPreviewUsage?.usedTokens)} />
+              <UsageCell label="模型窗口" value={formatToken(contextPreviewUsage?.contextLimit)} />
+              <UsageCell label="窗口占比" value={formatRatio(contextPreviewUsage?.ratio)} />
+              <UsageCell label="输入阈值" value={formatRatio(thresholdRatio)} />
+              <UsageCell label="估算精度" value={contextPreviewUsage?.accuracy ?? '-'} />
+              <UsageCell label="模型" value={previewModel || contextPreviewUsage?.model || '-'} />
+              <UsageCell
+                label="更新时间"
+                value={contextPreviewUsage?.createdAt ? new Date(contextPreviewUsage.createdAt).toLocaleTimeString() : '-'}
+              />
+            </div>
+            {contextPreviewUsage?.errorReason ? (
+              <p className="mt-2 text-xs font-semibold leading-5 text-amber-700 dark:text-amber-200">
+                估算降级：{contextPreviewUsage.errorReason}
+              </p>
+            ) : null}
+          </section>
 
-          {usage?.model || usage?.finishReason ? (
-            <p className="mt-3 text-xs font-semibold leading-5 text-slate-500 dark:text-slate-300">
-              {usage.model ? `模型：${usage.model}` : ''}
-              {usage.model && usage.finishReason ? ' / ' : ''}
-              {usage.finishReason ? `结束：${usage.finishReason}` : ''}
+          <section className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-700">
+            <strong className="block text-sm font-black text-slate-950 dark:text-slate-50">上一轮真实 turn usage</strong>
+            <p className="mt-1 text-xs font-semibold leading-5 text-slate-500 dark:text-slate-300">
+              仅来自 provider 完成事件，用于回合复盘，不参与下一轮 Context 门禁。
             </p>
-          ) : null}
+            {lastTurnUsage?.source === 'provider_usage' ? (
+              <>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <UsageCell label="Prompt" value={formatToken(lastTurnUsage.promptTokens ?? lastTurnUsage.usedTokens)} />
+                  <UsageCell label="Completion" value={formatToken(lastTurnUsage.completionTokens)} />
+                  <UsageCell label="Total" value={formatToken(lastTurnUsage.totalTokens)} />
+                  <UsageCell label="Cache 命中" value={formatToken(lastTurnUsage.cachedTokens)} />
+                  <UsageCell label="Cache 命中率" value={formatCacheHitRate(lastTurnUsage)} />
+                  <UsageCell label="模型" value={lastTurnUsage.model || '-'} />
+                  <UsageCell label="结束原因" value={lastTurnUsage.finishReason || '-'} />
+                  <UsageCell
+                    label="耗时"
+                    value={lastTurnUsage.durationMs === null || lastTurnUsage.durationMs === undefined
+                      ? '-'
+                      : `${Math.round(lastTurnUsage.durationMs)} ms`}
+                  />
+                  <UsageCell label="来源" value="provider usage" />
+                  <UsageCell
+                    label="更新时间"
+                    value={lastTurnUsage.createdAt ? new Date(lastTurnUsage.createdAt).toLocaleTimeString() : '-'}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="mt-3 rounded-lg border border-dashed border-slate-200 px-3 py-3 text-xs font-semibold text-slate-400 dark:border-slate-700 dark:text-slate-400">
+                当前页面尚未收到可用的 provider usage；不会用 context-preview 代替。
+              </p>
+            )}
+          </section>
         </div>
       ) : null}
     </div>
@@ -184,9 +199,9 @@ export function SessionContextUsageIndicator({
 
 function UsageCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
+    <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
       <span className="block text-[11px] font-bold text-slate-400 dark:text-slate-400">{label}</span>
-      <strong className="mt-1 block text-sm font-black text-slate-900 dark:text-slate-100">{value}</strong>
+      <strong className="mt-1 block truncate text-sm font-black text-slate-900 dark:text-slate-100" title={value}>{value}</strong>
     </div>
   )
 }

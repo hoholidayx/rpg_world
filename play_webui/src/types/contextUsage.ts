@@ -44,9 +44,9 @@ function optionalNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function statusFromRatio(ratio: number | null): ContextUsageStatus {
+function statusFromRatio(ratio: number | null, dangerThresholdRatio = 0.9): ContextUsageStatus {
   if (ratio === null) return 'unknown'
-  if (ratio >= 0.9) return 'danger'
+  if (ratio >= dangerThresholdRatio) return 'danger'
   if (ratio >= 0.7) return 'warning'
   return 'normal'
 }
@@ -69,7 +69,10 @@ function estimateAccuracy(value: unknown): ContextUsageAccuracy {
   return value === 'unknown' ? 'unknown' : 'estimated'
 }
 
-export function fromContextPreviewEstimate(preview: ContextPreviewPayload | undefined): ContextUsageSnapshot | null {
+export function fromContextPreviewEstimate(
+  preview: ContextPreviewPayload | undefined,
+  dangerThresholdRatio = 0.9,
+): ContextUsageSnapshot | null {
   if (!preview) return null
   const estimate = isRecord(preview.usageEstimate) ? preview.usageEstimate : null
   const usedTokens = optionalNumber(estimate?.usedTokens) ?? preview.totals.tokenCount
@@ -87,7 +90,7 @@ export function fromContextPreviewEstimate(preview: ContextPreviewPayload | unde
     ratio,
     source,
     accuracy,
-    status: statusFromRatio(ratio),
+    status: statusFromRatio(ratio, dangerThresholdRatio),
     model: typeof estimate?.model === 'string' ? estimate.model : null,
     finishReason: typeof estimate?.finishReason === 'string' ? estimate.finishReason : null,
     durationMs: optionalNumber(estimate?.durationMs),

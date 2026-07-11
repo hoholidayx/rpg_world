@@ -6,7 +6,13 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
-from commons.errors import TURN_METADATA_INVALID_ERROR_CODE, TURN_METADATA_INVALID_STATUS_CODE
+from commons.errors import (
+    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
+    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
+    TURN_METADATA_INVALID_ERROR_CODE,
+    TURN_METADATA_INVALID_STATUS_CODE,
+    MainContextWindowThresholdExceededError,
+)
 from llm_service.types import LLMUsage
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
@@ -179,6 +185,36 @@ class InvalidTurnAgentManager(FakeAgentManager):
     def get_or_create(cls, session_id: str):
         if session_id not in cls.instances:
             cls.instances[session_id] = InvalidTurnAgent(session_id)
+        return cls.instances[session_id]
+
+
+class ContextThresholdAgent(FakeAgent):
+    @staticmethod
+    def _error() -> MainContextWindowThresholdExceededError:
+        return MainContextWindowThresholdExceededError(
+            used_tokens=90,
+            context_limit=100,
+            threshold_ratio=0.9,
+        )
+
+    async def send(self, message: str) -> AgentReply:
+        del message
+        raise self._error()
+
+    async def send_stream(self, message: str, *, request_id: str | None = None):
+        del message, request_id
+        if False:
+            yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="")
+        raise self._error()
+
+
+class ContextThresholdAgentManager(FakeAgentManager):
+    instances: dict[str, FakeAgent] = {}
+
+    @classmethod
+    def get_or_create(cls, session_id: str):
+        if session_id not in cls.instances:
+            cls.instances[session_id] = ContextThresholdAgent(session_id)
         return cls.instances[session_id]
 
 
@@ -685,6 +721,34 @@ def test_agent_service_send_and_stream_map_turn_metadata_error(monkeypatch) -> N
     assert f'"status_code": {TURN_METADATA_INVALID_STATUS_CODE}' in body
     assert '"content": "invalid persisted turn metadata"' in body
     assert f"{TURN_METADATA_INVALID_ERROR_CODE}: invalid persisted turn metadata" not in body
+
+
+def test_agent_service_send_and_stream_map_context_threshold_error(monkeypatch) -> None:
+    monkeypatch.setattr(service_main, "AgentManager", ContextThresholdAgentManager)
+    monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
+    monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
+    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
+    FakeCatalog.reset()
+    ContextThresholdAgentManager.reset()
+
+    with TestClient(service_main.app) as client:
+        send = client.post(
+            "/agent/v1/chat/send",
+            json={"session_id": "s1", "message": "go"},
+        )
+        with client.stream(
+            "POST",
+            "/agent/v1/chat/stream",
+            json={"session_id": "s1", "message": "go"},
+        ) as stream:
+            body = "".join(stream.iter_text())
+
+    assert send.status_code == MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE
+    assert "请先执行 /compact" in send.json()["detail"]
+    assert f'"error_code": "{MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE}"' in body
+    assert f'"status_code": {MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE}' in body
+    assert '"content": "主 Agent Context 当前占用' in body
+    assert MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE not in send.json()["detail"]
 
 
 def test_agent_service_drops_cached_agent_when_truncate_sync_fails(monkeypatch) -> None:

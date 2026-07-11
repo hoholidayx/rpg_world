@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { deleteSessionMessage, truncateSessionTurn, type getSession } from '@/lib/api/sessions'
 import type { SessionPlayerCharacter } from '@/types/session'
+import type { ContextUsageSnapshot } from '@/types/contextUsage'
+import { isContextInputBlocked, isSlashCommandInput } from '../contextWindowGate'
 import type { SessionRoomLogger } from '../sessionRoomLogger'
 import {
   canEditMessage,
@@ -32,6 +34,8 @@ export function useSessionTimelineActions({
   inputMode,
   currentNarrativeStyle,
   composerText,
+  contextInputBlockThresholdRatio,
+  refreshContextPreview,
   timelineResetKey,
   lastTurnId,
   lastPersistedTurnId,
@@ -53,6 +57,11 @@ export function useSessionTimelineActions({
   inputMode: SessionInputMode
   currentNarrativeStyle: NarrativeStyle
   composerText: string
+  contextInputBlockThresholdRatio: number
+  refreshContextPreview: () => Promise<{
+    available: boolean
+    usage: ContextUsageSnapshot | null
+  }>
   timelineResetKey: number
   lastTurnId: number
   lastPersistedTurnId: number
@@ -118,6 +127,17 @@ export function useSessionTimelineActions({
     if (!trimmedText) {
       showToast(source === SESSION_STREAM_SOURCE.SEND ? '请输入内容后再发送' : '发送内容不能为空')
       return
+    }
+
+    if (!isSlashCommandInput(trimmedText)) {
+      const latestContext = await refreshContextPreview()
+      if (
+        latestContext.available
+        && isContextInputBlocked(latestContext.usage, contextInputBlockThresholdRatio)
+      ) {
+        showToast('主 Agent Context 已达到输入阈值，请先执行 /compact 手动压缩')
+        return
+      }
     }
 
     const ensuredLatestTurnId = await jumpToLatestHistoryBottom({ silent: true })
@@ -195,6 +215,7 @@ export function useSessionTimelineActions({
     })
   }, [
     currentNarrativeStyle,
+    contextInputBlockThresholdRatio,
     ensureCanStartTurn,
     inputMode,
     jumpToLatestHistoryBottom,
@@ -202,6 +223,7 @@ export function useSessionTimelineActions({
     lastTurnId,
     logger,
     playerCharacter,
+    refreshContextPreview,
     sessionId,
     setOptimisticTruncateFromTurn,
     showToast,

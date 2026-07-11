@@ -1,5 +1,8 @@
 {
   "session": {
+    "contextUsage": {
+      "inputBlockThresholdRatio": 0.9
+    },
     "historyPagination": {
       "pageTurnLimit": 50,
       "maxCachedPages": 2

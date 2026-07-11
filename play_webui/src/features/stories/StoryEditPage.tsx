@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   CheckCircle2,
+  Cpu,
   Globe2,
   Loader2,
   Play,
@@ -18,6 +19,7 @@ import {
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import { listStoryCharacters, unmountCharacter } from '@/lib/api/characters'
 import { listStoryLorebookEntries, unmountLorebookEntry } from '@/lib/api/lorebook'
+import { getMainLLMOptions, getStoryMainLLM, setStoryMainLLM } from '@/lib/api/mainLLM'
 import { listSessions } from '@/lib/api/sessions'
 import { createStory, listStories, updateStory } from '@/lib/api/stories'
 import { listStoryStatusMounts, unmountStatusTemplate } from '@/lib/api/statusTables'
@@ -50,6 +52,17 @@ function getTimestamp(value?: string | null) {
 
 function firstLetter(value: string) {
   return value.trim().slice(0, 1).toUpperCase() || '#'
+}
+
+function formatContextWindow(value: number | null | undefined) {
+  if (!value || value <= 0) return '窗口未知'
+  return `${value.toLocaleString()} tokens`
+}
+
+function mainLLMSourceLabel(source: 'config' | 'story' | 'session') {
+  if (source === 'story') return '故事默认'
+  if (source === 'session') return '会话覆盖'
+  return '系统默认'
 }
 
 function draftFromStory(story: StorySummary): DraftState {
@@ -252,6 +265,7 @@ function StoryEditContent({
   const [draftReady, setDraftReady] = useState(false)
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [mainLLMError, setMainLLMError] = useState<string | null>(null)
 
   const storiesQuery = useQuery({
     queryKey: ['play-stories', currentWorkspace],
@@ -284,6 +298,16 @@ function StoryEditContent({
     queryFn: () => listSessions(currentWorkspace ?? '', storyId ?? 0),
     enabled: Boolean(currentWorkspace && story && !isCreate && storyId !== undefined),
   })
+  const mainLLMOptionsQuery = useQuery({
+    queryKey: ['main-llm-options'],
+    queryFn: getMainLLMOptions,
+    enabled: Boolean(currentWorkspace && story && !isCreate),
+  })
+  const storyMainLLMQuery = useQuery({
+    queryKey: ['story-main-llm', currentWorkspace, storyId],
+    queryFn: () => getStoryMainLLM(currentWorkspace ?? '', storyId ?? 0),
+    enabled: Boolean(currentWorkspace && story && !isCreate && storyId !== undefined),
+  })
 
   const characters = charactersQuery.data ?? []
   const lorebookEntries = lorebookQuery.data ?? []
@@ -296,6 +320,36 @@ function StoryEditContent({
   const changedFields = isCreate
     ? ['new_story_draft']
     : dirtyFields(story, draft)
+
+  const storyMainLLMMutation = useMutation({
+    mutationFn: (providerKey: string | null) => {
+      if (!currentWorkspace || storyId === undefined) throw new Error('story missing')
+      return setStoryMainLLM(currentWorkspace, storyId, providerKey)
+    },
+    onSuccess: (selection) => {
+      setMainLLMError(null)
+      queryClient.setQueryData(['story-main-llm', currentWorkspace, storyId], selection)
+      queryClient.invalidateQueries({ queryKey: ['session-main-llm'] })
+      queryClient.invalidateQueries({ queryKey: ['play-session-context-preview'] })
+    },
+    onError: async (reason) => {
+      setMainLLMError(reason instanceof Error ? reason.message : '主 Agent 默认 LLM 更新失败')
+      await Promise.all([mainLLMOptionsQuery.refetch(), storyMainLLMQuery.refetch()])
+    },
+  })
+  const mainLLMOptions = mainLLMOptionsQuery.data?.options ?? []
+  const configDefaultMainLLM = mainLLMOptions.find(
+    (option) => option.providerKey === mainLLMOptionsQuery.data?.configDefaultProviderKey,
+  )
+  const storyMainLLMSelection = storyMainLLMQuery.data
+  const validMainLLMKeys = new Set(mainLLMOptions.map((option) => option.providerKey))
+  const selectedStoryProviderKey = (
+    storyMainLLMSelection?.storyProviderKey
+    && validMainLLMKeys.has(storyMainLLMSelection.storyProviderKey)
+  ) ? storyMainLLMSelection.storyProviderKey : ''
+  const invalidStoryOverrides = storyMainLLMSelection?.invalidOverrides.filter(
+    (item) => item.source === 'story',
+  ) ?? []
 
   useEffect(() => {
     if (!isCreate || !draftStorageKey) return
@@ -510,6 +564,84 @@ function StoryEditContent({
                   </FieldShell>
                 </div>
               </Panel>
+
+              {!isCreate ? (
+                <Panel
+                  title="主 Agent 默认 LLM"
+                  description="选择后立即保存。没有会话级覆盖的 Session 会从下一 turn 继承该设置。"
+                  action={<Chip tone="violet">story override</Chip>}
+                >
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.6fr)] md:items-end">
+                    <label className="min-w-0">
+                      <span className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-slate-500">
+                        <Cpu size={14} />
+                        默认模型
+                      </span>
+                      <select
+                        value={selectedStoryProviderKey}
+                        disabled={
+                          mainLLMOptionsQuery.isLoading
+                          || storyMainLLMQuery.isLoading
+                          || storyMainLLMMutation.isPending
+                        }
+                        onChange={(event) => {
+                          storyMainLLMMutation.mutate(event.target.value || null)
+                        }}
+                        className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-4 focus:ring-teal-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <option value="">
+                          使用系统默认
+                          {configDefaultMainLLM
+                            ? ` · ${configDefaultMainLLM.model}`
+                            : ''}
+                        </option>
+                        {mainLLMOptions.map((option) => (
+                          <option key={option.providerKey} value={option.providerKey}>
+                            {option.model} · {option.backend} · {formatContextWindow(option.contextWindow)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-600">
+                      {storyMainLLMSelection ? (
+                        <>
+                          <strong className="block text-slate-950">{storyMainLLMSelection.effective.model}</strong>
+                          <span>
+                            {mainLLMSourceLabel(storyMainLLMSelection.effectiveSource)} · {storyMainLLMSelection.effective.backend} · {formatContextWindow(storyMainLLMSelection.effective.contextWindow)}
+                          </span>
+                        </>
+                      ) : (
+                        <span>正在读取当前有效模型...</span>
+                      )}
+                    </div>
+                  </div>
+                  {invalidStoryOverrides.length ? (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-700">
+                      <span>
+                        已忽略失效的故事覆盖：{invalidStoryOverrides.map((item) => item.providerKey).join('、')}。
+                      </span>
+                      <button
+                        type="button"
+                        disabled={storyMainLLMMutation.isPending}
+                        onClick={() => storyMainLLMMutation.mutate(null)}
+                        className="h-8 rounded-lg border border-amber-300 bg-white px-3 font-black transition hover:border-amber-400 disabled:opacity-60"
+                      >
+                        清除并使用系统默认
+                      </button>
+                    </div>
+                  ) : null}
+                  {mainLLMOptionsQuery.isError || storyMainLLMQuery.isError ? (
+                    <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-700">
+                      主 Agent LLM 配置加载失败，请刷新后重试。
+                    </p>
+                  ) : null}
+                  {mainLLMError ? (
+                    <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-700">
+                      {mainLLMError}
+                    </p>
+                  ) : null}
+                </Panel>
+              ) : null}
 
               <Panel
                 title="开场与固定提示词"
