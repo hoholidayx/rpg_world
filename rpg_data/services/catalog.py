@@ -15,6 +15,7 @@ from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services.status import StatusTableService
 from rpg_data.settings import resolve_workspace_relative_path, resolve_workspace_root
+from rpg_data.story_template import validate_story_text_template
 
 __all__ = ["CatalogService"]
 
@@ -103,6 +104,8 @@ class CatalogService:
         story_prompt: str = "",
         first_message: str = "",
     ) -> models.Story | None:
+        validate_story_text_template(story_prompt)
+        validate_story_text_template(first_message)
         workspace = self._workspaces.get(workspace_id)
         if workspace is None:
             logger.warning("create story rejected missing workspace_id=%s", workspace_id)
@@ -131,6 +134,10 @@ class CatalogService:
         story_prompt: str | None = None,
         first_message: str | None = None,
     ) -> models.Story | None:
+        if story_prompt is not None:
+            validate_story_text_template(story_prompt)
+        if first_message is not None:
+            validate_story_text_template(first_message)
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
             logger.warning("update story rejected missing story workspace_id=%s story_id=%s", workspace_id, story_id)

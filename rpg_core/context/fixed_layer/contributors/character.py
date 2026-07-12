@@ -12,6 +12,10 @@ from rpg_core.context.fixed_layer.models import (
     FixedLayerContributor,
     FixedLayerSection,
 )
+from rpg_core.context.fixed_layer.contributors.player_character import (
+    PlayerCharacterContext,
+    annotate_player_character_cards,
+)
 from rpg_core.context.rendering import render_jinja_template
 
 if TYPE_CHECKING:
@@ -54,14 +58,19 @@ class CharacterFixedLayerContributor(FixedLayerContributor):
         character_mgr: "CharacterManager | None",
         *,
         enabled: bool = True,
+        player_character: PlayerCharacterContext | None = None,
     ) -> None:
         self._character_mgr = character_mgr
         self._enabled = enabled
+        self._player_character = player_character
 
     def get_fixed_contribution(self) -> FixedLayerContribution:
         if not self._enabled or self._character_mgr is None:
             return FixedLayerContribution()
-        characters = list(self._character_mgr.list_enabled_characters())
+        characters = annotate_player_character_cards(
+            list(self._character_mgr.list_enabled_characters()),
+            self._player_character,
+        )
         section = build_character_section(characters)
         if section is None:
             return FixedLayerContribution()

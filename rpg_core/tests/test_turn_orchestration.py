@@ -14,21 +14,44 @@ from rpg_core.agent.turn.models import (
     TurnExecutionPolicy,
     TurnExecutionSnapshot,
     TurnMode,
+    TurnPlayerCharacterSnapshot,
     TurnRequest,
 )
 from rpg_core.agent.turn.orchestrator import TurnOrchestrator
-from rpg_core.agent.turn.resolver import TurnSnapshotResolver
+from rpg_core.agent.turn.resolver import (
+    PlayerCharacterRequiredError,
+    TurnSnapshotResolver,
+)
 from rpg_core.agent.turn.runtime import TurnRuntime
 from rpg_core.context.rpg_context import Role
 from rpg_core.session import SessionManager
 
 
 class _Catalog:
-    def __init__(self, session) -> None:  # noqa: ANN001
+    def __init__(self, session, story=None) -> None:  # noqa: ANN001
         self._session = session
+        self._story = story
 
     def get_session(self, _session_id: str):  # noqa: ANN201
         return self._session
+
+    def get_session_story(self, _session_id: str):  # noqa: ANN201
+        return self._story
+
+
+class _SessionRoles:
+    def __init__(self, player=None) -> None:  # noqa: ANN001
+        self.player = player
+
+    def get_state(self, _session_id: str):  # noqa: ANN201
+        return SimpleNamespace(
+            status="bound" if self.player is not None else "invalid",
+            player=self.player,
+        )
+
+    @staticmethod
+    def render_role_bind_prompt(_session_id: str) -> str:
+        return "请选择角色"
 
 
 class _Composer:
@@ -49,6 +72,7 @@ def test_turn_snapshot_resolver_freezes_mode_and_style_selection() -> None:
     gateway = SimpleNamespace(
         catalog=_Catalog(SimpleNamespace(workspace_id="ws")),
         session_composer=composer,
+        session_roles=_SessionRoles(),
     )
     request = TurnRequest.create("行动", mode="gm", narrative_style_id=7)
 
@@ -67,6 +91,7 @@ def test_ooc_snapshot_validates_but_suppresses_explicit_style() -> None:
     gateway = SimpleNamespace(
         catalog=_Catalog(SimpleNamespace(workspace_id="ws")),
         session_composer=composer,
+        session_roles=_SessionRoles(),
     )
     snapshot = TurnSnapshotResolver("s1", gateway=gateway).resolve(
         TurnRequest.create("解释规则", mode="ooc", narrative_style_id=7)
@@ -76,6 +101,75 @@ def test_ooc_snapshot_validates_but_suppresses_explicit_style() -> None:
     assert snapshot.narrative_style_prompt == ""
     assert snapshot.policy.run_status_preflight is False
     assert composer.style_calls == [("s1", 7)]
+
+
+def test_turn_snapshot_freezes_player_and_rendered_story_prompt() -> None:
+    player = SimpleNamespace(
+        character_id=2,
+        mount_id=20,
+        story_id=1,
+        name="Alice",
+    )
+    roles = _SessionRoles(player)
+    gateway = SimpleNamespace(
+        catalog=_Catalog(
+            SimpleNamespace(workspace_id="ws"),
+            SimpleNamespace(story_prompt="玩家角色是 {USER_PLAY_ROLE_NAME}。"),
+        ),
+        session_composer=_Composer(),
+        session_roles=roles,
+    )
+
+    snapshot = TurnSnapshotResolver("s1", gateway=gateway).resolve(
+        TurnRequest.create("行动"),
+        require_player_character=True,
+    )
+    roles.player = SimpleNamespace(
+        character_id=1,
+        mount_id=10,
+        story_id=1,
+        name="Bob",
+    )
+
+    assert snapshot.player_character == TurnPlayerCharacterSnapshot(
+        character_id=2,
+        mount_id=20,
+        story_id=1,
+        name="Alice",
+    )
+    assert snapshot.rendered_story_prompt == "玩家角色是 Alice。"
+
+
+def test_required_turn_snapshot_rejects_missing_player_before_runtime() -> None:
+    gateway = SimpleNamespace(
+        catalog=_Catalog(SimpleNamespace(workspace_id="ws")),
+        session_composer=_Composer(),
+        session_roles=_SessionRoles(),
+    )
+
+    with pytest.raises(PlayerCharacterRequiredError, match="请选择角色"):
+        TurnSnapshotResolver("s1", gateway=gateway).resolve(
+            TurnRequest.create("行动"),
+            require_player_character=True,
+        )
+
+
+def test_unbound_inspection_renders_stable_story_prompt_placeholder() -> None:
+    gateway = SimpleNamespace(
+        catalog=_Catalog(
+            SimpleNamespace(workspace_id="ws"),
+            SimpleNamespace(story_prompt="当前玩家是 {USER_PLAY_ROLE_NAME}。"),
+        ),
+        session_composer=_Composer(),
+        session_roles=_SessionRoles(),
+    )
+
+    snapshot = TurnSnapshotResolver("s1", gateway=gateway).resolve(
+        TurnRequest.create("预览"),
+    )
+
+    assert snapshot.player_character is None
+    assert snapshot.rendered_story_prompt == "当前玩家是 尚未绑定玩家角色。"
 
 
 def test_explicit_style_requires_catalog_session() -> None:

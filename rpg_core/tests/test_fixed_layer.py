@@ -16,6 +16,8 @@ from rpg_core.context.fixed_layer.contributors import (
     CharacterFixedLayerContributor,
     CoreRPContractContributor,
     LorebookFixedLayerContributor,
+    PLAYER_CHARACTER_SECTION_ID,
+    PlayerCharacterFixedLayerContributor,
     StaticFixedLayerContributor,
     STORY_PROMPT_SECTION_ID,
     StoryPromptFixedLayerContributor,
@@ -119,6 +121,42 @@ def test_story_prompt_contributor_skips_blank_or_missing_story():
 
     assert blank.sections == []
     assert missing.sections == []
+
+
+def test_player_character_section_and_card_labels_are_session_local() -> None:
+    player = SimpleNamespace(
+        character_id=2,
+        mount_id=20,
+        story_id=1,
+        name="Alice",
+    )
+    characters = [
+        {"id": 1, "mount_id": 10, "name": "Bob"},
+        {"id": 2, "mount_id": 20, "name": "Alice"},
+    ]
+
+    fixed_layer = FixedLayerAssembler(
+        world_name="测试世界",
+        contributors=[
+            PlayerCharacterFixedLayerContributor(player),
+            CharacterFixedLayerContributor(
+                FakeCharacterManager(characters),
+                player_character=player,
+            ),
+        ],
+    ).assemble()
+
+    assert [section.id for section in fixed_layer.sections] == [
+        PLAYER_CHARACTER_SECTION_ID,
+        FIXED_LAYER_CHARACTER_SECTION_ID,
+    ]
+    player_section, character_section = fixed_layer.sections
+    assert "当前玩家扮演角色：Alice" in player_section.content
+    assert "必须以本节的 session 绑定为准" in player_section.content
+    assert "Bob [NPC｜非玩家角色]" in character_section.content
+    assert "Alice [PLAYER_CHARACTER｜玩家当前扮演]" in character_section.content
+    assert fixed_layer.characters[0]["control_role"] == "npc"
+    assert fixed_layer.characters[1]["is_player_character"] is True
 
 
 def test_fixed_layer_assembler_keeps_domain_structure_when_contributor_disabled():

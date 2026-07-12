@@ -163,7 +163,7 @@ class TestCommandDispatcher:
         result = await dispatcher.dispatch("/role_bind 1")
 
         assert result.handled is True
-        assert result.reply == "开场白"
+        assert result.reply == "已绑定/切换扮演角色：Alice。\n\n开场白"
 
     @pytest.mark.asyncio
     async def test_role_bind_returns_switch_confirmation(self):
@@ -180,7 +180,10 @@ class TestCommandDispatcher:
         result = await dispatcher.dispatch("/role_bind 2")
 
         assert result.handled is True
-        assert result.reply == "已切换扮演角色：Bob。后续消息将使用该身份。"
+        assert result.reply == (
+            "已绑定/切换扮演角色：Bob。 "
+            "后续消息将使用该身份；已有历史不会被改写。"
+        )
 
     def test_session_id_validation_has_length_limit(self):
         from rpg_core.session import SessionManager

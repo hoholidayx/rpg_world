@@ -879,6 +879,23 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert new_story.json()["summary"] == "潮湿港口的失踪案。"
     assert new_story.json()["storyPrompt"] == "固定故事提示词，仅存储展示。"
     assert new_story.json()["firstMessage"] == "你听见远处钟声。"
+    templated_story = client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories",
+        json={
+            "title": "角色模板故事",
+            "storyPrompt": "当前玩家是 {USER_PLAY_ROLE_NAME}。",
+            "firstMessage": "欢迎，{USER_PLAY_ROLE_NAME}。",
+        },
+    )
+    assert templated_story.status_code == 200
+    assert templated_story.json()["storyPrompt"] == "当前玩家是 {USER_PLAY_ROLE_NAME}。"
+    assert templated_story.json()["firstMessage"] == "欢迎，{USER_PLAY_ROLE_NAME}。"
+    invalid_template = client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories",
+        json={"title": "非法模板", "firstMessage": "欢迎，{UNKNOWN_ROLE}。"},
+    )
+    assert invalid_template.status_code == 422
+    assert "UNKNOWN_ROLE" in invalid_template.text
     assert client.post(
         "/play-api/v1/workspaces/demo_workspace/stories",
         json={"title": " "},

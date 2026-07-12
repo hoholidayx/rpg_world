@@ -16,6 +16,7 @@ from rpg_core.agent.agent_types import (
 from rpg_core.agent.loop import AgentReply
 from rpg_core.agent.turn.models import TurnBypass, TurnRequest
 from rpg_core.agent.turn.preprocessor import TurnPreprocessor
+from rpg_core.agent.turn.resolver import PlayerCharacterRequiredError
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -52,7 +53,12 @@ class AgentTurnService:
         bypass = await self._resolve_bypass(request)
         if bypass is not None:
             return self._reply_for_bypass(bypass)
-        result = await self._orchestrator.execute_sync(request)
+        try:
+            result = await self._orchestrator.execute_sync(request)
+        except PlayerCharacterRequiredError as exc:
+            return self._reply_for_bypass(
+                TurnBypass(text=exc.reply, reason="player_character_guard")
+            )
         return AgentReply(
             text=result.text,
             tool_records=(
@@ -82,12 +88,18 @@ class AgentTurnService:
         async def emit_end() -> None:
             await event_queue.put(_StreamSentinel())
 
-        await self._orchestrator.execute_stream(
-            request,
-            emit_event=event_queue.put,
-            emit_error=emit_error,
-            emit_end=emit_end,
-        )
+        try:
+            await self._orchestrator.execute_stream(
+                request,
+                emit_event=event_queue.put,
+                emit_error=emit_error,
+                emit_end=emit_end,
+            )
+        except PlayerCharacterRequiredError as exc:
+            await self._emit_bypass(
+                event_queue,
+                TurnBypass(text=exc.reply, reason="player_character_guard"),
+            )
 
     async def _resolve_bypass(self, request: TurnRequest) -> TurnBypass | None:
         return await TurnPreprocessor(

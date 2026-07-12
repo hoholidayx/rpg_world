@@ -215,7 +215,7 @@ await agent.initialize()
 
 `rpg_data` 的数据关系是：workspace 下有多个 story，story 下有多个 session；角色卡和世界书条目属于 workspace，并通过 `rpg_story_characters`、`rpg_story_lorebook_entries` 挂载到 story。同一个角色卡或世界书条目可以挂载到多个 story，挂载表只禁止同一 story 内重复挂载。
 
-Story 主数据字段中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。当前硬切换 schema 变更直接体现在 `0001_initial.sql`，demo 与分页测试数据分别放在 `0002_demo.sql`、`0003_pagination_demo.sql`。
+Story 主数据字段中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。两类 Story 文本当前只支持白名单变量 `{USER_PLAY_ROLE_NAME}`；数据库和 API 返回原始模板，首消息在首次绑定且历史为空时渲染后持久化，Story Prompt 在 turn snapshot 中按 session 角色渲染。未知单花括号变量在保存边界失败，不执行 Jinja、表达式或递归替换。当前硬切换 schema 变更直接体现在 `0001_initial.sql`，demo 与分页测试数据分别放在 `0002_demo.sql`、`0003_pagination_demo.sql`；`0007_player_role_templates.sql` 只条件更新仍精确等于旧默认值的 Demo 数据。
 
 状态表也由 `rpg_data` 管理。SQLite 中的 `document_json` 是模板表和会话表的正文真源，SQL 同时保存模板、story 挂载、session 副本、来源关系、排序和 `status_kind`。`status_kind` 当前只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。状态表必须先通过 `rpg_story_status_tables` 挂载到 story，才能可选绑定到该 story 的一个角色挂载 `story_character_mount_id`；一个角色允许绑定多张状态表，一张 story 状态表挂载最多绑定一个角色，不要给 `story_character_mount_id` 增加唯一约束。`mount_origin` 区分 `system_mount` 与 `story_template`：系统模板只能解除挂载，故事内创建模板可删除挂载及其底层模板，但模板仍被其它 story 使用时必须拒绝删除。创建 session 时 `CatalogService` 调用 `StatusTableService.initialize_session_tables()`，把当前 story 已挂载模板的 document 复制到 `rpg_session_status_tables`，并把 story mount、角色绑定和 `characterName` 快照写入 session 表 metadata；模板后续修改不影响已有 session 副本。`DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；bootstrap 代码不要硬编码 demo 或业务数据。Bootstrap 默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，日志必须输出删除/跳过明细和汇总计数。
 
@@ -225,7 +225,9 @@ Story 主数据字段中，`summary` 是短摘要，`first_message` 是会话开
 
 玩家扮演角色是 session 级运行语义。绑定状态对外只暴露 `bound | invalid`：缺失绑定、角色不存在、未挂载到当前 story、snapshot 损坏或 snapshot 的 mount/story 与当前挂载不一致，都统一视为 `invalid`。WebUI 不在进入 SessionRoom 前拦截，而是在 SessionRoom 内打开不可取消的角色选择弹窗；没有可选角色时显示阻塞空态。CLI / Telegram / Agent API 允许创建空 session，但普通消息在绑定前只返回固定编号角色列表，不调用 LLM、不写 user history。
 
-绑定和切换必须统一经 Agent 命令链路：`/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 只负责把角色 ID 转发到 Agent service，由 Agent service 映射为当前 story 已挂载角色的 1-based 序号并执行 `/role_bind`；不要在 Play API 或 DataManager 中直接写 `rpg_session_profiles`。绑定成功且 main history 为空、story `first_message` 非空时，`SessionRoleService` 追加一条 assistant 开场消息到 main history 和 backup history；已有 history 时不重复追加。Agent 的 send/send_stream 在命令分发之后、进入 LLM 前强校验玩家角色，只有 `bound` 才进入正常生成。
+绑定和切换必须统一经 Agent 命令链路：`/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 只负责把角色 ID 转发到 Agent service，由 Agent service 映射为当前 story 已挂载角色的 1-based 序号并执行 `/role_bind`；不要在 Play API 或 DataManager 中直接写 `rpg_session_profiles`。首次成功绑定且 main history 为空、story `first_message` 非空时，`SessionRoleService` 追加一条渲染后的 assistant 开场消息到 main history 和 backup history；已有 history、后续切换或清空历史后都不重复追加。Agent 的 send/send_stream 在命令分发之后、进入 LLM 前强校验玩家角色，只有 `bound` 才进入正常生成。
+
+玩家角色必须在 Context 门禁前进入不可变 turn snapshot，并由主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是玩家身份唯一真源：角色卡按当前 session 投影为 `PLAYER_CHARACTER` 或 `NPC`，Story Prompt、开场消息、历史、摘要、记忆或旧 metadata 与其冲突时均以绑定快照为准。玩家/NPC 标记不得写回 workspace 角色 metadata；角色切换后刷新 MemorySubAgent 等缓存上下文，但不重写已有历史。
 
 ### ChannelAdapter 基类（`channels/base.py`）
 
@@ -426,7 +428,7 @@ LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache
 
 | 层 | role | 内容 | 变更频率 |
 |---|---|---|---|
-| [0] Fixed | system | 系统提示 + 已启用 RP Module 静态契约 + 世界书 + 角色卡 | ★ 几乎不变 |
+| [0] Fixed | system | 系统提示 + 已启用 RP Module 静态契约 + Story Prompt + 世界书 + 当前玩家角色绑定 + 已标注角色卡 | ★ 几乎不变 |
 | [1] Persistent Memory | system | 常驻记忆 | ★ 离线更新 |
 | [2] Summary | system | 历史摘要（条件触发） | ★☆ 少量 |
 | [3..N] Hot History | mixed | 最近 N 轮对话 | ★★☆ 每轮追加 |
@@ -551,7 +553,7 @@ agent.send(user_input)
 | **StatusSubAgent** | 外部变数预判、可选 Narrative Outcome 预裁定、无需裁定时的确定性状态预更新 | 主 LLM 调用之前；预裁定结果进入主 Agent 首次 Context |
 | **MemorySubAgent** | 记忆总结/召回/剧情持久化 | `process()` 由 CommandDispatcher 或自动触发 |
 
-支持独立 LLM provider 配置，通过 `llm_service/llm.yaml` 的 `agent.status_sub_agent` / `agent.memory_sub_agent` biz key 选择 `shared`、`openai` 或 `llama`，通过 `SubAgentContext` 获取世界书 + 角色卡上下文。
+支持独立 LLM provider 配置，通过 `llm_service/llm.yaml` 的 `agent.status_sub_agent` / `agent.memory_sub_agent` biz key 选择 `shared`、`openai` 或 `llama`，通过 `SubAgentContext` 获取世界书、当前玩家角色强约束和带 PLAYER/NPC 标注的角色卡上下文。StatusSubAgent 使用本轮不可变角色快照；MemorySubAgent 在角色绑定或切换后刷新共享上下文。
 
 ### 斜杠命令系统（`agent/command.py`）
 

@@ -31,11 +31,19 @@ async def test_role_guard_bind_and_first_message_are_end_to_end_and_idempotent(
     scripted_llm_manager,
 ):
     session_id = "integration_role"
-    first_message = "你在测试大厅醒来。"
+    first_message_template = "你——{USER_PLAY_ROLE_NAME}——在测试大厅醒来。"
+    rendered_first_message = "你——Integration Tester——在测试大厅醒来。"
     agent = await integration_agent_factory(
         session_id,
         bind_role=False,
-        first_message=first_message,
+        first_message=first_message_template,
+    )
+    story = integration_data_gateway.catalog.get_session_story(session_id)
+    assert story is not None
+    integration_data_gateway.catalog.update_story(
+        str(story.workspace_id),
+        int(story.id),
+        story_prompt="当前玩家是 {USER_PLAY_ROLE_NAME}。",
     )
 
     blocked = await agent.send("在吗？")
@@ -48,18 +56,28 @@ async def test_role_guard_bind_and_first_message_are_end_to_end_and_idempotent(
     bound = await agent.execute_command("/role_bind 1")
     rebound = await agent.execute_command("/role_bind 1")
 
-    assert bound.handled is True and bound.reply == first_message
-    assert rebound.handled is True and "已切换扮演角色" in rebound.reply
+    assert bound.handled is True
+    assert bound.reply == (
+        "已绑定/切换扮演角色：Integration Tester。\n\n"
+        + rendered_first_message
+    )
+    assert rebound.handled is True and "已绑定/切换扮演角色" in rebound.reply
     first_rows = integration_data_gateway.messages.list(session_id)
     first_backup = integration_data_gateway.backup.messages.list(session_id)
     assert [(row.role, row.content, row.turn_id, row.seq_in_turn) for row in first_rows] == [
-        ("assistant", first_message, 1, 1),
+        ("assistant", rendered_first_message, 1, 1),
     ]
-    assert [(row.role, row.content) for row in first_backup] == [("assistant", first_message)]
+    assert [(row.role, row.content) for row in first_backup] == [
+        ("assistant", rendered_first_message)
+    ]
 
     reply = await agent.send("现在开始")
 
     assert reply.text == "config-model response"
+    main_system = scripted_llm_manager.main_provider().calls[-1].messages[0]["content"]
+    assert "当前玩家扮演角色：Integration Tester" in main_system
+    assert "当前玩家是 Integration Tester。" in main_system
+    assert "Integration Tester [PLAYER_CHARACTER｜玩家当前扮演]" in main_system
     rows = integration_data_gateway.messages.list(session_id)
     assert [(row.turn_id, row.seq_in_turn) for row in rows] == [(1, 1), (2, 1), (2, 2)]
     assert integration_data_gateway.backup.messages.count(session_id) == 3
@@ -132,6 +150,9 @@ async def test_main_llm_runtime_priority_context_window_and_subagent_route_indep
         STORY_PROVIDER_KEY,
     ]
     assert len(scripted_llm_manager.status.calls) == 4
+    status_system = scripted_llm_manager.status.calls[0].messages[0]["content"]
+    assert "当前玩家扮演角色：Integration Tester" in status_system
+    assert "Integration Tester [PLAYER_CHARACTER｜玩家当前扮演]" in status_system
     assert scripted_llm_manager.status.get_default_model() == "status-model"
     assert any(
         call.biz_key == AGENT_STATUS_SUB_AGENT_BIZ_KEY and call.provider_key is None

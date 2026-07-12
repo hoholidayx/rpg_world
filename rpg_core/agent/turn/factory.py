@@ -69,6 +69,7 @@ class TurnRuntimeFactory:
                     user_input=plan.request.text,
                     turn_stats=stats,
                     rp_module_runtime=runtime.rp_module_runtime,
+                    player_character=plan.execution.player_character,
                 )
             runtime.preflight_outcome = self._status_preflight.outcome_state(
                 scratch,

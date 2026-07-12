@@ -1,6 +1,6 @@
 {% if characters %}
 {% for char in characters %}
-### {{ char.name }}
+### {{ char.name }}{% if char.control_role == "player_character" %} [PLAYER_CHARACTER｜玩家当前扮演]{% elif char.control_role == "npc" %} [NPC｜非玩家角色]{% endif %}
 {% if char.personality %}
 个性: {{ char.personality }}
 {% endif %}

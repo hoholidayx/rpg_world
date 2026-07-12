@@ -14,13 +14,22 @@ Usage::
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from rpg_core.context.fixed_layer.contributors import (
+    annotate_player_character_cards,
     build_character_section,
     build_lorebook_section,
+    build_player_character_section,
 )
 from rpg_core.context.fixed_layer.rendering import (
     render_fixed_layer_sections,
 )
+
+if TYPE_CHECKING:
+    from rpg_core.context.fixed_layer.contributors.player_character import (
+        PlayerCharacterContext,
+    )
 
 
 class SubAgentContext:
@@ -42,10 +51,12 @@ class SubAgentContext:
         self,
         lorebook_entries: list[dict[str, object]] | None = None,
         characters: list[dict[str, object]] | None = None,
+        player_character: "PlayerCharacterContext | None" = None,
     ) -> None:
         self._system_prompt: str = ""  # 由 bind_context() 注入
         self._lorebook_entries = lorebook_entries or []
         self._characters = characters or []
+        self._player_character = player_character
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -53,7 +64,11 @@ class SubAgentContext:
         """设置子 Agent 自己的系统提示（由 BaseSubAgent.bind_context 调用）。"""
         self._system_prompt = prompt
 
-    def render(self) -> str:
+    def render(
+        self,
+        *,
+        player_character: "PlayerCharacterContext | None" = None,
+    ) -> str:
         """渲染完整上下文：系统提示（子 Agent 自身） + 世界书 + 角色卡。
 
         空段自动跳过（若无世界书条目则世界书段不出现）。
@@ -67,7 +82,12 @@ class SubAgentContext:
         if lore_section:
             parts.append(lore_section)
 
-        char_section = self._render_characters()
+        resolved_player = player_character or self._player_character
+        player_section = self._render_player_character(resolved_player)
+        if player_section:
+            parts.append(player_section)
+
+        char_section = self._render_characters(resolved_player)
         if char_section:
             parts.append(char_section)
 
@@ -80,7 +100,22 @@ class SubAgentContext:
         section = build_lorebook_section(self._lorebook_entries)
         return render_fixed_layer_sections([section]) if section is not None else ""
 
-    def _render_characters(self) -> str:
+    def _render_player_character(
+        self,
+        player_character: "PlayerCharacterContext | None",
+    ) -> str:
+        section = build_player_character_section(player_character)
+        return render_fixed_layer_sections([section]) if section is not None else ""
+
+    def _render_characters(
+        self,
+        player_character: "PlayerCharacterContext | None",
+    ) -> str:
         """渲染角色卡段落。"""
-        section = build_character_section(self._characters)
+        section = build_character_section(
+            annotate_player_character_cards(
+                self._characters,
+                player_character,
+            )
+        )
         return render_fixed_layer_sections([section]) if section is not None else ""

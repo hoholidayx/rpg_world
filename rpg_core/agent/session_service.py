@@ -58,6 +58,7 @@ class AgentSessionService:
             int(index),
         )
         self._lifecycle.session_manager.load()
+        self._lifecycle.refresh_sub_agent_bindings()
         logger.info(
             _TAG + " player character binding loaded history: session_id={}, index={}, first_message_appended={}, history_len={}",
             session_id,

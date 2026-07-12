@@ -12,6 +12,7 @@ from loguru import logger
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_core.agent.sub_agents import StatusSubAgentPreflightOutcome
 from rpg_core.agent.turn.models import TurnRequest, TurnResult
+from rpg_core.agent.turn.resolver import PlayerCharacterRequiredError
 from rpg_core.context.usage import aggregate_usage_records
 from rpg_core.settings import settings
 
@@ -96,6 +97,8 @@ class TurnOrchestrator:
             )
             if runtime is not None:
                 runtime.discard()
+            raise
+        except PlayerCharacterRequiredError:
             raise
         except Exception as exc:
             logger.opt(exception=exc).error(
@@ -185,6 +188,8 @@ class TurnOrchestrator:
             )
             if runtime is not None:
                 runtime.discard()
+            raise
+        except PlayerCharacterRequiredError:
             raise
         except Exception as exc:
             logger.opt(exception=exc).error(

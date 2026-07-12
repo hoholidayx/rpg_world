@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from llm_service.manager import ProviderOverrides
 
     from rpg_core.agent.sub_agents.context import SubAgentContext
+    from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
 
 # ── constants ──────────────────────────────────────────────────────────
 
@@ -210,6 +211,7 @@ class StatusSubAgent(BaseSubAgent):
         user_input: str,
         max_history_rounds: int = 5,
         turn_stats: TurnStats | None = None,
+        player_character: "TurnPlayerCharacterSnapshot | None" = None,
     ) -> StatusSubAgentResult:
         """根据用户输入预更新状态表。
 
@@ -218,7 +220,7 @@ class StatusSubAgent(BaseSubAgent):
         history:
             完整对话历史（内部按 *max_history_rounds* 窗口化）。
         state_context:
-            当前状态描述（如 ``[scene]`` 块）。
+            当前状态描述（如 ``[scene]`` 标签块）。
         user_input:
             用户原始输入（最新一条）。
         max_history_rounds:
@@ -249,7 +251,11 @@ class StatusSubAgent(BaseSubAgent):
                 )
 
             messages = self._build_messages(
-                history, state_context, user_input, max_history_rounds
+                history,
+                state_context,
+                user_input,
+                max_history_rounds,
+                player_character=player_character,
             )
 
             # ── LLM call with timing ────────────────────────────────
@@ -484,6 +490,8 @@ class StatusSubAgent(BaseSubAgent):
         state_context: str,
         user_input: str,
         max_rounds: int,
+        *,
+        player_character: "TurnPlayerCharacterSnapshot | None" = None,
     ) -> list[dict]:
         """组装子 Agent 消息：系统上下文（含世界书/角色卡） + 历史窗口 + 场景 + 用户输入。"""
         total_turns = SessionManager.count_turns(history)
@@ -494,7 +502,9 @@ class StatusSubAgent(BaseSubAgent):
                 _TAG + " history window: {}/{} turns (max_rounds={})",
                 kept, total_turns, max_rounds,
             )
-        system_content = self._build_system_context()
+        system_content = self._build_system_context(
+            player_character=player_character,
+        )
         outcome_instruction = (
             "先判断是否存在外部实质变数；需要裁定时只调用 "
             "rp_story_outcome，且不要同时调用状态工具。"

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.loop import ToolCallRecord
     from rpg_core.agent.sub_agents import StatusSubAgent
     from rpg_core.agent.tool_service import AgentToolService
+    from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
     from rpg_core.agent.transaction import TurnScratch
     from rpg_core.rp_modules import RPModuleTurnRuntime
     from rpg_core.scene import SceneTracker
@@ -51,6 +52,7 @@ class StatusPreflightHook:
         user_input: str,
         turn_stats: "TurnStats",
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
+        player_character: "TurnPlayerCharacterSnapshot | None" = None,
     ) -> StatusSubAgentResult | None:
         sub_agent = self._status_sub_agent()
         if sub_agent is None:
@@ -99,6 +101,7 @@ class StatusPreflightHook:
                 ),
                 user_input=user_input,
                 turn_stats=turn_stats,
+                player_character=player_character,
             )
         if result.updated:
             logger.info(

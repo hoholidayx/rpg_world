@@ -234,6 +234,36 @@ async def test_lifecycle_switch_rebuilds_resources_and_rebinds_subagents(
     assert lifecycle_deps.start.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_lifecycle_can_refresh_sub_agent_bindings_without_rebuilding_resources(
+    lifecycle_deps,
+) -> None:
+    built: list[str] = []
+
+    def factory(*, world_name: str, session_id: str) -> AgentContextResources:
+        del world_name
+        built.append(session_id)
+        return _resources(session_id)
+
+    lifecycle = AgentRuntimeLifecycle(
+        session_id="s1",
+        world_name="World",
+        history_enabled=False,
+        model_runtime=_ModelRuntime(),
+        command_dispatcher=_Commands(),
+        resource_factory=factory,
+    )
+    await lifecycle.initialize(tool_service=_ToolService(), mailbox=_Mailbox())
+    status_sub_agent = lifecycle.status_sub_agent
+    memory_sub_agent = lifecycle.memory_sub_agent
+
+    lifecycle.refresh_sub_agent_bindings()
+
+    assert built == ["s1"]
+    assert len(status_sub_agent.contexts) == 2
+    assert len(memory_sub_agent.contexts) == 2
+
+
 def test_lifecycle_reindex_memory_uses_typed_resources(lifecycle_deps) -> None:
     lifecycle = AgentRuntimeLifecycle(
         session_id="s1",

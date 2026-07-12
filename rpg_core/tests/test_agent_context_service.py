@@ -13,8 +13,10 @@ from rpg_core.agent.turn import (
     TurnExecutionPolicy,
     TurnExecutionSnapshot,
     TurnMode,
+    TurnPlayerCharacterSnapshot,
     TurnRequest,
 )
+from rpg_core.context.fixed_layer.contributors import PLAYER_CHARACTER_SECTION_ID
 from rpg_core.context.rpg_context import (
     FixedLayerData,
     HotHistoryLayer,
@@ -73,10 +75,10 @@ class _Scene:
         return "<scene>大厅</scene>"
 
 
-def _resources(builder: _Builder, scene=None) -> AgentContextResources:  # noqa: ANN001
+def _resources(builder: _Builder, scene=None, characters=None) -> AgentContextResources:  # noqa: ANN001
     return AgentContextResources(
         builder=builder,
-        character_manager=None,
+        character_manager=characters,
         lorebook_manager=None,
         status_manager=None,
         scene_tracker=scene,
@@ -84,9 +86,9 @@ def _resources(builder: _Builder, scene=None) -> AgentContextResources:  # noqa:
     )
 
 
-def _service(builder: _Builder, *, session=None, scene=None):  # noqa: ANN001, ANN201
+def _service(builder: _Builder, *, session=None, scene=None, characters=None):  # noqa: ANN001, ANN201
     session = session or SessionManager(history_enabled=False)
-    resources = _resources(builder, scene)
+    resources = _resources(builder, scene, characters)
     return AgentContextService(
         world_name="World",
         session_id=lambda: "s1",
@@ -100,7 +102,12 @@ def _service(builder: _Builder, *, session=None, scene=None):  # noqa: ANN001, A
     )
 
 
-def _execution(mode: TurnMode = TurnMode.IC) -> TurnExecutionSnapshot:
+def _execution(
+    mode: TurnMode = TurnMode.IC,
+    *,
+    player_character: TurnPlayerCharacterSnapshot | None = None,
+    rendered_story_prompt: str = "",
+) -> TurnExecutionSnapshot:
     request = TurnRequest.create("preview", mode=mode)
     return TurnExecutionSnapshot(
         request=request,
@@ -109,7 +116,18 @@ def _execution(mode: TurnMode = TurnMode.IC) -> TurnExecutionSnapshot:
         narrative_style_name="",
         narrative_style_prompt="",
         policy=TurnExecutionPolicy.for_mode(mode),
+        player_character=player_character,
+        rendered_story_prompt=rendered_story_prompt,
     )
+
+
+class _Characters:
+    @staticmethod
+    def list_enabled_characters() -> list[dict[str, object]]:
+        return [
+            {"id": 1, "mount_id": 10, "name": "Bob"},
+            {"id": 2, "mount_id": 20, "name": "Alice"},
+        ]
 
 
 def test_context_preview_composes_scene_before_input_without_mutating_history() -> None:
@@ -151,6 +169,31 @@ def test_context_service_reassembles_fixed_layer_for_each_build() -> None:
     assert service._assemble_fixed_layer.call_count == 2
     assert builder.calls[0]["fixed_layer"].world_name == "first"
     assert builder.calls[1]["fixed_layer"].world_name == "second"
+
+
+def test_context_fixed_layer_uses_frozen_player_and_story_prompt() -> None:
+    builder = _Builder()
+    service = _service(builder, characters=_Characters())
+    execution = _execution(
+        player_character=TurnPlayerCharacterSnapshot(
+            character_id=2,
+            mount_id=20,
+            story_id=1,
+            name="Alice",
+        ),
+        rendered_story_prompt="本轮玩家角色是 Alice。",
+    )
+
+    fixed_layer = service._assemble_fixed_layer(turn_execution=execution)
+
+    section_ids = [section.id for section in fixed_layer.sections]
+    assert PLAYER_CHARACTER_SECTION_ID in section_ids
+    assert fixed_layer.sections[section_ids.index("story_prompt")].content == "本轮玩家角色是 Alice。"
+    player_section = fixed_layer.sections[section_ids.index(PLAYER_CHARACTER_SECTION_ID)]
+    assert player_section.priority == 25
+    assert "旧内容与本绑定冲突" in player_section.content
+    assert fixed_layer.characters[0]["control_role"] == "npc"
+    assert fixed_layer.characters[1]["control_role"] == "player_character"
 
 
 def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -> None:

@@ -17,6 +17,7 @@ from rpg_core.context.fixed_layer.contributors import (
     CharacterFixedLayerContributor,
     CoreRPContractContributor,
     LorebookFixedLayerContributor,
+    PlayerCharacterFixedLayerContributor,
     StaticFixedLayerContributor,
     StoryPromptFixedLayerContributor,
     TextOutputFormatFixedLayerContributor,
@@ -66,8 +67,16 @@ class AgentContextService:
         self._main_llm_selection = main_llm_selection
         self._token_counter = token_counter
 
-    def resolve_turn_execution(self, request: TurnRequest) -> TurnExecutionSnapshot:
-        return TurnSnapshotResolver(self._session_id()).resolve(request)
+    def resolve_turn_execution(
+        self,
+        request: TurnRequest,
+        *,
+        require_player_character: bool = False,
+    ) -> TurnExecutionSnapshot:
+        return TurnSnapshotResolver(self._session_id()).resolve(
+            request,
+            require_player_character=require_player_character,
+        )
 
     def resolve_rp_module_snapshot(self) -> "RPModuleSelectionSnapshot":
         registry = self._rp_module_registry()
@@ -352,14 +361,31 @@ class AgentContextService:
         config = resources.builder.config
         contributors = [
             CoreRPContractContributor(self._world_name),
-            StoryPromptFixedLayerContributor(self._session_id()),
+            StoryPromptFixedLayerContributor(
+                self._session_id(),
+                content=(
+                    turn_execution.rendered_story_prompt
+                    if turn_execution is not None
+                    else None
+                ),
+            ),
             LorebookFixedLayerContributor(
                 resources.lorebook_manager,
                 enabled=getattr(config, "enable_lorebook", True),
             ),
+            PlayerCharacterFixedLayerContributor(
+                turn_execution.player_character
+                if turn_execution is not None
+                else None
+            ),
             CharacterFixedLayerContributor(
                 resources.character_manager,
                 enabled=getattr(config, "enable_character", True),
+                player_character=(
+                    turn_execution.player_character
+                    if turn_execution is not None
+                    else None
+                ),
             ),
         ]
         if turn_execution is not None:

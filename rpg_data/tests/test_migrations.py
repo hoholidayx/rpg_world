@@ -252,6 +252,55 @@ def test_run_migrations_creates_initial_tables() -> None:
         conn.close()
 
 
+def test_player_role_template_migration_only_repairs_untouched_demo_values(tmp_path) -> None:
+    conn = db.connect(tmp_path / "role_template.sqlite3")
+    try:
+        run_migrations(conn)
+        old_forest_message = (
+            "北境森林的霜雾刚漫过石林入口，幽蓝封印在远处一明一暗。"
+            "Alice 收紧斗篷，看向你：“Bob，祭坛那边又有潮声了。”"
+        )
+        conn.execute(
+            "UPDATE rpg_stories SET first_message = ? WHERE title = ?",
+            (old_forest_message, "北境森林 Demo"),
+        )
+        conn.execute(
+            "UPDATE rpg_stories SET first_message = ? WHERE title = ?",
+            ("用户自定义开场", "奥术学院 Demo"),
+        )
+        conn.execute(
+            "UPDATE rpg_characters SET metadata_json = ? WHERE name = ?",
+            ('{"kind":"demo","role":"player"}', "Bob"),
+        )
+        conn.execute(
+            "UPDATE rpg_characters SET metadata_json = ? WHERE name = ?",
+            ('{"kind":"demo","custom":true}', "Alice"),
+        )
+        conn.execute("DELETE FROM rpg_schema_migrations WHERE version = '0007'")
+        conn.commit()
+
+        run_migrations(conn)
+
+        stories = {
+            row["title"]: row["first_message"]
+            for row in conn.execute(
+                "SELECT title, first_message FROM rpg_stories WHERE workspace_id = 'demo_workspace'"
+            )
+        }
+        metadata = {
+            row["name"]: row["metadata_json"]
+            for row in conn.execute(
+                "SELECT name, metadata_json FROM rpg_characters WHERE workspace_id = 'demo_workspace'"
+            )
+        }
+        assert "{USER_PLAY_ROLE_NAME}" in stories["北境森林 Demo"]
+        assert stories["奥术学院 Demo"] == "用户自定义开场"
+        assert metadata["Bob"] == '{"kind":"demo"}'
+        assert metadata["Alice"] == '{"kind":"demo","custom":true}'
+    finally:
+        conn.close()
+
+
 def test_run_migrations_is_idempotent() -> None:
     conn = db.connect(":memory:")
     try:
@@ -269,6 +318,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0004", "0004_main_llm_selection.sql"),
             ("0005", "0005_rp_modules.sql"),
             ("0006", "0006_session_composer.sql"),
+            ("0007", "0007_player_role_templates.sql"),
         ]
     finally:
         conn.close()

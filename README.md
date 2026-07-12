@@ -98,7 +98,7 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 
 - 1 个 workspace 下可以有多个 story。
 - 1 个 story 下可以有多个 session。
-- Story 主数据中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。当前硬切换 schema 变更直接体现在 `0001_initial.sql`，demo 与分页测试数据分别放在 `0002_demo.sql`、`0003_pagination_demo.sql`。
+- Story 主数据中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词。两类模板当前只支持 `{USER_PLAY_ROLE_NAME}` 白名单变量，数据库与 API 始终返回原始模板；未知变量在保存时返回校验错误，不执行 Jinja、表达式或递归替换。首消息在首次成功绑定且历史为空时渲染，Story Prompt 在每个 turn 的不可变 snapshot 中渲染一次。当前硬切换 schema 变更直接体现在 `0001_initial.sql`，demo 与分页测试数据分别放在 `0002_demo.sql`、`0003_pagination_demo.sql`；`0007_player_role_templates.sql` 只条件更新仍保持旧默认值的 Demo 数据。
 - 角色卡和世界书条目属于 workspace，通过挂载表关联到 story；同一个角色卡或世界书条目可以挂载到多个 story。
 - 状态表模板属于 workspace，通过 `rpg_story_status_tables` 挂载到 story；挂载记录可选绑定同一 story 的一个角色。一个角色可绑定多张状态表，但单张 story 状态表挂载最多绑定一个角色。
 - Play 侧公开 `session_id` 是全局唯一短 ID，创建入口由 `rpg_data` 生成，当前生成格式为 `s_` + 10 位小写字母/数字；创建 session 时绑定 `workspace_id + story_id`，之后会话内接口只传 `session_id`。
@@ -111,7 +111,8 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - Play WebUI 新建或进入 session 后统一在 SessionRoom 内处理选角；invalid 时打开不可取消弹窗，绑定前禁用输入区。设置菜单可以切换当前扮演角色，切换只影响后续 user 消息展示和后续 prompt 语义，不重写历史。
 - CLI / Telegram / Agent API 允许建立空 session；绑定前普通消息只返回固定编号角色列表，不调用 LLM、不写 user history。
 - 绑定与切换统一走 Agent 命令 `/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 会转发到 Agent service，由 Agent service 将角色 ID 映射为当前 story 已挂载角色序号并执行同一命令；不要在 Play API/DataManager 中直接写绑定。
-- 绑定成功且 main history 为空、story `first_message` 非空时，`SessionRoleService` 会追加一条 assistant 开场消息到 main 和 backup history；已有 history 时不会重复追加。
+- 首次成功绑定且 main history 为空、story `first_message` 非空时，`SessionRoleService` 会按刚绑定的角色渲染模板，再将同一条 assistant 开场消息写入 main 和 backup history；已有 history 或后续切换角色时不会重复追加或改写。
+- 玩家身份在 Context 门禁前固化进 `TurnExecutionSnapshot`，由门禁、主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是身份唯一真源；角色卡只在 Context 投影时标注为 `PLAYER_CHARACTER` 或 `NPC`，不依赖角色 metadata。当前绑定覆盖冲突的旧历史、摘要和记忆，但不会自动改写这些既有数据。
 
 Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream`、`/chat/stop` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`history-page`、`scene`、`commands`、`turn`、`stream`、`stop`、`player-character`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
 
@@ -188,7 +189,7 @@ RPGGameAgent（composition root + public facade）
 RPGGameAgent → AgentMailbox（QueueItem / TurnRequest）
   → TurnPreprocessor（命令 + 玩家角色 guard）
   → TurnPlanResolver
-      → TurnSnapshotResolver → TurnExecutionSnapshot（mode / style / policy）
+      → TurnSnapshotResolver → TurnExecutionSnapshot（mode / style / policy / player character / rendered story prompt）
       → MainLLMSelection + RPModuleSelectionSnapshot
   → TurnOrchestrator
       → TurnRuntimeFactory
@@ -265,7 +266,7 @@ async for event in agent.send_stream(
 
 当前发送顺序按缓存稳定性和 RP 注意力组织：
 
-1. Fixed Layer：固定 RP 指令、文本输出格式、已启用 RP Module 静态契约、世界书、角色卡。
+1. Fixed Layer：固定 RP 指令、Story Prompt、当前玩家角色标签块、文本输出格式、已启用 RP Module 静态契约、世界书、带 PLAYER/NPC 标注的角色卡。
 2. Persistent Memory / Summary。
 3. Hot History。
 4. Story Memory / Recalled Memory / Status Tables / RP Modules。

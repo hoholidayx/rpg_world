@@ -11,6 +11,15 @@ from rpg_core.context.fixed_layer.contributors.lorebook import (
     build_lorebook_section,
     render_lorebook_section_body,
 )
+from rpg_core.context.fixed_layer.contributors.player_character import (
+    NPC_CONTROL_ROLE,
+    PLAYER_CHARACTER_CONTROL_ROLE,
+    PLAYER_CHARACTER_SECTION_ID,
+    PLAYER_CHARACTER_SOURCE,
+    PlayerCharacterFixedLayerContributor,
+    annotate_player_character_cards,
+    build_player_character_section,
+)
 from rpg_core.context.fixed_layer.contributors.story_prompt import (
     STORY_PROMPT_SECTION_ID,
     STORY_PROMPT_SOURCE,
@@ -48,6 +57,13 @@ __all__ = [
     "TurnExecutionFixedLayerContributor",
     "build_character_section",
     "build_lorebook_section",
+    "NPC_CONTROL_ROLE",
+    "PLAYER_CHARACTER_CONTROL_ROLE",
+    "PLAYER_CHARACTER_SECTION_ID",
+    "PLAYER_CHARACTER_SOURCE",
+    "PlayerCharacterFixedLayerContributor",
+    "annotate_player_character_cards",
+    "build_player_character_section",
     "render_character_section_body",
     "render_lorebook_section_body",
 ]

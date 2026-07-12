@@ -26,7 +26,7 @@ VALUES (
     '北境森林 Demo',
     'Bob 与 Alice 在北境森林追查幽蓝封印。',
     '用于验证 workspace、story、session、角色卡与 lorebook 挂载关系的演示故事。',
-    '北境森林的霜雾刚漫过石林入口，幽蓝封印在远处一明一暗。Alice 收紧斗篷，看向你：“Bob，祭坛那边又有潮声了。”',
+    '北境森林的霜雾刚漫过石林入口，幽蓝封印在远处一明一暗。你——{USER_PLAY_ROLE_NAME}——听见祭坛方向再次传来潮声。',
     '{"kind":"demo","order":1}'
 );
 
@@ -43,7 +43,7 @@ VALUES (
     '奥术学院 Demo',
     'Alice 返回学院调查炎心之木的旧档案。',
     '用于验证同一角色卡和 lorebook entry 可挂载到多个 story。',
-    '旧档案馆的铜铃在午后轻响，管理员莫兰把一叠封蜡破损的登记簿推到桌边：“Alice，如果你真要查炎心之木，就从这一本开始。”',
+    '旧档案馆的铜铃在午后轻响，管理员莫兰把一叠封蜡破损的登记簿推到桌边，看向你：“{USER_PLAY_ROLE_NAME}，如果你真要查炎心之木，就从这一本开始。”',
     '{"kind":"demo","order":2}'
 );
 
@@ -194,7 +194,7 @@ VALUES (
     'Bob',
     'bold',
     'A brave knight who favors direct charges and two-handed swords.',
-    '{"kind":"demo","role":"player"}'
+    '{"kind":"demo"}'
 );
 
 INSERT OR IGNORE INTO rpg_characters (
@@ -209,7 +209,7 @@ VALUES (
     'Alice',
     'curious',
     'A young wizard from the Arcanum Academy with a talent for elemental magic.',
-    '{"kind":"demo","role":"companion"}'
+    '{"kind":"demo"}'
 );
 
 INSERT OR IGNORE INTO rpg_character_details (

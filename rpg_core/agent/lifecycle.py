@@ -131,6 +131,11 @@ class AgentRuntimeLifecycle:
         self._replace_resources(self._session_id)
         tool_service.refresh_base_registry()
 
+    def refresh_sub_agent_bindings(self) -> None:
+        """Refresh cached SubAgent context after session-local role changes."""
+
+        self._refresh_sub_agent_bindings()
+
     async def switch_session(
         self,
         session_id: str,
@@ -214,7 +219,10 @@ class AgentRuntimeLifecycle:
         self._refresh_sub_agent_bindings()
 
     def _refresh_sub_agent_bindings(self) -> None:
-        context = _build_sub_agent_context(self._resources)
+        context = _build_sub_agent_context(
+            self._resources,
+            session_id=self._session_id,
+        )
         if self._status_sub_agent is not None:
             providers = (
                 [self._resources.scene_tracker]
@@ -224,7 +232,12 @@ class AgentRuntimeLifecycle:
             self._status_sub_agent.replace_tool_providers(providers)
             self._status_sub_agent.bind_context(context)
         if self._memory_sub_agent is not None:
-            self._memory_sub_agent.bind_context(_build_sub_agent_context(self._resources))
+            self._memory_sub_agent.bind_context(
+                _build_sub_agent_context(
+                    self._resources,
+                    session_id=self._session_id,
+                )
+            )
 
     def _configure_commands(self) -> None:
         self._command_dispatcher.register_default_builtins()
@@ -241,7 +254,11 @@ class AgentRuntimeLifecycle:
         self._command_dispatcher.replace_sub_agents(sub_agents)
 
 
-def _build_sub_agent_context(resources: AgentContextResources) -> SubAgentContext:
+def _build_sub_agent_context(
+    resources: AgentContextResources,
+    *,
+    session_id: str,
+) -> SubAgentContext:
     lorebook_entries: list[dict[str, object]] = []
     if resources.lorebook_manager is not None:
         try:
@@ -256,7 +273,22 @@ def _build_sub_agent_context(resources: AgentContextResources) -> SubAgentContex
         except Exception:
             pass
 
+    player_character = None
+    try:
+        from rpg_data import models
+        from rpg_data.services import get_data_service_gateway
+
+        state = get_data_service_gateway().session_roles.get_state(session_id)
+        if state.status == models.PLAYER_CHARACTER_STATUS_BOUND:
+            player_character = state.player
+    except FileNotFoundError:
+        logger.debug(
+            _TAG + " SubAgent player context skipped missing session: session_id={}",
+            session_id,
+        )
+
     return SubAgentContext(
         lorebook_entries=lorebook_entries,
         characters=characters,
+        player_character=player_character,
     )

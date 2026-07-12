@@ -41,6 +41,8 @@ const emptyDraft: DraftState = {
   storyPrompt: '',
 }
 
+const PLAYER_ROLE_NAME_TEMPLATE = '{USER_PLAY_ROLE_NAME}'
+
 function formatDate(value?: string | null) {
   if (!value) return '暂无'
   return value.replace('T', ' ').slice(0, 16)
@@ -268,6 +270,13 @@ function StoryEditContent({
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [mainLLMError, setMainLLMError] = useState<string | null>(null)
+
+  function appendPlayerRoleTemplate(field: 'firstMessage' | 'storyPrompt') {
+    setDraft((current) => ({
+      ...current,
+      [field]: `${current[field]}${PLAYER_ROLE_NAME_TEMPLATE}`,
+    }))
+  }
 
   const storiesQuery = useQuery({
     queryKey: ['play-stories', currentWorkspace],
@@ -658,7 +667,7 @@ function StoryEditContent({
 
               <Panel
                 title="开场与固定提示词"
-                description="first_message 用于新会话开场模板；story_prompt 会作为故事固定提示词进入 fixed layer。"
+                description="first_message 与 story_prompt 支持安全的玩家角色变量；原始模板保存在 Story 中，实际内容按 session 绑定角色渲染。"
                 action={<Chip tone="violet">rpg_stories</Chip>}
               >
                 <div className="grid gap-4">
@@ -668,6 +677,21 @@ function StoryEditContent({
                       onChange={(event) => setDraft((current) => ({ ...current, firstMessage: event.target.value }))}
                       className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-7 text-slate-800 outline-none transition focus:border-teal-300 focus:ring-4 focus:ring-teal-100"
                     />
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => appendPlayerRoleTemplate('firstMessage')}
+                        className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 font-mono text-xs font-bold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                      >
+                        插入 {PLAYER_ROLE_NAME_TEMPLATE}
+                      </button>
+                      <span className="text-xs font-semibold leading-5 text-slate-400">
+                        仅在历史为空的首次绑定时渲染并写入；不会回写已有 session。
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-amber-600">
+                      可能被玩家选择的角色不要固定写成与玩家对话的 NPC；优先使用中立旁白和玩家角色变量。
+                    </p>
                   </FieldShell>
                   <FieldShell label="story_prompt" hint="固定故事提示词" full>
                     <textarea
@@ -675,7 +699,18 @@ function StoryEditContent({
                       onChange={(event) => setDraft((current) => ({ ...current, storyPrompt: event.target.value }))}
                       className="min-h-44 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-sm leading-7 text-slate-800 outline-none transition focus:border-teal-300 focus:ring-4 focus:ring-teal-100"
                     />
-                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">保存后会在下一次上下文构建或预览时生效。</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => appendPlayerRoleTemplate('storyPrompt')}
+                        className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 font-mono text-xs font-bold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                      >
+                        插入 {PLAYER_ROLE_NAME_TEMPLATE}
+                      </button>
+                      <span className="text-xs font-semibold leading-5 text-slate-400">
+                        保存后会在下一次上下文构建或预览时按当前绑定角色生效。
+                      </span>
+                    </div>
                   </FieldShell>
                 </div>
               </Panel>

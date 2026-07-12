@@ -90,8 +90,18 @@ class TurnExecutionPolicy:
 
 
 @dataclass(frozen=True)
+class TurnPlayerCharacterSnapshot:
+    """Session player identity frozen before Context gates and LLM work."""
+
+    character_id: int
+    mount_id: int
+    story_id: int
+    name: str
+
+
+@dataclass(frozen=True)
 class TurnExecutionSnapshot:
-    """Resolved mode/style configuration that stays immutable for one turn."""
+    """Resolved mode, style, player identity, and Story prompt for one turn."""
 
     request: TurnRequest
     mode_prompt: str
@@ -99,6 +109,8 @@ class TurnExecutionSnapshot:
     narrative_style_name: str
     narrative_style_prompt: str
     policy: TurnExecutionPolicy
+    player_character: TurnPlayerCharacterSnapshot | None = None
+    rendered_story_prompt: str = ""
 
 
 @dataclass(frozen=True)

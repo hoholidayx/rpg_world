@@ -28,7 +28,12 @@ from llm_service.base_provider import LLMProvider
 if TYPE_CHECKING:
     from rpg_core.agent.command import AgentCommandTarget, CommandDef
     from rpg_core.agent.sub_agents.context import SubAgentContext
+    from rpg_core.context.fixed_layer.contributors.player_character import (
+        PlayerCharacterContext,
+    )
     from llm_service.manager import ProviderOverrides
+
+
 @runtime_checkable
 class ToolProvider(Protocol):
     """工具提供者接口。
@@ -150,7 +155,12 @@ class BaseSubAgent:
             type(self).__name__, len(self.system_prompt),
         )
 
-    def _build_system_context(self, pipeline_prompt: str | None = None) -> str:
+    def _build_system_context(
+        self,
+        pipeline_prompt: str | None = None,
+        *,
+        player_character: "PlayerCharacterContext | None" = None,
+    ) -> str:
         """构建完整系统上下文。
 
         如果提供了 ``pipeline_prompt``（多管线场景），在其后追加
@@ -165,7 +175,7 @@ class BaseSubAgent:
         """
         if self._context is None:
             return pipeline_prompt or ""
-        rendered = self._context.render()
+        rendered = self._context.render(player_character=player_character)
         if pipeline_prompt:
             return f"{pipeline_prompt}\n\n{rendered}" if rendered else pipeline_prompt
         return rendered

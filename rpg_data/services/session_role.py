@@ -18,6 +18,7 @@ from rpg_data.repositories.records import (
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.services.backup import BackupService
 from rpg_data.services.message import MessageService
+from rpg_data.story_template import render_story_text_template
 
 logger = logging.getLogger("rpg_data.session_role")
 
@@ -154,6 +155,14 @@ class SessionRoleService:
             raise ValueError(f"player character is not mounted to this session story: {target_id}")
 
         snapshot_json = _snapshot_json(option.snapshot)
+        prepared_first_message = (
+            self._prepare_first_message(
+                session_id,
+                option.snapshot,
+            )
+            if session.player_character_id is None
+            else ""
+        )
         logger.info(
             "binding player character session_id=%s workspace_id=%s story_id=%s character_id=%s mount_id=%s",
             session_id,
@@ -171,7 +180,11 @@ class SessionRoleService:
             if updated is None:
                 logger.warning("player character bind lost session during update session_id=%s", session_id)
                 raise FileNotFoundError(f"Session not found: {session_id}")
-            first_message = self._append_first_message_if_empty(session_id)
+            first_message = self._append_prepared_first_message_if_empty(
+                session_id,
+                prepared_first_message,
+                story_id=int(session.story_id),
+            )
 
         logger.info(
             "player character bound session_id=%s character_id=%s first_message_appended=%s",
@@ -203,9 +216,16 @@ class SessionRoleService:
         if error:
             lines.append(error.strip())
             lines.append("")
+        state = self.get_state(session_id)
+        current_character_id = (
+            state.player.character_id
+            if state.status == models.PLAYER_CHARACTER_STATUS_BOUND and state.player is not None
+            else None
+        )
         lines.append("请选择你要扮演的角色（回复 /role_bind 序号）：")
         for index, option in enumerate(options, start=1):
-            lines.append(f"{index}. {option.snapshot.name}")
+            marker = "（当前扮演）" if option.snapshot.character_id == current_character_id else ""
+            lines.append(f"{index}. {option.snapshot.name}{marker}")
             lines.append(f"   {option.summary}")
         lines.append("")
         lines.append("示例：/role_bind 2")
@@ -229,7 +249,11 @@ class SessionRoleService:
         )
         return self.bind_player_character(session_id, options[index - 1].snapshot.character_id)
 
-    def _append_first_message_if_empty(self, session_id: str) -> str:
+    def _prepare_first_message(
+        self,
+        session_id: str,
+        player: models.SessionPlayerCharacterSnapshot,
+    ) -> str:
         message_count = self._messages.count(session_id)
         if message_count > 0:
             logger.debug(
@@ -246,6 +270,29 @@ class SessionRoleService:
                 "skip first message append because story has no first_message session_id=%s story_id=%s",
                 session_id,
                 session.story_id,
+            )
+            return ""
+
+        return render_story_text_template(
+            first_message,
+            user_play_role_name=player.name,
+        )
+
+    def _append_prepared_first_message_if_empty(
+        self,
+        session_id: str,
+        first_message: str,
+        *,
+        story_id: int,
+    ) -> str:
+        if not first_message:
+            return ""
+        message_count = self._messages.count(session_id)
+        if message_count > 0:
+            logger.debug(
+                "skip prepared first message append because history exists session_id=%s message_count=%s",
+                session_id,
+                message_count,
             )
             return ""
 
@@ -271,7 +318,7 @@ class SessionRoleService:
         logger.info(
             "appended story first message after player bind session_id=%s story_id=%s first_message_chars=%s",
             session_id,
-            session.story_id,
+            story_id,
             len(first_message),
         )
         return first_message

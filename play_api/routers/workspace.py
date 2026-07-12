@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from play_api.backends import get_data_manager_backend
+from rpg_data.story_template import validate_story_text_template
 
 
 router = APIRouter(prefix="/workspaces", tags=["play-workspaces"])
@@ -46,6 +47,12 @@ class PlayStoryPayload(BaseModel):
             raise ValueError("title must not be empty")
         return value
 
+    @field_validator("story_prompt", "first_message")
+    @classmethod
+    def _story_text_template_must_be_valid(cls, value: str) -> str:
+        validate_story_text_template(value)
+        return value
+
 
 class PlayStoryPatch(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
@@ -63,6 +70,13 @@ class PlayStoryPatch(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("title must not be empty")
+        return value
+
+    @field_validator("story_prompt", "first_message")
+    @classmethod
+    def _story_text_template_must_be_valid(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_story_text_template(value)
         return value
 
 

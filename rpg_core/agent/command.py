@@ -151,11 +151,12 @@ async def _cmd_role_bind(agent: AgentCommandTarget, args: list[str]) -> str:
     except ValueError as exc:
         return agent.render_role_bind_prompt(error=str(exc))
     player = result.state.player
-    if result.first_message:
-        return result.first_message
     if player is None:
         return agent.render_role_bind_prompt()
-    return f"已切换扮演角色：{player.name}。后续消息将使用该身份。"
+    confirmation = f"已绑定/切换扮演角色：{player.name}。"
+    if result.first_message:
+        return f"{confirmation}\n\n{result.first_message}"
+    return f"{confirmation} 后续消息将使用该身份；已有历史不会被改写。"
 
 
 def _current_catalog_session(agent: AgentCommandTarget):
