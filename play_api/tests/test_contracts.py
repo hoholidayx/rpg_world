@@ -348,6 +348,7 @@ class _StreamingAgentClient(_FakeAgentClient):
             model="test-model",
             finish_reason="stop",
             duration_ms=12.3,
+            committed_turn_id=4,
         )
 
 
@@ -364,7 +365,7 @@ def test_history_endpoint_rejects_invalid_turn_metadata(tmp_path, monkeypatch) -
     assert "history[1]" in response.json()["detail"]
 
 
-def test_narrative_outcome_config_inheritance_validation_and_history_page(
+def test_rp_module_config_inheritance_validation_and_history_page(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -389,19 +390,27 @@ def test_narrative_outcome_config_inheritance_validation_and_history_page(
     }
 
     with TestClient(app) as client:
+        catalog = client.get("/play-api/v1/rp-modules/catalog")
+        assert catalog.status_code == 200
+        assert [item["moduleName"] for item in catalog.json()["modules"]] == [
+            "narrative_outcome",
+            "dice",
+        ]
+
         story_default = client.get(
-            "/play-api/v1/workspaces/demo_workspace/stories/1/narrative-outcome"
+            "/play-api/v1/workspaces/demo_workspace/stories/1/rp-modules"
         )
         assert story_default.status_code == 200
-        assert story_default.json()["effectiveSource"] == "config"
-        assert story_default.json()["effectiveWeights"] == {
+        story_outcome = story_default.json()["modules"][0]
+        assert story_outcome["configSources"]["weights"] == "config"
+        assert story_outcome["effectiveConfig"]["weights"] == {
             "critical_success": 5,
             "success": 25,
             "success_with_cost": 40,
             "setback": 25,
             "critical_failure": 5,
         }
-        assert [item["code"] for item in story_default.json()["definitions"]] == [
+        assert [item["code"] for item in story_outcome["outcomeDefinitions"]] == [
             "critical_success",
             "success",
             "success_with_cost",
@@ -410,57 +419,55 @@ def test_narrative_outcome_config_inheritance_validation_and_history_page(
         ]
 
         story_override = client.patch(
-            "/play-api/v1/workspaces/demo_workspace/stories/1/narrative-outcome",
-            json={"weights": story_weights},
+            "/play-api/v1/workspaces/demo_workspace/stories/1/rp-modules/narrative_outcome",
+            json={"config": {"weights": story_weights}},
         )
         assert story_override.status_code == 200
-        assert story_override.json()["storyOverride"] == story_weights
-        assert story_override.json()["effectiveSource"] == "story"
+        assert story_override.json()["storyConfig"]["weights"] == story_weights
+        assert story_override.json()["configSources"]["weights"] == "story"
 
         inherited = client.get(
-            "/play-api/v1/sessions/s_forest001/narrative-outcome"
+            "/play-api/v1/sessions/s_forest001/rp-modules"
         )
         assert inherited.status_code == 200
-        assert inherited.json()["sessionOverride"] is None
-        assert inherited.json()["effectiveWeights"] == story_weights
-        assert inherited.json()["effectiveSource"] == "story"
+        inherited_outcome = inherited.json()["modules"][0]
+        assert inherited_outcome["sessionConfig"] == {}
+        assert inherited_outcome["effectiveConfig"]["weights"] == story_weights
+        assert inherited_outcome["configSources"]["weights"] == "story"
 
         session_override = client.patch(
-            "/play-api/v1/sessions/s_forest001/narrative-outcome",
-            json={"weights": session_weights},
+            "/play-api/v1/sessions/s_forest001/rp-modules/narrative_outcome",
+            json={"enabled": True, "config": {"weights": session_weights}},
         )
         assert session_override.status_code == 200
-        assert session_override.json()["effectiveSource"] == "session"
-        assert session_override.json()["effectiveWeights"] == session_weights
+        assert session_override.json()["configSources"]["weights"] == "session"
+        assert session_override.json()["effectiveConfig"]["weights"] == session_weights
 
-        cleared = client.patch(
-            "/play-api/v1/sessions/s_forest001/narrative-outcome",
-            json={"weights": None},
+        cleared = client.delete(
+            "/play-api/v1/sessions/s_forest001/rp-modules/narrative_outcome"
         )
         assert cleared.status_code == 200
-        assert cleared.json()["sessionOverride"] is None
-        assert cleared.json()["effectiveSource"] == "story"
+        assert cleared.json()["sessionConfig"] == {}
+        assert cleared.json()["configSources"]["weights"] == "story"
 
         invalid = client.patch(
-            "/play-api/v1/sessions/s_forest001/narrative-outcome",
-            json={"weights": {**session_weights, "success": 19}},
+            "/play-api/v1/sessions/s_forest001/rp-modules/narrative_outcome",
+            json={"config": {"weights": {**session_weights, "success": 19}}},
         )
         assert invalid.status_code == 422
 
         cleared_story = client.patch(
-            "/play-api/v1/workspaces/demo_workspace/stories/1/narrative-outcome",
-            json={"weights": None},
+            "/play-api/v1/workspaces/demo_workspace/stories/1/rp-modules/narrative_outcome",
+            json={"config": {}},
         )
         assert cleared_story.status_code == 200
-        assert cleared_story.json()["storyOverride"] is None
-        assert cleared_story.json()["effectiveSource"] == "config"
+        assert cleared_story.json()["storyConfig"] == {}
+        assert cleared_story.json()["configSources"]["weights"] == "config"
+        assert client.get(
+            "/play-api/v1/workspaces/demo_workspace/stories/1/narrative-outcome"
+        ).status_code == 404
 
         gateway = get_data_service_gateway()
-        selection = gateway.narrative_outcomes.get_session_selection(
-            "s_forest001",
-            models.NarrativeOutcomeWeights(),
-        )
-        assert selection is not None
         gateway.narrative_outcomes.record(
             session_id="s_forest001",
             turn_id=1,
@@ -468,8 +475,8 @@ def test_narrative_outcome_config_inheritance_validation_and_history_page(
             reason="穿越霜藤",
             actor="Bob",
             sample_value=50,
-            effective_weights=selection.effective_weights,
-            effective_source=selection.effective_source,
+            effective_weights=models.NarrativeOutcomeWeights(),
+            effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
         )
 
         history_page = client.get(
@@ -811,6 +818,7 @@ def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
         "model": "test-model",
         "finishReason": "stop",
         "durationMs": 12.3,
+        "committedTurnId": 4,
     }
     assert ("stream", "s_forest001", "hello", "req-play") in fake_agent.calls
 

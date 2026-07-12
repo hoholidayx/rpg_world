@@ -180,6 +180,7 @@ class AgentStreamEvent:
     model: str | None = None
     finish_reason: str | None = None
     duration_ms: float = 0.0
+    committed_turn_id: int | None = None
     reasoning_content: str | None = None
     stats: TurnStats | None = None
     """完整 LLM 调用明细（含 SubAgent 细分）。仅在 DONE 事件携带。"""
@@ -218,6 +219,10 @@ class AgentStreamEvent:
             d["model"] = self.model
         if self.finish_reason:
             d["finish_reason"] = self.finish_reason
+        if self.committed_turn_id is not None:
+            if self.committed_turn_id <= 0:
+                raise ValueError("committed_turn_id must be a positive integer")
+            d["committed_turn_id"] = int(self.committed_turn_id)
         return d
 
 

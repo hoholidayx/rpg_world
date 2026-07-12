@@ -276,9 +276,9 @@ send(B)     → put QueueItem → [queue]     → ...等待...
 `send()` / `send_stream()` 的普通 RP turn 通过 `AgentTurnTransaction` 管理写入一致性。事务边界是内存 scratch 加最终短 commit 点，不跨 LLM 调用打开数据库事务。
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
-- turn 开始时 Narrative Outcome 形成权重快照，`rp_story_outcome` 与 scratch 版 scene/status 工具一起提供给 `StatusSubAgent`。子 Agent 先判断外部实质变数；需要裁定时只能请求 outcome，不得提前假设结果。
+- 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起提供给 `StatusSubAgent`。子 Agent 先判断外部实质变数；需要裁定时只能请求 outcome，不得提前假设结果。
 - StatusSubAgent tool calls 必须先整批扫描：同批只要出现 `rp_story_outcome`，仅执行一次裁定，所有 scene/status 调用标记 `skipped_due_to_outcome` 且不进入 scratch；没有 outcome 时才执行确定性状态预更新。状态工具批次失败使用内存 checkpoint 撤销部分预写并由主 Agent 回退，不新增持久化 journal。
-- 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定结果不得改判或重抽；主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，工具返回后再输出与状态一致的最终正文；状态同步无需询问玩家。
+- 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后主 Agent schema 隐藏 outcome 工具，漏判或预裁定失败时才保留补判；主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
 - 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
 - WebUI 停止生成通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 到 Agent service `/chat/stop`；取消成功的 stream turn 丢弃 scratch，不发 DONE，不提交消息、状态或 usage。
@@ -424,9 +424,10 @@ StatusSubAgent 和 LLM 之前兜底拒绝，业务错误码为 `MAIN_CONTEXT_WIN
 
 RP Modules 不是通用 skill 体系。骰子、战斗、物品、关系等能力必须定义为围绕 RP 语义的模块：
 模块可以注册工具、暴露运行态 section、读写受控状态，但固定 instruction 层和不可变模块描述应保持稳定，
-避免频繁变化破坏 prefix cache。当前实现位于 `rpg_core/rp_modules/`，由 session-scoped
-`RPModuleRegistry` 收集 fixed sections、runtime sections、tools 和 commands，并在
-`RPGGameAgent._ensure_initialized()` / reload / session switch 后重建或重新绑定。
+避免频繁变化破坏 prefix cache。当前实现位于 `rpg_core/rp_modules/`：`RPModuleRegistry` 只持有内置
+Python 定义与配置校验；`RPModuleSelectionSnapshot` 是一次 preview/turn 的不可变 Story/Session 选择，
+`RPModuleTurnRuntime` 才持有本轮模块实例、tools 和 sections。Story 挂载是能力上限，Session 只能覆盖
+已挂载模块；新 Story 默认挂载 catalog 中当前全部默认模块。不要把动态选择或 active scratch 写回共享 Registry。
 
 RP Modules 使用常规上下文分层/分配策略：
 
@@ -434,7 +435,7 @@ RP Modules 使用常规上下文分层/分配策略：
 - `text_output_format` 作为 fixed layer 输出格式约束默认启用，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文中的旁白/角色分离，不进入 `RPModuleRegistry`。
 - 动态运行态只在模块确有临时状态时进入 `RP_MODULES` system layer；Narrative Outcome 平时依赖 fixed contract，检测到明确随机意图时注入本轮强制工具指令；StatusSubAgent 已预裁定时则注入已生效结果和裁定后状态写入边界。
 - `verbose_logging=true` 时，主 Agent 在 Context Builder 前记录 RP runtime section 总数、`id/title/source/priority` 和完整公开 content；空 runtime 记录 `count=0`，不输出 sample、权重等内部随机细节。
-- 工具 schema 常驻注册到 `ToolRegistry`，但具体机制结果只在 LLM tool call 或显式斜杠命令时产生。
+- RP 工具只注册到本轮 `ToolRegistry`；当前主 LLM/StatusSubAgent 的 RP schema 最多只有 `rp_story_outcome`。模块命令按最新非 turn 快照动态解析。
 - RP Modules 不进入 user prefix，不写 history；`[scene]` 仍是唯一高优先级 user prefix 运行态。
 
 Assistant 回复的 `content` 是唯一真源：带标签全文原样写入主历史、备份历史、Agent service stream 和 Play SSE。不要把旁白/角色分段写入 message metadata，也不要恢复 `metadata.messageDisplay` 空壳。Play WebUI 可以在展示层容错解析这些标签；解析失败、半截标签或非标准 SSE 坏帧必须原文展示，不丢内容。
@@ -444,13 +445,14 @@ Narrative Outcome 是当前剧情分支随机机制：
 - 主 LLM 的 RP schema 只暴露 `rp_story_outcome(reason, actor?)`；不得重新暴露 `rp_dice_roll`、`rp_dice_check_dc`、表达式、DC、权重或随机数。
 - `auto_adjudication_enabled=true` 时，主 Agent 必须结合用户完整语义、当前场景和状态判断外部实质变数。触发不依赖关键词；未知信息、能力、阻力、风险、时机、环境或 NPC/世界反应导致多个合理剧情分支时，在叙事结果前调用工具。玩家内心选择、已确定结果和无实质代价的小事不裁定。
 - 结果固定为 `critical_success / success / success_with_cost / setback / critical_failure` 五档，系统默认比例 `5/25/40/25/5`。`reason` 是不可缩小的整体目标边界；`success_with_cost` 必须完整达成目标，代价不得抵消成功。重大失败不得自动死亡、硬停局或永久剥夺玩家角色主权。
-- 每 turn 最多一条裁定；重复调用复用 scratch 结果。有效权重在 turn 开始时形成快照，优先级 `config < story < session`，每层是完整五项且总和严格等于 100。
-- `StatusSubAgent` 负责可选预裁定：需要 outcome 的同批状态预写全部延后，结果以 `outcomeCode / label / narrativeGuidance / reason / actor?` 在主 Agent 首次调用前进入 `RP_MODULES` runtime section。漏判时主 Agent 仍可补判；已预裁定时主 Agent 的重复调用幂等复用。
+- 每 turn 最多一条裁定；重复调用复用 scratch 结果。有效权重在 turn 开始前形成模块快照，优先级 `config < story < session`；各层可以不覆盖 `weights`，但一旦提供就必须是总和严格等于 100 的完整五项原子组。
+- `StatusSubAgent` 负责可选预裁定：需要 outcome 的同批状态预写全部延后，结果以 `outcomeCode / label / narrativeGuidance / reason / actor?` 在主 Agent 首次调用前进入 `RP_MODULES` runtime section。漏判或预裁定失败时主 Agent 仍可补判；已预裁定时主 Agent schema 隐藏 outcome 工具，内部重复调用仍幂等复用。
 - 裁定与消息、状态表在同一个短 `database.atomic()` 中提交。取消、provider 错误或 commit 失败不落库；truncate、clear、用户消息编辑和相关历史删除同步清理裁定，retry/edit 重新抽取。
 - retry/edit/truncate 不回滚已经提交的状态表；状态分支回滚留作独立能力，不增加 `status_turn_journal` 或其它状态 journal。
 - 持久化表是 `rpg_session_narrative_outcomes`，内部保存 sample 和有效权重快照；LLM、Play API outcome 与 WebUI 卡片不得展示 sample、区间或百分比。
-- Story/Session 配置接口分别是 `/workspaces/{workspace_id}/stories/{story_id}/narrative-outcome` 与 `/sessions/{session_id}/narrative-outcome`。PlayTurn 的 nullable `outcome` 用于刷新/分页恢复；流式卡按 turn 去重且不受 `showTools` 控制。
-- canonical 配置位于 `rp_modules.modules.narrative_outcome`；旧 `dice.allow_auto_checks` 只作一版兼容 fallback。
+- 配置统一走 `/rp-modules/catalog`、Story `/rp-modules/{module_name}` 和 Session `/rp-modules/{module_name}` 通用接口。PlayTurn 的 nullable `outcome` 用于刷新/分页恢复；流式卡按 turn 去重且不受 `showTools` 控制。
+- canonical 系统配置位于 `rp_modules.modules.narrative_outcome`；`dice.allow_auto_checks` 已移除且旧 key 必须启动失败。
+- 开发期 `0005` 已重写为 `0005_rp_modules.sql`，不兼容执行过旧 `0005_narrative_outcome.sql` 的数据库；此类本地数据应直接重建。
 
 Dice 只保留低层随机与调试能力：
 
@@ -464,16 +466,17 @@ Dice 只保留低层随机与调试能力：
 agent.send(user_input)
   → CommandDispatcher 拦截斜杠命令（是则旁路 LLM，不入历史）
   → 玩家角色校验
-  → 当前主 Agent Context 窗口门禁（不计本次 input；达到阈值则拒绝且不创建 scratch）
-  → Narrative Outcome 形成本 turn 权重快照，rp_story_outcome 注册给 StatusSubAgent
+  → 解析不可变 RPModuleSelectionSnapshot
+  → 当前主 Agent Context 窗口门禁使用同一快照（不计本次 input；达到阈值则拒绝且不创建 scratch）
+  → 创建 RPModuleTurnRuntime；Narrative Outcome 权重随快照固定，rp_story_outcome 按需注册给 StatusSubAgent
   → StatusSubAgent.update() 先判断外部实质变数
     → 需要裁定：只暂存 outcome，同批 scene/status 预写全部跳过
     → 无需裁定：确定性 scene/status 变化进入 scratch
   → SceneTracker.get_context() → [scene] 嵌入 user message
-  → RPModuleRegistry 收集 runtime sections；已暂存 outcome 在主 Agent 首次调用前注入
+  → turn runtime 收集 runtime sections；已暂存 outcome 在主 Agent 首次调用前注入
   → _build_transformed_context() → builder.build() → RPGContext.to_message_objects()
   → run_chat_loop(provider, tool_registry, messages)
-    → 主 Agent 可补判或幂等复用 outcome；真实持久变化先修正状态，再输出 RP 正文
+    → 主 Agent 在漏判时可补判 outcome；已预裁定时不再获得重复调用选项，真实持久变化先修正状态，再输出 RP 正文
     → LLM 也可调用其它 RP module tools / file tools
     → 每轮记录 TurnStats + CallRecord
   → 短事务写入主/backup 消息、Narrative Outcome 与状态表
@@ -534,7 +537,7 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 - `/sessions/{session_id}/context-preview` 可透传估算 `usageEstimate`；它不是 provider usage。
 - `/sessions/{session_id}/history-page` 按显式 turn metadata 返回窗口页；分页只校验当前返回页，旧 `/history` 仍保留全量读取语义。
 - `/sessions/{session_id}/turn` 在正常 turn 返回中携带本轮 `usage`；流式只在 `turn_completed.payload.usage` 携带，不额外发 usage 事件或请求。
-- SSE 流式格式：`data: {json}\n\n`。`turn_completed.payload.text` 承载完整 assistant 原文；旁白/角色分离由正文标签表达，不通过 `metadata.messageDisplay` 传输。
+- SSE 流式格式：`data: {json}\n\n`。`turn_completed.payload.text` 承载完整 assistant 原文，成功持久化的普通 turn 同时携带正整数 `committedTurnId`，供 WebUI 将请求期诊断绑定到正式历史 turn；旁白/角色分离由正文标签表达，不通过 `metadata.messageDisplay` 传输。
 - SSE 业务错误使用独立 `errorCode`；`message` 保留底层错误文本，不把错误码拼进正文，也不把业务错误和 HTTP `statusCode` 混用。
 - `/sessions/{session_id}/stop` 只取消带 `requestId` 的活动或队列 stream turn，返回 `cancelled | not_running | stale`；前端只有收到 `cancelled` 才展示“已停止”。
 

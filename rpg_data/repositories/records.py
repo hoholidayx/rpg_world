@@ -25,10 +25,12 @@ __all__ = [
     "CharacterDetailRecord",
     "CharacterRecord",
     "LorebookEntryRecord",
+    "RPModuleCatalogRecord",
     "SessionBackupMessageRecord",
     "SessionMessageRecord",
     "SessionNarrativeOutcomeRecord",
     "SessionProfileRecord",
+    "SessionRPModuleOverrideRecord",
     "SessionRecord",
     "SessionStoryMemoryRecord",
     "SessionStatusTableRecord",
@@ -36,6 +38,7 @@ __all__ = [
     "StoryLorebookEntryRecord",
     "StoryStatusTableRecord",
     "StoryRecord",
+    "StoryRPModuleRecord",
     "StatusTableTemplateRecord",
     "WorkspaceRecord",
     "bind_database",
@@ -107,7 +110,6 @@ class StoryRecord(BaseRecord):
     story_prompt = TextField(default="")
     first_message = TextField(default="")
     main_llm_provider_key = TextField(null=True)
-    narrative_outcome_weights_json = TextField(null=True)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
     created_at = TextField()
@@ -151,7 +153,6 @@ class SessionProfileRecord(BaseRecord):
     title = TextField(default="")
     description = TextField(default="")
     main_llm_provider_key = TextField(null=True)
-    narrative_outcome_weights_json = TextField(null=True)
     player_character_id = IntegerField(null=True)
     player_character_snapshot_json = TextField(default="{}")
     metadata_json = TextField(default="{}")
@@ -256,6 +257,72 @@ class SessionNarrativeOutcomeRecord(BaseRecord):
     class Meta:
         table_name = "rpg_session_narrative_outcomes"
         indexes = ((('session', 'turn_id'), True),)
+
+
+class RPModuleCatalogRecord(BaseRecord):
+    module_name = TextField(primary_key=True)
+    display_name = TextField()
+    description = TextField(default="")
+    sort_order = IntegerField(default=0)
+    config_version = IntegerField(default=1)
+    default_story_enabled = BooleanField(default=True)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_rp_module_catalog"
+
+
+class StoryRPModuleRecord(BaseRecord):
+    id = AutoField()
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="rp_modules",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    module_name = ForeignKeyField(
+        RPModuleCatalogRecord,
+        field=RPModuleCatalogRecord.module_name,
+        backref="story_mounts",
+        column_name="module_name",
+        on_delete="CASCADE",
+    )
+    enabled = BooleanField(default=True)
+    config_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_rp_modules"
+        indexes = ((('story', 'module_name'), True),)
+
+
+class SessionRPModuleOverrideRecord(BaseRecord):
+    id = AutoField()
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="rp_module_overrides",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    module_name = ForeignKeyField(
+        RPModuleCatalogRecord,
+        field=RPModuleCatalogRecord.module_name,
+        backref="session_overrides",
+        column_name="module_name",
+        on_delete="CASCADE",
+    )
+    enabled = BooleanField(null=True)
+    config_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_rp_module_overrides"
+        indexes = ((('session', 'module_name'), True),)
 
 
 class CharacterRecord(BaseRecord):
@@ -483,6 +550,9 @@ RECORD_MODELS = (
     SessionMessageRecord,
     SessionBackupMessageRecord,
     SessionStoryMemoryRecord,
+    RPModuleCatalogRecord,
+    StoryRPModuleRecord,
+    SessionRPModuleOverrideRecord,
     SessionNarrativeOutcomeRecord,
     CharacterRecord,
     CharacterDetailRecord,

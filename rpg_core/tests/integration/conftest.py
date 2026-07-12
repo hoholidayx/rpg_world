@@ -241,6 +241,7 @@ def _create_integration_session(
             workspace_id=workspace_id,
             story_id=story.id,
         )
+        gateway.rp_modules.mount_story_defaults(story.id)
 
     if with_status:
         _mount_integration_status(gateway, workspace_id, story.id)

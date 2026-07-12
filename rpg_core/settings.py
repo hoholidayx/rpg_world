@@ -201,7 +201,6 @@ class DiceModuleSettings:
     """Dice RP module settings."""
 
     enabled: bool = True
-    allow_auto_checks: bool = True
     default_dc: int = 12
     max_dice_count: int = 100
     max_die_sides: int = 1000
@@ -323,25 +322,25 @@ class Settings(ProfiledYamlSettings):
                 "rp_modules.modules.narrative_outcome.default_weights must be a mapping"
             )
 
-        # One-version compatibility: old deployments may still only declare
-        # dice.allow_auto_checks. The canonical switch lives on narrative_outcome.
-        legacy_auto_checks = bool(dice_raw.get("allow_auto_checks", True))
-        auto_adjudication_enabled = bool(
-            narrative_raw.get("auto_adjudication_enabled", legacy_auto_checks)
-        )
+        if "allow_auto_checks" in dice_raw:
+            raise ValueError(
+                "rp_modules.modules.dice.allow_auto_checks is no longer supported; "
+                "configure narrative_outcome.auto_adjudication_enabled instead"
+            )
 
         return RPModuleSettings(
             enabled=bool(raw.get("enabled", True)),
             dice=DiceModuleSettings(
                 enabled=bool(dice_raw.get("enabled", True)),
-                allow_auto_checks=bool(dice_raw.get("allow_auto_checks", True)),
                 default_dc=int(dice_raw.get("default_dc", 12)),
                 max_dice_count=int(dice_raw.get("max_dice_count", 100)),
                 max_die_sides=int(dice_raw.get("max_die_sides", 1000)),
             ),
             narrative_outcome=NarrativeOutcomeModuleSettings(
                 enabled=bool(narrative_raw.get("enabled", True)),
-                auto_adjudication_enabled=auto_adjudication_enabled,
+                auto_adjudication_enabled=bool(
+                    narrative_raw.get("auto_adjudication_enabled", True)
+                ),
                 default_weights=default_weights,
             ),
         )

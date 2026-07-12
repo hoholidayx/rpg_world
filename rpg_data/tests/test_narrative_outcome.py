@@ -49,62 +49,6 @@ def test_weights_validate_integer_range_and_exact_total() -> None:
         })
 
 
-def test_story_and_session_override_precedence_and_clear(tmp_path) -> None:
-    gateway = get_data_service_gateway(tmp_path / "narrative-selection.sqlite3")
-    service = gateway.narrative_outcomes
-
-    base = service.get_session_selection("s_forest001", DEFAULT_WEIGHTS)
-    assert base is not None
-    assert base.effective_weights == DEFAULT_WEIGHTS
-    assert base.effective_source == models.NARRATIVE_OUTCOME_SOURCE_CONFIG
-
-    story = gateway.catalog.get_session_story("s_forest001")
-    assert story is not None
-    story_selection = service.set_story_weights(
-        story.workspace_id,
-        story.id,
-        STORY_WEIGHTS,
-        DEFAULT_WEIGHTS,
-    )
-    assert story_selection is not None
-    assert story_selection.effective_weights == STORY_WEIGHTS
-    assert story_selection.effective_source == models.NARRATIVE_OUTCOME_SOURCE_STORY
-
-    inherited = service.get_session_selection("s_forest001", DEFAULT_WEIGHTS)
-    assert inherited is not None
-    assert inherited.story_weights == STORY_WEIGHTS
-    assert inherited.session_weights is None
-    assert inherited.effective_weights == STORY_WEIGHTS
-
-    overridden = service.set_session_weights(
-        "s_forest001",
-        SESSION_WEIGHTS,
-        DEFAULT_WEIGHTS,
-    )
-    assert overridden is not None
-    assert overridden.effective_weights == SESSION_WEIGHTS
-    assert overridden.effective_source == models.NARRATIVE_OUTCOME_SOURCE_SESSION
-
-    cleared_session = service.set_session_weights(
-        "s_forest001",
-        None,
-        DEFAULT_WEIGHTS,
-    )
-    assert cleared_session is not None
-    assert cleared_session.session_weights is None
-    assert cleared_session.effective_weights == STORY_WEIGHTS
-
-    cleared_story = service.set_story_weights(
-        story.workspace_id,
-        story.id,
-        None,
-        DEFAULT_WEIGHTS,
-    )
-    assert cleared_story is not None
-    assert cleared_story.story_weights is None
-    assert cleared_story.effective_weights == DEFAULT_WEIGHTS
-
-
 def test_outcome_record_typed_round_trip_and_unique_turn(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "narrative-records.sqlite3")
     service = gateway.narrative_outcomes

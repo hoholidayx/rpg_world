@@ -71,10 +71,9 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
         assert "/check_dc" in command_names
         assert "/check" not in command_names
 
-        tool_names = [
-            schema["function"]["name"]
-            for schema in agent._tool_registry.get_openai_schemas()
-        ]
+        snapshot = agent._resolve_rp_module_snapshot()
+        runtime = agent._rp_module_registry.create_runtime(snapshot)
+        tool_names = [tool.name for tool in runtime.get_tools()]
         assert "rp_story_outcome" in tool_names
         assert "rp_dice_roll" not in tool_names
         assert "rp_dice_check_dc" not in tool_names

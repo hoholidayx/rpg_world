@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TypeVar
+from typing import Mapping, TypeVar
 
 from peewee import SQL, DoesNotExist, Model
 
@@ -58,9 +58,6 @@ def to_story(row: records.StoryRecord) -> models.Story:
             if row.main_llm_provider_key is not None
             else None
         ),
-        narrative_outcome_weights=_parse_narrative_outcome_weights(
-            row.narrative_outcome_weights_json
-        ),
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),
         created_at=str(row.created_at),
@@ -90,9 +87,6 @@ def to_session(row: records.SessionRecord) -> models.Session:
             if profile is not None and profile.main_llm_provider_key is not None
             else None
         ),
-        narrative_outcome_weights=_parse_narrative_outcome_weights(
-            profile.narrative_outcome_weights_json if profile is not None else None
-        ),
         player_character_id=(
             int(profile.player_character_id)
             if profile is not None and profile.player_character_id is not None
@@ -118,9 +112,6 @@ def to_session_profile(row: records.SessionProfileRecord) -> models.SessionProfi
             str(row.main_llm_provider_key)
             if row.main_llm_provider_key is not None
             else None
-        ),
-        narrative_outcome_weights=_parse_narrative_outcome_weights(
-            row.narrative_outcome_weights_json
         ),
         player_character_id=int(row.player_character_id) if row.player_character_id is not None else None,
         player_character_snapshot_json=str(row.player_character_snapshot_json or "{}"),
@@ -181,12 +172,69 @@ def to_narrative_outcome(
     )
 
 
+def to_rp_module_catalog(
+    row: records.RPModuleCatalogRecord,
+) -> models.RPModuleCatalogEntry:
+    return models.RPModuleCatalogEntry(
+        module_name=str(row.module_name),
+        display_name=str(row.display_name),
+        description=str(row.description or ""),
+        sort_order=int(row.sort_order),
+        config_version=int(row.config_version),
+        default_story_enabled=bool(row.default_story_enabled),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_story_rp_module(row: records.StoryRPModuleRecord) -> models.StoryRPModule:
+    return models.StoryRPModule(
+        id=int(row.id),
+        story_id=int(row.story_id),
+        module_name=str(row.module_name_id),
+        enabled=bool(row.enabled),
+        config=parse_rp_module_config(row.config_json),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_session_rp_module_override(
+    row: records.SessionRPModuleOverrideRecord,
+) -> models.SessionRPModuleOverride:
+    return models.SessionRPModuleOverride(
+        id=int(row.id),
+        session_id=str(row.session_id),
+        module_name=str(row.module_name_id),
+        enabled=bool(row.enabled) if row.enabled is not None else None,
+        config=parse_rp_module_config(row.config_json),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
 def serialize_narrative_outcome_weights(
     weights: models.NarrativeOutcomeWeights | None,
 ) -> str | None:
     if weights is None:
         return None
     return json.dumps(weights.to_dict(), ensure_ascii=False, separators=(",", ":"))
+
+
+def serialize_rp_module_config(config: Mapping[str, object]) -> str:
+    return json.dumps(dict(config), ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def parse_rp_module_config(raw: object) -> dict[str, object]:
+    try:
+        payload = json.loads(str(raw or "{}"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid RP module config JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("RP module config JSON must be an object")
+    return payload
 
 
 def _parse_narrative_outcome_weights(

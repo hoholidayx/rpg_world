@@ -38,6 +38,10 @@ class RPModule(ABC):
     def get_tools(self) -> list[BaseTool]:
         return []
 
+    def get_main_agent_tools(self) -> list[BaseTool]:
+        """Return tools currently exposed to the main Agent."""
+        return self.get_tools()
+
     def get_commands(self) -> list[ModuleCommand]:
         return []
 

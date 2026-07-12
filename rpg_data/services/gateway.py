@@ -17,6 +17,7 @@ from rpg_data.services.character import CharacterManagementService, CharacterRea
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
 from rpg_data.services.message import MessageService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
+from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_role import SessionRoleService
 from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
@@ -44,6 +45,7 @@ class DataServiceGateway:
         self._lorebook_management: LorebookManagementService | None = None
         self._messages: MessageService | None = None
         self._narrative_outcomes: NarrativeOutcomeService | None = None
+        self._rp_modules: RPModuleService | None = None
         self._session_roles: SessionRoleService | None = None
         self._backup: BackupService | None = None
         self._story_memory: StoryMemoryService | None = None
@@ -127,6 +129,15 @@ class DataServiceGateway:
         return self._narrative_outcomes
 
     @property
+    def rp_modules(self) -> RPModuleService:
+        database = self.database
+        if self._rp_modules is None:
+            logger.debug("creating RP module service db_path=%s", self._database_path)
+            self._rp_modules = RPModuleService(database)
+        self._ensure_bound()
+        return self._rp_modules
+
+    @property
     def session_roles(self) -> SessionRoleService:
         database = self.database
         if self._session_roles is None:
@@ -197,6 +208,7 @@ class DataServiceGateway:
         self._lorebook_management = None
         self._messages = None
         self._narrative_outcomes = None
+        self._rp_modules = None
         self._session_roles = None
         self._backup = None
         self._story_memory = None

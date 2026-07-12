@@ -11,6 +11,7 @@ from rpg_core.rp_modules.narrative_outcome import (
 )
 from rpg_core.rp_modules.narrative_outcome.models import (
     NARRATIVE_OUTCOME_DEFINITION_BY_CODE,
+    NarrativeOutcomeSelection,
 )
 from rpg_core.rp_modules.models import ModuleContextRequest
 from rpg_core.settings import NarrativeOutcomeModuleSettings
@@ -84,10 +85,7 @@ class _SequenceRng:
 @pytest.mark.asyncio
 async def test_same_turn_reuses_staged_result_and_hides_random_details() -> None:
     rng = _SequenceRng(31, 100)
-    selection = models.NarrativeOutcomeSelection(
-        config_default=DEFAULT_WEIGHTS,
-        story_weights=None,
-        session_weights=None,
+    selection = NarrativeOutcomeSelection(
         effective_weights=DEFAULT_WEIGHTS,
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
     )
@@ -95,7 +93,7 @@ async def test_same_turn_reuses_staged_result_and_hides_random_details() -> None
         session_id="s1",
         settings=NarrativeOutcomeModuleSettings(),
         rng=rng,  # type: ignore[arg-type]
-        selection_resolver=lambda _session_id, _defaults: selection,
+        selection=selection,
     )
     scratch = SimpleNamespace(
         turn_id=7,
@@ -133,10 +131,7 @@ async def test_same_turn_reuses_staged_result_and_hides_random_details() -> None
 
 def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> None:
     rng = _SequenceRng(71)
-    selection = models.NarrativeOutcomeSelection(
-        config_default=DEFAULT_WEIGHTS,
-        story_weights=None,
-        session_weights=None,
+    selection = NarrativeOutcomeSelection(
         effective_weights=DEFAULT_WEIGHTS,
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
     )
@@ -144,7 +139,7 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
         session_id="s1",
         settings=NarrativeOutcomeModuleSettings(),
         rng=rng,  # type: ignore[arg-type]
-        selection_resolver=lambda _session_id, _defaults: selection,
+        selection=selection,
     )
     scratch = SimpleNamespace(
         turn_id=9,

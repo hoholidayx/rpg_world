@@ -70,7 +70,7 @@ class FakeAsyncClient:
         self.calls.append((method, url, {"json": json}))
         return FakeStreamResponse([
             'data: {"kind": "text", "content": "hi"}',
-            'data: {"kind": "done", "content": "hi"}',
+            'data: {"kind": "done", "content": "hi", "committed_turn_id": 4}',
         ])
 
 
@@ -202,6 +202,7 @@ async def test_client_stream_parses_sse_events() -> None:
     ]
     assert [event.kind for event in events] == [StreamEventKind.TEXT, StreamEventKind.DONE]
     assert events[-1].content == "hi"
+    assert events[-1].committed_turn_id == 4
     assert FakeAsyncClient.calls[-1] == (
         "POST",
         "http://agent/chat/stream",

@@ -8,7 +8,6 @@ from rpg_data import models
 from rpg_data.repositories.records import StoryRecord, bind_database
 from rpg_data.repositories._utils import (
     get_or_none,
-    serialize_narrative_outcome_weights,
     to_story,
     update_timestamp,
 )
@@ -90,26 +89,6 @@ class StoryRepository:
             StoryRecord
             .update(
                 main_llm_provider_key=provider_key,
-                version=StoryRecord.version + 1,
-                updated_at=SQL("CURRENT_TIMESTAMP"),
-            )
-            .where(StoryRecord.id == story_id)
-            .execute()
-        )
-        if not updated:
-            return None
-        row = get_or_none(StoryRecord, story_id)
-        return to_story(row) if row is not None else None
-
-    def set_narrative_outcome_weights(
-        self,
-        story_id: int,
-        weights: models.NarrativeOutcomeWeights | None,
-    ) -> models.Story | None:
-        updated = (
-            StoryRecord
-            .update(
-                narrative_outcome_weights_json=serialize_narrative_outcome_weights(weights),
                 version=StoryRecord.version + 1,
                 updated_at=SQL("CURRENT_TIMESTAMP"),
             )

@@ -1312,7 +1312,7 @@ def test_rpg_game_agent_default_model_no_longer_forces_gpt4o(monkeypatch):
     assert agent._provider_overrides == ProviderOverrides()
 
 
-def test_setup_rp_module_registry_adds_fixed_sections(monkeypatch):
+def test_setup_rp_module_registry_keeps_module_sections_out_of_shared_fixed_layer(monkeypatch):
     _patch_story_prompt_contributor(monkeypatch, "故事固定约束。")
 
     agent = object.__new__(RPGGameAgent)
@@ -1328,8 +1328,8 @@ def test_setup_rp_module_registry_adds_fixed_sections(monkeypatch):
 
     assert agent._rp_module_registry is not None
     assert any(section.id == STORY_PROMPT_SECTION_ID for section in agent._fixed_layer.sections)
-    assert any(
-        section.id == RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+    assert all(
+        section.id != RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
         for section in agent._fixed_layer.sections
     )
     assert any(section.id == TEXT_OUTPUT_FORMAT_SECTION_ID for section in agent._fixed_layer.sections)
@@ -1366,13 +1366,16 @@ def test_assemble_fixed_layer_reads_story_prompt_from_data_service(monkeypatch):
     ]
 
 
-def test_register_rp_module_commands_exposes_check_dc():
+def test_register_rp_module_commands_exposes_check_dc(tmp_path):
+    from rpg_data.services import get_data_service_gateway
+
+    gateway = get_data_service_gateway(tmp_path / "agent-rp-commands.sqlite3")
     agent = object.__new__(RPGGameAgent)
+    agent._session_id = "s_forest001"
     agent._cmd_dispatcher = CommandDispatcher(agent=agent)
     agent._rp_module_registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
         settings=RPModuleSettings(),
+        gateway_provider=lambda: gateway,
     )
 
     agent._register_rp_module_commands()
@@ -1436,7 +1439,7 @@ async def test_get_context_json_does_not_mutate_history(fake_token_counter):
     ]
 
 
-def test_setup_tool_registry_registers_rp_module_tools(tmp_path, monkeypatch):
+def test_setup_tool_registry_keeps_rp_module_tools_turn_local(tmp_path, monkeypatch):
     class FakeTool(BaseTool):
         name = "rp_fake_tool"
         description = "fake"
@@ -1446,10 +1449,6 @@ def test_setup_tool_registry_registers_rp_module_tools(tmp_path, monkeypatch):
 
         async def execute(self, **kwargs):
             return "ok"
-
-    class FakeRegistry:
-        def get_tools(self):
-            return [FakeTool()]
 
     class FakeGateway:
         catalog = SimpleNamespace(get_session_runtime_dir=lambda session_id: tmp_path)
@@ -1462,11 +1461,11 @@ def test_setup_tool_registry_registers_rp_module_tools(tmp_path, monkeypatch):
     agent._session_id = "s1"
     agent._scene_tracker = None
     agent._extra_tools = []
-    agent._rp_module_registry = FakeRegistry()
+    agent._rp_module_registry = SimpleNamespace(create_runtime=lambda _snapshot: None)
 
     agent._setup_tool_registry()
 
-    assert "rp_fake_tool" in agent._tool_registry
+    assert "rp_fake_tool" not in agent._tool_registry
 
 
 def test_build_transformed_context_rebuilds_fixed_layer_each_time() -> None:
@@ -1541,7 +1540,7 @@ def test_rp_runtime_sections_log_full_content_when_verbose(
     content: str,
     include_staged_turn: bool,
 ) -> None:
-    class FakeRegistry:
+    class FakeRuntime:
         def get_runtime_sections(self, request):  # noqa: ANN001
             assert request.session_id == "s_runtime_log"
             assert request.include_staged_turn is include_staged_turn
@@ -1560,11 +1559,13 @@ def test_rp_runtime_sections_log_full_content_when_verbose(
     monkeypatch.setattr(agent_module, "logger", SimpleNamespace(debug=debug))
     agent = object.__new__(RPGGameAgent)
     agent._session_id = "s_runtime_log"
-    agent._rp_module_registry = FakeRegistry()
+    agent._rp_module_registry = None
+    runtime = FakeRuntime()
 
     sections = agent._get_rp_module_runtime_sections(
         "明确随机意图",
         include_staged_turn=include_staged_turn,
+        rp_module_runtime=runtime,
     )
 
     assert [section.content for section in sections] == [content]

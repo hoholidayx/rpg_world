@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rpg_core.agent.agent import RPGGameAgent
     from rpg_core.agent.sub_agents.base import BaseSubAgent
+    from rpg_core.rp_modules.models import ModuleCommand
 
 # 命令处理器签名：async (agent, args) -> str
 HandlerFunc = Callable[["RPGGameAgent", list[str]], Awaitable[str]]
+CommandProvider = Callable[[], list["ModuleCommand"]]
 
 
 # ── 内置命令处理器 ──────────────────────────────────────────────────────────
@@ -197,6 +199,7 @@ class CommandDispatcher:
         self._agent = agent
         self._builtins: dict[str, tuple[CommandDef, HandlerFunc]] = {}
         self._sub_agents: list[BaseSubAgent] = []
+        self._command_providers: list[CommandProvider] = []
 
     # ── 注册 ──────────────────────────────────────────────────────────
 
@@ -216,6 +219,10 @@ class CommandDispatcher:
     def register_sub_agent(self, sub_agent: BaseSubAgent) -> None:
         """注册子 Agent，dispatch 时会查询其 accept_command()。"""
         self._sub_agents.append(sub_agent)
+
+    def register_command_provider(self, provider: CommandProvider) -> None:
+        """Register commands resolved from current external state on every access."""
+        self._command_providers.append(provider)
 
     def register_default_builtins(self) -> None:
         """注册所有默认内置命令。
@@ -266,6 +273,12 @@ class CommandDispatcher:
     def list_commands(self) -> list[CommandDef]:
         """返回所有可用的命令定义（用于前端渲染）。"""
         defs: list[CommandDef] = [cmd_def for cmd_def, _ in self._builtins.values()]
+        for command in self._provided_commands():
+            defs.append(CommandDef(
+                name=command.name,
+                description=command.description,
+                detail=command.detail,
+            ))
         for sa in self._sub_agents:
             result = sa.get_command_def()
             if result is None:
@@ -309,7 +322,16 @@ class CommandDispatcher:
             except Exception as e:
                 return CommandResult(reply=f"命令 {name} 执行失败: {e}", handled=True)
 
-        # 2) 子 Agent 命令
+        # 2) 动态命令（例如随 Story/Session RP Module 挂载变化的 Dice 命令）
+        provided = {command.name: command for command in self._provided_commands()}
+        if name in provided:
+            try:
+                reply = await provided[name].handler(self._agent, args)
+                return CommandResult(reply=reply, handled=True)
+            except Exception as e:
+                return CommandResult(reply=f"命令 {name} 执行失败: {e}", handled=True)
+
+        # 3) 子 Agent 命令
         for sa in self._sub_agents:
             if sa.accept_command(name):
                 try:
@@ -329,3 +351,10 @@ class CommandDispatcher:
             reply=f"未知命令: {name}\n输入 /help 查看可用命令。",
             handled=True,
         )
+
+    def _provided_commands(self) -> list["ModuleCommand"]:
+        commands: dict[str, "ModuleCommand"] = {}
+        for provider in self._command_providers:
+            for command in provider():
+                commands[command.name] = command
+        return list(commands.values())

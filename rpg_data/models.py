@@ -11,8 +11,9 @@ __all__ = [
     "CharacterDetail",
     "LorebookEntry",
     "NarrativeOutcomeRecord",
-    "NarrativeOutcomeSelection",
     "NarrativeOutcomeWeights",
+    "RPModuleCatalogEntry",
+    "SessionRPModuleOverride",
     "Session",
     "SessionCharacter",
     "SessionCharacterDetail",
@@ -23,6 +24,7 @@ __all__ = [
     "SessionStoryMemory",
     "SessionStatusTable",
     "Story",
+    "StoryRPModule",
     "StoryCharacter",
     "StoryLorebookEntry",
     "StoryLorebookEntryDetail",
@@ -150,47 +152,6 @@ class NarrativeOutcomeWeights:
 
 
 @dataclass(frozen=True)
-class NarrativeOutcomeSelection:
-    config_default: NarrativeOutcomeWeights
-    story_weights: NarrativeOutcomeWeights | None
-    session_weights: NarrativeOutcomeWeights | None
-    effective_weights: NarrativeOutcomeWeights
-    effective_source: str
-
-    def __post_init__(self) -> None:
-        if self.effective_source not in {
-            NARRATIVE_OUTCOME_SOURCE_CONFIG,
-            NARRATIVE_OUTCOME_SOURCE_STORY,
-            NARRATIVE_OUTCOME_SOURCE_SESSION,
-        }:
-            raise ValueError(
-                f"invalid narrative outcome source: {self.effective_source}"
-            )
-        if self.effective_source == NARRATIVE_OUTCOME_SOURCE_CONFIG:
-            if self.story_weights is not None or self.session_weights is not None:
-                raise ValueError(
-                    "config narrative outcome source cannot ignore an override"
-                )
-            expected = self.config_default
-        elif self.effective_source == NARRATIVE_OUTCOME_SOURCE_STORY:
-            if self.story_weights is None:
-                raise ValueError("story narrative outcome source requires story weights")
-            if self.session_weights is not None:
-                raise ValueError(
-                    "story narrative outcome source cannot ignore a session override"
-                )
-            expected = self.story_weights
-        else:
-            if self.session_weights is None:
-                raise ValueError("session narrative outcome source requires session weights")
-            expected = self.session_weights
-        if self.effective_weights != expected:
-            raise ValueError(
-                "effective narrative outcome weights do not match effective source"
-            )
-
-
-@dataclass(frozen=True)
 class NarrativeOutcomeRecord:
     id: int
     session_id: str
@@ -242,6 +203,42 @@ class Workspace:
 
 
 @dataclass(frozen=True)
+class RPModuleCatalogEntry:
+    module_name: str
+    display_name: str
+    description: str = ""
+    sort_order: int = 0
+    config_version: int = 1
+    default_story_enabled: bool = True
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class StoryRPModule:
+    id: int
+    story_id: int
+    module_name: str
+    enabled: bool = True
+    config: Mapping[str, object] = field(default_factory=dict)
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionRPModuleOverride:
+    id: int
+    session_id: str
+    module_name: str
+    enabled: bool | None = None
+    config: Mapping[str, object] = field(default_factory=dict)
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
 class Story:
     id: int
     workspace_id: str
@@ -251,7 +248,6 @@ class Story:
     story_prompt: str = ""
     first_message: str = ""
     main_llm_provider_key: str | None = None
-    narrative_outcome_weights: NarrativeOutcomeWeights | None = None
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""
@@ -270,7 +266,6 @@ class Session:
     title: str = ""
     description: str = ""
     main_llm_provider_key: str | None = None
-    narrative_outcome_weights: NarrativeOutcomeWeights | None = None
     player_character_id: int | None = None
     player_character_snapshot_json: str = "{}"
     profile_metadata_json: str = "{}"
@@ -284,7 +279,6 @@ class SessionProfile:
     title: str = ""
     description: str = ""
     main_llm_provider_key: str | None = None
-    narrative_outcome_weights: NarrativeOutcomeWeights | None = None
     player_character_id: int | None = None
     player_character_snapshot_json: str = "{}"
     metadata_json: str = "{}"

@@ -151,6 +151,13 @@ def _turn_completed_payload(event: dict[str, object]) -> dict[str, object]:
     duration_ms = _camel_or_snake(event, "durationMs", "duration_ms")
     if duration_ms is not None:
         payload["durationMs"] = duration_ms
+    committed_turn_id = _camel_or_snake(
+        event,
+        "committedTurnId",
+        "committed_turn_id",
+    )
+    if isinstance(committed_turn_id, int) and committed_turn_id > 0:
+        payload["committedTurnId"] = committed_turn_id
     return payload
 
 

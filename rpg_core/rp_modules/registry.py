@@ -1,219 +1,380 @@
-"""Session-scoped RP Module registry."""
+"""Built-in RP Module definitions and immutable Story/Session selection snapshots."""
 
 from __future__ import annotations
 
 import random
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Mapping
 
-from rpg_core.agent.tools import BaseTool
-from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
-from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
 )
 from rpg_core.rp_modules.dice import DiceModule
+from rpg_core.rp_modules.models import (
+    ModuleCommand,
+    RPModuleDefinition,
+    RPModuleSelection,
+    RPModuleSelectionSnapshot,
+)
 from rpg_core.rp_modules.narrative_outcome import NarrativeOutcomeModule
-from rpg_core.rp_modules.models import ModuleCommand, ModuleContextRequest, ModuleStatus
-from rpg_core.settings import RPModuleSettings
-
-if TYPE_CHECKING:
-    from rpg_core.agent.transaction import TurnScratch
-    from rpg_core.scene import SceneTracker
-    from rpg_core.status.manager import StatusManager
+from rpg_core.rp_modules.narrative_outcome.models import NarrativeOutcomeSelection
+from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
+from rpg_core.settings import (
+    DiceModuleSettings,
+    NarrativeOutcomeModuleSettings,
+    RPModuleSettings,
+)
+from rpg_data import models as data_models
 
 
 class RPModuleRegistry:
-    """Collect enabled RP modules for one agent session."""
+    """Resolve persistent mounts into immutable snapshots and local runtimes."""
 
     def __init__(
         self,
         *,
-        session_id: str,
-        world_name: str,
-        status_mgr: "StatusManager | None" = None,
-        scene_tracker: "SceneTracker | None" = None,
         settings: RPModuleSettings | None = None,
         rng_factory: Callable[[], random.Random] | None = None,
+        gateway_provider: Callable[[], object] | None = None,
     ) -> None:
-        self.session_id = session_id
-        self.world_name = world_name
-        self.status_mgr = status_mgr
-        self.scene_tracker = scene_tracker
         self.settings = settings or RPModuleSettings()
         self._rng_factory = rng_factory or random.Random
-        self._modules: dict[str, RPModule] = {}
-        self._tool_to_module: dict[str, str] = {}
-        self._disabled_status: dict[str, ModuleStatus] = {}
-        self._load_modules()
+        self._gateway_provider = gateway_provider
+        self._definitions = (
+            RPModuleDefinition(
+                name=RP_MODULE_NARRATIVE_OUTCOME_NAME,
+                display_name="剧情结果裁定",
+                description="按五档随机结果裁定存在外部实质变数的剧情分支。",
+                sort_order=10,
+                configurable_fields=("auto_adjudication_enabled", "weights"),
+                config_validator=self._validate_narrative_config,
+                system_config_resolver=self._narrative_system_config,
+                module_factory=self._create_narrative_module,
+            ),
+            RPModuleDefinition(
+                name=RP_MODULE_DICE_NAME,
+                display_name="骰子调试",
+                description="提供 /roll 与 /check_dc 低层随机调试命令。",
+                sort_order=20,
+                configurable_fields=("default_dc",),
+                config_validator=self._validate_dice_config,
+                system_config_resolver=self._dice_system_config,
+                module_factory=self._create_dice_module,
+            ),
+        )
 
-    def enabled_modules(self) -> list[RPModule]:
-        return [self._modules[name] for name in sorted(self._modules)]
+    def definitions(self) -> tuple[RPModuleDefinition, ...]:
+        return self._definitions
 
-    def get_fixed_sections(self) -> list[FixedLayerSection]:
-        sections: list[FixedLayerSection] = []
-        for module in self.enabled_modules():
-            sections.extend(module.get_fixed_sections())
-        return sorted(sections, key=lambda section: (section.priority, section.id))
+    def definition(self, module_name: str) -> RPModuleDefinition | None:
+        name = str(module_name or "").strip().lower()
+        return next((item for item in self._definitions if item.name == name), None)
 
-    def get_runtime_sections(
+    def resolve_snapshot(self, session_id: str | None = None) -> RPModuleSelectionSnapshot:
+        from rpg_data.services import get_data_service_gateway
+
+        resolved_session_id = session_id
+        if not resolved_session_id:
+            raise ValueError("session_id is required to resolve RP Modules")
+        gateway = (
+            self._gateway_provider()
+            if self._gateway_provider is not None
+            else get_data_service_gateway()
+        )
+        session = gateway.catalog.get_session(resolved_session_id)
+        if session is None:
+            raise FileNotFoundError(f"session not found: {resolved_session_id}")
+        mounts = gateway.rp_modules.list_story_modules(
+            session.workspace_id,
+            int(session.story_id),
+        )
+        overrides = gateway.rp_modules.list_session_overrides(resolved_session_id)
+        if mounts is None or overrides is None:
+            raise FileNotFoundError(f"RP Module selection context not found: {resolved_session_id}")
+        return self._build_snapshot(
+            session_id=resolved_session_id,
+            story_id=int(session.story_id),
+            mounts=mounts,
+            overrides=overrides,
+        )
+
+    def resolve_story_snapshot(
         self,
-        request: ModuleContextRequest | None = None,
-    ) -> list[RPModuleRuntimeSection]:
-        request = request or ModuleContextRequest(session_id=self.session_id)
-        sections: list[RPModuleRuntimeSection] = []
-        for module in self.enabled_modules():
-            sections.extend(module.get_runtime_sections(request))
-        return sorted(sections, key=lambda section: (section.priority, section.id))
+        workspace_id: str,
+        story_id: int,
+    ) -> RPModuleSelectionSnapshot | None:
+        from rpg_data.services import get_data_service_gateway
 
-    def get_tools(self) -> list[BaseTool]:
-        tools: list[BaseTool] = []
-        for module in self.enabled_modules():
-            tools.extend(module.get_tools())
-        return tools
+        gateway = (
+            self._gateway_provider()
+            if self._gateway_provider is not None
+            else get_data_service_gateway()
+        )
+        mounts = gateway.rp_modules.list_story_modules(
+            workspace_id,
+            int(story_id),
+        )
+        if mounts is None:
+            return None
+        return self._build_snapshot(
+            session_id="",
+            story_id=int(story_id),
+            mounts=mounts,
+            overrides=[],
+        )
 
-    def get_status_preflight_tools(self, user_input: str) -> list[BaseTool]:
-        """Return high-level tools that StatusSubAgent may use this turn."""
-        module = self._modules.get(RP_MODULE_NARRATIVE_OUTCOME_NAME)
-        if not isinstance(module, NarrativeOutcomeModule):
-            return []
-        if not module.should_offer_status_preflight(user_input):
-            return []
-        return module.get_tools()
+    def validate_config_patch(
+        self,
+        module_name: str,
+        config: Mapping[str, object],
+    ) -> dict[str, object]:
+        definition = self.definition(module_name)
+        if definition is None:
+            raise KeyError(f"unknown RP module: {module_name}")
+        raw = dict(config)
+        unexpected = sorted(set(raw) - set(definition.configurable_fields))
+        if unexpected:
+            raise ValueError(
+                f"unsupported {definition.name} config field(s): {unexpected}"
+            )
+        return definition.config_validator(raw)
 
-    def get_commands(self) -> list[ModuleCommand]:
-        if not self.settings.enabled:
-            return []
+    def create_runtime(
+        self,
+        snapshot: RPModuleSelectionSnapshot,
+    ) -> RPModuleTurnRuntime:
+        modules = []
+        for selected in snapshot.enabled_modules:
+            definition = self.definition(selected.name)
+            if definition is None:
+                continue
+            modules.append(definition.module_factory(snapshot.session_id, selected))
+        return RPModuleTurnRuntime(snapshot, modules)
+
+    def get_commands(self, session_id: str | None = None) -> list[ModuleCommand]:
+        snapshot = self.resolve_snapshot(session_id)
+
+        async def list_modules(_agent, _args: list[str]) -> str:
+            return self._format_modules(snapshot)
+
+        async def show_module(_agent, args: list[str]) -> str:
+            return self._format_module(snapshot, args)
 
         commands = [
             ModuleCommand(
                 name="/rp_modules",
-                description="列出已启用 RP Modules",
-                detail="用法：/rp_modules。显示当前启用的 RP 玩法模块和公开工具。",
-                handler=self._cmd_rp_modules,
+                description="列出当前 Story/Session 的 RP Modules",
+                detail="用法：/rp_modules。显示模块挂载、覆盖与有效状态。",
+                handler=list_modules,
             ),
             ModuleCommand(
                 name="/rp_module",
                 description="查看 RP Module 状态",
-                detail=(
-                    f"用法：/rp_module <name>。例如 /rp_module "
-                    f"{RP_MODULE_NARRATIVE_OUTCOME_NAME}。"
-                ),
-                handler=self._cmd_rp_module,
+                detail="用法：/rp_module <name>。",
+                handler=show_module,
             ),
         ]
-        for module in self.enabled_modules():
+        runtime = self.create_runtime(snapshot)
+        for module in runtime.enabled_modules():
             commands.extend(module.get_commands())
         return commands
 
-    def module_status(self, name: str) -> ModuleStatus:
-        module = self._modules.get(name)
-        if module is not None:
-            return module.status()
-        return self._disabled_status.get(name) or ModuleStatus(name=name, enabled=False)
-
-    def bind_turn(self, scratch: "TurnScratch") -> None:
-        for module in self.enabled_modules():
-            module.bind_turn(scratch)
-
-    def unbind_turn(self, scratch: "TurnScratch") -> None:
-        for module in reversed(self.enabled_modules()):
-            module.unbind_turn(scratch)
-
-    def _load_modules(self) -> None:
-        if not self.settings.enabled:
-            return
-        if self.settings.narrative_outcome.enabled:
-            self._modules[RP_MODULE_NARRATIVE_OUTCOME_NAME] = NarrativeOutcomeModule(
-                session_id=self.session_id,
-                settings=self.settings.narrative_outcome,
-                rng=self._rng_factory(),
+    def _build_snapshot(
+        self,
+        *,
+        session_id: str,
+        story_id: int,
+        mounts: list[data_models.StoryRPModule],
+        overrides: list[data_models.SessionRPModuleOverride],
+    ) -> RPModuleSelectionSnapshot:
+        mount_by_name = {mount.module_name: mount for mount in mounts}
+        override_by_name = {override.module_name: override for override in overrides}
+        selected: list[RPModuleSelection] = []
+        for definition in self._definitions:
+            system_enabled, system_config = self._system_module_config(definition.name)
+            mount = mount_by_name.get(definition.name)
+            override = override_by_name.get(definition.name)
+            story_config = self.validate_config_patch(
+                definition.name,
+                mount.config if mount is not None else {},
             )
-        else:
-            self._disabled_status[RP_MODULE_NARRATIVE_OUTCOME_NAME] = ModuleStatus(
-                name=RP_MODULE_NARRATIVE_OUTCOME_NAME,
-                enabled=False,
-                config_summary={
-                    "auto_adjudication_enabled": (
-                        self.settings.narrative_outcome.auto_adjudication_enabled
-                    ),
-                    "default_weights": (
-                        self.settings.narrative_outcome.default_weights.to_dict()
-                    ),
-                },
+            session_config = self.validate_config_patch(
+                definition.name,
+                override.config if override is not None else {},
             )
-        if self.settings.dice.enabled:
-            self._modules[RP_MODULE_DICE_NAME] = DiceModule(
-                settings=self.settings.dice,
-                rng=self._rng_factory(),
+            effective_config = dict(system_config)
+            sources = {key: data_models.NARRATIVE_OUTCOME_SOURCE_CONFIG for key in system_config}
+            for key, value in story_config.items():
+                effective_config[key] = value
+                sources[key] = data_models.NARRATIVE_OUTCOME_SOURCE_STORY
+            for key, value in session_config.items():
+                effective_config[key] = value
+                sources[key] = data_models.NARRATIVE_OUTCOME_SOURCE_SESSION
+            story_mounted = mount is not None
+            story_enabled = bool(mount.enabled) if mount is not None else False
+            session_enabled = override.enabled if override is not None else None
+            effective_enabled = bool(
+                self.settings.enabled
+                and system_enabled
+                and story_mounted
+                and story_enabled
+                and session_enabled is not False
             )
-        else:
-            self._disabled_status[RP_MODULE_DICE_NAME] = ModuleStatus(
-                name=RP_MODULE_DICE_NAME,
-                enabled=False,
-                config_summary={
-                    "default_dc": self.settings.dice.default_dc,
-                    "max_dice_count": self.settings.dice.max_dice_count,
-                    "max_die_sides": self.settings.dice.max_die_sides,
-                },
+            selected.append(
+                RPModuleSelection(
+                    name=definition.name,
+                    display_name=definition.display_name,
+                    description=definition.description,
+                    sort_order=definition.sort_order,
+                    system_enabled=system_enabled,
+                    story_mounted=story_mounted,
+                    story_enabled=story_enabled,
+                    session_enabled_override=session_enabled,
+                    effective_enabled=effective_enabled,
+                    system_config=system_config,
+                    story_config=story_config,
+                    session_config=session_config,
+                    effective_config=effective_config,
+                    config_sources=sources,
+                )
             )
-        self._validate_tool_names()
+        return RPModuleSelectionSnapshot(
+            session_id=session_id,
+            story_id=story_id,
+            global_enabled=self.settings.enabled,
+            modules=tuple(sorted(selected, key=lambda item: (item.sort_order, item.name))),
+        )
 
-    def _validate_tool_names(self) -> None:
-        for module in self.enabled_modules():
-            for tool in module.get_tools():
-                owner = self._tool_to_module.get(tool.name)
-                if owner is not None:
-                    raise ValueError(
-                        f"Duplicate RP module tool name {tool.name!r}: {owner} and {module.name}"
-                    )
-                self._tool_to_module[tool.name] = module.name
+    def _system_module_config(self, module_name: str) -> tuple[bool, dict[str, object]]:
+        definition = self.definition(module_name)
+        if definition is None:
+            raise KeyError(f"unknown RP module: {module_name}")
+        return definition.system_config_resolver(self.settings)
 
-    async def _cmd_rp_modules(self, _agent, _args: list[str]) -> str:
-        if not self.settings.enabled:
-            return "RP Modules 未启用。"
+    @staticmethod
+    def _validate_narrative_config(raw: Mapping[str, object]) -> dict[str, object]:
+        normalized: dict[str, object] = {}
+        if "auto_adjudication_enabled" in raw:
+            value = raw["auto_adjudication_enabled"]
+            if not isinstance(value, bool):
+                raise ValueError("auto_adjudication_enabled must be a boolean")
+            normalized["auto_adjudication_enabled"] = value
+        if "weights" in raw:
+            value = raw["weights"]
+            if not isinstance(value, Mapping):
+                raise ValueError("weights must be an object")
+            normalized["weights"] = data_models.NarrativeOutcomeWeights.from_mapping(
+                value
+            ).to_dict()
+        return normalized
 
-        modules = self.enabled_modules()
-        lines = ["已启用 RP Modules:"]
-        if not modules:
-            lines.append("- （无）")
-            return "\n".join(lines)
-        for module in modules:
-            tools = ",".join(tool.name for tool in module.get_tools()) or "无"
-            lines.append(f"- {module.name}: tools={tools}")
+    @staticmethod
+    def _validate_dice_config(raw: Mapping[str, object]) -> dict[str, object]:
+        if "default_dc" not in raw:
+            return {}
+        value = raw["default_dc"]
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError("default_dc must be a positive integer")
+        return {"default_dc": value}
+
+    @staticmethod
+    def _narrative_system_config(settings: object) -> tuple[bool, dict[str, object]]:
+        current = settings.narrative_outcome
+        return current.enabled, {
+            "auto_adjudication_enabled": current.auto_adjudication_enabled,
+            "weights": current.default_weights.to_dict(),
+        }
+
+    @staticmethod
+    def _dice_system_config(settings: object) -> tuple[bool, dict[str, object]]:
+        current = settings.dice
+        return current.enabled, {"default_dc": current.default_dc}
+
+    def _create_narrative_module(
+        self,
+        session_id: str,
+        selected: RPModuleSelection,
+    ) -> NarrativeOutcomeModule:
+        weights = data_models.NarrativeOutcomeWeights.from_mapping(
+            _mapping(selected.effective_config["weights"], "weights")
+        )
+        return NarrativeOutcomeModule(
+            session_id=session_id,
+            settings=NarrativeOutcomeModuleSettings(
+                enabled=True,
+                auto_adjudication_enabled=bool(
+                    selected.effective_config["auto_adjudication_enabled"]
+                ),
+                default_weights=weights,
+            ),
+            rng=self._rng_factory(),
+            selection=NarrativeOutcomeSelection(
+                effective_weights=weights,
+                effective_source=selected.config_sources.get(
+                    "weights",
+                    data_models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
+                ),
+            ),
+        )
+
+    def _create_dice_module(
+        self,
+        _session_id: str,
+        selected: RPModuleSelection,
+    ) -> DiceModule:
+        return DiceModule(
+            settings=DiceModuleSettings(
+                enabled=True,
+                default_dc=int(selected.effective_config["default_dc"]),
+                max_dice_count=self.settings.dice.max_dice_count,
+                max_die_sides=self.settings.dice.max_die_sides,
+            ),
+            rng=self._rng_factory(),
+        )
+
+    @staticmethod
+    def _format_modules(snapshot: RPModuleSelectionSnapshot) -> str:
+        lines = ["RP Modules:"]
+        for module in snapshot.modules:
+            state = "启用" if module.effective_enabled else "停用"
+            lines.append(f"- {module.name}: {state}")
         return "\n".join(lines)
 
-    async def _cmd_rp_module(self, _agent, args: list[str]) -> str:
-        if not self.settings.enabled:
-            return "RP Modules 未启用。"
+    def _format_module(
+        self,
+        snapshot: RPModuleSelectionSnapshot,
+        args: list[str],
+    ) -> str:
         if not args:
             return "[错误] 用法：/rp_module <name>"
-
-        name = args[0].strip().lower()
-        status = self.module_status(name)
-        if name not in self._known_module_names() and not status.enabled:
-            return f"[错误] 未知 RP Module: {name}"
-
+        selected = snapshot.get(args[0].strip().lower())
+        if selected is None:
+            return f"[错误] 未知 RP Module: {args[0]}"
         lines = [
-            f"RP Module: {status.name}",
-            f"启用: {'是' if status.enabled else '否'}",
+            f"RP Module: {selected.name}",
+            f"Story 挂载: {'是' if selected.story_mounted else '否'}",
+            f"Story 启用: {'是' if selected.story_enabled else '否'}",
+            f"Session 覆盖: {selected.session_enabled_override}",
+            f"有效启用: {'是' if selected.effective_enabled else '否'}",
+            f"有效配置: {_plain_value(selected.effective_config)}",
         ]
-        if status.tools:
-            lines.append(f"工具: {', '.join(status.tools)}")
-        if status.config_summary:
-            config = ", ".join(f"{key}={value}" for key, value in status.config_summary.items())
-            lines.append(f"配置: {config}")
-        if name == RP_MODULE_DICE_NAME:
-            lines.append("策略: 仅提供 /roll 与 /check_dc 手动调试，不向主 LLM 暴露低层骰子工具。")
-            lines.append("审计: 手动 rolls 不落盘。")
-        if name == RP_MODULE_NARRATIVE_OUTCOME_NAME:
-            lines.append("策略: 主 LLM 只通过 rp_story_outcome 进行五级剧情分支裁定。")
-            lines.append("审计: 每个成功 turn 最多持久化一条裁定。")
+        if selected.name == RP_MODULE_DICE_NAME:
+            lines.append("策略: 仅提供 /roll 与 /check_dc，不进入 LLM 工具 schema。")
+        if selected.name == RP_MODULE_NARRATIVE_OUTCOME_NAME:
+            lines.append("工具: rp_story_outcome")
+            lines.append("策略: 当前主流程唯一的剧情随机决策模块。")
         return "\n".join(lines)
 
-    def _known_module_names(self) -> set[str]:
-        return {
-            RP_MODULE_DICE_NAME,
-            RP_MODULE_NARRATIVE_OUTCOME_NAME,
-        }
+
+def _mapping(value: object, label: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be a mapping")
+    return value
+
+
+def _plain_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _plain_value(item) for key, item in value.items()}
+    if isinstance(value, tuple | list):
+        return [_plain_value(item) for item in value]
+    return value

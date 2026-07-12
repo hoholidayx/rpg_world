@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import random
 import re
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
+from rpg_core.context.fixed_layer.contributors.core_contract import (
+    STATE_SYNC_BEFORE_NARRATION_RULE,
+)
 from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import (
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
@@ -23,6 +25,7 @@ from rpg_core.rp_modules.narrative_outcome.tools import (
     NarrativeOutcomeSampler,
     NarrativeOutcomeTool,
 )
+from rpg_core.rp_modules.narrative_outcome.models import NarrativeOutcomeSelection
 from rpg_core.settings import NarrativeOutcomeModuleSettings
 from rpg_data import models as data_models
 
@@ -73,12 +76,6 @@ _NEGATED_ENGLISH_RANDOM_CUE_RE = re.compile(
     re.IGNORECASE,
 )
 
-SelectionResolver = Callable[
-    [str, data_models.NarrativeOutcomeWeights],
-    data_models.NarrativeOutcomeSelection | None,
-]
-
-
 class NarrativeOutcomeModule(RPModule):
     """Choose a five-level story branch without exposing random mechanics."""
 
@@ -90,12 +87,15 @@ class NarrativeOutcomeModule(RPModule):
         session_id: str,
         settings: NarrativeOutcomeModuleSettings | None = None,
         rng: random.Random | None = None,
-        selection_resolver: SelectionResolver | None = None,
+        selection: NarrativeOutcomeSelection | None = None,
     ) -> None:
         self.session_id = session_id
         self.settings = settings or NarrativeOutcomeModuleSettings()
         self._sampler = NarrativeOutcomeSampler(rng)
-        self._selection_resolver = selection_resolver
+        self._selection = selection or NarrativeOutcomeSelection(
+            effective_weights=self.settings.default_weights,
+            effective_source=data_models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
+        )
         self._active_scratch: TurnScratch | None = None
         self._tool = NarrativeOutcomeTool(self)
 
@@ -164,10 +164,8 @@ class NarrativeOutcomeModule(RPModule):
                         "弱化、重新抽取或先写出相反结果，也不需要再次调用 rp_story_outcome。若仍"
                         "重复调用，该工具只会幂等返回同一结果。\n"
                         "reason 是本次裁定不可缩小的整体目标边界，不得用子步骤代替整体目标。\n"
-                        "先在内部确定该结果造成的叙事后果和最终状态。凡实际、持久且已经确定的"
-                        "裁定派生变化，必须在输出任何 RP 正文前调用 scene_time、scene_attr、"
-                        "scene_del_attr 或 status_table_set_values；工具调用轮不得夹带 RP 正文，"
-                        "工具返回后再输出与已同步状态一致的正文。状态同步无需玩家确认，"
+                        f"{STATE_SYNC_BEFORE_NARRATION_RULE} 可用状态工具包括 scene_time、"
+                        "scene_attr、scene_del_attr 和 status_table_set_values。状态同步无需玩家确认，"
                         "不得询问是否需要标记、记录或更新状态。"
                     ),
                 )
@@ -191,6 +189,12 @@ class NarrativeOutcomeModule(RPModule):
     def get_tools(self):
         return [self._tool]
 
+    def get_main_agent_tools(self):
+        scratch = self._active_scratch
+        if scratch is not None and scratch.narrative_outcome is not None:
+            return []
+        return self.get_tools()
+
     def should_offer_status_preflight(self, user_input: str) -> bool:
         """Respect auto-adjudication while still handling explicit random intent."""
         return (
@@ -211,14 +215,13 @@ class NarrativeOutcomeModule(RPModule):
         )
 
     def bind_turn(self, scratch: TurnScratch) -> None:
-        selection = self._resolve_selection()
-        scratch.narrative_outcome_selection = selection
+        scratch.narrative_outcome_selection = self._selection
         self._active_scratch = scratch
         logger.debug(
             "[NarrativeOutcome] turn bound: session_id={}, turn_id={}, source={}",
             self.session_id,
             scratch.turn_id,
-            selection.effective_source,
+            self._selection.effective_source,
         )
 
     def unbind_turn(self, scratch: TurnScratch) -> None:
@@ -255,31 +258,6 @@ class NarrativeOutcomeModule(RPModule):
             staged.actor,
         )
         return staged
-
-    def _resolve_selection(self) -> data_models.NarrativeOutcomeSelection:
-        resolver = self._selection_resolver or self._default_selection_resolver
-        selection = resolver(self.session_id, self.settings.default_weights)
-        if selection is not None:
-            return selection
-        return data_models.NarrativeOutcomeSelection(
-            config_default=self.settings.default_weights,
-            story_weights=None,
-            session_weights=None,
-            effective_weights=self.settings.default_weights,
-            effective_source=data_models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
-        )
-
-    @staticmethod
-    def _default_selection_resolver(
-        session_id: str,
-        config_default: data_models.NarrativeOutcomeWeights,
-    ) -> data_models.NarrativeOutcomeSelection | None:
-        from rpg_data.services import get_data_service_gateway
-
-        return get_data_service_gateway().narrative_outcomes.get_session_selection(
-            session_id,
-            config_default,
-        )
 
     @staticmethod
     def _has_explicit_random_intent(user_input: str) -> bool:

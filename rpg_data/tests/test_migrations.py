@@ -32,6 +32,9 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_session_backup_messages",
             "rpg_session_story_memories",
             "rpg_session_narrative_outcomes",
+            "rpg_rp_module_catalog",
+            "rpg_story_rp_modules",
+            "rpg_session_rp_module_overrides",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -94,8 +97,8 @@ def test_run_migrations_creates_initial_tables() -> None:
             "story_prompt",
             "first_message",
             "main_llm_provider_key",
-            "narrative_outcome_weights_json",
         }.issubset(story_columns)
+        assert "narrative_outcome_weights_json" not in story_columns
         assert "description" not in story_columns
         assert {
             "session_id",
@@ -104,8 +107,20 @@ def test_run_migrations_creates_initial_tables() -> None:
             "main_llm_provider_key",
             "player_character_id",
             "player_character_snapshot_json",
-            "narrative_outcome_weights_json",
         }.issubset(profile_columns)
+        assert "narrative_outcome_weights_json" not in profile_columns
+        catalog_names = {
+            row["module_name"]
+            for row in conn.execute("SELECT module_name FROM rpg_rp_module_catalog")
+        }
+        assert catalog_names == {"narrative_outcome", "dice"}
+        mounted = {
+            row["module_name"]
+            for row in conn.execute(
+                "SELECT module_name FROM rpg_story_rp_modules WHERE story_id = 1"
+            )
+        }
+        assert mounted == catalog_names
         assert {
             "session_id",
             "role",
@@ -221,7 +236,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0002", "0002_demo.sql"),
             ("0003", "0003_pagination_demo.sql"),
             ("0004", "0004_main_llm_selection.sql"),
-            ("0005", "0005_narrative_outcome.sql"),
+            ("0005", "0005_rp_modules.sql"),
         ]
     finally:
         conn.close()

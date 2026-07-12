@@ -143,6 +143,7 @@ export function mapHistoryToMessages({
   playerCharacter: SessionPlayerCharacter | null
 }): SessionTimelineMessage[] {
   return (turns ?? []).flatMap((turn, turnIndex) => {
+    const timelineGroupId = `turn:${turn.turnId}`
     const messages = turn.messages.map((message, messageIndex) => {
       const role = timelineRole(message.role)
       const persistent = Boolean(message.messageId)
@@ -153,6 +154,9 @@ export function mapHistoryToMessages({
         id: message.messageId ? `history-${message.messageId}` : `history-${turn.turnId || turnIndex + 1}-${messageIndex}`,
         messageId: message.messageId || undefined,
         turnId: message.turnId || turn.turnId || turnIndex + 1,
+        timelineGroupId,
+        timelineAnchorTurnId: turn.turnId,
+        timelineGroupOrder: 0,
         seqInTurn: message.seqInTurn || messageIndex + 1,
         role,
         content,
@@ -175,6 +179,9 @@ export function mapHistoryToMessages({
       {
         id: `history-outcome-${turn.turnId}`,
         turnId: turn.turnId,
+        timelineGroupId,
+        timelineAnchorTurnId: turn.turnId,
+        timelineGroupOrder: 0,
         seqInTurn: 2,
         role: SESSION_TIMELINE_ROLE.OUTCOME,
         content: turn.outcome.reason,

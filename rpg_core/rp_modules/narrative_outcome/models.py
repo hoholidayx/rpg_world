@@ -8,6 +8,12 @@ from rpg_data.models import NarrativeOutcomeWeights
 
 
 @dataclass(frozen=True)
+class NarrativeOutcomeSelection:
+    effective_weights: NarrativeOutcomeWeights
+    effective_source: str
+
+
+@dataclass(frozen=True)
 class NarrativeOutcomeDefinition:
     code: str
     label: str

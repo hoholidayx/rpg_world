@@ -18,7 +18,7 @@ from play_api.routers import (
     characters,
     lorebook,
     main_llm,
-    narrative_outcome,
+    rp_modules,
     ops,
     sessions,
     status_tables,
@@ -51,7 +51,7 @@ app.include_router(workspace.router, prefix=_PLAY_API_PREFIX)
 app.include_router(characters.router, prefix=_PLAY_API_PREFIX)
 app.include_router(lorebook.router, prefix=_PLAY_API_PREFIX)
 app.include_router(main_llm.router, prefix=_PLAY_API_PREFIX)
-app.include_router(narrative_outcome.router, prefix=_PLAY_API_PREFIX)
+app.include_router(rp_modules.router, prefix=_PLAY_API_PREFIX)
 app.include_router(ops.router, prefix=_PLAY_API_PREFIX)
 app.include_router(sessions.router, prefix=_PLAY_API_PREFIX)
 app.include_router(status_tables.router, prefix=_PLAY_API_PREFIX)

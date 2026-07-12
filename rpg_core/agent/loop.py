@@ -342,6 +342,14 @@ async def run_chat_loop_stream(
                     tc["id"] = f"call_stream_{id(tc)}"
 
         tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls or []]
+        if tool_calls and round_text.strip():
+            logger.warning(
+                _TAG
+                + " toolRoundBodyDetected=true round={} tools={} text_length={}",
+                tool_call_count + 1,
+                tool_names,
+                len(round_text),
+            )
         if settings.verbose_logging:
             logger.info(
                 _TAG + " stream LLM round {} completed: finish_reason={}, tool_calls={}",

@@ -29,7 +29,7 @@ import type { LorebookEntry } from '@/types/lorebook'
 import type { SessionSummary } from '@/types/session'
 import { STATUS_KIND, type StoryStatusMount } from '@/types/statusTables'
 import type { StoryInput, StorySummary } from '@/types/story'
-import { StoryNarrativeOutcomePanel } from './StoryNarrativeOutcomePanel'
+import { StoryRPModulesPanel } from './StoryRPModulesPanel'
 
 type DraftState = StoryInput
 
@@ -645,7 +645,7 @@ function StoryEditContent({
               ) : null}
 
               {!isCreate && currentWorkspace && story ? (
-                <StoryNarrativeOutcomePanel
+                <StoryRPModulesPanel
                   workspace={currentWorkspace}
                   storyId={story.id}
                 />

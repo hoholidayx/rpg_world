@@ -9,7 +9,6 @@ from peewee import Database
 from rpg_data import models
 from rpg_data.repositories.narrative_outcome_repo import NarrativeOutcomeRepository
 from rpg_data.repositories.session_repo import SessionRepository
-from rpg_data.repositories.story_repo import StoryRepository
 
 _VALID_SOURCES = {
     models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
@@ -21,84 +20,8 @@ _VALID_SOURCES = {
 class NarrativeOutcomeService:
     def __init__(self, database: Database) -> None:
         self._database = database
-        self._stories = StoryRepository(database)
         self._sessions = SessionRepository(database)
         self._records = NarrativeOutcomeRepository(database)
-
-    def get_story_selection(
-        self,
-        workspace_id: str,
-        story_id: int,
-        config_default: models.NarrativeOutcomeWeights,
-    ) -> models.NarrativeOutcomeSelection | None:
-        story = self._stories.get(int(story_id))
-        if story is None or story.workspace_id != workspace_id:
-            return None
-        story_weights = story.narrative_outcome_weights
-        return models.NarrativeOutcomeSelection(
-            config_default=config_default,
-            story_weights=story_weights,
-            session_weights=None,
-            effective_weights=story_weights or config_default,
-            effective_source=(
-                models.NARRATIVE_OUTCOME_SOURCE_STORY
-                if story_weights is not None
-                else models.NARRATIVE_OUTCOME_SOURCE_CONFIG
-            ),
-        )
-
-    def set_story_weights(
-        self,
-        workspace_id: str,
-        story_id: int,
-        weights: models.NarrativeOutcomeWeights | None,
-        config_default: models.NarrativeOutcomeWeights,
-    ) -> models.NarrativeOutcomeSelection | None:
-        story = self._stories.get(int(story_id))
-        if story is None or story.workspace_id != workspace_id:
-            return None
-        self._stories.set_narrative_outcome_weights(int(story_id), weights)
-        return self.get_story_selection(workspace_id, story_id, config_default)
-
-    def get_session_selection(
-        self,
-        session_id: str,
-        config_default: models.NarrativeOutcomeWeights,
-    ) -> models.NarrativeOutcomeSelection | None:
-        session = self._sessions.get(session_id)
-        if session is None:
-            return None
-        story = self._stories.get(session.story_id)
-        if story is None:
-            return None
-        story_weights = story.narrative_outcome_weights
-        session_weights = session.narrative_outcome_weights
-        if session_weights is not None:
-            effective = session_weights
-            source = models.NARRATIVE_OUTCOME_SOURCE_SESSION
-        elif story_weights is not None:
-            effective = story_weights
-            source = models.NARRATIVE_OUTCOME_SOURCE_STORY
-        else:
-            effective = config_default
-            source = models.NARRATIVE_OUTCOME_SOURCE_CONFIG
-        return models.NarrativeOutcomeSelection(
-            config_default=config_default,
-            story_weights=story_weights,
-            session_weights=session_weights,
-            effective_weights=effective,
-            effective_source=source,
-        )
-
-    def set_session_weights(
-        self,
-        session_id: str,
-        weights: models.NarrativeOutcomeWeights | None,
-        config_default: models.NarrativeOutcomeWeights,
-    ) -> models.NarrativeOutcomeSelection | None:
-        if self._sessions.set_narrative_outcome_weights(session_id, weights) is None:
-            return None
-        return self.get_session_selection(session_id, config_default)
 
     def record(
         self,

@@ -306,9 +306,8 @@ class _SequenceRng:
 
 
 def _set_outcome_rng(agent, *values: int) -> _SequenceRng:
-    module = agent._rp_module_registry._modules["narrative_outcome"]
     rng = _SequenceRng(*values)
-    module._sampler._rng = rng
+    agent._rp_module_registry._rng_factory = lambda: rng
     return rng
 
 
@@ -344,6 +343,11 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
         for schema in scripted_llm_manager.status.calls[0].tools or []
     }
     assert status_schema_names == {"rp_story_outcome"}
+    main_schema_names = {
+        schema["function"]["name"]
+        for schema in scripted_llm_manager.main_provider().calls[0].tools or []
+    }
+    assert "rp_story_outcome" not in main_schema_names
     first_main_context = "\n".join(
         str(message.get("content", ""))
         for message in scripted_llm_manager.main_provider().calls[0].messages
@@ -354,6 +358,7 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
     assert "reason 是本次裁定不可缩小的整体目标边界" in first_main_context
     assert "输出任何 RP 正文前调用" in first_main_context
     assert "工具调用轮不得夹带 RP 正文" in first_main_context
+    assert "最终正文不得再新增本应写入 scene 或普通状态表" in first_main_context
     assert "不得询问是否需要标记、记录或更新状态" in first_main_context
     assert "StatusSubAgent 已完成本轮剧情预裁定" not in first_main_context
     assert [call.source for call in reply.stats.calls] == [
@@ -601,6 +606,7 @@ async def test_stream_emits_preadjudication_card_before_main_narration(
     assert events[1].tool_name == "rp_story_outcome"
     assert '"outcomeCode"' in (events[1].tool_result or "")
     assert events[-1].kind == StreamEventKind.DONE
+    assert events[-1].committed_turn_id == 1
 
 
 @pytest.mark.asyncio
@@ -684,6 +690,7 @@ async def test_stream_syncs_state_before_success_with_cost_narration(
     assert max(state_tool_indices) < min(text_indices)
     final = events[-1]
     assert final.kind == StreamEventKind.DONE
+    assert final.committed_turn_id == 1
     assert "回到北境镇" in final.content
     assert "需要我标记" not in final.content
     scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")

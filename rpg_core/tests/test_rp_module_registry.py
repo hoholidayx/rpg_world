@@ -19,26 +19,33 @@ from rpg_core.settings import (
     NarrativeOutcomeModuleSettings,
     RPModuleSettings,
 )
+from rpg_data.services import get_data_service_gateway
 
 
-def test_registry_loads_default_modules():
+def _runtime(tmp_path, settings: RPModuleSettings | None = None):
+    gateway = get_data_service_gateway(tmp_path / "registry.sqlite3")
     registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(),
+        settings=settings or RPModuleSettings(),
         rng_factory=lambda: random.Random(0),
+        gateway_provider=lambda: gateway,
     )
+    snapshot = registry.resolve_snapshot("s_forest001")
+    return registry, snapshot, registry.create_runtime(snapshot)
 
-    assert [module.name for module in registry.enabled_modules()] == [
+
+def test_registry_loads_default_modules(tmp_path):
+    registry, _snapshot, runtime = _runtime(tmp_path)
+
+    assert [module.name for module in runtime.enabled_modules()] == [
         RP_MODULE_DICE_NAME,
         RP_MODULE_NARRATIVE_OUTCOME_NAME,
     ]
-    assert [section.id for section in registry.get_fixed_sections()] == [
+    assert [section.id for section in runtime.get_fixed_sections()] == [
         RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
     ]
-    assert [tool.name for tool in registry.get_tools()] == ["rp_story_outcome"]
-    assert registry.get_runtime_sections() == []
-    assert [command.name for command in registry.get_commands()] == [
+    assert [tool.name for tool in runtime.get_tools()] == ["rp_story_outcome"]
+    assert runtime.get_runtime_sections(ModuleContextRequest(session_id="s_forest001")) == []
+    assert [command.name for command in registry.get_commands("s_forest001")] == [
         "/rp_modules",
         "/rp_module",
         "/roll",
@@ -46,54 +53,55 @@ def test_registry_loads_default_modules():
     ]
 
 
-def test_registry_global_disable_returns_empty_collections():
-    registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(enabled=False),
+def test_registry_global_disable_returns_empty_collections(tmp_path):
+    registry, _snapshot, runtime = _runtime(
+        tmp_path,
+        RPModuleSettings(enabled=False),
     )
 
-    assert registry.enabled_modules() == []
-    assert registry.get_fixed_sections() == []
-    assert registry.get_tools() == []
-    assert registry.get_commands() == []
-    assert registry.get_runtime_sections() == []
-
-
-def test_registry_keeps_narrative_module_and_framework_commands_when_dice_disabled():
-    registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(dice=DiceModuleSettings(enabled=False)),
-    )
-
-    assert [module.name for module in registry.enabled_modules()] == [
-        RP_MODULE_NARRATIVE_OUTCOME_NAME
-    ]
-    assert [section.id for section in registry.get_fixed_sections()] == [
-        RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
-    ]
-    assert [command.name for command in registry.get_commands()] == [
+    assert runtime.enabled_modules() == []
+    assert runtime.get_fixed_sections() == []
+    assert runtime.get_tools() == []
+    assert [command.name for command in registry.get_commands("s_forest001")] == [
         "/rp_modules",
         "/rp_module",
     ]
-    status = registry.module_status(RP_MODULE_DICE_NAME)
-    assert status.enabled is False
-    assert status.config_summary["default_dc"] == 12
+    assert runtime.get_runtime_sections(ModuleContextRequest(session_id="s_forest001")) == []
 
 
-def test_narrative_fixed_contract_uses_semantic_scene_gate():
-    registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(
+def test_registry_keeps_narrative_module_and_framework_commands_when_dice_disabled(tmp_path):
+    registry, snapshot, runtime = _runtime(
+        tmp_path,
+        RPModuleSettings(dice=DiceModuleSettings(enabled=False)),
+    )
+
+    assert [module.name for module in runtime.enabled_modules()] == [
+        RP_MODULE_NARRATIVE_OUTCOME_NAME
+    ]
+    assert [section.id for section in runtime.get_fixed_sections()] == [
+        RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+    ]
+    assert [command.name for command in registry.get_commands("s_forest001")] == [
+        "/rp_modules",
+        "/rp_module",
+    ]
+    selected = snapshot.get(RP_MODULE_DICE_NAME)
+    assert selected is not None
+    assert selected.effective_enabled is False
+    assert selected.effective_config["default_dc"] == 12
+
+
+def test_narrative_fixed_contract_uses_semantic_scene_gate(tmp_path):
+    _registry, _snapshot, runtime = _runtime(
+        tmp_path,
+        RPModuleSettings(
             narrative_outcome=NarrativeOutcomeModuleSettings(
                 auto_adjudication_enabled=True
             )
         ),
     )
 
-    content = registry.get_fixed_sections()[0].content
+    content = runtime.get_fixed_sections()[0].content
 
     assert "每轮叙事前" in content
     assert "用户完整语义、当前场景和状态" in content
@@ -107,39 +115,37 @@ def test_narrative_fixed_contract_uses_semantic_scene_gate():
     assert "当前 scene 与普通状态表" not in content
 
 
-def test_narrative_fixed_contract_disables_only_implicit_auto_adjudication():
-    registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(
+def test_narrative_fixed_contract_disables_only_implicit_auto_adjudication(tmp_path):
+    _registry, _snapshot, runtime = _runtime(
+        tmp_path,
+        RPModuleSettings(
             narrative_outcome=NarrativeOutcomeModuleSettings(
                 auto_adjudication_enabled=False
             )
         ),
     )
 
-    content = registry.get_fixed_sections()[0].content
+    content = runtime.get_fixed_sections()[0].content
 
     assert "自动剧情裁定已关闭" in content
     assert "用户明确要求" in content
     assert "每轮叙事前" not in content
 
 
-def test_status_preflight_respects_auto_adjudication_setting():
-    registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(
+def test_status_preflight_respects_auto_adjudication_setting(tmp_path):
+    _registry, _snapshot, runtime = _runtime(
+        tmp_path,
+        RPModuleSettings(
             narrative_outcome=NarrativeOutcomeModuleSettings(
                 auto_adjudication_enabled=False
             )
         ),
     )
 
-    assert registry.get_status_preflight_tools("我向 Alice 点头问好") == []
+    assert runtime.get_status_preflight_tools("我向 Alice 点头问好") == []
     assert [
         tool.name
-        for tool in registry.get_status_preflight_tools("请为潜行做一次检定")
+        for tool in runtime.get_status_preflight_tools("请为潜行做一次检定")
     ] == ["rp_story_outcome"]
 
 
@@ -152,15 +158,11 @@ def test_status_preflight_respects_auto_adjudication_setting():
         "这次交给运气随机裁定",
     ],
 )
-def test_narrative_explicit_random_intent_adds_turn_directive(user_input: str):
-    registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(),
-    )
+def test_narrative_explicit_random_intent_adds_turn_directive(user_input: str, tmp_path):
+    _registry, _snapshot, runtime = _runtime(tmp_path)
 
-    sections = registry.get_runtime_sections(
-        ModuleContextRequest(session_id="s1", user_input=user_input)
+    sections = runtime.get_runtime_sections(
+        ModuleContextRequest(session_id="s_forest001", user_input=user_input)
     )
 
     assert [section.id for section in sections] == [
@@ -171,15 +173,11 @@ def test_narrative_explicit_random_intent_adds_turn_directive(user_input: str):
     assert "不要询问表达式、DC" in sections[0].content
 
 
-def test_narrative_ordinary_roleplay_does_not_add_turn_directive():
-    registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(),
-    )
+def test_narrative_ordinary_roleplay_does_not_add_turn_directive(tmp_path):
+    _registry, _snapshot, runtime = _runtime(tmp_path)
 
-    sections = registry.get_runtime_sections(
-        ModuleContextRequest(session_id="s1", user_input="我向 Alice 点头问好。")
+    sections = runtime.get_runtime_sections(
+        ModuleContextRequest(session_id="s_forest001", user_input="我向 Alice 点头问好。")
     )
 
     assert sections == []
@@ -193,21 +191,17 @@ def test_narrative_ordinary_roleplay_does_not_add_turn_directive():
         "Check the clock on the wall.",
     ],
 )
-def test_narrative_negated_or_plain_check_text_does_not_force_turn_directive(user_input: str):
-    registry = RPModuleRegistry(
-        session_id="s1",
-        world_name="world",
-        settings=RPModuleSettings(),
-    )
+def test_narrative_negated_or_plain_check_text_does_not_force_turn_directive(user_input: str, tmp_path):
+    _registry, _snapshot, runtime = _runtime(tmp_path)
 
-    sections = registry.get_runtime_sections(
-        ModuleContextRequest(session_id="s1", user_input=user_input)
+    sections = runtime.get_runtime_sections(
+        ModuleContextRequest(session_id="s_forest001", user_input=user_input)
     )
 
     assert sections == []
 
 
-def test_registry_rejects_duplicate_public_tool_names(monkeypatch):
+def test_registry_rejects_duplicate_public_tool_names(monkeypatch, tmp_path):
     class DuplicateTool(BaseTool):
         name = "rp_duplicate"
         description = "duplicate"
@@ -237,10 +231,80 @@ def test_registry_rejects_duplicate_public_tool_names(monkeypatch):
             return []
 
     monkeypatch.setattr(registry_module, "DiceModule", DuplicateDiceModule)
+    gateway = get_data_service_gateway(tmp_path / "duplicate-tools.sqlite3")
+    registry = RPModuleRegistry(gateway_provider=lambda: gateway)
+    snapshot = registry.resolve_snapshot("s_forest001")
 
     with pytest.raises(ValueError, match="Duplicate RP module tool name"):
-        RPModuleRegistry(
-            session_id="s1",
-            world_name="world",
-            settings=RPModuleSettings(),
-        )
+        registry.create_runtime(snapshot)
+
+
+def test_snapshot_merges_story_and_session_config_with_story_capability_ceiling(tmp_path):
+    gateway = get_data_service_gateway(tmp_path / "rp-module-selection.sqlite3")
+    registry = RPModuleRegistry(gateway_provider=lambda: gateway)
+    weights = {
+        "critical_success": 10,
+        "success": 30,
+        "success_with_cost": 30,
+        "setback": 25,
+        "critical_failure": 5,
+    }
+    gateway.rp_modules.set_story_module(
+        "demo_workspace",
+        1,
+        RP_MODULE_NARRATIVE_OUTCOME_NAME,
+        enabled=True,
+        config={"auto_adjudication_enabled": False, "weights": weights},
+    )
+    gateway.rp_modules.set_session_override(
+        "s_forest001",
+        RP_MODULE_NARRATIVE_OUTCOME_NAME,
+        enabled=True,
+        config={"auto_adjudication_enabled": True},
+    )
+
+    first = registry.resolve_snapshot("s_forest001")
+    selected = first.get(RP_MODULE_NARRATIVE_OUTCOME_NAME)
+    assert selected is not None
+    assert selected.effective_enabled is True
+    assert selected.effective_config["auto_adjudication_enabled"] is True
+    assert selected.effective_config["weights"] == weights
+    assert selected.config_sources == {
+        "auto_adjudication_enabled": "session",
+        "weights": "story",
+    }
+    with pytest.raises(TypeError):
+        selected.effective_config["weights"]["success"] = 1
+
+    gateway.rp_modules.set_story_module(
+        "demo_workspace",
+        1,
+        RP_MODULE_NARRATIVE_OUTCOME_NAME,
+        enabled=False,
+        config={"auto_adjudication_enabled": False, "weights": weights},
+    )
+    second = registry.resolve_snapshot("s_forest001")
+    assert second.get(RP_MODULE_NARRATIVE_OUTCOME_NAME).effective_enabled is False
+    assert first.get(RP_MODULE_NARRATIVE_OUTCOME_NAME).effective_enabled is True
+    disabled_runtime = registry.create_runtime(second)
+    assert "rp_story_outcome" not in [tool.name for tool in disabled_runtime.get_tools()]
+    assert all(
+        section.id != RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID
+        for section in disabled_runtime.get_fixed_sections()
+    )
+
+
+def test_dice_commands_follow_latest_story_mount_state(tmp_path):
+    gateway = get_data_service_gateway(tmp_path / "rp-module-commands.sqlite3")
+    registry = RPModuleRegistry(gateway_provider=lambda: gateway)
+    assert "/roll" in [item.name for item in registry.get_commands("s_forest001")]
+
+    gateway.rp_modules.set_story_module(
+        "demo_workspace",
+        1,
+        RP_MODULE_DICE_NAME,
+        enabled=False,
+        config={},
+    )
+    names = [item.name for item in registry.get_commands("s_forest001")]
+    assert names == ["/rp_modules", "/rp_module"]

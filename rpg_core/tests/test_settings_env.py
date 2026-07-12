@@ -268,10 +268,11 @@ def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> Non
     modules:
       dice:
         enabled: false
-        allow_auto_checks: false
         default_dc: 15
         max_dice_count: 8
         max_die_sides: 100
+      narrative_outcome:
+        auto_adjudication_enabled: false
   memory:\n""",
         ),
         encoding="utf-8",
@@ -284,7 +285,6 @@ def test_rp_module_settings_read_yaml_values(tmp_path: Path, monkeypatch) -> Non
 
     assert rp_modules.enabled is False
     assert rp_modules.dice.enabled is False
-    assert rp_modules.dice.allow_auto_checks is False
     assert rp_modules.dice.default_dc == 15
     assert rp_modules.dice.max_dice_count == 8
     assert rp_modules.dice.max_die_sides == 100
@@ -314,7 +314,6 @@ def test_narrative_outcome_settings_read_canonical_weights(
           critical_failure: 5
       dice:
         enabled: true
-        allow_auto_checks: true
   memory:
 """,
         ),
@@ -334,6 +333,29 @@ def test_narrative_outcome_settings_read_canonical_weights(
         "setback": 25,
         "critical_failure": 5,
     }
+
+
+def test_legacy_dice_auto_checks_key_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8").replace(
+            "  memory:\n",
+            """  rp_modules:
+    modules:
+      dice:
+        allow_auto_checks: true
+  memory:
+""",
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    with pytest.raises(ValueError, match="allow_auto_checks is no longer supported"):
+        settings_module.Settings()
 
 
 def test_memory_settings_resolve_provider_pool_entries(tmp_path: Path, monkeypatch) -> None:

@@ -75,14 +75,20 @@ def test_map_agent_event_accepts_agent_field_variants() -> None:
     }
 
 
-def test_turn_completed_payload_keeps_text_as_source_of_truth() -> None:
-    mapped = map_agent_event({"kind": AgentEventKind.DONE.value, "content": "reply", "finish_reason": "stop"})
+def test_turn_completed_payload_keeps_text_and_committed_turn() -> None:
+    mapped = map_agent_event({
+        "kind": AgentEventKind.DONE.value,
+        "content": "reply",
+        "finish_reason": "stop",
+        "committed_turn_id": 7,
+    })
 
     assert mapped is not None
     assert mapped.type is PlaySSEType.TURN_COMPLETED
     assert mapped.payload == {
         "text": "reply",
         "finishReason": "stop",
+        "committedTurnId": 7,
     }
 
 

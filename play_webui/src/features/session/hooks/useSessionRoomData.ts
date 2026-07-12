@@ -286,11 +286,29 @@ export function useSessionRoomData({
 }
 
 function compareTimelineMessages(first: SessionTimelineMessage, second: SessionTimelineMessage) {
+  const firstGroup = timelineGroup(first)
+  const secondGroup = timelineGroup(second)
+  if (firstGroup.id !== secondGroup.id) {
+    return (
+      firstGroup.anchorTurnId - secondGroup.anchorTurnId
+      || firstGroup.order - secondGroup.order
+      || firstGroup.id.localeCompare(secondGroup.id)
+    )
+  }
   return (
-    first.turnId - second.turnId
-    || timelineDisplayOrder(first) - timelineDisplayOrder(second)
+    timelineDisplayOrder(first) - timelineDisplayOrder(second)
+    || (first.timelineItemOrder ?? first.seqInTurn ?? 0)
+      - (second.timelineItemOrder ?? second.seqInTurn ?? 0)
     || (first.seqInTurn ?? 0) - (second.seqInTurn ?? 0)
   )
+}
+
+function timelineGroup(message: SessionTimelineMessage) {
+  return {
+    id: message.timelineGroupId ?? `turn:${message.turnId}`,
+    anchorTurnId: message.timelineAnchorTurnId ?? message.turnId,
+    order: message.timelineGroupOrder ?? 0,
+  }
 }
 
 function timelineDisplayOrder(message: SessionTimelineMessage) {

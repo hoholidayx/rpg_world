@@ -12,7 +12,7 @@ import type { SessionPlayerCharacter } from '@/types/session'
 import { SessionComposer } from './SessionComposer'
 import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
-import { SessionNarrativeOutcomeDialog } from './SessionNarrativeOutcomeDialog'
+import { SessionRPModulesDialog } from './SessionRPModulesDialog'
 import { SessionTimeline } from './SessionTimeline'
 import { useSessionRoomData } from './hooks/useSessionRoomData'
 import { useSessionRoomLayout } from './hooks/useSessionRoomLayout'
@@ -218,7 +218,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [composerText, setComposerText] = useState('')
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
   const [toastMessage, setToastMessage] = useState('')
-  const [narrativeOutcomeDialogOpen, setNarrativeOutcomeDialogOpen] = useState(false)
+  const [rpModulesDialogOpen, setRPModulesDialogOpen] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showToast = useCallback((message: string) => {
@@ -428,9 +428,9 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               onShowThinkingChange={layout.setShowThinking}
               onShowToolsChange={layout.setShowTools}
               onOpenRoleDialog={role.openRoleDialog}
-              onOpenNarrativeOutcomeDialog={() => {
+              onOpenRPModulesDialog={() => {
                 layout.setSettingsOpen(false)
-                setNarrativeOutcomeDialogOpen(true)
+                setRPModulesDialogOpen(true)
               }}
             />
           </div>
@@ -543,10 +543,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         onSubmit={role.submitRoleDialog}
         onClose={role.closeRoleDialog}
       />
-      <SessionNarrativeOutcomeDialog
-        open={narrativeOutcomeDialogOpen}
+      <SessionRPModulesDialog
+        open={rpModulesDialogOpen}
         sessionId={sessionId}
-        onClose={() => setNarrativeOutcomeDialogOpen(false)}
+        onClose={() => setRPModulesDialogOpen(false)}
         showToast={showToast}
       />
       <Toast message={toastMessage} />

@@ -9,6 +9,7 @@ from peewee import Database
 
 from rpg_data import models
 from rpg_data.repositories.session_repo import SessionRepository
+from rpg_data.repositories.rp_module_repo import RPModuleRepository
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services.status import StatusTableService
@@ -32,6 +33,7 @@ class CatalogService:
         self._workspaces = WorkspaceRepository(database)
         self._stories = StoryRepository(database)
         self._sessions = SessionRepository(database)
+        self._rp_modules = RPModuleRepository(database)
         self._status = status_service
 
     def list_workspaces(self) -> list[models.Workspace]:
@@ -112,6 +114,7 @@ class CatalogService:
                 story_prompt=story_prompt,
                 first_message=first_message,
             )
+            self._rp_modules.mount_story_defaults(story.id)
         logger.info("created story story_id=%s workspace_id=%s", story.id, workspace_id)
         return story
 

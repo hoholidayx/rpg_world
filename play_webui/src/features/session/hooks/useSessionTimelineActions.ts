@@ -149,6 +149,9 @@ export function useSessionTimelineActions({
     const persistedLastTurnId = Math.max(lastPersistedTurnId, ensuredLatestTurnId)
     const replacingLastTurn = Boolean(message?.messageId) && message?.turnId === persistedLastTurnId
     const turnId = replacingLastTurn && message ? message.turnId : Math.max(lastTurnId, persistedLastTurnId) + 1
+    const timelineAnchorTurnId = replacingLastTurn && message
+      ? Math.max(0, message.turnId - 1)
+      : persistedLastTurnId
     const playerSpeaker = makePlayerSpeaker(playerCharacter)
     const userMessage: SessionTimelineMessage = {
       id: `local-${source}-user-${turnId}-${crypto.randomUUID()}`,
@@ -205,6 +208,7 @@ export function useSessionTimelineActions({
     await streamLocalTurn({
       text: trimmedText,
       turnId,
+      timelineAnchorTurnId,
       userMessage,
       assistantMessage,
       source,

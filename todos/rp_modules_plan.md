@@ -54,7 +54,7 @@ rp_story_outcome(reason, actor?)
 每个自动剧情 turn 最多一条裁定：
 
 1. `AgentTurnTransaction.begin()` 创建 `TurnScratch`。
-2. `NarrativeOutcomeModule.bind_turn()` 解析并快照本轮有效权重。
+2. 编排层在 Context 门禁前解析不可变 module snapshot，`NarrativeOutcomeModule.bind_turn()` 只接收该快照中的有效权重，不再读取数据库。
 3. 第一次工具调用抽取并暂存结果；同 turn 后续调用复用该结果。
 4. 主回复完整成功后，消息、裁定和状态表在同一个短 `database.atomic()` 中提交。
 5. 取消、provider 错误或 commit 失败丢弃 scratch，不保留裁定。
@@ -85,27 +85,29 @@ rp_modules:
       max_die_sides: 1000
 ```
 
-权重优先级为 `config < story < session`。Story 和 Session 覆盖都是完整五项；传 `null` 清除整组覆盖，不逐字段继承。五项必须是 `0..100` 整数，总和严格等于 `100`。
+模块配置优先级为 `config < story < session`，普通字段逐字段继承，`weights` 作为完整五项的原子字段。五项必须是 `0..100` 整数，总和严格等于 `100`。
 
-旧 `dice.allow_auto_checks` 只作为一版兼容 fallback；新配置必须使用 `narrative_outcome.auto_adjudication_enabled`。
+旧 `dice.allow_auto_checks` 已移除；自动剧情裁定只使用 `narrative_outcome.auto_adjudication_enabled`。
 
 ### 持久化与 API
 
-迁移 `0005_narrative_outcome.sql` 增加：
+迁移 `0005_rp_modules.sql` 增加：
 
-- `rpg_stories.narrative_outcome_weights_json`
-- `rpg_session_profiles.narrative_outcome_weights_json`
+- `rpg_rp_module_catalog`
+- `rpg_story_rp_modules`
+- `rpg_session_rp_module_overrides`
 - `rpg_session_narrative_outcomes`，唯一约束 `(session_id, turn_id)`
 
-公开数据类型为 `NarrativeOutcomeWeights`、`NarrativeOutcomeSelection` 和 `NarrativeOutcomeRecord`。
+旧 Story/Session Narrative Outcome 权重列不保留；选择由不可变 module snapshot 负责。
 
 Play API：
 
-- `GET/PATCH /play-api/v1/workspaces/{workspace_id}/stories/{story_id}/narrative-outcome`
-- `GET/PATCH /play-api/v1/sessions/{session_id}/narrative-outcome`
+- `GET /play-api/v1/rp-modules/catalog`
+- `GET/PATCH /play-api/v1/workspaces/{workspace_id}/stories/{story_id}/rp-modules[/{module_name}]`
+- `GET/PATCH/DELETE /play-api/v1/sessions/{session_id}/rp-modules[/{module_name}]`
 - `history` / `history-page` 的每个 `PlayTurn` 带 nullable `outcome`
 
-响应包含五档定义、系统默认、Story 覆盖、Session 覆盖、有效权重与 `effectiveSource`。
+响应包含模块定义、系统配置、Story 挂载/配置、Session 覆盖、有效配置与字段来源。
 
 ### Play WebUI
 

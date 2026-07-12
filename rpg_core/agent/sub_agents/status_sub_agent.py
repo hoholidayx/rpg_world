@@ -59,29 +59,35 @@ class _StatusPrewriteRollbackError(RuntimeError):
 
 # ── system prompt ─────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = (
-    "你是 RPG 游戏世界的剧情预裁定与状态表预处理器。\n\n"
+BASE_SYSTEM_PROMPT = (
+    "你是 RPG 游戏世界的状态表预处理器。\n\n"
     "可用操作及其修改的状态表：\n"
-    "- rp_story_outcome：对存在外部实质变数的行动或场景决策进行一次五级剧情裁定\n"
     "- scene_time / scene_attr / scene_del_attr：更新当前场景状态"
     "（时间、地点、天气、氛围、在场的 NPC 等）\n"
     "- status_table_set_values：批量更新普通状态表中已有键的值\n\n"
-    "决策顺序与边界：\n"
+    "状态更新边界：\n"
+    "1. 只依据既有 assistant 已确认事实、用户对既有事实的明确纠正，或没有随机分支的确定性动作"
+    "更新状态。用户单方面宣称的未决外部结果不是已确认事实。\n"
+    "2. 仅当实际、持久、已经确定的追踪值发生变化时调用状态工具；不要修改没有变化的属性，"
+    "不要制造 no-op。没有裁定且没有状态变化时，不调用任何工具。\n"
+    "3. 主动清理：如果某个属性不再与当前场景相关"
+    "（例如角色离开了、某种天气效果消失了），"
+    "使用 scene_del_attr 将其移除。只保留活跃属性可以防止上下文膨胀。\n"
+    "4. 普通状态表不得新增、删除或重命名键；角色状态表只追踪对应角色。\n"
+    "5. 属性键和值使用状态表已有语言和格式。"
+)
+
+NARRATIVE_OUTCOME_SYSTEM_PROMPT = (
+    "\n\n剧情预裁定边界：\n"
     "1. 先结合最近历史、当前场景、普通状态表和用户输入，判断本轮是否存在外部实质变数："
     "同一行动或场景反应仍有两个或以上合理结果，受未知信息、能力、阻力、风险、时机、环境或 "
     "NPC/世界反应影响，而且不同结果会实质改变剧情、信息、风险或代价。\n"
     "2. 只要需要裁定，就只调用一次 rp_story_outcome。不得同时调用任何状态工具，也不得提前假设"
     "成功、失败、发现、伤害、NPC 反应或位置抵达；混合行动中的确定性子动作也交给主 Agent 延后处理。\n"
-    "3. 只有不需要裁定时，才可依据既有 assistant 已确认事实、用户对既有事实的明确纠正，或没有"
-    "随机分支的确定性动作更新状态。用户单方面宣称的未决外部结果不是已确认事实。\n"
-    "4. 仅当实际、持久、已经确定的追踪值发生变化时调用状态工具；不要修改没有变化的属性，"
-    "不要制造 no-op。没有裁定且没有状态变化时，不调用任何工具。\n"
-    "5. 主动清理：如果某个属性不再与当前场景相关"
-    "（例如角色离开了、某种天气效果消失了），"
-    "使用 scene_del_attr 将其移除。只保留活跃属性可以防止上下文膨胀。\n"
-    "6. 普通状态表不得新增、删除或重命名键；角色状态表只追踪对应角色。\n"
-    "7. 属性键和值使用状态表已有语言和格式。"
+    "3. 只有不需要裁定时，才执行上述确定性状态预更新。"
 )
+
+SYSTEM_PROMPT = BASE_SYSTEM_PROMPT + NARRATIVE_OUTCOME_SYSTEM_PROMPT
 
 # ── sub-agent ─────────────────────────────────────────────────────────
 
@@ -119,6 +125,7 @@ class StatusSubAgent(BaseSubAgent):
         self._mutation_probe: Callable[[], object] | None = None
         self._mutation_checkpoint: Callable[[], object] | None = None
         self._mutation_restore: Callable[[object], None] | None = None
+        self._outcome_preflight_enabled = False
 
     # ── 工具注册（可多次调用追加） ─────────────────────────────────────
 
@@ -152,6 +159,7 @@ class StatusSubAgent(BaseSubAgent):
         mutation_probe: Callable[[], object] | None,
         create_checkpoint: Callable[[], object] | None,
         restore_checkpoint: Callable[[object], None] | None,
+        outcome_preflight_enabled: bool | None = None,
     ) -> Iterator[None]:
         """Temporarily bind tools and rollback callbacks for one turn."""
         previous_registry = self._tool_registry
@@ -159,17 +167,24 @@ class StatusSubAgent(BaseSubAgent):
         previous_probe = self._mutation_probe
         previous_checkpoint = self._mutation_checkpoint
         previous_restore = self._mutation_restore
+        previous_outcome_preflight_enabled = self._outcome_preflight_enabled
         try:
             self.clear_tools()
             self.register_tools(tools)
             self.set_mutation_probe(mutation_probe)
             self.set_mutation_boundary(create_checkpoint, restore_checkpoint)
+            self._outcome_preflight_enabled = (
+                any(tool.name == NARRATIVE_OUTCOME_TOOL_NAME for tool in tools)
+                if outcome_preflight_enabled is None
+                else bool(outcome_preflight_enabled)
+            )
             yield
         finally:
             self._tool_registry = previous_registry
             self._schemas = previous_schemas
             self.set_mutation_probe(previous_probe)
             self.set_mutation_boundary(previous_checkpoint, previous_restore)
+            self._outcome_preflight_enabled = previous_outcome_preflight_enabled
 
     # ── Context 绑定（覆盖基类） ─────────────────────────────────────
 
@@ -184,7 +199,9 @@ class StatusSubAgent(BaseSubAgent):
     @property
     def system_prompt(self) -> str:
         """返回状态表预更新子 Agent 的系统提示。"""
-        return SYSTEM_PROMPT
+        if self._outcome_preflight_enabled:
+            return BASE_SYSTEM_PROMPT + NARRATIVE_OUTCOME_SYSTEM_PROMPT
+        return BASE_SYSTEM_PROMPT
 
     async def update(
         self,

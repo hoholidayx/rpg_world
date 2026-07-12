@@ -169,7 +169,7 @@ Telegram 渠道当前支持：
 - `StatusSubAgent` 返回 tool calls 后由编排层按整批处理：只要同批出现 `rp_story_outcome`，就只执行一次裁定，所有 scene/status 预写无论调用顺序都标记为 `skipped_due_to_outcome`；没有裁定时才执行确定性状态预更新。
 - `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。状态工具批次失败会恢复本轮内存 checkpoint，由主 Agent 使用现有工具链回退；这不是持久化 journal。
 - 普通状态表通过同一 scratch 注册 `status_table_set_values`，只允许按 session 运行时表 ID 批量修改已有 key 的 value；工具同时提供给 `StatusSubAgent` 和主 Agent，no-op 不进入 staged changes。
-- 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status；若已预裁定，`RP_MODULES` runtime section 还会在主 Agent 首次调用前注入 `outcomeCode`、标签、叙事指导、reason 和可选 actor。主 Agent 不得改判或重抽，并只在结果实际造成持久状态变化后调用状态工具；有变化时工具调用轮不得夹带 RP 正文，工具返回后再输出与状态一致的最终正文，确认无变化时允许零状态工具。
+- 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status；若已预裁定，`RP_MODULES` runtime section 还会在主 Agent 首次调用前注入 `outcomeCode`、标签、叙事指导、reason 和可选 actor，同时从主 Agent schema 隐藏 `rp_story_outcome`。主 Agent 不得改判或重抽，并只在结果实际造成持久状态变化后调用状态工具；有变化时工具调用轮不得夹带 RP 正文，最终正文也不得新增尚未同步的可追踪确定事实，确认无变化时允许零状态工具。
 - LLM 完整成功后，事务一次性提交 staged user message、assistant message、Narrative Outcome 裁定和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
 - WebUI 停止生成走 `requestId` 精准取消：Play API `/sessions/{session_id}/stop` 转发到 Agent service `/chat/stop`，被取消的 stream turn 只丢弃 scratch，不发送 DONE，也不提交消息、状态或 usage。
 - WebUI `retry/edit` 保持历史语义可预期：如果目标是最后一个已持久化 turn，先截断该 turn 再用同一 turn id 重新流式发送；如果目标不是最后一轮，不改写旧历史，而是追加一个新的 turn。
@@ -179,7 +179,7 @@ Telegram 渠道当前支持：
 - summary compression 和 story memory extraction 是 commit 后副作用；失败只记录 warning，不回滚已提交 turn。
 - session 状态表并发写入暂采用 last-write-wins，不使用 version/CAS；Agent 提交发现持久化 document 已偏离 scratch 基线时由 `rpg_data` 记录 warning 后继续覆盖。
 
-事务生命周期有日志覆盖：begin 构建失败、send/send_stream 异常、commit 失败、commit 成功摘要和 post-commit 副作用失败都会记录；预裁定摘要额外输出 `preflightOutcome=staged|none|fallback`、`statePrewritesSkipped`、`mainStateCorrections` 和 `outcomeReusedByMain`，便于排查裁定来源、跳过的预写及主 Agent 修正。`verbose_logging=true` 时还会记录 RP runtime section 总数、metadata 和完整公开 content，空 runtime 也记录 `count=0`；不输出 sample 或权重。
+事务生命周期有日志覆盖：begin 构建失败、send/send_stream 异常、commit 失败、commit 成功摘要和 post-commit 副作用失败都会记录；预裁定摘要额外输出 `preflightOutcome=staged|none|fallback`、`statePrewritesSkipped`、`mainStateCorrections` 和 `outcomeReusedByMain`，便于排查裁定来源、跳过的预写及主 Agent 修正。`verbose_logging=true` 时还会记录 RP runtime section 总数、metadata 和完整公开 content，空 runtime 也记录 `count=0`；Narrative Outcome 模块内部日志可记录 sample、权重与来源用于诊断，但这些细节不得进入 LLM Context、工具公开结果或玩家界面。
 
 ### 上下文与 RP 模块
 
@@ -193,6 +193,7 @@ Telegram 渠道当前支持：
 - `context/usage.py` 封装最终渲染 messages 的共享 token 估算和 provider usage 归一化。`context-preview` 只返回下一轮主 Context 估算并驱动圆环/正文门禁；准确 usage 只来自正常 `/turn` 返回或 `/stream` 的 `turn_completed.payload.usage`，仅用于回复气泡和详情复盘，当前不落库。
 - 主 Agent LLM 选择使用 `config default < story override < session override`：Story 详情编辑页立即保存故事默认，SessionRoom context 圆环左侧设置会话覆盖；生成中切换只影响下一 turn，不触发自动压缩。
 - `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。`narrative_outcome` 负责主 Agent 的剧情分支随机裁定；`dice` 只保留表达式解析和手动调试命令；`text_output_format` 仍由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
+- 内置模块登记在 `rpg_rp_module_catalog`。Story 挂载是 Session 的能力上限，新 Story 默认挂载当前全部内置模块；Session 可覆盖模块启用状态和稀疏配置，但不能重新启用 Story 已停用的模块。每次 preview/turn 都解析独立不可变快照，生成中的配置修改只影响下一 turn。
 - `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Narrative Outcome 平时依靠 fixed contract 判断隐式变数；检测到明确随机意图时加入本轮强制裁定指令；若 StatusSubAgent 已预裁定，则该层改为注入已生效结果和裁定后状态检查边界。
 
 当前发送顺序按缓存稳定性和 RP 注意力组织：
@@ -213,7 +214,7 @@ RP Modules 采用上下文分层策略：
 - 文本输出格式是默认启用的 fixed layer 约束；RP 正文使用 `<rp-narration>` 和 `<rp-character name="...">` 标签区分旁白与角色发言。
 - 高频或临时模块状态才进入 `RP_MODULES` 动态层；Narrative Outcome 为明确随机意图加入本轮强制指令，并把 StatusSubAgent 已暂存的裁定结果注入主 Agent 首次调用。
 - 主 LLM 的 RP schema 只暴露 `rp_story_outcome(reason, actor?)`，不暴露表达式、DC、随机数、权重或低层 Dice 工具。
-- `/rp_modules`、`/rp_module narrative_outcome`、`/rp_module dice`、`/roll`、`/check_dc` 都由 `CommandDispatcher` 在 LLM 前拦截，不进入对话历史。
+- `/rp_modules`、`/rp_module` 始终由 `CommandDispatcher` 在 LLM 前拦截；`/roll`、`/check_dc` 只在当前 Story/Session 的 Dice 模块有效启用时动态出现。所有命令都不进入对话历史。
 
 #### Narrative Outcome：五级剧情分支随机机制
 
@@ -238,7 +239,7 @@ RP Modules 采用上下文分层策略：
   → 模块内部按本轮有效五档权重抽取结果
   → 主 Agent 首次调用前读取等级、叙事指导、reason 和可选 actor
   → 主 Agent 依据整体目标与结果继续剧情；真实持久变化先写 scene/status，再输出 RP 正文
-  → StatusSubAgent 漏判时主 Agent 可调用同一工具补判；重复调用幂等复用
+  → StatusSubAgent 漏判时主 Agent schema 保留同一工具用于补判；已预裁定时 schema 隐藏该工具，内部重复调用仍幂等复用
 ```
 
 适合触发剧情裁定的情况：
@@ -265,10 +266,15 @@ RP Modules 采用上下文分层策略：
 
 每个自动剧情 turn 最多产生一条裁定；同一 turn 重复工具调用复用第一次结果。常见的“预裁定但无状态变化”turn 只需要 StatusSubAgent 与主 Agent 两次 LLM 调用；只有主 Agent 漏判补裁定或确有状态写入时才增加工具 round。权重在 turn 开始时形成快照，生成中修改只影响下一 turn。裁定与 user/assistant message、状态表在同一个短数据库事务中提交；取消、provider 失败或 commit 失败都不留记录。retry/edit 截断原 turn 时同时删除旧裁定并重新抽取，但不回滚已提交状态表。
 
-权重优先级是 `系统配置 < Story 覆盖 < Session 覆盖`，每层都是完整五项，不逐字段继承。五项必须是 `0..100` 整数且总和严格等于 `100`。Story 编辑页和 Session 设置菜单可以直接编辑比例；Session 开启覆盖时复制当前有效比例，也可清除覆盖并继续继承 Story。接口为：
+模块配置优先级是 `系统配置 < Story 稀疏覆盖 < Session 稀疏覆盖`；普通字段逐字段合并，Narrative Outcome 的五档 `weights` 是不可拆分整组，五项必须是 `0..100` 整数且总和严格等于 `100`。Story 编辑页管理模块挂载开关与配置，Session 设置菜单可覆盖或清除后继续继承 Story。通用接口为：
 
-- `GET/PATCH /play-api/v1/workspaces/{workspace_id}/stories/{story_id}/narrative-outcome`
-- `GET/PATCH /play-api/v1/sessions/{session_id}/narrative-outcome`
+- `GET /play-api/v1/rp-modules/catalog`
+- `GET /play-api/v1/workspaces/{workspace_id}/stories/{story_id}/rp-modules`
+- `PATCH /play-api/v1/workspaces/{workspace_id}/stories/{story_id}/rp-modules/{module_name}`
+- `GET /play-api/v1/sessions/{session_id}/rp-modules`
+- `PATCH/DELETE /play-api/v1/sessions/{session_id}/rp-modules/{module_name}`
+
+开发期迁移 `0005` 已整合重写为 `0005_rp_modules.sql`，不保留旧权重列兼容；本地数据库若曾执行旧版 `0005_narrative_outcome.sql`，需要重建后再启动。
 
 `rpg_core/settings.yaml` 的 canonical 配置是：
 
@@ -291,7 +297,7 @@ rp_modules:
 ```
 
 - `auto_adjudication_enabled=true`：允许按语义、当前场景和状态主动裁定隐式变数；关闭后只响应明确随机请求。
-- 旧 `dice.allow_auto_checks` 仅作为一版兼容 fallback；新配置应写到 `narrative_outcome`。
+- `dice.allow_auto_checks` 已移除；出现该旧 key 会在启动时明确报错。自动剧情裁定只由 `narrative_outcome.auto_adjudication_enabled` 控制。
 
 #### Dice：低层随机与手动调试
 

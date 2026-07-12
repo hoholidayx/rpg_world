@@ -231,15 +231,17 @@ class TestCommandDispatcher:
         assert "- s2 （当前）" in result.reply
 
     @pytest.mark.asyncio
-    async def test_rp_module_commands_are_dispatched(self):
+    async def test_rp_module_commands_are_dispatched(self, tmp_path):
+        from rpg_data.services import get_data_service_gateway
+
         dispatcher = CommandDispatcher(agent=SimpleNamespace())
         dispatcher.register_default_builtins()
+        gateway = get_data_service_gateway(tmp_path / "command-rp-modules.sqlite3")
         registry = RPModuleRegistry(
-            session_id="s1",
-            world_name="world",
             settings=RPModuleSettings(),
+            gateway_provider=lambda: gateway,
         )
-        for command in registry.get_commands():
+        for command in registry.get_commands("s_forest001"):
             dispatcher.register_builtin(
                 command.name,
                 command.description,

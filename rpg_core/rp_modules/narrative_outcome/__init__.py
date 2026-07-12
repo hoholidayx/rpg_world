@@ -3,6 +3,7 @@
 from rpg_core.rp_modules.narrative_outcome.models import (
     NARRATIVE_OUTCOME_DEFINITIONS,
     NarrativeOutcomeDefinition,
+    NarrativeOutcomeSelection,
     StagedNarrativeOutcome,
 )
 from rpg_core.rp_modules.narrative_outcome.module import NarrativeOutcomeModule
@@ -17,6 +18,7 @@ __all__ = [
     "NARRATIVE_OUTCOME_DEFINITIONS",
     "NarrativeOutcomeDefinition",
     "NarrativeOutcomeModule",
+    "NarrativeOutcomeSelection",
     "NarrativeOutcomeSampler",
     "NarrativeOutcomeTool",
     "StagedNarrativeOutcome",

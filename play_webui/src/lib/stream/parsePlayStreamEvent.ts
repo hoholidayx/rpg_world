@@ -85,6 +85,16 @@ function validatePayload(type: PlayStreamEventType, payload: Record<string, unkn
       assertRequiredString(payload, 'text', type, raw)
       assertOptionalString(payload, 'model', type, raw)
       assertOptionalString(payload, 'finishReason', type, raw)
+      if (
+        payload.committedTurnId !== undefined
+        && (
+          typeof payload.committedTurnId !== 'number'
+          || !Number.isInteger(payload.committedTurnId)
+          || payload.committedTurnId <= 0
+        )
+      ) {
+        throw parseError(`Play SSE ${type}.payload.committedTurnId 必须是正整数`, raw)
+      }
       if (payload.durationMs !== undefined && typeof payload.durationMs !== 'number') {
         throw parseError(`Play SSE ${type}.payload.durationMs 必须是 number`, raw)
       }

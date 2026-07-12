@@ -8,9 +8,10 @@ import random
 from rpg_core.agent.tools import BaseTool
 from rpg_core.rp_modules.narrative_outcome.models import (
     NARRATIVE_OUTCOME_DEFINITIONS,
+    NarrativeOutcomeSelection,
     StagedNarrativeOutcome,
 )
-from rpg_data.models import NarrativeOutcomeSelection, NarrativeOutcomeWeights
+from rpg_data.models import NarrativeOutcomeWeights
 
 
 NARRATIVE_OUTCOME_TOOL_NAME = "rp_story_outcome"

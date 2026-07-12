@@ -11,6 +11,7 @@ from rpg_data.services.gateway import (
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
 from rpg_data.services.message import MessageService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
+from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_role import (
     PlayerCharacterOption,
     SessionPlayerCharacterBindResult,
@@ -31,6 +32,7 @@ __all__ = [
     "LorebookReadService",
     "MessageService",
     "NarrativeOutcomeService",
+    "RPModuleService",
     "PlayerCharacterOption",
     "SessionPlayerCharacterBindResult",
     "SessionPlayerCharacterState",

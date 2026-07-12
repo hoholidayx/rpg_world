@@ -365,6 +365,38 @@ async def test_status_sub_agent_outcome_batch_skips_all_state_prewrites() -> Non
     assert manager.documents[1].row_for_key("生命").value == "10"
 
 
+def test_status_sub_agent_prompt_and_schema_only_include_outcome_when_mounted() -> None:
+    manager = FakeRuntimeStatusManager()
+    _scratch, runtime = _scratch_runtime(manager)
+    state_tool = StatusTableSetValuesTool(runtime)
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+
+    with sub_agent.use_turn_tools(
+        [state_tool],
+        mutation_probe=None,
+        create_checkpoint=None,
+        restore_checkpoint=None,
+        outcome_preflight_enabled=False,
+    ):
+        assert NARRATIVE_OUTCOME_TOOL_NAME not in sub_agent.system_prompt
+        assert [schema["function"]["name"] for schema in sub_agent._schemas] == [
+            "status_table_set_values"
+        ]
+
+    with sub_agent.use_turn_tools(
+        [_OutcomeTool(), state_tool],
+        mutation_probe=None,
+        create_checkpoint=None,
+        restore_checkpoint=None,
+        outcome_preflight_enabled=True,
+    ):
+        assert NARRATIVE_OUTCOME_TOOL_NAME in sub_agent.system_prompt
+        assert NARRATIVE_OUTCOME_TOOL_NAME in [
+            schema["function"]["name"] for schema in sub_agent._schemas
+        ]
+
+
 @pytest.mark.asyncio
 async def test_status_sub_agent_failed_state_batch_restores_all_prewrites() -> None:
     manager = FakeRuntimeStatusManager()

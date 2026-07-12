@@ -86,6 +86,10 @@ export type SessionTimelineMessage = {
   id: string
   messageId?: number
   turnId: number
+  timelineGroupId?: string
+  timelineAnchorTurnId?: number
+  timelineGroupOrder?: number
+  timelineItemOrder?: number
   seqInTurn?: number
   role: SessionTimelineRole
   content: string

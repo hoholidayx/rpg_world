@@ -39,6 +39,7 @@ type ActiveStream = {
 export type StreamLocalTurnOptions = {
   text: string
   turnId: number
+  timelineAnchorTurnId: number
   userMessage: SessionTimelineMessage
   assistantMessage: SessionTimelineMessage
   source: SessionStreamSource
@@ -85,6 +86,7 @@ export function useSessionStreamTurn({
   const activeStreamRef = useRef<ActiveStream | null>(null)
   const stoppingRequestIdRef = useRef<string | null>(null)
   const stopSettledRequestIdsRef = useRef<Set<string>>(new Set())
+  const nextTimelineGroupOrderRef = useRef(0)
 
   useEffect(() => {
     setStoppingRequestId(null)
@@ -137,7 +139,14 @@ export function useSessionStreamTurn({
     )
   }, [setLocalMessages])
 
-  const appendLocalStreamError = useCallback((assistantMessageId: string, turnId: number, errorText: string) => {
+  const appendLocalStreamError = useCallback((
+    assistantMessageId: string,
+    turnId: number,
+    errorText: string,
+    requestId: string,
+    timelineAnchorTurnId: number,
+    timelineGroupOrder: number,
+  ) => {
     setLocalMessages((current) => [
       ...current.filter((message) => !(
         message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.OUTCOME
@@ -147,9 +156,13 @@ export function useSessionStreamTurn({
       {
         id: `local-error-${turnId}-${crypto.randomUUID()}`,
         turnId,
+        timelineGroupId: `stream:${requestId}`,
+        timelineAnchorTurnId,
+        timelineGroupOrder,
         seqInTurn: 5,
         role: SESSION_TIMELINE_ROLE.ERROR,
         content: errorText,
+        metadata: { streamRequestId: requestId },
         createdAt: new Date().toISOString(),
         speaker: errorSpeaker(),
         status: SESSION_MESSAGE_STATUS.ERROR,
@@ -165,6 +178,9 @@ export function useSessionStreamTurn({
     event: PlayStreamEvent,
     assistantMessageId: string,
     turnId: number,
+    requestId: string,
+    timelineAnchorTurnId: number,
+    timelineGroupOrder: number,
     usageFallback: ContextUsageSnapshot | null,
     isCommand: boolean,
   ) => {
@@ -195,10 +211,14 @@ export function useSessionStreamTurn({
           {
             id: `local-thinking-${turnId}-${crypto.randomUUID()}`,
             turnId,
+            timelineGroupId: `stream:${requestId}`,
+            timelineAnchorTurnId,
+            timelineGroupOrder,
+            timelineItemOrder: event.eventId,
             seqInTurn: 3,
             role: SESSION_TIMELINE_ROLE.THINKING,
             content: event.payload.text,
-            metadata: { streamKind: 'thinking' },
+            metadata: { streamKind: 'thinking', streamRequestId: requestId },
             createdAt: new Date().toISOString(),
             speaker: thinkingSpeaker(),
             status: SESSION_MESSAGE_STATUS.STREAMING,
@@ -245,11 +265,15 @@ export function useSessionStreamTurn({
           {
             id: `local-outcome-${turnId}`,
             turnId,
+            timelineGroupId: `stream:${requestId}`,
+            timelineAnchorTurnId,
+            timelineGroupOrder,
+            timelineItemOrder: event.eventId,
             seqInTurn: 2,
             role: SESSION_TIMELINE_ROLE.OUTCOME,
             content: outcome.reason,
             outcome,
-            metadata: { toolName: 'rp_story_outcome' },
+            metadata: { toolName: 'rp_story_outcome', streamRequestId: requestId },
             createdAt: new Date().toISOString(),
             speaker: outcomeSpeaker(),
             status: SESSION_MESSAGE_STATUS.LOCAL,
@@ -269,9 +293,14 @@ export function useSessionStreamTurn({
         {
           id: `local-tool-${turnId}-${crypto.randomUUID()}`,
           turnId,
+          timelineGroupId: `stream:${requestId}`,
+          timelineAnchorTurnId,
+          timelineGroupOrder,
+          timelineItemOrder: event.eventId,
           seqInTurn: 4,
           role: SESSION_TIMELINE_ROLE.TOOL,
           content: toolText,
+          metadata: { streamRequestId: requestId },
           createdAt: new Date().toISOString(),
           speaker: toolSpeaker(),
           status: SESSION_MESSAGE_STATUS.LOCAL,
@@ -300,18 +329,19 @@ export function useSessionStreamTurn({
       })
       if (usage) setLastTurnUsage(usage)
       else if (!isCommand) setLastTurnUsage(null)
+      const usageTurnId = event.payload.committedTurnId ?? turnId
       if (usage) {
-        setLocalTurnUsageByTurn((current) => ({ ...current, [turnId]: usage }))
+        setLocalTurnUsageByTurn((current) => ({ ...current, [usageTurnId]: usage }))
       } else {
         setLocalTurnUsageByTurn((current) => {
           const next = { ...current }
-          delete next[turnId]
+          delete next[usageTurnId]
           return next
         })
       }
       setLocalMessages((current) =>
-        current.map((message) =>
-          message.id === assistantMessageId
+        current.map((message) => {
+          const completedMessage = message.id === assistantMessageId
             ? {
                 ...message,
                 status: SESSION_MESSAGE_STATUS.DONE,
@@ -319,10 +349,25 @@ export function useSessionStreamTurn({
                 usage,
                 canCopy: Boolean((message.content || event.payload.text || '已完成。').trim()),
               }
-            : message.turnId === turnId && message.role === SESSION_TIMELINE_ROLE.THINKING
+            : message.metadata?.streamRequestId === requestId
+                && message.role === SESSION_TIMELINE_ROLE.THINKING
               ? { ...message, status: SESSION_MESSAGE_STATUS.DONE }
-            : message,
-        ),
+              : message
+          const committedTurnId = event.payload.committedTurnId
+          if (
+            committedTurnId
+            && completedMessage.metadata?.streamRequestId === requestId
+          ) {
+            return {
+              ...completedMessage,
+              turnId: committedTurnId,
+              timelineGroupId: `turn:${committedTurnId}`,
+              timelineAnchorTurnId: committedTurnId,
+              timelineGroupOrder: 0,
+            }
+          }
+          return completedMessage
+        }),
       )
       return
     }
@@ -345,10 +390,15 @@ export function useSessionStreamTurn({
         {
           id: `local-error-${turnId}-${crypto.randomUUID()}`,
           turnId,
+          timelineGroupId: `stream:${requestId}`,
+          timelineAnchorTurnId,
+          timelineGroupOrder,
+          timelineItemOrder: event.eventId,
           seqInTurn: 5,
           role: SESSION_TIMELINE_ROLE.ERROR,
           content: errorText,
           metadata: {
+            streamRequestId: requestId,
             errorCode: event.payload.errorCode,
             errorMessage: event.payload.message,
           },
@@ -367,6 +417,7 @@ export function useSessionStreamTurn({
   const streamLocalTurn = useCallback(async ({
     text,
     turnId,
+    timelineAnchorTurnId,
     userMessage,
     assistantMessage,
     source,
@@ -377,22 +428,38 @@ export function useSessionStreamTurn({
   }: StreamLocalTurnOptions) => {
     const controller = new AbortController()
     const requestId = crypto.randomUUID()
+    const timelineGroupOrder = ++nextTimelineGroupOrderRef.current
+    const timelineGroup = {
+      timelineGroupId: `stream:${requestId}`,
+      timelineAnchorTurnId,
+      timelineGroupOrder,
+    }
     const turnUsageFallback = contextPreviewUsage
     const commandInput = isSlashCommandInput(text)
     const displayedUserMessage = commandInput
       ? {
           ...userMessage,
-          metadata: { ...userMessage.metadata, localCommand: true },
+          ...timelineGroup,
+          metadata: { ...userMessage.metadata, localCommand: true, streamRequestId: requestId },
           speaker: { ...userMessage.speaker, label: 'CMD' },
         }
-      : userMessage
+      : {
+          ...userMessage,
+          ...timelineGroup,
+          metadata: { ...userMessage.metadata, streamRequestId: requestId },
+        }
     const displayedAssistantMessage = commandInput
       ? {
           ...assistantMessage,
-          metadata: { ...assistantMessage.metadata, localCommand: true },
+          ...timelineGroup,
+          metadata: { ...assistantMessage.metadata, localCommand: true, streamRequestId: requestId },
           speaker: commandSpeaker(),
         }
-      : assistantMessage
+      : {
+          ...assistantMessage,
+          ...timelineGroup,
+          metadata: { ...assistantMessage.metadata, streamRequestId: requestId },
+        }
     stoppingRequestIdRef.current = null
     stopSettledRequestIdsRef.current.clear()
     setStoppingRequestId(null)
@@ -440,7 +507,16 @@ export function useSessionStreamTurn({
         {
           signal: controller.signal,
           onEvent: (event) => {
-            appendStreamEvent(event, assistantMessage.id, turnId, turnUsageFallback, commandInput)
+            appendStreamEvent(
+              event,
+              assistantMessage.id,
+              turnId,
+              requestId,
+              timelineAnchorTurnId,
+              timelineGroupOrder,
+              turnUsageFallback,
+              commandInput,
+            )
             if (
               event.type === PLAY_STREAM_EVENT_TYPE.ERROR
               && event.payload.errorCode === MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE
@@ -493,7 +569,16 @@ export function useSessionStreamTurn({
           status: 'error',
           error,
         })
-        if (!streamFailure) appendLocalStreamError(assistantMessage.id, turnId, errorText)
+        if (!streamFailure) {
+          appendLocalStreamError(
+            assistantMessage.id,
+            turnId,
+            errorText,
+            requestId,
+            timelineAnchorTurnId,
+            timelineGroupOrder,
+          )
+        }
         showToast(errorText)
       }
     } finally {
