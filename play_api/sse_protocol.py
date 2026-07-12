@@ -10,6 +10,11 @@ from uuid import uuid4
 
 PLAY_SSE_SCHEMA_VERSION = "play_sse_v1"
 SSE_MEDIA_TYPE = "text/event-stream"
+# Keep Next.js and reverse proxies from gzip-buffering incremental SSE frames.
+SSE_RESPONSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+}
 TURN_ID_PREFIX = "turn"
 TURN_ID_RANDOM_HEX_LENGTH = 12
 DEFAULT_AGENT_ERROR_MESSAGE = "Agent stream failed"

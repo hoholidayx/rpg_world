@@ -15,7 +15,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from agent_service.client import AgentClientError, AgentServiceUnavailable
 from play_api.backends import get_agent_backend, get_data_manager_backend
 from play_api.routers._locator import resolve_session_or_404
-from play_api.sse_protocol import AgentEventKind, PlaySSEStream, SSE_MEDIA_TYPE, agent_event_kind
+from play_api.sse_protocol import (
+    AgentEventKind,
+    PlaySSEStream,
+    SSE_MEDIA_TYPE,
+    SSE_RESPONSE_HEADERS,
+    agent_event_kind,
+)
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload
 from rpg_core.rp_modules.narrative_outcome import (
     NARRATIVE_OUTCOME_DEFINITIONS,
@@ -760,7 +766,11 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
         except (AgentServiceUnavailable, AgentClientError) as exc:
             yield stream.error(str(exc), status_code=exc.status_code)
 
-    return StreamingResponse(event_generator(), media_type=SSE_MEDIA_TYPE)
+    return StreamingResponse(
+        event_generator(),
+        media_type=SSE_MEDIA_TYPE,
+        headers=SSE_RESPONSE_HEADERS,
+    )
 
 
 @router.post("/{session_id}/stop")

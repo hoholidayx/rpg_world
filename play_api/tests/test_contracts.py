@@ -787,6 +787,8 @@ def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
             body = "".join(response.iter_text())
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, no-transform"
+    assert response.headers["x-accel-buffering"] == "no"
     events = _sse_payloads(body)
     assert [event["type"] for event in events] == [
         PlaySSEType.TURN_STARTED.value,
