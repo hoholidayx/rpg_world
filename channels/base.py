@@ -50,7 +50,7 @@ class ChannelAdapter(ABC):
         """流式增量发送。
 
         基类默认行为：仅当 *final* 为 ``True`` 时调用 ``send_text``。
-        子类（如 Telegram）应覆写此方法实现逐段编辑。
+        子类可覆写此方法实现逐段编辑，也可在渠道专用 turn flow 中接管流式展示。
 
         Parameters
         ----------

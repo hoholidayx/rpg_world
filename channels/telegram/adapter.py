@@ -1,7 +1,7 @@
 """TelegramAdapter — 基于 python-telegram-bot 的 Telegram 渠道适配器。
 
 支持两种模式：
-- **流式（streaming=True）**：通过 ``send_delta`` 逐段编辑消息实现实时输出
+- **流式（streaming=True）**：通过 ``TelegramTurnFlow`` 逐段编辑消息实现实时输出
 - **非流式（streaming=False）**：一次性通过 ``send_text`` 发送完整回复
 
 用法::
@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -27,28 +25,28 @@ from telegram.error import BadRequest, RetryAfter, TelegramError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
 from channels.base import ChannelAdapter
+from channels.telegram.action_registry import TelegramActionRegistry
 from channels.telegram.render import (
     chunk_rendered_text,
     render_markdown_to_telegram_html,
 )
 from channels.telegram.session_flow import TelegramSessionFlow
+from channels.telegram.turn_flow import (
+    TelegramTurnBusyReason,
+    TelegramTurnFlow,
+)
 
 if TYPE_CHECKING:
     from agent_service.client import AgentClient
 
 _TELEGRAM_PARSE_MODE = "HTML"
-_TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 _TELEGRAM_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
-
-
-@dataclass
-class _StreamBuf:
-    """单条流式消息的发送状态。"""
-
-    msg_id: int
-    text: str
-    sent_text: str
-    last_edit_at: float
+_CALLBACK_INVALID_TEXT = "该菜单已失效，请重新打开。"
+_CALLBACK_BUSY_TEXT = "当前会话正在生成，请完成后再操作。"
+_CHAT_BUSY_TEXT = "当前消息仍在生成，请等待完成后再发送。"
+_SESSION_BUSY_TEXT = "当前会话正在处理另一条消息，请稍后再试。"
+_COMMAND_BUSY_TEXT = "当前会话正在生成，请完成后再执行命令。"
+_GENERIC_FAILURE_TEXT = "处理消息失败，请稍后重试。"
 
 
 def _preview_text(text: str, limit: int = 120) -> str:
@@ -136,9 +134,14 @@ class TelegramAdapter(ChannelAdapter):
         self._default_session_id = (session_id or "").strip()
         self._session_title = (session_title or bot_name or "Telegram").strip()
         self._app: Application | None = None
-        # chat_id → _StreamBuf, 用于流式增量编辑
-        self._stream_buf: dict[str, _StreamBuf] = {}
-        self._session_flow = TelegramSessionFlow()
+        self._action_registry = TelegramActionRegistry()
+        self._session_flow = TelegramSessionFlow(self._action_registry)
+        self._turn_flow = TelegramTurnFlow(
+            presenter=self,
+            streaming=self._streaming,
+            stream_edit_interval_seconds=self._stream_edit_interval,
+            stream_edit_min_chars=self._stream_edit_min_chars,
+        )
         if agent_client:
             self.bind_agent_client(agent_client)
 
@@ -150,6 +153,10 @@ class TelegramAdapter(ChannelAdapter):
         if self._workspace_override:
             return self._workspace_override
         raise RuntimeError("Telegram workspace is not resolved")
+
+    def bind_agent_client(self, client: AgentClient) -> None:
+        super().bind_agent_client(client)
+        self._turn_flow.bind_agent_client(client)
 
     # ── 生命周期 ────────────────────────────────────────────────────────
 
@@ -189,12 +196,31 @@ class TelegramAdapter(ChannelAdapter):
     async def stop(self) -> None:
         """优雅关闭 Telegram 连接。"""
         if not self._app:
+            await self._turn_flow.shutdown()
+            self._action_registry.clear()
             return
+        app = self._app
         logger.info("telegram: stopping adapter bot={}", self._bot_name)
-        await self._app.updater.stop()
-        await self._app.stop()
-        await self._app.shutdown()
-        self._app = None
+        try:
+            try:
+                await app.updater.stop()
+            except Exception:
+                logger.exception("telegram: updater stop failed bot={}", self._bot_name)
+            try:
+                await self._turn_flow.shutdown()
+            except Exception:
+                logger.exception("telegram: turn flow shutdown failed bot={}", self._bot_name)
+            self._action_registry.clear()
+            try:
+                await app.stop()
+            except Exception:
+                logger.exception("telegram: application stop failed bot={}", self._bot_name)
+            try:
+                await app.shutdown()
+            except Exception:
+                logger.exception("telegram: application shutdown failed bot={}", self._bot_name)
+        finally:
+            self._app = None
         logger.info("telegram: adapter stopped bot={}", self._bot_name)
 
     # ── 消息发送 ────────────────────────────────────────────────────────
@@ -265,185 +291,54 @@ class TelegramAdapter(ChannelAdapter):
             _preview_text(text),
         )
         for chunk in chunk_rendered_text(rendered):
-            await self._request_with_timeout(
-                chat_id,
-                "send_message",
-                self._app.bot.send_message(
-                    chat_id=int(chat_id),
-                    text=chunk,
-                    parse_mode=_TELEGRAM_PARSE_MODE,
-                ),
-            )
+            await self.send_html(chat_id, chunk)
 
-    async def send_delta(self, chat_id: str, delta: str, final: bool = False) -> None:
-        """Telegram 流式增量发送。
-
-        第 1 条 delta 发新消息，后续 delta 通过 ``edit_message_text``
-        增量更新，参考 nanobot telegram channel 的 StreamBuf 模式。
-
-        Parameters
-        ----------
-        chat_id:
-            目标对话 ID。
-        delta:
-            本次增量文本（非完整文本）。
-        final:
-            是否为最终增量。
-        """
+    async def send_html(self, chat_id: str, text: str) -> int | None:
+        """Send one already-rendered Telegram HTML message."""
         if not self._app:
-            logger.warning("telegram: send_delta skipped because application is not ready")
-            return
+            logger.warning("telegram: send_html skipped because application is not ready")
+            return None
+        message = await self._request_with_timeout(
+            chat_id,
+            "send_message",
+            self._app.bot.send_message(
+                chat_id=int(chat_id),
+                text=text,
+                parse_mode=_TELEGRAM_PARSE_MODE,
+            ),
+        )
+        message_id = getattr(message, "message_id", None)
+        return int(message_id) if message_id is not None else None
 
-        if not final:
-            if chat_id not in self._stream_buf:
-                logger.debug(
-                    "telegram: streaming first delta chat_id={} preview={}",
-                    chat_id,
-                    _preview_text(delta),
-                )
-                rendered_delta = render_markdown_to_telegram_html(delta)
-                msg = await self._request_with_timeout(
-                    chat_id,
-                    "send_message",
-                    self._app.bot.send_message(
-                        chat_id=int(chat_id),
-                        text=rendered_delta,
-                        parse_mode=_TELEGRAM_PARSE_MODE,
-                    ),
-                )
-                if msg is None:
-                    self._stream_buf[chat_id] = _StreamBuf(
-                        msg_id=0,
-                        text=delta,
-                        sent_text="",
-                        last_edit_at=time.monotonic(),
-                    )
-                    return
-                self._stream_buf[chat_id] = _StreamBuf(
-                    msg_id=msg.message_id,
-                    text=delta,
-                    sent_text=delta,
-                    last_edit_at=time.monotonic(),
-                )
-            else:
-                buf = self._stream_buf[chat_id]
-                buf.text += delta
-                if buf.msg_id <= 0:
-                    rendered_text = render_markdown_to_telegram_html(buf.text)
-                    msg = await self._request_with_timeout(
-                        chat_id,
-                        "send_message",
-                        self._app.bot.send_message(
-                            chat_id=int(chat_id),
-                            text=rendered_text,
-                            parse_mode=_TELEGRAM_PARSE_MODE,
-                        ),
-                    )
-                    if msg is None:
-                        return
-                    buf.msg_id = msg.message_id
-                    buf.sent_text = buf.text
-                    buf.last_edit_at = time.monotonic()
-                    return
-                elapsed = time.monotonic() - buf.last_edit_at
-                pending_chars = len(buf.text) - len(buf.sent_text)
-                if elapsed < self._stream_edit_interval and pending_chars < self._stream_edit_min_chars:
-                    logger.debug(
-                        "telegram: streaming update deferred chat_id={} elapsed_ms={} pending_chars={} preview={}",
-                        chat_id,
-                        int(elapsed * 1000),
-                        pending_chars,
-                        _preview_text(buf.text),
-                    )
-                    return
-                logger.debug(
-                    "telegram: streaming delta update chat_id={} preview={}",
-                    chat_id,
-                    _preview_text(buf.text),
-                )
-                rendered_text = render_markdown_to_telegram_html(buf.text)
-                if len(rendered_text) > _TELEGRAM_MAX_MESSAGE_LENGTH:
-                    logger.warning(
-                        "telegram: streaming edit exceeded limit chat_id={} length={}, defer to final",
-                        chat_id,
-                        len(rendered_text),
-                    )
-                    return
-                edited = await self._request_with_timeout(
-                    chat_id,
-                    "edit_message_text",
-                    self._app.bot.edit_message_text(
-                        chat_id=int(chat_id),
-                        message_id=buf.msg_id,
-                        text=rendered_text,
-                        parse_mode=_TELEGRAM_PARSE_MODE,
-                    ),
-                )
-                if edited is None:
-                    buf.last_edit_at = time.monotonic()
-                    return
-                buf.sent_text = buf.text
-                buf.last_edit_at = time.monotonic()
-        else:
-            buf = self._stream_buf.pop(chat_id, None)
-            if buf:
-                if buf.msg_id <= 0:
-                    logger.debug(
-                        "telegram: streaming final sends pending buffer chat_id={} preview={}",
-                        chat_id,
-                        _preview_text(delta),
-                    )
-                    await self.send_text(chat_id, delta)
-                    return
-                if buf.sent_text == delta:
-                    logger.debug(
-                        "telegram: streaming final update skipped (unchanged) chat_id={} preview={}",
-                        chat_id,
-                        _preview_text(delta),
-                    )
-                    return
-                logger.debug(
-                    "telegram: streaming final update chat_id={} preview={}",
-                    chat_id,
-                    _preview_text(delta),
-                )
-                rendered_delta = render_markdown_to_telegram_html(delta)
-                if len(rendered_delta) > _TELEGRAM_MAX_MESSAGE_LENGTH:
-                    logger.warning(
-                        "telegram: streaming final exceeded edit limit chat_id={} length={}, fallback to chunks",
-                        chat_id,
-                        len(rendered_delta),
-                    )
-                    await self.send_text(chat_id, delta)
-                    return
-                edited = await self._request_with_timeout(
-                    chat_id,
-                    "edit_message_text",
-                    self._app.bot.edit_message_text(
-                        chat_id=int(chat_id),
-                        message_id=buf.msg_id,
-                        text=rendered_delta,
-                        parse_mode=_TELEGRAM_PARSE_MODE,
-                    ),
-                )
-                if edited is None:
-                    logger.warning(
-                        "telegram: streaming final edit failed, fallback to send_text chat_id={} preview={}",
-                        chat_id,
-                        _preview_text(delta),
-                    )
-                    await self.send_text(chat_id, delta)
-            else:
-                logger.debug(
-                    "telegram: streaming final fallback to send_text chat_id={} preview={}",
-                    chat_id,
-                    _preview_text(delta),
-                )
-                await self.send_text(chat_id, delta)
+    async def edit_html(self, chat_id: str, message_id: int, text: str) -> bool:
+        """Edit one Telegram message with already-rendered HTML."""
+        if not self._app:
+            return False
+        result = await self._request_with_timeout(
+            chat_id,
+            "edit_message_text",
+            self._app.bot.edit_message_text(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                text=text,
+                parse_mode=_TELEGRAM_PARSE_MODE,
+            ),
+        )
+        return result is not None
 
-    async def _clear_stream_state(self, chat_id: str) -> None:
-        """清理 Telegram 流式 buffer，避免错误后复用失效消息。"""
-        self._stream_buf.pop(chat_id, None)
+    async def delete_message(self, chat_id: str, message_id: int) -> bool:
+        """Best-effort deletion used when a final placeholder edit fails."""
+        if not self._app:
+            return False
+        result = await self._request_with_timeout(
+            chat_id,
+            "delete_message",
+            self._app.bot.delete_message(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+            ),
+        )
+        return result is not None
 
     async def _configure_bot_commands(self) -> None:
         """把 agent 的命令列表同步到 Telegram bot 菜单。"""
@@ -495,7 +390,7 @@ class TelegramAdapter(ChannelAdapter):
                 chat_id=int(chat_id),
                 text=text,
                 parse_mode=_TELEGRAM_PARSE_MODE,
-                reply_markup=self._session_flow.build_session_picker(sessions, current),
+                reply_markup=self._session_flow.build_session_picker(chat_id, sessions, current),
             ),
         )
 
@@ -541,6 +436,16 @@ class TelegramAdapter(ChannelAdapter):
             _preview_text(text),
         )
         try:
+            session_id = self.get_session_id(chat_id)
+        except Exception:
+            logger.exception("telegram: failed to resolve session chat_id={}", chat_id)
+            await self.send_text(chat_id, _GENERIC_FAILURE_TEXT)
+            return
+        busy = self._turn_flow.busy_reason(chat_id, session_id)
+        if busy is not None:
+            await self.send_text(chat_id, self._turn_busy_text(busy))
+            return
+        try:
             if await self._session_flow.handle_plain_text(
                 chat_id,
                 text,
@@ -567,33 +472,52 @@ class TelegramAdapter(ChannelAdapter):
             )
             await self.send_text(chat_id, "会话操作失败，请重试或发送 /cancel。")
             return
+
+        reservation = self._turn_flow.reserve(chat_id, session_id)
+        if not reservation.accepted or reservation.active is None:
+            await self.send_text(
+                chat_id,
+                self._turn_busy_text(reservation.busy_reason),
+            )
+            return
+        active = reservation.active
+        if not self._app:
+            self._turn_flow.release(active)
+            await self.send_text(chat_id, _GENERIC_FAILURE_TEXT)
+            return
+
+        coroutine = self._turn_flow.run(active, text)
         try:
-            reply = await self._handle_message(chat_id, user_id, text)
+            task = self._app.create_task(
+                coroutine,
+                update=update,
+                name=f"telegram:{self._bot_name}:{chat_id}:{active.request_id[:8]}",
+            )
         except Exception:
+            coroutine.close()
+            self._turn_flow.release(active)
             logger.exception(
-                "telegram: handler failed bot={} chat_id={} user_id={} text={}",
+                "telegram: failed to schedule turn bot={} chat_id={} user_id={} text={}",
                 self._bot_name,
                 chat_id,
                 user_id,
                 _preview_text(text),
             )
-            await self.send_text(chat_id, "处理消息失败，请稍后重试。")
+            await self.send_text(chat_id, _GENERIC_FAILURE_TEXT)
             return
-        if reply is None:
-            logger.warning(
-                "telegram: message ignored bot={} chat_id={} user_id={} (agent missing or rejected)",
-                self._bot_name,
-                chat_id,
-                user_id,
-            )
-        else:
-            logger.info(
-                "telegram: replied bot={} chat_id={} user_id={} preview={}",
-                self._bot_name,
-                chat_id,
-                user_id,
-                _preview_text(reply),
-            )
+        if not self._turn_flow.attach_task(active, task):
+            task.cancel()
+            self._turn_flow.release(active)
+            await self.send_text(chat_id, _GENERIC_FAILURE_TEXT)
+            return
+        logger.info(
+            "telegram: turn scheduled bot={} chat_id={} user_id={} session_id={} request_id={}",
+            self._bot_name,
+            chat_id,
+            user_id,
+            session_id,
+            active.request_id[:11],
+        )
 
     async def _on_command(self, update: Update, _context: object) -> None:
         """处理 Telegram 斜杠命令。"""
@@ -603,6 +527,16 @@ class TelegramAdapter(ChannelAdapter):
         user_id = str(update.effective_user.id) if update.effective_user else "0"
         raw_command = update.message.text.strip()
         command = _normalize_telegram_command(raw_command)
+
+        try:
+            session_id = self.get_session_id(chat_id)
+        except Exception:
+            logger.exception("telegram: failed to resolve command session chat_id={}", chat_id)
+            await self.send_text(chat_id, "命令暂不可用。")
+            return
+        if self._turn_flow.busy_reason(chat_id, session_id) is not None:
+            await self.send_text(chat_id, _COMMAND_BUSY_TEXT)
+            return
 
         if command == "/start":
             await self._on_start(update, _context)
@@ -649,7 +583,7 @@ class TelegramAdapter(ChannelAdapter):
         )
         try:
             result = await self._agent_client.execute_command(
-                self.get_session_id(chat_id),
+                session_id,
                 command,
             )
             handled = bool(result.get("handled", True))
@@ -677,29 +611,60 @@ class TelegramAdapter(ChannelAdapter):
             await self.send_text(chat_id, reply)
 
     async def _on_callback_query(self, update: Update, _context: object) -> None:
-        """处理会话菜单的 callback 按钮。"""
+        """Resolve, gate, claim, and dispatch Telegram callback actions."""
         query = update.callback_query
         if query is None:
             return
         chat_id = str(query.message.chat.id) if query.message and query.message.chat else "0"
-        await query.answer()
-        if await self._session_flow.handle_callback_query(
-            chat_id,
+        try:
+            current_session_id = self.get_session_id(chat_id)
+        except Exception:
+            await query.answer(_CALLBACK_INVALID_TEXT, show_alert=True)
+            return
+        resolution = self._action_registry.resolve(
             str(query.data or ""),
-            send_text=lambda reply: self.send_text(chat_id, reply),
-            switch_session=lambda session_id: self._switch_chat_session(chat_id, session_id),
-            create_session=lambda: self._create_chat_session(chat_id),
-        ):
+            chat_id=chat_id,
+            current_session_id=current_session_id,
+        )
+        if not resolution.resolved or resolution.action is None:
+            await query.answer(_CALLBACK_INVALID_TEXT, show_alert=True)
             return
+        if self._turn_flow.busy_reason(chat_id, current_session_id) is not None:
+            await query.answer(_CALLBACK_BUSY_TEXT)
+            return
+        action = self._action_registry.claim(resolution.token)
+        if action is None:
+            await query.answer(_CALLBACK_INVALID_TEXT, show_alert=True)
+            return
+        await query.answer()
+        try:
+            handled = await self._session_flow.handle_action(
+                action,
+                send_text=lambda reply: self.send_text(chat_id, reply),
+                switch_session=lambda session_id: self._switch_chat_session(chat_id, session_id),
+                create_session=lambda: self._create_chat_session(chat_id),
+            )
+        except Exception:
+            logger.exception(
+                "telegram: callback action failed chat_id={} kind={}",
+                chat_id,
+                action.kind,
+            )
+            await self.send_text(chat_id, "会话操作失败，请重新打开菜单。")
+            return
+        if not handled:
+            await self.send_text(chat_id, _CALLBACK_INVALID_TEXT)
 
-    async def _switch_chat_session(self, chat_id: str, session_id: str) -> None:
+    async def _switch_chat_session(self, chat_id: str, session_id: str) -> str:
         if not self._agent_client:
-            return
-        await self._agent_client.execute_command(
+            raise RuntimeError("Agent client is not bound")
+        result = await self._agent_client.execute_command(
             self.get_session_id(chat_id),
             f"/session_switch {session_id}",
         )
-        self._session_flow.pin_session(chat_id, session_id)
+        active_session = str(result.get("active_session") or session_id)
+        self._session_flow.pin_session(chat_id, active_session)
+        return active_session
 
     async def _on_start(self, update: Update, _context: object) -> None:
         """处理 /start 命令。"""
@@ -716,3 +681,9 @@ class TelegramAdapter(ChannelAdapter):
             logger.error("telegram: application error without exception payload")
             return
         logger.opt(exception=error).error("telegram: application error")
+
+    @staticmethod
+    def _turn_busy_text(reason: TelegramTurnBusyReason | None) -> str:
+        if reason == TelegramTurnBusyReason.SESSION:
+            return _SESSION_BUSY_TEXT
+        return _CHAT_BUSY_TEXT

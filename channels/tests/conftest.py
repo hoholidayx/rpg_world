@@ -57,8 +57,14 @@ class FakeAgent:
             content=f"[mock] reply to: {text}",
         )
 
-    async def stream(self, *args: str) -> AsyncIterator[AgentStreamEvent]:
-        self.calls.append(("stream", tuple(args)))
+    async def stream(
+        self,
+        *args: str,
+        request_id: str | None = None,
+        **_kwargs: object,
+    ) -> AsyncIterator[AgentStreamEvent]:
+        recorded_args = tuple(args) + ((request_id,) if request_id is not None else ())
+        self.calls.append(("stream", recorded_args))
         async for event in self.send_stream(args[-1]):
             yield event
 
@@ -118,7 +124,12 @@ class FakeStreamAgent(FakeAgent):
             content="Hello World!",
         )
 
-    async def stream(self, *args: str) -> AsyncIterator[AgentStreamEvent]:
+    async def stream(
+        self,
+        *args: str,
+        request_id: str | None = None,
+        **_kwargs: object,
+    ) -> AsyncIterator[AgentStreamEvent]:
         async for event in self.send_stream(args[-1]):
             yield event
 
@@ -129,7 +140,12 @@ class FakeErrorAgent(FakeAgent):
     async def send_stream(self, text: str) -> AsyncIterator[AgentStreamEvent]:
         yield AgentStreamEvent(kind=StreamEventKind.ERROR, content="模拟错误")
 
-    async def stream(self, *args: str) -> AsyncIterator[AgentStreamEvent]:
+    async def stream(
+        self,
+        *args: str,
+        request_id: str | None = None,
+        **_kwargs: object,
+    ) -> AsyncIterator[AgentStreamEvent]:
         async for event in self.send_stream(args[-1]):
             yield event
 

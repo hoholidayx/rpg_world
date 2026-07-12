@@ -6,18 +6,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telegram import BotCommand, InlineKeyboardMarkup
 from telegram.error import BadRequest
 
-from channels.telegram.adapter import TelegramAdapter, _StreamBuf
+from channels.telegram.adapter import TelegramAdapter
 from channels.telegram.render import (
     chunk_rendered_text,
     render_markdown_to_telegram_html,
 )
-from channels.tests.conftest import FakeAgent, FakeErrorAgent
+from channels.tests.conftest import FakeAgent
+from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.command import CommandDef
 
 
@@ -31,6 +33,21 @@ def mock_app() -> MagicMock:
     app = MagicMock()
     app.bot = MagicMock()
     app.bot.set_my_commands = AsyncMock()
+    app.bot.send_message = AsyncMock(return_value=MagicMock(message_id=42))
+    app.bot.edit_message_text = AsyncMock(return_value=True)
+    app.bot.delete_message = AsyncMock(return_value=True)
+    app.updater = MagicMock()
+    app.updater.stop = AsyncMock()
+    app.stop = AsyncMock()
+    app.shutdown = AsyncMock()
+    app.test_tasks = []
+
+    def create_task(coroutine, **_kwargs):  # noqa: ANN001
+        task = asyncio.create_task(coroutine)
+        app.test_tasks.append(task)
+        return task
+
+    app.create_task = MagicMock(side_effect=create_task)
     builder.build.return_value = app
     return builder.build.return_value
 
@@ -49,6 +66,51 @@ def adapter(mock_app: MagicMock) -> TelegramAdapter:
     )
     a._app = mock_app  # 注入 mock，避免真实网络连接
     return a
+
+
+async def _drain_tasks(app: MagicMock) -> None:
+    tasks = list(app.test_tasks)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _message_update(chat_id: int, text: str, *, user_id: int = 456) -> MagicMock:
+    update = MagicMock()
+    update.message = MagicMock()
+    update.message.text = text
+    update.effective_chat.id = chat_id
+    update.effective_user.id = user_id
+    return update
+
+
+def _callback_update(chat_id: int, callback_data: str) -> MagicMock:
+    update = MagicMock()
+    query = MagicMock()
+    query.data = callback_data
+    query.message = MagicMock()
+    query.message.chat.id = chat_id
+    query.answer = AsyncMock()
+    update.callback_query = query
+    return update
+
+
+class _BlockingAgent(FakeAgent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def stream(
+        self,
+        *args: str,
+        request_id: str | None = None,
+        **_kwargs: object,
+    ):
+        recorded_args = tuple(args) + ((request_id,) if request_id is not None else ())
+        self.calls.append(("stream", recorded_args))
+        self.started.set()
+        await self.release.wait()
+        yield AgentStreamEvent(kind=StreamEventKind.DONE, content="done")
 
 
 class TestTelegramAdapter:
@@ -80,7 +142,8 @@ class TestTelegramAdapter:
         assert a._proxy == "http://127.0.0.1:7890"
 
     async def test_on_message_routes_to_agent_client(self, adapter: TelegramAdapter):
-        adapter._handle_message = AsyncMock(return_value="reply text")
+        agent = FakeAgent()
+        adapter.bind_agent_client(agent)
         update = MagicMock()
         update.message = MagicMock()
         update.message.text = "hello"
@@ -88,12 +151,15 @@ class TestTelegramAdapter:
         update.effective_user.id = 456
 
         await adapter._on_message(update, object())
+        await _drain_tasks(adapter._app)
 
-        adapter._handle_message.assert_awaited_once_with("123", "456", "hello")
+        assert agent.calls[-1][0] == "stream"
+        assert agent.calls[-1][1][:2] == ("tg_default", "hello")
+        assert str(agent.calls[-1][1][2]).startswith("tg_")
 
     async def test_on_message_handler_exception_sends_friendly_reply(self, adapter: TelegramAdapter):
-        adapter._handle_message = AsyncMock(side_effect=RuntimeError("boom"))
         adapter.send_text = AsyncMock()
+        adapter._app.create_task = MagicMock(side_effect=RuntimeError("boom"))
         update = MagicMock()
         update.message = MagicMock()
         update.message.text = "hello"
@@ -103,6 +169,145 @@ class TestTelegramAdapter:
         await adapter._on_message(update, object())
 
         adapter.send_text.assert_awaited_once_with("123", "处理消息失败，请稍后重试。")
+
+    async def test_on_message_returns_while_generation_is_running_and_rejects_same_chat(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = _BlockingAgent()
+        adapter.bind_agent_client(agent)
+
+        await adapter._on_message(_message_update(123, "first"), object())
+
+        assert adapter._app.create_task.call_count == 1
+        assert adapter._turn_flow.busy_reason("123", "tg_default") is not None
+        await agent.started.wait()
+
+        await adapter._on_message(_message_update(123, "second"), object())
+
+        assert len([call for call in agent.calls if call[0] == "stream"]) == 1
+        assert any(
+            call.kwargs.get("text") == "当前消息仍在生成，请等待完成后再发送。"
+            for call in adapter._app.bot.send_message.await_args_list
+        )
+
+        agent.release.set()
+        await _drain_tasks(adapter._app)
+        assert adapter._turn_flow.busy_reason("123", "tg_default") is None
+
+    async def test_generation_rejects_other_chat_using_same_session(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = _BlockingAgent()
+        adapter.bind_agent_client(agent)
+
+        await adapter._on_message(_message_update(123, "first"), object())
+        await agent.started.wait()
+        await adapter._on_message(_message_update(999, "second"), object())
+
+        assert len([call for call in agent.calls if call[0] == "stream"]) == 1
+        assert any(
+            call.kwargs.get("chat_id") == 999
+            and call.kwargs.get("text") == "当前会话正在处理另一条消息，请稍后再试。"
+            for call in adapter._app.bot.send_message.await_args_list
+        )
+
+        agent.release.set()
+        await _drain_tasks(adapter._app)
+
+    async def test_different_chats_on_different_sessions_can_generate_concurrently(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = _BlockingAgent()
+        adapter.bind_agent_client(agent)
+        adapter._session_flow.pin_session("999", "other_session")
+
+        await adapter._on_message(_message_update(123, "first"), object())
+        await adapter._on_message(_message_update(999, "second"), object())
+        for _ in range(5):
+            if len([call for call in agent.calls if call[0] == "stream"]) == 2:
+                break
+            await asyncio.sleep(0)
+
+        stream_calls = [call for call in agent.calls if call[0] == "stream"]
+        assert len(stream_calls) == 2
+        assert {call[1][0] for call in stream_calls} == {"tg_default", "other_session"}
+
+        agent.release.set()
+        await _drain_tasks(adapter._app)
+
+    async def test_commands_are_rejected_while_session_is_generating(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = _BlockingAgent()
+        agent.execute_command = AsyncMock(return_value={"reply": "done", "handled": True})
+        adapter.bind_agent_client(agent)
+
+        await adapter._on_message(_message_update(123, "first"), object())
+        await adapter._on_command(_message_update(123, "/clear"), object())
+
+        agent.execute_command.assert_not_awaited()
+        assert any(
+            call.kwargs.get("text") == "当前会话正在生成，请完成后再执行命令。"
+            for call in adapter._app.bot.send_message.await_args_list
+        )
+
+        agent.release.set()
+        await _drain_tasks(adapter._app)
+
+    async def test_busy_callback_is_not_claimed_and_can_be_retried_after_done(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = _BlockingAgent()
+        adapter.bind_agent_client(agent)
+        markup = adapter._session_flow.build_session_picker(
+            "123",
+            ["tg_default", "session_b"],
+            "tg_default",
+        )
+        callback_data = markup.inline_keyboard[1][0].callback_data
+        assert callback_data is not None
+
+        await adapter._on_message(_message_update(123, "first"), object())
+        busy_update = _callback_update(123, callback_data)
+        await adapter._on_callback_query(busy_update, object())
+
+        busy_update.callback_query.answer.assert_awaited_once_with(
+            "当前会话正在生成，请完成后再操作。",
+        )
+
+        agent.release.set()
+        await _drain_tasks(adapter._app)
+        agent.execute_command = AsyncMock(
+            return_value={
+                "reply": "[已切换到会话: session_b]",
+                "handled": True,
+                "active_session": "session_b",
+            },
+        )
+        retry_update = _callback_update(123, callback_data)
+        await adapter._on_callback_query(retry_update, object())
+
+        agent.execute_command.assert_awaited_once_with(
+            "tg_default",
+            "/session_switch session_b",
+        )
+        assert adapter.get_session_id("123") == "session_b"
+
+    async def test_invalid_and_legacy_callbacks_show_expired_alert(self, adapter: TelegramAdapter):
+        for callback_data in ("tg:a:missing", "tg_sess:legacy"):
+            update = _callback_update(123, callback_data)
+
+            await adapter._on_callback_query(update, object())
+
+            update.callback_query.answer.assert_awaited_once_with(
+                "该菜单已失效，请重新打开。",
+                show_alert=True,
+            )
 
     async def test_on_command_routes_to_agent_client(self, adapter: TelegramAdapter):
         agent = FakeAgent()
@@ -150,7 +355,7 @@ class TestTelegramAdapter:
         sessions = [f"session_{idx}" for idx in range(25)]
 
         text = adapter._session_flow.render_session_picker_text(sessions, "session_1")
-        markup = adapter._session_flow.build_session_picker(sessions, "session_1")
+        markup = adapter._session_flow.build_session_picker("123", sessions, "session_1")
 
         assert "... 还有 5 个会话未展示" in text
         # 20 个可见会话 + 1 个新建会话按钮
@@ -433,11 +638,11 @@ class TestTelegramAdapter:
         update.effective_user.id = 456
 
         await adapter._on_message(update, object())
+        await _drain_tasks(adapter._app)
 
-        assert agent.calls[-1] == (
-            "stream",
-            ("my_tel", "hello"),
-        )
+        assert agent.calls[-1][0] == "stream"
+        assert agent.calls[-1][1][:2] == ("my_tel", "hello")
+        assert str(agent.calls[-1][1][2]).startswith("tg_")
 
     async def test_start_configures_proxy_and_handlers(self, monkeypatch):
         builder = MagicMock()
@@ -496,6 +701,7 @@ class TestTelegramAdapter:
         assert any(cmd.command == "session_create" for cmd in commands)
         assert any(cmd.command == "session_switch" for cmd in commands)
         assert any(cmd.command == "memory_reindex" for cmd in commands)
+        assert all(cmd.command != "stop" for cmd in commands)
         app.initialize.assert_awaited_once()
         app.start.assert_awaited_once()
         app.updater.start_polling.assert_awaited_once()
@@ -505,6 +711,39 @@ class TestTelegramAdapter:
 
         with pytest.raises(ValueError):
             await adapter.start()
+
+    async def test_stop_cancels_background_turn_before_application_shutdown(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        app = adapter._app
+        agent = _BlockingAgent()
+        adapter.bind_agent_client(agent)
+        await adapter._on_message(_message_update(123, "first"), object())
+        await agent.started.wait()
+        task = app.test_tasks[-1]
+
+        await adapter.stop()
+
+        assert task.cancelled()
+        app.updater.stop.assert_awaited_once()
+        app.stop.assert_awaited_once()
+        app.shutdown.assert_awaited_once()
+        assert adapter._app is None
+        assert len(adapter._action_registry) == 0
+
+    async def test_stop_continues_cleanup_when_updater_was_not_running(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        app = adapter._app
+        app.updater.stop = AsyncMock(side_effect=RuntimeError("not running"))
+
+        await adapter.stop()
+
+        app.stop.assert_awaited_once()
+        app.shutdown.assert_awaited_once()
+        assert adapter._app is None
 
     async def test_configure_bot_commands_filters_invalid_and_truncates(self, adapter: TelegramAdapter):
         agent = FakeAgent()
@@ -626,210 +865,6 @@ class TestTelegramAdapter:
         assert args2["chat_id"] == 123
         assert len(args1["text"]) == 4096
         assert len(args2["text"]) == 5000 - 4096
-
-    async def test_send_delta_first(self, adapter: TelegramAdapter):
-        """第 1 条 delta 应发新消息并记录到 buffer。"""
-        fake_msg = MagicMock()
-        fake_msg.message_id = 42
-        adapter._app.bot.send_message = AsyncMock(return_value=fake_msg)
-
-        await adapter.send_delta("123", "Hello ", final=False)
-
-        adapter._app.bot.send_message.assert_called_once_with(
-            chat_id=123, text="Hello ", parse_mode="HTML",
-        )
-        assert "123" in adapter._stream_buf
-        assert adapter._stream_buf["123"].msg_id == 42
-        assert adapter._stream_buf["123"].text == "Hello "
-
-    async def test_send_delta_subsequent(self, adapter: TelegramAdapter):
-        """后续 delta 应编辑已有消息。"""
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="Hello ",
-            sent_text="Hello ",
-            last_edit_at=0.0,
-        )
-        adapter._app.bot.edit_message_text = AsyncMock()
-
-        await adapter.send_delta("123", "World", final=False)
-
-        adapter._app.bot.edit_message_text.assert_called_once_with(
-            chat_id=123,
-            message_id=42,
-            text="Hello World",
-            parse_mode="HTML",
-        )
-        assert adapter._stream_buf["123"].text == "Hello World"
-
-    async def test_send_delta_subsequent_edit_failure_keeps_pending_text(self, adapter: TelegramAdapter):
-        """中间编辑失败后不应把未发送文本标记为已发送。"""
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="Hello ",
-            sent_text="Hello ",
-            last_edit_at=0.0,
-        )
-        adapter._app.bot.edit_message_text = AsyncMock(return_value=None)
-
-        await adapter.send_delta("123", "World", final=False)
-
-        assert adapter._stream_buf["123"].text == "Hello World"
-        assert adapter._stream_buf["123"].sent_text == "Hello "
-        assert adapter._stream_buf["123"].last_edit_at > 0.0
-
-    async def test_send_delta_first_send_failure_keeps_single_pending_buffer(self, adapter: TelegramAdapter):
-        """首次发送失败后，后续 delta 应复用同一 pending buffer 再发送合并文本。"""
-        adapter._app.bot.send_message = AsyncMock(side_effect=[None, MagicMock(message_id=42)])
-
-        await adapter.send_delta("123", "Hello ", final=False)
-        await adapter.send_delta("123", "World", final=False)
-
-        assert adapter._app.bot.send_message.await_count == 2
-        second_call = adapter._app.bot.send_message.await_args_list[1]
-        assert second_call.kwargs["text"] == "Hello World"
-        assert adapter._stream_buf["123"].msg_id == 42
-        assert adapter._stream_buf["123"].text == "Hello World"
-        assert adapter._stream_buf["123"].sent_text == "Hello World"
-
-    async def test_stream_error_clears_buffer_and_notifies_user(self, adapter: TelegramAdapter):
-        """流式 ERROR 后应清理 buffer，避免下一条消息复用失效状态。"""
-        agent = FakeErrorAgent()
-        adapter.bind_agent_client(agent)
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="stale",
-            sent_text="stale",
-            last_edit_at=0.0,
-        )
-        adapter.send_text = AsyncMock()
-
-        result = await adapter._stream_and_send("123", "hi")
-
-        assert result.text == ""
-        assert "123" not in adapter._stream_buf
-        adapter.send_text.assert_awaited_once_with("123", "处理消息失败，请稍后重试。")
-
-    async def test_send_delta_subsequent_throttled(self, adapter: TelegramAdapter):
-        """未到节流阈值时不应立即编辑消息。"""
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="Hello ",
-            sent_text="Hello ",
-            last_edit_at=1000.0,
-        )
-        adapter._app.bot.edit_message_text = AsyncMock()
-
-        import channels.telegram.adapter as telegram_adapter_module
-
-        original_monotonic = telegram_adapter_module.time.monotonic
-        telegram_adapter_module.time.monotonic = lambda: 1000.1
-        try:
-            await adapter.send_delta("123", "World", final=False)
-        finally:
-            telegram_adapter_module.time.monotonic = original_monotonic
-
-        adapter._app.bot.edit_message_text.assert_not_called()
-        assert adapter._stream_buf["123"].text == "Hello World"
-
-    async def test_send_delta_final_with_buffer(self, adapter: TelegramAdapter):
-        """final delta 应编辑最终文本并清理 buffer。"""
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="Hello ",
-            sent_text="Hello ",
-            last_edit_at=0.0,
-        )
-        adapter._app.bot.edit_message_text = AsyncMock()
-
-        await adapter.send_delta("123", "Hello World!", final=True)
-
-        adapter._app.bot.edit_message_text.assert_called_once_with(
-            chat_id=123,
-            message_id=42,
-            text="Hello World!",
-            parse_mode="HTML",
-        )
-        assert "123" not in adapter._stream_buf  # buffer 已清理
-
-    async def test_send_delta_final_edit_failure_falls_back_to_send_text(self, adapter: TelegramAdapter):
-        """final 编辑失败时应回退为 send_text，避免用户收不到回复。"""
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="Hello ",
-            sent_text="Hello ",
-            last_edit_at=0.0,
-        )
-        adapter._app.bot.edit_message_text = AsyncMock(return_value=None)
-        adapter._app.bot.send_message = AsyncMock()
-
-        await adapter.send_delta("123", "Hello World!", final=True)
-
-        adapter._app.bot.edit_message_text.assert_called_once()
-        adapter._app.bot.send_message.assert_called_once_with(
-            chat_id=123, text="Hello World!", parse_mode="HTML",
-        )
-        assert "123" not in adapter._stream_buf
-
-    async def test_send_delta_final_unchanged_is_noop(self, adapter: TelegramAdapter):
-        """final delta 与当前缓冲内容完全一致时应直接跳过。"""
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="Hello World!",
-            sent_text="Hello World!",
-            last_edit_at=0.0,
-        )
-        adapter._app.bot.edit_message_text = AsyncMock()
-
-        await adapter.send_delta("123", "Hello World!", final=True)
-
-        adapter._app.bot.edit_message_text.assert_not_called()
-        assert "123" not in adapter._stream_buf
-
-    async def test_send_delta_final_flushes_deferred_updates(self, adapter: TelegramAdapter):
-        """前面的流式更新都被节流时，final 仍应补发最终内容。"""
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="Hello World!",
-            sent_text="Hello ",
-            last_edit_at=1000.0,
-        )
-        adapter._app.bot.edit_message_text = AsyncMock()
-
-        await adapter.send_delta("123", "Hello World!", final=True)
-
-        adapter._app.bot.edit_message_text.assert_called_once_with(
-            chat_id=123,
-            message_id=42,
-            text="Hello World!",
-            parse_mode="HTML",
-        )
-        assert "123" not in adapter._stream_buf
-
-    async def test_send_delta_final_without_buffer(self, adapter: TelegramAdapter):
-        """无 buffer 时的 final delta 应降级为 send_text。"""
-        adapter._app.bot.send_message = AsyncMock()
-
-        await adapter.send_delta("123", "Direct text", final=True)
-
-        adapter._app.bot.send_message.assert_called_once_with(
-            chat_id=123, text="Direct text", parse_mode="HTML",
-        )
-
-    async def test_send_delta_final_long_text_falls_back_to_chunks(self, adapter: TelegramAdapter):
-        adapter._stream_buf["123"] = _StreamBuf(
-            msg_id=42,
-            text="x",
-            sent_text="x",
-            last_edit_at=0.0,
-        )
-        adapter._app.bot.edit_message_text = AsyncMock()
-        adapter._app.bot.send_message = AsyncMock()
-
-        await adapter.send_delta("123", "x" * 5000, final=True)
-
-        adapter._app.bot.edit_message_text.assert_not_called()
-        assert adapter._app.bot.send_message.call_count == 2
 
     async def test_name_is_instance_specific(self):
         assert TelegramAdapter(token="fake:token").name == "telegram_default"

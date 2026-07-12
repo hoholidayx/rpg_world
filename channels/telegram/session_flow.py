@@ -6,21 +6,26 @@
 
 from __future__ import annotations
 
-import secrets
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from channels.telegram.action_registry import (
+    TelegramActionRegistry,
+    TelegramCallbackAction,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from agent_service.client import AgentClient
 
-_SESSION_PICKER_TOKEN_PREFIX = "tg_sess"
 _SESSION_CREATE_TTL_SECONDS = 300
 _MAX_SESSION_PICKER_ROWS = 20
+SESSION_ACTION_SWITCH = "session_switch"
+SESSION_ACTION_CREATE = "session_create"
 
 
 @dataclass
@@ -28,19 +33,15 @@ class _PendingSessionCreate:
     started_at: float
 
 
-@dataclass
-class _PickerAction:
-    kind: str
-    session_id: str | None = None
-
-
 class TelegramSessionFlow:
     """管理 Telegram 会话菜单、会话切换与可复用二段输入状态。"""
 
-    def __init__(self) -> None:
+    def __init__(self, action_registry: TelegramActionRegistry | None = None) -> None:
         self._session_overrides: dict[str, str] = {}
         self._pending_session_create: dict[str, _PendingSessionCreate] = {}
-        self._picker_actions: dict[str, _PickerAction] = {}
+        self._action_registry = (
+            action_registry if action_registry is not None else TelegramActionRegistry()
+        )
 
     def get_session_id(self, chat_id: str, default_session_id: str) -> str:
         """优先返回当前 chat 被显式钉住的会话，否则返回默认值。"""
@@ -67,30 +68,34 @@ class TelegramSessionFlow:
         """清除当前 chat 的显式会话绑定。"""
         self._session_overrides.pop(chat_id, None)
 
-    def _new_picker_token(self) -> str:
-        token = secrets.token_urlsafe(8)
-        self._picker_actions[token] = _PickerAction(kind="noop")
-        return token
-
-    def _register_picker_action(self, action: _PickerAction) -> str:
-        token = self._new_picker_token()
-        self._picker_actions[token] = action
-        return token
-
-    def build_session_picker(self, sessions: list[str], current: str) -> InlineKeyboardMarkup:
+    def build_session_picker(
+        self,
+        chat_id: str,
+        sessions: list[str],
+        current: str,
+    ) -> InlineKeyboardMarkup:
         """构造可点击的会话选择菜单。"""
         rows: list[list[InlineKeyboardButton]] = []
         visible_sessions = sessions[:_MAX_SESSION_PICKER_ROWS]
         for sid in visible_sessions:
             label = f"{sid} （当前）" if sid == current else sid
-            token = self._register_picker_action(_PickerAction(kind="switch", session_id=sid))
+            callback_data = self._action_registry.add(
+                kind=SESSION_ACTION_SWITCH,
+                chat_id=chat_id,
+                session_id=current,
+                payload={"target_session_id": sid},
+            )
             rows.append(
-                [InlineKeyboardButton(text=label, callback_data=f"{_SESSION_PICKER_TOKEN_PREFIX}:{token}")]
+                [InlineKeyboardButton(text=label, callback_data=callback_data)]
             )
 
-        create_token = self._register_picker_action(_PickerAction(kind="create"))
+        create_callback_data = self._action_registry.add(
+            kind=SESSION_ACTION_CREATE,
+            chat_id=chat_id,
+            session_id=current,
+        )
         rows.append([
-            InlineKeyboardButton(text="新建会话", callback_data=f"{_SESSION_PICKER_TOKEN_PREFIX}:{create_token}"),
+            InlineKeyboardButton(text="新建会话", callback_data=create_callback_data),
         ])
         return InlineKeyboardMarkup(rows)
 
@@ -222,34 +227,25 @@ class TelegramSessionFlow:
 
         return False
 
-    async def handle_callback_query(
+    async def handle_action(
         self,
-        chat_id: str,
-        callback_data: str,
+        action: TelegramCallbackAction,
         *,
         send_text: Callable[[str], Awaitable[None]],
-        switch_session: Callable[[str], Awaitable[None]],
+        switch_session: Callable[[str], Awaitable[str]],
         create_session: Callable[[], Awaitable[None]],
     ) -> bool:
-        """处理会话菜单按钮点击。"""
-        token = str(callback_data or "")
-        if not token.startswith(f"{_SESSION_PICKER_TOKEN_PREFIX}:"):
-            return False
-
-        raw_token = token.split(":", maxsplit=1)[1]
-        action = self._picker_actions.pop(raw_token, None)
-        if action is None:
-            await send_text("该会话菜单已失效，请重新输入 /sessions。")
-            return True
-
-        if action.kind == "create":
+        """执行已由统一 registry 校验并 claim 的会话 action。"""
+        if action.kind == SESSION_ACTION_CREATE:
             await create_session()
             return True
 
-        if action.kind == "switch" and action.session_id:
-            await switch_session(action.session_id)
-            self.pin_session(chat_id, action.session_id)
-            await send_text(f"[已切换到会话: {action.session_id}]")
+        if action.kind == SESSION_ACTION_SWITCH:
+            target_session_id = str(action.payload.get("target_session_id") or "")
+            if not target_session_id:
+                return False
+            active_session_id = await switch_session(target_session_id)
+            await send_text(f"[已切换到会话: {active_session_id}]")
             return True
 
         return False
