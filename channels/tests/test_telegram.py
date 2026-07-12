@@ -478,7 +478,7 @@ class TestTelegramAdapter:
             CommandDef(name="/session_switch", description="switch", detail="switch session"),
             CommandDef(name="/memory_reindex", description="reindex", detail="reindex memory"),
         ]
-        agent._ensure_initialized = AsyncMock()
+        agent.initialize = AsyncMock()
         adapter.bind_agent_client(agent)
         await adapter.start()
 

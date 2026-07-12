@@ -125,11 +125,11 @@ async def test_command_help_and_context_are_available(integration_agent):
 
 @pytest.mark.asyncio
 async def test_status_tables_and_scene_enter_agent_context(integration_status_agent):
-    ctx = integration_status_agent._build_ctx_for_inspection("inspect status")
+    ctx = integration_status_agent._context_service.build_for_inspection("inspect status")
     user_content = ctx.render_layer(LayerType.USER_MESSAGE)
     status_content = ctx.render_layer(LayerType.STATUS_TABLES)
 
-    assert integration_status_agent._scene_tracker is not None
+    assert integration_status_agent._lifecycle.resources.scene_tracker is not None
     assert user_content is not None
     assert "[scene]" in user_content
     assert "位置: 集成测试大厅" in user_content
@@ -180,7 +180,7 @@ async def test_session_create_and_switch_isolate_history(integration_agent, inte
     )
     assert switch_result.handled is True
     assert "已切换" in switch_result.reply
-    assert integration_agent._session_id == created_session_id
+    assert integration_agent.session_id == created_session_id
     assert integration_agent.history == []
 
     second_reply = await asyncio.wait_for(

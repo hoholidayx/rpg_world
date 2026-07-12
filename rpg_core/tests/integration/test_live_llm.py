@@ -28,7 +28,7 @@ async def live_agent(
     session_id = f"live_{request.node.name[-24:]}".replace("-", "_")
     _create_integration_session(integration_data_gateway, integration_workspace, session_id)
     agent = RPGGameAgent(session_id=session_id)
-    await agent._ensure_initialized()
+    await agent.initialize()
     try:
         yield agent
     finally:

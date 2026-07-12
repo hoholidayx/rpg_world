@@ -34,7 +34,7 @@ class FakeAgent:
             CommandDef(name="/memory_reindex", description="memory reindex", detail="reindex memory"),
         ]
 
-    async def _ensure_initialized(self) -> None:
+    async def initialize(self) -> None:
         pass
 
     async def switch_session(self, session_id: str) -> None:

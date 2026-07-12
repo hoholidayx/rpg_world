@@ -72,7 +72,7 @@ class AgentManager:
         if session_id in cls._initialized_targets:
             return
         agent = cls.get_or_create(session_id=session_id)
-        await agent._ensure_initialized()
+        await agent.initialize()
         cls._initialized_targets.add(session_id)
         cls._initialized = True
 

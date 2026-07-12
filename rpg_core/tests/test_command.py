@@ -20,9 +20,8 @@ class TestCommandDispatcher:
             clear_history=lambda: None,
             reload_rpg_context=AsyncMock(),
             get_context_markdown=AsyncMock(return_value="context"),
-            _memory_manager=None,
-            _workspace="data/test",
-            _session_id="s1",
+            session_id="s1",
+            reindex_memory=lambda: False,
             switch_session=AsyncMock(),
         )
         dispatcher = CommandDispatcher(agent=fake_agent)
@@ -201,9 +200,8 @@ class TestCommandDispatcher:
             clear_history=lambda: None,
             reload_rpg_context=AsyncMock(),
             get_context_markdown=AsyncMock(return_value="context"),
-            _memory_manager=None,
-            _workspace="data/test",
-            _session_id="s2",
+            session_id="s2",
+            reindex_memory=lambda: False,
             switch_session=AsyncMock(),
             list_commands=lambda: [],
         )

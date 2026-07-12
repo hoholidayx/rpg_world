@@ -38,7 +38,7 @@ async def _run_execute_story_memory(workspace: str) -> int:
         return MemoryAgentResult(story_details_added=3)
 
     sub_agent.process = fake_process  # type: ignore[assignment]
-    await sub_agent._execute_story_memory(SimpleNamespace(_session=session))
+    await sub_agent._execute_story_memory(SimpleNamespace(session_manager=session))
     return session.count_new_turns_since_story()
 
 
@@ -95,6 +95,6 @@ async def test_story_memory_failure_keeps_messages_retryable() -> None:
 
     sub_agent.process = fail_process  # type: ignore[assignment]
     with pytest.raises(RuntimeError, match="provider failed"):
-        await sub_agent._execute_story_memory(SimpleNamespace(_session=session))
+        await sub_agent._execute_story_memory(SimpleNamespace(session_manager=session))
 
     assert session.count_new_turns_since_story() == 1

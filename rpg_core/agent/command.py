@@ -8,15 +8,36 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from rpg_core.agent.agent import RPGGameAgent
     from rpg_core.agent.sub_agents.base import BaseSubAgent
+    from rpg_core.context.inspector import LayerInfo
     from rpg_core.rp_modules.models import ModuleCommand
+    from rpg_core.session import SessionManager
+
+
+class AgentCommandTarget(Protocol):
+    """Stable internal surface available to slash-command handlers."""
+
+    @property
+    def session_id(self) -> str: ...
+
+    @property
+    def session_manager(self) -> "SessionManager": ...
+
+    def clear_history(self) -> None: ...
+    async def reload_rpg_context(self) -> None: ...
+    def reindex_memory(self) -> bool: ...
+    def list_commands(self) -> list["CommandDef"]: ...
+    async def get_context_json(self, user_input: str = "", **kwargs) -> str: ...
+    async def get_context_markdown(self, user_input: str = "", **kwargs) -> str: ...
+    async def switch_session(self, session_id: str) -> None: ...
+    def render_role_bind_prompt(self, *, error: str = "") -> str: ...
+    def bind_player_character_by_index(self, index: int): ...
 
 # 命令处理器签名：async (agent, args) -> str
-HandlerFunc = Callable[["RPGGameAgent", list[str]], Awaitable[str]]
+HandlerFunc = Callable[[AgentCommandTarget, list[str]], Awaitable[str]]
 CommandProvider = Callable[[], list["ModuleCommand"]]
 
 
@@ -25,34 +46,33 @@ CommandProvider = Callable[[], list["ModuleCommand"]]
 # 处理器签名：(agent: RPGGameAgent, args: list[str]) -> str
 
 
-async def _cmd_clear(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_clear(agent: AgentCommandTarget, args: list[str]) -> str:
     """清空当前会话的对话历史。"""
     agent.clear_history()
     return "对话历史已清空。"
 
 
-async def _cmd_reload(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_reload(agent: AgentCommandTarget, args: list[str]) -> str:
     """重新加载 RPG 数据（角色卡、世界书）。"""
     await agent.reload_rpg_context()
     return "RPG 数据已重新加载。"
 
 
-async def _cmd_memory_reindex(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_memory_reindex(agent: AgentCommandTarget, args: list[str]) -> str:
     """手动触发 memory 全量重建。"""
-    if agent._memory_manager is None:
+    if not agent.reindex_memory():
         return "memory 未启用或未初始化，无法重建索引。"
-    agent._memory_manager.reindex()
     return "memory 全量重建已触发。"
 
 
-async def _cmd_help(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_help(agent: AgentCommandTarget, args: list[str]) -> str:
     """列出所有可用命令。"""
     if agent is None:
         return "命令帮助不可用。"
     return format_command_help(agent.list_commands())
 
 
-async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_context(agent: AgentCommandTarget, args: list[str]) -> str:
     """查看当前上下文结构和 token 用量。"""
     if args == ["--json"]:
         return await agent.get_context_json()
@@ -61,7 +81,7 @@ async def _cmd_context(agent: RPGGameAgent, args: list[str]) -> str:
     return await agent.get_context_markdown()
 
 
-async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_sessions(agent: AgentCommandTarget, args: list[str]) -> str:
     """列出当前工作区所有会话。"""
     gateway, current_session = _current_catalog_session(agent)
 
@@ -69,7 +89,7 @@ async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
         str(current_session.workspace_id),
         int(current_session.story_id),
     ) or []
-    current = agent._session_id
+    current = agent.session_id
     lines = [f"会话列表 ({len(sessions)}):", f"当前会话: {current}"]
     for session in sessions:
         sid = str(session.id)
@@ -78,7 +98,7 @@ async def _cmd_sessions(agent: RPGGameAgent, args: list[str]) -> str:
     return "\n".join(lines)
 
 
-async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_session_create(agent: AgentCommandTarget, args: list[str]) -> str:
     """创建新会话。"""
     title = " ".join(args).strip() or "New Session"
     gateway, current_session = _current_catalog_session(agent)
@@ -93,7 +113,7 @@ async def _cmd_session_create(agent: RPGGameAgent, args: list[str]) -> str:
     return f"[会话已创建: {sid}]"
 
 
-async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_session_switch(agent: AgentCommandTarget, args: list[str]) -> str:
     """切换到指定会话。"""
     from rpg_core.session import SessionManager
 
@@ -116,7 +136,7 @@ async def _cmd_session_switch(agent: RPGGameAgent, args: list[str]) -> str:
     return f"[已切换到会话: {sid}]"
 
 
-async def _cmd_role_bind(agent: RPGGameAgent, args: list[str]) -> str:
+async def _cmd_role_bind(agent: AgentCommandTarget, args: list[str]) -> str:
     """Bind or switch the player-controlled role for the current session."""
     if agent is None:
         return "角色绑定不可用。"
@@ -138,13 +158,13 @@ async def _cmd_role_bind(agent: RPGGameAgent, args: list[str]) -> str:
     return f"已切换扮演角色：{player.name}。后续消息将使用该身份。"
 
 
-def _current_catalog_session(agent: RPGGameAgent):
+def _current_catalog_session(agent: AgentCommandTarget):
     from rpg_data.services import get_data_service_gateway
 
     gateway = get_data_service_gateway()
-    current_session = gateway.catalog.get_session(agent._session_id)
+    current_session = gateway.catalog.get_session(agent.session_id)
     if current_session is None:
-        raise FileNotFoundError(f"Session not found in rpg_data: {agent._session_id}")
+        raise FileNotFoundError(f"Session not found in rpg_data: {agent.session_id}")
     return gateway, current_session
 
 
@@ -195,7 +215,7 @@ class CommandDispatcher:
     3. 未知斜杠命令 → handled=True，返回错误提示
     """
 
-    def __init__(self, agent: RPGGameAgent | None = None) -> None:
+    def __init__(self, agent: AgentCommandTarget | None = None) -> None:
         self._agent = agent
         self._builtins: dict[str, tuple[CommandDef, HandlerFunc]] = {}
         self._sub_agents: list[BaseSubAgent] = []
@@ -220,9 +240,17 @@ class CommandDispatcher:
         """注册子 Agent，dispatch 时会查询其 accept_command()。"""
         self._sub_agents.append(sub_agent)
 
+    def replace_sub_agents(self, sub_agents: list[BaseSubAgent]) -> None:
+        """Replace lifecycle-owned sub-agents during idempotent setup."""
+        self._sub_agents = list(sub_agents)
+
     def register_command_provider(self, provider: CommandProvider) -> None:
         """Register commands resolved from current external state on every access."""
         self._command_providers.append(provider)
+
+    def replace_command_providers(self, providers: list[CommandProvider]) -> None:
+        """Replace lifecycle-owned dynamic command providers."""
+        self._command_providers = list(providers)
 
     def register_default_builtins(self) -> None:
         """注册所有默认内置命令。

@@ -145,7 +145,7 @@ async def integration_agent_factory(
             first_message=first_message,
         )
         agent = RPGGameAgent(session_id=session_id)
-        await agent._ensure_initialized()
+        await agent.initialize()
         agents.append(agent)
         return agent
 

@@ -26,8 +26,7 @@ from rpg_core.agent.tools.base import BaseTool
 from llm_service.base_provider import LLMProvider
 
 if TYPE_CHECKING:
-    from rpg_core.agent.agent import RPGGameAgent
-    from rpg_core.agent.command import CommandDef
+    from rpg_core.agent.command import AgentCommandTarget, CommandDef
     from rpg_core.agent.sub_agents.context import SubAgentContext
     from llm_service.manager import ProviderOverrides
 @runtime_checkable
@@ -99,7 +98,7 @@ class BaseSubAgent:
         """判断此子 Agent 是否处理指定斜杠命令。"""
         return False
 
-    async def execute_command(self, command: str, args: list[str], agent: RPGGameAgent | None = None) -> dict | None:
+    async def execute_command(self, command: str, args: list[str], agent: AgentCommandTarget | None = None) -> dict | None:
         """执行命令，返回 ``{"reply": str, "stats": dict | None}`` 或 ``None``。
 
         Parameters
@@ -109,7 +108,7 @@ class BaseSubAgent:
         args:
             命令参数列表。
         agent:
-            主 ``RPGGameAgent`` 实例，子 Agent 可通过它访问 agent 方法。
+            实现 ``AgentCommandTarget`` 的主 Agent 命令目标。
         """
         return None
 
@@ -183,6 +182,12 @@ class BaseSubAgent:
         """
         if provider not in self._tool_providers:
             self._tool_providers.append(provider)
+
+    def replace_tool_providers(self, providers: list[ToolProvider]) -> None:
+        """Replace session-scoped providers without exposing internal storage."""
+        self._tool_providers = []
+        for provider in providers:
+            self.add_tool_provider(provider)
 
     def _collect_provider_tools(self) -> list[BaseTool]:
         """从所有已注册的工具提供者拉取扁平化工具列表。"""

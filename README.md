@@ -147,8 +147,10 @@ Telegram 渠道当前支持：
 
 | 模块 | 说明 |
 |---|---|
-| `agent/` | LLM Agent 引擎（公开门面、消息队列、chat loop、子 Agent、命令系统） |
-| `agent/turn/` | 单轮请求、不可变执行快照、准备、运行态与同步/流式共享编排 |
+| `agent/agent.py` | `RPGGameAgent` 组合根与公开门面，只组装组件并委托公开 API |
+| `agent/mailbox.py` / `session_service.py` / `lifecycle.py` | FIFO 队列与取消、会话操作、session-scoped runtime 生命周期 |
+| `agent/model_runtime.py` / `context_service.py` / `tool_service.py` | 主模型选择与 provider cache、Context/门禁/预览、工具与 schema 装配 |
+| `agent/turn/` | 单轮请求、不可变执行计划、固定阶段 hooks、运行态与同步/流式共享编排 |
 | `context/` | 结构化 RPG 上下文构建、LLM 边界渲染、上下文诊断 |
 | `scene/` | 场景状态跟踪（时间/地点/属性） |
 | `character/` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
@@ -160,31 +162,56 @@ Telegram 渠道当前支持：
 
 顶层 `rp_memory/` 是独立记忆系统包，负责检索、索引、规划、召回和 rerank；顶层 `llm_service/` 是统一 LLM 服务包，负责 provider 路由、配置解析、OpenAI-compatible provider 与本地 llama.cpp runtime。
 
-### Agent turn 事务
+### Agent 组合式门面与 turn 事务
 
-`send()` 和 `send_stream()` 使用同一套 turn pipeline，只在最终输出适配上区分 `AgentReply` 与 SSE。`RPGGameAgent` 负责公开入口、队列串行化和 session 生命周期，`agent/turn/` 负责单轮编排：
+`RPGGameAgent` 是组合根和公开门面，不再拥有队列、Context、工具、模型选择或 turn 阶段实现。公开接口保持 `send()`、`send_stream()`、`cancel_current_turn()`、命令、Context inspection、history、角色绑定和 reload/switch；内部稳定接口为幂等 `initialize()`、只读 `session_id` / `session_manager` 与 `reindex_memory()`。
 
 ```text
-RPGGameAgent / Queue（TurnRequest）
+RPGGameAgent（composition root + public facade）
+├── AgentMailbox              FIFO、stream task、requestId 取消、错误事件
+├── AgentSessionService       角色、history、truncate/delete/clear、reload/switch
+├── AgentRuntimeLifecycle     初始化、AgentContextResources、SubAgents、compressor、watcher
+├── MainModelRuntime          MainLLMSelection、provider cache、当前模型
+├── AgentContextService       fixed layer、Context 构建/预览、窗口门禁
+├── AgentToolService          base/turn-local tools、主 schema 过滤
+└── AgentTurnService
+    └── TurnOrchestrator      同步/流式共享业务模板
+```
+
+`AgentContextResources` 是一次性替换的不可变引用集合，包含 builder、角色、世界书、状态、scene 与 memory manager。reload/switch 不再逐字段改写 Agent，也不会保留 `_rpg_ctx` 字典；生命周期组件重建整组资源后，显式重绑 SubAgent context/tool provider、memory stores、compressor、RP registry 与 base tools。
+
+`send()` 和 `send_stream()` 使用同一套 turn pipeline，只在最终输出适配上区分 `AgentReply` 与 SSE：
+
+```text
+RPGGameAgent → AgentMailbox（QueueItem / TurnRequest）
   → TurnPreprocessor（命令 + 玩家角色 guard）
-  → TurnSnapshotResolver → TurnExecutionSnapshot（mode / style / policy）
+  → TurnPlanResolver
+      → TurnSnapshotResolver → TurnExecutionSnapshot（mode / style / policy）
+      → MainLLMSelection + RPModuleSelectionSnapshot
   → TurnOrchestrator
-      → TurnExecutionPlan（snapshot + 主 LLM / RP Module 选择）
-      → Context 门禁
-      → TurnRuntime
+      → TurnRuntimeFactory
+          → Context 门禁（不计本次 input）
           → AgentTurnTransaction → TurnScratch（message / scene / status COW）
-      → TurnPreparation（Context / tools / schemas）
+          → RPModuleTurnRuntime
+          → StatusPreflightHook
+      → TurnPreparation
+          → MemoryRecallHook
+          → AgentContextService + AgentToolService
       → 同步或流式 runner
       → commit
-  → AgentReply 或 SSE DONE
-  → commit 后 summary / story-memory 副作用
+      → AgentReply 或 commit 后 SSE DONE
+      → PostCommitHooks（story-memory / summary，逐项隔离失败）
 ```
+
+这些 hook 是固定的类型化阶段，不是事件总线：`StatusPreflightHook` 的未处理异常终止并 discard；`MemoryRecallHook` 失败只记录 warning；`PostCommitHooks` 在 commit 之后逐项隔离，永不回滚已提交 turn。顺序由 `TurnOrchestrator` / `TurnPreparation` 直接表达，不提供动态优先级、运行时重排或第三方注册。
 
 三个 turn 对象对应不同生命周期，不能合并成可变的大 request：
 
 - `TurnRequest` 只表示调用方要求，包含正文、mode、style override 和可选 request ID。
 - `TurnExecutionSnapshot` / `TurnExecutionPlan` 保存门禁前解析完成的本轮选择，生成期间不可变化。
 - `TurnRuntime` 持有 transaction、scratch、统计、preflight 结果和 RP Module runtime，负责统一 commit/discard/close。
+
+turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool service 与固定 hooks；不得重新引入 `TurnHost` / `TurnPreparationHost` 或让 `TurnOrchestrator` 回调 `RPGGameAgent` 私有方法。生产代码也不得访问 `agent._session_id`、`agent._session`、`agent._memory_manager`、builder 私有 store 或 SubAgent 私有 provider 列表。
 
 公开调用保持简单，调用方不接触 snapshot、runtime 或 transaction：
 
@@ -680,13 +707,29 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 当前测试会 mock LLM、Telegram SDK 和网络调用。若本地缺少 `pytest-asyncio`，`rpg_core/tests/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。覆盖范围包括：
 
 - `channels/tests/`：ChannelAdapter、CLI、Telegram 渠道和渠道侧会话流程。
-- `rpg_core/tests/`：命令分发、上下文、scene、session、summary、AgentManager。
+- `rpg_core/tests/`：Agent facade、Mailbox、Lifecycle、MainModel、Context/Tool service、turn hooks/runtime/orchestrator、transaction、命令、scene、session 与 summary。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank。
 - `llm_service/tests/`：LLM provider 配置、manager 路由与 llama 本地 runtime 协议。
 - `play_api/tests/`：Play API workspace/session/scene/turn/stream、characters、lorebook、status-tables 和 ops 等契约。
 
 Telegram 测试已覆盖会话菜单、命令规范化、系统生成 ID 的创建流程、流式编辑节流、
 Markdown 渲染和长文本分块。后续修改 Telegram 行为必须补对应测试。
+
+修改 Agent 组合或 turn pipeline 时，先跑组件专项与 Agent Service 契约，再跑完整基线和 Core integration：
+
+```bash
+uv run python -m pytest \
+  rpg_core/tests/test_agent.py \
+  rpg_core/tests/test_agent_mailbox.py \
+  rpg_core/tests/test_agent_lifecycle.py \
+  rpg_core/tests/test_agent_context_service.py \
+  rpg_core/tests/test_agent_tool_service.py \
+  rpg_core/tests/test_turn_hooks.py \
+  rpg_core/tests/test_turn_runtime_factory.py \
+  rpg_core/tests/test_turn_orchestration.py -q
+uv run python -m pytest agent_service/tests -q
+INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q
+```
 
 ## 当前实现优先级
 

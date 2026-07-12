@@ -35,7 +35,11 @@ class FakeAgent:
         self.history = [Message(Role.USER, "hello"), Message(Role.ASSISTANT, "hi")]
         self.last_stream_request_id: str | None = None
 
-    async def _ensure_initialized(self) -> None:
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    async def initialize(self) -> None:
         return None
 
     async def send(self, message: str) -> AgentReply:

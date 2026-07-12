@@ -43,7 +43,7 @@ from rpg_core.agent.sub_agents.memory_candidates import (
 )
 
 if TYPE_CHECKING:
-    from rpg_core.agent.agent import RPGGameAgent
+    from rpg_core.agent.command import AgentCommandTarget
     from llm_service.base_provider import LLMProvider
     from llm_service.manager import ProviderOverrides
     from rp_memory.recalled_memory import RecalledMemoryStore
@@ -348,6 +348,18 @@ class MemorySubAgent(BaseSubAgent):
         """多管线子 Agent，无统一系统提示。各管线自行提供。"""
         return ""
 
+    def replace_session_stores(
+        self,
+        *,
+        summary_store: SummaryStore | None,
+        story_store: StoryMemoryStore | None,
+        batch_store: "BatchSummaryStore | None",
+    ) -> None:
+        """Rebind stores after a runtime reload or session switch."""
+        self._summary_store = summary_store
+        self._story_store = story_store
+        self._batch_store = batch_store
+
     # ── Command interface ─────────────────────────────────────────────
 
     def get_command_def(self) -> list[CommandDef] | None:
@@ -374,7 +386,7 @@ class MemorySubAgent(BaseSubAgent):
             return False
         return command in (COMMAND_NAME_COMPACT, COMMAND_NAME_EXTRACT_STORY)
 
-    async def execute_command(self, command: str, args: list[str], agent: RPGGameAgent | None = None) -> dict | None:
+    async def execute_command(self, command: str, args: list[str], agent: AgentCommandTarget | None = None) -> dict | None:
         if not self.enabled:
             return None
         if command == COMMAND_NAME_EXTRACT_STORY:
@@ -383,12 +395,13 @@ class MemorySubAgent(BaseSubAgent):
             return await self._execute_compact(agent, args)
         return None
 
-    async def _execute_story_memory(self, agent: RPGGameAgent | None) -> dict:
+    async def _execute_story_memory(self, agent: AgentCommandTarget | None) -> dict:
         """处理 /story_memory 命令：提取剧情记忆。"""
-        if agent is None or not hasattr(agent, "_session"):
+        if agent is None:
             return {"reply": "未绑定主 Agent，无法执行 story_memory"}
 
-        new_groups = select_story_memory_turn_groups(agent._session)
+        session = agent.session_manager
+        new_groups = select_story_memory_turn_groups(session)
         new_msgs = [message for group in new_groups for message in group]
         if not new_msgs:
             logger.info(_TAG + " story_memory skipped: no new messages since last extraction")
@@ -402,7 +415,7 @@ class MemorySubAgent(BaseSubAgent):
         if result.skipped:
             return {"reply": "剧情记忆提取跳过：处理器当前不可用。", "stats": None}
         added = result.story_details_added
-        agent._session.mark_story_messages_processed(new_msgs)
+        session.mark_story_messages_processed(new_msgs)
 
         stats = _build_call_stats(result)
         if stats:
@@ -415,7 +428,7 @@ class MemorySubAgent(BaseSubAgent):
 
         return {"reply": f"已提取 {added} 条剧情记忆。", "stats": stats}
 
-    async def _execute_compact(self, agent: RPGGameAgent | None, args: list[str]) -> dict:
+    async def _execute_compact(self, agent: AgentCommandTarget | None, args: list[str]) -> dict:
         """处理 /compact 命令：压缩对话历史。"""
         if agent is None:
             return {"reply": f"未绑定主 Agent，无法执行 {COMMAND_NAME_COMPACT}"}
@@ -456,7 +469,7 @@ class MemorySubAgent(BaseSubAgent):
 
     async def compact_history(
         self,
-        agent: RPGGameAgent,
+        agent: AgentCommandTarget,
         compress_batch_size: int | None = None,
         keep_rounds: int | None = None,
     ) -> dict[str, int | str | bool]:
@@ -477,13 +490,14 @@ class MemorySubAgent(BaseSubAgent):
         compress_batch_size = compress_batch_size or settings.memory_compress_batch_size
         keep_rounds = keep_rounds or settings.memory_keep_rounds
 
+        session = agent.session_manager
         candidate_groups = select_summary_turn_groups(
-            agent._session,
+            session,
             keep_recent_turns=keep_rounds,
         )
         if self._batch_store is None:
             return {"skipped": True, "reason": "no batch_store configured"}
-        total = len(SessionManager.iter_turn_groups(agent._session.history))
+        total = len(SessionManager.iter_turn_groups(session.history))
         if not candidate_groups:
             logger.info(
                 _TAG + " compact skipped: no unprocessed turns outside keep window (total={}, keep={})",
@@ -529,7 +543,7 @@ class MemorySubAgent(BaseSubAgent):
                         characters=result.get("characters", []),
                     )
                     batch_files.append(file_path.name)
-                    agent._session.mark_summary_messages_processed(batch_slice, batch_id=batch_id)
+                    session.mark_summary_messages_processed(batch_slice, batch_id=batch_id)
                     total_compressed += user_rounds_in_batch
                     processed_batch_ids.append(batch_id)
             except Exception as exc:
@@ -562,7 +576,7 @@ class MemorySubAgent(BaseSubAgent):
             except Exception as exc:
                 logger.warning(_TAG + " overall summary failed: {}", exc)
 
-        before_len = len(agent._session.history)
+        before_len = len(session.history)
 
         logger.info(
             _TAG + " compact: {} turns summarized, history remains {} msgs",

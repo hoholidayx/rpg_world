@@ -48,8 +48,11 @@
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
 - Story 主数据字段保持：`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。
 - 玩家角色绑定状态只对外暴露 `bound | invalid`。缺失绑定、角色不存在、未挂载、snapshot 损坏或 snapshot mount/story 不匹配都视为 `invalid`；WebUI 进入 SessionRoom 后用不可取消弹窗补选，Agent 在普通 send/send_stream 进入 LLM 前强校验，invalid 时只返回固定编号角色列表，不写 user history、不调用 LLM。绑定成功且 main history 为空时，`SessionRoleService` 追加 story `first_message` 到 main 和 backup，且只追加一次。
+- `RPGGameAgent` 只作为 composition root + public facade：保留依赖组装、幂等 `initialize()` 与公开 API 委托。FIFO/取消归 `AgentMailbox`，会话操作归 `AgentSessionService`，初始化/reload/switch 归 `AgentRuntimeLifecycle`，模型/Context/工具分别归 `MainModelRuntime`、`AgentContextService`、`AgentToolService`，正文协议适配归 `AgentTurnService`。不要把这些实现重新堆回 `agent.py`。
+- session-scoped Context 资源必须使用不可变 `AgentContextResources` 整组替换；reload/switch 后显式重绑 SubAgent context/tool providers、memory stores、compressor、RP registry 与 base tools。不要恢复 `_rpg_ctx` 字典、Agent 上的散落 manager/store 字段，生产代码不得访问 `agent._*`、builder 私有 store 或 SubAgent 私有 provider 列表；跨模块使用公开 `initialize()`、`session_id`、`session_manager`、`reindex_memory()` 或 `AgentCommandTarget`。
 - Agent turn 代码保持 `TurnRequest`（调用方原始输入）→ `TurnExecutionSnapshot` / `TurnExecutionPlan`（门禁前不可变选择）→ `TurnRuntime`（事务期可变资源）三段生命周期。不要把 scratch、transaction、manager/provider 或解析后的配置塞回 `TurnRequest`；新增 turn 配置先进入 snapshot，再由 policy 或 `TurnPreparation` 消费。
-- `send` / `send_stream` 必须共用 `TurnPreprocessor`、`TurnSnapshotResolver`、`TurnPreparation` 和 `TurnOrchestrator` 的业务 pipeline，只允许 LLM runner 与 `AgentReply`/SSE 输出适配不同；不要复制 preflight、Context/工具构建、commit、discard 或 close 分支。`RPGGameAgent` 只保留公开入口、队列、session 生命周期和 turn 门面职责。
+- `send` / `send_stream` 必须共用 `TurnPreprocessor`、`TurnPlanResolver`、`TurnRuntimeFactory`、`TurnPreparation` 和 `TurnOrchestrator` 的业务 pipeline，只允许 LLM runner 与 `AgentReply`/SSE 输出适配不同；不要复制 preflight、Context/工具构建、commit、discard 或 close 分支。turn 子系统必须依赖显式 service/factory/hook，不得重新引入 `TurnHost` / `TurnPreparationHost` 或回调 `RPGGameAgent` 私有方法。
+- turn hooks 只允许固定类型化阶段：`StatusPreflightHook → MemoryRecallHook → runner/commit → PostCommitHooks`。Status preflight 未处理异常终止并 discard，memory recall 失败 warning-and-continue，story-memory/summary post-commit 逐项隔离且不回滚。不要增加事件总线、动态优先级、运行时重排或第三方 hook 注册。
 - Agent 普通正文在命令分发和角色校验后先解析 RP Module 不可变快照，再在创建 `AgentTurnTransaction` 前执行主 Context 窗口门禁；门禁只估算当前 Context，不计本次 input，达到 `settings.context_window_reject_threshold_ratio` 时拒绝正文但始终允许斜杠命令。通过门禁后，`send/send_stream` 的 user/assistant message、Narrative Outcome 与 scene/status document 才进入内存 scratch，LLM 完整成功后在短 commit 点统一写 main history、backup history、剧情裁定和状态表；summary compression 和 story memory extraction 仍只作为 commit 后副作用运行，失败只记录 warning。
 - `AgentTurnTransaction` / `TurnScratch` 是 turn 写入的唯一事务边界：所有事务性状态先写 scratch；取消、provider/stream ERROR、缺失 DONE 或 commit 失败必须 discard。流式 DONE 只能在 commit 成功后发送并携带最终 usage 与 `committed_turn_id`。
 - `StatusSubAgent` 在主 Agent 前先判断外部实质变数：需要裁定时只执行 `rp_story_outcome`，同批所有 scene/status 预写不论顺序都标记 `skipped_due_to_outcome` 并延后给主 Agent；无需裁定时才允许确定性状态预更新。预裁定结果必须在主 Agent 首次调用前进入 `RP_MODULES` runtime section，并从主 Agent schema 隐藏 outcome 工具；漏判或预裁定失败时才保留主 Agent 补判。主 Agent 不得改判或重抽，只在结果造成实际、持久、确定的追踪值变化时写状态，允许零状态工具。有状态变化时必须先在无 RP 正文的工具调用轮完成同步，最终正文不得新增尚未同步的可追踪确定事实；不得询问玩家是否需要标记或更新状态。状态预写批次失败只使用内存 checkpoint 恢复并回退主 Agent，不新增持久化 status journal；retry/edit/truncate 删除消息与裁定并重新抽取，但不回滚已提交状态表。
@@ -75,8 +78,8 @@
 - 修改核心上下文、summary、session 行为时，补 `rpg_core/tests/`；修改 memory 行为时，补 `rp_memory/tests/`。
 - 修改主 agent、LLM provider、session manager、context 或相关配置时，默认跑：
   `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q`。
-- 修改 `rpg_core/agent/turn/`、transaction 或同步/流式编排时，至少先跑：
-  `uv run python -m pytest rpg_core/tests/test_agent.py rpg_core/tests/test_turn_orchestration.py -q`。
+- 修改 Agent 组合、`rpg_core/agent/turn/`、transaction 或同步/流式编排时，至少先跑：
+  `uv run python -m pytest rpg_core/tests/test_agent.py rpg_core/tests/test_agent_mailbox.py rpg_core/tests/test_agent_lifecycle.py rpg_core/tests/test_main_model_runtime.py rpg_core/tests/test_agent_context_service.py rpg_core/tests/test_agent_tool_service.py rpg_core/tests/test_turn_hooks.py rpg_core/tests/test_turn_runtime_factory.py rpg_core/tests/test_turn_orchestration.py rpg_core/tests/test_turn_transaction.py -q`，并补跑 `uv run python -m pytest agent_service/tests -q`。
 - 保留 `pytest.ini` 中的 `asyncio_mode = auto`。
 - pytest 默认会清理代理环境变量；需要保留代理时显式设置 `PYTEST_KEEP_PROXY=1`。
 

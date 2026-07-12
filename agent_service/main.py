@@ -108,7 +108,7 @@ async def get_history(
 ) -> AgentHistoryPayload:
     agent = _get_agent(session_id)
     try:
-        await agent._ensure_initialized()
+        await agent.initialize()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Agent initialization failed: {exc}") from exc
     rows = get_data_service_gateway().messages.list(session_id)
@@ -125,7 +125,7 @@ async def list_commands(
 ) -> AgentCommandsPayload:
     agent = _get_agent(session_id)
     try:
-        await agent._ensure_initialized()
+        await agent.initialize()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Agent initialization failed: {exc}") from exc
     return {
@@ -434,7 +434,7 @@ async def chat_command(body: AgentCommandRequest) -> AgentCommandResultPayload:
             detail=f"未知命令: {command.split()[0] if command else '(empty)'}",
         )
     data = _command_result_to_dict(result)
-    data["active_session"] = getattr(agent, "_session_id", body.session_id)
+    data["active_session"] = agent.session_id
     return data
 
 

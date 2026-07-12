@@ -5,7 +5,7 @@ from contextlib import suppress
 
 import pytest
 
-import rpg_core.agent.agent as agent_module
+from llm_service import manager as llm_manager_module
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.context.rpg_context import LayerType
 from rpg_core.context.fixed_layer.contributors import (
@@ -56,12 +56,16 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
     integration_workspace,
     integration_data_gateway,
 ):
-    monkeypatch.setattr(agent_module.LLMManager, "get", classmethod(lambda cls: _NoLLMManager()))
+    monkeypatch.setattr(
+        llm_manager_module.LLMManager,
+        "get",
+        classmethod(lambda cls: _NoLLMManager()),
+    )
 
     session_id = "integration_rp_modules"
     _ensure_integration_session(integration_data_gateway, integration_workspace, session_id)
     agent = RPGGameAgent(session_id=session_id)
-    await agent._ensure_initialized()
+    await agent.initialize()
 
     try:
         command_names = [command.name for command in agent.list_commands()]
@@ -71,14 +75,14 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
         assert "/check_dc" in command_names
         assert "/check" not in command_names
 
-        snapshot = agent._resolve_rp_module_snapshot()
-        runtime = agent._rp_module_registry.create_runtime(snapshot)
+        snapshot = agent._context_service.resolve_rp_module_snapshot()
+        runtime = agent._lifecycle.rp_module_registry.create_runtime(snapshot)
         tool_names = [tool.name for tool in runtime.get_tools()]
         assert "rp_story_outcome" in tool_names
         assert "rp_dice_roll" not in tool_names
         assert "rp_dice_check_dc" not in tool_names
 
-        ctx = agent._build_ctx_for_inspection("我想碰碰运气，看能不能在附近找到其他线索")
+        ctx = agent._context_service.build_for_inspection("我想碰碰运气，看能不能在附近找到其他线索")
         fixed_content = ctx.render_layer(LayerType.FIXED) or ""
         assert f"[{RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID}]" in fixed_content
         assert f"[{TEXT_OUTPUT_FORMAT_SECTION_ID}]" in fixed_content

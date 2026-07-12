@@ -4,9 +4,8 @@ import asyncio
 
 import pytest
 
-import rpg_core.agent.agent as agent_module
 from llm_service.types import ProviderChunk
-from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
+from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnCancelStatus
 from rpg_core.agent.transaction.status_scratch import StatusDocumentScratch
 from rpg_core.tests.integration.scripted_llm import response, tool_call
 
@@ -89,9 +88,13 @@ async def test_stream_loop_without_done_is_treated_as_failed_turn(
     monkeypatch,
 ):
     async def incomplete_loop(**_kwargs):
-        yield agent_module.AgentStreamEvent(kind=StreamEventKind.ROUND_START)
+        yield AgentStreamEvent(kind=StreamEventKind.ROUND_START)
 
-    monkeypatch.setattr(agent_module, "run_chat_loop_stream", incomplete_loop)
+    monkeypatch.setattr(
+        integration_agent._turn_service._orchestrator,
+        "_stream_runner",
+        incomplete_loop,
+    )
 
     events = [event async for event in integration_agent.send_stream("missing done")]
 
@@ -148,7 +151,7 @@ async def test_status_scratch_and_messages_commit_together_with_real_sqlite(
     integration_data_gateway,
     scripted_llm_manager,
 ):
-    table = integration_status_agent._status_mgr.list_context_tables()[0]
+    table = integration_status_agent._lifecycle.resources.status_manager.list_context_tables()[0]
     table_id = int(table["id"])
     scripted_llm_manager.status.queue_chat(
         response(
@@ -185,7 +188,8 @@ async def test_status_commit_failure_rolls_back_messages_backup_and_document(
     scripted_llm_manager,
     monkeypatch,
 ):
-    table = integration_status_agent._status_mgr.list_context_tables()[0]
+    status_manager = integration_status_agent._lifecycle.resources.status_manager
+    table = status_manager.list_context_tables()[0]
     table_id = int(table["id"])
     scripted_llm_manager.status.queue_chat(
         response(
@@ -203,7 +207,7 @@ async def test_status_commit_failure_rolls_back_messages_backup_and_document(
     def fail_save(*_args, **_kwargs):
         raise RuntimeError("forced status commit failure")
 
-    monkeypatch.setattr(integration_status_agent._status_mgr, "save_table_document", fail_save)
+    monkeypatch.setattr(status_manager, "save_table_document", fail_save)
 
     with pytest.raises(RuntimeError, match="forced status commit failure"):
         await integration_status_agent.send("触发回滚")
@@ -228,7 +232,7 @@ async def test_post_commit_side_effect_failure_does_not_undo_successful_turn(
         raise RuntimeError("post-commit failure")
 
     monkeypatch.setattr(
-        integration_agent._memory_sub_agent,
+        integration_agent._lifecycle.memory_sub_agent,
         "maybe_auto_extract",
         fail_after_commit,
     )
@@ -307,7 +311,7 @@ class _SequenceRng:
 
 def _set_outcome_rng(agent, *values: int) -> _SequenceRng:
     rng = _SequenceRng(*values)
-    agent._rp_module_registry._rng_factory = lambda: rng
+    agent._lifecycle.rp_module_registry._rng_factory = lambda: rng
     return rng
 
 
@@ -380,7 +384,7 @@ async def test_main_agent_syncs_scene_and_normal_status_after_preadjudication(
     scripted_llm_manager,
 ):
     rng = _set_outcome_rng(integration_status_agent, 71)
-    table = integration_status_agent._status_mgr.list_context_tables()[0]
+    table = integration_status_agent._lifecycle.resources.status_manager.list_context_tables()[0]
     table_id = int(table["id"])
     scripted_llm_manager.status.queue_chat(
         response(
@@ -444,7 +448,7 @@ async def test_status_sub_agent_outcome_skips_mixed_state_prewrites(
     integration_data_gateway,
     scripted_llm_manager,
 ):
-    table = integration_status_agent._status_mgr.list_context_tables()[0]
+    table = integration_status_agent._lifecycle.resources.status_manager.list_context_tables()[0]
     table_id = int(table["id"])
     scripted_llm_manager.status.queue_chat(
         response(
@@ -616,7 +620,7 @@ async def test_stream_syncs_state_before_success_with_cost_narration(
     scripted_llm_manager,
 ):
     _set_outcome_rng(integration_status_agent, 31)
-    table = integration_status_agent._status_mgr.list_context_tables()[0]
+    table = integration_status_agent._lifecycle.resources.status_manager.list_context_tables()[0]
     table_id = int(table["id"])
     scripted_llm_manager.status.queue_chat(
         response(

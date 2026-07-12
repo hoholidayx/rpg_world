@@ -15,7 +15,7 @@ class FakeAgent:
         self._session_id = kwargs["session_id"]
         FakeAgent.instances.append(self)
 
-    async def _ensure_initialized(self) -> None:
+    async def initialize(self) -> None:
         self.init_calls += 1
 
 

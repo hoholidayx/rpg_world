@@ -116,6 +116,21 @@ class RPGContextBuilder:
     def set_batch_summary_store(self, store: BatchSummaryStore) -> None:
         self._batch_summary_store = store
 
+    @property
+    def summary_store(self) -> SummaryStore | None:
+        """Read-only access for runtime composition."""
+        return self._summary_store
+
+    @property
+    def story_memory_store(self) -> StoryMemoryStore | None:
+        """Read-only access for runtime composition."""
+        return self._story_memory
+
+    @property
+    def batch_summary_store(self) -> BatchSummaryStore | None:
+        """Read-only access for runtime composition."""
+        return self._batch_summary_store
+
     # ── main entry ──────────────────────────────────────────────────
 
     def build(

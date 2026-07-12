@@ -112,6 +112,16 @@ class SummaryCompressor:
 
     # ── public API ─────────────────────────────────────────────────────
 
+    def replace_session_resources(
+        self,
+        *,
+        batch_store: "BatchSummaryStore | None",
+        memory_sub_agent: MemorySubAgent | None,
+    ) -> None:
+        """Rebind session-scoped stores without changing compression policy."""
+        self._batch_store = batch_store
+        self._memory_sub_agent = memory_sub_agent
+
     async def maybe_compress(self, session: "SessionManager") -> CompressResult:
         """检查是否需要压缩，是则执行分批压缩。
 

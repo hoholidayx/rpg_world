@@ -1,125 +1,46 @@
-"""RPGGameAgent — orchestrates history, 5-layer context build, and LLM call."""
+"""Public composition facade for the RPG Agent runtime."""
 
 from __future__ import annotations
 
-import asyncio
-import json
-import time as _time
-from asyncio import Future
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from loguru import logger
-
-from commons.errors import (
-    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
-    MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
-    TURN_METADATA_INVALID_ERROR_CODE,
-    TURN_METADATA_INVALID_STATUS_CODE,
-    MainContextWindowThresholdExceededError,
-    format_turn_metadata_error_message,
-)
-from rpg_core.agent.agent_types import (
-    AgentStreamEvent,
-    QueueItem,
-    QueueKind,
-    StreamEventKind,
-    TurnCancelResult,
-    TurnCancelStatus,
-    TurnStats,
-    _StreamSentinel,
-)
-from rpg_core.agent.command import CommandResult
-from rpg_core.agent.command import CommandDispatcher
-from rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
-from rpg_core.agent.transaction import SCENE_TOOL_NAMES
-from rpg_core.agent.turn import (
-    TurnBypass,
-    TurnExecutionPolicy,
-    TurnExecutionSnapshot,
-    TurnMode,
-    TurnRequest,
+from llm_service.manager import ProviderOverrides
+from rpg_core.agent.agent_types import AgentStreamEvent, TurnCancelResult
+from rpg_core.agent.command import CommandDispatcher, CommandResult
+from rpg_core.agent.context_service import AgentContextService
+from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
+from rpg_core.agent.loop import AgentReply, run_chat_loop, run_chat_loop_stream
+from rpg_core.agent.mailbox import AgentMailbox
+from rpg_core.agent.model_runtime import MainModelRuntime
+from rpg_core.agent.session_service import AgentSessionService
+from rpg_core.agent.tool_service import AgentToolService
+from rpg_core.agent.tools import BaseTool
+from rpg_core.agent.turn import TurnMode, TurnRequest
+from rpg_core.agent.turn.factory import TurnRuntimeFactory
+from rpg_core.agent.turn.hooks import (
+    MemoryRecallHook,
+    PostCommitHooks,
+    StatusPreflightHook,
+    TurnDiagnostics,
 )
 from rpg_core.agent.turn.orchestrator import TurnOrchestrator
-from rpg_core.agent.turn.preprocessor import TurnPreprocessor
-from rpg_core.agent.turn.resolver import TurnSnapshotResolver
-from rpg_core.agent.sub_agents import (
-    MemorySubAgent,
-    StatusSubAgent,
-    StatusSubAgentPreflightOutcome,
-    StatusSubAgentResult,
-    SubAgentContext,
-)
+from rpg_core.agent.turn.planning import TurnPlanResolver
+from rpg_core.agent.turn.preparation import TurnPreparation
+from rpg_core.agent.turn.service import AgentTurnService
+from rpg_core.main_llm import MainLLMSelectionService
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
-from rpg_core.agent.tools import (
-    BaseTool,
-    GrepTool,
-    ListFilesTool,
-    ReadFileTool,
-    ToolRegistry,
-    WriteFileTool,
-)
-from rpg_core.context import RPGContextBuilder
-from rpg_core.context.fixed_layer import FixedLayerAssembler
-from rpg_core.context.fixed_layer.contributors import (
-    CharacterFixedLayerContributor,
-    CoreRPContractContributor,
-    LorebookFixedLayerContributor,
-    StaticFixedLayerContributor,
-    StoryPromptFixedLayerContributor,
-    TextOutputFormatFixedLayerContributor,
-    TurnExecutionFixedLayerContributor,
-)
-from rpg_core.context.inspector import ContextInspector
-from rpg_core.context.rpg_context import FixedLayerData, Role, Message
-from rpg_core.context.usage import estimate_rendered_context_usage
-from llm_service.base_provider import LLMProvider
-from llm_service.keys import (
-    AGENT_MAIN_BIZ_KEY,
-    AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
-    AGENT_STATUS_SUB_AGENT_BIZ_KEY,
-)
-from rpg_core.main_llm import MainLLMSelection, MainLLMSelectionService
-from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
-from rpg_core.scene import SceneTracker
-from rpg_core.session import InvalidTurnMetadataError, SessionManager
-from rpg_core.settings import settings
-from rpg_core.status.context import render_status_tables_context
-from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME, StatusTableToolProvider
-from rpg_core.utils.watcher import get_watcher
-from rpg_core.summary.compressor import SummaryCompressor
-from llm_service.manager import LLMManager, ProviderOverrides
 
 if TYPE_CHECKING:
-    from rpg_core.character.manager import CharacterManager
     from rpg_core.agent.command import CommandDef
-    from rpg_core.lorebook.manager import LorebookManager
-    from rpg_core.rp_modules import (
-        RPModuleRegistry,
-        RPModuleSelectionSnapshot,
-        RPModuleTurnRuntime,
-    )
-    from rpg_core.agent.transaction import TurnScratch
-    from rp_memory.memory_manager import MemoryManager
-    from rpg_core.status.manager import StatusManager
-
-_TAG = "[MainAgent]"
+    from rpg_core.agent.loop import ToolCallRecord
+    from rpg_core.context.inspector import LayerInfo
+    from rpg_core.context.rpg_context import Message
+    from rpg_core.session import SessionManager
 
 
 class RPGGameAgent:
-    """Standalone RPG agent.
-
-    Owns the full lifecycle:
-      1. RPG context (builder + managers + stores from ``build_rpg_context``)
-      2. Conversation history (in-memory)
-      3. Main LLM provider
-
-    Usage::
-
-        agent = RPGGameAgent()
-        reply = await agent.send("look around the room")
-        print(reply)
-    """
+    """Composition root and stable public API for one cached Agent session."""
 
     def __init__(
         self,
@@ -135,236 +56,113 @@ class RPGGameAgent:
         token_counter: TokenCounter | None = None,
         main_llm_selection_service: MainLLMSelectionService | None = None,
     ) -> None:
-        self._session_id = session_id
-        self._world_name = world_name
-        self._model = model
-        self._api_key = api_key
-        self._base_url = base_url
-        self._max_tokens = max_tokens
-        self._temperature = temperature
-        self._provider_overrides = ProviderOverrides(
+        token_counter = token_counter or TiktokenTokenCounter()
+        provider_overrides = ProviderOverrides(
             openai_model=model,
             openai_api_key=api_key,
             openai_base_url=base_url,
             openai_max_tokens=max_tokens,
             openai_temperature=temperature,
         )
-        self._history_enabled = history_enabled
-        self._extra_tools = tools or []
-        self._token_counter = token_counter or TiktokenTokenCounter()
-        self._main_llm_selection_service = (
-            main_llm_selection_service or MainLLMSelectionService()
+        self._command_dispatcher = CommandDispatcher(agent=self)
+        self._model_runtime = MainModelRuntime(
+            selection_service=(
+                main_llm_selection_service or MainLLMSelectionService()
+            ),
+            provider_overrides=provider_overrides,
+            initial_model=model,
         )
-        self._turn_snapshot_resolver = TurnSnapshotResolver(self._session_id)
-        self._main_llm_selection: MainLLMSelection | None = None
-
-        self._initialized: bool = False
-        self._builder: RPGContextBuilder | None = None
-        self._character_mgr: CharacterManager | None = None
-        self._lorebook_mgr: LorebookManager | None = None
-        self._status_mgr: StatusManager | None = None
-        self._scene_tracker: SceneTracker | None = None
-        self._provider: LLMProvider | None = None
-        self._fixed_layer = FixedLayerData(world_name=self._world_name)
-        self._session = SessionManager(
-            session_id=self._session_id,
-            history_enabled=self._history_enabled,
+        self._lifecycle = AgentRuntimeLifecycle(
+            session_id=session_id,
+            world_name=world_name,
+            history_enabled=history_enabled,
+            model_runtime=self._model_runtime,
+            command_dispatcher=self._command_dispatcher,
         )
-        self._tool_registry: ToolRegistry | None = None
-        self._last_tool_records: list[ToolCallRecord] | None = None
-        self._status_sub_agent: StatusSubAgent | None = None
-        self._memory_sub_agent: MemorySubAgent | None = None
-        self._compressor: SummaryCompressor | None = None
-        self._cmd_dispatcher: CommandDispatcher | None = None
-        self._rp_module_registry: RPModuleRegistry | None = None
-        self._memory_manager: MemoryManager | None = None
-        self._rpg_ctx: dict[str, object] = {}
-        self._init_lock: asyncio.Lock | None = None
-
-        # 会话确定后立即初始化 RPG context managers/stores（同步，不等第一句消息）
-        self._refresh_rpg_context()
-
-        # 消息队列（初始化时创建，_ensure_initialized 末尾启动消费者）
-        self._queue: asyncio.Queue[QueueItem] = asyncio.Queue()
-        self._consumer_task: asyncio.Task | None = None
-        self._active_stream_task: asyncio.Task | None = None
-        self._active_stream_request_id: str | None = None
-        self._queued_stream_request_ids: set[str] = set()
-        self._cancelled_request_ids: set[str] = set()
-
-    def _create_future(self) -> asyncio.Future:
-        """在当前运行中的事件循环里创建 Future。
-
-        统一收口，避免多个入口各自使用过时的 ``get_event_loop()``。
-        """
-        return asyncio.get_running_loop().create_future()
-
-    async def _emit_stream_error(self, event_queue: asyncio.Queue, error: BaseException) -> None:
-        """把流式失败转换成可消费的 ERROR 事件并结束队列。"""
-        await event_queue.put(self._stream_error_event(error))
-        await event_queue.put(_StreamSentinel())
-
-    @staticmethod
-    def _stream_error_event(error: BaseException) -> AgentStreamEvent:
-        if isinstance(error, MainContextWindowThresholdExceededError):
-            return AgentStreamEvent(
-                kind=StreamEventKind.ERROR,
-                content=str(error),
-                error_code=MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
-                status_code=MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
-            )
-        if isinstance(error, InvalidTurnMetadataError):
-            return AgentStreamEvent(
-                kind=StreamEventKind.ERROR,
-                content=format_turn_metadata_error_message(error),
-                error_code=TURN_METADATA_INVALID_ERROR_CODE,
-                status_code=TURN_METADATA_INVALID_STATUS_CODE,
-            )
-        return AgentStreamEvent(kind=StreamEventKind.ERROR, content=str(error))
-
-    # ── 消息队列消费者 ─────────────────────────────────────────────────
-
-    async def _queue_consumer(self) -> None:
-        """后台消费者——逐个处理消息队列中的工作项。
-
-        所有 ``send()`` / ``send_stream()`` / 命令都经过此消费者串行执行。
-        ``_send_stream_impl`` 内部已捕获异常并通过 event_queue 传播，
-        此处的异常捕获仅作为安全网。
-        """
-        while True:
-            item: QueueItem = await self._queue.get()
-            logger.debug(
-                _TAG + " consumer processing: kind={}, input={!r:.60}",
-                item.kind,
-                item.input_text,
-            )
-            try:
-                match item.kind:
-                    case QueueKind.SEND:
-                        if item.turn_request is None:
-                            raise ValueError("turn_request is required for send")
-                        result = await self._send_impl(item.turn_request)
-                        item.future.set_result(result)
-                    case QueueKind.SEND_STREAM:
-                        await self._run_stream_queue_item(item)
-                    case QueueKind.COMMAND:
-                        if item.command is None:
-                            raise ValueError("command is required")
-                        cmd_result = await self._cmd_dispatcher.dispatch(item.command)
-                        item.future.set_result(cmd_result)
-                    case QueueKind.TRUNCATE_HISTORY:
-                        if item.turn_id is None:
-                            raise ValueError("turn_id is required")
-                        result = self._truncate_history_from_turn_impl(item.turn_id)
-                        item.future.set_result(result)
-            except Exception as e:
-                logger.warning(_TAG + " consumer error on kind={}: {}", item.kind, e)
-                if item.kind == QueueKind.SEND_STREAM and item.event_queue is not None:
-                    await self._emit_stream_error(item.event_queue, e)
-                    if not item.future.done():
-                        item.future.set_result(None)
-                elif not item.future.done():
-                    item.future.set_exception(e)
-            finally:
-                self._queue.task_done()
-
-    async def _run_stream_queue_item(self, item: QueueItem) -> None:
-        """Run one queued stream request in a cancellable task."""
-        if item.event_queue is None:
-            raise ValueError("event_queue is required for send_stream")
-
-        request_id = item.request_id
-        if request_id:
-            self._queued_stream_request_ids.discard(request_id)
-            if request_id in self._cancelled_request_ids:
-                self._cancelled_request_ids.discard(request_id)
-                logger.info(
-                    _TAG + " skipping cancelled queued stream: session_id={}, request_id={}",
-                    self._session_id,
-                    request_id,
-                )
-                await item.event_queue.put(_StreamSentinel())
-                if not item.future.done():
-                    item.future.set_result(None)
-                return
-
-        if item.turn_request is None:
-            raise ValueError("turn_request is required for send_stream")
-        task = asyncio.create_task(self._send_stream_impl(
-            item.turn_request,
-            item.event_queue,
-        ))
-        self._active_stream_task = task
-        self._active_stream_request_id = request_id
-        logger.debug(
-            _TAG + " stream task started: session_id={}, request_id={}",
-            self._session_id,
-            request_id,
+        self._context_service = AgentContextService(
+            world_name=world_name,
+            session_id=lambda: self._lifecycle.session_id,
+            session_manager=self._lifecycle.session_manager,
+            resources=lambda: self._lifecycle.resources,
+            rp_module_registry=lambda: self._lifecycle.rp_module_registry,
+            main_llm_selection=self._model_runtime.resolve,
+            token_counter=token_counter,
         )
-        try:
-            await task
-        except asyncio.CancelledError:
-            current_task = asyncio.current_task()
-            if current_task is not None and current_task.cancelling():
-                raise
-            logger.info(
-                _TAG + " stream task cancelled: session_id={}, request_id={}",
-                self._session_id,
-                request_id,
-            )
-            await item.event_queue.put(_StreamSentinel())
-            if not item.future.done():
-                item.future.set_result(None)
-            return
-        finally:
-            if self._active_stream_task is task:
-                self._active_stream_task = None
-                self._active_stream_request_id = None
-
-        if not item.future.done():
-            item.future.set_result(None)
-
-    def _new_turn_orchestrator(self) -> TurnOrchestrator:
-        """Build the turn pipeline with the currently patched/configured runners."""
-        return TurnOrchestrator(
-            self,
+        self._tool_service = AgentToolService(
+            session_id=lambda: self._lifecycle.session_id,
+            resources=lambda: self._lifecycle.resources,
+            extra_tools=tools,
+        )
+        self._session_service = AgentSessionService(
+            lifecycle=self._lifecycle,
+            tool_service=self._tool_service,
+        )
+        status_preflight = StatusPreflightHook(
+            status_sub_agent=lambda: self._lifecycle.status_sub_agent,
+            tool_service=self._tool_service,
+        )
+        preparation = TurnPreparation(
+            context_service=self._context_service,
+            tool_service=self._tool_service,
+            memory_recall=MemoryRecallHook(
+                lambda: self._lifecycle.resources
+            ),
+        )
+        orchestrator = TurnOrchestrator(
+            session_id=lambda: self._lifecycle.session_id,
+            plan_resolver=TurnPlanResolver(
+                lifecycle=self._lifecycle,
+                context_service=self._context_service,
+                model_runtime=self._model_runtime,
+            ),
+            runtime_factory=TurnRuntimeFactory(
+                lifecycle=self._lifecycle,
+                context_service=self._context_service,
+                model_runtime=self._model_runtime,
+                status_preflight=status_preflight,
+            ),
+            preparation=preparation,
+            post_commit_hooks=PostCommitHooks(
+                lifecycle=self._lifecycle,
+                session_manager=self._lifecycle.session_manager,
+            ),
+            diagnostics=TurnDiagnostics(),
             sync_runner=run_chat_loop,
             stream_runner=run_chat_loop_stream,
         )
+        self._turn_service = AgentTurnService(
+            session_id=lambda: self._lifecycle.session_id,
+            model=lambda: self._model_runtime.model,
+            command_dispatcher=self._command_dispatcher,
+            player_character_guard=self._session_service.player_character_guard_reply,
+            orchestrator=orchestrator,
+            stream_error_event=AgentMailbox.stream_error_event,
+        )
+        self._mailbox = AgentMailbox(
+            session_id=lambda: self._lifecycle.session_id,
+            model=lambda: self._model_runtime.model,
+            turn_service=self._turn_service,
+            command_dispatcher=self._command_dispatcher,
+            truncate_history=self._session_service.truncate_history_from_turn_now,
+        )
+        self._session_service.bind_mailbox(self._mailbox)
 
-    async def _resolve_turn_bypass(self, request: TurnRequest) -> TurnBypass | None:
-        """Handle work that must complete before snapshot or transaction creation."""
-        return await TurnPreprocessor(
-            session_id=getattr(self, "_session_id", ""),
-            command_dispatcher=getattr(self, "_cmd_dispatcher", None),
-            player_character_guard=self._player_character_guard_reply,
-        ).resolve(request)
+    @property
+    def session_id(self) -> str:
+        """Current globally unique session ID."""
+        return self._lifecycle.session_id
 
-    @staticmethod
-    def _reply_for_turn_bypass(bypass: TurnBypass) -> AgentReply:
-        stats = TurnStats(started_at=_time.monotonic())
-        stats.finished_at = _time.monotonic()
-        return AgentReply(text=bypass.text, stats=stats)
+    @property
+    def session_manager(self) -> "SessionManager":
+        """Read-only access for trusted internal command collaborators."""
+        return self._lifecycle.session_manager
 
-    async def _emit_turn_bypass(
-        self,
-        event_queue: asyncio.Queue,
-        bypass: TurnBypass,
-    ) -> None:
-        if bypass.text:
-            await event_queue.put(AgentStreamEvent(
-                kind=StreamEventKind.TEXT,
-                content=bypass.text,
-                model=self._model,
-            ))
-        await event_queue.put(AgentStreamEvent(
-            kind=StreamEventKind.DONE,
-            content=bypass.text,
-            model=self._model,
-        ))
-        await event_queue.put(_StreamSentinel())
-
-    # ── public API ─────────────────────────────────────────────────────
+    async def initialize(self) -> None:
+        """Idempotently initialize the session runtime and mailbox."""
+        await self._lifecycle.initialize(
+            tool_service=self._tool_service,
+            mailbox=self._mailbox,
+        )
 
     async def send(
         self,
@@ -373,44 +171,13 @@ class RPGGameAgent:
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> AgentReply:
-        """Send user text through the message queue and return a structured ``AgentReply``.
-
-        If the agent is busy processing a previous message, this call waits
-        in the queue until the agent is free.  Both output protocols use the
-        shared :class:`TurnOrchestrator` pipeline.
-
-        Usage is identical to the old ``send()`` — no caller changes needed.
-        """
-        await self._ensure_initialized()
-        future: Future[AgentReply] = self._create_future()
-        turn_request = TurnRequest.create(
-            user_input,
-            mode=mode,
-            narrative_style_id=narrative_style_id,
-        )
-        await self._queue.put(QueueItem(
-            kind=QueueKind.SEND,
-            future=future,
-            turn_request=turn_request,
-        ))
-        logger.debug(_TAG + " send() enqueued: input={!r:.60}", user_input)
-        return await future
-
-    async def _send_impl(self, turn_request: TurnRequest | str) -> AgentReply:
-        """Run one queued request through the shared turn orchestrator."""
-        if not isinstance(turn_request, TurnRequest):
-            turn_request = TurnRequest.create(turn_request)
-        bypass = await self._resolve_turn_bypass(turn_request)
-        if bypass is not None:
-            return self._reply_for_turn_bypass(bypass)
-
-        result = await self._new_turn_orchestrator().execute_sync(turn_request)
-        return AgentReply(
-            text=result.text,
-            tool_records=(result.tool_records or None) if settings.include_tool_records else None,
-            status_sub_agent_records=result.status_sub_agent_records,
-            stats=result.stats,
-            committed_turn_id=result.committed_turn_id,
+        await self.initialize()
+        return await self._mailbox.send(
+            TurnRequest.create(
+                user_input,
+                mode=mode,
+                narrative_style_id=narrative_style_id,
+            )
         )
 
     async def send_stream(
@@ -421,503 +188,66 @@ class RPGGameAgent:
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> AsyncIterator[AgentStreamEvent]:
-        """Streaming variant of ``send()``, goes through the message queue.
-
-        Enqueues the request and streams events from a per-request event queue
-        so that the consumer's output is delivered incrementally to the caller.
-
-        Usage is identical to the old ``send_stream()`` — no caller changes needed.
-        """
-        await self._ensure_initialized()
-        event_queue: asyncio.Queue[AgentStreamEvent | BaseException | _StreamSentinel] = asyncio.Queue()
-        future: Future[None] = self._create_future()
-        turn_request = TurnRequest.create(
+        await self.initialize()
+        request = TurnRequest.create(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
             request_id=request_id,
         )
-        request_id = turn_request.request_id
-        if request_id:
-            self._queued_stream_request_ids.add(request_id)
-        await self._queue.put(QueueItem(
-            kind=QueueKind.SEND_STREAM,
-            future=future,
-            event_queue=event_queue,
-            turn_request=turn_request,
-        ))
-        logger.debug(
-            _TAG + " send_stream() enqueued: request_id={}, input={!r:.60}",
-            request_id,
-            user_input,
-        )
-        stream_completed = False
-        try:
-            while True:
-                item = await event_queue.get()
-                if isinstance(item, _StreamSentinel):
-                    stream_completed = True
-                    break
-                if isinstance(item, BaseException):
-                    raise item
-                yield item
-        finally:
-            if request_id and not stream_completed and not future.done():
-                logger.info(
-                    _TAG + " stream consumer closed before completion; cancelling turn: session_id={}, request_id={}",
-                    self._session_id,
-                    request_id,
-                )
-                try:
-                    await self.cancel_current_turn(request_id=request_id)
-                except Exception as exc:
-                    logger.opt(exception=exc).warning(
-                        _TAG + " stream close cancellation failed: session_id={}, request_id={}",
-                        self._session_id,
-                        request_id,
-                    )
-        # 如果消费者侧有未预期的异常，在此处传播
-        if future.done() and future.exception():
-            raise future.exception()
+        async for event in self._mailbox.send_stream(request):
+            yield event
 
-    async def cancel_current_turn(self, request_id: str | None = None) -> TurnCancelResult:
-        """Best-effort cancellation for an active or queued stream turn."""
-        active_task = self._active_stream_task
-        active_request_id = self._active_stream_request_id
-
-        if active_task is not None and active_task.done():
-            self._active_stream_task = None
-            self._active_stream_request_id = None
-            active_task = None
-            active_request_id = None
-
-        if request_id and request_id in self._queued_stream_request_ids:
-            self._cancelled_request_ids.add(request_id)
-            logger.info(
-                _TAG + " queued stream cancel requested: session_id={}, request_id={}",
-                self._session_id,
-                request_id,
-            )
-            return TurnCancelResult(
-                status=TurnCancelStatus.CANCELLED,
-                session_id=self._session_id,
-                request_id=request_id,
-            )
-
-        if active_task is None:
-            logger.info(
-                _TAG + " stream cancel requested but no active turn: session_id={}, request_id={}",
-                self._session_id,
-                request_id,
-            )
-            return TurnCancelResult(
-                status=TurnCancelStatus.NOT_RUNNING,
-                session_id=self._session_id,
-                request_id=request_id,
-            )
-
-        if request_id and active_request_id != request_id:
-            logger.info(
-                _TAG + " stale stream cancel ignored: session_id={}, request_id={}, active_request_id={}",
-                self._session_id,
-                request_id,
-                active_request_id,
-            )
-            return TurnCancelResult(
-                status=TurnCancelStatus.STALE,
-                session_id=self._session_id,
-                request_id=request_id,
-            )
-
-        active_task.cancel()
-        logger.info(
-            _TAG + " active stream cancel requested: session_id={}, request_id={}",
-            self._session_id,
-            active_request_id,
-        )
-        return TurnCancelResult(
-            status=TurnCancelStatus.CANCELLED,
-            session_id=self._session_id,
-            request_id=active_request_id or request_id,
-        )
-
-    async def _send_stream_impl(
+    async def cancel_current_turn(
         self,
-        turn_request: TurnRequest | str,
-        event_queue: asyncio.Queue,
-    ) -> None:
-        """Run one queued stream through the shared turn orchestrator."""
-        if not isinstance(turn_request, TurnRequest):
-            turn_request = TurnRequest.create(turn_request)
-        bypass = await self._resolve_turn_bypass(turn_request)
-        if bypass is not None:
-            await self._emit_turn_bypass(event_queue, bypass)
-            return
-
-        async def emit_error(error: BaseException) -> None:
-            await self._emit_stream_error(event_queue, error)
-
-        async def emit_end() -> None:
-            await event_queue.put(_StreamSentinel())
-
-        await self._new_turn_orchestrator().execute_stream(
-            turn_request,
-            emit_event=event_queue.put,
-            emit_error=emit_error,
-            emit_end=emit_end,
-        )
+        request_id: str | None = None,
+    ) -> TurnCancelResult:
+        return await self._mailbox.cancel_current_turn(request_id=request_id)
 
     async def execute_command(self, command: str) -> CommandResult:
-        """将斜杠命令入队执行，返回执行结果。
-
-        通过消息队列串行化，避免与正在处理的 ``send()`` 竞态。
-        供 ``/chat/command`` API 端点使用。
-        """
-        await self._ensure_initialized()
-        future: Future[CommandResult] = self._create_future()
-        await self._queue.put(QueueItem(
-            kind=QueueKind.COMMAND,
-            future=future,
-            command=command,
-        ))
-        logger.debug(_TAG + " execute_command() enqueued: cmd={!r:.60}", command)
-        return await future
+        await self.initialize()
+        return await self._mailbox.execute_command(command)
 
     def list_commands(self) -> list["CommandDef"]:
-        """返回当前 agent 可用的全部斜杠命令定义。"""
-        if self._cmd_dispatcher is None:
-            return []
-        return self._cmd_dispatcher.list_commands()
+        return self._command_dispatcher.list_commands()
 
     def render_role_bind_prompt(self, *, error: str = "") -> str:
-        from rpg_data.services import get_data_service_gateway
-
-        return get_data_service_gateway().session_roles.render_role_bind_prompt(
-            self._session_id,
-            error=error,
-        )
+        return self._session_service.render_role_bind_prompt(error=error)
 
     def bind_player_character_by_index(self, index: int):
-        from rpg_data.services import get_data_service_gateway
-
-        logger.info(_TAG + " binding player character by index: session_id={}, index={}", self._session_id, index)
-        result = get_data_service_gateway().session_roles.bind_by_index(self._session_id, int(index))
-        self._session.load()
-        logger.info(
-            _TAG + " player character binding loaded history: session_id={}, index={}, first_message_appended={}, history_len={}",
-            self._session_id,
-            index,
-            bool(result.first_message),
-            len(self._session.history),
-        )
-        return result
-
-    def _player_character_guard_reply(self) -> str:
-        from rpg_data import models
-        from rpg_data.services import get_data_service_gateway
-
-        session_id = str(getattr(self, "_session_id", "") or "")
-        if not session_id:
-            return ""
-        service = get_data_service_gateway().session_roles
-        try:
-            state = service.get_state(session_id)
-        except FileNotFoundError:
-            logger.warning(_TAG + " player character guard skipped missing session: session_id={}", session_id)
-            return ""
-        if state.status == models.PLAYER_CHARACTER_STATUS_BOUND:
-            return ""
-        logger.info(
-            _TAG + " player character guard requires binding: session_id={}, status={}",
-            session_id,
-            state.status,
-        )
-        return service.render_role_bind_prompt(session_id)
+        return self._session_service.bind_player_character_by_index(index)
 
     @property
-    def history(self) -> list[Message]:
-        """Read-only view of the raw conversation history (before RPG transform)."""
-        return self._session.history
+    def history(self) -> list["Message"]:
+        return self._session_service.history
 
     async def reload_history(self) -> None:
-        """Reload mutable SQL history into this cached agent."""
-        await self._ensure_initialized()
-        await self._queue.join()
-        self._session.load()
+        await self.initialize()
+        await self._session_service.reload_history()
 
     async def truncate_history_from_turn(self, turn_id: int) -> dict[str, object]:
-        """Queue a history truncation behind any active send/stream work."""
-        await self._ensure_initialized()
-        future: Future[dict[str, object]] = self._create_future()
-        await self._queue.put(
-            QueueItem(
-                kind=QueueKind.TRUNCATE_HISTORY,
-                future=future,
-                turn_id=int(turn_id),
-            )
-        )
-        logger.debug(
-            _TAG + " truncate_history_from_turn() enqueued: session_id={}, turn_id={}",
-            self._session_id,
-            turn_id,
-        )
-        return await future
+        await self.initialize()
+        return await self._session_service.truncate_history_from_turn(turn_id)
 
-    def _truncate_history_from_turn_impl(self, turn_id: int) -> dict[str, object]:
-        boundary_turn = int(turn_id)
-        if boundary_turn <= 0:
-            raise ValueError("turn_id must be positive")
-        if self._session.first_user_message_for_turn(boundary_turn) is None:
-            logger.warning(
-                _TAG + " truncate rejected: user message not found, session_id={}, turn_id={}",
-                self._session_id,
-                boundary_turn,
-            )
-            raise ValueError(f"user message not found for turn: {boundary_turn}")
-
-        before_count = len(self._session.history)
-        logger.info(
-            _TAG + " truncate starting: session_id={}, turn_id={}, history_count={}",
-            self._session_id,
-            boundary_turn,
-            before_count,
-        )
-        try:
-            removed = self._session.truncate_from_turn(boundary_turn)
-        except Exception as exc:
-            remaining_rows = self._history_rows()
-            if any(int(row.turn_id) == boundary_turn for row in remaining_rows):
-                raise
-            logger.warning(
-                _TAG + " truncate persisted but agent reload failed: session_id={}, turn_id={}, error={}",
-                self._session_id,
-                boundary_turn,
-                exc,
-            )
-            return {
-                "status": "truncated",
-                "session_id": self._session_id,
-                "turn_id": boundary_turn,
-                "removed": max(0, before_count - len(remaining_rows)),
-                "agent_sync_status": "failed",
-                "agent_sync_error": str(exc),
-            }
-
-        logger.info(
-            _TAG + " truncate completed: session_id={}, turn_id={}, removed={}, remaining_count={}",
-            self._session_id,
-            boundary_turn,
-            removed,
-            len(self._session.history),
-        )
-        return {
-            "status": "truncated",
-            "session_id": self._session_id,
-            "turn_id": boundary_turn,
-            "removed": removed,
-            "agent_sync_status": "synced",
-        }
-
-    def _history_rows(self):
-        from rpg_data.services import get_data_service_gateway
-
-        return get_data_service_gateway().messages.list(self._session_id)
-
-    async def delete_message(self, message_id: int) -> Message:
-        """Delete one history message and reload this cached agent."""
-        await self._ensure_initialized()
-        await self._queue.join()
-        return self._session.delete_message(message_id)
+    async def delete_message(self, message_id: int) -> "Message":
+        await self.initialize()
+        return await self._session_service.delete_message(message_id)
 
     @property
-    def last_tool_records(self) -> list[ToolCallRecord] | None:
-        """Tool-call records from the most recent ``send()``.
-
-        ``None`` if no tool calls were made.  Useful for displaying
-        intermediate tool usage in UIs without persisting them to history.
-        """
-        return self._last_tool_records
+    def last_tool_records(self) -> list["ToolCallRecord"] | None:
+        return self._turn_service.last_tool_records
 
     def clear_history(self) -> None:
-        """清空对话历史（RPG 数据保留不动）。
-
-        Also clears the mutable rpg_data message table so the next session
-        starts fresh. Cold backup records are append-only.
-        """
-        if self._initialized:
-            self._session.clear()
+        self._session_service.clear_history()
 
     async def reload_rpg_context(self) -> None:
-        """重新构建 RPG context 管理器，拾取文件变更。
-
-        复用 ``_refresh_rpg_context()`` 与初始化流程一致的逻辑。
-        """
-        if not self._initialized:
-            return
-        self._refresh_rpg_context()
-        self._setup_tool_registry()
+        await self._session_service.reload_rpg_context()
 
     async def switch_session(self, session_id: str) -> None:
-        """原地切换到指定会话，不退出 REPL/Agent。
+        await self._session_service.switch_session(session_id)
 
-        依次执行：
-        1. 更新 session_id
-        2. 重建所有 manager/store（build_rpg_context 接收新 session_id）
-        3. 清空并重载历史
-        4. 重建工具注册表
-
-        session 未变时直接返回，避免每轮消息都重建 MemoryManager。
-        """
-        if self._session_id == session_id:
-            return
-        self._session_id = session_id
-        self._turn_snapshot_resolver = TurnSnapshotResolver(session_id)
-        self._refresh_rpg_context()
-        if self._memory_manager:
-            self._memory_manager.init()
-        get_watcher().start()
-        self._session.switch_to(session_id)
-        self._setup_tool_registry()
-        logger.info("[MainAgent] switched to session: {}", session_id)
-
-    # ── context inspection (no LLM call) ─────────────────────────────
-
-    def _resolve_main_llm_selection(self) -> MainLLMSelection:
-        selection = self._main_llm_selection_service.resolve_session(self._session_id)
-        if selection is None:
-            raise FileNotFoundError(
-                f"Main LLM selection context not found for session: {self._session_id}"
-            )
-        return selection
-
-    def _resolve_rp_module_snapshot(self) -> "RPModuleSelectionSnapshot":
-        registry = self._rp_module_registry
-        if registry is None:
-            from rpg_core.rp_modules import RPModuleSelectionSnapshot
-
-            return RPModuleSelectionSnapshot(
-                session_id=self._session_id,
-                story_id=0,
-                global_enabled=False,
-                modules=(),
-            )
-        return registry.resolve_snapshot(self._session_id)
-
-    def _resolve_turn_execution_snapshot(
-        self,
-        request: TurnRequest,
-    ) -> TurnExecutionSnapshot:
-        """Resolve the immutable mode/style policy used by one preview or turn."""
-        resolver = getattr(self, "_turn_snapshot_resolver", None)
-        if resolver is None:
-            resolver = TurnSnapshotResolver(self._session_id)
-            self._turn_snapshot_resolver = resolver
-        return resolver.resolve(request)
-
-    def _refresh_main_provider(
-        self,
-        *,
-        selection: MainLLMSelection | None = None,
-    ) -> LLMProvider:
-        selection = selection or self._resolve_main_llm_selection()
-        if (
-            self._provider is not None
-            and self._main_llm_selection is not None
-            and self._main_llm_selection.effective_provider_key
-            == selection.effective_provider_key
-        ):
-            self._main_llm_selection = selection
-            return self._provider
-
-        self._provider = LLMManager.get().get_provider(
-            AGENT_MAIN_BIZ_KEY,
-            overrides=self._provider_overrides,
-            provider_key=selection.effective_provider_key,
-        )
-        self._model = self._provider.get_default_model()
-        previous_key = (
-            self._main_llm_selection.effective_provider_key
-            if self._main_llm_selection is not None
-            else None
-        )
-        self._main_llm_selection = selection
-        logger.info(
-            _TAG + " main provider selected: session_id={}, previous={}, current={}, source={}",
-            self._session_id,
-            previous_key,
-            selection.effective_provider_key,
-            selection.effective_source,
-        )
-        return self._provider
-
-    def _enforce_main_context_window_threshold(
-        self,
-        selection: MainLLMSelection,
-        *,
-        rp_module_snapshot: "RPModuleSelectionSnapshot",
-        turn_execution: TurnExecutionSnapshot,
-    ) -> None:
-        """Reject normal input before starting a turn when current context is full."""
-
-        context_limit = selection.effective.context_window
-        if context_limit is None or context_limit <= 0:
-            logger.warning(
-                _TAG + " context threshold skipped because window is unknown: session_id={}, provider={}",
-                self._session_id,
-                selection.effective_provider_key,
-            )
-            return
-
-        threshold_ratio = float(
-            getattr(settings, "context_window_reject_threshold_ratio", 0.9)
-        )
-        current_context = self._build_ctx_for_inspection(
-            "",
-            rp_module_snapshot=rp_module_snapshot,
-            turn_execution=turn_execution,
-        )
-        usage = estimate_rendered_context_usage(
-            current_context.to_message_objects(),
-            self._token_counter,
-            context_limit=context_limit,
-        )
-        used_tokens = usage.used_tokens
-        if used_tokens is None:
-            logger.warning(
-                _TAG + " context threshold skipped because usage is unknown: session_id={}, provider={}",
-                self._session_id,
-                selection.effective_provider_key,
-            )
-            return
-
-        usage_ratio = used_tokens / context_limit
-        logger.debug(
-            _TAG + " context threshold evaluated: session_id={}, provider={}, used={}, limit={}, ratio={:.4f}, threshold={:.4f}, source={}",
-            self._session_id,
-            selection.effective_provider_key,
-            used_tokens,
-            context_limit,
-            usage_ratio,
-            threshold_ratio,
-            usage.source,
-        )
-        if usage_ratio < threshold_ratio:
-            return
-
-        logger.warning(
-            _TAG + " normal input rejected by context threshold: session_id={}, provider={}, used={}, limit={}, ratio={:.4f}, threshold={:.4f}",
-            self._session_id,
-            selection.effective_provider_key,
-            used_tokens,
-            context_limit,
-            usage_ratio,
-            threshold_ratio,
-        )
-        raise MainContextWindowThresholdExceededError(
-            used_tokens=used_tokens,
-            context_limit=context_limit,
-            threshold_ratio=threshold_ratio,
-        )
+    def reindex_memory(self) -> bool:
+        return self._session_service.reindex_memory()
 
     async def get_context_info(
         self,
@@ -926,29 +256,12 @@ class RPGGameAgent:
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> list["LayerInfo"]:
-        """Build the full 5-layer context and return structured layer metadata.
-
-        Uses the current ``_history`` and *user_input* (optional) to assemble
-        the context **without** sending it to the LLM.  ``_history`` is not
-        modified.
-
-        Returns a list of ``LayerInfo``, one per layer, with token counts
-        estimated using the agent's ``_token_counter``.
-        """
-
-        await self._ensure_initialized()
-        turn_execution = self._resolve_turn_execution_snapshot(TurnRequest.create(
+        await self.initialize()
+        return self._context_service.inspect_info(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
-        ))
-        ctx = self._build_ctx_for_inspection(user_input, turn_execution=turn_execution)
-        return ContextInspector(
-            ctx,
-            self._token_counter,
-            hot_history_rounds=self._builder.config.hot_history_rounds,
-            context_limit=self._resolve_main_llm_selection().effective.context_window,
-        ).layer_summary()
+        )
 
     async def get_context_markdown(
         self,
@@ -957,25 +270,12 @@ class RPGGameAgent:
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> str:
-        """Build the full 5-layer context and return a Markdown-formatted table.
-
-        Convenience wrapper around ``get_context_info()`` that renders the
-        result as a Markdown table string suitable for CLI display or tool
-        output.
-        """
-        await self._ensure_initialized()
-        turn_execution = self._resolve_turn_execution_snapshot(TurnRequest.create(
+        await self.initialize()
+        return self._context_service.inspect_markdown(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
-        ))
-        ctx = self._build_ctx_for_inspection(user_input, turn_execution=turn_execution)
-        return ContextInspector(
-            ctx,
-            self._token_counter,
-            hot_history_rounds=self._builder.config.hot_history_rounds,
-            context_limit=self._resolve_main_llm_selection().effective.context_window,
-        ).to_markdown()
+        )
 
     async def get_context_payload(
         self,
@@ -984,20 +284,12 @@ class RPGGameAgent:
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> dict[str, object]:
-        """Build the full 5-layer context and return a JSON-ready payload."""
-        await self._ensure_initialized()
-        turn_execution = self._resolve_turn_execution_snapshot(TurnRequest.create(
+        await self.initialize()
+        return self._context_service.inspect_payload(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
-        ))
-        ctx = self._build_ctx_for_inspection(user_input, turn_execution=turn_execution)
-        return ContextInspector(
-            ctx,
-            self._token_counter,
-            hot_history_rounds=self._builder.config.hot_history_rounds,
-            context_limit=self._resolve_main_llm_selection().effective.context_window,
-        ).to_payload(session_id=self._session_id)
+        )
 
     async def get_context_json(
         self,
@@ -1006,701 +298,9 @@ class RPGGameAgent:
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> str:
-        """Build the full 5-layer context and return formatted JSON text."""
-        payload = await self.get_context_payload(
+        await self.initialize()
+        return self._context_service.inspect_json(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
         )
-        return json.dumps(payload, ensure_ascii=False, indent=2)
-
-    def _build_ctx_for_inspection(
-        self,
-        user_input: str = "",
-        *,
-        rp_module_snapshot: "RPModuleSelectionSnapshot | None" = None,
-        turn_execution: TurnExecutionSnapshot | None = None,
-    ) -> "RPGContext":
-        """Build context for inspection (no _history mutation, no LLM call)."""
-        # Build scene context same way as send()
-        scene_ctx = self._scene_tracker.get_context() if self._scene_tracker else None
-        current_user_message: Message | None = None
-        if user_input or scene_ctx:
-            stored_input = self._compose_stored_user_input(scene_ctx, user_input)
-            current_user_message = Message(
-                role=Role.USER,
-                content=stored_input,
-                mode=(turn_execution.request.mode.value if turn_execution else TurnMode.IC.value),
-            )
-
-        snapshot = rp_module_snapshot or self._resolve_rp_module_snapshot()
-        if self._rp_module_registry is None:
-            return self._build_main_context(
-                current_user_message=current_user_message,
-                status_mgr=self._status_mgr,
-                scene_tracker=self._scene_tracker,
-                user_input=user_input,
-                turn_execution=turn_execution,
-            )
-        runtime = self._rp_module_registry.create_runtime(snapshot)
-        try:
-            return self._build_main_context(
-                current_user_message=current_user_message,
-                status_mgr=self._status_mgr,
-                scene_tracker=self._scene_tracker,
-                user_input=user_input,
-                rp_module_runtime=runtime,
-                turn_execution=turn_execution,
-            )
-        finally:
-            runtime.close()
-
-    @staticmethod
-    def _compose_stored_user_input(scene_ctx: str | None, user_input: str) -> str:
-        if scene_ctx and user_input:
-            return f"{scene_ctx}\n{user_input}"
-        return scene_ctx or user_input
-
-    # ── internals — context & tools ────────────────────────────────────
-
-    def _refresh_rpg_context(self) -> None:
-        """构建/刷新 RPG context 管理器（初始化与 reload 共用）。
-
-        重新执行 ``_build_rpg_context()`` 并更新 manager 引用，
-        然后刷新 SubAgentContext。不涉及 provider / history / tools 等一次性初始化。
-        """
-        self._rpg_ctx = _build_rpg_context(
-            world_name=self._world_name,
-            session_id=self._session_id,
-        )
-        self._builder = self._rpg_ctx["builder"]
-        self._character_mgr = self._rpg_ctx["character_mgr"]
-        self._lorebook_mgr = self._rpg_ctx["lorebook_mgr"]
-        self._status_mgr = self._rpg_ctx["status_mgr"]
-        self._scene_tracker = self._rpg_ctx.get("scene_tracker")
-        self._memory_manager = self._rpg_ctx.get("memory_manager")
-
-        self._refresh_sub_agent_contexts(refresh_status_tool_providers=True)
-        if self._rp_module_registry is not None:
-            self._setup_rp_module_registry()
-        else:
-            self._fixed_layer = self._assemble_fixed_layer()
-
-    def _refresh_sub_agent_contexts(self, *, refresh_status_tool_providers: bool = False) -> None:
-        """Refresh sub-agent fixed-layer prompts from current character/lorebook managers."""
-        if self._status_sub_agent is not None:
-            _sub_ctx_status = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
-            self._status_sub_agent.bind_context(_sub_ctx_status)
-            # Session switches rebuild SceneTracker; refresh tool references only on full context reload.
-            if refresh_status_tool_providers and self._scene_tracker is not None:
-                self._status_sub_agent._tool_providers.clear()
-                self._status_sub_agent.add_tool_provider(self._scene_tracker)
-        if self._memory_sub_agent is not None:
-            _sub_ctx_memory = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
-            self._memory_sub_agent.bind_context(_sub_ctx_memory)
-
-    def _assemble_fixed_layer(
-        self,
-        rp_fixed_sections: list | None = None,
-        *,
-        turn_execution: TurnExecutionSnapshot | None = None,
-    ) -> FixedLayerData:
-        builder = self._builder
-        builder_config = getattr(builder, "config", None)
-        enable_lorebook = getattr(builder_config, "enable_lorebook", True)
-        enable_character = getattr(builder_config, "enable_character", True)
-        world_name = getattr(self, "_world_name", "Nanobot Realm")
-        contributors = [
-            CoreRPContractContributor(world_name),
-            StoryPromptFixedLayerContributor(self._session_id),
-            LorebookFixedLayerContributor(
-                getattr(self, "_lorebook_mgr", None),
-                enabled=enable_lorebook,
-            ),
-            CharacterFixedLayerContributor(
-                getattr(self, "_character_mgr", None),
-                enabled=enable_character,
-            ),
-        ]
-        if turn_execution is not None:
-            contributors.append(TurnExecutionFixedLayerContributor(turn_execution))
-        if turn_execution is None or turn_execution.request.mode is not TurnMode.OOC:
-            contributors.append(TextOutputFormatFixedLayerContributor())
-        assembler = FixedLayerAssembler(
-            world_name=world_name,
-            contributors=contributors,
-        )
-        if (
-            rp_fixed_sections
-            and (
-                turn_execution is None
-                or turn_execution.policy.expose_rp_modules
-            )
-        ):
-            assembler = assembler.with_contributor(
-                StaticFixedLayerContributor(rp_fixed_sections)
-            )
-        return assembler.assemble()
-
-    def _setup_rp_module_registry(self) -> None:
-        """Build the static built-in module definition registry."""
-        from rpg_core.rp_modules import RPModuleRegistry
-
-        rp_settings = getattr(settings, "rp_module_settings", None)
-        self._rp_module_registry = RPModuleRegistry(
-            settings=rp_settings,
-        )
-        self._fixed_layer = self._assemble_fixed_layer()
-
-    def _register_rp_module_commands(self) -> None:
-        """Expose RP Module slash commands through the existing dispatcher."""
-        dispatcher = getattr(self, "_cmd_dispatcher", None)
-        registry = getattr(self, "_rp_module_registry", None)
-        if dispatcher is None or registry is None:
-            return
-        if not hasattr(dispatcher, "register_builtin"):
-            return
-        register_provider = getattr(dispatcher, "register_command_provider", None)
-        if register_provider is None:
-            return
-        register_provider(
-            lambda: self._rp_module_registry.get_commands(
-                getattr(self, "_session_id", None)
-            )
-            if self._rp_module_registry is not None
-            else []
-        )
-
-    def _get_rp_module_runtime_sections(
-        self,
-        user_input: str = "",
-        *,
-        include_staged_turn: bool = False,
-        rp_module_runtime: "RPModuleTurnRuntime | None" = None,
-        turn_execution: TurnExecutionSnapshot | None = None,
-    ):
-        """Collect dynamic RP module sections for the current user input."""
-        sections = []
-        if (
-            rp_module_runtime is not None
-            and (
-                turn_execution is None
-                or turn_execution.policy.expose_rp_modules
-            )
-        ):
-            from rpg_core.rp_modules.models import ModuleContextRequest
-
-            sections = rp_module_runtime.get_runtime_sections(
-                ModuleContextRequest(
-                    session_id=self._session_id,
-                    user_input=user_input,
-                    include_staged_turn=include_staged_turn,
-                ),
-            )
-
-        if settings.verbose_logging:
-            logger.debug(
-                _TAG
-                + " RP runtime sections prepared: session_id={} include_staged_turn={} count={}",
-                self._session_id,
-                include_staged_turn,
-                len(sections),
-            )
-            for section in sections:
-                logger.debug(
-                    _TAG
-                    + " RP runtime section: session_id={} id={} title={!r} source={} "
-                    "priority={} content=\n{}",
-                    self._session_id,
-                    section.id,
-                    section.title,
-                    section.source,
-                    section.priority,
-                    section.content,
-                )
-        return sections
-
-    def _refresh_fixed_layer_snapshot(self) -> None:
-        """Rebuild fixed-layer sections from the latest character/lorebook data."""
-        self._fixed_layer = self._assemble_fixed_layer()
-        self._refresh_sub_agent_contexts()
-
-    def _build_transformed_context(
-        self,
-        *,
-        current_user_message: Message | None = None,
-        status_mgr: "StatusManager | None" = None,
-        scene_tracker: SceneTracker | None = None,
-        user_input: str = "",
-        rp_module_runtime: "RPModuleTurnRuntime | None" = None,
-        turn_execution: TurnExecutionSnapshot | None = None,
-    ) -> list[Message]:
-        """Build the 5-layer RPG context as Message objects."""
-        return self._build_main_context(
-            current_user_message=current_user_message,
-            status_mgr=status_mgr,
-            scene_tracker=scene_tracker,
-            user_input=user_input,
-            include_staged_turn_runtime=True,
-            rp_module_runtime=rp_module_runtime,
-            turn_execution=turn_execution,
-        ).to_message_objects()
-
-    def _build_main_context(
-        self,
-        *,
-        current_user_message: Message | None = None,
-        status_mgr: "StatusManager | None" = None,
-        scene_tracker: SceneTracker | None = None,
-        user_input: str = "",
-        include_staged_turn_runtime: bool = False,
-        rp_module_runtime: "RPModuleTurnRuntime | None" = None,
-        turn_execution: TurnExecutionSnapshot | None = None,
-    ) -> "RPGContext":
-        """Build the shared main-Agent context used by turns and inspection."""
-        from rpg_core.context.rpg_context import RPGContext
-
-        if rp_module_runtime is None and self._rp_module_registry is None:
-            self._refresh_fixed_layer_snapshot()
-            fixed_layer = (
-                self._fixed_layer
-                if turn_execution is None
-                else self._assemble_fixed_layer(turn_execution=turn_execution)
-            )
-        else:
-            fixed_layer = self._assemble_fixed_layer(
-                rp_module_runtime.get_fixed_sections()
-                if rp_module_runtime is not None
-                else None,
-                turn_execution=turn_execution,
-            )
-        history = self._session.context_history()
-        resolved_status_mgr = self._status_mgr if status_mgr is None else status_mgr
-        resolved_scene_tracker = self._scene_tracker if scene_tracker is None else scene_tracker
-        ctx: RPGContext = self._builder.build(
-            fixed_layer=fixed_layer,
-            history_messages=list(history.messages),
-            current_user_message=current_user_message,
-            summarized_message_count=history.filtered_message_count,
-            status_mgr=resolved_status_mgr,
-            scene_tracker=resolved_scene_tracker,
-            rp_module_sections=self._get_rp_module_runtime_sections(
-                user_input=user_input,
-                include_staged_turn=include_staged_turn_runtime,
-                rp_module_runtime=rp_module_runtime,
-                turn_execution=turn_execution,
-            ),
-        )
-        return ctx
-
-    def _tool_registry_for_turn(
-        self,
-        scene_tracker: SceneTracker | None,
-        status_manager: StatusManager | None,
-        *,
-        rp_module_runtime: "RPModuleTurnRuntime | None" = None,
-        turn_execution: TurnExecutionSnapshot | None = None,
-    ) -> ToolRegistry | None:
-        """Return a per-turn registry with state tools bound to the turn scratch."""
-        registry = ToolRegistry()
-        policy = (
-            turn_execution.policy
-            if turn_execution is not None
-            else TurnExecutionPolicy.for_mode(TurnMode.IC)
-        )
-        if self._tool_registry:
-            for tool in self._tool_registry:
-                if tool.name in SCENE_TOOL_NAMES or tool.name == STATUS_TABLE_SET_VALUES_TOOL_NAME:
-                    continue
-                if not policy.expose_state_tools and isinstance(tool, WriteFileTool):
-                    continue
-                registry.register(tool)
-        if rp_module_runtime is not None and policy.expose_rp_modules:
-            # Keep all module tools executable as a safety boundary even when
-            # a turn-sensitive schema omits one from the main Agent's choices.
-            registry.register_all(rp_module_runtime.get_tools())
-        if policy.expose_state_tools:
-            registry.register_all(self._turn_state_tools(scene_tracker, status_manager))
-        if settings.verbose_logging:
-            tool_names = [tool.name for tool in registry]
-            logger.debug(
-                _TAG + " turn executable tool registry prepared: count={}, names={}",
-                len(tool_names),
-                tool_names,
-            )
-        return registry if len(registry) else None
-
-    @staticmethod
-    def _main_tool_schemas(
-        registry: ToolRegistry | None,
-        *,
-        rp_module_runtime: "RPModuleTurnRuntime | None",
-    ) -> list[dict] | None:
-        if registry is None:
-            return None
-        schemas = registry.get_openai_schemas()
-        if rp_module_runtime is None:
-            return schemas or None
-        module_tool_names = {
-            tool.name for tool in rp_module_runtime.get_tools()
-        }
-        exposed_module_tool_names = {
-            tool.name for tool in rp_module_runtime.get_main_agent_tools()
-        }
-        filtered = [
-            schema
-            for schema in schemas
-            if (
-                str(schema.get("function", {}).get("name", ""))
-                not in module_tool_names
-                or str(schema.get("function", {}).get("name", ""))
-                in exposed_module_tool_names
-            )
-        ]
-        if settings.verbose_logging:
-            schema_names = [
-                str(schema.get("function", {}).get("name", ""))
-                for schema in filtered
-            ]
-            logger.debug(
-                _TAG + " main tool schema prepared: count={}, names={}",
-                len(schema_names),
-                schema_names,
-            )
-        return filtered or None
-
-    @staticmethod
-    def _turn_state_tools(
-        scene_tracker: SceneTracker | None,
-        status_manager: StatusManager | None,
-    ) -> list[BaseTool]:
-        tools: list[BaseTool] = []
-        if scene_tracker is not None:
-            tools.extend(scene_tracker.get_tools())
-        if status_manager is not None:
-            tools.extend(StatusTableToolProvider(status_manager).get_tools())
-        return tools
-
-    def _turn_narrative_outcome_tools(
-        self,
-        user_input: str,
-        rp_module_runtime: "RPModuleTurnRuntime | None",
-    ) -> list[BaseTool]:
-        if rp_module_runtime is None:
-            return []
-        return [
-            tool
-            for tool in rp_module_runtime.get_status_preflight_tools(user_input)
-            if tool.name == NARRATIVE_OUTCOME_TOOL_NAME
-        ]
-
-    async def _run_status_preflight(
-        self,
-        *,
-        turn_scratch: "TurnScratch",
-        user_input: str,
-        turn_stats: TurnStats,
-        rp_module_runtime: "RPModuleTurnRuntime | None" = None,
-    ) -> StatusSubAgentResult | None:
-        """Run optional outcome adjudication or deterministic state prewrites."""
-        sub_agent = self._status_sub_agent
-        if sub_agent is None:
-            return None
-
-        # Outcome comes first in the schema to make the decision boundary
-        # prominent. The sub-agent still batch-scans returned calls before any
-        # execution, so provider call order cannot leak a premature state write.
-        tools = [
-            *self._turn_narrative_outcome_tools(user_input, rp_module_runtime),
-            *self._turn_state_tools(
-                turn_scratch.scene_tracker,
-                turn_scratch.status_manager,
-            ),
-        ]
-        if not tools:
-            return None
-
-        state_context = self._status_sub_agent_state_context(
-            turn_scratch.scene_tracker,
-            turn_scratch.status_manager,
-        )
-
-        def create_checkpoint() -> object:
-            scene_time = (
-                turn_scratch.scene_tracker.get_time_state()
-                if turn_scratch.scene_tracker is not None
-                else None
-            )
-            return (
-                turn_scratch.status_scratch.create_checkpoint(),
-                scene_time,
-            )
-
-        def restore_checkpoint(checkpoint: object) -> None:
-            status_checkpoint, scene_time = checkpoint  # type: ignore[misc]
-            turn_scratch.status_scratch.restore_checkpoint(status_checkpoint)
-            if turn_scratch.scene_tracker is not None and scene_time is not None:
-                turn_scratch.scene_tracker.set_time_state(scene_time)
-
-        with sub_agent.use_turn_tools(
-            tools,
-            mutation_probe=lambda: turn_scratch.status_scratch.change_token,
-            create_checkpoint=create_checkpoint,
-            restore_checkpoint=restore_checkpoint,
-            outcome_preflight_enabled=any(
-                tool.name == NARRATIVE_OUTCOME_TOOL_NAME for tool in tools
-            ),
-        ):
-            result = await sub_agent.update(
-                history=turn_scratch.base_history,
-                state_context=state_context,
-                user_input=user_input,
-                turn_stats=turn_stats,
-            )
-
-        if result.updated:
-            logger.info(
-                _TAG + " StatusSubAgent updated state via {}",
-                [
-                    record.tool_name
-                    for record in result.records
-                    if record.changed
-                ],
-            )
-        return result
-
-    @staticmethod
-    def _preflight_outcome_state(
-        turn_scratch: "TurnScratch",
-        sub_result: StatusSubAgentResult | None,
-    ) -> StatusSubAgentPreflightOutcome:
-        if turn_scratch.narrative_outcome is not None:
-            return StatusSubAgentPreflightOutcome.STAGED
-        if sub_result is not None and (
-            sub_result.failed or sub_result.outcome_requested
-        ):
-            return StatusSubAgentPreflightOutcome.FALLBACK
-        return StatusSubAgentPreflightOutcome.NONE
-
-    @staticmethod
-    def _tool_names_from_records(records: list[ToolCallRecord]) -> list[str]:
-        names: list[str] = []
-        for record in records:
-            tool_calls = record.assistant_message.get("tool_calls", [])
-            if not isinstance(tool_calls, list):
-                continue
-            for tool_call in tool_calls:
-                if not isinstance(tool_call, dict):
-                    continue
-                function = tool_call.get("function")
-                if not isinstance(function, dict):
-                    continue
-                name = str(function.get("name", "") or "")
-                if name:
-                    names.append(name)
-        return names
-
-    @staticmethod
-    def _log_turn_preflight_diagnostics(
-        *,
-        turn_scratch: "TurnScratch",
-        preflight_outcome: StatusSubAgentPreflightOutcome,
-        state_prewrites_skipped: int,
-        main_tool_names: list[str],
-    ) -> None:
-        effective_preflight_outcome = preflight_outcome
-        if (
-            effective_preflight_outcome is StatusSubAgentPreflightOutcome.NONE
-            and turn_scratch.narrative_outcome is not None
-        ):
-            effective_preflight_outcome = StatusSubAgentPreflightOutcome.FALLBACK
-        state_tool_names = SCENE_TOOL_NAMES | {STATUS_TABLE_SET_VALUES_TOOL_NAME}
-        main_state_corrections = sum(
-            name in state_tool_names for name in main_tool_names
-        )
-        outcome_reused_by_main = (
-            preflight_outcome is StatusSubAgentPreflightOutcome.STAGED
-            and NARRATIVE_OUTCOME_TOOL_NAME in main_tool_names
-        )
-        logger.info(
-            _TAG
-            + " preflightOutcome={} statePrewritesSkipped={} "
-            "mainStateCorrections={} outcomeReusedByMain={}",
-            effective_preflight_outcome.value,
-            int(state_prewrites_skipped),
-            int(main_state_corrections),
-            outcome_reused_by_main,
-        )
-
-    @staticmethod
-    def _status_sub_agent_state_context(
-        scene_tracker: SceneTracker | None,
-        status_manager: StatusManager | None,
-    ) -> str:
-        sections: list[str] = []
-        if scene_tracker is not None:
-            sections.append(scene_tracker.get_context())
-        if status_manager is not None:
-            try:
-                status_context = render_status_tables_context(status_manager.list_context_tables())
-            except Exception as exc:
-                logger.warning(_TAG + " failed to render status context for sub-agent: {}", exc)
-                status_context = ""
-            if status_context:
-                sections.append(status_context)
-        return "\n\n".join(sections)
-
-    async def _run_post_commit_side_effects(self) -> None:
-        """Run turn side effects that must not participate in the turn commit."""
-        if self._memory_sub_agent:
-            try:
-                await self._memory_sub_agent.maybe_auto_extract(self._session)
-            except Exception as exc:
-                logger.opt(exception=exc).warning(_TAG + " post-commit story memory extraction failed")
-
-        if self._compressor:
-            try:
-                compress_result = await self._compressor.maybe_compress(self._session)
-                if compress_result.triggered:
-                    logger.info(
-                        _TAG + " auto-compressed: {} turns, {} batches",
-                        compress_result.user_rounds_compressed,
-                        len(compress_result.batch_files or []),
-                    )
-            except Exception as exc:
-                logger.opt(exception=exc).warning(_TAG + " post-commit auto-compress failed")
-
-    def _setup_tool_registry(self) -> None:
-        """Create and populate the ToolRegistry with built-in file tools."""
-        from rpg_core.agent.tools.file_tools import FileToolSandbox
-        from rpg_data.services import get_data_service_gateway
-
-        session_root = get_data_service_gateway().catalog.get_session_runtime_dir(self._session_id)
-        sandbox = FileToolSandbox(session_root=session_root)
-        self._tool_registry = ToolRegistry()
-        self._tool_registry.register_all([
-            ListFilesTool(sandbox),
-            ReadFileTool(sandbox),
-            WriteFileTool(sandbox),
-            GrepTool(sandbox),
-        ])
-        if self._scene_tracker:
-            self._tool_registry.register_all(self._scene_tracker.get_tools())
-        if self._extra_tools:
-            self._tool_registry.register_all(self._extra_tools)
-        tool_names = [tool.name for tool in self._tool_registry]
-        logger.info(
-            _TAG + " registered {} main tool(s): {}",
-            len(tool_names),
-            tool_names,
-        )
-
-    async def _ensure_initialized(self) -> None:
-        if self._initialized:
-            return
-
-        if self._init_lock is None:
-            self._init_lock = asyncio.Lock()
-
-        async with self._init_lock:
-            if self._initialized:
-                return
-
-            self._setup_rp_module_registry()
-            self._session.load()
-
-            # ── MemoryManager 初始化（仅注册 FileWatcher） ─────────
-            if self._memory_manager:
-                self._memory_manager.init()
-
-            self._refresh_main_provider()
-
-            # ── StatusSubAgent ────────────────────────────────────────────
-            status_cfg = settings.status_sub_agent_config
-            self._status_sub_agent = StatusSubAgent(
-                provider_biz_key=AGENT_STATUS_SUB_AGENT_BIZ_KEY,
-                enabled=status_cfg.get("enabled", True),
-            )
-            if self._scene_tracker:
-                self._status_sub_agent.add_tool_provider(self._scene_tracker)
-            _status_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
-            self._status_sub_agent.bind_context(_status_ctx)
-
-            # ── MemorySubAgent ────────────────────────────────────────────
-            memory_cfg = settings.memory_sub_agent_config
-            self._memory_sub_agent = MemorySubAgent(
-                provider_biz_key=AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
-                enabled=memory_cfg.get("enabled", True),
-                summary_store=self._builder._summary_store if self._builder else None,
-                story_store=self._builder._story_memory if self._builder else None,
-                batch_store=self._builder._batch_summary_store if self._builder else None,
-                max_window_rounds=settings.memory_keep_rounds,
-            )
-            _memory_ctx = _build_sub_agent_context(self._character_mgr, self._lorebook_mgr)
-            self._memory_sub_agent.bind_context(_memory_ctx)
-
-            # ── SummaryCompressor ─────────────────────────────────────────
-            self._compressor = SummaryCompressor(
-                batch_store=self._builder._batch_summary_store if self._builder else None,
-                memory_sub_agent=self._memory_sub_agent,
-                enabled=settings.memory_compression_enabled,
-                keep_recent_rounds=settings.memory_keep_rounds,
-                compression_threshold=settings.memory_keep_rounds,
-                compress_batch_size=settings.memory_compress_batch_size,
-            )
-
-            # ── CommandDispatcher ─────────────────────────────────────────
-            self._cmd_dispatcher = CommandDispatcher(agent=self)
-            self._cmd_dispatcher.register_default_builtins()
-            self._register_rp_module_commands()
-
-            # 子 Agent 命令
-            if self._status_sub_agent is not None and self._status_sub_agent.enabled:
-                self._cmd_dispatcher.register_sub_agent(self._status_sub_agent)
-            if self._memory_sub_agent is not None and self._memory_sub_agent.enabled:
-                self._cmd_dispatcher.register_sub_agent(self._memory_sub_agent)
-
-            self._setup_tool_registry()
-
-            # 启动文件监听（summary / memory store 会注册自己的 session 文件路径）
-            get_watcher().start()
-
-            # 启动消息队列消费者
-            self._consumer_task = asyncio.create_task(self._queue_consumer())
-
-            self._initialized = True
-
-
-def _build_rpg_context(world_name: str, session_id: str) -> dict[str, object]:
-    """Inline import of the factory to keep the top level free of side effects."""
-    from rpg_core.context.factory import build_rpg_context
-
-    return build_rpg_context(world_name=world_name, session_id=session_id)
-
-
-def _build_sub_agent_context(
-        character_mgr: CharacterManager | None,
-        lorebook_mgr: LorebookManager | None,
-) -> SubAgentContext:
-    """从 Manager 读取已启用条目，构造 SubAgentContext。
-
-    主 Agent 读 Manager 后直接传 data，SubAgentContext 不依赖 Manager 类型。
-    """
-    lorebook_entries: list[dict[str, object]] = []
-    if lorebook_mgr is not None:
-        try:
-            lorebook_entries = lorebook_mgr.list_enabled_entries()
-        except Exception:
-            pass
-
-    characters: list[dict[str, object]] = []
-    if character_mgr is not None:
-        try:
-            characters = character_mgr.list_enabled_characters()
-        except Exception:
-            pass
-
-    return SubAgentContext(
-        lorebook_entries=lorebook_entries,
-        characters=characters,
-    )
