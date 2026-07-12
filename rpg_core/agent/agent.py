@@ -32,7 +32,17 @@ from rpg_core.agent.agent_types import (
 from rpg_core.agent.command import CommandResult
 from rpg_core.agent.command import CommandDispatcher
 from rpg_core.agent.loop import AgentReply, ToolCallRecord, run_chat_loop, run_chat_loop_stream
-from rpg_core.agent.transaction import AgentTurnTransaction, SCENE_TOOL_NAMES
+from rpg_core.agent.transaction import SCENE_TOOL_NAMES
+from rpg_core.agent.turn import (
+    TurnBypass,
+    TurnExecutionPolicy,
+    TurnExecutionSnapshot,
+    TurnMode,
+    TurnRequest,
+)
+from rpg_core.agent.turn.orchestrator import TurnOrchestrator
+from rpg_core.agent.turn.preprocessor import TurnPreprocessor
+from rpg_core.agent.turn.resolver import TurnSnapshotResolver
 from rpg_core.agent.sub_agents import (
     MemorySubAgent,
     StatusSubAgent,
@@ -62,7 +72,7 @@ from rpg_core.context.fixed_layer.contributors import (
 )
 from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.rpg_context import FixedLayerData, Role, Message
-from rpg_core.context.usage import aggregate_usage_records, estimate_rendered_context_usage
+from rpg_core.context.usage import estimate_rendered_context_usage
 from llm_service.base_provider import LLMProvider
 from llm_service.keys import (
     AGENT_MAIN_BIZ_KEY,
@@ -79,12 +89,6 @@ from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME, StatusTable
 from rpg_core.utils.watcher import get_watcher
 from rpg_core.summary.compressor import SummaryCompressor
 from llm_service.manager import LLMManager, ProviderOverrides
-from rpg_core.turns import (
-    TurnExecutionPolicy,
-    TurnExecutionSnapshot,
-    TurnMode,
-    TurnRequest,
-)
 
 if TYPE_CHECKING:
     from rpg_core.character.manager import CharacterManager
@@ -151,6 +155,7 @@ class RPGGameAgent:
         self._main_llm_selection_service = (
             main_llm_selection_service or MainLLMSelectionService()
         )
+        self._turn_snapshot_resolver = TurnSnapshotResolver(self._session_id)
         self._main_llm_selection: MainLLMSelection | None = None
 
         self._initialized: bool = False
@@ -228,18 +233,24 @@ class RPGGameAgent:
         """
         while True:
             item: QueueItem = await self._queue.get()
-            logger.debug(_TAG + " consumer processing: kind={}, input={!r:.60}", item.kind, item.user_input)
+            logger.debug(
+                _TAG + " consumer processing: kind={}, input={!r:.60}",
+                item.kind,
+                item.input_text,
+            )
             try:
                 match item.kind:
                     case QueueKind.SEND:
-                        result = await self._send_impl(
-                            item.turn_request or TurnRequest.create(item.user_input)
-                        )
+                        if item.turn_request is None:
+                            raise ValueError("turn_request is required for send")
+                        result = await self._send_impl(item.turn_request)
                         item.future.set_result(result)
                     case QueueKind.SEND_STREAM:
                         await self._run_stream_queue_item(item)
                     case QueueKind.COMMAND:
-                        cmd_result = await self._cmd_dispatcher.dispatch(item.user_input)
+                        if item.command is None:
+                            raise ValueError("command is required")
+                        cmd_result = await self._cmd_dispatcher.dispatch(item.command)
                         item.future.set_result(cmd_result)
                     case QueueKind.TRUNCATE_HISTORY:
                         if item.turn_id is None:
@@ -277,8 +288,10 @@ class RPGGameAgent:
                     item.future.set_result(None)
                 return
 
+        if item.turn_request is None:
+            raise ValueError("turn_request is required for send_stream")
         task = asyncio.create_task(self._send_stream_impl(
-            item.turn_request or TurnRequest.create(item.user_input, request_id=item.request_id),
+            item.turn_request,
             item.event_queue,
         ))
         self._active_stream_task = task
@@ -311,6 +324,46 @@ class RPGGameAgent:
         if not item.future.done():
             item.future.set_result(None)
 
+    def _new_turn_orchestrator(self) -> TurnOrchestrator:
+        """Build the turn pipeline with the currently patched/configured runners."""
+        return TurnOrchestrator(
+            self,
+            sync_runner=run_chat_loop,
+            stream_runner=run_chat_loop_stream,
+        )
+
+    async def _resolve_turn_bypass(self, request: TurnRequest) -> TurnBypass | None:
+        """Handle work that must complete before snapshot or transaction creation."""
+        return await TurnPreprocessor(
+            session_id=getattr(self, "_session_id", ""),
+            command_dispatcher=getattr(self, "_cmd_dispatcher", None),
+            player_character_guard=self._player_character_guard_reply,
+        ).resolve(request)
+
+    @staticmethod
+    def _reply_for_turn_bypass(bypass: TurnBypass) -> AgentReply:
+        stats = TurnStats(started_at=_time.monotonic())
+        stats.finished_at = _time.monotonic()
+        return AgentReply(text=bypass.text, stats=stats)
+
+    async def _emit_turn_bypass(
+        self,
+        event_queue: asyncio.Queue,
+        bypass: TurnBypass,
+    ) -> None:
+        if bypass.text:
+            await event_queue.put(AgentStreamEvent(
+                kind=StreamEventKind.TEXT,
+                content=bypass.text,
+                model=self._model,
+            ))
+        await event_queue.put(AgentStreamEvent(
+            kind=StreamEventKind.DONE,
+            content=bypass.text,
+            model=self._model,
+        ))
+        await event_queue.put(_StreamSentinel())
+
     # ── public API ─────────────────────────────────────────────────────
 
     async def send(
@@ -323,8 +376,8 @@ class RPGGameAgent:
         """Send user text through the message queue and return a structured ``AgentReply``.
 
         If the agent is busy processing a previous message, this call waits
-        in the queue until the agent is free.  The actual processing logic
-        is in ``_send_impl()``.
+        in the queue until the agent is free.  Both output protocols use the
+        shared :class:`TurnOrchestrator` pipeline.
 
         Usage is identical to the old ``send()`` — no caller changes needed.
         """
@@ -337,7 +390,6 @@ class RPGGameAgent:
         )
         await self._queue.put(QueueItem(
             kind=QueueKind.SEND,
-            user_input=turn_request.text,
             future=future,
             turn_request=turn_request,
         ))
@@ -345,194 +397,21 @@ class RPGGameAgent:
         return await future
 
     async def _send_impl(self, turn_request: TurnRequest | str) -> AgentReply:
-        """Internal send implementation — runs inside the queue consumer.
-
-        May involve multiple LLM round-trips when tool calls are needed
-        (the chat loop).  The 5-layer context is built once; subsequent
-        iterations append raw assistant/tool messages.
-
-        The user message in session history includes the ``[scene]``
-        context so that MemorySubAgent can see scene timeline during
-        summarization (it filters ``role == "system"`` messages).
-        """
-
+        """Run one queued request through the shared turn orchestrator."""
         if not isinstance(turn_request, TurnRequest):
             turn_request = TurnRequest.create(turn_request)
-        user_input = turn_request.text
-        # ── 斜杠命令分发（不走 LLM） ─────────────────────────────────
-        if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
-            cmd_result = await self._cmd_dispatcher.dispatch(user_input)
-            if cmd_result.handled:
-                _turn_stats = TurnStats(started_at=_time.monotonic())
-                _turn_stats.finished_at = _time.monotonic()
-                return AgentReply(
-                    text=cmd_result.reply,
-                    stats=_turn_stats,
-                )
+        bypass = await self._resolve_turn_bypass(turn_request)
+        if bypass is not None:
+            return self._reply_for_turn_bypass(bypass)
 
-        role_guard_reply = self._player_character_guard_reply()
-        if role_guard_reply:
-            logger.info(
-                _TAG + " blocked send because player character is invalid: session_id={}",
-                self._session_id,
-            )
-            _turn_stats = TurnStats(started_at=_time.monotonic())
-            _turn_stats.finished_at = _time.monotonic()
-            return AgentReply(text=role_guard_reply, stats=_turn_stats)
-
-        turn_execution = self._resolve_turn_execution_snapshot(turn_request)
-        main_llm_selection = self._resolve_main_llm_selection()
-        rp_module_snapshot = self._resolve_rp_module_snapshot()
-        self._enforce_main_context_window_threshold(
-            main_llm_selection,
-            rp_module_snapshot=rp_module_snapshot,
-            turn_execution=turn_execution,
+        result = await self._new_turn_orchestrator().execute_sync(turn_request)
+        return AgentReply(
+            text=result.text,
+            tool_records=(result.tool_records or None) if settings.include_tool_records else None,
+            status_sub_agent_records=result.status_sub_agent_records,
+            stats=result.stats,
+            committed_turn_id=result.committed_turn_id,
         )
-        main_provider = self._refresh_main_provider(selection=main_llm_selection)
-
-        # ── TurnStats 聚合器（追踪本轮所有 LLM 调用） ──────────────
-        turn_stats = TurnStats(started_at=_time.monotonic())
-        tx = AgentTurnTransaction(
-            session=self._session,
-            status_mgr=self._status_mgr,
-            scene_tracker=self._scene_tracker,
-        )
-        turn_scratch = tx.begin(turn_stats, mode=turn_request.mode.value)
-        rp_module_runtime: RPModuleTurnRuntime | None = None
-
-        try:
-            if self._rp_module_registry is not None:
-                rp_module_runtime = self._rp_module_registry.create_runtime(
-                    rp_module_snapshot
-                )
-                rp_module_runtime.bind_turn(turn_scratch)
-            # ── 可选剧情预裁定 / 确定性状态预更新 ──────────────────────
-            sub_result = None
-            if turn_execution.policy.run_status_preflight:
-                sub_result = await self._run_status_preflight(
-                    turn_scratch=turn_scratch,
-                    user_input=user_input,
-                    turn_stats=turn_stats,
-                    rp_module_runtime=rp_module_runtime,
-                )
-            status_records = (
-                sub_result.record_payloads()
-                if sub_result is not None and sub_result.records
-                else None
-            )
-            preflight_outcome = self._preflight_outcome_state(
-                turn_scratch,
-                sub_result,
-            )
-
-            # Build scene context and embed into stored user message
-            scene_ctx = turn_scratch.scene_tracker.get_context() if turn_scratch.scene_tracker else None
-            stored_input = self._compose_stored_user_input(scene_ctx, user_input)
-
-            current_user_message = tx.stage_user_message(stored_input)
-
-            # ── 记忆检索 ────────────────────────────────────────────────
-            if self._memory_manager:
-                try:
-                    self._memory_manager.recall(user_input)
-                except Exception as exc:
-                    logger.opt(exception=exc).warning(_TAG + " memory recall failed")
-
-            messages = self._build_transformed_context(
-                current_user_message=current_user_message,
-                status_mgr=turn_scratch.status_manager,
-                scene_tracker=turn_scratch.scene_tracker,
-                user_input=user_input,
-                rp_module_runtime=rp_module_runtime,
-                turn_execution=turn_execution,
-            )
-            if settings.verbose_logging:
-                sys_msgs = sum(1 for m in messages if m.is_system())
-                user_msgs = sum(1 for m in messages if m.is_user())
-                asst_msgs = sum(1 for m in messages if m.is_assistant())
-                total_chars = sum(len(m.content) for m in messages)
-                logger.debug(
-                    _TAG + " context messages: {} total (sys={}, user={}, asst={}) chars={}",
-                    len(messages), sys_msgs, user_msgs, asst_msgs, total_chars,
-                )
-
-            tool_registry = self._tool_registry_for_turn(
-                turn_scratch.scene_tracker,
-                turn_scratch.status_manager,
-                rp_module_runtime=rp_module_runtime,
-                turn_execution=turn_execution,
-            )
-            schemas = self._main_tool_schemas(
-                tool_registry,
-                rp_module_runtime=rp_module_runtime,
-            )
-
-            reply_text, records = await run_chat_loop(
-                provider=main_provider,
-                tool_registry=tool_registry,
-                messages=messages,
-                schemas=schemas,
-                turn_stats=turn_stats,
-            )
-            self._last_tool_records = records
-            self._log_turn_preflight_diagnostics(
-                turn_scratch=turn_scratch,
-                preflight_outcome=preflight_outcome,
-                state_prewrites_skipped=(
-                    sub_result.state_prewrites_skipped
-                    if sub_result is not None
-                    else 0
-                ),
-                main_tool_names=self._tool_names_from_records(records),
-            )
-
-            turn_stats.finished_at = _time.monotonic()
-
-            # ── 日志摘要 ────────────────────────────────────────────────
-            if turn_stats.calls:
-                logger.info(
-                    _TAG + " turn stats: {}",
-                    turn_stats.summary(),
-                )
-
-            # ── 构建 AgentReply ──────────────────────────────────────────
-            if settings.include_tool_records:
-                result = AgentReply(
-                    text=reply_text,
-                    tool_records=records or None,
-                    status_sub_agent_records=status_records,
-                    stats=turn_stats,
-                )
-            else:
-                result = AgentReply(
-                    text=reply_text,
-                    status_sub_agent_records=status_records,
-                    stats=turn_stats,
-                )
-
-            tx.stage_assistant_message(reply_text)
-            tx.commit()
-            result.committed_turn_id = turn_scratch.turn_id
-            await self._run_post_commit_side_effects()
-            return result
-        except asyncio.CancelledError as exc:
-            logger.opt(exception=exc).warning(
-                _TAG + " send cancelled: session_id={}",
-                self._session_id,
-            )
-            tx.discard()
-            raise
-        except Exception as exc:
-            logger.opt(exception=exc).error(
-                _TAG + " send failed: session_id={}",
-                self._session_id,
-            )
-            tx.discard()
-            raise
-        finally:
-            if rp_module_runtime is not None:
-                rp_module_runtime.close()
-            tx.close()
 
     async def send_stream(
         self,
@@ -552,20 +431,19 @@ class RPGGameAgent:
         await self._ensure_initialized()
         event_queue: asyncio.Queue[AgentStreamEvent | BaseException | _StreamSentinel] = asyncio.Queue()
         future: Future[None] = self._create_future()
-        if request_id:
-            self._queued_stream_request_ids.add(request_id)
         turn_request = TurnRequest.create(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
             request_id=request_id,
         )
+        request_id = turn_request.request_id
+        if request_id:
+            self._queued_stream_request_ids.add(request_id)
         await self._queue.put(QueueItem(
             kind=QueueKind.SEND_STREAM,
-            user_input=turn_request.text,
             future=future,
             event_queue=event_queue,
-            request_id=request_id,
             turn_request=turn_request,
         ))
         logger.debug(
@@ -668,239 +546,26 @@ class RPGGameAgent:
         turn_request: TurnRequest | str,
         event_queue: asyncio.Queue,
     ) -> None:
-        """Internal send_stream implementation — runs inside the queue consumer.
-
-        Pushes ``AgentStreamEvent`` objects into *event_queue* instead of
-        yielding them directly.  Exceptions are also pushed into the queue
-        so the caller can re-raise them.
-        """
-
+        """Run one queued stream through the shared turn orchestrator."""
         if not isinstance(turn_request, TurnRequest):
             turn_request = TurnRequest.create(turn_request)
-        user_input = turn_request.text
-        # ── 斜杠命令分发（不走 LLM） ─────────────────────────────────
-        if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
-            cmd_result = await self._cmd_dispatcher.dispatch(user_input)
-            if cmd_result.handled:
-                if cmd_result.reply:
-                    await event_queue.put(AgentStreamEvent(
-                        kind=StreamEventKind.TEXT,
-                        content=cmd_result.reply,
-                        model=self._model,
-                    ))
-                await event_queue.put(AgentStreamEvent(
-                    kind=StreamEventKind.DONE,
-                    content=cmd_result.reply,
-                    model=self._model,
-                ))
-                await event_queue.put(_StreamSentinel())
-                return
-
-        role_guard_reply = self._player_character_guard_reply()
-        if role_guard_reply:
-            logger.info(
-                _TAG + " blocked stream because player character is invalid: session_id={}",
-                self._session_id,
-            )
-            await event_queue.put(AgentStreamEvent(
-                kind=StreamEventKind.TEXT,
-                content=role_guard_reply,
-                model=self._model,
-            ))
-            await event_queue.put(AgentStreamEvent(
-                kind=StreamEventKind.DONE,
-                content=role_guard_reply,
-                model=self._model,
-            ))
-            await event_queue.put(_StreamSentinel())
+        bypass = await self._resolve_turn_bypass(turn_request)
+        if bypass is not None:
+            await self._emit_turn_bypass(event_queue, bypass)
             return
 
-        turn_execution = self._resolve_turn_execution_snapshot(turn_request)
-        main_llm_selection = self._resolve_main_llm_selection()
-        rp_module_snapshot = self._resolve_rp_module_snapshot()
-        self._enforce_main_context_window_threshold(
-            main_llm_selection,
-            rp_module_snapshot=rp_module_snapshot,
-            turn_execution=turn_execution,
-        )
-        main_provider = self._refresh_main_provider(selection=main_llm_selection)
+        async def emit_error(error: BaseException) -> None:
+            await self._emit_stream_error(event_queue, error)
 
-        # ── TurnStats 聚合器 ───────────────────────────────────────
-        turn_stats = TurnStats(started_at=_time.monotonic())
-        tx = AgentTurnTransaction(
-            session=self._session,
-            status_mgr=self._status_mgr,
-            scene_tracker=self._scene_tracker,
-        )
-        turn_scratch = tx.begin(turn_stats, mode=turn_request.mode.value)
-        rp_module_runtime: RPModuleTurnRuntime | None = None
-
-        try:
-            if self._rp_module_registry is not None:
-                rp_module_runtime = self._rp_module_registry.create_runtime(
-                    rp_module_snapshot
-                )
-                rp_module_runtime.bind_turn(turn_scratch)
-            # ── 可选剧情预裁定 / 确定性状态预更新 ────────────────────
-            sub_result = None
-            if turn_execution.policy.run_status_preflight:
-                sub_result = await self._run_status_preflight(
-                    turn_scratch=turn_scratch,
-                    user_input=user_input,
-                    turn_stats=turn_stats,
-                    rp_module_runtime=rp_module_runtime,
-                )
-            preflight_outcome = self._preflight_outcome_state(
-                turn_scratch,
-                sub_result,
-            )
-            if sub_result is not None and sub_result.records:
-                # skipped/rolled-back calls stay in buffered diagnostics only;
-                # they must never look like successful state writes in SSE.
-                for record in sub_result.records:
-                    if not record.status.emits_tool_event:
-                        continue
-                    await event_queue.put(AgentStreamEvent(
-                        kind=StreamEventKind.TOOL_CALL,
-                        tool_name=record.tool_name,
-                        tool_arguments=record.arguments,
-                        content="",
-                    ))
-                    await event_queue.put(AgentStreamEvent(
-                        kind=StreamEventKind.TOOL_RESULT,
-                        tool_name=record.tool_name,
-                        tool_result=record.result,
-                        tool_result_preview=record.result[:200],
-                    ))
-
-            # ── Build scene context and embed into stored user message ──
-            scene_ctx = turn_scratch.scene_tracker.get_context() if turn_scratch.scene_tracker else None
-            stored_input = self._compose_stored_user_input(scene_ctx, user_input)
-
-            current_user_message = tx.stage_user_message(stored_input)
-
-            # ── 记忆检索 ────────────────────────────────────────────────
-            if self._memory_manager:
-                try:
-                    self._memory_manager.recall(user_input)
-                except Exception as exc:
-                    logger.opt(exception=exc).warning(_TAG + " memory recall failed")
-
-            messages = self._build_transformed_context(
-                current_user_message=current_user_message,
-                status_mgr=turn_scratch.status_manager,
-                scene_tracker=turn_scratch.scene_tracker,
-                user_input=user_input,
-                rp_module_runtime=rp_module_runtime,
-                turn_execution=turn_execution,
-            )
-            tool_registry = self._tool_registry_for_turn(
-                turn_scratch.scene_tracker,
-                turn_scratch.status_manager,
-                rp_module_runtime=rp_module_runtime,
-                turn_execution=turn_execution,
-            )
-            schemas = self._main_tool_schemas(
-                tool_registry,
-                rp_module_runtime=rp_module_runtime,
-            )
-
-            # ── Stream loop ────────────────────────────────────────────
-            final_content = ""
-            final_event: AgentStreamEvent | None = None
-            stream_failed = False
-            main_tool_names: list[str] = []
-
-            try:
-                async for event in run_chat_loop_stream(
-                        provider=main_provider,
-                        tool_registry=tool_registry,
-                        messages=messages,
-                        schemas=schemas,
-                        turn_stats=turn_stats,
-                ):
-                    if event.kind == StreamEventKind.DONE:
-                        final_content = event.content
-                        final_event = event
-                    else:
-                        if event.kind == StreamEventKind.TOOL_CALL and event.tool_name:
-                            main_tool_names.append(event.tool_name)
-                        if event.kind == StreamEventKind.ERROR:
-                            stream_failed = True
-                        await event_queue.put(event)
-            except Exception as exc:
-                logger.opt(exception=exc).error(_TAG + " send_stream error")
-                await self._emit_stream_error(event_queue, exc)
-                return
-
-            if stream_failed or final_event is None:
-                tx.discard()
-                if stream_failed:
-                    await event_queue.put(_StreamSentinel())
-                else:
-                    await self._emit_stream_error(
-                        event_queue,
-                        RuntimeError("LLM stream ended without a DONE event"),
-                    )
-                return
-
-            self._log_turn_preflight_diagnostics(
-                turn_scratch=turn_scratch,
-                preflight_outcome=preflight_outcome,
-                state_prewrites_skipped=(
-                    sub_result.state_prewrites_skipped
-                    if sub_result is not None
-                    else 0
-                ),
-                main_tool_names=main_tool_names,
-            )
-
-            # ── Agent-level cleanup（流结束后执行） ────────────────────
-            turn_stats.finished_at = _time.monotonic()
-
-            if settings.verbose_logging and turn_stats.calls:
-                logger.info(
-                    _TAG + " turn stats: {}",
-                    turn_stats.summary(),
-                )
-
-            # ── 构建最终的 DONE 事件（含完整元数据） ──────────────────
-            aggregate_usage = aggregate_usage_records(turn_stats.calls)
-
-            tx.stage_assistant_message(final_content)
-
-            try:
-                tx.commit()
-            except Exception as exc:
-                logger.opt(exception=exc).error(_TAG + " send_stream commit error")
-                await self._emit_stream_error(event_queue, exc)
-                return
-
-            final_event.duration_ms = turn_stats.total_duration_ms
-            final_event.usage = aggregate_usage
-            final_event.stats = turn_stats
-            final_event.committed_turn_id = turn_scratch.turn_id
-            await event_queue.put(final_event)
+        async def emit_end() -> None:
             await event_queue.put(_StreamSentinel())
-            await self._run_post_commit_side_effects()
-        except asyncio.CancelledError:
-            logger.info(
-                _TAG + " send_stream cancelled: session_id={}",
-                self._session_id,
-            )
-            tx.discard()
-            raise
-        except Exception as exc:
-            logger.opt(exception=exc).error(
-                _TAG + " send_stream failed: session_id={}",
-                self._session_id,
-            )
-            tx.discard()
-            raise
-        finally:
-            if rp_module_runtime is not None:
-                rp_module_runtime.close()
-            tx.close()
+
+        await self._new_turn_orchestrator().execute_stream(
+            turn_request,
+            emit_event=event_queue.put,
+            emit_error=emit_error,
+            emit_end=emit_end,
+        )
 
     async def execute_command(self, command: str) -> CommandResult:
         """将斜杠命令入队执行，返回执行结果。
@@ -910,7 +575,11 @@ class RPGGameAgent:
         """
         await self._ensure_initialized()
         future: Future[CommandResult] = self._create_future()
-        await self._queue.put(QueueItem(kind=QueueKind.COMMAND, user_input=command, future=future))
+        await self._queue.put(QueueItem(
+            kind=QueueKind.COMMAND,
+            future=future,
+            command=command,
+        ))
         logger.debug(_TAG + " execute_command() enqueued: cmd={!r:.60}", command)
         return await future
 
@@ -983,7 +652,6 @@ class RPGGameAgent:
         await self._queue.put(
             QueueItem(
                 kind=QueueKind.TRUNCATE_HISTORY,
-                user_input="",
                 future=future,
                 turn_id=int(turn_id),
             )
@@ -1103,6 +771,7 @@ class RPGGameAgent:
         if self._session_id == session_id:
             return
         self._session_id = session_id
+        self._turn_snapshot_resolver = TurnSnapshotResolver(session_id)
         self._refresh_rpg_context()
         if self._memory_manager:
             self._memory_manager.init()
@@ -1139,54 +808,11 @@ class RPGGameAgent:
         request: TurnRequest,
     ) -> TurnExecutionSnapshot:
         """Resolve the immutable mode/style policy used by one preview or turn."""
-        from rpg_data.services import get_data_service_gateway
-
-        policy = TurnExecutionPolicy.for_mode(request.mode)
-        gateway = get_data_service_gateway()
-        session = gateway.catalog.get_session(self._session_id)
-        if session is None:
-            if request.narrative_style_id is not None:
-                raise FileNotFoundError(
-                    f"Session not found while resolving narrative style: {self._session_id}"
-                )
-            # In-memory unit-test agents may intentionally have no catalog row.
-            # Production Agent service always resolves a catalog session first.
-            return TurnExecutionSnapshot(
-                request=request,
-                mode_prompt="",
-                narrative_style_id=None,
-                narrative_style_name="",
-                narrative_style_prompt="",
-                policy=policy,
-            )
-
-        mode_config = gateway.session_composer.get_mode(
-            session.workspace_id,
-            request.mode.value,
-        )
-        mode_prompt = mode_config.prompt if mode_config is not None else ""
-
-        style = None
-        if policy.apply_narrative_style or request.narrative_style_id is not None:
-            # An explicit override is validated even in OOC mode. OOC then
-            # ignores its prompt as a hard execution-policy boundary.
-            style = gateway.session_composer.resolve_session_style(
-                self._session_id,
-                request.narrative_style_id,
-            )
-
-        return TurnExecutionSnapshot(
-            request=request,
-            mode_prompt=mode_prompt,
-            narrative_style_id=(style.narrative_style_id if style is not None else None),
-            narrative_style_name=(style.name if style is not None else ""),
-            narrative_style_prompt=(
-                style.prompt
-                if style is not None and policy.apply_narrative_style
-                else ""
-            ),
-            policy=policy,
-        )
+        resolver = getattr(self, "_turn_snapshot_resolver", None)
+        if resolver is None:
+            resolver = TurnSnapshotResolver(self._session_id)
+            self._turn_snapshot_resolver = resolver
+        return resolver.resolve(request)
 
     def _refresh_main_provider(
         self,

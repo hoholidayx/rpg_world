@@ -7,7 +7,7 @@ from rpg_core.context.fixed_layer.models import (
     FixedLayerContributor,
     FixedLayerSection,
 )
-from rpg_core.turns import TurnExecutionSnapshot, TurnMode
+from rpg_core.agent.turn.models import TurnExecutionSnapshot, TurnMode
 
 TURN_MODE_SECTION_ID = "turn_mode"
 TURN_MODE_SOURCE = "turn_mode"

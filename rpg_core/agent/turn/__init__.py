@@ -1,21 +1,24 @@
-"""Compatibility exports for the Agent turn domain.
-
-New core code should import from :mod:`rpg_core.agent.turn`.  This module stays
-as the stable boundary used by Agent service and Play API schemas.
-"""
+"""Turn-scoped request, snapshot, runtime, and orchestration APIs."""
 
 from rpg_core.agent.turn.models import (
+    PreparedTurn,
+    TurnBypass,
+    TurnExecutionPlan,
     TurnExecutionPolicy,
     TurnExecutionSnapshot,
     TurnMode,
     TurnRequest,
+    TurnResult,
     normalize_turn_mode,
 )
-
 __all__ = [
+    "PreparedTurn",
+    "TurnBypass",
+    "TurnExecutionPlan",
     "TurnExecutionPolicy",
     "TurnExecutionSnapshot",
     "TurnMode",
     "TurnRequest",
+    "TurnResult",
     "normalize_turn_mode",
 ]

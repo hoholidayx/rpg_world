@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from rpg_core.agent.turn.models import DEFAULT_TURN_MODE
 from rpg_core.context.rpg_context import Message, Role
 
 
@@ -13,7 +14,7 @@ class MessageScratch:
 
     turn_id: int
     base_history: list[Message]
-    mode: str = "ic"
+    mode: str = DEFAULT_TURN_MODE.value
     staged_messages: list[Message] = field(default_factory=list)
 
     def stage(self, role: Role | str, content: str) -> Message:

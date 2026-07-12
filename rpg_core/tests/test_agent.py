@@ -111,9 +111,9 @@ async def test_queue_consumer_surfaces_stream_errors(monkeypatch):
     await agent._queue.put(
         QueueItem(
             kind=QueueKind.SEND_STREAM,
-            user_input="hello",
             future=future,
             event_queue=event_queue,
+            turn_request=TurnRequest.create("hello"),
         )
     )
 
@@ -148,9 +148,9 @@ async def test_queue_consumer_surfaces_turn_metadata_stream_error(monkeypatch):
     await agent._queue.put(
         QueueItem(
             kind=QueueKind.SEND_STREAM,
-            user_input="hello",
             future=future,
             event_queue=event_queue,
+            turn_request=TurnRequest.create("hello"),
         )
     )
 
@@ -197,11 +197,14 @@ async def test_queue_consumer_serializes_truncate_after_send() -> None:
 
     send_future = asyncio.get_running_loop().create_future()
     truncate_future = asyncio.get_running_loop().create_future()
-    await agent._queue.put(QueueItem(kind=QueueKind.SEND, user_input="go", future=send_future))
+    await agent._queue.put(QueueItem(
+        kind=QueueKind.SEND,
+        future=send_future,
+        turn_request=TurnRequest.create("go"),
+    ))
     await agent._queue.put(
         QueueItem(
             kind=QueueKind.TRUNCATE_HISTORY,
-            user_input="",
             future=truncate_future,
             turn_id=2,
         )
@@ -282,10 +285,9 @@ async def test_queue_consumer_skips_cancelled_queued_stream() -> None:
     await agent._queue.put(
         QueueItem(
             kind=QueueKind.SEND_STREAM,
-            user_input="hello",
             future=future,
             event_queue=event_queue,
-            request_id=request_id,
+            turn_request=TurnRequest.create("hello", request_id=request_id),
         )
     )
 

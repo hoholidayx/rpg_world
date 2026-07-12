@@ -48,7 +48,10 @@
 - `rpg_data` catalog 模型保持：workspace -> stories -> sessions；`rpg_story_characters` / `rpg_story_lorebook_entries` 是 story 挂载表，允许同一角色卡或世界书条目挂载到多个 story，只禁止同一 story 重复挂载。
 - Story 主数据字段保持：`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。
 - 玩家角色绑定状态只对外暴露 `bound | invalid`。缺失绑定、角色不存在、未挂载、snapshot 损坏或 snapshot mount/story 不匹配都视为 `invalid`；WebUI 进入 SessionRoom 后用不可取消弹窗补选，Agent 在普通 send/send_stream 进入 LLM 前强校验，invalid 时只返回固定编号角色列表，不写 user history、不调用 LLM。绑定成功且 main history 为空时，`SessionRoleService` 追加 story `first_message` 到 main 和 backup，且只追加一次。
+- Agent turn 代码保持 `TurnRequest`（调用方原始输入）→ `TurnExecutionSnapshot` / `TurnExecutionPlan`（门禁前不可变选择）→ `TurnRuntime`（事务期可变资源）三段生命周期。不要把 scratch、transaction、manager/provider 或解析后的配置塞回 `TurnRequest`；新增 turn 配置先进入 snapshot，再由 policy 或 `TurnPreparation` 消费。
+- `send` / `send_stream` 必须共用 `TurnPreprocessor`、`TurnSnapshotResolver`、`TurnPreparation` 和 `TurnOrchestrator` 的业务 pipeline，只允许 LLM runner 与 `AgentReply`/SSE 输出适配不同；不要复制 preflight、Context/工具构建、commit、discard 或 close 分支。`RPGGameAgent` 只保留公开入口、队列、session 生命周期和 turn 门面职责。
 - Agent 普通正文在命令分发和角色校验后先解析 RP Module 不可变快照，再在创建 `AgentTurnTransaction` 前执行主 Context 窗口门禁；门禁只估算当前 Context，不计本次 input，达到 `settings.context_window_reject_threshold_ratio` 时拒绝正文但始终允许斜杠命令。通过门禁后，`send/send_stream` 的 user/assistant message、Narrative Outcome 与 scene/status document 才进入内存 scratch，LLM 完整成功后在短 commit 点统一写 main history、backup history、剧情裁定和状态表；summary compression 和 story memory extraction 仍只作为 commit 后副作用运行，失败只记录 warning。
+- `AgentTurnTransaction` / `TurnScratch` 是 turn 写入的唯一事务边界：所有事务性状态先写 scratch；取消、provider/stream ERROR、缺失 DONE 或 commit 失败必须 discard。流式 DONE 只能在 commit 成功后发送并携带最终 usage 与 `committed_turn_id`。
 - `StatusSubAgent` 在主 Agent 前先判断外部实质变数：需要裁定时只执行 `rp_story_outcome`，同批所有 scene/status 预写不论顺序都标记 `skipped_due_to_outcome` 并延后给主 Agent；无需裁定时才允许确定性状态预更新。预裁定结果必须在主 Agent 首次调用前进入 `RP_MODULES` runtime section，并从主 Agent schema 隐藏 outcome 工具；漏判或预裁定失败时才保留主 Agent 补判。主 Agent 不得改判或重抽，只在结果造成实际、持久、确定的追踪值变化时写状态，允许零状态工具。有状态变化时必须先在无 RP 正文的工具调用轮完成同步，最终正文不得新增尚未同步的可追踪确定事实；不得询问玩家是否需要标记或更新状态。状态预写批次失败只使用内存 checkpoint 恢复并回退主 Agent，不新增持久化 status journal；retry/edit/truncate 删除消息与裁定并重新抽取，但不回滚已提交状态表。
 - 持久化会话消息必须写入正数 `turn_id` 和 `seq_in_turn`；主消息表唯一约束 `(session_id, turn_id, seq_in_turn)`，冷备份表保持 append-only、不做唯一约束。新增写入路径必须让非法 turn metadata 在写入或加载边界失败，不要恢复 summary/story memory/history pagination 的降级分组。
 - summary/story memory 的续处理进度只使用 `rpg_session_messages.summary_processed` / `story_memory_processed` 行标记，不恢复 last-turn 游标，不通过截断主历史表示已处理范围。
@@ -72,6 +75,8 @@
 - 修改核心上下文、summary、session 行为时，补 `rpg_core/tests/`；修改 memory 行为时，补 `rp_memory/tests/`。
 - 修改主 agent、LLM provider、session manager、context 或相关配置时，默认跑：
   `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q`。
+- 修改 `rpg_core/agent/turn/`、transaction 或同步/流式编排时，至少先跑：
+  `uv run python -m pytest rpg_core/tests/test_agent.py rpg_core/tests/test_turn_orchestration.py -q`。
 - 保留 `pytest.ini` 中的 `asyncio_mode = auto`。
 - pytest 默认会清理代理环境变量；需要保留代理时显式设置 `PYTEST_KEEP_PROXY=1`。
 

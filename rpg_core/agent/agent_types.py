@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 
 from llm_service.types import LLMResponse, LLMUsage, ProviderChunk
-from rpg_core.turns import TurnRequest
+from rpg_core.agent.turn.models import TurnRequest
 
 
 # ── 一次 LLM 调用的记录 ──────────────────────────────────────────────
@@ -285,25 +285,34 @@ class QueueItem:
     ----------
     kind:
         工作项类型。使用 ``QueueKind.*`` 常量赋值。
-    user_input:
-        用户输入文本（``send`` / ``send_stream`` 的消息，或 ``command`` 的完整命令）。
     future:
         用于返回结果的 Future。send → ``Future[AgentReply]``，command → ``Future[CommandResult]``。
+    turn_request:
+        仅 ``send`` / ``send_stream`` 使用的规范化请求，是正文与 request ID 的唯一真源。
+    command:
+        仅 ``command`` 使用的完整命令。
     event_queue:
         仅 ``send_stream`` 使用：消费者向此队列推入事件，主协程从中读取并 yield。
     turn_id:
         仅历史截断工作项使用。
-    request_id:
-        仅 ``send_stream`` 使用：前端/调用方生成的单次请求 ID，用于精准 stop。
     """
 
     kind: QueueKind
-    user_input: str
     future: Future
+    turn_request: TurnRequest | None = None
+    command: str | None = None
     event_queue: AsyncQueue | None = None
     turn_id: int | None = None
-    request_id: str | None = None
-    turn_request: TurnRequest | None = None
+
+    @property
+    def request_id(self) -> str | None:
+        return self.turn_request.request_id if self.turn_request is not None else None
+
+    @property
+    def input_text(self) -> str:
+        if self.turn_request is not None:
+            return self.turn_request.text
+        return self.command or ""
 
 
 class _StreamSentinel:

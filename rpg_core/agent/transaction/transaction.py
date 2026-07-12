@@ -8,6 +8,7 @@ from loguru import logger
 
 from rpg_core.context.rpg_context import Role
 from rpg_core.scene import SceneTracker
+from rpg_core.agent.turn.models import TurnMode, normalize_turn_mode
 from rpg_core.agent.transaction.commit_plan import TurnCommitPlan
 from rpg_core.agent.transaction.message_scratch import MessageScratch
 from rpg_core.agent.transaction.status_scratch import (
@@ -49,7 +50,12 @@ class AgentTurnTransaction:
             raise RuntimeError("Agent turn transaction has not begun")
         return self._scratch
 
-    def begin(self, turn_stats: "TurnStats", *, mode: str = "ic") -> TurnScratch:
+    def begin(
+        self,
+        turn_stats: "TurnStats",
+        *,
+        mode: TurnMode | str = TurnMode.IC,
+    ) -> TurnScratch:
         turn_id: int | None = None
         try:
             turn_id = self._session.begin_turn()
@@ -57,7 +63,7 @@ class AgentTurnTransaction:
             message_scratch = MessageScratch(
                 turn_id=turn_id,
                 base_history=self._session.history,
-                mode=mode,
+                mode=normalize_turn_mode(mode).value,
             )
             status_scratch = StatusDocumentScratch(self._status_mgr)
             scratch_status_mgr = ScratchStatusManager(self._status_mgr, status_scratch)

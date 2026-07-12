@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from rpg_core.context.rpg_context import Message
 from rpg_core.session.manager import SessionManager
-from rpg_core.turns import TurnMode
+from rpg_core.agent.turn.models import TurnMode
 
 _ALLOWED_MEMORY_MODES = frozenset({TurnMode.IC.value, TurnMode.GM.value})
 

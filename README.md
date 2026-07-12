@@ -147,7 +147,8 @@ Telegram 渠道当前支持：
 
 | 模块 | 说明 |
 |---|---|
-| `agent/` | LLM Agent 引擎（消息队列、chat loop、子 Agent、命令系统） |
+| `agent/` | LLM Agent 引擎（公开门面、消息队列、chat loop、子 Agent、命令系统） |
+| `agent/turn/` | 单轮请求、不可变执行快照、准备、运行态与同步/流式共享编排 |
 | `context/` | 结构化 RPG 上下文构建、LLM 边界渲染、上下文诊断 |
 | `scene/` | 场景状态跟踪（时间/地点/属性） |
 | `character/` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
@@ -161,7 +162,44 @@ Telegram 渠道当前支持：
 
 ### Agent turn 事务
 
-`send()` 和 `send_stream()` 的 RP 主链路通过 `AgentTurnTransaction` 管理本轮写入。这里的事务不是长数据库事务，而是“一轮 Agent turn 的内存 scratch + 短 commit 点”：
+`send()` 和 `send_stream()` 使用同一套 turn pipeline，只在最终输出适配上区分 `AgentReply` 与 SSE。`RPGGameAgent` 负责公开入口、队列串行化和 session 生命周期，`agent/turn/` 负责单轮编排：
+
+```text
+RPGGameAgent / Queue（TurnRequest）
+  → TurnPreprocessor（命令 + 玩家角色 guard）
+  → TurnSnapshotResolver → TurnExecutionSnapshot（mode / style / policy）
+  → TurnOrchestrator
+      → TurnExecutionPlan（snapshot + 主 LLM / RP Module 选择）
+      → Context 门禁
+      → TurnRuntime
+          → AgentTurnTransaction → TurnScratch（message / scene / status COW）
+      → TurnPreparation（Context / tools / schemas）
+      → 同步或流式 runner
+      → commit
+  → AgentReply 或 SSE DONE
+  → commit 后 summary / story-memory 副作用
+```
+
+三个 turn 对象对应不同生命周期，不能合并成可变的大 request：
+
+- `TurnRequest` 只表示调用方要求，包含正文、mode、style override 和可选 request ID。
+- `TurnExecutionSnapshot` / `TurnExecutionPlan` 保存门禁前解析完成的本轮选择，生成期间不可变化。
+- `TurnRuntime` 持有 transaction、scratch、统计、preflight 结果和 RP Module runtime，负责统一 commit/discard/close。
+
+公开调用保持简单，调用方不接触 snapshot、runtime 或 transaction：
+
+```python
+reply = await agent.send("我推开门", mode="ic", narrative_style_id=3)
+
+async for event in agent.send_stream(
+    "以 GM 视角说明当前风险",
+    mode="gm",
+    request_id="req_123",
+):
+    ...
+```
+
+`AgentTurnTransaction` 管理本轮写入一致性。这里的事务不是长数据库事务，而是“一轮 Agent turn 的内存 scratch + 短 commit 点”：
 
 - 进入 LLM 前，user message 不直接写入 `SessionManager.append()`，而是暂存在 `MessageScratch`。
 - 斜杠命令和玩家角色校验先行；普通正文会在创建 transaction 前按当前主 Agent Context 占用执行窗口门禁，不把本次待发送 input 计入估算。达到 Core 配置阈值时不调用主/子 Agent、不写历史，并提示手动 `/compact`。
