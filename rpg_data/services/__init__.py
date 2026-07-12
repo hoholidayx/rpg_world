@@ -18,6 +18,7 @@ from rpg_data.services.session_role import (
     SessionPlayerCharacterState,
     SessionRoleService,
 )
+from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
 
@@ -37,6 +38,7 @@ __all__ = [
     "SessionPlayerCharacterBindResult",
     "SessionPlayerCharacterState",
     "SessionRoleService",
+    "SessionComposerService",
     "StoryMemoryService",
     "StatusTableService",
     "get_data_service_gateway",

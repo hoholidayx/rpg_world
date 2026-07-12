@@ -35,13 +35,6 @@ import {
   type SessionInputMode,
 } from './sessionRoomTypes'
 
-const narrativeStyles: NarrativeStyle[] = [
-  { id: 'default', label: '默认', prompt: '' },
-  { id: 'detailed', label: '细腻描写', prompt: '请用细腻描写推进这一幕。' },
-  { id: 'fast', label: '快速推进', prompt: '请快速推进到下一个关键选择。' },
-  { id: 'options', label: '多给选项', prompt: '请在回应末尾给出多个可选择的行动方向。' },
-]
-
 function Toast({ message }: { message: string }) {
   return (
     <div
@@ -214,7 +207,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const router = useRouter()
   const logger = useMemo(() => createSessionRoomLogger(sessionId), [sessionId])
   const [inputMode, setInputMode] = useState<SessionInputMode>('ic')
-  const [narrativeStyleId, setNarrativeStyleId] = useState<NarrativeStyleId>('default')
+  const [narrativeStyleId, setNarrativeStyleId] = useState<NarrativeStyleId>(null)
   const [composerText, setComposerText] = useState('')
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
   const [toastMessage, setToastMessage] = useState('')
@@ -229,6 +222,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     setComposerText('')
+    setInputMode('ic')
+    setNarrativeStyleId(null)
     logger.info('session room entered', { status: 'session_changed' })
   }, [logger, sessionId])
 
@@ -239,7 +234,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   }, [])
 
   const layout = useSessionRoomLayout({ sessionId, logger })
-  const data = useSessionRoomData({ sessionId, showToast, logger })
+  const data = useSessionRoomData({
+    sessionId,
+    inputMode,
+    narrativeStyleId,
+    showToast,
+    logger,
+  })
   const requestConfirm = useCallback((request: ConfirmRequest) => {
     setConfirmRequest(request)
   }, [])
@@ -255,7 +256,28 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     closeSettings: () => layout.setSettingsOpen(false),
   })
 
-  const currentNarrativeStyle = narrativeStyles.find((style) => style.id === narrativeStyleId) ?? narrativeStyles[0]
+  const composerConfig = data.composerQuery.data
+  const baseStyle = composerConfig?.narrativeStyles.find((style) => style.isBase)
+  const narrativeStyles = useMemo<NarrativeStyle[]>(() => [
+    {
+      id: null,
+      label: baseStyle ? `故事默认 · ${baseStyle.name}` : '故事默认 · 无额外风格',
+    },
+    ...(composerConfig?.narrativeStyles ?? []).map((style) => ({
+      id: style.narrativeStyleId,
+      label: style.name,
+    })),
+  ], [baseStyle, composerConfig?.narrativeStyles])
+
+  useEffect(() => {
+    if (
+      narrativeStyleId !== null
+      && composerConfig
+      && !composerConfig.narrativeStyles.some((style) => style.narrativeStyleId === narrativeStyleId)
+    ) {
+      setNarrativeStyleId(null)
+    }
+  }, [composerConfig, narrativeStyleId])
   const roleSelectionBlocked = !data.session || data.playerCharacterInvalid || role.bindingRole
   const contextPreviewUsage = roleSelectionBlocked ? null : data.contextPreviewUsage
   const contextInputBlocked = !roleSelectionBlocked && isContextInputBlocked(
@@ -274,9 +296,12 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setComposerText(value)
   }, [])
 
+  const handleCommittedNarrativeStyle = useCallback((sentStyleId: NarrativeStyleId) => {
+    setNarrativeStyleId((current) => current === sentStyleId ? null : current)
+  }, [])
+
   const stream = useSessionStreamTurn({
     sessionId,
-    inputMode,
     contextPreviewUsage: data.contextPreviewUsage,
     setLastTurnUsage: data.setLastTurnUsage,
     setLocalTurnUsageByTurn: data.setLocalTurnUsageByTurn,
@@ -288,6 +313,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     showToast,
     logger,
     onExit: () => router.push('/sessions'),
+    onCommittedNarrativeStyle: handleCommittedNarrativeStyle,
   })
 
   const timelineActions = useSessionTimelineActions({
@@ -296,7 +322,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     playerCharacter: data.playerCharacter,
     playerCharacterInvalid: data.playerCharacterInvalid,
     inputMode,
-    currentNarrativeStyle,
+    narrativeStyleId,
     composerText,
     contextInputBlockThresholdRatio: sessionContextUsageConfig.inputBlockThresholdRatio,
     refreshContextPreview: data.refreshContextPreview,
@@ -467,6 +493,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           mode={inputMode}
           narrativeStyleId={narrativeStyleId}
           narrativeStyles={narrativeStyles}
+          turnModes={composerConfig?.modes ?? []}
+          quickReplies={composerConfig?.quickReplies ?? []}
           sending={stream.sending}
           disabled={roleSelectionBlocked}
           contextPreviewUsage={contextPreviewUsage}
@@ -485,6 +513,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           onNarrativeStyleChange={setNarrativeStyleId}
           onMainLLMChange={mainLLM.selectProvider}
           onSend={timelineActions.handleSend}
+          onQuickReply={timelineActions.handleQuickReply}
           onStop={() => {
             void stream.stopActiveStream()
           }}

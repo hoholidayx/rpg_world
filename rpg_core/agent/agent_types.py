@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 
 from llm_service.types import LLMResponse, LLMUsage, ProviderChunk
+from rpg_core.turns import TurnRequest
 
 
 # ── 一次 LLM 调用的记录 ──────────────────────────────────────────────
@@ -302,6 +303,7 @@ class QueueItem:
     event_queue: AsyncQueue | None = None
     turn_id: int | None = None
     request_id: str | None = None
+    turn_request: TurnRequest | None = None
 
 
 class _StreamSentinel:

@@ -232,6 +232,67 @@ async def test_story_memory_extraction_runs_after_commit_and_marks_message_rows(
 
 
 @pytest.mark.asyncio
+async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
+    integration_agent_factory,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    session_id = "integration_composer"
+    agent = await integration_agent_factory(session_id, with_status=True)
+    session = integration_data_gateway.catalog.get_session(session_id)
+    assert session is not None
+    style = integration_data_gateway.session_composer.create_style(
+        session.workspace_id,
+        name="集成测试风格",
+        prompt="COMPOSER_STYLE_PROMPT",
+        sort_order=90,
+    )
+    assert style is not None
+    mount = integration_data_gateway.session_composer.mount_story_style(
+        session.workspace_id,
+        session.story_id,
+        style.id,
+    )
+    assert mount is not None
+
+    preview = await agent.get_context_payload(mode="gm", narrative_style_id=style.id)
+    assert any(
+        "COMPOSER_STYLE_PROMPT" in str(message.get("content") or "")
+        for message in preview["messages"]
+    )
+
+    status_calls_before = len(scripted_llm_manager.status.calls)
+    ooc_reply = await agent.send(
+        "解释当前规则",
+        mode="ooc",
+        narrative_style_id=style.id,
+    )
+    ooc_call = scripted_llm_manager.main_provider().calls[-1]
+    ooc_content = "\n".join(str(message.get("content") or "") for message in ooc_call.messages)
+    ooc_tool_names = {
+        str(schema.get("function", {}).get("name", ""))
+        for schema in (ooc_call.tools or [])
+    }
+    assert ooc_reply.committed_turn_id == 1
+    assert len(scripted_llm_manager.status.calls) == status_calls_before
+    assert "COMPOSER_STYLE_PROMPT" not in ooc_content
+    assert "硬性边界：本轮是场外讨论" in ooc_content
+    assert not ({"rp_story_outcome", "status_table_set_values", "write_file"} & ooc_tool_names)
+    assert not any(name.startswith("scene_") for name in ooc_tool_names)
+
+    gm_reply = await agent.send("推进场景", mode="gm", narrative_style_id=style.id)
+    gm_call = scripted_llm_manager.main_provider().calls[-1]
+    gm_content = "\n".join(str(message.get("content") or "") for message in gm_call.messages)
+    assert gm_reply.committed_turn_id == 2
+    assert len(scripted_llm_manager.status.calls) == status_calls_before + 1
+    assert "COMPOSER_STYLE_PROMPT" in gm_content
+    rows = integration_data_gateway.messages.list(session_id)
+    assert [row.mode for row in rows] == ["ooc", "ooc", "gm", "gm"]
+    assert all(row.summary_processed and row.summary_batch_id is None for row in rows[:2])
+    assert all(row.story_memory_processed for row in rows[:2])
+
+
+@pytest.mark.asyncio
 async def test_main_context_and_preview_filter_summary_processed_rows_only(
     integration_agent_factory,
     integration_data_gateway,

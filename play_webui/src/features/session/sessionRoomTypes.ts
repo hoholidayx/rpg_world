@@ -5,12 +5,11 @@ import type { NarrativeOutcome } from '@/types/narrativeOutcome'
 
 export type SessionInputMode = 'ic' | 'ooc' | 'gm'
 
-export type NarrativeStyleId = 'default' | 'detailed' | 'fast' | 'options'
+export type NarrativeStyleId = number | null
 
 export type NarrativeStyle = {
   id: NarrativeStyleId
   label: string
-  prompt: string
 }
 
 export type SpeakerTone = 'player' | 'assistant' | 'tool' | 'outcome' | 'system' | 'thinking' | 'error'
@@ -92,6 +91,7 @@ export type SessionTimelineMessage = {
   timelineItemOrder?: number
   seqInTurn?: number
   role: SessionTimelineRole
+  mode?: SessionInputMode
   content: string
   usage?: ContextUsageSnapshot | null
   outcome?: NarrativeOutcome
@@ -99,7 +99,6 @@ export type SessionTimelineMessage = {
   createdAt?: string | null
   speaker: SessionSpeaker
   status?: SessionMessageStatus
-  hiddenPrompt?: string
   canCopy?: boolean
   canRetry?: boolean
   canEdit?: boolean

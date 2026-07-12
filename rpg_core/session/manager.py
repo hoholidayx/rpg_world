@@ -279,6 +279,8 @@ class SessionManager:
         content: str,
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
+        *,
+        mode: str = "ic",
     ) -> None:
         """Append a message to in-memory history and, when enabled, rpg_data."""
         role_value = Role(role).value
@@ -288,7 +290,7 @@ class SessionManager:
             seq_in_turn = self._turn_seq_by_turn.get(turn_id, 1)
 
         text = str(content or "")
-        pending = Message(role_value, text, turn_id=turn_id, seq_in_turn=seq_in_turn)
+        pending = Message(role_value, text, mode=mode, turn_id=turn_id, seq_in_turn=seq_in_turn)
         self._validate_append_turn_metadata(pending)
         turn_id = pending.turn_id
         seq_in_turn = pending.seq_in_turn
@@ -301,6 +303,7 @@ class SessionManager:
                     self._session_id,
                     role_value,
                     text,
+                    mode=pending.mode,
                     turn_id=turn_id,
                     seq_in_turn=seq_in_turn,
                 )
@@ -308,6 +311,7 @@ class SessionManager:
                     self._session_id,
                     role_value,
                     text,
+                    mode=pending.mode,
                     turn_id=turn_id,
                     seq_in_turn=seq_in_turn,
                 )
@@ -318,6 +322,7 @@ class SessionManager:
             Message(
                 role_value,
                 text,
+                mode=pending.mode,
                 uid=uid,
                 turn_id=turn_id,
                 seq_in_turn=seq_in_turn,
@@ -444,6 +449,7 @@ class SessionManager:
                     updated = Message(
                         message.role,
                         str(content),
+                        mode=message.mode,
                         uid=message.uid,
                         turn_id=message.turn_id,
                         seq_in_turn=message.seq_in_turn,
@@ -554,6 +560,7 @@ class SessionManager:
             for message in self.__history
             if not message.is_system()
         ]
+
         if not any(
             self._in_memory_message_key(message) not in self._summary_processed_message_keys
             for message in conversation
@@ -576,10 +583,33 @@ class SessionManager:
             )
         ]
 
+    def summary_unprocessed_turn_groups(self) -> list[list[Message]]:
+        """Return all unprocessed summary groups without mode/keep policy."""
+        if self._history_enabled:
+            groups = self._require_data_session().messages.list_summary_unprocessed_turn_groups(
+                self._session_id
+            )
+            return [
+                [Message.from_dict(row.to_message_dict()) for row in group]
+                for group in groups
+            ]
+        return self._conversation_turn_groups([
+            message
+            for message in self.__history
+            if not message.is_system()
+            and self._in_memory_message_key(message)
+            not in self._summary_processed_message_keys
+        ], purpose="summary")
+
     def count_summary_turns_for_compression(self, keep_recent_turns: int) -> int:
         return len(self.summary_turn_groups_for_compression(keep_recent_turns))
 
-    def mark_summary_messages_processed(self, messages: list[Message], *, batch_id: int) -> None:
+    def mark_summary_messages_processed(
+        self,
+        messages: list[Message],
+        *,
+        batch_id: int | None,
+    ) -> None:
         """Mark messages included in a successfully written summary batch."""
         if not messages:
             return
@@ -666,7 +696,7 @@ class SessionManager:
             with gateway.database.atomic():
                 rows = gateway.messages.replace(
                     self._session_id,
-                    (msg.to_dict() for msg in self.__history),
+                    (msg.to_persistence_dict() for msg in self.__history),
                 )
                 gateway.narrative_outcomes.retain_turns(
                     self._session_id,

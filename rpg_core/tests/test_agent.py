@@ -60,6 +60,7 @@ from rpg_core.agent.agent_types import (
     TurnCancelStatus,
     _StreamSentinel,
 )
+from rpg_core.turns import TurnRequest
 
 
 def _init_stream_cancel_state(agent: RPGGameAgent, *, session_id: str = "s_cancel") -> None:
@@ -1434,7 +1435,7 @@ async def test_get_context_json_does_not_mutate_history(fake_token_counter):
     assert [message.content for message in builder.last_messages] == ["old"]
     assert payload["sessionId"] == "s_json"
     assert payload["messages"] == [
-        {"role": "user", "content": "old", "turn_id": 1, "seq_in_turn": 1},
+        {"role": "user", "content": "old"},
         {"role": "user", "content": "preview"},
     ]
 
@@ -1466,6 +1467,70 @@ def test_setup_tool_registry_keeps_rp_module_tools_turn_local(tmp_path, monkeypa
     agent._setup_tool_registry()
 
     assert "rp_fake_tool" not in agent._tool_registry
+
+
+@pytest.mark.asyncio
+async def test_ooc_turn_skips_preflight_and_state_tools_and_persists_mode(monkeypatch):
+    agent = _make_transaction_agent(monkeypatch)
+    agent._run_status_preflight = AsyncMock()
+
+    async def fake_run_chat_loop(**kwargs):  # noqa: ANN001
+        assert kwargs["tool_registry"] is None
+        assert kwargs["schemas"] is None
+        return "场外回答", []
+
+    monkeypatch.setattr(agent_module, "run_chat_loop", fake_run_chat_loop)
+    reply = await agent._send_impl(TurnRequest.create("讨论设定", mode=" OOC "))
+
+    assert reply.committed_turn_id == 1
+    agent._run_status_preflight.assert_not_awaited()
+    assert [message.mode for message in agent._session.history] == ["ooc", "ooc"]
+
+
+@pytest.mark.asyncio
+async def test_ooc_stream_matches_non_stream_policy(monkeypatch):
+    agent = _make_transaction_agent(monkeypatch)
+    agent._run_status_preflight = AsyncMock()
+
+    async def fake_stream(**kwargs):  # noqa: ANN001
+        assert kwargs["tool_registry"] is None
+        assert kwargs["schemas"] is None
+        yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="场外")
+        yield AgentStreamEvent(kind=StreamEventKind.DONE, content="场外回答")
+
+    monkeypatch.setattr(agent_module, "run_chat_loop_stream", fake_stream)
+    queue: asyncio.Queue = asyncio.Queue()
+    await agent._send_stream_impl(TurnRequest.create("解释规则", mode="ooc"), queue)
+
+    events = []
+    while not queue.empty():
+        events.append(await queue.get())
+    done = next(event for event in events if isinstance(event, AgentStreamEvent) and event.kind is StreamEventKind.DONE)
+    assert done.committed_turn_id == 1
+    agent._run_status_preflight.assert_not_awaited()
+    assert [message.mode for message in agent._session.history] == ["ooc", "ooc"]
+
+
+def test_provider_message_serialization_excludes_persistence_metadata() -> None:
+    message = Message(
+        Role.USER,
+        "hello",
+        mode="gm",
+        uid=9,
+        turn_id=3,
+        seq_in_turn=1,
+    )
+
+    assert message.to_provider_dict() == {"role": "user", "content": "hello"}
+    assert message.to_dict() == {"role": "user", "content": "hello"}
+    assert message.to_persistence_dict() == {
+        "role": "user",
+        "content": "hello",
+        "mode": "gm",
+        "uid": 9,
+        "turn_id": 3,
+        "seq_in_turn": 1,
+    }
 
 
 def test_build_transformed_context_rebuilds_fixed_layer_each_time() -> None:

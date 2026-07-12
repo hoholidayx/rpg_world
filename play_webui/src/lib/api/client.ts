@@ -10,6 +10,14 @@ export async function playApiFetch<T>(path: string, init?: RequestInit): Promise
   return response.json() as Promise<T>
 }
 
+export async function playApiFetchNoContent(path: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(`${getPlayApiBaseUrl()}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    ...init,
+  })
+  if (!response.ok) throw new Error(await readApiError(response))
+}
+
 export function withWorkspace(path: string, workspace: string) {
   const separator = path.includes('?') ? '&' : '?'
   return `${path}${separator}workspace=${encodeURIComponent(workspace)}`

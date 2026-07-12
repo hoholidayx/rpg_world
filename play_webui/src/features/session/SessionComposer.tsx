@@ -1,18 +1,29 @@
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import {
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react'
 import { AlertTriangle, Check, ChevronDown, Cpu, Plane, Square } from 'lucide-react'
 import { CommandPaletteDialog } from '@/components/input/CommandPaletteDialog'
 import { cn } from '@/lib/utils/cn'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
 import type { MainLLMProviderCatalog, MainLLMSelection } from '@/types/mainLLM'
+import type { StoryQuickReply, WorkspaceTurnMode } from '@/types/sessionComposer'
 import { SessionContextUsageIndicator } from './SessionContextUsageIndicator'
 import { isSlashCommandInput } from './contextWindowGate'
 import type { NarrativeStyle, NarrativeStyleId, SessionInputMode } from './sessionRoomTypes'
 
-const inputModes: Array<{ id: SessionInputMode; label: string }> = [
-  { id: 'ic', label: 'IC' },
-  { id: 'ooc', label: 'OOC' },
-  { id: 'gm', label: 'GM' },
+const fallbackInputModes: Array<{ id: SessionInputMode; label: string }> = [
+  { id: 'ic', label: 'IC·角色内' },
+  { id: 'ooc', label: 'OOC·场外' },
+  { id: 'gm', label: 'GM·主持' },
 ]
+
+const QUICK_REPLY_LONG_PRESS_MS = 400
 
 const INHERIT_MAIN_LLM_OPTION = '__inherit_main_llm__'
 
@@ -29,13 +40,13 @@ function mainLLMSourceLabel(source: MainLLMSelection['effectiveSource'] | undefi
   return '系统默认'
 }
 
-type SelectOption<TValue extends string> = {
+type SelectOption<TValue extends string | number | null> = {
   id: TValue
   label: string
   description?: string
 }
 
-function PopupSingleSelect<TValue extends string>({
+function PopupSingleSelect<TValue extends string | number | null>({
   label,
   value,
   options,
@@ -149,7 +160,7 @@ function PopupSingleSelect<TValue extends string>({
             const active = option.id === value
             return (
               <button
-                key={option.id}
+                key={option.id ?? '__default__'}
                 type="button"
                 role="radio"
                 aria-checked={active}
@@ -200,6 +211,8 @@ export function SessionComposer({
   mode,
   narrativeStyleId,
   narrativeStyles,
+  turnModes,
+  quickReplies,
   sending,
   stopping = false,
   disabled = false,
@@ -218,6 +231,7 @@ export function SessionComposer({
   onNarrativeStyleChange,
   onMainLLMChange,
   onSend,
+  onQuickReply,
   onStop,
 }: {
   sessionId: string
@@ -225,6 +239,8 @@ export function SessionComposer({
   mode: SessionInputMode
   narrativeStyleId: NarrativeStyleId
   narrativeStyles: NarrativeStyle[]
+  turnModes: WorkspaceTurnMode[]
+  quickReplies: StoryQuickReply[]
   sending: boolean
   stopping?: boolean
   disabled?: boolean
@@ -243,9 +259,18 @@ export function SessionComposer({
   onNarrativeStyleChange: (styleId: NarrativeStyleId) => void
   onMainLLMChange: (providerKey: string | null) => void
   onSend: () => void
+  onQuickReply: (message: string) => void
   onStop: () => void
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const sendButtonRef = useRef<HTMLButtonElement | null>(null)
+  const quickReplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activePointerIdRef = useRef<number | null>(null)
+  const longPressTriggeredRef = useRef(false)
+  const suppressClickRef = useRef(false)
+  const lastPointerPositionRef = useRef({ x: 0, y: 0 })
+  const [quickReplyOpen, setQuickReplyOpen] = useState(false)
+  const [highlightedReplyId, setHighlightedReplyId] = useState<number | null>(null)
   const commandInput = isSlashCommandInput(text)
   const contextRejectsCurrentInput = contextInputBlocked && !commandInput
   const handleCommandSelect = (command: string) => {
@@ -268,6 +293,14 @@ export function SessionComposer({
   const actionDisabled = disabled || stopping || (!sending && contextRejectsCurrentInput)
   const actionStopping = stopping
   const actionSending = sending || stopping
+  const canLongPress = !sending && !stopping && !actionDisabled && quickReplies.length > 0
+  const modeOptions: Array<SelectOption<SessionInputMode>> = fallbackInputModes.map((fallback) => {
+    const configured = turnModes.find((item) => item.mode === fallback.id)
+    return {
+      id: fallback.id,
+      label: configured ? `${fallback.id.toUpperCase()}·${configured.shortName}` : fallback.label,
+    }
+  })
   const narrativeOptions: Array<SelectOption<NarrativeStyleId>> = narrativeStyles.map((style) => ({
     id: style.id,
     label: style.label,
@@ -308,6 +341,94 @@ export function SessionComposer({
         ? `当前来源：${mainLLMSourceLabel(mainLLMSelection.effectiveSource)}`
         : null)
 
+  const setHighlightedQuickReply = (replyId: number | null) => {
+    setHighlightedReplyId(replyId)
+  }
+
+  const clearQuickReplyTimer = () => {
+    if (!quickReplyTimerRef.current) return
+    clearTimeout(quickReplyTimerRef.current)
+    quickReplyTimerRef.current = null
+  }
+
+  const closeQuickReplies = () => {
+    clearQuickReplyTimer()
+    longPressTriggeredRef.current = false
+    activePointerIdRef.current = null
+    setHighlightedQuickReply(null)
+    setQuickReplyOpen(false)
+  }
+
+  const replyIdAtPoint = (clientX: number, clientY: number) => {
+    const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-quick-reply-id]')
+    if (!target) return null
+    const value = Number(target.dataset.quickReplyId)
+    return Number.isInteger(value) && quickReplies.some((reply) => reply.id === value) ? value : null
+  }
+
+  const updateQuickReplyHit = (clientX: number, clientY: number) => {
+    lastPointerPositionRef.current = { x: clientX, y: clientY }
+    setHighlightedQuickReply(replyIdAtPoint(clientX, clientY))
+  }
+
+  const handleSendPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!canLongPress || event.button !== 0) return
+    activePointerIdRef.current = event.pointerId
+    longPressTriggeredRef.current = false
+    lastPointerPositionRef.current = { x: event.clientX, y: event.clientY }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    clearQuickReplyTimer()
+    quickReplyTimerRef.current = setTimeout(() => {
+      quickReplyTimerRef.current = null
+      longPressTriggeredRef.current = true
+      setQuickReplyOpen(true)
+      requestAnimationFrame(() => {
+        const { x, y } = lastPointerPositionRef.current
+        updateQuickReplyHit(x, y)
+      })
+    }, QUICK_REPLY_LONG_PRESS_MS)
+  }
+
+  const handleSendPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (activePointerIdRef.current !== event.pointerId) return
+    lastPointerPositionRef.current = { x: event.clientX, y: event.clientY }
+    if (longPressTriggeredRef.current) updateQuickReplyHit(event.clientX, event.clientY)
+  }
+
+  const handleSendPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (activePointerIdRef.current !== event.pointerId) return
+    clearQuickReplyTimer()
+    const longPressed = longPressTriggeredRef.current
+    const selectedId = longPressed ? replyIdAtPoint(event.clientX, event.clientY) : null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    closeQuickReplies()
+    if (!longPressed) return
+    event.preventDefault()
+    suppressClickRef.current = true
+    const selectedReply = quickReplies.find((reply) => reply.id === selectedId)
+    if (selectedReply) onQuickReply(selectedReply.message)
+    else onSend()
+  }
+
+  const handleSendPointerCancel = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (activePointerIdRef.current !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    closeQuickReplies()
+  }
+
+  useEffect(() => {
+    const cancel = () => closeQuickReplies()
+    window.addEventListener('blur', cancel)
+    return () => {
+      window.removeEventListener('blur', cancel)
+      clearQuickReplyTimer()
+    }
+  }, [])
+
   return (
     <section className="border-t border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6">
       <div className="mx-auto max-w-6xl overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
@@ -315,7 +436,7 @@ export function SessionComposer({
           <PopupSingleSelect
             label="模式"
             value={mode}
-            options={inputModes}
+            options={modeOptions}
             onChange={onModeChange}
             side="bottom"
             align="left"
@@ -343,22 +464,68 @@ export function SessionComposer({
                   : '输入你的行动、台词或 GM 指令...'
             }
           />
-          <button
-            type="button"
-            onClick={sending ? onStop : onSend}
-            disabled={actionDisabled}
-            className={cn(
-              'my-1 flex min-h-20 items-center justify-center gap-2 rounded-lg px-5 text-base font-black text-white shadow-lg transition sm:min-h-24',
-              actionDisabled
-                ? 'cursor-not-allowed bg-slate-300 shadow-none dark:bg-slate-700'
-                : sending
-                ? 'bg-rose-500 shadow-rose-100 hover:bg-rose-600 dark:shadow-rose-950/30'
-                : 'bg-violet-600 shadow-violet-200 hover:bg-violet-700 dark:shadow-violet-950/40',
-            )}
-          >
-            {actionSending ? <Square size={16} fill="currentColor" /> : <Plane size={17} fill="currentColor" />}
-            {actionStopping ? '停止中' : sending ? '停止' : '发送'}
-          </button>
+          <div className="relative my-1 min-h-20 sm:min-h-24">
+            {quickReplyOpen ? (
+              <div
+                role="listbox"
+                aria-label="快速回复"
+                className="absolute bottom-[calc(100%+10px)] right-0 z-50 w-72 overflow-hidden rounded-lg border border-violet-200 bg-white p-1 shadow-2xl shadow-violet-950/20 dark:border-violet-500/40 dark:bg-slate-950"
+              >
+                <p className="px-3 py-2 text-[11px] font-black uppercase tracking-wide text-slate-400">滑动选择快速回复</p>
+                {quickReplies.map((reply) => (
+                  <div
+                    key={reply.id}
+                    role="option"
+                    aria-selected={highlightedReplyId === reply.id}
+                    data-quick-reply-id={reply.id}
+                    className={cn(
+                      'rounded-md px-3 py-2 transition',
+                      highlightedReplyId === reply.id
+                        ? 'bg-violet-600 text-white'
+                        : 'text-slate-700 dark:text-slate-200',
+                    )}
+                  >
+                    <strong className="block truncate text-sm">{reply.title}</strong>
+                    <span className={cn(
+                      'mt-0.5 block truncate text-xs font-semibold',
+                      highlightedReplyId === reply.id ? 'text-violet-100' : 'text-slate-400',
+                    )}>
+                      {reply.message}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <button
+              ref={sendButtonRef}
+              type="button"
+              onPointerDown={handleSendPointerDown}
+              onPointerMove={handleSendPointerMove}
+              onPointerUp={handleSendPointerUp}
+              onPointerCancel={handleSendPointerCancel}
+              onClick={(event) => {
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false
+                  event.preventDefault()
+                  return
+                }
+                if (sending) onStop()
+                else onSend()
+              }}
+              disabled={actionDisabled}
+              className={cn(
+                'flex h-full min-h-20 w-full items-center justify-center gap-2 rounded-lg px-5 text-base font-black text-white shadow-lg transition sm:min-h-24',
+                actionDisabled
+                  ? 'cursor-not-allowed bg-slate-300 shadow-none dark:bg-slate-700'
+                  : sending
+                  ? 'bg-rose-500 shadow-rose-100 hover:bg-rose-600 dark:shadow-rose-950/30'
+                  : 'bg-violet-600 shadow-violet-200 hover:bg-violet-700 dark:shadow-violet-950/40',
+              )}
+            >
+              {actionSending ? <Square size={16} fill="currentColor" /> : <Plane size={17} fill="currentColor" />}
+              {actionStopping ? '停止中' : sending ? '停止' : '发送'}
+            </button>
+          </div>
         </div>
 
         {contextInputBlocked ? (
@@ -378,6 +545,8 @@ export function SessionComposer({
             value={narrativeStyleId}
             options={narrativeOptions}
             onChange={onNarrativeStyleChange}
+            disabled={mode === 'ooc'}
+            statusMessage={mode === 'ooc' ? 'OOC 场外模式不应用叙事风格；切回 IC/GM 后恢复当前选择。' : null}
             side="top"
             align="left"
           />

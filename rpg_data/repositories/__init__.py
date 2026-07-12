@@ -5,6 +5,7 @@ from rpg_data.repositories.character_repo import CharacterRepository
 from rpg_data.repositories.lorebook_repo import LorebookEntryRepository
 from rpg_data.repositories.narrative_outcome_repo import NarrativeOutcomeRepository
 from rpg_data.repositories.session_repo import SessionRepository
+from rpg_data.repositories.session_composer_repo import SessionComposerRepository
 from rpg_data.repositories.story_character_repo import StoryCharacterRepository
 from rpg_data.repositories.story_lorebook_repo import StoryLorebookEntryRepository
 from rpg_data.repositories.story_repo import StoryRepository
@@ -16,6 +17,7 @@ __all__ = [
     "LorebookEntryRepository",
     "NarrativeOutcomeRepository",
     "SessionRepository",
+    "SessionComposerRepository",
     "StoryCharacterRepository",
     "StoryLorebookEntryRepository",
     "StoryRepository",

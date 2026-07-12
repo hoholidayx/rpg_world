@@ -118,6 +118,63 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         database.close()
 
 
+def test_message_mode_is_persisted_in_main_backup_and_replace(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        backup = BackupService(database)
+        session_id = _create_test_session(database, "s_message_modes")
+
+        user = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "场外问题",
+            mode=models.TURN_MODE_OOC,
+            turn_id=1,
+            seq_in_turn=1,
+        )
+        backup.messages.append_mapping(session_id, user)
+        assistant = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "场外回答",
+            mode=models.TURN_MODE_OOC,
+            turn_id=1,
+            seq_in_turn=2,
+        )
+        backup.messages.append_mapping(session_id, assistant)
+
+        assert [row.mode for row in messages.list(session_id)] == ["ooc", "ooc"]
+        assert [row.mode for row in backup.messages.list(session_id)] == ["ooc", "ooc"]
+        assert messages.mark_summary_processed(
+            session_id,
+            [user.id, assistant.id],
+            batch_id=None,
+        ) == 2
+        excluded = messages.list(session_id)
+        assert all(row.summary_processed for row in excluded)
+        assert all(row.summary_batch_id is None for row in excluded)
+        updated = messages.update(user.id, content="编辑后的场外问题")
+        assert updated is not None and updated.mode == "ooc"
+
+        replaced = messages.replace(
+            session_id,
+            [row.to_message_dict() for row in messages.list(session_id)],
+        )
+        assert [row.mode for row in replaced] == ["ooc", "ooc"]
+        with pytest.raises(ValueError, match="invalid session message mode"):
+            messages.append(
+                session_id,
+                models.MESSAGE_ROLE_USER,
+                "bad",
+                mode="chat",
+                turn_id=2,
+                seq_in_turn=1,
+            )
+    finally:
+        database.close()
+
+
 def test_message_service_turn_window_pagination(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:

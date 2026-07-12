@@ -2,19 +2,21 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Eye, Sparkles, Trash2, type LucideIcon } from 'lucide-react'
+import { Eye, MessagesSquare, Sparkles, Trash2, type LucideIcon } from 'lucide-react'
 import { listWorkspaces } from '@/lib/api/sessions'
 import { ContextPreviewSettingsContainer } from './context-preview/ContextPreviewSettingsContainer'
 import { DataCleanupSettingsContainer } from './cleanup/DataCleanupSettingsContainer'
 import { SettingsWorkspaceSwitcher } from './SettingsWorkspaceSwitcher'
+import { TurnModesSettingsContainer } from './turn-modes/TurnModesSettingsContainer'
 
-type SettingsSection = 'context-preview' | 'data-cleanup'
+type SettingsSection = 'turn-modes' | 'context-preview' | 'data-cleanup'
 
 const settingsSections: Array<{
   id: SettingsSection
   label: string
   icon: LucideIcon
 }> = [
+  { id: 'turn-modes', label: '对话模式', icon: MessagesSquare },
   { id: 'context-preview', label: '上下文预览', icon: Eye },
   { id: 'data-cleanup', label: '数据清理', icon: Trash2 },
 ]
@@ -119,7 +121,7 @@ export function SettingsPage() {
 
         <div className="min-w-0 px-5 py-8 xl:px-7">
           <div className="mx-auto max-w-[1500px] space-y-6">
-            <nav className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-2 lg:hidden" aria-label="设置分区">
+            <nav className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-3 lg:hidden" aria-label="设置分区">
               {settingsSections.map((section) => {
                 const Icon = section.icon
                 const selected = section.id === activeSection
@@ -138,7 +140,9 @@ export function SettingsPage() {
                 )
               })}
             </nav>
-            {activeSection === 'context-preview' ? (
+            {activeSection === 'turn-modes' ? (
+              <TurnModesSettingsContainer workspaceId={currentWorkspace} />
+            ) : activeSection === 'context-preview' ? (
               <ContextPreviewSettingsContainer workspaceId={currentWorkspace} />
             ) : (
               <DataCleanupSettingsContainer workspaceId={currentWorkspace} />

@@ -21,5 +21,6 @@ export type SendMessagePayload = {
   sessionId: string
   text: string
   mode: InputMode
+  narrativeStyleId?: number | null
   requestId?: string
 }

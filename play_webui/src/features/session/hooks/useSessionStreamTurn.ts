@@ -24,6 +24,7 @@ import {
   SESSION_TIMELINE_ROLE,
   type RefreshSessionDataOptions,
   type SessionInputMode,
+  type NarrativeStyleId,
   type SessionStreamSource,
   type SessionTimelineMessage,
 } from '../sessionRoomTypes'
@@ -43,6 +44,8 @@ export type StreamLocalTurnOptions = {
   userMessage: SessionTimelineMessage
   assistantMessage: SessionTimelineMessage
   source: SessionStreamSource
+  mode: SessionInputMode
+  narrativeStyleId: NarrativeStyleId
   pendingToast?: string
   successToast: string
   failureToast: string
@@ -51,7 +54,6 @@ export type StreamLocalTurnOptions = {
 
 export function useSessionStreamTurn({
   sessionId,
-  inputMode,
   contextPreviewUsage,
   setLastTurnUsage,
   setLocalTurnUsageByTurn,
@@ -63,9 +65,9 @@ export function useSessionStreamTurn({
   showToast,
   logger,
   onExit,
+  onCommittedNarrativeStyle,
 }: {
   sessionId: string
-  inputMode: SessionInputMode
   contextPreviewUsage: ContextUsageSnapshot | null
   setLastTurnUsage: Dispatch<SetStateAction<ContextUsageSnapshot | null>>
   setLocalTurnUsageByTurn: Dispatch<SetStateAction<Record<number, ContextUsageSnapshot>>>
@@ -80,6 +82,7 @@ export function useSessionStreamTurn({
   showToast: (message: string) => void
   logger: SessionRoomLogger
   onExit: () => void
+  onCommittedNarrativeStyle: (styleId: NarrativeStyleId) => void
 }) {
   const [sending, setSending] = useState(false)
   const [stoppingRequestId, setStoppingRequestId] = useState<string | null>(null)
@@ -421,6 +424,8 @@ export function useSessionStreamTurn({
     userMessage,
     assistantMessage,
     source,
+    mode,
+    narrativeStyleId,
     pendingToast,
     successToast,
     failureToast,
@@ -487,7 +492,8 @@ export function useSessionStreamTurn({
       requestId,
       source,
       turnId,
-      mode: inputMode,
+      mode,
+      narrativeStyleId,
       textLength: text.length,
       hasText: Boolean(text.trim()),
     })
@@ -501,7 +507,8 @@ export function useSessionStreamTurn({
         {
           sessionId,
           text,
-          mode: inputMode,
+          mode,
+          narrativeStyleId,
           requestId,
         },
         {
@@ -517,6 +524,13 @@ export function useSessionStreamTurn({
               turnUsageFallback,
               commandInput,
             )
+            if (
+              event.type === PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED
+              && event.payload.committedTurnId
+              && event.payload.committedTurnId > 0
+            ) {
+              onCommittedNarrativeStyle(narrativeStyleId)
+            }
             if (
               event.type === PLAY_STREAM_EVENT_TYPE.ERROR
               && event.payload.errorCode === MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE
@@ -590,9 +604,9 @@ export function useSessionStreamTurn({
     appendLocalStreamError,
     appendStreamEvent,
     contextPreviewUsage,
-    inputMode,
     logger,
     markStreamStopped,
+    onCommittedNarrativeStyle,
     refreshContextPreview,
     refreshSessionData,
     sessionId,

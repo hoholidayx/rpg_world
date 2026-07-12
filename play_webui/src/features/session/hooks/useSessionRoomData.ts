@@ -6,6 +6,7 @@ import { getCurrentScene } from '@/lib/api/scene'
 import { getSession } from '@/lib/api/sessions'
 import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { getSessionSummary, listSessionSummaries } from '@/lib/api/summaries'
+import { getSessionComposer } from '@/lib/api/sessionComposer'
 import { sessionContextUsageConfig } from '@/lib/config/appConfig'
 import { fromContextPreviewEstimate, type ContextUsageSnapshot } from '@/types/contextUsage'
 import { PLAYER_CHARACTER_STATUS } from '@/types/session'
@@ -17,17 +18,23 @@ import {
   SESSION_HISTORY_MESSAGES,
   SESSION_TIMELINE_ROLE,
   type RefreshSessionDataOptions,
+  type NarrativeStyleId,
   type SessionRailDrawerState,
+  type SessionInputMode,
   type SessionTimelineMessage,
 } from '../sessionRoomTypes'
 import { useSessionHistoryWindow } from './useSessionHistoryWindow'
 
 export function useSessionRoomData({
   sessionId,
+  inputMode,
+  narrativeStyleId,
   showToast,
   logger,
 }: {
   sessionId: string
+  inputMode: SessionInputMode
+  narrativeStyleId: NarrativeStyleId
   showToast: (message: string) => void
   logger: SessionRoomLogger
 }) {
@@ -46,6 +53,11 @@ export function useSessionRoomData({
   })
 
   const session = sessionQuery.data
+  const effectiveNarrativeStyleId = inputMode === 'ooc' ? null : narrativeStyleId
+  const composerQuery = useQuery({
+    queryKey: ['play-session-composer', sessionId],
+    queryFn: () => getSessionComposer(sessionId),
+  })
   const {
     historyQuery,
     activePage: historyPage,
@@ -100,9 +112,12 @@ export function useSessionRoomData({
   const playerCharacterInvalid = session?.playerCharacterStatus === PLAYER_CHARACTER_STATUS.INVALID
 
   const contextPreviewQuery = useQuery({
-    queryKey: ['play-session-context-preview', sessionId],
+    queryKey: ['play-session-context-preview', sessionId, inputMode, effectiveNarrativeStyleId],
     enabled: Boolean(session && !playerCharacterInvalid),
-    queryFn: () => getContextPreview(sessionId),
+    queryFn: () => getContextPreview(sessionId, {
+      mode: inputMode,
+      narrativeStyleId: effectiveNarrativeStyleId,
+    }),
   })
 
   const contextPreviewUsage = useMemo(
@@ -113,11 +128,19 @@ export function useSessionRoomData({
     [contextPreviewQuery.data],
   )
 
-  const refreshContextPreview = useCallback(async () => {
+  const refreshContextPreview = useCallback(async (overrides: {
+    mode?: SessionInputMode
+    narrativeStyleId?: NarrativeStyleId
+  } = {}) => {
+    const mode = overrides.mode ?? inputMode
+    const selectedStyleId = overrides.narrativeStyleId === undefined
+      ? narrativeStyleId
+      : overrides.narrativeStyleId
+    const styleId = mode === 'ooc' ? null : selectedStyleId
     try {
       const preview = await queryClient.fetchQuery({
-        queryKey: ['play-session-context-preview', sessionId],
-        queryFn: () => getContextPreview(sessionId),
+        queryKey: ['play-session-context-preview', sessionId, mode, styleId],
+        queryFn: () => getContextPreview(sessionId, { mode, narrativeStyleId: styleId }),
         staleTime: 0,
       })
       return {
@@ -131,7 +154,7 @@ export function useSessionRoomData({
       logger.warn('context preview refresh failed', { status: 'error', error })
       return { available: false as const, usage: null }
     }
-  }, [logger, queryClient, sessionId])
+  }, [inputMode, logger, narrativeStyleId, queryClient, sessionId])
 
   const baseMessages = useMemo(
     () => mapHistoryToMessages({ turns: historyPage?.turns, playerCharacter })
@@ -244,6 +267,7 @@ export function useSessionRoomData({
 
   return {
     sessionQuery,
+    composerQuery,
     historyQuery,
     historyPage,
     historyLoadingBefore,

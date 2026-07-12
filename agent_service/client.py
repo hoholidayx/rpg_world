@@ -121,8 +121,15 @@ class AgentClient:
     async def get_context_preview(
         self,
         session_id: str,
+        *,
+        mode: str | None = None,
+        narrative_style_id: int | None = None,
     ) -> ContextPreviewPayload:
-        params = {"session_id": session_id}
+        params: dict[str, str | int] = {"session_id": session_id}
+        if mode is not None:
+            params["mode"] = mode
+        if narrative_style_id is not None:
+            params["narrative_style_id"] = int(narrative_style_id)
         return cast(ContextPreviewPayload, await self._get("/chat/context-preview", params=params))
 
     async def get_main_llm_options(self) -> AgentMainLLMProviderCatalogPayload:
@@ -239,10 +246,18 @@ class AgentClient:
         self,
         session_id: str,
         message: str,
+        *,
+        mode: str | None = None,
+        narrative_style_id: int | None = None,
     ) -> AgentReplyPayload:
+        payload: JsonObject = {"session_id": session_id, "message": message}
+        if mode is not None:
+            payload["mode"] = mode
+        if narrative_style_id is not None:
+            payload["narrative_style_id"] = int(narrative_style_id)
         result = await self._post(
             "/chat/send",
-            json={"session_id": session_id, "message": message},
+            json=payload,
         )
         return cast(AgentReplyPayload, result)
 
@@ -315,10 +330,17 @@ class AgentClient:
         session_id: str,
         message: str,
         request_id: str | None = None,
+        *,
+        mode: str | None = None,
+        narrative_style_id: int | None = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         payload: JsonObject = {"session_id": session_id, "message": message}
         if request_id:
             payload["request_id"] = request_id
+        if mode is not None:
+            payload["mode"] = mode
+        if narrative_style_id is not None:
+            payload["narrative_style_id"] = int(narrative_style_id)
         client = self._stream_http_client()
         try:
             async with client.stream("POST", self._url("/chat/stream"), json=payload) as response:

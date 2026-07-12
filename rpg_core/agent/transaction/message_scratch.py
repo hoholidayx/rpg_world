@@ -13,12 +13,14 @@ class MessageScratch:
 
     turn_id: int
     base_history: list[Message]
+    mode: str = "ic"
     staged_messages: list[Message] = field(default_factory=list)
 
     def stage(self, role: Role | str, content: str) -> Message:
         message = Message(
             role=role,
             content=str(content or ""),
+            mode=self.mode,
             turn_id=self.turn_id,
             seq_in_turn=len(self.staged_messages) + 1,
         )

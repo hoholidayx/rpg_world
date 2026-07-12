@@ -45,6 +45,66 @@ def to_workspace(row: records.WorkspaceRecord) -> models.Workspace:
     )
 
 
+def to_workspace_turn_mode(row: records.WorkspaceTurnModeRecord) -> models.WorkspaceTurnMode:
+    return models.WorkspaceTurnMode(
+        workspace_id=str(row.workspace_id),
+        mode=str(row.mode),
+        short_name=str(row.short_name),
+        prompt=str(row.prompt or ""),
+        sort_order=int(row.sort_order),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_narrative_style(row: records.NarrativeStyleRecord) -> models.NarrativeStyle:
+    return models.NarrativeStyle(
+        id=int(row.id),
+        workspace_id=str(row.workspace_id),
+        name=str(row.name),
+        prompt=str(row.prompt or ""),
+        sort_order=int(row.sort_order),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_story_narrative_style(
+    row: records.StoryNarrativeStyleRecord,
+) -> models.StoryNarrativeStyle:
+    style = row.narrative_style
+    return models.StoryNarrativeStyle(
+        id=int(row.id),
+        workspace_id=str(row.workspace_id),
+        story_id=int(row.story_id),
+        narrative_style_id=int(row.narrative_style_id),
+        name=str(style.name),
+        prompt=str(style.prompt or ""),
+        is_base=bool(row.is_base),
+        sort_order=int(row.sort_order),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_story_quick_reply(row: records.StoryQuickReplyRecord) -> models.StoryQuickReply:
+    return models.StoryQuickReply(
+        id=int(row.id),
+        workspace_id=str(row.workspace_id),
+        story_id=int(row.story_id),
+        title=str(row.title),
+        message=str(row.message or ""),
+        sort_order=int(row.sort_order),
+        enabled=bool(row.enabled),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
 def to_story(row: records.StoryRecord) -> models.Story:
     return models.Story(
         id=int(row.id),
@@ -130,6 +190,7 @@ def to_session_message(
         session_id=str(row.session_id),
         role=str(row.role),
         content=str(row.content or ""),
+        mode=str(getattr(row, "mode", models.TURN_MODE_IC) or models.TURN_MODE_IC),
         turn_id=int(row.turn_id),
         seq_in_turn=int(row.seq_in_turn),
         tool_call_id=str(row.tool_call_id or ""),

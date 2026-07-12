@@ -78,11 +78,13 @@ class AgentReply:
         tool_records: list[ToolCallRecord] | None = None,
         status_sub_agent_records: list[dict[str, object]] | None = None,
         stats: TurnStats | None = None,
+        committed_turn_id: int | None = None,
     ) -> None:
         self.text = text
         self.tool_records = tool_records
         self.status_sub_agent_records = status_sub_agent_records
         self.stats = stats
+        self.committed_turn_id = committed_turn_id
 
     def __str__(self) -> str:
         return self.text

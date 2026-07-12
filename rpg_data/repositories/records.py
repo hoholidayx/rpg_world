@@ -9,6 +9,7 @@ from peewee import (
     BooleanField,
     CharField,
     Check,
+    CompositeKey,
     Database,
     DatabaseProxy,
     ForeignKeyField,
@@ -18,13 +19,14 @@ from peewee import (
     TextField,
 )
 
-from rpg_data.models import STATUS_KIND_NORMAL, STORY_STATUS_MOUNT_ORIGIN_SYSTEM
+from rpg_data.models import STATUS_KIND_NORMAL, STORY_STATUS_MOUNT_ORIGIN_SYSTEM, TURN_MODE_IC
 from rpg_data.settings import resolve_database_path
 
 __all__ = [
     "CharacterDetailRecord",
     "CharacterRecord",
     "LorebookEntryRecord",
+    "NarrativeStyleRecord",
     "RPModuleCatalogRecord",
     "SessionBackupMessageRecord",
     "SessionMessageRecord",
@@ -36,11 +38,14 @@ __all__ = [
     "SessionStatusTableRecord",
     "StoryCharacterRecord",
     "StoryLorebookEntryRecord",
+    "StoryNarrativeStyleRecord",
+    "StoryQuickReplyRecord",
     "StoryStatusTableRecord",
     "StoryRecord",
     "StoryRPModuleRecord",
     "StatusTableTemplateRecord",
     "WorkspaceRecord",
+    "WorkspaceTurnModeRecord",
     "bind_database",
     "make_database",
 ]
@@ -96,6 +101,26 @@ class WorkspaceRecord(BaseRecord):
         table_name = "rpg_workspaces"
 
 
+class WorkspaceTurnModeRecord(BaseRecord):
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="turn_modes",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    mode = TextField()
+    short_name = TextField()
+    prompt = TextField(default="")
+    sort_order = IntegerField(default=0)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_workspace_turn_modes"
+        primary_key = CompositeKey("workspace", "mode")
+
+
 class StoryRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
@@ -117,6 +142,81 @@ class StoryRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_stories"
+
+
+class NarrativeStyleRecord(BaseRecord):
+    id = AutoField()
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="narrative_styles",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    name = TextField()
+    prompt = TextField(default="")
+    sort_order = IntegerField(default=0)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_narrative_styles"
+
+
+class StoryNarrativeStyleRecord(BaseRecord):
+    id = AutoField()
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="story_narrative_styles",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="narrative_style_mounts",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    narrative_style = ForeignKeyField(
+        NarrativeStyleRecord,
+        backref="story_mounts",
+        column_name="narrative_style_id",
+        on_delete="CASCADE",
+    )
+    is_base = BooleanField(default=False)
+    sort_order = IntegerField(default=0)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_narrative_styles"
+
+
+class StoryQuickReplyRecord(BaseRecord):
+    id = AutoField()
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="story_quick_replies",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="quick_replies",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    title = TextField()
+    message = TextField(default="")
+    sort_order = IntegerField(default=0)
+    enabled = BooleanField(default=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_quick_replies"
 
 
 class SessionRecord(BaseRecord):
@@ -174,6 +274,7 @@ class SessionMessageRecord(BaseRecord):
     )
     role = TextField()
     content = TextField(default="")
+    mode = TextField(default=TURN_MODE_IC)
     turn_id = IntegerField(constraints=[Check("turn_id > 0")])
     seq_in_turn = IntegerField(constraints=[Check("seq_in_turn > 0")])
     tool_call_id = TextField(default="")
@@ -202,6 +303,7 @@ class SessionBackupMessageRecord(BaseRecord):
     )
     role = TextField()
     content = TextField(default="")
+    mode = TextField(default=TURN_MODE_IC)
     turn_id = IntegerField(constraints=[Check("turn_id > 0")])
     seq_in_turn = IntegerField(constraints=[Check("seq_in_turn > 0")])
     tool_call_id = TextField(default="")
@@ -544,7 +646,11 @@ class SessionStatusTableRecord(BaseRecord):
 
 RECORD_MODELS = (
     WorkspaceRecord,
+    WorkspaceTurnModeRecord,
     StoryRecord,
+    NarrativeStyleRecord,
+    StoryNarrativeStyleRecord,
+    StoryQuickReplyRecord,
     SessionRecord,
     SessionProfileRecord,
     SessionMessageRecord,

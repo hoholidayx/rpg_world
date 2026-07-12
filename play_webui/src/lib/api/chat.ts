@@ -12,6 +12,7 @@ export function createStreamRequest(payload: SendMessagePayload, signal?: AbortS
     body: JSON.stringify({
       text: payload.text,
       mode: payload.mode,
+      narrativeStyleId: payload.narrativeStyleId ?? null,
       requestId: payload.requestId,
     }),
     signal,

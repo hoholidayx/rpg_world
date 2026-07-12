@@ -73,13 +73,42 @@ class AgentBackend:
             for item in result.get("commands", [])
         ]
 
-    async def get_context_preview(self, workspace: str, story_id: int, session_id: str) -> ContextPreviewPayload:
+    async def get_context_preview(
+        self,
+        workspace: str,
+        story_id: int,
+        session_id: str,
+        *,
+        mode: str | None = None,
+        narrative_style_id: int | None = None,
+    ) -> ContextPreviewPayload:
         del workspace, story_id
-        return await agent_client.get_agent_client().get_context_preview(session_id)
+        if (mode is None or mode == "ic") and narrative_style_id is None:
+            return await agent_client.get_agent_client().get_context_preview(session_id)
+        return await agent_client.get_agent_client().get_context_preview(
+            session_id,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+        )
 
-    async def send(self, workspace: str, story_id: int, session_id: str, text: str, mode: str) -> dict[str, object]:
+    async def send(
+        self,
+        workspace: str,
+        story_id: int,
+        session_id: str,
+        text: str,
+        mode: str,
+        narrative_style_id: int | None = None,
+    ) -> dict[str, object]:
         del workspace, story_id
-        return await agent_client.get_agent_client().send(session_id, text)
+        if mode == "ic" and narrative_style_id is None:
+            return await agent_client.get_agent_client().send(session_id, text)
+        return await agent_client.get_agent_client().send(
+            session_id,
+            text,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+        )
 
     async def reload_history(self, workspace: str, story_id: int, session_id: str) -> dict[str, object]:
         del workspace, story_id
@@ -122,10 +151,26 @@ class AgentBackend:
         session_id: str,
         text: str,
         mode: str,
+        narrative_style_id: int | None = None,
         request_id: str | None = None,
     ) -> AsyncIterator[dict[str, object]]:
-        del workspace, story_id, mode
-        async for event in agent_client.get_agent_client().stream(session_id, text, request_id=request_id):
+        del workspace, story_id
+        events = (
+            agent_client.get_agent_client().stream(
+                session_id,
+                text,
+                request_id=request_id,
+            )
+            if mode == "ic" and narrative_style_id is None
+            else agent_client.get_agent_client().stream(
+                session_id,
+                text,
+                request_id=request_id,
+                mode=mode,
+                narrative_style_id=narrative_style_id,
+            )
+        )
+        async for event in events:
             yield event.to_dict()
 
     async def stop(

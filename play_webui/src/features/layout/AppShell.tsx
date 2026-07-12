@@ -18,6 +18,7 @@ import {
   Sparkles,
   TableProperties,
   UsersRound,
+  WandSparkles,
   X,
 } from 'lucide-react'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
@@ -39,6 +40,7 @@ const navItems = [
   { label: '首页', icon: Home, href: '/' },
   { label: '会话中心', icon: Clock3, href: '/sessions' },
   { label: '故事库', icon: BookOpen, href: '/stories' },
+  { label: '叙事风格库', icon: WandSparkles, href: '/narrative-styles' },
   { label: '角色库', icon: UsersRound, href: '/characters' },
   { label: '世界设定', icon: Globe2, href: '/worldbook' },
   { label: '状态表', icon: TableProperties, href: '/status-tables' },

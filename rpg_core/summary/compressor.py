@@ -35,6 +35,7 @@ from loguru import logger
 from rpg_core.session.manager import SessionManager
 
 from rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
+from rpg_core.agent.sub_agents.memory_candidates import select_summary_turn_groups
 
 if TYPE_CHECKING:
     from rpg_core.summary.batch_store import BatchSummaryStore
@@ -119,15 +120,24 @@ class SummaryCompressor:
 
         多次调用是安全的 —— 如果历史不够长，直接返回 ``triggered=False``。
         """
+        # A globally disabled MemorySubAgent owns no processing side effects.
+        if self._memory_sub_agent is None or not bool(
+            getattr(self._memory_sub_agent, "enabled", True)
+        ):
+            return CompressResult()
+
+        compress_groups = select_summary_turn_groups(
+            session,
+            keep_recent_turns=self._keep_recent_rounds,
+        )
+
+        # Auto compression can be disabled independently; OOC exclusion above
+        # is still a lightweight continuation step.
         if not self._enabled:
             return CompressResult()
 
-        if self._memory_sub_agent is None or self._batch_store is None:
+        if self._batch_store is None:
             return CompressResult()
-
-        compress_groups = session.summary_turn_groups_for_compression(
-            self._keep_recent_rounds
-        )
         user_rounds_in_compress = len(compress_groups)
         if user_rounds_in_compress <= self._compression_threshold:
             return CompressResult()

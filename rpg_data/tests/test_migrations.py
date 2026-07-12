@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from rpg_data import db
 from rpg_data.migrations.runner import run_migrations
 
@@ -35,6 +37,10 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_rp_module_catalog",
             "rpg_story_rp_modules",
             "rpg_session_rp_module_overrides",
+            "rpg_workspace_turn_modes",
+            "rpg_narrative_styles",
+            "rpg_story_narrative_styles",
+            "rpg_story_quick_replies",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -129,7 +135,11 @@ def test_run_migrations_creates_initial_tables() -> None:
             "seq_in_turn",
             "tool_call_id",
             "tool_calls_json",
+            "mode",
         }.issubset(session_message_columns)
+        assert "mode" in backup_message_columns
+        assert session_message_info["mode"]["notnull"] == 1
+        assert session_message_info["mode"]["dflt_value"] == "'ic'"
         assert {
             "summary_processed",
             "summary_batch_id",
@@ -206,7 +216,28 @@ def test_run_migrations_creates_initial_tables() -> None:
             "idx_rpg_session_story_memories_turn",
             "idx_rpg_session_story_memories_dream",
             "idx_rpg_session_narrative_outcomes_session_turn",
+            "idx_rpg_story_narrative_styles_story",
+            "ux_rpg_story_narrative_styles_base",
+            "idx_rpg_story_quick_replies_story",
         }.issubset(indexes)
+
+        assert {
+            (row["mode"], row["short_name"])
+            for row in conn.execute(
+                "SELECT mode, short_name FROM rpg_workspace_turn_modes WHERE workspace_id = 'demo_workspace'"
+            )
+        } == {("ic", "角色内"), ("ooc", "场外"), ("gm", "主持")}
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_narrative_styles WHERE workspace_id = 'demo_workspace'"
+        ).fetchone()["count"] == 3
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_story_narrative_styles WHERE story_id = 1"
+        ).fetchone()["count"] == 3
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO rpg_session_messages (session_id, role, content, mode, turn_id, seq_in_turn) VALUES ('s_forest001', 'user', 'bad', 'chat', 99, 1)"
+            )
 
         story_status_indexes = conn.execute("PRAGMA index_list(rpg_story_status_tables)").fetchall()
         for index in story_status_indexes:
@@ -237,6 +268,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0003", "0003_pagination_demo.sql"),
             ("0004", "0004_main_llm_selection.sql"),
             ("0005", "0005_rp_modules.sql"),
+            ("0006", "0006_session_composer.sql"),
         ]
     finally:
         conn.close()

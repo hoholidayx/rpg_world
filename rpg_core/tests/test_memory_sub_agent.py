@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from rpg_core.agent.sub_agents.memory_sub_agent import MemoryAgentResult, MemorySubAgent
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session.manager import SessionManager
@@ -73,3 +75,26 @@ def test_story_progress_restart(tmp_path, make_data_session):
 
     assert remaining == []
     assert remaining_turns == 0
+
+
+@pytest.mark.asyncio
+async def test_story_memory_failure_keeps_messages_retryable() -> None:
+    session = SessionManager(history_enabled=False)
+    session.replace_history([
+        Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
+    ], persist=False)
+    sub_agent = MemorySubAgent(
+        story_store=DummyStoryStore(),
+        provider_biz_key="agent.memory_sub_agent",
+        enabled=True,
+    )
+
+    async def fail_process(_context):
+        raise RuntimeError("provider failed")
+
+    sub_agent.process = fail_process  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="provider failed"):
+        await sub_agent._execute_story_memory(SimpleNamespace(_session=session))
+
+    assert session.count_new_turns_since_story() == 1

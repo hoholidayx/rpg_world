@@ -10,7 +10,7 @@ from typing import Literal, TypeVar
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agent_service.client import AgentClientError, AgentServiceUnavailable
 from play_api.backends import get_agent_backend, get_data_manager_backend
@@ -25,6 +25,7 @@ from rpg_core.session.turn_metadata import (
     has_trustworthy_turn_metadata,
     validate_turn_metadata,
 )
+from rpg_core.turns import normalize_turn_mode
 from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
@@ -115,11 +116,17 @@ class ContextPreviewPayload(BaseModel):
 
 
 class PlayChatRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     text: str
-    mode: str = "ic"
+    mode: Literal["ic", "ooc", "gm"] = "ic"
+    narrative_style_id: int | None = Field(default=None, alias="narrativeStyleId", gt=0)
     request_id: str | None = Field(default=None, alias="requestId")
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _normalize_mode(cls, value: object) -> str:
+        return normalize_turn_mode(value).value
 
 
 class PlayStopRequest(BaseModel):
@@ -146,6 +153,7 @@ class PlayHistoryMessage(BaseModel):
     seq_in_turn: int = Field(alias="seqInTurn")
     role: Literal["user", "assistant", "tool", "system"]
     content: str
+    mode: Literal["ic", "ooc", "gm"] = "ic"
     metadata: dict[str, object] = Field(default_factory=dict)
     created_at: str | None = Field(default=None, alias="createdAt")
 
@@ -302,6 +310,7 @@ def _history_message(
         seq_in_turn=raw_seq or fallback_seq,
         role=_history_role(raw),
         content=str(raw.get("content") or ""),
+        mode=normalize_turn_mode(raw.get("mode")).value,
         metadata=metadata if isinstance(metadata, dict) else {},
         created_at=str(raw.get("createdAt")) if raw.get("createdAt") is not None else None,
     )
@@ -397,6 +406,7 @@ def _history_payload_from_row(row: object) -> dict[str, object]:
         "seqInTurn": int(getattr(row, "seq_in_turn", 0) or 0),
         "role": str(getattr(row, "role", "") or "assistant"),
         "content": str(getattr(row, "content", "") or ""),
+        "mode": str(getattr(row, "mode", "") or "ic"),
         "metadata": metadata,
     }
     created_at = str(getattr(row, "created_at", "") or "")
@@ -622,10 +632,24 @@ async def list_commands(session_id: str) -> list[PlayCommand]:
 
 
 @router.get("/{session_id}/context-preview", response_model=ContextPreviewPayload)
-async def get_context_preview(session_id: str) -> ContextPreviewPayload:
+async def get_context_preview(
+    session_id: str,
+    mode: str | None = Query(default=None),
+    narrative_style_id: int | None = Query(default=None, alias="narrativeStyleId", gt=0),
+) -> ContextPreviewPayload:
     workspace, story_id, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    try:
+        normalized_mode = normalize_turn_mode(mode).value
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     preview = await _agent_call(
-        get_agent_backend().get_context_preview(workspace, story_id, agent_session_id)
+        get_agent_backend().get_context_preview(
+            workspace,
+            story_id,
+            agent_session_id,
+            mode=normalized_mode,
+            narrative_style_id=narrative_style_id,
+        )
     )
     _log_context_preview_usage(session_id=agent_session_id, preview=preview)
     return ContextPreviewPayload.model_validate(preview)
@@ -642,6 +666,7 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
             agent_session_id,
             payload.text,
             payload.mode,
+            payload.narrative_style_id,
         )
     )
     _log_turn_usage(session_id=agent_session_id, usage=result.get("usage"), mode=payload.mode)
@@ -652,6 +677,9 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
         "storyId": story_id,
         "sessionId": agent_session_id,
         "mode": payload.mode,
+        "committedTurnId": _positive_int(
+            result.get("committedTurnId") or result.get("committed_turn_id")
+        ),
         "reply": result.get("reply", ""),
         "usage": result.get("usage"),
         "agent": result,
@@ -714,6 +742,7 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
                 agent_session_id,
                 payload.text,
                 payload.mode,
+                payload.narrative_style_id,
                 request_id=payload.request_id,
             ):
                 kind = agent_event_kind(event)

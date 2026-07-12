@@ -33,6 +33,7 @@ class BaseSessionMessageStore:
         role: str,
         content: str = "",
         *,
+        mode: str = models.TURN_MODE_IC,
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
         tool_call_id: str = "",
@@ -45,11 +46,13 @@ class BaseSessionMessageStore:
         story_memory_processed_at: str = "",
     ) -> models.SessionMessage:
         role = _validate_role(role)
+        mode = _validate_mode(mode)
         turn_id, seq_in_turn = _validate_turn_metadata_fields(turn_id, seq_in_turn)
         fields: dict[str, object] = {
             "session": session_id,
             "role": role,
             "content": str(content or ""),
+            "mode": mode,
             "turn_id": int(turn_id or 0),
             "seq_in_turn": int(seq_in_turn or 0),
             "tool_call_id": str(tool_call_id or ""),
@@ -280,6 +283,7 @@ class BaseSessionMessageStore:
         *,
         role: str | None = None,
         content: str | None = None,
+        mode: str | None = None,
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
         tool_call_id: str | None = None,
@@ -293,6 +297,8 @@ class BaseSessionMessageStore:
             fields["role"] = _validate_role(role)
         if content is not None:
             fields["content"] = str(content)
+        if mode is not None:
+            fields["mode"] = _validate_mode(mode)
         if turn_id is not None:
             fields["turn_id"] = int(turn_id)
         if seq_in_turn is not None:
@@ -415,7 +421,7 @@ class BaseSessionMessageStore:
         session_id: str,
         message_ids: Iterable[int],
         *,
-        batch_id: int,
+        batch_id: int | None,
     ) -> int:
         ids = _normalize_ids(message_ids)
         if not ids:
@@ -424,7 +430,7 @@ class BaseSessionMessageStore:
             self._record_model
             .update(
                 summary_processed=True,
-                summary_batch_id=int(batch_id),
+                summary_batch_id=(int(batch_id) if batch_id is not None else None),
                 summary_processed_at=SQL("CURRENT_TIMESTAMP"),
                 updated_at=SQL("CURRENT_TIMESTAMP"),
             )
@@ -490,6 +496,13 @@ def _validate_role(role: str) -> str:
     return normalized
 
 
+def _validate_mode(mode: str | None) -> str:
+    normalized = str(mode or "").strip().lower() or models.TURN_MODE_IC
+    if normalized not in models.TURN_MODES:
+        raise ValueError(f"invalid session message mode: {normalized}")
+    return normalized
+
+
 def _validate_turn_metadata_fields(
     turn_id: object | None,
     seq_in_turn: object | None,
@@ -538,6 +551,7 @@ def _coerce_message_input(values: MessageInput) -> dict[str, object]:
         return {
             "role": values.role,
             "content": values.content,
+            "mode": values.mode,
             "turn_id": values.turn_id,
             "seq_in_turn": values.seq_in_turn,
             "tool_call_id": values.tool_call_id,
@@ -556,6 +570,7 @@ def _coerce_message_input(values: MessageInput) -> dict[str, object]:
     return {
         "role": str(values["role"]),
         "content": str(values.get("content", "") or ""),
+        "mode": _validate_mode(str(values.get("mode", models.TURN_MODE_IC) or "")),
         "turn_id": _required_positive_int(values.get("turn_id", values.get("turnId")), "turn_id"),
         "seq_in_turn": _required_positive_int(
             values.get("seq_in_turn", values.get("seqInTurn")),

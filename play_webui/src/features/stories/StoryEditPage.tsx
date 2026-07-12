@@ -30,6 +30,7 @@ import type { SessionSummary } from '@/types/session'
 import { STATUS_KIND, type StoryStatusMount } from '@/types/statusTables'
 import type { StoryInput, StorySummary } from '@/types/story'
 import { StoryRPModulesPanel } from './StoryRPModulesPanel'
+import { StoryComposerPanel } from './StoryComposerPanel'
 
 type DraftState = StoryInput
 
@@ -649,6 +650,10 @@ function StoryEditContent({
                   workspace={currentWorkspace}
                   storyId={story.id}
                 />
+              ) : null}
+
+              {!isCreate && currentWorkspace && story ? (
+                <StoryComposerPanel workspaceId={currentWorkspace} storyId={story.id} />
               ) : null}
 
               <Panel

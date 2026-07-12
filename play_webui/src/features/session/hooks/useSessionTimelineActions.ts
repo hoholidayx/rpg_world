@@ -11,12 +11,11 @@ import {
   streamPlaceholder,
 } from '../sessionTimelineMessages'
 import {
-  SESSION_MESSAGE_STATUS,
   SESSION_STREAM_SOURCE,
   SESSION_TIMELINE_ROLE,
   SESSION_HISTORY_MESSAGES,
   type ConfirmRequest,
-  type NarrativeStyle,
+  type NarrativeStyleId,
   type RefreshSessionDataOptions,
   type SessionInputMode,
   type SessionStreamSource,
@@ -32,7 +31,7 @@ export function useSessionTimelineActions({
   playerCharacter,
   playerCharacterInvalid,
   inputMode,
-  currentNarrativeStyle,
+  narrativeStyleId,
   composerText,
   contextInputBlockThresholdRatio,
   refreshContextPreview,
@@ -55,10 +54,13 @@ export function useSessionTimelineActions({
   playerCharacter: SessionPlayerCharacter | null
   playerCharacterInvalid: boolean
   inputMode: SessionInputMode
-  currentNarrativeStyle: NarrativeStyle
+  narrativeStyleId: NarrativeStyleId
   composerText: string
   contextInputBlockThresholdRatio: number
-  refreshContextPreview: () => Promise<{
+  refreshContextPreview: (overrides?: {
+    mode?: SessionInputMode
+    narrativeStyleId?: NarrativeStyleId
+  }) => Promise<{
     available: boolean
     usage: ContextUsageSnapshot | null
   }>
@@ -123,6 +125,9 @@ export function useSessionTimelineActions({
   }) => {
     if (!ensureCanStartTurn()) return
 
+    const turnMode = message?.mode ?? inputMode
+    const turnNarrativeStyleId = turnMode === 'ooc' ? null : narrativeStyleId
+
     const trimmedText = text.trim()
     if (!trimmedText) {
       showToast(source === SESSION_STREAM_SOURCE.SEND ? '请输入内容后再发送' : '发送内容不能为空')
@@ -130,7 +135,10 @@ export function useSessionTimelineActions({
     }
 
     if (!isSlashCommandInput(trimmedText)) {
-      const latestContext = await refreshContextPreview()
+      const latestContext = await refreshContextPreview({
+        mode: turnMode,
+        narrativeStyleId: turnNarrativeStyleId,
+      })
       if (
         latestContext.available
         && isContextInputBlocked(latestContext.usage, contextInputBlockThresholdRatio)
@@ -152,17 +160,16 @@ export function useSessionTimelineActions({
     const timelineAnchorTurnId = replacingLastTurn && message
       ? Math.max(0, message.turnId - 1)
       : persistedLastTurnId
-    const playerSpeaker = makePlayerSpeaker(playerCharacter)
+    const playerSpeaker = makePlayerSpeaker(playerCharacter, turnMode)
     const userMessage: SessionTimelineMessage = {
       id: `local-${source}-user-${turnId}-${crypto.randomUUID()}`,
       turnId,
       seqInTurn: 1,
       role: SESSION_TIMELINE_ROLE.USER,
+      mode: turnMode,
       content: trimmedText,
       createdAt: new Date().toISOString(),
-      speaker: { ...playerSpeaker, label: inputMode.toUpperCase() },
-      hiddenPrompt: currentNarrativeStyle.prompt,
-      status: currentNarrativeStyle.prompt ? SESSION_MESSAGE_STATUS.LOCAL : undefined,
+      speaker: playerSpeaker,
       canCopy: true,
       canRetry: false,
       canEdit: false,
@@ -175,7 +182,8 @@ export function useSessionTimelineActions({
       turnId,
       messageId: message?.messageId,
       replacingLastTurn,
-      mode: inputMode,
+      mode: turnMode,
+      narrativeStyleId: turnNarrativeStyleId,
       textLength: trimmedText.length,
       hasText: Boolean(trimmedText),
     })
@@ -212,13 +220,14 @@ export function useSessionTimelineActions({
       userMessage,
       assistantMessage,
       source,
+      mode: turnMode,
+      narrativeStyleId: turnNarrativeStyleId,
       pendingToast,
       successToast,
       failureToast,
       clearComposer,
     })
   }, [
-    currentNarrativeStyle,
     contextInputBlockThresholdRatio,
     ensureCanStartTurn,
     inputMode,
@@ -227,6 +236,7 @@ export function useSessionTimelineActions({
     lastTurnId,
     logger,
     playerCharacter,
+    narrativeStyleId,
     refreshContextPreview,
     sessionId,
     setOptimisticTruncateFromTurn,
@@ -243,6 +253,16 @@ export function useSessionTimelineActions({
       clearComposer: true,
     })
   }, [composerText, streamTurnFromText])
+
+  const handleQuickReply = useCallback(async (message: string) => {
+    await streamTurnFromText({
+      text: message,
+      source: SESSION_STREAM_SOURCE.SEND,
+      successToast: '快速回复已发送',
+      failureToast: '快速回复发送失败',
+      clearComposer: false,
+    })
+  }, [streamTurnFromText])
 
   const performRetry = useCallback(async (message: SessionTimelineMessage) => {
     if (!canRetryMessage(message)) {
@@ -384,6 +404,7 @@ export function useSessionTimelineActions({
     editDraft,
     setEditDraft,
     handleSend,
+    handleQuickReply,
     handleRetry,
     handleCopy,
     handleStartEdit,

@@ -90,6 +90,30 @@ async def test_client_send_uses_standard_payload() -> None:
     )
 
 
+async def test_client_send_and_preview_forward_optional_composer_fields() -> None:
+    client = AgentClient(base_url="http://agent")
+    await client.send("s1", "hello", mode="gm", narrative_style_id=42)
+    await client.get_context_preview("s1", mode="ooc", narrative_style_id=42)
+
+    assert FakeAsyncClient.calls[-2:] == [
+        (
+            "POST",
+            "http://agent/chat/send",
+            {"json": {
+                "session_id": "s1",
+                "message": "hello",
+                "mode": "gm",
+                "narrative_style_id": 42,
+            }},
+        ),
+        (
+            "GET",
+            "http://agent/chat/context-preview",
+            {"params": {"session_id": "s1", "mode": "ooc", "narrative_style_id": 42}},
+        ),
+    ]
+
+
 async def test_client_reload_history_uses_standard_payload() -> None:
     result = await AgentClient(base_url="http://agent").reload_history("s1")
     assert result == {"reply": "ok"}
@@ -207,6 +231,31 @@ async def test_client_stream_parses_sse_events() -> None:
         "POST",
         "http://agent/chat/stream",
         {"json": {"session_id": "s1", "message": "hello", "request_id": "req1"}},
+    )
+
+
+async def test_client_stream_forwards_optional_composer_fields() -> None:
+    events = [
+        event
+        async for event in AgentClient(base_url="http://agent").stream(
+            "s1",
+            "hello",
+            request_id="req2",
+            mode="gm",
+            narrative_style_id=8,
+        )
+    ]
+    assert events[-1].committed_turn_id == 4
+    assert FakeAsyncClient.calls[-1] == (
+        "POST",
+        "http://agent/chat/stream",
+        {"json": {
+            "session_id": "s1",
+            "message": "hello",
+            "request_id": "req2",
+            "mode": "gm",
+            "narrative_style_id": 8,
+        }},
     )
 
 

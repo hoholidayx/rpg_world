@@ -25,6 +25,10 @@ __all__ = [
     "SessionStatusTable",
     "Story",
     "StoryRPModule",
+    "NarrativeStyle",
+    "StoryNarrativeStyle",
+    "StoryQuickReply",
+    "WorkspaceTurnMode",
     "StoryCharacter",
     "StoryLorebookEntry",
     "StoryLorebookEntryDetail",
@@ -49,6 +53,10 @@ __all__ = [
     "MESSAGE_ROLE_TOOL",
     "MESSAGE_ROLE_USER",
     "MESSAGE_ROLES",
+    "TURN_MODE_GM",
+    "TURN_MODE_IC",
+    "TURN_MODE_OOC",
+    "TURN_MODES",
     "NARRATIVE_OUTCOME_CODES",
     "NARRATIVE_OUTCOME_SOURCE_CONFIG",
     "NARRATIVE_OUTCOME_SOURCE_SESSION",
@@ -84,6 +92,10 @@ MESSAGE_ROLES = frozenset({
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_TOOL,
 })
+TURN_MODE_IC = "ic"
+TURN_MODE_OOC = "ooc"
+TURN_MODE_GM = "gm"
+TURN_MODES = frozenset({TURN_MODE_IC, TURN_MODE_OOC, TURN_MODE_GM})
 NARRATIVE_OUTCOME_CODES = (
     "critical_success",
     "success",
@@ -203,6 +215,59 @@ class Workspace:
 
 
 @dataclass(frozen=True)
+class WorkspaceTurnMode:
+    workspace_id: str
+    mode: str
+    short_name: str
+    prompt: str = ""
+    sort_order: int = 0
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class NarrativeStyle:
+    id: int
+    workspace_id: str
+    name: str
+    prompt: str = ""
+    sort_order: int = 0
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class StoryNarrativeStyle:
+    id: int
+    workspace_id: str
+    story_id: int
+    narrative_style_id: int
+    name: str
+    prompt: str = ""
+    is_base: bool = False
+    sort_order: int = 0
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class StoryQuickReply:
+    id: int
+    workspace_id: str
+    story_id: int
+    title: str
+    message: str = ""
+    sort_order: int = 0
+    enabled: bool = True
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
 class RPModuleCatalogEntry:
     module_name: str
     display_name: str
@@ -304,6 +369,7 @@ class SessionMessage:
     session_id: str
     role: str
     content: str = ""
+    mode: str = TURN_MODE_IC
     turn_id: int = 0
     seq_in_turn: int = 0
     tool_call_id: str = ""
@@ -322,6 +388,7 @@ class SessionMessage:
         data: dict[str, object] = {
             "role": self.role,
             "content": self.content,
+            "mode": self.mode or TURN_MODE_IC,
         }
         if self.id:
             data["uid"] = self.id

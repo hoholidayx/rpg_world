@@ -128,8 +128,8 @@ def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_to
     messages = payload["messages"]
     assert messages == [
         {"role": "system", "content": "fixed|core"},
-        {"role": "user", "content": "u1", "turn_id": 1, "seq_in_turn": 1},
-        {"role": "assistant", "content": "a1", "turn_id": 1, "seq_in_turn": 2},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
         {"role": "user", "content": "inspect"},
     ]
 

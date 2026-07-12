@@ -37,6 +37,10 @@ from rpg_core.agent.agent_types import CallRecord, LLMResponse
 from rpg_core.agent.command import CommandDef
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session.manager import SessionManager
+from rpg_core.agent.sub_agents.memory_candidates import (
+    select_story_memory_turn_groups,
+    select_summary_turn_groups,
+)
 
 if TYPE_CHECKING:
     from rpg_core.agent.agent import RPGGameAgent
@@ -53,6 +57,10 @@ _TAG = "[MemorySubAgent]"
 COMMAND_NAME_COMPACT = "/compact"
 COMMAND_NAME_EXTRACT_STORY = "/extract_story_memory"
 """此子 Agent 注册到 CommandDispatcher 的斜杠命令名。"""
+
+
+class MemoryPipelineError(RuntimeError):
+    """Raised when an LLM or persistence failure must keep progress retryable."""
 
 # ── function schemas (one per pipeline) ───────────────────────────────
 
@@ -380,7 +388,8 @@ class MemorySubAgent(BaseSubAgent):
         if agent is None or not hasattr(agent, "_session"):
             return {"reply": "未绑定主 Agent，无法执行 story_memory"}
 
-        new_msgs = agent._session.story_messages_since_last_extraction()
+        new_groups = select_story_memory_turn_groups(agent._session)
+        new_msgs = [message for group in new_groups for message in group]
         if not new_msgs:
             logger.info(_TAG + " story_memory skipped: no new messages since last extraction")
             return {"reply": "剧情记忆提取跳过：没有新消息需要处理。", "stats": None}
@@ -390,6 +399,8 @@ class MemorySubAgent(BaseSubAgent):
             len(new_msgs),
         )
         result = await self.process({"story": new_msgs})
+        if result.skipped:
+            return {"reply": "剧情记忆提取跳过：处理器当前不可用。", "stats": None}
         added = result.story_details_added
         agent._session.mark_story_messages_processed(new_msgs)
 
@@ -466,10 +477,12 @@ class MemorySubAgent(BaseSubAgent):
         compress_batch_size = compress_batch_size or settings.memory_compress_batch_size
         keep_rounds = keep_rounds or settings.memory_keep_rounds
 
+        candidate_groups = select_summary_turn_groups(
+            agent._session,
+            keep_recent_turns=keep_rounds,
+        )
         if self._batch_store is None:
             return {"skipped": True, "reason": "no batch_store configured"}
-
-        candidate_groups = agent._session.summary_turn_groups_for_compression(keep_rounds)
         total = len(SessionManager.iter_turn_groups(agent._session.history))
         if not candidate_groups:
             logger.info(
@@ -622,25 +635,28 @@ class MemorySubAgent(BaseSubAgent):
 
         由主 Agent 在每轮对话结束后编排调用（await 等待完成）。
         """
-        if not self._enabled or not self._story_store:
+        if not self._enabled:
             return
+        new_groups = select_story_memory_turn_groups(session)
         from rpg_core.settings import settings as _s
         trigger = _s.memory_story_trigger_rounds
-        if trigger <= 0:
+        if not self._story_store or trigger <= 0:
             return
 
-        new_turns = session.count_new_turns_since_story()
+        new_turns = len(new_groups)
         if new_turns < trigger:
             return
         logger.info(
             _TAG + " auto story extraction: {} new turns >= trigger {}",
             new_turns, trigger,
         )
-        new_msgs = session.story_messages_since_last_extraction()
+        new_msgs = [message for group in new_groups for message in group]
         if not new_msgs:
             return
 
-        await self.process({"story": new_msgs})
+        result = await self.process({"story": new_msgs})
+        if result.skipped:
+            return
         session.mark_story_messages_processed(new_msgs)
 
     def update_store_refs(
@@ -718,7 +734,11 @@ class MemorySubAgent(BaseSubAgent):
             )).to_dict(),
         ]
 
-        decision, call_rec = await self._call_llm(messages, STORY_DETAIL_SCHEMA)
+        decision, call_rec = await self._call_llm(
+            messages,
+            STORY_DETAIL_SCHEMA,
+            raise_on_failure=True,
+        )
         if call_rec:
             call_stats.append(call_rec)
             logger.info(
@@ -729,18 +749,26 @@ class MemorySubAgent(BaseSubAgent):
                 call_rec.duration_ms,
             )
         details = decision.get("story_details", [])
+        if not isinstance(details, list):
+            raise MemoryPipelineError("story memory response must contain a list")
         turn_id = SessionManager.latest_turn_id(conv)
 
         added = 0
         if details and self._story_store:
+            write_errors: list[Exception] = []
             for detail in details:
                 try:
                     self._story_store.add_detail(detail, turn_id=turn_id)
                     added += 1
                 except Exception as exc:
+                    write_errors.append(exc)
                     logger.warning(
                         _TAG + " failed to add story detail: {}", exc
                     )
+            if write_errors:
+                raise MemoryPipelineError(
+                    f"failed to persist {len(write_errors)} story detail(s)"
+                ) from write_errors[0]
             if added:
                 logger.debug(_TAG + " added {} story details", added)
 
@@ -902,6 +930,8 @@ class MemorySubAgent(BaseSubAgent):
         self,
         messages: list[dict],
         schema: dict[str, object],
+        *,
+        raise_on_failure: bool = False,
     ) -> tuple[dict[str, object], CallRecord | None]:
         """Call provider with *messages* and *schema*, return parsed arguments.
 
@@ -919,6 +949,8 @@ class MemorySubAgent(BaseSubAgent):
             result = await provider.chat(messages, tools=[schema])
         except Exception as exc:
             logger.warning(_TAG + " LLM call failed: {}", exc)
+            if raise_on_failure:
+                raise MemoryPipelineError("memory LLM call failed") from exc
             return {}, None
 
         duration_ms = (time.monotonic() - t0) * 1000
@@ -937,15 +969,19 @@ class MemorySubAgent(BaseSubAgent):
         tool_calls = result.get("tool_calls") if isinstance(result, dict) else result.tool_calls
         if not tool_calls:
             logger.warning(_TAG + " LLM returned no tool calls")
+            if raise_on_failure:
+                raise MemoryPipelineError("memory LLM returned no tool calls")
             return {}, call_record
 
         try:
             parsed = json.loads(tool_calls[0]["function"]["arguments"])
             return parsed, call_record
-        except (KeyError, json.JSONDecodeError, IndexError) as exc:
+        except (KeyError, TypeError, json.JSONDecodeError, IndexError) as exc:
             logger.warning(
                 _TAG + " failed to parse function args: {}", exc
             )
+            if raise_on_failure:
+                raise MemoryPipelineError("failed to parse memory function arguments") from exc
             return {}, call_record
 
     def _format_conversation_window(

@@ -62,6 +62,7 @@ class TurnCommitPlan:
             self.session.append(
                 message.role,
                 message.content,
+                mode=message.mode,
                 turn_id=message.turn_id,
                 seq_in_turn=message.seq_in_turn,
             )

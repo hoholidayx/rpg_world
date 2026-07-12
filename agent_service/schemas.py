@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from commons.types import JsonObject, JsonValue
 from rpg_core.agent.agent_types import TurnCancelStatus
 from rpg_core.session.manager import DEFAULT_SESSION_ID, SessionManager
+from rpg_core.turns import normalize_turn_mode
 
 
 class _BaseSchema(BaseModel):
@@ -27,6 +28,13 @@ class AgentRequestBase(_BaseSchema):
 class AgentMessageRequest(AgentRequestBase):
     message: str
     request_id: str | None = None
+    mode: Literal["ic", "ooc", "gm"] = "ic"
+    narrative_style_id: int | None = Field(default=None, gt=0)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _normalize_mode(cls, value: object) -> str:
+        return normalize_turn_mode(value).value
 
 
 class AgentStopRequest(AgentRequestBase):
@@ -270,6 +278,7 @@ class AgentReplyPayload(AgentReplyPayloadBase, total=False):
     status_sub_agent_records: list[JsonObject]
     stats: AgentStatsPayload
     usage: JsonObject
+    committed_turn_id: int
 
 
 class AgentCommandResultPayloadBase(TypedDict):
@@ -294,3 +303,4 @@ class AgentStreamEventPayload(TypedDict):
     duration_ms: NotRequired[float]
     model: NotRequired[str]
     finish_reason: NotRequired[str]
+    committed_turn_id: NotRequired[int]

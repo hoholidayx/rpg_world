@@ -1,4 +1,5 @@
 import type { NarrativeOutcome } from './narrativeOutcome'
+import type { InputMode } from './command'
 
 export const PLAYER_CHARACTER_STATUS = {
   BOUND: 'bound',
@@ -73,6 +74,7 @@ export type HistoryMessage = {
   seqInTurn: number
   role: HistoryMessageRole
   content: string
+  mode: InputMode
   metadata: Record<string, unknown>
   createdAt?: string | null
 }

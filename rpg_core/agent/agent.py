@@ -58,6 +58,7 @@ from rpg_core.context.fixed_layer.contributors import (
     StaticFixedLayerContributor,
     StoryPromptFixedLayerContributor,
     TextOutputFormatFixedLayerContributor,
+    TurnExecutionFixedLayerContributor,
 )
 from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.rpg_context import FixedLayerData, Role, Message
@@ -78,6 +79,12 @@ from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME, StatusTable
 from rpg_core.utils.watcher import get_watcher
 from rpg_core.summary.compressor import SummaryCompressor
 from llm_service.manager import LLMManager, ProviderOverrides
+from rpg_core.turns import (
+    TurnExecutionPolicy,
+    TurnExecutionSnapshot,
+    TurnMode,
+    TurnRequest,
+)
 
 if TYPE_CHECKING:
     from rpg_core.character.manager import CharacterManager
@@ -225,7 +232,9 @@ class RPGGameAgent:
             try:
                 match item.kind:
                     case QueueKind.SEND:
-                        result = await self._send_impl(item.user_input)
+                        result = await self._send_impl(
+                            item.turn_request or TurnRequest.create(item.user_input)
+                        )
                         item.future.set_result(result)
                     case QueueKind.SEND_STREAM:
                         await self._run_stream_queue_item(item)
@@ -268,7 +277,10 @@ class RPGGameAgent:
                     item.future.set_result(None)
                 return
 
-        task = asyncio.create_task(self._send_stream_impl(item.user_input, item.event_queue))
+        task = asyncio.create_task(self._send_stream_impl(
+            item.turn_request or TurnRequest.create(item.user_input, request_id=item.request_id),
+            item.event_queue,
+        ))
         self._active_stream_task = task
         self._active_stream_request_id = request_id
         logger.debug(
@@ -301,7 +313,13 @@ class RPGGameAgent:
 
     # ── public API ─────────────────────────────────────────────────────
 
-    async def send(self, user_input: str) -> AgentReply:
+    async def send(
+        self,
+        user_input: str,
+        *,
+        mode: TurnMode | str | None = None,
+        narrative_style_id: int | None = None,
+    ) -> AgentReply:
         """Send user text through the message queue and return a structured ``AgentReply``.
 
         If the agent is busy processing a previous message, this call waits
@@ -312,11 +330,21 @@ class RPGGameAgent:
         """
         await self._ensure_initialized()
         future: Future[AgentReply] = self._create_future()
-        await self._queue.put(QueueItem(kind=QueueKind.SEND, user_input=user_input, future=future))
+        turn_request = TurnRequest.create(
+            user_input,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+        )
+        await self._queue.put(QueueItem(
+            kind=QueueKind.SEND,
+            user_input=turn_request.text,
+            future=future,
+            turn_request=turn_request,
+        ))
         logger.debug(_TAG + " send() enqueued: input={!r:.60}", user_input)
         return await future
 
-    async def _send_impl(self, user_input: str) -> AgentReply:
+    async def _send_impl(self, turn_request: TurnRequest | str) -> AgentReply:
         """Internal send implementation — runs inside the queue consumer.
 
         May involve multiple LLM round-trips when tool calls are needed
@@ -328,6 +356,9 @@ class RPGGameAgent:
         summarization (it filters ``role == "system"`` messages).
         """
 
+        if not isinstance(turn_request, TurnRequest):
+            turn_request = TurnRequest.create(turn_request)
+        user_input = turn_request.text
         # ── 斜杠命令分发（不走 LLM） ─────────────────────────────────
         if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
             cmd_result = await self._cmd_dispatcher.dispatch(user_input)
@@ -349,11 +380,13 @@ class RPGGameAgent:
             _turn_stats.finished_at = _time.monotonic()
             return AgentReply(text=role_guard_reply, stats=_turn_stats)
 
+        turn_execution = self._resolve_turn_execution_snapshot(turn_request)
         main_llm_selection = self._resolve_main_llm_selection()
         rp_module_snapshot = self._resolve_rp_module_snapshot()
         self._enforce_main_context_window_threshold(
             main_llm_selection,
             rp_module_snapshot=rp_module_snapshot,
+            turn_execution=turn_execution,
         )
         main_provider = self._refresh_main_provider(selection=main_llm_selection)
 
@@ -364,7 +397,7 @@ class RPGGameAgent:
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
         )
-        turn_scratch = tx.begin(turn_stats)
+        turn_scratch = tx.begin(turn_stats, mode=turn_request.mode.value)
         rp_module_runtime: RPModuleTurnRuntime | None = None
 
         try:
@@ -374,12 +407,14 @@ class RPGGameAgent:
                 )
                 rp_module_runtime.bind_turn(turn_scratch)
             # ── 可选剧情预裁定 / 确定性状态预更新 ──────────────────────
-            sub_result = await self._run_status_preflight(
-                turn_scratch=turn_scratch,
-                user_input=user_input,
-                turn_stats=turn_stats,
-                rp_module_runtime=rp_module_runtime,
-            )
+            sub_result = None
+            if turn_execution.policy.run_status_preflight:
+                sub_result = await self._run_status_preflight(
+                    turn_scratch=turn_scratch,
+                    user_input=user_input,
+                    turn_stats=turn_stats,
+                    rp_module_runtime=rp_module_runtime,
+                )
             status_records = (
                 sub_result.record_payloads()
                 if sub_result is not None and sub_result.records
@@ -409,6 +444,7 @@ class RPGGameAgent:
                 scene_tracker=turn_scratch.scene_tracker,
                 user_input=user_input,
                 rp_module_runtime=rp_module_runtime,
+                turn_execution=turn_execution,
             )
             if settings.verbose_logging:
                 sys_msgs = sum(1 for m in messages if m.is_system())
@@ -424,6 +460,7 @@ class RPGGameAgent:
                 turn_scratch.scene_tracker,
                 turn_scratch.status_manager,
                 rp_module_runtime=rp_module_runtime,
+                turn_execution=turn_execution,
             )
             schemas = self._main_tool_schemas(
                 tool_registry,
@@ -475,6 +512,7 @@ class RPGGameAgent:
 
             tx.stage_assistant_message(reply_text)
             tx.commit()
+            result.committed_turn_id = turn_scratch.turn_id
             await self._run_post_commit_side_effects()
             return result
         except asyncio.CancelledError as exc:
@@ -501,6 +539,8 @@ class RPGGameAgent:
         user_input: str,
         *,
         request_id: str | None = None,
+        mode: TurnMode | str | None = None,
+        narrative_style_id: int | None = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         """Streaming variant of ``send()``, goes through the message queue.
 
@@ -514,12 +554,19 @@ class RPGGameAgent:
         future: Future[None] = self._create_future()
         if request_id:
             self._queued_stream_request_ids.add(request_id)
+        turn_request = TurnRequest.create(
+            user_input,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+            request_id=request_id,
+        )
         await self._queue.put(QueueItem(
             kind=QueueKind.SEND_STREAM,
-            user_input=user_input,
+            user_input=turn_request.text,
             future=future,
             event_queue=event_queue,
             request_id=request_id,
+            turn_request=turn_request,
         ))
         logger.debug(
             _TAG + " send_stream() enqueued: request_id={}, input={!r:.60}",
@@ -616,7 +663,11 @@ class RPGGameAgent:
             request_id=active_request_id or request_id,
         )
 
-    async def _send_stream_impl(self, user_input: str, event_queue: asyncio.Queue) -> None:
+    async def _send_stream_impl(
+        self,
+        turn_request: TurnRequest | str,
+        event_queue: asyncio.Queue,
+    ) -> None:
         """Internal send_stream implementation — runs inside the queue consumer.
 
         Pushes ``AgentStreamEvent`` objects into *event_queue* instead of
@@ -624,6 +675,9 @@ class RPGGameAgent:
         so the caller can re-raise them.
         """
 
+        if not isinstance(turn_request, TurnRequest):
+            turn_request = TurnRequest.create(turn_request)
+        user_input = turn_request.text
         # ── 斜杠命令分发（不走 LLM） ─────────────────────────────────
         if self._cmd_dispatcher and self._cmd_dispatcher.is_command(user_input):
             cmd_result = await self._cmd_dispatcher.dispatch(user_input)
@@ -661,11 +715,13 @@ class RPGGameAgent:
             await event_queue.put(_StreamSentinel())
             return
 
+        turn_execution = self._resolve_turn_execution_snapshot(turn_request)
         main_llm_selection = self._resolve_main_llm_selection()
         rp_module_snapshot = self._resolve_rp_module_snapshot()
         self._enforce_main_context_window_threshold(
             main_llm_selection,
             rp_module_snapshot=rp_module_snapshot,
+            turn_execution=turn_execution,
         )
         main_provider = self._refresh_main_provider(selection=main_llm_selection)
 
@@ -676,7 +732,7 @@ class RPGGameAgent:
             status_mgr=self._status_mgr,
             scene_tracker=self._scene_tracker,
         )
-        turn_scratch = tx.begin(turn_stats)
+        turn_scratch = tx.begin(turn_stats, mode=turn_request.mode.value)
         rp_module_runtime: RPModuleTurnRuntime | None = None
 
         try:
@@ -686,12 +742,14 @@ class RPGGameAgent:
                 )
                 rp_module_runtime.bind_turn(turn_scratch)
             # ── 可选剧情预裁定 / 确定性状态预更新 ────────────────────
-            sub_result = await self._run_status_preflight(
-                turn_scratch=turn_scratch,
-                user_input=user_input,
-                turn_stats=turn_stats,
-                rp_module_runtime=rp_module_runtime,
-            )
+            sub_result = None
+            if turn_execution.policy.run_status_preflight:
+                sub_result = await self._run_status_preflight(
+                    turn_scratch=turn_scratch,
+                    user_input=user_input,
+                    turn_stats=turn_stats,
+                    rp_module_runtime=rp_module_runtime,
+                )
             preflight_outcome = self._preflight_outcome_state(
                 turn_scratch,
                 sub_result,
@@ -734,11 +792,13 @@ class RPGGameAgent:
                 scene_tracker=turn_scratch.scene_tracker,
                 user_input=user_input,
                 rp_module_runtime=rp_module_runtime,
+                turn_execution=turn_execution,
             )
             tool_registry = self._tool_registry_for_turn(
                 turn_scratch.scene_tracker,
                 turn_scratch.status_manager,
                 rp_module_runtime=rp_module_runtime,
+                turn_execution=turn_execution,
             )
             schemas = self._main_tool_schemas(
                 tool_registry,
@@ -1074,6 +1134,60 @@ class RPGGameAgent:
             )
         return registry.resolve_snapshot(self._session_id)
 
+    def _resolve_turn_execution_snapshot(
+        self,
+        request: TurnRequest,
+    ) -> TurnExecutionSnapshot:
+        """Resolve the immutable mode/style policy used by one preview or turn."""
+        from rpg_data.services import get_data_service_gateway
+
+        policy = TurnExecutionPolicy.for_mode(request.mode)
+        gateway = get_data_service_gateway()
+        session = gateway.catalog.get_session(self._session_id)
+        if session is None:
+            if request.narrative_style_id is not None:
+                raise FileNotFoundError(
+                    f"Session not found while resolving narrative style: {self._session_id}"
+                )
+            # In-memory unit-test agents may intentionally have no catalog row.
+            # Production Agent service always resolves a catalog session first.
+            return TurnExecutionSnapshot(
+                request=request,
+                mode_prompt="",
+                narrative_style_id=None,
+                narrative_style_name="",
+                narrative_style_prompt="",
+                policy=policy,
+            )
+
+        mode_config = gateway.session_composer.get_mode(
+            session.workspace_id,
+            request.mode.value,
+        )
+        mode_prompt = mode_config.prompt if mode_config is not None else ""
+
+        style = None
+        if policy.apply_narrative_style or request.narrative_style_id is not None:
+            # An explicit override is validated even in OOC mode. OOC then
+            # ignores its prompt as a hard execution-policy boundary.
+            style = gateway.session_composer.resolve_session_style(
+                self._session_id,
+                request.narrative_style_id,
+            )
+
+        return TurnExecutionSnapshot(
+            request=request,
+            mode_prompt=mode_prompt,
+            narrative_style_id=(style.narrative_style_id if style is not None else None),
+            narrative_style_name=(style.name if style is not None else ""),
+            narrative_style_prompt=(
+                style.prompt
+                if style is not None and policy.apply_narrative_style
+                else ""
+            ),
+            policy=policy,
+        )
+
     def _refresh_main_provider(
         self,
         *,
@@ -1115,6 +1229,7 @@ class RPGGameAgent:
         selection: MainLLMSelection,
         *,
         rp_module_snapshot: "RPModuleSelectionSnapshot",
+        turn_execution: TurnExecutionSnapshot,
     ) -> None:
         """Reject normal input before starting a turn when current context is full."""
 
@@ -1133,6 +1248,7 @@ class RPGGameAgent:
         current_context = self._build_ctx_for_inspection(
             "",
             rp_module_snapshot=rp_module_snapshot,
+            turn_execution=turn_execution,
         )
         usage = estimate_rendered_context_usage(
             current_context.to_message_objects(),
@@ -1177,7 +1293,13 @@ class RPGGameAgent:
             threshold_ratio=threshold_ratio,
         )
 
-    async def get_context_info(self, user_input: str = "") -> list["LayerInfo"]:
+    async def get_context_info(
+        self,
+        user_input: str = "",
+        *,
+        mode: TurnMode | str | None = None,
+        narrative_style_id: int | None = None,
+    ) -> list["LayerInfo"]:
         """Build the full 5-layer context and return structured layer metadata.
 
         Uses the current ``_history`` and *user_input* (optional) to assemble
@@ -1189,7 +1311,12 @@ class RPGGameAgent:
         """
 
         await self._ensure_initialized()
-        ctx = self._build_ctx_for_inspection(user_input)
+        turn_execution = self._resolve_turn_execution_snapshot(TurnRequest.create(
+            user_input,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+        ))
+        ctx = self._build_ctx_for_inspection(user_input, turn_execution=turn_execution)
         return ContextInspector(
             ctx,
             self._token_counter,
@@ -1197,7 +1324,13 @@ class RPGGameAgent:
             context_limit=self._resolve_main_llm_selection().effective.context_window,
         ).layer_summary()
 
-    async def get_context_markdown(self, user_input: str = "") -> str:
+    async def get_context_markdown(
+        self,
+        user_input: str = "",
+        *,
+        mode: TurnMode | str | None = None,
+        narrative_style_id: int | None = None,
+    ) -> str:
         """Build the full 5-layer context and return a Markdown-formatted table.
 
         Convenience wrapper around ``get_context_info()`` that renders the
@@ -1205,7 +1338,12 @@ class RPGGameAgent:
         output.
         """
         await self._ensure_initialized()
-        ctx = self._build_ctx_for_inspection(user_input)
+        turn_execution = self._resolve_turn_execution_snapshot(TurnRequest.create(
+            user_input,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+        ))
+        ctx = self._build_ctx_for_inspection(user_input, turn_execution=turn_execution)
         return ContextInspector(
             ctx,
             self._token_counter,
@@ -1213,10 +1351,21 @@ class RPGGameAgent:
             context_limit=self._resolve_main_llm_selection().effective.context_window,
         ).to_markdown()
 
-    async def get_context_payload(self, user_input: str = "") -> dict[str, object]:
+    async def get_context_payload(
+        self,
+        user_input: str = "",
+        *,
+        mode: TurnMode | str | None = None,
+        narrative_style_id: int | None = None,
+    ) -> dict[str, object]:
         """Build the full 5-layer context and return a JSON-ready payload."""
         await self._ensure_initialized()
-        ctx = self._build_ctx_for_inspection(user_input)
+        turn_execution = self._resolve_turn_execution_snapshot(TurnRequest.create(
+            user_input,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+        ))
+        ctx = self._build_ctx_for_inspection(user_input, turn_execution=turn_execution)
         return ContextInspector(
             ctx,
             self._token_counter,
@@ -1224,9 +1373,19 @@ class RPGGameAgent:
             context_limit=self._resolve_main_llm_selection().effective.context_window,
         ).to_payload(session_id=self._session_id)
 
-    async def get_context_json(self, user_input: str = "") -> str:
+    async def get_context_json(
+        self,
+        user_input: str = "",
+        *,
+        mode: TurnMode | str | None = None,
+        narrative_style_id: int | None = None,
+    ) -> str:
         """Build the full 5-layer context and return formatted JSON text."""
-        payload = await self.get_context_payload(user_input)
+        payload = await self.get_context_payload(
+            user_input,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+        )
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def _build_ctx_for_inspection(
@@ -1234,6 +1393,7 @@ class RPGGameAgent:
         user_input: str = "",
         *,
         rp_module_snapshot: "RPModuleSelectionSnapshot | None" = None,
+        turn_execution: TurnExecutionSnapshot | None = None,
     ) -> "RPGContext":
         """Build context for inspection (no _history mutation, no LLM call)."""
         # Build scene context same way as send()
@@ -1241,7 +1401,11 @@ class RPGGameAgent:
         current_user_message: Message | None = None
         if user_input or scene_ctx:
             stored_input = self._compose_stored_user_input(scene_ctx, user_input)
-            current_user_message = Message(role=Role.USER, content=stored_input)
+            current_user_message = Message(
+                role=Role.USER,
+                content=stored_input,
+                mode=(turn_execution.request.mode.value if turn_execution else TurnMode.IC.value),
+            )
 
         snapshot = rp_module_snapshot or self._resolve_rp_module_snapshot()
         if self._rp_module_registry is None:
@@ -1250,6 +1414,7 @@ class RPGGameAgent:
                 status_mgr=self._status_mgr,
                 scene_tracker=self._scene_tracker,
                 user_input=user_input,
+                turn_execution=turn_execution,
             )
         runtime = self._rp_module_registry.create_runtime(snapshot)
         try:
@@ -1259,6 +1424,7 @@ class RPGGameAgent:
                 scene_tracker=self._scene_tracker,
                 user_input=user_input,
                 rp_module_runtime=runtime,
+                turn_execution=turn_execution,
             )
         finally:
             runtime.close()
@@ -1310,28 +1476,41 @@ class RPGGameAgent:
     def _assemble_fixed_layer(
         self,
         rp_fixed_sections: list | None = None,
+        *,
+        turn_execution: TurnExecutionSnapshot | None = None,
     ) -> FixedLayerData:
         builder = self._builder
         builder_config = getattr(builder, "config", None)
         enable_lorebook = getattr(builder_config, "enable_lorebook", True)
         enable_character = getattr(builder_config, "enable_character", True)
+        world_name = getattr(self, "_world_name", "Nanobot Realm")
+        contributors = [
+            CoreRPContractContributor(world_name),
+            StoryPromptFixedLayerContributor(self._session_id),
+            LorebookFixedLayerContributor(
+                getattr(self, "_lorebook_mgr", None),
+                enabled=enable_lorebook,
+            ),
+            CharacterFixedLayerContributor(
+                getattr(self, "_character_mgr", None),
+                enabled=enable_character,
+            ),
+        ]
+        if turn_execution is not None:
+            contributors.append(TurnExecutionFixedLayerContributor(turn_execution))
+        if turn_execution is None or turn_execution.request.mode is not TurnMode.OOC:
+            contributors.append(TextOutputFormatFixedLayerContributor())
         assembler = FixedLayerAssembler(
-            world_name=self._world_name,
-            contributors=[
-                CoreRPContractContributor(self._world_name),
-                StoryPromptFixedLayerContributor(self._session_id),
-                LorebookFixedLayerContributor(
-                    self._lorebook_mgr,
-                    enabled=enable_lorebook,
-                ),
-                CharacterFixedLayerContributor(
-                    self._character_mgr,
-                    enabled=enable_character,
-                ),
-                TextOutputFormatFixedLayerContributor(),
-            ],
+            world_name=world_name,
+            contributors=contributors,
         )
-        if rp_fixed_sections:
+        if (
+            rp_fixed_sections
+            and (
+                turn_execution is None
+                or turn_execution.policy.expose_rp_modules
+            )
+        ):
             assembler = assembler.with_contributor(
                 StaticFixedLayerContributor(rp_fixed_sections)
             )
@@ -1372,10 +1551,17 @@ class RPGGameAgent:
         *,
         include_staged_turn: bool = False,
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
+        turn_execution: TurnExecutionSnapshot | None = None,
     ):
         """Collect dynamic RP module sections for the current user input."""
         sections = []
-        if rp_module_runtime is not None:
+        if (
+            rp_module_runtime is not None
+            and (
+                turn_execution is None
+                or turn_execution.policy.expose_rp_modules
+            )
+        ):
             from rpg_core.rp_modules.models import ModuleContextRequest
 
             sections = rp_module_runtime.get_runtime_sections(
@@ -1421,6 +1607,7 @@ class RPGGameAgent:
         scene_tracker: SceneTracker | None = None,
         user_input: str = "",
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
+        turn_execution: TurnExecutionSnapshot | None = None,
     ) -> list[Message]:
         """Build the 5-layer RPG context as Message objects."""
         return self._build_main_context(
@@ -1430,6 +1617,7 @@ class RPGGameAgent:
             user_input=user_input,
             include_staged_turn_runtime=True,
             rp_module_runtime=rp_module_runtime,
+            turn_execution=turn_execution,
         ).to_message_objects()
 
     def _build_main_context(
@@ -1441,18 +1629,24 @@ class RPGGameAgent:
         user_input: str = "",
         include_staged_turn_runtime: bool = False,
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
+        turn_execution: TurnExecutionSnapshot | None = None,
     ) -> "RPGContext":
         """Build the shared main-Agent context used by turns and inspection."""
         from rpg_core.context.rpg_context import RPGContext
 
         if rp_module_runtime is None and self._rp_module_registry is None:
             self._refresh_fixed_layer_snapshot()
-            fixed_layer = self._fixed_layer
+            fixed_layer = (
+                self._fixed_layer
+                if turn_execution is None
+                else self._assemble_fixed_layer(turn_execution=turn_execution)
+            )
         else:
             fixed_layer = self._assemble_fixed_layer(
                 rp_module_runtime.get_fixed_sections()
                 if rp_module_runtime is not None
-                else None
+                else None,
+                turn_execution=turn_execution,
             )
         history = self._session.context_history()
         resolved_status_mgr = self._status_mgr if status_mgr is None else status_mgr
@@ -1468,6 +1662,7 @@ class RPGGameAgent:
                 user_input=user_input,
                 include_staged_turn=include_staged_turn_runtime,
                 rp_module_runtime=rp_module_runtime,
+                turn_execution=turn_execution,
             ),
         )
         return ctx
@@ -1478,19 +1673,28 @@ class RPGGameAgent:
         status_manager: StatusManager | None,
         *,
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
+        turn_execution: TurnExecutionSnapshot | None = None,
     ) -> ToolRegistry | None:
         """Return a per-turn registry with state tools bound to the turn scratch."""
         registry = ToolRegistry()
+        policy = (
+            turn_execution.policy
+            if turn_execution is not None
+            else TurnExecutionPolicy.for_mode(TurnMode.IC)
+        )
         if self._tool_registry:
             for tool in self._tool_registry:
                 if tool.name in SCENE_TOOL_NAMES or tool.name == STATUS_TABLE_SET_VALUES_TOOL_NAME:
                     continue
+                if not policy.expose_state_tools and isinstance(tool, WriteFileTool):
+                    continue
                 registry.register(tool)
-        if rp_module_runtime is not None:
+        if rp_module_runtime is not None and policy.expose_rp_modules:
             # Keep all module tools executable as a safety boundary even when
             # a turn-sensitive schema omits one from the main Agent's choices.
             registry.register_all(rp_module_runtime.get_tools())
-        registry.register_all(self._turn_state_tools(scene_tracker, status_manager))
+        if policy.expose_state_tools:
+            registry.register_all(self._turn_state_tools(scene_tracker, status_manager))
         if settings.verbose_logging:
             tool_names = [tool.name for tool in registry]
             logger.debug(

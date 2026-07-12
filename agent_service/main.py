@@ -139,10 +139,22 @@ async def list_commands(
 @app.get(f"{_service_prefix()}/chat/context-preview", response_model=AgentContextPreviewResponse)
 async def get_context_preview(
     session_id: str = Query(...),
+    mode: str | None = Query(default=None),
+    narrative_style_id: int | None = Query(default=None, gt=0),
 ) -> AgentContextPreviewResponse:
     agent = _get_agent(session_id)
     try:
-        payload = await agent.get_context_payload()
+        if mode is None and narrative_style_id is None:
+            payload = await agent.get_context_payload()
+        else:
+            payload = await agent.get_context_payload(
+                mode=mode,
+                narrative_style_id=narrative_style_id,
+            )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Context preview failed: {exc}") from exc
     _log_context_preview_payload(body_session_id=session_id, payload=payload)
@@ -280,11 +292,22 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayload
 async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
     agent = _get_agent(body.session_id)
     try:
-        reply = await agent.send(body.message)
+        if body.mode == "ic" and body.narrative_style_id is None:
+            reply = await agent.send(body.message)
+        else:
+            reply = await agent.send(
+                body.message,
+                mode=body.mode,
+                narrative_style_id=body.narrative_style_id,
+            )
     except MainContextWindowThresholdExceededError as exc:
         raise _main_context_threshold_http_error(exc) from exc
     except InvalidTurnMetadataError as exc:
         raise _turn_metadata_http_error(exc) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Chat send failed: {exc}") from exc
     return _reply_to_dict(reply, session_id=body.session_id)
@@ -421,7 +444,17 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
 
     async def event_generator() -> AsyncIterator[str]:
         try:
-            async for event in agent.send_stream(body.message, request_id=body.request_id):
+            stream_events = (
+                agent.send_stream(body.message, request_id=body.request_id)
+                if body.mode == "ic" and body.narrative_style_id is None
+                else agent.send_stream(
+                    body.message,
+                    request_id=body.request_id,
+                    mode=body.mode,
+                    narrative_style_id=body.narrative_style_id,
+                )
+            )
+            async for event in stream_events:
                 yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except MainContextWindowThresholdExceededError as exc:
             event = _main_context_threshold_stream_error(exc)
@@ -650,6 +683,10 @@ def _turn_metadata_stream_error(exc: InvalidTurnMetadataError) -> AgentStreamEve
 
 def _reply_to_dict(reply: AgentReply, *, session_id: str = "-") -> AgentReplyPayload:
     result: AgentReplyPayload = {"reply": reply.text}
+    if reply.committed_turn_id is not None:
+        if reply.committed_turn_id <= 0:
+            raise ValueError("committed_turn_id must be a positive integer")
+        result["committed_turn_id"] = int(reply.committed_turn_id)
     if reply.tool_records:
         result["tool_records"] = [
             {
@@ -711,6 +748,7 @@ def _message_payload(row: models.SessionMessage) -> JsonObject:
         "seqInTurn": int(row.seq_in_turn),
         "role": str(row.role),
         "content": str(row.content or ""),
+        "mode": str(row.mode or models.TURN_MODE_IC),
         "metadata": _metadata_from_json(row.metadata_json),
     }
     if row.created_at:

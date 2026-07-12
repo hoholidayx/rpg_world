@@ -39,6 +39,7 @@ class MessageService:
         role: str,
         content: str = "",
         *,
+        mode: str = models.TURN_MODE_IC,
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
         tool_call_id: str = "",
@@ -49,6 +50,7 @@ class MessageService:
             session_id,
             role,
             content,
+            mode=mode,
             turn_id=turn_id,
             seq_in_turn=seq_in_turn,
             tool_call_id=tool_call_id,
@@ -114,6 +116,7 @@ class MessageService:
         *,
         role: str | None = None,
         content: str | None = None,
+        mode: str | None = None,
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
         tool_call_id: str | None = None,
@@ -126,6 +129,7 @@ class MessageService:
             message_id,
             role=role,
             content=content,
+            mode=mode,
             turn_id=turn_id,
             seq_in_turn=seq_in_turn,
             tool_call_id=tool_call_id,
@@ -137,6 +141,7 @@ class MessageService:
         if _processing_affecting_update(
             role=role,
             content=content,
+            mode=mode,
             turn_id=turn_id,
             seq_in_turn=seq_in_turn,
             tool_call_id=tool_call_id,
@@ -212,6 +217,18 @@ class MessageService:
             if any(not row.summary_processed for row in group)
         ]
 
+    def list_summary_unprocessed_turn_groups(
+        self,
+        session_id: str,
+    ) -> list[list[models.SessionMessage]]:
+        """Return all unprocessed turn groups without applying business policy."""
+        rows = [
+            row
+            for row in self.list(session_id)
+            if row.role != models.MESSAGE_ROLE_SYSTEM and not row.summary_processed
+        ]
+        return _conversation_turn_groups(rows, session_id=session_id, purpose="summary")
+
     def count_summary_candidate_turns(
         self,
         session_id: str,
@@ -230,7 +247,7 @@ class MessageService:
         session_id: str,
         message_ids: Iterable[int],
         *,
-        batch_id: int,
+        batch_id: int | None,
     ) -> int:
         return self._store.mark_summary_processed(
             session_id,
@@ -272,6 +289,7 @@ def _processing_affecting_update(
     *,
     role: str | None,
     content: str | None,
+    mode: str | None,
     turn_id: int | None,
     seq_in_turn: int | None,
     tool_call_id: str | None,
@@ -283,6 +301,7 @@ def _processing_affecting_update(
         for value in (
             role,
             content,
+            mode,
             turn_id,
             seq_in_turn,
             tool_call_id,

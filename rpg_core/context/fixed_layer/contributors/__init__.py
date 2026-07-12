@@ -26,6 +26,9 @@ from rpg_core.context.fixed_layer.contributors.text_output_format import (
     TEXT_OUTPUT_FORMAT_SOURCE,
     TextOutputFormatFixedLayerContributor,
 )
+from rpg_core.context.fixed_layer.contributors.turn_execution import (
+    TurnExecutionFixedLayerContributor,
+)
 
 __all__ = [
     "CharacterFixedLayerContributor",
@@ -42,6 +45,7 @@ __all__ = [
     "TEXT_OUTPUT_FORMAT_SECTION_ID",
     "TEXT_OUTPUT_FORMAT_SOURCE",
     "TextOutputFormatFixedLayerContributor",
+    "TurnExecutionFixedLayerContributor",
     "build_character_section",
     "build_lorebook_section",
     "render_character_section_body",

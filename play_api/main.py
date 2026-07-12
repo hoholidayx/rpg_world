@@ -19,6 +19,7 @@ from play_api.routers import (
     lorebook,
     main_llm,
     rp_modules,
+    session_composer,
     ops,
     sessions,
     status_tables,
@@ -52,6 +53,7 @@ app.include_router(characters.router, prefix=_PLAY_API_PREFIX)
 app.include_router(lorebook.router, prefix=_PLAY_API_PREFIX)
 app.include_router(main_llm.router, prefix=_PLAY_API_PREFIX)
 app.include_router(rp_modules.router, prefix=_PLAY_API_PREFIX)
+app.include_router(session_composer.router, prefix=_PLAY_API_PREFIX)
 app.include_router(ops.router, prefix=_PLAY_API_PREFIX)
 app.include_router(sessions.router, prefix=_PLAY_API_PREFIX)
 app.include_router(status_tables.router, prefix=_PLAY_API_PREFIX)

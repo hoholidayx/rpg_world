@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from rpg_core.summary.compressor import SummaryCompressor
 from rpg_core.context.rpg_context import Message, Role
@@ -71,6 +72,38 @@ async def test_summary_compressor_noop_when_disabled_or_short():
 
     assert result.triggered is False
     assert session.history[0].content == "system"
+
+
+@pytest.mark.asyncio
+async def test_disabled_auto_compression_still_marks_ooc_unless_memory_is_global_disabled():
+    session = SessionManager(history_enabled=False)
+    session.replace_history([
+        Message(Role.USER, "ooc", mode="ooc", turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "answer", mode="ooc", turn_id=1, seq_in_turn=2),
+        Message(Role.USER, "ic", mode="ic", turn_id=2, seq_in_turn=1),
+    ], persist=False)
+    compressor = SummaryCompressor(
+        batch_store=None,
+        memory_sub_agent=FakeMemorySubAgent(),  # type: ignore[arg-type]
+        enabled=False,
+        keep_recent_rounds=1,
+    )
+
+    result = await compressor.maybe_compress(session)
+
+    assert result.triggered is False
+    assert [message.content for message in session.context_history().messages] == ["ic"]
+
+    globally_disabled_session = SessionManager(history_enabled=False)
+    globally_disabled_session.replace_history([
+        Message(Role.USER, "ooc", mode="ooc", turn_id=1, seq_in_turn=1),
+    ], persist=False)
+    globally_disabled = SummaryCompressor(
+        memory_sub_agent=SimpleNamespace(enabled=False),  # type: ignore[arg-type]
+        enabled=False,
+    )
+    await globally_disabled.maybe_compress(globally_disabled_session)
+    assert [message.content for message in globally_disabled_session.context_history().messages] == ["ooc"]
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from rpg_data.services.message import MessageService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_role import SessionRoleService
+from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
 from rpg_data.settings import resolve_database_path
@@ -47,6 +48,7 @@ class DataServiceGateway:
         self._narrative_outcomes: NarrativeOutcomeService | None = None
         self._rp_modules: RPModuleService | None = None
         self._session_roles: SessionRoleService | None = None
+        self._session_composer: SessionComposerService | None = None
         self._backup: BackupService | None = None
         self._story_memory: StoryMemoryService | None = None
         self._status: StatusTableService | None = None
@@ -147,6 +149,15 @@ class DataServiceGateway:
         return self._session_roles
 
     @property
+    def session_composer(self) -> SessionComposerService:
+        database = self.database
+        if self._session_composer is None:
+            logger.debug("creating session composer service db_path=%s", self._database_path)
+            self._session_composer = SessionComposerService(database)
+        self._ensure_bound()
+        return self._session_composer
+
+    @property
     def backup(self) -> BackupService:
         database = self.database
         if self._backup is None:
@@ -210,6 +221,7 @@ class DataServiceGateway:
         self._narrative_outcomes = None
         self._rp_modules = None
         self._session_roles = None
+        self._session_composer = None
         self._backup = None
         self._story_memory = None
         self._status = None

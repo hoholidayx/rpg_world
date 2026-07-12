@@ -46,12 +46,13 @@ class MsgKey:
     UID = "uid"
     TURN_ID = "turn_id"
     SEQ_IN_TURN = "seq_in_turn"
+    MODE = "mode"
 
 
 class Message:
     """Typed wrapper for OpenAI-compatible message dicts."""
 
-    __slots__ = ("_role", "_content", "_uid", "_turn_id", "_seq_in_turn", "_tool_call_id", "_tool_calls")
+    __slots__ = ("_role", "_content", "_mode", "_uid", "_turn_id", "_seq_in_turn", "_tool_call_id", "_tool_calls")
 
     def __init__(
         self,
@@ -62,9 +63,11 @@ class Message:
         seq_in_turn: int = 0,
         tool_call_id: str = "",
         tool_calls: list[JsonObject] | None = None,
+        mode: str = "ic",
     ) -> None:
         self._role = Role(role) if isinstance(role, str) else role
         self._content = content
+        self._mode = str(mode or "ic").strip().lower() or "ic"
         self._uid = int(uid)
         self._turn_id = int(turn_id)
         self._seq_in_turn = int(seq_in_turn)
@@ -82,6 +85,10 @@ class Message:
     @property
     def uid(self) -> int:
         return self._uid
+
+    @property
+    def mode(self) -> str:
+        return self._mode
 
     @property
     def turn_id(self) -> int:
@@ -120,17 +127,25 @@ class Message:
         return self._role is Role.TOOL
 
     def to_dict(self) -> dict[str, object]:
+        return self.to_provider_dict()
+
+    def to_provider_dict(self) -> dict[str, object]:
         d: dict[str, object] = {MsgKey.ROLE: self._role.value, MsgKey.CONTENT: self._content}
+        if self._tool_call_id:
+            d["tool_call_id"] = self._tool_call_id
+        if self._tool_calls:
+            d["tool_calls"] = self._tool_calls
+        return d
+
+    def to_persistence_dict(self) -> dict[str, object]:
+        d = self.to_provider_dict()
+        d[MsgKey.MODE] = self._mode
         if self._uid:
             d[MsgKey.UID] = self._uid
         if self._turn_id:
             d[MsgKey.TURN_ID] = self._turn_id
         if self._seq_in_turn:
             d[MsgKey.SEQ_IN_TURN] = self._seq_in_turn
-        if self._tool_call_id:
-            d["tool_call_id"] = self._tool_call_id
-        if self._tool_calls:
-            d["tool_calls"] = self._tool_calls
         return d
 
     @classmethod
@@ -139,6 +154,7 @@ class Message:
         return cls(
             role=str(d[MsgKey.ROLE]),
             content=str(d.get(MsgKey.CONTENT) or ""),
+            mode=str(d.get(MsgKey.MODE, "ic") or "ic"),
             uid=int(d.get(MsgKey.UID, 0) or 0),
             turn_id=int(d.get(MsgKey.TURN_ID, 0) or 0),
             seq_in_turn=int(d.get(MsgKey.SEQ_IN_TURN, 0) or 0),
