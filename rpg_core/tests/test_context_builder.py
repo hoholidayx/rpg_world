@@ -10,6 +10,7 @@ from rpg_core.context.config import ExtensionModuleDef, RPGContextConfig
 from rpg_core.context.fixed_layer import FixedLayerSection
 from rpg_core.context.rpg_context import (
     FixedLayerData,
+    HotHistoryLayer,
     LayerType,
     Message,
     RPGContext,
@@ -221,6 +222,37 @@ def test_context_includes_dynamic_rp_modules_before_user():
 
     rendered = ctx.to_message_objects()
 
-    assert [m.role for m in rendered] == [Role.SYSTEM, Role.SYSTEM, Role.SYSTEM, Role.USER]
-    assert rendered[-2].content.startswith("[combat]")
+    assert [m.role for m in rendered] == [Role.SYSTEM, Role.USER]
+    assert rendered[0].content == (
+        "fixed|core\n\n"
+        "tables|状态\n\n"
+        "[combat]\ncombat turn\n[/combat]"
+    )
     assert rendered[-1].content == "hi"
+
+
+def test_context_coalesces_all_system_content_at_the_beginning():
+    ctx = RPGContext(
+        fixed_layer=FixedLayerData(
+            sections=[FixedLayerSection(id="core", title="核心", content="fixed")]
+        ),
+        hot_history=HotHistoryLayer(messages=[
+            Message(Role.USER, "u1"),
+            Message(Role.ASSISTANT, "a1"),
+            Message(Role.SYSTEM, "legacy system"),
+        ]),
+        status_tables=StatusTablesLayer(
+            tables=[{"name": "状态", "headers": ["k"], "rows": [["v"]]}]
+        ),
+        user_message=UserMessageLayer(user_input="hi"),
+    )
+
+    rendered = ctx.to_message_objects()
+
+    assert [message.role for message in rendered] == [
+        Role.SYSTEM,
+        Role.USER,
+        Role.ASSISTANT,
+        Role.USER,
+    ]
+    assert rendered[0].content == "fixed|core\n\nlegacy system\n\ntables|状态"

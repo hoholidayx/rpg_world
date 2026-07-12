@@ -455,15 +455,17 @@ def test_agent_service_contracts(monkeypatch) -> None:
         main_llm_options = client.get("/agent/v1/chat/main-llm/options")
         assert main_llm_options.status_code == 200
         assert main_llm_options.json()["config_default_provider_key"] == "deepseek_v4_flash"
-        assert [item["provider_key"] for item in main_llm_options.json()["options"]] == [
-            "deepseek_v4_flash"
-        ]
-        assert set(main_llm_options.json()["options"][0]) == {
-            "provider_key",
-            "backend",
-            "model",
-            "context_window",
-        }
+        main_llm_option_rows = main_llm_options.json()["options"]
+        assert main_llm_option_rows[0]["provider_key"] == "deepseek_v4_flash"
+        assert all(
+            set(item) == {
+                "provider_key",
+                "backend",
+                "model",
+                "context_window",
+            }
+            for item in main_llm_option_rows
+        )
 
         story_main_llm = client.get(
             "/agent/v1/chat/main-llm/story",

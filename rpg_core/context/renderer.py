@@ -13,7 +13,7 @@ class ContextRenderer:
         self._ctx = ctx
 
     def to_message_objects(self) -> list[Message]:
-        msgs: list[Message] = []
+        system_parts: list[str] = []
 
         for type_ in (
             LayerType.FIXED,
@@ -22,9 +22,14 @@ class ContextRenderer:
         ):
             content = self.render_layer(type_)
             if content:
-                msgs.append(Message(role=Role.SYSTEM, content=content))
+                system_parts.append(content)
 
-        msgs.extend(self._ctx.hot_history.messages)
+        history_messages: list[Message] = []
+        for message in self._ctx.hot_history.messages:
+            if message.is_system():
+                system_parts.append(message.content)
+            else:
+                history_messages.append(message)
 
         for type_ in (
             LayerType.STORY_MEMORY,
@@ -34,7 +39,15 @@ class ContextRenderer:
         ):
             content = self.render_layer(type_)
             if content:
-                msgs.append(Message(role=Role.SYSTEM, content=content))
+                system_parts.append(content)
+
+        # Some OpenAI-compatible chat templates (including Qwen) only accept
+        # one system message, and require it to be the first message.
+        msgs: list[Message] = []
+        if system_parts:
+            msgs.append(Message(role=Role.SYSTEM, content="\n\n".join(system_parts)))
+
+        msgs.extend(history_messages)
 
         user_content = self.render_layer(LayerType.USER_MESSAGE)
         if user_content:
