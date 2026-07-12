@@ -30,7 +30,6 @@ export type AssistantTextParseResult = {
 type OpeningTag = {
   kind: Exclude<AssistantTextSegmentKind, typeof ASSISTANT_TEXT_SEGMENT_KIND.RAW>
   openEnd: number
-  tagName: string
   speakerName?: string
 }
 
@@ -63,6 +62,10 @@ function incompleteOpeningTagRe(tagName: string) {
 }
 
 const PROTOCOL_OPEN_RE = new RegExp(`<\\s*(?:${TAG_NAMES.map(tagBoundary).join('|')})`, 'g')
+const PROTOCOL_CLOSE_RE = new RegExp(
+  `</\\s*(?:${TAG_NAMES.map(looseClosingTagBoundary).join('|')})\\s*>?`,
+  'g',
+)
 const ATTRIBUTE_NAME_RE = new RegExp(
   `(?:^|\\s)${escapeRegExp(ASSISTANT_TEXT_ATTR.CHARACTER_NAME)}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`,
 )
@@ -113,10 +116,9 @@ function parseIncompleteOpeningTag(content: string, start: number, tagName: stri
   }
 }
 
-function findClosingTag(content: string, tagName: string, start: number): ClosingTag | null {
-  const closeRe = new RegExp(`</\\s*${looseClosingTagBoundary(tagName)}\\s*>?`, 'g')
-  closeRe.lastIndex = start
-  const match = closeRe.exec(content)
+function findNextClosingTag(content: string, start: number): ClosingTag | null {
+  PROTOCOL_CLOSE_RE.lastIndex = start
+  const match = PROTOCOL_CLOSE_RE.exec(content)
   if (!match) return null
   return {
     start: match.index,
@@ -132,7 +134,6 @@ function parseOpeningTag(content: string, start: number): OpeningTag | null {
     return {
       kind: ASSISTANT_TEXT_SEGMENT_KIND.NARRATION,
       openEnd: narration.openEnd,
-      tagName: ASSISTANT_TEXT_TAG.NARRATION,
     }
   }
 
@@ -145,7 +146,6 @@ function parseOpeningTag(content: string, start: number): OpeningTag | null {
   return {
     kind: ASSISTANT_TEXT_SEGMENT_KIND.CHARACTER,
     openEnd: skipWhitespace(content, character.openEnd),
-    tagName: ASSISTANT_TEXT_TAG.CHARACTER,
     speakerName,
   }
 }
@@ -193,23 +193,25 @@ export function parseAssistantTextSegments(content: string): AssistantTextParseR
       continue
     }
 
-    const closing = findClosingTag(content, opening.tagName, opening.openEnd)
+    const closing = findNextClosingTag(content, opening.openEnd)
+    const nestedTag = findNextProtocolTag(content, opening.openEnd)
+    if (nestedTag >= 0 && (!closing || nestedTag < closing.start)) {
+      appendSegment(segments, {
+        kind: opening.kind,
+        text: content.slice(opening.openEnd, nestedTag),
+        speakerName: opening.speakerName,
+      })
+      structured = true
+      index = nestedTag
+      continue
+    }
+
     if (!closing) {
       appendSegment(segments, {
         kind: ASSISTANT_TEXT_SEGMENT_KIND.RAW,
         text: content.slice(index),
       })
       break
-    }
-
-    const nestedTag = findNextProtocolTag(content, opening.openEnd)
-    if (nestedTag >= 0 && nestedTag < closing.start) {
-      appendSegment(segments, {
-        kind: ASSISTANT_TEXT_SEGMENT_KIND.RAW,
-        text: content.slice(index, closing.end),
-      })
-      index = closing.end
-      continue
     }
 
     appendSegment(segments, {
