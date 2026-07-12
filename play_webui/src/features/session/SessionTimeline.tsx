@@ -221,7 +221,7 @@ function MessageBubble({
     return (
       <details
         className={cn(
-          'group rounded-lg border px-4 py-3 text-sm leading-6 break-words whitespace-normal',
+          'group rounded-lg border px-4 py-3 text-[length:var(--session-message-font-size)] leading-[var(--session-message-line-height)] break-words whitespace-normal',
           toneClass,
         )}
       >
@@ -229,7 +229,7 @@ function MessageBubble({
           <span>{message.status === SESSION_MESSAGE_STATUS.STREAMING ? '正在思考...' : '思考过程'}</span>
           <ChevronDown size={16} className="shrink-0 transition group-open:rotate-180" />
         </summary>
-        <div className="mt-3 whitespace-pre-wrap border-t border-amber-200/70 pt-3 text-xs font-semibold leading-6 text-amber-900 dark:border-amber-500/20 dark:text-amber-100">
+        <div className="mt-3 whitespace-pre-wrap border-t border-amber-200/70 pt-3 font-semibold text-amber-900 dark:border-amber-500/20 dark:text-amber-100">
           {content || '暂无思考内容'}
         </div>
       </details>

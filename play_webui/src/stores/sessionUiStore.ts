@@ -2,12 +2,35 @@
 
 import { create } from 'zustand'
 
-export type SessionFontScale = 90 | 95 | 100 | 105 | 110 | 115 | 120 | 125
+export type SessionFontScale =
+  | 90
+  | 95
+  | 100
+  | 105
+  | 110
+  | 115
+  | 120
+  | 125
+  | 130
+  | 135
+  | 140
+  | 145
+  | 150
+  | 155
+  | 160
+  | 165
+  | 170
+  | 175
+  | 180
+  | 185
+  | 190
+  | 195
+  | 200
 
 export const SESSION_FONT_SCALE_MIN = 90
-export const SESSION_FONT_SCALE_MAX = 125
+export const SESSION_FONT_SCALE_MAX = 200
 export const SESSION_FONT_SCALE_STEP = 5
-export const SESSION_FONT_SCALE_DEFAULT: SessionFontScale = 100
+export const SESSION_FONT_SCALE_DEFAULT: SessionFontScale = 125
 
 const SESSION_FONT_SCALE_STORAGE_KEY = 'rpg-world-session-font-scale'
 const SESSION_SHOW_THINKING_STORAGE_KEY = 'rpg-world-session-show-thinking'
@@ -22,9 +45,11 @@ function normalizeSessionFontScale(value: number): SessionFontScale {
 function readStoredFontScale(): SessionFontScale {
   if (typeof window === 'undefined') return SESSION_FONT_SCALE_DEFAULT
 
-  const stored = Number(window.localStorage.getItem(SESSION_FONT_SCALE_STORAGE_KEY))
-  if (!Number.isFinite(stored)) return SESSION_FONT_SCALE_DEFAULT
-  return normalizeSessionFontScale(stored)
+  const stored = window.localStorage.getItem(SESSION_FONT_SCALE_STORAGE_KEY)
+  if (stored === null) return SESSION_FONT_SCALE_DEFAULT
+  const parsed = Number(stored)
+  if (!Number.isFinite(parsed)) return SESSION_FONT_SCALE_DEFAULT
+  return normalizeSessionFontScale(parsed)
 }
 
 function storeFontScale(fontScale: SessionFontScale) {
