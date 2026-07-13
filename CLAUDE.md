@@ -338,7 +338,7 @@ TurnRequest                            调用方原始、不可变输入
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
 - 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起绑定给 `StatusSubAgent`。代码固定编排为 Outcome 独立判定 → 状态表/字段路由 → scene 与每张命中表分别更新；Outcome 已暂存或判定失败时不进入状态路由与预写。
-- 状态路由只能选择 scene，以及普通表中的 `realtime` / 已明确命中 `updateRule` 的 `event_driven` 字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID、key allowlist 和频率。任一状态更新批次失败使用内存 checkpoint 撤销本轮全部预写并由主 Agent 回退，不新增持久化 journal。
+- 状态路由只能选择 scene，以及普通表中的 `realtime` / 已明确命中 `updateRule` 的 `event_driven` 字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID、key allowlist 和频率。快速更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
 - 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后主 Agent schema 隐藏 outcome 工具，漏判或预裁定失败时才保留补判；主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
 - 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。字段更新频率固定为 `realtime | event_driven | deferred | manual`，旧字段默认 `realtime`，scene 永远只能是 `realtime`；`deferred` 由回复交付后的慢状态归纳维护，`manual` 不允许 LLM 写入。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
@@ -534,7 +534,7 @@ agent.send(user_input)
   → StatusPreflightHook 调用 StatusSubAgent.run_preflight() 执行固定编排
     → Outcome 阶段：需要裁定时只暂存 outcome，并停止后续状态阶段
     → Route 阶段：只选择相关 scene、表 ID 及 realtime/event_driven key
-    → Update 阶段：scene 与每张命中表分别调用，确定性变化进入 scratch
+    → Update 阶段：scene 与每张命中表分别调用；目标失败只恢复该目标，其他确定性变化保留在 scratch
   → SceneTracker.get_context() → [scene] 嵌入 user message
   → MemoryRecallHook：失败 warning-and-continue
   → turn runtime 收集 runtime sections；已暂存 outcome 在主 Agent 首次调用前注入

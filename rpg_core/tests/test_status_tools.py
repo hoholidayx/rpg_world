@@ -14,6 +14,7 @@ from rpg_core.agent.sub_agents import (
 from rpg_core.agent.tools import BaseTool
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
+from rpg_core.scene import SceneTracker
 from rpg_core.status.tools import StatusTableSetValuesTool, StatusTableToolProvider, StatusWritePolicy
 
 
@@ -37,8 +38,14 @@ class FakeRuntimeStatusManager:
         document = self.documents[table_id]
         return {
             "id": table_id,
-            "name": "角色状态" if table_id == 1 else "当前场景",
-            "status_kind": STATUS_KIND_NORMAL if table_id == 1 else STATUS_KIND_SCENE,
+            "name": (
+                "当前场景"
+                if table_id == 2
+                else "角色状态"
+                if table_id == 1
+                else f"状态表 {table_id}"
+            ),
+            "status_kind": STATUS_KIND_SCENE if table_id == 2 else STATUS_KIND_NORMAL,
             "description": "追踪已有状态",
             "headers": list(document.headers),
             "rows": [list(row) for row in document.data_rows],
@@ -411,6 +418,287 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts() -> Non
     assert provider.stages == ["outcome", "route", "scene", "table"]
 
 
+@pytest.mark.asyncio
+async def test_fixed_preflight_keeps_other_targets_when_provider_fails() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[3] = _document(("法力", "5"))
+    manager.documents[4] = _document(("线索", "0"))
+    manager.list_context_tables = lambda: [  # type: ignore[method-assign]
+        manager._table(table_id) for table_id in (1, 3, 4)
+    ]
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        def __init__(self) -> None:
+            self.stages: list[str] = []
+
+        async def chat(self, messages, *, tools):  # noqa: ANN001
+            names = {schema["function"]["name"] for schema in tools}
+            if names == {"select_status_targets"}:
+                self.stages.append("route")
+                return {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "select_status_targets",
+                            "arguments": json.dumps({
+                                "scene": False,
+                                "tables": [
+                                    {
+                                        "table_id": table_id,
+                                        "realtime_keys": [key],
+                                        "event_keys": [],
+                                        "reason": "确定变化",
+                                    }
+                                    for table_id, key in (
+                                        (1, "生命"),
+                                        (3, "法力"),
+                                        (4, "线索"),
+                                    )
+                                ],
+                            }, ensure_ascii=False),
+                        },
+                    }],
+                }
+
+            selected = str(messages[-1]["content"])
+            if "生命" in selected:
+                self.stages.append("table:1")
+                table_id, key, value = 1, "生命", "8"
+            elif "法力" in selected:
+                self.stages.append("table:3:error")
+                raise RuntimeError("provider unavailable")
+            else:
+                self.stages.append("table:4")
+                table_id, key, value = 4, "线索", "1"
+            return {
+                "tool_calls": [{
+                    "function": {
+                        "name": "status_table_set_values",
+                        "arguments": json.dumps({
+                            "table_id": table_id,
+                            "updates": [{"key": key, "value": value}],
+                        }, ensure_ascii=False),
+                    },
+                }],
+            }
+
+    provider = Provider()
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent.set_mutation_boundary(
+        scratch.create_checkpoint,
+        scratch.restore_checkpoint,
+    )
+    sub_agent._get_provider = lambda: provider  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="status",
+        scene_context="",
+        context_tables=runtime.list_context_tables(),
+        user_input="执行确定更新",
+    )
+
+    assert result.failed is True
+    assert result.updated is True
+    assert provider.stages == ["route", "table:1", "table:3:error", "table:4"]
+    assert [change.table_id for change in scratch.staged_changes] == [1, 4]
+    assert runtime.get_table_by_id(1)["rows"] == [["生命", "8"]]
+    assert runtime.get_table_by_id(3)["rows"] == [["法力", "5"]]
+    assert runtime.get_table_by_id(4)["rows"] == [["线索", "1"]]
+
+
+@pytest.mark.asyncio
+async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[3] = _document(("法力", "5"))
+    manager.documents[4] = _document(("线索", "0"))
+    manager.list_context_tables = lambda: [  # type: ignore[method-assign]
+        manager._table(table_id) for table_id in (1, 3, 4)
+    ]
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        async def chat(self, messages, *, tools):  # noqa: ANN001
+            names = {schema["function"]["name"] for schema in tools}
+            if names == {"select_status_targets"}:
+                return {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "select_status_targets",
+                            "arguments": json.dumps({
+                                "scene": False,
+                                "tables": [
+                                    {
+                                        "table_id": table_id,
+                                        "realtime_keys": [key],
+                                        "event_keys": [],
+                                        "reason": "确定变化",
+                                    }
+                                    for table_id, key in (
+                                        (1, "生命"),
+                                        (3, "法力"),
+                                        (4, "线索"),
+                                    )
+                                ],
+                            }, ensure_ascii=False),
+                        },
+                    }],
+                }
+
+            selected = str(messages[-1]["content"])
+            if "生命" in selected:
+                calls = [(1, "生命", "8")]
+            elif "法力" in selected:
+                calls = [(3, "法力", "4"), (3, "不存在", "x")]
+            else:
+                calls = [(4, "线索", "1")]
+            return {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "status_table_set_values",
+                            "arguments": json.dumps({
+                                "table_id": table_id,
+                                "updates": [{"key": key, "value": value}],
+                            }, ensure_ascii=False),
+                        },
+                    }
+                    for table_id, key, value in calls
+                ],
+            }
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent.set_mutation_boundary(
+        scratch.create_checkpoint,
+        scratch.restore_checkpoint,
+    )
+    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="status",
+        scene_context="",
+        context_tables=runtime.list_context_tables(),
+        user_input="执行确定更新",
+    )
+
+    assert result.failed is True
+    assert result.updated is True
+    assert [record.status for record in result.records] == [
+        StatusSubAgentRecordStatus.CHANGED,
+        StatusSubAgentRecordStatus.ROLLED_BACK_DUE_TO_FAILURE,
+        StatusSubAgentRecordStatus.ERROR,
+        StatusSubAgentRecordStatus.CHANGED,
+    ]
+    assert [change.table_id for change in scratch.staged_changes] == [1, 4]
+    assert runtime.get_table_by_id(3)["rows"] == [["法力", "5"]]
+
+
+@pytest.mark.asyncio
+async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+    scene_tracker = SceneTracker()
+    scene_tracker.bind_status_manager(runtime)
+    assert scene_tracker.load_from_status_table() is True
+
+    class Provider:
+        async def chat(self, messages, *, tools):  # noqa: ANN001
+            names = {schema["function"]["name"] for schema in tools}
+            if names == {"select_status_targets"}:
+                return {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "select_status_targets",
+                            "arguments": json.dumps({
+                                "scene": True,
+                                "tables": [{
+                                    "table_id": 1,
+                                    "realtime_keys": ["生命"],
+                                    "event_keys": [],
+                                    "reason": "确定变化",
+                                }],
+                            }, ensure_ascii=False),
+                        },
+                    }],
+                }
+            if "scene_time" in names:
+                return {
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "scene_time",
+                                "arguments": json.dumps({"hour": 9}),
+                            },
+                        },
+                        {
+                            "function": {
+                                "name": "status_table_set_values",
+                                "arguments": json.dumps({
+                                    "table_id": 1,
+                                    "updates": [{"key": "生命", "value": "7"}],
+                                }, ensure_ascii=False),
+                            },
+                        },
+                    ],
+                }
+            return {
+                "tool_calls": [{
+                    "function": {
+                        "name": "status_table_set_values",
+                        "arguments": json.dumps({
+                            "table_id": 1,
+                            "updates": [{"key": "生命", "value": "8"}],
+                        }, ensure_ascii=False),
+                    },
+                }],
+            }
+
+    def create_checkpoint() -> object:
+        return scratch.create_checkpoint(), scene_tracker.get_time_state()
+
+    def restore_checkpoint(checkpoint: object) -> None:
+        status_checkpoint, scene_time = checkpoint  # type: ignore[misc]
+        scratch.restore_checkpoint(status_checkpoint)
+        scene_tracker.set_time_state(scene_time)
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([
+        *scene_tracker.get_tools(),
+        StatusTableSetValuesTool(runtime),
+    ])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent.set_mutation_boundary(create_checkpoint, restore_checkpoint)
+    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="status",
+        scene_context=scene_tracker.get_context(),
+        context_tables=runtime.list_context_tables(),
+        user_input="时间推进并受伤",
+    )
+
+    assert result.failed is True
+    assert result.updated is True
+    assert scene_tracker.get_time_state()["hour"] == 6
+    assert [change.table_id for change in scratch.staged_changes] == [1]
+    assert runtime.get_table_by_id(1)["rows"] == [["生命", "8"]]
+    assert runtime.get_table_by_id(2)["rows"] == [["位置", "森林"]]
+    assert [record.status for record in result.records] == [
+        StatusSubAgentRecordStatus.ROLLED_BACK_DUE_TO_FAILURE,
+        StatusSubAgentRecordStatus.ERROR,
+        StatusSubAgentRecordStatus.CHANGED,
+    ]
+
+
 def test_status_sub_agent_turn_tool_scope_restores_owned_bindings() -> None:
     manager = FakeRuntimeStatusManager()
     _scratch, runtime = _scratch_runtime(manager)
@@ -550,7 +838,7 @@ def test_status_sub_agent_prompt_and_schema_only_include_outcome_when_mounted() 
 
 
 @pytest.mark.asyncio
-async def test_status_sub_agent_failed_state_batch_restores_all_prewrites() -> None:
+async def test_status_sub_agent_failed_state_target_restores_its_prewrites() -> None:
     manager = FakeRuntimeStatusManager()
     scratch, runtime = _scratch_runtime(manager)
 
@@ -605,3 +893,55 @@ async def test_status_sub_agent_failed_state_batch_restores_all_prewrites() -> N
     assert result.records[1].status is StatusSubAgentRecordStatus.ERROR
     assert scratch.staged_changes == []
     assert manager.documents[1].row_for_key("生命").value == "10"
+
+
+@pytest.mark.asyncio
+async def test_status_sub_agent_checkpoint_restore_failure_remains_fatal() -> None:
+    manager = FakeRuntimeStatusManager()
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        async def chat(self, _messages, *, tools):  # noqa: ANN001
+            assert tools[0]["function"]["name"] == "status_table_set_values"
+            return {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "status_table_set_values",
+                            "arguments": json.dumps({
+                                "table_id": 1,
+                                "updates": [{"key": "生命", "value": "8"}],
+                            }),
+                        },
+                    },
+                    {
+                        "function": {
+                            "name": "status_table_set_values",
+                            "arguments": json.dumps({
+                                "table_id": 1,
+                                "updates": [{"key": "不存在", "value": "x"}],
+                            }),
+                        },
+                    },
+                ],
+            }
+
+    def fail_restore(_checkpoint: object) -> None:
+        raise RuntimeError("restore unavailable")
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent.set_mutation_boundary(scratch.create_checkpoint, fail_restore)
+    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+
+    with pytest.raises(
+        RuntimeError,
+        match="failed to restore status update target checkpoint",
+    ):
+        await sub_agent.update(
+            history=[],
+            state_context="status",
+            user_input="更新两个值",
+        )

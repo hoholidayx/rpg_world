@@ -35,7 +35,7 @@ _TAG = "[TurnHooks]"
 
 
 class StatusPreflightHook:
-    """Critical preflight hook with scratch checkpoint/restore semantics."""
+    """Critical preflight hook with target-scoped scratch rollback callbacks."""
 
     def __init__(
         self,

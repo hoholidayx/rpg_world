@@ -249,7 +249,7 @@ class StatusSubAgent(BaseSubAgent):
         checkpoint: Callable[[], object] | None,
         restore: Callable[[object], None] | None,
     ) -> None:
-        """Bind an in-memory rollback boundary for one status prewrite batch."""
+        """Bind an in-memory rollback boundary for one status update target."""
         self._mutation_checkpoint = checkpoint
         self._mutation_restore = restore
 
@@ -760,11 +760,6 @@ class StatusSubAgent(BaseSubAgent):
         turn_stats: TurnStats | None,
         player_character: "TurnPlayerCharacterSnapshot | None",
     ) -> None:
-        checkpoint = (
-            self._mutation_checkpoint()
-            if self._mutation_checkpoint is not None
-            else None
-        )
         tables_by_id = {int(table.get("id", 0)): table for table in context_tables}
         recent = self._format_history_window(history, max_history_rounds)
         batches: list[_RoutedStatusUpdateBatch] = []
@@ -796,73 +791,119 @@ class StatusSubAgent(BaseSubAgent):
             schemas = self._schemas_for_names(set(batch.schema_names))
             if not schemas:
                 continue
-            messages = [
-                Message(
-                    role=Role.SYSTEM,
-                    content=self._build_system_context(
-                        BASE_SYSTEM_PROMPT,
-                        player_character=player_character,
-                    ),
-                ).to_dict(),
-                Message(
-                    role=Role.USER,
-                    content=(
-                        f"## Selected State Target\n{batch.selected_context}\n\n"
-                        f"## Recent Conversation\n{recent}\n\n"
-                        f"## User action\n{user_input}\n\n"
-                        "只更新这里列出的、已经确定且实际变化的值；没有变化不要调用工具。"
-                    ),
-                ).to_dict(),
-            ]
-            llm_result, call_record = await self._chat_with_stats(
-                messages,
-                schemas,
-                source=batch.source,
+            checkpoint = (
+                self._mutation_checkpoint()
+                if self._mutation_checkpoint is not None
+                else None
             )
-            self._append_call_record(result.call_stats, turn_stats, call_record)
-            for name, args in (
-                _normalize_tool_call(call) for call in self._tool_calls(llm_result)
-            ):
-                if name not in batch.schema_names:
-                    result.records.append(StatusSubAgentToolRecord(
-                        tool_name=name,
-                        arguments=args,
-                        result="Error: tool is outside the current fixed stage",
-                        success=False,
-                        changed=False,
-                        status=StatusSubAgentRecordStatus.ERROR,
-                        stage=StatusSubAgentStage.REALTIME,
-                    ))
-                    result.failed = True
-                    break
-                record = await self._execute_tool_call(
-                    name,
-                    args,
-                    track_mutation=True,
-                )
-                record.stage = (
-                    StatusSubAgentStage.EVENT_DRIVEN
-                    if name == STATUS_TABLE_SET_VALUES_TOOL_NAME
-                    and self._arguments_touch_event_key(args, route)
-                    else StatusSubAgentStage.REALTIME
-                )
-                result.records.append(record)
-                result.updated = result.updated or record.changed
-                result.failed = result.failed or not record.success
-            if result.failed:
-                break
-
-        if result.failed and checkpoint is not None and self._mutation_restore is not None:
+            record_start = len(result.records)
             try:
-                self._mutation_restore(checkpoint)
+                messages = [
+                    Message(
+                        role=Role.SYSTEM,
+                        content=self._build_system_context(
+                            BASE_SYSTEM_PROMPT,
+                            player_character=player_character,
+                        ),
+                    ).to_dict(),
+                    Message(
+                        role=Role.USER,
+                        content=(
+                            f"## Selected State Target\n{batch.selected_context}\n\n"
+                            f"## Recent Conversation\n{recent}\n\n"
+                            f"## User action\n{user_input}\n\n"
+                            "只更新这里列出的、已经确定且实际变化的值；没有变化不要调用工具。"
+                        ),
+                    ).to_dict(),
+                ]
+                llm_result, call_record = await self._chat_with_stats(
+                    messages,
+                    schemas,
+                    source=batch.source,
+                )
+                self._append_call_record(result.call_stats, turn_stats, call_record)
+                batch_failed = False
+                for name, args in (
+                    _normalize_tool_call(call) for call in self._tool_calls(llm_result)
+                ):
+                    if name not in batch.schema_names:
+                        result.records.append(StatusSubAgentToolRecord(
+                            tool_name=name,
+                            arguments=args,
+                            result="Error: tool is outside the current fixed stage",
+                            success=False,
+                            changed=False,
+                            status=StatusSubAgentRecordStatus.ERROR,
+                            stage=StatusSubAgentStage.REALTIME,
+                        ))
+                        batch_failed = True
+                        break
+                    record = await self._execute_tool_call(
+                        name,
+                        args,
+                        track_mutation=True,
+                    )
+                    record.stage = (
+                        StatusSubAgentStage.EVENT_DRIVEN
+                        if name == STATUS_TABLE_SET_VALUES_TOOL_NAME
+                        and self._arguments_touch_event_key(args, route)
+                        else StatusSubAgentStage.REALTIME
+                    )
+                    result.records.append(record)
+                    if not record.success:
+                        batch_failed = True
+                        break
+                if batch_failed:
+                    result.failed = True
+                    self._restore_failed_update_target(
+                        checkpoint,
+                        result.records[record_start:],
+                    )
+                    logger.warning(
+                        _TAG + " status update target failed and was restored: {}",
+                        batch.source,
+                    )
+            except _StatusPrewriteRollbackError:
+                raise
             except Exception as exc:
+                result.failed = True
+                self._restore_failed_update_target(
+                    checkpoint,
+                    result.records[record_start:],
+                )
+                logger.warning(
+                    _TAG + " status update target failed and was restored: {}: {}",
+                    batch.source,
+                    exc,
+                )
+
+        result.updated = any(
+            record.changed
+            for record in result.records
+            if record.stage is not StatusSubAgentStage.OUTCOME
+        )
+
+    def _restore_failed_update_target(
+        self,
+        checkpoint: object | None,
+        records: list[StatusSubAgentToolRecord],
+    ) -> None:
+        """Restore only the failed scene or single-table update target."""
+        changed = any(record.changed for record in records)
+        if self._mutation_restore is None or self._mutation_checkpoint is None:
+            if changed:
                 raise _StatusPrewriteRollbackError(
-                    "failed to restore status prewrite checkpoint"
-                ) from exc
-            for record in result.records:
-                if record.stage is not StatusSubAgentStage.OUTCOME:
-                    record.mark_rolled_back()
-            result.updated = False
+                    "status prewrite mutation boundary is unavailable"
+                )
+            return
+        try:
+            self._mutation_restore(checkpoint)
+        except Exception as exc:
+            raise _StatusPrewriteRollbackError(
+                "failed to restore status update target checkpoint"
+            ) from exc
+        for record in records:
+            record.mark_rolled_back()
 
     async def update(
         self,
@@ -1012,21 +1053,11 @@ class StatusSubAgent(BaseSubAgent):
                 result.updated = result.updated or record.changed
                 result.failed = result.failed or not record.success
 
-            if result.failed and checkpoint is not None and self._mutation_restore is not None:
-                try:
-                    self._mutation_restore(checkpoint)
-                except Exception as exc:
-                    logger.opt(exception=exc).error(
-                        _TAG + " failed to restore status prewrite checkpoint"
-                    )
-                    raise _StatusPrewriteRollbackError(
-                        "failed to restore status prewrite checkpoint"
-                    ) from exc
-                for record in result.records:
-                    record.mark_rolled_back()
-                result.updated = False
+            if result.failed:
+                self._restore_failed_update_target(checkpoint, result.records)
+                result.updated = any(record.changed for record in result.records)
                 logger.warning(
-                    _TAG + " state prewrite batch failed and was restored; main Agent will fallback"
+                    _TAG + " state update target failed and was restored"
                 )
 
             if result.updated:

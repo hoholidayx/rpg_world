@@ -94,8 +94,8 @@ class StatusSubAgentRecordText:
     DUPLICATE_OUTCOME_SKIPPED = (
         "Skipped: duplicate outcome call in the same preflight batch"
     )
-    BATCH_ROLLBACK_SUFFIX = (
-        " (rolled back because the preflight batch failed)"
+    TARGET_ROLLBACK_SUFFIX = (
+        " (rolled back because the status update target failed)"
     )
 
 
@@ -154,7 +154,7 @@ class StatusSubAgentToolRecord:
         """Convert a staged mutation into a diagnostic-only rollback record."""
         if not self.changed:
             return
-        self.result = f"{self.result}{StatusSubAgentRecordText.BATCH_ROLLBACK_SUFFIX}"
+        self.result = f"{self.result}{StatusSubAgentRecordText.TARGET_ROLLBACK_SUFFIX}"
         self.success = False
         self.changed = False
         self.status = StatusSubAgentRecordStatus.ROLLED_BACK_DUE_TO_FAILURE
@@ -174,7 +174,11 @@ class StatusSubAgentToolRecord:
 
 @dataclass
 class StatusSubAgentResult:
-    """StatusSubAgent result with typed tool-call diagnostics."""
+    """StatusSubAgent result with typed tool-call diagnostics.
+
+    ``failed`` and ``updated`` may both be true when one fast-update target was
+    restored while another target still has changes staged in turn scratch.
+    """
 
     updated: bool = False
     records: list[StatusSubAgentToolRecord] = field(default_factory=list)

@@ -32,7 +32,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
-- **2026-07-13：Agent Turn 与状态更新固定编排。** Narrative Outcome 与状态更新拆分为独立阶段；状态更新先 Route，再按 scene 和单张普通表隔离执行；字段频率统一为 `realtime | event_driven | deferred | manual`，其中 deferred 在回复交付后、同 session 下一 mailbox 项前归纳。scene 继续以 `status_kind="scene"` 作为数据真源，但在主 Context 和更新工具上走专用路径。完整设计、时序和失败回退见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。
+- **2026-07-13：Agent Turn 与状态更新固定编排。** Narrative Outcome 与状态更新拆分为独立阶段；状态更新先 Route，再按 scene 和单张普通表隔离执行。快速状态目标采用 best-effort：单个目标失败只回退该目标，其他成功目标保留且主流程继续；整个 turn 仍只在主 runner 成功后统一提交。字段频率统一为 `realtime | event_driven | deferred | manual`，其中 deferred 在回复交付后、同 session 下一 mailbox 项前归纳。scene 继续以 `status_kind="scene"` 作为数据真源，但在主 Context 和更新工具上走专用路径。完整设计、时序和失败语义见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。
 
 ## 快速起步
 
@@ -228,9 +228,9 @@ Mailbox → 命令/角色 guard → 不可变 TurnExecutionPlan
 
 turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool service 与固定 hooks；生产代码通过公开接口协作，不访问 Agent、builder 或 SubAgent 私有状态。
 
-`AgentTurnTransaction` 是“内存 scratch + 短 commit 点”，不是跨 LLM 调用的长数据库事务。user/assistant message、Narrative Outcome、scene/status 都先暂存；主 runner 完整成功后统一提交，流式 DONE 只在 commit 成功后发送。取消或失败丢弃 scratch；story-memory、summary 和 deferred 属于 commit 后任务，不回滚已提交 turn。
+`AgentTurnTransaction` 是“内存 scratch + 短 commit 点”，不是跨 LLM 调用的长数据库事务。user/assistant message、Narrative Outcome、scene/status 都先暂存；快速状态阶段按 scene/单表目标独立 checkpoint，目标失败只恢复该目标并继续后续目标及主 runner。主 runner 完整成功后才统一提交仍保留的 scratch，流式 DONE 只在 commit 成功后发送；主 turn 取消或失败仍丢弃全部 scratch。story-memory、summary 和 deferred 属于 commit 后任务，不回滚已提交 turn。
 
-完整阶段顺序、mode 差异、Outcome/Route/Update 隔离、scene 规则、字段 allowlist、同步/流式时序、失败回退和 LLM 调用数量见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。该文档是编排细节的单一说明入口。
+完整阶段顺序、mode 差异、Outcome/Route/Update 隔离、scene 规则、字段 allowlist、同步/流式时序、失败隔离和 LLM 调用数量见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。该文档是编排细节的单一说明入口。
 
 ### 上下文与 RP 模块
 
@@ -281,7 +281,7 @@ RP Modules 采用上下文分层策略：
 | `setback` | 失败但推进 | 25% | 未达成 reason 的整体目标，但提供新信息、替代路径或下一步行动 |
 | `critical_failure` | 重大失败 | 5% | 未达成 reason 的整体目标并引入严重后果，但不自动死亡、硬停局或永久剥夺玩家角色主权 |
 
-Outcome 判定与状态更新由代码拆成独立阶段：预裁定成功后停止 Route 并将结果注入主 Agent；无需裁定时才执行状态目标路由与隔离更新。完整正常链路和回退路径见 [StatusSubAgent 固定编排](docs/agent-turn-orchestration.md#statussubagent-固定编排)。
+Outcome 判定与状态更新由代码拆成独立阶段：预裁定成功后停止 Route 并将结果注入主 Agent；无需裁定时才执行状态目标路由与隔离更新。Outcome 的失败补判语义不受快速状态 best-effort 策略影响。完整正常链路和失败路径见 [StatusSubAgent 固定编排](docs/agent-turn-orchestration.md#statussubagent-固定编排)。
 
 适合触发剧情裁定的情况：
 

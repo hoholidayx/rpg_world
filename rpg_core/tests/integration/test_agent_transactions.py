@@ -193,6 +193,109 @@ async def test_status_scratch_and_messages_commit_together_with_real_sqlite(
 
 
 @pytest.mark.asyncio
+async def test_status_target_failure_keeps_successful_scene_and_main_turn_running(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    status_manager = integration_status_agent._lifecycle.resources.status_manager
+    table = status_manager.list_context_tables()[0]
+    table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                f'{{"scene":true,"tables":[{{"table_id":{table_id},'
+                '"realtime_keys":["线索"],"event_keys":[],'
+                '"reason":"确定更新线索"}]}',
+            )],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "scene_attr",
+                '{"key":"位置","value":"部分成功现场"}',
+            )],
+        ),
+        RuntimeError("normal table provider unavailable"),
+    )
+
+    reply = await integration_status_agent.send("移动并更新线索")
+
+    assert reply.status_sub_agent_records
+    assert reply.status_sub_agent_records[0]["status"] == "changed"
+    assert len(scripted_llm_manager.main_provider().calls) == 1
+    main_context = "\n".join(
+        str(message.get("content", ""))
+        for message in scripted_llm_manager.main_provider().calls[0].messages
+    )
+    assert "部分成功现场" in main_context
+    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    assert scene_attrs is not None
+    assert scene_attrs["位置"] == "部分成功现场"
+    persisted = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    assert persisted.document.row_for_key("线索").value == "状态表已挂载"
+    assert integration_data_gateway.messages.count("integration_status") == 2
+
+
+@pytest.mark.asyncio
+async def test_main_failure_discards_successful_partial_status_prewrites(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    status_manager = integration_status_agent._lifecycle.resources.status_manager
+    table = status_manager.list_context_tables()[0]
+    table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                f'{{"scene":true,"tables":[{{"table_id":{table_id},'
+                '"realtime_keys":["线索"],"event_keys":[],'
+                '"reason":"确定更新线索"}]}',
+            )],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "scene_attr",
+                '{"key":"位置","value":"不应提交的场景"}',
+            )],
+        ),
+        RuntimeError("normal table provider unavailable"),
+    )
+    scripted_llm_manager.main_provider().queue_chat(
+        RuntimeError("main provider unavailable")
+    )
+
+    with pytest.raises(RuntimeError, match="main provider unavailable"):
+        await integration_status_agent.send("移动后主流程失败")
+
+    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    assert scene_attrs is not None
+    assert scene_attrs["位置"] == "集成测试大厅"
+    persisted = integration_data_gateway.status.get_table_for_session(
+        "integration_status",
+        table_id,
+    )
+    assert persisted.document.row_for_key("线索").value == "状态表已挂载"
+    assert integration_data_gateway.messages.count("integration_status") == 0
+    assert integration_data_gateway.backup.messages.count("integration_status") == 0
+
+
+@pytest.mark.asyncio
 async def test_status_commit_failure_rolls_back_messages_backup_and_document(
     integration_status_agent,
     integration_data_gateway,
