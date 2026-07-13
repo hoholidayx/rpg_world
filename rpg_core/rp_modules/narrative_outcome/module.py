@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from rpg_core.agent.tools.state import resolve_state_tool_set
 from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
 from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import (
@@ -145,8 +146,23 @@ class NarrativeOutcomeModule(RPModule):
         request: ModuleContextRequest,
     ) -> list[RPModuleRuntimeSection]:
         scratch = self._active_scratch if request.include_staged_turn else None
-        staged = getattr(scratch, "narrative_outcome", None)
+        staged = scratch.narrative_outcome if scratch is not None else None
         if staged is not None:
+            state_tool_set = resolve_state_tool_set(
+                scratch.scene_tracker,
+                scratch.status_manager,
+            )
+            if state_tool_set.names:
+                state_tool_instruction = (
+                    "- 有实际、持久、已确定的状态变化时，必须在输出任何 RP 正文前调用"
+                    "本轮实际提供的状态工具（"
+                    + "、".join(state_tool_set.names)
+                    + "）；工具调用轮不得夹带 RP 正文。无状态变化时直接输出正文。\n"
+                )
+            else:
+                state_tool_instruction = (
+                    "- 本轮没有提供状态写入工具；没有可写追踪字段，直接输出正文。\n"
+                )
             public_result = json.dumps(
                 staged.to_tool_payload(),
                 ensure_ascii=False,
@@ -164,10 +180,7 @@ class NarrativeOutcomeModule(RPModule):
                         "- 按 outcomeCode 和 narrativeGuidance 推进；"
                         "不得改判、弱化或重新抽取。\n"
                         "- reason 是不可缩小的整体目标边界；不得用子步骤代替整目标。\n"
-                        "- 有实际、持久、已确定的状态变化时，必须在输出任何 RP 正文前调用"
-                        "本轮实际提供的状态工具（scene_time、scene_attr、scene_del_attr、"
-                        "status_table_set_values 中的可用者）；工具调用轮不得夹带 RP 正文。"
-                        "无状态变化时直接输出正文。\n"
+                        f"{state_tool_instruction}"
                         "- 最终正文不得新增尚未同步的确定状态；"
                         "状态同步无需玩家确认，不得询问是否需要更新状态。"
                     ),

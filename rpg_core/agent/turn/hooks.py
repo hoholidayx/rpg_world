@@ -13,8 +13,8 @@ from rpg_core.agent.sub_agents import (
     StatusSubAgentPreflightOutcome,
     StatusSubAgentResult,
 )
-from rpg_core.agent.transaction import SCENE_TOOL_NAMES
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
+from rpg_core.scene import SCENE_TOOL_NAMES
 from rpg_core.status.context import render_status_tables_context
 from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
 
@@ -58,15 +58,16 @@ class StatusPreflightHook:
         sub_agent = self._status_sub_agent()
         if sub_agent is None:
             return None
+        state_tool_set = self._tool_service.state_tools(
+            turn_scratch.scene_tracker,
+            turn_scratch.status_manager,
+        )
         tools = [
             *self._tool_service.narrative_outcome_tools(
                 user_input,
                 rp_module_runtime,
             ),
-            *self._tool_service.state_tools(
-                turn_scratch.scene_tracker,
-                turn_scratch.status_manager,
-            ),
+            *state_tool_set,
         ]
         if not tools:
             return None

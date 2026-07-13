@@ -510,6 +510,58 @@ def test_context_window_reject_threshold_rejects_invalid_values(
         settings_module.Settings()
 
 
+def test_scene_runtime_key_changes_default_off_and_accepts_boolean(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    assert settings_module.Settings().scene_settings.allow_runtime_key_changes is False
+
+    _write_settings(
+        cfg,
+        agent_extra=(
+            "    scene:\n"
+            "      allow_runtime_key_changes: true\n"
+        ),
+    )
+    assert settings_module.Settings().scene_settings.allow_runtime_key_changes is True
+
+
+@pytest.mark.parametrize(
+    ("agent_extra", "message"),
+    [
+        ("    scene: []\n", "agent.scene must be a mapping"),
+        (
+            "    scene:\n      allow_runtime_key_changes: 'false'\n",
+            "allow_runtime_key_changes must be a boolean",
+        ),
+        (
+            "    scene:\n      allow_runtime_key_changes: 1\n",
+            "allow_runtime_key_changes must be a boolean",
+        ),
+    ],
+)
+def test_scene_runtime_key_changes_rejects_malformed_config(
+    tmp_path: Path,
+    monkeypatch,
+    agent_extra: str,
+    message: str,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg, agent_extra=agent_extra)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    with pytest.raises(ValueError, match=message):
+        settings_module.Settings()
+
+
 def test_agent_model_is_required(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "settings.yaml"
     _write_settings(cfg)

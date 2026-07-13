@@ -126,7 +126,11 @@ class AgentTurnTransaction:
     def _build_scratch_scene_tracker(self, status_mgr: ScratchStatusManager) -> SceneTracker | None:
         if self._real_scene_tracker is None:
             return None
-        tracker = SceneTracker()
+        tracker = SceneTracker(
+            allow_runtime_key_changes=(
+                self._real_scene_tracker.allow_runtime_key_changes
+            )
+        )
         tracker.set_time_state(self._real_scene_tracker.get_time_state())
         tracker.bind_status_manager(status_mgr)
         tracker.load_from_status_table()

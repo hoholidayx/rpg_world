@@ -143,3 +143,12 @@ def test_ooc_tool_policy_hides_state_rp_and_write_tools(tmp_path, monkeypatch) -
     assert "rp_story_outcome" not in names
     assert "rp_visible" not in names
     assert "custom_read" in names
+
+
+def test_state_tool_set_reports_exact_runtime_capabilities() -> None:
+    state_tools = AgentToolService.state_tools(_Scene(), None)
+
+    assert state_tools.names == ("scene_time",)
+    assert state_tools.supports("scene_time") is True
+    assert state_tools.supports("scene_del_attr") is False
+    assert AgentToolService.state_tools(None, None).names == ()

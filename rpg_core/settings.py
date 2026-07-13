@@ -197,6 +197,13 @@ class CoreLoggingSettings:
 
 
 @dataclass(frozen=True)
+class SceneSettings:
+    """LLM-facing scene mutation policy."""
+
+    allow_runtime_key_changes: bool = False
+
+
+@dataclass(frozen=True)
 class DiceModuleSettings:
     """Dice RP module settings."""
 
@@ -299,6 +306,20 @@ class Settings(ProfiledYamlSettings):
         )
 
     @property
+    def scene_settings(self) -> SceneSettings:
+        raw = self.agent_settings.get("scene", {})
+        if not isinstance(raw, dict):
+            raise ValueError("agent.scene must be a mapping")
+        allow_runtime_key_changes = raw.get("allow_runtime_key_changes", False)
+        if not isinstance(allow_runtime_key_changes, bool):
+            raise ValueError(
+                "agent.scene.allow_runtime_key_changes must be a boolean"
+            )
+        return SceneSettings(
+            allow_runtime_key_changes=allow_runtime_key_changes,
+        )
+
+    @property
     def rp_module_settings(self) -> RPModuleSettings:
         """RP Modules typed settings."""
         raw = self._mapping("rp_modules")
@@ -349,6 +370,9 @@ class Settings(ProfiledYamlSettings):
         self._validate_agent_llm_settings()
         self._validate_context_window_reject_threshold()
         self._validate_status_sub_agent_settings()
+        # Materialize the typed scene policy so malformed permissions fail at
+        # startup rather than changing tool exposure during a turn.
+        self.scene_settings
         # Materialize typed RP module settings at startup so malformed weight
         # distributions fail fast instead of surfacing during a player turn.
         self.rp_module_settings

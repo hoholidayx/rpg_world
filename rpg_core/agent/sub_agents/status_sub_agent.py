@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Iterator, TypeAlias
@@ -48,9 +49,13 @@ from rpg_core.agent.sub_agents.status_sub_agent_models import (
 )
 from rpg_core.agent.tools import BaseTool
 from rpg_core.agent.tools.registry import ToolRegistry
-from rpg_core.agent.transaction.constants import SCENE_TOOL_NAMES
+from rpg_core.agent.tools.state import STATE_TOOL_NAMES, StateToolSet
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
+from rpg_core.scene import (
+    SCENE_DELETE_ATTR_TOOL_NAME,
+    SCENE_TOOL_NAMES,
+)
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
 from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
@@ -65,9 +70,6 @@ if TYPE_CHECKING:
 # ── constants ──────────────────────────────────────────────────────────
 
 _TAG = "[StatusSubAgent]"
-_STATE_TOOL_NAMES = frozenset(
-    (*SCENE_TOOL_NAMES, STATUS_TABLE_SET_VALUES_TOOL_NAME)
-)
 _LLMChatResult: TypeAlias = LLMResponse | dict[str, object]
 
 
@@ -87,23 +89,53 @@ class _StatusPrewriteRollbackError(RuntimeError):
 
 # ── system prompt ─────────────────────────────────────────────────────
 
-BASE_SYSTEM_PROMPT = (
-    "你是 RPG 游戏世界的状态表预处理器。\n\n"
-    "可用操作及其修改的状态表：\n"
-    "- scene_time / scene_attr / scene_del_attr：更新当前场景状态"
-    "（时间、地点、天气、氛围、在场的 NPC 等）\n"
-    "- status_table_set_values：批量更新普通状态表中已有键的值\n\n"
-    "状态更新边界：\n"
-    "1. 只依据既有 assistant 已确认事实、用户对既有事实的明确纠正，或没有随机分支的确定性动作"
-    "更新状态。用户单方面宣称的未决外部结果不是已确认事实。\n"
-    "2. 仅当实际、持久、已经确定的追踪值发生变化时调用状态工具；不要修改没有变化的属性，"
-    "不要制造 no-op。没有裁定且没有状态变化时，不调用任何工具。\n"
-    "3. 主动清理：如果某个属性不再与当前场景相关"
-    "（例如角色离开了、某种天气效果消失了），"
-    "使用 scene_del_attr 将其移除。只保留活跃属性可以防止上下文膨胀。\n"
-    "4. 普通状态表不得新增、删除或重命名键；角色状态表只追踪对应角色。\n"
-    "5. 属性键和值使用状态表已有语言和格式。"
-)
+def _build_state_system_prompt(state_tools: StateToolSet) -> str:
+    scene_names = tuple(name for name in state_tools.names if name in SCENE_TOOL_NAMES)
+    operation_lines: list[str] = []
+    if scene_names:
+        operation_lines.append(
+            f"- {' / '.join(scene_names)}：更新当前场景状态"
+            "（时间、地点、天气、氛围、在场的 NPC 等）"
+        )
+    if state_tools.supports(STATUS_TABLE_SET_VALUES_TOOL_NAME):
+        operation_lines.append(
+            "- status_table_set_values：批量更新普通状态表中已有键的值"
+        )
+    if not operation_lines:
+        operation_lines.append("- 本轮没有状态写入工具；当前场景和普通状态表均为只读")
+
+    if state_tools.supports(SCENE_DELETE_ATTR_TOOL_NAME):
+        scene_boundary = (
+            "3. 主动清理：如果某个属性不再与当前场景相关"
+            "（例如角色离开了、某种天气效果消失了），"
+            "使用 scene_del_attr 将其移除。只保留活跃属性可以防止上下文膨胀。"
+        )
+    elif scene_names:
+        scene_boundary = (
+            "3. scene 与普通状态表一样，只能修改已有 key 的 value，不能新增、删除或重命名 key。"
+            "若某个现有属性暂时不适用，将该现有 key 的 value 更新为空字符串或当前适用值。"
+        )
+    else:
+        scene_boundary = "3. 本轮未提供 scene 写入工具，当前 scene 仅供读取。"
+
+    normal_boundary = (
+        "4. 普通状态表不得新增、删除或重命名键；角色状态表只追踪对应角色。"
+        if state_tools.supports(STATUS_TABLE_SET_VALUES_TOOL_NAME)
+        else "4. 本轮未提供普通状态表写入工具，普通状态表仅供读取。"
+    )
+    return (
+        "你是 RPG 游戏世界的状态表预处理器。\n\n"
+        "可用操作及其修改的状态表：\n"
+        + "\n".join(operation_lines)
+        + "\n\n状态更新边界：\n"
+        "1. 只依据既有 assistant 已确认事实、用户对既有事实的明确纠正，或没有随机分支的确定性动作"
+        "更新状态。用户单方面宣称的未决外部结果不是已确认事实。\n"
+        "2. 仅当实际、持久、已经确定的追踪值发生变化时调用状态工具；不要修改没有变化的属性，"
+        "不要制造 no-op。没有裁定且没有状态变化时，不调用任何工具。\n"
+        f"{scene_boundary}\n"
+        f"{normal_boundary}\n"
+        "5. 属性键和值使用状态表已有语言和格式。"
+    )
 
 NARRATIVE_OUTCOME_SYSTEM_PROMPT = (
     "\n\n剧情预裁定边界：\n"
@@ -114,8 +146,6 @@ NARRATIVE_OUTCOME_SYSTEM_PROMPT = (
     "成功、失败、发现、伤害、NPC 反应或位置抵达；混合行动中的确定性子动作也交给主 Agent 延后处理。\n"
     "3. 只有不需要裁定时，才执行上述确定性状态预更新。"
 )
-
-SYSTEM_PROMPT = BASE_SYSTEM_PROMPT + NARRATIVE_OUTCOME_SYSTEM_PROMPT
 
 OUTCOME_ONLY_SYSTEM_PROMPT = (
     "你是 RPG 剧情裁定门禁。只判断当前玩家行动是否存在外部实质变数。\n"
@@ -222,6 +252,7 @@ class StatusSubAgent(BaseSubAgent):
         # ── 可扩展工具集 ──────────────────────────────────────────────
         self._tool_registry = ToolRegistry()
         self._schemas: list[dict[str, object]] = []
+        self._state_tool_set = StateToolSet()
         self._mutation_probe: Callable[[], object] | None = None
         self._mutation_checkpoint: Callable[[], object] | None = None
         self._mutation_restore: Callable[[object], None] | None = None
@@ -235,6 +266,7 @@ class StatusSubAgent(BaseSubAgent):
         """注册状态表操作工具。可多次调用追加。"""
         self._tool_registry.register_all(tools)
         self._schemas = self._tool_registry.get_openai_schemas()
+        self._state_tool_set = StateToolSet.from_tools(self._tool_registry)
         logger.info(
             _TAG + " registered {} tool(s): {}",
             len(tools),
@@ -266,6 +298,7 @@ class StatusSubAgent(BaseSubAgent):
         """Temporarily bind tools and rollback callbacks for one turn."""
         previous_registry = self._tool_registry
         previous_schemas = self._schemas
+        previous_state_tool_set = self._state_tool_set
         previous_probe = self._mutation_probe
         previous_checkpoint = self._mutation_checkpoint
         previous_restore = self._mutation_restore
@@ -284,6 +317,7 @@ class StatusSubAgent(BaseSubAgent):
         finally:
             self._tool_registry = previous_registry
             self._schemas = previous_schemas
+            self._state_tool_set = previous_state_tool_set
             self.set_mutation_probe(previous_probe)
             self.set_mutation_boundary(previous_checkpoint, previous_restore)
             self._outcome_preflight_enabled = previous_outcome_preflight_enabled
@@ -301,9 +335,10 @@ class StatusSubAgent(BaseSubAgent):
     @property
     def system_prompt(self) -> str:
         """返回状态表预更新子 Agent 的系统提示。"""
+        base_prompt = _build_state_system_prompt(self._state_tool_set)
         if self._outcome_preflight_enabled:
-            return BASE_SYSTEM_PROMPT + NARRATIVE_OUTCOME_SYSTEM_PROMPT
-        return BASE_SYSTEM_PROMPT
+            return base_prompt + NARRATIVE_OUTCOME_SYSTEM_PROMPT
+        return base_prompt
 
     async def run_preflight(
         self,
@@ -345,7 +380,7 @@ class StatusSubAgent(BaseSubAgent):
                 str(schema.get("function", {}).get("name", ""))
                 for schema in self._schemas
                 if isinstance(schema.get("function"), dict)
-            } & _STATE_TOOL_NAMES
+            } & set(self._state_tool_set.names)
             if not state_schema_names:
                 return result
 
@@ -672,6 +707,20 @@ class StatusSubAgent(BaseSubAgent):
         route = StatusRouteResult()
         catalog, policy_index = self._status_catalog(context_tables)
         recent = self._format_history_window(history, max_history_rounds)
+        scene_writable = any(
+            name in SCENE_TOOL_NAMES for name in self._state_tool_set.names
+        )
+        route_schema = deepcopy(STATUS_ROUTER_SCHEMA)
+        if not scene_writable:
+            parameters = route_schema["function"]["parameters"]  # type: ignore[index]
+            scene_schema = parameters["properties"]["scene"]  # type: ignore[index]
+            scene_schema["const"] = False  # type: ignore[index]
+            scene_schema["description"] = "本轮没有 scene 写入工具，必须为 false。"  # type: ignore[index]
+        scene_constraint = (
+            ""
+            if scene_writable
+            else "本轮没有 scene 写入工具，scene 必须为 false；"
+        )
         messages = [
             Message(
                 role=Role.SYSTEM,
@@ -689,13 +738,13 @@ class StatusSubAgent(BaseSubAgent):
                     f"## Current State\n{state_context}\n\n"
                     f"## Recent Conversation\n{recent}\n\n"
                     f"## User action\n{user_input}\n\n"
-                    "有目标时调用 select_status_targets；完全无关时不要调用。"
+                    f"{scene_constraint}有目标时调用 select_status_targets；完全无关时不要调用。"
                 ),
             ).to_dict(),
         ]
         llm_result, call_record = await self._chat_with_stats(
             messages,
-            [STATUS_ROUTER_SCHEMA],
+            [route_schema],
             source="status_router",
         )
         self._append_call_record(route.call_stats, turn_stats, call_record)
@@ -712,7 +761,7 @@ class StatusSubAgent(BaseSubAgent):
             raw_scene = payload.get("scene", False)
             if not isinstance(raw_scene, bool):
                 raise TypeError("route scene must be a boolean")
-            route.scene = raw_scene
+            route.scene = raw_scene and scene_writable
             raw_targets = payload.get("tables", [])
             if not isinstance(raw_targets, list):
                 raise TypeError("route tables must be an array")
@@ -763,11 +812,14 @@ class StatusSubAgent(BaseSubAgent):
         tables_by_id = {int(table.get("id", 0)): table for table in context_tables}
         recent = self._format_history_window(history, max_history_rounds)
         batches: list[_RoutedStatusUpdateBatch] = []
-        if route.scene:
+        scene_tool_names = frozenset(
+            name for name in self._state_tool_set.names if name in SCENE_TOOL_NAMES
+        )
+        if route.scene and scene_tool_names:
             batches.append(_RoutedStatusUpdateBatch(
                 source="status_update:scene",
                 selected_context=scene_context,
-                schema_names=frozenset(SCENE_TOOL_NAMES),
+                schema_names=scene_tool_names,
                 allowed_status_keys=None,
                 is_scene=True,
             ))
@@ -802,7 +854,7 @@ class StatusSubAgent(BaseSubAgent):
                     Message(
                         role=Role.SYSTEM,
                         content=self._build_system_context(
-                            BASE_SYSTEM_PROMPT,
+                            _build_state_system_prompt(self._state_tool_set),
                             player_character=player_character,
                         ),
                     ).to_dict(),
@@ -990,7 +1042,7 @@ class StatusSubAgent(BaseSubAgent):
             if result.outcome_requested:
                 outcome_executed = False
                 for name, args in normalized_calls:
-                    if name in _STATE_TOOL_NAMES:
+                    if name in STATE_TOOL_NAMES:
                         result.state_prewrites_skipped += 1
                         skipped = StatusSubAgentToolRecord.skipped_due_to_outcome(
                             tool_name=name,
@@ -1351,6 +1403,7 @@ class StatusSubAgent(BaseSubAgent):
         """清空已注册的工具集（重新注册前调用避免重复）。"""
         self._tool_registry = ToolRegistry()
         self._schemas = []
+        self._state_tool_set = StateToolSet()
 
     # ── internal helpers ──────────────────────────────────────────────
 
@@ -1373,6 +1426,7 @@ class StatusSubAgent(BaseSubAgent):
                 kept, total_turns, max_rounds,
             )
         system_content = self._build_system_context(
+            self.system_prompt,
             player_character=player_character,
         )
         outcome_instruction = (

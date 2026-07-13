@@ -19,6 +19,10 @@ base:
     # 主 Agent 当前 Context 达到该窗口占比时拒绝普通正文；斜杠命令不受限。
     context_window_reject_threshold_ratio: 0.9
 
+    # LLM 默认只能修改 scene 已有字段的 value；开启后才允许增删非锁定 key。
+    scene:
+      allow_runtime_key_changes: false
+
     # 记忆子 Agent 的摘要、召回、剧情记忆触发参数。
     memory_sub_agent:
       enabled: true

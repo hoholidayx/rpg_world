@@ -151,7 +151,7 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 - migration `0008_status_update_frequency.sql` 新增 `rpg_session_status_deferred_progress`，以运行时表 ID + 字段 key 保存最后处理 turn。deferred 的 document 值与进度在同一数据库事务中提交；归纳失败不推进进度，truncate/clear 只收缩进度边界，不回滚已经提交的状态值。
 - `DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；service 不扫描目录补业务索引，也不维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。
 - Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
-- `当前场景` 是 `status_kind="scene"` 的特殊状态表，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。scene document 的所有字段固定为 `realtime`，保存边界拒绝 `event_driven` / `deferred` / `manual`。
+- `当前场景` 是 `status_kind="scene"` 的特殊状态表，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。scene document 的所有字段固定为 `realtime`，保存边界拒绝 `event_driven` / `deferred` / `manual`。LLM 默认只能修改已有 key 的 value；`agent.scene.allow_runtime_key_changes=true` 才允许通过 scene 工具增删非锁定 key，管理端手工 CRUD 不受影响。
 - `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，workspace/story/session 运行目录使用 workspace-relative 路径时统一由 `rpg_data.settings` 解析并阻止路径逃逸。
 
 Play WebUI 的状态表页分为 `系统模板`、`故事状态模板` 和 `故事运行时` 三个视图。`系统模板` 管理工作区级模板及其 story 挂载；`故事状态模板` 管理当前 story 已挂载模板、故事内创建模板和可选角色绑定；`故事运行时` 只管理当前 session 的运行时副本。
@@ -255,7 +255,7 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 4. Story Memory / Recalled Memory / Status Tables / RP Modules。
 5. User Message。
 
-`当前场景` 在数据层仍是必须挂载到 story 的 `status_kind="scene"` SQL document，在主 Context 中则是高优先级 `[scene]` user prefix，不进入普通 `STATUS_TABLES`。Status Route 只在本轮涉及 scene 时选择它，并使用专用 scene 工具；scene 不走普通表工具或 deferred。完整差异见 [scene 的特殊语义](docs/agent-turn-orchestration.md#scene-的特殊语义)。
+`当前场景` 在数据层仍是必须挂载到 story 的 `status_kind="scene"` SQL document，在主 Context 中则是高优先级 `[scene]` user prefix，不进入普通 `STATUS_TABLES`。Status Route 只在本轮涉及且存在可用 scene 工具时选择它；scene 不走普通表工具或 deferred。默认关闭结构编辑时，已有字段都保持可见且可改 value，`scene_attr` 只接受现有 key，`scene_time` 只在已有 `时间` key 时出现，`scene_del_attr` 不注册；空 scene 完全不暴露写工具。完整差异见 [scene 的特殊语义](docs/agent-turn-orchestration.md#scene-的特殊语义)。
 
 普通 `STATUS_TABLES` 层展示 session 运行时表 ID、表名、`description`（用途与更新规则）和完整 KV，不展示模板来源或通用挂载范围。绑定角色的表单独进入“角色状态表”段落并按角色名分组；当前只用角色绑定辅助模型理解所属角色，不扩展其它行为。
 
@@ -544,7 +544,7 @@ rp_memory/
 
 | 文件 | 职责 |
 |---|---|
-| `rpg_core/settings.yaml` | 核心业务配置：Agent 行为、主 Context 正文拒绝阈值、memory 检索参数、核心日志 |
+| `rpg_core/settings.yaml` | 核心业务配置：Agent 行为、scene 的 LLM 结构写权限、主 Context 正文拒绝阈值、memory 检索参数、核心日志 |
 | `agent_service/settings.yaml` | Agent 服务监听参数、非 Agent 进程访问 Agent 服务的客户端默认值、Agent 服务日志 |
 | `channels/settings.yaml` | CLI / Telegram 渠道行为、Telegram bot、渠道日志 |
 | `play_api/settings.yaml` | Play API 监听参数、Play API 日志 |
@@ -573,6 +573,8 @@ base:
     max_tool_call_limit: 10
     include_tool_records: true
     verbose_logging: true
+    scene:
+      allow_runtime_key_changes: false
     status_sub_agent:
       enabled: true
       deferred:

@@ -16,13 +16,13 @@ from rpg_core.agent.tools import (
     ToolRegistry,
     WriteFileTool,
 )
-from rpg_core.agent.transaction import SCENE_TOOL_NAMES
+from rpg_core.agent.tools.state import StateToolSet, resolve_state_tool_set
 from rpg_core.agent.turn import TurnExecutionPolicy, TurnExecutionSnapshot, TurnMode
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
+from rpg_core.scene import SCENE_TOOL_NAMES
 from rpg_core.settings import settings
 from rpg_core.status.tools import (
     STATUS_TABLE_SET_VALUES_TOOL_NAME,
-    StatusTableToolProvider,
 )
 
 if TYPE_CHECKING:
@@ -107,7 +107,9 @@ class AgentToolService:
         if rp_module_runtime is not None and policy.expose_rp_modules:
             registry.register_all(rp_module_runtime.get_main_agent_tools())
         if policy.expose_state_tools:
-            registry.register_all(self.state_tools(scene_tracker, status_manager))
+            registry.register_all(
+                list(self.state_tools(scene_tracker, status_manager).tools)
+            )
         if settings.verbose_logging:
             logger.debug(
                 _TAG + " turn executable tool registry prepared: count={}, names={}",
@@ -156,13 +158,8 @@ class AgentToolService:
     def state_tools(
         scene_tracker: "SceneTracker | None",
         status_manager: "StatusManager | None",
-    ) -> list[BaseTool]:
-        tools: list[BaseTool] = []
-        if scene_tracker is not None:
-            tools.extend(scene_tracker.get_tools())
-        if status_manager is not None:
-            tools.extend(StatusTableToolProvider(status_manager).get_tools())
-        return tools
+    ) -> StateToolSet:
+        return resolve_state_tool_set(scene_tracker, status_manager)
 
     @staticmethod
     def narrative_outcome_tools(

@@ -219,7 +219,7 @@ Story 主数据字段中，`summary` 是短摘要，`first_message` 是会话开
 
 状态表也由 `rpg_data` 管理。SQLite 中的 `document_json` 是模板表和会话表的正文真源，SQL 同时保存模板、story 挂载、session 副本、来源关系、排序和 `status_kind`。`status_kind` 当前只允许 `scene` / `normal`，不再维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。状态表必须先通过 `rpg_story_status_tables` 挂载到 story，才能可选绑定到该 story 的一个角色挂载 `story_character_mount_id`；一个角色允许绑定多张状态表，一张 story 状态表挂载最多绑定一个角色，不要给 `story_character_mount_id` 增加唯一约束。`mount_origin` 区分 `system_mount` 与 `story_template`：系统模板只能解除挂载，故事内创建模板可删除挂载及其底层模板，但模板仍被其它 story 使用时必须拒绝删除。创建 session 时 `CatalogService` 调用 `StatusTableService.initialize_session_tables()`，把当前 story 已挂载模板的 document 复制到 `rpg_session_status_tables`，并把 story mount、角色绑定和 `characterName` 快照写入 session 表 metadata；模板后续修改不影响已有 session 副本。`DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；bootstrap 代码不要硬编码 demo 或业务数据。Bootstrap 默认不删除不在 SQL 索引中的 workspace/story/session 目录；只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理，日志必须输出删除/跳过明细和汇总计数。
 
-`当前场景` 是 `status_kind="scene"` 的特殊状态表，展示名可以自定义，但仍必须挂载到 story 才会被 session 感知。多张 scene 表存在时，v1 消费排序第一张 active scene。
+`当前场景` 是 `status_kind="scene"` 的特殊状态表，展示名可以自定义，但仍必须挂载到 story 才会被 session 感知。多张 scene 表存在时，v1 消费排序第一张 active scene。LLM 结构写权限由 `agent.scene.allow_runtime_key_changes` 控制且默认关闭：现有字段继续完整注入并允许更新 value，但不能新增、删除或重命名 key；只有显式开启后才恢复非锁定 key 的运行时增删能力。该开关只收紧 Agent 工具，不改变 Play API / `rpg_data` 的手工管理 CRUD。
 
 `rpg_sessions.id` 是跨 workspace/story 全局唯一的稳定定位 ID，兼容 `rpg_core` 当前 `^[A-Za-z0-9_]+$` 校验。所有创建入口都由 `rpg_data` 生成 session ID，用户只允许指定 title；`rpg_session_profiles` 保存 title、description、玩家扮演角色 ID 和角色快照。Play API 是 catalog session 到 Agent 服务的边界层：会话内接口只收 `session_id`，内部解析出 workspace/story；Agent 服务运行态只接收全局 `session_id`。CLI / Telegram 启动时也先 ensure session：配置了 `session_id` 只校验并加载既有 session，未配置则创建系统生成 ID 的默认 session。
 
@@ -338,7 +338,7 @@ TurnRequest                            调用方原始、不可变输入
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
 - 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起绑定给 `StatusSubAgent`。代码固定编排为 Outcome 独立判定 → 状态表/字段路由 → scene 与每张命中表分别更新；Outcome 已暂存或判定失败时不进入状态路由与预写。
-- 状态路由只能选择 scene，以及普通表中的 `realtime` / 已明确命中 `updateRule` 的 `event_driven` 字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID、key allowlist 和频率。快速更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
+- 状态路由只能选择具有实际可用工具的 scene，以及普通表中的 `realtime` / 已明确命中 `updateRule` 的 `event_driven` 字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID、key allowlist 和频率。scene 工具与提示词从同一份 turn-local 能力集合生成；默认结构权限关闭时只允许更新已有 value，不出现删除或主动清理指令。快速更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
 - 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后不再注入 Narrative Outcome fixed section，只用简短无序条目要求执行最终结果并明确列出本轮可用的 scene/status 工具，同时从主 Agent schema 和可执行 registry 移除 outcome 工具；漏判或预裁定失败时才保留原 fixed contract 和补判工具。主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
 - 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。字段更新频率固定为 `realtime | event_driven | deferred | manual`，旧字段默认 `realtime`，scene 永远只能是 `realtime`；`deferred` 由回复交付后的慢状态归纳维护，`manual` 不允许 LLM 写入。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
@@ -457,6 +457,10 @@ Summary Layer 只把“本次投影过滤过至少一条消息”作为尝试加
 另一方面让场景状态随 user message 进入历史，便于后续摘要和记忆按时间顺序归纳。
 `rpg_data` 状态表 service 用 `status_kind="scene"` 表达这一类特殊状态，且仍由 story
 挂载关系决定 session 是否可见；未挂载 scene 时，Agent 不注入 `[scene]`，也不注册 scene 工具。
+默认配置 `agent.scene.allow_runtime_key_changes=false` 时，非空 scene 只注册已有 value 更新能力：
+`scene_attr` 的 key schema 枚举当前已有字段，`scene_time` 仅在 `时间` 字段已存在时注册，
+`scene_del_attr` 不注册；空 scene 没有任何 scene 工具，Route 也不能选择 scene。工具执行层会再次校验，
+因此旧 schema 或手工构造的工具实例也不能越权创建/删除 key。显式开启该配置后才恢复原有结构编辑能力。
 
 普通 `STATUS_TABLES` 层只展示 session 运行时表 ID、表名、作为“用途与更新规则”的
 `description`、完整 KV、更新频率和事件规则，不展示模板来源或通用作用范围。绑定角色的普通表进入独立的

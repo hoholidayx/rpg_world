@@ -31,7 +31,9 @@ class SceneTracker:
     MAX_ATTRS = 8
     """场景属性总数上限（含默认属性），超出后 set_attr 返回错误。"""
 
-    def __init__(self) -> None:
+    def __init__(self, *, allow_runtime_key_changes: bool = False) -> None:
+        self._allow_runtime_key_changes = allow_runtime_key_changes
+
         # 结构化时间字段
         self._year: int = 1
         self._month: int = 1
@@ -50,6 +52,16 @@ class SceneTracker:
     def table_key(self) -> tuple[str, str] | None:
         """供 builder 排除通用状态表时使用，避免硬编码。"""
         return self._table_key
+
+    @property
+    def allow_runtime_key_changes(self) -> bool:
+        """Whether LLM scene tools may add or delete keys."""
+        return self._allow_runtime_key_changes
+
+    @property
+    def attr_keys(self) -> tuple[str, ...]:
+        """Current scene keys in document order for tool schema allowlists."""
+        return tuple(self._current_attrs())
 
     # ── 持久化绑定 ──────────────────────────────────────────────────
 
@@ -117,11 +129,30 @@ class SceneTracker:
         其余关键字参数直接写入状态表（不参与 _format_time）。
         """
         pending_attrs: dict[str, str] = {}
+        next_time_state = self.get_time_state()
         for k, v in kwargs.items():
             if k in self.TIME_STATE_FIELDS:
-                setattr(self, f"_{k}", v)
+                next_time_state[k] = v
             else:
                 pending_attrs[k] = str(v)
+
+        if (
+            not self._allow_runtime_key_changes
+            and self._status_mgr is not None
+            and self._scene_table_id is not None
+        ):
+            existing_keys = set(self._current_attrs())
+            missing_keys = {
+                self.TIME_ATTR,
+                *pending_attrs,
+            } - existing_keys
+            if missing_keys:
+                raise PermissionError(
+                    "LLM 只能修改场景中已有字段的值，不能新增字段："
+                    + "、".join(sorted(missing_keys))
+                )
+
+        self.set_time_state(next_time_state)
 
         attrs = self._runtime_set_attr(self.TIME_ATTR, self._format_time())
         for key, value in pending_attrs.items():
@@ -140,6 +171,10 @@ class SceneTracker:
         超出 ``MAX_ATTRS`` 上限时抛 ``ValueError``。
         """
         attrs = self._current_attrs()
+        if not self._allow_runtime_key_changes and key not in attrs:
+            raise PermissionError(
+                f"LLM 只能修改场景中已有字段的值，不能新增字段：{key}"
+            )
         if key not in attrs and len(attrs) >= self.MAX_ATTRS:
             raise ValueError(
                 f"场景属性已达上限（{self.MAX_ATTRS} 个），"
@@ -149,6 +184,8 @@ class SceneTracker:
 
     def delete_attr(self, key: str) -> dict[str, str]:
         """删除场景属性；失败时返回 rpg_data 当前状态。"""
+        if not self._allow_runtime_key_changes:
+            raise PermissionError("LLM 不允许删除或重命名场景字段")
         if self._status_mgr is not None and self._scene_table_id is not None:
             try:
                 table = self._status_mgr.runtime_delete_key_value(self._scene_table_id, key)
@@ -199,15 +236,24 @@ class SceneTracker:
     # ── 工具注册 ────────────────────────────────────────────────────
 
     def get_tools(self) -> list:
-        """返回绑定了此实例的 LLM 工具列表。"""
+        """Return only the scene tools allowed by the current document/policy."""
         from rpg_core.scene.tools import (
             DeleteAttrTool,
             SetAttrTool,
             SetTimeTool,
         )
 
-        return [
-            SetTimeTool(self),
-            SetAttrTool(self),
-            DeleteAttrTool(self),
-        ]
+        if self._allow_runtime_key_changes:
+            return [
+                SetTimeTool(self),
+                SetAttrTool(self),
+                DeleteAttrTool(self),
+            ]
+
+        attrs = self._current_attrs()
+        tools = []
+        if self.TIME_ATTR in attrs:
+            tools.append(SetTimeTool(self))
+        if attrs:
+            tools.append(SetAttrTool(self))
+        return tools

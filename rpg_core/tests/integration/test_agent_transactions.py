@@ -486,10 +486,11 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
     assert "不得改判" in first_main_context
     assert "reason 是不可缩小的整体目标边界" in first_main_context
     assert "rp_story_outcome" not in first_main_context
-    assert "scene_time、scene_attr、scene_del_attr" in first_main_context
-    assert "status_table_set_values" in first_main_context
-    assert "输出任何 RP 正文前调用" in first_main_context
-    assert "工具调用轮不得夹带 RP 正文" in first_main_context
+    assert "本轮没有提供状态写入工具" in first_main_context
+    assert "scene_time" not in first_main_context
+    assert "scene_attr" not in first_main_context
+    assert "scene_del_attr" not in first_main_context
+    assert "status_table_set_values" not in first_main_context
     assert "最终正文不得新增尚未同步的确定状态" in first_main_context
     assert "不得询问是否需要更新状态" in first_main_context
     assert "StatusSubAgent 已完成本轮剧情预裁定" not in first_main_context
@@ -554,6 +555,18 @@ async def test_main_agent_syncs_scene_and_normal_status_after_preadjudication(
     assert reply.status_sub_agent_records
     assert reply.status_sub_agent_records[0]["status"] == "outcome_staged"
     assert len(provider.calls) == 2
+    first_schema_by_name = {
+        schema["function"]["name"]: schema
+        for schema in provider.calls[0].tools or []
+    }
+    assert "scene_attr" in first_schema_by_name
+    assert "status_table_set_values" in first_schema_by_name
+    assert "scene_del_attr" not in first_schema_by_name
+    assert first_schema_by_name["scene_attr"]["function"]["parameters"]["properties"]["key"]["enum"] == [
+        "时间",
+        "位置",
+        "在场人物",
+    ]
     scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
     assert scene_attrs is not None
     assert scene_attrs["位置"] == "地下裂隙"
@@ -568,6 +581,43 @@ async def test_main_agent_syncs_scene_and_normal_status_after_preadjudication(
     )
     assert persisted_outcome is not None
     assert persisted_outcome.outcome_code == "setback"
+
+
+@pytest.mark.asyncio
+async def test_default_scene_policy_rejects_main_agent_new_key(
+    integration_status_agent,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        response(
+            "",
+            model="config-model",
+            tool_calls=[
+                tool_call(
+                    "scene_attr",
+                    '{"key":"天气","value":"暴雨"}',
+                    call_id="call_forbidden_scene_key",
+                )
+            ],
+        ),
+        response("场景结构保持不变。", model="config-model"),
+    )
+
+    reply = await integration_status_agent.send("观察大厅外的天气")
+
+    assert reply.text == "场景结构保持不变。"
+    assert len(provider.calls) == 2
+    tool_messages = [
+        str(message.get("content", ""))
+        for message in provider.calls[1].messages
+        if message.get("role") == "tool"
+    ]
+    assert any("不能新增字段：天气" in message for message in tool_messages)
+    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    assert scene_attrs is not None
+    assert "天气" not in scene_attrs
 
 
 @pytest.mark.asyncio
@@ -813,6 +863,14 @@ async def test_stream_syncs_state_before_success_with_cost_narration(
     assert len(state_tool_indices) == 2
     assert text_indices
     assert max(state_tool_indices) < min(text_indices)
+    first_stream_schema_names = {
+        schema["function"]["name"]
+        for schema in provider.calls[0].tools or []
+    }
+    assert {"scene_time", "scene_attr", "status_table_set_values"}.issubset(
+        first_stream_schema_names
+    )
+    assert "scene_del_attr" not in first_stream_schema_names
     final = events[-1]
     assert final.kind == StreamEventKind.DONE
     assert final.committed_turn_id == 1

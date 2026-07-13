@@ -215,7 +215,7 @@ rp_story_outcome(reason, actor?)
 
 同一 turn 最多暂存一条结果。若模型返回多个纯 outcome 调用，只执行第一个，其余作为重复调用诊断；底层工具本身也会幂等复用 scratch 中的第一条结果。若一次响应混入任何非 outcome 工具，则不执行混合批次并进入 `FALLBACK`。
 
-Outcome 一旦 `STAGED`，本轮主 Context 不再注入 Narrative Outcome fixed section；结果只通过 `RP_MODULES` runtime section 进入主 Agent，包含公开的 `outcomeCode`、label、`narrativeGuidance`、reason 和可选 actor。该 section 使用简短无序条目要求直接执行最终结果，并明确列出本轮实际提供的 `scene_time`、`scene_attr`、`scene_del_attr`、`status_table_set_values` 状态工具边界。`rp_story_outcome` 同时从主 Agent schema 和可执行 registry 移除，主 Agent 不能改判、重抽或重复执行；底层工具幂等只保留给预裁定边界内部使用。若 Outcome 未预裁定或进入 `FALLBACK`，主 Agent 则继续获得明确写出 `rp_story_outcome` 的原 fixed contract 与补判工具。
+Outcome 一旦 `STAGED`，本轮主 Context 不再注入 Narrative Outcome fixed section；结果只通过 `RP_MODULES` runtime section 进入主 Agent，包含公开的 `outcomeCode`、label、`narrativeGuidance`、reason 和可选 actor。该 section 使用简短无序条目要求直接执行最终结果，并从统一的 turn-local 状态工具集合中精确列出本轮实际存在的方法；未注册的方法不会出现在提示词中，没有任何可写字段时则明确说明本轮没有状态写入工具。`rp_story_outcome` 同时从主 Agent schema 和可执行 registry 移除，主 Agent 不能改判、重抽或重复执行；底层工具幂等只保留给预裁定边界内部使用。若 Outcome 未预裁定或进入 `FALLBACK`，主 Agent 则继续获得明确写出 `rp_story_outcome` 的原 fixed contract 与补判工具。
 
 ### 阶段 B：状态目标 Route
 
@@ -259,10 +259,10 @@ normal table B 被选中      → 1 次 table B update
 
 | 目标 | 可见 Context | 可用工具 | 代码边界 |
 |---|---|---|---|
-| scene | 当前 scene + 近期历史 + input | `scene_time` / `scene_attr` / `scene_del_attr` | 禁止普通表工具 |
+| scene | 当前 scene + 近期历史 + input | 本轮动态注册的 scene 工具 | 禁止普通表工具；默认只能改已有 value |
 | 单张 normal 表 | 该表被选中的 rows + 近期历史 + input | `status_table_set_values` | 固定 table ID + key allowlist |
 
-普通表更新工具只能修改已有 key 的 value，不能新增、删除或重命名 key。执行前后有多层校验：
+普通表更新工具以及默认策略下的 scene 工具都只能修改已有 key 的 value，不能新增、删除或重命名 key。执行前后有多层校验：
 
 1. 当前阶段只能调用为该 batch 注册的工具名。
 2. StatusSubAgent active scope 校验 `table_id` 和本次 Route 产生的 key allowlist。
@@ -282,7 +282,7 @@ Status preflight 的结果决定主 Agent 能看到什么：
 - `NONE`：没有预裁定；若 Narrative Outcome 模块允许，主 Agent 仍可调用 `rp_story_outcome` 补判。
 - `FALLBACK`：预判不可靠，主 Agent 保留同一 outcome 工具完成补判。
 
-scene/status 工具仍绑定到同一个 turn scratch。主 Agent 可以补做预路由遗漏或快速目标失败后的确定状态同步，但普通表工具仍拒绝 `deferred` / `manual` 和非现有 key；该补写是机会性的，不承诺本轮或下一轮一定修复。
+scene/status 工具仍绑定到同一个 turn scratch。主 Agent 可以补做预路由遗漏或快速目标失败后的确定状态同步，但普通表工具仍拒绝 `deferred` / `manual` 和非现有 key，默认 scene 工具同样拒绝非现有 key；该补写是机会性的，不承诺本轮或下一轮一定修复。
 
 模型协议要求：只有发生真实、持久、确定的追踪值变化时才写状态；有变化时先在不含 RP 正文的工具调用轮完成同步，最终正文不得新增尚未同步的可追踪确定事实。确认没有变化时允许零状态工具，也不得询问玩家是否需要标记状态。
 
@@ -318,13 +318,25 @@ scene 在数据层和 Agent 编排层承担不同职责：
 | 主 Context | 不进入普通 `STATUS_TABLES`，而作为高优先级 `[scene]` user prefix 与当前输入合并 |
 | Outcome / Route | 可读取 scene；Route 用独立 `scene: boolean` 决定本轮是否涉及它 |
 | Update | 命中后单独调用，只暴露 scene Context 和 scene 专用工具 |
+| LLM key 权限 | `agent.scene.allow_runtime_key_changes=false` 时只能修改已有 value；开启后才允许增删非锁定 key |
 | 普通表工具 | 永远不使用 `status_table_set_values` |
 | 慢归纳 | 永远不进入 deferred |
 
 因此需要区分两件事：
 
 - 只要 active scene 存在，它通常会出现在主 Agent 的当前 user prefix 中。
-- 但在状态 Route 中，scene **不会必定返回或必定更新**；只有路由判断本轮涉及 scene 时才返回 `scene=true`。
+- 但在状态 Route 中，scene **不会必定返回或必定更新**；只有路由判断本轮涉及 scene 且至少有一个 scene 工具时才返回 `scene=true`。
+
+scene 工具注册和执行权限如下：
+
+| 配置/文档状态 | 实际能力 |
+|---|---|
+| 默认关闭，至少一个已有 key | 注册 `scene_attr`，其 key schema 只枚举已有字段 |
+| 默认关闭，已有 `时间` key | 额外注册 `scene_time`；该工具不能隐式创建 `时间` |
+| 默认关闭，空 scene | 不注册任何 scene 工具，Route 强制 `scene=false` |
+| `allow_runtime_key_changes=true` | 注册 `scene_time` / `scene_attr` / `scene_del_attr`，保留 `MAX_ATTRS=8` 与非锁定 key 删除规则 |
+
+默认关闭时，`runtimeKeyLocked` 不限制已有 value 更新；它只继续参与显式开启结构编辑后的删除保护。该配置只影响 LLM 工具暴露和执行，Play API / Data 层的手工 CRUD 不变。
 
 普通表才通过 `tables[]` 选择具体运行时表 ID 和字段 key；scene 走专用布尔目标和专用工具，不参与普通表 catalog。
 

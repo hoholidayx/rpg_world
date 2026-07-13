@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from rpg_core.agent.tools import BaseTool
 from rpg_core.rp_modules.narrative_outcome import (
     NarrativeOutcomeModule,
     NarrativeOutcomeSampler,
@@ -82,6 +83,41 @@ class _SequenceRng:
         return self.values.pop(0)
 
 
+class _StateTool(BaseTool):
+    description = "state test tool"
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def parameters(self) -> dict[str, object]:
+        return {"type": "object", "properties": {}}
+
+    async def execute(self, **kwargs: object) -> str:
+        del kwargs
+        return "ok"
+
+
+class _SceneCapabilities:
+    def __init__(self, *names: str) -> None:
+        self._names = names
+
+    def get_tools(self) -> list[BaseTool]:
+        return [_StateTool(name) for name in self._names]
+
+
+class _NormalStatusCapabilities:
+    session_id = "s1"
+
+    @staticmethod
+    def list_context_tables() -> list[dict[str, object]]:
+        return [{
+            "id": 1,
+            "document": {
+                "rows": [{"key": "生命", "value": "10", "updateFrequency": "realtime"}],
+            },
+        }]
+
+
 @pytest.mark.asyncio
 async def test_same_turn_reuses_staged_result_and_hides_random_details() -> None:
     rng = _SequenceRng(31, 100)
@@ -145,6 +181,8 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
         turn_id=9,
         narrative_outcome_selection=None,
         narrative_outcome=None,
+        scene_tracker=_SceneCapabilities("scene_attr"),
+        status_manager=_NormalStatusCapabilities(),
     )
     module.bind_turn(scratch)  # type: ignore[arg-type]
     try:
@@ -175,8 +213,9 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
     assert "rp_story_outcome" not in content
     assert "不得改判" in content
     assert "reason 是不可缩小的整体目标边界" in content
-    assert "scene_time、scene_attr、scene_del_attr" in content
-    assert "status_table_set_values" in content
+    assert "本轮实际提供的状态工具（scene_attr、status_table_set_values）" in content
+    assert "scene_time" not in content
+    assert "scene_del_attr" not in content
     assert "输出任何 RP 正文前调用" in content
     assert "工具调用轮不得夹带 RP 正文" in content
     assert "状态同步无需玩家确认" in content
@@ -184,3 +223,62 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
     assert "StatusSubAgent" not in content
     assert "sample" not in content
     assert "weights" not in content
+
+
+def test_staged_outcome_lists_opted_in_scene_tools_without_normal_writer() -> None:
+    module = NarrativeOutcomeModule(
+        session_id="s1",
+        rng=_SequenceRng(6),  # type: ignore[arg-type]
+    )
+    scratch = SimpleNamespace(
+        turn_id=10,
+        narrative_outcome_selection=None,
+        narrative_outcome=None,
+        scene_tracker=_SceneCapabilities(
+            "scene_time",
+            "scene_attr",
+            "scene_del_attr",
+        ),
+        status_manager=None,
+    )
+    module.bind_turn(scratch)  # type: ignore[arg-type]
+    try:
+        module.adjudicate(reason="穿过风暴")
+        sections = module.get_runtime_sections(ModuleContextRequest(
+            session_id="s1",
+            include_staged_turn=True,
+        ))
+    finally:
+        module.unbind_turn(scratch)  # type: ignore[arg-type]
+
+    content = sections[0].content
+    assert "本轮实际提供的状态工具（scene_time、scene_attr、scene_del_attr）" in content
+    assert "status_table_set_values" not in content
+
+
+def test_staged_outcome_does_not_name_unavailable_state_tools() -> None:
+    module = NarrativeOutcomeModule(
+        session_id="s1",
+        rng=_SequenceRng(6),  # type: ignore[arg-type]
+    )
+    scratch = SimpleNamespace(
+        turn_id=11,
+        narrative_outcome_selection=None,
+        narrative_outcome=None,
+        scene_tracker=None,
+        status_manager=None,
+    )
+    module.bind_turn(scratch)  # type: ignore[arg-type]
+    try:
+        module.adjudicate(reason="等待天亮")
+        sections = module.get_runtime_sections(ModuleContextRequest(
+            session_id="s1",
+            include_staged_turn=True,
+        ))
+    finally:
+        module.unbind_turn(scratch)  # type: ignore[arg-type]
+
+    content = sections[0].content
+    assert "本轮没有提供状态写入工具" in content
+    assert "scene_" not in content
+    assert "status_table_set_values" not in content

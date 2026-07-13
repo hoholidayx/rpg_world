@@ -114,7 +114,11 @@ def build_rpg_context(
             from rpg_core.scene import SceneTracker
 
             if status_mgr.get_active_scene_table() is not None:
-                scene_tracker = SceneTracker()
+                scene_tracker = SceneTracker(
+                    allow_runtime_key_changes=(
+                        rpg_settings.scene_settings.allow_runtime_key_changes
+                    )
+                )
                 scene_tracker.bind_status_manager(status_mgr)
                 scene_tracker.load_from_status_table()
         except Exception as exc:

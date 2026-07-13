@@ -604,7 +604,7 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
 async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> None:
     manager = FakeRuntimeStatusManager()
     scratch, runtime = _scratch_runtime(manager)
-    scene_tracker = SceneTracker()
+    scene_tracker = SceneTracker(allow_runtime_key_changes=True)
     scene_tracker.bind_status_manager(runtime)
     assert scene_tracker.load_from_status_table() is True
 
@@ -835,6 +835,104 @@ def test_status_sub_agent_prompt_and_schema_only_include_outcome_when_mounted() 
         assert NARRATIVE_OUTCOME_TOOL_NAME in [
             schema["function"]["name"] for schema in sub_agent._schemas
         ]
+
+
+def test_status_sub_agent_prompt_uses_actual_value_only_scene_tools() -> None:
+    manager = FakeRuntimeStatusManager()
+    _scratch, runtime = _scratch_runtime(manager)
+    scene_tracker = SceneTracker()
+    scene_tracker.bind_status_manager(runtime)
+    assert scene_tracker.load_from_status_table() is True
+    tools = [
+        *scene_tracker.get_tools(),
+        StatusTableSetValuesTool(runtime),
+    ]
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+
+    with sub_agent.use_turn_tools(
+        tools,
+        mutation_probe=None,
+        create_checkpoint=None,
+        restore_checkpoint=None,
+        outcome_preflight_enabled=False,
+    ):
+        prompt = sub_agent.system_prompt
+        assert "scene_attr" in prompt
+        assert "status_table_set_values" in prompt
+        assert "scene_time" not in prompt
+        assert "scene_del_attr" not in prompt
+        assert "主动清理" not in prompt
+        assert "只能修改已有 key 的 value" in prompt
+        assert "value 更新为空字符串或当前适用值" in prompt
+        attr_schema = next(
+            schema
+            for schema in sub_agent._schemas
+            if schema["function"]["name"] == "scene_attr"
+        )
+        assert attr_schema["function"]["parameters"]["properties"]["key"]["enum"] == [
+            "位置"
+        ]
+
+
+def test_status_sub_agent_prompt_retains_structural_guidance_when_enabled() -> None:
+    manager = FakeRuntimeStatusManager()
+    _scratch, runtime = _scratch_runtime(manager)
+    scene_tracker = SceneTracker(allow_runtime_key_changes=True)
+    scene_tracker.bind_status_manager(runtime)
+    assert scene_tracker.load_from_status_table() is True
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+
+    with sub_agent.use_turn_tools(
+        scene_tracker.get_tools(),
+        mutation_probe=None,
+        create_checkpoint=None,
+        restore_checkpoint=None,
+        outcome_preflight_enabled=False,
+    ):
+        prompt = sub_agent.system_prompt
+        assert "scene_time / scene_attr / scene_del_attr" in prompt
+        assert "主动清理" in prompt
+        assert "使用 scene_del_attr 将其移除" in prompt
+
+
+@pytest.mark.asyncio
+async def test_status_route_cannot_select_scene_without_scene_tools() -> None:
+    manager = FakeRuntimeStatusManager()
+    _scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        async def chat(self, _messages, *, tools):  # noqa: ANN001
+            assert [schema["function"]["name"] for schema in tools] == [
+                "select_status_targets"
+            ]
+            scene_schema = tools[0]["function"]["parameters"]["properties"]["scene"]
+            assert scene_schema["const"] is False
+            return {
+                "tool_calls": [{
+                    "function": {
+                        "name": "select_status_targets",
+                        "arguments": json.dumps({"scene": True, "tables": []}),
+                    },
+                }],
+            }
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
+    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="status",
+        scene_context="scene is read-only",
+        context_tables=runtime.list_context_tables(),
+        user_input="检查场景",
+    )
+
+    assert result.failed is False
+    assert result.route is not None
+    assert result.route.scene is False
+    assert result.records == []
 
 
 @pytest.mark.asyncio
