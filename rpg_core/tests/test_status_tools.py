@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
+import rpg_core.agent.sub_agents.status_sub_agent as status_module
 from rpg_data.models import STATUS_KIND_NORMAL, STATUS_KIND_SCENE, StatusTableDocument, StatusTableRow
 from rpg_core.agent.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
 from rpg_core.agent.sub_agents import (
@@ -339,7 +342,9 @@ class _SceneAttrTool(BaseTool):
 
 
 @pytest.mark.asyncio
-async def test_fixed_preflight_isolates_scene_and_routed_table_contexts() -> None:
+async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
+    monkeypatch,
+) -> None:
     manager = FakeRuntimeStatusManager()
     manager.documents[1] = StatusTableDocument.from_rows(rows=[
         StatusTableRow("生命", "RT_SENTINEL"),
@@ -404,6 +409,13 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts() -> Non
     ])
     sub_agent.set_mutation_probe(lambda: scratch.change_token)
     sub_agent._get_provider = lambda: provider  # type: ignore[method-assign]
+    info = MagicMock()
+    monkeypatch.setattr(
+        status_module,
+        "settings",
+        SimpleNamespace(verbose_logging=True),
+    )
+    monkeypatch.setattr(status_module.logger, "info", info)
 
     context_tables = runtime.list_context_tables()
     result = await sub_agent.run_preflight(
@@ -416,6 +428,36 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts() -> Non
 
     assert result.failed is False
     assert provider.stages == ["outcome", "route", "scene", "table"]
+    llm_started_sources = [
+        call.args[1]
+        for call in info.call_args_list
+        if "LLM call started" in call.args[0]
+    ]
+    llm_completed_sources = [
+        call.args[1]
+        for call in info.call_args_list
+        if "LLM call completed" in call.args[0]
+    ]
+    expected_sources = [
+        "status_outcome_preflight",
+        "status_router",
+        "status_update:scene",
+        "status_update:table:1",
+    ]
+    assert llm_started_sources == expected_sources
+    assert llm_completed_sources == expected_sources
+    target_sources = [
+        call.args[1]
+        for call in info.call_args_list
+        if "update target started" in call.args[0]
+    ]
+    assert target_sources == ["status_update:scene", "status_update:table:1"]
+    log_formats = [call.args[0] for call in info.call_args_list]
+    assert any("preflight started" in message for message in log_formats)
+    assert any("stage completed: stage=outcome" in message for message in log_formats)
+    assert any("stage completed: stage=router" in message for message in log_formats)
+    assert any("stage completed: stage=state_updates" in message for message in log_formats)
+    assert any("preflight completed" in message for message in log_formats)
 
 
 @pytest.mark.asyncio

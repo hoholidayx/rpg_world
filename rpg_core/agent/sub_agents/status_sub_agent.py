@@ -340,6 +340,11 @@ class StatusSubAgent(BaseSubAgent):
             return base_prompt + NARRATIVE_OUTCOME_SYSTEM_PROMPT
         return base_prompt
 
+    @staticmethod
+    def _log_verbose(message: str, *args: object) -> None:
+        if settings.verbose_logging:
+            logger.info(_TAG + " " + message, *args)
+
     async def run_preflight(
         self,
         *,
@@ -354,13 +359,26 @@ class StatusSubAgent(BaseSubAgent):
     ) -> StatusSubAgentResult:
         """Run the fixed outcome -> route -> selected-update pipeline."""
         if self._busy:
-            logger.debug(_TAG + " skipped (re-entrancy guard)")
+            logger.debug(_TAG + " preflight skipped: reason=reentrancy_guard")
             return StatusSubAgentResult()
-        if not self._enabled or not self._schemas:
+        if not self._enabled:
+            self._log_verbose("preflight skipped: reason=disabled")
+            return StatusSubAgentResult()
+        if not self._schemas:
+            self._log_verbose("preflight skipped: reason=no_tools")
             return StatusSubAgentResult()
 
         self._busy = True
         result = StatusSubAgentResult()
+        self._log_verbose(
+            "preflight started: user_input={!r}, history_messages={}, tables={}, "
+            "state_tools={}, outcome_tool_available={}",
+            user_input[:200],
+            len(history),
+            len(context_tables),
+            sorted(self._state_tool_set.names),
+            bool(self._schemas_for_names({NARRATIVE_OUTCOME_TOOL_NAME})),
+        )
         try:
             outcome = await self._decide_outcome(
                 history=history,
@@ -374,6 +392,10 @@ class StatusSubAgent(BaseSubAgent):
             result.outcome_decision = outcome
             if outcome is not OutcomeDecision.NOT_REQUIRED:
                 result.failed = outcome is OutcomeDecision.FALLBACK
+                self._log_verbose(
+                    "state orchestration skipped: reason=outcome_{}",
+                    outcome.value,
+                )
                 return result
 
             state_schema_names = {
@@ -382,6 +404,9 @@ class StatusSubAgent(BaseSubAgent):
                 if isinstance(schema.get("function"), dict)
             } & set(self._state_tool_set.names)
             if not state_schema_names:
+                self._log_verbose(
+                    "state orchestration skipped: reason=no_state_write_tools"
+                )
                 return result
 
             route = await self._route_status(
@@ -397,6 +422,9 @@ class StatusSubAgent(BaseSubAgent):
             result.call_stats.extend(route.call_stats)
             if route.failed:
                 result.failed = True
+                self._log_verbose(
+                    "state updates skipped: reason=router_failed"
+                )
                 return result
 
             await self._update_routed_state(
@@ -411,13 +439,30 @@ class StatusSubAgent(BaseSubAgent):
                 player_character=player_character,
             )
             return result
-        except _StatusPrewriteRollbackError:
+        except _StatusPrewriteRollbackError as exc:
+            result.failed = True
+            logger.opt(exception=exc).error(
+                _TAG + " preflight aborted: reason=mutation_boundary_failed"
+            )
             raise
         except Exception as exc:
             result.failed = True
             logger.warning(_TAG + " fixed preflight failed: {}", exc)
             return result
         finally:
+            route = result.route
+            self._log_verbose(
+                "preflight completed: outcome={}, route_failed={}, scene_selected={}, "
+                "table_targets={}, records={}, changed_records={}, updated={}, failed={}",
+                result.outcome_decision.value,
+                route.failed if route is not None else False,
+                route.scene if route is not None else False,
+                len(route.targets) if route is not None else 0,
+                len(result.records),
+                sum(record.changed for record in result.records),
+                result.updated,
+                result.failed,
+            )
             self._active_status_allowed_keys = None
             self._active_scene_allowed = True
             self._busy = False
@@ -429,12 +474,23 @@ class StatusSubAgent(BaseSubAgent):
         status_manager: "StatusManager",
     ) -> DeferredStatusResult:
         """Reconcile due deferred fields from committed history only."""
-        if self._busy or not self._enabled:
+        if self._busy:
+            logger.debug(
+                _TAG + " deferred reconciliation skipped: reason=reentrancy_guard"
+            )
+            return DeferredStatusResult()
+        if not self._enabled:
+            self._log_verbose(
+                "deferred reconciliation skipped: reason=disabled"
+            )
             return DeferredStatusResult()
 
         history = session_manager.history
         groups = SessionManager.iter_turn_groups(history)
         if not groups:
+            self._log_verbose(
+                "deferred reconciliation skipped: reason=no_committed_turns"
+            )
             return DeferredStatusResult()
         latest_turn_id = SessionManager.latest_turn_id(history)
         status_manager.clamp_deferred_progress(latest_turn_id)
@@ -497,12 +553,37 @@ class StatusSubAgent(BaseSubAgent):
                 ))
 
         if not batches:
+            self._log_verbose(
+                "deferred reconciliation skipped: reason=no_due_fields "
+                "latest_turn_id={}",
+                latest_turn_id,
+            )
             return DeferredStatusResult()
 
         self._busy = True
         batch_count = field_count = changed_count = 0
+        self._log_verbose(
+            "deferred reconciliation started: latest_turn_id={} batches={}",
+            latest_turn_id,
+            [
+                {
+                    "table_id": table_id,
+                    "boundary": boundary,
+                    "keys": list(allowed_keys),
+                }
+                for table_id, boundary, allowed_keys, _history in batches
+            ],
+        )
         try:
             for table_id, boundary, allowed_keys, batch_history in batches:
+                self._log_verbose(
+                    "deferred batch started: table_id={} boundary={} keys={} "
+                    "history_messages={}",
+                    table_id,
+                    boundary,
+                    list(allowed_keys),
+                    len(batch_history),
+                )
                 try:
                     changed = await self._reconcile_deferred_batch(
                         table_id=table_id,
@@ -524,13 +605,28 @@ class StatusSubAgent(BaseSubAgent):
                 batch_count += 1
                 field_count += len(allowed_keys)
                 changed_count += changed
+                self._log_verbose(
+                    "deferred batch completed: table_id={} boundary={} keys={} "
+                    "changed_fields={}",
+                    table_id,
+                    boundary,
+                    list(allowed_keys),
+                    changed,
+                )
         finally:
             self._busy = False
-        return DeferredStatusResult(
+        deferred_result = DeferredStatusResult(
             batches=batch_count,
             fields=field_count,
             changed=changed_count,
         )
+        self._log_verbose(
+            "deferred reconciliation completed: batches={} fields={} changed={}",
+            deferred_result.batches,
+            deferred_result.fields,
+            deferred_result.changed,
+        )
+        return deferred_result
 
     async def _reconcile_deferred_batch(
         self,
@@ -635,7 +731,17 @@ class StatusSubAgent(BaseSubAgent):
     ) -> OutcomeDecision:
         outcome_schema = self._schemas_for_names({NARRATIVE_OUTCOME_TOOL_NAME})
         if not outcome_schema:
+            self._log_verbose(
+                "stage skipped: stage=outcome reason=outcome_tool_unavailable"
+            )
             return OutcomeDecision.NOT_REQUIRED
+        self._log_verbose(
+            "stage started: stage=outcome history_messages={} state_chars={} "
+            "user_input={!r}",
+            len(history),
+            len(state_context),
+            user_input[:200],
+        )
         recent = self._format_history_window(history, max_history_rounds)
         messages = [
             Message(
@@ -664,9 +770,18 @@ class StatusSubAgent(BaseSubAgent):
         self._append_call_record(result.call_stats, turn_stats, call_record)
         calls = [_normalize_tool_call(call) for call in self._tool_calls(llm_result)]
         if not calls:
+            self._log_verbose(
+                "stage completed: stage=outcome decision={} tool_calls=0",
+                OutcomeDecision.NOT_REQUIRED.value,
+            )
             return OutcomeDecision.NOT_REQUIRED
         if any(name != NARRATIVE_OUTCOME_TOOL_NAME for name, _args in calls):
-            logger.warning(_TAG + " outcome stage returned a non-outcome tool")
+            logger.warning(
+                _TAG
+                + " outcome stage returned invalid tools: tools={} decision={}",
+                [name for name, _args in calls],
+                OutcomeDecision.FALLBACK.value,
+            )
             result.outcome_requested = True
             return OutcomeDecision.FALLBACK
 
@@ -687,11 +802,20 @@ class StatusSubAgent(BaseSubAgent):
             )
             result.records.append(duplicate)
         result.outcome_staged = record.success
-        return (
+        decision = (
             OutcomeDecision.STAGED
             if record.success
             else OutcomeDecision.FALLBACK
         )
+        self._log_verbose(
+            "stage completed: stage=outcome decision={} tool_calls={} "
+            "outcome_staged={} duplicate_calls={}",
+            decision.value,
+            len(calls),
+            result.outcome_staged,
+            max(len(calls) - 1, 0),
+        )
+        return decision
 
     async def _route_status(
         self,
@@ -709,6 +833,14 @@ class StatusSubAgent(BaseSubAgent):
         recent = self._format_history_window(history, max_history_rounds)
         scene_writable = any(
             name in SCENE_TOOL_NAMES for name in self._state_tool_set.names
+        )
+        self._log_verbose(
+            "stage started: stage=router catalog_tables={} scene_writable={} "
+            "history_messages={} user_input={!r}",
+            len(catalog),
+            scene_writable,
+            len(history),
+            user_input[:200],
         )
         route_schema = deepcopy(STATUS_ROUTER_SCHEMA)
         if not scene_writable:
@@ -750,9 +882,21 @@ class StatusSubAgent(BaseSubAgent):
         self._append_call_record(route.call_stats, turn_stats, call_record)
         calls = [_normalize_tool_call(call) for call in self._tool_calls(llm_result)]
         if not calls:
+            self._log_verbose(
+                "stage completed: stage=router scene_selected=False "
+                "table_targets=[] reason=no_targets"
+            )
             return route
         if len(calls) != 1 or calls[0][0] != STATUS_ROUTER_TOOL_NAME:
             route.failed = True
+            logger.warning(
+                _TAG + " invalid status route tools: tools={}",
+                [name for name, _args in calls],
+            )
+            self._log_verbose(
+                "stage completed: stage=router scene_selected=False "
+                "table_targets=[] failed=True"
+            )
             return route
         try:
             payload = json.loads(calls[0][1])
@@ -794,6 +938,20 @@ class StatusSubAgent(BaseSubAgent):
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.warning(_TAG + " invalid status route: {}", exc)
             route.failed = True
+        self._log_verbose(
+            "stage completed: stage=router scene_selected={} table_targets={} failed={}",
+            route.scene,
+            [
+                {
+                    "table_id": target.table_id,
+                    "realtime_keys": list(target.realtime_keys),
+                    "event_keys": list(target.event_keys),
+                    "reason": target.reason,
+                }
+                for target in route.targets
+            ],
+            route.failed,
+        )
         return route
 
     async def _update_routed_state(
@@ -826,9 +984,19 @@ class StatusSubAgent(BaseSubAgent):
         for target in route.targets:
             table = tables_by_id.get(target.table_id)
             if table is None:
+                self._log_verbose(
+                    "update target skipped: source=status_update:table:{} "
+                    "reason=table_not_found",
+                    target.table_id,
+                )
                 continue
             allowed = frozenset((*target.realtime_keys, *target.event_keys))
             if not allowed:
+                self._log_verbose(
+                    "update target skipped: source=status_update:table:{} "
+                    "reason=no_allowed_keys",
+                    target.table_id,
+                )
                 continue
             batches.append(_RoutedStatusUpdateBatch(
                 source=f"status_update:table:{target.table_id}",
@@ -837,12 +1005,36 @@ class StatusSubAgent(BaseSubAgent):
                 allowed_status_keys={target.table_id: allowed},
             ))
 
+        self._log_verbose(
+            "stage started: stage=state_updates planned_targets={}",
+            [batch.source for batch in batches],
+        )
         for batch in batches:
             self._active_scene_allowed = batch.is_scene
             self._active_status_allowed_keys = batch.allowed_status_keys
             schemas = self._schemas_for_names(set(batch.schema_names))
             if not schemas:
+                self._log_verbose(
+                    "update target skipped: source={} reason=no_matching_schema "
+                    "requested_tools={}",
+                    batch.source,
+                    sorted(batch.schema_names),
+                )
                 continue
+            self._log_verbose(
+                "update target started: source={} scene={} tools={} allowed_status_keys={}",
+                batch.source,
+                batch.is_scene,
+                sorted(batch.schema_names),
+                (
+                    {
+                        table_id: sorted(keys)
+                        for table_id, keys in batch.allowed_status_keys.items()
+                    }
+                    if batch.allowed_status_keys is not None
+                    else None
+                ),
+            )
             checkpoint = (
                 self._mutation_checkpoint()
                 if self._mutation_checkpoint is not None
@@ -875,9 +1067,15 @@ class StatusSubAgent(BaseSubAgent):
                 )
                 self._append_call_record(result.call_stats, turn_stats, call_record)
                 batch_failed = False
-                for name, args in (
+                normalized_calls = [
                     _normalize_tool_call(call) for call in self._tool_calls(llm_result)
-                ):
+                ]
+                self._log_verbose(
+                    "update target decision: source={} tool_calls={}",
+                    batch.source,
+                    [name for name, _args in normalized_calls],
+                )
+                for name, args in normalized_calls:
                     if name not in batch.schema_names:
                         result.records.append(StatusSubAgentToolRecord(
                             tool_name=name,
@@ -912,8 +1110,28 @@ class StatusSubAgent(BaseSubAgent):
                         result.records[record_start:],
                     )
                     logger.warning(
-                        _TAG + " status update target failed and was restored: {}",
+                        _TAG
+                        + " status update target failed and was restored: {} statuses={}",
                         batch.source,
+                        [
+                            record.status.value
+                            for record in result.records[record_start:]
+                        ],
+                    )
+                else:
+                    self._log_verbose(
+                        "update target completed: source={} tool_calls={} statuses={} "
+                        "changed_records={}",
+                        batch.source,
+                        len(normalized_calls),
+                        [
+                            record.status.value
+                            for record in result.records[record_start:]
+                        ],
+                        sum(
+                            record.changed
+                            for record in result.records[record_start:]
+                        ),
                     )
             except _StatusPrewriteRollbackError:
                 raise
@@ -924,15 +1142,37 @@ class StatusSubAgent(BaseSubAgent):
                     result.records[record_start:],
                 )
                 logger.warning(
-                    _TAG + " status update target failed and was restored: {}: {}",
+                    _TAG
+                    + " status update target failed and was restored: {}: {} statuses={}",
                     batch.source,
                     exc,
+                    [
+                        record.status.value
+                        for record in result.records[record_start:]
+                    ],
                 )
 
         result.updated = any(
             record.changed
             for record in result.records
             if record.stage is not StatusSubAgentStage.OUTCOME
+        )
+        self._log_verbose(
+            "stage completed: stage=state_updates planned_targets={} records={} "
+            "changed_records={} updated={} failed={}",
+            len(batches),
+            len([
+                record
+                for record in result.records
+                if record.stage is not StatusSubAgentStage.OUTCOME
+            ]),
+            sum(
+                record.changed
+                for record in result.records
+                if record.stage is not StatusSubAgentStage.OUTCOME
+            ),
+            result.updated,
+            result.failed,
         )
 
     def _restore_failed_update_target(
@@ -986,10 +1226,14 @@ class StatusSubAgent(BaseSubAgent):
         ``StatusSubAgentResult``，包含是否更新以及工具调用记录。
         """
         if self._busy:
-            logger.debug(_TAG + " skipped (re-entrancy guard)")
+            logger.debug(_TAG + " legacy update skipped: reason=reentrancy_guard")
             return StatusSubAgentResult()
 
-        if not self._enabled or not self._schemas:
+        if not self._enabled:
+            self._log_verbose("legacy update skipped: reason=disabled")
+            return StatusSubAgentResult()
+        if not self._schemas:
+            self._log_verbose("legacy update skipped: reason=no_tools")
             return StatusSubAgentResult()
 
         self._busy = True
@@ -1129,6 +1373,16 @@ class StatusSubAgent(BaseSubAgent):
             logger.warning(_TAG + " update failed: {}", exc)
             return result
         finally:
+            self._log_verbose(
+                "legacy update completed: outcome_requested={} outcome_staged={} "
+                "records={} changed_records={} updated={} failed={}",
+                result.outcome_requested,
+                result.outcome_staged,
+                len(result.records),
+                sum(record.changed for record in result.records),
+                result.updated,
+                result.failed,
+            )
             self._busy = False
 
     async def _execute_tool_call(
@@ -1213,18 +1467,65 @@ class StatusSubAgent(BaseSubAgent):
     ) -> tuple[_LLMChatResult, CallRecord | None]:
         import time
 
+        schema_names = [
+            str(schema.get("function", {}).get("name", ""))
+            for schema in schemas
+            if isinstance(schema.get("function"), dict)
+        ]
+        self._log_verbose(
+            "LLM call started: source={} messages={} tools={}",
+            source,
+            len(messages),
+            schema_names,
+        )
         t0 = time.monotonic()
-        llm_result = await self._get_provider().chat(messages, tools=schemas)
+        try:
+            provider = self._get_provider()
+            llm_result = await provider.chat(messages, tools=schemas)
+        except Exception as exc:
+            duration_ms = (time.monotonic() - t0) * 1000
+            logger.opt(exception=exc).warning(
+                _TAG + " LLM call failed: source={} duration_ms={:.1f}",
+                source,
+                duration_ms,
+            )
+            raise
         duration_ms = (time.monotonic() - t0) * 1000
         if isinstance(llm_result, dict):
+            self._log_verbose(
+                "LLM call completed: source={} duration_ms={:.1f} model={} "
+                "finish_reason={} tool_calls={} usage={}",
+                source,
+                duration_ms,
+                str(llm_result.get("model") or "-"),
+                str(llm_result.get("finish_reason") or "-"),
+                self._tool_names_for_log(llm_result),
+                "(unavailable)",
+            )
             return llm_result, None
         if not isinstance(llm_result, LLMResponse):
+            logger.warning(
+                _TAG + " LLM call returned invalid response: source={} type={}",
+                source,
+                type(llm_result).__name__,
+            )
             raise TypeError(
                 "LLM provider chat() must return LLMResponse or a mapping test double"
-            )
+        )
+        model = llm_result.model or provider.get_default_model()
+        self._log_verbose(
+            "LLM call completed: source={} duration_ms={:.1f} model={} "
+            "finish_reason={} tool_calls={} usage={}",
+            source,
+            duration_ms,
+            model,
+            llm_result.finish_reason or "-",
+            self._tool_names_for_log(llm_result),
+            str(llm_result.usage) if llm_result.usage is not None else "(no usage)",
+        )
         return llm_result, CallRecord(
             source=source,
-            model=llm_result.model or self._get_provider().get_default_model(),
+            model=model,
             usage=llm_result.usage,
             duration_ms=duration_ms,
             reasoning_content=llm_result.reasoning_content,
@@ -1253,6 +1554,22 @@ class StatusSubAgent(BaseSubAgent):
         if not isinstance(raw, list):
             raise TypeError("LLM tool_calls must be an array or null")
         return list(raw)
+
+    @staticmethod
+    def _tool_names_for_log(llm_result: _LLMChatResult) -> list[str]:
+        raw = (
+            llm_result.tool_calls
+            if isinstance(llm_result, LLMResponse)
+            else llm_result.get("tool_calls")
+        )
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            return ["<invalid_tool_calls>"]
+        return [
+            name or "<invalid_tool_call>"
+            for name, _args in (_normalize_tool_call(call) for call in raw)
+        ]
 
     def _schemas_for_names(self, names: set[str]) -> list[dict[str, object]]:
         return [

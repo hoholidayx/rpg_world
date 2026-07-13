@@ -239,7 +239,7 @@ def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -
         )
 
 
-def test_verbose_context_logging_includes_all_layers_except_history_content(monkeypatch) -> None:
+def test_verbose_context_logging_only_logs_main_llm_context_once(monkeypatch) -> None:
     builder = _Builder()
     session = SessionManager(history_enabled=False)
     session.replace_history([
@@ -266,25 +266,32 @@ def test_verbose_context_logging_includes_all_layers_except_history_content(monk
         get_runtime_sections=lambda _request: [section],
     )
 
-    result = service.build_main_context(
+    service.build_for_inspection(
+        "preview action",
+        turn_execution=_execution(),
+    )
+    messages = service.build_transformed_context(
         current_user_message=Message(Role.USER, "current action"),
         user_input="行动",
         rp_module_runtime=runtime,
         turn_execution=_execution(),
     )
 
-    assert result.rp_modules.sections == [section]
-    context_log = next(
+    assert messages[-1].content == "current action"
+    context_logs = [
         call.args[-1]
         for call in debug.call_args_list
         if "current context prepared" in call.args[0]
-    )
+    ]
+    assert len(context_logs) == 1
+    context_log = context_logs[0]
     assert "当前 Context（结构化分层）" in context_log
     assert "fixed_layer (system)" in context_log
     assert "rp_modules (system)" in context_log
     assert "staged outcome runtime" in context_log
     assert "user_message (user)" in context_log
     assert "current action" in context_log
+    assert "preview action" not in context_log
     assert "hot_history (mixed)" in context_log
     assert "turns=1" in context_log
     assert "history user secret" not in context_log

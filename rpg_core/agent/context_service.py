@@ -102,7 +102,7 @@ class AgentContextService:
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
     ) -> list[Message]:
-        return self.build_main_context(
+        context = self.build_main_context(
             current_user_message=current_user_message,
             status_manager=status_manager,
             scene_tracker=scene_tracker,
@@ -110,7 +110,10 @@ class AgentContextService:
             include_staged_turn_runtime=True,
             rp_module_runtime=rp_module_runtime,
             turn_execution=turn_execution,
-        ).to_message_objects()
+        )
+        messages = context.to_message_objects()
+        self._log_verbose_context(context)
+        return messages
 
     def build_main_context(
         self,
@@ -153,7 +156,6 @@ class AgentContextService:
                 turn_execution=turn_execution,
             ),
         )
-        self._log_verbose_context(context)
         return context
 
     def build_for_inspection(
