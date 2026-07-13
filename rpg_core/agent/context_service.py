@@ -131,7 +131,7 @@ class AgentContextService:
             turn_execution=turn_execution,
         )
         history = self._session_manager.context_history()
-        return resources.builder.build(
+        context = resources.builder.build(
             fixed_layer=fixed_layer,
             history_messages=list(history.messages),
             current_user_message=current_user_message,
@@ -153,6 +153,8 @@ class AgentContextService:
                 turn_execution=turn_execution,
             ),
         )
+        self._log_verbose_context(context)
+        return context
 
     def build_for_inspection(
         self,
@@ -432,17 +434,26 @@ class AgentContextService:
                 include_staged_turn,
                 len(sections),
             )
-            for section in sections:
-                logger.debug(
-                    _TAG + " RP runtime section: session_id={} id={} title={!r} source={} priority={} content=\n{}",
-                    self._session_id(),
-                    section.id,
-                    section.title,
-                    section.source,
-                    section.priority,
-                    section.content,
-                )
         return sections
+
+    def _log_verbose_context(self, context: "RPGContext") -> None:
+        """Log the rendered context by layer without duplicating history text."""
+        if not settings.verbose_logging:
+            return
+        try:
+            content = ContextInspector(context, self._token_counter).to_verbose_log()
+        except Exception as exc:
+            logger.warning(
+                _TAG + " verbose context logging skipped: session_id={}, error={}",
+                self._session_id(),
+                exc,
+            )
+            return
+        logger.debug(
+            _TAG + " current context prepared: session_id={} content=\n{}",
+            self._session_id(),
+            content,
+        )
 
     @staticmethod
     def compose_stored_user_input(scene_context: str | None, user_input: str) -> str:

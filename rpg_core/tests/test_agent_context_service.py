@@ -21,6 +21,7 @@ from rpg_core.context.rpg_context import (
     FixedLayerData,
     HotHistoryLayer,
     Message,
+    RPModulesLayer,
     Role,
     RPGContext,
     UserMessageLayer,
@@ -63,6 +64,9 @@ class _Builder:
         return RPGContext(
             fixed_layer=fixed_layer,
             hot_history=HotHistoryLayer(messages=list(history_messages)),
+            rp_modules=RPModulesLayer(
+                sections=list(kwargs.get("rp_module_sections") or [])
+            ),
             user_message=UserMessageLayer(
                 user_input=(current_user_message.content if current_user_message else "")
             ),
@@ -235,9 +239,14 @@ def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -
         )
 
 
-def test_runtime_section_logging_includes_public_content(monkeypatch) -> None:
+def test_verbose_context_logging_includes_all_layers_except_history_content(monkeypatch) -> None:
     builder = _Builder()
-    service = _service(builder)
+    session = SessionManager(history_enabled=False)
+    session.replace_history([
+        Message(Role.USER, "history user secret", turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "history assistant secret", turn_id=1, seq_in_turn=2),
+    ], persist=False)
+    service = _service(builder, session=session)
     debug = MagicMock()
     monkeypatch.setattr(
         context_module,
@@ -252,20 +261,34 @@ def test_runtime_section_logging_includes_public_content(monkeypatch) -> None:
         priority=80,
         content="staged outcome runtime",
     )
-    runtime = SimpleNamespace(get_runtime_sections=lambda _request: [section])
+    runtime = SimpleNamespace(
+        get_fixed_sections=lambda: [],
+        get_runtime_sections=lambda _request: [section],
+    )
 
-    result = service._runtime_sections(
+    result = service.build_main_context(
+        current_user_message=Message(Role.USER, "current action"),
         user_input="行动",
-        include_staged_turn=True,
         rp_module_runtime=runtime,
         turn_execution=_execution(),
     )
 
-    assert result == [section]
-    assert any(
-        "staged outcome runtime" in str(call.args)
+    assert result.rp_modules.sections == [section]
+    context_log = next(
+        call.args[-1]
         for call in debug.call_args_list
+        if "current context prepared" in call.args[0]
     )
+    assert "当前 Context（结构化分层）" in context_log
+    assert "fixed_layer (system)" in context_log
+    assert "rp_modules (system)" in context_log
+    assert "staged outcome runtime" in context_log
+    assert "user_message (user)" in context_log
+    assert "current action" in context_log
+    assert "hot_history (mixed)" in context_log
+    assert "turns=1" in context_log
+    assert "history user secret" not in context_log
+    assert "history assistant secret" not in context_log
 
 
 def test_compose_stored_user_input_keeps_user_after_scene_close_tag() -> None:

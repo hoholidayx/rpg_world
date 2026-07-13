@@ -12,7 +12,7 @@ from loguru import logger
 
 from rpg_core.context.usage import estimate_rendered_context_usage
 from rpg_core.context.rpg_context import LayerType, Message, RPGContext, Role
-from rpg_core.session.turns import count_roles
+from rpg_core.session.turns import count_roles, count_turns
 from rpg_core.utils.tokenizer import TokenCounter
 
 
@@ -200,6 +200,48 @@ class ContextInspector:
             )
             if info.description and info.description != "-":
                 lines.append(f"  - {info.description}")
+
+        return "\n".join(lines)
+
+    def to_verbose_log(self) -> str:
+        """Render a complete, layered context view for verbose logs.
+
+        Hot history deliberately exposes only its logical turn count: logging
+        the full conversation here would duplicate potentially large session
+        history while making the other runtime layers difficult to inspect.
+        """
+        layers = (
+            (LayerType.FIXED, Role.SYSTEM.value),
+            (LayerType.PERSISTENT_MEMORY, Role.SYSTEM.value),
+            (LayerType.SUMMARY, Role.SYSTEM.value),
+            (LayerType.HOT_HISTORY, "mixed"),
+            (LayerType.STORY_MEMORY, Role.SYSTEM.value),
+            (LayerType.RECALLED_MEMORY, Role.SYSTEM.value),
+            (LayerType.STATUS_TABLES, Role.SYSTEM.value),
+            (LayerType.RP_MODULES, Role.SYSTEM.value),
+            (LayerType.USER_MESSAGE, Role.USER.value),
+        )
+        lines = ["当前 Context（结构化分层）："]
+        for index, (type_, role) in enumerate(layers):
+            is_last = index == len(layers) - 1
+            branch = "└──" if is_last else "├──"
+            child_prefix = "    " if is_last else "│   "
+            lines.append(f"{branch} {type_} ({role})")
+
+            if type_ == LayerType.HOT_HISTORY:
+                lines.append(
+                    f"{child_prefix}└── turns={count_turns(self._ctx.hot_history.messages)}"
+                )
+                continue
+
+            content = self._ctx.render_layer(type_)
+            if not content:
+                lines.append(f"{child_prefix}└── <empty>")
+                continue
+
+            lines.append(f"{child_prefix}└── content:")
+            content_prefix = f"{child_prefix}    "
+            lines.extend(f"{content_prefix}{line}" for line in content.splitlines())
 
         return "\n".join(lines)
 

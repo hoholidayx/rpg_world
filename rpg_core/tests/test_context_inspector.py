@@ -78,6 +78,31 @@ def test_context_inspector_handles_hot_history_without_user_anchor(fake_token_co
     assert summary[-1].status == "active"
 
 
+def test_context_inspector_verbose_log_omits_history_content(fake_token_counter):
+    ctx = RPGContext(
+        fixed_layer=FixedLayerData(
+            sections=[FixedLayerSection(id="core", title="核心", content="fixed")]
+        ),
+        hot_history=HotHistoryLayer(messages=[
+            Message(Role.USER, "history user secret", turn_id=1, seq_in_turn=1),
+            Message(Role.ASSISTANT, "history assistant secret", turn_id=1, seq_in_turn=2),
+        ]),
+        user_message=UserMessageLayer(user_input="current input"),
+    )
+
+    log = ContextInspector(ctx, fake_token_counter).to_verbose_log()
+
+    assert "当前 Context（结构化分层）" in log
+    assert "fixed_layer (system)" in log
+    assert "fixed|core" in log
+    assert "hot_history (mixed)" in log
+    assert "turns=1" in log
+    assert "history user secret" not in log
+    assert "history assistant secret" not in log
+    assert "user_message (user)" in log
+    assert "current input" in log
+
+
 def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_token_counter):
     ctx = RPGContext(
         fixed_layer=FixedLayerData(sections=[FixedLayerSection(id="core", title="核心", content="fixed")]),
