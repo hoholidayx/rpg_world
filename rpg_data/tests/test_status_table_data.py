@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from rpg_data.models import StatusRowRef, StatusTableData, StatusTableDocument, StatusTableRow
+from rpg_data.models import (
+    STATUS_UPDATE_FREQUENCY_DEFERRED,
+    STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
+    StatusRowRef,
+    StatusTableData,
+    StatusTableDocument,
+    StatusTableRow,
+    parse_status_document,
+    serialize_status_document,
+)
 
 
 def test_status_table_data_resolves_columns_and_rows_by_name() -> None:
@@ -86,3 +97,64 @@ def test_status_document_updates_existing_values_without_changing_structure() ->
         document.with_existing_values([("生命", "9"), ("生命", "8")])
     with pytest.raises(ValueError, match="empty"):
         document.with_existing_values([])
+
+
+def test_status_update_policy_round_trips_and_legacy_defaults_to_realtime() -> None:
+    document = StatusTableDocument.from_rows(rows=[
+        StatusTableRow(
+            "关系",
+            "疏远",
+            update_frequency=STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
+            update_rule="对方明确接受道歉时更新",
+        ),
+        StatusTableRow(
+            "长期信任",
+            "低",
+            update_frequency=STATUS_UPDATE_FREQUENCY_DEFERRED,
+            deferred_interval_turns=8,
+        ),
+    ])
+
+    restored = parse_status_document(serialize_status_document(document))
+
+    assert restored.rows[0].update_rule == "对方明确接受道歉时更新"
+    assert restored.rows[1].deferred_interval_turns == 8
+    legacy = parse_status_document(
+        '{"rows":[{"key":"位置","value":"森林"}]}'
+    )
+    assert legacy.rows[0].update_frequency == "realtime"
+
+
+def test_status_update_policy_rejects_invalid_combinations() -> None:
+    with pytest.raises(ValueError, match="require updateRule"):
+        StatusTableDocument.from_rows(rows=[
+            StatusTableRow("关系", "普通", update_frequency="event_driven")
+        ])
+    with pytest.raises(ValueError, match="only supported for deferred"):
+        StatusTableDocument.from_rows(rows=[
+            StatusTableRow("位置", "森林", deferred_interval_turns=3)
+        ])
+    with pytest.raises(ValueError, match="positive integer"):
+        StatusTableDocument.from_rows(rows=[
+            StatusTableRow(
+                "长期信任",
+                "低",
+                update_frequency="deferred",
+                deferred_interval_turns=1.5,  # type: ignore[arg-type]
+            )
+        ])
+
+
+@pytest.mark.parametrize("value", [True, "5", 1.5])
+def test_status_document_rejects_malformed_deferred_interval(value: object) -> None:
+    raw = json.dumps({
+        "rows": [{
+            "key": "长期信任",
+            "value": "低",
+            "updateFrequency": "deferred",
+            "deferredIntervalTurns": value,
+        }]
+    })
+
+    with pytest.raises(ValueError, match="positive integer"):
+        parse_status_document(raw)

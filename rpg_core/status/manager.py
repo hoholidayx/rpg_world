@@ -9,7 +9,7 @@ from rpg_data.models import STATUS_KEY_COLUMN, STATUS_KIND_NORMAL, STATUS_KIND_S
 from rpg_data.services import get_data_service_gateway
 
 if TYPE_CHECKING:
-    from rpg_data.models import SessionStatusTable, StatusTableDocument
+    from rpg_data.models import SessionStatusTable, StatusDeferredProgress, StatusTableDocument
     from rpg_data.services.status import StatusTableService
 
 
@@ -88,6 +88,35 @@ class StatusManager:
                 expected_status_kind=expected_status_kind or table.status_kind,
                 base_document=base_document,
                 write_source=write_source,
+            )
+        )
+
+    def list_deferred_progress(self) -> list["StatusDeferredProgress"]:
+        return self._service.list_deferred_progress(self.session_id)
+
+    def clamp_deferred_progress(self, max_turn_id: int) -> int:
+        return self._service.clamp_deferred_progress(
+            self.session_id,
+            max_turn_id,
+        )
+
+    def commit_deferred_update(
+        self,
+        table_id: int,
+        document: "StatusTableDocument",
+        *,
+        processed_keys: Iterable[str],
+        last_processed_turn_id: int,
+        base_document: "StatusTableDocument | None" = None,
+    ) -> dict[str, object]:
+        return _table_to_dict(
+            self._service.commit_deferred_update(
+                self.session_id,
+                table_id,
+                document,
+                processed_keys=processed_keys,
+                last_processed_turn_id=last_processed_turn_id,
+                base_document=base_document,
             )
         )
 

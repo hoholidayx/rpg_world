@@ -1279,14 +1279,66 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
             "statusKind": "normal",
             "keyColumn": "属性",
             "valueColumn": "值",
-            "rows": [{"key": "钟声", "value": "未响", "runtimeKeyLocked": False}],
+            "rows": [
+                {
+                    "key": "钟声",
+                    "value": "未响",
+                    "runtimeKeyLocked": False,
+                    "updateFrequency": "event_driven",
+                    "updateRule": "钟楼被明确敲响时更新",
+                },
+                {
+                    "key": "长期警戒",
+                    "value": "低",
+                    "updateFrequency": "deferred",
+                    "deferredIntervalTurns": 6,
+                },
+            ],
             "metadata": {"ui": {"compact": True}},
         },
     )
     assert new_status_template.status_code == 200
     assert new_status_template.json()["name"] == "测试状态表"
     assert new_status_template.json()["rows"][0]["key"] == "钟声"
+    assert new_status_template.json()["rows"][0]["updateFrequency"] == "event_driven"
+    assert new_status_template.json()["rows"][0]["updateRule"] == "钟楼被明确敲响时更新"
+    assert new_status_template.json()["rows"][1]["updateFrequency"] == "deferred"
+    assert new_status_template.json()["rows"][1]["deferredIntervalTurns"] == 6
     assert new_status_template.json()["metadata"]["ui"]["compact"] is True
+    assert client.post(
+        "/play-api/v1/workspaces/demo_workspace/status-templates",
+        json={
+            "name": "无规则事件表",
+            "rows": [{
+                "key": "事件",
+                "value": "未发生",
+                "updateFrequency": "event_driven",
+            }],
+        },
+    ).status_code == 422
+    assert client.post(
+        "/play-api/v1/workspaces/demo_workspace/status-templates",
+        json={
+            "name": "非法慢场景",
+            "statusKind": "scene",
+            "rows": [{
+                "key": "位置",
+                "value": "林地",
+                "updateFrequency": "deferred",
+            }],
+        },
+    ).status_code == 422
+    assert client.patch(
+        f"/play-api/v1/workspaces/demo_workspace/status-templates/{mounted_scene_template['id']}",
+        json={
+            "rows": [{
+                "key": "位置",
+                "value": "林地",
+                "updateFrequency": "event_driven",
+                "updateRule": "角色抵达林地时更新",
+            }],
+        },
+    ).status_code == 422
 
     patched_status_template = client.patch(
         f"/play-api/v1/workspaces/demo_workspace/status-templates/{new_status_template.json()['id']}",

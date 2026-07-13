@@ -1,4 +1,4 @@
-import { STORY_STATUS_MOUNT_ORIGIN } from '@/types/statusTables'
+import { STATUS_KIND, STORY_STATUS_MOUNT_ORIGIN } from '@/types/statusTables'
 import { STATUS_DESCRIPTION_PLACEHOLDER, statusKindLabel, storyMountOriginLabel } from '../constants'
 import { characterLabelByMountId, formatDate } from '../helpers'
 import type { StatusTablesController } from '../useStatusTablesController'
@@ -147,7 +147,7 @@ export function StoryTemplatesView({ controller }: { controller: StatusTablesCon
               </label>
               <div>
                 <h3 className="mb-3 text-sm font-bold text-slate-950">Key-Value 模板内容</h3>
-                <KvEditor draft={storyTemplateDraft} onChange={setStoryTemplateDraft} toolbarTitle="初始键值" />
+                <KvEditor draft={storyTemplateDraft} onChange={setStoryTemplateDraft} toolbarTitle="初始键值" isScene={selectedStoryTemplate.statusKind === STATUS_KIND.SCENE} />
               </div>
               <div className="grid gap-4 border-t border-slate-100 pt-4 text-xs text-slate-500 md:grid-cols-3">
                 <p>角色 {characterLabelByMountId(storyCharacters, selectedStoryMount.characterMountId)}</p>

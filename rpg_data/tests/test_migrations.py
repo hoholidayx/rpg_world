@@ -319,6 +319,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0005", "0005_rp_modules.sql"),
             ("0006", "0006_session_composer.sql"),
             ("0007", "0007_player_role_templates.sql"),
+            ("0008", "0008_status_update_frequency.sql"),
         ]
     finally:
         conn.close()

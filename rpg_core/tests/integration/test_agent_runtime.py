@@ -149,7 +149,17 @@ async def test_main_llm_runtime_priority_context_window_and_subagent_route_indep
         SESSION_PROVIDER_KEY,
         STORY_PROVIDER_KEY,
     ]
-    assert len(scripted_llm_manager.status.calls) == 4
+    assert len(scripted_llm_manager.status.calls) == 8
+    assert [
+        {
+            str(schema.get("function", {}).get("name", ""))
+            for schema in (call.tools or [])
+        }
+        for call in scripted_llm_manager.status.calls
+    ] == [
+        {"rp_story_outcome"},
+        {"select_status_targets"},
+    ] * 4
     status_system = scripted_llm_manager.status.calls[0].messages[0]["content"]
     assert "当前玩家扮演角色：Integration Tester" in status_system
     assert "Integration Tester [PLAYER_CHARACTER｜玩家当前扮演]" in status_system
@@ -305,7 +315,17 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
     gm_call = scripted_llm_manager.main_provider().calls[-1]
     gm_content = "\n".join(str(message.get("content") or "") for message in gm_call.messages)
     assert gm_reply.committed_turn_id == 2
-    assert len(scripted_llm_manager.status.calls) == status_calls_before + 1
+    assert len(scripted_llm_manager.status.calls) == status_calls_before + 2
+    assert [
+        {
+            str(schema.get("function", {}).get("name", ""))
+            for schema in (call.tools or [])
+        }
+        for call in scripted_llm_manager.status.calls[-2:]
+    ] == [
+        {"rp_story_outcome"},
+        {"select_status_targets"},
+    ]
     assert "COMPOSER_STYLE_PROMPT" in gm_content
     rows = integration_data_gateway.messages.list(session_id)
     assert [row.mode for row in rows] == ["ooc", "ooc", "gm", "gm"]

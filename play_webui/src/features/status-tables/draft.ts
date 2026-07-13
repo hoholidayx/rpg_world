@@ -1,4 +1,4 @@
-import type { StatusRow, StatusTable } from '@/types/statusTables'
+import { STATUS_UPDATE_FREQUENCY, type StatusRow, type StatusTable } from '@/types/statusTables'
 import { DEFAULT_KEY_COLUMN, DEFAULT_VALUE_COLUMN } from './constants'
 
 export type TableDraft = {
@@ -31,6 +31,9 @@ export function draftFromTable(table: StatusTable | null): TableDraft {
       value: row.value,
       runtimeKeyLocked: row.runtimeKeyLocked,
       metadata: row.metadata ?? {},
+      updateFrequency: row.updateFrequency ?? STATUS_UPDATE_FREQUENCY.REALTIME,
+      updateRule: row.updateRule ?? '',
+      deferredIntervalTurns: row.deferredIntervalTurns ?? null,
     })),
   }
 }
@@ -43,12 +46,27 @@ export function validateRows(rows: StatusRow[]) {
     const key = row.key.trim()
     if (!key) return { error: 'Key 不能为空', rows: [] as StatusRow[] }
     if (seen.has(key)) return { error: `Key 不能重复：${key}`, rows: [] as StatusRow[] }
+    if (row.updateFrequency === STATUS_UPDATE_FREQUENCY.EVENT_DRIVEN && !row.updateRule.trim()) {
+      return { error: `事件驱动字段必须填写更新规则：${key}`, rows: [] as StatusRow[] }
+    }
+    if (
+      row.updateFrequency === STATUS_UPDATE_FREQUENCY.DEFERRED
+      && row.deferredIntervalTurns !== null
+      && (!Number.isInteger(row.deferredIntervalTurns) || row.deferredIntervalTurns <= 0)
+    ) {
+      return { error: `延迟更新周期必须是正整数：${key}`, rows: [] as StatusRow[] }
+    }
     seen.add(key)
     normalized.push({
       key,
       value: row.value,
       runtimeKeyLocked: row.runtimeKeyLocked,
       metadata: row.metadata ?? {},
+      updateFrequency: row.updateFrequency,
+      updateRule: row.updateFrequency === STATUS_UPDATE_FREQUENCY.EVENT_DRIVEN ? row.updateRule.trim() : '',
+      deferredIntervalTurns: row.updateFrequency === STATUS_UPDATE_FREQUENCY.DEFERRED
+        ? row.deferredIntervalTurns
+        : null,
     })
   }
 

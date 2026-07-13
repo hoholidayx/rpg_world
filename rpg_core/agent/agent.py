@@ -9,6 +9,7 @@ from llm_service.manager import ProviderOverrides
 from rpg_core.agent.agent_types import AgentStreamEvent, TurnCancelResult
 from rpg_core.agent.command import CommandDispatcher, CommandResult
 from rpg_core.agent.context_service import AgentContextService
+from rpg_core.agent.deferred_status import DeferredStatusCoordinator
 from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
 from rpg_core.agent.loop import AgentReply, run_chat_loop, run_chat_loop_stream
 from rpg_core.agent.mailbox import AgentMailbox
@@ -138,12 +139,14 @@ class RPGGameAgent:
             orchestrator=orchestrator,
             stream_error_event=AgentMailbox.stream_error_event,
         )
+        deferred_status = DeferredStatusCoordinator(self._lifecycle)
         self._mailbox = AgentMailbox(
             session_id=lambda: self._lifecycle.session_id,
             model=lambda: self._model_runtime.model,
             turn_service=self._turn_service,
             command_dispatcher=self._command_dispatcher,
             truncate_history=self._session_service.truncate_history_from_turn_now,
+            deferred_status=deferred_status.run,
         )
         self._session_service.bind_mailbox(self._mailbox)
 

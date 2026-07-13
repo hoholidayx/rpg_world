@@ -68,6 +68,7 @@ class SubAgentContext:
         self,
         *,
         player_character: "PlayerCharacterContext | None" = None,
+        include_system_prompt: bool = True,
     ) -> str:
         """渲染完整上下文：系统提示（子 Agent 自身） + 世界书 + 角色卡。
 
@@ -75,7 +76,7 @@ class SubAgentContext:
         """
         parts: list[str] = []
 
-        if self._system_prompt.strip():
+        if include_system_prompt and self._system_prompt.strip():
             parts.append(self._system_prompt.strip())
 
         lore_section = self._render_lorebook()

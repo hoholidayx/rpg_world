@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -48,12 +48,14 @@ class AgentMailbox:
         turn_service: "AgentTurnService",
         command_dispatcher: "CommandDispatcher",
         truncate_history: Callable[[int], dict[str, object]],
+        deferred_status: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._session_id = session_id
         self._model = model
         self._turn_service = turn_service
         self._command_dispatcher = command_dispatcher
         self._truncate_history = truncate_history
+        self._deferred_status = deferred_status
         self._queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         self._consumer_task: asyncio.Task | None = None
         self._active_stream_task: asyncio.Task | None = None
@@ -248,9 +250,11 @@ class AgentMailbox:
                     case QueueKind.SEND:
                         if item.turn_request is None:
                             raise ValueError("turn_request is required for send")
-                        item.future.set_result(
-                            await self._turn_service.execute_sync(item.turn_request)
-                        )
+                        reply = await self._turn_service.execute_sync(item.turn_request)
+                        item.future.set_result(reply)
+                        if reply.committed_turn_id is not None:
+                            await asyncio.sleep(0)
+                            await self._run_deferred_status()
                     case QueueKind.SEND_STREAM:
                         await self._run_stream_item(item)
                     case QueueKind.COMMAND:
@@ -305,7 +309,7 @@ class AgentMailbox:
             request_id,
         )
         try:
-            await task
+            committed_turn_id = await task
         except asyncio.CancelledError:
             current_task = asyncio.current_task()
             if current_task is not None and current_task.cancelling():
@@ -325,6 +329,20 @@ class AgentMailbox:
                 self._active_stream_request_id = None
         if not item.future.done():
             item.future.set_result(None)
+        if committed_turn_id is not None:
+            await asyncio.sleep(0)
+            await self._run_deferred_status()
+
+    async def _run_deferred_status(self) -> None:
+        if self._deferred_status is None:
+            return
+        try:
+            await self._deferred_status()
+        except Exception as exc:
+            logger.opt(exception=exc).warning(
+                _TAG + " deferred status reconciliation failed: session_id={}",
+                self._session_id(),
+            )
 
     @staticmethod
     def _create_future() -> asyncio.Future:

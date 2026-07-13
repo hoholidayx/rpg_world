@@ -46,6 +46,8 @@ def test_status_context_separates_regular_and_character_tables() -> None:
     assert "本轮回复前的普通状态表快照" in rendered
     assert "遵循核心状态同步协议" in rendered
     assert "只能修改已有键的值" in rendered
+    assert "event_driven 只在“事件规则”明确命中时同步" in rendered
+    assert "主 Agent 不得写 deferred 或 manual 字段" in rendered
     assert "只有核验后确认无变化" not in rendered
     assert "### 世界状态" in rendered
     assert "运行时表 ID：1" in rendered

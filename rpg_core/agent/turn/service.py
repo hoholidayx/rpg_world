@@ -75,11 +75,11 @@ class AgentTurnService:
         self,
         request: TurnRequest,
         event_queue: asyncio.Queue,
-    ) -> None:
+    ) -> int | None:
         bypass = await self._resolve_bypass(request)
         if bypass is not None:
             await self._emit_bypass(event_queue, bypass)
-            return
+            return None
 
         async def emit_error(error: BaseException) -> None:
             await event_queue.put(self._stream_error_event(error))
@@ -89,17 +89,19 @@ class AgentTurnService:
             await event_queue.put(_StreamSentinel())
 
         try:
-            await self._orchestrator.execute_stream(
+            result = await self._orchestrator.execute_stream(
                 request,
                 emit_event=event_queue.put,
                 emit_error=emit_error,
                 emit_end=emit_end,
             )
+            return result.committed_turn_id if result is not None else None
         except PlayerCharacterRequiredError as exc:
             await self._emit_bypass(
                 event_queue,
                 TurnBypass(text=exc.reply, reason="player_character_guard"),
             )
+            return None
 
     async def _resolve_bypass(self, request: TurnRequest) -> TurnBypass | None:
         return await TurnPreprocessor(

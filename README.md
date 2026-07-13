@@ -120,14 +120,17 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 
 - 模板表和会话表都在 SQL 行内保存封装后的 `document_json`，对外通过 `StatusTableDocument` / `StatusTableRow` 等 dataclass 暴露，不把原始 JSON 字符串作为正文数据返回。
 - SQLite 同时记录模板、story 挂载、session 副本、来源关系、排序、`metadata_json` 和 `status_kind`；`status_kind` 当前只允许 `scene` / `normal`。
+- 每个 `StatusTableRow` 可声明 `updateFrequency`、`updateRule` 和 `deferredIntervalTurns`。频率只允许 `realtime | event_driven | deferred | manual`；旧 document 缺少频率时按 `realtime` 读取，`event_driven` 必须填写非空规则，只有 `deferred` 可以配置正整数归纳周期。
+- `event_driven` 不是事件总线：每个 turn 的状态路由根据当前输入、已提交历史和 `updateRule` 判断规则是否明确命中，代码再校验返回字段确为 event-driven 且处于本批 allowlist。`deferred` 则由回复交付后的慢状态流程按累计 committed turn 归纳；`manual` 只允许管理端人工维护。
 - 状态表模板属于 workspace，通过 `rpg_story_status_tables` 挂载到 story 后才可绑定角色；绑定字段是 nullable `story_character_mount_id`，只校验角色挂载属于同一 story，不限制同一角色绑定的状态表数量。
 - `rpg_story_status_tables.mount_origin` 区分 `system_mount` 与 `story_template`。系统模板挂载只能解除挂载；故事内创建的状态模板可删除挂载及其底层模板，若模板仍被其它 story 使用则拒绝删除。
 - 创建 session 时会把当时已挂载模板的 `document_json` 复制到 `rpg_session_status_tables`，`origin="template_copy"`，并把 story mount、角色绑定和 `characterName` 快照写入 session 表 metadata；角色名只用于在 LLM 上下文中分组角色状态表。
 - 角色绑定要求挂载角色具有非空 name。旧 session 缺少 `characterName` 时，context 读取优先通过 `characterMountId -> rpg_story_characters -> rpg_characters` 反查；缺少直接角色挂载 ID 时可由状态表 `mountId -> rpg_story_status_tables.story_character_mount_id` 回退解析，成功后回填快照。无法解析的角色状态表会记录 warning 并从 LLM 上下文排除。
 - 模板后续修改不影响已有 session 副本；运行时直接新建的会话表写入 `rpg_session_status_tables`，`origin="session_native"`。
+- migration `0008_status_update_frequency.sql` 新增 `rpg_session_status_deferred_progress`，以运行时表 ID + 字段 key 保存最后处理 turn。deferred 的 document 值与进度在同一数据库事务中提交；归纳失败不推进进度，truncate/clear 只收缩进度边界，不回滚已经提交的状态值。
 - `DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；service 不扫描目录补业务索引，也不维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。
 - Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
-- `当前场景` 是 `status_kind="scene"` 的特殊状态表，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。
+- `当前场景` 是 `status_kind="scene"` 的特殊状态表，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。scene document 的所有字段固定为 `realtime`，保存边界拒绝 `event_driven` / `deferred` / `manual`。
 - `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，workspace/story/session 运行目录使用 workspace-relative 路径时统一由 `rpg_data.settings` 解析并阻止路径逃逸。
 
 Play WebUI 的状态表页分为 `系统模板`、`故事状态模板` 和 `故事运行时` 三个视图。`系统模板` 管理工作区级模板及其 story 挂载；`故事状态模板` 管理当前 story 已挂载模板、故事内创建模板和可选角色绑定；`故事运行时` 只管理当前 session 的运行时副本。
@@ -233,12 +236,15 @@ async for event in agent.send_stream(
 
 - 进入 LLM 前，user message 不直接写入 `SessionManager.append()`，而是暂存在 `MessageScratch`。
 - 斜杠命令和玩家角色校验先行；普通正文会在创建 transaction 前按当前主 Agent Context 占用执行窗口门禁，不把本次待发送 input 计入估算。达到 Core 配置阈值时不调用主/子 Agent、不写历史，并提示手动 `/compact`。
-- turn 开始时 Narrative Outcome 先形成有效权重快照；`rp_story_outcome` 与 scene/status 工具一起注册给 `StatusSubAgent`。子 Agent 先判断外部实质变数，再决定“预裁定”或“确定性状态预更新”。
-- `StatusSubAgent` 返回 tool calls 后由编排层按整批处理：只要同批出现 `rp_story_outcome`，就只执行一次裁定，所有 scene/status 预写无论调用顺序都标记为 `skipped_due_to_outcome`；没有裁定时才执行确定性状态预更新。
-- `StatusSubAgent` 和 scene 工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，状态表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。状态工具批次失败会恢复本轮内存 checkpoint，由主 Agent 使用现有工具链回退；这不是持久化 journal。
-- 普通状态表通过同一 scratch 注册 `status_table_set_values`，只允许按 session 运行时表 ID 批量修改已有 key 的 value；工具同时提供给 `StatusSubAgent` 和主 Agent，no-op 不进入 staged changes。
+- turn 开始时 Narrative Outcome 先形成有效权重快照；`rp_story_outcome` 与 scene/status 工具绑定给 `StatusSubAgent`，但由代码编排隔离调用阶段，而不是让一次 LLM 响应同时决定裁定和状态写入。
+- 第一阶段是独立 Outcome 判定。需要裁定时只执行一次 `rp_story_outcome`，立即停止状态路由和预写；结果进入本轮 scratch。判定失败同样停止快速状态链路并把补判权交回主 Agent。
+- 只有 Outcome 明确判定为不需要时才进入 Route 阶段。路由只输出相关的 scene、运行时表 ID、`realtime` key，以及 `updateRule` 已明确命中的 `event_driven` key；`deferred` / `manual` 永不进入快速路由。
+- Update 阶段把 scene 和每张命中的普通表拆成独立 LLM 调用。scene 调用只获得 scene context 与专用 scene 工具；普通表调用只获得单张表的选中字段。工具层再次校验 scene/table 边界、运行时表 ID、key allowlist 和更新频率。
+- `StatusSubAgent` 和状态工具绑定到 scratch 版 `SceneTracker` / `ScratchStatusManager`，普通表变更以 `StatusTableDocument` copy-on-write 方式暂存到 `StatusDocumentScratch`。任一快速更新批次失败会恢复本轮内存 checkpoint，由主 Agent 使用现有工具链回退；这不是持久化 journal。
+- 普通状态表统一使用 `status_table_set_values`，只允许按 session 运行时表 ID 批量修改已有 key 的 value；工具同时提供给 `StatusSubAgent` 和主 Agent，no-op 不进入 staged changes。scene 始终使用 `scene_time` / `scene_attr` / `scene_del_attr`，不走普通表工具。
 - 上下文构建读取主 Agent 专用历史投影、当前 scratch user message 与 scratch 后的 scene/status；若已预裁定，`RP_MODULES` runtime section 还会在主 Agent 首次调用前注入 `outcomeCode`、标签、叙事指导、reason 和可选 actor，同时从主 Agent schema 隐藏 `rp_story_outcome`。主 Agent 不得改判或重抽，并只在结果实际造成持久状态变化后调用状态工具；有变化时工具调用轮不得夹带 RP 正文，最终正文也不得新增尚未同步的可追踪确定事实，确认无变化时允许零状态工具。
 - LLM 完整成功后，事务一次性提交 staged user message、assistant message、Narrative Outcome 裁定和 staged status documents；`send_stream()` 只有 commit 成功后才发送最终 DONE。
+- 已提交回复或 SSE DONE 先交付调用方，随后同一 session mailbox 在处理下一队列项前运行到期的 deferred 慢状态归纳。它不阻塞本轮内容展示，但会在下一 turn 前形成一致状态；各表批次相互隔离，失败只记录 warning。
 - WebUI 停止生成走 `requestId` 精准取消：Play API `/sessions/{session_id}/stop` 转发到 Agent service `/chat/stop`，被取消的 stream turn 只丢弃 scratch，不发送 DONE，也不提交消息、状态或 usage。
 - WebUI `retry/edit` 保持历史语义可预期：如果目标是最后一个已持久化 turn，先截断该 turn 再用同一 turn id 重新流式发送；如果目标不是最后一轮，不改写旧历史，而是追加一个新的 turn。
 - retry/edit/truncate 会删除对应消息与 Narrative Outcome 并重新抽取，但不会回滚已经提交的状态表；状态分支回滚是独立的后续能力，本链路不新增 `status_turn_journal`。
@@ -272,7 +278,9 @@ async for event in agent.send_stream(
 4. Story Memory / Recalled Memory / Status Tables / RP Modules。
 5. User Message。
 
-`当前场景` 不作为普通状态表进入 `STATUS_TABLES`。它由 `SceneTracker` 作为高优先级 user prefix 合入最终用户消息，确保故事时间、地点和场景状态被模型重点关注，并随 user message 进入历史用于后续有序归纳。`rpg_data` 用 `status_kind="scene"` 表达这一类特殊状态；未挂载到 story 时 session 不会感知 scene，也不会注册 scene 工具。
+`当前场景` 在数据层和 Agent 编排层有不同职责。数据层仍用 `status_kind="scene"` 的 SQL document 表达，必须挂载到 story，未挂载时 session 不会感知 scene，也不会注册 scene 工具；所有 scene 字段固定 `realtime`。主 Context 中它不进入普通 `STATUS_TABLES`，而由 `SceneTracker` 作为高优先级 `[scene]` user prefix 合入最终用户消息，确保故事时间、地点和场景状态获得更高注意力。
+
+在 StatusSubAgent 固定编排中，Outcome 和 Route 阶段可以读取 scene；Route 命中后，scene 被拆成独立更新调用，只向模型提供 scene context 和 `scene_time` / `scene_attr` / `scene_del_attr`。它不使用 `status_table_set_values`，不参与普通表逐字段 event 路由，也不会进入 deferred 慢归纳。这个差异只改变 Agent 的投影与更新路径，不改变 scene 的 SQL document 真源和 story 挂载语义。
 
 普通 `STATUS_TABLES` 层展示 session 运行时表 ID、表名、`description`（用途与更新规则）和完整 KV，不展示模板来源或通用挂载范围。绑定角色的表单独进入“角色状态表”段落并按角色名分组；当前只用角色绑定辅助模型理解所属角色，不扩展其它行为。
 
@@ -302,12 +310,14 @@ RP Modules 采用上下文分层策略：
 
 ```text
 用户行动
-  → StatusSubAgent 结合历史、当前场景、状态和输入判断外部实质变数
-  → 需要裁定时只调用 rp_story_outcome(reason, actor?)，同批状态预写全部延后
-  → 模块内部按本轮有效五档权重抽取结果
-  → 主 Agent 首次调用前读取等级、叙事指导、reason 和可选 actor
+  → StatusSubAgent Outcome 阶段结合历史、当前场景、状态和输入判断外部实质变数
+    ├─ 需要裁定：只调用 rp_story_outcome(reason, actor?)，模块按本轮权重抽取，停止快速状态链路
+    └─ 无需裁定：Route 选择 scene / 表 ID / realtime 与命中规则的 event_driven key
+                    → scene 与每张命中表分别执行受 allowlist 约束的确定性预更新
+  → 若有预裁定，主 Agent 首次调用前读取等级、叙事指导、reason 和可选 actor
   → 主 Agent 依据整体目标与结果继续剧情；真实持久变化先写 scene/status，再输出 RP 正文
   → StatusSubAgent 漏判时主 Agent schema 保留同一工具用于补判；已预裁定时 schema 隐藏该工具，内部重复调用仍幂等复用
+  → commit 并交付回复；normal 表中到期的 deferred 字段随后在下一 mailbox 项前归纳
 ```
 
 适合触发剧情裁定的情况：
@@ -332,7 +342,7 @@ RP Modules 采用上下文分层策略：
 | `我很犹豫，但还是没有决定是否原谅他` | 不替玩家作出内心选择 |
 | `这轮不要掷骰，直接继续叙事` | 尊重明确否定，不注入本轮强制裁定指令 |
 
-每个自动剧情 turn 最多产生一条裁定；同一 turn 重复工具调用复用第一次结果。常见的“预裁定但无状态变化”turn 只需要 StatusSubAgent 与主 Agent 两次 LLM 调用；只有主 Agent 漏判补裁定或确有状态写入时才增加工具 round。权重在 turn 开始时形成快照，生成中修改只影响下一 turn。裁定与 user/assistant message、状态表在同一个短数据库事务中提交；取消、provider 失败或 commit 失败都不留记录。retry/edit 截断原 turn 时同时删除旧裁定并重新抽取，但不回滚已提交状态表。
+每个自动剧情 turn 最多产生一条裁定；同一 turn 重复工具调用复用第一次结果。命中预裁定且无需主 Agent 状态写入时，通常是一次 Outcome 调用加一次主 Agent 调用。未命中裁定但启用了状态能力时，基础开销是 Outcome + Route + 主 Agent；每个命中的 scene 或普通表再增加一次隔离更新调用。没有命中目标时不会调用状态工具，deferred 调用只在回复后字段到期时发生。权重在 turn 开始时形成快照，生成中修改只影响下一 turn。裁定与 user/assistant message、快速状态表在同一个短数据库事务中提交；取消、provider 失败或 commit 失败都不留记录。retry/edit 截断原 turn 时同时删除旧裁定并重新抽取，但不回滚已提交状态表。
 
 模块配置优先级是 `系统配置 < Story 稀疏覆盖 < Session 稀疏覆盖`；普通字段逐字段合并，Narrative Outcome 的五档 `weights` 是不可拆分整组，五项必须是 `0..100` 整数且总和严格等于 `100`。Story 编辑页管理模块挂载开关与配置，Session 设置菜单可覆盖或清除后继续继承 Story。通用接口为：
 
@@ -600,6 +610,10 @@ base:
     max_tool_call_limit: 10
     include_tool_records: true
     verbose_logging: true
+    status_sub_agent:
+      enabled: true
+      deferred:
+        default_interval_turns: 5
   memory:
     top_k: 2
     keyword_tokenizer: jieba

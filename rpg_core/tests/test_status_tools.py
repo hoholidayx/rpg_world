@@ -14,7 +14,7 @@ from rpg_core.agent.sub_agents import (
 from rpg_core.agent.tools import BaseTool
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
-from rpg_core.status.tools import StatusTableSetValuesTool, StatusTableToolProvider
+from rpg_core.status.tools import StatusTableSetValuesTool, StatusTableToolProvider, StatusWritePolicy
 
 
 def _document(*rows: tuple[str, str]) -> StatusTableDocument:
@@ -152,6 +152,60 @@ def test_status_tool_provider_skips_empty_normal_tables() -> None:
         "status_table_set_values"
     ]
 
+    slow_manager = FakeRuntimeStatusManager()
+    slow_manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow("长期信任", "低", update_frequency="deferred"),
+        StatusTableRow("人工备注", "无", update_frequency="manual"),
+    ])
+    _scratch, slow_runtime = _scratch_runtime(slow_manager)
+    assert StatusTableToolProvider(slow_runtime).get_tools() == []
+
+
+@pytest.mark.asyncio
+async def test_status_tool_enforces_frequency_and_scoped_key_policy() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow("生命", "10"),
+        StatusTableRow(
+            "关系事件",
+            "无",
+            update_frequency="event_driven",
+            update_rule="明确结盟时更新",
+        ),
+        StatusTableRow("长期信任", "低", update_frequency="deferred"),
+        StatusTableRow("隐藏设定", "是", update_frequency="manual"),
+    ])
+    _scratch, runtime = _scratch_runtime(manager)
+    default_tool = StatusTableSetValuesTool(runtime)
+
+    blocked_deferred = json.loads(await default_tool.execute(
+        table_id=1,
+        updates=[{"key": "长期信任", "value": "中"}],
+    ))
+    blocked_manual = json.loads(await default_tool.execute(
+        table_id=1,
+        updates=[{"key": "隐藏设定", "value": "否"}],
+    ))
+    assert blocked_deferred["errorCode"] == "write_not_allowed"
+    assert blocked_manual["errorCode"] == "write_not_allowed"
+
+    scoped = StatusTableSetValuesTool(
+        runtime,
+        write_policy=StatusWritePolicy(
+            allowed_keys={1: frozenset({"生命"})},
+        ),
+    )
+    blocked_event = json.loads(await scoped.execute(
+        table_id=1,
+        updates=[{"key": "关系事件", "value": "已结盟"}],
+    ))
+    changed = json.loads(await scoped.execute(
+        table_id=1,
+        updates=[{"key": "生命", "value": "8"}],
+    ))
+    assert blocked_event["errorCode"] == "write_not_allowed"
+    assert changed["changed"] is True
+
 
 def test_status_scratch_removes_net_no_op_document() -> None:
     manager = FakeRuntimeStatusManager()
@@ -257,6 +311,104 @@ class _OutcomeTool(BaseTool):
             },
             ensure_ascii=False,
         )
+
+
+class _SceneAttrTool(BaseTool):
+    name = "scene_attr"
+    description = "test scene writer"
+
+    def parameters(self) -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["key", "value"],
+        }
+
+    async def execute(self, **kwargs: object) -> str:
+        return json.dumps({"ok": True, "changed": bool(kwargs)})
+
+
+@pytest.mark.asyncio
+async def test_fixed_preflight_isolates_scene_and_routed_table_contexts() -> None:
+    manager = FakeRuntimeStatusManager()
+    manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow("生命", "RT_SENTINEL"),
+        StatusTableRow("长期信任", "SLOW_SENTINEL", update_frequency="deferred"),
+    ])
+    scratch, runtime = _scratch_runtime(manager)
+
+    class Provider:
+        def __init__(self) -> None:
+            self.stages: list[str] = []
+
+        async def chat(self, messages, *, tools):  # noqa: ANN001
+            names = {
+                schema["function"]["name"]
+                for schema in tools
+            }
+            user_content = str(messages[-1]["content"])
+            if names == {NARRATIVE_OUTCOME_TOOL_NAME}:
+                self.stages.append("outcome")
+                assert "COMBINED_TABLE_SENTINEL" in user_content
+                return {"tool_calls": []}
+            if names == {"select_status_targets"}:
+                self.stages.append("route")
+                assert "COMBINED_TABLE_SENTINEL" in user_content
+                return {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "select_status_targets",
+                            "arguments": json.dumps({
+                                "scene": True,
+                                "tables": [{
+                                    "table_id": 1,
+                                    "realtime_keys": ["生命"],
+                                    "event_keys": [],
+                                    "reason": "本轮生命值相关",
+                                }],
+                            }, ensure_ascii=False),
+                        },
+                    }],
+                }
+            if names == {"scene_attr"}:
+                self.stages.append("scene")
+                assert "SCENE_SENTINEL" in user_content
+                assert "COMBINED_TABLE_SENTINEL" not in user_content
+                assert "SLOW_SENTINEL" not in user_content
+                return {"tool_calls": []}
+            if names == {"status_table_set_values"}:
+                self.stages.append("table")
+                assert "RT_SENTINEL" in user_content
+                assert "SLOW_SENTINEL" not in user_content
+                assert "SCENE_SENTINEL" not in user_content
+                return {"tool_calls": []}
+            raise AssertionError(f"unexpected schemas: {names}")
+
+    provider = Provider()
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.bind_context(SubAgentContext())
+    sub_agent.register_tools([
+        _OutcomeTool(),
+        _SceneAttrTool(),
+        StatusTableSetValuesTool(runtime),
+    ])
+    sub_agent.set_mutation_probe(lambda: scratch.change_token)
+    sub_agent._get_provider = lambda: provider  # type: ignore[method-assign]
+
+    context_tables = runtime.list_context_tables()
+    result = await sub_agent.run_preflight(
+        history=[],
+        state_context="SCENE_SENTINEL\nCOMBINED_TABLE_SENTINEL",
+        scene_context="SCENE_SENTINEL",
+        context_tables=context_tables,
+        user_input="检查状态",
+    )
+
+    assert result.failed is False
+    assert provider.stages == ["outcome", "route", "scene", "table"]
 
 
 def test_status_sub_agent_turn_tool_scope_restores_owned_bindings() -> None:

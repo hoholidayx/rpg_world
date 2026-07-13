@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Protocol
 
+from rpg_data import models
 from rpg_core.agent.tools.base import BaseTool
 from rpg_core.status.manager import StatusValueUpdateResult
 
@@ -14,16 +16,70 @@ STATUS_TABLE_SET_VALUES_TOOL_NAME = "status_table_set_values"
 logger = logging.getLogger("rpg_core.status.tools")
 
 
+class StatusWritePolicyError(PermissionError):
+    """The requested field is outside the phase-bound write policy."""
+
+
 class StatusTableRuntime(Protocol):
     session_id: str
 
     def list_context_tables(self) -> list[dict[str, object]]: ...
+
+    def get_table_by_id(self, table_id: int) -> dict[str, object]: ...
 
     def runtime_set_existing_values(
         self,
         table_id: int,
         updates: list[tuple[str, str]],
     ) -> StatusValueUpdateResult: ...
+
+
+@dataclass(frozen=True)
+class StatusWritePolicy:
+    """Code-enforced table/key/frequency boundary for one tool binding."""
+
+    allowed_frequencies: frozenset[str] = frozenset({
+        models.STATUS_UPDATE_FREQUENCY_REALTIME,
+        models.STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
+    })
+    allowed_keys: dict[int, frozenset[str]] | None = None
+
+    def validate(
+        self,
+        runtime: StatusTableRuntime,
+        table_id: int,
+        updates: list[tuple[str, str]],
+    ) -> None:
+        table = runtime.get_table_by_id(table_id)
+        raw_document = table.get("document")
+        if not isinstance(raw_document, dict):
+            raise StatusWritePolicyError("状态表缺少可验证的 document")
+        rows = raw_document.get("rows")
+        if not isinstance(rows, list):
+            raise StatusWritePolicyError("状态表缺少可验证的 rows")
+        policies = {
+            str(row.get("key", "")): str(
+                row.get(models.STATUS_ROW_UPDATE_FREQUENCY_KEY)
+                or models.STATUS_UPDATE_FREQUENCY_REALTIME
+            )
+            for row in rows
+            if isinstance(row, dict)
+        }
+        scoped_keys = (
+            self.allowed_keys.get(table_id, frozenset())
+            if self.allowed_keys is not None
+            else None
+        )
+        for key, _value in updates:
+            if scoped_keys is not None and key not in scoped_keys:
+                raise StatusWritePolicyError(f"字段不在本阶段写入范围：{key}")
+            frequency = policies.get(key)
+            if frequency is None:
+                raise KeyError(f"Status table key not found: {key}")
+            if frequency not in self.allowed_frequencies:
+                raise StatusWritePolicyError(
+                    f"字段更新频率不允许在本阶段写入：{key}/{frequency}"
+                )
 
 
 class StatusTableSetValuesTool(BaseTool):
@@ -34,8 +90,14 @@ class StatusTableSetValuesTool(BaseTool):
         "只能修改已有键的 value，不能新增、删除或重命名 key；不确定时不要调用。"
     )
 
-    def __init__(self, runtime: StatusTableRuntime) -> None:
+    def __init__(
+        self,
+        runtime: StatusTableRuntime,
+        *,
+        write_policy: StatusWritePolicy | None = None,
+    ) -> None:
         self._runtime = runtime
+        self._write_policy = write_policy or StatusWritePolicy()
 
     def parameters(self) -> dict[str, object]:
         return {
@@ -74,6 +136,11 @@ class StatusTableSetValuesTool(BaseTool):
             if extra:
                 raise ValueError(f"不支持的参数：{', '.join(sorted(extra))}")
             normalized_id, normalized_updates = _normalize_arguments(table_id, updates)
+            self._write_policy.validate(
+                self._runtime,
+                normalized_id,
+                normalized_updates,
+            )
             result = self._runtime.runtime_set_existing_values(normalized_id, normalized_updates)
         except FileNotFoundError as exc:
             logger.warning(
@@ -83,6 +150,8 @@ class StatusTableSetValuesTool(BaseTool):
                 exc,
             )
             return _error("table_unavailable", "状态表不存在或当前 session 无权访问")
+        except StatusWritePolicyError as exc:
+            return _error("write_not_allowed", str(exc))
         except PermissionError as exc:
             logger.warning(
                 "status table tool rejected non-normal table session_id=%s table_id=%s detail=%s",
@@ -126,12 +195,21 @@ class StatusTableSetValuesTool(BaseTool):
 class StatusTableToolProvider:
     """Expose the generic writer only when at least one key can be updated."""
 
-    def __init__(self, runtime: StatusTableRuntime) -> None:
+    def __init__(
+        self,
+        runtime: StatusTableRuntime,
+        *,
+        write_policy: StatusWritePolicy | None = None,
+    ) -> None:
         self._runtime = runtime
+        self._write_policy = write_policy
 
     def get_tools(self) -> list[BaseTool]:
         try:
-            has_keys = any(table.get("rows") for table in self._runtime.list_context_tables())
+            has_keys = any(
+                _has_llm_writable_field(table)
+                for table in self._runtime.list_context_tables()
+            )
         except Exception as exc:
             logger.warning(
                 "failed to inspect writable status tables session_id=%s detail=%s",
@@ -139,7 +217,30 @@ class StatusTableToolProvider:
                 exc,
             )
             return []
-        return [StatusTableSetValuesTool(self._runtime)] if has_keys else []
+        return [
+            StatusTableSetValuesTool(
+                self._runtime,
+                write_policy=self._write_policy,
+            )
+        ] if has_keys else []
+
+
+def _has_llm_writable_field(table: dict[str, object]) -> bool:
+    document = table.get("document")
+    rows = document.get("rows") if isinstance(document, dict) else None
+    if not isinstance(rows, list):
+        return False
+    return any(
+        isinstance(row, dict)
+        and str(
+            row.get(models.STATUS_ROW_UPDATE_FREQUENCY_KEY)
+            or models.STATUS_UPDATE_FREQUENCY_REALTIME
+        ) in {
+            models.STATUS_UPDATE_FREQUENCY_REALTIME,
+            models.STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
+        }
+        for row in rows
+    )
 
 
 def _normalize_arguments(

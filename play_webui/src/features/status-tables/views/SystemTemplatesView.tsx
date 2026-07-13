@@ -1,4 +1,5 @@
 import { Copy, Loader2, TableProperties, Trash2 } from 'lucide-react'
+import { STATUS_KIND } from '@/types/statusTables'
 import { STATUS_DESCRIPTION_PLACEHOLDER, statusKindLabel } from '../constants'
 import { formatDate } from '../helpers'
 import type { StatusTablesController } from '../useStatusTablesController'
@@ -80,7 +81,7 @@ export function SystemTemplatesView({ controller }: { controller: StatusTablesCo
               </label>
               <div>
                 <h3 className="mb-3 text-sm font-bold text-slate-950">Key-Value 模板内容</h3>
-                <KvEditor draft={templateDraft} onChange={setTemplateDraft} toolbarTitle="初始键值" />
+                <KvEditor draft={templateDraft} onChange={setTemplateDraft} toolbarTitle="初始键值" isScene={selectedTemplate.statusKind === STATUS_KIND.SCENE} />
               </div>
               <div className="grid gap-4 border-t border-slate-100 pt-4 text-xs text-slate-500 md:grid-cols-2">
                 <p>创建时间 {formatDate(selectedTemplate.createdAt)}</p>

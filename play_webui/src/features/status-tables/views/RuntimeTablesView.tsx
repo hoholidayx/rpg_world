@@ -1,4 +1,4 @@
-import { STATUS_ORIGIN } from '@/types/statusTables'
+import { STATUS_KIND, STATUS_ORIGIN } from '@/types/statusTables'
 import { STATUS_DESCRIPTION_PLACEHOLDER, originLabel } from '../constants'
 import { formatDate, selectedSessionLabel, templateNameById } from '../helpers'
 import type { StatusTablesController } from '../useStatusTablesController'
@@ -132,7 +132,7 @@ export function RuntimeTablesView({ controller }: { controller: StatusTablesCont
               </label>
               <div>
                 <h3 className="mb-3 text-sm font-bold text-slate-950">Key-Value 运行时内容</h3>
-                <KvEditor draft={runtimeDraft} onChange={setRuntimeDraft} toolbarTitle="当前键值" />
+                <KvEditor draft={runtimeDraft} onChange={setRuntimeDraft} toolbarTitle="当前键值" isScene={selectedRuntimeTable.statusKind === STATUS_KIND.SCENE} />
               </div>
               <div className="grid gap-4 border-t border-slate-100 pt-4 text-xs text-slate-500 md:grid-cols-3">
                 <p>会话 {selectedSessionLabel(selectedSession)}</p>

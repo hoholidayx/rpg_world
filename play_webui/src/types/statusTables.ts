@@ -12,6 +12,15 @@ export const STATUS_ORIGIN = {
 
 export type StatusOrigin = (typeof STATUS_ORIGIN)[keyof typeof STATUS_ORIGIN]
 
+export const STATUS_UPDATE_FREQUENCY = {
+  REALTIME: 'realtime',
+  EVENT_DRIVEN: 'event_driven',
+  DEFERRED: 'deferred',
+  MANUAL: 'manual',
+} as const
+
+export type StatusUpdateFrequency = (typeof STATUS_UPDATE_FREQUENCY)[keyof typeof STATUS_UPDATE_FREQUENCY]
+
 export const STORY_STATUS_MOUNT_ORIGIN = {
   SYSTEM: 'system_mount',
   STORY_TEMPLATE: 'story_template',
@@ -24,6 +33,9 @@ export type StatusRow = {
   value: string
   runtimeKeyLocked: boolean
   metadata: Record<string, unknown>
+  updateFrequency: StatusUpdateFrequency
+  updateRule: string
+  deferredIntervalTurns: number | null
 }
 
 export type StatusTable = {

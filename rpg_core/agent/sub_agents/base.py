@@ -175,7 +175,10 @@ class BaseSubAgent:
         """
         if self._context is None:
             return pipeline_prompt or ""
-        rendered = self._context.render(player_character=player_character)
+        rendered = self._context.render(
+            player_character=player_character,
+            include_system_prompt=pipeline_prompt is None,
+        )
         if pipeline_prompt:
             return f"{pipeline_prompt}\n\n{rendered}" if rendered else pipeline_prompt
         return rendered

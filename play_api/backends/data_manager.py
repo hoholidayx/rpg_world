@@ -886,6 +886,9 @@ def _status_document_summary(document: models.StatusTableDocument) -> dict[str, 
                 "value": row.value,
                 "runtime_key_locked": row.runtime_key_locked,
                 "metadata": dict(row.metadata),
+                "update_frequency": row.update_frequency,
+                "update_rule": row.update_rule,
+                "deferred_interval_turns": row.deferred_interval_turns,
             }
             for row in document.rows
         ],

@@ -14,9 +14,14 @@ from rpg_core.agent.sub_agents.memory_sub_agent import (
 )
 from rpg_core.agent.sub_agents.status_sub_agent import StatusSubAgent
 from rpg_core.agent.sub_agents.status_sub_agent_models import (
+    DeferredStatusResult,
+    OutcomeDecision,
+    StatusRouteResult,
+    StatusRouteTarget,
     StatusSubAgentPreflightOutcome,
     StatusSubAgentRecordStatus,
     StatusSubAgentResult,
+    StatusSubAgentStage,
     StatusSubAgentToolRecord,
 )
 
@@ -26,8 +31,13 @@ __all__ = [
     "MemoryAgentResult",
     "MemorySubAgent",
     "StatusSubAgent",
+    "DeferredStatusResult",
+    "OutcomeDecision",
+    "StatusRouteResult",
+    "StatusRouteTarget",
     "StatusSubAgentPreflightOutcome",
     "StatusSubAgentRecordStatus",
     "StatusSubAgentResult",
+    "StatusSubAgentStage",
     "StatusSubAgentToolRecord",
 ]

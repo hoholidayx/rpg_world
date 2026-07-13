@@ -25,6 +25,7 @@ class _Turns:
         self.block_send = False
         self.stream_error: BaseException | None = None
         self.order: list[str] = []
+        self.committed_turn_id: int | None = None
 
     async def execute_sync(self, request: TurnRequest) -> AgentReply:
         self.order.append("send-start")
@@ -32,7 +33,10 @@ class _Turns:
         if self.block_send:
             await self.release_send.wait()
         self.order.append("send-end")
-        return AgentReply(text=request.text)
+        return AgentReply(
+            text=request.text,
+            committed_turn_id=self.committed_turn_id,
+        )
 
     async def execute_stream(self, request: TurnRequest, event_queue) -> None:  # noqa: ANN001
         del request, event_queue
@@ -107,6 +111,53 @@ async def test_mailbox_serializes_truncate_after_send() -> None:
         assert await truncate_task == {"status": "truncated", "turn_id": 2}
         assert turns.order == ["send-start", "send-end", "truncate-2"]
     finally:
+        await mailbox.close()
+
+
+@pytest.mark.asyncio
+async def test_mailbox_delivers_reply_then_serializes_deferred_work_before_next_item() -> None:
+    turns = _Turns()
+    turns.committed_turn_id = 1
+    deferred_started = asyncio.Event()
+    release_deferred = asyncio.Event()
+
+    async def deferred_status() -> None:
+        turns.order.append("deferred-start")
+        deferred_started.set()
+        await release_deferred.wait()
+        turns.order.append("deferred-end")
+
+    def truncate(turn_id: int) -> dict[str, object]:
+        turns.order.append(f"truncate-{turn_id}")
+        return {"turn_id": turn_id}
+
+    mailbox = AgentMailbox(
+        session_id=lambda: "s_mailbox",
+        model=lambda: "test-model",
+        turn_service=turns,
+        command_dispatcher=_Commands(),
+        truncate_history=truncate,
+        deferred_status=deferred_status,
+    )
+    mailbox.start()
+    try:
+        reply = await mailbox.send(TurnRequest.create("go"))
+        assert reply.committed_turn_id == 1
+        await deferred_started.wait()
+        truncate_task = asyncio.create_task(mailbox.truncate_history_from_turn(2))
+        await asyncio.sleep(0)
+        assert not truncate_task.done()
+        release_deferred.set()
+        assert await truncate_task == {"turn_id": 2}
+        assert turns.order == [
+            "send-start",
+            "send-end",
+            "deferred-start",
+            "deferred-end",
+            "truncate-2",
+        ]
+    finally:
+        release_deferred.set()
         await mailbox.close()
 
 

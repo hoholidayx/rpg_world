@@ -49,7 +49,7 @@ class _SubAgent:
         self.scratch = scratch
         self.scene = scene
         self.bound_tools = []
-        self.update_kwargs = {}
+        self.preflight_kwargs = {}
 
     @contextmanager
     def use_turn_tools(
@@ -67,8 +67,8 @@ class _SubAgent:
         restore_checkpoint(checkpoint)
         yield
 
-    async def update(self, **_kwargs) -> StatusSubAgentResult:
-        self.update_kwargs = dict(_kwargs)
+    async def run_preflight(self, **_kwargs) -> StatusSubAgentResult:
+        self.preflight_kwargs = dict(_kwargs)
         return StatusSubAgentResult(updated=True)
 
 
@@ -110,7 +110,7 @@ async def test_status_preflight_hook_binds_scratch_checkpoint_restore() -> None:
     assert status_scratch.value == 0
     assert scene.time == "old"
     assert [tool.name for tool in sub_agent.bound_tools] == ["scene_time"]
-    assert sub_agent.update_kwargs["player_character"].name == "Alice"
+    assert sub_agent.preflight_kwargs["player_character"].name == "Alice"
 
 
 def test_status_preflight_outcome_state_is_structured() -> None:

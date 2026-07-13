@@ -13,6 +13,7 @@ from rpg_data import models
 from rpg_data.repositories.records import (
     CharacterRecord,
     SessionRecord,
+    SessionStatusDeferredProgressRecord,
     SessionStatusTableRecord,
     StatusTableTemplateRecord,
     StoryCharacterRecord,
@@ -494,6 +495,120 @@ class StatusTableService:
         )
         row.updated_at = SQL("CURRENT_TIMESTAMP")
         row.save()
+        return _to_session_table(row)
+
+    def list_deferred_progress(
+        self,
+        session_id: str,
+    ) -> list[models.StatusDeferredProgress]:
+        query = (
+            SessionStatusDeferredProgressRecord
+            .select(
+                SessionStatusDeferredProgressRecord,
+                SessionStatusTableRecord,
+            )
+            .join(SessionStatusTableRecord)
+            .where(SessionStatusTableRecord.session == session_id)
+        )
+        return [
+            models.StatusDeferredProgress(
+                session_status_table_id=int(row.session_status_table_id),
+                field_key=str(row.field_key),
+                last_processed_turn_id=max(0, int(row.last_processed_turn_id)),
+            )
+            for row in query
+        ]
+
+    def clamp_deferred_progress(
+        self,
+        session_id: str,
+        max_turn_id: int,
+    ) -> int:
+        """Clamp progress after history truncation without rolling back values."""
+        boundary = max(0, int(max_turn_id))
+        table_ids = (
+            SessionStatusTableRecord
+            .select(SessionStatusTableRecord.id)
+            .where(SessionStatusTableRecord.session == session_id)
+        )
+        return (
+            SessionStatusDeferredProgressRecord
+            .update(
+                last_processed_turn_id=boundary,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(
+                (SessionStatusDeferredProgressRecord.session_status_table.in_(table_ids))
+                & (SessionStatusDeferredProgressRecord.last_processed_turn_id > boundary)
+            )
+            .execute()
+        )
+
+    def commit_deferred_update(
+        self,
+        session_id: str,
+        table_id: int,
+        document: models.StatusTableDocument,
+        *,
+        processed_keys: Iterable[str],
+        last_processed_turn_id: int,
+        base_document: models.StatusTableDocument | None = None,
+    ) -> models.SessionStatusTable:
+        """Atomically write deferred values and advance per-field progress."""
+        if last_processed_turn_id <= 0:
+            raise ValueError("last_processed_turn_id must be positive")
+        keys = tuple(dict.fromkeys(str(key) for key in processed_keys if str(key)))
+        if not keys:
+            raise ValueError("processed_keys must not be empty")
+        row = self._get_session_table_row(table_id)
+        if str(row.session_id) != str(session_id):
+            raise FileNotFoundError(
+                f"Session status table is unavailable: {session_id}/{table_id}"
+            )
+        if str(row.status_kind) != models.STATUS_KIND_NORMAL:
+            raise PermissionError("Deferred updates only support normal status tables")
+        validated = document.validated()
+        for key in keys:
+            field = validated.row_for_key(key)
+            if field is None:
+                raise KeyError(f"Status table key not found: {key}")
+            if field.update_frequency != models.STATUS_UPDATE_FREQUENCY_DEFERRED:
+                raise PermissionError(f"Status field is not deferred: {key}")
+
+        current_document = _parse_row_document(row)
+        if base_document is not None and current_document != base_document:
+            logger.warning(
+                "overwriting concurrently changed deferred status table with last-write-wins session_id=%s table_id=%s",
+                session_id,
+                table_id,
+            )
+        with self._database.atomic():
+            row.document_json = models.serialize_status_document(validated)
+            row.updated_at = SQL("CURRENT_TIMESTAMP")
+            row.save()
+            for key in keys:
+                (
+                    SessionStatusDeferredProgressRecord
+                    .insert(
+                        session_status_table=table_id,
+                        field_key=key,
+                        last_processed_turn_id=last_processed_turn_id,
+                        updated_at=SQL("CURRENT_TIMESTAMP"),
+                    )
+                    .on_conflict(
+                        conflict_target=(
+                            SessionStatusDeferredProgressRecord.session_status_table,
+                            SessionStatusDeferredProgressRecord.field_key,
+                        ),
+                        update={
+                            SessionStatusDeferredProgressRecord.last_processed_turn_id:
+                                last_processed_turn_id,
+                            SessionStatusDeferredProgressRecord.updated_at:
+                                SQL("CURRENT_TIMESTAMP"),
+                        },
+                    )
+                    .execute()
+                )
         return _to_session_table(row)
 
     def update_table(
@@ -1054,9 +1169,15 @@ def _document_for_kind(status_kind: str, document: models.StatusTableDocument) -
             row.value,
             row.runtime_key_locked or row.key in SCENE_DEFAULT_LOCKED_KEYS,
             dict(row.metadata),
+            row.update_frequency,
+            row.update_rule,
+            row.deferred_interval_turns,
         )
         for row in document.rows
     )
+    for row in rows:
+        if row.update_frequency != models.STATUS_UPDATE_FREQUENCY_REALTIME:
+            raise ValueError("scene status fields must use realtime updateFrequency")
     return models.StatusTableDocument(
         schema_version=document.schema_version,
         kind=document.kind,

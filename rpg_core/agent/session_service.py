@@ -135,6 +135,9 @@ class AgentSessionService:
                 boundary_turn,
                 exc,
             )
+            self._clamp_deferred_progress(
+                max((int(row.turn_id) for row in remaining_rows), default=0)
+            )
             return {
                 "status": "truncated",
                 "session_id": session_id,
@@ -144,6 +147,7 @@ class AgentSessionService:
                 "agent_sync_error": str(exc),
             }
 
+        self._clamp_deferred_progress()
         logger.info(
             _TAG + " truncate completed: session_id={}, turn_id={}, removed={}, remaining_count={}",
             session_id,
@@ -161,11 +165,14 @@ class AgentSessionService:
 
     async def delete_message(self, message_id: int) -> Message:
         await self._wait_idle()
-        return self._lifecycle.session_manager.delete_message(message_id)
+        deleted = self._lifecycle.session_manager.delete_message(message_id)
+        self._clamp_deferred_progress()
+        return deleted
 
     def clear_history(self) -> None:
         if self._lifecycle.initialized:
             self._lifecycle.session_manager.clear()
+            self._clamp_deferred_progress(0)
 
     async def reload_rpg_context(self) -> None:
         await self._lifecycle.reload_resources(self._tool_service)
@@ -183,6 +190,28 @@ class AgentSessionService:
         from rpg_data.services import get_data_service_gateway
 
         return get_data_service_gateway().messages.list(self._lifecycle.session_id)
+
+    def _clamp_deferred_progress(self, max_turn_id: int | None = None) -> None:
+        if not self._lifecycle.initialized:
+            return
+        status_manager = self._lifecycle.resources.status_manager
+        if status_manager is None:
+            return
+        boundary = (
+            self._lifecycle.session_manager.latest_turn_id(
+                self._lifecycle.session_manager.history
+            )
+            if max_turn_id is None
+            else max(0, int(max_turn_id))
+        )
+        try:
+            status_manager.clamp_deferred_progress(boundary)
+        except Exception as exc:
+            logger.opt(exception=exc).warning(
+                _TAG + " failed to clamp deferred status progress: session_id={}, max_turn_id={}",
+                self._lifecycle.session_id,
+                boundary,
+            )
 
     async def _wait_idle(self) -> None:
         if self._mailbox is not None:

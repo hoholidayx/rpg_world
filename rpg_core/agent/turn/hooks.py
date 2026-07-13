@@ -9,6 +9,7 @@ from loguru import logger
 
 from rpg_core.agent.resources import AgentContextResources
 from rpg_core.agent.sub_agents import (
+    OutcomeDecision,
     StatusSubAgentPreflightOutcome,
     StatusSubAgentResult,
 )
@@ -93,12 +94,26 @@ class StatusPreflightHook:
                 tool.name == NARRATIVE_OUTCOME_TOOL_NAME for tool in tools
             ),
         ):
-            result = await sub_agent.update(
+            context_tables = (
+                turn_scratch.status_manager.list_context_tables()
+                if turn_scratch.status_manager is not None
+                else []
+            )
+            state_context = self._state_context(
+                turn_scratch.scene_tracker,
+                turn_scratch.status_manager,
+                context_tables=context_tables,
+            )
+            scene_context = (
+                turn_scratch.scene_tracker.get_context()
+                if turn_scratch.scene_tracker is not None
+                else ""
+            )
+            result = await sub_agent.run_preflight(
                 history=turn_scratch.base_history,
-                state_context=self._state_context(
-                    turn_scratch.scene_tracker,
-                    turn_scratch.status_manager,
-                ),
+                state_context=state_context,
+                scene_context=scene_context,
+                context_tables=context_tables,
                 user_input=user_input,
                 turn_stats=turn_stats,
                 player_character=player_character,
@@ -117,14 +132,19 @@ class StatusPreflightHook:
     ) -> StatusSubAgentPreflightOutcome:
         if turn_scratch.narrative_outcome is not None:
             return StatusSubAgentPreflightOutcome.STAGED
-        if result is not None and (result.failed or result.outcome_requested):
-            return StatusSubAgentPreflightOutcome.FALLBACK
+        if result is not None:
+            if result.outcome_decision is OutcomeDecision.FALLBACK:
+                return StatusSubAgentPreflightOutcome.FALLBACK
+            if result.failed and result.route is None:
+                return StatusSubAgentPreflightOutcome.FALLBACK
         return StatusSubAgentPreflightOutcome.NONE
 
     @staticmethod
     def _state_context(
         scene_tracker: "SceneTracker | None",
         status_manager: "StatusManager | None",
+        *,
+        context_tables: list[dict[str, object]] | None = None,
     ) -> str:
         sections: list[str] = []
         if scene_tracker is not None:
@@ -132,7 +152,9 @@ class StatusPreflightHook:
         if status_manager is not None:
             try:
                 status_context = render_status_tables_context(
-                    status_manager.list_context_tables()
+                    context_tables
+                    if context_tables is not None
+                    else status_manager.list_context_tables()
                 )
             except Exception as exc:
                 logger.warning(

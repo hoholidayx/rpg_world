@@ -27,7 +27,7 @@ async def test_send_persists_history_and_turn_metadata(integration_agent, integr
         "config-model",
     ]
     assert [call.source for call in reply.stats.calls] == [
-        "status_sub_agent",
+        "status_outcome_preflight",
         "chat_loop",
     ]
     assert [m.role for m in integration_agent.history] == [Role.USER, Role.ASSISTANT]

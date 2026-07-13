@@ -36,6 +36,7 @@ __all__ = [
     "SessionRecord",
     "SessionStoryMemoryRecord",
     "SessionStatusTableRecord",
+    "SessionStatusDeferredProgressRecord",
     "StoryCharacterRecord",
     "StoryLorebookEntryRecord",
     "StoryNarrativeStyleRecord",
@@ -644,6 +645,22 @@ class SessionStatusTableRecord(BaseRecord):
         table_name = "rpg_session_status_tables"
 
 
+class SessionStatusDeferredProgressRecord(BaseRecord):
+    session_status_table = ForeignKeyField(
+        SessionStatusTableRecord,
+        backref="deferred_progress",
+        column_name="session_status_table_id",
+        on_delete="CASCADE",
+    )
+    field_key = TextField()
+    last_processed_turn_id = IntegerField(default=0)
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_status_deferred_progress"
+        primary_key = CompositeKey("session_status_table", "field_key")
+
+
 RECORD_MODELS = (
     WorkspaceRecord,
     WorkspaceTurnModeRecord,
@@ -668,4 +685,5 @@ RECORD_MODELS = (
     StatusTableTemplateRecord,
     StoryStatusTableRecord,
     SessionStatusTableRecord,
+    SessionStatusDeferredProgressRecord,
 )

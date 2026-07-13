@@ -1,6 +1,8 @@
 {% if status_tables %}
-{% set writable_tables = status_tables | selectattr('rows') | list %}
+{% set writable_tables = status_tables | selectattr('has_llm_writable_rows') | list %}
 以下是本轮回复前的普通状态表快照，遵循核心状态同步协议。{% if writable_tables %}需要更新时调用 status_table_set_values，并使用对应的运行时表 ID。{% endif %}只能修改已有键的值，不得新增、删除或重命名键；不确定时保持原值。
+
+更新频率语义：realtime 在本轮事实明确且值实际变化时同步；event_driven 只在“事件规则”明确命中时同步；deferred 由回复后的慢状态归纳流程维护；manual 仅允许人工维护。主 Agent 不得写 deferred 或 manual 字段。
 
 {% set regular_tables = status_tables | rejectattr('character_name') | list %}
 {% if regular_tables %}
@@ -13,10 +15,10 @@
 
 用途与更新规则：{{ table.context_description }}
 
-| {% for col in table.headers %}{{ col }} |{% endfor %}
-|{% for col in table.headers %} --- |{% endfor %}
-{% for row in table.rows %}
-| {% for cell in row %}{{ cell }} |{% endfor %}
+| {{ table.headers[0] }} | {{ table.headers[1] }} | 更新频率 | 事件规则 |
+| --- | --- | --- | --- |
+{% for row in table.context_rows %}
+| {{ row.key }} | {{ row.value }} | {{ row.update_frequency }} | {{ row.update_rule }} |
 {% endfor %}
 
 {% endfor %}
@@ -37,10 +39,10 @@
 
 用途与更新规则：{{ table.context_description }}
 
-| {% for col in table.headers %}{{ col }} |{% endfor %}
-|{% for col in table.headers %} --- |{% endfor %}
-{% for row in table.rows %}
-| {% for cell in row %}{{ cell }} |{% endfor %}
+| {{ table.headers[0] }} | {{ table.headers[1] }} | 更新频率 | 事件规则 |
+| --- | --- | --- | --- |
+{% for row in table.context_rows %}
+| {{ row.key }} | {{ row.value }} | {{ row.update_frequency }} | {{ row.update_rule }} |
 {% endfor %}
 
 {% endfor %}

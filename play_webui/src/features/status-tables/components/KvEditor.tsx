@@ -1,15 +1,21 @@
 import { Check } from 'lucide-react'
-import type { StatusRow } from '@/types/statusTables'
+import {
+  STATUS_UPDATE_FREQUENCY,
+  type StatusRow,
+  type StatusUpdateFrequency,
+} from '@/types/statusTables'
 import type { TableDraft } from '../draft'
 
 export function KvEditor({
   draft,
   onChange,
   toolbarTitle,
+  isScene = false,
 }: {
   draft: TableDraft
   onChange: (draft: TableDraft) => void
   toolbarTitle: string
+  isScene?: boolean
 }) {
   function updateRow(index: number, patch: Partial<StatusRow>) {
     onChange({
@@ -21,7 +27,15 @@ export function KvEditor({
   function addRow() {
     onChange({
       ...draft,
-      rows: [...draft.rows, { key: '', value: '', runtimeKeyLocked: false, metadata: {} }],
+      rows: [...draft.rows, {
+        key: '',
+        value: '',
+        runtimeKeyLocked: false,
+        metadata: {},
+        updateFrequency: STATUS_UPDATE_FREQUENCY.REALTIME,
+        updateRule: '',
+        deferredIntervalTurns: null,
+      }],
     })
   }
 
@@ -55,15 +69,17 @@ export function KvEditor({
         </div>
       </div>
       <div className="overflow-x-auto rounded-b-xl border-x border-b border-slate-200">
-        <div className="min-w-[650px]">
-          <div className="grid grid-cols-[180px_minmax(0,1fr)_126px_60px] items-center gap-3 border-b border-slate-100 bg-slate-50 px-3 py-3 text-xs font-extrabold text-slate-600">
+        <div className="min-w-[980px]">
+          <div className="grid grid-cols-[170px_minmax(180px,1fr)_150px_minmax(220px,1fr)_110px_60px] items-center gap-3 border-b border-slate-100 bg-slate-50 px-3 py-3 text-xs font-extrabold text-slate-600">
             <span>Key</span>
             <span>Value</span>
+            <span>更新频率</span>
+            <span>事件规则 / 延迟周期</span>
             <span>运行时锁定 key</span>
             <span />
           </div>
           {draft.rows.length ? draft.rows.map((row, index) => (
-            <div key={index} className="grid grid-cols-[180px_minmax(0,1fr)_126px_60px] items-center gap-3 border-b border-slate-100 bg-white px-3 py-3 last:border-b-0">
+            <div key={index} className="grid grid-cols-[170px_minmax(180px,1fr)_150px_minmax(220px,1fr)_110px_60px] items-center gap-3 border-b border-slate-100 bg-white px-3 py-3 last:border-b-0">
               <input
                 value={row.key}
                 onChange={(event) => updateRow(index, { key: event.target.value })}
@@ -74,6 +90,50 @@ export function KvEditor({
                 onChange={(event) => updateRow(index, { value: event.target.value })}
                 className="h-9 min-w-0 rounded-lg border border-slate-200 px-3 text-sm text-slate-950 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
               />
+              <select
+                value={isScene ? STATUS_UPDATE_FREQUENCY.REALTIME : row.updateFrequency}
+                disabled={isScene}
+                onChange={(event) => {
+                  const updateFrequency = event.target.value as StatusUpdateFrequency
+                  updateRow(index, {
+                    updateFrequency,
+                    updateRule: updateFrequency === STATUS_UPDATE_FREQUENCY.EVENT_DRIVEN ? row.updateRule : '',
+                    deferredIntervalTurns: updateFrequency === STATUS_UPDATE_FREQUENCY.DEFERRED
+                      ? row.deferredIntervalTurns
+                      : null,
+                  })
+                }}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-950 outline-none disabled:bg-slate-100"
+              >
+                <option value={STATUS_UPDATE_FREQUENCY.REALTIME}>实时</option>
+                <option value={STATUS_UPDATE_FREQUENCY.EVENT_DRIVEN}>事件驱动</option>
+                <option value={STATUS_UPDATE_FREQUENCY.DEFERRED}>延迟归纳</option>
+                <option value={STATUS_UPDATE_FREQUENCY.MANUAL}>仅手动</option>
+              </select>
+              {row.updateFrequency === STATUS_UPDATE_FREQUENCY.EVENT_DRIVEN && !isScene ? (
+                <input
+                  value={row.updateRule}
+                  placeholder="明确描述触发事件"
+                  onChange={(event) => updateRow(index, { updateRule: event.target.value })}
+                  className="h-9 min-w-0 rounded-lg border border-slate-200 px-3 text-sm text-slate-950 outline-none"
+                />
+              ) : row.updateFrequency === STATUS_UPDATE_FREQUENCY.DEFERRED && !isScene ? (
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={row.deferredIntervalTurns ?? ''}
+                  placeholder="留空使用全局默认周期"
+                  onChange={(event) => updateRow(index, {
+                    deferredIntervalTurns: event.target.value ? Number(event.target.value) : null,
+                  })}
+                  className="h-9 min-w-0 rounded-lg border border-slate-200 px-3 text-sm text-slate-950 outline-none"
+                />
+              ) : (
+                <span className="text-xs text-slate-400">
+                  {isScene ? '场景字段固定实时' : row.updateFrequency === STATUS_UPDATE_FREQUENCY.MANUAL ? 'Agent 不自动更新' : '相关 turn 检查'}
+                </span>
+              )}
               <label className="flex items-center justify-center">
                 <input
                   type="checkbox"
@@ -99,7 +159,7 @@ export function KvEditor({
         </div>
       </div>
       <p className="mt-2 text-xs leading-5 text-slate-400">
-        勾选后，LLM 运行时不能删除或重命名该 key；value 仍可更新，管理端仍可编辑。
+        频率约束会在工具层校验；事件驱动字段必须填写明确规则。勾选运行时锁定后，LLM 不能删除或重命名 key。
       </p>
     </div>
   )

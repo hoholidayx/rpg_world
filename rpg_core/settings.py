@@ -348,6 +348,7 @@ class Settings(ProfiledYamlSettings):
     def _validate_settings(self) -> None:
         self._validate_agent_llm_settings()
         self._validate_context_window_reject_threshold()
+        self._validate_status_sub_agent_settings()
         # Materialize typed RP module settings at startup so malformed weight
         # distributions fail fast instead of surfacing during a player turn.
         self.rp_module_settings
@@ -373,6 +374,9 @@ class Settings(ProfiledYamlSettings):
             raise ValueError(
                 "agent.context_window_reject_threshold_ratio must be within (0, 1]"
             )
+
+    def _validate_status_sub_agent_settings(self) -> None:
+        _ = self.status_deferred_default_interval_turns
 
     @property
     def jinja_dir(self) -> Path:
@@ -447,6 +451,19 @@ class Settings(ProfiledYamlSettings):
     def status_sub_agent_config(self) -> ConfigDict:
         """status_sub_agent 完整配置 dict，包含显式 LLM provider 选择。"""
         return self.agent_settings.get("status_sub_agent", {})
+
+    @property
+    def status_deferred_default_interval_turns(self) -> int:
+        deferred = self.status_sub_agent_config.get("deferred", {})
+        if not isinstance(deferred, dict):
+            raise ValueError("agent.status_sub_agent.deferred must be a mapping")
+        value = deferred.get("default_interval_turns", 5)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(
+                "agent.status_sub_agent.deferred.default_interval_turns "
+                "must be a positive integer"
+            )
+        return value
 
     @property
     def max_tool_calls(self) -> int:

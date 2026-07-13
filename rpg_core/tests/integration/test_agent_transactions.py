@@ -153,6 +153,17 @@ async def test_status_scratch_and_messages_commit_together_with_real_sqlite(
 ):
     table = integration_status_agent._lifecycle.resources.status_manager.list_context_tables()[0]
     table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(response("", model="status-model"))
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                f'{{"scene":false,"tables":[{{"table_id":{table_id},"realtime_keys":["线索"],"event_keys":[],"reason":"明确更新线索"}}]}}',
+            )],
+        )
+    )
     scripted_llm_manager.status.queue_chat(
         response(
             "",
@@ -191,6 +202,17 @@ async def test_status_commit_failure_rolls_back_messages_backup_and_document(
     status_manager = integration_status_agent._lifecycle.resources.status_manager
     table = status_manager.list_context_tables()[0]
     table_id = int(table["id"])
+    scripted_llm_manager.status.queue_chat(response("", model="status-model"))
+    scripted_llm_manager.status.queue_chat(
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call(
+                "select_status_targets",
+                f'{{"scene":false,"tables":[{{"table_id":{table_id},"realtime_keys":["线索"],"event_keys":[],"reason":"明确更新线索"}}]}}',
+            )],
+        )
+    )
     scripted_llm_manager.status.queue_chat(
         response(
             "",
@@ -366,7 +388,7 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
     assert "不得询问是否需要标记、记录或更新状态" in first_main_context
     assert "StatusSubAgent 已完成本轮剧情预裁定" not in first_main_context
     assert [call.source for call in reply.stats.calls] == [
-        "status_sub_agent",
+        "status_outcome_preflight",
         "chat_loop",
     ]
     persisted = integration_data_gateway.narrative_outcomes.get_for_turn(
@@ -448,18 +470,11 @@ async def test_status_sub_agent_outcome_skips_mixed_state_prewrites(
     integration_data_gateway,
     scripted_llm_manager,
 ):
-    table = integration_status_agent._lifecycle.resources.status_manager.list_context_tables()[0]
-    table_id = int(table["id"])
     scripted_llm_manager.status.queue_chat(
         response(
             "",
             model="status-model",
             tool_calls=[
-                tool_call(
-                    "status_table_set_values",
-                    f'{{"table_id":{table_id},"updates":[{{"key":"线索","value":"不应预写"}}]}}',
-                    call_id="call_state",
-                ),
                 tool_call(
                     "rp_story_outcome",
                     '{"reason":"能否找到隐藏线索"}',
@@ -473,9 +488,10 @@ async def test_status_sub_agent_outcome_skips_mixed_state_prewrites(
 
     assert reply.status_sub_agent_records
     assert [record["status"] for record in reply.status_sub_agent_records] == [
-        "skipped_due_to_outcome",
         "outcome_staged",
     ]
+    table = integration_status_agent._lifecycle.resources.status_manager.list_context_tables()[0]
+    table_id = int(table["id"])
     persisted_table = integration_data_gateway.status.get_table_for_session(
         "integration_status",
         table_id,

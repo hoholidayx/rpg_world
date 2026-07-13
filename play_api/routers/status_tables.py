@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
@@ -19,6 +19,17 @@ class StatusRowPayload(BaseModel):
     value: str = ""
     runtime_key_locked: bool = Field(default=False, alias="runtimeKeyLocked")
     metadata: JsonObject = Field(default_factory=dict)
+    update_frequency: str = Field(
+        default=models.STATUS_UPDATE_FREQUENCY_REALTIME,
+        alias=models.STATUS_ROW_UPDATE_FREQUENCY_KEY,
+    )
+    update_rule: str = Field(default="", alias=models.STATUS_ROW_UPDATE_RULE_KEY)
+    deferred_interval_turns: int | None = Field(
+        default=None,
+        alias=models.STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY,
+        strict=True,
+        gt=0,
+    )
 
     @field_validator("key")
     @classmethod
@@ -27,6 +38,16 @@ class StatusRowPayload(BaseModel):
         if not value:
             raise ValueError("key must not be empty")
         return value
+
+    @model_validator(mode="after")
+    def _validate_update_policy(self) -> "StatusRowPayload":
+        self.update_frequency = models.validate_status_update_policy(
+            self.update_frequency,
+            update_rule=self.update_rule,
+            deferred_interval_turns=self.deferred_interval_turns,
+        )
+        self.update_rule = self.update_rule.strip()
+        return self
 
 
 class StatusDocumentPayload(BaseModel):
@@ -47,6 +68,9 @@ class StatusDocumentPayload(BaseModel):
                     value=row.value,
                     runtime_key_locked=row.runtime_key_locked,
                     metadata=row.metadata,
+                    update_frequency=row.update_frequency,
+                    update_rule=row.update_rule,
+                    deferred_interval_turns=row.deferred_interval_turns,
                 )
                 for row in self.rows
             ],
@@ -68,6 +92,12 @@ class StatusTemplatePayload(StatusDocumentPayload):
         if not value:
             raise ValueError("name must not be empty")
         return value
+
+    @model_validator(mode="after")
+    def _validate_status_kind_policy(self) -> "StatusTemplatePayload":
+        self.status_kind = models.validate_status_kind(self.status_kind)
+        _validate_scene_rows(self.status_kind, self.rows)
+        return self
 
 
 class StatusTemplatePatch(BaseModel):
@@ -111,6 +141,12 @@ class SessionStatusTablePayload(StatusDocumentPayload):
     description: str = ""
     sort_order: int = Field(default=0, alias="sortOrder")
     metadata: JsonObject = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_status_kind_policy(self) -> "SessionStatusTablePayload":
+        self.status_kind = models.validate_status_kind(self.status_kind)
+        _validate_scene_rows(self.status_kind, self.rows)
+        return self
 
 
 class SessionStatusTablePatch(BaseModel):
@@ -190,6 +226,16 @@ def _table_response(item: dict[str, object]) -> StatusTableResponse:
                 value=str(row.get("value", "")),
                 runtimeKeyLocked=bool(row.get("runtime_key_locked", False)),
                 metadata=dict(row.get("metadata") or {}),
+                update_frequency=str(
+                    row.get("update_frequency")
+                    or models.STATUS_UPDATE_FREQUENCY_REALTIME
+                ),
+                update_rule=str(row.get("update_rule") or ""),
+                deferred_interval_turns=(
+                    int(row["deferred_interval_turns"])
+                    if row.get("deferred_interval_turns") is not None
+                    else None
+                ),
             )
             for row in item.get("rows", [])
             if isinstance(row, dict)
@@ -233,6 +279,16 @@ def _document_from_patch(
                 value=str(row.get("value", "")),
                 runtimeKeyLocked=bool(row.get("runtime_key_locked", False)),
                 metadata=dict(row.get("metadata") or {}),
+                update_frequency=str(
+                    row.get("update_frequency")
+                    or models.STATUS_UPDATE_FREQUENCY_REALTIME
+                ),
+                update_rule=str(row.get("update_rule") or ""),
+                deferred_interval_turns=(
+                    int(row["deferred_interval_turns"])
+                    if row.get("deferred_interval_turns") is not None
+                    else None
+                ),
             )
             for row in fallback.get("rows", [])
             if isinstance(row, dict)
@@ -241,11 +297,52 @@ def _document_from_patch(
         key_column=payload.key_column or str(fallback.get("key_column") or models.STATUS_KEY_COLUMN),
         value_column=payload.value_column or str(fallback.get("value_column") or models.STATUS_VALUE_COLUMN),
         rows=[
-            models.StatusTableRow(row.key, row.value, row.runtime_key_locked, row.metadata)
+            models.StatusTableRow(
+                row.key,
+                row.value,
+                row.runtime_key_locked,
+                row.metadata,
+                row.update_frequency,
+                row.update_rule,
+                row.deferred_interval_turns,
+            )
             for row in rows
         ],
         metadata=payload.metadata if payload.metadata is not None else dict(fallback.get("metadata") or {}),
     )
+
+
+def _validate_scene_rows(
+    status_kind: str,
+    rows: list[StatusRowPayload],
+) -> None:
+    if status_kind != models.STATUS_KIND_SCENE:
+        return
+    if any(
+        row.update_frequency != models.STATUS_UPDATE_FREQUENCY_REALTIME
+        for row in rows
+    ):
+        raise ValueError("scene status fields must use realtime updateFrequency")
+
+
+def _validate_document_for_kind(
+    status_kind: object,
+    document: models.StatusTableDocument | None,
+) -> None:
+    if document is None:
+        return
+    kind = models.validate_status_kind(str(status_kind or ""))
+    if (
+        kind == models.STATUS_KIND_SCENE
+        and any(
+            row.update_frequency != models.STATUS_UPDATE_FREQUENCY_REALTIME
+            for row in document.rows
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="scene status fields must use realtime updateFrequency",
+        )
 
 
 @router.get("/workspaces/{workspace_id}/status-templates", response_model=list[StatusTableResponse])
@@ -280,11 +377,13 @@ async def update_status_template(workspace_id: str, template_id: int, payload: S
     current = next((item for item in current_items if int(item["id"]) == template_id), None)
     if current is None:
         raise HTTPException(status_code=404, detail="status template not found")
+    document = payload.to_document(current)
+    _validate_document_for_kind(current.get("status_kind"), document)
     item = await get_data_manager_backend().update_status_template(
         workspace_id,
         template_id,
         name=payload.name,
-        document=payload.to_document(current),
+        document=document,
         description=payload.description,
         sort_order=payload.sort_order,
     )
@@ -417,11 +516,13 @@ async def update_session_status_table(session_id: str, table_id: int, payload: S
     current = next((item for item in current_items if int(item["id"]) == table_id), None)
     if current is None:
         raise HTTPException(status_code=404, detail="status table not found")
+    document = payload.to_document(current)
+    _validate_document_for_kind(current.get("status_kind"), document)
     item = await get_data_manager_backend().update_session_status_table(
         session_id,
         table_id,
         name=payload.name,
-        document=payload.to_document(current),
+        document=document,
         description=payload.description,
         sort_order=payload.sort_order,
     )

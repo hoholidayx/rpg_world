@@ -39,6 +39,9 @@ base:
     # 状态子 Agent 开关。
     status_sub_agent:
       enabled: true
+      deferred:
+        # deferred 字段未单独配置时，累计多少个已提交 turn 后归纳。
+        default_interval_turns: 5
 
   # ── RP Modules 玩法机制配置 ─────────────────────────────────────
   rp_modules:

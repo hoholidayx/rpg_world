@@ -575,6 +575,50 @@ def test_session_native_table_crud(tmp_path) -> None:
         service.get_table_by_id(table.id)
 
 
+def test_deferred_update_and_progress_commit_atomically(tmp_path) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "deferred_ws")
+    service = gateway.status
+    session = gateway.catalog.create_session(workspace_id, story.id, title="Deferred")
+    assert session is not None
+    document = models.StatusTableDocument.from_rows(rows=[
+        models.StatusTableRow(
+            "长期信任",
+            "低",
+            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
+            deferred_interval_turns=2,
+        )
+    ])
+    table = service.create_table(str(session.id), "人物关系", document=document)
+    updated = document.with_existing_values([("长期信任", "中")])
+
+    service.commit_deferred_update(
+        str(session.id),
+        table.id,
+        updated,
+        processed_keys=["长期信任"],
+        last_processed_turn_id=4,
+        base_document=document,
+    )
+
+    assert service.get_table_by_id(table.id).document.rows[0].value == "中"
+    assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 4
+    assert service.clamp_deferred_progress(str(session.id), 2) == 1
+    assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 2
+    assert service.clamp_deferred_progress(str(session.id), 9) == 0
+
+    with pytest.raises(PermissionError, match="not deferred"):
+        service.commit_deferred_update(
+            str(session.id),
+            table.id,
+            models.StatusTableDocument.from_rows(rows=[
+                models.StatusTableRow("长期信任", "高")
+            ]),
+            processed_keys=["长期信任"],
+            last_processed_turn_id=5,
+        )
+    assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 2
+
+
 def test_scene_not_mounted_is_not_visible_to_session(tmp_path) -> None:
     gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "no_scene_ws")
     service = gateway.status

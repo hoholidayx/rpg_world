@@ -16,6 +16,47 @@ class StatusSubAgentPreflightOutcome(StrEnum):
     FALLBACK = "fallback"
 
 
+class OutcomeDecision(StrEnum):
+    """Typed result of the isolated outcome decision call."""
+
+    STAGED = "staged"
+    NOT_REQUIRED = "not_required"
+    FALLBACK = "fallback"
+
+
+class StatusSubAgentStage(StrEnum):
+    """Fixed execution stage that produced a tool diagnostic."""
+
+    OUTCOME = "outcome"
+    REALTIME = "realtime"
+    EVENT_DRIVEN = "event_driven"
+
+
+@dataclass(frozen=True)
+class DeferredStatusResult:
+    """Typed summary of one post-reply deferred reconciliation pass."""
+
+    batches: int = 0
+    fields: int = 0
+    changed: int = 0
+
+
+@dataclass(frozen=True)
+class StatusRouteTarget:
+    table_id: int
+    realtime_keys: tuple[str, ...] = ()
+    event_keys: tuple[str, ...] = ()
+    reason: str = ""
+
+
+@dataclass
+class StatusRouteResult:
+    scene: bool = False
+    targets: list[StatusRouteTarget] = field(default_factory=list)
+    failed: bool = False
+    call_stats: list[CallRecord] = field(default_factory=list)
+
+
 class StatusSubAgentRecordStatus(StrEnum):
     """Stable diagnostic states for a StatusSubAgent tool call."""
 
@@ -68,6 +109,7 @@ class StatusSubAgentToolRecord:
     success: bool
     changed: bool
     status: StatusSubAgentRecordStatus
+    stage: StatusSubAgentStage = StatusSubAgentStage.REALTIME
 
     @classmethod
     def skipped_due_to_outcome(
@@ -88,6 +130,7 @@ class StatusSubAgentToolRecord:
             success=False,
             changed=False,
             status=StatusSubAgentRecordStatus.SKIPPED_DUE_TO_OUTCOME,
+            stage=StatusSubAgentStage.OUTCOME,
         )
 
     @classmethod
@@ -104,6 +147,7 @@ class StatusSubAgentToolRecord:
             success=False,
             changed=False,
             status=StatusSubAgentRecordStatus.SKIPPED_DUPLICATE_OUTCOME,
+            stage=StatusSubAgentStage.OUTCOME,
         )
 
     def mark_rolled_back(self) -> None:
@@ -124,6 +168,7 @@ class StatusSubAgentToolRecord:
             "success": self.success,
             "changed": self.changed,
             "status": self.status.value,
+            "stage": self.stage.value,
         }
 
 
@@ -138,6 +183,8 @@ class StatusSubAgentResult:
     outcome_staged: bool = False
     state_prewrites_skipped: int = 0
     failed: bool = False
+    outcome_decision: OutcomeDecision = OutcomeDecision.NOT_REQUIRED
+    route: StatusRouteResult | None = None
 
     def record_payloads(self) -> list[dict[str, object]]:
         return [record.to_payload() for record in self.records]
