@@ -209,8 +209,8 @@ class SceneTracker:
                 lines.append(f"{k}: ")
         lines.append("")
         lines.append(
-            "（这是本轮回复前的场景快照；核对本轮结束后的时间、地点和活跃属性，"
-            "并遵循核心状态同步协议。）"
+            "（scene 数据可能不准确，需根据上下文内容裁定是否使用工具更新，"
+            "需遵循核心状态同步协议。）"
         )
         lines.append("[/scene]")
         return "\n".join(lines)
