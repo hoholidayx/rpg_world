@@ -215,7 +215,7 @@ rp_story_outcome(reason, actor?)
 
 同一 turn 最多暂存一条结果。若模型返回多个纯 outcome 调用，只执行第一个，其余作为重复调用诊断；底层工具本身也会幂等复用 scratch 中的第一条结果。若一次响应混入任何非 outcome 工具，则不执行混合批次并进入 `FALLBACK`。
 
-Outcome 一旦 `STAGED`，结果会在主 Agent 首次调用前进入 `RP_MODULES` runtime section，包含公开的 `outcomeCode`、label、`narrativeGuidance`、reason 和可选 actor。主 Agent schema 隐藏 `rp_story_outcome`，不能改判或重抽；可执行 registry 仍保留工具，以便内部重复调用只能幂等返回同一结果。
+Outcome 一旦 `STAGED`，本轮主 Context 不再注入 Narrative Outcome fixed section；结果只通过 `RP_MODULES` runtime section 进入主 Agent，包含公开的 `outcomeCode`、label、`narrativeGuidance`、reason 和可选 actor。该 section 使用简短无序条目要求直接执行最终结果，并明确列出本轮实际提供的 `scene_time`、`scene_attr`、`scene_del_attr`、`status_table_set_values` 状态工具边界。`rp_story_outcome` 同时从主 Agent schema 和可执行 registry 移除，主 Agent 不能改判、重抽或重复执行；底层工具幂等只保留给预裁定边界内部使用。若 Outcome 未预裁定或进入 `FALLBACK`，主 Agent 则继续获得明确写出 `rp_story_outcome` 的原 fixed contract 与补判工具。
 
 ### 阶段 B：状态目标 Route
 
@@ -278,7 +278,7 @@ normal table B 被选中      → 1 次 table B update
 
 Status preflight 的结果决定主 Agent 能看到什么：
 
-- `STAGED`：主 Context 注入已生效裁定，隐藏 outcome schema；主 Agent 只能遵循结果。
+- `STAGED`：主 Context 注入最终裁定，并从 schema 与可执行 registry 移除 outcome 工具；主 Agent 只能遵循结果。
 - `NONE`：没有预裁定；若 Narrative Outcome 模块允许，主 Agent 仍可调用 `rp_story_outcome` 补判。
 - `FALLBACK`：预判不可靠，主 Agent 保留同一 outcome 工具完成补判。
 

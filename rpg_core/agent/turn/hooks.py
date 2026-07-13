@@ -263,16 +263,16 @@ class TurnDiagnostics:
         main_state_corrections = sum(
             name in state_tool_names for name in main_tool_names
         )
-        outcome_reused_by_main = (
+        outcome_repeat_requested_by_main = (
             preflight_outcome is StatusSubAgentPreflightOutcome.STAGED
             and NARRATIVE_OUTCOME_TOOL_NAME in main_tool_names
         )
         logger.info(
             _TAG
             + " preflightOutcome={} statePrewritesSkipped={} "
-            "mainStateCorrections={} outcomeReusedByMain={}",
+            "mainStateCorrections={} outcomeRepeatRequestedByMain={}",
             effective.value,
             int(state_prewrites_skipped),
             int(main_state_corrections),
-            outcome_reused_by_main,
+            outcome_repeat_requested_by_main,
         )

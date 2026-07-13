@@ -10,9 +10,6 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
-from rpg_core.context.fixed_layer.contributors.core_contract import (
-    STATE_SYNC_BEFORE_NARRATION_RULE,
-)
 from rpg_core.rp_modules.base import RPModule
 from rpg_core.rp_modules.constants import (
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
@@ -100,6 +97,10 @@ class NarrativeOutcomeModule(RPModule):
         self._tool = NarrativeOutcomeTool(self)
 
     def get_fixed_sections(self) -> list[FixedLayerSection]:
+        scratch = self._active_scratch
+        if scratch is not None and scratch.narrative_outcome is not None:
+            return []
+
         if self.settings.auto_adjudication_enabled:
             trigger_rule = (
                 "- 每轮叙事前，必须结合用户完整语义、当前场景和状态判断是否存在外部实质变数。"
@@ -108,7 +109,7 @@ class NarrativeOutcomeModule(RPModule):
                 "且不同结果会实质改变剧情走向、获得的信息、风险或代价，就必须先调用 "
                 "rp_story_outcome，再描述结果。\n"
                 "- 即使用户没有提到骰子，只要 NPC 是否配合或察觉、事件是否及时发生、线索是否获得、"
-                "行动能否奏效等仍存在上述实质分支，也必须裁定。"
+                "行动能否奏效等仍存在上述实质分支，也必须调用 rp_story_outcome 裁定。"
             )
         else:
             trigger_rule = (
@@ -154,19 +155,21 @@ class NarrativeOutcomeModule(RPModule):
             return [
                 RPModuleRuntimeSection(
                     id=RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
-                    title="本轮已生效的剧情预裁定",
+                    title="本轮最终剧情结果",
                     source=RP_MODULE_NARRATIVE_OUTCOME_SOURCE,
                     priority=80,
                     content=(
-                        "以下剧情裁定结果在本轮首次生成前就已生效：\n"
+                        "本轮裁定已完成，直接执行以下最终结果：\n"
                         f"{public_result}\n"
-                        "必须直接遵循 outcomeCode、label 与 narrativeGuidance 推进叙事；不得改判、"
-                        "弱化、重新抽取或先写出相反结果，也不需要再次调用 rp_story_outcome。若仍"
-                        "重复调用，该工具只会幂等返回同一结果。\n"
-                        "reason 是本次裁定不可缩小的整体目标边界，不得用子步骤代替整体目标。\n"
-                        f"{STATE_SYNC_BEFORE_NARRATION_RULE} 可用状态工具包括 scene_time、"
-                        "scene_attr、scene_del_attr 和 status_table_set_values。状态同步无需玩家确认，"
-                        "不得询问是否需要标记、记录或更新状态。"
+                        "- 按 outcomeCode 和 narrativeGuidance 推进；"
+                        "不得改判、弱化或重新抽取。\n"
+                        "- reason 是不可缩小的整体目标边界；不得用子步骤代替整目标。\n"
+                        "- 有实际、持久、已确定的状态变化时，必须在输出任何 RP 正文前调用"
+                        "本轮实际提供的状态工具（scene_time、scene_attr、scene_del_attr、"
+                        "status_table_set_values 中的可用者）；工具调用轮不得夹带 RP 正文。"
+                        "无状态变化时直接输出正文。\n"
+                        "- 最终正文不得新增尚未同步的确定状态；"
+                        "状态同步无需玩家确认，不得询问是否需要更新状态。"
                     ),
                 )
             ]

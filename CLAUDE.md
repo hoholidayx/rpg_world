@@ -339,7 +339,7 @@ TurnRequest                            调用方原始、不可变输入
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
 - 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起绑定给 `StatusSubAgent`。代码固定编排为 Outcome 独立判定 → 状态表/字段路由 → scene 与每张命中表分别更新；Outcome 已暂存或判定失败时不进入状态路由与预写。
 - 状态路由只能选择 scene，以及普通表中的 `realtime` / 已明确命中 `updateRule` 的 `event_driven` 字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID、key allowlist 和频率。快速更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
-- 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后主 Agent schema 隐藏 outcome 工具，漏判或预裁定失败时才保留补判；主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
+- 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后不再注入 Narrative Outcome fixed section，只用简短无序条目要求执行最终结果并明确列出本轮可用的 scene/status 工具，同时从主 Agent schema 和可执行 registry 移除 outcome 工具；漏判或预裁定失败时才保留原 fixed contract 和补判工具。主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
 - 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。字段更新频率固定为 `realtime | event_driven | deferred | manual`，旧字段默认 `realtime`，scene 永远只能是 `realtime`；`deferred` 由回复交付后的慢状态归纳维护，`manual` 不允许 LLM 写入。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
 - WebUI 停止生成通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 到 Agent service `/chat/stop`；取消成功的 stream turn 丢弃 scratch，不发 DONE，不提交消息、状态或 usage。
@@ -495,7 +495,7 @@ RP Modules 使用常规上下文分层/分配策略：
 
 - 静态契约进入 fixed layer：例如 narrative_outcome 的“何时裁定、必须调用工具、不得替玩家选择行动”。
 - `text_output_format` 作为 fixed layer 输出格式约束默认启用，用 `<rp-narration>` 和 `<rp-character name="...">` 约束 assistant 正文中的旁白/角色分离，不进入 `RPModuleRegistry`。
-- 动态运行态只在模块确有临时状态时进入 `RP_MODULES` system layer；Narrative Outcome 平时依赖 fixed contract，检测到明确随机意图时注入本轮强制工具指令；StatusSubAgent 已预裁定时则注入已生效结果和裁定后状态写入边界。
+- 动态运行态只在模块确有临时状态时进入 `RP_MODULES` system layer；Narrative Outcome 平时依赖 fixed contract，检测到明确随机意图时注入本轮强制工具指令；StatusSubAgent 已预裁定时省略该 fixed section，仅以简短无序条目注入最终结果和明确的 scene/status 工具边界。
 - `verbose_logging=true` 时，主 Agent 在 Context Builder 前记录 RP runtime section 总数、`id/title/source/priority` 和完整公开 content；空 runtime 记录 `count=0`，不输出 sample、权重等内部随机细节。
 - RP 工具只注册到本轮 `ToolRegistry`；当前主 LLM/StatusSubAgent 的 RP schema 最多只有 `rp_story_outcome`。模块命令按最新非 turn 快照动态解析。
 - RP Modules 不进入 user prefix，不写 history；`[scene]` 仍是唯一高优先级 user prefix 运行态。
@@ -508,7 +508,7 @@ Narrative Outcome 是当前剧情分支随机机制：
 - `auto_adjudication_enabled=true` 时，主 Agent 必须结合用户完整语义、当前场景和状态判断外部实质变数。触发不依赖关键词；未知信息、能力、阻力、风险、时机、环境或 NPC/世界反应导致多个合理剧情分支时，在叙事结果前调用工具。玩家内心选择、已确定结果和无实质代价的小事不裁定。
 - 结果固定为 `critical_success / success / success_with_cost / setback / critical_failure` 五档，系统默认比例 `5/25/40/25/5`。`reason` 是不可缩小的整体目标边界；`success_with_cost` 必须完整达成目标，代价不得抵消成功。重大失败不得自动死亡、硬停局或永久剥夺玩家角色主权。
 - 每 turn 最多一条裁定；重复调用复用 scratch 结果。有效权重在 turn 开始前形成模块快照，优先级 `config < story < session`；各层可以不覆盖 `weights`，但一旦提供就必须是总和严格等于 100 的完整五项原子组。
-- `StatusSubAgent` 负责可选预裁定：需要 outcome 的同批状态预写全部延后，结果以 `outcomeCode / label / narrativeGuidance / reason / actor?` 在主 Agent 首次调用前进入 `RP_MODULES` runtime section。漏判或预裁定失败时主 Agent 仍可补判；已预裁定时主 Agent schema 隐藏 outcome 工具，内部重复调用仍幂等复用。
+- `StatusSubAgent` 负责可选预裁定：需要 outcome 的同批状态预写全部延后，结果以 `outcomeCode / label / narrativeGuidance / reason / actor?` 在主 Agent 首次调用前进入 `RP_MODULES` runtime section。漏判或预裁定失败时主 Agent 保留明确写出 `rp_story_outcome` 的 fixed contract 与补判工具；已预裁定时不注入该 fixed section，outcome 工具也从主 Agent schema 和可执行 registry 同时移除。工具自身的幂等只用于预裁定边界内的重复保护。
 - 裁定与消息、状态表在同一个短 `database.atomic()` 中提交。取消、provider 错误或 commit 失败不落库；truncate、clear、用户消息编辑和相关历史删除同步清理裁定，retry/edit 重新抽取。
 - retry/edit/truncate 不回滚已经提交的状态表；状态分支回滚留作独立能力，不增加 `status_turn_journal` 或其它状态 journal。
 - 持久化表是 `rpg_session_narrative_outcomes`，内部保存 sample 和有效权重快照；LLM、Play API outcome 与 WebUI 卡片不得展示 sample、区间或百分比。

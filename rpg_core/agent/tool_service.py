@@ -34,7 +34,7 @@ _TAG = "[AgentToolService]"
 
 
 class AgentToolService:
-    """Build executable tools and the independently filtered main schema."""
+    """Build the main Agent's turn-local executable tools and schemas."""
 
     def __init__(
         self,
@@ -105,9 +105,7 @@ class AgentToolService:
                     continue
                 registry.register(tool)
         if rp_module_runtime is not None and policy.expose_rp_modules:
-            # Executability remains broader than the main schema so a staged
-            # outcome can be reused safely even when hidden from model choices.
-            registry.register_all(rp_module_runtime.get_tools())
+            registry.register_all(rp_module_runtime.get_main_agent_tools())
         if policy.expose_state_tools:
             registry.register_all(self.state_tools(scene_tracker, status_manager))
         if settings.verbose_logging:

@@ -149,6 +149,7 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
     module.bind_turn(scratch)  # type: ignore[arg-type]
     try:
         module.adjudicate(reason="能否说服守门人", actor="Alice")
+        fixed_sections = module.get_fixed_sections()
         inspection_sections = module.get_runtime_sections(
             ModuleContextRequest(session_id="s1", user_input="")
         )
@@ -162,6 +163,7 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
     finally:
         module.unbind_turn(scratch)  # type: ignore[arg-type]
 
+    assert fixed_sections == []
     assert inspection_sections == []
     assert len(sections) == 1
     content = sections[0].content
@@ -169,12 +171,16 @@ def test_staged_outcome_is_injected_into_main_runtime_before_generation() -> Non
     assert '"label":"失败但推进"' in content
     assert '"reason":"能否说服守门人"' in content
     assert '"actor":"Alice"' in content
+    assert "本轮裁定已完成，直接执行以下最终结果" in content
+    assert "rp_story_outcome" not in content
     assert "不得改判" in content
-    assert "reason 是本次裁定不可缩小的整体目标边界" in content
+    assert "reason 是不可缩小的整体目标边界" in content
+    assert "scene_time、scene_attr、scene_del_attr" in content
+    assert "status_table_set_values" in content
     assert "输出任何 RP 正文前调用" in content
     assert "工具调用轮不得夹带 RP 正文" in content
     assert "状态同步无需玩家确认" in content
-    assert "不得询问是否需要标记、记录或更新状态" in content
+    assert "不得询问是否需要更新状态" in content
     assert "StatusSubAgent" not in content
     assert "sample" not in content
     assert "weights" not in content

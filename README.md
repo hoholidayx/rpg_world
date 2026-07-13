@@ -245,7 +245,7 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 - 主 Agent LLM 选择使用 `config default < story override < session override`：Story 详情编辑页立即保存故事默认，SessionRoom context 圆环左侧设置会话覆盖；生成中切换只影响下一 turn，不触发自动压缩。
 - `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。`narrative_outcome` 负责主 Agent 的剧情分支随机裁定；`dice` 只保留表达式解析和手动调试命令；`text_output_format` 仍由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
 - 内置模块登记在 `rpg_rp_module_catalog`。Story 挂载是 Session 的能力上限，新 Story 默认挂载当前全部内置模块；Session 可覆盖模块启用状态和稀疏配置，但不能重新启用 Story 已停用的模块。每次 preview/turn 都解析独立不可变快照，生成中的配置修改只影响下一 turn。
-- `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Narrative Outcome 平时依靠 fixed contract 判断隐式变数；检测到明确随机意图时加入本轮强制裁定指令；若 StatusSubAgent 已预裁定，则该层改为注入已生效结果和裁定后状态检查边界。
+- `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Narrative Outcome 平时依靠 fixed contract 判断隐式变数；检测到明确随机意图时加入本轮强制裁定指令。若 StatusSubAgent 已预裁定，本轮不再注入 Narrative Outcome fixed section，只在动态层注入最终结果和明确的状态工具边界。
 
 当前发送顺序按缓存稳定性和 RP 注意力组织：
 
@@ -261,10 +261,10 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 
 RP Modules 采用上下文分层策略：
 
-- 稳定、低频变化的规则只放进 fixed layer，例如 Narrative Outcome 的“何时裁定、必须调用工具、不得替玩家做选择”。
+- 稳定、低频变化的规则只放进 fixed layer，例如主 Agent 仍需裁定时 Narrative Outcome 的“何时裁定、调用哪个工具、不得替玩家做选择”；预裁定成功的 turn 不再重复注入这组规则。
 - 文本输出格式是默认启用的 fixed layer 约束；RP 正文使用 `<rp-narration>` 和 `<rp-character name="...">` 标签区分旁白与角色发言。
 - 高频或临时模块状态才进入 `RP_MODULES` 动态层；Narrative Outcome 为明确随机意图加入本轮强制指令，并把 StatusSubAgent 已暂存的裁定结果注入主 Agent 首次调用。
-- 未预裁定时，主 LLM 的 RP schema 只暴露高层 `rp_story_outcome(reason, actor?)`；已预裁定时该 schema 隐藏。两种情况都不暴露表达式、DC、随机数、权重或低层 Dice 工具。
+- 未预裁定时，主 LLM 的 RP schema 只暴露高层 `rp_story_outcome(reason, actor?)`；已预裁定时，该工具同时从主 Agent schema 和可执行 registry 移除。两种情况都不暴露表达式、DC、随机数、权重或低层 Dice 工具。
 - `/rp_modules`、`/rp_module` 始终由 `CommandDispatcher` 在 LLM 前拦截；`/roll`、`/check_dc` 只在当前 Story/Session 的 Dice 模块有效启用时动态出现。所有命令都不进入对话历史。
 
 #### Narrative Outcome：五级剧情分支随机机制

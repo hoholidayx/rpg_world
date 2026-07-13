@@ -484,11 +484,14 @@ async def test_status_sub_agent_preadjudicates_before_first_main_call(
     assert '"outcomeCode":"success_with_cost"' in first_main_context
     assert '"reason":"能否潜过巡逻守卫"' in first_main_context
     assert "不得改判" in first_main_context
-    assert "reason 是本次裁定不可缩小的整体目标边界" in first_main_context
+    assert "reason 是不可缩小的整体目标边界" in first_main_context
+    assert "rp_story_outcome" not in first_main_context
+    assert "scene_time、scene_attr、scene_del_attr" in first_main_context
+    assert "status_table_set_values" in first_main_context
     assert "输出任何 RP 正文前调用" in first_main_context
     assert "工具调用轮不得夹带 RP 正文" in first_main_context
-    assert "最终正文不得再新增本应写入 scene 或普通状态表" in first_main_context
-    assert "不得询问是否需要标记、记录或更新状态" in first_main_context
+    assert "最终正文不得新增尚未同步的确定状态" in first_main_context
+    assert "不得询问是否需要更新状态" in first_main_context
     assert "StatusSubAgent 已完成本轮剧情预裁定" not in first_main_context
     assert [call.source for call in reply.stats.calls] == [
         "status_outcome_preflight",
@@ -613,7 +616,7 @@ async def test_status_sub_agent_outcome_skips_mixed_state_prewrites(
 
 
 @pytest.mark.asyncio
-async def test_main_agent_reuses_status_sub_agent_preadjudication(
+async def test_main_agent_cannot_reexecute_status_sub_agent_preadjudication(
     integration_agent,
     integration_data_gateway,
     scripted_llm_manager,
@@ -649,9 +652,8 @@ async def test_main_agent_reuses_status_sub_agent_preadjudication(
     assert rng.calls == 1
     assert len(provider.calls) == 2
     assert reply.tool_records and len(reply.tool_records) == 1
-    reused_tool_result = reply.tool_records[0].tool_results[0]["content"]
-    assert '"outcomeCode":"critical_failure"' in reused_tool_result
-    assert '"reason":"撬开封印"' in reused_tool_result
+    rejected_tool_result = reply.tool_records[0].tool_results[0]["content"]
+    assert rejected_tool_result == "Error: unknown tool 'rp_story_outcome'"
     persisted = integration_data_gateway.narrative_outcomes.get_for_turn(
         "integration_smoke",
         1,

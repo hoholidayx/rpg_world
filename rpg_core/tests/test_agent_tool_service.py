@@ -62,7 +62,7 @@ def _execution(mode: TurnMode) -> TurnExecutionSnapshot:
     )
 
 
-def test_tool_service_keeps_hidden_rp_tool_executable_but_out_of_schema(
+def test_tool_service_removes_hidden_rp_tool_from_registry_and_schema(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -97,7 +97,7 @@ def test_tool_service_keeps_hidden_rp_tool_executable_but_out_of_schema(
         turn_execution=_execution(TurnMode.IC),
     )
     assert registry is not None
-    assert "rp_story_outcome" in registry
+    assert "rp_story_outcome" not in registry
     assert "rp_visible" in registry
     assert "scene_time" in registry
     schemas = service.main_schemas(registry, rp_module_runtime=runtime)
