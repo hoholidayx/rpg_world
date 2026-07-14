@@ -24,7 +24,6 @@ def _make_bot(name: str, enabled: bool = True) -> TelegramBotSettings:
         stream_edit_interval_ms=800,
         stream_edit_min_chars=24,
         request_timeout_ms=5000,
-        auto_pin_created_session=True,
     )
 
 
@@ -79,7 +78,6 @@ async def test_start_enabled_bots_creates_one_task_per_enabled_bot(monkeypatch):
     assert created_adapters[0]["workspace_id"] == "main_workspace"
     assert created_adapters[0]["story_id"] == 1
     assert created_adapters[0]["session_id"] == "resolved_main_workspace"
-    assert created_adapters[0]["auto_pin_created_session"] is True
     assert created_adapters[0]["streaming"] is True
     assert created_adapters[1]["bot_name"] == "prod"
     assert created_adapters[1]["token"] == "token-prod"

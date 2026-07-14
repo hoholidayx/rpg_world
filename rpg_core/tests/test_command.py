@@ -150,12 +150,13 @@ class TestCommandDispatcher:
 
     @pytest.mark.asyncio
     async def test_role_bind_returns_first_message_when_appended(self):
+        bind_result = SimpleNamespace(
+            state=SimpleNamespace(player=SimpleNamespace(name="Alice")),
+            first_message="开场白",
+        )
         fake_agent = SimpleNamespace(
             render_role_bind_prompt=lambda error="": "角色列表",
-            bind_player_character_by_index=lambda index: SimpleNamespace(
-                state=SimpleNamespace(player=SimpleNamespace(name="Alice")),
-                first_message="开场白",
-            ),
+            bind_player_character_by_index=lambda index: bind_result,
         )
         dispatcher = CommandDispatcher(agent=fake_agent)
         dispatcher.register_default_builtins()
@@ -164,6 +165,7 @@ class TestCommandDispatcher:
 
         assert result.handled is True
         assert result.reply == "已绑定/切换扮演角色：Alice。\n\n开场白"
+        assert result.role_bind_result is bind_result
 
     @pytest.mark.asyncio
     async def test_role_bind_returns_switch_confirmation(self):

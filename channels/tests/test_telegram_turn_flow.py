@@ -17,12 +17,19 @@ class _Presenter:
         self.sent: list[tuple[str, str, int]] = []
         self.edited: list[tuple[str, int, str]] = []
         self.deleted: list[tuple[str, int]] = []
+        self.cleared_markup: list[tuple[str, int]] = []
         self.next_message_id = 1
         self.fail_send = False
         self.fail_edit = False
         self.edit_gate: asyncio.Event | None = None
 
-    async def send_html(self, chat_id: str, text: str) -> int | None:
+    async def send_html(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        reply_markup: object | None = None,
+    ) -> int | None:
         if self.fail_send:
             return None
         message_id = self.next_message_id
@@ -40,6 +47,10 @@ class _Presenter:
         self.deleted.append((chat_id, message_id))
         return True
 
+    async def clear_reply_markup(self, chat_id: str, message_id: int) -> bool:
+        self.cleared_markup.append((chat_id, message_id))
+        return True
+
 
 class _Agent:
     def __init__(self, events: list[AgentStreamEvent] | None = None) -> None:
@@ -47,6 +58,8 @@ class _Agent:
         self.stream_calls: list[tuple[str, str, str | None]] = []
         self.send_calls: list[tuple[str, str]] = []
         self.stream_gate: asyncio.Event | None = None
+        self.stop_status = "cancelled"
+        self.stop_calls: list[tuple[str, str | None]] = []
 
     async def stream(
         self,
@@ -65,8 +78,9 @@ class _Agent:
         self.send_calls.append((session_id, text))
         return {"reply": f"reply:{text}"}
 
-    async def stop(self, *_args: object, **_kwargs: object) -> None:
-        raise AssertionError("Telegram P0 must not call AgentClient.stop")
+    async def stop(self, session_id: str, *, request_id: str | None = None) -> dict[str, object]:
+        self.stop_calls.append((session_id, request_id))
+        return {"status": self.stop_status, "session_id": session_id, "request_id": request_id}
 
 
 def _flow(
@@ -282,3 +296,100 @@ async def test_shutdown_cancels_tasks_and_clears_indexes_without_failure_message
     assert task.cancelled()
     assert flow.busy_reason("1", "s1") == TelegramTurnBusyReason.CLOSING
     assert all(item[1] != "处理消息失败，请稍后重试。" for item in presenter.sent)
+
+
+async def test_stream_projects_rp_tags_and_tolerates_partial_open_tag() -> None:
+    presenter = _Presenter()
+    agent = _Agent([
+        AgentStreamEvent(kind=StreamEventKind.TEXT, content='<rp-character name="Ali'),
+        AgentStreamEvent(kind=StreamEventKind.TEXT, content='ce">你好'),
+        AgentStreamEvent(
+            kind=StreamEventKind.DONE,
+            content='<rp-character name="Alice">你好</rp-character>',
+        ),
+    ])
+    flow = _flow(presenter, agent)
+    active = flow.reserve("1", "s1").active
+    assert active is not None
+
+    await flow.run(active, "go")
+
+    assert presenter.edited[-1][2] == "Alice：你好"
+    assert all("rp-character" not in item[2] for item in presenter.edited)
+
+
+async def test_cancelled_stop_uses_exact_request_and_stops_local_task() -> None:
+    presenter = _Presenter()
+    agent = _Agent()
+    agent.stream_gate = asyncio.Event()
+    flow = _flow(presenter, agent)
+    active = flow.reserve("1", "s1").active
+    assert active is not None
+    task = asyncio.create_task(flow.run(active, "go"))
+    flow.attach_task(active, task)
+    await asyncio.sleep(0)
+
+    status = await flow.request_stop("1")
+
+    assert status == "cancelled"
+    assert agent.stop_calls == [("s1", "tg_1234567890abcdef")]
+    assert task.cancelled()
+    assert presenter.edited[-1][2] == "已停止"
+    assert flow.busy_reason("1", "s1") is None
+
+
+async def test_stale_stop_keeps_generation_running() -> None:
+    presenter = _Presenter()
+    agent = _Agent([AgentStreamEvent(kind=StreamEventKind.DONE, content="done")])
+    agent.stop_status = "stale"
+    agent.stream_gate = asyncio.Event()
+    flow = _flow(presenter, agent)
+    active = flow.reserve("1", "s1").active
+    assert active is not None
+    task = asyncio.create_task(flow.run(active, "go"))
+    flow.attach_task(active, task)
+    await asyncio.sleep(0)
+
+    assert await flow.request_stop("1") == "stale"
+    assert not task.done()
+    agent.stream_gate.set()
+    await task
+    assert presenter.edited[-1][2] == "done"
+
+
+async def test_not_running_stop_without_active_turn() -> None:
+    flow = _flow(_Presenter(), _Agent())
+
+    assert await flow.request_stop("missing") == "not_running"
+
+
+async def test_confirmed_stop_does_not_render_missing_done_failure() -> None:
+    class _RaceAgent(_Agent):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stream_gate = asyncio.Event()
+
+        async def stream(self, session_id, text, request_id=None, **_kwargs):  # noqa: ANN001
+            self.stream_calls.append((session_id, text, request_id))
+            await self.stream_gate.wait()
+            if False:
+                yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="")
+
+        async def stop(self, session_id: str, *, request_id: str | None = None) -> dict[str, object]:
+            self.stop_calls.append((session_id, request_id))
+            self.stream_gate.set()
+            await asyncio.sleep(0)
+            return {"status": "cancelled", "session_id": session_id, "request_id": request_id}
+
+    presenter = _Presenter()
+    agent = _RaceAgent()
+    flow = _flow(presenter, agent)
+    active = flow.reserve("1", "s1").active
+    assert active is not None
+    task = asyncio.create_task(flow.run(active, "go"))
+    flow.attach_task(active, task)
+    await asyncio.sleep(0)
+
+    assert await flow.request_stop("1") == "cancelled"
+    assert all(item[2] != "处理消息失败，请稍后重试。" for item in presenter.edited)
+    assert presenter.edited[-1][2] == "已停止"

@@ -44,9 +44,6 @@ base:
           stream_edit_min_chars: 64
           # 单次 Telegram API 请求超时，单位毫秒。
           request_timeout_ms: 5000
-          # 新建会话后是否立即把当前 chat pin 到该会话。
-          auto_pin_created_session: false
-
     # ── CLI 渠道配置 ───────────────────────────────────────────────
     cli:
       # CLI 绑定的 rpg_data workspace/story。

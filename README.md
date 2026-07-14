@@ -162,12 +162,12 @@ Telegram 渠道当前支持：
 
 - 长轮询启动与优雅关闭。
 - `streaming=true` 时由 Application 托管后台生成任务，通过占位消息和增量编辑实现流式输出。
-- 同一 Telegram chat 或同一 session 同时只接受一个生成，新输入会立即提示忙碌而不进入 AgentMailbox 排队；当前不提供主动停止按钮或 `/stop` 命令。
-- Markdown 到 Telegram HTML 的渲染与 4096 字符分块发送。
-- `/start`、后端斜杠命令透传，以及 Telegram 菜单命令规范化。
+- 同一 Telegram chat 或同一 session 同时只接受一个生成，新输入会立即提示忙碌而不进入 AgentMailbox 排队；streaming bot 可用 `/stop` 或生成中按钮按 request ID 停止。
+- RP 标签展示投影、Markdown 到 Telegram HTML 的渲染与 4096 字符分块发送；原始 assistant content 不改写。
+- `/start` 游玩入口卡、按钮角色选择、本地动态 `/help`、精简 Bot 菜单及后端高级斜杠命令透传。
 - Inline Keyboard callback 使用带 10 分钟 TTL、chat/session 归属校验和一次性 claim 的短 token。
 - 每个 bot 绑定 `workspace_id + story_id`，启动时解析一个默认 session；未 pin 的 chat 使用 bot 默认 session，显式切换后会在当前 chat 内钉住 session。
-- `/sessions` 会话菜单、按钮切换会话、`/session_create [title...]` 立即创建系统生成 ID 的 session；`/cancel` 保留给 Telegram 专属二段交互状态。
+- `/sessions` 使用标题和短 ID 展示会话；`/session_create <title>` 直接新建并进入，无标题命令或按钮进入标题输入状态，支持 `/cancel`。
 - `proxy`、流式编辑间隔、最小编辑字符数、请求超时等参数由 `channels/settings.yaml` 的 bot 配置控制。
 
 ### 核心引擎
@@ -616,7 +616,6 @@ base:
           story_id: 1
           session_id: ""
           session_title: main
-          auto_pin_created_session: false
     cli:
       workspace_id: demo_workspace
       story_id: 1
@@ -702,8 +701,8 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 - `llm_service/tests/`：LLM provider 配置、manager 路由与 llama 本地 runtime 协议。
 - `play_api/tests/`：Play API workspace/session/scene/turn/stream、characters、lorebook、status-tables 和 ops 等契约。
 
-Telegram 测试已覆盖会话菜单、命令规范化、系统生成 ID 的创建流程、流式编辑节流、
-Markdown 渲染和长文本分块。后续修改 Telegram 行为必须补对应测试。
+Telegram 测试已覆盖入口卡、角色选择、会话菜单、命令帮助、系统生成 ID 的创建切换、
+停止生成、RP/Markdown 渲染、流式编辑节流和长文本分块。后续修改 Telegram 行为必须补对应测试。
 
 修改 Agent 组合或 turn pipeline 时，先跑组件专项与 Agent Service 契约，再跑完整基线和 Core integration：
 

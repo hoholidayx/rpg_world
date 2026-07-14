@@ -15,6 +15,39 @@ _LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<marker>(?:[-*+])|(?:\d+\.))\
 _TASK_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<marker>[-*+])\s+\[(?P<state>[ xX])\]\s+(?P<body>.+)$")
 _HEADING_RE = re.compile(r"^(?P<level>#{1,6})\s+(?P<body>.+)$")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_RP_TAG_RE = re.compile(
+    r"</?rp-narration>|</rp-character>|<rp-character\s+name=\"([^\"]*)\">"
+)
+_RP_TAG_PREFIXES = (
+    "<rp-narration>",
+    "</rp-narration>",
+    "<rp-character",
+    "</rp-character>",
+)
+
+
+def project_rp_text(text: str, *, streaming: bool = False) -> str:
+    """Project fixed-layer RP tags into Telegram-friendly plain text.
+
+    The projection is display-only. During streaming, a trailing partial known
+    tag is withheld until the next accumulated chunk makes it complete.
+    """
+    source = str(text or "")
+    if streaming:
+        last_open = source.rfind("<")
+        if last_open >= 0:
+            suffix = source[last_open:]
+            if ">" not in suffix and any(
+                prefix.startswith(suffix) or suffix.startswith(prefix.rstrip(">"))
+                for prefix in _RP_TAG_PREFIXES
+            ):
+                source = source[:last_open]
+
+    def replace_tag(match: re.Match[str]) -> str:
+        character_name = match.group(1)
+        return f"{character_name}：" if character_name is not None else ""
+
+    return _RP_TAG_RE.sub(replace_tag, source)
 
 
 def _escape_html(text: str) -> str:

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import Literal, cast
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,13 +33,17 @@ from agent_service.schemas import (
     AgentMainLLMSessionUpdateRequest,
     AgentMainLLMStoryUpdateRequest,
     AgentMessageRequest,
+    AgentPlayerCharacterBindPayload,
     AgentPlayerCharacterBindRequest,
+    AgentPlayerCharacterBindResponse,
     AgentReplyPayload,
     AgentSessionCreatePayload,
     AgentSessionCreateRequest,
     AgentSessionCreateResponse,
     AgentSessionEnsureRequest,
     AgentSessionMutationRequest,
+    AgentSessionOverviewPayload,
+    AgentSessionOverviewResponse,
     AgentSessionPayload,
     AgentSessionPayloadDict,
     AgentSessionsPayload,
@@ -248,7 +252,60 @@ async def list_sessions(
     if sessions is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return {
-        "sessions": [str(session.id) for session in sessions],
+        "sessions": [
+            {"session_id": str(session.id), "title": str(session.title or "")}
+            for session in sessions
+        ],
+    }
+
+
+@app.get(
+    f"{_service_prefix()}/chat/session/overview",
+    response_model=AgentSessionOverviewResponse,
+)
+async def get_session_overview(
+    session_id: str = Query(...),
+) -> AgentSessionOverviewPayload:
+    session_id = _require_session_id(session_id)
+    gateway = get_data_service_gateway()
+    session = gateway.catalog.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+    story = gateway.catalog.get_session_story(session_id)
+    if story is None:
+        raise HTTPException(status_code=404, detail=f"Story for session {session_id!r} not found")
+    workspace = next(
+        (item for item in gateway.catalog.list_workspaces() if item.id == session.workspace_id),
+        None,
+    )
+    state = gateway.session_roles.get_state(session_id)
+    options = gateway.session_roles.list_options(session_id)
+    player = state.player
+    player_status: Literal["bound", "invalid"] = (
+        "bound"
+        if state.status == models.PLAYER_CHARACTER_STATUS_BOUND
+        else "invalid"
+    )
+    return {
+        "workspace_id": str(session.workspace_id),
+        "workspace_title": str(workspace.name if workspace is not None else session.workspace_id),
+        "story_id": int(story.id),
+        "story_title": str(story.title or ""),
+        "session_id": str(session.id),
+        "session_title": str(session.title or ""),
+        "player_character_status": player_status,
+        "player_character": (
+            {"character_id": int(player.character_id), "name": str(player.name)}
+            if player is not None
+            else None
+        ),
+        "role_options": [
+            {
+                "character_id": int(option.snapshot.character_id),
+                "name": str(option.snapshot.name),
+            }
+            for option in options
+        ],
     }
 
 
@@ -329,8 +386,13 @@ async def reload_history(body: AgentSessionMutationRequest) -> JsonObject:
     return {"status": "reloaded", "session_id": body.session_id}
 
 
-@app.post(f"{_service_prefix()}/chat/session/player-character")
-async def bind_player_character(body: AgentPlayerCharacterBindRequest) -> JsonObject:
+@app.post(
+    f"{_service_prefix()}/chat/session/player-character",
+    response_model=AgentPlayerCharacterBindResponse,
+)
+async def bind_player_character(
+    body: AgentPlayerCharacterBindRequest,
+) -> AgentPlayerCharacterBindPayload:
     logger.info(
         "[AgentService] player character bind requested: session_id={}, character_id={}",
         body.session_id,
@@ -357,10 +419,19 @@ async def bind_player_character(body: AgentPlayerCharacterBindRequest) -> JsonOb
             body.player_character_id,
         )
         raise HTTPException(status_code=400, detail=f"Player character bind failed: {exc}") from exc
+    bind_result = result.role_bind_result
+    player = bind_result.state.player if bind_result is not None else None
+    if player is None:
+        raise HTTPException(status_code=400, detail="Player character bind returned no typed player state")
     return {
         "status": "bound",
         "session_id": body.session_id,
         "player_character_id": int(body.player_character_id),
+        "player_character": {
+            "character_id": int(player.character_id),
+            "name": str(player.name),
+        },
+        "first_message": str(bind_result.first_message or ""),
         "reply": result.reply,
     }
 

@@ -13,16 +13,18 @@ from typing import Protocol
 from loguru import logger
 
 from agent_service.client import AgentClient
-from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
 
 from channels.telegram.render import (
     chunk_rendered_text,
+    project_rp_text,
     render_markdown_to_telegram_html,
 )
 
 _PLACEHOLDER_TEXT = "⏳ 正在生成，请稍候…"
 _FAILURE_TEXT = "处理消息失败，请稍后重试。"
 _EMPTY_REPLY_TEXT = "本轮已完成，但没有返回可显示的文本。"
+_STOPPED_TEXT = "已停止"
 _TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
 
@@ -51,6 +53,9 @@ class ActiveTelegramTurn:
     rendered_sent_text: str = ""
     last_edit_at: float = 0.0
     progress_edit_attempted: bool = False
+    stop_action_token: str = ""
+    stop_decision: asyncio.Future[str] | None = None
+    stop_status: str = ""
 
 
 @dataclass(frozen=True)
@@ -66,11 +71,19 @@ class TelegramTurnReservation:
 class TelegramTurnPresenter(Protocol):
     """Telegram Bot I/O used by the flow after text is rendered to HTML."""
 
-    async def send_html(self, chat_id: str, text: str) -> int | None: ...
+    async def send_html(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        reply_markup: object | None = None,
+    ) -> int | None: ...
 
     async def edit_html(self, chat_id: str, message_id: int, text: str) -> bool: ...
 
     async def delete_message(self, chat_id: str, message_id: int) -> bool: ...
+
+    async def clear_reply_markup(self, chat_id: str, message_id: int) -> bool: ...
 
 
 class TelegramTurnFlow:
@@ -86,6 +99,8 @@ class TelegramTurnFlow:
         clock: Callable[[], float] = time.monotonic,
         request_id_factory: Callable[[], str] | None = None,
         agent_client: AgentClient | None = None,
+        stop_markup_factory: Callable[[ActiveTelegramTurn], object | None] | None = None,
+        terminal_cleanup: Callable[[ActiveTelegramTurn], None] | None = None,
     ) -> None:
         self._presenter = presenter
         self._streaming = bool(streaming)
@@ -94,6 +109,8 @@ class TelegramTurnFlow:
         self._clock = clock
         self._request_id_factory = request_id_factory or (lambda: f"tg_{uuid.uuid4().hex}")
         self._agent_client = agent_client
+        self._stop_markup_factory = stop_markup_factory
+        self._terminal_cleanup = terminal_cleanup
         self._active_by_chat: dict[str, ActiveTelegramTurn] = {}
         self._active_by_session: dict[str, ActiveTelegramTurn] = {}
         self._closing = False
@@ -141,6 +158,48 @@ class TelegramTurnFlow:
         if self._same_request(self._active_by_session.get(active.session_id), active):
             self._active_by_session.pop(active.session_id, None)
 
+    async def request_stop(self, chat_id: str) -> str:
+        """Ask Agent service to cancel the exact active streaming request."""
+        active = self._active_by_chat.get(str(chat_id))
+        if active is None or not active.streaming:
+            return TurnCancelStatus.NOT_RUNNING.value
+        if active.stop_decision is not None:
+            return await asyncio.shield(active.stop_decision)
+        client = self._agent_client
+        if client is None:
+            return "error"
+
+        decision: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        active.stop_decision = decision
+        try:
+            payload = await client.stop(
+                active.session_id,
+                request_id=active.request_id,
+            )
+            status = str(payload.get("status") or TurnCancelStatus.NOT_RUNNING.value)
+        except Exception:
+            logger.exception(
+                "telegram stop failed: chat_id={} session_id={} request_id={}",
+                active.chat_id,
+                active.session_id,
+                self._request_preview(active.request_id),
+            )
+            status = "error"
+        active.stop_status = status
+        if not decision.done():
+            decision.set_result(status)
+
+        if status != TurnCancelStatus.CANCELLED.value:
+            return status
+
+        task = active.task
+        current = asyncio.current_task()
+        if task is not None and task is not current and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await self._render_stopped(active)
+        return status
+
     async def run(self, active: ActiveTelegramTurn, text: str) -> None:
         """Run one reserved turn and guarantee terminal state cleanup."""
         cancelled = False
@@ -148,6 +207,11 @@ class TelegramTurnFlow:
             active.placeholder_message_id = await self._presenter.send_html(
                 active.chat_id,
                 _PLACEHOLDER_TEXT,
+                reply_markup=(
+                    self._stop_markup_factory(active)
+                    if active.streaming and self._stop_markup_factory is not None
+                    else None
+                ),
             )
             active.phase = TelegramTurnPhase.RUNNING
             client = self._agent_client
@@ -161,6 +225,8 @@ class TelegramTurnFlow:
             cancelled = True
             raise
         except Exception:
+            if await self._is_confirmed_stop(active):
+                return
             logger.exception(
                 "telegram turn failed: chat_id={} session_id={} request_id={}",
                 active.chat_id,
@@ -221,6 +287,8 @@ class TelegramTurnFlow:
                 )
                 break
             if event.kind == StreamEventKind.ERROR:
+                if await self._is_confirmed_stop(active):
+                    return
                 logger.warning(
                     "telegram stream returned error: chat_id={} session_id={} request_id={} error_code={} status_code={}",
                     active.chat_id,
@@ -233,6 +301,8 @@ class TelegramTurnFlow:
                 await self._render_failure(active)
                 return
         if not saw_done:
+            if await self._is_confirmed_stop(active):
+                return
             logger.warning(
                 "telegram stream ended without DONE: chat_id={} session_id={} request_id={}",
                 active.chat_id,
@@ -255,7 +325,8 @@ class TelegramTurnFlow:
     async def _render_progress(self, active: ActiveTelegramTurn) -> None:
         if not active.accumulated_text or active.placeholder_message_id is None:
             return
-        rendered = render_markdown_to_telegram_html(active.accumulated_text)
+        projected = project_rp_text(active.accumulated_text, streaming=True)
+        rendered = render_markdown_to_telegram_html(projected)
         if not rendered or len(rendered) > _TELEGRAM_MAX_MESSAGE_LENGTH:
             return
         now = self._clock()
@@ -283,8 +354,9 @@ class TelegramTurnFlow:
         *,
         committed_turn_id: int | None = None,
     ) -> None:
-        display_text = text or _EMPTY_REPLY_TEXT
+        display_text = project_rp_text(text, streaming=False) or _EMPTY_REPLY_TEXT
         rendered = render_markdown_to_telegram_html(display_text)
+        await self._clear_terminal_controls(active)
         chunks = chunk_rendered_text(rendered)
         delivered = await self._deliver_chunks(active, chunks)
         if not delivered:
@@ -321,6 +393,7 @@ class TelegramTurnFlow:
         return delivered
 
     async def _render_failure(self, active: ActiveTelegramTurn) -> None:
+        await self._clear_terminal_controls(active)
         message_id = active.placeholder_message_id
         if message_id is not None:
             edited = await self._presenter.edit_html(active.chat_id, message_id, _FAILURE_TEXT)
@@ -328,6 +401,31 @@ class TelegramTurnFlow:
                 active.rendered_sent_text = _FAILURE_TEXT
                 return
         await self._presenter.send_html(active.chat_id, _FAILURE_TEXT)
+
+    async def _render_stopped(self, active: ActiveTelegramTurn) -> None:
+        await self._clear_terminal_controls(active)
+        message_id = active.placeholder_message_id
+        if message_id is not None:
+            edited = await self._presenter.edit_html(active.chat_id, message_id, _STOPPED_TEXT)
+            if edited:
+                active.rendered_sent_text = _STOPPED_TEXT
+                return
+        await self._presenter.send_html(active.chat_id, _STOPPED_TEXT)
+
+    async def _clear_terminal_controls(self, active: ActiveTelegramTurn) -> None:
+        if active.placeholder_message_id is not None:
+            await self._presenter.clear_reply_markup(
+                active.chat_id,
+                active.placeholder_message_id,
+            )
+        if self._terminal_cleanup is not None:
+            self._terminal_cleanup(active)
+
+    @staticmethod
+    async def _is_confirmed_stop(active: ActiveTelegramTurn) -> bool:
+        if active.stop_decision is not None and not active.stop_decision.done():
+            await asyncio.shield(active.stop_decision)
+        return active.stop_status == TurnCancelStatus.CANCELLED.value
 
     def _owns(self, active: ActiveTelegramTurn) -> bool:
         return (

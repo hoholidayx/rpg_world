@@ -81,12 +81,35 @@ class FakeAgent:
     async def execute_command(self, *args: str) -> dict[str, object] | CommandResult:
         self.calls.append(("execute_command", tuple(args)))
         command = args[-1]
-        return {"reply": f"[mock cmd] {command}", "handled": True, "active_session": args[0] if args else ""}
+        active_session = args[0] if args else ""
+        if command.startswith("/session_switch "):
+            active_session = command.split(maxsplit=1)[1]
+        return {"reply": f"[mock cmd] {command}", "handled": True, "active_session": active_session}
 
     async def list_sessions(self, _workspace_id: str, _story_id: int) -> dict[str, object]:
-        return {"sessions": ["tg_default"]}
+        return {"sessions": [{"session_id": "tg_default", "title": "Telegram"}]}
 
-    async def create_session(self, workspace_id: str, story_id: int, *, title: str = "") -> dict[str, object]:
+    async def get_session_overview(self, session_id: str) -> dict[str, object]:
+        return {
+            "workspace_id": "tg_workspace",
+            "workspace_title": "Telegram Workspace",
+            "story_id": 1,
+            "story_title": "Telegram Story",
+            "session_id": session_id,
+            "session_title": "Telegram",
+            "player_character_status": "bound",
+            "player_character": {"character_id": 1, "name": "Hero"},
+            "role_options": [{"character_id": 1, "name": "Hero"}],
+        }
+
+    async def create_session(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        title: str = "",
+        player_character_id: int | None = None,
+    ) -> dict[str, object]:
         self.calls.append(("create_session", (workspace_id, str(story_id), title)))
         return {
             "workspace": workspace_id,
@@ -94,6 +117,21 @@ class FakeAgent:
             "session_id": "generated_session",
             "title": title,
         }
+
+    async def bind_player_character(self, session_id: str, character_id: int) -> dict[str, object]:
+        self.calls.append(("bind_player_character", (session_id, str(character_id))))
+        return {
+            "status": "bound",
+            "session_id": session_id,
+            "player_character_id": character_id,
+            "player_character": {"character_id": character_id, "name": "Hero"},
+            "first_message": "",
+            "reply": "已绑定",
+        }
+
+    async def stop(self, session_id: str, *, request_id: str | None = None) -> dict[str, object]:
+        self.calls.append(("stop", (session_id, request_id or "")))
+        return {"status": "cancelled", "session_id": session_id, "request_id": request_id}
 
     async def ensure_session(
         self,

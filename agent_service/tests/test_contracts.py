@@ -92,7 +92,12 @@ class FakeAgent:
         if parts[:1] == ["/session_switch"] and len(parts) > 1:
             self._session_id = parts[1]
         if parts[:1] == ["/role_bind"] and len(parts) > 1:
-            FakeGateway.session_roles.bind_by_index(self._session_id, int(parts[1]))
+            bind_result = FakeGateway.session_roles.bind_by_index(self._session_id, int(parts[1]))
+            return CommandResult(
+                reply=f"cmd:{command}",
+                handled=True,
+                role_bind_result=bind_result,
+            )
         return CommandResult(reply=f"cmd:{command}", handled=True)
 
     async def get_context_payload(self) -> dict[str, object]:
@@ -243,6 +248,13 @@ class FakeCatalog:
     def get_session(cls, session_id: str) -> models.Session | None:
         return cls.sessions.get(session_id)
 
+    @staticmethod
+    def list_workspaces() -> list[models.Workspace]:
+        return [
+            models.Workspace("ws", "Workspace", "/tmp/ws"),
+            models.Workspace("other", "Other", "/tmp/other"),
+        ]
+
     @classmethod
     def get_story(cls, workspace_id: str, story_id: int) -> models.Story | None:
         story = cls.stories.get(story_id)
@@ -360,7 +372,7 @@ class FakeSessionRoles:
         cls.state[session_id] = option.snapshot
         return SimpleNamespace(
             state=SimpleNamespace(status=models.PLAYER_CHARACTER_STATUS_BOUND, player=option.snapshot),
-            first_message="",
+            first_message="Welcome Bob" if index == 1 else "",
         )
 
     @classmethod
@@ -547,7 +559,29 @@ def test_agent_service_contracts(monkeypatch) -> None:
             params={"workspace_id": "ws", "story_id": 1},
         )
         assert sessions.status_code == 200
-        assert sessions.json()["sessions"] == ["s1"]
+        assert sessions.json()["sessions"] == [
+            {"session_id": "s1", "title": "Existing"},
+        ]
+
+        overview = client.get(
+            "/agent/v1/chat/session/overview",
+            params={"session_id": "s1"},
+        )
+        assert overview.status_code == 200
+        assert overview.json() == {
+            "workspace_id": "ws",
+            "workspace_title": "Workspace",
+            "story_id": 1,
+            "story_title": "Main Story",
+            "session_id": "s1",
+            "session_title": "Existing",
+            "player_character_status": "invalid",
+            "player_character": None,
+            "role_options": [
+                {"character_id": 101, "name": "Bob"},
+                {"character_id": 102, "name": "Alice"},
+            ],
+        }
 
         created = client.post(
             "/agent/v1/chat/sessions",
@@ -600,7 +634,11 @@ def test_agent_service_contracts(monkeypatch) -> None:
             "/agent/v1/chat/sessions",
             params={"workspace_id": "ws", "story_id": 1},
         )
-        assert sessions.json()["sessions"] == ["s1", "generated_1", "generated_2"]
+        assert sessions.json()["sessions"] == [
+            {"session_id": "s1", "title": "Existing"},
+            {"session_id": "generated_1", "title": "New"},
+            {"session_id": "generated_2", "title": "Default"},
+        ]
 
         send = client.post(
             "/agent/v1/chat/send",
@@ -629,7 +667,16 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert bind_player.status_code == 200
         assert bind_player.json()["status"] == "bound"
         assert bind_player.json()["reply"] == "cmd:/role_bind 1"
+        assert bind_player.json()["player_character"] == {"character_id": 101, "name": "Bob"}
+        assert bind_player.json()["first_message"] == "Welcome Bob"
         assert FakeSessionRoles.state["s1"].character_id == 101
+
+        generic_bind = client.post(
+            "/agent/v1/chat/command",
+            json={"session_id": "s1", "command": "/role_bind 2"},
+        )
+        assert generic_bind.status_code == 200
+        assert set(generic_bind.json()) == {"reply", "handled", "active_session"}
 
         invalid_bind = client.post(
             "/agent/v1/chat/session/player-character",

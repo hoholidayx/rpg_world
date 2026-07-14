@@ -20,12 +20,17 @@ from channels.telegram.action_registry import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from agent_service.client import AgentClient
+    from agent_service.schemas import AgentSessionSummaryPayload
 
 _SESSION_CREATE_TTL_SECONDS = 300
 _MAX_SESSION_PICKER_ROWS = 20
 SESSION_ACTION_SWITCH = "session_switch"
 SESSION_ACTION_CREATE = "session_create"
+
+
+def short_session_id(session_id: str) -> str:
+    value = str(session_id)
+    return value if len(value) <= 12 else value[-8:]
 
 
 @dataclass
@@ -54,16 +59,6 @@ class TelegramSessionFlow:
         """把当前 chat 固定到指定会话。"""
         self._session_overrides[chat_id] = session_id
 
-    def maybe_pin_created_session(self, chat_id: str, session_id: str, *, auto_pin: bool = False) -> None:
-        """按产品开关决定是否把新建会话立即固定到当前 chat。
-
-        当前产品要求：新建会话后不立即 pin。这里保留一个集中入口，
-        若后续需求改为“创建后自动切换”，只需打开调用方的
-        ``auto_pin_created_session`` 配置并复用该方法。
-        """
-        if auto_pin:
-            self.pin_session(chat_id, session_id)
-
     def clear_pinned_session(self, chat_id: str) -> None:
         """清除当前 chat 的显式会话绑定。"""
         self._session_overrides.pop(chat_id, None)
@@ -71,14 +66,16 @@ class TelegramSessionFlow:
     def build_session_picker(
         self,
         chat_id: str,
-        sessions: list[str],
+        sessions: list[AgentSessionSummaryPayload],
         current: str,
     ) -> InlineKeyboardMarkup:
         """构造可点击的会话选择菜单。"""
         rows: list[list[InlineKeyboardButton]] = []
         visible_sessions = sessions[:_MAX_SESSION_PICKER_ROWS]
-        for sid in visible_sessions:
-            label = f"{sid} （当前）" if sid == current else sid
+        for session in visible_sessions:
+            sid = str(session["session_id"])
+            title = str(session.get("title") or "未命名会话")
+            label = f"{'✓ ' if sid == current else ''}{title[:40]} · {short_session_id(sid)}"
             callback_data = self._action_registry.add(
                 kind=SESSION_ACTION_SWITCH,
                 chat_id=chat_id,
@@ -95,30 +92,36 @@ class TelegramSessionFlow:
             session_id=current,
         )
         rows.append([
-            InlineKeyboardButton(text="新建会话", callback_data=create_callback_data),
+            InlineKeyboardButton(text="新建并进入", callback_data=create_callback_data),
         ])
         return InlineKeyboardMarkup(rows)
 
-    def render_session_picker_text(self, sessions: list[str], current: str) -> str:
+    def render_session_picker_text(
+        self,
+        sessions: list[AgentSessionSummaryPayload],
+        current: str,
+    ) -> str:
         """渲染会话列表文案。"""
         if not sessions:
             return "\n".join(
                 [
                     "会话列表 (0):",
                     f"当前会话: {current}",
-                    "点击下方“新建会话”开始创建。",
+                    "点击下方“新建并进入”开始创建。",
                 ]
             )
 
         lines = [
             f"会话列表 ({len(sessions)}):",
             f"当前会话: {current}",
-            "点击下方按钮切换会话，或点“新建会话”创建新的会话。",
+            "点击下方按钮切换会话，或点“新建并进入”创建新的会话。",
         ]
         visible_sessions = sessions[:_MAX_SESSION_PICKER_ROWS]
-        for sid in visible_sessions:
+        for session in visible_sessions:
+            sid = str(session["session_id"])
+            title = str(session.get("title") or "未命名会话")
             marker = " （当前）" if sid == current else ""
-            lines.append(f"- {sid}{marker}")
+            lines.append(f"- {title} · {short_session_id(sid)}{marker}")
         if len(sessions) > len(visible_sessions):
             lines.append(f"... 还有 {len(sessions) - len(visible_sessions)} 个会话未展示，请使用命令直接切换。")
         return "\n".join(lines)
@@ -154,17 +157,10 @@ class TelegramSessionFlow:
         chat_id: str,
         text: str,
         *,
-        agent_client: AgentClient | None,
-        workspace_id: str,
-        story_id: int,
         send_text: Callable[[str], Awaitable[None]],
-        auto_pin_created_session: bool = False,
+        create_and_switch: Callable[[str], Awaitable[str]],
     ) -> bool:
-        """消费保留的二段创建状态。
-
-        当前 /session_create 已不再进入该流程；该实现仅保留给后续
-        Telegram 专属二段交互复用。
-        """
+        """消费“输入标题后新建并进入”的二段创建状态。"""
         if self.expire_session_create_flow(chat_id):
             await send_text("会话创建已超时，请重新发送 /session_create。")
             return True
@@ -177,25 +173,12 @@ class TelegramSessionFlow:
             await send_text("已取消创建会话。")
             return True
 
-        if agent_client is not None:
-            result = await agent_client.create_session(
-                workspace_id,
-                story_id,
-                title=title,
-            )
-            created_session_id = str(result.get("session_id") or "")
-            reply = f"[会话已创建: {created_session_id}]" if created_session_id else "会话创建完成。"
-        else:
-            await send_text("会话创建暂不可用。")
+        if not title:
+            await send_text("会话标题不能为空，请重新输入，或发送 /cancel 取消。")
             return True
-        if created_session_id:
-            self.cancel_session_create_flow(chat_id)
-            self.maybe_pin_created_session(
-                chat_id,
-                created_session_id,
-                auto_pin=auto_pin_created_session,
-            )
-        await send_text(reply or "会话创建完成。")
+        active_session_id = await create_and_switch(title)
+        self.cancel_session_create_flow(chat_id)
+        await send_text(f"已新建并进入会话：{title} · {short_session_id(active_session_id)}")
         return True
 
     async def handle_command(

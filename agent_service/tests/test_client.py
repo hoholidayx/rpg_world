@@ -162,6 +162,17 @@ async def test_client_session_crud_uses_agent_service_contract() -> None:
     ]
 
 
+async def test_client_get_session_overview_uses_agent_service_contract() -> None:
+    result = await AgentClient(base_url="http://agent").get_session_overview("s1")
+
+    assert result == {"ok": True, "commands": []}
+    assert FakeAsyncClient.calls[-1] == (
+        "GET",
+        "http://agent/chat/session/overview",
+        {"params": {"session_id": "s1"}},
+    )
+
+
 async def test_client_get_context_preview_uses_agent_service_contract() -> None:
     result = await AgentClient(base_url="http://agent").get_context_preview("s1")
 

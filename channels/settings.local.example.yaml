@@ -11,4 +11,3 @@ channels:
         story_id: 1
         session_id: ""
         session_title: main
-        auto_pin_created_session: false

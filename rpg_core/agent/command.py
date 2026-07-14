@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from rpg_data.services import SessionPlayerCharacterBindResult
     from rpg_core.agent.sub_agents.base import BaseSubAgent
     from rpg_core.context.inspector import LayerInfo
     from rpg_core.rp_modules.models import ModuleCommand
@@ -36,8 +37,34 @@ class AgentCommandTarget(Protocol):
     def render_role_bind_prompt(self, *, error: str = "") -> str: ...
     def bind_player_character_by_index(self, index: int): ...
 
-# 命令处理器签名：async (agent, args) -> str
-HandlerFunc = Callable[[AgentCommandTarget, list[str]], Awaitable[str]]
+@dataclass
+class CommandDef:
+    """命令定义——展示用。"""
+
+    name: str
+    """命令名，如 ``/compact``。"""
+    description: str
+    """一句话说明。"""
+    detail: str
+    """详细用法说明。"""
+
+
+@dataclass
+class CommandResult:
+    """命令执行结果。"""
+
+    reply: str = ""
+    """文本回复。"""
+    stats: dict[str, object] | None = None
+    """可选的统计信息。"""
+    handled: bool = False
+    """是否被某个处理器消费。"""
+    role_bind_result: "SessionPlayerCharacterBindResult | None" = None
+    """角色绑定命令的内部类型化结果，不进入通用命令接口。"""
+
+
+# 命令处理器签名：async (agent, args) -> str | CommandResult
+HandlerFunc = Callable[[AgentCommandTarget, list[str]], Awaitable[str | CommandResult]]
 CommandProvider = Callable[[], list["ModuleCommand"]]
 
 
@@ -136,7 +163,7 @@ async def _cmd_session_switch(agent: AgentCommandTarget, args: list[str]) -> str
     return f"[已切换到会话: {sid}]"
 
 
-async def _cmd_role_bind(agent: AgentCommandTarget, args: list[str]) -> str:
+async def _cmd_role_bind(agent: AgentCommandTarget, args: list[str]) -> str | CommandResult:
     """Bind or switch the player-controlled role for the current session."""
     if agent is None:
         return "角色绑定不可用。"
@@ -155,8 +182,14 @@ async def _cmd_role_bind(agent: AgentCommandTarget, args: list[str]) -> str:
         return agent.render_role_bind_prompt()
     confirmation = f"已绑定/切换扮演角色：{player.name}。"
     if result.first_message:
-        return f"{confirmation}\n\n{result.first_message}"
-    return f"{confirmation} 后续消息将使用该身份；已有历史不会被改写。"
+        reply = f"{confirmation}\n\n{result.first_message}"
+    else:
+        reply = f"{confirmation} 后续消息将使用该身份；已有历史不会被改写。"
+    return CommandResult(
+        reply=reply,
+        handled=True,
+        role_bind_result=result,
+    )
 
 
 def _current_catalog_session(agent: AgentCommandTarget):
@@ -167,33 +200,6 @@ def _current_catalog_session(agent: AgentCommandTarget):
     if current_session is None:
         raise FileNotFoundError(f"Session not found in rpg_data: {agent.session_id}")
     return gateway, current_session
-
-
-# ── 数据类 ──────────────────────────────────────────────────────────────
-
-
-@dataclass
-class CommandDef:
-    """命令定义——展示用。"""
-
-    name: str
-    """命令名，如 ``/compact``。"""
-    description: str
-    """一句话说明。"""
-    detail: str
-    """详细用法说明。"""
-
-
-@dataclass
-class CommandResult:
-    """命令执行结果。"""
-
-    reply: str = ""
-    """文本回复。"""
-    stats: dict[str, object] | None = None
-    """可选的统计信息。"""
-    handled: bool = False
-    """是否被某个处理器消费。"""
 
 
 def format_command_help(commands: list[CommandDef]) -> str:
@@ -346,8 +352,10 @@ class CommandDispatcher:
         if name in self._builtins:
             cmd_def, handler = self._builtins[name]
             try:
-                reply = await handler(self._agent, args)
-                return CommandResult(reply=reply, handled=True)
+                result = await handler(self._agent, args)
+                if isinstance(result, CommandResult):
+                    return result
+                return CommandResult(reply=result, handled=True)
             except Exception as e:
                 return CommandResult(reply=f"命令 {name} 执行失败: {e}", handled=True)
 

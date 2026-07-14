@@ -103,8 +103,39 @@ class AgentCommandsResponse(_BaseSchema):
     commands: list[AgentCommandInfo] = Field(default_factory=list)
 
 
+class AgentSessionSummaryResponse(_BaseSchema):
+    session_id: str
+    title: str
+
+
 class AgentSessionsResponse(_BaseSchema):
-    sessions: list[str] = Field(default_factory=list)
+    sessions: list[AgentSessionSummaryResponse] = Field(default_factory=list)
+
+
+class AgentPlayerCharacterInfoResponse(_BaseSchema):
+    character_id: int
+    name: str
+
+
+class AgentSessionOverviewResponse(_BaseSchema):
+    workspace_id: str
+    workspace_title: str
+    story_id: int
+    story_title: str
+    session_id: str
+    session_title: str
+    player_character_status: Literal["bound", "invalid"]
+    player_character: AgentPlayerCharacterInfoResponse | None = None
+    role_options: list[AgentPlayerCharacterInfoResponse] = Field(default_factory=list)
+
+
+class AgentPlayerCharacterBindResponse(_BaseSchema):
+    status: Literal["bound"] = "bound"
+    session_id: str
+    player_character_id: int
+    player_character: AgentPlayerCharacterInfoResponse
+    first_message: str = ""
+    reply: str
 
 
 class AgentSessionPayload(_BaseSchema):
@@ -203,8 +234,39 @@ class AgentCommandsPayload(TypedDict):
     commands: list[AgentCommandPayload]
 
 
+class AgentSessionSummaryPayload(TypedDict):
+    session_id: str
+    title: str
+
+
 class AgentSessionsPayload(TypedDict):
-    sessions: list[str]
+    sessions: list[AgentSessionSummaryPayload]
+
+
+class AgentPlayerCharacterInfoPayload(TypedDict):
+    character_id: int
+    name: str
+
+
+class AgentSessionOverviewPayload(TypedDict):
+    workspace_id: str
+    workspace_title: str
+    story_id: int
+    story_title: str
+    session_id: str
+    session_title: str
+    player_character_status: Literal["bound", "invalid"]
+    player_character: AgentPlayerCharacterInfoPayload | None
+    role_options: list[AgentPlayerCharacterInfoPayload]
+
+
+class AgentPlayerCharacterBindPayload(TypedDict):
+    status: Literal["bound"]
+    session_id: str
+    player_character_id: int
+    player_character: AgentPlayerCharacterInfoPayload
+    first_message: str
+    reply: str
 
 
 class AgentSessionPayloadDict(TypedDict):

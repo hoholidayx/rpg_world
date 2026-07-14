@@ -16,9 +16,11 @@ from agent_service.schemas import (
     AgentHistoryPayload,
     AgentMainLLMProviderCatalogPayload,
     AgentMainLLMSelectionPayload,
+    AgentPlayerCharacterBindPayload,
     AgentReplyPayload,
     AgentSessionCreatePayload,
     AgentSessionPayloadDict,
+    AgentSessionOverviewPayload,
     AgentSessionsPayload,
     AgentTurnCancelPayload,
 )
@@ -202,6 +204,18 @@ class AgentClient:
         params = {"workspace_id": workspace_id, "story_id": story_id}
         return cast(AgentSessionsPayload, await self._get("/chat/sessions", params=params))
 
+    async def get_session_overview(
+        self,
+        session_id: str,
+    ) -> AgentSessionOverviewPayload:
+        return cast(
+            AgentSessionOverviewPayload,
+            await self._get(
+                "/chat/session/overview",
+                params={"session_id": session_id},
+            ),
+        )
+
     async def create_session(
         self,
         workspace_id: str,
@@ -275,12 +289,12 @@ class AgentClient:
         self,
         session_id: str,
         player_character_id: int,
-    ) -> JsonObject:
+    ) -> AgentPlayerCharacterBindPayload:
         result = await self._post(
             "/chat/session/player-character",
             json={"session_id": session_id, "player_character_id": int(player_character_id)},
         )
-        return result
+        return cast(AgentPlayerCharacterBindPayload, result)
 
     async def truncate_turn(
         self,

@@ -32,7 +32,6 @@ class TelegramBotSettings:
     stream_edit_interval_ms: int = 800
     stream_edit_min_chars: int = 24
     request_timeout_ms: int = 5000
-    auto_pin_created_session: bool = False
 
 
 @dataclass(frozen=True)
@@ -179,7 +178,6 @@ class ChannelsSettings(ProfiledYamlSettings):
             stream_edit_interval_ms=self._int(bot, "channels.telegram.bots", "stream_edit_interval_ms", 800),
             stream_edit_min_chars=self._int(bot, "channels.telegram.bots", "stream_edit_min_chars", 24),
             request_timeout_ms=self._int(bot, "channels.telegram.bots", "request_timeout_ms", 5000),
-            auto_pin_created_session=self._bool(bot, "channels.telegram.bots", "auto_pin_created_session", False),
         )
 
     def _validate_settings(self) -> None:

@@ -27,7 +27,6 @@ base:
           stream_edit_interval_ms: 800
           stream_edit_min_chars: 24
           request_timeout_ms: 5000
-          auto_pin_created_session: true
     cli:
       workspace_id: base_workspace
       story_id: 1
@@ -138,7 +137,6 @@ def test_dict_deep_merge_keeps_base_values(monkeypatch, tmp_path):
     assert bot.token == "base-token"
     assert bot.workspace_id == "override_workspace"
     assert bot.story_id == 2
-    assert bot.auto_pin_created_session is True
 
 
 def test_telegram_bots_merge_by_mapping_key_and_append_new(monkeypatch, tmp_path):
