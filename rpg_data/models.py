@@ -21,6 +21,7 @@ __all__ = [
     "SessionMessage",
     "SessionPlayerCharacterSnapshot",
     "SessionProfile",
+    "SessionDeleteResult",
     "SessionResetResult",
     "SessionStatusResetResult",
     "SessionStoryMemory",
@@ -74,6 +75,9 @@ __all__ = [
     "NARRATIVE_OUTCOME_SOURCE_STORY",
     "PLAYER_CHARACTER_STATUS_BOUND",
     "PLAYER_CHARACTER_STATUS_INVALID",
+    "SESSION_RUNTIME_CLEANUP_ABSENT",
+    "SESSION_RUNTIME_CLEANUP_DELETED",
+    "SESSION_RUNTIME_CLEANUP_PENDING",
     "Workspace",
     "parse_status_document",
     "serialize_status_document",
@@ -86,6 +90,9 @@ STATUS_TABLE_KIND = "status_table"
 STATUS_TABLE_MODE_KEY_VALUE = "key_value"
 PLAYER_CHARACTER_STATUS_BOUND = "bound"
 PLAYER_CHARACTER_STATUS_INVALID = "invalid"
+SESSION_RUNTIME_CLEANUP_DELETED = "deleted"
+SESSION_RUNTIME_CLEANUP_ABSENT = "absent"
+SESSION_RUNTIME_CLEANUP_PENDING = "pending"
 STATUS_KIND_SCENE = "scene"
 STATUS_KIND_NORMAL = "normal"
 STATUS_ORIGIN_TEMPLATE_COPY = "template_copy"
@@ -375,6 +382,14 @@ class SessionProfile:
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionDeleteResult:
+    """Result of permanently deleting one catalog session."""
+
+    session_id: str
+    runtime_cleanup: str
 
 
 @dataclass(frozen=True)

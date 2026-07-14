@@ -7,7 +7,7 @@ import pytest
 from commons.errors import TURN_METADATA_INVALID_ERROR_CODE
 from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
 from rpg_core.agent.loop import AgentReply
-from rpg_core.agent.mailbox import AgentMailbox
+from rpg_core.agent.mailbox import AgentMailbox, AgentMailboxClosedError
 from rpg_core.agent.turn import TurnRequest
 from rpg_core.session import InvalidTurnMetadataError
 
@@ -216,3 +216,29 @@ async def test_mailbox_skips_cancelled_queued_stream() -> None:
     finally:
         turns.release_send.set()
         await mailbox.close()
+
+
+@pytest.mark.asyncio
+async def test_mailbox_close_cancels_active_and_fails_queued_work() -> None:
+    turns = _Turns()
+    turns.block_send = True
+    mailbox = _mailbox(turns)
+    send_task = asyncio.create_task(mailbox.send(TurnRequest.create("active")))
+    await turns.send_started.wait()
+    command_task = asyncio.create_task(mailbox.execute_command("/queued"))
+    await asyncio.sleep(0)
+
+    await mailbox.close()
+
+    results = await asyncio.gather(send_task, command_task, return_exceptions=True)
+    assert all(isinstance(result, AgentMailboxClosedError) for result in results)
+    assert mailbox._queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_mailbox_rejects_new_work_after_close() -> None:
+    mailbox = _mailbox(_Turns())
+    await mailbox.close()
+
+    with pytest.raises(AgentMailboxClosedError):
+        await mailbox.send(TurnRequest.create("late"))

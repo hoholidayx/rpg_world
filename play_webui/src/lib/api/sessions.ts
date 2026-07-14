@@ -1,4 +1,4 @@
-import type { HistoryPage, SessionSummary, Turn, WorkspaceSummary } from '@/types/session'
+import type { HistoryPage, SessionDeleteResult, SessionSummary, Turn, WorkspaceSummary } from '@/types/session'
 import { playApiFetch, withWorkspace } from './client'
 
 export function listWorkspaces() {
@@ -19,6 +19,12 @@ export function createSession(workspace: string, storyId: number, title?: string
   return playApiFetch<SessionSummary>('/sessions', {
     method: 'POST',
     body: JSON.stringify({ workspaceId: workspace, storyId, title: title ?? '' }),
+  })
+}
+
+export function deleteSession(sessionId: string) {
+  return playApiFetch<SessionDeleteResult>(`/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
   })
 }
 

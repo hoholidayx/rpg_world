@@ -168,6 +168,14 @@ class RPGGameAgent:
             mailbox=self._mailbox,
         )
 
+    async def close(self) -> None:
+        """Permanently stop this cached runtime and release session resources."""
+
+        try:
+            await self._mailbox.close()
+        finally:
+            self._lifecycle.release_resources()
+
     async def send(
         self,
         user_input: str,

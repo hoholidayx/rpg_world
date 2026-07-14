@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     pass
 
 
+class SessionDeletionInProgressError(RuntimeError):
+    """Raised when a request targets a session currently being deleted."""
+
+
 class AgentManager:
     """Agent 管理器单例。
 
@@ -32,6 +36,7 @@ class AgentManager:
     _instances: dict[str, RPGGameAgent] = {}
     _initialized: bool = False
     _initialized_targets: set[str] = set()
+    _deleting_sessions: set[str] = set()
 
     @classmethod
     def _cache_key(cls, session_id: str) -> str:
@@ -52,6 +57,10 @@ class AgentManager:
         intentionally keyed by ``session_id`` only.
         """
         key = cls._cache_key(session_id)
+        if key in cls._deleting_sessions:
+            raise SessionDeletionInProgressError(
+                f"Session {session_id!r} is being deleted"
+            )
         if key not in cls._instances:
             cls._instances[key] = RPGGameAgent(session_id=session_id)
         return cls._instances[key]
@@ -82,6 +91,7 @@ class AgentManager:
         cls._instances.clear()
         cls._initialized = False
         cls._initialized_targets.clear()
+        cls._deleting_sessions.clear()
 
     @classmethod
     def drop_session(cls, session_id: str) -> None:
@@ -89,3 +99,29 @@ class AgentManager:
         cls._instances.pop(session_id, None)
         cls._initialized_targets.discard(session_id)
         cls._initialized = bool(cls._initialized_targets)
+
+    @classmethod
+    async def begin_session_deletion(cls, session_id: str) -> None:
+        """Block new work, evict the cached agent, and close its resources."""
+
+        key = cls._cache_key(session_id)
+        if key in cls._deleting_sessions:
+            raise SessionDeletionInProgressError(
+                f"Session {session_id!r} is already being deleted"
+            )
+        cls._deleting_sessions.add(key)
+        agent = cls._instances.pop(key, None)
+        cls._initialized_targets.discard(key)
+        cls._initialized = bool(cls._initialized_targets)
+        try:
+            if agent is not None:
+                await agent.close()
+        except BaseException:
+            cls._deleting_sessions.discard(key)
+            raise
+
+    @classmethod
+    def finish_session_deletion(cls, session_id: str) -> None:
+        """Release the transient deletion guard after persistence completes."""
+
+        cls._deleting_sessions.discard(cls._cache_key(session_id))

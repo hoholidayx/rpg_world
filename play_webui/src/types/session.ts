@@ -42,6 +42,12 @@ export type SessionSummary = {
   updatedAt?: string | null
 }
 
+export type SessionDeleteResult = {
+  status: 'deleted'
+  sessionId: string
+  runtimeCleanup: 'deleted' | 'absent' | 'pending'
+}
+
 export type SessionPlayerCharacter = {
   characterId: number
   mountId: number

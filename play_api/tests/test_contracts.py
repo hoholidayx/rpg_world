@@ -301,6 +301,14 @@ class _FakeAgentClient:
         self.calls.append(("delete-message", session_id, str(message_id)))
         return {"status": "deleted"}
 
+    async def delete_session(self, session_id: str) -> dict[str, object]:
+        self.calls.append(("delete-session", session_id))
+        return {
+            "status": "deleted",
+            "session_id": session_id,
+            "runtime_cleanup": "deleted",
+        }
+
     async def stop(self, session_id: str, request_id: str | None = None) -> dict[str, object]:
         self.calls.append(("stop", session_id, request_id or ""))
         return {"status": TurnCancelStatus.CANCELLED.value, "session_id": session_id, "request_id": request_id}
@@ -842,6 +850,25 @@ def test_stop_endpoint_forwards_request_id(tmp_path, monkeypatch) -> None:
     assert response.json()["status"] == TurnCancelStatus.CANCELLED.value
     assert response.json()["requestId"] == "req-play"
     assert ("stop", "s_forest001", "req-play") in fake_agent.calls
+
+
+def test_delete_session_endpoint_forwards_to_agent_owner(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    fake_agent = _FakeAgentClient()
+    monkeypatch.setattr(agent_client, "_client", fake_agent)
+    reset_delete_confirmation_tokens()
+
+    with TestClient(app) as client:
+        response = client.delete("/play-api/v1/sessions/s_forest001")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "deleted",
+        "sessionId": "s_forest001",
+        "runtimeCleanup": "deleted",
+    }
+    assert ("delete-session", "s_forest001") in fake_agent.calls
 
 
 def test_play_api_contracts(tmp_path, monkeypatch) -> None:

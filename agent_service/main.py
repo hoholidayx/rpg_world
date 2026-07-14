@@ -40,6 +40,8 @@ from agent_service.schemas import (
     AgentSessionCreatePayload,
     AgentSessionCreateRequest,
     AgentSessionCreateResponse,
+    AgentSessionDeletePayload,
+    AgentSessionDeleteResponse,
     AgentSessionEnsureRequest,
     AgentSessionMutationRequest,
     AgentSessionOverviewPayload,
@@ -67,7 +69,7 @@ from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnSt
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload, usage_payload_from_records
 from rpg_core.agent.command import CommandResult
 from rpg_core.agent.loop import AgentReply
-from rpg_core.agent.manager import AgentManager
+from rpg_core.agent.manager import AgentManager, SessionDeletionInProgressError
 from rpg_core.main_llm import (
     InvalidMainLLMProviderKey,
     MainLLMProviderCatalog,
@@ -386,6 +388,67 @@ async def reload_history(body: AgentSessionMutationRequest) -> JsonObject:
     return {"status": "reloaded", "session_id": body.session_id}
 
 
+@app.delete(
+    f"{_service_prefix()}/chat/session",
+    response_model=AgentSessionDeleteResponse,
+)
+async def delete_session(
+    session_id: str = Query(...),
+) -> AgentSessionDeletePayload:
+    normalized_session_id = _require_session_id(session_id)
+    gateway = get_data_service_gateway()
+    if gateway.catalog.get_session(normalized_session_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {normalized_session_id!r} not found",
+        )
+
+    try:
+        await AgentManager.begin_session_deletion(normalized_session_id)
+    except SessionDeletionInProgressError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "[AgentService] failed to close session runtime before deletion: session_id={}",
+            normalized_session_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Session runtime close failed: {exc}",
+        ) from exc
+
+    try:
+        result = gateway.session_deletion.delete(normalized_session_id)
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {normalized_session_id!r} not found",
+            )
+        logger.info(
+            "[AgentService] deleted session: session_id={}, runtime_cleanup={}",
+            normalized_session_id,
+            result.runtime_cleanup,
+        )
+        return {
+            "status": "deleted",
+            "session_id": normalized_session_id,
+            "runtime_cleanup": result.runtime_cleanup,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "[AgentService] session deletion failed: session_id={}",
+            normalized_session_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Session deletion failed: {exc}",
+        ) from exc
+    finally:
+        AgentManager.finish_session_deletion(normalized_session_id)
+
+
 @app.post(
     f"{_service_prefix()}/chat/session/player-character",
     response_model=AgentPlayerCharacterBindResponse,
@@ -559,7 +622,10 @@ def _get_agent(session_id: str):
     session_id = _require_session_id(session_id)
     if get_data_service_gateway().catalog.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
-    return AgentManager.get_or_create(session_id=session_id)
+    try:
+        return AgentManager.get_or_create(session_id=session_id)
+    except SessionDeletionInProgressError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> models.Session:

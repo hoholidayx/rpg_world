@@ -34,6 +34,7 @@ class FakeAgent:
         self._session_id = session_id
         self.history = [Message(Role.USER, "hello"), Message(Role.ASSISTANT, "hi")]
         self.last_stream_request_id: str | None = None
+        self.closed = False
 
     @property
     def session_id(self) -> str:
@@ -41,6 +42,9 @@ class FakeAgent:
 
     async def initialize(self) -> None:
         return None
+
+    async def close(self) -> None:
+        self.closed = True
 
     async def send(self, message: str) -> AgentReply:
         stats = TurnStats(started_at=0.0, finished_at=0.0123)
@@ -138,6 +142,7 @@ class FakeAgent:
 
 class FakeAgentManager:
     instances: dict[str, FakeAgent] = {}
+    deleting: set[str] = set()
 
     @classmethod
     def get_or_create(cls, session_id: str):
@@ -148,10 +153,22 @@ class FakeAgentManager:
     @classmethod
     def reset(cls) -> None:
         cls.instances.clear()
+        cls.deleting.clear()
 
     @classmethod
     def drop_session(cls, session_id: str) -> None:
         cls.instances.pop(session_id, None)
+
+    @classmethod
+    async def begin_session_deletion(cls, session_id: str) -> None:
+        cls.deleting.add(session_id)
+        agent = cls.instances.pop(session_id, None)
+        if agent is not None:
+            await agent.close()
+
+    @classmethod
+    def finish_session_deletion(cls, session_id: str) -> None:
+        cls.deleting.discard(session_id)
 
 
 class FailedSyncAgent(FakeAgent):
@@ -406,10 +423,22 @@ class InvalidTurnMessages:
         ]
 
 
+class FakeSessionDeletion:
+    @staticmethod
+    def delete(session_id: str) -> models.SessionDeleteResult | None:
+        if FakeCatalog.sessions.pop(session_id, None) is None:
+            return None
+        return models.SessionDeleteResult(
+            session_id=session_id,
+            runtime_cleanup=models.SESSION_RUNTIME_CLEANUP_DELETED,
+        )
+
+
 class FakeGateway:
     catalog = FakeCatalog
     messages = FakeMessages
     session_roles = FakeSessionRoles
+    session_deletion = FakeSessionDeletion
 
 
 class InvalidHistoryGateway:
@@ -729,6 +758,39 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert '"prompt_tokens": 13' in body
         assert '"source": "provider_usage"' in body
         assert FakeAgentManager.instances["s1"].last_stream_request_id == "req-stream"
+
+
+def test_agent_service_deletes_catalog_session_and_cached_runtime(monkeypatch) -> None:
+    monkeypatch.setattr(service_main, "AgentManager", FakeAgentManager)
+    monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
+    monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
+    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
+    FakeCatalog.reset()
+    FakeAgentManager.reset()
+    agent = FakeAgentManager.get_or_create("s1")
+
+    with TestClient(service_main.app) as client:
+        response = client.delete(
+            "/agent/v1/chat/session",
+            params={"session_id": "s1"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "status": "deleted",
+            "session_id": "s1",
+            "runtime_cleanup": "deleted",
+        }
+        assert agent.closed is True
+        assert "s1" not in FakeCatalog.sessions
+        assert "s1" not in FakeAgentManager.instances
+        assert "s1" not in FakeAgentManager.deleting
+
+        missing = client.delete(
+            "/agent/v1/chat/session",
+            params={"session_id": "s1"},
+        )
+        assert missing.status_code == 404
 
 
 def test_agent_service_history_rejects_invalid_turn_metadata(monkeypatch) -> None:

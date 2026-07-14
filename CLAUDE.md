@@ -223,6 +223,8 @@ Story 主数据字段中，`summary` 是短摘要，`first_message` 是会话开
 
 `rpg_sessions.id` 是跨 workspace/story 全局唯一的稳定定位 ID，兼容 `rpg_core` 当前 `^[A-Za-z0-9_]+$` 校验。所有创建入口都由 `rpg_data` 生成 session ID，用户只允许指定 title；`rpg_session_profiles` 保存 title、description、玩家扮演角色 ID 和角色快照。Play API 是 catalog session 到 Agent 服务的边界层：会话内接口只收 `session_id`，内部解析出 workspace/story；Agent 服务运行态只接收全局 `session_id`。CLI / Telegram 启动时也先 ensure session：配置了 `session_id` 只校验并加载既有 session，未配置则创建系统生成 ID 的默认 session。
 
+会话永久删除由 Agent service 统一协调。删除期间 `AgentManager` 阻止同 ID runtime 重建，取消活动和排队 turn、丢弃未提交 scratch，并关闭 mailbox、watcher 与向量 SQLite；随后删除 `rpg_sessions` 及其所有外键级联数据（包含冷备、状态表、裁定、记忆和配置覆盖），最后清理整个 runtime 目录。runtime 先重命名隔离，数据库失败时恢复；数据库提交后目录删除失败返回 `runtime_cleanup=pending`，隔离目录由未索引数据清理能力继续发现。Play API 只通过 AgentClient 转发删除，不直接操作 AgentManager。
+
 玩家扮演角色是 session 级运行语义。绑定状态对外只暴露 `bound | invalid`：缺失绑定、角色不存在、未挂载到当前 story、snapshot 损坏或 snapshot 的 mount/story 与当前挂载不一致，都统一视为 `invalid`。WebUI 不在进入 SessionRoom 前拦截，而是在 SessionRoom 内打开不可取消的角色选择弹窗；没有可选角色时显示阻塞空态。CLI / Telegram / Agent API 允许创建空 session，但普通消息在绑定前只返回固定编号角色列表，不调用 LLM、不写 user history。
 
 绑定和切换必须统一经 Agent 命令链路：`/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 只负责把角色 ID 转发到 Agent service，由 Agent service 映射为当前 story 已挂载角色的 1-based 序号并执行 `/role_bind`；不要在 Play API 或 DataManager 中直接写 `rpg_session_profiles`。首次成功绑定且 main history 为空、story `first_message` 非空时，`SessionRoleService` 追加一条渲染后的 assistant 开场消息到 main history 和 backup history；普通历史删除/截断或后续切换不重复追加，`/clear` 完整重置是唯一例外，会按当前有效绑定重新渲染开场。Agent 的 send/send_stream 在命令分发之后、进入 LLM 前强校验玩家角色，只有 `bound` 才进入正常生成。
@@ -597,7 +599,7 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 | 模块 | 路由文件 | 职责 |
 |---|---|---|
 | workspace | `play_api/routers/workspace.py` | 工作区列表 |
-| sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取，以及 `history/history-page/scene/commands/turn/stream/stop` 子资源 |
+| sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取、永久删除，以及 `history/history-page/scene/commands/turn/stream/stop` 子资源 |
 | main-llm | `play_api/routers/main_llm.py` | 主 Agent 安全模型目录、story 默认和 session 覆盖 |
 | characters | `play_api/routers/characters.py` | workspace 角色库、角色详情、story 挂载 |
 | lorebook | `play_api/routers/lorebook.py` | workspace 世界书条目、story 挂载 |

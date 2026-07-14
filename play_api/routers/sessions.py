@@ -74,6 +74,16 @@ class PlaySessionSummary(BaseModel):
     updated_at: str | None = Field(default=None, alias="updatedAt")
 
 
+class PlaySessionDeleteResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: Literal["deleted"] = "deleted"
+    session_id: str = Field(alias="sessionId")
+    runtime_cleanup: Literal["deleted", "absent", "pending"] = Field(
+        alias="runtimeCleanup"
+    )
+
+
 class PlayPlayerCharacterBindRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -489,6 +499,23 @@ async def create_session(payload: PlaySessionCreateRequest) -> PlaySessionSummar
 @router.get("/{session_id}", response_model=PlaySessionSummary)
 async def get_session(session_id: str) -> PlaySessionSummary:
     return _session_summary(await resolve_session_or_404(session_id))
+
+
+@router.delete("/{session_id}", response_model=PlaySessionDeleteResult)
+async def delete_session(session_id: str) -> PlaySessionDeleteResult:
+    session = await resolve_session_or_404(session_id)
+    workspace, story_id, agent_session_id = _session_context(session)
+    result = await _agent_call(
+        get_agent_backend().delete_session(
+            workspace,
+            story_id,
+            agent_session_id,
+        )
+    )
+    return PlaySessionDeleteResult(
+        sessionId=agent_session_id,
+        runtimeCleanup=str(result.get("runtime_cleanup") or "absent"),
+    )
 
 
 @router.patch("/{session_id}/player-character", response_model=PlaySessionSummary)

@@ -149,6 +149,12 @@ class AgentSessionCreateResponse(AgentSessionPayload):
     status: Literal["created"] = "created"
 
 
+class AgentSessionDeleteResponse(_BaseSchema):
+    status: Literal["deleted"] = "deleted"
+    session_id: str
+    runtime_cleanup: Literal["deleted", "absent", "pending"]
+
+
 class AgentTurnCancelResponse(_BaseSchema):
     status: TurnCancelStatus
     session_id: str
@@ -278,6 +284,12 @@ class AgentSessionPayloadDict(TypedDict):
 
 class AgentSessionCreatePayload(AgentSessionPayloadDict):
     status: Literal["created"]
+
+
+class AgentSessionDeletePayload(TypedDict):
+    status: Literal["deleted"]
+    session_id: str
+    runtime_cleanup: Literal["deleted", "absent", "pending"]
 
 
 class AgentMainLLMProviderOptionPayload(TypedDict):

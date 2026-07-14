@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING
 
@@ -37,6 +36,10 @@ if TYPE_CHECKING:
 _TAG = "[AgentMailbox]"
 
 
+class AgentMailboxClosedError(RuntimeError):
+    """Raised when work targets a permanently closed session runtime."""
+
+
 class AgentMailbox:
     """Own FIFO serialization, stream tasks, and request-id cancellation."""
 
@@ -62,8 +65,10 @@ class AgentMailbox:
         self._active_stream_request_id: str | None = None
         self._queued_stream_request_ids: set[str] = set()
         self._cancelled_request_ids: set[str] = set()
+        self._closed = False
 
     def start(self) -> None:
+        self._ensure_open()
         if self._consumer_task is None or self._consumer_task.done():
             self._consumer_task = asyncio.create_task(self._consume())
 
@@ -71,22 +76,53 @@ class AgentMailbox:
         await self._queue.join()
 
     async def close(self) -> None:
-        """Cancel owned background tasks; primarily used by scoped runtimes/tests."""
+        """Cancel active work and fail every queued request permanently."""
+
+        if self._closed:
+            return
+        self._closed = True
+        close_error = AgentMailboxClosedError(
+            f"Session runtime {self._session_id()!r} is closed"
+        )
         active = self._active_stream_task
         if active is not None and not active.done():
             active.cancel()
-            with suppress(asyncio.CancelledError):
+            try:
                 await active
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.opt(exception=exc).warning(
+                    _TAG + " active stream failed while mailbox was closing: session_id={}",
+                    self._session_id(),
+                )
         consumer = self._consumer_task
         if consumer is not None and not consumer.done():
             consumer.cancel()
-            with suppress(asyncio.CancelledError):
+            try:
                 await consumer
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.opt(exception=exc).warning(
+                    _TAG + " consumer failed while mailbox was closing: session_id={}",
+                    self._session_id(),
+                )
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._fail_item(item, close_error)
+            self._queue.task_done()
         self._active_stream_task = None
         self._active_stream_request_id = None
+        self._queued_stream_request_ids.clear()
+        self._cancelled_request_ids.clear()
         self._consumer_task = None
 
     async def send(self, request: "TurnRequest") -> "AgentReply":
+        self._ensure_open()
         future = self._create_future()
         await self._queue.put(
             QueueItem(
@@ -102,6 +138,7 @@ class AgentMailbox:
         self,
         request: "TurnRequest",
     ) -> AsyncIterator[AgentStreamEvent]:
+        self._ensure_open()
         event_queue: asyncio.Queue[
             AgentStreamEvent | BaseException | _StreamSentinel
         ] = asyncio.Queue()
@@ -151,6 +188,7 @@ class AgentMailbox:
             raise future.exception()
 
     async def execute_command(self, command: str) -> "CommandResult":
+        self._ensure_open()
         future = self._create_future()
         await self._queue.put(
             QueueItem(
@@ -163,6 +201,7 @@ class AgentMailbox:
         return await future
 
     async def truncate_history_from_turn(self, turn_id: int) -> dict[str, object]:
+        self._ensure_open()
         future = self._create_future()
         await self._queue.put(
             QueueItem(
@@ -246,6 +285,14 @@ class AgentMailbox:
                 item.input_text,
             )
             try:
+                if self._closed:
+                    self._fail_item(
+                        item,
+                        AgentMailboxClosedError(
+                            f"Session runtime {self._session_id()!r} is closed"
+                        ),
+                    )
+                    continue
                 match item.kind:
                     case QueueKind.SEND:
                         if item.turn_request is None:
@@ -267,6 +314,14 @@ class AgentMailbox:
                         if item.turn_id is None:
                             raise ValueError("turn_id is required")
                         item.future.set_result(self._truncate_history(item.turn_id))
+            except asyncio.CancelledError:
+                self._fail_item(
+                    item,
+                    AgentMailboxClosedError(
+                        f"Session runtime {self._session_id()!r} is closed"
+                    ),
+                )
+                raise
             except Exception as exc:
                 logger.warning(_TAG + " consumer error on kind={}: {}", item.kind, exc)
                 if item.kind == QueueKind.SEND_STREAM and item.event_queue is not None:
@@ -343,6 +398,23 @@ class AgentMailbox:
                 _TAG + " deferred status reconciliation failed: session_id={}",
                 self._session_id(),
             )
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise AgentMailboxClosedError(
+                f"Session runtime {self._session_id()!r} is closed"
+            )
+
+    @staticmethod
+    def _fail_item(item: QueueItem, error: BaseException) -> None:
+        if item.future.done():
+            return
+        if item.kind == QueueKind.SEND_STREAM and item.event_queue is not None:
+            item.event_queue.put_nowait(error)
+            item.event_queue.put_nowait(_StreamSentinel())
+            item.future.set_result(None)
+            return
+        item.future.set_exception(error)
 
     @staticmethod
     def _create_future() -> asyncio.Future:

@@ -144,6 +144,15 @@ class AgentBackend:
         del workspace, story_id
         return await agent_client.get_agent_client().delete_message(session_id, message_id)
 
+    async def delete_session(
+        self,
+        workspace: str,
+        story_id: int,
+        session_id: str,
+    ) -> dict[str, object]:
+        del workspace, story_id
+        return dict(await agent_client.get_agent_client().delete_session(session_id))
+
     async def stream(
         self,
         workspace: str,

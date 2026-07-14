@@ -95,6 +95,15 @@ class SessionRepository:
         )
         return to_session(row) if row is not None else None
 
+    def delete(self, session_id: str) -> bool:
+        """Delete one session and all database-owned children via FK cascades."""
+
+        return bool(
+            SessionRecord.delete()
+            .where(SessionRecord.id == str(session_id))
+            .execute()
+        )
+
     def update_timestamp(self, session_id: str) -> models.Session | None:
         row = update_timestamp(SessionRecord, session_id)
         return to_session(row) if row is not None else None

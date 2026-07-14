@@ -19,6 +19,7 @@ from agent_service.schemas import (
     AgentPlayerCharacterBindPayload,
     AgentReplyPayload,
     AgentSessionCreatePayload,
+    AgentSessionDeletePayload,
     AgentSessionPayloadDict,
     AgentSessionOverviewPayload,
     AgentSessionsPayload,
@@ -316,6 +317,13 @@ class AgentClient:
             f"/chat/messages/{int(message_id)}",
             params={"session_id": session_id},
         )
+
+    async def delete_session(self, session_id: str) -> AgentSessionDeletePayload:
+        result = await self._delete(
+            "/chat/session",
+            params={"session_id": session_id},
+        )
+        return cast(AgentSessionDeletePayload, result)
 
     async def execute_command(
         self,

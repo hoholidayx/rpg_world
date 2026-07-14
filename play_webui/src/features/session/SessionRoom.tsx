@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { sessionContextUsageConfig } from '@/lib/config/appConfig'
+import { deleteSession } from '@/lib/api/sessions'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import type { SessionPlayerCharacter } from '@/types/session'
@@ -205,6 +207,7 @@ function PlayerCharacterDialog({
 
 export function SessionRoom({ sessionId }: { sessionId: string }) {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const logger = useMemo(() => createSessionRoomLogger(sessionId), [sessionId])
   const [inputMode, setInputMode] = useState<SessionInputMode>('ic')
   const [narrativeStyleId, setNarrativeStyleId] = useState<NarrativeStyleId>(null)
@@ -212,7 +215,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
   const [toastMessage, setToastMessage] = useState('')
   const [rpModulesDialogOpen, setRPModulesDialogOpen] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteRedirecting, setDeleteRedirecting] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const deleteRedirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message)
@@ -230,6 +236,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+      if (deleteRedirectTimerRef.current) clearTimeout(deleteRedirectTimerRef.current)
     }
   }, [])
 
@@ -314,6 +321,34 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     logger,
     onExit: () => router.push('/sessions'),
     onCommittedNarrativeStyle: handleCommittedNarrativeStyle,
+  })
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: () => deleteSession(sessionId),
+    onSuccess: (result) => {
+      queryClient.removeQueries({ queryKey: ['play-session', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-history-page', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-history', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-scene', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-status-tables', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-composer', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-summaries', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-summary', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-context-preview', sessionId] })
+      queryClient.removeQueries({ queryKey: ['session-main-llm', sessionId] })
+      queryClient.removeQueries({ queryKey: ['session-rp-modules', sessionId] })
+      queryClient.invalidateQueries({ queryKey: ['play-sessions'] })
+      if (result.runtimeCleanup === 'pending') {
+        setDeleteRedirecting(true)
+        showToast('会话已删除，运行目录仍待数据清理处理')
+        deleteRedirectTimerRef.current = setTimeout(() => {
+          router.replace('/sessions')
+        }, 1200)
+        return
+      }
+      setDeleteDialogOpen(false)
+      router.replace('/sessions')
+    },
   })
 
   const timelineActions = useSessionTimelineActions({
@@ -458,6 +493,12 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
                 layout.setSettingsOpen(false)
                 setRPModulesDialogOpen(true)
               }}
+              onDeleteSession={() => {
+                layout.setSettingsOpen(false)
+                deleteSessionMutation.reset()
+                setDeleteRedirecting(false)
+                setDeleteDialogOpen(true)
+              }}
             />
           </div>
         </header>
@@ -557,6 +598,36 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           pending={false}
           onClose={() => setConfirmRequest(null)}
           onConfirm={handleConfirm}
+        />
+      ) : null}
+      {deleteDialogOpen ? (
+        <ConfirmDialog
+          title="删除会话"
+          heading={deleteRedirecting ? '会话已删除' : `永久删除“${data.session?.title || sessionId}”？`}
+          body={(
+            <div>
+              <p>
+                会话 <strong>{sessionId}</strong> 的主历史、冷备、角色绑定、状态表、剧情记忆、配置覆盖和全部运行文件都会永久删除，且无法恢复。
+              </p>
+              {deleteRedirecting ? (
+                <p className="mt-3 font-bold text-rose-800">运行目录仍待清理，即将返回会话中心。</p>
+              ) : null}
+              {deleteSessionMutation.error ? (
+                <p className="mt-3 font-bold text-rose-800">
+                  删除失败：{deleteSessionMutation.error instanceof Error ? deleteSessionMutation.error.message : '未知错误'}
+                </p>
+              ) : null}
+            </div>
+          )}
+          confirmLabel={deleteRedirecting ? '正在返回' : '永久删除'}
+          pending={deleteSessionMutation.isPending || deleteRedirecting}
+          onClose={() => {
+            if (!deleteSessionMutation.isPending && !deleteRedirecting) setDeleteDialogOpen(false)
+          }}
+          onConfirm={() => {
+            stream.prepareForSessionDeletion()
+            deleteSessionMutation.mutate()
+          }}
         />
       ) : null}
       <PlayerCharacterDialog

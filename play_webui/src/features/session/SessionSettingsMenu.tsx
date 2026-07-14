@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Boxes, Brain, CaseSensitive, PanelLeftClose, PanelRightClose, Settings, UserRound, Wrench } from 'lucide-react'
+import { Boxes, Brain, CaseSensitive, PanelLeftClose, PanelRightClose, Settings, Trash2, UserRound, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import {
   SESSION_FONT_SCALE_DEFAULT,
@@ -57,6 +57,7 @@ export function SessionSettingsMenu({
   playerCharacter,
   onOpenRoleDialog,
   onOpenRPModulesDialog,
+  onDeleteSession,
 }: {
   open: boolean
   leftCollapsed: boolean
@@ -73,6 +74,7 @@ export function SessionSettingsMenu({
   playerCharacter?: SessionPlayerCharacter | null
   onOpenRoleDialog: () => void
   onOpenRPModulesDialog: () => void
+  onDeleteSession: () => void
 }) {
   return (
     <div className="relative">
@@ -88,7 +90,7 @@ export function SessionSettingsMenu({
       </button>
 
       {open ? (
-        <section className="absolute right-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-200/80 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40" aria-label="会话设置菜单">
+        <section className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100vh-6rem)] w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-200/80 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40" aria-label="会话设置菜单">
           <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
             <strong className="block text-sm font-black text-slate-950 dark:text-slate-100">会话设置</strong>
             <span className="mt-1 block text-xs font-semibold text-slate-400 dark:text-slate-300">布局与输入偏好</span>
@@ -228,6 +230,23 @@ export function SessionSettingsMenu({
                 </span>
               )}
             />
+            <div className="my-2 border-t border-slate-200 dark:border-slate-800" />
+            <button
+              type="button"
+              onClick={onDeleteSession}
+              className="grid w-full grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-3 text-left text-rose-700 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">
+                <Trash2 size={16} />
+              </span>
+              <span className="min-w-0">
+                <strong className="block text-sm font-black">删除会话</strong>
+                <span className="mt-0.5 block text-xs font-semibold text-rose-500/80 dark:text-rose-300/80">永久删除全部会话数据</span>
+              </span>
+              <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-black text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">
+                删除
+              </span>
+            </button>
           </div>
         </section>
       ) : null}

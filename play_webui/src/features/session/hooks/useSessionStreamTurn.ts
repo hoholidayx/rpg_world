@@ -718,11 +718,26 @@ export function useSessionStreamTurn({
     onExit()
   }, [logger, onExit, sessionId])
 
+  const prepareForSessionDeletion = useCallback(() => {
+    const active = activeStreamRef.current
+    if (!active) return
+    logger.info('stream local view cancelled for session deletion', {
+      requestId: active.requestId,
+      source: active.source,
+      turnId: active.turnId,
+    })
+    activeStreamRef.current = null
+    stoppingRequestIdRef.current = null
+    setStoppingRequestId(null)
+    active.controller.abort()
+  }, [logger])
+
   return {
     sending,
     stopping: Boolean(stoppingRequestId),
     streamLocalTurn,
     stopActiveStream,
     handleExitSession,
+    prepareForSessionDeletion,
   }
 }

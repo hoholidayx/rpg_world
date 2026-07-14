@@ -18,11 +18,12 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Trash2,
 } from 'lucide-react'
-import { Dialog } from '@/components/common/Dialog'
+import { ConfirmDialog, Dialog } from '@/components/common/Dialog'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import { getCurrentScene } from '@/lib/api/scene'
-import { createSession, getSessionHistory, listSessions } from '@/lib/api/sessions'
+import { createSession, deleteSession, getSessionHistory, listSessions } from '@/lib/api/sessions'
 import { listSessionStatusTables } from '@/lib/api/statusTables'
 import { listStories } from '@/lib/api/stories'
 import { cn } from '@/lib/utils/cn'
@@ -33,6 +34,7 @@ import type { StorySummary } from '@/types/story'
 
 type ActivityFilter = 'all' | SessionComputedActivity
 type SortMode = 'active' | 'created' | 'title' | 'story'
+type DeleteNotice = { message: string; pendingCleanup: boolean }
 
 type StorySessionAggregate = {
   story: StorySummary
@@ -383,6 +385,7 @@ function SessionInspector({
   loading,
   errors,
   onEnter,
+  onDelete,
 }: {
   item: SessionCenterItem | null
   scene?: Scene | null
@@ -391,6 +394,7 @@ function SessionInspector({
   loading: boolean
   errors: string[]
   onEnter: () => void
+  onDelete: () => void
 }) {
   if (!item) {
     return (
@@ -444,6 +448,19 @@ function SessionInspector({
           <Play size={16} />
           进入会话
         </button>
+        <div className="mt-5 border-t border-slate-200 pt-4">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 text-sm font-black text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+          >
+            <Trash2 size={16} />
+            删除会话
+          </button>
+          <p className="mt-2 text-center text-xs font-semibold leading-5 text-slate-400">
+            永久删除该会话及其全部游玩数据
+          </p>
+        </div>
       </div>
     </aside>
   )
@@ -547,6 +564,8 @@ function SessionCenterContent() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createStoryId, setCreateStoryId] = useState<number | null>(null)
   const [createTitle, setCreateTitle] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<SessionCenterItem | null>(null)
+  const [deleteNotice, setDeleteNotice] = useState<DeleteNotice | null>(null)
 
   const now = useMemo(() => Date.now(), [currentWorkspace])
 
@@ -636,6 +655,37 @@ function SessionCenterContent() {
     },
   })
 
+  const deleteSessionMutation = useMutation({
+    mutationFn: (item: SessionCenterItem) => deleteSession(item.id),
+    onSuccess: (result, item) => {
+      queryClient.setQueryData<SessionSummary[]>(
+        ['play-sessions', currentWorkspace, item.storyId],
+        (sessions) => sessions?.filter((session) => session.id !== item.id),
+      )
+      queryClient.removeQueries({ queryKey: ['play-session-scene', item.id] })
+      queryClient.removeQueries({ queryKey: ['play-session-status-tables', item.id] })
+      queryClient.removeQueries({ queryKey: ['play-session-history', item.id] })
+      queryClient.removeQueries({ queryKey: ['play-session-history-page', item.id] })
+      queryClient.removeQueries({ queryKey: ['play-session', item.id] })
+      queryClient.removeQueries({ queryKey: ['play-session-composer', item.id] })
+      queryClient.removeQueries({ queryKey: ['play-session-summaries', item.id] })
+      queryClient.removeQueries({ queryKey: ['play-session-summary', item.id] })
+      queryClient.removeQueries({ queryKey: ['play-session-context-preview', item.id] })
+      queryClient.removeQueries({ queryKey: ['session-main-llm', item.id] })
+      queryClient.removeQueries({ queryKey: ['session-rp-modules', item.id] })
+      queryClient.invalidateQueries({ queryKey: ['play-sessions', currentWorkspace] })
+      queryClient.invalidateQueries({ queryKey: ['play-story-library-aggregate', currentWorkspace, item.storyId] })
+      setSelectedSessionId(null)
+      setDeleteTarget(null)
+      setDeleteNotice({
+        pendingCleanup: result.runtimeCleanup === 'pending',
+        message: result.runtimeCleanup === 'pending'
+          ? '会话记录已删除，但运行目录仍待清理；可在设置的数据清理中处理。'
+          : `会话“${item.title || item.id}”已永久删除。`,
+      })
+    },
+  })
+
   const aggregatesLoading = sessionQueries.some((query) => query.isLoading)
   const initialSessionsLoading = aggregatesLoading && allItems.length === 0
   const aggregateErrors = aggregates.filter((aggregate) => aggregate.error)
@@ -715,6 +765,20 @@ function SessionCenterContent() {
           </button>
         </div>
       </section>
+
+      {deleteNotice ? (
+        <section className={cn(
+          'mb-5 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm font-semibold leading-6',
+          deleteNotice.pendingCleanup
+            ? 'border-amber-200 bg-amber-50 text-amber-800'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-800',
+        )}>
+          {deleteNotice.pendingCleanup
+            ? <AlertCircle size={18} className="mt-0.5 shrink-0" />
+            : <CheckCircle2 size={18} className="mt-0.5 shrink-0" />}
+          <span>{deleteNotice.message}</span>
+        </section>
+      ) : null}
 
       <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(280px,1fr)_auto_auto_auto] xl:items-center" aria-label="筛选会话">
         <label className="flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-500 shadow-sm focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
@@ -874,6 +938,12 @@ function SessionCenterContent() {
                   loading={sceneQuery.isLoading || statusTablesQuery.isLoading || historyQuery.isLoading}
                   errors={detailErrors}
                   onEnter={() => enterSession(selectedItem)}
+                  onDelete={() => {
+                    if (!selectedItem) return
+                    deleteSessionMutation.reset()
+                    setDeleteNotice(null)
+                    setDeleteTarget(selectedItem)
+                  }}
                 />
               </div>
 
@@ -923,6 +993,30 @@ function SessionCenterContent() {
           onTitleChange={setCreateTitle}
           onClose={() => setCreateDialogOpen(false)}
           onSubmit={submitCreateSession}
+        />
+      ) : null}
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="删除会话"
+          heading={`永久删除“${deleteTarget.title || deleteTarget.id}”？`}
+          body={(
+            <div>
+              <p>
+                会话 <strong>{deleteTarget.id}</strong> 的主历史、冷备、角色绑定、状态表、剧情记忆、配置覆盖和全部运行文件都会永久删除，且无法恢复。
+              </p>
+              {deleteSessionMutation.error ? (
+                <p className="mt-3 font-bold text-rose-800">
+                  删除失败：{toErrorMessage(deleteSessionMutation.error)}
+                </p>
+              ) : null}
+            </div>
+          )}
+          confirmLabel="永久删除"
+          pending={deleteSessionMutation.isPending}
+          onClose={() => {
+            if (!deleteSessionMutation.isPending) setDeleteTarget(null)
+          }}
+          onConfirm={() => deleteSessionMutation.mutate(deleteTarget)}
         />
       ) : null}
     </div>

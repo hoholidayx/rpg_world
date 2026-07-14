@@ -137,6 +137,8 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 
 Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream`、`/chat/stop` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`history-page`、`scene`、`commands`、`turn`、`stream`、`stop`、`player-character`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
 
+会话中心详情面板和 Session Room 设置菜单提供永久删除入口，并统一使用确认弹窗。`DELETE /play-api/v1/sessions/{session_id}` 转发到 Agent service：先阻止该 session 的新请求、取消活动及排队生成并释放 watcher/SQLite，再删除 catalog 行、全部级联数据（包括 append-only 冷备）和 runtime 目录。它与保留 session 身份的 `/clear` 不同；运行目录清理失败时返回 `runtimeCleanup="pending"`，隔离目录可继续在数据清理中处理。
+
 状态表在 `rpg_data` 中采用 SQLite document 真源：
 
 - 模板表和会话表都在 SQL 行内保存封装后的 `document_json`，对外通过 `StatusTableDocument` / `StatusTableRow` 等 dataclass 暴露，不把原始 JSON 字符串作为正文数据返回。

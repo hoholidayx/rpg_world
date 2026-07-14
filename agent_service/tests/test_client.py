@@ -66,6 +66,16 @@ class FakeAsyncClient:
             })
         return FakeResponse({"reply": "ok"})
 
+    async def delete(self, url: str, params=None):
+        self.calls.append(("DELETE", url, {"params": params}))
+        if url.endswith("/chat/session"):
+            return FakeResponse({
+                "status": "deleted",
+                "session_id": params["session_id"],
+                "runtime_cleanup": "deleted",
+            })
+        return FakeResponse({"status": "deleted"})
+
     def stream(self, method: str, url: str, json=None):
         self.calls.append((method, url, {"json": json}))
         return FakeStreamResponse([
@@ -335,4 +345,19 @@ async def test_client_stop_uses_request_id_payload() -> None:
         "POST",
         "http://agent/chat/stop",
         {"json": {"session_id": "s1", "request_id": "req1"}},
+    )
+
+
+async def test_client_delete_session_uses_global_session_id() -> None:
+    result = await AgentClient(base_url="http://agent").delete_session("s1")
+
+    assert result == {
+        "status": "deleted",
+        "session_id": "s1",
+        "runtime_cleanup": "deleted",
+    }
+    assert FakeAsyncClient.calls[-1] == (
+        "DELETE",
+        "http://agent/chat/session",
+        {"params": {"session_id": "s1"}},
     )
