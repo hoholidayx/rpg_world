@@ -225,7 +225,7 @@ Story 主数据字段中，`summary` 是短摘要，`first_message` 是会话开
 
 玩家扮演角色是 session 级运行语义。绑定状态对外只暴露 `bound | invalid`：缺失绑定、角色不存在、未挂载到当前 story、snapshot 损坏或 snapshot 的 mount/story 与当前挂载不一致，都统一视为 `invalid`。WebUI 不在进入 SessionRoom 前拦截，而是在 SessionRoom 内打开不可取消的角色选择弹窗；没有可选角色时显示阻塞空态。CLI / Telegram / Agent API 允许创建空 session，但普通消息在绑定前只返回固定编号角色列表，不调用 LLM、不写 user history。
 
-绑定和切换必须统一经 Agent 命令链路：`/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 只负责把角色 ID 转发到 Agent service，由 Agent service 映射为当前 story 已挂载角色的 1-based 序号并执行 `/role_bind`；不要在 Play API 或 DataManager 中直接写 `rpg_session_profiles`。首次成功绑定且 main history 为空、story `first_message` 非空时，`SessionRoleService` 追加一条渲染后的 assistant 开场消息到 main history 和 backup history；已有 history、后续切换或清空历史后都不重复追加。Agent 的 send/send_stream 在命令分发之后、进入 LLM 前强校验玩家角色，只有 `bound` 才进入正常生成。
+绑定和切换必须统一经 Agent 命令链路：`/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 只负责把角色 ID 转发到 Agent service，由 Agent service 映射为当前 story 已挂载角色的 1-based 序号并执行 `/role_bind`；不要在 Play API 或 DataManager 中直接写 `rpg_session_profiles`。首次成功绑定且 main history 为空、story `first_message` 非空时，`SessionRoleService` 追加一条渲染后的 assistant 开场消息到 main history 和 backup history；普通历史删除/截断或后续切换不重复追加，`/clear` 完整重置是唯一例外，会按当前有效绑定重新渲染开场。Agent 的 send/send_stream 在命令分发之后、进入 LLM 前强校验玩家角色，只有 `bound` 才进入正常生成。
 
 玩家角色必须在 Context 门禁前进入不可变 turn snapshot，并由主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是玩家身份唯一真源：角色卡按当前 session 投影为 `PLAYER_CHARACTER` 或 `NPC`，Story Prompt、开场消息、历史、摘要、记忆或旧 metadata 与其冲突时均以绑定快照为准。玩家/NPC 标记不得写回 workspace 角色 metadata；角色切换后刷新 MemorySubAgent 等缓存上下文，但不重写已有历史。
 
@@ -289,7 +289,7 @@ send_stream(C) → QueueItem(TurnRequest C) → [queue]    → ...等待...
 ```text
 RPGGameAgent（composition root + public facade）
 ├── AgentMailbox              QueueItem、consumer、stream task、取消与错误事件
-├── AgentSessionService       角色、history、truncate/delete/clear、reload/switch
+├── AgentSessionService       角色、history、truncate/delete/reset、reload/switch
 ├── AgentRuntimeLifecycle     初始化、AgentContextResources、SubAgents、compressor、watcher
 ├── MainModelRuntime          MainLLMSelection、provider cache、model
 ├── AgentContextService       fixed layer、Context 构建/预览、窗口门禁
@@ -571,7 +571,7 @@ agent.send(user_input)
 
 | 命令 | 来源 | 功能 |
 |---|---|---|
-| `/clear` | 内置 | 清空对话历史 |
+| `/clear` | 内置 | 保留 session 身份/配置与原生状态表结构，清空游玩数据、重建 Story 状态副本并重新发送开场 |
 | `/reload` | 内置 | 重新加载 RPG 数据 |
 | `/context` | 内置 | 查看上下文结构和 token 用量 |
 | `/compact [N] [K]` | MemorySubAgent | 压缩最老的 N 轮对话为摘要 |
@@ -654,7 +654,7 @@ value，不能增删改 key。key/value 写入操作以
 `get_data_service_gateway().status` 取得 service，不要新增 per-service 全局 getter。
 每个 `StatusTableRow` 可配置 `updateFrequency`、`updateRule`、`deferredIntervalTurns`；
 `event_driven` 必须提供非空 `updateRule`，只有 `deferred` 可设置正整数间隔，旧 document 缺字段时按
-`realtime` 读取。deferred 进度保存在 `rpg_session_status_deferred_progress`，历史 truncate/clear 只收缩进度边界，不回滚已经提交的状态值。
+`realtime` 读取。deferred 进度保存在 `rpg_session_status_deferred_progress`；历史 truncate 只收缩进度边界、不回滚已经提交的状态值。`/clear` 删除全部进度与旧 `template_copy` 并按当前 Story 挂载重建；`session_native` 表保留 ID 和完整结构，但所有 value 置空。同名原生表与当前模板冲突时 reset 原子失败。
 gateway/bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session
 状态表副本，不负责发现或创建业务索引。默认不清理不在 SQL 索引中的 workspace/story/session 目录；
 开启开关是 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true`。

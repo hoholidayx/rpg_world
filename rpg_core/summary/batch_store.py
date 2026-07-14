@@ -31,6 +31,13 @@ class BatchSummaryStore:
         self._load_index()
         self._register_watcher()
 
+    def close(self) -> None:
+        """Detach this store from the global file watcher."""
+
+        from rpg_core.utils.watcher import get_watcher
+
+        get_watcher().unregister(self._dir, self.reload)
+
     # ── 批次摘要 ───────────────────────────────────────────────────
 
     def save_batch_summary(

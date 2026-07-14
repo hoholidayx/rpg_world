@@ -99,6 +99,41 @@ def test_status_document_updates_existing_values_without_changing_structure() ->
         document.with_existing_values([])
 
 
+def test_status_document_clears_values_without_changing_structure() -> None:
+    document = StatusTableDocument.from_rows(
+        key_column="字段",
+        value_column="当前值",
+        rows=[
+            StatusTableRow(
+                "关系",
+                "亲密",
+                True,
+                {"format": "text"},
+                update_frequency=STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
+                update_rule="关系发生明确变化时更新",
+            ),
+            StatusTableRow(
+                "长期信任",
+                "高",
+                update_frequency=STATUS_UPDATE_FREQUENCY_DEFERRED,
+                deferred_interval_turns=8,
+            ),
+        ],
+        metadata={"ui": {"compact": True}},
+    )
+
+    cleared = document.with_cleared_values()
+
+    assert cleared.data_rows == (("关系", ""), ("长期信任", ""))
+    assert cleared.headers == document.headers
+    assert cleared.metadata == document.metadata
+    assert cleared.rows[0].runtime_key_locked is True
+    assert cleared.rows[0].metadata == {"format": "text"}
+    assert cleared.rows[0].update_rule == "关系发生明确变化时更新"
+    assert cleared.rows[1].deferred_interval_turns == 8
+    assert document.data_rows == (("关系", "亲密"), ("长期信任", "高"))
+
+
 def test_status_update_policy_round_trips_and_legacy_defaults_to_realtime() -> None:
     document = StatusTableDocument.from_rows(rows=[
         StatusTableRow(

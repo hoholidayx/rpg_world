@@ -97,3 +97,27 @@ def test_file_watcher_clear_all_cancels_pending_timers(tmp_path: Path, monkeypat
     assert timers[0].cancelled is True
     timers[0].fire()
     assert reloads == []
+
+
+def test_file_watcher_unregister_removes_only_owned_callback(tmp_path: Path, watcher_module):
+    watcher = watcher_module.FileWatcher()
+    watched_file = tmp_path / "data.json"
+    watched_file.write_text("v1", encoding="utf-8")
+    reloads: list[str] = []
+
+    def first() -> None:
+        reloads.append("first")
+
+    def second() -> None:
+        reloads.append("second")
+
+    watcher.register(watched_file, first)
+    watcher.register(watched_file, second)
+    watcher.unregister(watched_file, first)
+
+    watcher._debounce_seq[watched_file.resolve()] = 1
+    watcher._emit_change(watched_file.resolve(), 1)
+
+    assert reloads == ["second"]
+    watcher.unregister(watched_file, second)
+    assert watched_file.resolve() not in watcher._callbacks

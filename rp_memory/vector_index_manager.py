@@ -57,6 +57,7 @@ class VectorIndexManager:
         self._embedding = embedding
         self._sources = sources
         self._chunker = chunker or Chunker()
+        self._watch_callbacks: list[tuple[Path, Callable[[], None]]] = []
 
     # ── lifecycle ─────────────────────────────────────────────────────
 
@@ -66,6 +67,16 @@ class VectorIndexManager:
         for src in self._sources:
             self._register(src)
         logger.info("[VectorIndex] start done")
+
+    def close(self) -> None:
+        """Detach all source callbacks from the global file watcher."""
+
+        from rpg_core.utils.watcher import get_watcher
+
+        watcher = get_watcher()
+        for target, callback in self._watch_callbacks:
+            watcher.unregister(target, callback)
+        self._watch_callbacks.clear()
 
     def reindex_all(self) -> None:
         """强制全量索引：遍历所有 source，同步阻塞直到嵌入+写入完成。
@@ -112,7 +123,9 @@ class VectorIndexManager:
         def callback() -> None:
             self.on_source_change(src.source_id)
 
-        get_watcher().register(target.resolve(), callback)
+        resolved_target = target.resolve()
+        get_watcher().register(resolved_target, callback)
+        self._watch_callbacks.append((resolved_target, callback))
         logger.info("[VectorIndex] registered source=%s path=%s", src.source_id, target)
 
     def _iter_files(self, src: WatchSource) -> list[Path]:

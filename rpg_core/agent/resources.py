@@ -29,6 +29,15 @@ class AgentContextResources:
     scene_tracker: "SceneTracker | None"
     memory_manager: "MemoryManager | None"
 
+    def close(self) -> None:
+        """Release every session-scoped file watcher and storage handle."""
+
+        try:
+            if self.memory_manager is not None:
+                self.memory_manager.close()
+        finally:
+            self.builder.close()
+
     @classmethod
     def from_factory_result(
         cls,

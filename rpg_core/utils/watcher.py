@@ -78,7 +78,7 @@ class FileWatcher:
         return cls._instance
 
     def _init(self) -> None:
-        self._callbacks: dict[Path, Callable[[], None]] = {}
+        self._callbacks: dict[Path, list[Callable[[], None]]] = {}
         self._debounce_seq: dict[Path, int] = {}
         self._debounce_timers: dict[Path, threading.Timer] = {}
         self._lock = threading.RLock()
@@ -99,14 +99,14 @@ class FileWatcher:
         """
         watched_path = watched_path.resolve()
         logger.info("register path=%s", watched_path)
-        if watched_path in self._callbacks:
-            existing = self._callbacks[watched_path]
-            self._callbacks[watched_path] = lambda: (existing(), on_reload())
-        else:
-            self._callbacks[watched_path] = on_reload
+        with self._lock:
+            callbacks = self._callbacks.setdefault(watched_path, [])
+            is_new_path = not callbacks
+            if on_reload not in callbacks:
+                callbacks.append(on_reload)
 
         # If observer already running, schedule this path now
-        if self._started and self._observer is not None:
+        if is_new_path and self._started and self._observer is not None:
             watch_target = str(watched_path.parent if watched_path.is_file() else watched_path)
             if watched_path.exists():
                 self._observer.schedule(
@@ -115,6 +115,26 @@ class FileWatcher:
                     recursive=True,
                 )
                 logger.info("  -> scheduled with running observer")
+
+    def unregister(self, watched_path: Path, on_reload: Callable[[], None]) -> None:
+        """Remove one callback without disturbing other users of the path."""
+
+        watched_path = watched_path.resolve()
+        with self._lock:
+            callbacks = self._callbacks.get(watched_path)
+            if callbacks is None:
+                return
+            self._callbacks[watched_path] = [
+                callback for callback in callbacks if callback != on_reload
+            ]
+            if self._callbacks[watched_path]:
+                return
+            self._callbacks.pop(watched_path, None)
+            timer = self._debounce_timers.pop(watched_path, None)
+            if timer is not None:
+                timer.cancel()
+            self._debounce_seq.pop(watched_path, None)
+        logger.info("unregister path=%s", watched_path)
 
     @property
     def is_available(self) -> bool:
@@ -205,11 +225,20 @@ class FileWatcher:
                 logger.info("_emit_change %s -> stale timer ignored (seq=%s current=%s)", path, seq, current_seq)
                 return
             self._debounce_timers.pop(path, None)
-            callback = self._callbacks.get(path)
+            callbacks = tuple(self._callbacks.get(path, ()))
 
-        if callback:
-            logger.info("_emit_change %s -> trigger reload (seq=%s)", path, seq)
-            callback()
+        if callbacks:
+            logger.info(
+                "_emit_change %s -> trigger %d reload callback(s) (seq=%s)",
+                path,
+                len(callbacks),
+                seq,
+            )
+            for callback in callbacks:
+                try:
+                    callback()
+                except Exception:
+                    logger.exception("watch callback failed path=%s", path)
         else:
             logger.warning("  -> no callback registered for %s", path)
 

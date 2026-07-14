@@ -114,6 +114,16 @@ class RPGContextBuilder:
     def set_batch_summary_store(self, store: BatchSummaryStore) -> None:
         self._batch_summary_store = store
 
+    def close(self) -> None:
+        """Release session-local store registrations and transient context."""
+
+        if self._summary_store is not None:
+            self._summary_store.close()
+        if self._batch_summary_store is not None:
+            self._batch_summary_store.close()
+        if self._recalled_memory is not None:
+            self._recalled_memory.clear()
+
     @property
     def summary_store(self) -> SummaryStore | None:
         """Read-only access for runtime composition."""

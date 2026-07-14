@@ -129,7 +129,14 @@ class AgentRuntimeLifecycle:
         if not self._initialized:
             return
         self._replace_resources(self._session_id)
+        if self._resources.memory_manager is not None:
+            self._resources.memory_manager.init()
         tool_service.refresh_base_registry()
+
+    def release_resources(self) -> None:
+        """Close the active resource set before destructive session file work."""
+
+        self._resources.close()
 
     def refresh_sub_agent_bindings(self) -> None:
         """Refresh cached SubAgent context after session-local role changes."""
@@ -168,7 +175,9 @@ class AgentRuntimeLifecycle:
         )
 
     def _replace_resources(self, session_id: str) -> None:
-        self._resources = self._build_resources(session_id)
+        replacement = self._build_resources(session_id)
+        self._resources.close()
+        self._resources = replacement
         builder = self._resources.builder
         if self._memory_sub_agent is not None:
             self._memory_sub_agent.replace_session_stores(

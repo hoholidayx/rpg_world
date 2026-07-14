@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -9,6 +12,7 @@ from loguru import logger
 from rpg_core.context.rpg_context import Message
 
 if TYPE_CHECKING:
+    from rpg_data.models import SessionResetResult
     from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
     from rpg_core.agent.mailbox import AgentMailbox
     from rpg_core.agent.tool_service import AgentToolService
@@ -169,10 +173,100 @@ class AgentSessionService:
         self._clamp_deferred_progress()
         return deleted
 
-    def clear_history(self) -> None:
-        if self._lifecycle.initialized:
-            self._lifecycle.session_manager.clear()
-            self._clamp_deferred_progress(0)
+    async def reset_session(self) -> "SessionResetResult":
+        """Reset gameplay data, runtime files, and session-scoped resources."""
+
+        from rpg_data.services import get_data_service_gateway
+
+        if not self._lifecycle.initialized:
+            raise RuntimeError("Agent runtime is not initialized")
+
+        session_id = self._lifecycle.session_id
+        gateway = get_data_service_gateway()
+        runtime_dir = gateway.catalog.resolve_session_runtime_dir(session_id)
+        quarantine_dir = runtime_dir.with_name(
+            f".{runtime_dir.name}.clear-{uuid.uuid4().hex}"
+        )
+        runtime_moved = False
+        database_reset = False
+        logger.info(
+            _TAG + " session reset starting: session_id={}, runtime_dir={}",
+            session_id,
+            runtime_dir,
+        )
+
+        try:
+            self._lifecycle.release_resources()
+            if runtime_dir.exists():
+                runtime_dir.rename(quarantine_dir)
+                runtime_moved = True
+
+            result = gateway.session_reset.reset(session_id)
+            database_reset = True
+
+            if runtime_moved:
+                shutil.rmtree(quarantine_dir)
+
+            await self._lifecycle.reload_resources(self._tool_service)
+            self._lifecycle.session_manager.load()
+        except Exception:
+            logger.exception(
+                _TAG + " session reset failed: session_id={}, database_reset={}",
+                session_id,
+                database_reset,
+            )
+            self._recover_reset_runtime(
+                runtime_dir=runtime_dir,
+                quarantine_dir=quarantine_dir,
+                runtime_moved=runtime_moved,
+                restore_old_runtime=not database_reset,
+            )
+            try:
+                await self._lifecycle.reload_resources(self._tool_service)
+                self._lifecycle.session_manager.load()
+            except Exception:
+                logger.exception(
+                    _TAG + " session reset recovery reload failed: session_id={}",
+                    session_id,
+                )
+            raise
+
+        logger.info(
+            _TAG
+            + " session reset completed: session_id={}, messages={}, outcomes={}, story_memories={}, template_status_tables_cleared={}, template_status_tables_initialized={}, native_status_tables_reset={}, first_message_appended={}",
+            session_id,
+            result.messages_cleared,
+            result.narrative_outcomes_cleared,
+            result.story_memories_cleared,
+            result.template_status_tables_cleared,
+            result.template_status_tables_initialized,
+            result.session_native_status_tables_reset,
+            bool(result.first_message),
+        )
+        return result
+
+    @staticmethod
+    def _recover_reset_runtime(
+        *,
+        runtime_dir: Path,
+        quarantine_dir: Path,
+        runtime_moved: bool,
+        restore_old_runtime: bool,
+    ) -> None:
+        if not runtime_moved or not quarantine_dir.exists():
+            return
+        if restore_old_runtime:
+            if runtime_dir.exists():
+                shutil.rmtree(runtime_dir)
+            quarantine_dir.rename(runtime_dir)
+            return
+        try:
+            shutil.rmtree(quarantine_dir)
+        except Exception:
+            logger.exception(
+                _TAG + " failed to remove quarantined reset runtime: path={}",
+                quarantine_dir,
+            )
 
     async def reload_rpg_context(self) -> None:
         await self._lifecycle.reload_resources(self._tool_service)

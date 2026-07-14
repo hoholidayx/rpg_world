@@ -15,6 +15,7 @@ class _MemoryManager:
         self.session_id = session_id
         self.init_calls = 0
         self.reindex_calls = 0
+        self.close_calls = 0
 
     def init(self) -> None:
         self.init_calls += 1
@@ -22,14 +23,21 @@ class _MemoryManager:
     def reindex(self) -> None:
         self.reindex_calls += 1
 
+    def close(self) -> None:
+        self.close_calls += 1
+
 
 class _Builder:
     config = SimpleNamespace(enable_lorebook=True, enable_character=True)
 
     def __init__(self, session_id: str) -> None:
+        self.close_calls = 0
         self.summary_store = f"summary:{session_id}"
         self.story_memory_store = f"story:{session_id}"
         self.batch_summary_store = f"batch:{session_id}"
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 class _Scene:
@@ -140,6 +148,18 @@ def _resources(session_id: str) -> AgentContextResources:
     )
 
 
+def test_resources_close_releases_builder_when_memory_close_fails() -> None:
+    resources = _resources("s1")
+    memory_manager = resources.memory_manager
+    assert memory_manager is not None
+    memory_manager.close = MagicMock(side_effect=RuntimeError("memory close failed"))
+
+    with pytest.raises(RuntimeError, match="memory close failed"):
+        resources.close()
+
+    assert resources.builder.close_calls == 1
+
+
 @pytest.fixture
 def lifecycle_deps(monkeypatch):  # noqa: ANN201
     _SubAgent.instances = []
@@ -220,6 +240,7 @@ async def test_lifecycle_switch_rebuilds_resources_and_rebinds_subagents(
     tools = _ToolService()
     await lifecycle.initialize(tool_service=tools, mailbox=_Mailbox())
     status_sub_agent = lifecycle.status_sub_agent
+    old_resources = lifecycle.resources
 
     await lifecycle.switch_session("new", tool_service=tools)
 
@@ -228,10 +249,38 @@ async def test_lifecycle_switch_rebuilds_resources_and_rebinds_subagents(
     assert built == ["old", "new"]
     assert lifecycle.resources.memory_manager.session_id == "new"
     assert lifecycle.resources.memory_manager.init_calls == 1
+    assert old_resources.memory_manager.close_calls == 1
+    assert old_resources.builder.close_calls == 1
     assert status_sub_agent.providers[0].session_id == "new"
     assert len(status_sub_agent.contexts) == 2
     assert tools.refresh_calls == 2
     assert lifecycle_deps.start.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_release_and_reload_reinitializes_memory_and_tools(
+    lifecycle_deps,
+) -> None:
+    lifecycle = AgentRuntimeLifecycle(
+        session_id="s1",
+        world_name="World",
+        history_enabled=False,
+        model_runtime=_ModelRuntime(),
+        command_dispatcher=_Commands(),
+        resource_factory=lambda **_kwargs: _resources("s1"),
+    )
+    tools = _ToolService()
+    await lifecycle.initialize(tool_service=tools, mailbox=_Mailbox())
+    old_resources = lifecycle.resources
+
+    lifecycle.release_resources()
+    await lifecycle.reload_resources(tools)
+
+    assert old_resources.memory_manager.close_calls >= 1
+    assert old_resources.builder.close_calls >= 1
+    assert lifecycle.resources is not old_resources
+    assert lifecycle.resources.memory_manager.init_calls == 1
+    assert tools.refresh_calls == 2
 
 
 @pytest.mark.asyncio

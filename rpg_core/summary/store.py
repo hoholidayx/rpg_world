@@ -34,6 +34,13 @@ class SummaryStore:
             self._save()  # ensure file exists for FileWatcher
         _register_watcher(self._file, self.reload)
 
+    def close(self) -> None:
+        """Detach this store from the global file watcher."""
+
+        from rpg_core.utils.watcher import get_watcher
+
+        get_watcher().unregister(self._file, self.reload)
+
     # ── public API ────────────────────────────────────────
 
     def reload(self) -> None:

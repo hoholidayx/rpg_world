@@ -20,6 +20,7 @@ import {
   parseNarrativeOutcomeToolResult,
 } from '../sessionTimelineMessages'
 import {
+  HISTORY_REFRESH_MODE,
   SESSION_MESSAGE_STATUS,
   SESSION_TIMELINE_ROLE,
   type RefreshSessionDataOptions,
@@ -441,6 +442,7 @@ export function useSessionStreamTurn({
     }
     const turnUsageFallback = contextPreviewUsage
     const commandInput = isSlashCommandInput(text)
+    const clearCommandInput = text.trim() === '/clear'
     const displayedUserMessage = commandInput
       ? {
           ...userMessage,
@@ -546,9 +548,13 @@ export function useSessionStreamTurn({
       if (streamFailure) throw new Error(streamFailure)
       const refreshed = await refreshSessionData({
         silent: true,
-        clearLastTurnUsage: false,
-        preserveDiagnostics: true,
-        preserveCommandMessages: commandInput,
+        clearLastTurnUsage: clearCommandInput,
+        preserveDiagnostics: !clearCommandInput,
+        preserveCommandMessages: commandInput && !clearCommandInput,
+        historyMode: clearCommandInput
+          ? HISTORY_REFRESH_MODE.LATEST
+          : HISTORY_REFRESH_MODE.ACTIVE,
+        scrollToBottom: clearCommandInput,
       })
       logger.info('stream refresh after completion', {
         requestId,

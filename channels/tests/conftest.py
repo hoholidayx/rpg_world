@@ -27,7 +27,7 @@ class FakeAgent:
         self._initialized = True
         self._commands = [
             CommandDef(name="/help", description="help", detail="list commands"),
-            CommandDef(name="/clear", description="clear", detail="clear history"),
+            CommandDef(name="/clear", description="clear", detail="reset session gameplay data"),
             CommandDef(name="/compact", description="compact", detail="compact history"),
             CommandDef(name="/session_create", description="session create", detail="create session"),
             CommandDef(name="/session_switch", description="session switch", detail="switch session"),

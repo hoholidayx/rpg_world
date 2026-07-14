@@ -132,7 +132,7 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - Play WebUI 新建或进入 session 后统一在 SessionRoom 内处理选角；invalid 时打开不可取消弹窗，绑定前禁用输入区。设置菜单可以切换当前扮演角色，切换只影响后续 user 消息展示和后续 prompt 语义，不重写历史。
 - CLI / Telegram / Agent API 允许建立空 session；绑定前普通消息只返回固定编号角色列表，不调用 LLM、不写 user history。
 - 绑定与切换统一走 Agent 命令 `/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 会转发到 Agent service，由 Agent service 将角色 ID 映射为当前 story 已挂载角色序号并执行同一命令；不要在 Play API/DataManager 中直接写绑定。
-- 首次成功绑定且 main history 为空、story `first_message` 非空时，`SessionRoleService` 会按刚绑定的角色渲染模板，再将同一条 assistant 开场消息写入 main 和 backup history；已有 history 或后续切换角色时不会重复追加或改写。
+- 首次成功绑定且 main history 为空、story `first_message` 非空时，`SessionRoleService` 会按刚绑定的角色渲染模板，再将同一条 assistant 开场消息写入 main 和 backup history；普通历史删除或后续切换角色时不会重复追加。`/clear` 完整重置是例外：有效绑定会按当前模板重新写入 turn 1 开场，下一次玩家输入从 turn 2 开始。
 - 玩家身份在 Context 门禁前固化进 `TurnExecutionSnapshot`，由门禁、主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是身份唯一真源；角色卡只在 Context 投影时标注为 `PLAYER_CHARACTER` 或 `NPC`，不依赖角色 metadata。当前绑定覆盖冲突的旧历史、摘要和记忆，但不会自动改写这些既有数据。
 
 Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream`、`/chat/stop` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`history-page`、`scene`、`commands`、`turn`、`stream`、`stop`、`player-character`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
@@ -148,7 +148,7 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 - 创建 session 时会把当时已挂载模板的 `document_json` 复制到 `rpg_session_status_tables`，`origin="template_copy"`，并把 story mount、角色绑定和 `characterName` 快照写入 session 表 metadata；角色名只用于在 LLM 上下文中分组角色状态表。
 - 角色绑定要求挂载角色具有非空 name。旧 session 缺少 `characterName` 时，context 读取优先通过 `characterMountId -> rpg_story_characters -> rpg_characters` 反查；缺少直接角色挂载 ID 时可由状态表 `mountId -> rpg_story_status_tables.story_character_mount_id` 回退解析，成功后回填快照。无法解析的角色状态表会记录 warning 并从 LLM 上下文排除。
 - 模板后续修改不影响已有 session 副本；运行时直接新建的会话表写入 `rpg_session_status_tables`，`origin="session_native"`。
-- migration `0008_status_update_frequency.sql` 新增 `rpg_session_status_deferred_progress`，以运行时表 ID + 字段 key 保存最后处理 turn。deferred 的 document 值与进度在同一数据库事务中提交；归纳失败不推进进度，truncate/clear 只收缩进度边界，不回滚已经提交的状态值。
+- migration `0008_status_update_frequency.sql` 新增 `rpg_session_status_deferred_progress`，以运行时表 ID + 字段 key 保存最后处理 turn。deferred 的 document 值与进度在同一数据库事务中提交；归纳失败不推进进度，truncate 只收缩进度边界且不回滚已经提交的状态值。`/clear` 删除全部进度和旧 Story 模板副本，再按当前挂载重建；`session_native` 表保留 ID、结构、metadata 和字段策略，仅将所有 value 置空。同名原生表与当前 Story 模板冲突时整个 reset 回滚。
 - `DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；service 不扫描目录补业务索引，也不维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。
 - Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
 - `当前场景` 是 `status_kind="scene"` 的特殊状态表，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。scene document 的所有字段固定为 `realtime`，保存边界拒绝 `event_driven` / `deferred` / `manual`。LLM 默认只能修改已有 key 的 value；`agent.scene.allow_runtime_key_changes=true` 才允许通过 scene 工具增删非锁定 key，管理端手工 CRUD 不受影响。
@@ -196,7 +196,7 @@ Telegram 渠道当前支持：
 ```text
 RPGGameAgent（composition root + public facade）
 ├── AgentMailbox              FIFO、stream task、requestId 取消、错误事件
-├── AgentSessionService       角色、history、truncate/delete/clear、reload/switch
+├── AgentSessionService       角色、history、truncate/delete/reset、reload/switch
 ├── AgentRuntimeLifecycle     初始化、AgentContextResources、SubAgents、compressor、watcher
 ├── MainModelRuntime          MainLLMSelection、provider cache、当前模型
 ├── AgentContextService       fixed layer、Context 构建/预览、窗口门禁

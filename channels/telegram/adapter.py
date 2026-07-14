@@ -65,7 +65,7 @@ _LOCAL_COMMANDS = {
     "role_bind": "选择或切换玩家角色",
     "sessions": "查看并切换会话",
     "session_create": "新建并进入会话",
-    "clear": "清空当前会话历史",
+    "clear": "重置当前会话并重新开始游戏",
     "compact": "压缩当前会话上下文",
     "stop": "停止当前生成",
     "cancel": "取消正在输入的新会话标题",

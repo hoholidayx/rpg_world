@@ -16,7 +16,7 @@ class _StatusManager:
         return 0
 
 
-def test_history_truncate_and_clear_clamp_deferred_progress() -> None:
+def test_history_truncate_clamps_deferred_progress() -> None:
     session = SessionManager(history_enabled=False)
     session.replace_history([
         Message(Role.USER, "第一轮", turn_id=1, seq_in_turn=1),
@@ -34,7 +34,6 @@ def test_history_truncate_and_clear_clamp_deferred_progress() -> None:
     service = AgentSessionService(lifecycle=lifecycle, tool_service=object())
 
     result = service.truncate_history_from_turn_now(2)
-    service.clear_history()
 
     assert result["removed"] == 2
-    assert status.boundaries == [1, 0]
+    assert status.boundaries == [1]

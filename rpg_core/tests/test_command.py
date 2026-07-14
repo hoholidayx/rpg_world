@@ -17,7 +17,7 @@ class TestCommandDispatcher:
     @pytest.mark.asyncio
     async def test_help_command_lists_all_commands(self):
         fake_agent = SimpleNamespace(
-            clear_history=lambda: None,
+            reset_session=AsyncMock(),
             reload_rpg_context=AsyncMock(),
             get_context_markdown=AsyncMock(return_value="context"),
             session_id="s1",
@@ -35,6 +35,27 @@ class TestCommandDispatcher:
         assert "可用命令:" in result.reply
         assert "/help" in result.reply
         assert "/clear" in result.reply
+
+    @pytest.mark.asyncio
+    async def test_clear_command_awaits_complete_session_reset(self):
+        fake_agent = SimpleNamespace(reset_session=AsyncMock(return_value=models.SessionResetResult(
+            session_id="s1",
+            first_message="新的开场白",
+        )))
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/clear")
+
+        assert result.handled is True
+        assert "游玩数据已清空" in result.reply
+        assert "会话原生状态表已保留并清空值" in result.reply
+        assert result.reply.endswith("新的开场白")
+        fake_agent.reset_session.assert_awaited_once_with()
+
+        invalid = await dispatcher.dispatch("/clear now")
+        assert invalid.reply == "[错误] 用法：/clear"
+        fake_agent.reset_session.assert_awaited_once_with()
 
     @pytest.mark.asyncio
     async def test_unknown_slash_command_is_handled_as_error(self):
@@ -202,7 +223,7 @@ class TestCommandDispatcher:
     @pytest.mark.asyncio
     async def test_sessions_command_marks_current_session(self, monkeypatch):
         fake_agent = SimpleNamespace(
-            clear_history=lambda: None,
+            reset_session=AsyncMock(),
             reload_rpg_context=AsyncMock(),
             get_context_markdown=AsyncMock(return_value="context"),
             session_id="s2",

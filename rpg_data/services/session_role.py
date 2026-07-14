@@ -184,6 +184,7 @@ class SessionRoleService:
                 session_id,
                 prepared_first_message,
                 story_id=int(session.story_id),
+                trigger="player_bind",
             )
 
         logger.info(
@@ -199,6 +200,27 @@ class SessionRoleService:
             ),
             first_message=first_message,
         )
+
+    def append_first_message_for_reset(self, session_id: str) -> str:
+        """Render and append a fresh opening for the current valid binding."""
+
+        state = self.get_state(session_id)
+        if state.status != models.PLAYER_CHARACTER_STATUS_BOUND or state.player is None:
+            logger.info(
+                "skip reset first message because player binding is invalid session_id=%s",
+                session_id,
+            )
+            return ""
+
+        first_message = self._prepare_first_message(session_id, state.player)
+        session = self._require_session(session_id)
+        with self._database.atomic():
+            return self._append_prepared_first_message_if_empty(
+                session_id,
+                first_message,
+                story_id=int(session.story_id),
+                trigger="session_reset",
+            )
 
     def render_role_bind_prompt(self, session_id: str, *, error: str = "") -> str:
         options = self.list_options(session_id)
@@ -284,6 +306,7 @@ class SessionRoleService:
         first_message: str,
         *,
         story_id: int,
+        trigger: str,
     ) -> str:
         if not first_message:
             return ""
@@ -316,9 +339,10 @@ class SessionRoleService:
             metadata_json=metadata_json,
         )
         logger.info(
-            "appended story first message after player bind session_id=%s story_id=%s first_message_chars=%s",
+            "appended story first message session_id=%s story_id=%s trigger=%s first_message_chars=%s",
             session_id,
             story_id,
+            trigger,
             len(first_message),
         )
         return first_message

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from rpg_data.models import SessionResetResult
     from rpg_data.services import SessionPlayerCharacterBindResult
     from rpg_core.agent.sub_agents.base import BaseSubAgent
     from rpg_core.context.inspector import LayerInfo
@@ -27,7 +28,7 @@ class AgentCommandTarget(Protocol):
     @property
     def session_manager(self) -> "SessionManager": ...
 
-    def clear_history(self) -> None: ...
+    async def reset_session(self) -> "SessionResetResult": ...
     async def reload_rpg_context(self) -> None: ...
     def reindex_memory(self) -> bool: ...
     def list_commands(self) -> list["CommandDef"]: ...
@@ -74,9 +75,17 @@ CommandProvider = Callable[[], list["ModuleCommand"]]
 
 
 async def _cmd_clear(agent: AgentCommandTarget, args: list[str]) -> str:
-    """清空当前会话的对话历史。"""
-    agent.clear_history()
-    return "对话历史已清空。"
+    """清空当前会话的游玩数据并重置状态。"""
+    if args:
+        return "[错误] 用法：/clear"
+    result = await agent.reset_session()
+    reply = (
+        "当前会话的游玩数据已清空；Story 状态模板已重建，"
+        "会话原生状态表已保留并清空值。"
+    )
+    if result.first_message:
+        return f"{reply}\n\n{result.first_message}"
+    return reply
 
 
 async def _cmd_reload(agent: AgentCommandTarget, args: list[str]) -> str:
@@ -271,8 +280,8 @@ class CommandDispatcher:
             "用法：/help。输出当前 agent 支持的全部斜杠命令。", _cmd_help,
         )
         self.register_builtin(
-            "/clear", "清空当前会话的对话历史",
-            "重置对话上下文，清除所有已发送的消息记录。", _cmd_clear,
+            "/clear", "完全重置当前会话的游玩数据",
+            "清除主历史、摘要、记忆、向量索引和运行文件，重建 Story 状态副本，保留并清空会话原生表；有效角色绑定会重新收到开场。", _cmd_clear,
         )
         self.register_builtin(
             "/reload", "重新加载 RPG 数据（角色卡、世界书）",

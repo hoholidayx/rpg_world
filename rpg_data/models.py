@@ -21,6 +21,8 @@ __all__ = [
     "SessionMessage",
     "SessionPlayerCharacterSnapshot",
     "SessionProfile",
+    "SessionResetResult",
+    "SessionStatusResetResult",
     "SessionStoryMemory",
     "SessionStatusTable",
     "Story",
@@ -373,6 +375,32 @@ class SessionProfile:
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionResetResult:
+    """Counts produced by one atomic reset of session-owned runtime data."""
+
+    session_id: str
+    messages_cleared: int = 0
+    narrative_outcomes_cleared: int = 0
+    story_memories_cleared: int = 0
+    template_status_tables_cleared: int = 0
+    template_status_tables_initialized: int = 0
+    session_native_status_tables_reset: int = 0
+    deferred_progress_cleared: int = 0
+    first_message: str = ""
+
+
+@dataclass(frozen=True)
+class SessionStatusResetResult:
+    """Counts produced by resetting one session's status-table runtime."""
+
+    session_id: str
+    template_tables_cleared: int = 0
+    template_tables_initialized: int = 0
+    native_tables_reset: int = 0
+    deferred_progress_cleared: int = 0
 
 
 @dataclass(frozen=True)
@@ -921,6 +949,30 @@ class StatusTableDocument:
                 StatusTableRow(
                     row.key,
                     values_by_key.get(row.key, row.value),
+                    row.runtime_key_locked,
+                    dict(row.metadata),
+                    row.update_frequency,
+                    row.update_rule,
+                    row.deferred_interval_turns,
+                )
+                for row in self.rows
+            ),
+            metadata=dict(self.metadata),
+        ).validated()
+
+    def with_cleared_values(self) -> "StatusTableDocument":
+        """Return a copy with every value cleared and all structure preserved."""
+
+        return StatusTableDocument(
+            schema_version=self.schema_version,
+            kind=self.kind,
+            mode=self.mode,
+            key_column=self.key_column,
+            value_column=self.value_column,
+            rows=tuple(
+                StatusTableRow(
+                    row.key,
+                    "",
                     row.runtime_key_locked,
                     dict(row.metadata),
                     row.update_frequency,

@@ -435,6 +435,16 @@ class MemoryManager:
             self._inited = True
         logger.info("[MemoryManager] manual reindex done")
 
+    def close(self) -> None:
+        """Release watcher registrations, transient recall, and SQLite handles."""
+
+        if self._index_manager is not None:
+            self._index_manager.close()
+        self._recalled_store.clear()
+        if self._store is not None:
+            self._store.close()
+        self._inited = False
+
     def _get_db_path(self) -> Path | None:
         """返回 create() 时保存的 DB 路径，用于 init() 检查。"""
         if self._db_path:

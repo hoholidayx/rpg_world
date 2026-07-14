@@ -303,7 +303,122 @@ class StatusTableService:
             return self.list_tables(session_id)
         workspace_id = str(session.workspace_id)
         story_id = int(session.story_id)
-        mounts = list(
+        mounts = self._list_story_status_mounts(workspace_id, story_id)
+        with self._database.atomic():
+            self._create_session_template_copies(
+                session_id,
+                workspace_id,
+                story_id,
+                mounts,
+            )
+        tables = self.list_tables(session_id)
+        logger.info("initialized session status tables session_id=%s table_count=%s", session_id, len(tables))
+        return tables
+
+    def reset_session_tables(self, session_id: str) -> models.SessionStatusResetResult:
+        """Rebuild Story copies while preserving native table structure and IDs."""
+
+        with self._database.atomic():
+            session = self._get_session_row(session_id)
+            workspace_id = str(session.workspace_id)
+            story_id = int(session.story_id)
+            existing_tables = self.list_tables(session_id)
+            template_tables = [
+                table
+                for table in existing_tables
+                if table.origin == models.STATUS_ORIGIN_TEMPLATE_COPY
+            ]
+            native_tables = [
+                table
+                for table in existing_tables
+                if table.origin == models.STATUS_ORIGIN_SESSION_NATIVE
+            ]
+            mounts = self._list_story_status_mounts(workspace_id, story_id)
+            mounted_names = {str(mount.status_table.name) for mount in mounts}
+            conflicts = sorted(
+                table.name for table in native_tables if table.name in mounted_names
+            )
+            if conflicts:
+                joined = ", ".join(conflicts)
+                raise ValueError(
+                    "Session-native status table names conflict with current Story templates: "
+                    + joined
+                )
+
+            table_ids = [table.id for table in existing_tables]
+            deferred_progress_cleared = 0
+            if table_ids:
+                deferred_progress_cleared = int(
+                    SessionStatusDeferredProgressRecord
+                    .delete()
+                    .where(
+                        SessionStatusDeferredProgressRecord.session_status_table.in_(
+                            table_ids
+                        )
+                    )
+                    .execute()
+                )
+
+            if template_tables:
+                (
+                    SessionStatusTableRecord
+                    .delete()
+                    .where(
+                        SessionStatusTableRecord.id.in_(
+                            [table.id for table in template_tables]
+                        )
+                    )
+                    .execute()
+                )
+
+            for table in native_tables:
+                cleared_document = _document_for_kind(
+                    table.status_kind,
+                    table.document.with_cleared_values(),
+                )
+                updated = (
+                    SessionStatusTableRecord
+                    .update(
+                        document_json=models.serialize_status_document(cleared_document),
+                        updated_at=SQL("CURRENT_TIMESTAMP"),
+                    )
+                    .where(SessionStatusTableRecord.id == table.id)
+                    .execute()
+                )
+                if updated != 1:
+                    raise RuntimeError(
+                        f"Session-native status table disappeared during reset: {table.id}"
+                    )
+
+            initialized_count = self._create_session_template_copies(
+                session_id,
+                workspace_id,
+                story_id,
+                mounts,
+            )
+
+        logger.info(
+            "reset session status tables session_id=%s template_cleared=%s template_initialized=%s native_reset=%s deferred_progress_cleared=%s",
+            session_id,
+            len(template_tables),
+            initialized_count,
+            len(native_tables),
+            deferred_progress_cleared,
+        )
+        return models.SessionStatusResetResult(
+            session_id=session_id,
+            template_tables_cleared=len(template_tables),
+            template_tables_initialized=initialized_count,
+            native_tables_reset=len(native_tables),
+            deferred_progress_cleared=deferred_progress_cleared,
+        )
+
+    @staticmethod
+    def _list_story_status_mounts(
+        workspace_id: str,
+        story_id: int,
+    ) -> list[StoryStatusTableRecord]:
+        return list(
             StoryStatusTableRecord
             .select(StoryStatusTableRecord, StatusTableTemplateRecord)
             .join(StatusTableTemplateRecord)
@@ -313,25 +428,33 @@ class StatusTableService:
             )
             .order_by(StoryStatusTableRecord.sort_order, StoryStatusTableRecord.id)
         )
-        with self._database.atomic():
-            for mount in mounts:
-                template = mount.status_table
-                SessionStatusTableRecord.create(
-                    session=session_id,
-                    workspace=workspace_id,
-                    story=story_id,
-                    source_table_id=int(template.id),
-                    origin=models.STATUS_ORIGIN_TEMPLATE_COPY,
-                    name=str(template.name),
-                    status_kind=str(template.status_kind),
-                    description=str(template.description or ""),
-                    document_json=str(template.document_json),
-                    sort_order=int(mount.sort_order),
-                    metadata_json=_session_metadata_for_mount(str(template.metadata_json or "{}"), mount),
-                )
-        tables = self.list_tables(session_id)
-        logger.info("initialized session status tables session_id=%s table_count=%s", session_id, len(tables))
-        return tables
+
+    @staticmethod
+    def _create_session_template_copies(
+        session_id: str,
+        workspace_id: str,
+        story_id: int,
+        mounts: list[StoryStatusTableRecord],
+    ) -> int:
+        for mount in mounts:
+            template = mount.status_table
+            SessionStatusTableRecord.create(
+                session=session_id,
+                workspace=workspace_id,
+                story=story_id,
+                source_table_id=int(template.id),
+                origin=models.STATUS_ORIGIN_TEMPLATE_COPY,
+                name=str(template.name),
+                status_kind=str(template.status_kind),
+                description=str(template.description or ""),
+                document_json=str(template.document_json),
+                sort_order=int(mount.sort_order),
+                metadata_json=_session_metadata_for_mount(
+                    str(template.metadata_json or "{}"),
+                    mount,
+                ),
+            )
+        return len(mounts)
 
     def list_tables(
         self,

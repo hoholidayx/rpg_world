@@ -318,7 +318,10 @@ class TestTelegramAdapter:
     async def test_on_command_routes_to_agent_client(self, adapter: TelegramAdapter):
         agent = FakeAgent()
         agent.execute_command = AsyncMock(
-            return_value={"reply": "done", "handled": True},
+            return_value={
+                "reply": "当前会话已重置。\n\n新的开场白",
+                "handled": True,
+            },
         )
         adapter.bind_agent_client(agent)
         adapter.send_text = AsyncMock()
@@ -332,7 +335,10 @@ class TestTelegramAdapter:
 
         agent.execute_command.assert_awaited_once()
         assert agent.execute_command.await_args.args[-1] == "/clear"
-        adapter.send_text.assert_awaited_once_with("123", "done")
+        adapter.send_text.assert_awaited_once_with(
+            "123",
+            "当前会话已重置。\n\n新的开场白",
+        )
 
     async def test_on_command_sessions_shows_picker(self, adapter: TelegramAdapter, monkeypatch):
         agent = FakeAgent()

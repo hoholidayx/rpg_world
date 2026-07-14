@@ -33,6 +33,7 @@ from rpg_core.main_llm import MainLLMSelectionService
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 
 if TYPE_CHECKING:
+    from rpg_data.models import SessionResetResult
     from rpg_core.agent.command import CommandDef
     from rpg_core.agent.loop import ToolCallRecord
     from rpg_core.context.inspector import LayerInfo
@@ -240,8 +241,8 @@ class RPGGameAgent:
     def last_tool_records(self) -> list["ToolCallRecord"] | None:
         return self._turn_service.last_tool_records
 
-    def clear_history(self) -> None:
-        self._session_service.clear_history()
+    async def reset_session(self) -> "SessionResetResult":
+        return await self._session_service.reset_session()
 
     async def reload_rpg_context(self) -> None:
         await self._session_service.reload_rpg_context()

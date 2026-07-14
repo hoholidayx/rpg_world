@@ -13,10 +13,6 @@ from channels.cli import CLIAdapter
 from channels.tests.conftest import FakeAgent
 
 
-# 给 FakeAgent 补充命令用到的 clear_history
-FakeAgent.clear_history = lambda self: None  # type: ignore[attr-defined]
-
-
 class TestCLIAdapter:
     """CLIAdapter 核心功能测试。"""
 
