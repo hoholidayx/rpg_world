@@ -285,7 +285,7 @@ def test_verbose_context_logging_only_logs_main_llm_context_once(monkeypatch) ->
     ]
     assert len(context_logs) == 1
     context_log = context_logs[0]
-    assert "当前 Context（结构化分层）" in context_log
+    assert "当前 Context（provider message 顺序）" in context_log
     assert "fixed_layer (system)" in context_log
     assert "rp_modules (system)" in context_log
     assert "staged outcome runtime" in context_log

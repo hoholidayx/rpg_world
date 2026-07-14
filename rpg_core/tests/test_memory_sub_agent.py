@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
-from rpg_core.agent.sub_agents.memory_sub_agent import MemoryAgentResult, MemorySubAgent
+import rpg_core.agent.sub_agents.memory_sub_agent as memory_module
+from rpg_core.agent.agent_types import LLMResponse, LLMUsage
+from rpg_core.agent.sub_agents.memory_sub_agent import (
+    MEMORY_LLM_SOURCE_RECALL,
+    MemoryAgentResult,
+    MemorySubAgent,
+    RECALL_SCHEMA,
+)
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session.manager import SessionManager
 
@@ -98,3 +106,79 @@ async def test_story_memory_failure_keeps_messages_retryable() -> None:
         await sub_agent._execute_story_memory(SimpleNamespace(session_manager=session))
 
     assert session.count_new_turns_since_story() == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_sub_agent_logs_request_shape_and_cache_by_pipeline(
+    monkeypatch,
+) -> None:
+    class Provider:
+        async def chat(self, _messages, *, tools):  # noqa: ANN001
+            assert tools == [RECALL_SCHEMA]
+            return LLMResponse(
+                content="",
+                tool_calls=[{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "extract_recalls",
+                        "arguments": '{"recalls": ["memory"]}',
+                    },
+                }],
+                finish_reason="tool_calls",
+                usage=LLMUsage(
+                    prompt_tokens=80,
+                    completion_tokens=5,
+                    total_tokens=85,
+                    prompt_cache_hit_tokens=50,
+                    prompt_cache_miss_tokens=30,
+                ),
+                model="qwen",
+            )
+
+        def get_default_model(self) -> str:
+            return "qwen"
+
+    info = MagicMock()
+    monkeypatch.setattr(
+        memory_module,
+        "settings",
+        SimpleNamespace(verbose_logging=True),
+    )
+    monkeypatch.setattr(memory_module.logger, "info", info)
+    sub_agent = MemorySubAgent(provider_biz_key="agent.memory_sub_agent")
+    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+
+    decision, record = await sub_agent._call_llm(
+        [
+            {"role": "system", "content": "stable memory system"},
+            {"role": "user", "content": "dynamic memory input"},
+        ],
+        RECALL_SCHEMA,
+        source=MEMORY_LLM_SOURCE_RECALL,
+    )
+
+    assert decision == {"recalls": ["memory"]}
+    assert record is not None
+    assert record.source == MEMORY_LLM_SOURCE_RECALL
+
+    fingerprint = next(
+        call
+        for call in info.call_args_list
+        if "LLM request fingerprint" in call.args[0]
+    )
+    assert fingerprint.args[1] == MEMORY_LLM_SOURCE_RECALL
+    assert [item["role"] for item in fingerprint.args[11]] == ["system", "user"]
+    assert [item["chars"] for item in fingerprint.args[11]] == [
+        len("stable memory system"),
+        len("dynamic memory input"),
+    ]
+    assert "stable memory system" not in repr(fingerprint)
+    assert "dynamic memory input" not in repr(fingerprint)
+
+    cache_usage = next(
+        call
+        for call in info.call_args_list
+        if "LLM cache usage" in call.args[0]
+    )
+    assert cache_usage.args[1:] == (MEMORY_LLM_SOURCE_RECALL, 50, 30, 62.5)

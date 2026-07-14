@@ -32,15 +32,20 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.agent.sub_agents.base import BaseSubAgent
-from rpg_core.agent.agent_types import CallRecord, LLMResponse
+from rpg_core.agent.agent_types import CallRecord, LLMResponse, LLMUsage
 from rpg_core.agent.command import CommandDef
-from rpg_core.context.rpg_context import Message, Role
-from rpg_core.session.manager import SessionManager
+from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.agent.sub_agents.memory_candidates import (
     select_story_memory_turn_groups,
     select_summary_turn_groups,
 )
+from rpg_core.context.fingerprint import (
+    build_request_fingerprint,
+    request_fingerprint_log_values,
+)
+from rpg_core.context.rpg_context import Message, Role
+from rpg_core.session.manager import SessionManager
+from rpg_core.settings import settings
 
 if TYPE_CHECKING:
     from rpg_core.agent.command import AgentCommandTarget
@@ -57,6 +62,12 @@ _TAG = "[MemorySubAgent]"
 COMMAND_NAME_COMPACT = "/compact"
 COMMAND_NAME_EXTRACT_STORY = "/extract_story_memory"
 """此子 Agent 注册到 CommandDispatcher 的斜杠命令名。"""
+
+MEMORY_LLM_SOURCE_RECALL = "memory_recall"
+MEMORY_LLM_SOURCE_STORY = "memory_story"
+MEMORY_LLM_SOURCE_SUMMARY = "memory_summary"
+MEMORY_LLM_SOURCE_BATCH_SUMMARY = "memory_batch_summary"
+MEMORY_LLM_SOURCE_OVERALL_SUMMARY = "memory_overall_summary"
 
 
 class MemoryPipelineError(RuntimeError):
@@ -705,7 +716,11 @@ class MemorySubAgent(BaseSubAgent):
             )).to_dict(),
         ]
 
-        decision, call_rec = await self._call_llm(messages, RECALL_SCHEMA)
+        decision, call_rec = await self._call_llm(
+            messages,
+            RECALL_SCHEMA,
+            source=MEMORY_LLM_SOURCE_RECALL,
+        )
         if call_rec:
             call_stats.append(call_rec)
         recalls = decision.get("recalls", [])[: self._max_recall_items]
@@ -751,6 +766,7 @@ class MemorySubAgent(BaseSubAgent):
         decision, call_rec = await self._call_llm(
             messages,
             STORY_DETAIL_SCHEMA,
+            source=MEMORY_LLM_SOURCE_STORY,
             raise_on_failure=True,
         )
         if call_rec:
@@ -804,7 +820,11 @@ class MemorySubAgent(BaseSubAgent):
             )).to_dict(),
         ]
 
-        decision, call_rec = await self._call_llm(messages, SUMMARY_SCHEMA)
+        decision, call_rec = await self._call_llm(
+            messages,
+            SUMMARY_SCHEMA,
+            source=MEMORY_LLM_SOURCE_SUMMARY,
+        )
         if call_rec:
             call_stats.append(call_rec)
         text = decision.get("summary_text", "")
@@ -849,7 +869,11 @@ class MemorySubAgent(BaseSubAgent):
             )).to_dict(),
         ]
 
-        decision, call_rec = await self._call_llm(messages, BATCH_SUMMARY_SCHEMA)
+        decision, call_rec = await self._call_llm(
+            messages,
+            BATCH_SUMMARY_SCHEMA,
+            source=MEMORY_LLM_SOURCE_BATCH_SUMMARY,
+        )
         if call_rec:
             if call_stats is not None:
                 call_stats.append(call_rec)
@@ -917,7 +941,11 @@ class MemorySubAgent(BaseSubAgent):
             )).to_dict(),
         ]
 
-        decision, call_rec = await self._call_llm(messages, OVERALL_SCHEMA)
+        decision, call_rec = await self._call_llm(
+            messages,
+            OVERALL_SCHEMA,
+            source=MEMORY_LLM_SOURCE_OVERALL_SUMMARY,
+        )
         if call_rec:
             if call_stats is not None:
                 call_stats.append(call_rec)
@@ -945,6 +973,7 @@ class MemorySubAgent(BaseSubAgent):
         messages: list[dict],
         schema: dict[str, object],
         *,
+        source: str,
         raise_on_failure: bool = False,
     ) -> tuple[dict[str, object], CallRecord | None]:
         """Call provider with *messages* and *schema*, return parsed arguments.
@@ -956,6 +985,16 @@ class MemorySubAgent(BaseSubAgent):
         """
         import time
 
+        if settings.verbose_logging:
+            fingerprint = build_request_fingerprint(messages, [schema])
+            logger.info(
+                _TAG + " LLM request fingerprint: source={} "
+                "contextHash={} contextChars={} systemHash={} systemChars={} "
+                "toolsHash={} toolsChars={} messages={} roles={} tools={} "
+                "messageShape={}",
+                source,
+                *request_fingerprint_log_values(fingerprint),
+            )
         t0 = time.monotonic()
         provider = self._get_provider()
 
@@ -968,12 +1007,16 @@ class MemorySubAgent(BaseSubAgent):
             return {}, None
 
         duration_ms = (time.monotonic() - t0) * 1000
+        self._log_cache_usage(
+            source,
+            result.usage if isinstance(result, LLMResponse) else None,
+        )
 
         # 捕获 CallRecord
         call_record: CallRecord | None = None
         if isinstance(result, LLMResponse):
             call_record = CallRecord(
-                source="memory_sub_agent",
+                source=source,
                 model=result.model or provider.get_default_model(),
                 usage=result.usage,
                 duration_ms=duration_ms,
@@ -997,6 +1040,32 @@ class MemorySubAgent(BaseSubAgent):
             if raise_on_failure:
                 raise MemoryPipelineError("failed to parse memory function arguments") from exc
             return {}, call_record
+
+    @staticmethod
+    def _log_cache_usage(source: str, usage: LLMUsage | None) -> None:
+        if not settings.verbose_logging:
+            return
+        if usage is None:
+            logger.info(
+                _TAG + " LLM cache usage: source={} hit=- miss=- rate=-",
+                source,
+            )
+            return
+
+        hit = max(0, int(usage.cached_tokens or 0))
+        miss = max(0, int(usage.prompt_cache_miss_tokens or 0))
+        prompt_tokens = max(0, int(usage.prompt_tokens or 0))
+        if miss == 0 and prompt_tokens > hit:
+            miss = prompt_tokens - hit
+        cache_tokens = hit + miss
+        rate = hit / cache_tokens * 100 if cache_tokens else 0.0
+        logger.info(
+            _TAG + " LLM cache usage: source={} hit={} miss={} rate={:.1f}%",
+            source,
+            hit,
+            miss,
+            rate,
+        )
 
     def _format_conversation_window(
         self,

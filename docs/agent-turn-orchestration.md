@@ -288,14 +288,22 @@ Recent Conversation
 
 Provider 缓存匹配的是实际序列化并 tokenized 后的请求共同前缀，不是代码里的阶段名或 `RPGContext` 层。Outcome、Route、scene Update 和 table Update 使用不同的 system/tool schema，应视为不同缓存族；同一 turn 第一次调用这些阶段时没有命中是正常现象，业务正确性不得依赖缓存。
 
+| 调用链路 | Provider message 顺序 | 缓存族边界 |
+|---|---|---|
+| Main Agent | Fixed / Persistent / Summary → Hot History 原始 messages → Story / Status / Recall / RP Modules → Current User | 同一主模型与工具集合；rolling history 和动态层决定后续公共前缀 |
+| StatusSubAgent | 一条阶段 system contract → 一条动态 user（history/action/target） | Outcome、Route、scene Update、各单表 Update、Deferred 分开 |
+| MemorySubAgent | 一条 pipeline system contract → 一条动态 user | Recall、Story、Summary、Batch Summary、Overall Summary 分开 |
+
+StatusSubAgent 与 MemorySubAgent 本身没有使用主 Context 的 system 合并逻辑；它们保持稳定 system 在前、动态 user 在后的两消息结构。主 Context 是否合并不会直接改变 SubAgent 请求，低命中更常由不同阶段 schema、动态 user 内容、服务端缓存策略或共享缓存容量造成。
+
 DeepSeek 的 context cache 由服务端自动、best-effort 管理。以 `A` 为公共前缀，先请求 `A+B`、再请求 `A+C` 时，第二次仍可能没有命中；服务端识别并持久化公共前缀后，后续 `A+D` 才可能报告命中。因此不做额外预热、不为了缓存合并 Outcome/Route/Update，也不向单目标调用暴露工具全集。规则以 [DeepSeek Context Caching](https://api-docs.deepseek.com/guides/kv_cache/) 为准。
 
-开启 `verbose_logging` 后，每次 StatusSubAgent provider 调用按 `source` 记录：
+开启 `verbose_logging` 后，每次 StatusSubAgent 与 MemorySubAgent provider 调用按独立 `source` 记录：
 
-- `contextHash` / `systemHash` / `toolsHash`、对应字符数、message/role 计数和工具名，用于比较本地最终请求；日志不输出 system/user/tool schema 正文；
+- `contextHash` / `systemHash` / `toolsHash`、对应字符数、逐消息 `index/role/hash/chars`、message/role 计数和工具名，用于比较本地最终请求；日志不输出 system/user/tool schema 正文；
 - provider 返回的 cache hit、miss 和 hit rate。实际命中以 usage 为准，hash 相同只说明本地可见前缀结构相同，不保证服务端一定命中。
 
-主 Agent 与 StatusSubAgent 共用 canonical JSON + SHA-256（截断 16 位）的指纹口径。`contextHash` 覆盖按顺序排列的最终 messages，`systemHash` 只覆盖其中的 system message，`toolsHash` 覆盖最终 schema 列表。它们是完整内容的相等性指纹，不是 provider cache key：只要尾部变化，完整 hash 就会变化，但 provider 仍可能复用变化点之前的 token 前缀。反过来，hash 相同也不保证服务端缓存一定存在。
+主 Agent、StatusSubAgent 与 MemorySubAgent 共用 canonical JSON + SHA-256（截断 16 位）的指纹口径。`contextHash` 覆盖按顺序排列的最终 messages，`systemHash` 只覆盖其中的 system message，`toolsHash` 覆盖最终 schema 列表；逐消息 hash 用来定位第一个变化的 wire message。它们是完整内容的相等性指纹，不是 provider cache key：只要尾部变化，完整 hash 就会变化，但 provider 仍可能复用变化点之前的 token 前缀。反过来，hash 相同也不保证服务端缓存一定存在。
 
 这些诊断只进入日志，不新增 API、持久化字段或 WebUI 状态。
 
@@ -386,9 +394,11 @@ Fixed Layer
 → 当前 User Message（含 scene prefix）
 ```
 
-实际 provider wire message 为兼容只接受单个首位 system message 的 chat template，会把 Fixed、Persistent Memory、Summary、history 中的 system message以及 Story Memory / `STATUS_TABLES` / Recalled Memory / `RP_MODULES` 合并进首个 system message；之后才追加非 system 的 Hot History 和当前 User Message。Story Memory 作为低频累积信息放在 Summary 之后的动态 system 段开头，当前状态表位于每轮召回之前；这样 Recall 变化时，provider 仍可能复用截至状态表的更长 token 前缀。Recall 块同时声明冲突时以当前 scene、普通状态表、玩家角色绑定和更新事实为准，不能仅凭历史召回回滚状态。
+实际 provider wire messages 与上述结构化顺序一致：Fixed、Persistent Memory、Summary 分别作为 system message，Hot History 的 user/assistant/tool/system role 全部原位保留，之后 Story Memory、`STATUS_TABLES`、Recalled Memory、`RP_MODULES` 分别作为 system message，最后发送当前 User Message。Story Memory 作为低频累积信息放在 Summary 后、状态表前；当前状态表位于每轮召回之前。这样动态层变化不会截断更早的固定指令与 Hot History 前缀；历史窗口滑动时共同前缀仍可能缩短。Recall 块同时声明冲突时以当前 scene、普通状态表、玩家角色绑定和更新事实为准，不能仅凭历史召回回滚状态。
 
-仍保留一个合并后的首位 system message。单条大 system 的尾部变化会改变本地整条 `systemHash`，拆成多条 system 也会改变覆盖全部 system messages 的 hash；两者都不能直接推导 provider 是否命中，因为 provider 判断的是序列化/tokenized 后从请求开头起的相同 token。只要前段 token 不变，完整 hash 不同也可能报告部分 cache hit。
+“只能有一条且必须首位 system”不是跨 provider 的行业准则，而是具体 API 或 chat template 的兼容能力。本项目不再为某个模型全局合并 system。局域网原生 llama.cpp/Qwen 部署可以使用 `--jinja` 和 `--chat-template` / `--chat-template-file` 配置服务端模板；模板上线前必须用包含“Hot History 后再次出现 system”的请求验证角色顺序和生成结果。若某个部署不支持，应在该 provider/chat-template 边界修复，不得改变 canonical Context。
+
+拆分消息不会使 cache 以“单条消息 hash”为单位工作。完整 `systemHash` 覆盖所有 system messages，任一尾部变化仍会改变它；provider 实际判断的是 chat template 序列化/tokenized 后从请求开头起的相同 token。只要前段 token 不变，完整 hash 不同也可能报告部分 cache hit，逐消息 hash 仅用于定位应用层变化点。
 
 主 Agent 历史与 StatusSubAgent 历史不同：主 Context 只投影 `summary_processed=false` 的消息；Play/Agent history API 和 StatusSubAgent 独立链路仍可读取完整未删除历史。
 

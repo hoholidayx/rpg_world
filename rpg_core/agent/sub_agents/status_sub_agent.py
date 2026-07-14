@@ -51,7 +51,10 @@ from rpg_core.agent.tools import BaseTool
 from rpg_core.agent.tools.registry import ToolRegistry
 from rpg_core.agent.tools.state import STATE_TOOL_NAMES, StateToolSet
 from rpg_core.context.rpg_context import Message, Role
-from rpg_core.context.fingerprint import build_request_fingerprint
+from rpg_core.context.fingerprint import (
+    build_request_fingerprint,
+    request_fingerprint_log_values,
+)
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import (
     SCENE_DELETE_ATTR_TOOL_NAME,
@@ -1501,17 +1504,9 @@ class StatusSubAgent(BaseSubAgent):
             self._log_verbose(
                 "LLM request fingerprint: source={} contextHash={} contextChars={} "
                 "systemHash={} systemChars={} toolsHash={} toolsChars={} "
-                "messages={} roles={} tools={}",
+                "messages={} roles={} tools={} messageShape={}",
                 source,
-                fingerprint.context_hash,
-                fingerprint.context_chars,
-                fingerprint.system_hash,
-                fingerprint.system_chars,
-                fingerprint.tools_hash,
-                fingerprint.tools_chars,
-                fingerprint.message_count,
-                dict(fingerprint.role_counts),
-                list(fingerprint.tool_names),
+                *request_fingerprint_log_values(fingerprint),
             )
         t0 = time.monotonic()
         try:

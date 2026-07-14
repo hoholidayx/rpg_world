@@ -12,6 +12,16 @@ from rpg_core.context.rpg_context import Message, Role
 
 
 @dataclass(frozen=True)
+class LLMMessageFingerprint:
+    """Non-content identity for one provider-visible message."""
+
+    index: int
+    role: str
+    payload_hash: str
+    content_chars: int
+
+
+@dataclass(frozen=True)
 class LLMRequestFingerprint:
     """Stable hashes and size metadata for one provider-visible request."""
 
@@ -24,6 +34,7 @@ class LLMRequestFingerprint:
     message_count: int
     role_counts: tuple[tuple[str, int], ...]
     tool_names: tuple[str, ...]
+    message_fingerprints: tuple[LLMMessageFingerprint, ...]
 
 
 def build_request_fingerprint(
@@ -55,6 +66,15 @@ def build_request_fingerprint(
         for schema in schema_payloads
         if (name := _tool_name(schema))
     )
+    message_fingerprints = tuple(
+        LLMMessageFingerprint(
+            index=index,
+            role=str(payload.get("role") or "unknown"),
+            payload_hash=_short_hash(_canonical_json(payload)),
+            content_chars=_content_chars(payload),
+        )
+        for index, payload in enumerate(message_payloads)
+    )
     return LLMRequestFingerprint(
         context_hash=_short_hash(context_json),
         system_hash=_short_hash(system_json),
@@ -65,6 +85,35 @@ def build_request_fingerprint(
         message_count=len(message_payloads),
         role_counts=ordered_role_counts,
         tool_names=tool_names,
+        message_fingerprints=message_fingerprints,
+    )
+
+
+def request_fingerprint_log_values(
+    fingerprint: LLMRequestFingerprint,
+) -> tuple[object, ...]:
+    """Return the shared, content-free values used by verbose request logs."""
+
+    message_shape = [
+        {
+            "index": item.index,
+            "role": item.role,
+            "hash": item.payload_hash,
+            "chars": item.content_chars,
+        }
+        for item in fingerprint.message_fingerprints
+    ]
+    return (
+        fingerprint.context_hash,
+        fingerprint.context_chars,
+        fingerprint.system_hash,
+        fingerprint.system_chars,
+        fingerprint.tools_hash,
+        fingerprint.tools_chars,
+        fingerprint.message_count,
+        dict(fingerprint.role_counts),
+        list(fingerprint.tool_names),
+        message_shape,
     )
 
 

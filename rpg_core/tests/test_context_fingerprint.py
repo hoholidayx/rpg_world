@@ -41,6 +41,13 @@ def test_request_fingerprint_is_deterministic_and_component_scoped() -> None:
         "tool": 0,
     }
     assert baseline.tool_names == ("status_table_set_values",)
+    assert [item.index for item in baseline.message_fingerprints] == [0, 1]
+    assert [item.role for item in baseline.message_fingerprints] == ["system", "user"]
+    assert [item.content_chars for item in baseline.message_fingerprints] == [
+        len("stable system"),
+        len("current action"),
+    ]
+    assert all(len(item.payload_hash) == 16 for item in baseline.message_fingerprints)
 
     user_changed = build_request_fingerprint(
         [Message(Role.SYSTEM, "stable system"), Message(Role.USER, "new action")],
@@ -49,6 +56,8 @@ def test_request_fingerprint_is_deterministic_and_component_scoped() -> None:
     assert user_changed.context_hash != baseline.context_hash
     assert user_changed.system_hash == baseline.system_hash
     assert user_changed.tools_hash == baseline.tools_hash
+    assert user_changed.message_fingerprints[0] == baseline.message_fingerprints[0]
+    assert user_changed.message_fingerprints[1] != baseline.message_fingerprints[1]
 
     system_changed = build_request_fingerprint(
         [Message(Role.SYSTEM, "changed system"), Message(Role.USER, "current action")],

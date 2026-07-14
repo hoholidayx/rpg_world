@@ -97,14 +97,14 @@ def test_context_inspector_verbose_log_omits_history_content(fake_token_counter)
 
     log = ContextInspector(ctx, fake_token_counter).to_verbose_log()
 
-    assert "当前 Context（结构化分层）" in log
-    assert "fixed_layer (system)" in log
+    assert "当前 Context（provider message 顺序）" in log
+    assert "fixed_layer (system) [message=0]" in log
     assert "fixed|core" in log
-    assert "hot_history (mixed)" in log
-    assert "turns=1" in log
+    assert "hot_history (mixed) [messages=1..2]" in log
+    assert "turns=1, messages=2, roles=user → assistant" in log
     assert "history user secret" not in log
     assert "history assistant secret" not in log
-    assert "user_message (user)" in log
+    assert "user_message (user) [message=3]" in log
     assert "current input" in log
 
 
@@ -131,6 +131,11 @@ def test_context_inspector_uses_provider_dynamic_layer_order(fake_token_counter)
     assert verbose.index("story_memory (system)") < verbose.index("status_tables (system)")
     assert verbose.index("status_tables (system)") < verbose.index("recalled_memory (system)")
     assert verbose.index("recalled_memory (system)") < verbose.index("rp_modules (system)")
+    assert "fixed_layer (system)\n│   └── <empty; not sent>" in verbose
+    assert "story_memory (system) [message=0]" in verbose
+    assert "status_tables (system) [message=1]" in verbose
+    assert "recalled_memory (system) [message=2]" in verbose
+    assert "rp_modules (system) [message=3]" in verbose
 
 
 def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_token_counter):

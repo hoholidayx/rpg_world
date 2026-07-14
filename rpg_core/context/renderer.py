@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from rpg_core.context.layout import CONTEXT_LAYER_ORDER
 from rpg_core.context.rendering import render_jinja_template
-from rpg_core.context.rpg_context import LayerType, Message, Role, RPGContext, UserExtensionBlock
+from rpg_core.context.rpg_context import LayerType, Message, RPGContext, UserExtensionBlock
 
 
 class ContextRenderer:
@@ -13,49 +14,15 @@ class ContextRenderer:
         self._ctx = ctx
 
     def to_message_objects(self) -> list[Message]:
-        system_parts: list[str] = []
-
-        for type_ in (
-            LayerType.FIXED,
-            LayerType.PERSISTENT_MEMORY,
-            LayerType.SUMMARY,
-        ):
-            content = self.render_layer(type_)
-            if content:
-                system_parts.append(content)
-
-        history_messages: list[Message] = []
-        for message in self._ctx.hot_history.messages:
-            if message.is_system():
-                system_parts.append(message.content)
-            else:
-                history_messages.append(message)
-
-        for type_ in (
-            LayerType.STORY_MEMORY,
-            LayerType.STATUS_TABLES,
-            LayerType.RECALLED_MEMORY,
-            LayerType.RP_MODULES,
-        ):
-            content = self.render_layer(type_)
-            if content:
-                system_parts.append(content)
-
-        # Some OpenAI-compatible chat templates (including Qwen) only accept
-        # one system message, and require it to be the first message. This also
-        # defines the real provider cache-prefix boundary: dynamic system layers
-        # are inside this first message before non-system history, so changing a
-        # dynamic layer may make the later history miss even though the stable
-        # beginning of the system message remains reusable.
         msgs: list[Message] = []
-        if system_parts:
-            msgs.append(Message(role=Role.SYSTEM, content="\n\n".join(system_parts)))
+        for placement in CONTEXT_LAYER_ORDER:
+            if placement.type == LayerType.HOT_HISTORY:
+                msgs.extend(self._ctx.hot_history.messages)
+                continue
 
-        msgs.extend(history_messages)
-
-        user_content = self.render_layer(LayerType.USER_MESSAGE)
-        if user_content:
-            msgs.append(Message(role=Role.USER, content=user_content))
+            content = self.render_layer(placement.type)
+            if content and placement.role is not None:
+                msgs.append(Message(role=placement.role, content=content))
 
         return msgs
 

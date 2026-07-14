@@ -146,6 +146,21 @@ def test_turn_preparation_logs_final_main_fingerprint_once_after_schemas(
         "tool": 0,
     }
     assert call.args[9] == ["set_state"]
+    assert call.args[10] == [
+        {
+            "index": 0,
+            "role": "system",
+            "hash": call.args[10][0]["hash"],
+            "chars": len("system body must stay private"),
+        },
+        {
+            "index": 1,
+            "role": "user",
+            "hash": call.args[10][1]["hash"],
+            "chars": len("user body must stay private"),
+        },
+    ]
+    assert all(len(item["hash"]) == 16 for item in call.args[10])
     logged = repr(call)
     assert "system body must stay private" not in logged
     assert "user body must stay private" not in logged

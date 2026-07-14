@@ -13,6 +13,7 @@ from rpg_core.context.rpg_context import (
     HotHistoryLayer,
     LayerType,
     Message,
+    PersistentMemoryLayer,
     RecalledMemoryLayer,
     RPGContext,
     RPModuleRuntimeSection,
@@ -20,6 +21,7 @@ from rpg_core.context.rpg_context import (
     Role,
     StatusTablesLayer,
     StoryMemoryLayer,
+    SummaryLayer,
     UserMessageLayer,
 )
 
@@ -224,12 +226,17 @@ def test_context_includes_dynamic_rp_modules_before_user():
 
     rendered = ctx.to_message_objects()
 
-    assert [m.role for m in rendered] == [Role.SYSTEM, Role.USER]
-    assert rendered[0].content == (
-        "fixed|core\n\n"
-        "tables|状态\n\n"
-        "[combat]\ncombat turn\n[/combat]"
-    )
+    assert [m.role for m in rendered] == [
+        Role.SYSTEM,
+        Role.SYSTEM,
+        Role.SYSTEM,
+        Role.USER,
+    ]
+    assert [m.content for m in rendered[:-1]] == [
+        "fixed|core",
+        "tables|状态",
+        "[combat]\ncombat turn\n[/combat]",
+    ]
     assert rendered[-1].content == "hi"
 
 
@@ -256,26 +263,42 @@ def test_context_dynamic_system_layers_follow_cache_optimized_order():
     )
 
     rendered = ctx.to_message_objects()
-    system_content = rendered[0].content
+    assert [message.content for message in rendered] == [
+        "fixed|core",
+        "story|story detail",
+        "tables|状态",
+        "recalled|recalled detail",
+        "[combat]\ncombat turn\n[/combat]",
+        "hi",
+    ]
 
-    assert system_content.index("story|story detail") < system_content.index("tables|状态")
-    assert system_content.index("tables|状态") < system_content.index("recalled|recalled detail")
-    assert system_content.index("recalled|recalled detail") < system_content.index("[combat]")
 
-
-def test_context_coalesces_all_system_content_at_the_beginning():
+def test_context_preserves_canonical_layers_and_history_message_order():
     ctx = RPGContext(
         fixed_layer=FixedLayerData(
             sections=[FixedLayerSection(id="core", title="核心", content="fixed")]
         ),
+        persistent_memory=PersistentMemoryLayer(
+            sections=[{"title": "常驻", "content": "persistent"}]
+        ),
+        summary=SummaryLayer(text="summary"),
         hot_history=HotHistoryLayer(messages=[
             Message(Role.USER, "u1"),
             Message(Role.ASSISTANT, "a1"),
             Message(Role.SYSTEM, "legacy system"),
         ]),
+        story_memory=StoryMemoryLayer(details=[{"text": "story detail"}]),
         status_tables=StatusTablesLayer(
             tables=[{"name": "状态", "headers": ["k"], "rows": [["v"]]}]
         ),
+        recalled_memory=RecalledMemoryLayer(items=["recalled detail"]),
+        rp_modules=RPModulesLayer(sections=[
+            RPModuleRuntimeSection(
+                id="combat",
+                title="战斗",
+                content="combat turn",
+            ),
+        ]),
         user_message=UserMessageLayer(user_input="hi"),
     )
 
@@ -283,8 +306,27 @@ def test_context_coalesces_all_system_content_at_the_beginning():
 
     assert [message.role for message in rendered] == [
         Role.SYSTEM,
+        Role.SYSTEM,
+        Role.SYSTEM,
         Role.USER,
         Role.ASSISTANT,
+        Role.SYSTEM,
+        Role.SYSTEM,
+        Role.SYSTEM,
+        Role.SYSTEM,
+        Role.SYSTEM,
         Role.USER,
     ]
-    assert rendered[0].content == "fixed|core\n\nlegacy system\n\ntables|状态"
+    assert [message.content for message in rendered] == [
+        "fixed|core",
+        "pm|persistent",
+        "summary|summary",
+        "u1",
+        "a1",
+        "legacy system",
+        "story|story detail",
+        "tables|状态",
+        "recalled|recalled detail",
+        "[combat]\ncombat turn\n[/combat]",
+        "hi",
+    ]

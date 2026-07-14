@@ -10,8 +10,9 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from rpg_core.context.usage import estimate_rendered_context_usage
+from rpg_core.context.layout import CONTEXT_LAYER_ORDER
 from rpg_core.context.rpg_context import LayerType, Message, RPGContext, Role
+from rpg_core.context.usage import estimate_rendered_context_usage
 from rpg_core.session.turns import count_roles, count_turns
 from rpg_core.utils.tokenizer import TokenCounter
 
@@ -104,65 +105,65 @@ class ContextInspector:
 
     def _layer_payloads(self) -> list[dict[str, object]]:
         layers: list[dict[str, object]] = []
-        self._add_rendered_layer_payload(
-            layers,
-            LayerType.FIXED,
-            Role.SYSTEM.value,
-            _build_fixed_desc(
+        for placement in CONTEXT_LAYER_ORDER:
+            if placement.type == LayerType.HOT_HISTORY:
+                self._add_hot_history_payload(layers)
+                continue
+
+            role = placement.role.value if placement.role is not None else "mixed"
+            self._add_rendered_layer_payload(
+                layers,
+                placement.type,
+                role,
+                self._layer_description(placement.type),
+            )
+        return layers
+
+    def _layer_description(self, type_: str) -> str:
+        if type_ == LayerType.FIXED:
+            return _build_fixed_desc(
                 section_count=len(self._ctx.fixed_layer.sections),
                 lore_count=len(self._ctx.fixed_layer.lorebook_entries),
                 char_count=len(self._ctx.fixed_layer.characters),
-            ),
-        )
-        self._add_rendered_layer_payload(
-            layers,
-            LayerType.PERSISTENT_MEMORY,
-            Role.SYSTEM.value,
-            f"{len(self._ctx.persistent_memory.sections)} 段常驻记忆"
-            if self._ctx.persistent_memory.active
-            else "-",
-        )
-        self._add_rendered_layer_payload(
-            layers,
-            LayerType.SUMMARY,
-            Role.SYSTEM.value,
-            _preview_text(self._ctx.summary.text or "", 50),
-        )
-        self._add_hot_history_payload(layers)
-        self._add_rendered_layer_payload(
-            layers,
-            LayerType.STORY_MEMORY,
-            Role.SYSTEM.value,
-            f"{len(self._ctx.story_memory.details)} 条剧情细节" if self._ctx.story_memory.active else "-",
-        )
-        self._add_rendered_layer_payload(
-            layers,
-            LayerType.STATUS_TABLES,
-            Role.SYSTEM.value,
-            f"{len(self._ctx.status_tables.tables)} 张状态表" if self._ctx.status_tables.active else "-",
-        )
-        self._add_rendered_layer_payload(
-            layers,
-            LayerType.RECALLED_MEMORY,
-            Role.SYSTEM.value,
-            f"{len(self._ctx.recalled_memory.items)} 条召回记忆" if self._ctx.recalled_memory.active else "-",
-        )
-        self._add_rendered_layer_payload(
-            layers,
-            LayerType.RP_MODULES,
-            Role.SYSTEM.value,
-            f"{len(self._ctx.rp_modules.sections)} 个 RP 模块运行态" if self._ctx.rp_modules.active else "-",
-        )
-        # USER_MESSAGE 的摘要需要包含 scene/user prefix 等最终拼接结果，所以这里先渲染再预览。
-        user_content = self._ctx.render_layer(LayerType.USER_MESSAGE)
-        self._add_layer_payload(
-            layers,
-            LayerType.USER_MESSAGE,
-            Role.USER.value,
-            user_content,
-            _preview_text(user_content or "", 50),
-        )
-        return layers
+            )
+        if type_ == LayerType.PERSISTENT_MEMORY:
+            return (
+                f"{len(self._ctx.persistent_memory.sections)} 段常驻记忆"
+                if self._ctx.persistent_memory.active
+                else "-"
+            )
+        if type_ == LayerType.SUMMARY:
+            return _preview_text(self._ctx.summary.text or "", 50)
+        if type_ == LayerType.STORY_MEMORY:
+            return (
+                f"{len(self._ctx.story_memory.details)} 条剧情细节"
+                if self._ctx.story_memory.active
+                else "-"
+            )
+        if type_ == LayerType.STATUS_TABLES:
+            return (
+                f"{len(self._ctx.status_tables.tables)} 张状态表"
+                if self._ctx.status_tables.active
+                else "-"
+            )
+        if type_ == LayerType.RECALLED_MEMORY:
+            return (
+                f"{len(self._ctx.recalled_memory.items)} 条召回记忆"
+                if self._ctx.recalled_memory.active
+                else "-"
+            )
+        if type_ == LayerType.RP_MODULES:
+            return (
+                f"{len(self._ctx.rp_modules.sections)} 个 RP 模块运行态"
+                if self._ctx.rp_modules.active
+                else "-"
+            )
+        if type_ == LayerType.USER_MESSAGE:
+            return _preview_text(
+                self._ctx.render_layer(LayerType.USER_MESSAGE) or "",
+                50,
+            )
+        return "-"
 
     def to_markdown(self) -> str:
         layers = self.layer_summary()
@@ -204,44 +205,55 @@ class ContextInspector:
         return "\n".join(lines)
 
     def to_verbose_log(self) -> str:
-        """Render a complete, layered context view for verbose logs.
+        """Render the canonical provider order for verbose logs.
 
         Hot history deliberately exposes only its logical turn count: logging
         the full conversation here would duplicate potentially large session
         history while making the other runtime layers difficult to inspect.
         """
-        layers = (
-            (LayerType.FIXED, Role.SYSTEM.value),
-            (LayerType.PERSISTENT_MEMORY, Role.SYSTEM.value),
-            (LayerType.SUMMARY, Role.SYSTEM.value),
-            (LayerType.HOT_HISTORY, "mixed"),
-            (LayerType.STORY_MEMORY, Role.SYSTEM.value),
-            (LayerType.STATUS_TABLES, Role.SYSTEM.value),
-            (LayerType.RECALLED_MEMORY, Role.SYSTEM.value),
-            (LayerType.RP_MODULES, Role.SYSTEM.value),
-            (LayerType.USER_MESSAGE, Role.USER.value),
-        )
-        lines = ["当前 Context（结构化分层）："]
-        for index, (type_, role) in enumerate(layers):
-            is_last = index == len(layers) - 1
+        lines = ["当前 Context（provider message 顺序）："]
+        message_index = 0
+        for index, placement in enumerate(CONTEXT_LAYER_ORDER):
+            type_ = placement.type
+            role = placement.role.value if placement.role is not None else "mixed"
+            is_last = index == len(CONTEXT_LAYER_ORDER) - 1
             branch = "└──" if is_last else "├──"
             child_prefix = "    " if is_last else "│   "
-            lines.append(f"{branch} {type_} ({role})")
 
             if type_ == LayerType.HOT_HISTORY:
-                lines.append(
-                    f"{child_prefix}└── turns={count_turns(self._ctx.hot_history.messages)}"
+                history = self._ctx.hot_history.messages
+                if not history:
+                    lines.append(f"{branch} {type_} ({role})")
+                    lines.append(f"{child_prefix}└── <empty; not sent>")
+                    continue
+
+                first_index = message_index
+                last_index = message_index + len(history) - 1
+                message_span = (
+                    f"message={first_index}"
+                    if first_index == last_index
+                    else f"messages={first_index}..{last_index}"
                 )
+                lines.append(f"{branch} {type_} ({role}) [{message_span}]")
+                lines.append(
+                    f"{child_prefix}└── turns={count_turns(history)}, "
+                    f"messages={len(history)}, "
+                    f"roles={' → '.join(message.role.value for message in history)}"
+                )
+                message_index += len(history)
                 continue
 
             content = self._ctx.render_layer(type_)
             if not content:
-                lines.append(f"{child_prefix}└── <empty>")
+                lines.append(f"{branch} {type_} ({role})")
+                lines.append(f"{child_prefix}└── <empty; not sent>")
                 continue
 
+            lines.append(f"{branch} {type_} ({role}) [message={message_index}]")
             lines.append(f"{child_prefix}└── content:")
             content_prefix = f"{child_prefix}    "
             lines.extend(f"{content_prefix}{line}" for line in content.splitlines())
+            message_index += 1
 
         return "\n".join(lines)
 

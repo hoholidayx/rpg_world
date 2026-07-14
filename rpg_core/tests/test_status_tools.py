@@ -987,6 +987,12 @@ async def test_status_sub_agent_logs_cache_fingerprint_and_usage_by_source(
         "tool": 0,
     }
     assert fingerprint.args[10] == ["status_table_set_values"]
+    assert [item["role"] for item in fingerprint.args[11]] == ["system", "user"]
+    assert [item["chars"] for item in fingerprint.args[11]] == [
+        len("stable system"),
+        len("dynamic user"),
+    ]
+    assert all(len(item["hash"]) == 16 for item in fingerprint.args[11])
     assert "stable system" not in fingerprint.args[0]
     assert "dynamic user" not in fingerprint.args[0]
     assert "stable system" not in repr(fingerprint)
