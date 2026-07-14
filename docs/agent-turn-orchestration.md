@@ -262,6 +262,16 @@ normal table B 被选中      → 1 次 table B update
 | scene | 当前 scene + 近期历史 + input | 本轮动态注册的 scene 工具 | 禁止普通表工具；默认只能改已有 value |
 | 单张 normal 表 | 该表被选中的 rows + 近期历史 + input | `status_table_set_values` | 固定 table ID + key allowlist |
 
+隔离 Update 使用同一份稳定 system contract，不再根据整轮工具全集动态枚举能力。contract 明确“只能使用本请求实际提供的工具”，而每次实际下发的 schema 仍只包含当前 scene 或单张 normal 表，因此提示词与执行能力一致。user message 固定按以下顺序组织：
+
+```text
+Recent Conversation
+→ User Action
+→ Selected State Target
+```
+
+同一 Route 产生多个目标时，近期历史和当前动作构成共同前缀，目标内容只在末尾分叉；scene 与单表仍保持独立 Context、schema、allowlist 和 checkpoint，不合并调用。
+
 普通表更新工具以及默认策略下的 scene 工具都只能修改已有 key 的 value，不能新增、删除或重命名 key。执行前后有多层校验：
 
 1. 当前阶段只能调用为该 batch 注册的工具名。
@@ -273,6 +283,19 @@ normal table B 被选中      → 1 次 table B update
 每个快速 Update 目标在 provider 调用前各自创建内存 checkpoint。目标内任一 provider 异常、非法工具、工具执行失败或范围校验失败，都会恢复该目标开始前的 scratch；该目标内已恢复的记录只保留诊断意义，此前成功目标不受影响，代码继续执行后续 scene/普通表目标和主 Agent。`StatusSubAgentResult.failed` 仅表示至少一个快速目标失败，`updated` 表示最终仍有修改保留在 scratch，二者可以同时为 `true`。
 
 目标级 best-effort 不提供可靠重试：主 Agent 仍获得同一个 scratch 上的 scene/status 工具，可以机会性补写失败目标；如果没有补写，也只提交成功目标。checkpoint 创建或恢复失败意味着无法确认 scratch 一致性，异常必须上抛并 discard 整个 turn。取消信号同样向外传播，不作为可恢复目标失败吞掉。不新增持久化 journal、失败待办或重试队列。
+
+### 缓存前缀与观测
+
+Provider 缓存匹配的是实际序列化并 tokenized 后的请求共同前缀，不是代码里的阶段名或 `RPGContext` 层。Outcome、Route、scene Update 和 table Update 使用不同的 system/tool schema，应视为不同缓存族；同一 turn 第一次调用这些阶段时没有命中是正常现象，业务正确性不得依赖缓存。
+
+DeepSeek 的 context cache 由服务端自动、best-effort 管理。以 `A` 为公共前缀，先请求 `A+B`、再请求 `A+C` 时，第二次仍可能没有命中；服务端识别并持久化公共前缀后，后续 `A+D` 才可能报告命中。因此不做额外预热、不为了缓存合并 Outcome/Route/Update，也不向单目标调用暴露工具全集。规则以 [DeepSeek Context Caching](https://api-docs.deepseek.com/guides/kv_cache/) 为准。
+
+开启 `verbose_logging` 后，每次 StatusSubAgent provider 调用按 `source` 记录：
+
+- `systemHash` / `toolsHash`、对应字符数和工具名，用于判断请求是否属于同一候选缓存族；日志不输出 system/user/tool schema 正文；
+- provider 返回的 cache hit、miss 和 hit rate。实际命中以 usage 为准，hash 相同只说明本地可见前缀结构相同，不保证服务端一定命中。
+
+这些诊断只进入日志，不新增 API、持久化字段或 WebUI 状态。
 
 ### 主 Agent 的补判与状态修正
 
@@ -350,7 +373,7 @@ scene 工具注册和执行权限如下：
 4. 使用 scratch 后的 scene/status、已暂存 Outcome 和当前 user message 构建主 Context。
 5. 使用相同 scratch 资源构建可执行工具 registry 和模型可见 schema。
 
-主 Context 的发送顺序是：
+主 Context 的结构化层顺序是：
 
 ```text
 Fixed Layer
@@ -359,6 +382,8 @@ Fixed Layer
 → Story Memory / Recalled Memory / STATUS_TABLES / RP_MODULES
 → 当前 User Message（含 scene prefix）
 ```
+
+实际 provider wire message 为兼容只接受单个首位 system message 的 chat template，会把 Fixed、Persistent Memory、Summary、history 中的 system message以及 Story Memory / Recalled Memory / `STATUS_TABLES` / `RP_MODULES` 合并进首个 system message；之后才追加非 system 的 Hot History 和当前 User Message。因此动态 system 层变化仍可复用首个 system message 中更早的稳定 token 前缀，但其后的历史不再天然处于同一命中前缀。调整主 Agent 的 role/消息顺序属于独立兼容性主题，本轮 StatusSubAgent 优化不改变该 wire layout。
 
 主 Agent 历史与 StatusSubAgent 历史不同：主 Context 只投影 `summary_processed=false` 的消息；Play/Agent history API 和 StatusSubAgent 独立链路仍可读取完整未删除历史。
 
@@ -477,7 +502,7 @@ Status preflight 的单目标可恢复失败不会自动终止后续快速目标
 - StatusSubAgent 的 Outcome、Route、隔离 Update 和 deferred 当前复用 `agent.status_sub_agent` 的 provider 配置与逻辑。
 - 当前没有按阶段、成本或 provider 健康度动态降级的编排；如需使用低成本或本地模型，应通过现有 biz provider 配置切换整个 StatusSubAgent 链路。
 - 当前没有额外轻量预处理 LLM、归纳式 StatusSubAgent 历史窗口，也没有把 Outcome 延迟到多个 turn 后批量判断。
-- rolling history 可能降低严格前缀 cache 命中率；当前选择用固定 system prompt、结构化阶段和单目标 Context 控制注意力与错误半径，而不是增加动态 provider 路由复杂度。
+- rolling history 可能降低严格前缀 cache 命中率；隔离 Update 通过稳定 system contract 和 `Recent Conversation → User Action → Selected State Target` 扩大同一 Route 内的公共前缀，不增加动态 provider 路由复杂度。
 
 ## 关键实现入口
 

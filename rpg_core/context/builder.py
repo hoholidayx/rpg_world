@@ -55,7 +55,7 @@ def _flatten_status_tables(
 class RPGContextBuilder:
     """将原始消息列表转换为 5 层 RPG 结构。
 
-    Layers (ordered for LLM prefix-cache efficiency):
+    Structured layers (conceptual order, not provider wire-message boundaries):
 
         Index  Role       Content                         Change frequency
         ─────  ─────────  ─────────────────────────────── ─────────────────
@@ -63,20 +63,18 @@ class RPGContextBuilder:
         [1]    system     Persistent Memory (常驻记忆)      ★ offline update only
         [2]    system     Summary Layer (conditional)      ★☆ rarely
         [3..N] mixed      Hot History (windowed)           ★★☆ every turn (appended)
-        [N+1]  system     Milestones                       ★★☆ plot-driven
-        [N+2]  system     Story Memory (剧情记忆)          ★★☆ accumulated details
-        [N+3]  system     Recalled Memory (召回)            ★★★ dynamically injected
-        [N+4]  system     Status Tables                    ★★★★ most volatile
-        [N+5]  system     RP Modules (optional)            ★★★★ dynamic module state
-        [N+6]  user       User Message                     always new
+        [N+1]  system     Story Memory (剧情记忆)          ★★☆ accumulated details
+        [N+2]  system     Recalled Memory (召回)            ★★★ dynamically injected
+        [N+3]  system     Status Tables                    ★★★★ most volatile
+        [N+4]  system     RP Modules (optional)            ★★★★ dynamic module state
+        [N+5]  user       User Message                     always new
 
-    Prefix cache rule: content after the first changed position is a miss.
-    Persistent Memory is split out of Fixed Layer as its own [1] because
-    it changes offline (MEMORY.md update) — without the split, any offline
-    memory update would invalidate the entire Fixed Layer cache.
-    Volatile modules are placed AFTER history so a status-table update only
-    evicts [N+3..N+4]; the Fixed + Persistent + Summary + History + Milestones
-    prefix remains cached.
+    Provider prefix caching follows the serialized/tokenized request, not these
+    dataclass layers. ``ContextRenderer`` currently coalesces every system layer
+    into one leading system message for chat-template compatibility, then appends
+    non-system history and the current user message. A volatile system-layer
+    change can therefore preserve the stable beginning of that system message,
+    but prevent later history from belonging to the same reusable prefix.
 
     Story Memory lifecycle: records accumulate in day-to-day play, then get
     distilled into Persistent Memory during offline summary — after which
@@ -190,8 +188,8 @@ class RPGContextBuilder:
         hot_history = slice_recent_turns(resolved_history, self.config.hot_history_rounds)
 
         # ── 6. Build Dynamic Layer modules ──────────────────────────
-        # Ordered by change frequency (low → high) for prefix cache efficiency:
-        #   story memory → recalled memory → status tables (most volatile)
+        # Keep the conceptual dynamic-layer order deterministic. ContextRenderer
+        # owns the final provider message layout and its cache-prefix boundary.
         story_details: list[dict] = []
         if self._story_memory and self.config.enable_story_memory:
             try:
@@ -220,7 +218,7 @@ class RPGContextBuilder:
             {"user_reply_suffix": "请用中文回复，保持角色设定。"},
         )
 
-        # ── 8. Assemble into RPGContext (stable-first for prefix cache) ─
+        # ── 8. Assemble structured RPGContext ─────────────────────────
         return RPGContext(
             fixed_layer=resolved_fixed_layer,
             persistent_memory=PersistentMemoryLayer(sections=persistent_sections),

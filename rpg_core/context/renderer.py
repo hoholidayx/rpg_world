@@ -42,7 +42,11 @@ class ContextRenderer:
                 system_parts.append(content)
 
         # Some OpenAI-compatible chat templates (including Qwen) only accept
-        # one system message, and require it to be the first message.
+        # one system message, and require it to be the first message. This also
+        # defines the real provider cache-prefix boundary: dynamic system layers
+        # are inside this first message before non-system history, so changing a
+        # dynamic layer may make the later history miss even though the stable
+        # beginning of the system message remains reusable.
         msgs: list[Message] = []
         if system_parts:
             msgs.append(Message(role=Role.SYSTEM, content="\n\n".join(system_parts)))

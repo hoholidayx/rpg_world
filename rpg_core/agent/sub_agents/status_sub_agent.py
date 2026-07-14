@@ -19,9 +19,10 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
 import json
-from copy import deepcopy
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Iterator, TypeAlias
 
@@ -35,7 +36,7 @@ from rpg_data.models import (
     STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
     STATUS_UPDATE_FREQUENCY_REALTIME,
 )
-from rpg_core.agent.agent_types import CallRecord, LLMResponse, TurnStats
+from rpg_core.agent.agent_types import CallRecord, LLMResponse, LLMUsage, TurnStats
 from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.agent.sub_agents.status_sub_agent_models import (
     DeferredStatusResult,
@@ -151,6 +152,20 @@ OUTCOME_ONLY_SYSTEM_PROMPT = (
     "你是 RPG 剧情裁定门禁。只判断当前玩家行动是否存在外部实质变数。\n"
     "需要裁定时只调用一次 rp_story_outcome；不需要时不调用任何工具。\n"
     "不得更新状态、不得虚构结果。"
+)
+
+ROUTED_STATE_UPDATE_SYSTEM_PROMPT = (
+    "你是 RPG 游戏世界的单目标状态更新器。当前请求只包含一个已经路由的状态目标。\n\n"
+    "执行契约：\n"
+    "1. 只能使用本请求实际提供的工具；未提供的工具视为不存在，不得请求或假设其它 "
+    "scene 或状态工具。\n"
+    "2. 只依据既有 assistant 已确认事实、用户对既有事实的明确纠正，或没有随机分支的"
+    "确定性动作更新状态；不得把未决外部结果当作事实。\n"
+    "3. 仅当实际、持久、已经确定的追踪值发生变化时调用工具；不要制造 no-op，"
+    "没有变化时不调用任何工具。\n"
+    "4. 严格遵守当前工具 schema 的目标、字段和参数约束。只有实际提供的 schema 明确允许时"
+    "才能改变 key 结构，否则只能修改已有 key 的 value。\n"
+    "5. key 和 value 使用目标状态已有的语言与格式。"
 )
 
 STATUS_ROUTER_TOOL_NAME = "select_status_targets"
@@ -326,9 +341,9 @@ class StatusSubAgent(BaseSubAgent):
 
     def bind_context(self, context: SubAgentContext) -> None:
         """绑定 SubAgentContext，同时刷新所有工具提供者的工具。"""
-        super().bind_context(context)
         self.clear_tools()
         self.register_tools(self._collect_provider_tools())
+        super().bind_context(context)
 
     # ── 核心方法 ─────────────────────────────────────────────────────
 
@@ -1046,16 +1061,16 @@ class StatusSubAgent(BaseSubAgent):
                     Message(
                         role=Role.SYSTEM,
                         content=self._build_system_context(
-                            _build_state_system_prompt(self._state_tool_set),
+                            ROUTED_STATE_UPDATE_SYSTEM_PROMPT,
                             player_character=player_character,
                         ),
                     ).to_dict(),
                     Message(
                         role=Role.USER,
                         content=(
-                            f"## Selected State Target\n{batch.selected_context}\n\n"
                             f"## Recent Conversation\n{recent}\n\n"
-                            f"## User action\n{user_input}\n\n"
+                            f"## User Action\n{user_input}\n\n"
+                            f"## Selected State Target\n{batch.selected_context}\n\n"
                             "只更新这里列出的、已经确定且实际变化的值；没有变化不要调用工具。"
                         ),
                     ).to_dict(),
@@ -1478,6 +1493,21 @@ class StatusSubAgent(BaseSubAgent):
             len(messages),
             schema_names,
         )
+        if settings.verbose_logging:
+            system_text, tools_text = self._request_fingerprint_payloads(
+                messages,
+                schemas,
+            )
+            self._log_verbose(
+                "LLM request fingerprint: source={} systemHash={} systemChars={} "
+                "toolsHash={} toolsChars={} tools={}",
+                source,
+                self._short_hash(system_text),
+                len(system_text),
+                self._short_hash(tools_text),
+                len(tools_text),
+                schema_names,
+            )
         t0 = time.monotonic()
         try:
             provider = self._get_provider()
@@ -1513,6 +1543,7 @@ class StatusSubAgent(BaseSubAgent):
                 "LLM provider chat() must return LLMResponse or a mapping test double"
         )
         model = llm_result.model or provider.get_default_model()
+        self._log_cache_usage(source, llm_result.usage)
         self._log_verbose(
             "LLM call completed: source={} duration_ms={:.1f} model={} "
             "finish_reason={} tool_calls={} usage={}",
@@ -1529,6 +1560,55 @@ class StatusSubAgent(BaseSubAgent):
             usage=llm_result.usage,
             duration_ms=duration_ms,
             reasoning_content=llm_result.reasoning_content,
+        )
+
+    @staticmethod
+    def _request_fingerprint_payloads(
+        messages: list[dict],
+        schemas: list[dict[str, object]],
+    ) -> tuple[str, str]:
+        """Return canonical, non-logged request parts used for cache diagnostics."""
+        system_text = "\n\n".join(
+            str(message.get("content") or "")
+            for message in messages
+            if message.get("role") == Role.SYSTEM.value
+        )
+        tools_text = json.dumps(
+            schemas,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return system_text, tools_text
+
+    @staticmethod
+    def _short_hash(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+    def _log_cache_usage(self, source: str, usage: LLMUsage | None) -> None:
+        if not settings.verbose_logging:
+            return
+        if usage is None:
+            logger.info(
+                _TAG + " LLM cache usage: source={} hit=- miss=- rate=-",
+                source,
+            )
+            return
+
+        hit = max(0, int(usage.cached_tokens or 0))
+        miss = max(0, int(usage.prompt_cache_miss_tokens or 0))
+        prompt_tokens = max(0, int(usage.prompt_tokens or 0))
+        if miss == 0 and prompt_tokens > hit:
+            miss = prompt_tokens - hit
+        cache_tokens = hit + miss
+        rate = hit / cache_tokens * 100 if cache_tokens else 0.0
+        logger.info(
+            _TAG + " LLM cache usage: source={} hit={} miss={} rate={:.1f}%",
+            source,
+            hit,
+            miss,
+            rate,
         )
 
     @staticmethod

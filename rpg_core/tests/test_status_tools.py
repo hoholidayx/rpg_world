@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import rpg_core.agent.sub_agents.status_sub_agent as status_module
+from llm_service.types import LLMResponse, LLMUsage
 from rpg_data.models import STATUS_KIND_NORMAL, STATUS_KIND_SCENE, StatusTableDocument, StatusTableRow
 from rpg_core.agent.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
 from rpg_core.agent.sub_agents import (
@@ -355,6 +356,8 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
     class Provider:
         def __init__(self) -> None:
             self.stages: list[str] = []
+            self.update_system_prompts: list[str] = []
+            self.update_user_prefixes: list[str] = []
 
         async def chat(self, messages, *, tools):  # noqa: ANN001
             names = {
@@ -387,17 +390,31 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
                 }
             if names == {"scene_attr"}:
                 self.stages.append("scene")
+                self._record_update_request(messages)
                 assert "SCENE_SENTINEL" in user_content
                 assert "COMBINED_TABLE_SENTINEL" not in user_content
                 assert "SLOW_SENTINEL" not in user_content
                 return {"tool_calls": []}
             if names == {"status_table_set_values"}:
                 self.stages.append("table")
+                self._record_update_request(messages)
                 assert "RT_SENTINEL" in user_content
                 assert "SLOW_SENTINEL" not in user_content
                 assert "SCENE_SENTINEL" not in user_content
                 return {"tool_calls": []}
             raise AssertionError(f"unexpected schemas: {names}")
+
+        def _record_update_request(self, messages) -> None:  # noqa: ANN001
+            system_content = str(messages[0]["content"])
+            user_content = str(messages[-1]["content"])
+            assert "只能使用本请求实际提供的工具" in system_content
+            assert user_content.index("## Recent Conversation") < user_content.index(
+                "## User Action"
+            ) < user_content.index("## Selected State Target")
+            self.update_system_prompts.append(system_content)
+            self.update_user_prefixes.append(
+                user_content.split("## Selected State Target", 1)[0]
+            )
 
     provider = Provider()
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
@@ -428,6 +445,8 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
 
     assert result.failed is False
     assert provider.stages == ["outcome", "route", "scene", "table"]
+    assert len(set(provider.update_system_prompts)) == 1
+    assert len(set(provider.update_user_prefixes)) == 1
     llm_started_sources = [
         call.args[1]
         for call in info.call_args_list
@@ -877,6 +896,97 @@ def test_status_sub_agent_prompt_and_schema_only_include_outcome_when_mounted() 
         assert NARRATIVE_OUTCOME_TOOL_NAME in [
             schema["function"]["name"] for schema in sub_agent._schemas
         ]
+
+
+def test_status_sub_agent_refreshes_provider_tools_before_binding_prompt() -> None:
+    class Provider:
+        def get_tools(self) -> list[BaseTool]:
+            return [_SceneAttrTool()]
+
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent.add_tool_provider(Provider())
+    context = SubAgentContext()
+
+    sub_agent.bind_context(context)
+
+    rendered = context.render()
+    assert "scene_attr" in rendered
+    assert "本轮没有状态写入工具" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_status_sub_agent_logs_cache_fingerprint_and_usage_by_source(
+    monkeypatch,
+) -> None:
+    source = "status_update:table:1"
+    schema = {
+        "type": "function",
+        "function": {
+            "name": "status_table_set_values",
+            "description": "update",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+    class Provider:
+        async def chat(self, _messages, *, tools):  # noqa: ANN001
+            assert tools == [schema]
+            return LLMResponse(
+                content="",
+                tool_calls=None,
+                finish_reason="stop",
+                usage=LLMUsage(
+                    prompt_tokens=100,
+                    completion_tokens=1,
+                    total_tokens=101,
+                    prompt_cache_hit_tokens=32,
+                    prompt_cache_miss_tokens=68,
+                ),
+                model="deepseek-v4-flash",
+            )
+
+        def get_default_model(self) -> str:
+            return "deepseek-v4-flash"
+
+    info = MagicMock()
+    monkeypatch.setattr(
+        status_module,
+        "settings",
+        SimpleNamespace(verbose_logging=True),
+    )
+    monkeypatch.setattr(status_module.logger, "info", info)
+    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
+    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+
+    await sub_agent._chat_with_stats(
+        [
+            {"role": "system", "content": "stable system"},
+            {"role": "user", "content": "dynamic user"},
+        ],
+        [schema],
+        source=source,
+    )
+
+    fingerprint = next(
+        call
+        for call in info.call_args_list
+        if "LLM request fingerprint" in call.args[0]
+    )
+    assert fingerprint.args[1] == source
+    assert len(fingerprint.args[2]) == 16
+    assert fingerprint.args[3] == len("stable system")
+    assert len(fingerprint.args[4]) == 16
+    assert fingerprint.args[5] > 0
+    assert fingerprint.args[6] == ["status_table_set_values"]
+    assert "stable system" not in fingerprint.args[0]
+    assert "dynamic user" not in fingerprint.args[0]
+
+    cache_usage = next(
+        call
+        for call in info.call_args_list
+        if "LLM cache usage" in call.args[0]
+    )
+    assert cache_usage.args[1:] == (source, 32, 68, 32.0)
 
 
 def test_status_sub_agent_prompt_uses_actual_value_only_scene_tools() -> None:

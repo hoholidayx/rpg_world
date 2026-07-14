@@ -338,7 +338,7 @@ TurnRequest                            调用方原始、不可变输入
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
 - 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起绑定给 `StatusSubAgent`。代码固定编排为 Outcome 独立判定 → 状态表/字段路由 → scene 与每张命中表分别更新；Outcome 已暂存或判定失败时不进入状态路由与预写。
-- 状态路由只能选择具有实际可用工具的 scene，以及普通表中的 `realtime` / 已明确命中 `updateRule` 的 `event_driven` 字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID、key allowlist 和频率。scene 工具与提示词从同一份 turn-local 能力集合生成；默认结构权限关闭时只允许更新已有 value，不出现删除或主动清理指令。快速更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
+- 状态路由只能选择具有实际可用工具的 scene，以及普通表中的 `realtime` / 已明确命中 `updateRule` 的 `event_driven` 字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID、key allowlist 和频率。隔离 Update 使用稳定 system contract，明确只能调用本请求实际提供的工具；user 内容按 `Recent Conversation → User Action → Selected State Target` 排列，每次仍只下发当前目标 schema。默认结构权限关闭时只允许更新已有 value。快速更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
 - 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后不再注入 Narrative Outcome fixed section，只用简短无序条目要求执行最终结果并明确列出本轮可用的 scene/status 工具，同时从主 Agent schema 和可执行 registry 移除 outcome 工具；漏判或预裁定失败时才保留原 fixed contract 和补判工具。主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
 - 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。字段更新频率固定为 `realtime | event_driven | deferred | manual`，旧字段默认 `realtime`，scene 永远只能是 `realtime`；`deferred` 由回复交付后的慢状态归纳维护，`manual` 不允许 LLM 写入。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
@@ -425,7 +425,7 @@ TurnRequest                            调用方原始、不可变输入
 | `usage.py` | context/token 用量快照、provider usage 聚合与 wire payload 归一化 |
 | `rendering.py` | 共享 Jinja2 环境和模板渲染工具 |
 
-LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache：
+`RPGContext` 的结构化概念顺序如下：
 
 | 层 | role | 内容 | 变更频率 |
 |---|---|---|---|
@@ -438,6 +438,8 @@ LLM 调用时的消息构建顺序，按变更频率排列以优化 prefix cache
 | [N+3] Status Tables | system | 普通状态表，不包含 `status_kind="scene"` 的当前场景 | ★★★★ 高频变化 |
 | [N+4] RP Modules | system | RP 模块动态运行态；明确随机意图时注入本轮指令，预裁定后注入已生效结果 | ★★★★ 动态 |
 | [N+5] User Message | user | `[scene]` + 用户输入 + 前后缀 | 总是新的 |
+
+`ContextRenderer` 为兼容只接受一个首位 system message 的 chat template，会把 Fixed、Persistent Memory、Summary、history 中的 system message和 Story Memory / Recalled Memory / Status Tables / RP Modules 合并为第一个 provider wire system message，再追加非 system Hot History 和 User Message。prefix cache 匹配实际序列化/tokenized 请求的共同前缀，不以结构化层为独立缓存单元；动态 system 层变化可保留该 system message 更早的稳定 token，但会使其后的 history 不再天然命中。StatusSubAgent 的各阶段使用独立 system/schema，应视为不同缓存族；隔离 Update 的 verbose 日志按 source 输出无正文的 `systemHash` / `toolsHash`、字符数、工具名和 provider cache hit/miss/rate。
 
 主 Agent Context 与历史展示分离。`SessionManager.context_history()` 是主 Agent 的历史投影入口：
 持久化 session 每次构建 Context 都重新读取 `rpg_session_messages.summary_processed`，仅把
