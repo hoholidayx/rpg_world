@@ -33,8 +33,8 @@ class ContextRenderer:
 
         for type_ in (
             LayerType.STORY_MEMORY,
-            LayerType.RECALLED_MEMORY,
             LayerType.STATUS_TABLES,
+            LayerType.RECALLED_MEMORY,
             LayerType.RP_MODULES,
         ):
             content = self.render_layer(type_)

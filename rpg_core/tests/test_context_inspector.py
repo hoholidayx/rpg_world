@@ -11,8 +11,13 @@ from rpg_core.context.rpg_context import (
     HotHistoryLayer,
     LayerType,
     Message,
+    RecalledMemoryLayer,
     RPGContext,
+    RPModuleRuntimeSection,
+    RPModulesLayer,
     Role,
+    StatusTablesLayer,
+    StoryMemoryLayer,
     UserMessageLayer,
 )
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload
@@ -101,6 +106,31 @@ def test_context_inspector_verbose_log_omits_history_content(fake_token_counter)
     assert "history assistant secret" not in log
     assert "user_message (user)" in log
     assert "current input" in log
+
+
+def test_context_inspector_uses_provider_dynamic_layer_order(fake_token_counter):
+    ctx = RPGContext(
+        story_memory=StoryMemoryLayer(details=[{"text": "story"}]),
+        status_tables=StatusTablesLayer(tables=[{"name": "status"}]),
+        recalled_memory=RecalledMemoryLayer(items=["recall"]),
+        rp_modules=RPModulesLayer(
+            sections=[RPModuleRuntimeSection(id="runtime", title="运行态", content="state")]
+        ),
+    )
+    inspector = ContextInspector(ctx, fake_token_counter)
+
+    layer_types = [layer.type for layer in inspector.layer_summary()]
+    assert layer_types[4:8] == [
+        LayerType.STORY_MEMORY,
+        LayerType.STATUS_TABLES,
+        LayerType.RECALLED_MEMORY,
+        LayerType.RP_MODULES,
+    ]
+
+    verbose = inspector.to_verbose_log()
+    assert verbose.index("story_memory (system)") < verbose.index("status_tables (system)")
+    assert verbose.index("status_tables (system)") < verbose.index("recalled_memory (system)")
+    assert verbose.index("recalled_memory (system)") < verbose.index("rp_modules (system)")
 
 
 def test_context_inspector_payload_includes_rendered_layers_and_messages(fake_token_counter):

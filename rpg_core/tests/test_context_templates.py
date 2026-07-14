@@ -115,3 +115,27 @@ def test_sub_agent_context_marks_current_player_for_memory_and_status_prompts() 
     assert "当前玩家扮演角色：Alice" in rendered
     assert "Bob [NPC｜非玩家角色]" in rendered
     assert "Alice [PLAYER_CHARACTER｜玩家当前扮演]" in rendered
+
+
+def test_recalled_memory_template_keeps_conflict_rule_inside_active_block() -> None:
+    rendered = render_jinja_template(
+        "modules/recalled_memory.jinja",
+        recalled_items=["旧记录：Alice 仍在森林。"],
+    )
+
+    assert "## 召回记忆" in rendered
+    assert "可能过时的历史参考" in rendered
+    assert "不是当前状态真源" in rendered
+    assert "`[scene]`" in rendered
+    assert "玩家角色绑定" in rendered
+    assert "不得仅凭召回记忆回滚状态" in rendered
+    assert "旧记录：Alice 仍在森林。" in rendered
+
+
+def test_recalled_memory_template_is_empty_without_recalled_items() -> None:
+    rendered = render_jinja_template(
+        "modules/recalled_memory.jinja",
+        recalled_items=[],
+    )
+
+    assert rendered.strip() == ""

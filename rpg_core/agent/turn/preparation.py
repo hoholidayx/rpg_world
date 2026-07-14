@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from rpg_core.agent.turn.models import PreparedTurn
+from rpg_core.context.fingerprint import build_request_fingerprint
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -53,7 +54,6 @@ class TurnPreparation:
             rp_module_runtime=runtime.rp_module_runtime,
             turn_execution=runtime.plan.execution,
         )
-        self._log_context_shape(messages)
         tool_registry = self._tool_service.registry_for_turn(
             scratch.scene_tracker,
             scratch.status_manager,
@@ -64,6 +64,7 @@ class TurnPreparation:
             tool_registry,
             rp_module_runtime=runtime.rp_module_runtime,
         )
+        self._log_request_fingerprint(messages, schemas)
         return PreparedTurn(
             messages=messages,
             tool_registry=tool_registry,
@@ -71,18 +72,24 @@ class TurnPreparation:
         )
 
     @staticmethod
-    def _log_context_shape(messages: list["Message"]) -> None:
+    def _log_request_fingerprint(
+        messages: list["Message"],
+        schemas: list[dict[str, object]] | None,
+    ) -> None:
         if not settings.verbose_logging:
             return
-        sys_msgs = sum(1 for message in messages if message.is_system())
-        user_msgs = sum(1 for message in messages if message.is_user())
-        assistant_msgs = sum(1 for message in messages if message.is_assistant())
-        total_chars = sum(len(message.content) for message in messages)
-        logger.debug(
-            _TAG + " context messages: {} total (sys={}, user={}, asst={}) chars={}",
-            len(messages),
-            sys_msgs,
-            user_msgs,
-            assistant_msgs,
-            total_chars,
+        fingerprint = build_request_fingerprint(messages, schemas)
+        logger.info(
+            _TAG + " main LLM request fingerprint: source=main_initial "
+            "contextHash={} contextChars={} systemHash={} systemChars={} "
+            "toolsHash={} toolsChars={} messages={} roles={} tools={}",
+            fingerprint.context_hash,
+            fingerprint.context_chars,
+            fingerprint.system_hash,
+            fingerprint.system_chars,
+            fingerprint.tools_hash,
+            fingerprint.tools_chars,
+            fingerprint.message_count,
+            dict(fingerprint.role_counts),
+            list(fingerprint.tool_names),
         )

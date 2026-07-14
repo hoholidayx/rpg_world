@@ -252,14 +252,16 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 1. Fixed Layer：固定 RP 指令、Story Prompt、当前玩家角色标签块、文本输出格式、已启用 RP Module 静态契约、世界书、带 PLAYER/NPC 标注的角色卡。
 2. Persistent Memory / Summary。
 3. Hot History。
-4. Story Memory / Recalled Memory / Status Tables / RP Modules。
+4. 动态 system 段固定为 Story Memory / Status Tables / Recalled Memory / RP Modules。
 5. User Message。
 
-为兼容只接受一个首位 system message 的 OpenAI-compatible chat template，`ContextRenderer` 实际会把所有 system 层合并成第一个 wire message，再追加非 system Hot History 和当前 User Message。prefix cache 以 provider 最终序列化/tokenized 的请求共同前缀为准，不以结构化层为独立缓存单元；动态 system 层变化可能让其后的 history 失去命中。本轮只优化 StatusSubAgent 的隔离 Update 前缀，主 Agent wire role/顺序保持不变。
+为兼容只接受一个首位 system message 的 OpenAI-compatible chat template，`ContextRenderer` 实际会把所有 system 层合并成第一个 wire message，再追加非 system Hot History 和当前 User Message。合并后的动态 system 段按 `Story Memory → Status Tables → Recalled Memory → RP Modules` 排列：低频累积的 Story Memory 前置，当前状态放在按 turn 变化的 Recall 之前，使 Recall 变化时仍有机会复用截至状态表的更长 token 前缀。Recall 块自身明确声明它只是可能过时的历史参考；与当前 scene、状态表、玩家角色绑定或更新事实冲突时，以当前/更新状态为准。
+
+prefix cache 以 provider 最终序列化/tokenized 请求的共同前缀为准，不以结构化层或整条 system message 的应用层 hash 为独立缓存单元。整条 system/context hash 不同仍可能命中更早的部分 token 前缀；实际缓存效果只看 provider usage 返回的 hit/miss token。开启 `verbose_logging` 后，`TurnPreparation` 会在最终主 Agent messages 和 tool schemas 完成后、首次主 LLM 调用前输出一次不含正文的 `contextHash` / `systemHash` / `toolsHash`、字符数、role 计数和工具名；后续工具 round 不重复输出这条初始指纹。
 
 `当前场景` 在数据层仍是必须挂载到 story 的 `status_kind="scene"` SQL document，在主 Context 中则是高优先级 `[scene]` user prefix，不进入普通 `STATUS_TABLES`。Status Route 只在本轮涉及且存在可用 scene 工具时选择它；scene 不走普通表工具或 deferred。默认关闭结构编辑时，已有字段都保持可见且可改 value，`scene_attr` 只接受现有 key，`scene_time` 只在已有 `时间` key 时出现，`scene_del_attr` 不注册；空 scene 完全不暴露写工具。完整差异见 [scene 的特殊语义](docs/agent-turn-orchestration.md#scene-的特殊语义)。
 
-StatusSubAgent 的 Outcome、Route、scene Update 和单表 Update 是不同缓存族。隔离 Update 使用稳定 system contract，并按 `Recent Conversation → User Action → Selected State Target` 排列 user 内容；每次仍只下发当前目标 schema。`verbose_logging` 会按 source 输出无正文的 system/tools 哈希与字符数，以及 provider usage 的 cache hit/miss/rate。完整说明见 [缓存前缀与观测](docs/agent-turn-orchestration.md#缓存前缀与观测)。
+StatusSubAgent 的 Outcome、Route、scene Update 和单表 Update 是不同缓存族。隔离 Update 使用稳定 system contract，并按 `Recent Conversation → User Action → Selected State Target` 排列 user 内容；每次仍只下发当前目标 schema。`verbose_logging` 会按 source 使用与主 Agent 相同的指纹口径输出无正文的 context/system/tools 哈希与字符数，以及 provider usage 的 cache hit/miss/rate。完整说明见 [缓存前缀与观测](docs/agent-turn-orchestration.md#缓存前缀与观测)。
 
 普通 `STATUS_TABLES` 层展示 session 运行时表 ID、表名、`description`（用途与更新规则）和完整 KV，不展示模板来源或通用挂载范围。绑定角色的表单独进入“角色状态表”段落并按角色名分组；当前只用角色绑定辅助模型理解所属角色，不扩展其它行为。
 

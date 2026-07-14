@@ -19,7 +19,6 @@ Usage::
 
 from __future__ import annotations
 
-import hashlib
 import json
 from contextlib import contextmanager
 from copy import deepcopy
@@ -52,6 +51,7 @@ from rpg_core.agent.tools import BaseTool
 from rpg_core.agent.tools.registry import ToolRegistry
 from rpg_core.agent.tools.state import STATE_TOOL_NAMES, StateToolSet
 from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.fingerprint import build_request_fingerprint
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import (
     SCENE_DELETE_ATTR_TOOL_NAME,
@@ -1494,19 +1494,24 @@ class StatusSubAgent(BaseSubAgent):
             schema_names,
         )
         if settings.verbose_logging:
-            system_text, tools_text = self._request_fingerprint_payloads(
+            fingerprint = build_request_fingerprint(
                 messages,
                 schemas,
             )
             self._log_verbose(
-                "LLM request fingerprint: source={} systemHash={} systemChars={} "
-                "toolsHash={} toolsChars={} tools={}",
+                "LLM request fingerprint: source={} contextHash={} contextChars={} "
+                "systemHash={} systemChars={} toolsHash={} toolsChars={} "
+                "messages={} roles={} tools={}",
                 source,
-                self._short_hash(system_text),
-                len(system_text),
-                self._short_hash(tools_text),
-                len(tools_text),
-                schema_names,
+                fingerprint.context_hash,
+                fingerprint.context_chars,
+                fingerprint.system_hash,
+                fingerprint.system_chars,
+                fingerprint.tools_hash,
+                fingerprint.tools_chars,
+                fingerprint.message_count,
+                dict(fingerprint.role_counts),
+                list(fingerprint.tool_names),
             )
         t0 = time.monotonic()
         try:
@@ -1561,30 +1566,6 @@ class StatusSubAgent(BaseSubAgent):
             duration_ms=duration_ms,
             reasoning_content=llm_result.reasoning_content,
         )
-
-    @staticmethod
-    def _request_fingerprint_payloads(
-        messages: list[dict],
-        schemas: list[dict[str, object]],
-    ) -> tuple[str, str]:
-        """Return canonical, non-logged request parts used for cache diagnostics."""
-        system_text = "\n\n".join(
-            str(message.get("content") or "")
-            for message in messages
-            if message.get("role") == Role.SYSTEM.value
-        )
-        tools_text = json.dumps(
-            schemas,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        )
-        return system_text, tools_text
-
-    @staticmethod
-    def _short_hash(value: str) -> str:
-        return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
     def _log_cache_usage(self, source: str, usage: LLMUsage | None) -> None:
         if not settings.verbose_logging:

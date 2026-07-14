@@ -974,12 +974,23 @@ async def test_status_sub_agent_logs_cache_fingerprint_and_usage_by_source(
     )
     assert fingerprint.args[1] == source
     assert len(fingerprint.args[2]) == 16
-    assert fingerprint.args[3] == len("stable system")
+    assert fingerprint.args[3] == len("stable systemdynamic user")
     assert len(fingerprint.args[4]) == 16
-    assert fingerprint.args[5] > 0
-    assert fingerprint.args[6] == ["status_table_set_values"]
+    assert fingerprint.args[5] == len("stable system")
+    assert len(fingerprint.args[6]) == 16
+    assert fingerprint.args[7] > 0
+    assert fingerprint.args[8] == 2
+    assert fingerprint.args[9] == {
+        "system": 1,
+        "user": 1,
+        "assistant": 0,
+        "tool": 0,
+    }
+    assert fingerprint.args[10] == ["status_table_set_values"]
     assert "stable system" not in fingerprint.args[0]
     assert "dynamic user" not in fingerprint.args[0]
+    assert "stable system" not in repr(fingerprint)
+    assert "dynamic user" not in repr(fingerprint)
 
     cache_usage = next(
         call

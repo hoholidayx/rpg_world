@@ -137,15 +137,15 @@ class ContextInspector:
         )
         self._add_rendered_layer_payload(
             layers,
-            LayerType.RECALLED_MEMORY,
-            Role.SYSTEM.value,
-            f"{len(self._ctx.recalled_memory.items)} 条召回记忆" if self._ctx.recalled_memory.active else "-",
-        )
-        self._add_rendered_layer_payload(
-            layers,
             LayerType.STATUS_TABLES,
             Role.SYSTEM.value,
             f"{len(self._ctx.status_tables.tables)} 张状态表" if self._ctx.status_tables.active else "-",
+        )
+        self._add_rendered_layer_payload(
+            layers,
+            LayerType.RECALLED_MEMORY,
+            Role.SYSTEM.value,
+            f"{len(self._ctx.recalled_memory.items)} 条召回记忆" if self._ctx.recalled_memory.active else "-",
         )
         self._add_rendered_layer_payload(
             layers,
@@ -216,8 +216,8 @@ class ContextInspector:
             (LayerType.SUMMARY, Role.SYSTEM.value),
             (LayerType.HOT_HISTORY, "mixed"),
             (LayerType.STORY_MEMORY, Role.SYSTEM.value),
-            (LayerType.RECALLED_MEMORY, Role.SYSTEM.value),
             (LayerType.STATUS_TABLES, Role.SYSTEM.value),
+            (LayerType.RECALLED_MEMORY, Role.SYSTEM.value),
             (LayerType.RP_MODULES, Role.SYSTEM.value),
             (LayerType.USER_MESSAGE, Role.USER.value),
         )

@@ -292,8 +292,10 @@ DeepSeek 的 context cache 由服务端自动、best-effort 管理。以 `A` 为
 
 开启 `verbose_logging` 后，每次 StatusSubAgent provider 调用按 `source` 记录：
 
-- `systemHash` / `toolsHash`、对应字符数和工具名，用于判断请求是否属于同一候选缓存族；日志不输出 system/user/tool schema 正文；
+- `contextHash` / `systemHash` / `toolsHash`、对应字符数、message/role 计数和工具名，用于比较本地最终请求；日志不输出 system/user/tool schema 正文；
 - provider 返回的 cache hit、miss 和 hit rate。实际命中以 usage 为准，hash 相同只说明本地可见前缀结构相同，不保证服务端一定命中。
+
+主 Agent 与 StatusSubAgent 共用 canonical JSON + SHA-256（截断 16 位）的指纹口径。`contextHash` 覆盖按顺序排列的最终 messages，`systemHash` 只覆盖其中的 system message，`toolsHash` 覆盖最终 schema 列表。它们是完整内容的相等性指纹，不是 provider cache key：只要尾部变化，完整 hash 就会变化，但 provider 仍可能复用变化点之前的 token 前缀。反过来，hash 相同也不保证服务端缓存一定存在。
 
 这些诊断只进入日志，不新增 API、持久化字段或 WebUI 状态。
 
@@ -372,6 +374,7 @@ scene 工具注册和执行权限如下：
 3. 执行 MemoryRecallHook；失败只记录 warning。
 4. 使用 scratch 后的 scene/status、已暂存 Outcome 和当前 user message 构建主 Context。
 5. 使用相同 scratch 资源构建可执行工具 registry 和模型可见 schema。
+6. `verbose_logging` 开启时，在首次主 LLM 调用前输出一次最终 messages/schemas 指纹；同步与流式共用该 preparation，后续工具 round 不重复。
 
 主 Context 的结构化层顺序是：
 
@@ -379,11 +382,13 @@ scene 工具注册和执行权限如下：
 Fixed Layer
 → Persistent Memory / Summary
 → Hot History
-→ Story Memory / Recalled Memory / STATUS_TABLES / RP_MODULES
+→ Story Memory / STATUS_TABLES / Recalled Memory / RP_MODULES
 → 当前 User Message（含 scene prefix）
 ```
 
-实际 provider wire message 为兼容只接受单个首位 system message 的 chat template，会把 Fixed、Persistent Memory、Summary、history 中的 system message以及 Story Memory / Recalled Memory / `STATUS_TABLES` / `RP_MODULES` 合并进首个 system message；之后才追加非 system 的 Hot History 和当前 User Message。因此动态 system 层变化仍可复用首个 system message 中更早的稳定 token 前缀，但其后的历史不再天然处于同一命中前缀。调整主 Agent 的 role/消息顺序属于独立兼容性主题，本轮 StatusSubAgent 优化不改变该 wire layout。
+实际 provider wire message 为兼容只接受单个首位 system message 的 chat template，会把 Fixed、Persistent Memory、Summary、history 中的 system message以及 Story Memory / `STATUS_TABLES` / Recalled Memory / `RP_MODULES` 合并进首个 system message；之后才追加非 system 的 Hot History 和当前 User Message。Story Memory 作为低频累积信息放在 Summary 之后的动态 system 段开头，当前状态表位于每轮召回之前；这样 Recall 变化时，provider 仍可能复用截至状态表的更长 token 前缀。Recall 块同时声明冲突时以当前 scene、普通状态表、玩家角色绑定和更新事实为准，不能仅凭历史召回回滚状态。
+
+仍保留一个合并后的首位 system message。单条大 system 的尾部变化会改变本地整条 `systemHash`，拆成多条 system 也会改变覆盖全部 system messages 的 hash；两者都不能直接推导 provider 是否命中，因为 provider 判断的是序列化/tokenized 后从请求开头起的相同 token。只要前段 token 不变，完整 hash 不同也可能报告部分 cache hit。
 
 主 Agent 历史与 StatusSubAgent 历史不同：主 Context 只投影 `summary_processed=false` 的消息；Play/Agent history API 和 StatusSubAgent 独立链路仍可读取完整未删除历史。
 

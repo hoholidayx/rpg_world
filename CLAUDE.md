@@ -434,12 +434,14 @@ TurnRequest                            调用方原始、不可变输入
 | [2] Summary | system | 历史摘要（条件触发） | ★☆ 少量 |
 | [3..N] Hot History | mixed | 最近 N 轮对话 | ★★☆ 每轮追加 |
 | [N+1] Story Memory | system | 剧情细节 | ★★☆ 累积 |
-| [N+2] Recalled Memory | system | 动态召回 | ★★★ 动态注入 |
-| [N+3] Status Tables | system | 普通状态表，不包含 `status_kind="scene"` 的当前场景 | ★★★★ 高频变化 |
+| [N+2] Status Tables | system | 普通状态表，不包含 `status_kind="scene"` 的当前场景 | ★★★★ 当前状态 |
+| [N+3] Recalled Memory | system | 动态召回；冲突时服从当前状态和更新事实 | ★★★ 动态注入 |
 | [N+4] RP Modules | system | RP 模块动态运行态；明确随机意图时注入本轮指令，预裁定后注入已生效结果 | ★★★★ 动态 |
 | [N+5] User Message | user | `[scene]` + 用户输入 + 前后缀 | 总是新的 |
 
-`ContextRenderer` 为兼容只接受一个首位 system message 的 chat template，会把 Fixed、Persistent Memory、Summary、history 中的 system message和 Story Memory / Recalled Memory / Status Tables / RP Modules 合并为第一个 provider wire system message，再追加非 system Hot History 和 User Message。prefix cache 匹配实际序列化/tokenized 请求的共同前缀，不以结构化层为独立缓存单元；动态 system 层变化可保留该 system message 更早的稳定 token，但会使其后的 history 不再天然命中。StatusSubAgent 的各阶段使用独立 system/schema，应视为不同缓存族；隔离 Update 的 verbose 日志按 source 输出无正文的 `systemHash` / `toolsHash`、字符数、工具名和 provider cache hit/miss/rate。
+`ContextRenderer` 为兼容只接受一个首位 system message 的 chat template，会把 Fixed、Persistent Memory、Summary、history 中的 system message和 Story Memory / Status Tables / Recalled Memory / RP Modules 合并为第一个 provider wire system message，再追加非 system Hot History 和 User Message。动态 system 段将当前状态放在按 turn 变化的 Recall 前；Recall 块明确自身只是可能过时的历史参考，与 scene、普通状态表、玩家角色绑定或更新事实冲突时必须服从当前/更新状态。prefix cache 匹配实际序列化/tokenized 请求的共同前缀，不以结构化层或整条消息 hash 为独立缓存单元；完整 hash 不同仍可能命中较早的部分 token 前缀，实际命中以 provider usage 为准。
+
+开启 `verbose_logging` 时，`TurnPreparation` 在最终主 messages 和 tool schemas 完成后、首次主 LLM 调用前只输出一次无正文的 `contextHash` / `systemHash` / `toolsHash`、字符数、role 计数和工具名，后续工具 round 不重复。StatusSubAgent 各阶段使用相同指纹工具按 source 输出上述字段，并继续记录 provider cache hit/miss/rate；Outcome、Route、scene Update 和单表 Update 使用不同 system/schema，仍应视为不同缓存族。
 
 主 Agent Context 与历史展示分离。`SessionManager.context_history()` 是主 Agent 的历史投影入口：
 持久化 session 每次构建 Context 都重新读取 `rpg_session_messages.summary_processed`，仅把

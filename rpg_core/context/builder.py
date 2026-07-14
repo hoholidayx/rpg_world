@@ -64,8 +64,8 @@ class RPGContextBuilder:
         [2]    system     Summary Layer (conditional)      ★☆ rarely
         [3..N] mixed      Hot History (windowed)           ★★☆ every turn (appended)
         [N+1]  system     Story Memory (剧情记忆)          ★★☆ accumulated details
-        [N+2]  system     Recalled Memory (召回)            ★★★ dynamically injected
-        [N+3]  system     Status Tables                    ★★★★ most volatile
+        [N+2]  system     Status Tables                    ★★★★ current state
+        [N+3]  system     Recalled Memory (召回)            ★★★ dynamically injected
         [N+4]  system     RP Modules (optional)            ★★★★ dynamic module state
         [N+5]  user       User Message                     always new
 
@@ -197,16 +197,16 @@ class RPGContextBuilder:
             except Exception as exc:
                 logger.debug("[RPGContextBuilder] story memory layer skipped: {}", exc)
 
+        status_tables: list[dict] = []
+        if status_mgr and self.config.enable_status_tables:
+            status_tables = _flatten_status_tables(status_mgr)
+
         recalled_items: list[str] = []
         if self._recalled_memory and self.config.enable_recalled_memory:
             try:
                 recalled_items = self._recalled_memory.get_items()
             except Exception as exc:
                 logger.debug("[RPGContextBuilder] recalled memory layer skipped: {}", exc)
-
-        status_tables: list[dict] = []
-        if status_mgr and self.config.enable_status_tables:
-            status_tables = _flatten_status_tables(status_mgr)
 
         # ── 7. Build user message with User Extension Layer ─────────
         user_before = self._build_extension_blocks(

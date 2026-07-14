@@ -13,11 +13,13 @@ from rpg_core.context.rpg_context import (
     HotHistoryLayer,
     LayerType,
     Message,
+    RecalledMemoryLayer,
     RPGContext,
     RPModuleRuntimeSection,
     RPModulesLayer,
     Role,
     StatusTablesLayer,
+    StoryMemoryLayer,
     UserMessageLayer,
 )
 
@@ -229,6 +231,36 @@ def test_context_includes_dynamic_rp_modules_before_user():
         "[combat]\ncombat turn\n[/combat]"
     )
     assert rendered[-1].content == "hi"
+
+
+def test_context_dynamic_system_layers_follow_cache_optimized_order():
+    ctx = RPGContext(
+        fixed_layer=FixedLayerData(
+            sections=[FixedLayerSection(id="core", title="核心", content="fixed")]
+        ),
+        story_memory=StoryMemoryLayer(details=[{"text": "story detail"}]),
+        status_tables=StatusTablesLayer(
+            tables=[{"name": "状态", "headers": ["k"], "rows": [["v"]]}]
+        ),
+        recalled_memory=RecalledMemoryLayer(items=["recalled detail"]),
+        rp_modules=RPModulesLayer(
+            sections=[
+                RPModuleRuntimeSection(
+                    id="combat",
+                    title="战斗",
+                    content="combat turn",
+                )
+            ]
+        ),
+        user_message=UserMessageLayer(user_input="hi"),
+    )
+
+    rendered = ctx.to_message_objects()
+    system_content = rendered[0].content
+
+    assert system_content.index("story|story detail") < system_content.index("tables|状态")
+    assert system_content.index("tables|状态") < system_content.index("recalled|recalled detail")
+    assert system_content.index("recalled|recalled detail") < system_content.index("[combat]")
 
 
 def test_context_coalesces_all_system_content_at_the_beginning():
