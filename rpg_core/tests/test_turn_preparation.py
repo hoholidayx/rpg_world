@@ -17,7 +17,7 @@ class _ContextService:
     def __init__(self, events: list[str]) -> None:
         self.events = events
 
-    def compose_stored_user_input(self, scene_ctx, user_input: str) -> str:  # noqa: ANN001
+    def compose_scene_user_input(self, scene_ctx, user_input: str) -> str:  # noqa: ANN001
         assert scene_ctx is None
         self.events.append("compose")
         return user_input
@@ -73,9 +73,11 @@ class _ToolRegistry:
 class _Transaction:
     def __init__(self, events: list[str]) -> None:
         self.events = events
+        self.staged_contents: list[str] = []
 
     def stage_user_message(self, content: str) -> Message:
         self.events.append("stage")
+        self.staged_contents.append(content)
         return Message(Role.USER, content)
 
 
@@ -186,6 +188,55 @@ async def test_turn_preparation_skips_fingerprint_when_verbose_is_disabled(
 
     info.assert_not_called()
     fingerprint.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_turn_preparation_persists_scene_snapshot_without_runtime_guidance() -> None:
+    class SceneTracker:
+        @staticmethod
+        def get_context() -> str:
+            return "[scene]\n位置: 大厅\n\n（仅供 LLM 的提示）\n[/scene]"
+
+        @staticmethod
+        def get_snapshot_context() -> str:
+            return "[scene]\n位置: 大厅\n[/scene]"
+
+    class ContextService:
+        def __init__(self) -> None:
+            self.current_user_message: Message | None = None
+
+        @staticmethod
+        def compose_scene_user_input(scene_ctx, user_input: str) -> str:  # noqa: ANN001
+            if scene_ctx and user_input:
+                return f"{scene_ctx}\n{user_input}"
+            return scene_ctx or user_input
+
+        def build_transformed_context(self, **kwargs) -> list[Message]:  # noqa: ANN003
+            self.current_user_message = kwargs["current_user_message"]
+            return [self.current_user_message]
+
+    events: list[str] = []
+    context_service = ContextService()
+    tool_service = _ToolService(events)
+    transaction = _Transaction(events)
+    runtime = _runtime(events)
+    runtime.scratch.scene_tracker = SceneTracker()
+    runtime.transaction = transaction
+    preparation = TurnPreparation(
+        context_service=context_service,  # type: ignore[arg-type]
+        tool_service=tool_service,  # type: ignore[arg-type]
+        memory_recall=_MemoryRecall(events),  # type: ignore[arg-type]
+    )
+
+    await preparation.build(runtime)  # type: ignore[arg-type]
+
+    assert transaction.staged_contents == [
+        "[scene]\n位置: 大厅\n[/scene]\ncurrent action"
+    ]
+    assert context_service.current_user_message is not None
+    assert context_service.current_user_message.content == (
+        "[scene]\n位置: 大厅\n\n（仅供 LLM 的提示）\n[/scene]\ncurrent action"
+    )
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,10 @@ class SceneTracker:
     }
     MAX_ATTRS = 8
     """场景属性总数上限（含默认属性），超出后 set_attr 返回错误。"""
+    RUNTIME_GUIDANCE = (
+        "（scene 数据可能不准确，需根据上下文内容裁定是否使用工具更新，"
+        "需遵循核心状态同步协议。）"
+    )
 
     def __init__(self, *, allow_runtime_key_changes: bool = False) -> None:
         self._allow_runtime_key_changes = allow_runtime_key_changes
@@ -197,23 +201,27 @@ class SceneTracker:
     # ── 上下文渲染 ──────────────────────────────────────────────────
 
     def get_context(self) -> str:
-        """渲染 ``[scene]...[/scene]``，用于注入到用户消息 user_before。
+        """渲染供 LLM 使用的 ``[scene]...[/scene]``。
 
-        末尾只保留指向核心状态同步协议的简短提示。
+        运行时提示只存在于本轮 LLM Context；持久化历史应使用
+        :meth:`get_snapshot_context`，避免把提示词写入消息正文。
         """
+        lines = self._snapshot_lines()
+        lines.extend(("", self.RUNTIME_GUIDANCE, "[/scene]"))
+        return "\n".join(lines)
+
+    def get_snapshot_context(self) -> str:
+        """渲染只包含场景数据的快照，供持久化历史使用。"""
+        return "\n".join((*self._snapshot_lines(), "[/scene]"))
+
+    def _snapshot_lines(self) -> list[str]:
         lines = ["[scene]"]
         for k, v in self._current_attrs().items():
             if v:
                 lines.append(f"{k}: {v}")
             else:
                 lines.append(f"{k}: ")
-        lines.append("")
-        lines.append(
-            "（scene 数据可能不准确，需根据上下文内容裁定是否使用工具更新，"
-            "需遵循核心状态同步协议。）"
-        )
-        lines.append("[/scene]")
-        return "\n".join(lines)
+        return lines
 
     def _runtime_set_attr(self, key: str, value: str) -> dict[str, str]:
         if self._status_mgr is None or self._scene_table_id is None:

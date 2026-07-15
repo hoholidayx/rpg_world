@@ -7,6 +7,7 @@ import pytest
 from llm_client.types import ProviderChunk
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnCancelStatus
 from rpg_core.agent.transaction.status_scratch import StatusDocumentScratch
+from rpg_core.scene import SceneTracker
 from rpg_core.tests.integration.scripted_llm import response, tool_call
 
 pytestmark = pytest.mark.integration
@@ -234,6 +235,13 @@ async def test_status_target_failure_keeps_successful_scene_and_main_turn_runnin
         for message in scripted_llm_manager.main_provider().calls[0].messages
     )
     assert "部分成功现场" in main_context
+    assert SceneTracker.RUNTIME_GUIDANCE in main_context
+    main_rows = integration_data_gateway.messages.list("integration_status")
+    backup_rows = integration_data_gateway.backup.messages.list("integration_status")
+    assert "[scene]" in main_rows[0].content
+    assert "部分成功现场" in main_rows[0].content
+    assert SceneTracker.RUNTIME_GUIDANCE not in main_rows[0].content
+    assert backup_rows[0].content == main_rows[0].content
     scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
     assert scene_attrs is not None
     assert scene_attrs["位置"] == "部分成功现场"

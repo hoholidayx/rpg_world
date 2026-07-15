@@ -175,7 +175,7 @@ class AgentContextService:
         if user_input or scene_ctx:
             current_user_message = Message(
                 role=Role.USER,
-                content=self.compose_stored_user_input(scene_ctx, user_input),
+                content=self.compose_scene_user_input(scene_ctx, user_input),
                 mode=(
                     turn_execution.request.mode.value
                     if turn_execution is not None
@@ -458,7 +458,7 @@ class AgentContextService:
         )
 
     @staticmethod
-    def compose_stored_user_input(scene_context: str | None, user_input: str) -> str:
+    def compose_scene_user_input(scene_context: str | None, user_input: str) -> str:
         if scene_context and user_input:
             return f"{scene_context}\n{user_input}"
         return scene_context or user_input

@@ -45,10 +45,16 @@ def test_scene_tracker_existing_table_round_trip():
 
     assert tracker.load_from_status_table() is True
     context = tracker.get_context()
+    snapshot_context = tracker.get_snapshot_context()
     assert "第 9 年 8 月 7 日 12 时" in context
     assert "大厅" in context
     assert "scene 数据可能不准确" in context
     assert "遵循核心状态同步协议" in context
+    assert "第 9 年 8 月 7 日 12 时" in snapshot_context
+    assert "大厅" in snapshot_context
+    assert "scene 数据可能不准确" not in snapshot_context
+    assert "遵循核心状态同步协议" not in snapshot_context
+    assert snapshot_context.endswith("[/scene]")
     assert "StatusSubAgent" not in context
     assert "scene_time" not in context
     assert "no-op" not in context

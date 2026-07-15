@@ -298,8 +298,8 @@ def test_verbose_context_logging_only_logs_main_llm_context_once(monkeypatch) ->
     assert "history assistant secret" not in context_log
 
 
-def test_compose_stored_user_input_keeps_user_after_scene_close_tag() -> None:
+def test_compose_scene_user_input_keeps_user_after_scene_close_tag() -> None:
     scene = '<scene time="09:00">\n地点: 门厅\n</scene>'
-    assert AgentContextService.compose_stored_user_input(scene, "我观察四周") == (
+    assert AgentContextService.compose_scene_user_input(scene, "我观察四周") == (
         '<scene time="09:00">\n地点: 门厅\n</scene>\n我观察四周'
     )

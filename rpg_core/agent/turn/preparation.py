@@ -11,6 +11,7 @@ from rpg_core.context.fingerprint import (
     build_request_fingerprint,
     request_fingerprint_log_values,
 )
+from rpg_core.context.rpg_context import Message
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -40,12 +41,32 @@ class TurnPreparation:
     async def build(self, runtime: "TurnRuntime") -> PreparedTurn:
         request = runtime.plan.request
         scratch = runtime.scratch
-        scene_ctx = scratch.scene_tracker.get_context() if scratch.scene_tracker else None
-        stored_input = self._context_service.compose_stored_user_input(
-            scene_ctx,
+        scene_tracker = scratch.scene_tracker
+        llm_scene_context = scene_tracker.get_context() if scene_tracker else None
+        persisted_scene_context = (
+            scene_tracker.get_snapshot_context() if scene_tracker else None
+        )
+        stored_input = self._context_service.compose_scene_user_input(
+            persisted_scene_context,
             request.text,
         )
-        current_user_message = runtime.transaction.stage_user_message(stored_input)
+        stored_user_message = runtime.transaction.stage_user_message(stored_input)
+        # The prompt guidance belongs to the LLM request, not durable history.
+        llm_input = (
+            stored_input
+            if llm_scene_context == persisted_scene_context
+            else self._context_service.compose_scene_user_input(
+                llm_scene_context,
+                request.text,
+            )
+        )
+        current_user_message = Message(
+            role=stored_user_message.role,
+            content=llm_input,
+            mode=stored_user_message.mode,
+            turn_id=stored_user_message.turn_id,
+            seq_in_turn=stored_user_message.seq_in_turn,
+        )
 
         await self._memory_recall.run(request.text)
 
