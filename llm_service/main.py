@@ -179,7 +179,7 @@ async def embedding_dimension(
 ) -> LLMEmbeddingDimensionResponse:
     try:
         provider = _provider(biz_key, provider_key)
-        dimension = await asyncio.to_thread(provider.dimension)
+        dimension = await provider.dimension()
     except Exception as exc:
         raise _http_error(request, exc) from exc
     return LLMEmbeddingDimensionResponse(dimension=dimension)

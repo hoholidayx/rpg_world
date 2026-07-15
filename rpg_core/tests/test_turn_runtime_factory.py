@@ -101,7 +101,10 @@ async def test_preflight_failure_discards_runtime_and_clears_active_turn() -> No
     status = _StatusHook()
     status.error = RuntimeError("preflight failed")
     context = SimpleNamespace(enforce_window_threshold=lambda *_args, **_kwargs: None)
-    model = SimpleNamespace(provider_for=lambda *_args, **_kwargs: object())
+    async def provider_for(*_args, **_kwargs):  # noqa: ANN202
+        return object()
+
+    model = SimpleNamespace(provider_for=provider_for)
     factory = TurnRuntimeFactory(
         lifecycle=_lifecycle(session),
         context_service=context,
@@ -121,14 +124,16 @@ async def test_preflight_failure_discards_runtime_and_clears_active_turn() -> No
 async def test_ooc_runtime_skips_status_preflight() -> None:
     session = SessionManager(history_enabled=False)
     status = _StatusHook()
+
+    async def provider_for(*_args, **_kwargs):  # noqa: ANN202
+        return object()
+
     factory = TurnRuntimeFactory(
         lifecycle=_lifecycle(session),
         context_service=SimpleNamespace(
             enforce_window_threshold=lambda *_args, **_kwargs: None
         ),
-        model_runtime=SimpleNamespace(
-            provider_for=lambda *_args, **_kwargs: object()
-        ),
+        model_runtime=SimpleNamespace(provider_for=provider_for),
         status_preflight=status,
     )
 

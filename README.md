@@ -33,7 +33,8 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
-- **2026-07-15：LLM Service 完全独立进程化。** 新增 `run_llm.py`、Bearer 鉴权的 `/llm/v1` HTTP/SSE 边界和独立 `llm_client` 契约包。只有 LLM Service 读取 `llm.yaml`、Provider 密钥并持有 OpenAI/llama runtime；Agent 与 Memory 只通过远端客户端调用，旧 llama 子进程协议已删除。
+- **2026-07-15：LLM Service 完全独立进程化。** 新增 `run_llm.py`、受 Bearer 保护的 `/llm/v1` 业务 HTTP/SSE 边界和独立 `llm_client` 契约包。只有 LLM Service 读取 `llm.yaml`、Provider 密钥并持有 OpenAI/llama runtime；Agent 与 Memory 只通过远端客户端调用，旧 llama 子进程协议已删除。
+- **2026-07-15：Agent / Memory / LLM 统一异步线程模型。** `llm_client` 改为 loop-owned 纯异步客户端，Agent 与 Memory 直接 await catalog、provider、embedding 和 recall；Memory 使用 session 级 async coordinator，watchdog 线程只入队。llama 的队列等待与运行期统一受 `request_timeout_ms` 控制，并在 completion、stream、rerank 安全边界协作取消。
 - **2026-07-15：RPG Media v1。** 新增与 `rpg_core` 同级的无框架 `rpg_media`，以及独立 `media_service` 持久任务进程。SessionRoom 支持从 1–20 个连续 turn 生成可编辑 `VisualBrief`、异步生图、Gallery 与会话背景；图片按工作区内容寻址存储，媒体故障不影响聊天主链路。
 - **2026-07-13：Agent Turn 与状态更新固定编排。** Narrative Outcome 与状态更新拆分为独立阶段；状态更新先 Route，再按 scene 和单张普通表隔离执行。快速状态目标采用 best-effort：单个目标失败只回退该目标，其他成功目标保留且主流程继续；整个 turn 仍只在主 runner 成功后统一提交。字段频率统一为 `realtime | event_driven | deferred | manual`，其中 deferred 在回复交付后、同 session 下一 mailbox 项前归纳。scene 继续以 `status_kind="scene"` 作为数据真源，但在主 Context 和更新工具上走专用路径。完整设计、时序和失败语义见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。
 
@@ -101,6 +102,29 @@ run_play_api.py -> play_api.main
 run_telegram.py -> channels.telegram.runner
 run_cli.py      -> channels.cli.repl
 ```
+
+### 事件循环与线程模型
+
+Agent Service 使用一个主事件循环。每个 session 的 turn 由自己的 `AgentMailbox` FIFO 串行，但不同 session 在等待 LLM HTTP 或 Memory 时可以并发。`llm_client` 只持有一个归属于该 loop 的 `httpx.AsyncClient`；catalog、provider、chat/stream、embedding、dimension、rerank 和 health 都直接 `await`。客户端一旦首次使用就不能跨事件循环或线程复用，重新配置和进程关闭会 await 关闭旧连接池。
+
+```text
+Agent event loop
+├── session A mailbox ── await LLM / Memory
+├── session B mailbox ── await LLM / Memory
+└── loop-owned LLMClientManager + AsyncClient
+
+MemoryManager（每个 session 一个）
+├── async lock：recall / index / reindex / close 串行
+├── watchdog callback thread：只投递 source ID
+└── loop consumer：await embedding；file/hash/chunk/SQLite 使用 to_thread
+
+LLM Service
+└── 每个 llama model cache key 一个 actor thread + FIFO
+```
+
+本地 llama 没有恢复为子进程。`request_timeout_ms` 从任务入队时开始计算，包含同模型排队和运行时间；排队任务取消后不会执行，completion/stream/rerank 在安全边界协作停止。原生 embedding 或单次 eval 无法在 C 调用中途抢占时，调用方仍按 deadline 收到超时，actor 会先自然排空，再处理同模型下一任务。服务关闭最多等待 `llama_shutdown_grace_ms`。
+
+LLM Service 的 `/health` 故意免 Bearer 鉴权，只回答进程是否存活、配置是否加载；它不验证 Agent 配置的 token。catalog、chat、stream、embedding、dimension、rerank 等业务接口仍要求 Bearer token，凭据错误会在受保护请求上明确返回 401。
 
 服务、渠道和客户端配置分别由对应模块的 YAML 管理，所有配置字段都封装为类型化属性：
 
@@ -431,8 +455,16 @@ rp_memory/
 ### 运行链路
 
 ```text
+进程启动 / session 初始化
+  -> MemoryManager.create() / initialize()
+     - 只建立本地 text index、keyword、raw-md 和 watcher coordinator
+     - 不访问 LLM Service
+首次 recall / reindex
+  -> 并发懒加载 embedding、QueryPlanner 和 reranker
+     - 远程能力失败时保留 keyword / raw-md / rule-based fallback
+     - 未就绪能力在后续调用中重试
 用户 query
-  -> MemoryManager
+  -> MemoryManager session operation lock
   -> QueryPlanner
      - 可通过 `llm_service/llm.yaml` 选择 OpenAI-compatible 或 llama provider
      - 配置缺失或加载失败时降级到 rule-based planner
@@ -452,7 +484,7 @@ rp_memory/
 负责把用户 query 变成结构化 `QueryPlan`。
 
 - `RuleBasedQueryPlanner`：无模型兜底，负责归一化、term extraction、jieba 切词
-- `LlamaQueryPlanner` / `OpenAIQueryPlanner`：可选的 LLM query planner，通过 `LLMManager` 获取 provider
+- `LlamaQueryPlanner` / `OpenAIQueryPlanner`：可选的 LLM query planner，通过 `await LLMClientManager.get().get_provider(...)` 获取远端 provider facade
 - `FallbackQueryPlanner`：运行时异常兜底，保证 recall 不被 planner 中断
 
 #### `retrieval/`
@@ -550,7 +582,7 @@ rp_memory/
 - `rpg_core/settings.yaml`：业务与检索参数，对应 `MemorySettings`，例如 `top_k`、`hybrid_*_weight`、`rerank_enabled`、`rerank_score_weight`、`chunk_size`、`chunk_overlap`、`jieba_dict`
 - `llm_service/llm.yaml`：仅由 LLM Service 读取的 LLM 强相关配置，例如 `memory.embed`、`memory.query_planner`、`memory.rerank` 的 provider、model、model_path、上下文窗口、温度、超时
 
-业务代码不读取 `llm.yaml`，只通过 `LLMClientManager.get().get_provider(biz_key)` 使用远端契约；`LLMManager` 与 `llm_service.config` 只在 LLM Service 进程内使用。
+业务代码不读取 `llm.yaml`，只通过 `await LLMClientManager.get().get_provider(biz_key)` 使用远端契约；`LLMManager` 与 `llm_service.config` 只在 LLM Service 进程内使用。
 
 常用 `rpg_core/settings.yaml` 的 `memory` 字段：
 
@@ -587,6 +619,10 @@ rp_memory/
 ### 设计原则
 
 - `MemoryManager` 负责组装，不负责检索细节
+- `MemoryManager.create()` / `initialize()` 只初始化本地能力，不产生 LLM HTTP I/O；远程能力在首次 `recall()` / `reindex()` 懒加载
+- 同一 session 的 recall、index、reindex 和 close 由单一 async lock 串行；不同 session 之间可并行
+- watchdog 回调只使用 `call_soon_threadsafe` 向所属 loop 入队，不在 watcher 线程运行 embedding、索引或 SQLite
+- 文件读取、hash、chunk 和 SQLite 操作通过 `asyncio.to_thread()` 移出 Agent 事件循环
 - `QueryPlanner` 是增强能力，不是主链路硬依赖
 - keyword 查询格式始终由 tokenizer 保证
 - raw md 的 `always` 是主召回策略，`fallback_only` 是触发策略；一旦进入候选池，raw md 候选与其他候选同样参与 merge、hybrid scoring 和 rerank
@@ -606,11 +642,11 @@ rp_memory/
 | `play_api/settings.yaml` | Play API 监听参数、Play API 日志 |
 | `rpg_media/settings.yaml` | VisualBrief Demo planner、默认图片 Provider 与 Local file Demo 图片目录 |
 | `media_service/settings.yaml` | Media 服务监听、MediaClient 地址/超时、worker 并发与轮询参数 |
-| `llm_service/settings.yaml` | LLM 服务监听、Bearer 令牌环境变量名、本地 llama 并行模型数与日志 |
+| `llm_service/settings.yaml` | LLM 服务监听、Bearer 令牌环境变量名、本地 llama 并行模型数、`llama_shutdown_grace_ms` 与日志 |
 | `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口和 context 正文门禁阈值 |
 | `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置 |
 
-`RPG_WORLD_LLM_SERVICE_TOKEN` 必须在 LLM Service 与所有 LLM 调用进程中设置为相同的非空值。LLM Service 缺少令牌时拒绝启动；Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。
+`RPG_WORLD_LLM_SERVICE_TOKEN` 必须在 LLM Service 与所有 LLM 调用进程中设置为相同的非空值。LLM Service 缺少令牌时拒绝启动；Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程与配置健康；health 成功不代表调用方 token 正确，token 会在 catalog、chat、embedding 等受保护请求上验证。
 
 正文门禁由 `play_webui` 的 `session.contextUsage.inputBlockThresholdRatio` 和 Core 的 `agent.context_window_reject_threshold_ratio` 独立控制，合法范围均为 `(0, 1]`、默认均为 `0.9`。前端非法值回退 `0.9`，Core 非法值会阻止启动；两侧都只计算不含当前待发送 input 的主 Agent Context。
 

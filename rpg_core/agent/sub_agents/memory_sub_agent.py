@@ -344,8 +344,8 @@ class MemorySubAgent(BaseSubAgent):
         self._max_recall_items = max_recall_items
         self._max_window_rounds = max_window_rounds
 
-    def _get_provider(self) -> LLMProvider:
-        provider = super()._get_provider()
+    async def _get_provider(self) -> LLMProvider:
+        provider = await super()._get_provider()
         self._provider = provider
         return provider
 
@@ -993,7 +993,7 @@ class MemorySubAgent(BaseSubAgent):
                 *request_fingerprint_log_values(fingerprint),
             )
         t0 = time.monotonic()
-        provider = self._get_provider()
+        provider = await self._get_provider()
 
         try:
             result = await provider.chat(messages, tools=[schema])

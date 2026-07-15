@@ -12,6 +12,7 @@
 __test__ = False  # 阻止 pytest 自动收集（本文件为独立 CLI，非 pytest 用例）
 
 
+import asyncio
 import sys
 import time
 from pathlib import Path
@@ -53,10 +54,10 @@ def _print_line(label: str, value: object, indent: str = "  ") -> None:
     print(f"{indent}{label:<24} {value}")
 
 
-def _print_provider_config(title: str, biz_key: str) -> None:
+async def _print_provider_config(title: str, biz_key: str) -> None:
     print(f"  {title}:")
     try:
-        catalog = LLMClientManager.get().get_catalog(biz_key)
+        catalog = await LLMClientManager.get().get_catalog(biz_key)
     except Exception as exc:
         _print_line("llm_service:", f"unavailable ({exc})", "    ")
         return
@@ -89,7 +90,7 @@ def _ensure_session(session: str) -> None:
         )
 
 
-def show_config(workspace: str, session: str) -> None:
+async def show_config(workspace: str, session: str) -> None:
     """1. 检查配置是否正确加载。"""
     _print_separator("1. MemorySettings 配置检查")
 
@@ -98,7 +99,7 @@ def show_config(workspace: str, session: str) -> None:
     _print_line("选中 workspace:", workspace)
     _print_line("选中 session:", session)
     _print_line("enabled:", mem.enabled)
-    _print_provider_config("embedding", MEMORY_EMBED_BIZ_KEY)
+    await _print_provider_config("embedding", MEMORY_EMBED_BIZ_KEY)
     _print_line("hybrid_enabled:", mem.hybrid_enabled)
     _print_line("vector_k:", mem.vector_k)
     _print_line("keyword_tokenizer:", mem.keyword_tokenizer)
@@ -116,18 +117,18 @@ def show_config(workspace: str, session: str) -> None:
     _print_line("chunk_size:", mem.chunk_size)
     _print_line("chunk_overlap:", mem.chunk_overlap)
     _print_line("query_planner_enabled:", mem.query_planner_enabled)
-    _print_provider_config("query_planner", MEMORY_QUERY_PLANNER_BIZ_KEY)
+    await _print_provider_config("query_planner", MEMORY_QUERY_PLANNER_BIZ_KEY)
     _print_line("rerank_enabled:", mem.rerank_enabled)
     _print_line("rerank_candidate_k:", mem.rerank_candidate_k)
     _print_line("rerank_score_weight:", mem.rerank_score_weight)
-    _print_provider_config("rerank", MEMORY_RERANK_BIZ_KEY)
+    await _print_provider_config("rerank", MEMORY_RERANK_BIZ_KEY)
     _print_line("DB path:", _vector_db_path(session))
     _print_line("session dir:", _session_root(session))
 
 
 def create_manager(workspace: str, session: str) -> MemoryManager | None:
-    """2. 同步创建 MemoryManager（加载模型 + 建 DB）。"""
-    _print_separator("2. MemoryManager.create() 同步创建")
+    """2. 创建不访问 LLM Service 的 MemoryManager 本地壳。"""
+    _print_separator("2. MemoryManager.create() 创建本地壳")
 
     recalled = RecalledMemoryStore()
     session_root = _session_root(session)
@@ -151,17 +152,17 @@ def create_manager(workspace: str, session: str) -> MemoryManager | None:
     return mm
 
 
-def initialize_manager(mm: MemoryManager, session: str) -> None:
+async def initialize_manager(mm: MemoryManager, session: str) -> None:
     """3. 初始化并启动 FileWatcher。"""
-    _print_separator(f"3. init() 初始化（session={session}）")
+    _print_separator(f"3. initialize() 初始化（session={session}）")
 
     t0 = time.monotonic()
-    mm.init()
+    await mm.initialize()
     watcher_started = get_watcher().start()
     elapsed = time.monotonic() - t0
 
     print(f"  耗时: {elapsed:.2f}s")
-    print(f"  inited: {mm._inited}")
+    print(f"  initialized: {mm._initialized}")
     print(f"  FileWatcher: {'running' if watcher_started else 'disabled'}")
 
 
@@ -179,11 +180,11 @@ def _print_recall_item(idx: int, item: "RecallItem") -> None:
     print()
 
 
-def preview_recall(mm: MemoryManager, query: str) -> None:
+async def preview_recall(mm: MemoryManager, query: str) -> None:
     """4. 执行召回测试。"""
     _print_separator(f"4. recall(query='{query}')")
 
-    items = mm.recall(query)
+    items = await mm.recall(query)
     print(f"  返回条目: {len(items)}")
     for i, item in enumerate(items):
         _print_recall_item(i, item)
@@ -265,8 +266,8 @@ def cleanup_workspace(workspace: str, session: str, remove_workspace: bool = Fal
         print("  ⚠️  catalog workspace/session 不由 memory CLI 删除")
 
 
-def _loop(mm: MemoryManager, workspace: str, session: str) -> None:
-    """交互式命令循环（全部同步，无事件循环依赖）。"""
+async def _loop(mm: MemoryManager, workspace: str, session: str) -> None:
+    """交互式命令循环；LLM/Memory 操作始终在当前事件循环中 await。"""
 
     commands = {
         "recall": "recall <query>    — 向量召回测试",
@@ -285,7 +286,7 @@ def _loop(mm: MemoryManager, workspace: str, session: str) -> None:
 
     while True:
         try:
-            line = input("🛸 ").strip()
+            line = (await asyncio.to_thread(input, "🛸 ")).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -311,25 +312,25 @@ def _loop(mm: MemoryManager, workspace: str, session: str) -> None:
             print(f"  session:           {session}")
             print(f"  DB:                {_vector_db_path(session)}")
             print(f"  DB 存在:            {_vector_db_path(session).exists()}")
-            print(f"  inited:             {mm._inited}")
+            print(f"  initialized:        {mm._initialized}")
             print(f"  index_manager:      {mm._index_manager is not None}")
             print(f"  retriever:          {mm._retriever is not None}")
             print(f"  top_k:              {mm._top_k}")
             print(f"  RecalledStore 条数: {len(mm._recalled_store.get_items())}")
 
         elif cmd == "db":
-            inspect_vector_store(workspace, session)
+            await asyncio.to_thread(inspect_vector_store, workspace, session)
 
         elif cmd == "reindex":
             _print_separator("重索引")
-            mm.reindex()
+            await mm.reindex()
             print("  ✅ 重索引完成")
 
         elif cmd == "recall":
             if not arg:
                 print("  ⚠️  用法: recall <查询文本>")
                 continue
-            items = mm.recall(arg)
+            items = await mm.recall(arg)
             print(f"  返回条目: {len(items)} (top_k={mm._top_k})")
             for i, item in enumerate(items):
                 _print_recall_item(i, item)
@@ -338,7 +339,7 @@ def _loop(mm: MemoryManager, workspace: str, session: str) -> None:
             print(f"  ⚠️  未知命令: {cmd}（输入 help 查看命令列表）")
 
 
-def main() -> None:
+async def main_async() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="MemoryManager CLI 测试")
@@ -355,12 +356,13 @@ def main() -> None:
 
     workspace = args.workspace.strip()
     temporary_workspace = False
+    mm: MemoryManager | None = None
 
     print(f"\n🔧 MemoryManager 测试 — workspace={workspace!r} session={args.session!r}\n")
 
-    # 前置检查
-    show_config(workspace, args.session)
     try:
+        # 前置检查
+        await show_config(workspace, args.session)
         if not settings.memory_settings.enabled:
             print("\n  ⚠️  memory 未启用（settings.yaml memory.enabled = false）")
             return
@@ -368,17 +370,18 @@ def main() -> None:
         _ensure_session(args.session)
         mm = create_manager(workspace, args.session)
         if mm is not None:
-            # 同步初始化并启动 FileWatcher
-            initialize_manager(mm, args.session)
+            await initialize_manager(mm, args.session)
 
             # 启动前的自动 recall
-            preview_recall(mm, args.query)
+            await preview_recall(mm, args.query)
 
             # 进入交互循环
-            _loop(mm, workspace, args.session)
+            await _loop(mm, workspace, args.session)
     finally:
-        if "mm" in locals() and mm is not None:
+        if mm is not None:
+            await mm.close()
             stop_file_watcher()
+        await LLMClientManager.areset()
         # 清理
         if not args.skip_cleanup and temporary_workspace:
             cleanup_workspace(workspace, args.session, remove_workspace=temporary_workspace)
@@ -388,4 +391,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())

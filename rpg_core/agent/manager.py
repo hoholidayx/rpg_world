@@ -86,19 +86,24 @@ class AgentManager:
         cls._initialized = True
 
     @classmethod
-    def reset(cls) -> None:
-        """重置所有 agent 实例和初始化状态（主要用于测试）。"""
+    async def areset(cls) -> None:
+        """Close and reset every cached agent runtime."""
+        agents = tuple(cls._instances.values())
         cls._instances.clear()
         cls._initialized = False
         cls._initialized_targets.clear()
         cls._deleting_sessions.clear()
+        for agent in agents:
+            await agent.close()
 
     @classmethod
-    def drop_session(cls, session_id: str) -> None:
+    async def drop_session(cls, session_id: str) -> None:
         """Remove cached agent runtime for one globally unique session."""
-        cls._instances.pop(session_id, None)
+        agent = cls._instances.pop(session_id, None)
         cls._initialized_targets.discard(session_id)
         cls._initialized = bool(cls._initialized_targets)
+        if agent is not None:
+            await agent.close()
 
     @classmethod
     async def begin_session_deletion(cls, session_id: str) -> None:

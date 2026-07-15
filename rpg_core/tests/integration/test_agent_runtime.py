@@ -101,7 +101,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     )
     await agent.send("before clear")
     selection = MainLLMSelectionService(integration_data_gateway)
-    selected = selection.set_session_provider_key(session_id, SESSION_PROVIDER_KEY)
+    selected = await selection.set_session_provider_key(session_id, SESSION_PROVIDER_KEY)
     assert selected is not None
     module_override = integration_data_gateway.rp_modules.set_session_override(
         session_id,
@@ -315,16 +315,16 @@ async def test_main_llm_runtime_priority_context_window_and_subagent_route_indep
     selection = MainLLMSelectionService(integration_data_gateway)
 
     default_reply = await agent.send("config")
-    story_selected = selection.set_story_provider_key(
+    story_selected = await selection.set_story_provider_key(
         str(story.workspace_id),
         int(story.id),
         STORY_PROVIDER_KEY,
     )
     story_reply = await agent.send("story")
-    session_selected = selection.set_session_provider_key(session_id, SESSION_PROVIDER_KEY)
+    session_selected = await selection.set_session_provider_key(session_id, SESSION_PROVIDER_KEY)
     session_reply = await agent.send("session")
     preview = await agent.get_context_payload()
-    session_cleared = selection.set_session_provider_key(session_id, None)
+    session_cleared = await selection.set_session_provider_key(session_id, None)
     fallback_reply = await agent.send("fallback")
 
     assert default_reply.text == "config-model response"
@@ -398,7 +398,7 @@ async def test_provider_switch_during_active_stream_only_applies_to_next_turn(
     task = asyncio.create_task(consume())
     await asyncio.wait_for(started.wait(), timeout=2)
     selection = MainLLMSelectionService(integration_data_gateway)
-    updated = selection.set_session_provider_key("integration_smoke", SESSION_PROVIDER_KEY)
+    updated = await selection.set_session_provider_key("integration_smoke", SESSION_PROVIDER_KEY)
     assert updated is not None
     release.set()
     await asyncio.wait_for(task, timeout=2)

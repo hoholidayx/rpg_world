@@ -6,7 +6,6 @@ Other processes access it through ``agent_service.client.AgentClient``.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -92,7 +91,7 @@ def _service_prefix() -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = process_settings.llm_client
-    llm_manager = LLMClientManager.configure(
+    await LLMClientManager.aconfigure(
         base_url=cfg.base_url,
         token=cfg.token,
         request_timeout_ms=cfg.request_timeout_ms,
@@ -101,9 +100,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        AgentManager.reset()
-        await llm_manager.aclose()
-        LLMClientManager.set_for_tests(None)
+        await AgentManager.areset()
+        await LLMClientManager.areset()
 
 
 app = FastAPI(title="RPG World Agent Service", lifespan=lifespan)
@@ -120,7 +118,7 @@ app.add_middleware(
 @app.get(f"{_service_prefix()}/health", response_model=AgentHealthResponse)
 async def health() -> AgentHealthResponse:
     try:
-        payload = await asyncio.to_thread(LLMClientManager.get().client.health)
+        payload = await LLMClientManager.get().client.health()
         llm_status = "ok" if payload.get("status") == "ok" else "degraded"
     except Exception:
         llm_status = "unavailable"
@@ -201,7 +199,9 @@ async def get_context_preview(
 )
 async def get_main_llm_options() -> AgentMainLLMProviderCatalogPayload:
     try:
-        return _main_llm_catalog_payload(_main_llm_selection_service().get_provider_catalog())
+        return _main_llm_catalog_payload(
+            await _main_llm_selection_service().get_provider_catalog()
+        )
     except LLMServiceClientError as exc:
         raise _llm_dependency_http_error(exc) from exc
 
@@ -216,7 +216,10 @@ async def get_story_main_llm(
 ) -> AgentMainLLMSelectionPayload:
     workspace_id = _require_workspace(workspace_id)
     try:
-        selection = _main_llm_selection_service().resolve_story(workspace_id, story_id)
+        selection = await _main_llm_selection_service().resolve_story(
+            workspace_id,
+            story_id,
+        )
     except LLMServiceClientError as exc:
         raise _llm_dependency_http_error(exc) from exc
     if selection is None:
@@ -233,7 +236,7 @@ async def set_story_main_llm(
 ) -> AgentMainLLMSelectionPayload:
     workspace_id = _require_workspace(body.workspace_id)
     try:
-        selection = _main_llm_selection_service().set_story_provider_key(
+        selection = await _main_llm_selection_service().set_story_provider_key(
             workspace_id,
             body.story_id,
             body.provider_key,
@@ -256,7 +259,7 @@ async def get_session_main_llm(
 ) -> AgentMainLLMSelectionPayload:
     session_id = _require_session_id(session_id)
     try:
-        selection = _main_llm_selection_service().resolve_session(session_id)
+        selection = await _main_llm_selection_service().resolve_session(session_id)
     except LLMServiceClientError as exc:
         raise _llm_dependency_http_error(exc) from exc
     if selection is None:
@@ -272,7 +275,7 @@ async def set_session_main_llm(
     body: AgentMainLLMSessionUpdateRequest,
 ) -> AgentMainLLMSelectionPayload:
     try:
-        selection = _main_llm_selection_service().set_session_provider_key(
+        selection = await _main_llm_selection_service().set_session_provider_key(
             body.session_id,
             body.provider_key,
         )
@@ -576,7 +579,7 @@ async def truncate_history(turn_id: int, body: AgentSessionMutationRequest) -> J
             turn_id,
             result.get("agent_sync_status"),
         )
-        AgentManager.drop_session(body.session_id)
+        await AgentManager.drop_session(body.session_id)
     return result
 
 

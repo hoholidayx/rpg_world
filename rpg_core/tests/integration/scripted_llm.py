@@ -182,13 +182,10 @@ class ScriptedEmbeddingProvider(LLMProvider):
         return "scripted-embedding"
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        return self.embed_sync(texts)
-
-    def embed_sync(self, texts: list[str]) -> list[list[float]]:
         self.calls.append(list(texts))
         return [self._vector(text) for text in texts]
 
-    def dimension(self) -> int:
+    async def dimension(self) -> int:
         return self._dimension
 
     def _vector(self, text: str) -> list[float]:
@@ -212,7 +209,7 @@ class ScriptedLLMManager:
         self.embedding = ScriptedEmbeddingProvider()
         self.calls: list[ManagerCall] = []
 
-    def get_provider(
+    async def get_provider(
         self,
         biz_key: str,
         *,
@@ -230,7 +227,7 @@ class ScriptedLLMManager:
         }
         return providers[biz_key]
 
-    def get_catalog(self, biz_key: str) -> LLMBizCatalog:
+    async def get_catalog(self, biz_key: str) -> LLMBizCatalog:
         if biz_key != AGENT_MAIN_BIZ_KEY:
             raise KeyError(biz_key)
         return LLMBizCatalog(

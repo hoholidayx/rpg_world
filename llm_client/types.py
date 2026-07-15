@@ -124,10 +124,7 @@ class LLMProvider(ABC):
     async def embed(self, texts: list[str]) -> list[list[float]]:
         raise NotImplementedError
 
-    def embed_sync(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError
-
-    def dimension(self) -> int:
+    async def dimension(self) -> int:
         raise NotImplementedError
 
 

@@ -5,6 +5,11 @@
 - Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口；不要恢复 Dashboard API/WebUI。
 - 修改启动流程、渠道生命周期、共享状态或 `AgentManager` 前，先阅读 `CLAUDE.md`。
 - 根目录聚合 supervisor 入口已移除；各进程必须通过独立入口启动。只有 `run_agent.py` 持有 `AgentManager` / `RPGGameAgent` / `rp_memory`，其它进程只能通过 `agent_service.client.AgentClient` 访问 Agent 服务。只有 `run_llm.py` 读取 `llm_service/llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 与本地 llama runtime；Agent、Memory、Media 等调用方只能通过 `llm_client` 访问 LLM 服务。
+- `llm_client` 是事件循环归属的纯异步客户端：`health()`、`get_catalog()`、`get_provider()`、`embed()`、`dimension()` 及推理 API 都必须在创建/首次使用它的同一 loop 中 `await`，不得跨线程/loop 复用 `AsyncClient`，不得在业务代码中用 `asyncio.run()`、同步 HTTP 客户端或 sync-to-async 桥接。重新 configure/reset 必须 await 关闭旧连接池。
+- Agent/Memory 的远端 LLM I/O 直接 await；调用方需要等待结果时由调用方 await，不把阻塞转移到 Agent 事件循环。Memory 的 `create()` / `initialize()` 只建立本地 text/keyword/raw-md 能力，首次 `recall()` / `reindex()` 才懒解析 embedding/planner/reranker；远端失败保留本地 fallback，后续调用继续重试。
+- 每个 session 的 Memory 操作由同一 async lock 串行，多个 session 可并发。watchdog 回调线程只允许通过 `loop.call_soon_threadsafe()` 入队 source ID，实际去重、索引、embedding 与 SQLite 更新由 loop-owned 单 consumer 执行；memory 文件/hash/chunk/SQLite 阻塞工作使用 `asyncio.to_thread()`。Memory、Agent 与 LLM client 的释放 API 必须 await。
+- 本地 llama 仍是 LLM Service 进程内 runtime，不恢复子进程 worker。每个不可变模型缓存键使用一个 actor 线程串行执行；`request_timeout_ms` 包含排队和运行时间，completion/stream/rerank 在安全边界协作取消。无法中断的原生 embedding/eval 超时后允许 actor 自然排空，同模型后续任务继续等待；关闭等待 `llama_shutdown_grace_ms` 后只记录仍在排空的 native call。
+- LLM Service `/health` 故意免 Bearer 鉴权，只表示进程存活和配置已加载，不验证调用方 token；catalog、chat、embedding、rerank 等业务接口仍必须鉴权。不要把 health 成功解释成凭据有效。
 - 保持 `play_api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
 - `rpg_media/` 是与 `rpg_core/` 同级的无框架高级能力模块；`media_service/` 独立持有图片 Provider、持久任务 worker 和媒体 HTTP 边界。Play WebUI 只能经 Play API → `MediaClient` 访问它，Play API 不得直接读取工作区图片文件，Media service 不得导入 Agent runtime 或持有 llama worker。
 - Play WebUI 会话内链路只使用全局短 `session_id` 定位；创建 session 时在 `rpg_data` 绑定 `workspace_id + story_id`，之后由 Play API 反查上下文并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。

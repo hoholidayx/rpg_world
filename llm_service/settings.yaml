@@ -12,6 +12,7 @@ base:
 
   runtime:
     llama_max_parallel_models: 2
+    llama_shutdown_grace_ms: 5000
 
   logging:
     log_level: DEBUG

@@ -30,7 +30,7 @@ async def agent_service_client(
     scripted_llm_manager,  # noqa: ARG001
     monkeypatch,
 ):
-    AgentManager.reset()
+    await AgentManager.areset()
     async with service_main.app.router.lifespan_context(service_main.app):
         transport = httpx.ASGITransport(app=service_main.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://agent.test") as client:

@@ -24,7 +24,7 @@ async def live_agent(
     integration_data_gateway,
 ):
     try:
-        LLMClientManager.get().client.health()
+        await LLMClientManager.get().client.health()
     except Exception:
         pytest.skip("standalone LLM service is not available")
     session_id = f"live_{request.node.name[-24:]}".replace("-", "_")
@@ -35,7 +35,7 @@ async def live_agent(
         yield agent
     finally:
         await _shutdown_agent(agent)
-        LLMClientManager.reset()
+        await LLMClientManager.areset()
 
 
 @pytest.mark.asyncio

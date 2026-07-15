@@ -67,7 +67,10 @@ class RawMarkdownGrepSearch:
 
     def _plan_query(self, query: str) -> QueryPlan:
         planner = self._fallback_planner()
-        return planner.plan(query)
+        plan_sync = getattr(planner, "plan_sync", None)
+        if plan_sync is None:
+            raise TypeError("raw markdown fallback requires a synchronous rule planner")
+        return plan_sync(query)
 
     def _search_plan(self, plan: QueryPlan, limit: int) -> list[MemoryCandidate]:
         normalized = plan.normalized_query
@@ -147,7 +150,10 @@ class RawMarkdownGrepSearch:
             for query in expanded_queries:
                 if not query:
                     continue
-                terms.extend(planner.plan(query).raw_md_terms)
+                plan_sync = getattr(planner, "plan_sync", None)
+                if plan_sync is None:
+                    continue
+                terms.extend(plan_sync(query).raw_md_terms)
         except Exception as exc:
             logger.warning("[RawMarkdownGrepSearch] expanded query tokenization failed — exact-only fallback: {}", exc)
             return []

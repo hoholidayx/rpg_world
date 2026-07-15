@@ -24,6 +24,20 @@ class KeywordRetriever(BaseRetriever):
     async def retrieve(self, query: str, top_k: int = 5) -> list[tuple[str, float, dict]]:
         return await asyncio.to_thread(self.retrieve_sync, query, top_k)
 
+    async def retrieve_plan(
+        self,
+        plan: QueryPlan,
+        top_k: int = 5,
+    ) -> list[tuple[str, float, dict]]:
+        return await asyncio.to_thread(self.retrieve_plan_sync, plan, top_k)
+
+    async def search_plan_async(
+        self,
+        plan: QueryPlan,
+        top_k: int = 5,
+    ) -> list[MemoryCandidate]:
+        return await asyncio.to_thread(self.search_plan, plan, top_k)
+
     def retrieve_sync(self, query: str, top_k: int = 5) -> list[tuple[str, float, dict]]:
         candidates = self.search(query, top_k=top_k)
         return self._format(candidates)

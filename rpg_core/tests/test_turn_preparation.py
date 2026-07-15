@@ -56,7 +56,7 @@ class _MemoryRecall:
     def __init__(self, events: list[str]) -> None:
         self.events = events
 
-    def run(self, user_input: str) -> None:
+    async def run(self, user_input: str) -> None:
         assert user_input == "current action"
         self.events.append("recall")
 
@@ -104,7 +104,7 @@ def _preparation(events: list[str]) -> tuple[TurnPreparation, _ToolService]:
     )
 
 
-def test_turn_preparation_logs_final_main_fingerprint_once_after_schemas(
+async def test_turn_preparation_logs_final_main_fingerprint_once_after_schemas(
     monkeypatch,
 ) -> None:
     events: list[str] = []
@@ -117,7 +117,7 @@ def test_turn_preparation_logs_final_main_fingerprint_once_after_schemas(
     )
     monkeypatch.setattr(preparation_module.logger, "info", info)
 
-    prepared = preparation.build(_runtime(events))  # type: ignore[arg-type]
+    prepared = await preparation.build(_runtime(events))  # type: ignore[arg-type]
 
     assert prepared.tool_registry is tool_service.registry
     assert prepared.schemas is tool_service.schemas
@@ -167,7 +167,7 @@ def test_turn_preparation_logs_final_main_fingerprint_once_after_schemas(
     assert "schema body must stay private" not in logged
 
 
-def test_turn_preparation_skips_fingerprint_when_verbose_is_disabled(
+async def test_turn_preparation_skips_fingerprint_when_verbose_is_disabled(
     monkeypatch,
 ) -> None:
     events: list[str] = []
@@ -182,7 +182,7 @@ def test_turn_preparation_skips_fingerprint_when_verbose_is_disabled(
     monkeypatch.setattr(preparation_module.logger, "info", info)
     monkeypatch.setattr(preparation_module, "build_request_fingerprint", fingerprint)
 
-    preparation.build(_runtime(events))  # type: ignore[arg-type]
+    await preparation.build(_runtime(events))  # type: ignore[arg-type]
 
     info.assert_not_called()
     fingerprint.assert_not_called()
@@ -234,7 +234,7 @@ async def test_main_initial_fingerprint_is_not_repeated_for_tool_rounds(
         SimpleNamespace(verbose_logging=False, max_tool_calls=3),
     )
     monkeypatch.setattr(preparation_module.logger, "info", info)
-    prepared = preparation.build(_runtime(events))  # type: ignore[arg-type]
+    prepared = await preparation.build(_runtime(events))  # type: ignore[arg-type]
     provider = Provider()
 
     reply, records = await run_chat_loop(

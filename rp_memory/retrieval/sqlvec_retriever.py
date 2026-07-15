@@ -22,21 +22,28 @@ class SqlVecRetriever(BaseRetriever):
         self._embedding = embedding
 
     async def retrieve(self, query: str, top_k: int = 5) -> list[tuple[str, float, dict]]:
-        return await asyncio.to_thread(self.retrieve_sync, query, top_k)
+        candidates = await self.search(query, top_k=top_k)
+        return self._format(candidates)
+
+    async def retrieve_plan(
+        self,
+        plan: QueryPlan,
+        top_k: int = 5,
+    ) -> list[tuple[str, float, dict]]:
+        candidates = await self.search_plan(plan, top_k=top_k)
+        return self._format(candidates)
 
     def retrieve_sync(self, query: str, top_k: int = 5) -> list[tuple[str, float, dict]]:
-        candidates = self.search(query, top_k=top_k)
-        return self._format(candidates)
+        raise RuntimeError("SqlVecRetriever is async-only; await retrieve()")
 
     def retrieve_plan_sync(self, plan: QueryPlan, top_k: int = 5) -> list[tuple[str, float, dict]]:
-        candidates = self.search_plan(plan, top_k=top_k)
-        return self._format(candidates)
+        raise RuntimeError("SqlVecRetriever is async-only; await retrieve_plan()")
 
-    def search(self, query: str, top_k: int = 5) -> list[MemoryCandidate]:
-        vecs = self._embedding.embed_sync([query])
+    async def search(self, query: str, top_k: int = 5) -> list[MemoryCandidate]:
+        vecs = await self._embedding.embed([query])
         if not vecs:
             return []
-        raw = self._store.search(vecs[0], top_k=top_k)
+        raw = await asyncio.to_thread(self._store.search, vecs[0], top_k)
         candidates: list[MemoryCandidate] = []
         for record, distance in raw:
             candidates.append(
@@ -49,8 +56,11 @@ class SqlVecRetriever(BaseRetriever):
             )
         return candidates
 
-    def search_plan(self, plan: QueryPlan, top_k: int = 5) -> list[MemoryCandidate]:
-        return self.search(plan.normalized_query or plan.original_query, top_k=top_k)
+    async def search_plan(self, plan: QueryPlan, top_k: int = 5) -> list[MemoryCandidate]:
+        return await self.search(
+            plan.normalized_query or plan.original_query,
+            top_k=top_k,
+        )
 
     def _format(self, candidates: list[MemoryCandidate]) -> list[tuple[str, float, dict]]:
         return [

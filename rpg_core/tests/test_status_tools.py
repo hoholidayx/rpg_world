@@ -22,6 +22,10 @@ from rpg_core.scene import SceneTracker
 from rpg_core.status.tools import StatusTableSetValuesTool, StatusTableToolProvider, StatusWritePolicy
 
 
+async def _async_value(value):  # noqa: ANN001, ANN201
+    return value
+
+
 def _document(*rows: tuple[str, str]) -> StatusTableDocument:
     return StatusTableDocument.from_rows(
         rows=[StatusTableRow(key, value) for key, value in rows]
@@ -281,7 +285,7 @@ async def test_status_sub_agent_updated_tracks_actual_scratch_change(
     sub_agent.bind_context(SubAgentContext())
     sub_agent.register_tools([tool])
     sub_agent.set_mutation_probe(lambda: scratch.change_token)
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     result = await sub_agent.update(
         history=[Message(Role.USER, "old")],
@@ -425,7 +429,7 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
         StatusTableSetValuesTool(runtime),
     ])
     sub_agent.set_mutation_probe(lambda: scratch.change_token)
-    sub_agent._get_provider = lambda: provider  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(provider)  # type: ignore[method-assign]
     info = MagicMock()
     monkeypatch.setattr(
         status_module,
@@ -552,7 +556,7 @@ async def test_fixed_preflight_keeps_other_targets_when_provider_fails() -> None
         scratch.create_checkpoint,
         scratch.restore_checkpoint,
     )
-    sub_agent._get_provider = lambda: provider  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(provider)  # type: ignore[method-assign]
 
     result = await sub_agent.run_preflight(
         history=[],
@@ -639,7 +643,7 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
         scratch.create_checkpoint,
         scratch.restore_checkpoint,
     )
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     result = await sub_agent.run_preflight(
         history=[],
@@ -737,7 +741,7 @@ async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> N
     ])
     sub_agent.set_mutation_probe(lambda: scratch.change_token)
     sub_agent.set_mutation_boundary(create_checkpoint, restore_checkpoint)
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     result = await sub_agent.run_preflight(
         history=[],
@@ -843,7 +847,7 @@ async def test_status_sub_agent_outcome_batch_skips_all_state_prewrites() -> Non
         StatusTableSetValuesTool(runtime),
     ])
     sub_agent.set_mutation_probe(lambda: scratch.change_token)
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     result = await sub_agent.update(
         history=[Message(Role.ASSISTANT, "伏击仍未解决")],
@@ -956,7 +960,7 @@ async def test_status_sub_agent_logs_cache_fingerprint_and_usage_by_source(
     )
     monkeypatch.setattr(status_module.logger, "info", info)
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     await sub_agent._chat_with_stats(
         [
@@ -1088,7 +1092,7 @@ async def test_status_route_cannot_select_scene_without_scene_tools() -> None:
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
     sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     result = await sub_agent.run_preflight(
         history=[],
@@ -1143,7 +1147,7 @@ async def test_status_sub_agent_failed_state_target_restores_its_prewrites() -> 
         scratch.create_checkpoint,
         scratch.restore_checkpoint,
     )
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     result = await sub_agent.update(
         history=[],
@@ -1201,7 +1205,7 @@ async def test_status_sub_agent_checkpoint_restore_failure_remains_fatal() -> No
     sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
     sub_agent.set_mutation_probe(lambda: scratch.change_token)
     sub_agent.set_mutation_boundary(scratch.create_checkpoint, fail_restore)
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     with pytest.raises(
         RuntimeError,

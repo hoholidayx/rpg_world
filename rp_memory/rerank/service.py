@@ -8,7 +8,6 @@ import time
 from loguru import logger
 
 from llm_client.types import DocumentScoreProvider
-from rp_memory.asyncio_utils import run_awaitable_sync
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.rerank.base import MemoryReranker
 from rp_memory.rerank.common import (
@@ -34,13 +33,10 @@ class PointwiseMemoryReranker(MemoryReranker):
         self._provider_label = provider_label
         self._max_candidate_chars = max_candidate_chars
 
-    def rerank(self, query: str, candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
+    async def rerank(self, query: str, candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
         if not candidates:
             logger.info("[PointwiseMemoryReranker] skipped — no candidates")
             return candidates
-        return run_awaitable_sync(self._rerank_async(query, candidates))
-
-    async def _rerank_async(self, query: str, candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
         logger.info(
             "[PointwiseMemoryReranker] rerank start — provider={} query={!r} candidates={}",
             self._provider_label,

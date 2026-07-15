@@ -33,6 +33,7 @@ class LLMServiceAuthSettings:
 @dataclass(frozen=True)
 class LLMRuntimeSettings:
     llama_max_parallel_models: int = 2
+    llama_shutdown_grace_ms: int = 5000
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,11 @@ class LLMServiceSettings(ProfiledYamlSettings):
             llama_max_parallel_models=max(
                 1,
                 forgiving_int(raw.get("llama_max_parallel_models", 2), 2),
-            )
+            ),
+            llama_shutdown_grace_ms=max(
+                1,
+                forgiving_int(raw.get("llama_shutdown_grace_ms", 5000), 5000),
+            ),
         )
 
     @property

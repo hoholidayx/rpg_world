@@ -11,7 +11,6 @@ from loguru import logger
 
 from commons.types import JsonObject, JsonValue
 from llm_client.types import LLMProvider
-from rp_memory.asyncio_utils import run_awaitable_sync
 from rp_memory.planning.plan import QueryPlan, make_empty_plan
 
 
@@ -59,7 +58,7 @@ class QueryPlanError(Exception):
 
 class BaseQueryPlanner(ABC):
     @abstractmethod
-    def plan(self, query: str) -> QueryPlan:
+    async def plan(self, query: str) -> QueryPlan:
         """Return a structured query plan."""
 
 
@@ -70,7 +69,10 @@ class RuleBasedQueryPlanner(BaseQueryPlanner):
         self._jieba_dict = jieba_dict or None
         self._tokenizer = _get_jieba_tokenizer(self._jieba_dict)
 
-    def plan(self, query: str) -> QueryPlan:
+    async def plan(self, query: str) -> QueryPlan:
+        return self.plan_sync(query)
+
+    def plan_sync(self, query: str) -> QueryPlan:
         normalized = _normalize(query)
         if not normalized:
             return make_empty_plan(query)
@@ -119,13 +121,12 @@ class LlamaQueryPlanner(BaseQueryPlanner):
             provider.get_default_model(),
         )
 
-    def plan(self, query: str) -> QueryPlan:
+    async def plan(self, query: str) -> QueryPlan:
         normalized = _normalize(query)
         if not normalized:
             return make_empty_plan(query, planner_source="llama")
         prompt = _build_prompt(normalized)
-        response = _run_llm_chat_sync(
-            self._provider,
+        response = await self._provider.chat(
             [
                 {"role": "system", "content": "You are a memory query planner."},
                 {"role": "user", "content": prompt},
@@ -153,12 +154,12 @@ class FallbackQueryPlanner(BaseQueryPlanner):
         self._primary = primary
         self._fallback = fallback or RuleBasedQueryPlanner(jieba_dict=jieba_dict)
 
-    def plan(self, query: str) -> QueryPlan:
+    async def plan(self, query: str) -> QueryPlan:
         try:
-            return self._primary.plan(query)
+            return await self._primary.plan(query)
         except Exception as exc:
             logger.warning("[QueryPlanner] primary planner failed, fallback: {}", exc)
-            return self._fallback.plan(query)
+            return await self._fallback.plan(query)
 
 
 def _build_prompt(query: str) -> str:
@@ -202,8 +203,9 @@ def _plan_from_mapping(
 def _plan_terms_from_fallback(fallback_planner: BaseQueryPlanner | None, query: str) -> list[str]:
     if fallback_planner is not None:
         try:
-            plan = fallback_planner.plan(query)
-            return list(plan.raw_md_terms)
+            plan_sync = getattr(fallback_planner, "plan_sync", None)
+            if plan_sync is not None:
+                return list(plan_sync(query).raw_md_terms)
         except Exception as exc:
             logger.warning("[QueryPlanner] fallback planner failed while extracting terms: {}", exc)
     return _extract_terms(query)
@@ -284,11 +286,6 @@ def _is_meaningful_term(term: str) -> bool:
     if not term or term in _STOPWORDS:
         return False
     return bool(re.search(r"[A-Za-z0-9_\u4e00-\u9fff]", term))
-
-
-def _run_llm_chat_sync(provider: LLMProvider, messages: list[dict]):
-    """Run ``provider.chat()`` synchronously, safe for any event-loop state."""
-    return run_awaitable_sync(provider.chat(messages))
 
 
 def _parse_json_object(text: str) -> JsonObject:

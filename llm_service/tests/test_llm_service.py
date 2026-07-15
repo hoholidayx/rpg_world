@@ -4,6 +4,7 @@ import asyncio
 import sys
 import threading
 import time
+from concurrent.futures import Future
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +14,11 @@ from llm_client.types import DocumentScore, DocumentScoreProvider, LLMProvider, 
 from llm_service import main as service_main
 from llm_service.llama_provider import LlamaCompletionProvider
 from llm_service.models import LlamaModelCache, build_qwen_rerank_prompt, model_cache_key
-from llm_service.runtime import DirectLlamaRuntime, LlamaRuntimeCapacityError
+from llm_service.runtime import (
+    DirectLlamaRuntime,
+    LlamaRuntimeCapacityError,
+    LlamaRuntimeTimeoutError,
+)
 
 
 def test_model_cache_reuses_same_key_and_splits_different_keys(tmp_path, monkeypatch):
@@ -166,6 +171,231 @@ async def test_direct_runtime_cancels_queued_same_model_request_before_execution
     runtime.close()
 
 
+async def test_direct_runtime_times_out_queued_request_before_execution():
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    class FakeCache:
+        def complete(self, model, prompt, **_kwargs):  # noqa: ANN001
+            del model
+            calls.append(prompt)
+            if prompt == "first":
+                started.set()
+                release.wait(timeout=1.0)
+            return prompt
+
+    runtime = DirectLlamaRuntime(max_parallel_models=1, cache=FakeCache())  # type: ignore[arg-type]
+    model = {"model_path": "same.gguf", "n_ctx": 16, "n_gpu_layers": 0}
+    first = asyncio.create_task(
+        runtime.complete_async(
+            model,
+            "first",
+            max_tokens=1,
+            temperature=0.0,
+            request_timeout_ms=1000,
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 1.0)
+
+    with pytest.raises(LlamaRuntimeTimeoutError):
+        await runtime.complete_async(
+            model,
+            "timed-out",
+            max_tokens=1,
+            temperature=0.0,
+            request_timeout_ms=20,
+        )
+
+    release.set()
+    assert await first == "first"
+    await asyncio.sleep(0.02)
+    assert calls == ["first"]
+    runtime.close()
+
+
+async def test_active_completion_observes_cooperative_timeout():
+    started = threading.Event()
+    cancellation_seen = threading.Event()
+
+    class FakeCache:
+        def complete(self, model, prompt, *, cancelled, **_kwargs):  # noqa: ANN001
+            del model, prompt
+            started.set()
+            while not cancelled():
+                time.sleep(0.002)
+            cancellation_seen.set()
+            return "stopped"
+
+    runtime = DirectLlamaRuntime(max_parallel_models=1, cache=FakeCache())  # type: ignore[arg-type]
+    model = {"model_path": "active.gguf", "n_ctx": 16, "n_gpu_layers": 0}
+
+    with pytest.raises(LlamaRuntimeTimeoutError):
+        await runtime.complete_async(
+            model,
+            "slow",
+            max_tokens=1,
+            temperature=0.0,
+            request_timeout_ms=20,
+        )
+
+    assert started.is_set()
+    assert await asyncio.to_thread(cancellation_seen.wait, 1.0)
+    runtime.close()
+
+
+async def test_native_embedding_timeout_returns_while_actor_drains() -> None:
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_first = threading.Event()
+
+    class FakeCache:
+        def embed(self, _model, texts):  # noqa: ANN001
+            if texts == ["first"]:
+                first_started.set()
+                release_first.wait(timeout=1.0)
+            else:
+                second_started.set()
+            return [[float(len(text))] for text in texts]
+
+    runtime = DirectLlamaRuntime(max_parallel_models=1, cache=FakeCache())  # type: ignore[arg-type]
+    model = {"model_path": "embed.gguf", "n_ctx": 16, "n_gpu_layers": 0}
+    first = asyncio.create_task(
+        runtime.embed_async(model, ["first"], request_timeout_ms=20)
+    )
+    assert await asyncio.to_thread(first_started.wait, 1.0)
+
+    with pytest.raises(LlamaRuntimeTimeoutError):
+        await first
+
+    second = asyncio.create_task(
+        runtime.embed_async(model, ["second"], request_timeout_ms=1000)
+    )
+    await asyncio.sleep(0.03)
+    assert second_started.is_set() is False
+
+    release_first.set()
+    assert await second == [[6.0]]
+    assert second_started.is_set() is True
+    runtime.close()
+
+
+async def test_rerank_timeout_stops_at_document_boundary(tmp_path, monkeypatch):
+    model_path = tmp_path / "rerank-timeout.gguf"
+    model_path.write_text("fake", encoding="utf-8")
+    eval_finished = threading.Event()
+    instances: list[object] = []
+
+    class FakeLlama:
+        def __init__(self, **_kwargs) -> None:
+            self.eval_count = 0
+            self.scores: list[list[float]] = []
+            instances.append(self)
+
+        def tokenize(self, raw, add_bos=False, special=False):  # noqa: ANN001
+            del special
+            text = raw.decode("utf-8")
+            if text == "yes":
+                return [1]
+            if text == "no":
+                return [2]
+            return ([7] if add_bos else []) + [3]
+
+        def reset(self) -> None:
+            pass
+
+        def eval(self, tokens):  # noqa: ANN001
+            self.eval_count += 1
+            time.sleep(0.05)
+            self.scores = [[0.0] * 8 for _ in tokens]
+            self.scores[-1][1] = 2.0
+            self.scores[-1][2] = 0.0
+            eval_finished.set()
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama))
+    runtime = DirectLlamaRuntime(max_parallel_models=1, cache=LlamaModelCache())
+    model = {"model_path": str(model_path), "n_ctx": 128, "n_gpu_layers": 0}
+
+    with pytest.raises(LlamaRuntimeTimeoutError):
+        await runtime.rerank_async(
+            model,
+            "query",
+            ["first", "second"],
+            instruction="match",
+            max_length=64,
+            request_timeout_ms=10,
+        )
+
+    assert await asyncio.to_thread(eval_finished.wait, 1.0)
+    await asyncio.sleep(0.01)
+    assert instances[0].eval_count == 1
+    runtime.close()
+
+
+async def test_llama_stream_timeout_cancels_active_callback():
+    cancellation_seen = threading.Event()
+
+    class FakeStreamModel:
+        def start_complete_stream(self, *args, on_chunk, cancelled, **kwargs):  # noqa: ANN002, ANN003
+            del args, on_chunk, kwargs
+            future: Future[None] = Future()
+
+            def run() -> None:
+                cancelled.wait(timeout=1.0)
+                cancellation_seen.set()
+                if not future.cancelled():
+                    future.set_result(None)
+
+            threading.Thread(target=run, daemon=True).start()
+            return future
+
+    provider = LlamaCompletionProvider(
+        model_path="fake.gguf",
+        request_timeout_ms=20,
+        model=FakeStreamModel(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(LlamaRuntimeTimeoutError):
+        async for _chunk in provider.chat_stream(
+            [{"role": "user", "content": "slow"}],
+        ):
+            pass
+
+    assert await asyncio.to_thread(cancellation_seen.wait, 1.0)
+
+
+async def test_llama_stream_consumer_cancel_stops_active_callback():
+    cancellation_seen = threading.Event()
+
+    class FakeStreamModel:
+        def start_complete_stream(self, *args, on_chunk, cancelled, **kwargs):  # noqa: ANN002, ANN003
+            del args, kwargs
+            future: Future[None] = Future()
+
+            def run() -> None:
+                on_chunk("first")
+                cancelled.wait(timeout=1.0)
+                cancellation_seen.set()
+                if not future.cancelled():
+                    future.set_result(None)
+
+            threading.Thread(target=run, daemon=True).start()
+            return future
+
+    provider = LlamaCompletionProvider(
+        model_path="fake.gguf",
+        request_timeout_ms=1000,
+        model=FakeStreamModel(),  # type: ignore[arg-type]
+    )
+    stream = provider.chat_stream([{"role": "user", "content": "stream"}])
+
+    chunk = await anext(stream)
+    await stream.aclose()
+
+    assert chunk.content == "first"
+    assert await asyncio.to_thread(cancellation_seen.wait, 1.0)
+
+
 def test_build_qwen_rerank_prompt_uses_official_sections():
     prompt = build_qwen_rerank_prompt(
         instruction="match memories",
@@ -209,10 +439,7 @@ class _FakeProvider(LLMProvider, DocumentScoreProvider):
     async def embed(self, texts):  # noqa: ANN001
         return [[float(len(text))] for text in texts]
 
-    def embed_sync(self, texts):  # noqa: ANN001
-        return [[float(len(text))] for text in texts]
-
-    def dimension(self) -> int:
+    async def dimension(self) -> int:
         return 1
 
     async def score_documents(self, query, documents):  # noqa: ANN001

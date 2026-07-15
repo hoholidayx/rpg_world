@@ -160,8 +160,17 @@ class FakeAgentManager:
         cls.deleting.clear()
 
     @classmethod
-    def drop_session(cls, session_id: str) -> None:
-        cls.instances.pop(session_id, None)
+    async def areset(cls) -> None:
+        agents = tuple(cls.instances.values())
+        cls.reset()
+        for agent in agents:
+            await agent.close()
+
+    @classmethod
+    async def drop_session(cls, session_id: str) -> None:
+        agent = cls.instances.pop(session_id, None)
+        if agent is not None:
+            await agent.close()
 
     @classmethod
     async def begin_session_deletion(cls, session_id: str) -> None:
@@ -464,13 +473,13 @@ def test_agent_service_contracts(monkeypatch) -> None:
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
 
     class UnavailableHealthClient:
-        def health(self):  # noqa: ANN201
+        async def health(self):  # noqa: ANN201
             raise RuntimeError("offline")
 
     class FakeLLMClientManager:
         client = UnavailableHealthClient()
 
-        def get_catalog(self, biz_key: str) -> LLMBizCatalog:
+        async def get_catalog(self, biz_key: str) -> LLMBizCatalog:
             return LLMBizCatalog(
                 biz_key=biz_key,
                 kind="chat",
@@ -495,13 +504,23 @@ def test_agent_service_contracts(monkeypatch) -> None:
         "get",
         classmethod(lambda cls: FakeLLMClientManager()),
     )
+    async def fake_provider_catalog(_self):  # noqa: ANN001, ANN202
+        return service_main.MainLLMProviderCatalog(
+            config_default_provider_key="deepseek_v4_flash",
+            options=(
+                LLMProviderOption(
+                    "deepseek_v4_flash",
+                    "openai",
+                    "deepseek-v4-flash",
+                    1_000_000,
+                ),
+            ),
+        )
+
     monkeypatch.setattr(
         service_main.MainLLMSelectionService,
         "get_provider_catalog",
-        lambda self: service_main.MainLLMProviderCatalog(
-            config_default_provider_key="deepseek_v4_flash",
-            options=FakeLLMClientManager().get_catalog("agent.main").options,
-        ),
+        fake_provider_catalog,
     )
     FakeCatalog.reset()
     FakeSessionRoles.reset()

@@ -50,14 +50,14 @@ class MainLLMSelectionService:
     def __init__(self, gateway: DataServiceGateway | None = None) -> None:
         self._gateway = gateway or get_data_service_gateway()
 
-    def get_provider_catalog(self) -> MainLLMProviderCatalog:
-        remote = LLMClientManager.get().get_catalog(AGENT_MAIN_BIZ_KEY)
+    async def get_provider_catalog(self) -> MainLLMProviderCatalog:
+        remote = await LLMClientManager.get().get_catalog(AGENT_MAIN_BIZ_KEY)
         return MainLLMProviderCatalog(
             config_default_provider_key=remote.default_provider_key,
             options=remote.options,
         )
 
-    def resolve_story(
+    async def resolve_story(
         self,
         workspace_id: str,
         story_id: int,
@@ -65,18 +65,18 @@ class MainLLMSelectionService:
         story = self._gateway.catalog.get_story(workspace_id, story_id)
         if story is None:
             return None
-        return self._resolve(story=story, session=None)
+        return await self._resolve(story=story, session=None)
 
-    def resolve_session(self, session_id: str) -> MainLLMSelection | None:
+    async def resolve_session(self, session_id: str) -> MainLLMSelection | None:
         session = self._gateway.catalog.get_session(session_id)
         if session is None:
             return None
         story = self._gateway.catalog.get_session_story(session_id)
         if story is None:
             return None
-        return self._resolve(story=story, session=session)
+        return await self._resolve(story=story, session=session)
 
-    def set_story_provider_key(
+    async def set_story_provider_key(
         self,
         workspace_id: str,
         story_id: int,
@@ -85,7 +85,7 @@ class MainLLMSelectionService:
         story = self._gateway.catalog.get_story(workspace_id, story_id)
         if story is None:
             return None
-        normalized = self._validate_provider_key(provider_key)
+        normalized = await self._validate_provider_key(provider_key)
         updated = self._gateway.catalog.set_story_main_llm_provider_key(
             workspace_id,
             story_id,
@@ -93,9 +93,9 @@ class MainLLMSelectionService:
         )
         if updated is None:
             return None
-        return self._resolve(story=updated, session=None)
+        return await self._resolve(story=updated, session=None)
 
-    def set_session_provider_key(
+    async def set_session_provider_key(
         self,
         session_id: str,
         provider_key: str | None,
@@ -103,7 +103,7 @@ class MainLLMSelectionService:
         session = self._gateway.catalog.get_session(session_id)
         if session is None:
             return None
-        normalized = self._validate_provider_key(provider_key)
+        normalized = await self._validate_provider_key(provider_key)
         updated = self._gateway.catalog.set_session_main_llm_provider_key(
             session_id,
             normalized,
@@ -113,15 +113,18 @@ class MainLLMSelectionService:
         story = self._gateway.catalog.get_session_story(session_id)
         if story is None:
             return None
-        return self._resolve(story=story, session=updated)
+        return await self._resolve(story=story, session=updated)
 
-    def _validate_provider_key(self, provider_key: str | None) -> str | None:
+    async def _validate_provider_key(self, provider_key: str | None) -> str | None:
         if provider_key is None:
             return None
         normalized = str(provider_key).strip()
         if not normalized:
             raise InvalidMainLLMProviderKey("provider_key must be null or a non-empty string")
-        allowed = {option.provider_key for option in self.get_provider_catalog().options}
+        allowed = {
+            option.provider_key
+            for option in (await self.get_provider_catalog()).options
+        }
         if normalized not in allowed:
             raise InvalidMainLLMProviderKey(
                 f"main Agent provider_key {normalized!r} is not selectable; "
@@ -129,13 +132,13 @@ class MainLLMSelectionService:
             )
         return normalized
 
-    def _resolve(
+    async def _resolve(
         self,
         *,
         story: models.Story,
         session: models.Session | None,
     ) -> MainLLMSelection:
-        catalog = self.get_provider_catalog()
+        catalog = await self.get_provider_catalog()
         options = {option.provider_key: option for option in catalog.options}
         invalid: list[InvalidMainLLMOverride] = []
 

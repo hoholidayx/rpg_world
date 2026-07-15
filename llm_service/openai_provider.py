@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 
 import httpx
@@ -141,39 +140,11 @@ class OpenAIProvider(LLMProvider):
             self._dimension = len(vectors[0])
         return vectors
 
-    def embed_sync(self, texts: list[str]) -> list[list[float]]:
-        """Synchronous version of :meth:`embed`."""
-        if not texts:
-            return []
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.embed(texts))
-
-        # Event loop already running — bridge via thread
-        import threading
-
-        result: dict[str, list[list[float]]] = {}
-        exc: dict[str, BaseException] = {}
-
-        def _runner() -> None:
-            try:
-                result["value"] = asyncio.run(self.embed(texts))
-            except BaseException as e:
-                exc["err"] = e
-
-        thread = threading.Thread(target=_runner, daemon=True)
-        thread.start()
-        thread.join()
-        if "err" in exc:
-            raise exc["err"]
-        return result["value"]
-
-    def dimension(self) -> int:
+    async def dimension(self) -> int:
         """Return the embedding vector dimension (lazy-probed)."""
         if self._dimension is not None:
             return self._dimension
-        vectors = self.embed_sync(["dimension probe"])
+        vectors = await self.embed(["dimension probe"])
         return len(vectors[0]) if vectors else 0
 
     async def chat_stream(

@@ -19,6 +19,10 @@ from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session import SessionManager
 
 
+async def _async_value(value):  # noqa: ANN001, ANN201
+    return value
+
+
 class _StatusManager:
     def __init__(self) -> None:
         self.document = StatusTableDocument.from_rows(rows=[
@@ -105,7 +109,7 @@ async def test_deferred_reconciler_uses_committed_interval_and_advances_progress
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     result = await sub_agent.reconcile_deferred(
         session_manager=session,
@@ -211,7 +215,7 @@ async def test_deferred_reconciler_isolates_failed_table_batches() -> None:
     provider = Provider()
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
-    sub_agent._get_provider = lambda: provider  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(provider)  # type: ignore[method-assign]
 
     result = await sub_agent.reconcile_deferred(
         session_manager=session,

@@ -18,6 +18,10 @@ from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session.manager import SessionManager
 
 
+async def _async_value(value):  # noqa: ANN001, ANN201
+    return value
+
+
 class DummyStoryStore:
     pass
 
@@ -147,7 +151,7 @@ async def test_memory_sub_agent_logs_request_shape_and_cache_by_pipeline(
     )
     monkeypatch.setattr(memory_module.logger, "info", info)
     sub_agent = MemorySubAgent(provider_biz_key="agent.memory_sub_agent")
-    sub_agent._get_provider = lambda: Provider()  # type: ignore[method-assign]
+    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
     decision, record = await sub_agent._call_llm(
         [

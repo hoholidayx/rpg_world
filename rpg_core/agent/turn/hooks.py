@@ -177,12 +177,12 @@ class MemoryRecallHook:
     ) -> None:
         self._resources = resources
 
-    def run(self, user_input: str) -> None:
+    async def run(self, user_input: str) -> None:
         manager = self._resources().memory_manager
         if manager is None:
             return
         try:
-            manager.recall(user_input)
+            await manager.recall(user_input)
         except Exception as exc:
             logger.opt(exception=exc).warning(_TAG + " memory recall failed")
 

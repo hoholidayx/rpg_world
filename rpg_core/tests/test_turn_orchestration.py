@@ -183,7 +183,7 @@ def test_explicit_style_requires_catalog_session() -> None:
 
 class _PlanResolver:
     @staticmethod
-    def resolve(request: TurnRequest) -> TurnExecutionPlan:
+    async def resolve(request: TurnRequest) -> TurnExecutionPlan:
         return TurnExecutionPlan(
             execution=TurnExecutionSnapshot(
                 request=request,
@@ -222,7 +222,7 @@ class _RuntimeFactory:
 
 class _Preparation:
     @staticmethod
-    def build(runtime: TurnRuntime) -> PreparedTurn:
+    async def build(runtime: TurnRuntime) -> PreparedTurn:
         message = runtime.transaction.stage_user_message(runtime.plan.request.text)
         return PreparedTurn(messages=[message], tool_registry=None, schemas=None)
 

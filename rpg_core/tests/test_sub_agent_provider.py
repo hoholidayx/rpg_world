@@ -14,12 +14,12 @@ class DummyProvider:
         return self.name
 
 
-def test_shared_provider_selection_is_hidden_behind_biz_key(monkeypatch):
+async def test_shared_provider_selection_is_hidden_behind_biz_key(monkeypatch):
     shared = DummyProvider("shared")
     calls: list[str] = []
 
     class FakeManager:
-        def get_provider(self, biz_key):  # noqa: ANN001
+        async def get_provider(self, biz_key):  # noqa: ANN001
             calls.append(biz_key)
             return shared
 
@@ -28,30 +28,30 @@ def test_shared_provider_selection_is_hidden_behind_biz_key(monkeypatch):
     status = StatusSubAgent(provider_biz_key="agent.status_sub_agent", enabled=True)
     memory = MemorySubAgent(provider_biz_key="agent.memory_sub_agent", enabled=True)
 
-    assert status._get_provider() is shared
-    assert memory._get_provider() is shared
+    assert await status._get_provider() is shared
+    assert await memory._get_provider() is shared
     assert calls == ["agent.status_sub_agent", "agent.memory_sub_agent"]
 
 
-def test_biz_key_routes_to_distinct_providers(monkeypatch):
+async def test_biz_key_routes_to_distinct_providers(monkeypatch):
     providers = {
         "agent.status_sub_agent": DummyProvider("status"),
         "agent.memory_sub_agent": DummyProvider("memory"),
     }
 
     class FakeManager:
-        def get_provider(self, biz_key):  # noqa: ANN001
+        async def get_provider(self, biz_key):  # noqa: ANN001
             return providers[biz_key]
 
     monkeypatch.setattr(manager_module.LLMClientManager, "get", classmethod(lambda cls: FakeManager()))
 
-    assert StatusSubAgent(provider_biz_key="agent.status_sub_agent")._get_provider() is providers["agent.status_sub_agent"]
-    assert MemorySubAgent(provider_biz_key="agent.memory_sub_agent")._get_provider() is providers["agent.memory_sub_agent"]
+    assert await StatusSubAgent(provider_biz_key="agent.status_sub_agent")._get_provider() is providers["agent.status_sub_agent"]
+    assert await MemorySubAgent(provider_biz_key="agent.memory_sub_agent")._get_provider() is providers["agent.memory_sub_agent"]
 
 
 def test_disabled_sub_agent_does_not_trigger_provider_resolution(monkeypatch):
     class FakeManager:
-        def get_provider(self, biz_key):  # noqa: ANN001
+        async def get_provider(self, biz_key):  # noqa: ANN001
             raise AssertionError(f"provider should not be resolved for {biz_key}")
 
     monkeypatch.setattr(manager_module.LLMClientManager, "get", classmethod(lambda cls: FakeManager()))

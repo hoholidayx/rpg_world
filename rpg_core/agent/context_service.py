@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -56,7 +56,7 @@ class AgentContextService:
         session_manager: "SessionManager",
         resources: Callable[[], AgentContextResources],
         rp_module_registry: Callable[[], "RPModuleRegistry | None"],
-        main_llm_selection: Callable[[str], "MainLLMSelection"],
+        main_llm_selection: Callable[[str], Awaitable["MainLLMSelection"]],
         token_counter: "TokenCounter",
     ) -> None:
         self._world_name = world_name
@@ -273,46 +273,46 @@ class AgentContextService:
             threshold_ratio=threshold_ratio,
         )
 
-    def inspect_info(
+    async def inspect_info(
         self,
         user_input: str = "",
         *,
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> list["LayerInfo"]:
-        return self._inspector(
+        return (await self._inspector(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
-        ).layer_summary()
+        )).layer_summary()
 
-    def inspect_markdown(
+    async def inspect_markdown(
         self,
         user_input: str = "",
         *,
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> str:
-        return self._inspector(
+        return (await self._inspector(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
-        ).to_markdown()
+        )).to_markdown()
 
-    def inspect_payload(
+    async def inspect_payload(
         self,
         user_input: str = "",
         *,
         mode: TurnMode | str | None = None,
         narrative_style_id: int | None = None,
     ) -> dict[str, object]:
-        return self._inspector(
+        return (await self._inspector(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
-        ).to_payload(session_id=self._session_id())
+        )).to_payload(session_id=self._session_id())
 
-    def inspect_json(
+    async def inspect_json(
         self,
         user_input: str = "",
         *,
@@ -320,7 +320,7 @@ class AgentContextService:
         narrative_style_id: int | None = None,
     ) -> str:
         return json.dumps(
-            self.inspect_payload(
+            await self.inspect_payload(
                 user_input,
                 mode=mode,
                 narrative_style_id=narrative_style_id,
@@ -329,7 +329,7 @@ class AgentContextService:
             indent=2,
         )
 
-    def _inspector(
+    async def _inspector(
         self,
         user_input: str,
         *,
@@ -347,7 +347,7 @@ class AgentContextService:
             user_input,
             turn_execution=execution,
         )
-        selection = self._main_llm_selection(self._session_id())
+        selection = await self._main_llm_selection(self._session_id())
         return ContextInspector(
             context,
             self._token_counter,

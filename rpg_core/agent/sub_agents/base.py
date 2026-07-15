@@ -116,12 +116,12 @@ class BaseSubAgent:
 
     # ── Provider ─────────────────────────────────────────────────────
 
-    def _get_provider(self) -> LLMProvider:
+    async def _get_provider(self) -> LLMProvider:
         """通过远程 LLM client 获取该子 Agent 对应的 provider。"""
         if self._own_provider is None:
             from llm_client.manager import LLMClientManager
 
-            self._own_provider = LLMClientManager.get().get_provider(
+            self._own_provider = await LLMClientManager.get().get_provider(
                 self._provider_biz_key
             )
         return self._own_provider

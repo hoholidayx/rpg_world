@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 
 from llm_client.client import LLMServiceClient
@@ -62,18 +61,15 @@ class RemoteLLMProvider(LLMProvider, DocumentScoreProvider):
             yield chunk
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        return await asyncio.to_thread(self.embed_sync, texts)
-
-    def embed_sync(self, texts: list[str]) -> list[list[float]]:
-        return self._client.embed(
+        return await self._client.embed(
             biz_key=self.biz_key,
             provider_key=self.provider_key,
             texts=texts,
         )
 
-    def dimension(self) -> int:
+    async def dimension(self) -> int:
         if self._dimension is None:
-            self._dimension = self._client.embedding_dimension(
+            self._dimension = await self._client.embedding_dimension(
                 biz_key=self.biz_key,
                 provider_key=self.provider_key,
             )

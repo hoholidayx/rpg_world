@@ -206,6 +206,32 @@ class VectorStore:
     def close(self) -> None:
         self._repo.close()
 
+    @property
+    def vector_enabled(self) -> bool:
+        return self._has_vector_index()
+
+    def enable_vector_index(self, dimension: int) -> bool:
+        """Upgrade a text-only store after async embedding discovery succeeds."""
+        normalized = int(dimension)
+        if normalized <= 0:
+            raise VectorStoreError("embedding dimension must be positive")
+        if self._vector_index is not None:
+            if self._dim != normalized:
+                raise VectorStoreError(
+                    "embedding dimension changed for an open vector store: "
+                    f"existing={self._dim} requested={normalized}"
+                )
+            return self._vector_index.enabled
+        try:
+            self._vector_index = VectorIndex(self._repo, normalized)
+            self._dim = normalized
+        except VectorStoreError as exc:
+            logger.warning("[VectorStore] vector index upgrade failed: {}", exc)
+            self._vector_index = None
+            self._dim = None
+            return False
+        return self._vector_index.enabled
+
     def _delete_secondary_rows(self, rowids: list[int]) -> None:
         if self._vector_index is not None:
             self._vector_index.delete_rows(rowids)

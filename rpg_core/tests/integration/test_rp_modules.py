@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 
 import pytest
 
@@ -39,7 +38,7 @@ class _NoLLMProvider:
 
 
 class _NoLLMManager:
-    def get_catalog(self, biz_key: str) -> LLMBizCatalog:
+    async def get_catalog(self, biz_key: str) -> LLMBizCatalog:
         return LLMBizCatalog(
             biz_key=biz_key,
             kind="chat",
@@ -49,7 +48,7 @@ class _NoLLMManager:
             ),
         )
 
-    def get_provider(
+    async def get_provider(
         self,
         _biz_key,
         *,
@@ -129,11 +128,7 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
         assert agent.history == []
         assert integration_data_gateway.messages.count(session_id) == 0
     finally:
-        consumer = getattr(agent, "_consumer_task", None)
-        if consumer is not None:
-            consumer.cancel()
-            with suppress(asyncio.CancelledError):
-                await consumer
+        await agent.close()
 
         watcher = get_watcher()
         watcher.stop()

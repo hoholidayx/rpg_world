@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from threading import RLock
 from typing import ClassVar
@@ -22,7 +23,7 @@ class LLMClientManager:
         )
         self._catalogs: dict[str, LLMBizCatalog] = {}
         self._providers: dict[tuple[str, str], RemoteLLMProvider] = {}
-        self._lock = RLock()
+        self._catalog_locks: dict[str, asyncio.Lock] = {}
 
     @classmethod
     def get(cls) -> "LLMClientManager":
@@ -32,7 +33,7 @@ class LLMClientManager:
             return cls._instance
 
     @classmethod
-    def configure(
+    async def aconfigure(
         cls,
         *,
         base_url: str,
@@ -52,51 +53,60 @@ class LLMClientManager:
             previous = cls._instance
             cls._instance = manager
         if previous is not None:
-            previous.client.close()
+            await previous.aclose()
         return manager
 
     @classmethod
-    def set_for_tests(cls, manager: "LLMClientManager | None") -> None:
+    async def aset_for_tests(cls, manager: "LLMClientManager | None") -> None:
         with cls._instance_lock:
+            previous = cls._instance
             cls._instance = manager
+        if previous is not None and previous is not manager:
+            await previous.aclose()
 
     @classmethod
-    def reset(cls) -> None:
+    async def areset(cls) -> None:
         with cls._instance_lock:
             previous = cls._instance
             cls._instance = None
         if previous is not None:
-            previous.client.close()
+            await previous.aclose()
 
-    def get_catalog(self, biz_key: str, *, refresh: bool = False) -> LLMBizCatalog:
-        with self._lock:
+    async def get_catalog(self, biz_key: str, *, refresh: bool = False) -> LLMBizCatalog:
+        lock = self._catalog_lock(biz_key)
+        async with lock:
             if not refresh and biz_key in self._catalogs:
                 return self._catalogs[biz_key]
-        catalog = self.client.get_catalog(biz_key)
-        with self._lock:
+            catalog = await self.client.get_catalog(biz_key)
             self._catalogs[biz_key] = catalog
-        return catalog
+            return catalog
 
-    def get_provider(
+    async def get_provider(
         self,
         biz_key: str,
         *,
         provider_key: str | None = None,
     ) -> RemoteLLMProvider:
-        catalog = self.get_catalog(biz_key)
+        catalog = await self.get_catalog(biz_key)
         selected = provider_key or catalog.default_provider_key
         key = (biz_key, selected)
-        with self._lock:
-            cached = self._providers.get(key)
-            if cached is not None:
-                return cached
-            provider = RemoteLLMProvider(
-                client=self.client,
-                catalog=catalog,
-                provider_key=selected,
-            )
-            self._providers[key] = provider
-            return provider
+        cached = self._providers.get(key)
+        if cached is not None:
+            return cached
+        provider = RemoteLLMProvider(
+            client=self.client,
+            catalog=catalog,
+            provider_key=selected,
+        )
+        self._providers[key] = provider
+        return provider
 
     async def aclose(self) -> None:
         await self.client.aclose()
+
+    def _catalog_lock(self, biz_key: str) -> asyncio.Lock:
+        lock = self._catalog_locks.get(biz_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._catalog_locks[biz_key] = lock
+        return lock

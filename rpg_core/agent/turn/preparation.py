@@ -37,7 +37,7 @@ class TurnPreparation:
         self._tool_service = tool_service
         self._memory_recall = memory_recall
 
-    def build(self, runtime: "TurnRuntime") -> PreparedTurn:
+    async def build(self, runtime: "TurnRuntime") -> PreparedTurn:
         request = runtime.plan.request
         scratch = runtime.scratch
         scene_ctx = scratch.scene_tracker.get_context() if scratch.scene_tracker else None
@@ -47,7 +47,7 @@ class TurnPreparation:
         )
         current_user_message = runtime.transaction.stage_user_message(stored_input)
 
-        self._memory_recall.run(request.text)
+        await self._memory_recall.run(request.text)
 
         messages = self._context_service.build_transformed_context(
             current_user_message=current_user_message,

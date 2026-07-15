@@ -133,10 +133,10 @@ def test_status_preflight_outcome_state_is_structured() -> None:
     )
 
 
-def test_memory_recall_hook_warns_and_continues_on_failure() -> None:
+async def test_memory_recall_hook_warns_and_continues_on_failure() -> None:
     class _Memory:
         @staticmethod
-        def recall(_input: str) -> None:
+        async def recall(_input: str) -> None:
             raise RuntimeError("recall failed")
 
     resources = AgentContextResources(
@@ -148,7 +148,7 @@ def test_memory_recall_hook_warns_and_continues_on_failure() -> None:
         memory_manager=_Memory(),
     )
 
-    MemoryRecallHook(lambda: resources).run("hello")
+    await MemoryRecallHook(lambda: resources).run("hello")
 
 
 @pytest.mark.asyncio

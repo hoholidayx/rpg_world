@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rp_memory.asyncio_utils import run_awaitable_sync
 from rp_memory.planning.planner import (
     BaseQueryPlanner,
     _build_prompt,
@@ -33,10 +32,7 @@ class OpenAIQueryPlanner(BaseQueryPlanner):
         self._fallback_planner = fallback_planner
         self._planner_source = planner_source
 
-    def plan(self, query: str):
-        return run_awaitable_sync(self._plan_async(query))
-
-    async def _plan_async(self, query: str):
+    async def plan(self, query: str):
         normalized = query.strip()
         if not normalized:
             return _plan_from_mapping(

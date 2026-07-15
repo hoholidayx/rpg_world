@@ -159,7 +159,7 @@ class RPGGameAgent:
         try:
             await self._mailbox.close()
         finally:
-            self._lifecycle.release_resources()
+            await self._lifecycle.release_resources()
 
     async def send(
         self,
@@ -243,8 +243,8 @@ class RPGGameAgent:
     async def switch_session(self, session_id: str) -> None:
         await self._session_service.switch_session(session_id)
 
-    def reindex_memory(self) -> bool:
-        return self._session_service.reindex_memory()
+    async def reindex_memory(self) -> bool:
+        return await self._session_service.reindex_memory()
 
     async def get_context_info(
         self,
@@ -254,7 +254,7 @@ class RPGGameAgent:
         narrative_style_id: int | None = None,
     ) -> list["LayerInfo"]:
         await self.initialize()
-        return self._context_service.inspect_info(
+        return await self._context_service.inspect_info(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
@@ -268,7 +268,7 @@ class RPGGameAgent:
         narrative_style_id: int | None = None,
     ) -> str:
         await self.initialize()
-        return self._context_service.inspect_markdown(
+        return await self._context_service.inspect_markdown(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
@@ -282,7 +282,7 @@ class RPGGameAgent:
         narrative_style_id: int | None = None,
     ) -> dict[str, object]:
         await self.initialize()
-        return self._context_service.inspect_payload(
+        return await self._context_service.inspect_payload(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,
@@ -296,7 +296,7 @@ class RPGGameAgent:
         narrative_style_id: int | None = None,
     ) -> str:
         await self.initialize()
-        return self._context_service.inspect_json(
+        return await self._context_service.inspect_json(
             user_input,
             mode=mode,
             narrative_style_id=narrative_style_id,

@@ -39,7 +39,7 @@ class TurnRuntimeFactory:
             rp_module_snapshot=plan.rp_modules,
             turn_execution=plan.execution,
         )
-        provider = self._model_runtime.provider_for(
+        provider = await self._model_runtime.provider_for(
             self._lifecycle.session_id,
             selection=plan.main_llm,
         )

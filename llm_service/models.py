@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Callable
 
 from llm_service.types import (
+    JsonValue,
     LlamaCacheKey,
     LlamaLogits,
-    JsonValue,
     LlamaModelConfig,
     LlamaModelHandle,
     LlamaResponsePayload,
@@ -17,6 +18,10 @@ from llm_service.types import (
 
 class LlamaModelError(Exception):
     """Raised when a llama model cannot be loaded or called."""
+
+
+class LlamaModelCancelledError(LlamaModelError):
+    """Raised at a cooperative boundary after runtime cancellation."""
 
 
 def model_cache_key(op: str, model: LlamaModelConfig) -> LlamaCacheKey:
@@ -78,13 +83,20 @@ class LlamaModelCache:
         max_tokens: int,
         temperature: float,
         stop: list[str] | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ) -> LlamaResponsePayload:
         llama = self._get_model("complete", model)
+        kwargs = {
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stop": stop or [],
+        }
+        criteria = _stopping_criteria(cancelled)
+        if criteria is not None:
+            kwargs["stopping_criteria"] = criteria
         return llama(
             prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            stop=stop or [],
+            **kwargs,
         )
 
     def complete_stream(
@@ -95,16 +107,25 @@ class LlamaModelCache:
         max_tokens: int,
         temperature: float,
         stop: list[str] | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ):
         llama = self._get_model("complete_stream", model)
+        kwargs = {
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stop": stop or [],
+            "stream": True,
+        }
+        criteria = _stopping_criteria(cancelled)
+        if criteria is not None:
+            kwargs["stopping_criteria"] = criteria
         chunks = llama(
             prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            stop=stop or [],
-            stream=True,
+            **kwargs,
         )
         for chunk in chunks:
+            if cancelled is not None and cancelled():
+                raise LlamaModelCancelledError("llama completion cancelled")
             text = _extract_stream_text(chunk)
             if text:
                 yield text
@@ -117,6 +138,7 @@ class LlamaModelCache:
         *,
         instruction: str,
         max_length: int,
+        cancelled: Callable[[], bool] | None = None,
     ) -> list[dict[str, float]]:
         if not documents:
             return []
@@ -125,6 +147,8 @@ class LlamaModelCache:
         no_token_id = _first_token_id(llama, "no")
         results: list[dict[str, float]] = []
         for document in documents:
+            if cancelled is not None and cancelled():
+                raise LlamaModelCancelledError("llama rerank cancelled")
             tokens = _build_qwen_rerank_tokens(
                 llama,
                 instruction=instruction,
@@ -137,6 +161,8 @@ class LlamaModelCache:
                 continue
             _reset_llama(llama)
             llama.eval(tokens)
+            if cancelled is not None and cancelled():
+                raise LlamaModelCancelledError("llama rerank cancelled")
             logits = _last_logits(llama, len(tokens))
             yes_logit = _logit_at(logits, yes_token_id)
             no_logit = _logit_at(logits, no_token_id)
@@ -191,6 +217,20 @@ class LlamaModelCache:
         self._models[key] = llama
         self.load_counts[key] = self.load_counts.get(key, 0) + 1
         return llama
+
+
+def _stopping_criteria(cancelled: Callable[[], bool] | None):
+    if cancelled is None:
+        return None
+    try:
+        from llama_cpp import StoppingCriteriaList
+    except ImportError:
+        return None
+
+    def should_stop(_input_ids, _logits) -> bool:  # noqa: ANN001
+        return cancelled()
+
+    return StoppingCriteriaList([should_stop])
 
 
 QWEN_RERANK_SYSTEM_PROMPT = (

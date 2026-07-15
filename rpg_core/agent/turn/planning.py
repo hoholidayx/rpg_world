@@ -26,12 +26,12 @@ class TurnPlanResolver:
         self._context_service = context_service
         self._model_runtime = model_runtime
 
-    def resolve(self, request: TurnRequest) -> TurnExecutionPlan:
+    async def resolve(self, request: TurnRequest) -> TurnExecutionPlan:
         return TurnExecutionPlan(
             execution=self._context_service.resolve_turn_execution(
                 request,
                 require_player_character=True,
             ),
-            main_llm=self._model_runtime.resolve(self._lifecycle.session_id),
+            main_llm=await self._model_runtime.resolve(self._lifecycle.session_id),
             rp_modules=self._context_service.resolve_rp_module_snapshot(),
         )

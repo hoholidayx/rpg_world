@@ -44,7 +44,7 @@ def main_llm_context(tmp_path, monkeypatch):
     )
 
     class FakeManager:
-        def get_catalog(self, _biz_key):  # noqa: ANN001, ANN201
+        async def get_catalog(self, _biz_key):  # noqa: ANN001, ANN201
             return remote_catalog
 
     monkeypatch.setattr(
@@ -64,17 +64,17 @@ def main_llm_context(tmp_path, monkeypatch):
     gateway.close()
 
 
-def test_main_llm_selection_uses_config_story_session_precedence(main_llm_context) -> None:
+async def test_main_llm_selection_uses_config_story_session_precedence(main_llm_context) -> None:
     ctx = main_llm_context
 
-    catalog = ctx.service.get_provider_catalog()
-    default_selection = ctx.service.resolve_session(ctx.session.id)
-    story_selection = ctx.service.set_story_provider_key(
+    catalog = await ctx.service.get_provider_catalog()
+    default_selection = await ctx.service.resolve_session(ctx.session.id)
+    story_selection = await ctx.service.set_story_provider_key(
         ctx.story.workspace_id,
         ctx.story.id,
         "story_chat",
     )
-    session_selection = ctx.service.set_session_provider_key(
+    session_selection = await ctx.service.set_session_provider_key(
         ctx.session.id,
         "session_chat",
     )
@@ -95,18 +95,18 @@ def test_main_llm_selection_uses_config_story_session_precedence(main_llm_contex
     assert session_selection.effective.context_window == 8192
 
 
-def test_clearing_main_llm_overrides_falls_back_one_scope_at_a_time(main_llm_context) -> None:
+async def test_clearing_main_llm_overrides_falls_back_one_scope_at_a_time(main_llm_context) -> None:
     ctx = main_llm_context
-    ctx.service.set_story_provider_key(ctx.story.workspace_id, ctx.story.id, "story_chat")
-    ctx.service.set_session_provider_key(ctx.session.id, "session_chat")
+    await ctx.service.set_story_provider_key(ctx.story.workspace_id, ctx.story.id, "story_chat")
+    await ctx.service.set_session_provider_key(ctx.session.id, "session_chat")
 
-    session_cleared = ctx.service.set_session_provider_key(ctx.session.id, None)
-    story_cleared = ctx.service.set_story_provider_key(
+    session_cleared = await ctx.service.set_session_provider_key(ctx.session.id, None)
+    story_cleared = await ctx.service.set_story_provider_key(
         ctx.story.workspace_id,
         ctx.story.id,
         None,
     )
-    final_selection = ctx.service.resolve_session(ctx.session.id)
+    final_selection = await ctx.service.resolve_session(ctx.session.id)
 
     assert session_cleared is not None
     assert session_cleared.session_provider_key is None
@@ -119,7 +119,7 @@ def test_clearing_main_llm_overrides_falls_back_one_scope_at_a_time(main_llm_con
     assert final_selection.effective_source == "config"
 
 
-def test_invalid_persisted_overrides_are_reported_and_skipped(main_llm_context) -> None:
+async def test_invalid_persisted_overrides_are_reported_and_skipped(main_llm_context) -> None:
     ctx = main_llm_context
     ctx.gateway.catalog.set_story_main_llm_provider_key(
         ctx.story.workspace_id,
@@ -131,7 +131,7 @@ def test_invalid_persisted_overrides_are_reported_and_skipped(main_llm_context) 
         "removed_session_chat",
     )
 
-    fallback = ctx.service.resolve_session(ctx.session.id)
+    fallback = await ctx.service.resolve_session(ctx.session.id)
 
     assert fallback is not None
     assert fallback.effective_provider_key == "config_chat"
@@ -146,7 +146,7 @@ def test_invalid_persisted_overrides_are_reported_and_skipped(main_llm_context) 
         ctx.story.id,
         "story_chat",
     )
-    story_fallback = ctx.service.resolve_session(ctx.session.id)
+    story_fallback = await ctx.service.resolve_session(ctx.session.id)
 
     assert story_fallback is not None
     assert story_fallback.effective_provider_key == "story_chat"
@@ -157,24 +157,24 @@ def test_invalid_persisted_overrides_are_reported_and_skipped(main_llm_context) 
 
 
 @pytest.mark.parametrize("provider_key", ["", "  ", "not_selectable"])
-def test_main_llm_writes_reject_blank_or_non_whitelisted_keys(
+async def test_main_llm_writes_reject_blank_or_non_whitelisted_keys(
     main_llm_context,
     provider_key: str,
 ) -> None:
     ctx = main_llm_context
 
     with pytest.raises(InvalidMainLLMProviderKey):
-        ctx.service.set_session_provider_key(ctx.session.id, provider_key)
+        await ctx.service.set_session_provider_key(ctx.session.id, provider_key)
 
     persisted = ctx.gateway.catalog.get_session(ctx.session.id)
     assert persisted is not None
     assert persisted.main_llm_provider_key is None
 
 
-def test_main_llm_selection_returns_none_for_unknown_catalog_targets(main_llm_context) -> None:
+async def test_main_llm_selection_returns_none_for_unknown_catalog_targets(main_llm_context) -> None:
     ctx = main_llm_context
 
-    assert ctx.service.resolve_story("missing", ctx.story.id) is None
-    assert ctx.service.resolve_session("missing") is None
-    assert ctx.service.set_story_provider_key("missing", ctx.story.id, "not_selectable") is None
-    assert ctx.service.set_session_provider_key("missing", "not_selectable") is None
+    assert await ctx.service.resolve_story("missing", ctx.story.id) is None
+    assert await ctx.service.resolve_session("missing") is None
+    assert await ctx.service.set_story_provider_key("missing", ctx.story.id, "not_selectable") is None
+    assert await ctx.service.set_session_provider_key("missing", "not_selectable") is None

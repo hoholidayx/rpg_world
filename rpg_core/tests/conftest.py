@@ -39,15 +39,11 @@ class FakeEmbedding:
         self.vectors = vectors or [[0.1, 0.2, 0.3]]
         self.calls: list[list[str]] = []
 
-    def embed_sync(self, queries: list[str]) -> list[list[float]]:
-        self.calls.append(list(queries))
-        return self.vectors
-
     async def embed(self, queries: list[str]) -> list[list[float]]:
         self.calls.append(list(queries))
         return self.vectors
 
-    def dimension(self) -> int:
+    async def dimension(self) -> int:
         return len(self.vectors[0]) if self.vectors else 0
 
 
@@ -88,15 +84,15 @@ class FakeRetriever:
         self.plan_calls: list[tuple[str, int]] = []
         self.hybrid_calls: list[tuple[str, int]] = []
 
-    def retrieve_sync(self, query: str, top_k: int = 5):
+    async def retrieve(self, query: str, top_k: int = 5):
         self.sync_calls.append((query, top_k))
         return self.raw[:top_k]
 
-    def retrieve_plan_sync(self, plan, top_k: int = 5):  # noqa: ANN001
+    async def retrieve_plan(self, plan, top_k: int = 5):  # noqa: ANN001
         self.plan_calls.append((plan.normalized_query, top_k))
         return self.raw[:top_k]
 
-    def hybrid_search(self, plan, top_k: int = 20):  # noqa: ANN001
+    async def hybrid_search(self, plan, top_k: int = 20):  # noqa: ANN001
         self.hybrid_calls.append((plan.normalized_query, top_k))
         return [
             MemoryCandidate(memory_id=i + 1, content=text, metadata=meta, hybrid_score=score)
@@ -129,10 +125,10 @@ class FakeBatchStore:
 
 
 @pytest.fixture(autouse=True)
-def reset_llm_manager():
-    LLMClientManager.reset()
+async def reset_llm_manager():
+    await LLMClientManager.areset()
     yield
-    LLMClientManager.reset()
+    await LLMClientManager.areset()
 
 
 class FakeMemorySubAgent:

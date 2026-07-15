@@ -1,7 +1,8 @@
-"""HTTP transport for the standalone LLM service."""
+"""Async HTTP transport for the standalone LLM service."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
 
@@ -45,7 +46,7 @@ class LLMServiceRemoteError(LLMServiceClientError):
 
 
 class LLMServiceClient:
-    """Thread-safe sync/async client used by Agent and memory callers."""
+    """Loop-owned async client used by Agent, memory, and media callers."""
 
     def __init__(
         self,
@@ -54,30 +55,34 @@ class LLMServiceClient:
         token: str,
         request_timeout_ms: int = 60000,
         stream_timeout_ms: int = 300000,
-        sync_transport: httpx.BaseTransport | None = None,
         async_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._token = token.strip()
         self.request_timeout_ms = max(1, int(request_timeout_ms))
         self.stream_timeout_ms = max(1, int(stream_timeout_ms))
-        self._sync = httpx.Client(
-            timeout=self.request_timeout_ms / 1000.0,
-            transport=sync_transport,
-        )
         self._async = httpx.AsyncClient(
             timeout=self.request_timeout_ms / 1000.0,
             transport=async_transport,
         )
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
+        self._closed = False
 
-    def health(self) -> dict[str, object]:
-        response = self._sync.get(f"{self.base_url}/health")
+    async def health(self) -> dict[str, object]:
+        """Probe process/config health; this endpoint intentionally has no auth."""
+        self._assert_loop()
+        try:
+            response = await self._async.get(f"{self.base_url}/health")
+        except httpx.TimeoutException as exc:
+            raise LLMServiceTimeout("LLM health request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise LLMServiceUnavailable(f"LLM service unavailable: {exc}") from exc
         self._raise_for_status(response)
         payload = response.json()
         return dict(payload) if isinstance(payload, Mapping) else {}
 
-    def get_catalog(self, biz_key: str) -> LLMBizCatalog:
-        response = self._request_sync("GET", f"/catalog/{biz_key}")
+    async def get_catalog(self, biz_key: str) -> LLMBizCatalog:
+        response = await self._request_async("GET", f"/catalog/{biz_key}")
         payload = response.json()
         if not isinstance(payload, Mapping):
             raise LLMServiceRemoteError("invalid LLM catalog response")
@@ -114,6 +119,7 @@ class LLMServiceClient:
         messages: list[dict],
         tools: list[dict] | None,
     ) -> AsyncIterator[ProviderChunk]:
+        self._assert_loop()
         timeout = httpx.Timeout(self.stream_timeout_ms / 1000.0)
         try:
             async with self._async.stream(
@@ -154,14 +160,14 @@ class LLMServiceClient:
         except httpx.HTTPError as exc:
             raise LLMServiceUnavailable(f"LLM service unavailable: {exc}") from exc
 
-    def embed(
+    async def embed(
         self,
         *,
         biz_key: str,
         provider_key: str | None,
         texts: list[str],
     ) -> list[list[float]]:
-        response = self._request_sync(
+        response = await self._request_async(
             "POST",
             "/embeddings",
             json={"bizKey": biz_key, "providerKey": provider_key, "texts": texts},
@@ -171,7 +177,7 @@ class LLMServiceClient:
             raise LLMServiceRemoteError("invalid LLM embeddings response")
         return [list(map(float, vector)) for vector in payload["vectors"]]
 
-    def embedding_dimension(
+    async def embedding_dimension(
         self,
         *,
         biz_key: str,
@@ -180,7 +186,7 @@ class LLMServiceClient:
         params = {"bizKey": biz_key}
         if provider_key is not None:
             params["providerKey"] = provider_key
-        response = self._request_sync("GET", "/embeddings/dimension", params=params)
+        response = await self._request_async("GET", "/embeddings/dimension", params=params)
         payload = response.json()
         if not isinstance(payload, Mapping):
             raise LLMServiceRemoteError("invalid LLM embedding dimension response")
@@ -209,29 +215,15 @@ class LLMServiceClient:
             raise LLMServiceRemoteError("invalid LLM rerank response")
         return scores_from_wire(payload.get("scores"))
 
-    def close(self) -> None:
-        self._sync.close()
-
     async def aclose(self) -> None:
-        self._sync.close()
+        if self._closed:
+            return
+        self._assert_loop()
+        self._closed = True
         await self._async.aclose()
 
-    def _request_sync(self, method: str, path: str, **kwargs) -> httpx.Response:
-        try:
-            response = self._sync.request(
-                method,
-                f"{self.base_url}{path}",
-                headers=self._headers(),
-                **kwargs,
-            )
-        except httpx.TimeoutException as exc:
-            raise LLMServiceTimeout(f"LLM request timed out: {path}") from exc
-        except httpx.HTTPError as exc:
-            raise LLMServiceUnavailable(f"LLM service unavailable: {exc}") from exc
-        self._raise_for_status(response)
-        return response
-
     async def _request_async(self, method: str, path: str, **kwargs) -> httpx.Response:
+        self._assert_loop()
         try:
             response = await self._async.request(
                 method,
@@ -245,6 +237,15 @@ class LLMServiceClient:
             raise LLMServiceUnavailable(f"LLM service unavailable: {exc}") from exc
         self._raise_for_status(response)
         return response
+
+    def _assert_loop(self) -> None:
+        if self._closed:
+            raise RuntimeError("LLM service client is closed")
+        loop = asyncio.get_running_loop()
+        if self._owner_loop is None:
+            self._owner_loop = loop
+        elif self._owner_loop is not loop:
+            raise RuntimeError("LLM service client cannot be reused across event loops")
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}

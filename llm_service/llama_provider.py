@@ -9,11 +9,15 @@ import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-
 from loguru import logger
 
 from llm_service.base_provider import DocumentScoreProvider, LLMProvider
-from llm_service.runtime import DirectLlamaCompletionModel, DirectLlamaEmbeddingModel, DirectLlamaRerankModel
+from llm_service.runtime import (
+    DirectLlamaCompletionModel,
+    DirectLlamaEmbeddingModel,
+    DirectLlamaRerankModel,
+    LlamaRuntimeTimeoutError,
+)
 from llm_service.types import DocumentScore, LLMResponse, ProviderChunk
 
 _TAG = "[LlamaCompletionProvider]"
@@ -40,6 +44,7 @@ class LlamaCompletionProvider(LLMProvider):
         self._model_path = str(Path(model_path))
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._request_timeout_seconds = max(1, int(request_timeout_ms)) / 1000.0
         self._model = model or DirectLlamaCompletionModel(
             self._model_path,
             n_ctx=n_ctx,
@@ -130,14 +135,20 @@ class LlamaCompletionProvider(LLMProvider):
         future.add_done_callback(_finished)
 
         try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                if isinstance(item, BaseException):
-                    raise item
-                content = item
-                yield ProviderChunk(content=content, model=self._model_path)
+            try:
+                async with asyncio.timeout(self._request_timeout_seconds):
+                    while True:
+                        item = await queue.get()
+                        if item is None:
+                            break
+                        if isinstance(item, BaseException):
+                            raise item
+                        content = item
+                        yield ProviderChunk(content=content, model=self._model_path)
+            except TimeoutError as exc:
+                raise LlamaRuntimeTimeoutError(
+                    "llama runtime stream timed out"
+                ) from exc
         finally:
             cancelled.set()
             future.cancel()
@@ -287,16 +298,9 @@ class LlamaEmbeddingProvider(LLMProvider):
         self._remember_dimension(vectors)
         return vectors
 
-    def embed_sync(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        vectors = self._model.embed(texts)
-        self._remember_dimension(vectors)
-        return vectors
-
-    def dimension(self) -> int:
+    async def dimension(self) -> int:
         if self._dim is None:
-            self._dim = self._model.dimension()
+            self._dim = await self._model.dimension_async()
         if self._dim <= 0:
             raise RuntimeError(
                 "LlamaEmbeddingProvider: model returned zero-dimension vectors "

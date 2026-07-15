@@ -60,30 +60,37 @@ class HybridRetriever(BaseRetriever):
         self._keyword_tokenizer = keyword_tokenizer
         self._rerank_candidate_k = max(1, int(rerank_candidate_k))
 
-    def _plan_query(self, query: str) -> QueryPlan:
-        return self._query_planner.plan(query)
+    async def _plan_query(self, query: str) -> QueryPlan:
+        return await self._query_planner.plan(query)
 
     async def retrieve(self, query: str, top_k: int = 5) -> list[tuple[str, float, dict]]:
-        return await asyncio.to_thread(self.retrieve_sync, query, top_k)
+        try:
+            plan = await self._plan_query(query)
+            return await self.retrieve_plan(plan, top_k=top_k)
+        except Exception as exc:
+            self._log_stage_error("retrieve", exc)
+            return []
 
     def retrieve_sync(self, query: str, top_k: int = 5) -> list[tuple[str, float, dict]]:
-        try:
-            plan = self._plan_query(query)
-        except Exception as exc:
-            self._log_stage_error("plan", exc)
-            return []
-        return self._format(self._search_plan_candidates(plan, top_k))
+        raise RuntimeError("HybridRetriever is async-only; await retrieve()")
 
     def retrieve_plan_sync(self, plan: QueryPlan, top_k: int = 5) -> list[tuple[str, float, dict]]:
+        raise RuntimeError("HybridRetriever is async-only; await retrieve_plan()")
+
+    async def retrieve_plan(
+        self,
+        plan: QueryPlan,
+        top_k: int = 5,
+    ) -> list[tuple[str, float, dict]]:
         try:
-            return self._format(self._search_plan_candidates(plan, top_k))
+            return self._format(await self._search_plan_candidates(plan, top_k))
         except Exception as exc:
             self._log_stage_error("retrieve_plan", exc)
             return []
 
-    def hybrid_search(self, query: str | QueryPlan, top_k: int = 20) -> list[MemoryCandidate]:
+    async def hybrid_search(self, query: str | QueryPlan, top_k: int = 20) -> list[MemoryCandidate]:
         try:
-            plan = query if isinstance(query, QueryPlan) else self._plan_query(query)
+            plan = query if isinstance(query, QueryPlan) else await self._plan_query(query)
         except Exception as exc:
             self._log_stage_error("plan", exc)
             return []
@@ -100,14 +107,17 @@ class HybridRetriever(BaseRetriever):
             self._raw_md_mode,
             self._keyword_tokenizer,
         )
-        return self._search_plan_candidates(plan, top_k)
+        return await self._search_plan_candidates(plan, top_k)
 
-    def _search_plan_candidates(self, plan: QueryPlan, top_k: int) -> list[MemoryCandidate]:
+    async def _search_plan_candidates(self, plan: QueryPlan, top_k: int) -> list[MemoryCandidate]:
         retrieval_limit = self._retrieval_limit(top_k)
         failures: list[str] = []
         if self._sqlvec_retriever is not None:
             try:
-                sqlvec_candidates = self._sqlvec_retriever.search_plan(plan, top_k=retrieval_limit)
+                sqlvec_candidates = await self._sqlvec_retriever.search_plan(
+                    plan,
+                    top_k=retrieval_limit,
+                )
             except Exception as exc:
                 self._log_stage_error("sqlvec search", exc)
                 failures.append("sqlvec_failed")
@@ -115,7 +125,10 @@ class HybridRetriever(BaseRetriever):
         else:
             sqlvec_candidates = []
 
-        keyword_candidates, keyword_failed = self._safe_keyword_candidates(plan, retrieval_limit)
+        keyword_candidates, keyword_failed = await self._safe_keyword_candidates(
+            plan,
+            retrieval_limit,
+        )
         if keyword_failed:
             failures.append("keyword_failed")
         raw_md_candidates: list[MemoryCandidate] = []
@@ -126,7 +139,7 @@ class HybridRetriever(BaseRetriever):
                 raw_md_reason = "store_unavailable"
         elif self._raw_md_mode == "always":
             raw_md_triggered = True
-            raw_md_candidates = self._safe_raw_md_candidates(plan, retrieval_limit)
+            raw_md_candidates = await self._safe_raw_md_candidates(plan, retrieval_limit)
             raw_md_reason = "always"
         elif self._raw_md_mode == "fallback_only":
             threshold = self._raw_md_min_results if self._raw_md_min_results > 0 else retrieval_limit
@@ -134,11 +147,11 @@ class HybridRetriever(BaseRetriever):
             if failures:
                 raw_md_triggered = True
                 raw_md_reason = failures[0]
-                raw_md_candidates = self._safe_raw_md_candidates(plan, retrieval_limit)
+                raw_md_candidates = await self._safe_raw_md_candidates(plan, retrieval_limit)
             elif main_count < threshold:
                 raw_md_triggered = True
                 raw_md_reason = "insufficient_candidates"
-                raw_md_candidates = self._safe_raw_md_candidates(plan, retrieval_limit)
+                raw_md_candidates = await self._safe_raw_md_candidates(plan, retrieval_limit)
             else:
                 raw_md_reason = "disabled"
 
@@ -182,22 +195,25 @@ class HybridRetriever(BaseRetriever):
                 candidate.fuzzy_score,
                 candidate.debug,
             )
-        return self._finalize(plan, candidates, top_k)
+        return await self._finalize(plan, candidates, top_k)
 
-    def _safe_keyword_candidates(self, plan: QueryPlan, top_k: int) -> tuple[list[MemoryCandidate], bool]:
+    async def _safe_keyword_candidates(self, plan: QueryPlan, top_k: int) -> tuple[list[MemoryCandidate], bool]:
         if self._keyword_retriever is None:
             return [], False
         try:
-            return self._keyword_retriever.search_plan(plan, top_k=top_k), False
+            return (
+                await self._keyword_retriever.search_plan_async(plan, top_k=top_k),
+                False,
+            )
         except Exception as exc:
             self._log_stage_error("keyword search", exc)
             return [], True
 
-    def _safe_raw_md_candidates(self, plan: QueryPlan, top_k: int) -> list[MemoryCandidate]:
+    async def _safe_raw_md_candidates(self, plan: QueryPlan, top_k: int) -> list[MemoryCandidate]:
         if self._raw_md_retriever is None:
             return []
         try:
-            return self._raw_md_retriever.search_plan(plan, top_k=top_k)
+            return await self._raw_md_retriever.search_plan_async(plan, top_k=top_k)
         except Exception as exc:
             self._log_stage_error("raw markdown search", exc)
             return []
@@ -222,7 +238,7 @@ class HybridRetriever(BaseRetriever):
         existing.debug.update(candidate.debug)
         existing.debug.setdefault("sources", []).append(source_name)
 
-    def _finalize(
+    async def _finalize(
         self,
         plan: QueryPlan,
         candidates: list[MemoryCandidate],
@@ -308,7 +324,7 @@ class HybridRetriever(BaseRetriever):
                 list(plan.expanded_queries),
             )
             try:
-                candidates = self._reranker.rerank(rerank_query, candidates)
+                candidates = await self._reranker.rerank(rerank_query, candidates)
             except Exception as exc:
                 self._log_stage_error("rerank", exc)
             else:

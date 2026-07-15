@@ -193,7 +193,31 @@ agent_service 进程
 └── HTTP + SSE: /agent/v1
 ```
 
-LLM Service 默认监听 `http://127.0.0.1:8012/llm/v1`，使用环境变量 `RPG_WORLD_LLM_SERVICE_TOKEN` 的静态 Bearer 令牌。缺少令牌时 LLM Service 拒绝启动。Agent Service 不因 LLM Service 暂不可用而拒绝启动，health 返回 degraded；需要 catalog 或推理的请求返回 503/SSE `LLM_SERVICE_UNAVAILABLE`。
+LLM Service 默认监听 `http://127.0.0.1:8012/llm/v1`，使用环境变量 `RPG_WORLD_LLM_SERVICE_TOKEN` 的静态 Bearer 令牌。缺少令牌时 LLM Service 拒绝启动。Agent Service 不因 LLM Service 暂不可用而拒绝启动，health 返回 degraded；需要 catalog 或推理的请求返回 503/SSE `LLM_SERVICE_UNAVAILABLE`。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程存活与配置是否加载，不校验调用方 token；catalog、chat、stream、embedding、dimension 和 rerank 仍全部鉴权。调用方凭据是否有效由首次受保护请求确认，不得把 health 成功解释为 token 有效。
+
+### Agent / Memory / LLM 异步与线程模型
+
+Agent 进程只有一个服务事件循环，单个 session 的 turn 继续由 `AgentMailbox` FIFO 串行；不同 session 可以在网络 await 或 memory await 期间并发推进。`llm_client` 不再维护同步 HTTP 客户端，`health()`、catalog、provider 解析、chat/stream、embedding、dimension 和 rerank 都是原生 async API。`LLMServiceClient` 在首次使用时绑定当前 loop，之后禁止跨 loop 或线程复用；`LLMClientManager.aconfigure()` / `areset()` / `aset_for_tests()` 会 await 关闭被替换实例的 `httpx.AsyncClient` 连接池。业务代码不得用 `asyncio.run()`、同步 HTTP 或 run-awaitable bridge 包装这些 API。
+
+```text
+Agent event loop
+├── session A AgentMailbox ── turn FIFO ── await LLM / await Memory
+├── session B AgentMailbox ── turn FIFO ── await LLM / await Memory
+└── one loop-owned LLMClientManager / httpx.AsyncClient
+
+MemoryManager(session A)
+├── one async operation lock：recall / index / reindex / close 串行
+├── watcher callback thread：只 call_soon_threadsafe(source_id)
+└── loop-owned consumer：去重 source → await embedding → to_thread(file/hash/chunk/SQLite)
+
+LLM Service
+├── async HTTP/SSE boundary
+└── DirectLlamaRuntime：每个不可变 model cache key 一个 actor thread + FIFO
+```
+
+`MemoryManager.create()` 只创建本地壳，`initialize()` 只建立 text index、keyword、raw-md 与 watcher coordinator，二者都不访问 LLM Service。首次 `recall()` / `reindex()` 才并发懒解析 embedding、query planner 和 reranker；远端能力失败时继续使用 keyword/raw-md/rule-based fallback，未就绪能力在之后调用中重试。每个 MemoryManager 的操作锁只约束该 session，因此同 session 不会并发操作同一 SQLite/索引状态，不同 session 仍可并行。watchdog 所在线程不得执行索引、embedding 或 SQLite。
+
+本地 llama 保持 LLM Service 进程内 actor 线程，不使用子进程。`request_timeout_ms` 从任务提交时开始计算，覆盖同模型队列等待与实际运行；排队任务超时/取消后不会执行，completion 使用 stopping criteria、stream 在 chunk 边界、rerank 在 document/native eval 边界协作停止。原生 embedding 或单次 eval 无法安全抢占时，HTTP/调用方会按时收到超时，actor 继续自然排空，且同 cache key 的下一任务必须等待它结束，绝不并发进入同一模型。关闭时先取消排队与活动任务，并最多等待 `llama_shutdown_grace_ms`；超过 grace 只记录仍在排空的 native call。
 
 ### RPG Media 与图片资产
 
@@ -218,7 +242,7 @@ channels_settings.cli_session_id
 核心配置访问规则：
 
 - 业务代码读取业务配置走 `rpg_core.settings.settings` 的属性或方法，例如 `settings.memory_settings`。
-- Agent、Memory 等业务代码通过 `LLMClientManager.get().get_provider(biz_key)` 获取远端 provider facade，不得导入 `llm_service`、读取 `llm.yaml` 或直接 new OpenAI/llama client。
+- Agent、Memory 等业务代码通过 `await LLMClientManager.get().get_provider(biz_key)` 获取远端 provider facade，不得导入 `llm_service`、读取 `llm.yaml` 或直接 new OpenAI/llama client。
 - `LLMManager` 与 `llm_service.config.resolve_biz_config()` 只允许在 LLM Service 实现内部使用。
 - memory 检索、融合、chunk 和 rerank pool 参数都属于 `settings.yaml`，包括 `keyword_tokenizer`、`keyword_k`、`raw_md_mode`、`raw_md_min_results`、`hybrid_*_weight`、`rerank_candidate_k`、`rerank_score_weight`。
 - `keyword_k` / `hybrid_keyword_weight` 是当前 keyword 架构配置；不要恢复旧 `bigram_k` / `hybrid_bigram_weight`。

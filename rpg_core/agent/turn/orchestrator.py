@@ -66,7 +66,7 @@ class TurnOrchestrator:
         runtime: TurnRuntime | None = None
         try:
             runtime = await self._begin_runtime(request)
-            prepared = self._preparation.build(runtime)
+            prepared = await self._preparation.build(runtime)
             reply_text, records = await self._sync_runner(
                 provider=runtime.provider,
                 tool_registry=prepared.tool_registry,
@@ -124,7 +124,7 @@ class TurnOrchestrator:
         try:
             runtime = await self._begin_runtime(request)
             await self._emit_preflight_events(runtime, emit_event)
-            prepared = self._preparation.build(runtime)
+            prepared = await self._preparation.build(runtime)
 
             final_event: AgentStreamEvent | None = None
             stream_failed = False
@@ -207,7 +207,7 @@ class TurnOrchestrator:
 
     async def _begin_runtime(self, request: TurnRequest) -> "TurnRuntime":
         return await self._runtime_factory.create(
-            self._plan_resolver.resolve(request)
+            await self._plan_resolver.resolve(request)
         )
 
     @staticmethod

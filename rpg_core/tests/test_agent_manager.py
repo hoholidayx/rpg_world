@@ -27,11 +27,11 @@ class FakeAgent:
 
 
 @pytest.fixture(autouse=True)
-def _reset_manager(monkeypatch):
-    AgentManager.reset()
+async def _reset_manager(monkeypatch):
+    await AgentManager.areset()
     monkeypatch.setattr(agent_manager_module, "RPGGameAgent", FakeAgent)
     yield
-    AgentManager.reset()
+    await AgentManager.areset()
     FakeAgent.instances.clear()
 
 
@@ -70,11 +70,11 @@ async def test_ensure_initialized_is_keyed_by_session_id():
     assert FakeAgent.instances[0].init_calls == 1
 
 
-def test_reset_clears_cache_and_init_targets():
+async def test_reset_clears_cache_and_init_targets():
     AgentManager.get_or_create(session_id="s1")
     AgentManager._initialized_targets.add("s1")
 
-    AgentManager.reset()
+    await AgentManager.areset()
 
     assert AgentManager._instances == {}
     assert AgentManager._initialized_targets == set()

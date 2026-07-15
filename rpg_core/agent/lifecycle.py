@@ -112,7 +112,7 @@ class AgentRuntimeLifecycle:
             self._setup_rp_module_registry()
             self._session_manager.load()
             if self._resources.memory_manager is not None:
-                self._resources.memory_manager.init()
+                await self._resources.memory_manager.initialize()
             self._create_sub_agents()
             self._configure_commands()
             tool_service.refresh_base_registry()
@@ -124,15 +124,15 @@ class AgentRuntimeLifecycle:
         """Rebuild managers/stores and rebind all dependent collaborators."""
         if not self._initialized:
             return
-        self._replace_resources(self._session_id)
+        await self._replace_resources(self._session_id)
         if self._resources.memory_manager is not None:
-            self._resources.memory_manager.init()
+            await self._resources.memory_manager.initialize()
         tool_service.refresh_base_registry()
 
-    def release_resources(self) -> None:
+    async def release_resources(self) -> None:
         """Close the active resource set before destructive session file work."""
 
-        self._resources.close()
+        await self._resources.close()
 
     def refresh_sub_agent_bindings(self) -> None:
         """Refresh cached SubAgent context after session-local role changes."""
@@ -149,19 +149,19 @@ class AgentRuntimeLifecycle:
         if self._session_id == session_id:
             return
         self._session_id = session_id
-        self._replace_resources(session_id)
+        await self._replace_resources(session_id)
         if self._resources.memory_manager is not None:
-            self._resources.memory_manager.init()
+            await self._resources.memory_manager.initialize()
         get_watcher().start()
         self._session_manager.switch_to(session_id)
         tool_service.refresh_base_registry()
         logger.info(_TAG + " switched to session: {}", session_id)
 
-    def reindex_memory(self) -> bool:
+    async def reindex_memory(self) -> bool:
         manager = self._resources.memory_manager
         if manager is None:
             return False
-        manager.reindex()
+        await manager.reindex()
         return True
 
     def _build_resources(self, session_id: str) -> AgentContextResources:
@@ -170,9 +170,9 @@ class AgentRuntimeLifecycle:
             session_id=session_id,
         )
 
-    def _replace_resources(self, session_id: str) -> None:
+    async def _replace_resources(self, session_id: str) -> None:
         replacement = self._build_resources(session_id)
-        self._resources.close()
+        await self._resources.close()
         self._resources = replacement
         builder = self._resources.builder
         if self._memory_sub_agent is not None:

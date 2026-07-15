@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -17,13 +17,13 @@ class _MemoryManager:
         self.reindex_calls = 0
         self.close_calls = 0
 
-    def init(self) -> None:
+    async def initialize(self) -> None:
         self.init_calls += 1
 
-    def reindex(self) -> None:
+    async def reindex(self) -> None:
         self.reindex_calls += 1
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.close_calls += 1
 
 
@@ -139,14 +139,14 @@ def _resources(session_id: str) -> AgentContextResources:
     )
 
 
-def test_resources_close_releases_builder_when_memory_close_fails() -> None:
+async def test_resources_close_releases_builder_when_memory_close_fails() -> None:
     resources = _resources("s1")
     memory_manager = resources.memory_manager
     assert memory_manager is not None
-    memory_manager.close = MagicMock(side_effect=RuntimeError("memory close failed"))
+    memory_manager.close = AsyncMock(side_effect=RuntimeError("memory close failed"))
 
     with pytest.raises(RuntimeError, match="memory close failed"):
-        resources.close()
+        await resources.close()
 
     assert resources.builder.close_calls == 1
 
@@ -259,7 +259,7 @@ async def test_lifecycle_release_and_reload_reinitializes_memory_and_tools(
     await lifecycle.initialize(tool_service=tools, mailbox=_Mailbox())
     old_resources = lifecycle.resources
 
-    lifecycle.release_resources()
+    await lifecycle.release_resources()
     await lifecycle.reload_resources(tools)
 
     assert old_resources.memory_manager.close_calls >= 1
@@ -298,7 +298,7 @@ async def test_lifecycle_can_refresh_sub_agent_bindings_without_rebuilding_resou
     assert len(memory_sub_agent.contexts) == 2
 
 
-def test_lifecycle_reindex_memory_uses_typed_resources(lifecycle_deps) -> None:
+async def test_lifecycle_reindex_memory_uses_typed_resources(lifecycle_deps) -> None:
     lifecycle = AgentRuntimeLifecycle(
         session_id="s1",
         world_name="World",
@@ -307,5 +307,5 @@ def test_lifecycle_reindex_memory_uses_typed_resources(lifecycle_deps) -> None:
         resource_factory=lambda **_kwargs: _resources("s1"),
     )
 
-    assert lifecycle.reindex_memory() is True
+    assert await lifecycle.reindex_memory() is True
     assert lifecycle.resources.memory_manager.reindex_calls == 1

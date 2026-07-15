@@ -196,7 +196,7 @@ class AgentSessionService:
         )
 
         try:
-            self._lifecycle.release_resources()
+            await self._lifecycle.release_resources()
             if runtime_dir.exists():
                 runtime_dir.rename(quarantine_dir)
                 runtime_moved = True
@@ -277,8 +277,8 @@ class AgentSessionService:
             tool_service=self._tool_service,
         )
 
-    def reindex_memory(self) -> bool:
-        return self._lifecycle.reindex_memory()
+    async def reindex_memory(self) -> bool:
+        return await self._lifecycle.reindex_memory()
 
     def _history_rows(self):
         from rpg_data.services import get_data_service_gateway

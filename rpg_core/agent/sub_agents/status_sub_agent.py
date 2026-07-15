@@ -1507,7 +1507,7 @@ class StatusSubAgent(BaseSubAgent):
             )
         t0 = time.monotonic()
         try:
-            provider = self._get_provider()
+            provider = await self._get_provider()
             llm_result = await provider.chat(messages, tools=schemas)
         except Exception as exc:
             duration_ms = (time.monotonic() - t0) * 1000

@@ -1,26 +1,20 @@
-"""MemoryManager — 统一记忆管理入口，封装所有记忆实现细节。
-
-所有操作同步执行，不依赖事件循环。
-
-初始化策略：
-  1. ``create()`` — 加载模型 + 建 DB
-  2. ``init()`` — 增量同步索引并注册 FileWatcher
-"""
+"""Async-first memory facade with one coordinator per Agent session."""
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from commons.types import Metadata
-
 from loguru import logger
 
 if TYPE_CHECKING:
     from llm_client.types import LLMProvider
     from rp_memory.planning.planner import BaseQueryPlanner
     from rp_memory.recalled_memory import RecalledMemoryStore
+    from rp_memory.rerank.base import MemoryReranker
     from rp_memory.retrieval.retriever import BaseRetriever
     from rp_memory.storage.vector_store import VectorStore
     from rp_memory.vector_index_manager import VectorIndexManager
@@ -29,110 +23,78 @@ if TYPE_CHECKING:
 
 @dataclass
 class RecallItem:
-    """一条召回结果的结构化数据。"""
-
     text: str
-    """匹配到的文本内容。"""
-
     score: float
-    """相似度分数（0~1，越高越相关）。"""
-
     source: str = ""
-    """来源标识（如 ``"summaries"``）。"""
-
     file_path: str = ""
-    """来源文件路径。"""
-
     chunk_idx: int = 0
-    """在文件内的分块索引。"""
-
     metadata: Metadata = field(default_factory=dict)
-    """扩展元信息。"""
 
 
 def format_recall_item(idx: int, item: RecallItem) -> str:
-    """格式化一条 RecallItem 为完整可读文本（无截断）。
-
-    与独立入口共享同一格式，确保 CLI / 日志输出一致。
-    """
-    lines: list[str] = []
-    lines.append(f"  [{idx}] score={item.score:.4f}")
-    lines.append(f"       source={item.source}  file={item.file_path}[{item.chunk_idx}]")
+    lines = [
+        f"  [{idx}] score={item.score:.4f}",
+        f"       source={item.source}  file={item.file_path}[{item.chunk_idx}]",
+    ]
     non_text_keys = {"source", "file", "chunk_idx", "file_path"}
-    extra = {k: v for k, v in item.metadata.items() if k not in non_text_keys}
+    extra = {key: value for key, value in item.metadata.items() if key not in non_text_keys}
     if extra:
         lines.append(f"       meta: {extra}")
     lines.append("       ---")
-    for line in item.text.splitlines():
-        lines.append(f"       {line}")
+    lines.extend(f"       {line}" for line in item.text.splitlines())
     return "\n".join(lines)
 
 
 class MemoryManager:
-    """记忆管理器 — 所有操作同步。"""
-
-    # ── 工厂方法 ───────────────────────────────────────────────────────
+    """Own lazy remote capabilities and serialized local memory state."""
 
     @classmethod
     def create(
         cls,
-        recalled_store: RecalledMemoryStore,
+        recalled_store: "RecalledMemoryStore",
         session_dir: str,
         get_vector_db_path: str,
-        mem_cfg: MemorySettings,
-    ) -> MemoryManager | None:
-        """构造 MemoryManager（同步：尽力加载模型并建立检索链路）。"""
+        mem_cfg: "MemorySettings",
+    ) -> "MemoryManager | None":
+        """Build a local shell without contacting LLM Service."""
         if not mem_cfg.enabled:
             logger.info("[MemoryManager] disabled by config")
             return None
+        sources = cls._build_sources(session_dir)
+        rule_planner = cls._build_rule_based_query_planner(mem_cfg)
+        fallback_search = cls._build_raw_md_search(sources, rule_planner)
         logger.info(
-            "[MemoryManager] create start — session_dir={} db_path={} hybrid={} top_k={}",
+            "[MemoryManager] local shell ready — session_dir={} db_path={} hybrid={} top_k={}",
             session_dir,
             get_vector_db_path,
             mem_cfg.hybrid_enabled,
             mem_cfg.top_k,
         )
-
-        sources = cls._build_sources(session_dir)
-        rule_based_planner = cls._build_rule_based_query_planner(mem_cfg)
-        fallback_search = cls._build_raw_md_search(sources, rule_based_planner)
-        embedding = cls._build_embedding(mem_cfg)
-        store = cls._build_store(get_vector_db_path, embedding, mem_cfg)
-        chunker = cls._build_chunker(mem_cfg)
-        index_mgr = cls._build_index_manager(store, embedding, sources, chunker)
-        retriever = cls._build_retriever(store, embedding, mem_cfg, fallback_search, rule_based_planner)
-        query_planner = cls._build_query_planner(mem_cfg, rule_based_planner)
-
-        mm = cls(
+        return cls(
             recalled_store=recalled_store,
-            index_manager=index_mgr,
-            retriever=retriever,
             top_k=mem_cfg.top_k,
-            store=store,
-            query_planner=query_planner,
+            query_planner=rule_planner,
+            session_dir=session_dir,
+            db_path=get_vector_db_path,
+            mem_cfg=mem_cfg,
+            sources=sources,
+            fallback_search=fallback_search,
         )
-        mm._db_path = get_vector_db_path
-        logger.info(
-            "[MemoryManager] create done — retriever={} store={} index={} embedding={}",
-            type(retriever).__name__ if retriever is not None else "None",
-            "ready" if store is not None else "none",
-            "ready" if index_mgr is not None else "none",
-            "ready" if embedding is not None else "none",
-        )
-        if embedding is None:
-            logger.warning("[MemoryManager] embedding unavailable — keyword/raw markdown fallback mode")
-        return mm
-
-    # ── 实例初始化 ─────────────────────────────────────────────────────
 
     def __init__(
         self,
-        recalled_store: RecalledMemoryStore,
-        index_manager: VectorIndexManager | None = None,
-        retriever: BaseRetriever | None = None,
+        recalled_store: "RecalledMemoryStore",
+        index_manager: "VectorIndexManager | None" = None,
+        retriever: "BaseRetriever | None" = None,
         top_k: int = 5,
-        store: VectorStore | None = None,
-        query_planner: BaseQueryPlanner | None = None,
+        store: "VectorStore | None" = None,
+        query_planner: "BaseQueryPlanner | None" = None,
+        *,
+        session_dir: str | None = None,
+        db_path: str | None = None,
+        mem_cfg: "MemorySettings | None" = None,
+        sources: list | None = None,
+        fallback_search: object | None = None,
     ) -> None:
         from rp_memory.planning.planner import RuleBasedQueryPlanner
 
@@ -142,121 +104,309 @@ class MemoryManager:
         self._top_k = top_k
         self._store = store
         self._query_planner = query_planner or RuleBasedQueryPlanner()
-        self._inited = False
-        self._db_path: str | None = None
+        self._session_dir = session_dir
+        self._db_path = db_path
+        self._mem_cfg = mem_cfg
+        self._sources = list(sources or [])
+        self._fallback_search = fallback_search
+        self._embedding: LLMProvider | None = None
+        self._reranker: MemoryReranker | None = None
+        self._embedding_ready = False
+        self._planner_ready = not bool(
+            mem_cfg and getattr(mem_cfg, "query_planner_enabled", False)
+        )
+        self._reranker_ready = not bool(
+            mem_cfg and getattr(mem_cfg, "rerank_enabled", False)
+        )
+        self._initialized = False
+        self._closed = False
+        self._operation_lock = asyncio.Lock()
+        self._init_lock = asyncio.Lock()
+        self._remote_lock = asyncio.Lock()
 
-    def init(self) -> None:
-        """同步初始化：增量补偿离线文件变化并注册 watcher。"""
-        logger.info("[MemoryManager] init() called — _inited={} index_manager={}", self._inited, self._index_manager is not None)
-        if self._inited:
+    async def initialize(self) -> None:
+        """Initialize text-only storage and watcher coordination without LLM I/O."""
+        if self._initialized:
             return
+        async with self._init_lock:
+            if self._initialized:
+                return
+            self._ensure_open()
+            if self._store is None and self._mem_cfg is not None and self._db_path:
+                self._store = await asyncio.to_thread(
+                    self._build_store,
+                    self._db_path,
+                    None,
+                    self._mem_cfg,
+                )
+            if self._retriever is None and self._mem_cfg is not None:
+                self._retriever = self._build_retriever(
+                    self._store,
+                    None,
+                    self._mem_cfg,
+                    self._fallback_search,
+                    self._query_planner,
+                    reranker=None,
+                )
+            if (
+                self._index_manager is None
+                and self._store is not None
+                and self._mem_cfg is not None
+            ):
+                self._index_manager = self._build_index_manager(
+                    self._store,
+                    None,
+                    self._sources,
+                    self._build_chunker(self._mem_cfg),
+                    operation_lock=self._operation_lock,
+                )
+            if self._index_manager is not None:
+                await self._index_manager.initialize()
+            self._initialized = True
+            logger.info("[MemoryManager] initialized in text-index-first mode")
+
+    async def recall(self, query: str) -> list[RecallItem]:
+        await self.initialize()
+        await self._refresh_remote_capabilities()
+        async with self._operation_lock:
+            self._ensure_open()
+            if self._retriever is None:
+                self._recalled_store.set_items([])
+                return []
+            logger.info(
+                "[MemoryManager] recall start — query={!r} top_k={}",
+                query,
+                self._top_k,
+            )
+            try:
+                plan = await self._query_planner.plan(query)
+            except Exception as exc:
+                logger.warning("[MemoryManager] recall planner failed: {}", exc)
+                self._recalled_store.set_items([])
+                return []
+            _log_query_plan("recall", plan)
+            try:
+                retrieve_plan = getattr(self._retriever, "retrieve_plan", None)
+                if retrieve_plan is not None:
+                    raw = await retrieve_plan(plan, self._top_k)
+                else:
+                    raw = await self._retriever.retrieve(
+                        plan.normalized_query or query,
+                        self._top_k,
+                    )
+            except Exception as exc:
+                logger.warning("[MemoryManager] recall retriever failed: {}", exc)
+                self._recalled_store.set_items([])
+                return []
+            items = self._items(raw)
+            self._recalled_store.set_items([item.text for item in items])
+        logger.info(
+            "[MemoryManager] recall done — query={!r} items={}",
+            query,
+            len(items),
+        )
+        for index, item in enumerate(items):
+            for line in format_recall_item(index, item).splitlines():
+                logger.info("[MemoryManager] {}", line)
+        return items
+
+    async def hybrid_search(self, query: str, top_k: int = 20) -> list[RecallItem]:
+        await self.initialize()
+        await self._refresh_remote_capabilities()
+        async with self._operation_lock:
+            if self._retriever is None:
+                return []
+            try:
+                plan = await self._query_planner.plan(query)
+                _log_query_plan("hybrid_search", plan)
+                search = getattr(self._retriever, "hybrid_search", None)
+                if search is None:
+                    retrieve_plan = getattr(self._retriever, "retrieve_plan", None)
+                    if retrieve_plan is not None:
+                        raw = await retrieve_plan(plan, top_k)
+                    else:
+                        raw = await self._retriever.retrieve(
+                            plan.normalized_query or query,
+                            top_k,
+                        )
+                    return self._items(raw)
+                candidates = await search(plan, top_k)
+            except Exception as exc:
+                logger.warning("[MemoryManager] hybrid_search failed: {}", exc)
+                return []
+            return self._items_from_candidates(candidates)
+
+    async def reindex(self) -> None:
+        await self.initialize()
+        await self._refresh_remote_capabilities()
         if self._index_manager is None:
-            logger.info("[MemoryManager] init skipped — index manager unavailable")
-            self._inited = True
+            logger.warning("[MemoryManager] reindex skipped: index manager unavailable")
             return
+        await self._index_manager.reindex_all()
 
-        self._index_manager.sync_all(force=False)
-        self._index_manager.start()
-        self._inited = True
-        logger.info("[MemoryManager] init done")
+    async def rebuild_fts_index(self) -> None:
+        await self.initialize()
+        async with self._operation_lock:
+            if self._store is not None:
+                await asyncio.to_thread(self._store.rebuild_fts_index)
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._index_manager is not None:
+            await self._index_manager.close()
+        async with self._operation_lock:
+            self._recalled_store.clear()
+            if self._store is not None:
+                await asyncio.to_thread(self._store.close)
+                self._store = None
+            self._initialized = False
+
+    @property
+    def recalled_items(self) -> list[str]:
+        return list(self._recalled_store.get_items())
+
+    def _get_db_path(self) -> Path | None:
+        return Path(self._db_path) if self._db_path else None
+
+    async def _refresh_remote_capabilities(self) -> None:
+        cfg = self._mem_cfg
+        if cfg is None:
+            return
+        if self._embedding_ready and self._planner_ready and self._reranker_ready:
+            return
+        async with self._remote_lock:
+            if self._embedding_ready and self._planner_ready and self._reranker_ready:
+                return
+            from llm_client.keys import (
+                MEMORY_EMBED_BIZ_KEY,
+                MEMORY_QUERY_PLANNER_BIZ_KEY,
+                MEMORY_RERANK_BIZ_KEY,
+            )
+            from llm_client.manager import LLMClientManager
+
+            manager = LLMClientManager.get()
+            requests: list[tuple[str, str]] = []
+            if not self._embedding_ready:
+                requests.append(("embedding", MEMORY_EMBED_BIZ_KEY))
+            if not self._planner_ready:
+                requests.append(("planner", MEMORY_QUERY_PLANNER_BIZ_KEY))
+            if not self._reranker_ready:
+                requests.append(("reranker", MEMORY_RERANK_BIZ_KEY))
+
+            async def resolve(label: str, biz_key: str):
+                try:
+                    return label, await manager.get_provider(biz_key)
+                except Exception as exc:
+                    logger.warning(
+                        "[MemoryManager] {} provider unavailable; keep fallback: {}",
+                        label,
+                        exc,
+                    )
+                    return label, None
+
+            resolved = await asyncio.gather(
+                *(resolve(label, key) for label, key in requests)
+            )
+            providers = {label: provider for label, provider in resolved}
+            embedding = providers.get("embedding")
+            dimension = 0
+            if embedding is not None:
+                try:
+                    dimension = await embedding.dimension()
+                except Exception as exc:
+                    logger.warning(
+                        "[MemoryManager] embedding dimension unavailable; keep text fallback: {}",
+                        exc,
+                    )
+
+            vector_upgraded = False
+            async with self._operation_lock:
+                if dimension > 0 and self._store is not None:
+                    vector_upgraded = await asyncio.to_thread(
+                        self._store.enable_vector_index,
+                        dimension,
+                    )
+                    if vector_upgraded:
+                        self._embedding = embedding
+                        self._embedding_ready = True
+                        if self._index_manager is not None:
+                            self._index_manager.set_embedding(embedding)
+
+                planner_provider = providers.get("planner")
+                if planner_provider is not None:
+                    self._query_planner = self._build_query_planner_with_provider(
+                        cfg,
+                        planner_provider,
+                    )
+                    self._planner_ready = True
+
+                rerank_provider = providers.get("reranker")
+                if rerank_provider is not None:
+                    self._reranker = self._build_reranker_with_provider(
+                        cfg,
+                        rerank_provider,
+                    )
+                    self._reranker_ready = True
+
+                self._retriever = self._build_retriever(
+                    self._store,
+                    self._embedding,
+                    cfg,
+                    self._fallback_search,
+                    self._query_planner,
+                    reranker=self._reranker,
+                )
+            if vector_upgraded and self._index_manager is not None:
+                await self._index_manager.reindex_all()
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("memory manager is closed")
 
     @staticmethod
     def _build_sources(session_dir: str):
         from rp_memory.vector_index_manager import WatchSource
 
-        sources = [
+        return [
             WatchSource(
                 path=Path(session_dir) / "summaries",
                 source_id="summaries",
-                file_filter=lambda p: p.suffix in (".md", ".json"),
-            ),
+                file_filter=lambda path: path.suffix in (".md", ".json"),
+            )
         ]
-        logger.info("[MemoryManager] watch sources ready — count={} root={}", len(sources), sources[0].path)
-        return sources
 
     @staticmethod
     def _build_raw_md_search(sources, rule_based_planner=None):
         from rp_memory.retrieval.raw_md_grep_search import RawMarkdownGrepSearch
 
-        logger.info("[MemoryManager] raw markdown fallback roots={}", len(sources))
         return RawMarkdownGrepSearch(
-            source_paths=[src.path for src in sources],
+            source_paths=[source.path for source in sources],
             rule_based_planner=rule_based_planner,
         )
 
     @staticmethod
-    def _build_embedding(mem_cfg: MemorySettings):
-        if not getattr(mem_cfg, "enabled", True):
-            return None
-        from llm_client.keys import MEMORY_EMBED_BIZ_KEY
-        from llm_client.manager import LLMClientManager
-
-        try:
-            embedding = LLMClientManager.get().get_provider(MEMORY_EMBED_BIZ_KEY)
-            dimension = embedding.dimension()
-            if dimension <= 0:
-                raise ValueError("embedding provider returned zero dimension")
-            logger.info("[MemoryManager] embedding provider ready: {}", type(embedding).__name__)
-            return embedding
-        except Exception as exc:
-            logger.warning("[MemoryManager] embedding init failed: {}", exc)
-            return None
-
-    @staticmethod
     def _build_store(
-        get_vector_db_path: str,
-        embedding: LLMProvider | None,
-        mem_cfg: MemorySettings,
+        db_path: str,
+        dimension: int | None,
+        mem_cfg: "MemorySettings",
     ):
-        from rp_memory.storage.types import VectorStoreError
         from rp_memory.storage.vector_store import VectorStore
 
-        dimension = None
-        if embedding is not None:
-            try:
-                dimension = embedding.dimension()  # type: ignore[union-attr]
-            except NotImplementedError:
-                dimension = None
-
         try:
-            store = VectorStore(
-                db_path=get_vector_db_path,
+            return VectorStore(
+                db_path=db_path,
                 dimension=dimension,
                 keyword_tokenizer=mem_cfg.keyword_tokenizer,
                 jieba_dict=mem_cfg.jieba_dict,
             )
-            logger.info(
-                "[MemoryManager] vector store ready: {} (vector_mode={})",
-                get_vector_db_path,
-                dimension is not None,
-            )
-            return store
-        except VectorStoreError as exc:
-            if dimension is None:
-                logger.warning("[MemoryManager] text index init failed: {}", exc)
-                return None
-            logger.warning("[MemoryManager] vector store init failed, retry text-index-only: {}", exc)
-            try:
-                store = VectorStore(
-                    db_path=get_vector_db_path,
-                    dimension=None,
-                    keyword_tokenizer=mem_cfg.keyword_tokenizer,
-                    jieba_dict=mem_cfg.jieba_dict,
-                )
-                logger.info(
-                    "[MemoryManager] text-index-only store ready: {}",
-                    get_vector_db_path,
-                )
-                return store
-            except Exception as retry_exc:
-                logger.warning("[MemoryManager] text index retry failed: {}", retry_exc)
-                return None
         except Exception as exc:
             logger.warning("[MemoryManager] store init failed: {}", exc)
             return None
 
     @staticmethod
-    def _build_chunker(mem_cfg: MemorySettings):
+    def _build_chunker(mem_cfg: "MemorySettings"):
         from rp_memory.chunker import Chunker
 
         return Chunker(
@@ -264,38 +414,30 @@ class MemoryManager:
             overlap=mem_cfg.chunk_overlap,
         )
 
-    @classmethod
+    @staticmethod
     def _build_index_manager(
-        cls,
         store,
         embedding,
         sources,
         chunker,
+        *,
+        operation_lock: asyncio.Lock | None = None,
     ):
         if store is None:
-            logger.warning("[MemoryManager] index manager skipped — store unavailable")
             return None
-        if embedding is None:
-            logger.info("[MemoryManager] index manager will operate in text-index-only mode")
+        from rp_memory.vector_index_manager import VectorIndexManager
 
-        try:
-            from rp_memory.vector_index_manager import VectorIndexManager
-
-            index_manager = VectorIndexManager(
-                store=store,
-                embedding=embedding,
-                sources=sources,
-                chunker=chunker,
-            )
-            logger.info("[MemoryManager] index manager ready")
-            return index_manager
-        except Exception as exc:
-            logger.warning("[MemoryManager] index manager init failed: {}", exc)
-            return None
+        return VectorIndexManager(
+            store=store,
+            embedding=embedding,
+            sources=sources,
+            chunker=chunker,
+            operation_lock=operation_lock,
+        )
 
     @staticmethod
     def _build_sqlvec_retriever(store, embedding):
-        if store is None or embedding is None:
+        if store is None or embedding is None or not store.vector_enabled:
             return None
         from rp_memory.retrieval.sqlvec_retriever import SqlVecRetriever
 
@@ -311,35 +453,31 @@ class MemoryManager:
 
     @staticmethod
     def _build_raw_md_retriever(fallback_search):
+        if fallback_search is None:
+            return None
         from rp_memory.retrieval.raw_md_retriever import RawMarkdownRetriever
 
         return RawMarkdownRetriever(fallback_search)
 
-    @staticmethod
-    def _build_retriever(store, embedding, mem_cfg: MemorySettings, fallback_search, rule_based_planner=None):
+    @classmethod
+    def _build_retriever(
+        cls,
+        store,
+        embedding,
+        mem_cfg: "MemorySettings",
+        fallback_search,
+        rule_based_planner=None,
+        *,
+        reranker=None,
+    ):
         from rp_memory.retrieval.hybrid_retriever import HybridRetriever
-        from rp_memory.retrieval.raw_md_retriever import RawMarkdownRetriever
 
-        raw_md_retriever = MemoryManager._build_raw_md_retriever(fallback_search)
+        raw_md_retriever = cls._build_raw_md_retriever(fallback_search)
         if store is None:
-            if mem_cfg.raw_md_mode == "disabled":
-                logger.info("[MemoryManager] retriever disabled — store unavailable and raw_md_mode=disabled")
-                return None
-            logger.info("[MemoryManager] retriever fallback — raw markdown only")
-            return raw_md_retriever
-
-        sqlvec_retriever = MemoryManager._build_sqlvec_retriever(store, embedding)
-        keyword_retriever = MemoryManager._build_keyword_retriever(store, mem_cfg.keyword_k)
-
+            return None if mem_cfg.raw_md_mode == "disabled" else raw_md_retriever
+        sqlvec_retriever = cls._build_sqlvec_retriever(store, embedding)
+        keyword_retriever = cls._build_keyword_retriever(store, mem_cfg.keyword_k)
         if mem_cfg.hybrid_enabled or embedding is None:
-            logger.info(
-                "[MemoryManager] retriever mode — hybrid (sqlvec={} keyword={} rerank={} raw_md_mode={})",
-                sqlvec_retriever is not None,
-                keyword_retriever is not None,
-                mem_cfg.rerank_enabled,
-                mem_cfg.raw_md_mode,
-            )
-            reranker = MemoryManager._build_reranker(mem_cfg)
             return HybridRetriever(
                 sqlvec_retriever=sqlvec_retriever,
                 keyword_retriever=keyword_retriever,
@@ -358,197 +496,43 @@ class MemoryManager:
                 keyword_tokenizer=mem_cfg.keyword_tokenizer,
                 rerank_candidate_k=mem_cfg.rerank_candidate_k,
             )
-
-        logger.info("[MemoryManager] retriever mode — sqlvec")
         return sqlvec_retriever
 
     @staticmethod
-    def _build_rule_based_query_planner(mem_cfg: MemorySettings):
+    def _build_rule_based_query_planner(mem_cfg: "MemorySettings"):
         from rp_memory.planning.planner import RuleBasedQueryPlanner
 
-        return RuleBasedQueryPlanner(jieba_dict=getattr(mem_cfg, "jieba_dict", "") or None)
+        return RuleBasedQueryPlanner(
+            jieba_dict=getattr(mem_cfg, "jieba_dict", "") or None
+        )
 
-    @staticmethod
-    def _build_query_planner(mem_cfg: MemorySettings, rule_based_planner=None):
-        if rule_based_planner is None:
-            rule_based_planner = MemoryManager._build_rule_based_query_planner(mem_cfg)
-        if not getattr(mem_cfg, "query_planner_enabled", False):
-            logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
-            return rule_based_planner
-        from llm_client.keys import MEMORY_QUERY_PLANNER_BIZ_KEY
-        from llm_client.manager import LLMClientManager
+    @classmethod
+    def _build_query_planner_with_provider(cls, mem_cfg, provider):
         from rp_memory.planning.openai_planner import OpenAIQueryPlanner
         from rp_memory.planning.planner import FallbackQueryPlanner
 
-        try:
-            provider = LLMClientManager.get().get_provider(MEMORY_QUERY_PLANNER_BIZ_KEY)
-            primary = OpenAIQueryPlanner(
+        fallback = cls._build_rule_based_query_planner(mem_cfg)
+        return FallbackQueryPlanner(
+            OpenAIQueryPlanner(
                 provider,
-                fallback_planner=rule_based_planner,
+                fallback_planner=fallback,
                 planner_source="llm_service",
-            )
-            planner = FallbackQueryPlanner(primary, rule_based_planner)
-            logger.info("[MemoryManager] query planner ready: {}", type(planner).__name__)
-            return planner
-        except Exception as exc:
-            logger.warning("[MemoryManager] query planner init failed — rule-based fallback: {}", exc)
-            return rule_based_planner
+            ),
+            fallback,
+        )
 
     @staticmethod
-    def _build_reranker(mem_cfg: MemorySettings):
-        try:
-            if not mem_cfg.rerank_enabled:
-                logger.info("[MemoryManager] reranker mode — disabled")
-                return None
-            from llm_client.keys import MEMORY_RERANK_BIZ_KEY
-            from llm_client.manager import LLMClientManager
-            from rp_memory.rerank.service import PointwiseMemoryReranker
+    def _build_reranker_with_provider(mem_cfg, provider):
+        from rp_memory.rerank.service import PointwiseMemoryReranker
 
-            provider = LLMClientManager.get().get_provider(MEMORY_RERANK_BIZ_KEY)
-            rerank_weight = mem_cfg.rerank_score_weight
-            reranker = PointwiseMemoryReranker(
-                provider,
-                rerank_weight=rerank_weight,
-                provider_label="llm_service",
-            )
-            logger.info("[MemoryManager] reranker ready: {}", type(reranker).__name__)
-            return reranker
-        except ValueError:
-            raise
-        except Exception as exc:
-            logger.warning("[MemoryManager] reranker init failed — disable rerank: {}", exc)
-            return None
+        return PointwiseMemoryReranker(
+            provider,
+            rerank_weight=mem_cfg.rerank_score_weight,
+            provider_label="llm_service",
+        )
 
-    def reindex(self) -> None:
-        """手动触发一次全量重建。"""
-        if self._index_manager is None:
-            logger.warning("[MemoryManager] reindex skipped: index manager unavailable")
-            return
-
-        logger.info("[MemoryManager] manual reindex start ...")
-        self._index_manager.sync_all(force=True)
-        if not self._inited:
-            self._index_manager.start()
-            self._inited = True
-        logger.info("[MemoryManager] manual reindex done")
-
-    def close(self) -> None:
-        """Release watcher registrations, transient recall, and SQLite handles."""
-
-        if self._index_manager is not None:
-            self._index_manager.close()
-        self._recalled_store.clear()
-        if self._store is not None:
-            self._store.close()
-        self._inited = False
-
-    def _get_db_path(self) -> Path | None:
-        """返回 create() 时保存的 DB 路径，用于 init() 检查。"""
-        if self._db_path:
-            return Path(self._db_path)
-        return None
-
-    @property
-    def recalled_items(self) -> list[str]:
-        """当前缓存的召回结果文本列表（供上下文构建器读取）。"""
-        return list(self._recalled_store.get_items())
-
-    # ── 检索 ───────────────────────────────────────────────────────────
-
-    def recall(self, query: str) -> list[RecallItem]:
-        """检索与 *query* 相关的记忆（同步，无事件循环依赖）。
-
-        返回结构化 ``RecallItem`` 列表（含文本、分数、来源信息）。
-        同时将文本列表写入 ``RecalledMemoryStore``（供上下文构建器读取）。
-        """
-        if self._retriever is None:
-            self._recalled_store.set_items([])
-            return []
-
-        logger.info("[MemoryManager] recall start — query={!r} top_k={}", query, self._top_k)
-        try:
-            plan = self._query_planner.plan(query)
-        except Exception as exc:
-            logger.warning("[MemoryManager] recall planner failed: {}", exc)
-            self._recalled_store.set_items([])
-            return []
-        _log_query_plan("recall", plan)
-
-        try:
-            retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
-            if retrieve_plan is None:
-                raw = self._retriever.retrieve_sync(plan.normalized_query or query, self._top_k)
-            else:
-                raw = retrieve_plan(plan, self._top_k)
-        except Exception as exc:
-            logger.warning("[MemoryManager] recall retriever failed: {}", exc)
-            self._recalled_store.set_items([])
-            return []
-
-        items: list[RecallItem] = []
-        for text, score, meta in raw:
-            items.append(RecallItem(
-                text=text,
-                score=score,
-                source=str(meta.get("source", "")),
-                file_path=str(meta.get("file", "")),
-                chunk_idx=int(meta.get("chunk_idx", 0)),
-                metadata=meta,
-            ))
-
-        self._recalled_store.set_items([i.text for i in items])
-        logger.info("[MemoryManager] recall done — query={!r} items={}", query, len(items))
-        for i, it in enumerate(items):
-            for line in format_recall_item(i, it).splitlines():
-                logger.info("[MemoryManager] {}", line)
-        return items
-
-    def hybrid_search(self, query: str, top_k: int = 20) -> list[RecallItem]:
-        """Run structured hybrid search when the active retriever supports it."""
-        if self._retriever is None:
-            return []
-        logger.info("[MemoryManager] hybrid_search start — query={!r} top_k={}", query, top_k)
-        try:
-            plan = self._query_planner.plan(query)
-        except Exception as exc:
-            logger.warning("[MemoryManager] hybrid_search planner failed: {}", exc)
-            return []
-        _log_query_plan("hybrid_search", plan)
-
-        try:
-            search = getattr(self._retriever, "hybrid_search", None)
-            if search is None:
-                retrieve_plan = getattr(self._retriever, "retrieve_plan_sync", None)
-                if retrieve_plan is None:
-                    raw = self._retriever.retrieve_sync(plan.normalized_query or query, top_k)
-                else:
-                    raw = retrieve_plan(plan, top_k)
-            else:
-                candidates = search(plan, top_k)
-                raw = []
-                for candidate in candidates:
-                    metadata = dict(candidate.metadata)
-                    metadata.update(
-                        {
-                            "memory_id": candidate.memory_id,
-                            "vector_score": candidate.vector_score,
-                            "keyword_score": candidate.keyword_score,
-                            "raw_md_score": candidate.raw_md_score,
-                            "exact_score": candidate.exact_score,
-                            "fuzzy_score": candidate.fuzzy_score,
-                            "expanded_score": candidate.expanded_score,
-                            "granularity_score": candidate.granularity_score,
-                            "recency_score": candidate.recency_score,
-                            "hybrid_score": candidate.hybrid_score,
-                            "rerank_score": candidate.rerank_score,
-                            "debug": candidate.debug,
-                        }
-                    )
-                    raw.append((candidate.content, candidate.final_score, metadata))
-        except Exception as exc:
-            logger.warning("[MemoryManager] hybrid_search retriever failed: {}", exc)
-            return []
-
+    @staticmethod
+    def _items(raw: list[tuple[str, float, dict]]) -> list[RecallItem]:
         return [
             RecallItem(
                 text=text,
@@ -561,10 +545,29 @@ class MemoryManager:
             for text, score, meta in raw
         ]
 
-    def rebuild_fts_index(self) -> None:
-        """Rebuild the keyword FTS index from stored chunks."""
-        if self._store is not None:
-            self._store.rebuild_fts_index()
+    @staticmethod
+    def _items_from_candidates(candidates) -> list[RecallItem]:
+        raw: list[tuple[str, float, dict]] = []
+        for candidate in candidates:
+            metadata = dict(candidate.metadata)
+            metadata.update(
+                {
+                    "memory_id": candidate.memory_id,
+                    "vector_score": candidate.vector_score,
+                    "keyword_score": candidate.keyword_score,
+                    "raw_md_score": candidate.raw_md_score,
+                    "exact_score": candidate.exact_score,
+                    "fuzzy_score": candidate.fuzzy_score,
+                    "expanded_score": candidate.expanded_score,
+                    "granularity_score": candidate.granularity_score,
+                    "recency_score": candidate.recency_score,
+                    "hybrid_score": candidate.hybrid_score,
+                    "rerank_score": candidate.rerank_score,
+                    "debug": candidate.debug,
+                }
+            )
+            raw.append((candidate.content, candidate.final_score, metadata))
+        return MemoryManager._items(raw)
 
 
 def _log_query_plan(stage: str, plan) -> None:  # noqa: ANN001

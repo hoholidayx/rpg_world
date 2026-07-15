@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
-from contextlib import suppress
 from dataclasses import dataclass
 
 import pytest
@@ -72,8 +70,8 @@ def integration_settings(monkeypatch):
                 setattr(module, "settings", old_settings)
 
 
-@pytest.fixture
-def integration_workspace(tmp_path, monkeypatch):
+@pytest_asyncio.fixture
+async def integration_workspace(tmp_path, monkeypatch):
     from rpg_data.services import reset_data_service_gateways
 
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_data.sqlite3"))
@@ -82,9 +80,9 @@ def integration_workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(watcher, "start", lambda: None)
     monkeypatch.setattr(watcher, "stop", lambda: None)
     reset_data_service_gateways()
-    AgentManager.reset()
+    await AgentManager.areset()
     yield tmp_path
-    AgentManager.reset()
+    await AgentManager.areset()
     reset_data_service_gateways()
 
 
@@ -139,7 +137,7 @@ async def integration_agent_factory(
         watcher = get_watcher()
         watcher.stop()
         watcher.clear_all()
-        AgentManager.reset()
+        await AgentManager.areset()
 
 
 @pytest_asyncio.fixture
@@ -153,11 +151,7 @@ async def integration_status_agent(integration_agent_factory):
 
 
 async def _shutdown_agent(agent: RPGGameAgent) -> None:
-    consumer = getattr(agent, "_consumer_task", None)
-    if consumer is not None and not consumer.done():
-        consumer.cancel()
-        with suppress(asyncio.CancelledError):
-            await consumer
+    await agent.close()
 
 
 @dataclass(frozen=True)

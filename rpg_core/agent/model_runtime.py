@@ -34,21 +34,21 @@ class MainModelRuntime:
     def selection(self) -> MainLLMSelection | None:
         return self._selection
 
-    def resolve(self, session_id: str) -> MainLLMSelection:
-        selection = self._selection_service.resolve_session(session_id)
+    async def resolve(self, session_id: str) -> MainLLMSelection:
+        selection = await self._selection_service.resolve_session(session_id)
         if selection is None:
             raise FileNotFoundError(
                 f"Main LLM selection context not found for session: {session_id}"
             )
         return selection
 
-    def provider_for(
+    async def provider_for(
         self,
         session_id: str,
         *,
         selection: MainLLMSelection | None = None,
     ) -> LLMProvider:
-        resolved = selection or self.resolve(session_id)
+        resolved = selection or await self.resolve(session_id)
         if (
             self._provider is not None
             and self._selection is not None
@@ -63,7 +63,7 @@ class MainModelRuntime:
             if self._selection is not None
             else None
         )
-        self._provider = LLMClientManager.get().get_provider(
+        self._provider = await LLMClientManager.get().get_provider(
             AGENT_MAIN_BIZ_KEY,
             provider_key=resolved.effective_provider_key,
         )
