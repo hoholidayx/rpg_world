@@ -18,12 +18,10 @@ class MediaJobWorker:
         data: MediaDataService,
         facade: MediaFacade,
         concurrency: int = 1,
-        poll_interval_ms: int = 250,
     ) -> None:
         self._data = data
         self._facade = facade
         self._concurrency = max(1, int(concurrency))
-        self._poll_interval = max(0.025, int(poll_interval_ms) / 1000)
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
@@ -90,10 +88,4 @@ class MediaJobWorker:
                     )
                 continue
             self._wake_event.clear()
-            try:
-                await asyncio.wait_for(
-                    self._wake_event.wait(),
-                    timeout=self._poll_interval,
-                )
-            except TimeoutError:
-                pass
+            await self._wake_event.wait()

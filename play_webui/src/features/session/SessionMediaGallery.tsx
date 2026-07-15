@@ -134,7 +134,7 @@ function GalleryCard({
         <img
           src={mediaAssetContentUrl(sessionId, item.assetId)}
           alt={item.visualBrief.sceneDescription}
-          className="h-full w-full object-cover transition duration-300 hover:scale-[1.03]"
+          className="h-full w-full object-contain object-center"
         />
         <div className="absolute left-2 top-2 flex gap-1.5">
           {isBackground ? <span className="rounded-full bg-teal-500 px-2.5 py-1 text-[10px] font-black text-white shadow">当前背景</span> : null}

@@ -27,7 +27,6 @@ class MediaClientSettings:
 @dataclass(frozen=True)
 class MediaWorkerSettings:
     concurrency: int = 1
-    poll_interval_ms: int = 250
 
 
 @dataclass(frozen=True)
@@ -70,10 +69,6 @@ class MediaServiceSettings(ProfiledYamlSettings):
         raw = self._mapping("worker")
         return MediaWorkerSettings(
             concurrency=max(1, forgiving_int(raw.get("concurrency", 1), 1)),
-            poll_interval_ms=max(
-                25,
-                forgiving_int(raw.get("poll_interval_ms", 250), 250),
-            ),
         )
 
     @property

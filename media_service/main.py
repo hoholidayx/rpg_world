@@ -65,7 +65,6 @@ class MediaRuntime:
                 data=gateway.media,
                 facade=facade,
                 concurrency=worker_settings.concurrency,
-                poll_interval_ms=worker_settings.poll_interval_ms,
             ),
         )
 

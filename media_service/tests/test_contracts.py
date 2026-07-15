@@ -47,7 +47,6 @@ def _runtime(tmp_path):  # noqa: ANN202
         data=gateway.media,
         facade=facade,
         concurrency=1,
-        poll_interval_ms=25,
     )
     return gateway, session, message, MediaRuntime(
         gateway=gateway,
@@ -109,11 +108,32 @@ def test_media_service_manual_generation_contract(tmp_path) -> None:
                 time.sleep(0.01)
             assert job_payload["status"] == "succeeded"
 
+            retried = client.post(
+                f"/media/v1/sessions/{session.id}/jobs/{job_id}/retry"
+            )
+            assert retried.status_code == 200
+            retry_payload = retried.json()
+            assert retry_payload["retryOfJobId"] == job_id
+            retry_job_id = retry_payload["jobId"]
+            for _ in range(100):
+                current = client.get(
+                    f"/media/v1/sessions/{session.id}/jobs/{retry_job_id}"
+                )
+                assert current.status_code == 200
+                retry_payload = current.json()
+                if retry_payload["status"] not in {"queued", "running", "cancelling"}:
+                    break
+                time.sleep(0.01)
+            assert retry_payload["status"] == "succeeded"
+
             gallery = client.get(
                 f"/media/v1/sessions/{session.id}/gallery"
             )
             assert gallery.status_code == 200
-            item = gallery.json()["items"][0]
+            gallery_payload = gallery.json()
+            assert gallery_payload["activeJobs"] == []
+            assert len(gallery_payload["items"]) == 2
+            item = gallery_payload["items"][0]
             assert item["visualBrief"]["style"] == "edited"
             asset_id = item["assetId"]
 

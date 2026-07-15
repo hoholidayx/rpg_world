@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -13,6 +15,48 @@ from rpg_media.providers.catalog import MediaProviderCatalog
 from rpg_media.providers.local_file import LocalFileProvider
 from rpg_media.source import build_source_snapshot
 from rpg_media.types import VisualBrief
+
+
+@pytest.mark.asyncio
+async def test_worker_sleeps_until_woken_and_returns_to_sleep_after_job() -> None:
+    data = Mock()
+    data.interrupt_active_jobs.return_value = 0
+    data.claim_next_job.return_value = None
+    facade = Mock()
+    facade.execute_job = AsyncMock(
+        return_value=SimpleNamespace(status=models.MEDIA_JOB_STATUS_SUCCEEDED)
+    )
+    worker = MediaJobWorker(data=data, facade=facade, concurrency=1)
+
+    await worker.start()
+    try:
+        for _ in range(100):
+            if data.claim_next_job.call_count:
+                break
+            await asyncio.sleep(0.001)
+        assert data.claim_next_job.call_count == 1
+
+        await asyncio.sleep(0.3)
+        assert data.claim_next_job.call_count == 1
+
+        job = SimpleNamespace(
+            id="job1",
+            session_id="session1",
+            provider_key="local_file",
+        )
+        data.claim_next_job.side_effect = [job, None]
+        worker.wake()
+        for _ in range(100):
+            if facade.execute_job.await_count == 1 and data.claim_next_job.call_count == 3:
+                break
+            await asyncio.sleep(0.001)
+        facade.execute_job.assert_awaited_once_with("job1")
+        assert data.claim_next_job.call_count == 3
+
+        await asyncio.sleep(0.3)
+        assert data.claim_next_job.call_count == 3
+    finally:
+        await worker.stop()
 
 
 @pytest.mark.asyncio
@@ -72,7 +116,6 @@ async def test_worker_interrupts_stale_active_jobs_and_resumes_queued(tmp_path) 
         data=gateway.media,
         facade=facade,
         concurrency=1,
-        poll_interval_ms=25,
     )
 
     await worker.start()

@@ -232,7 +232,7 @@ LLM Service
 
 来源快照保存 message ID、version、role、content、turn/seq，并以 SHA-256 指纹检测提交或重试前的历史变化。工作区图片只接受经魔数识别的 PNG、JPEG、WebP，原始内容写到 `{workspace_root}/assets/images/{sha256}.<ext>`。Blob 在数据库中按 `(workspace_id, sha256)` 去重；hash 不是业务 Asset ID，每次成功生成仍建立独立 UUID Asset，以保留不同的 Provider、简报、参数和来源语义。
 
-Media Job 默认由单 worker 消费，无自动重试；重启保留 `queued`，把遗留 `running/cancelling` 标成 `interrupted`，用户可显式重试。Session Gallery、背景引用与消息历史完全分离，不写入正文、message metadata、turn/SSE 或 localStorage。背景使用中的 Asset 禁止删除；最后一个 Asset 引用删除后才回收 Blob 行和文件。`/clear` 清除 Session Job/Gallery/背景但保留 Workspace Asset/Blob，Session 永久删除也依靠外键清理 Session 关联而保留 Workspace 资产。
+Media Job 默认由单 worker 消费，无自动重试；服务启动时扫描 `queued`，创建/重试通过进程内事件即时唤醒，队列排空后阻塞等待而不轮询数据库。重启把遗留 `running/cancelling` 标成 `interrupted`，用户可显式重试。Session Gallery、背景引用与消息历史完全分离，不写入正文、message metadata、turn/SSE 或 localStorage。背景使用中的 Asset 禁止删除；最后一个 Asset 引用删除后才回收 Blob 行和文件。`/clear` 清除 Session Job/Gallery/背景但保留 Workspace Asset/Blob，Session 永久删除也依靠外键清理 Session 关联而保留 Workspace 资产。
 
 ### 配置（`settings.yaml` / `llm.yaml` / WebUI config）
 

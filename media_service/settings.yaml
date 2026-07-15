@@ -13,7 +13,6 @@ base:
 
   worker:
     concurrency: 1
-    poll_interval_ms: 250
 
   logging:
     log_level: DEBUG

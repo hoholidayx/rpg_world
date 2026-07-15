@@ -223,7 +223,7 @@ v1 的交互是“手动触发 + 可检查提示词 + 异步生成”：
 
 1. 从 Session 已提交历史中选择 1–20 个连续 turn；前端提供 1/5/10/20 快捷范围和每个 turn 的紧凑预览。
 2. 后端固化包含 message ID/version/content 的来源快照和 SHA-256 指纹，生成九字段 `VisualBrief`；用户可编辑场景、主体、环境、动作、构图、光线、风格、负面约束和画幅。
-3. 提交时再次校验来源指纹，数据库 Job 进入持久队列；默认单 worker、无自动重试，支持取消和显式重试。服务重启保留 `queued`，把遗留 `running/cancelling` 标记为 `interrupted`。
+3. 提交时再次校验来源指纹，数据库 Job 进入持久队列；默认单 worker、无自动重试，支持取消和显式重试。服务启动时扫描 `queued`，创建/重试通过事件即时唤醒 worker，队列排空后阻塞等待；重启会把遗留 `running/cancelling` 标记为 `interrupted`。
 4. 成功图片进入 Session Gallery，可设置为 Session 背景。若原 turn 被编辑、截断或删除，Gallery 只标记来源陈旧，不自动删除图片。
 
 当前 `DemoVisualBriefPlanner` 是配置驱动的确定性实现，不调用外部文本模型；`VisualBriefPlanner` 是可替换契约。未来接入文本 LLM 时应通过 `llm_client` 使用通用 chat biz 选择，不对 llama 等 Provider 做业务黑名单；Media service 不直接读取 LLM 配置或创建 Provider，本地 llama runtime 仍只存在于 LLM Service。
@@ -652,7 +652,7 @@ rp_memory/
 | `channels/settings.yaml` | CLI / Telegram 渠道行为、Telegram bot、渠道日志 |
 | `play_api/settings.yaml` | Play API 监听参数、Play API 日志 |
 | `rpg_media/settings.yaml` | VisualBrief Demo planner、默认图片 Provider 与 Local file Demo 图片目录 |
-| `media_service/settings.yaml` | Media 服务监听、MediaClient 地址/超时、worker 并发与轮询参数 |
+| `media_service/settings.yaml` | Media 服务监听、MediaClient 地址/超时与 worker 并发参数 |
 | `llm_service/settings.yaml` | LLM 服务监听、Bearer 令牌环境变量名、本地 llama 并行模型数、`llama_shutdown_grace_ms` 与日志 |
 | `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口和 context 正文门禁阈值 |
 | `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置 |

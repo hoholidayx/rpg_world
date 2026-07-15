@@ -9,13 +9,19 @@ export function SessionMediaBackground({
   background: MediaGalleryItem | null
 }) {
   if (!background) return null
+  const imageUrl = mediaAssetContentUrl(sessionId, background.assetId)
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
+    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-slate-950" aria-hidden="true">
       <img
-        src={mediaAssetContentUrl(sessionId, background.assetId)}
+        src={imageUrl}
         alt=""
-        className="absolute -inset-2 h-[calc(100%+1rem)] w-[calc(100%+1rem)] scale-[1.02] object-cover blur-[2px]"
+        className="absolute inset-0 h-full w-full scale-110 object-cover object-center opacity-80 blur-xl"
+      />
+      <img
+        src={imageUrl}
+        alt=""
+        className="absolute inset-0 h-full w-full object-contain object-center"
       />
       <div className="absolute inset-0 bg-slate-950/55" />
     </div>
