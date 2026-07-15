@@ -43,7 +43,14 @@ def _prefix() -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _config_loaded
-    settings.auth.require_token()
+    auth = settings.auth
+    if auth.uses_default_token:
+        logger.warning(
+            "LLM service token environment variable {} is not set; "
+            "using the built-in local default token. Configure the environment "
+            "variable for non-local deployments.",
+            auth.token_env,
+        )
     _validate_config()
     _config_loaded = True
     try:
@@ -65,7 +72,7 @@ async def assign_request_id(request: Request, call_next):  # noqa: ANN001, ANN20
 
 
 def _authorize(authorization: str | None = Header(default=None)) -> None:
-    expected = settings.auth.require_token()
+    expected = settings.auth.token
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not token or not secrets.compare_digest(token, expected):
         raise HTTPException(

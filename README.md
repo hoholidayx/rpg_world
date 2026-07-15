@@ -44,7 +44,8 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 # 安装依赖
 uv sync
 
-# 为 LLM Service 与调用方配置相同的静态令牌
+# 可选：非本地部署应为 LLM Service 与调用方配置相同的静态令牌。
+# 未设置时双方共同使用内置的 rpg-world-local-token，LLM Service 会警告。
 export RPG_WORLD_LLM_SERVICE_TOKEN=replace-with-a-secret
 
 # 推荐：一键启动 LLM、Agent、Media、Play API；Ctrl-C 会优雅停止全部子进程
@@ -653,7 +654,7 @@ rp_memory/
 | `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口和 context 正文门禁阈值 |
 | `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置 |
 
-`RPG_WORLD_LLM_SERVICE_TOKEN` 必须在 LLM Service 与所有 LLM 调用进程中设置为相同的非空值。LLM Service 缺少令牌时拒绝启动；Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程与配置健康；health 成功不代表调用方 token 正确，token 会在 catalog、chat、embedding 等受保护请求上验证。
+`RPG_WORLD_LLM_SERVICE_TOKEN` 存在时会覆盖默认令牌，LLM Service 与所有调用进程必须使用相同值。环境变量缺失或仅含空白时，各进程共同使用内置的 `rpg-world-local-token`，LLM Service 记录 warning 但继续启动；该默认值只适合本地开发，非本地部署应显式覆盖。Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程与配置健康；health 成功不代表调用方 token 正确，token 会在 catalog、chat、embedding 等受保护请求上验证。
 
 正文门禁由 `play_webui` 的 `session.contextUsage.inputBlockThresholdRatio` 和 Core 的 `agent.context_window_reject_threshold_ratio` 独立控制，合法范围均为 `(0, 1]`、默认均为 `0.9`。前端非法值回退 `0.9`，Core 非法值会阻止启动；两侧都只计算不含当前待发送 input 的主 Agent Context。
 

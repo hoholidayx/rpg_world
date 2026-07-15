@@ -10,6 +10,10 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from llm_client.auth import (
+    DEFAULT_LLM_SERVICE_TOKEN,
+    DEFAULT_LLM_SERVICE_TOKEN_ENV,
+)
 from llm_client.types import DocumentScore, DocumentScoreProvider, LLMProvider, LLMResponse, ProviderChunk
 from llm_service import main as service_main
 from llm_service.llama_provider import LlamaCompletionProvider
@@ -444,6 +448,32 @@ class _FakeProvider(LLMProvider, DocumentScoreProvider):
 
     async def score_documents(self, query, documents):  # noqa: ANN001
         return [DocumentScore(score=0.75, reason="match") for _ in documents]
+
+
+def test_http_service_starts_with_shared_default_token_and_warns(monkeypatch):
+    monkeypatch.delenv(DEFAULT_LLM_SERVICE_TOKEN_ENV, raising=False)
+    warning_calls: list[tuple[object, ...]] = []
+    real_logger = service_main.logger
+    monkeypatch.setattr(
+        service_main,
+        "logger",
+        SimpleNamespace(
+            warning=lambda *args: warning_calls.append(args),
+            exception=real_logger.exception,
+        ),
+    )
+
+    headers = {"Authorization": f"Bearer {DEFAULT_LLM_SERVICE_TOKEN}"}
+    with TestClient(service_main.app) as client:
+        assert client.get("/llm/v1/health").status_code == 200
+        assert client.get("/llm/v1/catalog/agent.main").status_code == 401
+        assert client.get(
+            "/llm/v1/catalog/agent.main",
+            headers=headers,
+        ).status_code == 200
+
+    assert len(warning_calls) == 1
+    assert DEFAULT_LLM_SERVICE_TOKEN_ENV in warning_calls[0]
 
 
 def test_http_contract_auth_chat_stream_embedding_and_rerank(monkeypatch):

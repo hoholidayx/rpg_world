@@ -33,6 +33,7 @@ base:
   # ── Agent 进程访问独立 LLM Service ──────────────────────────────
   llm_client:
     base_url: http://127.0.0.1:8012/llm/v1
+    # 环境变量缺失时与 LLM Service 共同使用共享的本地默认 token。
     token_env: RPG_WORLD_LLM_SERVICE_TOKEN
     request_timeout_ms: 60000
     stream_timeout_ms: 300000

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from pathlib import Path
 
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
+from llm_client.auth import (
+    DEFAULT_LLM_SERVICE_TOKEN_ENV,
+    resolve_llm_service_token,
+)
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 
@@ -29,13 +32,13 @@ class AgentClientSettings:
 @dataclass(frozen=True)
 class LLMClientSettings:
     base_url: str = "http://127.0.0.1:8012/llm/v1"
-    token_env: str = "RPG_WORLD_LLM_SERVICE_TOKEN"
+    token_env: str = DEFAULT_LLM_SERVICE_TOKEN_ENV
     request_timeout_ms: int = 60000
     stream_timeout_ms: int = 300000
 
     @property
     def token(self) -> str:
-        return (os.environ.get(self.token_env) or "").strip()
+        return resolve_llm_service_token(self.token_env)
 
 
 @dataclass(frozen=True)
@@ -79,8 +82,8 @@ class AgentServiceSettings(ProfiledYamlSettings):
                 or "http://127.0.0.1:8012/llm/v1"
             ).rstrip("/"),
             token_env=str(
-                raw.get("token_env", "RPG_WORLD_LLM_SERVICE_TOKEN")
-                or "RPG_WORLD_LLM_SERVICE_TOKEN"
+                raw.get("token_env", DEFAULT_LLM_SERVICE_TOKEN_ENV)
+                or DEFAULT_LLM_SERVICE_TOKEN_ENV
             ),
             request_timeout_ms=forgiving_int(
                 raw.get("request_timeout_ms", 60000),

@@ -8,6 +8,7 @@ base:
     reload: false
 
   auth:
+    # 环境变量缺失时使用 llm_client.auth 中共享的本地默认 token，并记录 warning。
     token_env: RPG_WORLD_LLM_SERVICE_TOKEN
 
   runtime:

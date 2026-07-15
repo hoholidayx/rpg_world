@@ -7,6 +7,7 @@ import os
 from threading import RLock
 from typing import ClassVar
 
+from llm_client.auth import resolve_llm_service_token
 from llm_client.client import LLMServiceClient
 from llm_client.provider import RemoteLLMProvider
 from llm_client.types import LLMBizCatalog
@@ -19,7 +20,7 @@ class LLMClientManager:
     def __init__(self, client: LLMServiceClient | None = None) -> None:
         self.client = client or LLMServiceClient(
             base_url=os.environ.get("RPG_WORLD_LLM_SERVICE_URL", "http://127.0.0.1:8012/llm/v1"),
-            token=os.environ.get("RPG_WORLD_LLM_SERVICE_TOKEN", ""),
+            token=resolve_llm_service_token(),
         )
         self._catalogs: dict[str, LLMBizCatalog] = {}
         self._providers: dict[tuple[str, str], RemoteLLMProvider] = {}

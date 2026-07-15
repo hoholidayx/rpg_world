@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
+from llm_client.auth import (
+    DEFAULT_LLM_SERVICE_TOKEN_ENV,
+    resolve_llm_service_token,
+    uses_default_llm_service_token,
+)
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 
@@ -21,13 +25,15 @@ class LLMServiceListenSettings:
 
 @dataclass(frozen=True)
 class LLMServiceAuthSettings:
-    token_env: str = "RPG_WORLD_LLM_SERVICE_TOKEN"
+    token_env: str = DEFAULT_LLM_SERVICE_TOKEN_ENV
 
-    def require_token(self) -> str:
-        token = (os.environ.get(self.token_env) or "").strip()
-        if not token:
-            raise ValueError(f"LLM service auth token is required in environment variable {self.token_env}")
-        return token
+    @property
+    def token(self) -> str:
+        return resolve_llm_service_token(self.token_env)
+
+    @property
+    def uses_default_token(self) -> bool:
+        return uses_default_llm_service_token(self.token_env)
 
 
 @dataclass(frozen=True)
@@ -61,7 +67,10 @@ class LLMServiceSettings(ProfiledYamlSettings):
     def auth(self) -> LLMServiceAuthSettings:
         raw = self._mapping("auth")
         return LLMServiceAuthSettings(
-            token_env=str(raw.get("token_env", "RPG_WORLD_LLM_SERVICE_TOKEN") or "RPG_WORLD_LLM_SERVICE_TOKEN")
+            token_env=str(
+                raw.get("token_env", DEFAULT_LLM_SERVICE_TOKEN_ENV)
+                or DEFAULT_LLM_SERVICE_TOKEN_ENV
+            )
         )
 
     @property

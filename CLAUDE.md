@@ -18,7 +18,8 @@ Play WebUI 的会话定位采用 `rpg_data` catalog 中的全局短 `session_id`
 ## 启动
 
 ```bash
-# 两个进程使用同一个非空 Bearer 令牌
+# 可选：非本地部署应让两个进程使用同一个 Bearer 令牌。
+# 未设置时双方共同使用内置的 rpg-world-local-token，LLM Service 会警告。
 export RPG_WORLD_LLM_SERVICE_TOKEN=replace-with-a-secret
 
 # 推荐：一键启动 LLM、Agent、Media、Play API（Ctrl-C 优雅停止全部子进程）
@@ -197,7 +198,7 @@ agent_service 进程
 └── HTTP + SSE: /agent/v1
 ```
 
-LLM Service 默认监听 `http://127.0.0.1:8012/llm/v1`，使用环境变量 `RPG_WORLD_LLM_SERVICE_TOKEN` 的静态 Bearer 令牌。缺少令牌时 LLM Service 拒绝启动。Agent Service 不因 LLM Service 暂不可用而拒绝启动，health 返回 degraded；需要 catalog 或推理的请求返回 503/SSE `LLM_SERVICE_UNAVAILABLE`。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程存活与配置是否加载，不校验调用方 token；catalog、chat、stream、embedding、dimension 和 rerank 仍全部鉴权。调用方凭据是否有效由首次受保护请求确认，不得把 health 成功解释为 token 有效。
+LLM Service 默认监听 `http://127.0.0.1:8012/llm/v1`，优先使用环境变量 `RPG_WORLD_LLM_SERVICE_TOKEN` 的静态 Bearer 令牌。环境变量缺失或仅含空白时，LLM Service 与 `llm_client` 共同回退到内置的 `rpg-world-local-token`，服务继续启动并在启动阶段记录一次 warning；该默认值只用于本地开发，非本地部署应显式覆盖。Agent Service 不因 LLM Service 暂不可用而拒绝启动，health 返回 degraded；需要 catalog 或推理的请求返回 503/SSE `LLM_SERVICE_UNAVAILABLE`。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程存活与配置是否加载，不校验调用方 token；catalog、chat、stream、embedding、dimension 和 rerank 仍全部鉴权。调用方凭据是否有效由首次受保护请求确认，不得把 health 成功解释为 token 有效。
 
 ### Agent / Memory / LLM 异步与线程模型
 
