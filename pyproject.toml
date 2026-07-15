@@ -47,6 +47,7 @@ rpg-world-agent = "run_agent:main"
 rpg-world-llm = "run_llm:main"
 rpg-world-play-api = "run_play_api:main"
 rpg-world-media = "run_media:main"
+rpg-world-up = "run_all:main"
 rpg-world-cli = "run_cli:cli"
 rpg-world-telegram = "run_telegram:cli"
 
@@ -54,6 +55,7 @@ rpg-world-telegram = "run_telegram:cli"
 py-modules = [
     "run_agent",
     "run_llm",
+    "run_all",
     "run_cli",
     "run_play_api",
     "run_media",

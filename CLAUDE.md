@@ -21,13 +21,15 @@ Play WebUI 的会话定位采用 `rpg_data` catalog 中的全局短 `session_id`
 # 两个进程使用同一个非空 Bearer 令牌
 export RPG_WORLD_LLM_SERVICE_TOKEN=replace-with-a-secret
 
+# 推荐：一键启动 LLM、Agent、Media、Play API（Ctrl-C 优雅停止全部子进程）
+uv run python -m run_all
+# 或：uv run rpg-world-up
+
+# 也可按需分别启动（不要与 run_all 同时运行）
 # LLM 服务（唯一读取 llm.yaml/密钥并持有 Provider/本地 llama runtime）
 uv run python -m run_llm
-
 # Agent 服务（唯一持有 AgentManager/RPGGameAgent/rp_memory）
 uv run python -m run_agent
-
-# 独立入口，按需分别启动
 uv run python -m run_media
 # 或：.venv/bin/python -m run_media
 uv run python -m run_play_api
@@ -55,6 +57,7 @@ rpg_world/
 ├── run_agent.py                   # Agent 服务入口（唯一 agent runtime owner）
 ├── run_media.py                   # Media 服务 + 持久任务 worker 入口
 ├── run_play_api.py                # Play API 入口
+├── run_all.py                     # 一键拉起四个独立后端进程的前台入口
 ├── run_cli.py                     # CLI 入口（AgentClient）
 ├── run_telegram.py                # Telegram 入口（AgentClient）
 ├── commons/                       # 共享配置加载与 JSON/YAML 类型别名
@@ -153,7 +156,8 @@ rpg_world/
 
 ## 进程隔离架构
 
-RPG World 采用 **独立 Agent、LLM、Media 服务 + 独立入口** 模式。根目录聚合 supervisor 入口已移除。
+RPG World 采用 **独立 Agent、LLM、Media 服务 + 独立入口** 模式。根目录不再提供持有业务运行时的聚合 supervisor；
+`run_all.py` 仅作为可选的前台进程编排器，负责启动/停止独立子进程，不合并任何运行时。
 只有 `run_agent.py` 进程持有 `AgentManager`、`RPGGameAgent` 和 `rp_memory`。
 只有 `run_llm.py` 进程读取 `llm_service/llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 与本地 llama runtime；Agent、Memory 及未来 Media planner 只能通过 `llm_client` 调用它。
 Play API、CLI、Telegram 不创建 agent，不缓存 agent，不配置 llama，只通过

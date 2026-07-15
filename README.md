@@ -47,13 +47,15 @@ uv sync
 # 为 LLM Service 与调用方配置相同的静态令牌
 export RPG_WORLD_LLM_SERVICE_TOKEN=replace-with-a-secret
 
+# 推荐：一键启动 LLM、Agent、Media、Play API；Ctrl-C 会优雅停止全部子进程
+uv run python -m run_all
+# 或：uv run rpg-world-up
+
+# 也可以按需分别启动（不要与 run_all 同时运行）
 # 先启动 LLM 服务（唯一读取 llm.yaml/密钥并持有 Provider/llama runtime）
 uv run python -m run_llm
-
-# 在另一个配置了相同令牌的终端启动 Agent 服务
+# 再在另一个终端启动 Agent 服务
 uv run python -m run_agent
-
-# 按需在其它终端启动独立入口
 uv run python -m run_media
 # 已有项目虚拟环境时也可使用：.venv/bin/python -m run_media
 uv run python -m run_play_api
@@ -70,8 +72,9 @@ uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir age
 cd play_webui && npm run dev
 ```
 
-根目录聚合 supervisor 入口已移除。配置已按进程/模块拆分到各自目录；进程是否启动只由用户运行哪个
-`run_*` 入口决定，不再通过配置启停进程。
+根目录不再提供持有业务运行时的聚合 supervisor。`run_all.py` 只是可选的前台进程编排器，
+负责按顺序启动和停止四个独立 `run_*` 子进程，不合并任何 Agent、LLM、Media 或 Play API 运行时。
+配置已按进程/模块拆分到各自目录，进程启停不通过配置控制。
 
 ## 架构
 
@@ -90,6 +93,9 @@ run_media          -> media_service.main:app -> rpg_media + rpg_data
 run_play_api       -> play_api.main:app      -> AgentClient + MediaClient
 run_cli            -> channels.cli.repl      -> AgentClient
 run_telegram       -> channels.telegram.runner -> AgentClient
+
+# 可选的前台编排入口，仅负责启动/停止上述独立进程，不合并任何运行时
+run_all            -> run_llm + run_agent + run_media + run_play_api
 ```
 
 根目录还提供同级快捷入口，便于调试和查找：
@@ -99,6 +105,7 @@ run_llm.py      -> llm_service.main
 run_agent.py    -> agent_service.main
 run_media.py    -> media_service.main
 run_play_api.py -> play_api.main
+run_all.py      -> 启动并管理四个独立后端子进程
 run_telegram.py -> channels.telegram.runner
 run_cli.py      -> channels.cli.repl
 ```
