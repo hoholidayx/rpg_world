@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from llm_service.manager import ProviderOverrides
 from rpg_core.agent.agent_types import AgentStreamEvent, TurnCancelResult
 from rpg_core.agent.command import CommandDispatcher, CommandResult
 from rpg_core.agent.context_service import AgentContextService
@@ -48,37 +47,23 @@ class RPGGameAgent:
         self,
         session_id: str = "default",
         world_name: str = "Nanobot Realm",
-        model: str | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
-        max_tokens: int | None = None,
-        temperature: float | None = None,
         history_enabled: bool = True,
         tools: list[BaseTool] | None = None,
         token_counter: TokenCounter | None = None,
         main_llm_selection_service: MainLLMSelectionService | None = None,
     ) -> None:
         token_counter = token_counter or TiktokenTokenCounter()
-        provider_overrides = ProviderOverrides(
-            openai_model=model,
-            openai_api_key=api_key,
-            openai_base_url=base_url,
-            openai_max_tokens=max_tokens,
-            openai_temperature=temperature,
-        )
         self._command_dispatcher = CommandDispatcher(agent=self)
         self._model_runtime = MainModelRuntime(
             selection_service=(
                 main_llm_selection_service or MainLLMSelectionService()
             ),
-            provider_overrides=provider_overrides,
-            initial_model=model,
+            initial_model=None,
         )
         self._lifecycle = AgentRuntimeLifecycle(
             session_id=session_id,
             world_name=world_name,
             history_enabled=history_enabled,
-            model_runtime=self._model_runtime,
             command_dispatcher=self._command_dispatcher,
         )
         self._context_service = AgentContextService(

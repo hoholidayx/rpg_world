@@ -7,7 +7,7 @@ import time
 
 from loguru import logger
 
-from llm_service.base_provider import DocumentScoreProvider
+from llm_client.types import DocumentScoreProvider
 from rp_memory.asyncio_utils import run_awaitable_sync
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.rerank.base import MemoryReranker

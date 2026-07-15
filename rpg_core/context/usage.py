@@ -14,7 +14,7 @@ from typing import Literal, Protocol, Sequence
 
 from loguru import logger
 
-from llm_service.types import LLMUsage
+from llm_client.types import LLMUsage
 from rpg_core.context.rpg_context import Message
 from rpg_core.utils.tokenizer import TokenCounter
 

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import rpg_core.main_llm as main_llm_module
-from llm_service.config import LLMProviderOption
+from llm_client.types import LLMBizCatalog, LLMProviderOption
 from rpg_core.main_llm import InvalidMainLLMProviderKey, MainLLMSelectionService
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
@@ -36,12 +36,22 @@ def main_llm_context(tmp_path, monkeypatch):
         LLMProviderOption("story_chat", "openai", "story-model", 64000),
         LLMProviderOption("session_chat", "llama", "session.gguf", 8192),
     )
-    monkeypatch.setattr(
-        main_llm_module,
-        "resolve_biz_config",
-        lambda _biz_key: SimpleNamespace(provider_key="config_chat"),
+    remote_catalog = LLMBizCatalog(
+        biz_key="agent.main",
+        kind="chat",
+        default_provider_key="config_chat",
+        options=options,
     )
-    monkeypatch.setattr(main_llm_module, "list_provider_options", lambda _biz_key: options)
+
+    class FakeManager:
+        def get_catalog(self, _biz_key):  # noqa: ANN001, ANN201
+            return remote_catalog
+
+    monkeypatch.setattr(
+        main_llm_module.LLMClientManager,
+        "get",
+        classmethod(lambda cls: FakeManager()),
+    )
 
     service = MainLLMSelectionService(gateway)
     yield SimpleNamespace(

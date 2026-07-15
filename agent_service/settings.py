@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
@@ -23,6 +24,18 @@ class AgentClientSettings:
     base_url: str = "http://127.0.0.1:8010/agent/v1"
     request_timeout_ms: int = 60000
     stream_timeout_ms: int = 300000
+
+
+@dataclass(frozen=True)
+class LLMClientSettings:
+    base_url: str = "http://127.0.0.1:8012/llm/v1"
+    token_env: str = "RPG_WORLD_LLM_SERVICE_TOKEN"
+    request_timeout_ms: int = 60000
+    stream_timeout_ms: int = 300000
+
+    @property
+    def token(self) -> str:
+        return (os.environ.get(self.token_env) or "").strip()
 
 
 @dataclass(frozen=True)
@@ -55,6 +68,28 @@ class AgentServiceSettings(ProfiledYamlSettings):
             base_url=str(raw.get("base_url", "http://127.0.0.1:8010/agent/v1") or "http://127.0.0.1:8010/agent/v1").rstrip("/"),
             request_timeout_ms=forgiving_int(raw.get("request_timeout_ms", 60000), 60000),
             stream_timeout_ms=forgiving_int(raw.get("stream_timeout_ms", 300000), 300000),
+        )
+
+    @property
+    def llm_client(self) -> LLMClientSettings:
+        raw = self._mapping("llm_client")
+        return LLMClientSettings(
+            base_url=str(
+                raw.get("base_url", "http://127.0.0.1:8012/llm/v1")
+                or "http://127.0.0.1:8012/llm/v1"
+            ).rstrip("/"),
+            token_env=str(
+                raw.get("token_env", "RPG_WORLD_LLM_SERVICE_TOKEN")
+                or "RPG_WORLD_LLM_SERVICE_TOKEN"
+            ),
+            request_timeout_ms=forgiving_int(
+                raw.get("request_timeout_ms", 60000),
+                60000,
+            ),
+            stream_timeout_ms=forgiving_int(
+                raw.get("stream_timeout_ms", 300000),
+                300000,
+            ),
         )
 
     @property

@@ -33,6 +33,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-15：LLM Service 完全独立进程化。** 新增 `run_llm.py`、Bearer 鉴权的 `/llm/v1` HTTP/SSE 边界和独立 `llm_client` 契约包。只有 LLM Service 读取 `llm.yaml`、Provider 密钥并持有 OpenAI/llama runtime；Agent 与 Memory 只通过远端客户端调用，旧 llama 子进程协议已删除。
 - **2026-07-15：RPG Media v1。** 新增与 `rpg_core` 同级的无框架 `rpg_media`，以及独立 `media_service` 持久任务进程。SessionRoom 支持从 1–20 个连续 turn 生成可编辑 `VisualBrief`、异步生图、Gallery 与会话背景；图片按工作区内容寻址存储，媒体故障不影响聊天主链路。
 - **2026-07-13：Agent Turn 与状态更新固定编排。** Narrative Outcome 与状态更新拆分为独立阶段；状态更新先 Route，再按 scene 和单张普通表隔离执行。快速状态目标采用 best-effort：单个目标失败只回退该目标，其他成功目标保留且主流程继续；整个 turn 仍只在主 runner 成功后统一提交。字段频率统一为 `realtime | event_driven | deferred | manual`，其中 deferred 在回复交付后、同 session 下一 mailbox 项前归纳。scene 继续以 `status_kind="scene"` 作为数据真源，但在主 Context 和更新工具上走专用路径。完整设计、时序和失败语义见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。
 
@@ -42,7 +43,13 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 # 安装依赖
 uv sync
 
-# 启动 Agent 服务（唯一持有 AgentManager/RPGGameAgent/rp_memory 运行时）
+# 为 LLM Service 与调用方配置相同的静态令牌
+export RPG_WORLD_LLM_SERVICE_TOKEN=replace-with-a-secret
+
+# 先启动 LLM 服务（唯一读取 llm.yaml/密钥并持有 Provider/llama runtime）
+uv run python -m run_llm
+
+# 在另一个配置了相同令牌的终端启动 Agent 服务
 uv run python -m run_agent
 
 # 按需在其它终端启动独立入口
@@ -56,7 +63,7 @@ uv run python -m run_cli
 uv run python -m channels.cli.repl
 
 # 直接调试 API（自动重载）
-uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llm_service --host 127.0.0.1 --port 8000
+uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir agent_service --reload-dir media_service --host 127.0.0.1 --port 8000
 
 # 启动 Play WebUI（另一个终端）
 cd play_webui && npm run dev
@@ -69,11 +76,14 @@ cd play_webui && npm run dev
 
 ### 进程隔离架构
 
-RPG World 采用单 Agent 服务拓扑。只有 `run_agent.py` 进程持有
-`AgentManager`、`RPGGameAgent`、`rp_memory` 和 llama lazy worker。Play API、
-CLI、Telegram 只通过 `AgentClient` 调用 Agent 服务。
+RPG World 采用独立 Agent、LLM 与 Media 服务拓扑。只有 `run_agent.py` 进程持有
+`AgentManager`、`RPGGameAgent` 和 `rp_memory`；只有 `run_llm.py` 进程读取
+`llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 和本地 llama runtime。
+Agent/Memory 通过 `LLMClient` 调用 LLM 服务，Play API、CLI、Telegram 通过
+`AgentClient` 调用 Agent 服务。
 
 ```
+run_llm            -> llm_service.main:app   -> Provider + local llama runtime
 run_agent          -> agent_service.main:app
 run_media          -> media_service.main:app -> rpg_media + rpg_data
 run_play_api       -> play_api.main:app      -> AgentClient + MediaClient
@@ -84,6 +94,7 @@ run_telegram       -> channels.telegram.runner -> AgentClient
 根目录还提供同级快捷入口，便于调试和查找：
 
 ```
+run_llm.py      -> llm_service.main
 run_agent.py    -> agent_service.main
 run_media.py    -> media_service.main
 run_play_api.py -> play_api.main
@@ -96,11 +107,14 @@ run_cli.py      -> channels.cli.repl
 ```python
 from channels.config import settings as cfg
 from agent_service.settings import settings as agent_cfg
+from llm_service.settings import settings as llm_cfg
 from media_service.settings import settings as media_cfg
 from play_api.settings import play_settings
 
 agent_cfg.service.port
 agent_cfg.agent_client.base_url
+agent_cfg.llm_client.base_url
+llm_cfg.service.port
 media_cfg.media_client.base_url
 play_settings.service.port
 cfg.telegram_bots
@@ -177,7 +191,7 @@ v1 的交互是“手动触发 + 可检查提示词 + 异步生成”：
 3. 提交时再次校验来源指纹，数据库 Job 进入持久队列；默认单 worker、无自动重试，支持取消和显式重试。服务重启保留 `queued`，把遗留 `running/cancelling` 标记为 `interrupted`。
 4. 成功图片进入 Session Gallery，可设置为 Session 背景。若原 turn 被编辑、截断或删除，Gallery 只标记来源陈旧，不自动删除图片。
 
-当前 `DemoVisualBriefPlanner` 是配置驱动的确定性实现，不调用外部文本模型；`VisualBriefPlanner` 是可替换契约。未来接入文本 LLM 时应使用通用 chat biz 选择，不对 llama 等 Provider 做业务黑名单；进程边界仍保持本地 llama worker 只能由 Agent service 持有。
+当前 `DemoVisualBriefPlanner` 是配置驱动的确定性实现，不调用外部文本模型；`VisualBriefPlanner` 是可替换契约。未来接入文本 LLM 时应通过 `llm_client` 使用通用 chat biz 选择，不对 llama 等 Provider 做业务黑名单；Media service 不直接读取 LLM 配置或创建 Provider，本地 llama runtime 仍只存在于 LLM Service。
 
 图片二进制固定存放在：
 
@@ -216,11 +230,12 @@ Telegram 渠道当前支持：
 | `status/` | 状态表薄适配，通过 `rpg_data` 按 session 读取 SQLite document 真源 |
 | `rp_modules/` | RP 玩法模块框架，当前包含 Narrative Outcome 剧情裁定与 Dice 低层随机模块 |
 | `summary/` | 对话摘要压缩 |
+| 顶层 `llm_client/` | 供 Agent、Memory 及未来 Media planner 使用的稳定 HTTP/SSE 客户端、DTO 与 Provider facade |
 | 顶层 `llm_service/` | LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析与本地 llama runtime |
 | 顶层 `rpg_media/` | 来源快照、VisualBrief、图片 Provider 契约、内容寻址存储与媒体用例 |
 | 顶层 `media_service/` | 独立 Media HTTP 进程、MediaClient 与数据库持久任务 worker |
 
-顶层 `rp_memory/` 是独立记忆系统包，负责检索、索引、规划、召回和 rerank；顶层 `llm_service/` 是统一 LLM 服务包，负责 provider 路由、配置解析、OpenAI-compatible provider 与本地 llama.cpp runtime。
+顶层 `rp_memory/` 是独立记忆系统包，负责检索、索引、规划、召回和 rerank；顶层 `llm_service/` 是独立 LLM 服务实现，负责 provider 路由、配置解析、OpenAI-compatible provider 与本地 llama.cpp runtime。业务进程只依赖 `llm_client/`，不导入 `llm_service/`。
 
 ### Agent 组合式门面与 turn 事务
 
@@ -533,9 +548,9 @@ rp_memory/
 记忆系统配置分两类：
 
 - `rpg_core/settings.yaml`：业务与检索参数，对应 `MemorySettings`，例如 `top_k`、`hybrid_*_weight`、`rerank_enabled`、`rerank_score_weight`、`chunk_size`、`chunk_overlap`、`jieba_dict`
-- `llm_service/llm.yaml`：LLM 强相关配置，例如 `memory.embed`、`memory.query_planner`、`memory.rerank` 的 provider、model、model_path、上下文窗口、温度、超时
+- `llm_service/llm.yaml`：仅由 LLM Service 读取的 LLM 强相关配置，例如 `memory.embed`、`memory.query_planner`、`memory.rerank` 的 provider、model、model_path、上下文窗口、温度、超时
 
-代码外部不直接读取 YAML 字符串 key。业务代码通过 `settings.memory_settings`、`LLMManager.get().get_provider(biz_key)` 或 `Settings` / `llm.config` 的封装方法访问配置。
+业务代码不读取 `llm.yaml`，只通过 `LLMClientManager.get().get_provider(biz_key)` 使用远端契约；`LLMManager` 与 `llm_service.config` 只在 LLM Service 进程内使用。
 
 常用 `rpg_core/settings.yaml` 的 `memory` 字段：
 
@@ -586,13 +601,16 @@ rp_memory/
 | 文件 | 职责 |
 |---|---|
 | `rpg_core/settings.yaml` | 核心业务配置：Agent 行为、scene 的 LLM 结构写权限、主 Context 正文拒绝阈值、memory 检索参数、核心日志 |
-| `agent_service/settings.yaml` | Agent 服务监听参数、非 Agent 进程访问 Agent 服务的客户端默认值、Agent 服务日志 |
+| `agent_service/settings.yaml` | Agent 服务监听参数、AgentClient 默认值、LLMClient 地址/超时/令牌环境变量名、Agent 服务日志 |
 | `channels/settings.yaml` | CLI / Telegram 渠道行为、Telegram bot、渠道日志 |
 | `play_api/settings.yaml` | Play API 监听参数、Play API 日志 |
 | `rpg_media/settings.yaml` | VisualBrief Demo planner、默认图片 Provider 与 Local file Demo 图片目录 |
 | `media_service/settings.yaml` | Media 服务监听、MediaClient 地址/超时、worker 并发与轮询参数 |
+| `llm_service/settings.yaml` | LLM 服务监听、Bearer 令牌环境变量名、本地 llama 并行模型数与日志 |
 | `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口和 context 正文门禁阈值 |
 | `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置 |
+
+`RPG_WORLD_LLM_SERVICE_TOKEN` 必须在 LLM Service 与所有 LLM 调用进程中设置为相同的非空值。LLM Service 缺少令牌时拒绝启动；Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。
 
 正文门禁由 `play_webui` 的 `session.contextUsage.inputBlockThresholdRatio` 和 Core 的 `agent.context_window_reject_threshold_ratio` 独立控制，合法范围均为 `(0, 1]`、默认均为 `0.9`。前端非法值回退 `0.9`，Core 非法值会阻止启动；两侧都只计算不含当前待发送 input 的主 Agent Context。
 
@@ -602,6 +620,7 @@ rp_memory/
 rpg_core/settings.local.yaml
 channels/settings.local.yaml
 agent_service/settings.local.yaml
+llm_service/settings.local.yaml
 play_api/settings.local.yaml
 rpg_media/settings.local.yaml
 media_service/settings.local.yaml
@@ -735,7 +754,7 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 - `channels/tests/`：ChannelAdapter、CLI、Telegram 渠道和渠道侧会话流程。
 - `rpg_core/tests/`：Agent facade、Mailbox、Lifecycle、MainModel、Context/Tool service、turn hooks/runtime/orchestrator、transaction、命令、scene、session 与 summary。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank。
-- `llm_service/tests/`：LLM provider 配置、manager 路由与 llama 本地 runtime 协议。
+- `llm_service/tests/`：LLM HTTP/SSE 客户端契约、鉴权、provider 配置、manager 路由与 llama 本地 runtime。
 - `play_api/tests/`：Play API workspace/session/scene/turn/stream、characters、lorebook、status-tables 和 ops 等契约。
 - `rpg_media/tests/`：来源指纹、简报、Provider、图片魔数/存储与高层媒体用例。
 - `media_service/tests/`：HTTP 契约、持久队列、取消、重试和重启恢复。
@@ -772,6 +791,7 @@ INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q
 - `CLAUDE.md` — 完整架构文档和技术细节
 - `rpg_core/settings.yaml` — 核心业务、数据路径、memory 参数
 - `agent_service/settings.yaml` — Agent 服务监听与 AgentClient 默认值
+- `llm_service/settings.yaml` — LLM 服务监听、鉴权与本地 runtime 配置
 - `channels/settings.yaml` — CLI / Telegram 渠道配置
 - `play_api/settings.yaml` — Play API 监听与日志
 - `rpg_media/settings.yaml` — VisualBrief Demo planner 与图片 Provider 配置

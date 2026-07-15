@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from llm_service.keys import (
+from llm_client.keys import (
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
 )
@@ -25,7 +25,6 @@ from rpg_core.utils.watcher import get_watcher
 if TYPE_CHECKING:
     from rpg_core.agent.command import CommandDispatcher
     from rpg_core.agent.mailbox import AgentMailbox
-    from rpg_core.agent.model_runtime import MainModelRuntime
     from rpg_core.agent.tool_service import AgentToolService
     from rpg_core.rp_modules import RPModuleRegistry
 
@@ -43,13 +42,11 @@ class AgentRuntimeLifecycle:
         session_id: str,
         world_name: str,
         history_enabled: bool,
-        model_runtime: "MainModelRuntime",
         command_dispatcher: "CommandDispatcher",
         resource_factory: ContextResourceFactory = build_agent_context_resources,
     ) -> None:
         self._session_id = session_id
         self._world_name = world_name
-        self._model_runtime = model_runtime
         self._command_dispatcher = command_dispatcher
         self._resource_factory = resource_factory
         self._session_manager = SessionManager(
@@ -116,7 +113,6 @@ class AgentRuntimeLifecycle:
             self._session_manager.load()
             if self._resources.memory_manager is not None:
                 self._resources.memory_manager.init()
-            self._model_runtime.provider_for(self._session_id)
             self._create_sub_agents()
             self._configure_commands()
             tool_service.refresh_base_registry()

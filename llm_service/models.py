@@ -1,4 +1,4 @@
-"""Model loading and invocation for the llama worker process."""
+"""Model loading and invocation owned by the standalone LLM service."""
 
 from __future__ import annotations
 

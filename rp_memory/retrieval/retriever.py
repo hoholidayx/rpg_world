@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from llm_service.base_provider import LLMProvider as EmbeddingProvider
+    from llm_client.types import LLMProvider as EmbeddingProvider
     from rp_memory.storage.vector_store import VectorStore
 
 
@@ -34,4 +34,3 @@ class BaseRetriever(ABC):
 
 def _similarity(l2_distance: float) -> float:
     return 1.0 / (1.0 + l2_distance)
-

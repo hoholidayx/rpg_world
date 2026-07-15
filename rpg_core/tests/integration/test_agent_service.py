@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 
 from agent_service import main as service_main
-from llm_service.keys import AGENT_MAIN_BIZ_KEY
+from llm_client.keys import AGENT_MAIN_BIZ_KEY
 from rpg_core.agent.manager import AgentManager
 from rpg_core.tests.integration.conftest import (
     _create_integration_session,
@@ -30,7 +30,6 @@ async def agent_service_client(
     scripted_llm_manager,  # noqa: ARG001
     monkeypatch,
 ):
-    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
     AgentManager.reset()
     async with service_main.app.router.lifespan_context(service_main.app):
         transport = httpx.ASGITransport(app=service_main.app)

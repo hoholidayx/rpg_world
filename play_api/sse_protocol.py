@@ -62,10 +62,18 @@ class PlaySSEStream:
             return None
         return self.encode(mapping.type, mapping.payload)
 
-    def error(self, message: str, *, status_code: int | None = None) -> str:
+    def error(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        error_code: str | None = None,
+    ) -> str:
         payload: dict[str, object] = {"message": message}
         if status_code is not None:
             payload["statusCode"] = status_code
+        if error_code:
+            payload["errorCode"] = error_code
         return self.encode(PlaySSEType.ERROR, payload)
 
     def encode(self, type_: PlaySSEType, payload: dict[str, object] | None = None) -> str:

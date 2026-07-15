@@ -5,7 +5,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from llm_service.manager import LLMManager
+from llm_client.manager import LLMClientManager
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.agent_types import StreamEventKind
 from rpg_core.tests.integration.conftest import (
@@ -23,8 +23,10 @@ async def live_agent(
     integration_workspace,
     integration_data_gateway,
 ):
-    if not integration_settings.resolve_openai_api_key():
-        pytest.skip("the active test profile has no real main-agent API key")
+    try:
+        LLMClientManager.get().client.health()
+    except Exception:
+        pytest.skip("standalone LLM service is not available")
     session_id = f"live_{request.node.name[-24:]}".replace("-", "_")
     _create_integration_session(integration_data_gateway, integration_workspace, session_id)
     agent = RPGGameAgent(session_id=session_id)
@@ -33,7 +35,7 @@ async def live_agent(
         yield agent
     finally:
         await _shutdown_agent(agent)
-        LLMManager.reset()
+        LLMClientManager.reset()
 
 
 @pytest.mark.asyncio

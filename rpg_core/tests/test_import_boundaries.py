@@ -22,7 +22,6 @@ def test_non_agent_processes_do_not_import_agent_runtime() -> None:
     forbidden = (
         "from rpg_core.agent.manager import AgentManager",
         "from rpg_core.agent.agent import RPGGameAgent",
-        "configure_llama_client_from_runtime_config",
     )
     violations: list[str] = []
     for path in _python_files("play_api", "channels"):
@@ -34,14 +33,69 @@ def test_non_agent_processes_do_not_import_agent_runtime() -> None:
     assert violations == []
 
 
-def test_only_agent_service_configures_llama_client_from_runtime_config() -> None:
+def test_business_processes_only_use_public_llm_client_contract() -> None:
+    forbidden = (
+        "from llm_service",
+        "import llm_service",
+        "from openai",
+        "import llama_cpp",
+    )
     violations: list[str] = []
-    for path in _python_files("agent_service", "play_api", "channels"):
+    for path in _python_files(
+        "rpg_core",
+        "rp_memory",
+        "agent_service",
+        "play_api",
+        "channels",
+        "rpg_media",
+        "media_service",
+    ):
         text = path.read_text(encoding="utf-8")
-        if "configure_llama_client_from_runtime_config" in text and not str(path).endswith("agent_service/main.py"):
-            violations.append(str(path.relative_to(ROOT)))
+        for marker in forbidden:
+            if marker in text:
+                violations.append(f"{path.relative_to(ROOT)}: {marker}")
 
     assert violations == []
+
+
+def test_llm_service_does_not_import_business_runtimes() -> None:
+    forbidden = (
+        "from rpg_core",
+        "from rp_memory",
+        "from rpg_media",
+        "from rpg_data",
+        "from agent_service",
+        "from media_service",
+    )
+    violations: list[str] = []
+    for path in _python_files("llm_service"):
+        text = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            if marker in text:
+                violations.append(f"{path.relative_to(ROOT)}: {marker}")
+    assert violations == []
+
+
+def test_llm_client_does_not_import_server_or_provider_implementations() -> None:
+    forbidden = (
+        "from llm_service",
+        "import llm_service",
+        "from openai",
+        "import llama_cpp",
+    )
+    violations: list[str] = []
+    for path in _python_files("llm_client"):
+        text = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            if marker in text:
+                violations.append(f"{path.relative_to(ROOT)}: {marker}")
+    assert violations == []
+
+
+def test_llama_subprocess_protocol_is_removed() -> None:
+    assert not (ROOT / "llm_service/client.py").exists()
+    assert not (ROOT / "llm_service/server.py").exists()
+    assert not (ROOT / "llm_service/protocol.py").exists()
 
 
 def test_rpg_core_runtime_does_not_use_legacy_workspace_fallbacks() -> None:

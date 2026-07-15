@@ -7,13 +7,17 @@ from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
 from commons.errors import (
+    LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+    LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
     TURN_METADATA_INVALID_ERROR_CODE,
     TURN_METADATA_INVALID_STATUS_CODE,
     MainContextWindowThresholdExceededError,
 )
-from llm_service.types import LLMUsage
+from llm_client.client import LLMServiceClientError
+from llm_client.types import LLMBizCatalog, LLMProviderOption, LLMUsage
+import rpg_core.main_llm as main_llm_module
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     CallRecord,
@@ -458,12 +462,55 @@ def test_agent_service_contracts(monkeypatch) -> None:
     monkeypatch.setattr(service_main, "AgentManager", FakeAgentManager)
     monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
-    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
+
+    class UnavailableHealthClient:
+        def health(self):  # noqa: ANN201
+            raise RuntimeError("offline")
+
+    class FakeLLMClientManager:
+        client = UnavailableHealthClient()
+
+        def get_catalog(self, biz_key: str) -> LLMBizCatalog:
+            return LLMBizCatalog(
+                biz_key=biz_key,
+                kind="chat",
+                default_provider_key="deepseek_v4_flash",
+                options=(
+                    LLMProviderOption(
+                        "deepseek_v4_flash",
+                        "openai",
+                        "deepseek-v4-flash",
+                        1_000_000,
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(
+        service_main.LLMClientManager,
+        "get",
+        classmethod(lambda cls: FakeLLMClientManager()),
+    )
+    monkeypatch.setattr(
+        main_llm_module.LLMClientManager,
+        "get",
+        classmethod(lambda cls: FakeLLMClientManager()),
+    )
+    monkeypatch.setattr(
+        service_main.MainLLMSelectionService,
+        "get_provider_catalog",
+        lambda self: service_main.MainLLMProviderCatalog(
+            config_default_provider_key="deepseek_v4_flash",
+            options=FakeLLMClientManager().get_catalog("agent.main").options,
+        ),
+    )
     FakeCatalog.reset()
     FakeSessionRoles.reset()
 
     with TestClient(service_main.app) as client:
-        assert client.get("/agent/v1/health").json() == {"status": "ok"}
+        assert client.get("/agent/v1/health").json() == {
+            "status": "degraded",
+            "llm_service": "unavailable",
+        }
 
         history = client.get(
             "/agent/v1/chat/history",
@@ -764,7 +811,6 @@ def test_agent_service_deletes_catalog_session_and_cached_runtime(monkeypatch) -
     monkeypatch.setattr(service_main, "AgentManager", FakeAgentManager)
     monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
-    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
     FakeCatalog.reset()
     FakeAgentManager.reset()
     agent = FakeAgentManager.get_or_create("s1")
@@ -797,7 +843,6 @@ def test_agent_service_history_rejects_invalid_turn_metadata(monkeypatch) -> Non
     monkeypatch.setattr(service_main, "AgentManager", FakeAgentManager)
     monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: InvalidHistoryGateway)
-    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
     FakeCatalog.reset()
 
     with TestClient(service_main.app) as client:
@@ -814,7 +859,6 @@ def test_agent_service_send_and_stream_map_turn_metadata_error(monkeypatch) -> N
     monkeypatch.setattr(service_main, "AgentManager", InvalidTurnAgentManager)
     monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
-    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
     FakeCatalog.reset()
     InvalidTurnAgentManager.reset()
 
@@ -842,7 +886,6 @@ def test_agent_service_send_and_stream_map_context_threshold_error(monkeypatch) 
     monkeypatch.setattr(service_main, "AgentManager", ContextThresholdAgentManager)
     monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
-    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
     FakeCatalog.reset()
     ContextThresholdAgentManager.reset()
 
@@ -866,11 +909,64 @@ def test_agent_service_send_and_stream_map_context_threshold_error(monkeypatch) 
     assert MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE not in send.json()["detail"]
 
 
+def test_agent_service_send_and_stream_map_llm_dependency_error(monkeypatch) -> None:
+    class UnavailableLLMAgent(FakeAgent):
+        async def send(self, message: str, **kwargs):  # noqa: ANN003, ANN201
+            raise LLMServiceClientError("LLM service connection failed")
+
+        async def send_stream(self, message: str, **kwargs):  # noqa: ANN003, ANN201
+            raise LLMServiceClientError("LLM service connection failed")
+            yield  # pragma: no cover
+
+        async def execute_command(self, command: str) -> CommandResult:
+            raise LLMServiceClientError("LLM service connection failed")
+
+    class UnavailableLLMAgentManager(FakeAgentManager):
+        @classmethod
+        def get_or_create(cls, session_id: str):  # noqa: ANN206
+            if session_id not in cls.instances:
+                cls.instances[session_id] = UnavailableLLMAgent(session_id)
+            return cls.instances[session_id]
+
+    monkeypatch.setattr(service_main, "AgentManager", UnavailableLLMAgentManager)
+    monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
+    monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
+    FakeCatalog.reset()
+    UnavailableLLMAgentManager.reset()
+
+    with TestClient(service_main.app) as client:
+        send = client.post(
+            "/agent/v1/chat/send",
+            json={"session_id": "s1", "message": "go"},
+        )
+        command = client.post(
+            "/agent/v1/chat/command",
+            json={"session_id": "s1", "command": "/compact"},
+        )
+        with client.stream(
+            "POST",
+            "/agent/v1/chat/stream",
+            json={"session_id": "s1", "message": "go"},
+        ) as stream:
+            body = "".join(stream.iter_text())
+
+    assert send.status_code == LLM_SERVICE_UNAVAILABLE_STATUS_CODE
+    assert send.json()["detail"] == {
+        "error_code": LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+        "message": "LLM service connection failed",
+    }
+    assert command.status_code == LLM_SERVICE_UNAVAILABLE_STATUS_CODE
+    assert command.json()["detail"] == send.json()["detail"]
+    assert f'"error_code": "{LLM_SERVICE_UNAVAILABLE_ERROR_CODE}"' in body
+    assert f'"status_code": {LLM_SERVICE_UNAVAILABLE_STATUS_CODE}' in body
+    assert '"content": "LLM service connection failed"' in body
+    assert f"{LLM_SERVICE_UNAVAILABLE_ERROR_CODE}: LLM service connection failed" not in body
+
+
 def test_agent_service_drops_cached_agent_when_truncate_sync_fails(monkeypatch) -> None:
     monkeypatch.setattr(service_main, "AgentManager", FailedSyncAgentManager)
     monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: FakeGateway)
-    monkeypatch.setattr(service_main, "configure_llama_client_from_runtime_config", lambda: None)
     FakeCatalog.reset()
     FailedSyncAgentManager.reset()
 

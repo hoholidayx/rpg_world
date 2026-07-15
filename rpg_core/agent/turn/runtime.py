@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from rpg_core.agent.turn.models import TurnExecutionPlan
 
 if TYPE_CHECKING:
-    from llm_service.base_provider import LLMProvider
+    from llm_client.types import LLMProvider
     from rpg_core.agent.agent_types import TurnStats
     from rpg_core.agent.sub_agents import (
         StatusSubAgentPreflightOutcome,

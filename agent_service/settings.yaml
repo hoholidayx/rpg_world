@@ -1,6 +1,7 @@
 # ── Agent 服务进程配置 ───────────────────────────────────────────────
-# Agent 服务是唯一持有 AgentManager / RPGGameAgent / rp_memory / llama worker
-# 的进程。这里只放 HTTP 监听和其它进程访问 Agent 服务的客户端默认值。
+# Agent 服务是唯一持有 AgentManager / RPGGameAgent / rp_memory 的进程；
+# Provider、密钥和本地 llama runtime 只存在于独立 LLM 服务进程。
+# 这里只放 HTTP 监听、Agent/LLM 客户端及日志配置。
 # local / test / prod 是固定 profile 名称；同级 settings.local.yaml、
 # settings.test.yaml、settings.prod.yaml 会按当前 profile 自动覆盖本文件。
 
@@ -27,6 +28,13 @@ base:
     # 普通请求超时，单位毫秒。
     request_timeout_ms: 60000
     # SSE/流式请求超时，单位毫秒。
+    stream_timeout_ms: 300000
+
+  # ── Agent 进程访问独立 LLM Service ──────────────────────────────
+  llm_client:
+    base_url: http://127.0.0.1:8012/llm/v1
+    token_env: RPG_WORLD_LLM_SERVICE_TOKEN
+    request_timeout_ms: 60000
     stream_timeout_ms: 300000
 
   # ── Agent 服务日志配置 ───────────────────────────────────────────

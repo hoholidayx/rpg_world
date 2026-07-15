@@ -10,7 +10,7 @@ from rp_memory.planning.plan import QueryPlan
 from rp_memory.retrieval.retriever import BaseRetriever, _similarity
 
 if TYPE_CHECKING:
-    from llm_service.base_provider import LLMProvider as EmbeddingProvider
+    from llm_client.types import LLMProvider as EmbeddingProvider
     from rp_memory.storage.vector_store import VectorStore
 
 

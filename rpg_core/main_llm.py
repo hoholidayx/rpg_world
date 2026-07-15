@@ -7,8 +7,9 @@ from typing import Literal
 
 from loguru import logger
 
-from llm_service.config import LLMProviderOption, list_provider_options, resolve_biz_config
-from llm_service.keys import AGENT_MAIN_BIZ_KEY
+from llm_client.keys import AGENT_MAIN_BIZ_KEY
+from llm_client.manager import LLMClientManager
+from llm_client.types import LLMProviderOption
 from rpg_data import models
 from rpg_data.services import DataServiceGateway, get_data_service_gateway
 
@@ -50,10 +51,10 @@ class MainLLMSelectionService:
         self._gateway = gateway or get_data_service_gateway()
 
     def get_provider_catalog(self) -> MainLLMProviderCatalog:
-        default_cfg = resolve_biz_config(AGENT_MAIN_BIZ_KEY)
+        remote = LLMClientManager.get().get_catalog(AGENT_MAIN_BIZ_KEY)
         return MainLLMProviderCatalog(
-            config_default_provider_key=default_cfg.provider_key,
-            options=list_provider_options(AGENT_MAIN_BIZ_KEY),
+            config_default_provider_key=remote.default_provider_key,
+            options=remote.options,
         )
 
     def resolve_story(

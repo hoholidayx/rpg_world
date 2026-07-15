@@ -8,17 +8,6 @@ default_profile: local
 
 # 所有 profile 共享的默认值。
 base:
-  # ── llama.cpp 托管子进程运行参数 ─────────────────────────────────
-  runtime:
-    # 是否启用统一 llama 子进程。
-    llama_process_enabled: true
-    # 单次 llama 子进程请求超时，单位毫秒。
-    llama_request_timeout_ms: 60000
-    # llama 子进程启动等待超时，单位毫秒。
-    llama_startup_timeout_ms: 120000
-    # 子进程内最多同时保留/调度的模型实例数。
-    llama_max_parallel_models: 2
-
   # ── 可供业务选择的 LLM provider 池 ───────────────────────────────
   providers:
     # 主 Agent 与子 Agent 共用的 OpenAI-compatible 模型。

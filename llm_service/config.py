@@ -44,14 +44,6 @@ _cache_key: tuple[str, str] | None = None  # (resolved_path, profile)
 
 
 @dataclass(frozen=True)
-class LLMRuntimeConfig:
-    llama_process_enabled: bool = True
-    llama_request_timeout_ms: int = 60000
-    llama_startup_timeout_ms: int = 120000
-    llama_max_parallel_models: int = 2
-
-
-@dataclass(frozen=True)
 class LLMProviderOption:
     provider_key: str
     backend: str
@@ -128,22 +120,6 @@ def load_llm_settings() -> ConfigDict:
 def get_active_profile() -> str:
     """Return the active profile name (e.g. ``"local"``)."""
     return _resolve_profile_name()
-
-
-def get_runtime_config() -> LLMRuntimeConfig:
-    """Return typed runtime settings from ``llm_service/llm.yaml``."""
-    raw = load_llm_settings()
-    runtime = raw.get(LLMConfigKey.RUNTIME, {})
-    if not isinstance(runtime, dict):
-        runtime = {}
-    return LLMRuntimeConfig(
-        llama_process_enabled=optional_bool(runtime.get(LLMConfigKey.LLAMA_PROCESS_ENABLED), True),
-        llama_request_timeout_ms=optional_int(runtime.get(LLMConfigKey.LLAMA_REQUEST_TIMEOUT_MS), 60000)
-        or 60000,
-        llama_startup_timeout_ms=optional_int(runtime.get(LLMConfigKey.LLAMA_STARTUP_TIMEOUT_MS), 120000)
-        or 120000,
-        llama_max_parallel_models=optional_int(runtime.get(LLMConfigKey.LLAMA_MAX_PARALLEL_MODELS), 2) or 2,
-    )
 
 
 def resolve_llm_config(

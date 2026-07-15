@@ -87,6 +87,7 @@ class AgentSessionCreateRequest(_BaseSchema):
 
 class AgentHealthResponse(_BaseSchema):
     status: str = "ok"
+    llm_service: str = "unknown"
 
 
 class AgentHistoryResponse(_BaseSchema):
@@ -224,6 +225,7 @@ class AgentMainLLMSelectionResponse(_BaseSchema):
 
 class AgentHealthPayload(TypedDict):
     status: str
+    llm_service: NotRequired[str]
 
 
 class AgentHistoryPayload(TypedDict):

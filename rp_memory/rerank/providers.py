@@ -8,8 +8,7 @@ from dataclasses import dataclass, field
 
 from commons.types import DebugInfo
 
-from llm_service.base_provider import DocumentScoreProvider, LLMProvider
-from llm_service.types import LLMResponse
+from llm_client.types import DocumentScoreProvider, LLMProvider, LLMResponse
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.rerank.common import (
     MEMORY_RERANK_SYSTEM_PROMPT,

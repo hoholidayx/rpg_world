@@ -22,7 +22,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 
-from llm_service.types import LLMResponse, LLMUsage, ProviderChunk
+from llm_client.types import LLMResponse, LLMUsage, ProviderChunk
 from rpg_core.agent.turn.models import TurnRequest
 
 

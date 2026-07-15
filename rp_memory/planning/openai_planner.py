@@ -13,13 +13,13 @@ from rp_memory.planning.planner import (
 )
 
 if TYPE_CHECKING:
-    from llm_service.base_provider import LLMProvider
+    from llm_client.types import LLMProvider
 
 
 class OpenAIQueryPlanner(BaseQueryPlanner):
     """Plan memory queries with an OpenAI-compatible chat model.
 
-    Uses an ``LLMProvider`` obtained from ``LLMManager`` — no raw client.
+    Uses an ``LLMProvider`` obtained from ``LLMClientManager`` — no raw client.
     """
 
     def __init__(
@@ -27,9 +27,11 @@ class OpenAIQueryPlanner(BaseQueryPlanner):
         provider: LLMProvider,
         *,
         fallback_planner: BaseQueryPlanner | None = None,
+        planner_source: str = "openai",
     ) -> None:
         self._provider = provider
         self._fallback_planner = fallback_planner
+        self._planner_source = planner_source
 
     def plan(self, query: str):
         return run_awaitable_sync(self._plan_async(query))
@@ -41,7 +43,7 @@ class OpenAIQueryPlanner(BaseQueryPlanner):
                 query,
                 "",
                 {},
-                planner_source="openai",
+                planner_source=self._planner_source,
                 fallback_planner=self._fallback_planner,
             )
         prompt = _build_prompt(normalized)
@@ -56,6 +58,6 @@ class OpenAIQueryPlanner(BaseQueryPlanner):
             query,
             normalized,
             data,
-            planner_source="openai",
+            planner_source=self._planner_source,
             fallback_planner=self._fallback_planner,
         )

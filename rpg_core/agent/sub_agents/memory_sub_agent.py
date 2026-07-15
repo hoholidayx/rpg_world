@@ -49,8 +49,7 @@ from rpg_core.settings import settings
 
 if TYPE_CHECKING:
     from rpg_core.agent.command import AgentCommandTarget
-    from llm_service.base_provider import LLMProvider
-    from llm_service.manager import ProviderOverrides
+    from llm_client.types import LLMProvider
     from rp_memory.recalled_memory import RecalledMemoryStore
     from rp_memory.story_memory import StoryMemoryStore
     from rpg_core.summary.store import SummaryStore
@@ -309,7 +308,7 @@ class MemorySubAgent(BaseSubAgent):
     summary_store:
         摘要存储。
     provider_biz_key:
-        交给 ``LLMManager`` 路由的业务键，例如 ``agent.memory_sub_agent``。
+        交给 ``LLMClientManager`` 路由的业务键，例如 ``agent.memory_sub_agent``。
     enabled:
         总开关。
     max_recall_items:
@@ -325,7 +324,6 @@ class MemorySubAgent(BaseSubAgent):
         story_store: StoryMemoryStore | None = None,
         summary_store: SummaryStore | None = None,
         provider_biz_key: str,
-        provider_overrides: ProviderOverrides | None = None,
         enabled: bool = True,
         max_recall_items: int = 5,
         max_window_rounds: int = 10,
@@ -333,7 +331,6 @@ class MemorySubAgent(BaseSubAgent):
     ) -> None:
         super().__init__(
             provider_biz_key=provider_biz_key,
-            provider_overrides=provider_overrides,
             enabled=enabled,
         )
 

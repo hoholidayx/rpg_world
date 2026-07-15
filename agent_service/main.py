@@ -6,6 +6,7 @@ Other processes access it through ``agent_service.client.AgentClient``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -56,6 +57,8 @@ from agent_service.schemas import (
 )
 from agent_service.settings import settings as process_settings
 from commons.errors import (
+    LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+    LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
     TURN_METADATA_INVALID_ERROR_CODE,
@@ -64,7 +67,8 @@ from commons.errors import (
     format_turn_metadata_error_message,
 )
 from commons.types import JsonObject, JsonValue
-from llm_service.client import configure_llama_client_from_runtime_config
+from llm_client.manager import LLMClientManager
+from llm_client.client import LLMServiceClientError
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload, usage_payload_from_records
 from rpg_core.agent.command import CommandResult
@@ -87,9 +91,19 @@ def _service_prefix() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    configure_llama_client_from_runtime_config()
-    yield
-    AgentManager.reset()
+    cfg = process_settings.llm_client
+    llm_manager = LLMClientManager.configure(
+        base_url=cfg.base_url,
+        token=cfg.token,
+        request_timeout_ms=cfg.request_timeout_ms,
+        stream_timeout_ms=cfg.stream_timeout_ms,
+    )
+    try:
+        yield
+    finally:
+        AgentManager.reset()
+        await llm_manager.aclose()
+        LLMClientManager.set_for_tests(None)
 
 
 app = FastAPI(title="RPG World Agent Service", lifespan=lifespan)
@@ -105,7 +119,15 @@ app.add_middleware(
 
 @app.get(f"{_service_prefix()}/health", response_model=AgentHealthResponse)
 async def health() -> AgentHealthResponse:
-    return AgentHealthResponse()
+    try:
+        payload = await asyncio.to_thread(LLMClientManager.get().client.health)
+        llm_status = "ok" if payload.get("status") == "ok" else "degraded"
+    except Exception:
+        llm_status = "unavailable"
+    return AgentHealthResponse(
+        status="ok" if llm_status == "ok" else "degraded",
+        llm_service=llm_status,
+    )
 
 
 @app.get(f"{_service_prefix()}/chat/history", response_model=AgentHistoryResponse)
@@ -115,6 +137,8 @@ async def get_history(
     agent = _get_agent(session_id)
     try:
         await agent.initialize()
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Agent initialization failed: {exc}") from exc
     rows = get_data_service_gateway().messages.list(session_id)
@@ -132,6 +156,8 @@ async def list_commands(
     agent = _get_agent(session_id)
     try:
         await agent.initialize()
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Agent initialization failed: {exc}") from exc
     return {
@@ -161,6 +187,8 @@ async def get_context_preview(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Context preview failed: {exc}") from exc
     _log_context_preview_payload(body_session_id=session_id, payload=payload)
@@ -172,7 +200,10 @@ async def get_context_preview(
     response_model=AgentMainLLMProviderCatalogResponse,
 )
 async def get_main_llm_options() -> AgentMainLLMProviderCatalogPayload:
-    return _main_llm_catalog_payload(_main_llm_selection_service().get_provider_catalog())
+    try:
+        return _main_llm_catalog_payload(_main_llm_selection_service().get_provider_catalog())
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
 
 
 @app.get(
@@ -184,7 +215,10 @@ async def get_story_main_llm(
     story_id: int = Query(...),
 ) -> AgentMainLLMSelectionPayload:
     workspace_id = _require_workspace(workspace_id)
-    selection = _main_llm_selection_service().resolve_story(workspace_id, story_id)
+    try:
+        selection = _main_llm_selection_service().resolve_story(workspace_id, story_id)
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     if selection is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return _main_llm_selection_payload(selection)
@@ -206,6 +240,8 @@ async def set_story_main_llm(
         )
     except InvalidMainLLMProviderKey as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     if selection is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return _main_llm_selection_payload(selection)
@@ -219,7 +255,10 @@ async def get_session_main_llm(
     session_id: str = Query(...),
 ) -> AgentMainLLMSelectionPayload:
     session_id = _require_session_id(session_id)
-    selection = _main_llm_selection_service().resolve_session(session_id)
+    try:
+        selection = _main_llm_selection_service().resolve_session(session_id)
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     if selection is None:
         raise HTTPException(status_code=404, detail="session not found")
     return _main_llm_selection_payload(selection)
@@ -239,6 +278,8 @@ async def set_session_main_llm(
         )
     except InvalidMainLLMProviderKey as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     if selection is None:
         raise HTTPException(status_code=404, detail="session not found")
     return _main_llm_selection_payload(selection)
@@ -367,6 +408,8 @@ async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Chat send failed: {exc}") from exc
     return _reply_to_dict(reply, session_id=body.session_id)
@@ -383,6 +426,8 @@ async def reload_history(body: AgentSessionMutationRequest) -> JsonObject:
         raise _turn_metadata_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"History reload failed: {exc}") from exc
     return {"status": "reloaded", "session_id": body.session_id}
@@ -467,6 +512,8 @@ async def bind_player_character(
         raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except ValueError as exc:
         logger.warning(
             "[AgentService] player character bind rejected: session_id={}, character_id={}, error={}",
@@ -510,6 +557,8 @@ async def truncate_history(turn_id: int, body: AgentSessionMutationRequest) -> J
         raise _turn_metadata_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"History truncate failed: {exc}") from exc
 
@@ -545,6 +594,8 @@ async def delete_message(
         raise _turn_metadata_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Message delete failed: {exc}") from exc
     return {
@@ -560,6 +611,8 @@ async def chat_command(body: AgentCommandRequest) -> AgentCommandResultPayload:
     command = body.command.strip()
     try:
         result = await agent.execute_command(command)
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Command failed: {exc}") from exc
     if not result.handled:
@@ -595,6 +648,14 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
             yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except InvalidTurnMetadataError as exc:
             event = _turn_metadata_stream_error(exc)
+            yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+        except LLMServiceClientError as exc:
+            event = AgentStreamEvent(
+                kind=StreamEventKind.ERROR,
+                content=str(exc),
+                error_code=LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+                status_code=LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
+            )
             yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except Exception as exc:
             event = AgentStreamEvent(kind=StreamEventKind.ERROR, content=str(exc))
@@ -649,6 +710,8 @@ async def _bind_session_player_character_if_present(session_id: str, player_char
         await _bind_agent_player_character(session_id, int(player_character_id))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LLMServiceClientError as exc:
+        raise _llm_dependency_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -787,6 +850,16 @@ def _require_session_id(session_id: str) -> str:
 
 def _turn_metadata_http_error(exc: InvalidTurnMetadataError) -> HTTPException:
     return HTTPException(status_code=TURN_METADATA_INVALID_STATUS_CODE, detail=str(exc))
+
+
+def _llm_dependency_http_error(exc: LLMServiceClientError) -> HTTPException:
+    return HTTPException(
+        status_code=LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
+        detail={
+            "error_code": LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+            "message": str(exc),
+        },
+    )
 
 
 def _main_context_threshold_http_error(

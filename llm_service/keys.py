@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-AGENT_MAIN_BIZ_KEY = "agent.main"
-AGENT_STATUS_SUB_AGENT_BIZ_KEY = "agent.status_sub_agent"
-AGENT_MEMORY_SUB_AGENT_BIZ_KEY = "agent.memory_sub_agent"
-
-MEMORY_EMBED_BIZ_KEY = "memory.embed"
-MEMORY_QUERY_PLANNER_BIZ_KEY = "memory.query_planner"
-MEMORY_RERANK_BIZ_KEY = "memory.rerank"
+from llm_client.keys import (
+    AGENT_MAIN_BIZ_KEY,
+    AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
+    AGENT_STATUS_SUB_AGENT_BIZ_KEY,
+    MEMORY_EMBED_BIZ_KEY,
+    MEMORY_QUERY_PLANNER_BIZ_KEY,
+    MEMORY_RERANK_BIZ_KEY,
+    PROVIDER_LLAMA,
+    PROVIDER_OPENAI,
+)
 
 
 class LLMConfigKey:
     """Canonical field names used by ``llm_service/llm.yaml`` accessors."""
 
-    RUNTIME = "runtime"
     PROVIDERS = "providers"
     BIZ = "biz"
 
@@ -40,14 +42,6 @@ class LLMConfigKey:
     VERBOSE = "verbose"
     REQUEST_TIMEOUT_MS = "request_timeout_ms"
 
-    LLAMA_PROCESS_ENABLED = "llama_process_enabled"
-    LLAMA_REQUEST_TIMEOUT_MS = "llama_request_timeout_ms"
-    LLAMA_STARTUP_TIMEOUT_MS = "llama_startup_timeout_ms"
-    LLAMA_MAX_PARALLEL_MODELS = "llama_max_parallel_models"
-
-
-PROVIDER_OPENAI = "openai"
-PROVIDER_LLAMA = "llama"
 
 PROVIDER_KINDS = frozenset({PROVIDER_OPENAI, PROVIDER_LLAMA})
 

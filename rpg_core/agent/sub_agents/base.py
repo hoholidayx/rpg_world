@@ -2,7 +2,7 @@
 
 提供子 Agent 共用的基础设施：
 
-- LLM Provider 管理（通过统一 ``provider_biz_key`` 走 ``LLMManager``）
+- LLM Provider 管理（通过统一 ``provider_biz_key`` 走 ``LLMClientManager``）
 - 重入守卫（防止并发执行）
 - ``SubAgentContext`` 绑定（世界书 + 角色卡 + 子 Agent 系统提示）
 - ``ToolProvider`` 接口 + 工具提供者管理（注册、去重、刷新）
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from loguru import logger
 
 from rpg_core.agent.tools.base import BaseTool
-from llm_service.base_provider import LLMProvider
+from llm_client.types import LLMProvider
 
 if TYPE_CHECKING:
     from rpg_core.agent.command import AgentCommandTarget, CommandDef
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from rpg_core.context.fixed_layer.contributors.player_character import (
         PlayerCharacterContext,
     )
-    from llm_service.manager import ProviderOverrides
 
 
 @runtime_checkable
@@ -58,7 +57,7 @@ class BaseSubAgent:
     Parameters
     ----------
     provider_biz_key:
-        由 ``LLMManager`` 路由的业务键。外部不直接构造 provider。
+        由 ``LLMClientManager`` 路由的业务键。外部不直接构造 provider。
     enabled:
         总开关。
     """
@@ -67,13 +66,11 @@ class BaseSubAgent:
         self,
         *,
         provider_biz_key: str,
-        provider_overrides: ProviderOverrides | None = None,
         enabled: bool = True,
     ) -> None:
         if not provider_biz_key.strip():
             raise ValueError("sub-agent provider_biz_key is required")
         self._provider_biz_key = provider_biz_key.strip()
-        self._provider_overrides = provider_overrides
         self._own_provider: LLMProvider | None = None
         self._enabled = enabled
         self._busy: bool = False
@@ -120,18 +117,13 @@ class BaseSubAgent:
     # ── Provider ─────────────────────────────────────────────────────
 
     def _get_provider(self) -> LLMProvider:
-        """通过 ``LLMManager`` 获取该子 Agent 对应的 provider。"""
+        """通过远程 LLM client 获取该子 Agent 对应的 provider。"""
         if self._own_provider is None:
-            from llm_service.manager import LLMManager
+            from llm_client.manager import LLMClientManager
 
-            manager = LLMManager.get()
-            if self._provider_overrides is None:
-                self._own_provider = manager.get_provider(self._provider_biz_key)
-            else:
-                self._own_provider = manager.get_provider(
-                    self._provider_biz_key,
-                    overrides=self._provider_overrides,
-                )
+            self._own_provider = LLMClientManager.get().get_provider(
+                self._provider_biz_key
+            )
         return self._own_provider
 
     @property

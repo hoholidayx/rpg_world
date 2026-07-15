@@ -29,11 +29,6 @@ def _write_llm_config(
     path.write_text(
         f"""
 base:
-  runtime:
-    llama_process_enabled: true
-    llama_request_timeout_ms: 60000
-    llama_startup_timeout_ms: 120000
-    llama_max_parallel_models: 2
   providers:
 {providers}
   biz:

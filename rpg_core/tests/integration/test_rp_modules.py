@@ -5,7 +5,8 @@ from contextlib import suppress
 
 import pytest
 
-from llm_service import manager as llm_manager_module
+from llm_client import manager as llm_manager_module
+from llm_client.types import LLMBizCatalog, LLMProviderOption
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.context.rpg_context import LayerType
 from rpg_core.context.fixed_layer.contributors import (
@@ -38,14 +39,23 @@ class _NoLLMProvider:
 
 
 class _NoLLMManager:
+    def get_catalog(self, biz_key: str) -> LLMBizCatalog:
+        return LLMBizCatalog(
+            biz_key=biz_key,
+            kind="chat",
+            default_provider_key="no_llm",
+            options=(
+                LLMProviderOption("no_llm", "openai", "no-llm-model", 8_192),
+            ),
+        )
+
     def get_provider(
         self,
         _biz_key,
-        overrides=None,
         *,
         provider_key=None,
     ):  # noqa: ANN001
-        del overrides, provider_key
+        del provider_key
         return _NoLLMProvider()
 
 
@@ -57,7 +67,7 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
     integration_data_gateway,
 ):
     monkeypatch.setattr(
-        llm_manager_module.LLMManager,
+        llm_manager_module.LLMClientManager,
         "get",
         classmethod(lambda cls: _NoLLMManager()),
     )

@@ -12,8 +12,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from llm_service.client import LlamaCompletionModel, LlamaEmbeddingModel, LlamaRerankModel
 from llm_service.base_provider import DocumentScoreProvider, LLMProvider
+from llm_service.runtime import DirectLlamaCompletionModel, DirectLlamaEmbeddingModel, DirectLlamaRerankModel
 from llm_service.types import DocumentScore, LLMResponse, ProviderChunk
 
 _TAG = "[LlamaCompletionProvider]"
@@ -24,7 +24,7 @@ DEFAULT_QWEN_RERANK_INSTRUCTION = (
 
 
 class LlamaCompletionProvider(LLMProvider):
-    """OpenAI-style provider wrapper over the process-isolated llama service."""
+    """OpenAI-style provider wrapper over this service's direct llama runtime."""
 
     def __init__(
         self,
@@ -35,12 +35,12 @@ class LlamaCompletionProvider(LLMProvider):
         request_timeout_ms: int = 60000,
         max_tokens: int = 512,
         temperature: float = 0.0,
-        model: LlamaCompletionModel | None = None,
+        model: DirectLlamaCompletionModel | None = None,
     ) -> None:
         self._model_path = str(Path(model_path))
         self._max_tokens = max_tokens
         self._temperature = temperature
-        self._model = model or LlamaCompletionModel(
+        self._model = model or DirectLlamaCompletionModel(
             self._model_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
@@ -56,8 +56,7 @@ class LlamaCompletionProvider(LLMProvider):
         tools: list[dict] | None = None,
     ) -> LLMResponse:
         prompt = _build_prompt(messages, tools)
-        raw = await asyncio.to_thread(
-            self._model.complete,
+        raw = await self._model.complete_async(
             prompt,
             max_tokens=self._max_tokens,
             temperature=self._temperature,
@@ -103,33 +102,45 @@ class LlamaCompletionProvider(LLMProvider):
         queue: asyncio.Queue[str | BaseException | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
-        def _produce() -> None:
+        def _enqueue(item: str | BaseException | None) -> None:
             try:
-                for content in self._model.complete_stream(
-                    prompt,
-                    max_tokens=self._max_tokens,
-                    temperature=self._temperature,
-                ):
-                    loop.call_soon_threadsafe(queue.put_nowait, content)
-                loop.call_soon_threadsafe(queue.put_nowait, None)
-            except BaseException as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+            except RuntimeError:
+                # The request loop may already be closed during service shutdown.
+                pass
 
-        thread = threading.Thread(
-            target=_produce,
-            name="llama-provider-stream",
-            daemon=True,
+        cancelled = threading.Event()
+        future = self._model.start_complete_stream(
+            prompt,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+            stop=None,
+            on_chunk=_enqueue,
+            cancelled=cancelled,
         )
-        thread.start()
 
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            if isinstance(item, BaseException):
-                raise item
-            content = item
-            yield ProviderChunk(content=content, model=self._model_path)
+        def _finished(completed) -> None:  # noqa: ANN001
+            try:
+                completed.result()
+            except BaseException as exc:
+                _enqueue(exc)
+            else:
+                _enqueue(None)
+
+        future.add_done_callback(_finished)
+
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                content = item
+                yield ProviderChunk(content=content, model=self._model_path)
+        finally:
+            cancelled.set()
+            future.cancel()
         yield ProviderChunk(
             finish_reason="stop",
             model=self._model_path,
@@ -224,7 +235,7 @@ def _first_tool_name(tools: list[dict]) -> str:
 
 
 class LlamaEmbeddingProvider(LLMProvider):
-    """LLMProvider over a process-isolated llama.cpp embedding model.
+    """LLMProvider over a service-owned llama.cpp embedding model.
 
     Only embedding methods are supported; chat methods raise
     ``NotImplementedError``.
@@ -239,10 +250,10 @@ class LlamaEmbeddingProvider(LLMProvider):
         n_threads: int = 4,
         verbose: bool = False,
         request_timeout_ms: int = 60000,
-        model: LlamaEmbeddingModel | None = None,
+        model: DirectLlamaEmbeddingModel | None = None,
     ) -> None:
         self._model_path = str(Path(model_path))
-        self._model = model or LlamaEmbeddingModel(
+        self._model = model or DirectLlamaEmbeddingModel(
             self._model_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
@@ -250,12 +261,7 @@ class LlamaEmbeddingProvider(LLMProvider):
             verbose=verbose,
             request_timeout_ms=request_timeout_ms,
         )
-        self._dim = self._model.dimension()
-        if self._dim == 0:
-            raise RuntimeError(
-                f"LlamaEmbeddingProvider: model returned zero-dimension vectors "
-                f"({self._model_path!r})"
-            )
+        self._dim: int | None = None
 
     # ── chat — not supported ────────────────────────────────────────
 
@@ -277,15 +283,30 @@ class LlamaEmbeddingProvider(LLMProvider):
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        return await asyncio.to_thread(self.embed_sync, texts)
+        vectors = await self._model.embed_async(texts)
+        self._remember_dimension(vectors)
+        return vectors
 
     def embed_sync(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        return self._model.embed(texts)
+        vectors = self._model.embed(texts)
+        self._remember_dimension(vectors)
+        return vectors
 
     def dimension(self) -> int:
+        if self._dim is None:
+            self._dim = self._model.dimension()
+        if self._dim <= 0:
+            raise RuntimeError(
+                "LlamaEmbeddingProvider: model returned zero-dimension vectors "
+                f"({self._model_path!r})"
+            )
         return self._dim
+
+    def _remember_dimension(self, vectors: list[list[float]]) -> None:
+        if vectors and self._dim is None:
+            self._dim = len(vectors[0])
 
 
 class LlamaLogitRerankProvider(LLMProvider, DocumentScoreProvider):
@@ -301,12 +322,12 @@ class LlamaLogitRerankProvider(LLMProvider, DocumentScoreProvider):
         request_timeout_ms: int = 60000,
         instruction: str = DEFAULT_QWEN_RERANK_INSTRUCTION,
         max_length: int | None = None,
-        model: LlamaRerankModel | None = None,
+        model: DirectLlamaRerankModel | None = None,
     ) -> None:
         self._model_path = str(Path(model_path))
         self._instruction = instruction or DEFAULT_QWEN_RERANK_INSTRUCTION
         self._max_length = max(1, int(max_length or n_ctx))
-        self._model = model or LlamaRerankModel(
+        self._model = model or DirectLlamaRerankModel(
             self._model_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
@@ -318,8 +339,7 @@ class LlamaLogitRerankProvider(LLMProvider, DocumentScoreProvider):
         return self._model_path
 
     async def score_documents(self, query: str, documents: list[str]) -> list[DocumentScore]:
-        raw_scores = await asyncio.to_thread(
-            self._model.rerank,
+        raw_scores = await self._model.rerank_async(
             query,
             documents,
             instruction=self._instruction,

@@ -66,9 +66,13 @@ async def _agent_call(awaitable: Awaitable[T]) -> T:
     except AgentServiceUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AgentClientError as exc:
-        if exc.status_code is not None:
-            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        detail: str | dict[str, str] = str(exc)
+        if exc.error_code:
+            detail = {"errorCode": exc.error_code, "message": str(exc)}
+        raise HTTPException(
+            status_code=exc.status_code or 502,
+            detail=detail,
+        ) from exc
 
 
 @router.get("/llm/main-agent/options", response_model=PlayMainLLMProviderCatalog)

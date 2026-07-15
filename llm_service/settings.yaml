@@ -1,0 +1,22 @@
+default_profile: local
+
+base:
+  service:
+    host: 127.0.0.1
+    port: 8012
+    api_prefix: /llm/v1
+    reload: false
+
+  auth:
+    token_env: RPG_WORLD_LLM_SERVICE_TOKEN
+
+  runtime:
+    llama_max_parallel_models: 2
+
+  logging:
+    log_level: DEBUG
+
+profiles:
+  local: {}
+  test: {}
+  prod: {}

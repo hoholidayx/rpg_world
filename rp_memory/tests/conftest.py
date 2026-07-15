@@ -6,7 +6,7 @@ import pytest
 
 from rp_memory.candidate import MemoryCandidate
 from rpg_core.context.rpg_context import Message
-from llm_service.manager import LLMManager
+from llm_client.manager import LLMClientManager
 
 
 class FakeTokenCounter:
@@ -91,9 +91,9 @@ class FakeRetriever:
 
 @pytest.fixture(autouse=True)
 def reset_llm_manager():
-    LLMManager.reset()
+    LLMClientManager.reset()
     yield
-    LLMManager.reset()
+    LLMClientManager.reset()
 
 
 @pytest.fixture

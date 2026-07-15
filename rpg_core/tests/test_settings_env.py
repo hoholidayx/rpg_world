@@ -39,11 +39,6 @@ profiles:
     llm_path.write_text(
         f"""
 base:
-  runtime:
-    llama_process_enabled: true
-    llama_request_timeout_ms: 60000
-    llama_startup_timeout_ms: 120000
-    llama_max_parallel_models: 2
   providers:
     agent_chat:
       provider: openai
@@ -101,133 +96,6 @@ profiles:
 """,
         encoding="utf-8",
     )
-
-
-def test_get_openai_api_key_priority(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    _write_settings(cfg, agent_extra="    api_key: yaml-key\n")
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-    monkeypatch.setenv("TEST_OPENAI_KEY", "env-key")
-
-    local_settings = settings_module.Settings()
-
-    assert local_settings.get_openai_api_key("explicit-key") == "explicit-key"
-    assert local_settings.get_openai_api_key(None) == "yaml-key"
-
-
-def test_get_openai_api_key_reads_configured_env(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    _write_settings(cfg)
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-    monkeypatch.setenv("TEST_OPENAI_KEY", "env-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "ignored-key")
-
-    local_settings = settings_module.Settings()
-
-    assert local_settings.get_openai_api_key(None) == "env-key"
-
-
-def test_llm_profile_files_override_base_config(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    cfg.write_text(
-        """
-base:
-  memory:
-    enabled: false
-  modules:
-    telegram:
-      enabled: false
-      bots: []
-profiles:
-  local: {}
-  test: {}
-""",
-        encoding="utf-8",
-    )
-    (tmp_path / "llm.yaml").write_text(
-        """
-base:
-  runtime:
-    llama_process_enabled: true
-    llama_request_timeout_ms: 60000
-    llama_startup_timeout_ms: 120000
-    llama_max_parallel_models: 2
-  providers:
-    agent_chat:
-      provider: openai
-      openai:
-        model: base-model
-        api_key: null
-        api_key_env: BASE_KEY
-        base_url: null
-        max_tokens: null
-        temperature: null
-  biz:
-    agent.main:
-      kind: chat
-      provider_key: agent_chat
-profiles:
-  local: {}
-  test: {}
-  prod: {}
-""",
-        encoding="utf-8",
-    )
-    (tmp_path / "llm.local.yaml").write_text(
-        """
-providers:
-  agent_chat:
-    openai:
-      api_key: local-key
-""",
-        encoding="utf-8",
-    )
-    (tmp_path / "llm.test.yaml").write_text(
-        """
-providers:
-  agent_chat:
-    openai:
-      api_key_env: TEST_KEY
-""",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-
-    local_settings = settings_module.Settings()
-    assert local_settings.agent_model == "base-model"
-    assert local_settings.get_openai_api_key(None) == "local-key"
-
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
-    monkeypatch.setenv("TEST_KEY", "test-key")
-    assert settings_module.Settings().get_openai_api_key(None) == "test-key"
-
-
-def test_resolve_openai_api_key_can_skip_agent_fallback(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    _write_settings(cfg, agent_extra="    api_key: yaml-key\n")
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-    monkeypatch.setenv("MEMORY_OPENAI_KEY", "memory-env-key")
-
-    local_settings = settings_module.Settings()
-
-    assert local_settings.resolve_openai_api_key(
-        explicit=None,
-        explicit_env="MEMORY_OPENAI_KEY",
-        fallback_to_agent=False,
-    ) == "memory-env-key"
-    assert local_settings.resolve_openai_api_key(
-        explicit=None,
-        explicit_env=None,
-        fallback_to_agent=False,
-    ) is None
 
 
 def test_rp_module_settings_defaults(tmp_path: Path, monkeypatch) -> None:
@@ -358,7 +226,7 @@ def test_legacy_dice_auto_checks_key_is_rejected(tmp_path: Path, monkeypatch) ->
         settings_module.Settings()
 
 
-def test_memory_settings_resolve_provider_pool_entries(tmp_path: Path, monkeypatch) -> None:
+def test_core_settings_do_not_read_llm_service_config(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "settings.yaml"
     cfg.write_text(
         """
@@ -378,57 +246,7 @@ profiles:
 """,
         encoding="utf-8",
     )
-    (tmp_path / "llm.yaml").write_text(
-        """
-base:
-  runtime:
-    llama_process_enabled: true
-    llama_request_timeout_ms: 60000
-    llama_startup_timeout_ms: 120000
-    llama_max_parallel_models: 2
-  providers:
-    agent_chat:
-      provider: openai
-      openai:
-        model: test-model
-        api_key: null
-        api_key_env: TEST_OPENAI_KEY
-        base_url: null
-        max_tokens: null
-        temperature: null
-    memory_embedding:
-      provider: openai
-      openai:
-        model: embed-model
-        api_key: null
-        api_key_env: MEMORY_OPENAI_KEY
-        base_url: https://memory.example
-        max_tokens: null
-        temperature: null
-    memory_query_planner:
-      provider: llama
-      llama:
-        model_path: data/models/planner.gguf
-        n_ctx: 2048
-        n_gpu_layers: 0
-        temperature: 0.0
-        max_tokens: 512
-        request_timeout_ms: 60000
-  biz:
-    agent.main:
-      kind: chat
-      provider_key: agent_chat
-    memory.embed:
-      kind: embedding
-      provider_key: memory_embedding
-    memory.query_planner:
-      kind: planner
-      provider_key: memory_query_planner
-profiles:
-  local: {}
-""",
-        encoding="utf-8",
-    )
+    (tmp_path / "llm.yaml").write_text("this is not valid: [", encoding="utf-8")
     monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
     monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
     monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
@@ -436,8 +254,9 @@ profiles:
     local_settings = settings_module.Settings()
     mem = local_settings.memory_settings
 
-    assert mem.embedding_provider.provider == "openai"
-    assert mem.query_planner_provider.provider == "llama"
+    assert mem.enabled is True
+    assert mem.top_k == 5
+    assert not hasattr(mem, "embedding_provider")
 
 
 def test_profile_must_be_set_before_settings_construction(tmp_path: Path, monkeypatch) -> None:
@@ -559,171 +378,6 @@ def test_scene_runtime_key_changes_rejects_malformed_config(
     monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
 
     with pytest.raises(ValueError, match=message):
-        settings_module.Settings()
-
-
-def test_agent_model_is_required(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    _write_settings(cfg)
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-
-    assert settings_module.Settings().agent_model == "test-model"
-
-
-def test_agent_model_uses_llama_model_path_when_llm_provider_is_llama(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    _write_settings(cfg)
-    llm_path = tmp_path / "llm.yaml"
-    llm_path.write_text(
-        """
-base:
-  runtime:
-    llama_process_enabled: true
-    llama_request_timeout_ms: 60000
-    llama_startup_timeout_ms: 120000
-    llama_max_parallel_models: 2
-  providers:
-    llama_chat:
-      provider: llama
-      llama:
-        model_path: data/models/llama-main.gguf
-    memory_embedding:
-      provider: llama
-      llama:
-        model_path: data/models/Qwen3-Embedding-0.6B-f16.gguf
-        n_ctx: 32768
-        n_gpu_layers: 0
-        n_threads: 4
-        verbose: false
-        request_timeout_ms: 60000
-  biz:
-    agent.main:
-      kind: chat
-      provider_key: llama_chat
-    memory.embed:
-      kind: embedding
-      provider_key: memory_embedding
-profiles:
-  local: {}
-  test: {}
-""",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", llm_path)
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-
-    assert settings_module.Settings().agent_model == "data/models/llama-main.gguf"
-
-
-def test_agent_model_and_biz_output_overrides_use_provider_pool(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    _write_settings(cfg)
-    llm_path = tmp_path / "llm.yaml"
-    llm_path.write_text(
-        """
-base:
-  runtime:
-    llama_process_enabled: true
-    llama_request_timeout_ms: 60000
-    llama_startup_timeout_ms: 120000
-    llama_max_parallel_models: 2
-  providers:
-    shared_chat:
-      provider: openai
-      openai:
-        model: shared-model
-        api_key: shared-key
-        base_url: https://shared.example
-        max_tokens: 321
-        temperature: 0.2
-    memory_embedding:
-      provider: llama
-      llama:
-        model_path: data/models/Qwen3-Embedding-0.6B-f16.gguf
-        n_ctx: 32768
-        n_gpu_layers: 0
-        n_threads: 4
-        verbose: false
-        request_timeout_ms: 60000
-  biz:
-    agent.main:
-      kind: chat
-      provider_key: shared_chat
-      max_tokens: 654
-      temperature: 0.9
-    memory.embed:
-      kind: embedding
-      provider_key: memory_embedding
-profiles:
-  local: {}
-  test: {}
-""",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", llm_path)
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-
-    local_settings = settings_module.Settings()
-    assert local_settings.agent_model == "shared-model"
-    assert local_settings.agent_base_url == "https://shared.example"
-    assert local_settings.agent_max_tokens == 654
-    assert local_settings.agent_temperature == 0.9
-
-
-def test_get_openai_api_key_uses_selected_provider(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    _write_settings(
-        cfg,
-        agent_extra="    api_key_env: DEFAULT_KEY\n",
-    )
-    llm_path = tmp_path / "llm.yaml"
-    llm_path.write_text(
-        """
-base:
-  runtime:
-    llama_process_enabled: true
-    llama_request_timeout_ms: 60000
-    llama_startup_timeout_ms: 120000
-    llama_max_parallel_models: 2
-  providers:
-    shared_chat:
-      provider: openai
-      openai:
-        model: shared-model
-        api_key: shared-key
-  biz:
-    agent.main:
-      kind: chat
-      provider_key: shared_chat
-profiles:
-  local: {}
-""",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", llm_path)
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-
-    assert settings_module.Settings().get_openai_api_key() == "shared-key"
-
-
-def test_agent_llm_model_empty_raises(tmp_path: Path, monkeypatch) -> None:
-    cfg = tmp_path / "settings.yaml"
-    _write_settings(cfg)
-    llm_path = tmp_path / "llm.yaml"
-    llm_path.write_text(
-        llm_path.read_text(encoding="utf-8").replace("model: test-model", "model: ''"),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
-    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", llm_path)
-    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
-
-    with pytest.raises(ValueError, match="agent.main.openai.model is required"):
         settings_module.Settings()
 
 

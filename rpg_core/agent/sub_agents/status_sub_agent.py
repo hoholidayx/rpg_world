@@ -65,7 +65,6 @@ from rpg_core.settings import settings
 from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
 
 if TYPE_CHECKING:
-    from llm_service.manager import ProviderOverrides
 
     from rpg_core.agent.sub_agents.context import SubAgentContext
     from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
@@ -249,7 +248,7 @@ class StatusSubAgent(BaseSubAgent):
     Parameters
     ----------
     provider_biz_key:
-        交给 ``LLMManager`` 路由的业务键，例如 ``agent.status_sub_agent``。
+        交给 ``LLMClientManager`` 路由的业务键，例如 ``agent.status_sub_agent``。
     enabled:
         总开关。
     """
@@ -258,12 +257,10 @@ class StatusSubAgent(BaseSubAgent):
         self,
         *,
         provider_biz_key: str,
-        provider_overrides: ProviderOverrides | None = None,
         enabled: bool = True,
     ) -> None:
         super().__init__(
             provider_biz_key=provider_biz_key,
-            provider_overrides=provider_overrides,
             enabled=enabled,
         )
 

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 import agent_service.client as client_module
-from agent_service.client import AgentClient
+from agent_service.client import AgentClient, AgentClientError
 from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
 
 
@@ -240,6 +241,32 @@ async def test_client_main_llm_selection_uses_agent_service_contract() -> None:
     ]
 
 
+async def test_client_http_error_preserves_structured_business_error(
+    monkeypatch,
+) -> None:
+    async def post_with_error(self, url: str, json=None):  # noqa: ANN001
+        self.calls.append(("POST", url, {"json": json}))
+        return httpx.Response(
+            503,
+            request=httpx.Request("POST", url),
+            json={
+                "detail": {
+                    "error_code": "LLM_SERVICE_UNAVAILABLE",
+                    "message": "LLM service connection failed",
+                }
+            },
+        )
+
+    monkeypatch.setattr(FakeAsyncClient, "post", post_with_error)
+
+    with pytest.raises(AgentClientError) as exc_info:
+        await AgentClient(base_url="http://agent").send("s1", "hello")
+
+    assert str(exc_info.value) == "LLM service connection failed"
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.error_code == "LLM_SERVICE_UNAVAILABLE"
+
+
 async def test_client_stream_parses_sse_events() -> None:
     events = [
         event
@@ -278,6 +305,43 @@ async def test_client_stream_forwards_optional_composer_fields() -> None:
             "narrative_style_id": 8,
         }},
     )
+
+
+async def test_client_stream_http_error_preserves_structured_business_error(
+    monkeypatch,
+) -> None:
+    class ErrorStreamResponse:
+        def __init__(self, url: str) -> None:
+            self.response = httpx.Response(
+                503,
+                request=httpx.Request("POST", url),
+                json={
+                    "detail": {
+                        "errorCode": "LLM_SERVICE_UNAVAILABLE",
+                        "message": "LLM service connection failed",
+                    }
+                },
+            )
+
+        async def __aenter__(self):  # noqa: ANN201
+            return self.response
+
+        async def __aexit__(self, exc_type, exc, tb):  # noqa: ANN001, ANN201
+            return False
+
+    def stream_with_error(self, method: str, url: str, json=None):  # noqa: ANN001
+        self.calls.append((method, url, {"json": json}))
+        return ErrorStreamResponse(url)
+
+    monkeypatch.setattr(FakeAsyncClient, "stream", stream_with_error)
+
+    with pytest.raises(AgentClientError) as exc_info:
+        async for _event in AgentClient(base_url="http://agent").stream("s1", "hello"):
+            pass
+
+    assert str(exc_info.value) == "LLM service connection failed"
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.error_code == "LLM_SERVICE_UNAVAILABLE"
 
 
 async def test_client_stream_ignores_invalid_event_status_code(monkeypatch) -> None:

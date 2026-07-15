@@ -112,15 +112,6 @@ class _Commands:
         self.sub_agents = list(sub_agents)
 
 
-class _ModelRuntime:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def provider_for(self, session_id: str):  # noqa: ANN201
-        self.calls.append(session_id)
-        return object()
-
-
 class _ToolService:
     def __init__(self) -> None:
         self.refresh_calls = 0
@@ -193,14 +184,12 @@ async def test_lifecycle_initialize_is_idempotent(lifecycle_deps) -> None:
         return _resources(session_id)
 
     commands = _Commands()
-    model = _ModelRuntime()
     tools = _ToolService()
     mailbox = _Mailbox()
     lifecycle = AgentRuntimeLifecycle(
         session_id="s1",
         world_name="World",
         history_enabled=False,
-        model_runtime=model,
         command_dispatcher=commands,
         resource_factory=factory,
     )
@@ -209,7 +198,6 @@ async def test_lifecycle_initialize_is_idempotent(lifecycle_deps) -> None:
     await lifecycle.initialize(tool_service=tools, mailbox=mailbox)
 
     assert built == ["s1"]
-    assert model.calls == ["s1"]
     assert lifecycle.resources.memory_manager.init_calls == 1
     assert commands.default_calls == 1
     assert len(commands.sub_agents) == 2
@@ -233,7 +221,6 @@ async def test_lifecycle_switch_rebuilds_resources_and_rebinds_subagents(
         session_id="old",
         world_name="World",
         history_enabled=False,
-        model_runtime=_ModelRuntime(),
         command_dispatcher=_Commands(),
         resource_factory=factory,
     )
@@ -265,7 +252,6 @@ async def test_lifecycle_release_and_reload_reinitializes_memory_and_tools(
         session_id="s1",
         world_name="World",
         history_enabled=False,
-        model_runtime=_ModelRuntime(),
         command_dispatcher=_Commands(),
         resource_factory=lambda **_kwargs: _resources("s1"),
     )
@@ -298,7 +284,6 @@ async def test_lifecycle_can_refresh_sub_agent_bindings_without_rebuilding_resou
         session_id="s1",
         world_name="World",
         history_enabled=False,
-        model_runtime=_ModelRuntime(),
         command_dispatcher=_Commands(),
         resource_factory=factory,
     )
@@ -318,7 +303,6 @@ def test_lifecycle_reindex_memory_uses_typed_resources(lifecycle_deps) -> None:
         session_id="s1",
         world_name="World",
         history_enabled=False,
-        model_runtime=_ModelRuntime(),
         command_dispatcher=_Commands(),
         resource_factory=lambda **_kwargs: _resources("s1"),
     )

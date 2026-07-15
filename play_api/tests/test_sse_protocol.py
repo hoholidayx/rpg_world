@@ -108,6 +108,24 @@ def test_error_payload_preserves_business_error_code_without_http_status() -> No
     }
 
 
+def test_play_stream_error_keeps_business_code_separate_from_status() -> None:
+    stream = PlaySSEStream("s1", turn_id="turn_test")
+
+    event = _decode_sse(
+        stream.error(
+            "LLM service connection failed",
+            status_code=503,
+            error_code="LLM_SERVICE_UNAVAILABLE",
+        )
+    )
+
+    assert event["payload"] == {
+        "message": "LLM service connection failed",
+        "statusCode": 503,
+        "errorCode": "LLM_SERVICE_UNAVAILABLE",
+    }
+
+
 def test_unknown_agent_event_is_ignored() -> None:
     assert agent_event_kind({"kind": "round_start"}) == "round_start"
     assert map_agent_event({"kind": "round_start"}) is None

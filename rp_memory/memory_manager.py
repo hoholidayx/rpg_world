@@ -18,7 +18,7 @@ from commons.types import Metadata
 from loguru import logger
 
 if TYPE_CHECKING:
-    from llm_service.base_provider import LLMProvider
+    from llm_client.types import LLMProvider
     from rp_memory.planning.planner import BaseQueryPlanner
     from rp_memory.recalled_memory import RecalledMemoryStore
     from rp_memory.retrieval.retriever import BaseRetriever
@@ -188,11 +188,14 @@ class MemoryManager:
     def _build_embedding(mem_cfg: MemorySettings):
         if not getattr(mem_cfg, "enabled", True):
             return None
-        from llm_service.keys import MEMORY_EMBED_BIZ_KEY
-        from llm_service.manager import LLMManager
+        from llm_client.keys import MEMORY_EMBED_BIZ_KEY
+        from llm_client.manager import LLMClientManager
 
         try:
-            embedding = LLMManager.get().get_provider(MEMORY_EMBED_BIZ_KEY)
+            embedding = LLMClientManager.get().get_provider(MEMORY_EMBED_BIZ_KEY)
+            dimension = embedding.dimension()
+            if dimension <= 0:
+                raise ValueError("embedding provider returned zero dimension")
             logger.info("[MemoryManager] embedding provider ready: {}", type(embedding).__name__)
             return embedding
         except Exception as exc:
@@ -372,18 +375,18 @@ class MemoryManager:
         if not getattr(mem_cfg, "query_planner_enabled", False):
             logger.info("[MemoryManager] query planner mode — rule-based (disabled)")
             return rule_based_planner
-        from llm_service.keys import MEMORY_QUERY_PLANNER_BIZ_KEY
-        from llm_service.manager import LLMManager
-        from llm_service.keys import PROVIDER_LLAMA
+        from llm_client.keys import MEMORY_QUERY_PLANNER_BIZ_KEY
+        from llm_client.manager import LLMClientManager
         from rp_memory.planning.openai_planner import OpenAIQueryPlanner
-        from rp_memory.planning.planner import FallbackQueryPlanner, LlamaQueryPlanner
+        from rp_memory.planning.planner import FallbackQueryPlanner
 
         try:
-            provider = LLMManager.get().get_provider(MEMORY_QUERY_PLANNER_BIZ_KEY)
-            if mem_cfg.query_planner_provider.provider == PROVIDER_LLAMA:
-                primary = LlamaQueryPlanner(provider, fallback_planner=rule_based_planner)
-            else:
-                primary = OpenAIQueryPlanner(provider, fallback_planner=rule_based_planner)
+            provider = LLMClientManager.get().get_provider(MEMORY_QUERY_PLANNER_BIZ_KEY)
+            primary = OpenAIQueryPlanner(
+                provider,
+                fallback_planner=rule_based_planner,
+                planner_source="llm_service",
+            )
             planner = FallbackQueryPlanner(primary, rule_based_planner)
             logger.info("[MemoryManager] query planner ready: {}", type(planner).__name__)
             return planner
@@ -397,22 +400,16 @@ class MemoryManager:
             if not mem_cfg.rerank_enabled:
                 logger.info("[MemoryManager] reranker mode — disabled")
                 return None
-            from llm_service.keys import MEMORY_RERANK_BIZ_KEY
-            from llm_service.manager import LLMManager
+            from llm_client.keys import MEMORY_RERANK_BIZ_KEY
+            from llm_client.manager import LLMClientManager
             from rp_memory.rerank.service import PointwiseMemoryReranker
-            from llm_service.keys import PROVIDER_OPENAI, PROVIDER_LLAMA
-            from llm_service.base_provider import DocumentScoreProvider
 
-            provider = LLMManager.get().get_provider(MEMORY_RERANK_BIZ_KEY)
+            provider = LLMClientManager.get().get_provider(MEMORY_RERANK_BIZ_KEY)
             rerank_weight = mem_cfg.rerank_score_weight
-            if isinstance(provider, DocumentScoreProvider):
-                provider_label = PROVIDER_LLAMA
-            else:
-                provider_label = PROVIDER_OPENAI if mem_cfg.rerank_provider.provider == PROVIDER_OPENAI else PROVIDER_LLAMA
             reranker = PointwiseMemoryReranker(
                 provider,
                 rerank_weight=rerank_weight,
-                provider_label=provider_label,
+                provider_label="llm_service",
             )
             logger.info("[MemoryManager] reranker ready: {}", type(reranker).__name__)
             return reranker

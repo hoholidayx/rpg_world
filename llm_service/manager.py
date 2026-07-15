@@ -8,6 +8,7 @@ of embedding / rerank / planner outside this module.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from threading import RLock
 from typing import ClassVar
@@ -15,8 +16,6 @@ from typing import TypeAlias
 
 from openai import AsyncOpenAI
 
-from llm_service import LlamaEmbeddingModel, LlamaRerankModel
-from llm_service.client import LlamaCompletionModel
 from llm_service.base_provider import DocumentScoreProvider, LLMProvider
 from llm_service.config import BizConfig, resolve_biz_config
 from llm_service.keys import (
@@ -34,6 +33,12 @@ from llm_service.llama_provider import (
     LlamaLogitRerankProvider,
 )
 from llm_service.openai_provider import OpenAIProvider
+from llm_service.runtime import (
+    DirectLlamaCompletionModel,
+    DirectLlamaEmbeddingModel,
+    DirectLlamaRerankModel,
+    reset_direct_llama_runtime,
+)
 
 
 ManagedProvider: TypeAlias = LLMProvider | DocumentScoreProvider
@@ -77,34 +82,6 @@ class LlamaRerankModelCacheKey:
     request_timeout_ms: int
 
 
-@dataclass(frozen=True)
-class ProviderOverrides:
-    """Per-call OpenAI overrides, used by API request-scoped credentials."""
-
-    openai_model: str | None = None
-    openai_api_key: str | None = None
-    openai_base_url: str | None = None
-    openai_max_tokens: int | None = None
-    openai_temperature: float | None = None
-
-    def has_openai_values(self) -> bool:
-        def _has_value(value: object) -> bool:
-            if isinstance(value, str):
-                return bool(value.strip())
-            return value is not None
-
-        return any(
-            _has_value(value)
-            for value in (
-                self.openai_model,
-                self.openai_api_key,
-                self.openai_base_url,
-                self.openai_max_tokens,
-                self.openai_temperature,
-            )
-        )
-
-
 class LLMManager:
     """Per-process LLM factory and cache."""
 
@@ -113,10 +90,10 @@ class LLMManager:
 
     def __init__(self) -> None:
         self._openai_client_cache: dict[OpenAIClientCacheKey, AsyncOpenAI] = {}
-        self._llama_completion_model_cache: dict[LlamaCompletionModelCacheKey, LlamaCompletionModel] = {}
-        self._llama_embedding_model_cache: dict[LlamaEmbeddingModelCacheKey, LlamaEmbeddingModel] = {}
-        self._llama_rerank_model_cache: dict[LlamaRerankModelCacheKey, LlamaRerankModel] = {}
-        self._provider_cache: dict[tuple[str, str, ProviderOverrides | None], ManagedProvider] = {}
+        self._llama_completion_model_cache: dict[LlamaCompletionModelCacheKey, DirectLlamaCompletionModel] = {}
+        self._llama_embedding_model_cache: dict[LlamaEmbeddingModelCacheKey, DirectLlamaEmbeddingModel] = {}
+        self._llama_rerank_model_cache: dict[LlamaRerankModelCacheKey, DirectLlamaRerankModel] = {}
+        self._provider_cache: dict[tuple[str, str], ManagedProvider] = {}
         self._lock = RLock()
 
     @classmethod
@@ -130,6 +107,27 @@ class LLMManager:
     def reset(cls) -> None:
         with cls._instance_lock:
             cls._instance = None
+        reset_direct_llama_runtime()
+
+    @classmethod
+    async def areset(cls) -> None:
+        with cls._instance_lock:
+            previous = cls._instance
+            cls._instance = None
+        if previous is not None:
+            await previous.aclose()
+        reset_direct_llama_runtime()
+
+    async def aclose(self) -> None:
+        with self._lock:
+            clients = tuple(self._openai_client_cache.values())
+            self._openai_client_cache.clear()
+            self._provider_cache.clear()
+            self._llama_completion_model_cache.clear()
+            self._llama_embedding_model_cache.clear()
+            self._llama_rerank_model_cache.clear()
+        if clients:
+            await asyncio.gather(*(client.close() for client in clients))
 
     # ------------------------------------------------------------------
     # Raw client/model builders (private — only called internally)
@@ -171,7 +169,7 @@ class LLMManager:
         n_ctx: int = 2048,
         n_gpu_layers: int = 0,
         request_timeout_ms: int = 60000,
-    ) -> LlamaCompletionModel:
+    ) -> DirectLlamaCompletionModel:
         key = LlamaCompletionModelCacheKey(
             scope=scope,
             model_path=model_path,
@@ -183,7 +181,7 @@ class LLMManager:
             cached = self._llama_completion_model_cache.get(key)
             if cached is not None:
                 return cached
-            model = LlamaCompletionModel(
+            model = DirectLlamaCompletionModel(
                 model_path,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
@@ -202,7 +200,7 @@ class LLMManager:
         n_threads: int = 4,
         verbose: bool = False,
         request_timeout_ms: int = 60000,
-    ) -> LlamaEmbeddingModel:
+    ) -> DirectLlamaEmbeddingModel:
         key = LlamaEmbeddingModelCacheKey(
             scope=scope,
             model_path=model_path,
@@ -216,7 +214,7 @@ class LLMManager:
             cached = self._llama_embedding_model_cache.get(key)
             if cached is not None:
                 return cached
-            model = LlamaEmbeddingModel(
+            model = DirectLlamaEmbeddingModel(
                 model_path,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
@@ -236,7 +234,7 @@ class LLMManager:
         n_gpu_layers: int = 0,
         verbose: bool = False,
         request_timeout_ms: int = 60000,
-    ) -> LlamaRerankModel:
+    ) -> DirectLlamaRerankModel:
         key = LlamaRerankModelCacheKey(
             scope=scope,
             model_path=model_path,
@@ -249,7 +247,7 @@ class LLMManager:
             cached = self._llama_rerank_model_cache.get(key)
             if cached is not None:
                 return cached
-            model = LlamaRerankModel(
+            model = DirectLlamaRerankModel(
                 model_path,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
@@ -377,7 +375,6 @@ class LLMManager:
     def get_provider(
         self,
         biz_key: str,
-        overrides: ProviderOverrides | None = None,
         *,
         provider_key: str | None = None,
     ) -> ManagedProvider:
@@ -389,15 +386,11 @@ class LLMManager:
         """
         with self._lock:
             cfg = self._resolve_cfg(biz_key, provider_key=provider_key)
-            cache_key = (
-                biz_key,
-                cfg.provider_key,
-                self._effective_overrides(overrides),
-            )
+            cache_key = (biz_key, cfg.provider_key)
             cached = self._provider_cache.get(cache_key)
             if cached is not None:
                 return cached
-            provider = self._build_provider(cfg, biz_key, overrides=overrides)
+            provider = self._build_provider(cfg, biz_key)
             self._provider_cache[cache_key] = provider
             return provider
 
@@ -409,8 +402,6 @@ class LLMManager:
         self,
         cfg: BizConfig,
         biz_key: str,
-        *,
-        overrides: ProviderOverrides | None = None,
     ) -> ManagedProvider:
         backend = cfg.provider
 
@@ -421,29 +412,27 @@ class LLMManager:
             )
 
         if cfg.kind == LLM_KIND_EMBEDDING:
-            return self._build_embedding_provider(cfg, biz_key, backend, overrides=overrides)
+            return self._build_embedding_provider(cfg, biz_key, backend)
         if cfg.kind == LLM_KIND_RERANK:
-            return self._build_rerank_provider(cfg, biz_key, backend, overrides=overrides)
+            return self._build_rerank_provider(cfg, biz_key, backend)
 
         # Chat and planner use the same provider construction path.
-        return self._build_chat_provider_inner(cfg, biz_key, backend, overrides=overrides)
+        return self._build_chat_provider_inner(cfg, biz_key, backend)
 
     def _build_chat_provider_inner(
         self,
         cfg: BizConfig,
         biz_key: str,
         backend: str,
-        *,
-        overrides: ProviderOverrides | None = None,
     ) -> LLMProvider:
         if backend == PROVIDER_OPENAI:
             return self._build_openai_provider(
                 scope=cfg.provider_key,
-                model=self._openai_model(cfg, overrides),
-                api_key=self._openai_api_key(cfg, overrides),
-                base_url=self._openai_base_url(cfg, overrides),
-                max_tokens=self._openai_max_tokens(cfg, overrides),
-                temperature=self._openai_temperature(cfg, overrides),
+                model=cfg.openai_model,
+                api_key=cfg.openai_api_key,
+                base_url=cfg.openai_base_url,
+                max_tokens=cfg.openai_max_tokens,
+                temperature=cfg.openai_temperature,
             )
         if backend == PROVIDER_LLAMA:
             return self._build_llama_provider(
@@ -462,15 +451,13 @@ class LLMManager:
         cfg: BizConfig,
         biz_key: str,
         backend: str,
-        *,
-        overrides: ProviderOverrides | None = None,
     ) -> LLMProvider:
         if backend == PROVIDER_OPENAI:
             return self._build_openai_provider(
                 scope=cfg.provider_key,
-                model=self._openai_model(cfg, overrides),
-                api_key=self._openai_api_key(cfg, overrides),
-                base_url=self._openai_base_url(cfg, overrides),
+                model=cfg.openai_model,
+                api_key=cfg.openai_api_key,
+                base_url=cfg.openai_base_url,
             )
         if backend == PROVIDER_LLAMA:
             return self._build_llama_embedding_provider(
@@ -489,8 +476,6 @@ class LLMManager:
         cfg: BizConfig,
         biz_key: str,
         backend: str,
-        *,
-        overrides: ProviderOverrides | None = None,
     ) -> ManagedProvider:
         rerank_model_type = cfg.rerank_model_type
         if rerank_model_type == RERANK_MODEL_TYPE_CHAT_POINTWISE:
@@ -500,11 +485,11 @@ class LLMManager:
                 )
             return self._build_openai_provider(
                 scope=cfg.provider_key,
-                model=self._openai_model(cfg, overrides),
-                api_key=self._openai_api_key(cfg, overrides),
-                base_url=self._openai_base_url(cfg, overrides),
-                max_tokens=self._openai_max_tokens(cfg, overrides),
-                temperature=self._openai_temperature(cfg, overrides),
+                model=cfg.openai_model,
+                api_key=cfg.openai_api_key,
+                base_url=cfg.openai_base_url,
+                max_tokens=cfg.openai_max_tokens,
+                temperature=cfg.openai_temperature,
             )
         if rerank_model_type == RERANK_MODEL_TYPE_QWEN3_LOGIT:
             if backend != PROVIDER_LLAMA:
@@ -531,39 +516,3 @@ class LLMManager:
         if provider_key is None:
             return resolve_biz_config(biz_key)
         return resolve_biz_config(biz_key, provider_key=provider_key)
-
-    @staticmethod
-    def _effective_overrides(overrides: ProviderOverrides | None) -> ProviderOverrides | None:
-        if overrides is None or not overrides.has_openai_values():
-            return None
-        return overrides
-
-    @staticmethod
-    def _openai_model(cfg: BizConfig, overrides: ProviderOverrides | None) -> str:
-        if overrides and overrides.openai_model:
-            return overrides.openai_model
-        return cfg.openai_model
-
-    @staticmethod
-    def _openai_api_key(cfg: BizConfig, overrides: ProviderOverrides | None) -> str | None:
-        if overrides and overrides.openai_api_key is not None:
-            return overrides.openai_api_key
-        return cfg.openai_api_key
-
-    @staticmethod
-    def _openai_base_url(cfg: BizConfig, overrides: ProviderOverrides | None) -> str | None:
-        if overrides and overrides.openai_base_url is not None:
-            return overrides.openai_base_url
-        return cfg.openai_base_url or None
-
-    @staticmethod
-    def _openai_max_tokens(cfg: BizConfig, overrides: ProviderOverrides | None) -> int | None:
-        if overrides and overrides.openai_max_tokens is not None:
-            return overrides.openai_max_tokens
-        return cfg.openai_max_tokens
-
-    @staticmethod
-    def _openai_temperature(cfg: BizConfig, overrides: ProviderOverrides | None) -> float | None:
-        if overrides and overrides.openai_temperature is not None:
-            return overrides.openai_temperature
-        return cfg.openai_temperature

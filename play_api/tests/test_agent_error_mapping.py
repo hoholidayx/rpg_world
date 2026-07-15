@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from agent_service.client import AgentClientError, AgentServiceUnavailable
+from commons.errors import LLM_SERVICE_UNAVAILABLE_ERROR_CODE
 from play_api import agent_client
 from play_api.main import app
 from play_api.sse_protocol import PLAY_SSE_SCHEMA_VERSION, PlaySSEType
@@ -28,12 +29,42 @@ class _UnavailableSendClient:
         raise AgentServiceUnavailable("Agent service unavailable: connection refused")
 
 
+class _LLMUnavailableHistoryClient:
+    async def get_history(self, session_id: str) -> dict[str, object]:
+        raise AgentClientError(
+            "LLM service connection failed",
+            status_code=503,
+            error_code=LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+        )
+
+
+class _LLMUnavailableOptionsClient:
+    async def get_main_llm_options(self) -> dict[str, object]:
+        raise AgentClientError(
+            "LLM service connection failed",
+            status_code=503,
+            error_code=LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+        )
+
+
 class _FailingStreamClient:
     async def stream(self, session_id: str, text: str, request_id: str | None = None):
         del request_id
         if False:
             yield None
         raise AgentClientError("stream failed")
+
+
+class _LLMUnavailableStreamClient:
+    async def stream(self, session_id: str, text: str, request_id: str | None = None):
+        del request_id
+        if False:
+            yield None
+        raise AgentClientError(
+            "LLM service connection failed",
+            status_code=503,
+            error_code=LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+        )
 
 
 def test_history_maps_agent_client_error_to_bad_gateway(tmp_path, monkeypatch) -> None:
@@ -72,6 +103,36 @@ def test_history_maps_agent_unavailable_to_service_unavailable(tmp_path, monkeyp
     assert response.json()["detail"] == "Agent service unavailable: connection refused"
 
 
+def test_history_preserves_llm_dependency_error(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_client, "_client", _LLMUnavailableHistoryClient())
+
+    with TestClient(app) as client:
+        response = client.get("/play-api/v1/sessions/s_forest001/history")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "errorCode": LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+        "message": "LLM service connection failed",
+    }
+
+
+def test_main_llm_options_preserve_llm_dependency_error(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_client, "_client", _LLMUnavailableOptionsClient())
+
+    with TestClient(app) as client:
+        response = client.get("/play-api/v1/llm/main-agent/options")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "errorCode": LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+        "message": "LLM service connection failed",
+    }
+
+
 def test_turn_maps_agent_unavailable_to_service_unavailable(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
@@ -105,3 +166,22 @@ def test_stream_maps_agent_client_error_to_sse_error(tmp_path, monkeypatch) -> N
     assert f'"type": "{PlaySSEType.TURN_STARTED.value}"' in body
     assert f'"type": "{PlaySSEType.ERROR.value}"' in body
     assert "stream failed" in body
+
+
+def test_stream_preserves_llm_dependency_error_code(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_client, "_client", _LLMUnavailableStreamClient())
+
+    with TestClient(app) as client:
+        with client.stream(
+            "POST",
+            "/play-api/v1/sessions/s_forest001/stream",
+            json={"text": "hello"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert f'"errorCode": "{LLM_SERVICE_UNAVAILABLE_ERROR_CODE}"' in body
+    assert '"statusCode": 503' in body
+    assert '"message": "LLM service connection failed"' in body

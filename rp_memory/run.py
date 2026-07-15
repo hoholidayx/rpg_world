@@ -32,8 +32,8 @@ logger.add(
     colorize=True,
 )
 
-from llm_service.config import resolve_llm_config
-from llm_service.keys import MEMORY_EMBED_BIZ_KEY, MEMORY_QUERY_PLANNER_BIZ_KEY, MEMORY_RERANK_BIZ_KEY
+from llm_client.keys import MEMORY_EMBED_BIZ_KEY, MEMORY_QUERY_PLANNER_BIZ_KEY, MEMORY_RERANK_BIZ_KEY
+from llm_client.manager import LLMClientManager
 from rp_memory.recalled_memory import RecalledMemoryStore
 from rp_memory.memory_manager import MemoryManager, format_recall_item
 from rpg_core.utils.watcher import get_watcher
@@ -49,43 +49,22 @@ def _print_separator(title: str) -> None:
     print(f"{'=' * 60}")
 
 
-def _format_secret(value: str | None) -> str:
-    return "set" if value else "unset"
-
-
 def _print_line(label: str, value: object, indent: str = "  ") -> None:
     print(f"{indent}{label:<24} {value}")
 
 
-def _print_provider_config(title: str, provider_cfg, biz_key: str) -> None:  # noqa: ANN001
+def _print_provider_config(title: str, biz_key: str) -> None:
     print(f"  {title}:")
-    _print_line("provider:", provider_cfg.provider, "    ")
     try:
-        llm_cfg = resolve_llm_config(biz_key)
-    except ValueError as exc:
-        _print_line("llm.yaml:", f"invalid ({exc})", "    ")
+        catalog = LLMClientManager.get().get_catalog(biz_key)
+    except Exception as exc:
+        _print_line("llm_service:", f"unavailable ({exc})", "    ")
         return
-    openai = llm_cfg.openai
-    llama = llm_cfg.llama
-    _print_line("openai.model:", openai.get("model") or "unset", "    ")
-    _print_line("openai.api_key:", _format_secret(openai.get("api_key")), "    ")
-    _print_line("openai.api_key_env:", openai.get("api_key_env") or "unset", "    ")
-    _print_line("openai.base_url:", openai.get("base_url") or "unset", "    ")
-    _print_line("openai.max_tokens:", openai.get("max_tokens") if openai.get("max_tokens") is not None else "unset", "    ")
-    _print_line("openai.temperature:", openai.get("temperature") if openai.get("temperature") is not None else "unset", "    ")
-    if llama:
-        for key, label in [
-            ("model_path", "llama.model_path"),
-            ("n_ctx", "llama.n_ctx"),
-            ("n_gpu_layers", "llama.n_gpu_layers"),
-            ("n_threads", "llama.n_threads"),
-            ("verbose", "llama.verbose"),
-            ("request_timeout_ms", "llama.request_timeout_ms"),
-            ("max_tokens", "llama.max_tokens"),
-            ("temperature", "llama.temperature"),
-        ]:
-            if key in llama:
-                _print_line(f"{label}:", llama.get(key), "    ")
+    option = catalog.option()
+    _print_line("provider_key:", option.provider_key, "    ")
+    _print_line("backend:", option.backend, "    ")
+    _print_line("model:", option.model, "    ")
+    _print_line("context_window:", option.context_window, "    ")
 
 
 def _print_available_workspaces() -> None:
@@ -119,7 +98,7 @@ def show_config(workspace: str, session: str) -> None:
     _print_line("选中 workspace:", workspace)
     _print_line("选中 session:", session)
     _print_line("enabled:", mem.enabled)
-    _print_provider_config("embedding", mem.embedding_provider, MEMORY_EMBED_BIZ_KEY)
+    _print_provider_config("embedding", MEMORY_EMBED_BIZ_KEY)
     _print_line("hybrid_enabled:", mem.hybrid_enabled)
     _print_line("vector_k:", mem.vector_k)
     _print_line("keyword_tokenizer:", mem.keyword_tokenizer)
@@ -136,16 +115,12 @@ def show_config(workspace: str, session: str) -> None:
     _print_line("top_k:", mem.top_k)
     _print_line("chunk_size:", mem.chunk_size)
     _print_line("chunk_overlap:", mem.chunk_overlap)
-    _print_line("llama_process_enabled:", mem.llama_process_enabled)
-    _print_line("llama_request_timeout_ms:", mem.llama_request_timeout_ms)
-    _print_line("llama_startup_timeout_ms:", mem.llama_startup_timeout_ms)
-    _print_line("llama_max_parallel_models:", mem.llama_max_parallel_models)
     _print_line("query_planner_enabled:", mem.query_planner_enabled)
-    _print_provider_config("query_planner", mem.query_planner_provider, MEMORY_QUERY_PLANNER_BIZ_KEY)
+    _print_provider_config("query_planner", MEMORY_QUERY_PLANNER_BIZ_KEY)
     _print_line("rerank_enabled:", mem.rerank_enabled)
     _print_line("rerank_candidate_k:", mem.rerank_candidate_k)
     _print_line("rerank_score_weight:", mem.rerank_score_weight)
-    _print_provider_config("rerank", mem.rerank_provider, MEMORY_RERANK_BIZ_KEY)
+    _print_provider_config("rerank", MEMORY_RERANK_BIZ_KEY)
     _print_line("DB path:", _vector_db_path(session))
     _print_line("session dir:", _session_root(session))
 

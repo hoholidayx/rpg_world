@@ -27,16 +27,23 @@ from agent_service.schemas import (
 )
 from agent_service.settings import settings
 from commons.types import JsonObject
-from llm_service.types import LLMUsage
+from llm_client.types import LLMUsage
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
 
 
 class AgentClientError(RuntimeError):
     """Base error raised by ``AgentClient``."""
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        error_code: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = error_code
 
 
 class AgentServiceUnavailable(AgentClientError):
@@ -379,7 +386,8 @@ class AgentClient:
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
+            await exc.response.aread()
+            raise _client_http_error(exc.response) from exc
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 
@@ -392,7 +400,7 @@ class AgentClient:
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
+            raise _client_http_error(exc.response) from exc
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 
@@ -405,7 +413,7 @@ class AgentClient:
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
+            raise _client_http_error(exc.response) from exc
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 
@@ -418,7 +426,7 @@ class AgentClient:
         except httpx.ConnectError as exc:
             raise AgentServiceUnavailable(f"Agent service unavailable: {exc}") from exc
         except httpx.HTTPStatusError as exc:
-            raise AgentClientError(_http_error_message(exc.response), status_code=exc.response.status_code) from exc
+            raise _client_http_error(exc.response) from exc
         except httpx.HTTPError as exc:
             raise AgentClientError(str(exc)) from exc
 
@@ -444,13 +452,35 @@ class AgentClient:
         return f"{self.base_url}{path}"
 
 
-def _http_error_message(response: httpx.Response) -> str:
+def _client_http_error(response: httpx.Response) -> AgentClientError:
+    message = _response_text(response)
+    error_code: str | None = None
     try:
         payload: object = response.json()
-        detail = payload.get("detail") if isinstance(payload, dict) else response.text
-    except Exception:
-        detail = response.text
-    return str(detail or f"Agent service returned HTTP {response.status_code}")
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        detail = payload.get("detail")
+        if isinstance(detail, dict):
+            raw_error_code = detail.get("error_code") or detail.get("errorCode")
+            if raw_error_code is not None:
+                error_code = str(raw_error_code).strip() or None
+            raw_message = detail.get("message")
+            message = str(raw_message) if raw_message is not None else str(detail)
+        elif detail is not None:
+            message = str(detail)
+    return AgentClientError(
+        message or f"Agent service returned HTTP {response.status_code}",
+        status_code=response.status_code,
+        error_code=error_code,
+    )
+
+
+def _response_text(response: httpx.Response) -> str:
+    try:
+        return response.text
+    except httpx.ResponseNotRead:
+        return ""
 
 
 def _json_response(response: httpx.Response) -> JsonObject:

@@ -7,12 +7,12 @@ import sqlite3
 import pytest
 
 from commons.errors import MainContextWindowThresholdExceededError
-from llm_service.keys import (
+from llm_client.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
 )
-from llm_service.types import ProviderChunk
+from llm_client.types import ProviderChunk
 from rpg_core.agent.agent_types import StreamEventKind
 from rpg_core.main_llm import MainLLMSelectionService
 from rpg_core.tests.integration.scripted_llm import (

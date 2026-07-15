@@ -268,9 +268,17 @@ async def _agent_call(awaitable: Awaitable[T]) -> T:
     except AgentServiceUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AgentClientError as exc:
-        if exc.status_code in {404, 409, 422}:
-            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        status_code = exc.status_code if exc.status_code in {404, 409, 422, 503} else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail=_agent_error_detail(exc),
+        ) from exc
+
+
+def _agent_error_detail(exc: AgentClientError) -> str | dict[str, str]:
+    if exc.error_code:
+        return {"errorCode": exc.error_code, "message": str(exc)}
+    return str(exc)
 
 
 _SCENE_TIME_KEYS = ("time", "时间")
@@ -791,7 +799,11 @@ async def stream_turn(session_id: str, payload: PlayChatRequest) -> StreamingRes
                     _log_stream_done_usage(session_id=agent_session_id, usage=event.get("usage"), mode=payload.mode)
                 yield encoded
         except (AgentServiceUnavailable, AgentClientError) as exc:
-            yield stream.error(str(exc), status_code=exc.status_code)
+            yield stream.error(
+                str(exc),
+                status_code=exc.status_code,
+                error_code=exc.error_code,
+            )
 
     return StreamingResponse(
         event_generator(),

@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-from llm_service.manager import ProviderOverrides
 from rpg_core.agent import model_runtime as runtime_module
 from rpg_core.agent.model_runtime import MainModelRuntime
 
@@ -35,19 +34,17 @@ def test_main_model_runtime_reuses_provider_for_same_effective_key(monkeypatch) 
     calls: list[str] = []
 
     class _Manager:
-        def get_provider(self, _biz_key, *, overrides, provider_key):  # noqa: ANN001, ANN201
-            assert overrides == ProviderOverrides()
+        def get_provider(self, _biz_key, *, provider_key):  # noqa: ANN001, ANN201
             calls.append(provider_key)
             return _Provider(f"provider-{provider_key}")
 
     monkeypatch.setattr(
-        runtime_module.LLMManager,
+        runtime_module.LLMClientManager,
         "get",
         classmethod(lambda cls: _Manager()),
     )
     runtime = MainModelRuntime(
         selection_service=selections,
-        provider_overrides=ProviderOverrides(),
     )
 
     first = runtime.provider_for("s1")
@@ -66,19 +63,17 @@ def test_main_model_runtime_switches_provider_only_for_new_key(monkeypatch) -> N
     calls: list[str] = []
 
     class _Manager:
-        def get_provider(self, _biz_key, *, overrides, provider_key):  # noqa: ANN001, ANN201
-            del overrides
+        def get_provider(self, _biz_key, *, provider_key):  # noqa: ANN001, ANN201
             calls.append(provider_key)
             return _Provider(provider_key)
 
     monkeypatch.setattr(
-        runtime_module.LLMManager,
+        runtime_module.LLMClientManager,
         "get",
         classmethod(lambda cls: _Manager()),
     )
     runtime = MainModelRuntime(
         selection_service=selections,
-        provider_overrides=ProviderOverrides(),
     )
     assert runtime.model is None
 
@@ -91,7 +86,6 @@ def test_main_model_runtime_switches_provider_only_for_new_key(monkeypatch) -> N
 def test_main_model_runtime_requires_catalog_selection() -> None:
     runtime = MainModelRuntime(
         selection_service=_SelectionService(),
-        provider_overrides=ProviderOverrides(),
     )
 
     try:

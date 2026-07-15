@@ -8,7 +8,8 @@ import json
 import pytest
 
 from rp_memory.candidate import MemoryCandidate
-from llm_service.manager import LLMManager
+from llm_client.manager import LLMClientManager
+from llm_service.manager import LLMManager as ServerLLMManager
 from llm_service.keys import (
     MEMORY_RERANK_BIZ_KEY,
     RERANK_MODEL_TYPE_CHAT_POINTWISE,
@@ -108,7 +109,7 @@ def test_memory_manager_falls_back_when_llm_manager_fails(monkeypatch):
     def fake_get_provider(_self, biz_key):  # noqa: ANN001
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+    monkeypatch.setattr(LLMClientManager, "get_provider", fake_get_provider)
 
     mem_cfg = SimpleNamespace(
         enabled=True,
@@ -153,7 +154,7 @@ def test_memory_manager_uses_llm_manager_for_embedding(monkeypatch):
         calls.append(biz_key)
         return embedding
 
-    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+    monkeypatch.setattr(LLMClientManager, "get_provider", fake_get_provider)
 
     mem_cfg = SimpleNamespace(enabled=True, embedding_provider=_provider_cfg("llama"))
     result = MemoryManager._build_embedding(mem_cfg)
@@ -223,7 +224,7 @@ def test_memory_manager_uses_llm_manager_for_query_planner(monkeypatch):
     def fake_get_provider(_self, biz_key):  # noqa: ANN001
         return FakeLLMProvider()
 
-    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+    monkeypatch.setattr(LLMClientManager, "get_provider", fake_get_provider)
 
     mem_cfg = SimpleNamespace(
         enabled=True,
@@ -233,7 +234,7 @@ def test_memory_manager_uses_llm_manager_for_query_planner(monkeypatch):
     )
     result = MemoryManager._build_query_planner(mem_cfg, planner)
 
-    assert result.plan("查找线索").planner_source == "llama"
+    assert result.plan("查找线索").planner_source == "llm_service"
 
 
 def test_memory_manager_query_planner_respects_disabled_flag(monkeypatch):
@@ -242,7 +243,7 @@ def test_memory_manager_query_planner_respects_disabled_flag(monkeypatch):
     def fake_get_provider(_self, biz_key):  # noqa: ANN001
         raise AssertionError(f"query planner should not resolve provider {biz_key}")
 
-    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+    monkeypatch.setattr(LLMClientManager, "get_provider", fake_get_provider)
 
     mem_cfg = SimpleNamespace(
         enabled=True,
@@ -261,7 +262,7 @@ def test_memory_manager_query_planner_falls_back_on_manager_failure(monkeypatch)
     def fake_get_provider(_self, biz_key):  # noqa: ANN001
         raise RuntimeError("planner boom")
 
-    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+    monkeypatch.setattr(LLMClientManager, "get_provider", fake_get_provider)
 
     mem_cfg = SimpleNamespace(
         enabled=True,
@@ -311,7 +312,7 @@ def test_openai_reranker_requires_model(monkeypatch):
     def fake_get_provider(_self, biz_key):  # noqa: ANN001
         raise ValueError("memory.rerank.openai.model is required")
 
-    monkeypatch.setattr(LLMManager, "get_provider", fake_get_provider)
+    monkeypatch.setattr(LLMClientManager, "get_provider", fake_get_provider)
 
     # noinspection PyTypeChecker
     mem_cfg = SimpleNamespace(rerank_enabled=True)
@@ -332,7 +333,7 @@ def test_memory_manager_reranker_uses_settings_rerank_score_weight(monkeypatch):
         def get(cls) -> FakeManager:  # noqa: ANN101
             return FakeManager()
 
-    monkeypatch.setattr("llm_service.manager.LLMManager", FakeLLMManager)
+    monkeypatch.setattr("llm_client.manager.LLMClientManager", FakeLLMManager)
     reranker = MemoryManager._build_reranker(
         SimpleNamespace(
             rerank_enabled=True,
@@ -363,13 +364,13 @@ def test_llm_manager_builds_logit_provider_for_llama_rerank(monkeypatch):
             self.model_path = model_path
             self.kwargs = kwargs
 
-        def rerank(self, query, documents, *, instruction, max_length):  # noqa: ANN001
+        async def rerank_async(self, query, documents, *, instruction, max_length):  # noqa: ANN001
             return [{"score": 0.9, "yes_logit": 2.0, "no_logit": 0.0} for _ in documents]
 
     monkeypatch.setattr("llm_service.manager.resolve_biz_config", lambda _key: FakeCfg())
-    monkeypatch.setattr("llm_service.manager.LlamaRerankModel", FakeRerankModel)
+    monkeypatch.setattr("llm_service.manager.DirectLlamaRerankModel", FakeRerankModel)
 
-    provider = LLMManager().get_provider(MEMORY_RERANK_BIZ_KEY)
+    provider = ServerLLMManager().get_provider(MEMORY_RERANK_BIZ_KEY)
 
     assert isinstance(provider, LlamaLogitRerankProvider)
     assert provider.get_default_model() == "/tmp/qwen-rerank.gguf"
@@ -387,7 +388,7 @@ def test_llm_manager_builds_chat_score_provider_for_openai_rerank(monkeypatch):
         openai_max_tokens = 8
         openai_temperature = 0.0
 
-    class FakeManager(LLMManager):
+    class FakeManager(ServerLLMManager):
         def _build_openai_client(self, **_kwargs):  # noqa: ANN003
             return SimpleNamespace()
 
@@ -409,7 +410,7 @@ def test_llm_manager_rejects_rerank_model_type_backend_mismatch(monkeypatch):
     monkeypatch.setattr("llm_service.manager.resolve_biz_config", lambda _key: FakeCfg())
 
     with pytest.raises(ValueError, match="rerank_model_type"):
-        LLMManager().get_provider(MEMORY_RERANK_BIZ_KEY)
+        ServerLLMManager().get_provider(MEMORY_RERANK_BIZ_KEY)
 
 
 def test_pointwise_rerank_core_parses_and_blends_scores():
@@ -477,7 +478,7 @@ def test_qwen_reranker_provider_scores_without_chat():
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
 
-        def rerank(self, query, documents, *, instruction, max_length):  # noqa: ANN001
+        async def rerank_async(self, query, documents, *, instruction, max_length):  # noqa: ANN001
             self.calls.append(
                 {
                     "query": query,

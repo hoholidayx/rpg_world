@@ -9,9 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TypeAlias
 
-from llm_service.base_provider import LLMProvider
-from llm_service.config import LLMProviderOption
-from llm_service.keys import (
+from llm_client.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
@@ -19,7 +17,7 @@ from llm_service.keys import (
     MEMORY_QUERY_PLANNER_BIZ_KEY,
     MEMORY_RERANK_BIZ_KEY,
 )
-from llm_service.types import LLMResponse, LLMUsage, ProviderChunk
+from llm_client.types import LLMBizCatalog, LLMProvider, LLMProviderOption, LLMResponse, LLMUsage, ProviderChunk
 
 CONFIG_PROVIDER_KEY = "config_chat"
 STORY_PROVIDER_KEY = "story_chat"
@@ -217,11 +215,9 @@ class ScriptedLLMManager:
     def get_provider(
         self,
         biz_key: str,
-        overrides=None,
         *,
         provider_key: str | None = None,
     ) -> LLMProvider:
-        del overrides
         self.calls.append(ManagerCall(biz_key, provider_key))
         if biz_key == AGENT_MAIN_BIZ_KEY:
             return self.main[provider_key or CONFIG_PROVIDER_KEY]
@@ -233,6 +229,16 @@ class ScriptedLLMManager:
             MEMORY_RERANK_BIZ_KEY: self.rerank,
         }
         return providers[biz_key]
+
+    def get_catalog(self, biz_key: str) -> LLMBizCatalog:
+        if biz_key != AGENT_MAIN_BIZ_KEY:
+            raise KeyError(biz_key)
+        return LLMBizCatalog(
+            biz_key=biz_key,
+            kind="chat",
+            default_provider_key=CONFIG_PROVIDER_KEY,
+            options=MAIN_PROVIDER_OPTIONS,
+        )
 
     def main_provider(self, provider_key: str = CONFIG_PROVIDER_KEY) -> ScriptedChatProvider:
         return self.main[provider_key]

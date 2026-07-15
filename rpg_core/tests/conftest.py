@@ -13,7 +13,7 @@ from rpg_core.context.rpg_context import Message, Role
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.planning.plan import QueryPlan
 from rpg_core.session.manager import SessionManager
-from llm_service.manager import LLMManager
+from llm_client.manager import LLMClientManager
 
 
 class FakeTokenCounter:
@@ -130,9 +130,9 @@ class FakeBatchStore:
 
 @pytest.fixture(autouse=True)
 def reset_llm_manager():
-    LLMManager.reset()
+    LLMClientManager.reset()
     yield
-    LLMManager.reset()
+    LLMClientManager.reset()
 
 
 class FakeMemorySubAgent:

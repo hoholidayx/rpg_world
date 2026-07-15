@@ -4,7 +4,7 @@
 - 当前产品路线：WebUI 是沉浸式 RP 主体验，Telegram 是轻量入口、推送通知与兜底交互；短期仍保持 Telegram 稳定性，但新增体验型能力优先沉淀到 WebUI。
 - Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口；不要恢复 Dashboard API/WebUI。
 - 修改启动流程、渠道生命周期、共享状态或 `AgentManager` 前，先阅读 `CLAUDE.md`。
-- 根目录聚合 supervisor 入口已移除；各进程必须通过独立入口启动。只有 `run_agent.py` 持有 `AgentManager` / `RPGGameAgent` / `rp_memory` / llama lazy worker，其它进程只能通过 `agent_service.client.AgentClient` 访问 Agent 服务。
+- 根目录聚合 supervisor 入口已移除；各进程必须通过独立入口启动。只有 `run_agent.py` 持有 `AgentManager` / `RPGGameAgent` / `rp_memory`，其它进程只能通过 `agent_service.client.AgentClient` 访问 Agent 服务。只有 `run_llm.py` 读取 `llm_service/llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 与本地 llama runtime；Agent、Memory、Media 等调用方只能通过 `llm_client` 访问 LLM 服务。
 - 保持 `play_api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
 - `rpg_media/` 是与 `rpg_core/` 同级的无框架高级能力模块；`media_service/` 独立持有图片 Provider、持久任务 worker 和媒体 HTTP 边界。Play WebUI 只能经 Play API → `MediaClient` 访问它，Play API 不得直接读取工作区图片文件，Media service 不得导入 Agent runtime 或持有 llama worker。
 - Play WebUI 会话内链路只使用全局短 `session_id` 定位；创建 session 时在 `rpg_data` 绑定 `workspace_id + story_id`，之后由 Play API 反查上下文并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
@@ -15,7 +15,8 @@
 
 ## 常用命令
 - `uv sync`：安装后端依赖。
-- `uv run python -m run_agent`：启动 Agent 服务（默认 `http://127.0.0.1:8010/agent/v1`）。
+- `uv run python -m run_llm`：启动 LLM 服务（默认 `http://127.0.0.1:8012/llm/v1`，需要 `RPG_WORLD_LLM_SERVICE_TOKEN`）。
+- `uv run python -m run_agent`：启动 Agent 服务（默认 `http://127.0.0.1:8010/agent/v1`，通过同一令牌访问 LLM 服务）。
 - `uv run python -m run_media`：启动 Media 服务与持久任务 worker（默认 `http://127.0.0.1:8011/media/v1`）。
 - `uv run python -m run_play_api`：启动 Play API。
 - `uv run python -m run_cli`：启动 CLI（通过 Agent 服务交互）。
@@ -31,7 +32,7 @@
 - Python 使用 4 空格缩进，模块/函数用 `snake_case`，类用 `PascalCase`。
 - Play WebUI 使用 Next.js App Router + React + TypeScript；React 组件用 `PascalCase.tsx`，hook/composable 用 `useXxx`，前端状态 store 用清晰的 camelCase 命名。
 - 新增注释只解释非直观逻辑，避免复述代码。
-- 配置访问必须走封装：`settings.memory_settings`、`settings.agent_model`、`channels.config.settings`、`resolve_biz_config()`、`get_runtime_config()` 或 `LLMManager`。
+- 配置访问必须走封装：核心业务用 `settings.memory_settings` 等类型化属性，渠道用 `channels.config.settings`，LLM 调用方用 `LLMClientManager`；只有 LLM Service 内部可使用 `resolve_biz_config()` / `LLMManager`。
 - 业务代码不要直接解析 YAML key，不要直接 new OpenAI/llama 客户端。
 - 跨模块重复使用的业务状态值、阶段名和 document 字段名不得散落为 magic string；优先复用集中常量或枚举。跨层返回结果优先使用 dataclass/类型化模型，不用约定字符串 key 的裸 dict 传递。
 - `getattr`、反射式能力探测只用于真实动态扩展或外部兼容边界，并应注明理由；仓库内固定协作者必须声明具体类型或 Protocol，并直接调用其公开 API，不保留静默 fallback。
@@ -41,7 +42,7 @@
 - 媒体二进制固定写入 `{workspace_root}/assets/images/{sha256}.<ext>`，只接受经魔数确认的 PNG/JPEG/WebP。`rpg_media_blobs` 以 `(workspace_id, sha256)` 去重，但 SHA-256 不是业务 Asset ID；每次成功生成都创建独立 UUID Asset，以便保留不同简报、Provider 和来源语义。
 - Media Job 使用数据库持久队列，默认单 worker、无自动重试；重启时保留 `queued`，把遗留 `running/cancelling` 标为 `interrupted`。删除正在作为 Session 背景的 Asset 必须失败；最后一个 Asset 引用删除时才回收 Blob 行和文件。
 - `/clear` 同事务清除该 Session 的 Media Job、Gallery 与背景引用，但保留 Workspace Asset/Blob；删除 Session 依靠外键清除 Session 媒体关联，同样保留 Workspace Asset/Blob。Media service 不可用时媒体接口返回独立错误，不能影响聊天加载、输入或 Agent SSE。
-- `VisualBriefPlanner` 是可替换契约，v1 使用配置驱动、无外部调用的 Demo planner。未来文本 LLM planner 应走通用 chat biz 配置且不得硬编码 Provider 黑名单（包括 llama）；但本地 llama worker 仍只能由 Agent service 持有，Media service 不得直接 new OpenAI/llama 客户端或导入 Agent runtime。
+- `VisualBriefPlanner` 是可替换契约，v1 使用配置驱动、无外部调用的 Demo planner。未来文本 LLM planner 应通过 `llm_client` 走通用 chat biz 配置且不得硬编码 Provider 黑名单（包括 llama）；本地 llama runtime 只能由 LLM service 持有，Media service 不得直接 new OpenAI/llama 客户端或导入 Agent runtime。
 - 记忆检索保持 `SqlVecRetriever`、`KeywordRetriever`、`RawMarkdownRetriever` 三路独立；`HybridRetriever` 只负责组装与融合。
 - keyword 配置使用 `keyword_k` / `hybrid_keyword_weight`，不要恢复 `bigram_k` 或 `hybrid_bigram_weight`。
 - `memory.raw_md_mode` 语义保持：`disabled` 关闭，`always` 主召回，`fallback_only` 仅在主召回不足或失败时补候选。
@@ -99,7 +100,7 @@
 ## 配置与数据
 - 配置按进程/模块拆分：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听与日志，`rpg_media/settings.yaml` 管简报与图片 Provider，`media_service/settings.yaml` 管 Media 服务、客户端和 worker。
 - Play WebUI 通用配置入口是 `play_webui/play_webui.config.json`，前端通过 typed loader 读取；历史分页配置位于 `session.historyPagination`，正文门禁阈值位于 `session.contextUsage.inputBlockThresholdRatio`。Core 兜底阈值独立配置在 `rpg_core/settings.yaml` 的 `agent.context_window_reject_threshold_ratio`；两者合法范围均为 `(0, 1]`、默认均为 `0.9`，WebUI 非法值回退 `0.9`，Core 非法值必须启动失败。
-- `llm_service/llm.yaml` 管 LLM provider、模型、上下文窗口和超时等 LLM 强相关配置。
+- `llm_service/settings.yaml` 管 LLM 服务监听、Bearer 鉴权和本地 llama runtime；`llm_service/llm.yaml` 只由 LLM Service 读取，管理 Provider、密钥、模型、上下文窗口和超时等 LLM 强相关配置。
 - 它们都支持 `base + profiles`；`local` / `test` / `prod` 是固定 profile 名称，同级 `settings.local.yaml` / `llm.local.yaml` 等覆盖文件会自动加载。
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。
 - `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。所有 session 创建入口都由 `rpg_data` 生成 ID；用户只允许指定 title。

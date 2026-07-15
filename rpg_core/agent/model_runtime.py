@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from loguru import logger
 
-from llm_service.base_provider import LLMProvider
-from llm_service.keys import AGENT_MAIN_BIZ_KEY
-from llm_service.manager import LLMManager, ProviderOverrides
+from llm_client.keys import AGENT_MAIN_BIZ_KEY
+from llm_client.manager import LLMClientManager
+from llm_client.types import LLMProvider
 from rpg_core.main_llm import MainLLMSelection, MainLLMSelectionService
 
 _TAG = "[MainModelRuntime]"
@@ -19,11 +19,9 @@ class MainModelRuntime:
         self,
         *,
         selection_service: MainLLMSelectionService,
-        provider_overrides: ProviderOverrides,
         initial_model: str | None = None,
     ) -> None:
         self._selection_service = selection_service
-        self._provider_overrides = provider_overrides
         self._provider: LLMProvider | None = None
         self._selection: MainLLMSelection | None = None
         self._model = initial_model
@@ -65,9 +63,8 @@ class MainModelRuntime:
             if self._selection is not None
             else None
         )
-        self._provider = LLMManager.get().get_provider(
+        self._provider = LLMClientManager.get().get_provider(
             AGENT_MAIN_BIZ_KEY,
-            overrides=self._provider_overrides,
             provider_key=resolved.effective_provider_key,
         )
         self._model = self._provider.get_default_model()

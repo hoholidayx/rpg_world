@@ -12,24 +12,15 @@ ask ``CatalogService.get_session_runtime_dir(session_id)``.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 
 from commons.settings import (
     PROFILE_ENV,
     ProfiledYamlSettings,
     forgiving_float,
 )
-from commons.types import ConfigDict, ConfigValue
-from llm_service.config import get_runtime_config, resolve_agent_defaults, resolve_llm_config
-from llm_service.keys import (
-    AGENT_MAIN_BIZ_KEY,
-    MEMORY_EMBED_BIZ_KEY,
-    MEMORY_QUERY_PLANNER_BIZ_KEY,
-    MEMORY_RERANK_BIZ_KEY,
-)
+from commons.types import ConfigDict
 from rpg_core.rp_module_constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
@@ -46,42 +37,8 @@ _PROFILE_ENV = PROFILE_ENV
 class MemorySettings:
     """记忆系统配置（对应 settings.yaml 中 ``memory`` 节）。"""
 
-    @dataclass(frozen=True)
-    class Provider:
-        """单个 memory LLM 后端选择。
-
-        具体 OpenAI / llama 参数由 ``llm.yaml`` 和 ``LLMManager`` 负责解析，
-        memory 设置只保留业务开关与 provider kind。
-        """
-
-        provider: Literal["shared", "openai", "llama"] = "llama"
-
     enabled: bool = False
     """是否启用向量记忆索引与检索。"""
-
-    embedding_provider: Provider = field(default_factory=Provider)
-    """Embedding provider 配置。"""
-
-    query_planner_provider: Provider = field(default_factory=Provider)
-    """Query planner provider 配置。"""
-
-    rerank_provider: Provider = field(default_factory=Provider)
-    """Reranker provider 配置。"""
-
-    embedding_model_path: str = ""
-    """嵌入模型 GGUF 文件路径（相对于工作区根目录），为空时禁用。"""
-
-    n_ctx: int = 32768
-    """嵌入模型的上下文窗口大小（token），默认 32K 与模型对齐。"""
-
-    n_gpu_layers: int = 0
-    """GPU 加速层数（0=纯 CPU，-1=全部 GPU）。"""
-
-    embedding_n_threads: int = 4
-    """嵌入模型 CPU 线程数。"""
-
-    embedding_verbose: bool = False
-    """是否输出嵌入模型 llama.cpp verbose 日志。"""
 
     top_k: int = 5
     """向量检索返回的最大结果数。"""
@@ -134,53 +91,11 @@ class MemorySettings:
     rerank_enabled: bool = False
     """是否启用本地 llama.cpp 重排。"""
 
-    rerank_model_path: str = ""
-    """重排模型 GGUF 路径，为空或不存在时自动回退。"""
-
-    rerank_n_ctx: int = 4096
-    """本地重排模型上下文窗口。"""
-
-    rerank_n_gpu_layers: int = 0
-    """本地重排模型 GPU 加速层数。"""
-
-    rerank_temperature: float = 0.0
-    """本地重排模型采样温度。"""
-
-    rerank_verbose: bool = False
-    """重排模型 llama.cpp verbose 日志开关。"""
-
     query_planner_enabled: bool = False
     """是否启用本地 llama.cpp 查询规划器。"""
 
-    query_planner_model_path: str = ""
-    """查询规划模型 GGUF 路径，为空或不存在时回退到规则规划器。"""
-
-    query_planner_n_ctx: int = 2048
-    """查询规划模型上下文窗口。"""
-
-    query_planner_n_gpu_layers: int = 0
-    """查询规划模型 GPU 加速层数。"""
-
-    query_planner_temperature: float = 0.0
-    """查询规划模型采样温度。"""
-
-    query_planner_max_tokens: int = 512
-    """查询规划模型最大输出 token 数。"""
-
     jieba_dict: str = ""
     """jieba 用户词典路径（相对于项目根目录），留空使用默认词典。"""
-
-    llama_process_enabled: bool = True
-    """是否将 llama.cpp 推理隔离到托管子进程。"""
-
-    llama_request_timeout_ms: int = 60000
-    """主进程等待 llama 子进程单次请求响应的超时时间。"""
-
-    llama_startup_timeout_ms: int = 120000
-    """llama 子进程启动超时时间。"""
-
-    llama_max_parallel_models: int = 2
-    """llama 子进程中允许并行调度的最大模型实例数。"""
 
     chunk_size: int = 2000
     """单文件超过此字符数时分块。"""
@@ -245,58 +160,10 @@ class Settings(ProfiledYamlSettings):
         super().__init__()
         self._validate_settings()
 
-    @staticmethod
-    def _first_non_empty(*values: str | None) -> str | None:
-        for value in values:
-            if value is None:
-                continue
-            text = str(value).strip()
-            if text:
-                return text
-        return None
-
-    def get_openai_api_key(self, explicit: str | None = None) -> str | None:
-        """Return API key with priority: explicit -> YAML api_key -> env(api_key_env)."""
-        return self.resolve_openai_api_key(explicit=explicit)
-
-    def resolve_openai_api_key(
-        self,
-        *,
-        explicit: str | None = None,
-        explicit_env: str | None = None,
-        fallback_to_agent: bool = True,
-    ) -> str | None:
-        """Resolve an OpenAI API key from explicit values and config fallbacks."""
-        if not fallback_to_agent:
-            return self._first_non_empty(
-                explicit,
-                os.environ.get(explicit_env) if explicit_env else None,
-            )
-        llm_agent = self._llm_agent_openai_settings()
-        agent = self.agent_settings
-        llm_env = self._first_non_empty(llm_agent.get("api_key_env"))
-        agent_env = self._first_non_empty(agent.get("api_key_env"))
-        return self._first_non_empty(
-            explicit,
-            os.environ.get(explicit_env) if explicit_env else None,
-            llm_agent.get("api_key"),
-            agent.get("api_key"),
-            os.environ.get(llm_env) if llm_env else None,
-            os.environ.get(agent_env) if agent_env else None,
-        )
-
     @property
     def agent_settings(self) -> ConfigDict:
         raw = self._raw.get("agent", {})
         return raw if isinstance(raw, dict) else {}
-
-    @staticmethod
-    def _llm_agent_openai_settings() -> ConfigDict:
-        try:
-            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
-        except ValueError:
-            return {}
-        return cfg.openai if isinstance(cfg.openai, dict) else {}
 
     @property
     def logging(self) -> CoreLoggingSettings:
@@ -367,7 +234,6 @@ class Settings(ProfiledYamlSettings):
         )
 
     def _validate_settings(self) -> None:
-        self._validate_agent_llm_settings()
         self._validate_context_window_reject_threshold()
         self._validate_status_sub_agent_settings()
         # Materialize the typed scene policy so malformed permissions fail at
@@ -376,21 +242,6 @@ class Settings(ProfiledYamlSettings):
         # Materialize typed RP module settings at startup so malformed weight
         # distributions fail fast instead of surfacing during a player turn.
         self.rp_module_settings
-
-    def _validate_agent_llm_settings(self) -> None:
-        legacy_model = self._first_non_empty(self.agent_settings.get("model"))
-        try:
-            agent = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
-        except ValueError:
-            if not legacy_model:
-                raise
-            return
-
-        if agent.model:
-            return
-        if legacy_model:
-            return
-        raise ValueError(f"llm biz config invalid: {AGENT_MAIN_BIZ_KEY}.model is required")
 
     def _validate_context_window_reject_threshold(self) -> None:
         value = self.context_window_reject_threshold_ratio
@@ -497,53 +348,6 @@ class Settings(ProfiledYamlSettings):
     def include_tool_records(self) -> bool:
         return self.agent_settings.get("include_tool_records", True)
 
-    @property
-    def agent_model(self) -> str:
-        """用于 API 层创建 RPGGameAgent 的默认模型名。
-        """
-        try:
-            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
-        except ValueError:
-            return self._first_non_empty(self.agent_settings.get("model")) or ""
-
-        value = self._first_non_empty(cfg.model)
-        if value:
-            return value
-        return self._first_non_empty(self.agent_settings.get("model")) or ""
-
-    @property
-    def agent_base_url(self) -> str | None:
-        """用于 API 层创建 RPGGameAgent 的 base URL。None 表示使用 SDK 默认值。"""
-        try:
-            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
-            return cfg.base_url
-        except ValueError:
-            pass
-        value = self.agent_settings.get("base_url")
-        return str(value) if value is not None else None
-
-    @property
-    def agent_max_tokens(self) -> int | None:
-        try:
-            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
-            if cfg.max_tokens is not None:
-                return cfg.max_tokens
-        except ValueError:
-            pass
-        value = self.agent_settings.get("max_tokens")
-        return int(value) if value is not None else None
-
-    @property
-    def agent_temperature(self) -> float | None:
-        try:
-            cfg = resolve_agent_defaults(AGENT_MAIN_BIZ_KEY)
-            if cfg.temperature is not None:
-                return cfg.temperature
-        except ValueError:
-            pass
-        value = self.agent_settings.get("temperature")
-        return float(value) if value is not None else None
-
     # ------------------------------------------------------------------
     # Workspace operations
     # ------------------------------------------------------------------
@@ -570,17 +374,8 @@ class Settings(ProfiledYamlSettings):
             jieba_dict_resolved = str(p if p.is_absolute() else (_PACKAGE_ROOT / p).resolve())
         else:
             jieba_dict_resolved = ""
-        llm_runtime = get_runtime_config()
         return MemorySettings(
             enabled=raw.get("enabled", False),
-            embedding_provider=self._memory_llm_provider(MEMORY_EMBED_BIZ_KEY),
-            query_planner_provider=self._memory_llm_provider(MEMORY_QUERY_PLANNER_BIZ_KEY),
-            rerank_provider=self._memory_llm_provider(MEMORY_RERANK_BIZ_KEY),
-            embedding_model_path=self._memory_llama_model_path(MEMORY_EMBED_BIZ_KEY),
-            n_ctx=32768,
-            n_gpu_layers=0,
-            embedding_n_threads=4,
-            embedding_verbose=False,
             top_k=raw.get("top_k", 5),
             hybrid_enabled=raw.get("hybrid_enabled", True),
             vector_k=raw.get("vector_k", 50),
@@ -597,53 +392,12 @@ class Settings(ProfiledYamlSettings):
             raw_md_min_results=raw.get("raw_md_min_results", 0),
             rerank_candidate_k=raw.get("rerank_candidate_k", 8),
             rerank_enabled=raw.get("rerank_enabled", False),
-            rerank_model_path=self._memory_llama_model_path(MEMORY_RERANK_BIZ_KEY),
-            rerank_n_ctx=4096,
-            rerank_n_gpu_layers=0,
-            rerank_temperature=0.0,
             rerank_score_weight=forgiving_float(raw.get("rerank_score_weight", 0.70), 0.70),
-            rerank_verbose=False,
             query_planner_enabled=raw.get("query_planner_enabled", False),
-            query_planner_model_path=self._memory_llama_model_path(MEMORY_QUERY_PLANNER_BIZ_KEY),
-            query_planner_n_ctx=2048,
-            query_planner_n_gpu_layers=0,
-            query_planner_temperature=0.0,
-            query_planner_max_tokens=512,
             jieba_dict=jieba_dict_resolved,
-            llama_process_enabled=llm_runtime.llama_process_enabled,
-            llama_request_timeout_ms=llm_runtime.llama_request_timeout_ms,
-            llama_startup_timeout_ms=llm_runtime.llama_startup_timeout_ms,
-            llama_max_parallel_models=llm_runtime.llama_max_parallel_models,
             chunk_size=raw.get("chunk_size", 2000),
             chunk_overlap=raw.get("chunk_overlap", 64),
         )
-
-    @staticmethod
-    def _resolve_package_path(value: ConfigValue) -> str:
-        text = str(value or "").strip()
-        if not text:
-            return ""
-        path = Path(text)
-        if path.is_absolute():
-            return str(path)
-        return str((_PACKAGE_ROOT / path).resolve())
-
-    @staticmethod
-    def _memory_llm_provider(biz_key: str) -> MemorySettings.Provider:
-        try:
-            cfg = resolve_llm_config(biz_key)
-        except ValueError:
-            return MemorySettings.Provider()
-        provider = cfg.provider if cfg.provider in {"shared", "openai", "llama"} else "llama"
-        return MemorySettings.Provider(provider=provider)  # type: ignore[arg-type]
-
-    @staticmethod
-    def _memory_llama_model_path(biz_key: str) -> str:
-        try:
-            cfg = resolve_llm_config(biz_key)
-        except ValueError:
-            return ""
-        return Settings._resolve_package_path(cfg.llama.get("model_path"))
 
 # Singleton
 settings = Settings()

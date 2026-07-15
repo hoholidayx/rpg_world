@@ -11,15 +11,11 @@ from dataclasses import dataclass
 import pytest
 import pytest_asyncio
 
-import rpg_core.main_llm as main_llm_module
-from llm_service import config as llm_config_module
-from llm_service.manager import LLMManager
+from llm_client.manager import LLMClientManager
 from rpg_core import settings as settings_module
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.manager import AgentManager
 from rpg_core.tests.integration.scripted_llm import (
-    CONFIG_PROVIDER_KEY,
-    MAIN_PROVIDER_OPTIONS,
     ScriptedLLMManager,
 )
 from rpg_core.utils.watcher import get_watcher
@@ -48,8 +44,6 @@ def _patch_loaded_settings_refs(integration_settings) -> dict[str, object]:
         "rpg_core.agent.sub_agents.status_sub_agent",
         "rpg_core.agent.sub_agents.memory_sub_agent",
         "rpg_core.summary.compressor",
-        "llm_service.manager",
-        "llm_service.openai_provider",
         "rpg_core.session.manager",
     )
     previous: dict[str, object] = {}
@@ -64,7 +58,6 @@ def _patch_loaded_settings_refs(integration_settings) -> dict[str, object]:
 @pytest.fixture
 def integration_settings(monkeypatch):
     monkeypatch.setenv("RPG_WORLD_PROFILE", "test")
-    llm_config_module.reload_llm_settings()
     previous = settings_module.settings
     current = settings_module.Settings()
     settings_module.settings = current
@@ -77,7 +70,6 @@ def integration_settings(monkeypatch):
             module = sys.modules.get(module_name)
             if module is not None and hasattr(module, "settings"):
                 setattr(module, "settings", old_settings)
-        llm_config_module.reload_llm_settings()
 
 
 @pytest.fixture
@@ -106,17 +98,7 @@ def integration_data_gateway(integration_workspace):  # noqa: ARG001
 @pytest.fixture
 def scripted_llm_manager(monkeypatch) -> ScriptedLLMManager:
     manager = ScriptedLLMManager()
-    monkeypatch.setattr(LLMManager, "get", classmethod(lambda cls: manager))
-    monkeypatch.setattr(
-        main_llm_module,
-        "resolve_biz_config",
-        lambda _biz_key: type("Resolved", (), {"provider_key": CONFIG_PROVIDER_KEY})(),
-    )
-    monkeypatch.setattr(
-        main_llm_module,
-        "list_provider_options",
-        lambda _biz_key: MAIN_PROVIDER_OPTIONS,
-    )
+    monkeypatch.setattr(LLMClientManager, "get", classmethod(lambda cls: manager))
     return manager
 
 

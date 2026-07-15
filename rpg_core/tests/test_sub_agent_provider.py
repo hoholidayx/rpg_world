@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from llm_service import manager as manager_module
+from llm_client import manager as manager_module
 from rpg_core.agent.sub_agents import MemorySubAgent, StatusSubAgent
 
 
@@ -23,7 +23,7 @@ def test_shared_provider_selection_is_hidden_behind_biz_key(monkeypatch):
             calls.append(biz_key)
             return shared
 
-    monkeypatch.setattr(manager_module.LLMManager, "get", classmethod(lambda cls: FakeManager()))
+    monkeypatch.setattr(manager_module.LLMClientManager, "get", classmethod(lambda cls: FakeManager()))
 
     status = StatusSubAgent(provider_biz_key="agent.status_sub_agent", enabled=True)
     memory = MemorySubAgent(provider_biz_key="agent.memory_sub_agent", enabled=True)
@@ -43,7 +43,7 @@ def test_biz_key_routes_to_distinct_providers(monkeypatch):
         def get_provider(self, biz_key):  # noqa: ANN001
             return providers[biz_key]
 
-    monkeypatch.setattr(manager_module.LLMManager, "get", classmethod(lambda cls: FakeManager()))
+    monkeypatch.setattr(manager_module.LLMClientManager, "get", classmethod(lambda cls: FakeManager()))
 
     assert StatusSubAgent(provider_biz_key="agent.status_sub_agent")._get_provider() is providers["agent.status_sub_agent"]
     assert MemorySubAgent(provider_biz_key="agent.memory_sub_agent")._get_provider() is providers["agent.memory_sub_agent"]
@@ -54,7 +54,7 @@ def test_disabled_sub_agent_does_not_trigger_provider_resolution(monkeypatch):
         def get_provider(self, biz_key):  # noqa: ANN001
             raise AssertionError(f"provider should not be resolved for {biz_key}")
 
-    monkeypatch.setattr(manager_module.LLMManager, "get", classmethod(lambda cls: FakeManager()))
+    monkeypatch.setattr(manager_module.LLMClientManager, "get", classmethod(lambda cls: FakeManager()))
 
     memory = MemorySubAgent(provider_biz_key="agent.memory_sub_agent", enabled=False)
     assert memory.get_command_def() is None
