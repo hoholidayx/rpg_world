@@ -14,7 +14,7 @@ base:
     # 监听地址。
     host: 127.0.0.1
     # 监听端口。
-    port: 8012
+    port: 8001
     # API 路由前缀。
     api_prefix: /play-api/v1
     # 是否启用 uvicorn reload。

@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shlex
 import signal
 import socket
 import subprocess
@@ -25,6 +27,11 @@ from play_api.settings import play_settings
 _PROJECT_ROOT = Path(__file__).resolve().parent
 _DEFAULT_STARTUP_TIMEOUT = 30.0
 _DEFAULT_SHUTDOWN_TIMEOUT = 10.0
+_FORCED_PORT_RELEASE_TIMEOUT = 2.0
+_RUNTIME_PROCESS_NAME = re.compile(
+    r"^(?:python(?:w)?(?:\d+(?:\.\d+)*)?|uv)(?:\.exe)?$",
+    re.IGNORECASE,
+)
 
 
 class StartupError(RuntimeError):
@@ -35,15 +42,22 @@ class StartupError(RuntimeError):
 class ServiceSpec:
     name: str
     module: str
+    listen_address: tuple[str, int]
     health_url: str | None = None
     expected_status: str | None = None
-    ready_address: tuple[str, int] | None = None
 
 
 @dataclass
 class RunningService:
     spec: ServiceSpec
     process: subprocess.Popen[bytes]
+
+
+@dataclass(frozen=True)
+class ProcessInfo:
+    pid: int
+    command: str
+    arguments: str
 
 
 def _authority(host: str, port: int) -> str:
@@ -64,6 +78,7 @@ def _service_specs() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             name="llm",
             module="run_llm",
+            listen_address=(llm_settings.service.host, llm_settings.service.port),
             health_url=_health_url(
                 llm_settings.service.host,
                 llm_settings.service.port,
@@ -74,6 +89,10 @@ def _service_specs() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             name="agent",
             module="run_agent",
+            listen_address=(
+                agent_settings.service.host,
+                agent_settings.service.port,
+            ),
             health_url=_health_url(
                 agent_settings.service.host,
                 agent_settings.service.port,
@@ -83,6 +102,7 @@ def _service_specs() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             name="media",
             module="run_media",
+            listen_address=(media_settings.service.host, media_settings.service.port),
             health_url=_health_url(
                 media_settings.service.host,
                 media_settings.service.port,
@@ -92,7 +112,7 @@ def _service_specs() -> tuple[ServiceSpec, ...]:
         ServiceSpec(
             name="play_api",
             module="run_play_api",
-            ready_address=(play_settings.service.host, play_settings.service.port),
+            listen_address=(play_settings.service.host, play_settings.service.port),
         ),
     )
 
@@ -127,6 +147,226 @@ def _probe_port(address: tuple[str, int]) -> None:
         return
 
 
+def _port_in_use(address: tuple[str, int]) -> bool:
+    try:
+        _probe_port(address)
+    except OSError:
+        return False
+    return True
+
+
+def _listener_pids(port: int) -> tuple[int, ...]:
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", "-t", f"-iTCP:{int(port)}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise StartupError(
+            f"cannot inspect the process listening on port {port}: {exc}"
+        ) from exc
+
+    if result.returncode not in {0, 1}:
+        detail = result.stderr.strip() or f"lsof exited with code {result.returncode}"
+        raise StartupError(
+            f"cannot inspect the process listening on port {port}: {detail}"
+        )
+
+    pids: set[int] = set()
+    for line in result.stdout.splitlines():
+        value = line.strip()
+        if not value:
+            continue
+        try:
+            pid = int(value)
+        except ValueError as exc:
+            raise StartupError(
+                f"cannot parse listener pid for port {port}: {value!r}"
+            ) from exc
+        if pid > 0:
+            pids.add(pid)
+    return tuple(sorted(pids))
+
+
+def _process_info(pid: int) -> ProcessInfo | None:
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "comm=", "-o", "args="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise StartupError(f"cannot inspect process {pid}: {exc}") from exc
+
+    line = result.stdout.strip()
+    if result.returncode != 0 or not line:
+        return None
+    command, _, arguments = line.partition(" ")
+    return ProcessInfo(
+        pid=pid,
+        command=command.strip(),
+        arguments=arguments.strip(),
+    )
+
+
+def _process_executable_names(process: ProcessInfo) -> tuple[str, ...]:
+    candidates = [process.command]
+    if process.arguments:
+        try:
+            arguments = shlex.split(process.arguments, posix=os.name != "nt")
+        except ValueError:
+            arguments = process.arguments.split()
+        if arguments:
+            candidates.append(arguments[0])
+
+    names: list[str] = []
+    for candidate in candidates:
+        name = candidate.replace("\\", "/").rsplit("/", 1)[-1].strip()
+        if name:
+            names.append(name)
+    return tuple(names)
+
+
+def _is_python_or_uv_process(process: ProcessInfo) -> bool:
+    return any(
+        _RUNTIME_PROCESS_NAME.fullmatch(name) is not None
+        for name in _process_executable_names(process)
+    )
+
+
+def _validated_port_owners(port: int) -> tuple[ProcessInfo, ...]:
+    owners: list[ProcessInfo] = []
+    rejected: list[str] = []
+    for pid in _listener_pids(port):
+        process = _process_info(pid)
+        if process is None:
+            rejected.append(f"pid={pid} (process details unavailable)")
+            continue
+        if pid == os.getpid():
+            rejected.append(f"pid={pid} ({process.command}, current run_all process)")
+            continue
+        if not _is_python_or_uv_process(process):
+            rejected.append(f"pid={pid} ({process.command})")
+            continue
+        owners.append(process)
+
+    if rejected:
+        detail = ", ".join(rejected)
+        raise StartupError(
+            f"port {port} is occupied by a process that is not confirmed as "
+            f"Python or uv; refusing to terminate: {detail}"
+        )
+    return tuple(owners)
+
+
+def _signal_processes(
+    processes: tuple[ProcessInfo, ...],
+    signum: signal.Signals,
+) -> None:
+    for process in processes:
+        try:
+            os.kill(process.pid, signum)
+        except ProcessLookupError:
+            continue
+        except PermissionError as exc:
+            raise StartupError(
+                f"cannot signal process {process.pid} ({process.command}): {exc}"
+            ) from exc
+
+
+def _wait_for_port_release(
+    address: tuple[str, int],
+    *,
+    timeout: float,
+    stop_event: Event,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while _port_in_use(address):
+        if stop_event.is_set():
+            raise StartupError("startup interrupted")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        stop_event.wait(min(0.1, remaining))
+    return True
+
+
+def _clear_occupied_port(
+    spec: ServiceSpec,
+    *,
+    timeout: float,
+    stop_event: Event,
+) -> None:
+    address = spec.listen_address
+    host, port = address
+    if not _port_in_use(address):
+        return
+
+    owners = _validated_port_owners(port)
+    if not owners:
+        if not _port_in_use(address):
+            return
+        raise StartupError(
+            f"{spec.name} port {host}:{port} is occupied, but its listener "
+            "could not be identified"
+        )
+
+    for owner in owners:
+        print(
+            f"[run_all] {spec.name} port {host}:{port} is occupied by "
+            f"{owner.command} (pid={owner.pid}); terminating it",
+            flush=True,
+        )
+    _signal_processes(owners, signal.SIGTERM)
+    if _wait_for_port_release(address, timeout=timeout, stop_event=stop_event):
+        print(f"[run_all] {spec.name} port {host}:{port} released", flush=True)
+        return
+
+    remaining = _validated_port_owners(port)
+    if not remaining:
+        if not _port_in_use(address):
+            return
+        raise StartupError(
+            f"{spec.name} port {host}:{port} is still occupied, but its listener "
+            "could not be identified"
+        )
+    for owner in remaining:
+        print(
+            f"[run_all] force killing {owner.command} (pid={owner.pid}) "
+            f"on {spec.name} port {host}:{port}",
+            flush=True,
+        )
+    _signal_processes(remaining, signal.SIGKILL)
+    if not _wait_for_port_release(
+        address,
+        timeout=_FORCED_PORT_RELEASE_TIMEOUT,
+        stop_event=stop_event,
+    ):
+        raise StartupError(
+            f"timed out waiting for {spec.name} port {host}:{port} to be released"
+        )
+    print(f"[run_all] {spec.name} port {host}:{port} released", flush=True)
+
+
+def _validate_service_ports(specs: tuple[ServiceSpec, ...]) -> None:
+    services_by_port: dict[int, list[str]] = {}
+    for spec in specs:
+        services_by_port.setdefault(int(spec.listen_address[1]), []).append(spec.name)
+
+    conflicts = [
+        f"{port} ({', '.join(names)})"
+        for port, names in sorted(services_by_port.items())
+        if len(names) > 1
+    ]
+    if conflicts:
+        raise StartupError(
+            "services must use distinct listen ports; conflicts: " + "; ".join(conflicts)
+        )
+
+
 def _wait_for_ready(
     service: RunningService,
     *,
@@ -134,9 +374,7 @@ def _wait_for_ready(
     stop_event: Event,
 ) -> dict[str, Any]:
     url = service.spec.health_url
-    ready_address = service.spec.ready_address
-    if url is None and ready_address is None:
-        return {}
+    ready_address = service.spec.listen_address
 
     deadline = time.monotonic() + timeout
     last_error = "not reachable"
@@ -240,7 +478,15 @@ def run_stack(*, startup_timeout: float, shutdown_timeout: float) -> int:
         signal.signal(signum, _handle_signal)
 
     try:
+        _validate_service_ports(specs)
         for spec in specs:
+            if stop_event.is_set():
+                raise StartupError("startup interrupted")
+            _clear_occupied_port(
+                spec,
+                timeout=shutdown_timeout,
+                stop_event=stop_event,
+            )
             service = _start(spec)
             services.append(service)
             _wait_for_ready(
@@ -284,7 +530,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--shutdown-timeout",
         type=float,
         default=_DEFAULT_SHUTDOWN_TIMEOUT,
-        help="Seconds to wait for graceful child shutdown (default: %(default)s).",
+        help=(
+            "Seconds to wait for graceful port-owner and child shutdown "
+            "(default: %(default)s)."
+        ),
     )
     args = parser.parse_args(argv)
     if args.startup_timeout <= 0 or args.shutdown_timeout <= 0:

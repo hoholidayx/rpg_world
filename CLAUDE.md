@@ -159,6 +159,8 @@ rpg_world/
 
 RPG World 采用 **独立 Agent、LLM、Media 服务 + 独立入口** 模式。根目录不再提供持有业务运行时的聚合 supervisor；
 `run_all.py` 仅作为可选的前台进程编排器，负责启动/停止独立子进程，不合并任何运行时。
+它在启动每个服务前检查对应端口：仅当占用者确认是 Python 或 uv 进程时终止并等待释放，
+其他进程保持不动并使启动失败；四个服务配置为重复端口时同样拒绝启动。
 只有 `run_agent.py` 进程持有 `AgentManager`、`RPGGameAgent` 和 `rp_memory`。
 只有 `run_llm.py` 进程读取 `llm_service/llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 与本地 llama runtime；Agent、Memory 及未来 Media planner 只能通过 `llm_client` 调用它。
 Play API、CLI、Telegram 不创建 agent，不缓存 agent，不配置 llama，只通过

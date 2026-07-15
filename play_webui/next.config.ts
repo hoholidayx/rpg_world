@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next'
 
-const playApiOrigin = process.env.RPG_WORLD_PLAY_API_ORIGIN ?? 'http://127.0.0.1:8012'
+const playApiOrigin = process.env.RPG_WORLD_PLAY_API_ORIGIN ?? 'http://127.0.0.1:8001'
 
 const nextConfig: NextConfig = {
   async rewrites() {
