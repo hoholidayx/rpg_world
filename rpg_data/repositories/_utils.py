@@ -211,6 +211,96 @@ def to_session_message(
     )
 
 
+def to_media_blob(row: records.MediaBlobRecord) -> models.MediaBlob:
+    return models.MediaBlob(
+        id=str(row.id),
+        workspace_id=str(row.workspace_id),
+        sha256=str(row.sha256),
+        canonical_ext=str(row.canonical_ext),
+        mime_type=str(row.mime_type),
+        byte_size=int(row.byte_size),
+        relative_path=str(row.relative_path),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_media_asset(row: records.MediaAssetRecord) -> models.MediaAsset:
+    return models.MediaAsset(
+        id=str(row.id),
+        workspace_id=str(row.workspace_id),
+        blob_id=str(row.blob_id),
+        provider_key=str(row.provider_key),
+        provider_asset_id=str(row.provider_asset_id or ""),
+        visual_brief_json=str(row.visual_brief_json),
+        generation_params_json=str(row.generation_params_json or "{}"),
+        metadata_json=str(row.metadata_json or "{}"),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_media_job(row: records.MediaJobRecord) -> models.MediaJob:
+    return models.MediaJob(
+        id=str(row.id),
+        session_id=str(row.session_id),
+        provider_key=str(row.provider_key),
+        status=str(row.status),
+        source_start_turn_id=int(row.source_start_turn_id),
+        source_end_turn_id=int(row.source_end_turn_id),
+        source_fingerprint=str(row.source_fingerprint),
+        source_snapshot_json=str(row.source_snapshot_json),
+        visual_brief_json=str(row.visual_brief_json),
+        generation_params_json=str(row.generation_params_json or "{}"),
+        output_asset_id=(
+            str(row.output_asset_id) if row.output_asset_id is not None else None
+        ),
+        retry_of_job_id=(
+            str(row.retry_of_job_id) if row.retry_of_job_id is not None else None
+        ),
+        error_code=str(row.error_code or ""),
+        error_message=str(row.error_message or ""),
+        started_at=str(row.started_at or ""),
+        finished_at=str(row.finished_at or ""),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_session_media_gallery_item(
+    row: records.SessionMediaGalleryItemRecord,
+) -> models.SessionMediaGalleryItem:
+    return models.SessionMediaGalleryItem(
+        id=str(row.id),
+        session_id=str(row.session_id),
+        asset_id=str(row.asset_id),
+        job_id=str(row.job_id) if row.job_id is not None else None,
+        source_start_turn_id=int(row.source_start_turn_id),
+        source_end_turn_id=int(row.source_end_turn_id),
+        source_fingerprint=str(row.source_fingerprint),
+        source_snapshot_json=str(row.source_snapshot_json),
+        visual_brief_json=str(row.visual_brief_json),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_session_media_background(
+    row: records.SessionMediaBackgroundRecord,
+) -> models.SessionMediaBackground:
+    return models.SessionMediaBackground(
+        session_id=str(row.session_id),
+        asset_id=str(row.asset_id),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
 def to_narrative_outcome(
     row: records.SessionNarrativeOutcomeRecord,
 ) -> models.NarrativeOutcomeRecord:

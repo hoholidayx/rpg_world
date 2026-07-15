@@ -7,6 +7,11 @@ type ApiErrorDetailItem = {
   message?: unknown
 }
 
+type ApiErrorObject = {
+  errorCode?: unknown
+  message?: unknown
+}
+
 function isObject(item: unknown): item is Record<string, unknown> {
   return typeof item === 'object' && item !== null
 }
@@ -25,6 +30,14 @@ export async function readApiError(response: Response, fallback = '请求失败'
     if (!isApiErrorPayload(data)) return fallback
 
     if (typeof data?.detail === 'string') return data.detail
+    if (isObject(data?.detail)) {
+      const detail = data.detail as ApiErrorObject
+      if (typeof detail.message === 'string') {
+        return typeof detail.errorCode === 'string' && detail.errorCode
+          ? `${detail.message} (${detail.errorCode})`
+          : detail.message
+      }
+    }
     if (Array.isArray(data?.detail)) {
       return data.detail
         .map((item: unknown) => {

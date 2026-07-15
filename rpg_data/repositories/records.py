@@ -26,10 +26,15 @@ __all__ = [
     "CharacterDetailRecord",
     "CharacterRecord",
     "LorebookEntryRecord",
+    "MediaAssetRecord",
+    "MediaBlobRecord",
+    "MediaJobRecord",
     "NarrativeStyleRecord",
     "RPModuleCatalogRecord",
     "SessionBackupMessageRecord",
     "SessionMessageRecord",
+    "SessionMediaBackgroundRecord",
+    "SessionMediaGalleryItemRecord",
     "SessionNarrativeOutcomeRecord",
     "SessionProfileRecord",
     "SessionRPModuleOverrideRecord",
@@ -362,6 +367,158 @@ class SessionNarrativeOutcomeRecord(BaseRecord):
         indexes = ((('session', 'turn_id'), True),)
 
 
+class MediaBlobRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="media_blobs",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    sha256 = CharField(constraints=[Check("length(sha256) = 64")])
+    canonical_ext = CharField()
+    mime_type = CharField()
+    byte_size = IntegerField(constraints=[Check("byte_size > 0")])
+    relative_path = TextField()
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_media_blobs"
+        indexes = ((('workspace', 'sha256'), True),)
+
+
+class MediaAssetRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="media_assets",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    blob = ForeignKeyField(
+        MediaBlobRecord,
+        backref="assets",
+        column_name="blob_id",
+        on_delete="CASCADE",
+    )
+    provider_key = TextField()
+    provider_asset_id = TextField(default="")
+    visual_brief_json = TextField()
+    generation_params_json = TextField(default="{}")
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_media_assets"
+
+
+class MediaJobRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="media_jobs",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    provider_key = TextField()
+    status = TextField(default="queued")
+    source_start_turn_id = IntegerField(constraints=[Check("source_start_turn_id > 0")])
+    source_end_turn_id = IntegerField(
+        constraints=[Check("source_end_turn_id >= source_start_turn_id")]
+    )
+    source_fingerprint = CharField(constraints=[Check("length(source_fingerprint) = 64")])
+    source_snapshot_json = TextField()
+    visual_brief_json = TextField()
+    generation_params_json = TextField(default="{}")
+    output_asset = ForeignKeyField(
+        MediaAssetRecord,
+        backref="output_jobs",
+        column_name="output_asset_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    retry_of_job = ForeignKeyField(
+        "self",
+        backref="retry_jobs",
+        column_name="retry_of_job_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    error_code = TextField(default="")
+    error_message = TextField(default="")
+    started_at = TextField(null=True)
+    finished_at = TextField(null=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_media_jobs"
+
+
+class SessionMediaGalleryItemRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="media_gallery_items",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    asset = ForeignKeyField(
+        MediaAssetRecord,
+        backref="session_gallery_items",
+        column_name="asset_id",
+        on_delete="CASCADE",
+        unique=True,
+    )
+    job = ForeignKeyField(
+        MediaJobRecord,
+        backref="gallery_items",
+        column_name="job_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    source_start_turn_id = IntegerField(constraints=[Check("source_start_turn_id > 0")])
+    source_end_turn_id = IntegerField(
+        constraints=[Check("source_end_turn_id >= source_start_turn_id")]
+    )
+    source_fingerprint = CharField(constraints=[Check("length(source_fingerprint) = 64")])
+    source_snapshot_json = TextField()
+    visual_brief_json = TextField()
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_media_gallery_items"
+
+
+class SessionMediaBackgroundRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        primary_key=True,
+        backref="media_background",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    asset = ForeignKeyField(
+        MediaAssetRecord,
+        backref="session_backgrounds",
+        column_name="asset_id",
+        on_delete="RESTRICT",
+    )
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_media_backgrounds"
+
+
 class RPModuleCatalogRecord(BaseRecord):
     module_name = TextField(primary_key=True)
     display_name = TextField()
@@ -677,6 +834,11 @@ RECORD_MODELS = (
     StoryRPModuleRecord,
     SessionRPModuleOverrideRecord,
     SessionNarrativeOutcomeRecord,
+    MediaBlobRecord,
+    MediaAssetRecord,
+    MediaJobRecord,
+    SessionMediaGalleryItemRecord,
+    SessionMediaBackgroundRecord,
     CharacterRecord,
     CharacterDetailRecord,
     LorebookEntryRecord,

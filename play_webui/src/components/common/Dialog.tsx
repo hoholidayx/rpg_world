@@ -4,11 +4,12 @@ import type { ReactNode } from 'react'
 import { Loader2, Trash2, X } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 
-type DialogSize = 'xl' | '3xl'
+type DialogSize = 'xl' | '3xl' | '7xl'
 
 const dialogSizeClass: Record<DialogSize, string> = {
   xl: 'max-w-xl',
   '3xl': 'max-w-3xl',
+  '7xl': 'max-w-7xl',
 }
 
 export function Dialog({

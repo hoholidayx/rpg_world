@@ -10,6 +10,17 @@ __all__ = [
     "Character",
     "CharacterDetail",
     "LorebookEntry",
+    "MediaAsset",
+    "MediaAssetDeleteResult",
+    "MediaBlob",
+    "MediaJob",
+    "MediaJobCompletion",
+    "MediaSourceMessage",
+    "MediaSourceTurn",
+    "SessionMediaBackground",
+    "SessionMediaAssetBundle",
+    "SessionMediaGalleryItem",
+    "SessionMediaResetResult",
     "NarrativeOutcomeRecord",
     "NarrativeOutcomeWeights",
     "RPModuleCatalogEntry",
@@ -65,6 +76,16 @@ __all__ = [
     "MESSAGE_ROLE_TOOL",
     "MESSAGE_ROLE_USER",
     "MESSAGE_ROLES",
+    "MEDIA_JOB_ACTIVE_STATUSES",
+    "MEDIA_JOB_FINAL_STATUSES",
+    "MEDIA_JOB_STATUSES",
+    "MEDIA_JOB_STATUS_CANCELLED",
+    "MEDIA_JOB_STATUS_CANCELLING",
+    "MEDIA_JOB_STATUS_FAILED",
+    "MEDIA_JOB_STATUS_INTERRUPTED",
+    "MEDIA_JOB_STATUS_QUEUED",
+    "MEDIA_JOB_STATUS_RUNNING",
+    "MEDIA_JOB_STATUS_SUCCEEDED",
     "TURN_MODE_GM",
     "TURN_MODE_IC",
     "TURN_MODE_OOC",
@@ -124,6 +145,28 @@ MESSAGE_ROLES = frozenset({
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_TOOL,
 })
+MEDIA_JOB_STATUS_QUEUED = "queued"
+MEDIA_JOB_STATUS_RUNNING = "running"
+MEDIA_JOB_STATUS_CANCELLING = "cancelling"
+MEDIA_JOB_STATUS_SUCCEEDED = "succeeded"
+MEDIA_JOB_STATUS_FAILED = "failed"
+MEDIA_JOB_STATUS_CANCELLED = "cancelled"
+MEDIA_JOB_STATUS_INTERRUPTED = "interrupted"
+MEDIA_JOB_STATUSES = frozenset({
+    MEDIA_JOB_STATUS_QUEUED,
+    MEDIA_JOB_STATUS_RUNNING,
+    MEDIA_JOB_STATUS_CANCELLING,
+    MEDIA_JOB_STATUS_SUCCEEDED,
+    MEDIA_JOB_STATUS_FAILED,
+    MEDIA_JOB_STATUS_CANCELLED,
+    MEDIA_JOB_STATUS_INTERRUPTED,
+})
+MEDIA_JOB_ACTIVE_STATUSES = frozenset({
+    MEDIA_JOB_STATUS_QUEUED,
+    MEDIA_JOB_STATUS_RUNNING,
+    MEDIA_JOB_STATUS_CANCELLING,
+})
+MEDIA_JOB_FINAL_STATUSES = MEDIA_JOB_STATUSES - MEDIA_JOB_ACTIVE_STATUSES
 TURN_MODE_IC = "ic"
 TURN_MODE_OOC = "ooc"
 TURN_MODE_GM = "gm"
@@ -404,6 +447,9 @@ class SessionResetResult:
     template_status_tables_initialized: int = 0
     session_native_status_tables_reset: int = 0
     deferred_progress_cleared: int = 0
+    media_jobs_cleared: int = 0
+    media_gallery_items_cleared: int = 0
+    media_backgrounds_cleared: int = 0
     first_message: str = ""
 
 
@@ -416,6 +462,160 @@ class SessionStatusResetResult:
     template_tables_initialized: int = 0
     native_tables_reset: int = 0
     deferred_progress_cleared: int = 0
+
+
+@dataclass(frozen=True)
+class MediaSourceMessage:
+    """One immutable persisted-message component used by media source snapshots."""
+
+    id: int
+    version: int
+    role: str
+    content: str
+    turn_id: int
+    seq_in_turn: int
+
+    def __post_init__(self) -> None:
+        if self.id <= 0:
+            raise ValueError("media source message id must be positive")
+        if self.version <= 0:
+            raise ValueError("media source message version must be positive")
+        if self.role not in MESSAGE_ROLES:
+            raise ValueError(f"invalid media source message role: {self.role}")
+        if self.turn_id <= 0 or self.seq_in_turn <= 0:
+            raise ValueError("media source turn metadata must be positive")
+
+
+@dataclass(frozen=True)
+class MediaSourceTurn:
+    """Committed messages grouped under one positive turn id."""
+
+    turn_id: int
+    messages: tuple[MediaSourceMessage, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if self.turn_id <= 0:
+            raise ValueError("media source turn id must be positive")
+        if not self.messages:
+            raise ValueError("media source turn must contain at least one message")
+        if any(message.turn_id != self.turn_id for message in self.messages):
+            raise ValueError("media source turn contains a message from another turn")
+
+
+@dataclass(frozen=True)
+class MediaBlob:
+    id: str
+    workspace_id: str
+    sha256: str
+    canonical_ext: str
+    mime_type: str
+    byte_size: int
+    relative_path: str
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class MediaAsset:
+    id: str
+    workspace_id: str
+    blob_id: str
+    provider_key: str
+    visual_brief_json: str
+    provider_asset_id: str = ""
+    generation_params_json: str = "{}"
+    metadata_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class MediaJob:
+    id: str
+    session_id: str
+    provider_key: str
+    status: str
+    source_start_turn_id: int
+    source_end_turn_id: int
+    source_fingerprint: str
+    source_snapshot_json: str
+    visual_brief_json: str
+    generation_params_json: str = "{}"
+    output_asset_id: str | None = None
+    retry_of_job_id: str | None = None
+    error_code: str = ""
+    error_message: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status not in MEDIA_JOB_STATUSES:
+            raise ValueError(f"invalid media job status: {self.status}")
+        if self.source_start_turn_id <= 0:
+            raise ValueError("media source start turn id must be positive")
+        if self.source_end_turn_id < self.source_start_turn_id:
+            raise ValueError("media source end turn id precedes start turn id")
+
+
+@dataclass(frozen=True)
+class SessionMediaGalleryItem:
+    id: str
+    session_id: str
+    asset_id: str
+    source_start_turn_id: int
+    source_end_turn_id: int
+    source_fingerprint: str
+    source_snapshot_json: str
+    visual_brief_json: str
+    job_id: str | None = None
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionMediaBackground:
+    session_id: str
+    asset_id: str
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionMediaResetResult:
+    session_id: str
+    jobs_cleared: int = 0
+    gallery_items_cleared: int = 0
+    backgrounds_cleared: int = 0
+
+
+@dataclass(frozen=True)
+class MediaAssetDeleteResult:
+    asset: MediaAsset
+    blob: MediaBlob
+    blob_deleted: bool
+
+
+@dataclass(frozen=True)
+class SessionMediaAssetBundle:
+    gallery_item: SessionMediaGalleryItem
+    asset: MediaAsset
+    blob: MediaBlob
+
+
+@dataclass(frozen=True)
+class MediaJobCompletion:
+    job: MediaJob
+    asset: MediaAsset
+    blob: MediaBlob
+    gallery_item: SessionMediaGalleryItem
+    blob_created: bool
 
 
 @dataclass(frozen=True)

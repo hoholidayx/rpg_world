@@ -416,6 +416,7 @@ export function SessionTimeline({
   messages,
   showThinking,
   showTools,
+  backgroundActive = false,
   historyPage,
   loadingBefore,
   loadingAfter,
@@ -439,6 +440,7 @@ export function SessionTimeline({
   messages: SessionTimelineMessage[]
   showThinking: boolean
   showTools: boolean
+  backgroundActive?: boolean
   historyPage: HistoryPage | null
   loadingBefore: boolean
   loadingAfter: boolean
@@ -678,7 +680,10 @@ export function SessionTimeline({
   ])
 
   return (
-    <section className="relative min-h-0 flex-1 bg-[#f7f8fc] dark:bg-[#0b1020]">
+    <section className={cn(
+      'relative z-10 min-h-0 flex-1',
+      backgroundActive ? 'bg-transparent' : 'bg-[#f7f8fc] dark:bg-[#0b1020]',
+    )}>
       <div
         ref={scrollContainerRef}
         onScroll={updateStickToBottom}

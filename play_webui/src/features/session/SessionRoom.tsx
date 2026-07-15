@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlignJustify, LogOut, TableProperties } from 'lucide-react'
+import { AlignJustify, Images, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { sessionContextUsageConfig } from '@/lib/config/appConfig'
@@ -14,11 +14,14 @@ import type { SessionPlayerCharacter } from '@/types/session'
 import { SessionComposer } from './SessionComposer'
 import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
+import { SessionMediaBackground } from './SessionMediaBackground'
+import { SessionMediaGallery } from './SessionMediaGallery'
 import { SessionRPModulesDialog } from './SessionRPModulesDialog'
 import { SessionTimeline } from './SessionTimeline'
 import { useSessionRoomData } from './hooks/useSessionRoomData'
 import { useSessionRoomLayout } from './hooks/useSessionRoomLayout'
 import { useSessionMainLLM } from './hooks/useSessionMainLLM'
+import { useSessionMedia } from './hooks/useSessionMedia'
 import { useSessionRoleBinding } from './hooks/useSessionRoleBinding'
 import { useSessionStreamTurn } from './hooks/useSessionStreamTurn'
 import { useSessionTimelineActions } from './hooks/useSessionTimelineActions'
@@ -215,6 +218,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
   const [toastMessage, setToastMessage] = useState('')
   const [rpModulesDialogOpen, setRPModulesDialogOpen] = useState(false)
+  const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteRedirecting, setDeleteRedirecting] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -298,6 +302,12 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     showToast,
     logger,
   })
+  const media = useSessionMedia({
+    sessionId,
+    galleryOpen: mediaGalleryOpen,
+    showToast,
+  })
+  const mediaBackground = media.backgroundQuery.data?.background ?? null
 
   const handleComposerTextChange = useCallback((value: string) => {
     setComposerText(value)
@@ -337,6 +347,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       queryClient.removeQueries({ queryKey: ['play-session-context-preview', sessionId] })
       queryClient.removeQueries({ queryKey: ['session-main-llm', sessionId] })
       queryClient.removeQueries({ queryKey: ['session-rp-modules', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-media-gallery', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-media-background', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-media-providers', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-media-source-turns', sessionId] })
       queryClient.invalidateQueries({ queryKey: ['play-sessions'] })
       if (result.runtimeCleanup === 'pending') {
         setDeleteRedirecting(true)
@@ -430,9 +444,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
       <section
         style={layout.sessionExperienceStyle}
-        className="flex min-h-screen min-w-0 flex-col lg:h-screen lg:min-h-0"
+        className="relative isolate flex min-h-screen min-w-0 flex-col overflow-hidden lg:h-screen lg:min-h-0"
       >
-        <header className="flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
+        <SessionMediaBackground sessionId={sessionId} background={mediaBackground} />
+        <header className="relative z-10 flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
           <div className="min-w-0">
             <h1 className="truncate text-lg font-black text-slate-950 dark:text-slate-100 sm:text-xl">{data.session?.title ?? '加载会话中'}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-400 dark:text-slate-400">
@@ -463,6 +478,15 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               <TableProperties size={18} />
             </button>
             <ThemeSwitcher menuAlign="right" menuSide="bottom" triggerSize="compact" />
+            <button
+              type="button"
+              onClick={() => setMediaGalleryOpen(true)}
+              className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+              aria-label="打开 Session 图像工作室"
+            >
+              <Images size={16} />
+              <span className="hidden sm:inline">图像</span>
+            </button>
             <button
               type="button"
               onClick={stream.handleExitSession}
@@ -508,6 +532,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           messages={data.visibleMessages}
           showThinking={layout.showThinking}
           showTools={layout.showTools}
+          backgroundActive={Boolean(mediaBackground)}
           historyPage={data.historyPage}
           loadingBefore={data.historyLoadingBefore}
           loadingAfter={data.historyLoadingAfter}
@@ -528,37 +553,39 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           onEditSend={timelineActions.handleSendEdit}
         />
 
-        <SessionComposer
-          sessionId={sessionId}
-          text={composerText}
-          mode={inputMode}
-          narrativeStyleId={narrativeStyleId}
-          narrativeStyles={narrativeStyles}
-          turnModes={composerConfig?.modes ?? []}
-          quickReplies={composerConfig?.quickReplies ?? []}
-          sending={stream.sending}
-          disabled={roleSelectionBlocked}
-          contextPreviewUsage={contextPreviewUsage}
-          lastTurnUsage={data.lastTurnUsage}
-          contextInputBlocked={contextInputBlocked}
-          contextInputBlockThresholdRatio={sessionContextUsageConfig.inputBlockThresholdRatio}
-          contextUsageLoading={data.contextPreviewQuery.isLoading || data.contextPreviewQuery.isFetching}
-          mainLLMCatalog={mainLLM.catalog}
-          mainLLMSelection={mainLLM.selection}
-          mainLLMLoading={mainLLM.loading || mainLLM.fetching}
-          mainLLMUpdating={mainLLM.updating}
-          mainLLMError={mainLLM.error}
-          stopping={stream.stopping}
-          onTextChange={handleComposerTextChange}
-          onModeChange={setInputMode}
-          onNarrativeStyleChange={setNarrativeStyleId}
-          onMainLLMChange={mainLLM.selectProvider}
-          onSend={timelineActions.handleSend}
-          onQuickReply={timelineActions.handleQuickReply}
-          onStop={() => {
-            void stream.stopActiveStream()
-          }}
-        />
+        <div className="relative z-10">
+          <SessionComposer
+            sessionId={sessionId}
+            text={composerText}
+            mode={inputMode}
+            narrativeStyleId={narrativeStyleId}
+            narrativeStyles={narrativeStyles}
+            turnModes={composerConfig?.modes ?? []}
+            quickReplies={composerConfig?.quickReplies ?? []}
+            sending={stream.sending}
+            disabled={roleSelectionBlocked}
+            contextPreviewUsage={contextPreviewUsage}
+            lastTurnUsage={data.lastTurnUsage}
+            contextInputBlocked={contextInputBlocked}
+            contextInputBlockThresholdRatio={sessionContextUsageConfig.inputBlockThresholdRatio}
+            contextUsageLoading={data.contextPreviewQuery.isLoading || data.contextPreviewQuery.isFetching}
+            mainLLMCatalog={mainLLM.catalog}
+            mainLLMSelection={mainLLM.selection}
+            mainLLMLoading={mainLLM.loading || mainLLM.fetching}
+            mainLLMUpdating={mainLLM.updating}
+            mainLLMError={mainLLM.error}
+            stopping={stream.stopping}
+            onTextChange={handleComposerTextChange}
+            onModeChange={setInputMode}
+            onNarrativeStyleChange={setNarrativeStyleId}
+            onMainLLMChange={mainLLM.selectProvider}
+            onSend={timelineActions.handleSend}
+            onQuickReply={timelineActions.handleQuickReply}
+            onStop={() => {
+              void stream.stopActiveStream()
+            }}
+          />
+        </div>
       </section>
 
       <button
@@ -648,6 +675,12 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         sessionId={sessionId}
         onClose={() => setRPModulesDialogOpen(false)}
         showToast={showToast}
+      />
+      <SessionMediaGallery
+        open={mediaGalleryOpen}
+        sessionId={sessionId}
+        media={media}
+        onClose={() => setMediaGalleryOpen(false)}
       />
       <Toast message={toastMessage} />
     </main>

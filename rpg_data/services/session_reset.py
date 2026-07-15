@@ -7,6 +7,7 @@ from peewee import Database
 from rpg_data import models
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.services.message import MessageService
+from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.session_role import SessionRoleService
 from rpg_data.services.story_memory import StoryMemoryService
@@ -27,6 +28,7 @@ class SessionResetService:
         session_roles: SessionRoleService | None = None,
         story_memory: StoryMemoryService | None = None,
         status: StatusTableService | None = None,
+        media: MediaDataService | None = None,
     ) -> None:
         self._database = database
         self._sessions = SessionRepository(database)
@@ -35,6 +37,7 @@ class SessionResetService:
         self._session_roles = session_roles or SessionRoleService(database)
         self._story_memory = story_memory or StoryMemoryService(database)
         self._status = status or StatusTableService(database)
+        self._media = media or MediaDataService(database)
 
     def reset(self, session_id: str) -> models.SessionResetResult:
         """Clear mutable gameplay rows and recreate status copies atomically.
@@ -54,6 +57,7 @@ class SessionResetService:
             status_result = self._status.reset_session_tables(
                 normalized_session_id
             )
+            media_result = self._media.clear_session_runtime(normalized_session_id)
             first_message = self._session_roles.append_first_message_for_reset(
                 normalized_session_id
             )
@@ -69,5 +73,8 @@ class SessionResetService:
             ),
             session_native_status_tables_reset=status_result.native_tables_reset,
             deferred_progress_cleared=status_result.deferred_progress_cleared,
+            media_jobs_cleared=media_result.jobs_cleared,
+            media_gallery_items_cleared=media_result.gallery_items_cleared,
+            media_backgrounds_cleared=media_result.backgrounds_cleared,
             first_message=first_message,
         )

@@ -16,6 +16,7 @@ from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterManagementService, CharacterReadService
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
 from rpg_data.services.message import MessageService
+from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_role import SessionRoleService
@@ -47,6 +48,7 @@ class DataServiceGateway:
         self._lorebook: LorebookReadService | None = None
         self._lorebook_management: LorebookManagementService | None = None
         self._messages: MessageService | None = None
+        self._media: MediaDataService | None = None
         self._narrative_outcomes: NarrativeOutcomeService | None = None
         self._rp_modules: RPModuleService | None = None
         self._session_roles: SessionRoleService | None = None
@@ -126,6 +128,15 @@ class DataServiceGateway:
         return self._messages
 
     @property
+    def media(self) -> MediaDataService:
+        database = self.database
+        if self._media is None:
+            logger.debug("creating media data service db_path=%s", self._database_path)
+            self._media = MediaDataService(database)
+        self._ensure_bound()
+        return self._media
+
+    @property
     def narrative_outcomes(self) -> NarrativeOutcomeService:
         database = self.database
         if self._narrative_outcomes is None:
@@ -164,6 +175,7 @@ class DataServiceGateway:
                 session_roles=self.session_roles,
                 story_memory=self.story_memory,
                 status=self.status,
+                media=self.media,
             )
         self._ensure_bound()
         return self._session_reset
@@ -253,6 +265,7 @@ class DataServiceGateway:
         self._lorebook = None
         self._lorebook_management = None
         self._messages = None
+        self._media = None
         self._narrative_outcomes = None
         self._rp_modules = None
         self._session_roles = None

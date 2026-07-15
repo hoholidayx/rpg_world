@@ -49,6 +49,11 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_status_table_templates",
             "rpg_story_status_tables",
             "rpg_session_status_tables",
+            "rpg_media_blobs",
+            "rpg_media_assets",
+            "rpg_media_jobs",
+            "rpg_session_media_gallery_items",
+            "rpg_session_media_backgrounds",
         }.issubset(tables)
 
         for table in (
@@ -320,6 +325,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0006", "0006_session_composer.sql"),
             ("0007", "0007_player_role_templates.sql"),
             ("0008", "0008_status_update_frequency.sql"),
+            ("0009", "0009_media.sql"),
         ]
     finally:
         conn.close()

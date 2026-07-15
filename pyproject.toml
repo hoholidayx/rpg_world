@@ -45,6 +45,7 @@ dev = [
 [project.scripts]
 rpg-world-agent = "run_agent:main"
 rpg-world-play-api = "run_play_api:main"
+rpg-world-media = "run_media:main"
 rpg-world-cli = "run_cli:cli"
 rpg-world-telegram = "run_telegram:cli"
 
@@ -53,6 +54,7 @@ py-modules = [
     "run_agent",
     "run_cli",
     "run_play_api",
+    "run_media",
     "run_telegram",
 ]
 
@@ -63,8 +65,10 @@ include = [
     "agent_service*",
     "channels*",
     "play_api*",
+    "media_service*",
     "rpg_core*",
     "rpg_data*",
+    "rpg_media*",
     "rp_memory*",
     "llm_service*",
 ]
@@ -77,6 +81,8 @@ exclude = [
 [tool.setuptools.package-data]
 rpg_core = ["jinja/**/*.jinja"]
 rpg_data = ["migrations/*.sql"]
+rpg_media = ["settings.yaml"]
+media_service = ["settings.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
