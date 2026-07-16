@@ -12,12 +12,18 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 
 from llm_client.codec import chunk_to_wire, response_to_wire
 from llm_service.base_provider import DocumentScoreProvider, LLMProvider
-from llm_service.config import list_provider_options, load_llm_settings, resolve_biz_config
+from llm_service.config import (
+    get_biz_config,
+    list_provider_options,
+    load_llm_settings,
+    resolve_biz_config,
+)
+from llm_service.keys import LLM_KIND_SPEECH
 from llm_service.manager import LLMManager
 from llm_service.errors import LLMInputModalityUnsupportedError
 from llm_service.pointwise import score_documents_with_chat
@@ -33,6 +39,8 @@ from llm_service.schemas import (
     LLMProviderOptionResponse,
     LLMRerankRequest,
     LLMRerankResponse,
+    LLMSpeechProfileResponse,
+    LLMSpeechRequest,
 )
 from llm_service.settings import settings
 
@@ -219,6 +227,66 @@ async def rerank(body: LLMRerankRequest, request: Request) -> LLMRerankResponse:
             )
             for score in scores
         ]
+    )
+
+
+@app.get(
+    f"{_prefix()}/speech/profile/{{biz_key}}",
+    response_model=LLMSpeechProfileResponse,
+    dependencies=[Depends(_authorize)],
+)
+async def speech_profile(biz_key: str, request: Request) -> LLMSpeechProfileResponse:
+    try:
+        cfg = get_biz_config(biz_key)
+    except Exception as exc:
+        raise _http_error(request, exc) from exc
+    if cfg is None or cfg.kind != LLM_KIND_SPEECH:
+        raise _http_error(
+            request,
+            ValueError(f"LLM speech biz config not found: {biz_key}"),
+            status_code=404,
+            error_code="LLM_SPEECH_BIZ_NOT_FOUND",
+        )
+    try:
+        provider = LLMManager.get().get_speech_provider(biz_key)
+    except Exception as exc:
+        raise _http_error(request, exc) from exc
+    profile = provider.profile
+    return LLMSpeechProfileResponse(
+        bizKey=biz_key,
+        providerKey=profile.provider_key,
+        model=profile.model,
+        voice=profile.voice,
+        responseFormat=profile.response_format,
+        speed=profile.speed,
+        cacheRevision=profile.cache_revision,
+        configFingerprint=profile.config_fingerprint,
+    )
+
+
+@app.post(f"{_prefix()}/speech", dependencies=[Depends(_authorize)])
+async def speech(body: LLMSpeechRequest, request: Request) -> Response:
+    try:
+        provider = LLMManager.get().get_speech_provider(
+            body.biz_key,
+            provider_key=body.provider_key,
+        )
+        payload = await provider.synthesize(body.text)
+    except Exception as exc:
+        raise _http_error(request, exc) from exc
+    profile = provider.profile
+    media_type = {
+        "mp3": "audio/mpeg",
+        "opus": "audio/ogg",
+        "aac": "audio/aac",
+        "flac": "audio/flac",
+        "wav": "audio/wav",
+        "pcm": "audio/L16",
+    }[profile.response_format]
+    return Response(
+        content=payload,
+        media_type=media_type,
+        headers={"X-Speech-Config-Fingerprint": profile.config_fingerprint},
     )
 
 

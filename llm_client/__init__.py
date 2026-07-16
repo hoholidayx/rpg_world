@@ -18,6 +18,8 @@ from llm_client.types import (
     LLMProvider,
     LLMProviderOption,
     LLMResponse,
+    LLMSpeechAudio,
+    LLMSpeechProfile,
     LLMUsage,
     ProviderChunk,
 )
@@ -31,6 +33,8 @@ __all__ = [
     "LLMProvider",
     "LLMProviderOption",
     "LLMResponse",
+    "LLMSpeechAudio",
+    "LLMSpeechProfile",
     "LLMServiceAuthError",
     "LLMServiceClient",
     "LLMServiceClientError",

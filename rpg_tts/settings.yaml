@@ -1,0 +1,13 @@
+default_profile: local
+
+base:
+  synthesis:
+    biz_key: tts.reply
+    normalization_revision: rp-text-v1
+    # 保守覆盖中文近似一字一 token 的情况，低于当前 speech 单次输入上限。
+    max_chars_per_part: 1800
+
+profiles:
+  local: {}
+  test: {}
+  prod: {}

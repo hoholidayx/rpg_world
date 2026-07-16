@@ -4,8 +4,8 @@
 - 当前产品路线：WebUI 是沉浸式 RP 主体验，Telegram 是轻量入口、推送通知与兜底交互；短期仍保持 Telegram 稳定性，但新增体验型能力优先沉淀到 WebUI。
 - Play WebUI 是唯一 Web 主体验，承担玩家游玩、故事管理、角色/世界设定/状态维护、剧情日志、分支回滚与调试入口；不要恢复 Dashboard API/WebUI。
 - 修改启动流程、渠道生命周期、共享状态或 `AgentManager` 前，先阅读 `CLAUDE.md`。
-- 根目录聚合 supervisor 入口已移除；各进程必须通过独立入口启动。只有 `run_agent.py` 持有 `AgentManager` / `RPGGameAgent` / `rp_memory`，其它进程只能通过 `agent_service.client.AgentClient` 访问 Agent 服务。只有 `run_llm.py` 读取 `llm_service/llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 与本地 llama runtime；Agent、Memory、Media 等调用方只能通过 `llm_client` 访问 LLM 服务。
-- `llm_client` 是事件循环归属的纯异步客户端：`health()`、`get_catalog()`、`get_provider()`、`embed()`、`dimension()` 及推理 API 都必须在创建/首次使用它的同一 loop 中 `await`，不得跨线程/loop 复用 `AsyncClient`，不得在业务代码中用 `asyncio.run()`、同步 HTTP 客户端或 sync-to-async 桥接。重新 configure/reset 必须 await 关闭旧连接池。
+- 根目录聚合 supervisor 入口已移除；各进程必须通过独立入口启动。只有 `run_agent.py` 持有 `AgentManager` / `RPGGameAgent` / `rp_memory`，其它进程只能通过 `agent_service.client.AgentClient` 访问 Agent 服务。只有 `run_llm.py` 读取 `llm_service/llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 与本地 llama runtime；Agent、Memory、Media、TTS 等调用方只能通过 `llm_client` 访问 LLM 服务。
+- `llm_client` 是事件循环归属的纯异步客户端：`health()`、`get_catalog()`、`get_provider()`、`get_speech_profile()`、`speech()`、`embed()`、`dimension()` 及推理 API 都必须在创建/首次使用它的同一 loop 中 `await`，不得跨线程/loop 复用 `AsyncClient`，不得在业务代码中用 `asyncio.run()`、同步 HTTP 客户端或 sync-to-async 桥接。重新 configure/reset 必须 await 关闭旧连接池。
 - Agent/Memory 的远端 LLM I/O 直接 await；调用方需要等待结果时由调用方 await，不把阻塞转移到 Agent 事件循环。Memory 的 `create()` / `initialize()` 只建立本地 text/keyword/raw-md 能力，首次 `recall()` / `reindex()` 才懒解析 embedding/planner/reranker；远端失败保留本地 fallback，后续调用继续重试。
 - 每个 session 的 Memory 操作由同一 async lock 串行，多个 session 可并发。watchdog 回调线程只允许通过 `loop.call_soon_threadsafe()` 入队 source ID，实际去重、索引、embedding 与 SQLite 更新由 loop-owned 单 consumer 执行；memory 文件/hash/chunk/SQLite 阻塞工作使用 `asyncio.to_thread()`。Memory、Agent 与 LLM client 的释放 API 必须 await。
 - 本地 llama 仍是 LLM Service 进程内 runtime，不恢复子进程 worker。每个不可变模型缓存键使用一个 actor 线程串行执行；`request_timeout_ms` 包含排队和运行时间，completion/stream/rerank 在安全边界协作取消。无法中断的原生 embedding/eval 超时后允许 actor 自然排空，同模型后续任务继续等待；关闭等待 `llama_shutdown_grace_ms` 后只记录仍在排空的 native call。
@@ -13,6 +13,7 @@
 - `RPG_WORLD_LLM_SERVICE_TOKEN` 未设置时，LLM Service 记录 warning 并与调用方共同回退到 `rpg-world-local-token`，不得阻止进程启动；该默认值只用于本地开发，非本地部署应显式设置环境变量覆盖。
 - 保持 `play_api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
 - `rpg_media/` 是与 `rpg_core/` 同级的无框架高级能力模块；`media_service/` 独立持有图片 Provider、持久任务 worker 和媒体 HTTP 边界。Play WebUI 只能经 Play API → `MediaClient` 访问它，Play API 不得直接读取工作区图片文件，Media service 不得导入 Agent runtime 或持有 llama worker。
+- `rpg_tts/` 与 `rpg_core/`、`rpg_media/` 同级，负责正文清洗、分段、缓存指纹与 MP3 存储；`tts_service/` 独立持有持久任务 worker 和 HTTP 边界。TTS 只按已提交 assistant `message_id` 派生语音，不得进入 Agent turn、正文 SSE、message metadata 或 localStorage；OpenAI Speech 仍通过 `llm_client` 由 LLM Service 唯一持有 Provider 与密钥。
 - Play WebUI 会话内链路只使用全局短 `session_id` 定位；创建 session 时在 `rpg_data` 绑定 `workspace_id + story_id`，之后由 Play API 反查上下文并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
 - 玩家扮演角色是 session 级绑定，保存在 `rpg_session_profiles.player_character_id` 和 `player_character_snapshot_json`。WebUI 的选择/切换和 CLI/Telegram 文本渠道都必须统一走 Agent 服务的 `/role_bind <序号>` 命令链路；Play API 只能转发到 Agent service 后刷新 summary，不要直接在 Play API/DataManager 中写绑定。
 - CLI / Telegram 也必须通过 `rpg_data` catalog 解析会话：配置使用 `workspace_id + story_id + optional session_id + session_title`；未配置 `session_id` 时由 Agent service 创建系统生成 ID 的 session，配置了则只校验并加载既有 session。不要恢复 `workspace` 字段、`cli_direct` 默认 ID 或用户自定义 session ID 创建入口。
@@ -24,12 +25,13 @@
 - `uv run python -m run_llm`：启动 LLM 服务（默认 `http://127.0.0.1:8012/llm/v1`；未设置 `RPG_WORLD_LLM_SERVICE_TOKEN` 时使用本地默认 token 并警告）。
 - `uv run python -m run_agent`：启动 Agent 服务（默认 `http://127.0.0.1:8010/agent/v1`，通过同一令牌访问 LLM 服务）。
 - `uv run python -m run_media`：启动 Media 服务与持久任务 worker（默认 `http://127.0.0.1:8011/media/v1`）。
+- `uv run python -m run_tts`：启动 TTS 服务与持久任务 worker（默认 `http://127.0.0.1:8013/tts/v1`）。
 - `uv run python -m run_play_api`：启动 Play API。
 - `uv run python -m run_cli`：启动 CLI（通过 Agent 服务交互）。
 - `uv run python -m run_telegram`：启动 Telegram（通过 Agent 服务交互）。
-- `uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llm_service --host 127.0.0.1 --port 8000`：直接调试 Play API。
+- `uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir channels --reload-dir rpg_core --reload-dir rp_memory --reload-dir llm_service --reload-dir tts_service --reload-dir rpg_tts --host 127.0.0.1 --port 8000`：直接调试 Play API。
 - `uv run python -m channels.cli.repl`：启动独立 CLI。
-- `uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests -q`：运行 Python 测试基线。
+- `uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests rpg_tts/tests tts_service/tests -q`：运行 Python 测试基线。
 - `uv run python -m pytest channels/tests/test_telegram.py -q`：专项验证 Telegram。
 - `cd play_webui && npm run dev`：启动 Play 前端开发服务器。
 - `cd play_webui && npm run build`：构建 Play 前端产物。
@@ -104,9 +106,9 @@
 - pytest 默认会清理代理环境变量；需要保留代理时显式设置 `PYTEST_KEEP_PROXY=1`。
 
 ## 配置与数据
-- 配置按进程/模块拆分：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听与日志，`rpg_media/settings.yaml` 管简报与图片 Provider，`media_service/settings.yaml` 管 Media 服务、客户端和 worker。
+- 配置按进程/模块拆分：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听与日志，`rpg_media/settings.yaml` 管简报与图片 Provider，`media_service/settings.yaml` 管 Media 服务、客户端和 worker，`rpg_tts/settings.yaml` 管正文清洗与分段，`tts_service/settings.yaml` 管 TTS 服务、客户端和 worker。
 - Play WebUI 通用配置入口是 `play_webui/play_webui.config.json`，前端通过 typed loader 读取；历史分页配置位于 `session.historyPagination`，正文门禁阈值位于 `session.contextUsage.inputBlockThresholdRatio`。Core 兜底阈值独立配置在 `rpg_core/settings.yaml` 的 `agent.context_window_reject_threshold_ratio`；两者合法范围均为 `(0, 1]`、默认均为 `0.9`，WebUI 非法值回退 `0.9`，Core 非法值必须启动失败。
-- `llm_service/settings.yaml` 管 LLM 服务监听、Bearer 鉴权和本地 llama runtime；`llm_service/llm.yaml` 只由 LLM Service 读取，管理 Provider、密钥、模型、上下文窗口和超时等 LLM 强相关配置。
+- `llm_service/settings.yaml` 管 LLM 服务监听、Bearer 鉴权和本地 llama runtime；`llm_service/llm.yaml` 只由 LLM Service 读取，管理 Provider、密钥、模型、上下文窗口、speech 音色和超时等 LLM 强相关配置。
 - 它们都支持 `base + profiles`；`local` / `test` / `prod` 是固定 profile 名称，同级 `settings.local.yaml` / `llm.local.yaml` 等覆盖文件会自动加载。
 - `llm.yaml` 中 `kind: rerank` 的 biz 配置必须显式声明 `rerank_model_type`，当前允许 `qwen3_logit` 和 `chat_pointwise`。
 - `session_id` 只能使用英文字母、数字、下划线，规则为 `^[A-Za-z0-9_]+$`。所有 session 创建入口都由 `rpg_data` 生成 ID；用户只允许指定 title。

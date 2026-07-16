@@ -41,6 +41,29 @@ def _handler(request: httpx.Request) -> httpx.Response:
             200,
             json={"content": "ok", "toolCalls": None, "finishReason": "stop"},
         )
+    if request.url.path.endswith("/speech/profile/tts.reply"):
+        return httpx.Response(
+            200,
+            json={
+                "bizKey": "tts.reply",
+                "providerKey": "openai-tts",
+                "model": "gpt-4o-mini-tts",
+                "voice": "alloy",
+                "responseFormat": "mp3",
+                "speed": 1.0,
+                "cacheRevision": "v1",
+                "configFingerprint": "a" * 64,
+            },
+        )
+    if request.url.path.endswith("/speech"):
+        return httpx.Response(
+            200,
+            content=b"ID3audio",
+            headers={
+                "content-type": "audio/mpeg",
+                "x-speech-config-fingerprint": "a" * 64,
+            },
+        )
     if request.url.path.endswith("/chat/stream"):
         body = (
             "event: chunk\n"
@@ -106,6 +129,29 @@ async def test_async_client_chat_and_stream() -> None:
     ]
     assert response.content == "ok"
     assert chunks == ["a", "b"]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_client_speech_profile_and_audio() -> None:
+    client = LLMServiceClient(
+        base_url="http://llm.test/llm/v1",
+        token="token",
+        async_transport=httpx.MockTransport(_handler),
+    )
+
+    profile = await client.get_speech_profile("tts.reply")
+    audio = await client.speech(
+        biz_key="tts.reply",
+        provider_key=None,
+        text="hello",
+    )
+
+    assert profile.voice == "alloy"
+    assert profile.config_fingerprint == "a" * 64
+    assert audio.content == b"ID3audio"
+    assert audio.media_type == "audio/mpeg"
+    assert audio.config_fingerprint == profile.config_fingerprint
     await client.aclose()
 
 

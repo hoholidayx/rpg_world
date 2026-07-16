@@ -51,6 +51,10 @@ __all__ = [
     "StoryNarrativeStyleRecord",
     "StoryQuickReplyRecord",
     "StoryStatusTableRecord",
+    "TTSBlobRecord",
+    "TTSCacheEntryRecord",
+    "TTSAudioPartRecord",
+    "TTSJobRecord",
     "StoryRecord",
     "StoryRPModuleRecord",
     "StatusTableTemplateRecord",
@@ -553,6 +557,101 @@ class SessionMediaGalleryItemRecord(BaseRecord):
         table_name = "rpg_session_media_gallery_items"
 
 
+class TTSBlobRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="tts_blobs",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    sha256 = CharField()
+    mime_type = TextField(default="audio/mpeg")
+    byte_size = IntegerField()
+    relative_path = TextField()
+    created_at = TextField()
+
+    class Meta:
+        table_name = "rpg_tts_blobs"
+
+
+class TTSCacheEntryRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="tts_cache_entries",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    source_fingerprint = CharField()
+    config_fingerprint = CharField()
+    normalization_revision = TextField()
+    part_count = IntegerField()
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_tts_cache_entries"
+
+
+class TTSAudioPartRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    cache_entry = ForeignKeyField(
+        TTSCacheEntryRecord,
+        backref="parts",
+        column_name="cache_entry_id",
+        on_delete="CASCADE",
+    )
+    blob = ForeignKeyField(
+        TTSBlobRecord,
+        backref="audio_parts",
+        column_name="blob_id",
+        on_delete="NO ACTION",
+    )
+    part_index = IntegerField()
+    created_at = TextField()
+
+    class Meta:
+        table_name = "rpg_tts_audio_parts"
+
+
+class TTSJobRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="tts_jobs",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    message = ForeignKeyField(
+        SessionMessageRecord,
+        backref="tts_jobs",
+        column_name="message_id",
+        on_delete="CASCADE",
+    )
+    status = TextField(default="queued")
+    source_fingerprint = CharField()
+    config_fingerprint = CharField()
+    normalization_revision = TextField()
+    cache_entry = ForeignKeyField(
+        TTSCacheEntryRecord,
+        backref="jobs",
+        column_name="cache_entry_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    error_code = TextField(default="")
+    error_message = TextField(default="")
+    started_at = TextField(null=True)
+    finished_at = TextField(null=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_tts_jobs"
+
+
 class SessionMediaBackgroundRecord(BaseRecord):
     session = ForeignKeyField(
         SessionRecord,
@@ -956,6 +1055,10 @@ RECORD_MODELS = (
     MediaLibraryItemTagRecord,
     MediaJobRecord,
     SessionMediaGalleryItemRecord,
+    TTSBlobRecord,
+    TTSCacheEntryRecord,
+    TTSAudioPartRecord,
+    TTSJobRecord,
     SessionMediaBackgroundRecord,
     SessionMediaBackgroundStateRecord,
     MediaBackgroundEvaluationRecord,

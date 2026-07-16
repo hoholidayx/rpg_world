@@ -85,6 +85,21 @@ base:
         # 是否输出 llama.cpp verbose 日志。
         verbose: false
 
+    # SessionRoom 正文朗读。API Key 仍只由 LLM Service 读取。
+    openai_tts:
+      provider: openai
+      input_modalities:
+        - text
+      openai:
+        model: gpt-4o-mini-tts
+        api_key: null
+        api_key_env: OPENAI_API_KEY_TTS
+        base_url: null
+        voice: alloy
+        response_format: mp3
+        speed: 1.0
+        cache_revision: v1
+
   # ── 业务键到 provider 池的路由 ───────────────────────────────────
   biz:
     # 主 Agent 对话模型。
@@ -138,6 +153,11 @@ base:
       provider_key: memory_rerank
       # 必填：rerank 模型/评分协议，允许 qwen3_logit / chat_pointwise。
       rerank_model_type: qwen3_logit
+
+    # SessionRoom 已提交 assistant 正文的单音色语音合成。
+    tts.reply:
+      kind: speech
+      provider_key: openai_tts
 
 # 固定 profile 名称；覆盖文件无需在这里声明 file。
 profiles:

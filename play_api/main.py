@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from play_api.backends import close_data_manager_backend, get_data_manager_backend
 from play_api.media_client import close_media_client
+from play_api.tts_client import close_tts_client
 from play_api.settings import play_settings
 from play_api.routers import (
     characters,
@@ -25,6 +26,7 @@ from play_api.routers import (
     ops,
     sessions,
     status_tables,
+    tts,
     workspace,
 )
 
@@ -37,6 +39,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await close_media_client()
+        await close_tts_client()
         close_data_manager_backend()
 
 
@@ -61,3 +64,4 @@ app.include_router(session_composer.router, prefix=_PLAY_API_PREFIX)
 app.include_router(ops.router, prefix=_PLAY_API_PREFIX)
 app.include_router(sessions.router, prefix=_PLAY_API_PREFIX)
 app.include_router(status_tables.router, prefix=_PLAY_API_PREFIX)
+app.include_router(tts.router, prefix=_PLAY_API_PREFIX)

@@ -25,6 +25,7 @@ from rpg_data.services.session_reset import SessionResetService
 from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
+from rpg_data.services.tts import TTSDataService
 from rpg_data.settings import resolve_database_path
 
 __all__ = [
@@ -58,6 +59,7 @@ class DataServiceGateway:
         self._backup: BackupService | None = None
         self._story_memory: StoryMemoryService | None = None
         self._status: StatusTableService | None = None
+        self._tts: TTSDataService | None = None
         self._initialized = False
         logger.debug("data service gateway created db_path=%s", self._database_path)
 
@@ -135,6 +137,15 @@ class DataServiceGateway:
             self._media = MediaDataService(database)
         self._ensure_bound()
         return self._media
+
+    @property
+    def tts(self) -> TTSDataService:
+        database = self.database
+        if self._tts is None:
+            logger.debug("creating TTS data service db_path=%s", self._database_path)
+            self._tts = TTSDataService(database)
+        self._ensure_bound()
+        return self._tts
 
     @property
     def narrative_outcomes(self) -> NarrativeOutcomeService:
@@ -275,6 +286,7 @@ class DataServiceGateway:
         self._backup = None
         self._story_memory = None
         self._status = None
+        self._tts = None
 
     def _ensure_bound(self) -> None:
         if self._database is None:

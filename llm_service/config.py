@@ -27,6 +27,7 @@ from llm_service.keys import (
     LLMConfigKey,
     LLM_KIND_CHAT,
     LLM_KIND_RERANK,
+    LLM_KIND_SPEECH,
     LLM_KINDS,
     PROVIDER_KINDS,
     PROVIDER_LLAMA,
@@ -228,7 +229,7 @@ class BizConfig:
 
     @property
     def kind(self) -> str:
-        """``"chat"`` / ``"embedding"`` / ``"planner"`` / ``"rerank"``."""
+        """``chat`` / ``embedding`` / ``planner`` / ``rerank`` / ``speech``."""
         label = f"{self._key}.{LLMConfigKey.KIND}"
         value = self._require_non_empty(self._raw.get(LLMConfigKey.KIND), label)
         kind = value.lower()
@@ -312,6 +313,42 @@ class BizConfig:
         return self._optional_float(
             self._openai_sub.get(LLMConfigKey.TEMPERATURE),
             f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.TEMPERATURE}",
+        )
+
+    @property
+    def speech_voice(self) -> str:
+        return self._require_non_empty(
+            self._openai_sub.get(LLMConfigKey.VOICE),
+            f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.VOICE}",
+        )
+
+    @property
+    def speech_response_format(self) -> str:
+        value = self._optional_str(
+            self._openai_sub.get(LLMConfigKey.RESPONSE_FORMAT)
+        ).lower() or "mp3"
+        if value not in {"mp3", "opus", "aac", "flac", "wav", "pcm"}:
+            raise ValueError(
+                f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.RESPONSE_FORMAT} is unsupported"
+            )
+        return value
+
+    @property
+    def speech_speed(self) -> float:
+        value = self._optional_float(
+            self._openai_sub.get(LLMConfigKey.SPEED),
+            f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.SPEED}",
+        )
+        speed = 1.0 if value is None else value
+        if not 0.25 <= speed <= 4.0:
+            raise ValueError(f"{self._key}.openai.speed must be between 0.25 and 4.0")
+        return speed
+
+    @property
+    def speech_cache_revision(self) -> str:
+        return self._require_non_empty(
+            self._openai_sub.get(LLMConfigKey.CACHE_REVISION),
+            f"{self._key}.{PROVIDER_OPENAI}.{LLMConfigKey.CACHE_REVISION}",
         )
 
     @property
@@ -557,6 +594,13 @@ def _resolve_biz_entry(
     resolved.input_modalities
     if kind == LLM_KIND_RERANK:
         resolved.rerank_model_type
+    if kind == LLM_KIND_SPEECH:
+        if resolved.provider != PROVIDER_OPENAI:
+            raise ValueError(f"{biz_key} speech currently requires provider={PROVIDER_OPENAI!r}")
+        resolved.speech_voice
+        resolved.speech_response_format
+        resolved.speech_speed
+        resolved.speech_cache_revision
     return resolved
 
 

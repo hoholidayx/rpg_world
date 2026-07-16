@@ -47,8 +47,10 @@ uv sync
 # 可选：非本地部署应为 LLM Service 与调用方配置相同的静态令牌。
 # 未设置时双方共同使用内置的 rpg-world-local-token，LLM Service 会警告。
 export RPG_WORLD_LLM_SERVICE_TOKEN=replace-with-a-secret
+# 启用 SessionRoom OpenAI Speech TTS 时设置；仅 LLM Service 读取。
+export OPENAI_API_KEY_TTS=replace-with-an-openai-key
 
-# 推荐：一键启动 LLM、Agent、Media、Play API；Ctrl-C 会优雅停止全部子进程
+# 推荐：一键启动 LLM、Agent、Media、TTS、Play API；Ctrl-C 会优雅停止全部子进程
 uv run python -m run_all
 # 或：uv run rpg-world-up
 
@@ -59,6 +61,7 @@ uv run python -m run_llm
 uv run python -m run_agent
 uv run python -m run_media
 # 已有项目虚拟环境时也可使用：.venv/bin/python -m run_media
+uv run python -m run_tts
 uv run python -m run_play_api
 uv run python -m run_telegram
 uv run python -m run_cli
@@ -67,39 +70,40 @@ uv run python -m run_cli
 uv run python -m channels.cli.repl
 
 # 直接调试 API（自动重载）
-uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir agent_service --reload-dir media_service --host 127.0.0.1 --port 8000
+uv run uvicorn play_api.main:app --reload --reload-dir play_api --reload-dir agent_service --reload-dir media_service --reload-dir tts_service --host 127.0.0.1 --port 8000
 
 # 启动 Play WebUI（另一个终端）
 cd play_webui && npm run dev
 ```
 
 根目录不再提供持有业务运行时的聚合 supervisor。`run_all.py` 只是可选的前台进程编排器，
-负责按顺序启动和停止四个独立 `run_*` 子进程，不合并任何 Agent、LLM、Media 或 Play API 运行时。
+负责按顺序启动和停止五个独立 `run_*` 子进程，不合并任何 Agent、LLM、Media、TTS 或 Play API 运行时。
 每个服务启动前都会检查配置端口；占用者确认是 Python 或 uv 时先终止并等待端口释放，
 超时后强制结束，其他类型的进程则保留并中止启动。默认端口为 Play API `8001`、
-Agent `8010`、Media `8011`、LLM `8012`。
+Agent `8010`、Media `8011`、LLM `8012`、TTS `8013`。
 配置已按进程/模块拆分到各自目录，进程启停不通过配置控制。
 
 ## 架构
 
 ### 进程隔离架构
 
-RPG World 采用独立 Agent、LLM 与 Media 服务拓扑。只有 `run_agent.py` 进程持有
+RPG World 采用独立 Agent、LLM、Media 与 TTS 服务拓扑。只有 `run_agent.py` 进程持有
 `AgentManager`、`RPGGameAgent` 和 `rp_memory`；只有 `run_llm.py` 进程读取
 `llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 和本地 llama runtime。
-Agent/Memory 通过 `LLMClient` 调用 LLM 服务，Play API、CLI、Telegram 通过
-`AgentClient` 调用 Agent 服务。
+Agent/Memory 与 TTS Service 通过 `llm_client` 调用 LLM 服务；Play API 的聊天、媒体和语音链路分别通过
+`AgentClient`、`MediaClient`、`TTSClient` 访问独立服务，CLI 与 Telegram 通过 `AgentClient` 调用 Agent 服务。
 
 ```
 run_llm            -> llm_service.main:app   -> Provider + local llama runtime
 run_agent          -> agent_service.main:app
 run_media          -> media_service.main:app -> rpg_media + rpg_data
-run_play_api       -> play_api.main:app      -> AgentClient + MediaClient
+run_tts            -> tts_service.main:app   -> rpg_tts + rpg_data + llm_client
+run_play_api       -> play_api.main:app      -> AgentClient + MediaClient + TTSClient
 run_cli            -> channels.cli.repl      -> AgentClient
 run_telegram       -> channels.telegram.runner -> AgentClient
 
 # 可选的前台编排入口，仅负责启动/停止上述独立进程，不合并任何运行时
-run_all            -> run_llm + run_agent + run_media + run_play_api
+run_all            -> run_llm + run_agent + run_media + run_tts + run_play_api
 ```
 
 根目录还提供同级快捷入口，便于调试和查找：
@@ -108,8 +112,9 @@ run_all            -> run_llm + run_agent + run_media + run_play_api
 run_llm.py      -> llm_service.main
 run_agent.py    -> agent_service.main
 run_media.py    -> media_service.main
+run_tts.py      -> tts_service.main
 run_play_api.py -> play_api.main
-run_all.py      -> 启动并管理四个独立后端子进程
+run_all.py      -> 启动并管理五个独立后端子进程
 run_telegram.py -> channels.telegram.runner
 run_cli.py      -> channels.cli.repl
 ```
@@ -236,6 +241,10 @@ v1 的交互是“手动触发 + 可检查提示词 + 异步生成”：
 
 写入前按魔数识别 PNG/JPEG/WebP。数据库 Blob 用 `(workspace_id, sha256)` 去重；SHA-256 不作为业务 Asset ID，每次成功生成建立独立 UUID Asset，保留本次 Provider、简报、参数和来源语义。背景引用会阻止 Asset 删除，最后一个 Asset 引用删除后才回收 Blob 行与文件。`/clear` 清除当前 Session 的 Job、Gallery 和背景，但保留 Workspace Asset/Blob；永久删除 Session 也只级联清理 Session 关联。图片与消息历史分离，不进入正文、message metadata、turn/SSE 或 localStorage。
 
+### SessionRoom TTS
+
+`rpg_tts/` 是与 `rpg_core/`、`rpg_media/` 同级的无框架高级能力模块，负责从已提交 assistant 消息解析可朗读正文、确定性分段、缓存指纹和 MP3 内容寻址存储；FastAPI、持久任务 worker 与客户端位于独立的 `tts_service/`。SessionRoom 仅在玩家点击回复气泡的朗读按钮后，经 Play API → `TTSClient` 创建任务。TTS 不进入 Agent turn、正文 SSE、message metadata 或 localStorage。OpenAI Speech Provider、音色和密钥仍由 LLM Service 唯一持有，TTS Service 只通过 `llm_client` 调用；默认监听 `http://127.0.0.1:8013/tts/v1`。
+
 ### Telegram 渠道
 
 Telegram 渠道当前支持：
@@ -265,10 +274,12 @@ Telegram 渠道当前支持：
 | `status/` | 状态表薄适配，通过 `rpg_data` 按 session 读取 SQLite document 真源 |
 | `rp_modules/` | RP 玩法模块框架，当前包含 Narrative Outcome 剧情裁定与 Dice 低层随机模块 |
 | `summary/` | 对话摘要压缩 |
-| 顶层 `llm_client/` | 供 Agent、Memory 及未来 Media planner 使用的稳定 HTTP/SSE 客户端、DTO 与 Provider facade |
+| 顶层 `llm_client/` | 供 Agent、Memory、TTS 及未来 Media planner 使用的稳定 HTTP/SSE 客户端、DTO 与 Provider facade |
 | 顶层 `llm_service/` | LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析与本地 llama runtime |
 | 顶层 `rpg_media/` | 来源快照、VisualBrief、图片 Provider 契约、内容寻址存储与媒体用例 |
 | 顶层 `media_service/` | 独立 Media HTTP 进程、MediaClient 与数据库持久任务 worker |
+| 顶层 `rpg_tts/` | 正文标准化、确定性分段、缓存指纹与 MP3 内容寻址存储 |
+| 顶层 `tts_service/` | 独立 TTS HTTP 进程、TTSClient 与数据库持久任务 worker |
 
 顶层 `rp_memory/` 是独立记忆系统包，负责检索、索引、规划、召回和 rerank；顶层 `llm_service/` 是独立 LLM 服务实现，负责 provider 路由、配置解析、OpenAI-compatible provider 与本地 llama.cpp runtime。业务进程只依赖 `llm_client/`，不导入 `llm_service/`。
 
@@ -653,13 +664,15 @@ rp_memory/
 | `play_api/settings.yaml` | Play API 监听参数、Play API 日志 |
 | `rpg_media/settings.yaml` | VisualBrief Demo planner、默认图片 Provider 与 Local file Demo 图片目录 |
 | `media_service/settings.yaml` | Media 服务监听、MediaClient 地址/超时与 worker 并发参数 |
+| `rpg_tts/settings.yaml` | TTS 正文标准化版本、speech biz key 与单段字符上限 |
+| `tts_service/settings.yaml` | TTS 服务监听、TTSClient、LLMClient 与持久 worker |
 | `llm_service/settings.yaml` | LLM 服务监听、Bearer 令牌环境变量名、本地 llama 并行模型数、`llama_shutdown_grace_ms` 与日志 |
 | `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口和 context 正文门禁阈值 |
-| `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、温度、超时等 LLM 强相关配置 |
+| `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、speech 音色、温度、超时等 LLM 强相关配置 |
 
-`RPG_WORLD_LLM_SERVICE_TOKEN` 存在时会覆盖默认令牌，LLM Service 与所有调用进程必须使用相同值。环境变量缺失或仅含空白时，各进程共同使用内置的 `rpg-world-local-token`，LLM Service 记录 warning 但继续启动；该默认值只适合本地开发，非本地部署应显式覆盖。Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程与配置健康；health 成功不代表调用方 token 正确，token 会在 catalog、chat、embedding 等受保护请求上验证。
+`RPG_WORLD_LLM_SERVICE_TOKEN` 存在时会覆盖默认令牌，LLM Service 与所有调用进程必须使用相同值。环境变量缺失或仅含空白时，各进程共同使用内置的 `rpg-world-local-token`，LLM Service 记录 warning 但继续启动；该默认值只适合本地开发，非本地部署应显式覆盖。Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程与配置健康；health 成功不代表调用方 token 正确，token 会在 catalog、chat、embedding、rerank、speech 等受保护请求上验证。
 
-独立入口会统一接管 Loguru、Python `logging` 和 Uvicorn 日志，同时保留控制台输出，并在项目根目录写入 `logs/agent.log`、`llm.log`、`media.log`、`play_api.log`、`telegram.log` 或 `cli.log`。默认每个文件达到 20 MB 后滚动，保留最近 10 个 ZIP 压缩归档；`logs/` 不纳入版本控制。各进程的 `logging` 配置均支持 `directory`、`rotation_size_mb`、`retention_count`、`compression` 和 `console_enabled` 覆盖。
+独立入口会统一接管 Loguru、Python `logging` 和 Uvicorn 日志，同时保留控制台输出，并在项目根目录写入 `logs/agent.log`、`llm.log`、`media.log`、`tts.log`、`play_api.log`、`telegram.log` 或 `cli.log`。默认每个文件达到 20 MB 后滚动，保留最近 10 个 ZIP 压缩归档；`logs/` 不纳入版本控制。各进程的 `logging` 配置均支持 `directory`、`rotation_size_mb`、`retention_count`、`compression` 和 `console_enabled` 覆盖。
 
 正文门禁由 `play_webui` 的 `session.contextUsage.inputBlockThresholdRatio` 和 Core 的 `agent.context_window_reject_threshold_ratio` 独立控制，合法范围均为 `(0, 1]`、默认均为 `0.9`。前端非法值回退 `0.9`，Core 非法值会阻止启动；两侧都只计算不含当前待发送 input 的主 Agent Context。
 
@@ -805,7 +818,7 @@ Agent Context 与历史展示分离：Play/Agent 的 `history` / `history-page` 
 所有测试 mock LLM 调用，无需 API key：
 
 ```bash
-uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests -q
+uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests rpg_tts/tests tts_service/tests -q
 ```
 
 当前测试会 mock LLM、Telegram SDK 和网络调用。若本地缺少 `pytest-asyncio`，`rpg_core/tests/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。覆盖范围包括：
@@ -817,6 +830,7 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 - `play_api/tests/`：Play API workspace/session/scene/turn/stream、characters、lorebook、status-tables 和 ops 等契约。
 - `rpg_media/tests/`：来源指纹、简报、Provider、图片魔数/存储与高层媒体用例。
 - `media_service/tests/`：HTTP 契约、持久队列、取消、重试和重启恢复。
+- `rpg_tts/tests/` / `tts_service/tests/`：正文清洗与分段、MP3 存储、缓存复用、HTTP Range、持久队列与恢复语义。
 
 Telegram 测试已覆盖入口卡、角色选择、会话菜单、命令帮助、系统生成 ID 的创建切换、
 停止生成、RP/Markdown 渲染、流式编辑节流和长文本分块。后续修改 Telegram 行为必须补对应测试。

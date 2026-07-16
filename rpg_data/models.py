@@ -34,6 +34,11 @@ __all__ = [
     "SessionMediaAssetBundle",
     "SessionMediaGalleryItem",
     "SessionMediaResetResult",
+    "TTSJob",
+    "TTSCacheEntry",
+    "TTSAudioPart",
+    "TTSBlob",
+    "TTSMessageSource",
     "NarrativeOutcomeRecord",
     "NarrativeOutcomeWeights",
     "RPModuleCatalogEntry",
@@ -126,6 +131,12 @@ __all__ = [
     "MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL",
     "MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED",
     "MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED",
+    "TTS_JOB_STATUSES",
+    "TTS_JOB_STATUS_QUEUED",
+    "TTS_JOB_STATUS_RUNNING",
+    "TTS_JOB_STATUS_SUCCEEDED",
+    "TTS_JOB_STATUS_FAILED",
+    "TTS_JOB_STATUS_INTERRUPTED",
     "TURN_MODE_GM",
     "TURN_MODE_IC",
     "TURN_MODE_OOC",
@@ -207,6 +218,19 @@ MEDIA_JOB_ACTIVE_STATUSES = frozenset({
     MEDIA_JOB_STATUS_CANCELLING,
 })
 MEDIA_JOB_FINAL_STATUSES = MEDIA_JOB_STATUSES - MEDIA_JOB_ACTIVE_STATUSES
+
+TTS_JOB_STATUS_QUEUED = "queued"
+TTS_JOB_STATUS_RUNNING = "running"
+TTS_JOB_STATUS_SUCCEEDED = "succeeded"
+TTS_JOB_STATUS_FAILED = "failed"
+TTS_JOB_STATUS_INTERRUPTED = "interrupted"
+TTS_JOB_STATUSES = frozenset({
+    TTS_JOB_STATUS_QUEUED,
+    TTS_JOB_STATUS_RUNNING,
+    TTS_JOB_STATUS_SUCCEEDED,
+    TTS_JOB_STATUS_FAILED,
+    TTS_JOB_STATUS_INTERRUPTED,
+})
 MEDIA_ASSET_ORIGIN_GENERATED = "generated"
 MEDIA_ASSET_ORIGIN_UPLOAD = "upload"
 MEDIA_ASSET_ORIGINS = frozenset({
@@ -780,6 +804,70 @@ class MediaJob:
             raise ValueError("media source start turn id must be positive")
         if self.source_end_turn_id < self.source_start_turn_id:
             raise ValueError("media source end turn id precedes start turn id")
+
+
+@dataclass(frozen=True)
+class TTSBlob:
+    id: str
+    workspace_id: str
+    sha256: str
+    mime_type: str
+    byte_size: int
+    relative_path: str
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class TTSCacheEntry:
+    id: str
+    workspace_id: str
+    source_fingerprint: str
+    config_fingerprint: str
+    normalization_revision: str
+    part_count: int
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class TTSAudioPart:
+    id: str
+    cache_entry_id: str
+    blob_id: str
+    part_index: int
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class TTSJob:
+    id: str
+    session_id: str
+    message_id: int
+    status: str
+    source_fingerprint: str
+    config_fingerprint: str
+    normalization_revision: str
+    cache_entry_id: str | None = None
+    error_code: str = ""
+    error_message: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status not in TTS_JOB_STATUSES:
+            raise ValueError(f"invalid TTS job status: {self.status}")
+
+
+@dataclass(frozen=True)
+class TTSMessageSource:
+    session_id: str
+    message_id: int
+    workspace_id: str
+    workspace_root: str
+    content: str
 
 
 @dataclass(frozen=True)

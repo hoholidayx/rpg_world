@@ -9,7 +9,14 @@ from collections.abc import AsyncIterator, Mapping
 import httpx
 
 from llm_client.codec import catalog_from_wire, chunk_from_wire, response_from_wire, scores_from_wire
-from llm_client.types import DocumentScore, LLMBizCatalog, LLMResponse, ProviderChunk
+from llm_client.types import (
+    DocumentScore,
+    LLMBizCatalog,
+    LLMResponse,
+    LLMSpeechAudio,
+    LLMSpeechProfile,
+    ProviderChunk,
+)
 
 
 class LLMServiceClientError(Exception):
@@ -46,7 +53,7 @@ class LLMServiceRemoteError(LLMServiceClientError):
 
 
 class LLMServiceClient:
-    """Loop-owned async client used by Agent, memory, and media callers."""
+    """Loop-owned async client used by Agent, memory, media, and TTS callers."""
 
     def __init__(
         self,
@@ -214,6 +221,66 @@ class LLMServiceClient:
         if not isinstance(payload, Mapping):
             raise LLMServiceRemoteError("invalid LLM rerank response")
         return scores_from_wire(payload.get("scores"))
+
+    async def get_speech_profile(self, biz_key: str) -> LLMSpeechProfile:
+        response = await self._request_async("GET", f"/speech/profile/{biz_key}")
+        payload = response.json()
+        if not isinstance(payload, Mapping):
+            raise LLMServiceRemoteError("invalid LLM speech profile response")
+        try:
+            profile = LLMSpeechProfile(
+                biz_key=str(payload.get("bizKey") or ""),
+                provider_key=str(payload.get("providerKey") or ""),
+                model=str(payload.get("model") or ""),
+                voice=str(payload.get("voice") or ""),
+                response_format=str(payload.get("responseFormat") or ""),
+                speed=float(payload.get("speed", 1.0)),
+                cache_revision=str(payload.get("cacheRevision") or ""),
+                config_fingerprint=str(payload.get("configFingerprint") or ""),
+            )
+        except (TypeError, ValueError) as exc:
+            raise LLMServiceRemoteError(
+                "invalid LLM speech profile response"
+            ) from exc
+        if profile.biz_key != biz_key or not all(
+            (
+                profile.provider_key,
+                profile.model,
+                profile.voice,
+                profile.response_format,
+                profile.cache_revision,
+                profile.config_fingerprint,
+            )
+        ):
+            raise LLMServiceRemoteError("invalid LLM speech profile response")
+        return profile
+
+    async def speech(
+        self,
+        *,
+        biz_key: str,
+        provider_key: str | None,
+        text: str,
+    ) -> LLMSpeechAudio:
+        response = await self._request_async(
+            "POST",
+            "/speech",
+            json={"bizKey": biz_key, "providerKey": provider_key, "text": text},
+        )
+        config_fingerprint = response.headers.get(
+            "x-speech-config-fingerprint",
+            "",
+        )
+        if not response.content or not config_fingerprint:
+            raise LLMServiceRemoteError("invalid LLM speech response")
+        return LLMSpeechAudio(
+            content=response.content,
+            media_type=response.headers.get(
+                "content-type",
+                "application/octet-stream",
+            ).split(";", 1)[0],
+            config_fingerprint=config_fingerprint,
+        )
 
     async def aclose(self) -> None:
         if self._closed:

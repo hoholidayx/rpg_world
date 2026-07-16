@@ -100,6 +100,25 @@ class LLMBizCatalog:
         raise ValueError(f"provider_key {selected!r} is not available for {self.biz_key!r}")
 
 
+@dataclass(frozen=True)
+class LLMSpeechProfile:
+    biz_key: str
+    provider_key: str
+    model: str
+    voice: str
+    response_format: str
+    speed: float
+    cache_revision: str
+    config_fingerprint: str
+
+
+@dataclass(frozen=True)
+class LLMSpeechAudio:
+    content: bytes
+    media_type: str
+    config_fingerprint: str
+
+
 class EmbeddingProviderError(Exception):
     """Raised when an embedding request cannot be fulfilled."""
 

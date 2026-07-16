@@ -89,3 +89,20 @@ class LLMDocumentScoreResponse(WireModel):
 
 class LLMRerankResponse(WireModel):
     scores: list[LLMDocumentScoreResponse]
+
+
+class LLMSpeechRequest(WireModel):
+    biz_key: str = Field(alias="bizKey", min_length=1)
+    provider_key: str | None = Field(default=None, alias="providerKey")
+    text: str = Field(min_length=1, max_length=4096)
+
+
+class LLMSpeechProfileResponse(WireModel):
+    biz_key: str = Field(alias="bizKey")
+    provider_key: str = Field(alias="providerKey")
+    model: str
+    voice: str
+    response_format: str = Field(alias="responseFormat")
+    speed: float
+    cache_revision: str = Field(alias="cacheRevision")
+    config_fingerprint: str = Field(alias="configFingerprint")

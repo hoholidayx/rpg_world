@@ -11,6 +11,7 @@ MEMORY_RERANK_BIZ_KEY = "memory.rerank"
 MEDIA_SCENE_BACKGROUND_MATCH_BIZ_KEY = "media.scene_background_match"
 MEDIA_IMAGE_METADATA_BIZ_KEY = "media.image_metadata"
 MEDIA_VISUAL_BRIEF_BIZ_KEY = "media.visual_brief"
+TTS_REPLY_BIZ_KEY = "tts.reply"
 
 PROVIDER_OPENAI = "openai"
 PROVIDER_LLAMA = "llama"

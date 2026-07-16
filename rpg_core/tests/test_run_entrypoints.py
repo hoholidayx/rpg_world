@@ -13,6 +13,7 @@ import run_llm
 import run_media
 import run_play_api
 import run_telegram
+import run_tts
 
 
 def _run_all_spec(*, name: str = "agent", port: int = 8010) -> run_all.ServiceSpec:
@@ -26,7 +27,7 @@ def _run_all_spec(*, name: str = "agent", port: int = 8010) -> run_all.ServiceSp
 def test_run_all_uses_distinct_ports_for_every_service():
     specs = run_all._service_specs()
 
-    assert [spec.name for spec in specs] == ["llm", "agent", "media", "play_api"]
+    assert [spec.name for spec in specs] == ["llm", "agent", "media", "tts", "play_api"]
     assert len({spec.listen_address[1] for spec in specs}) == len(specs)
     run_all._validate_service_ports(specs)
 
@@ -199,6 +200,7 @@ def test_run_agent_main_invokes_uvicorn(monkeypatch):
     [
         (run_llm, "llm", "llm_service.main:app"),
         (run_media, "media", "media_service.main:app"),
+        (run_tts, "tts", "tts_service.main:app"),
     ],
 )
 def test_service_entrypoint_configures_process_logging_before_uvicorn(

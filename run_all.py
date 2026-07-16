@@ -21,6 +21,7 @@ from typing import Any
 from agent_service.settings import settings as agent_settings
 from llm_service.settings import settings as llm_settings
 from media_service.settings import settings as media_settings
+from tts_service.settings import settings as tts_settings
 from play_api.settings import play_settings
 
 
@@ -107,6 +108,16 @@ def _service_specs() -> tuple[ServiceSpec, ...]:
                 media_settings.service.host,
                 media_settings.service.port,
                 media_settings.service.api_prefix,
+            ),
+        ),
+        ServiceSpec(
+            name="tts",
+            module="run_tts",
+            listen_address=(tts_settings.service.host, tts_settings.service.port),
+            health_url=_health_url(
+                tts_settings.service.host,
+                tts_settings.service.port,
+                tts_settings.service.api_prefix,
             ),
         ),
         ServiceSpec(

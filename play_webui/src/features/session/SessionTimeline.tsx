@@ -1,4 +1,4 @@
-import { ChevronDown, Copy, GitBranch, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertCircle, ChevronDown, Copy, GitBranch, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Trash2, Volume2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { HistoryPage } from '@/types/session'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
@@ -11,6 +11,7 @@ import {
   type AssistantTextSegment,
 } from './assistantTextSegments'
 import { formatMessageTime } from './sessionRoomHelpers'
+import { useSessionTTS, type TTSMessagePlayback } from './hooks/useSessionTTS'
 import {
   HISTORY_LOAD_DIRECTION,
   SESSION_MESSAGE_STATUS,
@@ -107,6 +108,8 @@ function MessageActions({
   onRetry,
   onEdit,
   onDelete,
+  tts,
+  onToggleTTS,
 }: {
   message: SessionTimelineMessage
   moreOpen: boolean
@@ -115,14 +118,41 @@ function MessageActions({
   onRetry: (message: SessionTimelineMessage) => void
   onEdit: (message: SessionTimelineMessage) => void
   onDelete: (message: SessionTimelineMessage) => void
+  tts?: TTSMessagePlayback
+  onToggleTTS: (message: SessionTimelineMessage) => void
 }) {
   const canCopy = message.canCopy ?? Boolean(message.content.trim())
   const canRetry = Boolean(message.canRetry)
   const canEdit = Boolean(message.canEdit)
   const canDelete = Boolean(message.canDelete)
+  const canSpeak = (
+    message.role === SESSION_TIMELINE_ROLE.ASSISTANT
+    && message.status === SESSION_MESSAGE_STATUS.DONE
+    && Boolean(message.messageId)
+    && Boolean(message.content.trim())
+  )
+  const ttsBusy = tts?.phase === 'queued' || tts?.phase === 'running'
+  const ttsLabel = ttsBusy
+    ? '正在生成语音'
+    : tts?.phase === 'playing'
+      ? '暂停语音'
+      : tts?.phase === 'paused'
+        ? '继续播放语音'
+        : tts?.phase === 'error'
+          ? '重试生成语音'
+          : '朗读回复'
 
   return (
     <div className="relative mt-2 flex items-center gap-1.5">
+      {canSpeak ? (
+        <MiniButton label={ttsLabel} disabled={ttsBusy} onClick={() => onToggleTTS(message)}>
+          {ttsBusy ? <Loader2 size={14} className="animate-spin" /> : null}
+          {!ttsBusy && tts?.phase === 'playing' ? <Pause size={14} /> : null}
+          {!ttsBusy && tts?.phase === 'paused' ? <Play size={14} /> : null}
+          {!ttsBusy && tts?.phase === 'error' ? <AlertCircle size={14} /> : null}
+          {!ttsBusy && !['playing', 'paused', 'error'].includes(tts?.phase ?? '') ? <Volume2 size={14} /> : null}
+        </MiniButton>
+      ) : null}
       <MiniButton label="复制" disabled={!canCopy} onClick={() => onCopy(message)}>
         <Copy size={14} />
       </MiniButton>
@@ -153,6 +183,11 @@ function MessageActions({
             删除
           </button>
         </div>
+      ) : null}
+      {tts?.phase === 'error' && tts.error ? (
+        <span className="ml-1 max-w-72 text-left text-xs font-bold text-rose-600 dark:text-rose-300" title={tts.error}>
+          {tts.error}
+        </span>
       ) : null}
     </div>
   )
@@ -298,6 +333,8 @@ function TimelineMessage({
   onEditDraftChange,
   onEditCancel,
   onEditSend,
+  tts,
+  onToggleTTS,
 }: {
   message: SessionTimelineMessage
   isEditing: boolean
@@ -311,6 +348,8 @@ function TimelineMessage({
   onEditDraftChange: (value: string) => void
   onEditCancel: () => void
   onEditSend: () => void
+  tts?: TTSMessagePlayback
+  onToggleTTS: (message: SessionTimelineMessage) => void
 }) {
   if (message.role === SESSION_TIMELINE_ROLE.OUTCOME && message.outcome) {
     return <NarrativeOutcomeCard message={message} />
@@ -367,6 +406,8 @@ function TimelineMessage({
               onRetry={onRetry}
               onEdit={onEdit}
               onDelete={onDelete}
+              tts={tts}
+              onToggleTTS={onToggleTTS}
             />
           </div>
         ) : null}
@@ -483,6 +524,13 @@ export function SessionTimeline({
     }),
     [messages, showThinking, showTools],
   )
+  const visibleAssistantMessageIds = useMemo(
+    () => displayMessages
+      .filter((message) => message.role === SESSION_TIMELINE_ROLE.ASSISTANT && Boolean(message.messageId))
+      .map((message) => message.messageId!),
+    [displayMessages],
+  )
+  const tts = useSessionTTS(sessionId, visibleAssistantMessageIds)
   const lastMessageFingerprint = useMemo(() => {
     const lastMessage = displayMessages[displayMessages.length - 1]
     const usageStamp = lastMessage?.usage
@@ -735,6 +783,10 @@ export function SessionTimeline({
                   onEditDraftChange={onEditDraftChange}
                   onEditCancel={onEditCancel}
                   onEditSend={() => onEditSend(message)}
+                  tts={message.messageId ? tts.byMessageId[message.messageId] : undefined}
+                  onToggleTTS={(item) => {
+                    if (item.messageId) void tts.toggle(item.messageId)
+                  }}
                 />
               ))}
             </div>

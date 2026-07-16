@@ -604,3 +604,47 @@ def test_http_contract_auth_chat_stream_embedding_and_rerank(monkeypatch):
             json={"bizKey": "memory.rerank", "query": "q", "documents": ["d"]},
         )
         assert reranked.json()["scores"][0]["score"] == 0.75
+
+
+def test_http_speech_profile_and_binary_contract(monkeypatch):
+    monkeypatch.setenv("RPG_WORLD_LLM_SERVICE_TOKEN", "test-token")
+
+    class FakeSpeechProvider:
+        profile = SimpleNamespace(
+            provider_key="openai-tts",
+            model="tts-model",
+            voice="alloy",
+            response_format="mp3",
+            speed=1.0,
+            cache_revision="v1",
+            config_fingerprint="e" * 64,
+        )
+
+        async def synthesize(self, text: str) -> bytes:
+            assert text == "hello"
+            return b"ID3audio"
+
+    class FakeManager:
+        def get_speech_provider(self, _biz_key, *, provider_key=None):  # noqa: ANN001, ANN201
+            del provider_key
+            return FakeSpeechProvider()
+
+    monkeypatch.setattr(
+        service_main.LLMManager,
+        "get",
+        classmethod(lambda cls: FakeManager()),
+    )
+    headers = {"Authorization": "Bearer test-token"}
+    with TestClient(service_main.app) as client:
+        profile = client.get("/llm/v1/speech/profile/tts.reply", headers=headers)
+        audio = client.post(
+            "/llm/v1/speech",
+            headers=headers,
+            json={"bizKey": "tts.reply", "text": "hello"},
+        )
+
+    assert profile.status_code == 200
+    assert profile.json()["voice"] == "alloy"
+    assert audio.status_code == 200
+    assert audio.content == b"ID3audio"
+    assert audio.headers["x-speech-config-fingerprint"] == "e" * 64

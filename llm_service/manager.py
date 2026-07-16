@@ -9,6 +9,8 @@ of embedding / rerank / planner outside this module.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from dataclasses import dataclass
 from threading import RLock
 from typing import ClassVar
@@ -21,6 +23,7 @@ from llm_service.config import BizConfig, resolve_biz_config
 from llm_service.keys import (
     LLM_KIND_EMBEDDING,
     LLM_KIND_RERANK,
+    LLM_KIND_SPEECH,
     PROVIDER_LLAMA,
     PROVIDER_OPENAI,
     PROVIDER_KINDS,
@@ -33,6 +36,7 @@ from llm_service.llama_provider import (
     LlamaLogitRerankProvider,
 )
 from llm_service.openai_provider import OpenAIProvider
+from llm_service.openai_speech import OpenAISpeechProvider, SpeechProfile
 from llm_service.runtime import (
     DirectLlamaCompletionModel,
     DirectLlamaEmbeddingModel,
@@ -41,7 +45,7 @@ from llm_service.runtime import (
 )
 
 
-ManagedProvider: TypeAlias = LLMProvider | DocumentScoreProvider
+ManagedProvider: TypeAlias = LLMProvider | DocumentScoreProvider | OpenAISpeechProvider
 
 
 @dataclass(frozen=True)
@@ -415,9 +419,53 @@ class LLMManager:
             return self._build_embedding_provider(cfg, biz_key, backend)
         if cfg.kind == LLM_KIND_RERANK:
             return self._build_rerank_provider(cfg, biz_key, backend)
+        if cfg.kind == LLM_KIND_SPEECH:
+            if backend != PROVIDER_OPENAI:
+                raise ValueError(f"{biz_key} speech requires the OpenAI backend")
+            api_key = cfg.openai_api_key
+            if not api_key:
+                raise ValueError(f"{biz_key} speech API key is required")
+            profile_values = {
+                "providerKey": cfg.provider_key,
+                "model": cfg.openai_model,
+                "voice": cfg.speech_voice,
+                "responseFormat": cfg.speech_response_format,
+                "speed": cfg.speech_speed,
+                "cacheRevision": cfg.speech_cache_revision,
+            }
+            profile = SpeechProfile(
+                provider_key=cfg.provider_key,
+                model=cfg.openai_model,
+                voice=cfg.speech_voice,
+                response_format=cfg.speech_response_format,
+                speed=cfg.speech_speed,
+                cache_revision=cfg.speech_cache_revision,
+                config_fingerprint=hashlib.sha256(
+                    json.dumps(profile_values, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            )
+            return OpenAISpeechProvider(
+                client=self._build_openai_client(
+                    scope=cfg.provider_key,
+                    api_key=api_key,
+                    base_url=cfg.openai_base_url or None,
+                ),
+                profile=profile,
+            )
 
         # Chat and planner use the same provider construction path.
         return self._build_chat_provider_inner(cfg, biz_key, backend)
+
+    def get_speech_provider(
+        self,
+        biz_key: str,
+        *,
+        provider_key: str | None = None,
+    ) -> OpenAISpeechProvider:
+        provider = self.get_provider(biz_key, provider_key=provider_key)
+        if not isinstance(provider, OpenAISpeechProvider):
+            raise ValueError(f"LLM biz {biz_key!r} does not expose speech operations")
+        return provider
 
     def _build_chat_provider_inner(
         self,

@@ -11,6 +11,7 @@ from llm_client.keys import (
     MEMORY_RERANK_BIZ_KEY,
     MEDIA_IMAGE_METADATA_BIZ_KEY,
     MEDIA_VISUAL_BRIEF_BIZ_KEY,
+    TTS_REPLY_BIZ_KEY,
     PROVIDER_LLAMA,
     PROVIDER_OPENAI,
 )
@@ -35,6 +36,10 @@ class LLMConfigKey:
     CONTEXT_WINDOW = "context_window"
     MAX_TOKENS = "max_tokens"
     TEMPERATURE = "temperature"
+    VOICE = "voice"
+    RESPONSE_FORMAT = "response_format"
+    SPEED = "speed"
+    CACHE_REVISION = "cache_revision"
     INPUT_MODALITIES = "input_modalities"
 
     MODEL_PATH = "model_path"
@@ -52,7 +57,10 @@ LLM_KIND_CHAT = "chat"
 LLM_KIND_EMBEDDING = "embedding"
 LLM_KIND_PLANNER = "planner"
 LLM_KIND_RERANK = "rerank"
-LLM_KINDS = frozenset({LLM_KIND_CHAT, LLM_KIND_EMBEDDING, LLM_KIND_PLANNER, LLM_KIND_RERANK})
+LLM_KIND_SPEECH = "speech"
+LLM_KINDS = frozenset(
+    {LLM_KIND_CHAT, LLM_KIND_EMBEDDING, LLM_KIND_PLANNER, LLM_KIND_RERANK, LLM_KIND_SPEECH}
+)
 
 RERANK_MODEL_TYPE_QWEN3_LOGIT = "qwen3_logit"
 RERANK_MODEL_TYPE_CHAT_POINTWISE = "chat_pointwise"

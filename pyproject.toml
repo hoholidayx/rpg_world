@@ -48,6 +48,7 @@ rpg-world-agent = "run_agent:main"
 rpg-world-llm = "run_llm:main"
 rpg-world-play-api = "run_play_api:main"
 rpg-world-media = "run_media:main"
+rpg-world-tts = "run_tts:main"
 rpg-world-up = "run_all:main"
 rpg-world-cli = "run_cli:cli"
 rpg-world-telegram = "run_telegram:cli"
@@ -60,6 +61,7 @@ py-modules = [
     "run_cli",
     "run_play_api",
     "run_media",
+    "run_tts",
     "run_telegram",
 ]
 
@@ -71,6 +73,8 @@ include = [
     "channels*",
     "play_api*",
     "media_service*",
+    "tts_service*",
+    "rpg_tts*",
     "rpg_core*",
     "rpg_data*",
     "rpg_media*",
@@ -89,6 +93,8 @@ rpg_core = ["jinja/**/*.jinja"]
 rpg_data = ["migrations/*.sql"]
 rpg_media = ["settings.yaml"]
 media_service = ["settings.yaml"]
+tts_service = ["settings.yaml"]
+rpg_tts = ["settings.yaml"]
 llm_service = ["settings.yaml", "llm.yaml"]
 
 [tool.pytest.ini_options]
