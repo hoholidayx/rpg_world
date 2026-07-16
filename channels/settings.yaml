@@ -62,6 +62,12 @@ base:
   logging:
     # CLI / Telegram 渠道进程的标准日志级别。当前阶段默认 DEBUG。
     log_level: DEBUG
+    # CLI 与 Telegram 分别写入 logs/cli.log、logs/telegram.log。
+    directory: logs
+    rotation_size_mb: 20
+    retention_count: 10
+    compression: zip
+    console_enabled: true
     # FileWatcher 标准库 logger 级别。
     watcher_log_level: DEBUG
     # 记忆向量索引标准库 logger 级别。

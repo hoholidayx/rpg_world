@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
+from commons.process_logging import (
+    ProcessLoggingSettings,
+    parse_process_logging_settings,
+)
 from llm_client.auth import (
     DEFAULT_LLM_SERVICE_TOKEN_ENV,
     resolve_llm_service_token,
@@ -40,11 +44,6 @@ class LLMServiceAuthSettings:
 class LLMRuntimeSettings:
     llama_max_parallel_models: int = 2
     llama_shutdown_grace_ms: int = 5000
-
-
-@dataclass(frozen=True)
-class LLMServiceLoggingSettings:
-    log_level: str = "DEBUG"
 
 
 class LLMServiceSettings(ProfiledYamlSettings):
@@ -88,10 +87,11 @@ class LLMServiceSettings(ProfiledYamlSettings):
         )
 
     @property
-    def logging(self) -> LLMServiceLoggingSettings:
+    def logging(self) -> ProcessLoggingSettings:
         raw = self._mapping("logging")
-        return LLMServiceLoggingSettings(
-            log_level=str(raw.get("log_level", "DEBUG") or "DEBUG")
+        return parse_process_logging_settings(
+            raw,
+            label="llm_service.logging",
         )
 
 

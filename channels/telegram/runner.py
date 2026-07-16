@@ -14,6 +14,7 @@ from loguru import logger
 from agent_service.client import AgentClient
 from channels.config import settings as channels_settings
 from channels.telegram.adapter import TelegramAdapter
+from commons.process_logging import configure_process_logging
 
 
 class _BotRuntime:
@@ -133,6 +134,7 @@ def _install_stop_handlers(stop_event: asyncio.Event) -> None:
 
 
 async def main() -> int:
+    configure_process_logging("telegram", channels_settings.logging)
     stop_event = asyncio.Event()
     fatal_error = asyncio.Event()
     runtimes: list[_BotRuntime] = []

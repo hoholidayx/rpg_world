@@ -104,6 +104,27 @@ channels:
     assert settings.telegram_bots[0].story_id == 3
 
 
+def test_logging_profile_override_keeps_bounded_defaults(monkeypatch, tmp_path):
+    settings = _load(
+        tmp_path,
+        monkeypatch,
+        sibling_override="""
+logging:
+  log_level: INFO
+  rotation_size_mb: 5
+  retention_count: 3
+  console_enabled: false
+""",
+    )
+
+    assert settings.logging.log_level == "INFO"
+    assert settings.logging.directory == "logs"
+    assert settings.logging.rotation_size_mb == 5
+    assert settings.logging.retention_count == 3
+    assert settings.logging.compression == "zip"
+    assert settings.logging.console_enabled is False
+
+
 def test_explicit_profile_file_is_rejected(monkeypatch, tmp_path):
     cfg = tmp_path / "settings.yaml"
     _write_channels(

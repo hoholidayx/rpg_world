@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
+from commons.process_logging import (
+    ProcessLoggingSettings,
+    parse_process_logging_settings,
+)
 from llm_client.auth import (
     DEFAULT_LLM_SERVICE_TOKEN_ENV,
     resolve_llm_service_token,
@@ -48,11 +52,6 @@ class LLMClientSettings:
     @property
     def token(self) -> str:
         return resolve_llm_service_token(self.token_env)
-
-
-@dataclass(frozen=True)
-class MediaServiceLoggingSettings:
-    log_level: str = "DEBUG"
 
 
 class MediaServiceSettings(ProfiledYamlSettings):
@@ -122,10 +121,11 @@ class MediaServiceSettings(ProfiledYamlSettings):
         )
 
     @property
-    def logging(self) -> MediaServiceLoggingSettings:
+    def logging(self) -> ProcessLoggingSettings:
         raw = self._mapping("logging")
-        return MediaServiceLoggingSettings(
-            log_level=str(raw.get("log_level", "DEBUG") or "DEBUG"),
+        return parse_process_logging_settings(
+            raw,
+            label="media_service.logging",
         )
 
 

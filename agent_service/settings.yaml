@@ -42,6 +42,14 @@ base:
   logging:
     # uvicorn 日志级别。当前阶段默认 DEBUG，便于排查 Agent 服务问题。
     log_level: DEBUG
+    # 相对项目根目录解析；当前进程写入 logs/agent.log。
+    directory: logs
+    # 单文件达到 20 MB 后滚动，保留最近 10 个压缩归档。
+    rotation_size_mb: 20
+    retention_count: 10
+    compression: zip
+    # 持久化的同时保留前台控制台输出。
+    console_enabled: true
 
 # 固定 profile 名称；覆盖文件无需在这里声明 file。
 profiles:

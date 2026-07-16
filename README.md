@@ -659,6 +659,8 @@ rp_memory/
 
 `RPG_WORLD_LLM_SERVICE_TOKEN` 存在时会覆盖默认令牌，LLM Service 与所有调用进程必须使用相同值。环境变量缺失或仅含空白时，各进程共同使用内置的 `rpg-world-local-token`，LLM Service 记录 warning 但继续启动；该默认值只适合本地开发，非本地部署应显式覆盖。Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程与配置健康；health 成功不代表调用方 token 正确，token 会在 catalog、chat、embedding 等受保护请求上验证。
 
+独立入口会统一接管 Loguru、Python `logging` 和 Uvicorn 日志，同时保留控制台输出，并在项目根目录写入 `logs/agent.log`、`llm.log`、`media.log`、`play_api.log`、`telegram.log` 或 `cli.log`。默认每个文件达到 20 MB 后滚动，保留最近 10 个 ZIP 压缩归档；`logs/` 不纳入版本控制。各进程的 `logging` 配置均支持 `directory`、`rotation_size_mb`、`retention_count`、`compression` 和 `console_enabled` 覆盖。
+
 正文门禁由 `play_webui` 的 `session.contextUsage.inputBlockThresholdRatio` 和 Core 的 `agent.context_window_reject_threshold_ratio` 独立控制，合法范围均为 `(0, 1]`、默认均为 `0.9`。前端非法值回退 `0.9`，Core 非法值会阻止启动；两侧都只计算不含当前待发送 input 的主 Agent Context。
 
 上述 YAML 配置使用同一套 `base + profiles` 结构，通过 `RPG_WORLD_PROFILE` 选择 profile，默认读取各文件自己的 `default_profile`。`local` / `test` / `prod` 是固定 profile 名称；不需要在 `profiles.*.file` 里声明覆盖文件。当前 profile 会自动读取同级覆盖文件，例如：
@@ -727,6 +729,11 @@ base:
       streaming: true
   logging:
     log_level: DEBUG
+    directory: logs
+    rotation_size_mb: 20
+    retention_count: 10
+    compression: zip
+    console_enabled: true
 ```
 
 服务监听和客户端默认值按进程拆分。例如 `agent_service/settings.yaml`：
@@ -744,6 +751,11 @@ base:
     stream_timeout_ms: 300000
   logging:
     log_level: DEBUG
+    directory: logs
+    rotation_size_mb: 20
+    retention_count: 10
+    compression: zip
+    console_enabled: true
 ```
 
 Play API 的监听和日志放在 `play_api/settings.yaml`。

@@ -2,31 +2,23 @@
 
 from __future__ import annotations
 
-import logging
-
 import uvicorn
 
+from commons.process_logging import (
+    build_uvicorn_log_config,
+    configure_process_logging,
+)
 from media_service.settings import settings
 
 
-def _configure_logging() -> None:
-    level_name = settings.logging.log_level.upper()
-    level = getattr(logging, level_name, logging.DEBUG)
-    root = logging.getLogger()
-    if not root.handlers:
-        logging.basicConfig(level=level, format="%(levelname)s:%(name)s:%(message)s")
-    root.setLevel(level)
-    logging.getLogger("media_service").setLevel(level)
-    logging.getLogger("rpg_media").setLevel(level)
-
-
 def main() -> None:
-    _configure_logging()
+    configure_process_logging("media", settings.logging)
     uvicorn.run(
         "media_service.main:app",
         host=settings.service.host,
         port=settings.service.port,
         log_level=settings.logging.log_level.lower(),
+        log_config=build_uvicorn_log_config("media", settings.logging),
         reload=settings.service.reload,
     )
 

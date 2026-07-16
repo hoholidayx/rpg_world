@@ -17,6 +17,11 @@ base:
 
   logging:
     log_level: DEBUG
+    directory: logs
+    rotation_size_mb: 20
+    retention_count: 10
+    compression: zip
+    console_enabled: true
 
 profiles:
   local: {}

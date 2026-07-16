@@ -10,6 +10,17 @@ import pytest
 from channels.config import TelegramBotSettings
 
 
+@pytest.fixture(autouse=True)
+def _disable_real_process_logging(monkeypatch):
+    import channels.telegram.runner as runner_module
+
+    monkeypatch.setattr(
+        runner_module,
+        "configure_process_logging",
+        lambda _name, _settings: None,
+    )
+
+
 def _make_bot(name: str, enabled: bool = True) -> TelegramBotSettings:
     return TelegramBotSettings(
         name=name,
@@ -25,6 +36,30 @@ def _make_bot(name: str, enabled: bool = True) -> TelegramBotSettings:
         stream_edit_min_chars=24,
         request_timeout_ms=5000,
     )
+
+
+@pytest.mark.asyncio
+async def test_main_configures_telegram_process_logging(monkeypatch):
+    import channels.telegram.runner as runner_module
+
+    configured = []
+
+    async def fake_start_enabled_bots(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        runner_module,
+        "configure_process_logging",
+        lambda name, settings: configured.append((name, settings)),
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "_start_enabled_bots",
+        fake_start_enabled_bots,
+    )
+
+    assert await runner_module.main() == 0
+    assert configured == [("telegram", runner_module.channels_settings.logging)]
 
 
 @pytest.mark.asyncio

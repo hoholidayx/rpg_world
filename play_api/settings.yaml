@@ -24,6 +24,12 @@ base:
   logging:
     # uvicorn 日志级别。当前阶段默认 DEBUG，便于排查 Play API 请求。
     log_level: DEBUG
+    # 相对项目根目录解析；当前进程写入 logs/play_api.log。
+    directory: logs
+    rotation_size_mb: 20
+    retention_count: 10
+    compression: zip
+    console_enabled: true
 
 # 固定 profile 名称；覆盖文件无需在这里声明 file。
 profiles:

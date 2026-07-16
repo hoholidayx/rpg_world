@@ -15,30 +15,23 @@ import logging
 from agent_service.client import AgentClient
 from channels.cli import CLIAdapter
 from channels.config import settings as channels_settings
+from commons.process_logging import configure_process_logging
 
 
 def _logging_level(name: str) -> int:
     return getattr(logging, name.upper(), logging.DEBUG)
 
 
-def _configure_standard_logging() -> None:
+def _configure_logging() -> None:
     """Expose stdlib logging used by FileWatcher and memory indexing."""
     log_cfg = channels_settings.logging
-    root_level = _logging_level(log_cfg.log_level)
-    root = logging.getLogger()
-    if not root.handlers:
-        logging.basicConfig(
-            level=root_level,
-            format="%(asctime)s | %(levelname)-7s | %(name)s:%(funcName)s - %(message)s",
-            datefmt="%H:%M:%S",
-        )
-    root.setLevel(root_level)
+    configure_process_logging("cli", log_cfg)
     logging.getLogger("rpg_core.watcher").setLevel(_logging_level(log_cfg.watcher_log_level))
     logging.getLogger("rp_memory.vector_index_manager").setLevel(_logging_level(log_cfg.vector_index_log_level))
 
 
 async def main() -> int:
-    _configure_standard_logging()
+    _configure_logging()
     client = AgentClient()
     ensure_kwargs = {}
     if channels_settings.cli_player_character_id > 0:

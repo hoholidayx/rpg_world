@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
+from commons.process_logging import (
+    ProcessLoggingSettings,
+    parse_process_logging_settings,
+)
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 
@@ -16,11 +20,6 @@ class PlayApiServiceSettings:
     port: int = 8001
     api_prefix: str = "/play-api/v1"
     reload: bool = False
-
-
-@dataclass(frozen=True)
-class PlayApiLoggingSettings:
-    log_level: str = "DEBUG"
 
 
 class PlayApiSettings(ProfiledYamlSettings):
@@ -42,10 +41,11 @@ class PlayApiSettings(ProfiledYamlSettings):
         )
 
     @property
-    def logging(self) -> PlayApiLoggingSettings:
+    def logging(self) -> ProcessLoggingSettings:
         raw = self._mapping("logging")
-        return PlayApiLoggingSettings(
-            log_level=str(raw.get("log_level", "DEBUG") or "DEBUG"),
+        return parse_process_logging_settings(
+            raw,
+            label="play_api.logging",
         )
 
 

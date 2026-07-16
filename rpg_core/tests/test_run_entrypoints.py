@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import signal
 from threading import Event
 
@@ -10,6 +9,8 @@ import pytest
 import run_all
 import run_agent
 import run_cli
+import run_llm
+import run_media
 import run_play_api
 import run_telegram
 
@@ -133,16 +134,26 @@ def test_run_all_refuses_to_terminate_other_listener(monkeypatch):
 
 def test_run_play_api_main_invokes_uvicorn(monkeypatch):
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-    configured: list[bool] = []
+    configured: list[tuple[str, object]] = []
+    uvicorn_log_config = object()
 
     def _fake_run(*args, **kwargs):
         calls.append((args, kwargs))
 
     monkeypatch.setattr(run_play_api.uvicorn, "run", _fake_run)
-    monkeypatch.setattr(run_play_api, "_configure_standard_logging", lambda: configured.append(True))
+    monkeypatch.setattr(
+        run_play_api,
+        "configure_process_logging",
+        lambda name, settings: configured.append((name, settings)),
+    )
+    monkeypatch.setattr(
+        run_play_api,
+        "build_uvicorn_log_config",
+        lambda _name, _settings: uvicorn_log_config,
+    )
 
     assert run_play_api.main() is None
-    assert configured == [True]
+    assert configured == [("play_api", run_play_api.play_settings.logging)]
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args == ("play_api.main:app",)
@@ -150,45 +161,76 @@ def test_run_play_api_main_invokes_uvicorn(monkeypatch):
     assert kwargs["port"] == run_play_api.play_settings.service.port
     assert kwargs["reload"] == run_play_api.play_settings.service.reload
     assert kwargs["log_level"] == run_play_api.play_settings.logging.log_level.lower()
-
-
-def test_run_play_api_configures_application_logging(monkeypatch):
-    root = logging.getLogger()
-    old_level = root.level
-    old_play_level = logging.getLogger("play_api").level
-    old_data_level = logging.getLogger("rpg_data").level
-
-    try:
-        run_play_api._configure_standard_logging()
-
-        expected_level = getattr(
-            logging,
-            run_play_api.play_settings.logging.log_level.upper(),
-            logging.DEBUG,
-        )
-        assert root.level == expected_level
-        assert logging.getLogger("play_api").level == expected_level
-        assert logging.getLogger("rpg_data").level == expected_level
-    finally:
-        root.setLevel(old_level)
-        logging.getLogger("play_api").setLevel(old_play_level)
-        logging.getLogger("rpg_data").setLevel(old_data_level)
+    assert kwargs["log_config"] is uvicorn_log_config
 
 
 def test_run_agent_main_invokes_uvicorn(monkeypatch):
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    configured: list[tuple[str, object]] = []
+    uvicorn_log_config = object()
 
     def _fake_run(*args, **kwargs):
         calls.append((args, kwargs))
 
     monkeypatch.setattr(run_agent.uvicorn, "run", _fake_run)
+    monkeypatch.setattr(
+        run_agent,
+        "configure_process_logging",
+        lambda name, settings: configured.append((name, settings)),
+    )
+    monkeypatch.setattr(
+        run_agent,
+        "build_uvicorn_log_config",
+        lambda _name, _settings: uvicorn_log_config,
+    )
 
     assert run_agent.main() is None
+    assert configured == [("agent", run_agent.agent_service_settings.logging)]
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args == ("agent_service.main:app",)
     assert kwargs["host"] == run_agent.agent_service_settings.service.host
     assert kwargs["port"] == run_agent.agent_service_settings.service.port
+    assert kwargs["log_config"] is uvicorn_log_config
+
+
+@pytest.mark.parametrize(
+    ("module", "process_name", "app_path"),
+    [
+        (run_llm, "llm", "llm_service.main:app"),
+        (run_media, "media", "media_service.main:app"),
+    ],
+)
+def test_service_entrypoint_configures_process_logging_before_uvicorn(
+    monkeypatch,
+    module,
+    process_name,
+    app_path,
+):
+    events: list[tuple[str, object]] = []
+    uvicorn_log_config = object()
+
+    monkeypatch.setattr(
+        module,
+        "configure_process_logging",
+        lambda name, settings: events.append(("logging", (name, settings))),
+    )
+    monkeypatch.setattr(
+        module,
+        "build_uvicorn_log_config",
+        lambda _name, _settings: uvicorn_log_config,
+    )
+    monkeypatch.setattr(
+        module.uvicorn,
+        "run",
+        lambda *args, **kwargs: events.append(("uvicorn", (args, kwargs))),
+    )
+
+    assert module.main() is None
+    assert events[0] == ("logging", (process_name, module.settings.logging))
+    args, kwargs = events[1][1]
+    assert args == (app_path,)
+    assert kwargs["log_config"] is uvicorn_log_config
 
 
 def test_run_telegram_main_forwards(monkeypatch):

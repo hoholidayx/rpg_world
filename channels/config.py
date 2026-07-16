@@ -8,6 +8,10 @@ from pathlib import Path
 import os
 
 from commons.settings import ConfigDict, ProfiledYamlSettings, forgiving_int, optional_bool
+from commons.process_logging import (
+    ProcessLoggingSettings,
+    parse_process_logging_settings,
+)
 from rpg_core.session import SessionManager
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
@@ -47,8 +51,7 @@ class CliChannelSettings:
 
 
 @dataclass(frozen=True)
-class ChannelLoggingSettings:
-    log_level: str = "DEBUG"
+class ChannelLoggingSettings(ProcessLoggingSettings):
     watcher_log_level: str = "DEBUG"
     vector_index_log_level: str = "DEBUG"
 
@@ -133,10 +136,23 @@ class ChannelsSettings(ProfiledYamlSettings):
     @property
     def logging(self) -> ChannelLoggingSettings:
         raw = self._mapping("logging")
+        base = parse_process_logging_settings(
+            raw,
+            label="channels.logging",
+        )
         return ChannelLoggingSettings(
-            log_level=str(raw.get("log_level", "DEBUG") or "DEBUG"),
-            watcher_log_level=str(raw.get("watcher_log_level", raw.get("log_level", "DEBUG")) or "DEBUG"),
-            vector_index_log_level=str(raw.get("vector_index_log_level", raw.get("log_level", "DEBUG")) or "DEBUG"),
+            log_level=base.log_level,
+            directory=base.directory,
+            rotation_size_mb=base.rotation_size_mb,
+            retention_count=base.retention_count,
+            compression=base.compression,
+            console_enabled=base.console_enabled,
+            watcher_log_level=str(
+                raw.get("watcher_log_level", base.log_level) or base.log_level
+            ).upper(),
+            vector_index_log_level=str(
+                raw.get("vector_index_log_level", base.log_level) or base.log_level
+            ).upper(),
         )
 
     @staticmethod
