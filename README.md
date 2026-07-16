@@ -823,7 +823,10 @@ uv run python -m pytest \
   rpg_core/tests/test_turn_orchestration.py -q
 uv run python -m pytest agent_service/tests -q
 INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q
+SERVICE_INTEGRATION_TEST=1 uv run python -m pytest tests/integration -m service_integration -q
 ```
+
+跨服务覆盖矩阵见 [`docs/backend-integration-matrix.md`](docs/backend-integration-matrix.md)。`service_integration` 使用随机本地端口启动独立 LLM、Agent、Media 与 Play API 测试进程，覆盖真实 HTTP/SSE、服务生命周期、SQLite 和媒体落盘；模型与图片 Provider 使用 deterministic fake，不访问公网。
 
 ## 当前实现优先级
 

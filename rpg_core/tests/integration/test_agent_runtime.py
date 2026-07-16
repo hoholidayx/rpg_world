@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from dataclasses import replace
 
 import pytest
 
@@ -11,6 +12,9 @@ from llm_client.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
+    MEMORY_EMBED_BIZ_KEY,
+    MEMORY_QUERY_PLANNER_BIZ_KEY,
+    MEMORY_RERANK_BIZ_KEY,
 )
 from llm_client.types import ProviderChunk
 from rpg_core.agent.agent_types import StreamEventKind
@@ -100,6 +104,30 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         first_message=first_message,
     )
     await agent.send("before clear")
+    media_job = integration_data_gateway.media.create_job(
+        session_id=session_id,
+        provider_key="integration-local",
+        source_start_turn_id=1,
+        source_end_turn_id=1,
+        source_fingerprint="a" * 64,
+        source_snapshot_json='{"messages":[]}',
+        visual_brief_json='{"sceneDescription":"clear integration"}',
+    )
+    claimed_media_job = integration_data_gateway.media.claim_next_job()
+    assert claimed_media_job is not None and claimed_media_job.id == media_job.id
+    completed_media = integration_data_gateway.media.complete_job(
+        job_id=media_job.id,
+        sha256="b" * 64,
+        canonical_ext="png",
+        mime_type="image/png",
+        byte_size=64,
+        relative_path=f"assets/images/{'b' * 64}.png",
+    )
+    assert completed_media is not None
+    integration_data_gateway.media.set_background(
+        session_id,
+        completed_media.asset.id,
+    )
     selection = MainLLMSelectionService(integration_data_gateway)
     selected = await selection.set_session_provider_key(session_id, SESSION_PROVIDER_KEY)
     assert selected is not None
@@ -199,6 +227,22 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     assert integration_data_gateway.messages.count(session_id) == 1
     assert integration_data_gateway.story_memory.list(session_id) == []
     assert integration_data_gateway.narrative_outcomes.get_for_turn(session_id, 99) is None
+    assert integration_data_gateway.media.list_jobs(session_id) == []
+    assert integration_data_gateway.media.list_gallery(session_id) == []
+    assert integration_data_gateway.media.get_background(session_id) is None
+    assert (
+        integration_data_gateway.media.get_library_asset_by_asset_id(
+            completed_media.asset.id
+        )
+        is not None
+    )
+    assert (
+        integration_data_gateway.media.get_workspace_blob_by_hash(
+            "integration_workspace",
+            "b" * 64,
+        )
+        is not None
+    )
     assert integration_data_gateway.backup.messages.count(session_id) == backup_count + 1
     assert integration_data_gateway.status.list_deferred_progress(session_id) == []
     rebuilt = integration_data_gateway.status.get_table(session_id, template_copy.name)
@@ -458,6 +502,189 @@ async def test_story_memory_extraction_runs_after_commit_and_marks_message_rows(
         call.biz_key == AGENT_MEMORY_SUB_AGENT_BIZ_KEY and call.provider_key is None
         for call in scripted_llm_manager.calls
     )
+
+
+@pytest.mark.asyncio
+async def test_memory_recall_falls_back_locally_then_retries_remote_capability(
+    integration_agent_factory,
+    integration_data_gateway,
+    integration_settings,
+    scripted_llm_manager,
+    monkeypatch,
+):
+    session_id = "integration_memory_retry"
+    remote_memory_settings = replace(
+        integration_settings.memory_settings,
+        query_planner_enabled=True,
+        rerank_enabled=True,
+    )
+    monkeypatch.setattr(
+        type(integration_settings),
+        "memory_settings",
+        property(lambda self: remote_memory_settings),
+    )
+    agent = await integration_agent_factory(session_id)
+    runtime_dir = integration_data_gateway.catalog.get_session_runtime_dir(session_id)
+    summary_dir = runtime_dir / "summaries"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / "observatory.md").write_text(
+        "银色天文仪被藏在测试大厅北侧的锁柜中。",
+        encoding="utf-8",
+    )
+
+    original_get_provider = scripted_llm_manager.get_provider
+    remote_attempts = {
+        MEMORY_EMBED_BIZ_KEY: 0,
+        MEMORY_QUERY_PLANNER_BIZ_KEY: 0,
+        MEMORY_RERANK_BIZ_KEY: 0,
+    }
+
+    async def flaky_get_provider(biz_key: str, *, provider_key: str | None = None):
+        if biz_key in remote_attempts:
+            remote_attempts[biz_key] += 1
+            if remote_attempts[biz_key] == 1:
+                raise RuntimeError(f"{biz_key} temporarily unavailable")
+        return await original_get_provider(biz_key, provider_key=provider_key)
+
+    scripted_llm_manager.get_provider = flaky_get_provider  # type: ignore[method-assign]
+
+    first = await agent.send("银色天文仪在哪里？")
+    first_request = "\n".join(
+        str(message.get("content") or "")
+        for message in scripted_llm_manager.main_provider().calls[-1].messages
+    )
+
+    assert first.committed_turn_id == 1
+    assert "银色天文仪" in first_request
+    assert set(remote_attempts.values()) == {1}
+
+    second = await agent.send("再确认一次天文仪的位置。")
+
+    assert second.committed_turn_id == 2
+    assert set(remote_attempts.values()) == {2}
+    assert scripted_llm_manager.embedding.calls
+    assert integration_data_gateway.messages.latest_turn_id(session_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_deferred_status_runs_before_next_mailbox_item_and_isolates_batches(
+    integration_agent_factory,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    from rpg_data import models
+
+    session_id = "integration_deferred"
+    agent = await integration_agent_factory(session_id, with_status=True)
+    failed_document = models.StatusTableDocument.from_rows(rows=[
+        models.StatusTableRow(
+            "长期警戒",
+            "低",
+            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
+            deferred_interval_turns=1,
+        )
+    ])
+    successful_document = models.StatusTableDocument.from_rows(rows=[
+        models.StatusTableRow(
+            "长期信任",
+            "低",
+            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
+            deferred_interval_turns=1,
+        )
+    ])
+    failed_table = integration_data_gateway.status.create_table(
+        session_id,
+        "失败批次",
+        document=failed_document,
+    )
+    successful_table = integration_data_gateway.status.create_table(
+        session_id,
+        "成功批次",
+        document=successful_document,
+    )
+    scripted_llm_manager.status.queue_chat(
+        response("", model="status-model"),
+        response("", model="status-model"),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[tool_call("invalid_deferred_tool", "{}")],
+        ),
+        response(
+            "",
+            model="status-model",
+            tool_calls=[
+                tool_call(
+                    "set_deferred_values",
+                    '{"updates":[{"key":"长期信任","value":"中"}]}',
+                )
+            ],
+        ),
+    )
+
+    reply = await agent.send("我连续守约并帮助了同伴。")
+    command = await agent.execute_command("/help")
+
+    assert reply.committed_turn_id == 1
+    assert command.handled is True
+    failed_after = integration_data_gateway.status.get_table_for_session(
+        session_id,
+        failed_table.id,
+    )
+    successful_after = integration_data_gateway.status.get_table_for_session(
+        session_id,
+        successful_table.id,
+    )
+    assert failed_after.document.row_for_key("长期警戒").value == "低"
+    assert successful_after.document.row_for_key("长期信任").value == "中"
+    progress = integration_data_gateway.status.list_deferred_progress(session_id)
+    assert [(item.session_status_table_id, item.field_key, item.last_processed_turn_id) for item in progress] == [
+        (successful_table.id, "长期信任", 1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_different_sessions_progress_while_one_waits_on_remote_llm(
+    integration_agent_factory,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    first_agent = await integration_agent_factory("integration_concurrent_a")
+    second_agent = await integration_agent_factory("integration_concurrent_b")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked_reply(_messages, _tools):  # noqa: ANN001, ANN202
+        entered.set()
+        await release.wait()
+        return response("session A completed", model="config-model")
+
+    provider = scripted_llm_manager.main_provider()
+    provider.queue_chat(
+        blocked_reply,
+        response("session B completed", model="config-model"),
+    )
+
+    first_task = asyncio.create_task(first_agent.send("block session A"))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    second_reply = await asyncio.wait_for(
+        second_agent.send("allow session B"),
+        timeout=2,
+    )
+
+    assert second_reply.text == "session B completed"
+    assert not first_task.done()
+    assert integration_data_gateway.messages.latest_turn_id(
+        "integration_concurrent_b"
+    ) == 1
+
+    release.set()
+    first_reply = await asyncio.wait_for(first_task, timeout=2)
+
+    assert first_reply.text == "session A completed"
+    assert integration_data_gateway.messages.latest_turn_id(
+        "integration_concurrent_a"
+    ) == 1
 
 
 @pytest.mark.asyncio

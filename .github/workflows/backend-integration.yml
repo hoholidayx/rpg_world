@@ -1,0 +1,68 @@
+name: Backend integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-baseline:
+    name: Backend baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --dev
+      - name: Run backend tests
+        run: >-
+          uv run python -m pytest
+          channels/tests rpg_core/tests rp_memory/tests llm_service/tests
+          play_api/tests agent_service/tests rpg_data/tests rpg_media/tests
+          media_service/tests -q
+
+  core-integration:
+    name: Core integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --dev
+      - name: Run deterministic core integration
+        env:
+          INTEGRATION_TEST: "1"
+        run: uv run python -m pytest rpg_core/tests/integration -q
+
+  service-integration:
+    name: Service integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --dev
+      - name: Run real HTTP service smoke
+        env:
+          SERVICE_INTEGRATION_TEST: "1"
+        run: >-
+          uv run python -m pytest tests/integration
+          -m service_integration -q

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -8,6 +9,7 @@ import pytest_asyncio
 
 from agent_service import main as service_main
 from llm_client.keys import AGENT_MAIN_BIZ_KEY
+from llm_client.types import ProviderChunk
 from rpg_core.agent.manager import AgentManager
 from rpg_core.tests.integration.conftest import (
     _create_integration_session,
@@ -17,6 +19,7 @@ from rpg_core.tests.integration.scripted_llm import (
     CONFIG_PROVIDER_KEY,
     SESSION_PROVIDER_KEY,
     STORY_PROVIDER_KEY,
+    scripted_usage,
 )
 
 pytestmark = pytest.mark.integration
@@ -136,6 +139,218 @@ async def test_agent_service_stream_success_and_failure_preserve_transaction_sem
     assert failed_events[-1]["content"] == "service stream failed"
     assert integration_data_gateway.messages.count(failure_id) == 0
     assert integration_data_gateway.backup.messages.count(failure_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_service_stop_uses_request_id_and_discards_active_stream(
+    agent_service_client,
+    integration_workspace,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    session_id = "service_stop"
+    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocking_stream(_messages, _tools):  # noqa: ANN001, ANN202
+        entered.set()
+        await release.wait()
+        return (
+            ProviderChunk(content="partial"),
+            ProviderChunk(
+                finish_reason="stop",
+                usage=scripted_usage(),
+                model="config-model",
+            ),
+        )
+
+    scripted_llm_manager.main_provider().queue_stream(blocking_stream)
+    stream_task = asyncio.create_task(
+        agent_service_client.post(
+            "/agent/v1/chat/stream",
+            json={
+                "session_id": session_id,
+                "message": "wait for stop",
+                "request_id": "req_active",
+            },
+        )
+    )
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    queued_task = asyncio.create_task(
+        agent_service_client.post(
+            "/agent/v1/chat/stream",
+            json={
+                "session_id": session_id,
+                "message": "queued behind active",
+                "request_id": "req_queued",
+            },
+        )
+    )
+    await asyncio.sleep(0)
+
+    queued_cancelled = None
+    for _ in range(100):
+        candidate = await agent_service_client.post(
+            "/agent/v1/chat/stop",
+            json={"session_id": session_id, "request_id": "req_queued"},
+        )
+        if candidate.json()["status"] == "cancelled":
+            queued_cancelled = candidate
+            break
+        await asyncio.sleep(0)
+    assert queued_cancelled is not None
+    stale = await agent_service_client.post(
+        "/agent/v1/chat/stop",
+        json={"session_id": session_id, "request_id": "req_stale"},
+    )
+    cancelled = await agent_service_client.post(
+        "/agent/v1/chat/stop",
+        json={"session_id": session_id, "request_id": "req_active"},
+    )
+    streamed = await asyncio.wait_for(stream_task, timeout=2)
+    queued_streamed = await asyncio.wait_for(queued_task, timeout=2)
+    not_running = await agent_service_client.post(
+        "/agent/v1/chat/stop",
+        json={"session_id": session_id, "request_id": "req_active"},
+    )
+
+    assert queued_cancelled.json() == {
+        "status": "cancelled",
+        "session_id": session_id,
+        "request_id": "req_queued",
+    }
+    assert stale.json()["status"] == "stale"
+    assert cancelled.json() == {
+        "status": "cancelled",
+        "session_id": session_id,
+        "request_id": "req_active",
+    }
+    assert not_running.json()["status"] == "not_running"
+    assert all(event["kind"] != "done" for event in _sse_events(streamed))
+    assert _sse_events(queued_streamed) == []
+    assert integration_data_gateway.messages.count(session_id) == 0
+    assert integration_data_gateway.backup.messages.count(session_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_service_delete_closes_active_and_queued_turns_before_data_removal(
+    agent_service_client,
+    integration_workspace,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    session_id = "service_delete_busy"
+    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    runtime_dir = integration_data_gateway.catalog.get_session_runtime_dir(session_id)
+    marker = runtime_dir / "delete-marker.bin"
+    marker.write_bytes(b"delete")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocking_stream(_messages, _tools):  # noqa: ANN001, ANN202
+        entered.set()
+        await release.wait()
+        return (
+            ProviderChunk(content="must not commit"),
+            ProviderChunk(finish_reason="stop", usage=scripted_usage()),
+        )
+
+    scripted_llm_manager.main_provider().queue_stream(blocking_stream)
+    active_task = asyncio.create_task(
+        agent_service_client.post(
+            "/agent/v1/chat/stream",
+            json={
+                "session_id": session_id,
+                "message": "active",
+                "request_id": "req_delete_active",
+            },
+        )
+    )
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    queued_task = asyncio.create_task(
+        agent_service_client.post(
+            "/agent/v1/chat/stream",
+            json={
+                "session_id": session_id,
+                "message": "queued",
+                "request_id": "req_delete_queued",
+            },
+        )
+    )
+    await asyncio.sleep(0)
+
+    deleted = await agent_service_client.delete(
+        "/agent/v1/chat/session",
+        params={"session_id": session_id},
+    )
+    active_response, queued_response = await asyncio.wait_for(
+        asyncio.gather(active_task, queued_task),
+        timeout=2,
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {
+        "status": "deleted",
+        "session_id": session_id,
+        "runtime_cleanup": "deleted",
+    }
+    assert all(event["kind"] != "done" for event in _sse_events(active_response))
+    assert all(event["kind"] != "done" for event in _sse_events(queued_response))
+    assert integration_data_gateway.catalog.get_session(session_id) is None
+    assert session_id not in AgentManager._instances
+    assert not runtime_dir.exists()
+
+    missing = await agent_service_client.post(
+        "/agent/v1/chat/send",
+        json={"session_id": session_id, "message": "after delete"},
+    )
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_agent_service_delete_failure_restores_runtime_and_allows_recreation(
+    agent_service_client,
+    integration_workspace,
+    integration_data_gateway,
+    monkeypatch,
+):
+    session_id = "service_delete_rollback"
+    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    first = await agent_service_client.post(
+        "/agent/v1/chat/send",
+        json={"session_id": session_id, "message": "keep me"},
+    )
+    assert first.status_code == 200
+    runtime_dir = integration_data_gateway.catalog.get_session_runtime_dir(session_id)
+    marker = runtime_dir / "keep-marker.bin"
+    marker.write_bytes(b"keep")
+
+    def fail_delete(_session_id: str) -> bool:
+        raise RuntimeError("database delete failed")
+
+    monkeypatch.setattr(
+        integration_data_gateway.session_deletion._sessions,
+        "delete",
+        fail_delete,
+    )
+    failed = await agent_service_client.delete(
+        "/agent/v1/chat/session",
+        params={"session_id": session_id},
+    )
+
+    assert failed.status_code == 500
+    assert "database delete failed" in failed.json()["detail"]
+    assert integration_data_gateway.catalog.get_session(session_id) is not None
+    assert marker.read_bytes() == b"keep"
+    assert session_id not in AgentManager._instances
+
+    followup = await agent_service_client.post(
+        "/agent/v1/chat/send",
+        json={"session_id": session_id, "message": "still usable"},
+    )
+    assert followup.status_code == 200
+    assert integration_data_gateway.messages.latest_turn_id(session_id) == 2
 
 
 @pytest.mark.asyncio

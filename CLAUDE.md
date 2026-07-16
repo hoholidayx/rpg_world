@@ -796,7 +796,10 @@ uv run python -m pytest \
   rpg_core/tests/test_turn_transaction.py -q
 uv run python -m pytest agent_service/tests -q
 INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q
+SERVICE_INTEGRATION_TEST=1 uv run python -m pytest tests/integration -m service_integration -q
 ```
+
+跨服务覆盖矩阵见 `docs/backend-integration-matrix.md`。`service_integration` 会以随机 loopback 端口启动独立 LLM、Agent、Media、Play API 测试进程，真实经过 HTTP/SSE、lifespan、SQLite 和媒体文件落盘，但最终模型与图片 Provider 仍为 deterministic fake，不需要 API key 或公网。
 
 ## 当前实现优先级
 
