@@ -236,6 +236,73 @@ def to_media_asset(row: records.MediaAssetRecord) -> models.MediaAsset:
         visual_brief_json=str(row.visual_brief_json),
         generation_params_json=str(row.generation_params_json or "{}"),
         metadata_json=str(row.metadata_json or "{}"),
+        origin_kind=str(row.origin_kind or models.MEDIA_ASSET_ORIGIN_GENERATED),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_media_library_item(
+    row: records.MediaLibraryItemRecord,
+) -> models.MediaLibraryItem:
+    return models.MediaLibraryItem(
+        id=str(row.id),
+        workspace_id=str(row.workspace_id),
+        asset_id=str(row.asset_id),
+        scope=str(row.scope),
+        story_id=int(row.story_id) if row.story_id is not None else None,
+        title=str(row.title),
+        description=str(row.description),
+        is_default=bool(row.is_default),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_session_media_background_state(
+    row: records.SessionMediaBackgroundStateRecord,
+) -> models.SessionMediaBackgroundState:
+    return models.SessionMediaBackgroundState(
+        session_id=str(row.session_id),
+        latest_observed_turn_id=int(row.latest_observed_turn_id),
+        latest_source_fingerprint=str(row.latest_source_fingerprint or ""),
+        auto_suppressed=bool(row.auto_suppressed),
+        suppressed_through_turn_id=int(row.suppressed_through_turn_id),
+        desired_turn_id=int(row.desired_turn_id),
+        desired_source_fingerprint=str(row.desired_source_fingerprint or ""),
+        last_applied_turn_id=int(row.last_applied_turn_id),
+        last_applied_fingerprint=str(row.last_applied_fingerprint or ""),
+        last_decision=str(row.last_decision or ""),
+        last_reason=str(row.last_reason or ""),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
+def to_media_background_evaluation(
+    row: records.MediaBackgroundEvaluationRecord,
+) -> models.MediaBackgroundEvaluation:
+    return models.MediaBackgroundEvaluation(
+        id=str(row.id),
+        session_id=str(row.session_id),
+        status=str(row.status),
+        target_turn_id=int(row.target_turn_id),
+        source_fingerprint=str(row.source_fingerprint),
+        source_snapshot_json=str(row.source_snapshot_json),
+        decision=str(row.decision or ""),
+        selected_asset_id=(
+            str(row.selected_asset_id)
+            if row.selected_asset_id is not None
+            else None
+        ),
+        reason=str(row.reason or ""),
+        error_code=str(row.error_code or ""),
+        error_message=str(row.error_message or ""),
+        started_at=str(row.started_at or ""),
+        finished_at=str(row.finished_at or ""),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),
@@ -295,6 +362,7 @@ def to_session_media_background(
     return models.SessionMediaBackground(
         session_id=str(row.session_id),
         asset_id=str(row.asset_id),
+        source_mode=str(row.source_mode or models.MEDIA_BACKGROUND_SOURCE_MANUAL),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),

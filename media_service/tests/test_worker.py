@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from media_service.worker import MediaJobWorker
+from media_service.worker import MediaBackgroundWorker, MediaJobWorker
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
 from rpg_media.brief import DemoVisualBriefPlanner
@@ -55,6 +55,78 @@ async def test_worker_sleeps_until_woken_and_returns_to_sleep_after_job() -> Non
 
         await asyncio.sleep(0.3)
         assert data.claim_next_job.call_count == 3
+    finally:
+        await worker.stop()
+
+
+@pytest.mark.asyncio
+async def test_generation_worker_does_not_lose_wake_during_empty_claim() -> None:
+    data = Mock()
+    data.interrupt_active_jobs.return_value = 0
+    facade = Mock()
+    facade.execute_job = AsyncMock(
+        return_value=SimpleNamespace(status=models.MEDIA_JOB_STATUS_SUCCEEDED)
+    )
+    worker = MediaJobWorker(data=data, facade=facade, concurrency=1)
+    job = SimpleNamespace(id="job-race", session_id="session1", provider_key="local")
+    claims = 0
+
+    def claim():  # noqa: ANN202
+        nonlocal claims
+        claims += 1
+        if claims == 1:
+            worker.wake()
+            return None
+        if claims == 2:
+            return job
+        return None
+
+    data.claim_next_job.side_effect = claim
+    await worker.start()
+    try:
+        for _ in range(100):
+            if facade.execute_job.await_count:
+                break
+            await asyncio.sleep(0.001)
+        facade.execute_job.assert_awaited_once_with("job-race")
+    finally:
+        await worker.stop()
+
+
+@pytest.mark.asyncio
+async def test_background_worker_does_not_lose_wake_during_empty_claim() -> None:
+    data = Mock()
+    data.interrupt_background_evaluations.return_value = []
+    facade = Mock()
+    facade.execute_background_evaluation = AsyncMock(
+        return_value=SimpleNamespace(status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED)
+    )
+    worker = MediaBackgroundWorker(data=data, facade=facade, concurrency=1)
+    evaluation = SimpleNamespace(
+        id="evaluation-race",
+        session_id="session1",
+        target_turn_id=2,
+    )
+    claims = 0
+
+    def claim():  # noqa: ANN202
+        nonlocal claims
+        claims += 1
+        if claims == 1:
+            worker.wake()
+            return None
+        if claims == 2:
+            return evaluation
+        return None
+
+    data.claim_next_background_evaluation.side_effect = claim
+    await worker.start()
+    try:
+        for _ in range(100):
+            if facade.execute_background_evaluation.await_count:
+                break
+            await asyncio.sleep(0.001)
+        facade.execute_background_evaluation.assert_awaited_once_with("evaluation-race")
     finally:
         await worker.stop()
 

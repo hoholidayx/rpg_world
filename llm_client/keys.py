@@ -8,5 +8,7 @@ MEMORY_EMBED_BIZ_KEY = "memory.embed"
 MEMORY_QUERY_PLANNER_BIZ_KEY = "memory.query_planner"
 MEMORY_RERANK_BIZ_KEY = "memory.rerank"
 
+MEDIA_SCENE_BACKGROUND_MATCH_BIZ_KEY = "media.scene_background_match"
+
 PROVIDER_OPENAI = "openai"
 PROVIDER_LLAMA = "llama"

@@ -29,11 +29,15 @@ __all__ = [
     "MediaAssetRecord",
     "MediaBlobRecord",
     "MediaJobRecord",
+    "MediaLibraryItemRecord",
+    "MediaLibraryItemTagRecord",
+    "MediaBackgroundEvaluationRecord",
     "NarrativeStyleRecord",
     "RPModuleCatalogRecord",
     "SessionBackupMessageRecord",
     "SessionMessageRecord",
     "SessionMediaBackgroundRecord",
+    "SessionMediaBackgroundStateRecord",
     "SessionMediaGalleryItemRecord",
     "SessionNarrativeOutcomeRecord",
     "SessionProfileRecord",
@@ -408,12 +412,62 @@ class MediaAssetRecord(BaseRecord):
     visual_brief_json = TextField()
     generation_params_json = TextField(default="{}")
     metadata_json = TextField(default="{}")
+    origin_kind = TextField(default="generated")
     version = IntegerField(default=1)
     created_at = TextField()
     updated_at = TextField()
 
     class Meta:
         table_name = "rpg_media_assets"
+
+
+class MediaLibraryItemRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="media_library_items",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    asset = ForeignKeyField(
+        MediaAssetRecord,
+        backref="library_item",
+        column_name="asset_id",
+        on_delete="CASCADE",
+        unique=True,
+    )
+    scope = TextField()
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="media_library_items",
+        column_name="story_id",
+        null=True,
+        on_delete="CASCADE",
+    )
+    title = TextField()
+    description = TextField()
+    is_default = BooleanField(default=False)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_media_library_items"
+
+
+class MediaLibraryItemTagRecord(BaseRecord):
+    item = ForeignKeyField(
+        MediaLibraryItemRecord,
+        backref="tag_rows",
+        column_name="item_id",
+        on_delete="CASCADE",
+    )
+    tag = TextField()
+    created_at = TextField()
+
+    class Meta:
+        table_name = "rpg_media_library_item_tags"
+        primary_key = CompositeKey("item", "tag")
 
 
 class MediaJobRecord(BaseRecord):
@@ -511,12 +565,72 @@ class SessionMediaBackgroundRecord(BaseRecord):
         column_name="asset_id",
         on_delete="RESTRICT",
     )
+    source_mode = TextField(default="manual")
     version = IntegerField(default=1)
     created_at = TextField()
     updated_at = TextField()
 
     class Meta:
         table_name = "rpg_session_media_backgrounds"
+
+
+class SessionMediaBackgroundStateRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        primary_key=True,
+        backref="media_background_state",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    latest_observed_turn_id = IntegerField(default=0)
+    latest_source_fingerprint = TextField(default="")
+    auto_suppressed = BooleanField(default=False)
+    suppressed_through_turn_id = IntegerField(default=0)
+    desired_turn_id = IntegerField(default=0)
+    desired_source_fingerprint = TextField(default="")
+    last_applied_turn_id = IntegerField(default=0)
+    last_applied_fingerprint = TextField(default="")
+    last_decision = TextField(default="")
+    last_reason = TextField(default="")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_media_background_states"
+
+
+class MediaBackgroundEvaluationRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="media_background_evaluations",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    status = TextField(default="queued")
+    target_turn_id = IntegerField()
+    source_fingerprint = CharField()
+    source_snapshot_json = TextField()
+    decision = TextField(default="")
+    selected_asset = ForeignKeyField(
+        MediaAssetRecord,
+        backref="background_evaluations",
+        column_name="selected_asset_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    reason = TextField(default="")
+    error_code = TextField(default="")
+    error_message = TextField(default="")
+    started_at = TextField(null=True)
+    finished_at = TextField(null=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_media_background_evaluations"
 
 
 class RPModuleCatalogRecord(BaseRecord):
@@ -836,9 +950,13 @@ RECORD_MODELS = (
     SessionNarrativeOutcomeRecord,
     MediaBlobRecord,
     MediaAssetRecord,
+    MediaLibraryItemRecord,
+    MediaLibraryItemTagRecord,
     MediaJobRecord,
     SessionMediaGalleryItemRecord,
     SessionMediaBackgroundRecord,
+    SessionMediaBackgroundStateRecord,
+    MediaBackgroundEvaluationRecord,
     CharacterRecord,
     CharacterDetailRecord,
     LorebookEntryRecord,

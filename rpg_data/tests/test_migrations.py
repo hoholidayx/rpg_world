@@ -326,7 +326,95 @@ def test_run_migrations_is_idempotent() -> None:
             ("0007", "0007_player_role_templates.sql"),
             ("0008", "0008_status_update_frequency.sql"),
             ("0009", "0009_media.sql"),
+            ("0010", "0010_media_library_backgrounds.sql"),
+            ("0011", "0011_media_generated_library.sql"),
         ]
+    finally:
+        conn.close()
+
+
+def test_generated_media_library_migration_backfills_existing_gallery_assets() -> None:
+    conn = db.connect(":memory:")
+    try:
+        run_migrations(conn)
+        session = conn.execute(
+            "SELECT id, workspace_id, story_id FROM rpg_sessions ORDER BY id LIMIT 1"
+        ).fetchone()
+        assert session is not None
+        with db.transaction(conn):
+            conn.execute(
+                """
+                INSERT INTO rpg_media_blobs (
+                    id, workspace_id, sha256, canonical_ext, mime_type,
+                    byte_size, relative_path
+                ) VALUES (?, ?, ?, 'png', 'image/png', 128, ?)
+                """,
+                (
+                    "legacy_generated_blob",
+                    session["workspace_id"],
+                    "a" * 64,
+                    f"assets/images/{'a' * 64}.png",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO rpg_media_assets (
+                    id, workspace_id, blob_id, provider_key,
+                    visual_brief_json, origin_kind
+                ) VALUES (?, ?, ?, 'legacy_provider', ?, 'generated')
+                """,
+                (
+                    "legacy_generated_asset",
+                    session["workspace_id"],
+                    "legacy_generated_blob",
+                    '{"sceneDescription":"Moonlit legacy forest"}',
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO rpg_session_media_gallery_items (
+                    id, session_id, asset_id, source_start_turn_id,
+                    source_end_turn_id, source_fingerprint,
+                    source_snapshot_json, visual_brief_json
+                ) VALUES (?, ?, ?, 1, 1, ?, '{}', ?)
+                """,
+                (
+                    "legacy_generated_gallery",
+                    session["id"],
+                    "legacy_generated_asset",
+                    "b" * 64,
+                    '{"sceneDescription":"Moonlit legacy forest"}',
+                ),
+            )
+            conn.execute(
+                "DELETE FROM rpg_schema_migrations WHERE version = '0011'"
+            )
+
+        run_migrations(conn)
+
+        item = conn.execute(
+            """
+            SELECT scope, story_id, title, description
+            FROM rpg_media_library_items
+            WHERE asset_id = 'legacy_generated_asset'
+            """
+        ).fetchone()
+        assert item is not None
+        assert item["scope"] == "story"
+        assert item["story_id"] == session["story_id"]
+        assert item["title"] == "Moonlit legacy forest"
+        assert item["description"] == "Moonlit legacy forest"
+        tag = conn.execute(
+            """
+            SELECT tag
+            FROM rpg_media_library_item_tags
+            WHERE item_id = (
+                SELECT id FROM rpg_media_library_items
+                WHERE asset_id = 'legacy_generated_asset'
+            )
+            """
+        ).fetchone()
+        assert tag is not None and tag["tag"] == "generated"
     finally:
         conn.close()
 

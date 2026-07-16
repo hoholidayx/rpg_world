@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Cpu,
   Globe2,
+  Images,
   Loader2,
   Play,
   Save,
@@ -663,6 +664,22 @@ function StoryEditContent({
 
               {!isCreate && currentWorkspace && story ? (
                 <StoryComposerPanel workspaceId={currentWorkspace} storyId={story.id} />
+              ) : null}
+
+              {!isCreate && currentWorkspace && story ? (
+                <Panel
+                  title="环境背景素材"
+                  description="Story 专属背景、默认背景和 Workspace 通用兜底由独立媒体库维护；会话中的自动匹配不会耦合主 Agent。"
+                  action={(
+                    <Link href={`/media?storyId=${story.id}`} className="inline-flex h-10 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 text-sm font-black text-violet-700 transition hover:border-violet-300 hover:bg-violet-100">
+                      <Images size={16} />打开媒体库
+                    </Link>
+                  )}
+                >
+                  <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm font-semibold leading-6 text-slate-500">
+                    在媒体库中逐张上传图片并填写标题、描述与 tags；可指定一张 Story 默认背景。Workspace fallback 只供自动 Agent 搜索，不进入玩家的手工背景选择器。
+                  </p>
+                </Panel>
               ) : null}
 
               <Panel

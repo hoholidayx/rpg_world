@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
-from typing import Mapping
+from collections.abc import Iterable
+from typing import Mapping, Protocol, TypeVar
 
 from rpg_data import models
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.gateway import DataServiceGateway
 from rpg_data.services.media import MediaAssetInUseError, MediaDataService, MediaSourceRangeError
+from rpg_data.services.status import StatusTableService
+from rpg_media.background_agent import BackgroundMatcher, LLMMediaBackgroundAgent
 from rpg_media.brief import DemoVisualBriefPlanner, VisualBriefPlanner
 from rpg_media.errors import (
     MediaAssetInUseDomainError,
@@ -22,7 +26,13 @@ from rpg_media.errors import (
 from rpg_media.image_store import WorkspaceImageStore
 from rpg_media.providers.catalog import MediaProviderCatalog, build_provider_catalog
 from rpg_media.settings import RPGMediaSettings, settings
-from rpg_media.source import build_source_snapshot, source_turn_views
+from rpg_media.source import (
+    build_background_source_snapshot,
+    build_source_snapshot,
+    parse_background_source_snapshot,
+    source_turn_views,
+    visible_excerpt,
+)
 from rpg_media.types import (
     MediaBackgroundView,
     MediaGenerationRequest,
@@ -34,6 +44,15 @@ from rpg_media.types import (
     mapping_json,
 )
 
+logger = logging.getLogger(__name__)
+
+
+class _BlobBundle(Protocol):
+    blob: models.MediaBlob
+
+
+_BlobBundleT = TypeVar("_BlobBundleT", bound=_BlobBundle)
+
 
 class MediaFacade:
     def __init__(
@@ -44,12 +63,19 @@ class MediaFacade:
         planner: VisualBriefPlanner,
         providers: MediaProviderCatalog,
         image_store: WorkspaceImageStore | None = None,
+        status: StatusTableService | None = None,
+        background_matcher: BackgroundMatcher | None = None,
     ) -> None:
         self._data = data
         self._catalog = catalog
         self._planner = planner
         self._providers = providers
         self._image_store = image_store or WorkspaceImageStore(catalog)
+        self._status = status
+        self._background_matcher = background_matcher or LLMMediaBackgroundAgent(
+            data,
+            asset_exists=self._blob_file_exists,
+        )
 
     @classmethod
     def from_gateway(
@@ -66,6 +92,7 @@ class MediaFacade:
             catalog=gateway.catalog,
             planner=planner or DemoVisualBriefPlanner(configured.demo_brief),
             providers=providers or build_provider_catalog(configured.providers),
+            status=gateway.status,
         )
 
     @property
@@ -176,7 +203,9 @@ class MediaFacade:
                 bundle=bundle,
                 source_stale=self._is_gallery_source_stale(bundle),
             )
-            for bundle in self._data.list_gallery(session_id)
+            for bundle in self._existing_file_bundles(
+                self._data.list_gallery(session_id)
+            )
         ]
 
     def get_session_asset(
@@ -185,7 +214,7 @@ class MediaFacade:
         asset_id: str,
     ) -> SessionGalleryAsset | None:
         bundle = self._data.get_session_asset(session_id, asset_id)
-        if bundle is None:
+        if bundle is None or not self._blob_file_available(bundle.blob):
             return None
         return SessionGalleryAsset(
             bundle=bundle,
@@ -193,23 +222,279 @@ class MediaFacade:
         )
 
     def get_background(self, session_id: str) -> MediaBackgroundView | None:
+        session = self._catalog.get_session(session_id)
+        if session is None:
+            raise FileNotFoundError(f"Session not found: {session_id}")
+        state = self._data.get_background_state(session_id)
         background = self._data.get_background(session_id)
-        if background is None:
-            return None
-        asset = self.get_session_asset(session_id, background.asset_id)
-        if asset is None:
-            return None
-        return MediaBackgroundView(background=background, asset=asset)
+        if background is not None:
+            asset = self._data.get_display_asset_for_session(session_id, background.asset_id)
+            if asset is not None and not self._blob_file_available(asset.blob):
+                asset = None
+                background = None
+        if background is not None:
+            if asset is None:
+                return MediaBackgroundView(
+                    background=None,
+                    asset=None,
+                    source_mode="none",
+                    manual_locked=False,
+                    revision_token=f"none:{state.version}",
+                    state=state,
+                )
+            return MediaBackgroundView(
+                background=background,
+                asset=asset,
+                source_mode=background.source_mode,
+                manual_locked=(
+                    background.source_mode == models.MEDIA_BACKGROUND_SOURCE_MANUAL
+                ),
+                revision_token=f"{background.source_mode}:{background.version}:{asset.asset.id}",
+                state=state,
+            )
+        latest_turns = self._data.get_latest_source_turns(
+            session_id,
+            through_turn_id=2**63 - 1,
+            limit=1,
+        )
+        latest_turn_id = latest_turns[-1].turn_id if latest_turns else 0
+        if state.auto_suppressed and latest_turn_id <= state.suppressed_through_turn_id:
+            return MediaBackgroundView(
+                background=None,
+                asset=None,
+                source_mode="none",
+                manual_locked=False,
+                revision_token=f"none:{state.version}",
+                state=state,
+            )
+        default = self._data.get_story_default_asset(session.story_id)
+        if default is not None and not self._blob_file_available(default.blob):
+            default = None
+        if default is None:
+            return MediaBackgroundView(
+                background=None,
+                asset=None,
+                source_mode="none",
+                manual_locked=False,
+                revision_token=f"none:{state.version}",
+                state=state,
+            )
+        return MediaBackgroundView(
+            background=None,
+            asset=models.MediaDisplayAssetBundle(
+                asset=default.asset,
+                blob=default.blob,
+                library_item=default.item,
+                tags=default.tags,
+            ),
+            source_mode="story_default",
+            manual_locked=False,
+            revision_token=f"story_default:{default.item.id}:{default.item.version}",
+            state=state,
+        )
 
     def set_background(self, session_id: str, asset_id: str) -> MediaBackgroundView:
-        background = self._data.set_background(session_id, asset_id)
-        asset = self.get_session_asset(session_id, asset_id)
-        if asset is None:
+        candidate = self._data.get_display_asset_for_session(session_id, asset_id)
+        if candidate is None or not self._blob_file_available(candidate.blob):
+            raise FileNotFoundError(f"Media asset content not found: {asset_id}")
+        self._data.set_background(session_id, asset_id)
+        background = self.get_background(session_id)
+        if background is None or background.asset is None:
             raise RuntimeError(f"session background asset disappeared: {asset_id}")
-        return MediaBackgroundView(background=background, asset=asset)
+        return background
 
     def clear_background(self, session_id: str) -> bool:
         return bool(self._data.clear_background(session_id))
+
+    async def upload_library_asset(
+        self,
+        *,
+        workspace_id: str,
+        scope: str,
+        story_id: int | None,
+        title: str,
+        description: str,
+        tags: tuple[str, ...],
+        is_default: bool,
+        data: bytes,
+    ) -> models.MediaLibraryAssetBundle:
+        stored = await asyncio.to_thread(self._image_store.put, workspace_id, data)
+        try:
+            bundle, _ = self._data.create_library_asset(
+                workspace_id=workspace_id,
+                scope=scope,
+                story_id=story_id,
+                title=title,
+                description=description,
+                tags=tags,
+                is_default=is_default,
+                sha256=stored.image.sha256,
+                canonical_ext=stored.image.canonical_ext,
+                mime_type=stored.image.mime_type,
+                byte_size=stored.image.byte_size,
+                relative_path=stored.relative_path,
+                visual_brief_json=VisualBrief(scene_description=description).to_json(),
+            )
+            return bundle
+        except Exception:
+            await self._discard_unreferenced_file(workspace_id, stored)
+            raise
+
+    def list_library_assets(
+        self,
+        workspace_id: str,
+        *,
+        scope: str | None = None,
+        story_id: int | None = None,
+    ) -> list[models.MediaLibraryAssetBundle]:
+        return self._existing_file_bundles(
+            self._data.list_library_assets(
+                workspace_id,
+                scope=scope,
+                story_id=story_id,
+            )
+        )
+
+    async def reconcile_library_assets(
+        self,
+        workspace_id: str,
+    ) -> models.MediaLibraryReconcileResult:
+        blobs = self._data.list_workspace_blobs(workspace_id)
+        missing_blob_ids = await asyncio.to_thread(
+            lambda: tuple(
+                blob.id
+                for blob in blobs
+                if not self._blob_file_exists(blob)
+            )
+        )
+        return self._data.reconcile_missing_blobs(
+            workspace_id,
+            blob_ids=missing_blob_ids,
+            scanned_blobs=len(blobs),
+        )
+
+    def update_library_asset(
+        self,
+        workspace_id: str,
+        item_id: str,
+        *,
+        title: str,
+        description: str,
+        tags: tuple[str, ...],
+        is_default: bool,
+    ) -> models.MediaLibraryAssetBundle | None:
+        return self._data.update_library_asset(
+            workspace_id,
+            item_id,
+            title=title,
+            description=description,
+            tags=tags,
+            is_default=is_default,
+        )
+
+    def delete_library_asset(self, workspace_id: str, item_id: str) -> bool:
+        try:
+            deleted = self._data.delete_library_asset(workspace_id, item_id)
+        except MediaAssetInUseError as exc:
+            raise MediaAssetInUseDomainError(item_id) from exc
+        if deleted is None:
+            return False
+        if deleted.blob_deleted:
+            self._image_store.delete_blob_file(deleted.blob)
+        return True
+
+    def resolve_library_asset_content(
+        self,
+        workspace_id: str,
+        item_id: str,
+    ) -> tuple[Path, str]:
+        bundle = self._data.get_library_asset(workspace_id, item_id)
+        if bundle is None or not self._blob_file_available(bundle.blob):
+            raise FileNotFoundError(f"Media library item not found: {item_id}")
+        return self._image_store.resolve_blob_path(bundle.blob), bundle.blob.mime_type
+
+    def queue_background_evaluation(
+        self,
+        session_id: str,
+        *,
+        observed_turn_id: int,
+    ) -> models.MediaBackgroundEvaluation:
+        session = self._catalog.get_session(session_id)
+        if session is None:
+            raise FileNotFoundError(f"Session not found: {session_id}")
+        latest = self._data.get_latest_source_turns(
+            session_id,
+            through_turn_id=2**63 - 1,
+            limit=1,
+        )
+        if not latest:
+            raise MediaSourceRangeError("session has no committed media source turn")
+        target_turn_id = latest[-1].turn_id
+        if int(observed_turn_id) > target_turn_id:
+            raise MediaSourceRangeError("observed turn has not been committed")
+        state = self._data.get_background_state(session_id)
+        current_view = self.get_background(session_id)
+        current_asset = current_view.asset if current_view is not None else None
+        source = build_background_source_snapshot(
+            self._data,
+            session,
+            target_turn_id=target_turn_id,
+            scene_attrs=(
+                self._status.get_scene_attrs(session_id)
+                if self._status is not None
+                else None
+            ),
+            current_asset=current_asset,
+            state=state,
+        )
+        return self._data.queue_background_evaluation(
+            session_id=session_id,
+            observed_turn_id=int(observed_turn_id),
+            target_turn_id=target_turn_id,
+            source_fingerprint=source.fingerprint,
+            source_snapshot_json=source.snapshot_json,
+        )
+
+    def get_background_evaluation(
+        self,
+        session_id: str,
+        evaluation_id: str,
+    ) -> models.MediaBackgroundEvaluation | None:
+        return self._data.get_background_evaluation(session_id, evaluation_id)
+
+    def get_latest_background_evaluation(
+        self,
+        session_id: str,
+    ) -> models.MediaBackgroundEvaluation | None:
+        return self._data.get_latest_background_evaluation(session_id)
+
+    async def execute_background_evaluation(
+        self,
+        evaluation_id: str,
+    ) -> models.MediaBackgroundEvaluation | None:
+        evaluation = self._data.get_background_evaluation_for_worker(evaluation_id)
+        if evaluation is None or evaluation.status != models.MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING:
+            return evaluation
+        try:
+            source = parse_background_source_snapshot(evaluation.source_snapshot_json)
+            if source.fingerprint != evaluation.source_fingerprint:
+                raise ValueError("media background source fingerprint changed")
+            self.list_library_assets(source.workspace_id)
+            decision = await self._background_matcher.decide(source)
+            return self._data.apply_background_decision(
+                evaluation.id,
+                decision=decision.decision,
+                selected_asset_id=decision.asset_id,
+                reason=decision.reason,
+            )
+        except Exception as exc:
+            return self._data.fail_background_evaluation(
+                evaluation.id,
+                error_code=(
+                    exc.code if isinstance(exc, MediaError) else "MEDIA_BACKGROUND_MATCH_FAILED"
+                ),
+                error_message=str(exc),
+            )
 
     def delete_asset(self, session_id: str, asset_id: str) -> bool:
         try:
@@ -223,8 +508,8 @@ class MediaFacade:
         return True
 
     def resolve_asset_content(self, session_id: str, asset_id: str) -> tuple[Path, str]:
-        bundle = self._data.get_session_asset(session_id, asset_id)
-        if bundle is None:
+        bundle = self._data.get_display_asset_for_session(session_id, asset_id)
+        if bundle is None or not self._blob_file_available(bundle.blob):
             raise FileNotFoundError(f"Media asset not found: {asset_id}")
         return self._image_store.resolve_blob_path(bundle.blob), bundle.blob.mime_type
 
@@ -279,6 +564,12 @@ class MediaFacade:
                 relative_path=stored.relative_path,
                 provider_asset_id=generated.provider_asset_id,
                 metadata_json=mapping_json(generated.metadata),
+                library_title=visible_excerpt(
+                    brief.scene_description,
+                    segment_length=96,
+                ),
+                library_description=brief.to_prompt(),
+                library_tags=_generated_library_tags(brief, job.provider_key),
             )
             if completion is None:
                 await self._discard_unreferenced_file(session.workspace_id, stored)
@@ -305,6 +596,49 @@ class MediaFacade:
                 error_code=code,
                 error_message=str(exc),
             )
+
+    def _existing_file_bundles(
+        self,
+        bundles: Iterable[_BlobBundleT],
+    ) -> list[_BlobBundleT]:
+        return [bundle for bundle in bundles if self._blob_file_exists(bundle.blob)]
+
+    def _blob_file_exists(self, blob: models.MediaBlob) -> bool:
+        path: Path | None = None
+        try:
+            path = self._image_store.resolve_blob_path(blob)
+            if path.is_file():
+                return True
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "ignoring media blob with an invalid workspace path "
+                "blob_id=%s workspace_id=%s relative_path=%s error=%s",
+                blob.id,
+                blob.workspace_id,
+                blob.relative_path,
+                exc,
+            )
+            return False
+        logger.warning(
+            "ignoring media blob whose workspace file is missing "
+            "blob_id=%s workspace_id=%s path=%s",
+            blob.id,
+            blob.workspace_id,
+            path,
+        )
+        return False
+
+    def _blob_file_available(self, blob: models.MediaBlob) -> bool:
+        if self._blob_file_exists(blob):
+            return True
+        logger.warning(
+            "pruning unavailable media blob after a direct asset read "
+            "blob_id=%s workspace_id=%s",
+            blob.id,
+            blob.workspace_id,
+        )
+        self._data.purge_missing_blob(blob.id)
+        return False
 
     def _is_gallery_source_stale(
         self,
@@ -336,3 +670,30 @@ class MediaFacade:
             workspace_id,
             stored,
         )
+
+
+def _generated_library_tags(
+    brief: VisualBrief,
+    provider_key: str,
+) -> tuple[str, ...]:
+    values = (
+        "generated",
+        str(provider_key),
+        brief.aspect_ratio,
+        *brief.subjects,
+        brief.environment,
+        brief.style,
+        brief.mood_lighting,
+    )
+    tags: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        tag = visible_excerpt(str(value), segment_length=64).strip()
+        normalized = tag.casefold()
+        if not tag or normalized in seen:
+            continue
+        seen.add(normalized)
+        tags.append(tag)
+        if len(tags) == 20:
+            break
+    return tuple(tags)

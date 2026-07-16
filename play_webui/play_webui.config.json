@@ -6,6 +6,11 @@
     "historyPagination": {
       "pageTurnLimit": 50,
       "maxCachedPages": 2
+    },
+    "media": {
+      "backgroundEvaluationPollIntervalMs": 1500,
+      "backgroundEvaluationTimeoutMs": 60000,
+      "backgroundCrossfadeMs": 700
     }
   }
 }

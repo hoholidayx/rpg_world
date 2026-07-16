@@ -10,9 +10,15 @@ from media_service.client import (
 from media_service.schemas import (
     MediaAssetDeleteResponse,
     MediaBackgroundResponse,
+    MediaBackgroundEvaluationResponse,
+    MediaDisplayAssetResponse,
     MediaBriefResponse,
     MediaGalleryItemResponse,
     MediaGalleryResponse,
+    MediaLibraryDeleteResponse,
+    MediaLibraryItemResponse,
+    MediaLibraryReconcileResponse,
+    MediaLibraryResponse,
     MediaJobResponse,
     MediaProviderCatalogResponse,
     MediaProviderResponse,
@@ -71,9 +77,83 @@ def _asset() -> MediaGalleryItemResponse:
     )
 
 
+def _library_item() -> MediaLibraryItemResponse:
+    return MediaLibraryItemResponse(
+        itemId="item1",
+        assetId="library-asset1",
+        workspaceId="demo_workspace",
+        scope="story",
+        storyId=1,
+        title="Forest",
+        description="Moonlit forest",
+        tags=["forest", "night"],
+        isDefault=True,
+        origin="upload",
+        mimeType="image/png",
+        byteSize=9,
+        createdAt="now",
+        updatedAt="now",
+    )
+
+
+def _evaluation(status: str = "queued") -> MediaBackgroundEvaluationResponse:
+    return MediaBackgroundEvaluationResponse(
+        evaluationId="evaluation1",
+        sessionId="s_forest001",
+        status=status,
+        targetTurnId=1,
+        decision="",
+        selectedAssetId=None,
+        reason="",
+        errorCode="",
+        errorMessage="",
+        createdAt="now",
+        updatedAt="now",
+        startedAt="",
+        finishedAt="",
+    )
+
+
 class _FakeMediaClient:
     async def aclose(self) -> None:
         return None
+
+    async def list_library_assets(self, workspace_id, **kwargs):  # noqa: ANN001, ANN201
+        assert workspace_id == "demo_workspace"
+        return MediaLibraryResponse(items=[_library_item()])
+
+    async def reconcile_library_assets(self, workspace_id):  # noqa: ANN001, ANN201
+        assert workspace_id == "demo_workspace"
+        return MediaLibraryReconcileResponse(
+            workspaceId=workspace_id,
+            scannedBlobs=3,
+            removedBlobs=1,
+            removedAssets=2,
+            removedLibraryItems=2,
+            removedGalleryItems=1,
+            clearedBackgrounds=1,
+        )
+
+    async def upload_library_asset(self, workspace_id, **kwargs):  # noqa: ANN001, ANN201
+        assert kwargs["content"] == b"png-bytes"
+        assert kwargs["tags"] == ["forest", "night"]
+        return _library_item()
+
+    async def update_library_asset(self, workspace_id, item_id, body):  # noqa: ANN001, ANN201
+        return _library_item()
+
+    async def delete_library_asset(self, workspace_id, item_id):  # noqa: ANN001, ANN201
+        return MediaLibraryDeleteResponse(itemId=item_id, deleted=True)
+
+    async def stream_library_asset_content(self, workspace_id, item_id):  # noqa: ANN001, ANN201
+        async def chunks():  # noqa: ANN202
+            yield b"png-bytes"
+
+        return MediaContentStream(
+            media_type="image/png",
+            content_length=9,
+            chunks=chunks(),
+        )
 
     async def list_providers(self, session_id: str) -> MediaProviderCatalogResponse:
         assert session_id == "s_forest001"
@@ -125,13 +205,37 @@ class _FakeMediaClient:
         return MediaGalleryResponse(items=[_asset()], activeJobs=[_job()], recentJobs=[_job()])
 
     async def get_background(self, session_id: str) -> MediaBackgroundResponse:
-        return MediaBackgroundResponse(background=_asset())
+        return MediaBackgroundResponse(
+            background=MediaDisplayAssetResponse(
+                assetId="asset1",
+                origin="generated",
+                mimeType="image/png",
+                byteSize=12,
+                title="forest",
+                tags=[],
+                createdAt="now",
+            ),
+            sourceMode="manual",
+            manualLocked=True,
+            revisionToken="manual:1:asset1",
+        )
 
     async def set_background(self, session_id, body):  # noqa: ANN001, ANN201
-        return MediaBackgroundResponse(background=_asset())
+        return await self.get_background(session_id)
 
     async def clear_background(self, session_id: str) -> MediaBackgroundResponse:
-        return MediaBackgroundResponse(background=None)
+        return MediaBackgroundResponse(
+            background=None,
+            sourceMode="none",
+            manualLocked=False,
+            revisionToken="none:2",
+        )
+
+    async def queue_background_evaluation(self, session_id, body):  # noqa: ANN001, ANN201
+        return _evaluation()
+
+    async def get_background_evaluation(self, session_id, evaluation_id):  # noqa: ANN001, ANN201
+        return _evaluation("succeeded")
 
     async def get_asset(self, session_id: str, asset_id: str) -> MediaGalleryItemResponse:
         return _asset()
@@ -191,6 +295,49 @@ def test_play_media_proxy_contract_and_content_stream(tmp_path, monkeypatch) -> 
         assert content.content == b"png-bytes"
         assert content.headers["content-type"].startswith("image/png")
         assert content.headers["x-content-type-options"] == "nosniff"
+
+        library = client.get(
+            "/play-api/v1/workspaces/demo_workspace/media/library",
+            params={"scope": "story", "storyId": 1},
+        )
+        assert library.status_code == 200
+        assert library.json()["items"][0]["itemId"] == "item1"
+
+        reconciled = client.post(
+            "/play-api/v1/workspaces/demo_workspace/media/library/reconcile"
+        )
+        assert reconciled.status_code == 200
+        assert reconciled.json()["scannedBlobs"] == 3
+        assert reconciled.json()["removedAssets"] == 2
+        assert reconciled.json()["clearedBackgrounds"] == 1
+
+        uploaded = client.post(
+            "/play-api/v1/workspaces/demo_workspace/media/library",
+            data={
+                "scope": "story",
+                "storyId": "1",
+                "title": "Forest",
+                "description": "Moonlit forest",
+                "tags": '["forest", "night"]',
+                "isDefault": "true",
+            },
+            files={"file": ("forest.png", b"png-bytes", "image/png")},
+        )
+        assert uploaded.status_code == 200
+        assert uploaded.json()["assetId"] == "library-asset1"
+
+        library_content = client.get(
+            "/play-api/v1/workspaces/demo_workspace/media/library/item1/content"
+        )
+        assert library_content.status_code == 200
+        assert library_content.content == b"png-bytes"
+
+        queued = client.post(
+            "/play-api/v1/sessions/s_forest001/media/background-evaluations",
+            json={"observedTurnId": 1},
+        )
+        assert queued.status_code == 200
+        assert queued.json()["evaluationId"] == "evaluation1"
 
 
 class _UnavailableMediaClient(_FakeMediaClient):

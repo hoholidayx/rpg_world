@@ -8,7 +8,11 @@ import re
 
 from rpg_data import models
 from rpg_data.services.media import MediaDataService
-from rpg_media.types import MediaSourceSnapshot, MediaSourceTurnView
+from rpg_media.types import (
+    MediaBackgroundSourceSnapshot,
+    MediaSourceSnapshot,
+    MediaSourceTurnView,
+)
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
@@ -72,6 +76,137 @@ def build_source_snapshot(
             sort_keys=True,
             separators=(",", ":"),
         ),
+    )
+
+
+def build_background_source_snapshot(
+    media_data: MediaDataService,
+    session: models.Session,
+    *,
+    target_turn_id: int,
+    scene_attrs: dict[str, str] | None,
+    current_asset: models.MediaDisplayAssetBundle | None,
+    state: models.SessionMediaBackgroundState,
+) -> MediaBackgroundSourceSnapshot:
+    turns = tuple(
+        media_data.get_latest_source_turns(
+            session.id,
+            through_turn_id=int(target_turn_id),
+            limit=3,
+        )
+    )
+    if not turns or turns[-1].turn_id != int(target_turn_id):
+        raise ValueError(f"committed media source turn not found: {target_turn_id}")
+    normalized_scene = {
+        str(key): str(value)
+        for key, value in sorted((scene_attrs or {}).items())
+    }
+    current_title = (
+        current_asset.library_item.title
+        if current_asset is not None and current_asset.library_item is not None
+        else ""
+    )
+    payload = {
+        "sessionId": session.id,
+        "workspaceId": session.workspace_id,
+        "storyId": session.story_id,
+        "targetTurnId": int(target_turn_id),
+        "scene": normalized_scene,
+        "messages": [
+            {
+                "id": message.id,
+                "version": message.version,
+                "role": message.role,
+                "content": message.content,
+                "turnId": message.turn_id,
+                "seqInTurn": message.seq_in_turn,
+            }
+            for turn in turns
+            for message in turn.messages
+        ],
+        "currentBackground": {
+            "assetId": current_asset.asset.id if current_asset is not None else None,
+            "title": current_title,
+        },
+        "lastDecision": state.last_decision,
+        "lastReason": state.last_reason,
+    }
+    snapshot_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    fingerprint = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+    return MediaBackgroundSourceSnapshot(
+        session_id=session.id,
+        workspace_id=session.workspace_id,
+        story_id=session.story_id,
+        target_turn_id=int(target_turn_id),
+        scene_attrs=normalized_scene,
+        turns=turns,
+        current_asset_id=current_asset.asset.id if current_asset is not None else None,
+        current_title=current_title,
+        last_decision=state.last_decision,
+        last_reason=state.last_reason,
+        fingerprint=fingerprint,
+        snapshot_json=snapshot_json,
+    )
+
+
+def parse_background_source_snapshot(raw: str) -> MediaBackgroundSourceSnapshot:
+    payload = json.loads(str(raw))
+    if not isinstance(payload, dict):
+        raise ValueError("media background source snapshot must be an object")
+    grouped: dict[int, list[models.MediaSourceMessage]] = {}
+    messages = payload.get("messages", [])
+    if not isinstance(messages, list):
+        raise ValueError("media background source messages must be an array")
+    for item in messages:
+        if not isinstance(item, dict):
+            raise ValueError("media background source message must be an object")
+        message = models.MediaSourceMessage(
+            id=int(item.get("id", 0)),
+            version=int(item.get("version", 0)),
+            role=str(item.get("role", "")),
+            content=str(item.get("content", "")),
+            turn_id=int(item.get("turnId", 0)),
+            seq_in_turn=int(item.get("seqInTurn", 0)),
+        )
+        grouped.setdefault(message.turn_id, []).append(message)
+    turns = tuple(
+        models.MediaSourceTurn(turn_id=turn_id, messages=tuple(grouped[turn_id]))
+        for turn_id in sorted(grouped)
+    )
+    scene = payload.get("scene", {})
+    if not isinstance(scene, dict):
+        raise ValueError("media background scene must be an object")
+    current = payload.get("currentBackground", {})
+    if not isinstance(current, dict):
+        current = {}
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return MediaBackgroundSourceSnapshot(
+        session_id=str(payload.get("sessionId", "")),
+        workspace_id=str(payload.get("workspaceId", "")),
+        story_id=int(payload.get("storyId", 0)),
+        target_turn_id=int(payload.get("targetTurnId", 0)),
+        scene_attrs={str(key): str(value) for key, value in scene.items()},
+        turns=turns,
+        current_asset_id=(
+            str(current.get("assetId"))
+            if current.get("assetId") is not None
+            else None
+        ),
+        current_title=str(current.get("title", "")),
+        last_decision=str(payload.get("lastDecision", "")),
+        last_reason=str(payload.get("lastReason", "")),
+        fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        snapshot_json=canonical,
     )
 
 

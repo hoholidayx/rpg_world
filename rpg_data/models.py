@@ -15,9 +15,15 @@ __all__ = [
     "MediaBlob",
     "MediaJob",
     "MediaJobCompletion",
+    "MediaLibraryAssetBundle",
+    "MediaLibraryReconcileResult",
+    "MediaDisplayAssetBundle",
+    "MediaLibraryItem",
+    "MediaBackgroundEvaluation",
     "MediaSourceMessage",
     "MediaSourceTurn",
     "SessionMediaBackground",
+    "SessionMediaBackgroundState",
     "SessionMediaAssetBundle",
     "SessionMediaGalleryItem",
     "SessionMediaResetResult",
@@ -86,6 +92,23 @@ __all__ = [
     "MEDIA_JOB_STATUS_QUEUED",
     "MEDIA_JOB_STATUS_RUNNING",
     "MEDIA_JOB_STATUS_SUCCEEDED",
+    "MEDIA_ASSET_ORIGIN_GENERATED",
+    "MEDIA_ASSET_ORIGIN_UPLOAD",
+    "MEDIA_ASSET_ORIGINS",
+    "MEDIA_LIBRARY_SCOPE_STORY",
+    "MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK",
+    "MEDIA_LIBRARY_SCOPES",
+    "MEDIA_BACKGROUND_SOURCE_MANUAL",
+    "MEDIA_BACKGROUND_SOURCE_AUTO",
+    "MEDIA_BACKGROUND_SOURCES",
+    "MEDIA_BACKGROUND_EVALUATION_STATUSES",
+    "MEDIA_BACKGROUND_EVALUATION_STATUS_FAILED",
+    "MEDIA_BACKGROUND_EVALUATION_STATUS_INTERRUPTED",
+    "MEDIA_BACKGROUND_EVALUATION_STATUS_QUEUED",
+    "MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING",
+    "MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL",
+    "MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED",
+    "MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED",
     "TURN_MODE_GM",
     "TURN_MODE_IC",
     "TURN_MODE_OOC",
@@ -167,6 +190,40 @@ MEDIA_JOB_ACTIVE_STATUSES = frozenset({
     MEDIA_JOB_STATUS_CANCELLING,
 })
 MEDIA_JOB_FINAL_STATUSES = MEDIA_JOB_STATUSES - MEDIA_JOB_ACTIVE_STATUSES
+MEDIA_ASSET_ORIGIN_GENERATED = "generated"
+MEDIA_ASSET_ORIGIN_UPLOAD = "upload"
+MEDIA_ASSET_ORIGINS = frozenset({
+    MEDIA_ASSET_ORIGIN_GENERATED,
+    MEDIA_ASSET_ORIGIN_UPLOAD,
+})
+MEDIA_LIBRARY_SCOPE_STORY = "story"
+MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK = "workspace_fallback"
+MEDIA_LIBRARY_SCOPES = frozenset({
+    MEDIA_LIBRARY_SCOPE_STORY,
+    MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK,
+})
+MEDIA_BACKGROUND_SOURCE_MANUAL = "manual"
+MEDIA_BACKGROUND_SOURCE_AUTO = "auto"
+MEDIA_BACKGROUND_SOURCES = frozenset({
+    MEDIA_BACKGROUND_SOURCE_MANUAL,
+    MEDIA_BACKGROUND_SOURCE_AUTO,
+})
+MEDIA_BACKGROUND_EVALUATION_STATUS_QUEUED = "queued"
+MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING = "running"
+MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED = "succeeded"
+MEDIA_BACKGROUND_EVALUATION_STATUS_FAILED = "failed"
+MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED = "superseded"
+MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL = "skipped_manual"
+MEDIA_BACKGROUND_EVALUATION_STATUS_INTERRUPTED = "interrupted"
+MEDIA_BACKGROUND_EVALUATION_STATUSES = frozenset({
+    MEDIA_BACKGROUND_EVALUATION_STATUS_QUEUED,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_FAILED,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_INTERRUPTED,
+})
 TURN_MODE_IC = "ic"
 TURN_MODE_OOC = "ooc"
 TURN_MODE_GM = "gm"
@@ -526,9 +583,81 @@ class MediaAsset:
     provider_asset_id: str = ""
     generation_params_json: str = "{}"
     metadata_json: str = "{}"
+    origin_kind: str = MEDIA_ASSET_ORIGIN_GENERATED
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.origin_kind not in MEDIA_ASSET_ORIGINS:
+            raise ValueError(f"invalid media asset origin: {self.origin_kind}")
+
+
+@dataclass(frozen=True)
+class MediaLibraryItem:
+    id: str
+    workspace_id: str
+    asset_id: str
+    scope: str
+    story_id: int | None
+    title: str
+    description: str
+    is_default: bool = False
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.scope not in MEDIA_LIBRARY_SCOPES:
+            raise ValueError(f"invalid media library scope: {self.scope}")
+        if self.scope == MEDIA_LIBRARY_SCOPE_STORY and self.story_id is None:
+            raise ValueError("story media library item requires story_id")
+        if self.scope == MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK and self.story_id is not None:
+            raise ValueError("workspace fallback media item must not bind a story")
+        if self.scope != MEDIA_LIBRARY_SCOPE_STORY and self.is_default:
+            raise ValueError("only story media items may be default backgrounds")
+        if not self.title.strip() or not self.description.strip():
+            raise ValueError("media library title and description are required")
+
+
+@dataclass(frozen=True)
+class MediaLibraryAssetBundle:
+    item: MediaLibraryItem
+    asset: MediaAsset
+    blob: MediaBlob
+    tags: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class MediaLibraryReconcileResult:
+    workspace_id: str
+    scanned_blobs: int = 0
+    removed_blobs: int = 0
+    removed_assets: int = 0
+    removed_library_items: int = 0
+    removed_gallery_items: int = 0
+    cleared_backgrounds: int = 0
+
+    def __post_init__(self) -> None:
+        counts = (
+            self.scanned_blobs,
+            self.removed_blobs,
+            self.removed_assets,
+            self.removed_library_items,
+            self.removed_gallery_items,
+            self.cleared_backgrounds,
+        )
+        if any(count < 0 for count in counts):
+            raise ValueError("media library reconcile counts must not be negative")
+
+
+@dataclass(frozen=True)
+class MediaDisplayAssetBundle:
+    asset: MediaAsset
+    blob: MediaBlob
+    library_item: MediaLibraryItem | None = None
+    tags: tuple[str, ...] = field(default_factory=tuple)
+    gallery_item: SessionMediaGalleryItem | None = None
 
 
 @dataclass(frozen=True)
@@ -582,9 +711,62 @@ class SessionMediaGalleryItem:
 class SessionMediaBackground:
     session_id: str
     asset_id: str
+    source_mode: str = MEDIA_BACKGROUND_SOURCE_MANUAL
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.source_mode not in MEDIA_BACKGROUND_SOURCES:
+            raise ValueError(f"invalid media background source: {self.source_mode}")
+
+
+@dataclass(frozen=True)
+class SessionMediaBackgroundState:
+    session_id: str
+    latest_observed_turn_id: int = 0
+    latest_source_fingerprint: str = ""
+    auto_suppressed: bool = False
+    suppressed_through_turn_id: int = 0
+    desired_turn_id: int = 0
+    desired_source_fingerprint: str = ""
+    last_applied_turn_id: int = 0
+    last_applied_fingerprint: str = ""
+    last_decision: str = ""
+    last_reason: str = ""
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class MediaBackgroundEvaluation:
+    id: str
+    session_id: str
+    status: str
+    target_turn_id: int
+    source_fingerprint: str
+    source_snapshot_json: str
+    decision: str = ""
+    selected_asset_id: str | None = None
+    reason: str = ""
+    error_code: str = ""
+    error_message: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status not in MEDIA_BACKGROUND_EVALUATION_STATUSES:
+            raise ValueError(f"invalid media background evaluation status: {self.status}")
+        if self.target_turn_id <= 0:
+            raise ValueError("media background evaluation turn id must be positive")
+        if len(self.source_fingerprint) != 64:
+            raise ValueError("media background source fingerprint must be a SHA-256 digest")
+        if self.decision not in {"", "keep", "switch"}:
+            raise ValueError(f"invalid media background decision: {self.decision}")
 
 
 @dataclass(frozen=True)

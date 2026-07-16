@@ -15,13 +15,15 @@ import {
   Wallpaper,
 } from 'lucide-react'
 import { ConfirmDialog, Dialog } from '@/components/common/Dialog'
-import { mediaAssetContentUrl } from '@/lib/api/media'
+import { MediaImageFrame } from '@/components/common/MediaImageFrame'
+import { mediaAssetContentUrl, mediaLibraryContentUrl } from '@/lib/api/media'
 import { cn } from '@/lib/utils/cn'
 import {
   MEDIA_ASPECT_RATIOS,
   type MediaBrief,
   type MediaGalleryItem,
   type MediaJob,
+  type MediaLibraryItem,
   type VisualBrief,
 } from '@/types/media'
 import type { SessionMediaController } from './hooks/useSessionMedia'
@@ -130,17 +132,16 @@ function GalleryCard({
   const isBackground = backgroundAssetId === item.assetId
   return (
     <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
-      <div className="relative aspect-video overflow-hidden bg-slate-100 dark:bg-slate-800">
-        <img
-          src={mediaAssetContentUrl(sessionId, item.assetId)}
-          alt={item.visualBrief.sceneDescription}
-          className="h-full w-full object-contain object-center"
-        />
+      <MediaImageFrame
+        src={mediaAssetContentUrl(sessionId, item.assetId)}
+        alt={item.visualBrief.sceneDescription}
+        className="aspect-video"
+      >
         <div className="absolute left-2 top-2 flex gap-1.5">
           {isBackground ? <span className="rounded-full bg-teal-500 px-2.5 py-1 text-[10px] font-black text-white shadow">当前背景</span> : null}
           {item.source.stale ? <span className="rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-black text-white shadow">来源已变化</span> : null}
         </div>
-      </div>
+      </MediaImageFrame>
       <div className="p-3">
         <p className="line-clamp-2 text-sm font-black leading-5 text-slate-900 dark:text-slate-100">{item.visualBrief.sceneDescription}</p>
         <p className="mt-1 text-[11px] font-semibold text-slate-400">turn {item.source.startTurnId}–{item.source.endTurnId} · {item.visualBrief.aspectRatio}</p>
@@ -170,6 +171,42 @@ function GalleryCard({
           className="mt-2 inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg text-xs font-black text-rose-600 transition hover:bg-rose-50 disabled:opacity-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
         >
           <Trash2 size={13} />删除资产
+        </button>
+      </div>
+    </article>
+  )
+}
+
+function LibraryBackgroundCard({
+  item,
+  active,
+  pending,
+  onSet,
+  onClear,
+}: {
+  item: MediaLibraryItem
+  active: boolean
+  pending: boolean
+  onSet: () => void
+  onClear: () => void
+}) {
+  return (
+    <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <MediaImageFrame
+        src={mediaLibraryContentUrl(item.workspaceId, item.itemId)}
+        alt={item.title}
+        className="aspect-video"
+      >
+        <div className="absolute left-2 top-2 flex gap-1.5">
+          {active ? <span className="rounded-full bg-teal-500 px-2.5 py-1 text-[10px] font-black text-white shadow">当前背景</span> : null}
+          {item.isDefault ? <span className="rounded-full bg-violet-600 px-2.5 py-1 text-[10px] font-black text-white shadow">Story 默认</span> : null}
+        </div>
+      </MediaImageFrame>
+      <div className="p-3">
+        <p className="truncate text-sm font-black text-slate-900 dark:text-slate-100">{item.title}</p>
+        <p className="mt-1 line-clamp-2 min-h-10 text-xs font-semibold leading-5 text-slate-400">{item.description}</p>
+        <button type="button" disabled={pending} onClick={active ? onClear : onSet} className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-xs font-black text-slate-600 transition hover:border-violet-300 hover:text-violet-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+          {active ? <Ban size={14} /> : <Wallpaper size={14} />}{active ? '清除背景' : '手工设为背景'}
         </button>
       </div>
     </article>
@@ -346,6 +383,30 @@ export function SessionMediaGallery({
           </aside>
 
           <section className="min-h-0 overflow-y-auto px-5 py-5 sm:px-6">
+            <section className="mb-6 border-b border-slate-200 pb-6 dark:border-slate-800">
+              <div>
+                <h3 className="flex items-center gap-2 text-base font-black text-slate-950 dark:text-slate-100"><Wallpaper size={18} />Story 背景库</h3>
+                <p className="mt-1 text-xs font-semibold text-slate-400">展示当前 Story 的会话生成与离线导入素材；Workspace fallback 仅供自动匹配 Agent 使用。</p>
+              </div>
+              {media.storyLibraryQuery.isError ? <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">Story 背景加载失败：{errorMessage(media.storyLibraryQuery.error)}</p> : null}
+              {media.storyLibraryQuery.isLoading ? <div className="py-8 text-center text-xs font-bold text-slate-400"><Loader2 size={17} className="mx-auto mb-2 animate-spin" />正在加载 Story 背景</div> : null}
+              {media.storyLibraryQuery.data?.items.length ? (
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {media.storyLibraryQuery.data.items.map((item) => (
+                    <LibraryBackgroundCard
+                      key={item.itemId}
+                      item={item}
+                      active={backgroundAssetId === item.assetId}
+                      pending={actionPending}
+                      onSet={() => media.setBackgroundMutation.mutate(item.assetId)}
+                      onClear={() => media.clearBackgroundMutation.mutate()}
+                    />
+                  ))}
+                </div>
+              ) : !media.storyLibraryQuery.isLoading && !media.storyLibraryQuery.isError ? (
+                <p className="mt-4 rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-xs font-bold text-slate-400 dark:border-slate-700">当前 Story 尚无可复用背景，可在会话中生成或前往媒体库导入。</p>
+              ) : null}
+            </section>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="flex items-center gap-2 text-base font-black text-slate-950 dark:text-slate-100"><Images size={18} />Session Gallery</h3>

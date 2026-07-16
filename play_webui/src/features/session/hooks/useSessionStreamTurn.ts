@@ -67,6 +67,7 @@ export function useSessionStreamTurn({
   logger,
   onExit,
   onCommittedNarrativeStyle,
+  onTurnCommitted,
 }: {
   sessionId: string
   contextPreviewUsage: ContextUsageSnapshot | null
@@ -84,6 +85,7 @@ export function useSessionStreamTurn({
   logger: SessionRoomLogger
   onExit: () => void
   onCommittedNarrativeStyle: (styleId: NarrativeStyleId) => void
+  onTurnCommitted: (turnId: number) => void
 }) {
   const [sending, setSending] = useState(false)
   const [stoppingRequestId, setStoppingRequestId] = useState<string | null>(null)
@@ -532,6 +534,7 @@ export function useSessionStreamTurn({
               && event.payload.committedTurnId > 0
             ) {
               onCommittedNarrativeStyle(narrativeStyleId)
+              onTurnCommitted(event.payload.committedTurnId)
             }
             if (
               event.type === PLAY_STREAM_EVENT_TYPE.ERROR
@@ -613,6 +616,7 @@ export function useSessionStreamTurn({
     logger,
     markStreamStopped,
     onCommittedNarrativeStyle,
+    onTurnCommitted,
     refreshContextPreview,
     refreshSessionData,
     sessionId,

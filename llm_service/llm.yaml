@@ -102,6 +102,11 @@ base:
       kind: chat
       provider_key: deepseek_v4_flash
 
+    # Media 服务的离线场景背景匹配 Agent；不跟随主 Agent 的动态选择。
+    media.scene_background_match:
+      kind: chat
+      provider_key: deepseek_v4_flash
+
     # 记忆向量嵌入模型。
     memory.embed:
       kind: embedding

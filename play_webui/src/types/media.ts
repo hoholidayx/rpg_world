@@ -102,7 +102,91 @@ export type MediaGallery = {
 }
 
 export type MediaBackground = {
-  background: MediaGalleryItem | null
+  background: MediaDisplayAsset | null
+  sourceMode: 'none' | 'manual' | 'auto' | 'story_default'
+  manualLocked: boolean
+  revisionToken: string
+  lastDecision: string
+  lastReason: string
+  latestEvaluation: MediaBackgroundEvaluation | null
+}
+
+export type MediaDisplayAsset = {
+  assetId: string
+  libraryItemId: string | null
+  origin: 'generated' | 'upload'
+  mimeType: string
+  byteSize: number
+  title: string
+  tags: string[]
+  createdAt: string
+}
+
+export type MediaBackgroundEvaluationStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'superseded'
+  | 'skipped_manual'
+  | 'interrupted'
+
+export type MediaBackgroundEvaluation = {
+  evaluationId: string
+  sessionId: string
+  status: MediaBackgroundEvaluationStatus
+  targetTurnId: number
+  decision: '' | 'keep' | 'switch'
+  selectedAssetId: string | null
+  reason: string
+  errorCode: string
+  errorMessage: string
+  createdAt: string
+  updatedAt: string
+  startedAt: string
+  finishedAt: string
+}
+
+export type MediaLibraryScope = 'story' | 'workspace_fallback'
+
+export type MediaLibraryItem = {
+  itemId: string
+  assetId: string
+  workspaceId: string
+  scope: MediaLibraryScope
+  storyId: number | null
+  title: string
+  description: string
+  tags: string[]
+  isDefault: boolean
+  origin: 'generated' | 'upload'
+  mimeType: string
+  byteSize: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MediaLibrary = {
+  items: MediaLibraryItem[]
+}
+
+export type MediaLibraryReconcileResult = {
+  workspaceId: string
+  scannedBlobs: number
+  removedBlobs: number
+  removedAssets: number
+  removedLibraryItems: number
+  removedGalleryItems: number
+  clearedBackgrounds: number
+}
+
+export type MediaLibraryMetadataInput = {
+  scope: MediaLibraryScope
+  storyId: number | null
+  title: string
+  description: string
+  tags: string[]
+  isDefault: boolean
 }
 
 export type CreateMediaJobInput = {

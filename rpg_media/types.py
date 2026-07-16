@@ -102,6 +102,35 @@ class MediaSourceSnapshot:
 
 
 @dataclass(frozen=True)
+class MediaBackgroundSourceSnapshot:
+    session_id: str
+    workspace_id: str
+    story_id: int
+    target_turn_id: int
+    scene_attrs: Mapping[str, str]
+    turns: tuple[models.MediaSourceTurn, ...]
+    current_asset_id: str | None
+    current_title: str
+    last_decision: str
+    last_reason: str
+    fingerprint: str
+    snapshot_json: str
+
+
+@dataclass(frozen=True)
+class MediaBackgroundDecision:
+    decision: str
+    reason: str
+    asset_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.decision not in {"keep", "switch"}:
+            raise ValueError(f"invalid media background decision: {self.decision}")
+        if self.decision == "switch" and not self.asset_id:
+            raise ValueError("switch background decision requires asset_id")
+
+
+@dataclass(frozen=True)
 class MediaSourceTurnView:
     turn_id: int
     roles: tuple[str, ...]
@@ -165,8 +194,12 @@ class SessionGalleryAsset:
 
 @dataclass(frozen=True)
 class MediaBackgroundView:
-    background: models.SessionMediaBackground
-    asset: SessionGalleryAsset
+    background: models.SessionMediaBackground | None
+    asset: models.MediaDisplayAssetBundle | None
+    source_mode: str
+    manual_locked: bool
+    revision_token: str
+    state: models.SessionMediaBackgroundState
 
 
 def mapping_json(raw: Mapping[str, object]) -> str:

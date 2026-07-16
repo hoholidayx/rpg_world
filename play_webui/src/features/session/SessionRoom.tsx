@@ -304,10 +304,17 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   })
   const media = useSessionMedia({
     sessionId,
+    workspaceId: data.session?.workspace ?? null,
+    storyId: data.session?.storyId ?? null,
+    latestCommittedTurnId: data.lastPersistedTurnId,
     galleryOpen: mediaGalleryOpen,
     showToast,
   })
   const mediaBackground = media.backgroundQuery.data?.background ?? null
+  const mediaBackgroundRevision = media.backgroundQuery.data?.revisionToken ?? 'none'
+  const handleMediaTurnCommitted = useCallback((turnId: number) => {
+    media.requestBackgroundEvaluation(turnId, true)
+  }, [media.requestBackgroundEvaluation])
 
   const handleComposerTextChange = useCallback((value: string) => {
     setComposerText(value)
@@ -331,6 +338,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     logger,
     onExit: () => router.push('/sessions'),
     onCommittedNarrativeStyle: handleCommittedNarrativeStyle,
+    onTurnCommitted: handleMediaTurnCommitted,
   })
 
   const deleteSessionMutation = useMutation({
@@ -446,7 +454,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         style={layout.sessionExperienceStyle}
         className="relative isolate flex min-h-screen min-w-0 flex-col overflow-hidden lg:h-screen lg:min-h-0"
       >
-        <SessionMediaBackground sessionId={sessionId} background={mediaBackground} />
+        <SessionMediaBackground
+          sessionId={sessionId}
+          background={mediaBackground}
+          revisionToken={mediaBackgroundRevision}
+        />
         <header className="relative z-20 flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
           <div className="min-w-0">
             <h1 className="truncate text-lg font-black text-slate-950 dark:text-slate-100 sm:text-xl">{data.session?.title ?? '加载会话中'}</h1>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+import json
 from typing import TypeVar
 
 import httpx
@@ -12,11 +13,18 @@ from pydantic import BaseModel
 from media_service.schemas import (
     MediaAssetDeleteResponse,
     MediaBackgroundResponse,
+    MediaBackgroundEvaluationRequest,
+    MediaBackgroundEvaluationResponse,
     MediaBackgroundSetRequest,
     MediaBriefRequest,
     MediaBriefResponse,
     MediaGalleryItemResponse,
     MediaGalleryResponse,
+    MediaLibraryDeleteResponse,
+    MediaLibraryItemResponse,
+    MediaLibraryReconcileResponse,
+    MediaLibraryResponse,
+    MediaLibraryUpdateRequest,
     MediaJobCreateRequest,
     MediaJobResponse,
     MediaProviderCatalogResponse,
@@ -62,6 +70,103 @@ class MediaClient:
         self.base_url = (base_url or configured.base_url).rstrip("/")
         self.request_timeout_ms = request_timeout_ms or configured.request_timeout_ms
         self._client: httpx.AsyncClient | None = None
+
+    async def list_library_assets(
+        self,
+        workspace_id: str,
+        *,
+        scope: str | None = None,
+        story_id: int | None = None,
+    ) -> MediaLibraryResponse:
+        params: dict[str, str | int] = {}
+        if scope is not None:
+            params["scope"] = scope
+        if story_id is not None:
+            params["storyId"] = story_id
+        return await self._send_model(
+            "GET",
+            f"/workspaces/{workspace_id}/library",
+            MediaLibraryResponse,
+            params=params,
+        )
+
+    async def reconcile_library_assets(
+        self,
+        workspace_id: str,
+    ) -> MediaLibraryReconcileResponse:
+        return await self._send_model(
+            "POST",
+            f"/workspaces/{workspace_id}/library/reconcile",
+            MediaLibraryReconcileResponse,
+        )
+
+    async def upload_library_asset(
+        self,
+        workspace_id: str,
+        *,
+        filename: str,
+        content_type: str,
+        content: bytes,
+        scope: str,
+        story_id: int | None,
+        title: str,
+        description: str,
+        tags: list[str],
+        is_default: bool,
+    ) -> MediaLibraryItemResponse:
+        form = {
+            "scope": scope,
+            "title": title,
+            "description": description,
+            "tags": json.dumps(tags, ensure_ascii=False),
+            "isDefault": "true" if is_default else "false",
+        }
+        if story_id is not None:
+            form["storyId"] = str(story_id)
+        try:
+            response = await self._http_client().post(
+                self._url(f"/workspaces/{workspace_id}/library"),
+                data=form,
+                files={
+                    "file": (
+                        filename or "image",
+                        bytes(content),
+                        content_type or "application/octet-stream",
+                    )
+                },
+            )
+            response.raise_for_status()
+            return MediaLibraryItemResponse.model_validate(response.json())
+        except httpx.ConnectError as exc:
+            raise MediaServiceUnavailable(f"Media service unavailable: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise _client_http_error(exc.response) from exc
+        except httpx.HTTPError as exc:
+            raise MediaClientError(str(exc)) from exc
+
+    async def update_library_asset(
+        self,
+        workspace_id: str,
+        item_id: str,
+        body: MediaLibraryUpdateRequest,
+    ) -> MediaLibraryItemResponse:
+        return await self._send_model(
+            "PATCH",
+            f"/workspaces/{workspace_id}/library/{item_id}",
+            MediaLibraryItemResponse,
+            body=body,
+        )
+
+    async def delete_library_asset(
+        self,
+        workspace_id: str,
+        item_id: str,
+    ) -> MediaLibraryDeleteResponse:
+        return await self._send_model(
+            "DELETE",
+            f"/workspaces/{workspace_id}/library/{item_id}",
+            MediaLibraryDeleteResponse,
+        )
 
     async def list_providers(self, session_id: str) -> MediaProviderCatalogResponse:
         return await self._get_model(
@@ -150,6 +255,28 @@ class MediaClient:
             MediaBackgroundResponse,
         )
 
+    async def queue_background_evaluation(
+        self,
+        session_id: str,
+        body: MediaBackgroundEvaluationRequest,
+    ) -> MediaBackgroundEvaluationResponse:
+        return await self._send_model(
+            "POST",
+            f"/sessions/{session_id}/background-evaluations",
+            MediaBackgroundEvaluationResponse,
+            body=body,
+        )
+
+    async def get_background_evaluation(
+        self,
+        session_id: str,
+        evaluation_id: str,
+    ) -> MediaBackgroundEvaluationResponse:
+        return await self._get_model(
+            f"/sessions/{session_id}/background-evaluations/{evaluation_id}",
+            MediaBackgroundEvaluationResponse,
+        )
+
     async def get_asset(
         self,
         session_id: str,
@@ -212,6 +339,15 @@ class MediaClient:
             chunks=chunks(),
         )
 
+    async def stream_library_asset_content(
+        self,
+        workspace_id: str,
+        item_id: str,
+    ) -> MediaContentStream:
+        return await self._stream_content(
+            f"/workspaces/{workspace_id}/library/{item_id}/content"
+        )
+
     async def aclose(self) -> None:
         if self._client is not None:
             await self._client.aclose()
@@ -231,6 +367,7 @@ class MediaClient:
         response_model: type[ResponseT],
         *,
         body: BaseModel | None = None,
+        params: dict[str, str | int] | None = None,
     ) -> ResponseT:
         try:
             response = await self._http_client().request(
@@ -241,6 +378,7 @@ class MediaClient:
                     if body is not None
                     else None
                 ),
+                params=params,
             )
             response.raise_for_status()
             return response_model.model_validate(response.json())
@@ -257,6 +395,40 @@ class MediaClient:
                 timeout=httpx.Timeout(self.request_timeout_ms / 1000),
             )
         return self._client
+
+    async def _stream_content(self, path: str) -> MediaContentStream:
+        client = self._http_client()
+        request = client.build_request("GET", self._url(path))
+        try:
+            response = await client.send(request, stream=True)
+            response.raise_for_status()
+        except httpx.ConnectError as exc:
+            raise MediaServiceUnavailable(f"Media service unavailable: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            await exc.response.aread()
+            await exc.response.aclose()
+            raise _client_http_error(exc.response) from exc
+        except httpx.HTTPError as exc:
+            raise MediaClientError(str(exc)) from exc
+
+        async def chunks() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in response.aiter_bytes():
+                    if chunk:
+                        yield chunk
+            finally:
+                await response.aclose()
+
+        length_header = response.headers.get("content-length")
+        try:
+            content_length = int(length_header) if length_header else None
+        except ValueError:
+            content_length = None
+        return MediaContentStream(
+            media_type=response.headers.get("content-type", "application/octet-stream"),
+            content_length=content_length,
+            chunks=chunks(),
+        )
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}/{path.lstrip('/')}"

@@ -12,8 +12,28 @@ from rpg_media.brief import DemoVisualBriefPlanner
 from rpg_media.facade import MediaFacade
 from rpg_media.providers.catalog import MediaProviderCatalog
 from rpg_media.providers.local_file import LocalFileProvider
+from rpg_media.types import MediaBackgroundDecision
 
 PNG = b"\x89PNG\r\n\x1a\nservice"
+
+
+class _LibraryMatcher:
+    def __init__(self, data) -> None:  # noqa: ANN001
+        self._data = data
+
+    async def decide(self, source):  # noqa: ANN001, ANN201
+        items = self._data.list_library_assets(
+            source.workspace_id,
+            scope=models.MEDIA_LIBRARY_SCOPE_STORY,
+            story_id=source.story_id,
+        )
+        if not items:
+            return MediaBackgroundDecision(decision="keep", reason="no candidate")
+        return MediaBackgroundDecision(
+            decision="switch",
+            asset_id=items[0].asset.id,
+            reason="scene changed",
+        )
 
 
 def _runtime(tmp_path):  # noqa: ANN202
@@ -42,6 +62,8 @@ def _runtime(tmp_path):  # noqa: ANN202
             (LocalFileProvider(provider_dir),),
             default_key="local_file",
         ),
+        status=gateway.status,
+        background_matcher=_LibraryMatcher(gateway.media),
     )
     worker = MediaJobWorker(
         data=gateway.media,
@@ -191,5 +213,156 @@ def test_job_creation_returns_source_changed_error(tmp_path) -> None:
             )
             assert response.status_code == 409
             assert response.json()["detail"]["errorCode"] == "MEDIA_SOURCE_CHANGED"
+    finally:
+        set_runtime_for_tests(None)
+
+
+def test_library_upload_and_async_background_contract(tmp_path) -> None:
+    gateway, session, _message, runtime = _runtime(tmp_path)
+    set_runtime_for_tests(runtime)
+    try:
+        with TestClient(app) as client:
+            uploaded = client.post(
+                "/media/v1/workspaces/demo_workspace/library",
+                data={
+                    "scope": "story",
+                    "storyId": "1",
+                    "title": "月光森林",
+                    "description": "夜晚的森林入口，石门被月光照亮。",
+                    "tags": '["森林", "夜晚"]',
+                    "isDefault": "true",
+                },
+                files={"file": ("forest.png", PNG, "image/png")},
+            )
+            assert uploaded.status_code == 200
+            item = uploaded.json()
+            assert item["scope"] == "story"
+            assert item["isDefault"] is True
+            assert item["origin"] == "upload"
+            assert set(item["tags"]) == {"夜晚", "森林"}
+
+            library = client.get(
+                "/media/v1/workspaces/demo_workspace/library",
+                params={"scope": "story", "storyId": 1},
+            )
+            assert library.status_code == 200
+            assert library.json()["items"][0]["itemId"] == item["itemId"]
+
+            initial = client.get(f"/media/v1/sessions/{session.id}/background")
+            assert initial.status_code == 200
+            assert initial.json()["sourceMode"] == "story_default"
+            assert initial.json()["background"]["assetId"] == item["assetId"]
+
+            queued = client.post(
+                f"/media/v1/sessions/{session.id}/background-evaluations",
+                json={"observedTurnId": 1},
+            )
+            assert queued.status_code == 200
+            evaluation_id = queued.json()["evaluationId"]
+            evaluation = queued.json()
+            for _ in range(100):
+                response = client.get(
+                    f"/media/v1/sessions/{session.id}/background-evaluations/{evaluation_id}"
+                )
+                assert response.status_code == 200
+                evaluation = response.json()
+                if evaluation["status"] not in {"queued", "running"}:
+                    break
+                time.sleep(0.01)
+            assert evaluation["status"] == "succeeded"
+            assert evaluation["decision"] == "switch"
+
+            automatic = client.get(f"/media/v1/sessions/{session.id}/background")
+            assert automatic.json()["sourceMode"] == "auto"
+            assert automatic.json()["manualLocked"] is False
+
+            manual = client.put(
+                f"/media/v1/sessions/{session.id}/background",
+                json={"assetId": item["assetId"]},
+            )
+            assert manual.json()["sourceMode"] == "manual"
+            assert manual.json()["manualLocked"] is True
+
+            cleared = client.delete(f"/media/v1/sessions/{session.id}/background")
+            assert cleared.status_code == 200
+            assert cleared.json()["background"] is None
+            assert cleared.json()["sourceMode"] == "none"
+
+            gateway.messages.append(
+                session.id,
+                models.MESSAGE_ROLE_ASSISTANT,
+                "走入森林深处。",
+                turn_id=2,
+                seq_in_turn=1,
+            )
+            resumed = client.post(
+                f"/media/v1/sessions/{session.id}/background-evaluations",
+                json={"observedTurnId": 2},
+            )
+            evaluation_id = resumed.json()["evaluationId"]
+            for _ in range(100):
+                response = client.get(
+                    f"/media/v1/sessions/{session.id}/background-evaluations/{evaluation_id}"
+                )
+                if response.json()["status"] not in {"queued", "running"}:
+                    break
+                time.sleep(0.01)
+            restored = client.get(f"/media/v1/sessions/{session.id}/background")
+            assert restored.json()["sourceMode"] == "auto"
+
+            content = client.get(
+                f"/media/v1/workspaces/demo_workspace/library/{item['itemId']}/content"
+            )
+            assert content.status_code == 200
+            assert content.content == PNG
+    finally:
+        set_runtime_for_tests(None)
+
+
+def test_media_service_reconcile_contract(tmp_path) -> None:
+    _gateway, _session, _message, runtime = _runtime(tmp_path)
+    set_runtime_for_tests(runtime)
+    try:
+        with TestClient(app) as client:
+            uploaded = client.post(
+                "/media/v1/workspaces/demo_workspace/library",
+                data={
+                    "scope": "story",
+                    "storyId": "1",
+                    "title": "Missing forest",
+                    "description": "The indexed source file will be removed.",
+                    "tags": '["forest"]',
+                    "isDefault": "false",
+                },
+                files={"file": ("forest.png", PNG, "image/png")},
+            )
+            assert uploaded.status_code == 200
+            item = uploaded.json()
+            path, _ = runtime.facade.resolve_library_asset_content(
+                "demo_workspace",
+                item["itemId"],
+            )
+            path.unlink()
+
+            reconciled = client.post(
+                "/media/v1/workspaces/demo_workspace/library/reconcile"
+            )
+
+            assert reconciled.status_code == 200
+            assert reconciled.json() == {
+                "workspaceId": "demo_workspace",
+                "scannedBlobs": 1,
+                "removedBlobs": 1,
+                "removedAssets": 1,
+                "removedLibraryItems": 1,
+                "removedGalleryItems": 0,
+                "clearedBackgrounds": 0,
+            }
+            repeated = client.post(
+                "/media/v1/workspaces/demo_workspace/library/reconcile"
+            )
+            assert repeated.status_code == 200
+            assert repeated.json()["scannedBlobs"] == 0
+            assert repeated.json()["removedBlobs"] == 0
     finally:
         set_runtime_for_tests(None)

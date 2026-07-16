@@ -9,10 +9,17 @@ type ContextUsageConfig = {
   inputBlockThresholdRatio: number
 }
 
+type SessionMediaConfig = {
+  backgroundEvaluationPollIntervalMs: number
+  backgroundEvaluationTimeoutMs: number
+  backgroundCrossfadeMs: number
+}
+
 type AppConfig = {
   session: {
     contextUsage: ContextUsageConfig
     historyPagination: HistoryPaginationConfig
+    media: SessionMediaConfig
   }
 }
 
@@ -24,6 +31,11 @@ const DEFAULT_CONFIG: AppConfig = {
     historyPagination: {
       pageTurnLimit: 50,
       maxCachedPages: 2,
+    },
+    media: {
+      backgroundEvaluationPollIntervalMs: 1500,
+      backgroundEvaluationTimeoutMs: 60000,
+      backgroundCrossfadeMs: 700,
     },
   },
 }
@@ -63,6 +75,26 @@ function normalizeConfig(value: typeof rawConfig): AppConfig {
           5,
         ),
       },
+      media: {
+        backgroundEvaluationPollIntervalMs: boundedInt(
+          value.session?.media?.backgroundEvaluationPollIntervalMs,
+          DEFAULT_CONFIG.session.media.backgroundEvaluationPollIntervalMs,
+          250,
+          10000,
+        ),
+        backgroundEvaluationTimeoutMs: boundedInt(
+          value.session?.media?.backgroundEvaluationTimeoutMs,
+          DEFAULT_CONFIG.session.media.backgroundEvaluationTimeoutMs,
+          5000,
+          300000,
+        ),
+        backgroundCrossfadeMs: boundedInt(
+          value.session?.media?.backgroundCrossfadeMs,
+          DEFAULT_CONFIG.session.media.backgroundCrossfadeMs,
+          0,
+          5000,
+        ),
+      },
     },
   }
 }
@@ -70,3 +102,4 @@ function normalizeConfig(value: typeof rawConfig): AppConfig {
 export const appConfig = normalizeConfig(rawConfig)
 export const sessionContextUsageConfig = appConfig.session.contextUsage
 export const sessionHistoryPaginationConfig = appConfig.session.historyPagination
+export const sessionMediaConfig = appConfig.session.media

@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
+from llm_client.auth import (
+    DEFAULT_LLM_SERVICE_TOKEN_ENV,
+    resolve_llm_service_token,
+)
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 
@@ -27,6 +31,23 @@ class MediaClientSettings:
 @dataclass(frozen=True)
 class MediaWorkerSettings:
     concurrency: int = 1
+
+
+@dataclass(frozen=True)
+class MediaBackgroundWorkerSettings:
+    concurrency: int = 1
+
+
+@dataclass(frozen=True)
+class LLMClientSettings:
+    base_url: str = "http://127.0.0.1:8012/llm/v1"
+    token_env: str = DEFAULT_LLM_SERVICE_TOKEN_ENV
+    request_timeout_ms: int = 60000
+    stream_timeout_ms: int = 300000
+
+    @property
+    def token(self) -> str:
+        return resolve_llm_service_token(self.token_env)
 
 
 @dataclass(frozen=True)
@@ -69,6 +90,35 @@ class MediaServiceSettings(ProfiledYamlSettings):
         raw = self._mapping("worker")
         return MediaWorkerSettings(
             concurrency=max(1, forgiving_int(raw.get("concurrency", 1), 1)),
+        )
+
+    @property
+    def background_worker(self) -> MediaBackgroundWorkerSettings:
+        raw = self._mapping("background_worker")
+        return MediaBackgroundWorkerSettings(
+            concurrency=max(1, forgiving_int(raw.get("concurrency", 1), 1)),
+        )
+
+    @property
+    def llm_client(self) -> LLMClientSettings:
+        raw = self._mapping("llm_client")
+        return LLMClientSettings(
+            base_url=str(
+                raw.get("base_url", "http://127.0.0.1:8012/llm/v1")
+                or "http://127.0.0.1:8012/llm/v1"
+            ).rstrip("/"),
+            token_env=str(
+                raw.get("token_env", DEFAULT_LLM_SERVICE_TOKEN_ENV)
+                or DEFAULT_LLM_SERVICE_TOKEN_ENV
+            ),
+            request_timeout_ms=forgiving_int(
+                raw.get("request_timeout_ms", 60000),
+                60000,
+            ),
+            stream_timeout_ms=forgiving_int(
+                raw.get("stream_timeout_ms", 300000),
+                300000,
+            ),
         )
 
     @property

@@ -155,8 +155,101 @@ class MediaBackgroundSetRequest(MediaSchema):
     asset_id: str = Field(alias="assetId", min_length=1)
 
 
+class MediaDisplayAssetResponse(MediaSchema):
+    asset_id: str = Field(alias="assetId")
+    library_item_id: str | None = Field(default=None, alias="libraryItemId")
+    origin: Literal["generated", "upload"]
+    mime_type: str = Field(alias="mimeType")
+    byte_size: int = Field(alias="byteSize")
+    title: str = ""
+    tags: list[str] = Field(default_factory=list)
+    created_at: str = Field(alias="createdAt")
+
+
+class MediaBackgroundEvaluationRequest(MediaSchema):
+    observed_turn_id: int = Field(alias="observedTurnId", gt=0)
+
+
+class MediaBackgroundEvaluationResponse(MediaSchema):
+    evaluation_id: str = Field(alias="evaluationId")
+    session_id: str = Field(alias="sessionId")
+    status: Literal[
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "superseded",
+        "skipped_manual",
+        "interrupted",
+    ]
+    target_turn_id: int = Field(alias="targetTurnId")
+    decision: Literal["", "keep", "switch"] = ""
+    selected_asset_id: str | None = Field(default=None, alias="selectedAssetId")
+    reason: str = ""
+    error_code: str = Field(default="", alias="errorCode")
+    error_message: str = Field(default="", alias="errorMessage")
+    created_at: str = Field(alias="createdAt")
+    updated_at: str = Field(alias="updatedAt")
+    started_at: str = Field(default="", alias="startedAt")
+    finished_at: str = Field(default="", alias="finishedAt")
+
+
 class MediaBackgroundResponse(MediaSchema):
-    background: MediaGalleryItemResponse | None
+    background: MediaDisplayAssetResponse | None
+    source_mode: Literal["none", "manual", "auto", "story_default"] = Field(
+        alias="sourceMode"
+    )
+    manual_locked: bool = Field(alias="manualLocked")
+    revision_token: str = Field(alias="revisionToken")
+    last_decision: str = Field(default="", alias="lastDecision")
+    last_reason: str = Field(default="", alias="lastReason")
+    latest_evaluation: MediaBackgroundEvaluationResponse | None = Field(
+        default=None,
+        alias="latestEvaluation",
+    )
+
+
+class MediaLibraryUpdateRequest(MediaSchema):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=4000)
+    tags: list[str] = Field(min_length=1, max_length=20)
+    is_default: bool = Field(default=False, alias="isDefault")
+
+
+class MediaLibraryItemResponse(MediaSchema):
+    item_id: str = Field(alias="itemId")
+    asset_id: str = Field(alias="assetId")
+    workspace_id: str = Field(alias="workspaceId")
+    scope: Literal["story", "workspace_fallback"]
+    story_id: int | None = Field(default=None, alias="storyId")
+    title: str
+    description: str
+    tags: list[str]
+    is_default: bool = Field(alias="isDefault")
+    origin: Literal["generated", "upload"]
+    mime_type: str = Field(alias="mimeType")
+    byte_size: int = Field(alias="byteSize")
+    created_at: str = Field(alias="createdAt")
+    updated_at: str = Field(alias="updatedAt")
+
+
+class MediaLibraryResponse(MediaSchema):
+    items: list[MediaLibraryItemResponse]
+
+
+class MediaLibraryReconcileResponse(MediaSchema):
+    workspace_id: str = Field(alias="workspaceId")
+    scanned_blobs: int = Field(alias="scannedBlobs", ge=0)
+    removed_blobs: int = Field(alias="removedBlobs", ge=0)
+    removed_assets: int = Field(alias="removedAssets", ge=0)
+    removed_library_items: int = Field(alias="removedLibraryItems", ge=0)
+    removed_gallery_items: int = Field(alias="removedGalleryItems", ge=0)
+    cleared_backgrounds: int = Field(alias="clearedBackgrounds", ge=0)
+
+
+class MediaLibraryDeleteResponse(MediaSchema):
+    item_id: str = Field(alias="itemId")
+    deleted: bool
 
 
 class MediaAssetDeleteResponse(MediaSchema):
