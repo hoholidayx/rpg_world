@@ -306,6 +306,7 @@ class MediaDataService:
         workspace_id: str,
         scope: str,
         story_id: int | None,
+        media_type: str = models.MEDIA_LIBRARY_TYPE_BACKGROUND,
         title: str,
         description: str,
         tags: tuple[str, ...],
@@ -318,8 +319,12 @@ class MediaDataService:
         visual_brief_json: str,
     ) -> tuple[models.MediaLibraryAssetBundle, bool]:
         self._require_library_owner(workspace_id, scope=scope, story_id=story_id)
-        if scope != models.MEDIA_LIBRARY_SCOPE_STORY and is_default:
-            raise ValueError("workspace fallback media cannot be a story default")
+        _validate_library_type(media_type)
+        if (
+            scope != models.MEDIA_LIBRARY_SCOPE_STORY
+            or media_type != models.MEDIA_LIBRARY_TYPE_BACKGROUND
+        ) and is_default:
+            raise ValueError("only story background media can be a default")
         normalized_title, normalized_description, normalized_tags = _validate_library_metadata(
             title,
             description,
@@ -337,6 +342,7 @@ class MediaDataService:
             relative_path=str(relative_path),
             scope=str(scope),
             story_id=story_id,
+            media_type=str(media_type),
             title=normalized_title,
             description=normalized_description,
             tags=normalized_tags,
@@ -359,21 +365,80 @@ class MediaDataService:
         *,
         scope: str | None = None,
         story_id: int | None = None,
+        media_types: tuple[str, ...] = (),
     ) -> list[models.MediaLibraryAssetBundle]:
         self._require_workspace(workspace_id)
         if scope is not None and scope not in models.MEDIA_LIBRARY_SCOPES:
             raise ValueError(f"invalid media library scope: {scope}")
         if story_id is not None:
             self._require_story(workspace_id, story_id)
-        return [
-            bundle
-            for item in self._repository.list_library_items(
+        if scope == models.MEDIA_LIBRARY_SCOPE_WORKSPACE and story_id is not None:
+            raise ValueError("workspace media filter must not bind a story")
+        _validate_library_types(media_types)
+        return self._library_bundles(
+            self._repository.list_library_items(
                 str(workspace_id),
                 scope=scope,
                 story_id=story_id,
+                media_types=media_types,
             )
-            if (bundle := self._library_bundle(item)) is not None
-        ]
+        )
+
+    def list_library_assets_page(
+        self,
+        workspace_id: str,
+        *,
+        query: str = "",
+        media_types: tuple[str, ...] = (),
+        tags: tuple[str, ...] = (),
+        scope: str | None = None,
+        story_id: int | None = None,
+        origins: tuple[str, ...] = (),
+        sort: str = "updated_desc",
+        page: int = 1,
+        page_size: int = 48,
+    ) -> models.MediaLibraryPage:
+        self._require_workspace(workspace_id)
+        if scope is not None and scope not in models.MEDIA_LIBRARY_SCOPES:
+            raise ValueError(f"invalid media library scope: {scope}")
+        if story_id is not None:
+            self._require_story(workspace_id, story_id)
+        if scope == models.MEDIA_LIBRARY_SCOPE_WORKSPACE and story_id is not None:
+            raise ValueError("workspace media filter must not bind a story")
+        _validate_library_types(media_types)
+        invalid_origins = set(origins) - set(models.MEDIA_ASSET_ORIGINS)
+        if invalid_origins:
+            raise ValueError(f"invalid media origins: {', '.join(sorted(invalid_origins))}")
+        if sort not in {"updated_desc", "created_desc", "title_asc", "size_desc"}:
+            raise ValueError(f"invalid media library sort: {sort}")
+        normalized_page = int(page)
+        normalized_page_size = int(page_size)
+        if normalized_page < 1:
+            raise ValueError("media library page must be positive")
+        if not 1 <= normalized_page_size <= 100:
+            raise ValueError("media library pageSize must be between 1 and 100")
+        items, total = self._repository.list_library_items_page(
+            str(workspace_id),
+            query_text=str(query),
+            media_types=media_types,
+            tags=tags,
+            scope=scope,
+            story_id=story_id,
+            origins=origins,
+            sort=sort,
+            page=normalized_page,
+            page_size=normalized_page_size,
+        )
+        return models.MediaLibraryPage(
+            items=tuple(self._library_bundles(items)),
+            page=normalized_page,
+            page_size=normalized_page_size,
+            total=total,
+        )
+
+    def get_library_facets(self, workspace_id: str) -> models.MediaLibraryFacets:
+        self._require_workspace(workspace_id)
+        return self._repository.get_library_facets(str(workspace_id))
 
     def get_library_asset(
         self,
@@ -405,6 +470,9 @@ class MediaDataService:
         workspace_id: str,
         item_id: str,
         *,
+        scope: str,
+        story_id: int | None,
+        media_type: str,
         title: str,
         description: str,
         tags: tuple[str, ...],
@@ -413,15 +481,31 @@ class MediaDataService:
         existing = self.get_library_asset(workspace_id, item_id)
         if existing is None:
             return None
+        self._require_library_owner(workspace_id, scope=scope, story_id=story_id)
+        _validate_library_type(media_type)
+        if self._repository.count_background_references(existing.asset.id) and (
+            media_type != models.MEDIA_LIBRARY_TYPE_BACKGROUND
+            or scope != existing.item.scope
+            or story_id != existing.item.story_id
+        ):
+            raise MediaAssetInUseError(
+                f"media asset is referenced by a session background: {existing.asset.id}"
+            )
         normalized_title, normalized_description, normalized_tags = _validate_library_metadata(
             title,
             description,
             tags,
         )
-        if existing.item.scope != models.MEDIA_LIBRARY_SCOPE_STORY and is_default:
-            raise ValueError("workspace fallback media cannot be a story default")
+        if (
+            scope != models.MEDIA_LIBRARY_SCOPE_STORY
+            or media_type != models.MEDIA_LIBRARY_TYPE_BACKGROUND
+        ) and is_default:
+            raise ValueError("only story background media can be a default")
         item = self._repository.update_library_item(
             str(item_id),
+            scope=scope,
+            story_id=story_id,
+            media_type=media_type,
             title=normalized_title,
             description=normalized_description,
             tags=normalized_tags,
@@ -459,6 +543,7 @@ class MediaDataService:
             workspace_id,
             scope=scope,
             story_id=story_id,
+            media_types=(models.MEDIA_LIBRARY_TYPE_BACKGROUND,),
         )
         terms = _search_terms(query, tags)
         if not terms:
@@ -506,8 +591,16 @@ class MediaDataService:
             library_item is not None
             and library_item.scope == models.MEDIA_LIBRARY_SCOPE_STORY
             and library_item.story_id == session.story_id
+            and library_item.media_type == models.MEDIA_LIBRARY_TYPE_BACKGROUND
         )
-        if gallery_item is None and not library_allowed:
+        gallery_allowed = (
+            gallery_item is not None
+            and (
+                library_item is None
+                or library_item.media_type == models.MEDIA_LIBRARY_TYPE_BACKGROUND
+            )
+        )
+        if not gallery_allowed and not library_allowed:
             raise FileNotFoundError(f"Media asset is not manually selectable: {asset_id}")
         self._repository.ensure_background_state(str(session_id))
         return self._repository.set_background(
@@ -767,8 +860,8 @@ class MediaDataService:
                         library_item.scope == models.MEDIA_LIBRARY_SCOPE_STORY
                         and library_item.story_id == session.story_id
                     )
-                    or library_item.scope == models.MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK
-                )
+                    or library_item.scope == models.MEDIA_LIBRARY_SCOPE_WORKSPACE
+                ) and library_item.media_type == models.MEDIA_LIBRARY_TYPE_BACKGROUND
                 if not allowed:
                     raise PermissionError(
                         f"background asset is outside the session media pools: {selected_asset_id}"
@@ -864,7 +957,7 @@ class MediaDataService:
                 raise ValueError("story media requires story_id")
             self._require_story(workspace_id, story_id)
         elif story_id is not None:
-            raise ValueError("workspace fallback media must not bind a story")
+            raise ValueError("workspace media must not bind a story")
 
     def _library_bundle(
         self,
@@ -881,7 +974,36 @@ class MediaDataService:
             asset=asset,
             blob=blob,
             tags=self._repository.list_library_item_tags(item.id),
+            usage=self._repository.get_library_usage((asset.id,)).get(
+                asset.id,
+                models.MediaLibraryUsage(),
+            ),
         )
+
+    def _library_bundles(
+        self,
+        items: Iterable[models.MediaLibraryItem],
+    ) -> list[models.MediaLibraryAssetBundle]:
+        resolved: list[tuple[models.MediaLibraryItem, models.MediaAsset, models.MediaBlob]] = []
+        for item in items:
+            asset = self._repository.get_asset(item.asset_id)
+            if asset is None:
+                continue
+            blob = self._repository.get_blob(asset.blob_id)
+            if blob is None:
+                continue
+            resolved.append((item, asset, blob))
+        usage = self._repository.get_library_usage(asset.id for _, asset, _ in resolved)
+        return [
+            models.MediaLibraryAssetBundle(
+                item=item,
+                asset=asset,
+                blob=blob,
+                tags=self._repository.list_library_item_tags(item.id),
+                usage=usage.get(asset.id, models.MediaLibraryUsage()),
+            )
+            for item, asset, blob in resolved
+        ]
 
 
 def _validate_library_metadata(
@@ -901,6 +1023,17 @@ def _validate_library_metadata(
     if not 1 <= len(normalized_tags) <= 20:
         raise ValueError("media library requires between 1 and 20 tags")
     return normalized_title, normalized_description, normalized_tags
+
+
+def _validate_library_type(media_type: str) -> None:
+    if media_type not in models.MEDIA_LIBRARY_TYPES:
+        raise ValueError(f"invalid media library type: {media_type}")
+
+
+def _validate_library_types(media_types: Iterable[str]) -> None:
+    invalid = set(media_types) - set(models.MEDIA_LIBRARY_TYPES)
+    if invalid:
+        raise ValueError(f"invalid media library types: {', '.join(sorted(invalid))}")
 
 
 def _search_terms(query: str, tags: tuple[str, ...]) -> tuple[str, ...]:

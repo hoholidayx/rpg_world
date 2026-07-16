@@ -16,7 +16,14 @@ __all__ = [
     "MediaJob",
     "MediaJobCompletion",
     "MediaLibraryAssetBundle",
+    "MediaLibraryBatchFailure",
+    "MediaLibraryBatchResult",
+    "MediaLibraryFacetValue",
+    "MediaLibraryFacets",
+    "MediaLibraryPage",
     "MediaLibraryReconcileResult",
+    "MediaLibraryStoryFacet",
+    "MediaLibraryUsage",
     "MediaDisplayAssetBundle",
     "MediaLibraryItem",
     "MediaBackgroundEvaluation",
@@ -96,8 +103,18 @@ __all__ = [
     "MEDIA_ASSET_ORIGIN_UPLOAD",
     "MEDIA_ASSET_ORIGINS",
     "MEDIA_LIBRARY_SCOPE_STORY",
-    "MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK",
+    "MEDIA_LIBRARY_SCOPE_WORKSPACE",
     "MEDIA_LIBRARY_SCOPES",
+    "MEDIA_LIBRARY_TYPE_AVATAR",
+    "MEDIA_LIBRARY_TYPE_BACKGROUND",
+    "MEDIA_LIBRARY_TYPE_CHARACTER_SPRITE",
+    "MEDIA_LIBRARY_TYPE_ITEM",
+    "MEDIA_LIBRARY_TYPE_MAP",
+    "MEDIA_LIBRARY_TYPE_OTHER",
+    "MEDIA_LIBRARY_TYPE_REFERENCE",
+    "MEDIA_LIBRARY_TYPE_SCENE_ILLUSTRATION",
+    "MEDIA_LIBRARY_TYPE_UI",
+    "MEDIA_LIBRARY_TYPES",
     "MEDIA_BACKGROUND_SOURCE_MANUAL",
     "MEDIA_BACKGROUND_SOURCE_AUTO",
     "MEDIA_BACKGROUND_SOURCES",
@@ -197,10 +214,30 @@ MEDIA_ASSET_ORIGINS = frozenset({
     MEDIA_ASSET_ORIGIN_UPLOAD,
 })
 MEDIA_LIBRARY_SCOPE_STORY = "story"
-MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK = "workspace_fallback"
+MEDIA_LIBRARY_SCOPE_WORKSPACE = "workspace"
 MEDIA_LIBRARY_SCOPES = frozenset({
     MEDIA_LIBRARY_SCOPE_STORY,
-    MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK,
+    MEDIA_LIBRARY_SCOPE_WORKSPACE,
+})
+MEDIA_LIBRARY_TYPE_BACKGROUND = "background"
+MEDIA_LIBRARY_TYPE_AVATAR = "avatar"
+MEDIA_LIBRARY_TYPE_CHARACTER_SPRITE = "character_sprite"
+MEDIA_LIBRARY_TYPE_SCENE_ILLUSTRATION = "scene_illustration"
+MEDIA_LIBRARY_TYPE_MAP = "map"
+MEDIA_LIBRARY_TYPE_ITEM = "item"
+MEDIA_LIBRARY_TYPE_UI = "ui"
+MEDIA_LIBRARY_TYPE_REFERENCE = "reference"
+MEDIA_LIBRARY_TYPE_OTHER = "other"
+MEDIA_LIBRARY_TYPES = frozenset({
+    MEDIA_LIBRARY_TYPE_BACKGROUND,
+    MEDIA_LIBRARY_TYPE_AVATAR,
+    MEDIA_LIBRARY_TYPE_CHARACTER_SPRITE,
+    MEDIA_LIBRARY_TYPE_SCENE_ILLUSTRATION,
+    MEDIA_LIBRARY_TYPE_MAP,
+    MEDIA_LIBRARY_TYPE_ITEM,
+    MEDIA_LIBRARY_TYPE_UI,
+    MEDIA_LIBRARY_TYPE_REFERENCE,
+    MEDIA_LIBRARY_TYPE_OTHER,
 })
 MEDIA_BACKGROUND_SOURCE_MANUAL = "manual"
 MEDIA_BACKGROUND_SOURCE_AUTO = "auto"
@@ -600,6 +637,7 @@ class MediaLibraryItem:
     asset_id: str
     scope: str
     story_id: int | None
+    media_type: str
     title: str
     description: str
     is_default: bool = False
@@ -612,10 +650,14 @@ class MediaLibraryItem:
             raise ValueError(f"invalid media library scope: {self.scope}")
         if self.scope == MEDIA_LIBRARY_SCOPE_STORY and self.story_id is None:
             raise ValueError("story media library item requires story_id")
-        if self.scope == MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK and self.story_id is not None:
-            raise ValueError("workspace fallback media item must not bind a story")
+        if self.scope == MEDIA_LIBRARY_SCOPE_WORKSPACE and self.story_id is not None:
+            raise ValueError("workspace media item must not bind a story")
+        if self.media_type not in MEDIA_LIBRARY_TYPES:
+            raise ValueError(f"invalid media library type: {self.media_type}")
         if self.scope != MEDIA_LIBRARY_SCOPE_STORY and self.is_default:
             raise ValueError("only story media items may be default backgrounds")
+        if self.media_type != MEDIA_LIBRARY_TYPE_BACKGROUND and self.is_default:
+            raise ValueError("only background media items may be story defaults")
         if not self.title.strip() or not self.description.strip():
             raise ValueError("media library title and description are required")
 
@@ -626,6 +668,55 @@ class MediaLibraryAssetBundle:
     asset: MediaAsset
     blob: MediaBlob
     tags: tuple[str, ...] = field(default_factory=tuple)
+    usage: "MediaLibraryUsage" = field(default_factory=lambda: MediaLibraryUsage())
+
+
+@dataclass(frozen=True)
+class MediaLibraryUsage:
+    background_references: int = 0
+    gallery_references: int = 0
+
+
+@dataclass(frozen=True)
+class MediaLibraryPage:
+    items: tuple[MediaLibraryAssetBundle, ...]
+    page: int
+    page_size: int
+    total: int
+
+
+@dataclass(frozen=True)
+class MediaLibraryFacetValue:
+    value: str
+    count: int
+
+
+@dataclass(frozen=True)
+class MediaLibraryStoryFacet:
+    story_id: int
+    count: int
+
+
+@dataclass(frozen=True)
+class MediaLibraryFacets:
+    media_types: tuple[MediaLibraryFacetValue, ...] = field(default_factory=tuple)
+    tags: tuple[MediaLibraryFacetValue, ...] = field(default_factory=tuple)
+    scopes: tuple[MediaLibraryFacetValue, ...] = field(default_factory=tuple)
+    origins: tuple[MediaLibraryFacetValue, ...] = field(default_factory=tuple)
+    stories: tuple[MediaLibraryStoryFacet, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class MediaLibraryBatchFailure:
+    item_id: str
+    error_code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class MediaLibraryBatchResult:
+    succeeded_item_ids: tuple[str, ...] = field(default_factory=tuple)
+    failed: tuple[MediaLibraryBatchFailure, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

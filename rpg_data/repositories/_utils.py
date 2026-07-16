@@ -252,6 +252,7 @@ def to_media_library_item(
         asset_id=str(row.asset_id),
         scope=str(row.scope),
         story_id=int(row.story_id) if row.story_id is not None else None,
+        media_type=str(row.media_type),
         title=str(row.title),
         description=str(row.description),
         is_default=bool(row.is_default),

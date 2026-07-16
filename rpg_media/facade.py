@@ -218,6 +218,7 @@ class MediaFacade:
             SessionGalleryAsset(
                 bundle=bundle,
                 source_stale=self._is_gallery_source_stale(bundle),
+                media_type=self._gallery_media_type(bundle.asset.id),
             )
             for bundle in self._existing_file_bundles(
                 self._data.list_gallery(session_id)
@@ -235,6 +236,15 @@ class MediaFacade:
         return SessionGalleryAsset(
             bundle=bundle,
             source_stale=self._is_gallery_source_stale(bundle),
+            media_type=self._gallery_media_type(bundle.asset.id),
+        )
+
+    def _gallery_media_type(self, asset_id: str) -> str:
+        library = self._data.get_library_asset_by_asset_id(asset_id)
+        return (
+            library.item.media_type
+            if library is not None
+            else models.MEDIA_LIBRARY_TYPE_BACKGROUND
         )
 
     def get_background(self, session_id: str) -> MediaBackgroundView | None:
@@ -328,6 +338,7 @@ class MediaFacade:
         workspace_id: str,
         scope: str,
         story_id: int | None,
+        media_type: str = models.MEDIA_LIBRARY_TYPE_BACKGROUND,
         title: str,
         description: str,
         tags: tuple[str, ...],
@@ -340,6 +351,7 @@ class MediaFacade:
                 workspace_id=workspace_id,
                 scope=scope,
                 story_id=story_id,
+                media_type=media_type,
                 title=title,
                 description=description,
                 tags=tags,
@@ -362,14 +374,53 @@ class MediaFacade:
         *,
         scope: str | None = None,
         story_id: int | None = None,
+        media_types: tuple[str, ...] = (),
     ) -> list[models.MediaLibraryAssetBundle]:
         return self._existing_file_bundles(
             self._data.list_library_assets(
                 workspace_id,
                 scope=scope,
                 story_id=story_id,
+                media_types=media_types,
             )
         )
+
+    def list_library_assets_page(
+        self,
+        workspace_id: str,
+        *,
+        query: str = "",
+        media_types: tuple[str, ...] = (),
+        tags: tuple[str, ...] = (),
+        scope: str | None = None,
+        story_id: int | None = None,
+        origins: tuple[str, ...] = (),
+        sort: str = "updated_desc",
+        page: int = 1,
+        page_size: int = 48,
+    ) -> models.MediaLibraryPage:
+        result = self._data.list_library_assets_page(
+            workspace_id,
+            query=query,
+            media_types=media_types,
+            tags=tags,
+            scope=scope,
+            story_id=story_id,
+            origins=origins,
+            sort=sort,
+            page=page,
+            page_size=page_size,
+        )
+        visible = tuple(self._existing_file_bundles(result.items))
+        return models.MediaLibraryPage(
+            items=visible,
+            page=result.page,
+            page_size=result.page_size,
+            total=result.total,
+        )
+
+    def get_library_facets(self, workspace_id: str) -> models.MediaLibraryFacets:
+        return self._data.get_library_facets(workspace_id)
 
     async def reconcile_library_assets(
         self,
@@ -394,19 +445,28 @@ class MediaFacade:
         workspace_id: str,
         item_id: str,
         *,
+        scope: str,
+        story_id: int | None,
+        media_type: str,
         title: str,
         description: str,
         tags: tuple[str, ...],
         is_default: bool,
     ) -> models.MediaLibraryAssetBundle | None:
-        return self._data.update_library_asset(
-            workspace_id,
-            item_id,
-            title=title,
-            description=description,
-            tags=tags,
-            is_default=is_default,
-        )
+        try:
+            return self._data.update_library_asset(
+                workspace_id,
+                item_id,
+                scope=scope,
+                story_id=story_id,
+                media_type=media_type,
+                title=title,
+                description=description,
+                tags=tags,
+                is_default=is_default,
+            )
+        except MediaAssetInUseError as exc:
+            raise MediaAssetInUseDomainError(item_id) from exc
 
     def delete_library_asset(self, workspace_id: str, item_id: str) -> bool:
         try:
@@ -418,6 +478,104 @@ class MediaFacade:
         if deleted.blob_deleted:
             self._image_store.delete_blob_file(deleted.blob)
         return True
+
+    def batch_update_library_assets(
+        self,
+        workspace_id: str,
+        *,
+        item_ids: tuple[str, ...],
+        media_type: str | None = None,
+        add_tags: tuple[str, ...] = (),
+        remove_tags: tuple[str, ...] = (),
+    ) -> models.MediaLibraryBatchResult:
+        succeeded: list[str] = []
+        failed: list[models.MediaLibraryBatchFailure] = []
+        remove_keys = {tag.strip().casefold() for tag in remove_tags if tag.strip()}
+        for item_id in item_ids:
+            try:
+                existing = self._data.get_library_asset(workspace_id, item_id)
+                if existing is None:
+                    raise FileNotFoundError(f"Media library item not found: {item_id}")
+                merged = {
+                    tag.casefold(): tag
+                    for tag in existing.tags
+                    if tag.casefold() not in remove_keys
+                }
+                for tag in add_tags:
+                    normalized = tag.strip()
+                    if normalized:
+                        merged[normalized.casefold()] = normalized
+                next_type = media_type or existing.item.media_type
+                updated = self._data.update_library_asset(
+                    workspace_id,
+                    item_id,
+                    scope=existing.item.scope,
+                    story_id=existing.item.story_id,
+                    media_type=next_type,
+                    title=existing.item.title,
+                    description=existing.item.description,
+                    tags=tuple(merged.values()),
+                    is_default=(
+                        existing.item.is_default
+                        and next_type == models.MEDIA_LIBRARY_TYPE_BACKGROUND
+                    ),
+                )
+                if updated is None:
+                    raise FileNotFoundError(f"Media library item not found: {item_id}")
+                succeeded.append(item_id)
+            except FileNotFoundError as exc:
+                failed.append(models.MediaLibraryBatchFailure(
+                    item_id=item_id,
+                    error_code="MEDIA_LIBRARY_ITEM_NOT_FOUND",
+                    message=str(exc),
+                ))
+            except MediaAssetInUseError:
+                error = MediaAssetInUseDomainError(item_id)
+                failed.append(models.MediaLibraryBatchFailure(
+                    item_id=item_id,
+                    error_code=error.code,
+                    message=str(error),
+                ))
+            except ValueError as exc:
+                failed.append(models.MediaLibraryBatchFailure(
+                    item_id=item_id,
+                    error_code="MEDIA_LIBRARY_UPDATE_INVALID",
+                    message=str(exc),
+                ))
+        return models.MediaLibraryBatchResult(
+            succeeded_item_ids=tuple(succeeded),
+            failed=tuple(failed),
+        )
+
+    def batch_delete_library_assets(
+        self,
+        workspace_id: str,
+        *,
+        item_ids: tuple[str, ...],
+    ) -> models.MediaLibraryBatchResult:
+        succeeded: list[str] = []
+        failed: list[models.MediaLibraryBatchFailure] = []
+        for item_id in item_ids:
+            try:
+                if not self.delete_library_asset(workspace_id, item_id):
+                    raise FileNotFoundError(f"Media library item not found: {item_id}")
+                succeeded.append(item_id)
+            except MediaAssetInUseDomainError as exc:
+                failed.append(models.MediaLibraryBatchFailure(
+                    item_id=item_id,
+                    error_code=exc.code,
+                    message=str(exc),
+                ))
+            except FileNotFoundError as exc:
+                failed.append(models.MediaLibraryBatchFailure(
+                    item_id=item_id,
+                    error_code="MEDIA_LIBRARY_ITEM_NOT_FOUND",
+                    message=str(exc),
+                ))
+        return models.MediaLibraryBatchResult(
+            succeeded_item_ids=tuple(succeeded),
+            failed=tuple(failed),
+        )
 
     def resolve_library_asset_content(
         self,

@@ -69,6 +69,8 @@ export function useSessionMedia({
     queryFn: () => getMediaLibrary(workspaceId ?? '', {
       scope: 'story',
       storyId: storyId ?? undefined,
+      mediaTypes: ['background'],
+      pageSize: 100,
     }),
     enabled: galleryOpen && Boolean(workspaceId && storyId),
     retry: false,

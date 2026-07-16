@@ -328,6 +328,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0009", "0009_media.sql"),
             ("0010", "0010_media_library_backgrounds.sql"),
             ("0011", "0011_media_generated_library.sql"),
+            ("0012", "0012_media_library_taxonomy.sql"),
         ]
     finally:
         conn.close()

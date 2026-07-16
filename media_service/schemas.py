@@ -140,6 +140,17 @@ class MediaGalleryItemResponse(MediaSchema):
     sha256: str
     mime_type: str = Field(alias="mimeType")
     byte_size: int = Field(alias="byteSize")
+    media_type: Literal[
+        "background",
+        "avatar",
+        "character_sprite",
+        "scene_illustration",
+        "map",
+        "item",
+        "ui",
+        "reference",
+        "other",
+    ] = Field(default="background", alias="mediaType")
     visual_brief: VisualBriefSchema = Field(alias="visualBrief")
     source: MediaSourceReferenceResponse
     created_at: str = Field(alias="createdAt")
@@ -210,6 +221,19 @@ class MediaBackgroundResponse(MediaSchema):
 
 
 class MediaLibraryUpdateRequest(MediaSchema):
+    scope: Literal["story", "workspace"]
+    story_id: int | None = Field(default=None, alias="storyId")
+    media_type: Literal[
+        "background",
+        "avatar",
+        "character_sprite",
+        "scene_illustration",
+        "map",
+        "item",
+        "ui",
+        "reference",
+        "other",
+    ] = Field(alias="mediaType")
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=4000)
     tags: list[str] = Field(min_length=1, max_length=20)
@@ -226,8 +250,19 @@ class MediaLibraryItemResponse(MediaSchema):
     item_id: str = Field(alias="itemId")
     asset_id: str = Field(alias="assetId")
     workspace_id: str = Field(alias="workspaceId")
-    scope: Literal["story", "workspace_fallback"]
+    scope: Literal["story", "workspace"]
     story_id: int | None = Field(default=None, alias="storyId")
+    media_type: Literal[
+        "background",
+        "avatar",
+        "character_sprite",
+        "scene_illustration",
+        "map",
+        "item",
+        "ui",
+        "reference",
+        "other",
+    ] = Field(alias="mediaType")
     title: str
     description: str
     tags: list[str]
@@ -235,12 +270,83 @@ class MediaLibraryItemResponse(MediaSchema):
     origin: Literal["generated", "upload"]
     mime_type: str = Field(alias="mimeType")
     byte_size: int = Field(alias="byteSize")
+    background_references: int = Field(alias="backgroundReferences", ge=0)
+    gallery_references: int = Field(alias="galleryReferences", ge=0)
     created_at: str = Field(alias="createdAt")
     updated_at: str = Field(alias="updatedAt")
 
 
 class MediaLibraryResponse(MediaSchema):
     items: list[MediaLibraryItemResponse]
+    page: int = Field(ge=1)
+    page_size: int = Field(alias="pageSize", ge=1, le=100)
+    total: int = Field(ge=0)
+
+
+class MediaLibraryFacetValueResponse(MediaSchema):
+    value: str
+    count: int = Field(ge=0)
+
+
+class MediaLibraryStoryFacetResponse(MediaSchema):
+    story_id: int = Field(alias="storyId")
+    count: int = Field(ge=0)
+
+
+class MediaLibraryFacetsResponse(MediaSchema):
+    media_types: list[MediaLibraryFacetValueResponse] = Field(alias="mediaTypes")
+    tags: list[MediaLibraryFacetValueResponse]
+    scopes: list[MediaLibraryFacetValueResponse]
+    origins: list[MediaLibraryFacetValueResponse]
+    stories: list[MediaLibraryStoryFacetResponse]
+
+
+class MediaLibraryBatchUpdateRequest(MediaSchema):
+    item_ids: list[str] = Field(alias="itemIds", min_length=1, max_length=100)
+    media_type: Literal[
+        "background",
+        "avatar",
+        "character_sprite",
+        "scene_illustration",
+        "map",
+        "item",
+        "ui",
+        "reference",
+        "other",
+    ] | None = Field(default=None, alias="mediaType")
+    add_tags: list[str] = Field(default_factory=list, alias="addTags", max_length=20)
+    remove_tags: list[str] = Field(default_factory=list, alias="removeTags", max_length=20)
+
+    @field_validator("item_ids")
+    @classmethod
+    def validate_unique_item_ids(cls, value: list[str]) -> list[str]:
+        normalized = list(dict.fromkeys(item_id.strip() for item_id in value if item_id.strip()))
+        if not normalized:
+            raise ValueError("itemIds must contain at least one item")
+        return normalized
+
+
+class MediaLibraryBatchDeleteRequest(MediaSchema):
+    item_ids: list[str] = Field(alias="itemIds", min_length=1, max_length=100)
+
+    @field_validator("item_ids")
+    @classmethod
+    def validate_unique_item_ids(cls, value: list[str]) -> list[str]:
+        normalized = list(dict.fromkeys(item_id.strip() for item_id in value if item_id.strip()))
+        if not normalized:
+            raise ValueError("itemIds must contain at least one item")
+        return normalized
+
+
+class MediaLibraryBatchFailureResponse(MediaSchema):
+    item_id: str = Field(alias="itemId")
+    error_code: str = Field(alias="errorCode")
+    message: str
+
+
+class MediaLibraryBatchResponse(MediaSchema):
+    succeeded_item_ids: list[str] = Field(alias="succeededItemIds")
+    failed: list[MediaLibraryBatchFailureResponse]
 
 
 class MediaLibraryReconcileResponse(MediaSchema):

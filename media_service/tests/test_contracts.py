@@ -250,6 +250,7 @@ def test_library_upload_and_async_background_contract(tmp_path) -> None:
                 "/media/v1/workspaces/demo_workspace/library",
                 data={
                     "scope": "story",
+                    "mediaType": "background",
                     "storyId": "1",
                     "title": "月光森林",
                     "description": "夜晚的森林入口，石门被月光照亮。",
@@ -366,6 +367,79 @@ def test_library_analysis_unsupported_is_a_non_persistent_business_error(tmp_pat
         set_runtime_for_tests(None)
 
 
+def test_media_library_filters_facets_and_partial_batch_delete(tmp_path) -> None:
+    _gateway, session, _message, runtime = _runtime(tmp_path)
+    set_runtime_for_tests(runtime)
+    try:
+        with TestClient(app) as client:
+            def upload(name: str, payload: bytes, media_type: str):
+                response = client.post(
+                    "/media/v1/workspaces/demo_workspace/library",
+                    data={
+                        "scope": "story",
+                        "mediaType": media_type,
+                        "storyId": "1",
+                        "title": name,
+                        "description": f"{name} description",
+                        "tags": '["forest", "night"]',
+                        "isDefault": "false",
+                    },
+                    files={"file": (f"{name}.png", payload, "image/png")},
+                )
+                assert response.status_code == 200
+                return response.json()
+
+            background = upload("Background", PNG + b"-background", "background")
+            candidate = upload("Candidate", PNG + b"-candidate", "map")
+            selected = client.put(
+                f"/media/v1/sessions/{session.id}/background",
+                json={"assetId": background["assetId"]},
+            )
+            assert selected.status_code == 200
+
+            updated = client.patch(
+                "/media/v1/workspaces/demo_workspace/library/batch",
+                json={
+                    "itemIds": [candidate["itemId"]],
+                    "mediaType": "avatar",
+                    "addTags": ["curated"],
+                    "removeTags": ["night"],
+                },
+            )
+            assert updated.status_code == 200
+            assert updated.json()["succeededItemIds"] == [candidate["itemId"]]
+
+            filtered = client.get(
+                "/media/v1/workspaces/demo_workspace/library",
+                params={"mediaTypes": "avatar", "tags": "curated", "pageSize": 1},
+            )
+            assert filtered.status_code == 200
+            assert filtered.json()["total"] == 1
+            assert filtered.json()["items"][0]["mediaType"] == "avatar"
+            facets = client.get(
+                "/media/v1/workspaces/demo_workspace/library/facets"
+            )
+            assert facets.status_code == 200
+            assert {entry["value"] for entry in facets.json()["mediaTypes"]} == {
+                "avatar",
+                "background",
+            }
+
+            deleted = client.post(
+                "/media/v1/workspaces/demo_workspace/library/batch-delete",
+                json={"itemIds": [background["itemId"], candidate["itemId"]]},
+            )
+            assert deleted.status_code == 200
+            assert deleted.json()["succeededItemIds"] == [candidate["itemId"]]
+            assert deleted.json()["failed"] == [{
+                "itemId": background["itemId"],
+                "errorCode": "MEDIA_ASSET_IN_USE",
+                "message": f"Media asset is still used by a typed binding: {background['itemId']}",
+            }]
+    finally:
+        set_runtime_for_tests(None)
+
+
 def test_media_service_reconcile_contract(tmp_path) -> None:
     _gateway, _session, _message, runtime = _runtime(tmp_path)
     set_runtime_for_tests(runtime)
@@ -375,6 +449,7 @@ def test_media_service_reconcile_contract(tmp_path) -> None:
                 "/media/v1/workspaces/demo_workspace/library",
                 data={
                     "scope": "story",
+                    "mediaType": "background",
                     "storyId": "1",
                     "title": "Missing forest",
                     "description": "The indexed source file will be removed.",

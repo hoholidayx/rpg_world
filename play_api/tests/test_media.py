@@ -16,6 +16,10 @@ from media_service.schemas import (
     MediaGalleryItemResponse,
     MediaGalleryResponse,
     MediaLibraryDeleteResponse,
+    MediaLibraryBatchResponse,
+    MediaLibraryFacetValueResponse,
+    MediaLibraryFacetsResponse,
+    MediaLibraryStoryFacetResponse,
     MediaImageMetadataResponse,
     MediaLibraryItemResponse,
     MediaLibraryReconcileResponse,
@@ -85,6 +89,7 @@ def _library_item() -> MediaLibraryItemResponse:
         workspaceId="demo_workspace",
         scope="story",
         storyId=1,
+        mediaType="background",
         title="Forest",
         description="Moonlit forest",
         tags=["forest", "night"],
@@ -92,6 +97,8 @@ def _library_item() -> MediaLibraryItemResponse:
         origin="upload",
         mimeType="image/png",
         byteSize=9,
+        backgroundReferences=0,
+        galleryReferences=0,
         createdAt="now",
         updatedAt="now",
     )
@@ -121,7 +128,7 @@ class _FakeMediaClient:
 
     async def list_library_assets(self, workspace_id, **kwargs):  # noqa: ANN001, ANN201
         assert workspace_id == "demo_workspace"
-        return MediaLibraryResponse(items=[_library_item()])
+        return MediaLibraryResponse(items=[_library_item()], page=1, pageSize=48, total=1)
 
     async def reconcile_library_assets(self, workspace_id):  # noqa: ANN001, ANN201
         assert workspace_id == "demo_workspace"
@@ -134,6 +141,21 @@ class _FakeMediaClient:
             removedGalleryItems=1,
             clearedBackgrounds=1,
         )
+
+    async def get_library_facets(self, workspace_id):  # noqa: ANN001, ANN201
+        return MediaLibraryFacetsResponse(
+            mediaTypes=[MediaLibraryFacetValueResponse(value="background", count=1)],
+            tags=[MediaLibraryFacetValueResponse(value="forest", count=1)],
+            scopes=[MediaLibraryFacetValueResponse(value="story", count=1)],
+            origins=[MediaLibraryFacetValueResponse(value="upload", count=1)],
+            stories=[MediaLibraryStoryFacetResponse(storyId=1, count=1)],
+        )
+
+    async def batch_update_library_assets(self, workspace_id, body):  # noqa: ANN001, ANN201
+        return MediaLibraryBatchResponse(succeededItemIds=body.item_ids, failed=[])
+
+    async def batch_delete_library_assets(self, workspace_id, body):  # noqa: ANN001, ANN201
+        return MediaLibraryBatchResponse(succeededItemIds=body.item_ids, failed=[])
 
     async def analyze_library_image(self, workspace_id, **kwargs):  # noqa: ANN001, ANN201
         assert workspace_id == "demo_workspace"
@@ -313,6 +335,25 @@ def test_play_media_proxy_contract_and_content_stream(tmp_path, monkeypatch) -> 
         assert library.status_code == 200
         assert library.json()["items"][0]["itemId"] == "item1"
 
+        facets = client.get(
+            "/play-api/v1/workspaces/demo_workspace/media/library/facets"
+        )
+        assert facets.status_code == 200
+        assert facets.json()["mediaTypes"] == [{"value": "background", "count": 1}]
+
+        batch_updated = client.patch(
+            "/play-api/v1/workspaces/demo_workspace/media/library/batch",
+            json={"itemIds": ["item1"], "mediaType": "avatar"},
+        )
+        assert batch_updated.status_code == 200
+        assert batch_updated.json()["succeededItemIds"] == ["item1"]
+
+        batch_deleted = client.post(
+            "/play-api/v1/workspaces/demo_workspace/media/library/batch-delete",
+            json={"itemIds": ["item1"]},
+        )
+        assert batch_deleted.status_code == 200
+
         reconciled = client.post(
             "/play-api/v1/workspaces/demo_workspace/media/library/reconcile"
         )
@@ -332,6 +373,7 @@ def test_play_media_proxy_contract_and_content_stream(tmp_path, monkeypatch) -> 
             "/play-api/v1/workspaces/demo_workspace/media/library",
             data={
                 "scope": "story",
+                "mediaType": "background",
                 "storyId": "1",
                 "title": "Forest",
                 "description": "Moonlit forest",

@@ -230,6 +230,7 @@ class StoredImage:
 class SessionGalleryAsset:
     bundle: models.SessionMediaAssetBundle
     source_stale: bool
+    media_type: str = models.MEDIA_LIBRARY_TYPE_BACKGROUND
 
 
 @dataclass(frozen=True)

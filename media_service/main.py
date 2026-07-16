@@ -24,7 +24,14 @@ from media_service.schemas import (
     MediaGalleryResponse,
     MediaHealthResponse,
     MediaLibraryItemResponse,
+    MediaLibraryBatchDeleteRequest,
+    MediaLibraryBatchFailureResponse,
+    MediaLibraryBatchResponse,
+    MediaLibraryBatchUpdateRequest,
     MediaLibraryDeleteResponse,
+    MediaLibraryFacetValueResponse,
+    MediaLibraryFacetsResponse,
+    MediaLibraryStoryFacetResponse,
     MediaImageMetadataResponse,
     MediaLibraryReconcileResponse,
     MediaLibraryResponse,
@@ -154,18 +161,49 @@ async def health() -> MediaHealthResponse:
 )
 async def list_library_assets(
     workspace_id: str,
+    q: str = Query(default=""),
+    media_types: str | None = Query(default=None, alias="mediaTypes"),
+    tags: str | None = Query(default=None),
     scope: str | None = Query(default=None),
     story_id: int | None = Query(default=None, alias="storyId"),
+    origins: str | None = Query(default=None),
+    sort: str = Query(default="updated_desc"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=48, alias="pageSize", ge=1, le=100),
 ) -> MediaLibraryResponse:
     try:
-        items = get_runtime().facade.list_library_assets(
+        result = get_runtime().facade.list_library_assets_page(
             workspace_id,
+            query=q,
+            media_types=_split_query_values(media_types),
+            tags=_split_query_values(tags),
             scope=scope,
             story_id=story_id,
+            origins=_split_query_values(origins),
+            sort=sort,
+            page=page,
+            page_size=page_size,
         )
     except Exception as exc:
         raise _http_error(exc) from exc
-    return MediaLibraryResponse(items=[_library_item_response(item) for item in items])
+    return MediaLibraryResponse(
+        items=[_library_item_response(item) for item in result.items],
+        page=result.page,
+        pageSize=result.page_size,
+        total=result.total,
+    )
+
+
+@app.get(
+    f"{_prefix()}/workspaces/{{workspace_id}}/library/facets",
+    response_model=MediaLibraryFacetsResponse,
+)
+async def get_library_facets(workspace_id: str) -> MediaLibraryFacetsResponse:
+    try:
+        facets = get_runtime().facade.get_library_facets(workspace_id)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+    return _library_facets_response(facets)
 
 
 @app.post(
@@ -225,6 +263,7 @@ async def upload_library_asset(
     workspace_id: str,
     file: UploadFile = File(...),
     scope: str = Form(...),
+    media_type: str = Form(..., alias="mediaType"),
     title: str = Form(...),
     description: str = Form(...),
     tags: str = Form(...),
@@ -242,6 +281,7 @@ async def upload_library_asset(
             workspace_id=workspace_id,
             scope=scope,
             story_id=story_id,
+            media_type=media_type,
             title=title,
             description=description,
             tags=tuple(str(tag) for tag in parsed_tags),
@@ -253,6 +293,47 @@ async def upload_library_asset(
     finally:
         await file.close()
     return _library_item_response(bundle)
+
+
+@app.patch(
+    f"{_prefix()}/workspaces/{{workspace_id}}/library/batch",
+    response_model=MediaLibraryBatchResponse,
+)
+async def batch_update_library_assets(
+    workspace_id: str,
+    body: MediaLibraryBatchUpdateRequest,
+) -> MediaLibraryBatchResponse:
+    if body.media_type is None and not body.add_tags and not body.remove_tags:
+        raise HTTPException(status_code=422, detail="batch update requires at least one action")
+    try:
+        result = get_runtime().facade.batch_update_library_assets(
+            workspace_id,
+            item_ids=tuple(body.item_ids),
+            media_type=body.media_type,
+            add_tags=tuple(body.add_tags),
+            remove_tags=tuple(body.remove_tags),
+        )
+    except Exception as exc:
+        raise _http_error(exc) from exc
+    return _library_batch_response(result)
+
+
+@app.post(
+    f"{_prefix()}/workspaces/{{workspace_id}}/library/batch-delete",
+    response_model=MediaLibraryBatchResponse,
+)
+async def batch_delete_library_assets(
+    workspace_id: str,
+    body: MediaLibraryBatchDeleteRequest,
+) -> MediaLibraryBatchResponse:
+    try:
+        result = get_runtime().facade.batch_delete_library_assets(
+            workspace_id,
+            item_ids=tuple(body.item_ids),
+        )
+    except Exception as exc:
+        raise _http_error(exc) from exc
+    return _library_batch_response(result)
 
 
 @app.patch(
@@ -268,6 +349,9 @@ async def update_library_asset(
         bundle = get_runtime().facade.update_library_asset(
             workspace_id,
             item_id,
+            scope=body.scope,
+            story_id=body.story_id,
+            media_type=body.media_type,
             title=body.title,
             description=body.description,
             tags=tuple(body.tags),
@@ -642,6 +726,7 @@ def _gallery_item_response(item: SessionGalleryAsset) -> MediaGalleryItemRespons
         sha256=bundle.blob.sha256,
         mimeType=bundle.blob.mime_type,
         byteSize=bundle.blob.byte_size,
+        mediaType=item.media_type,
         visualBrief=VisualBriefSchema.from_domain(
             VisualBrief.from_json(bundle.asset.visual_brief_json)
         ),
@@ -723,6 +808,7 @@ def _library_item_response(
         workspaceId=item.workspace_id,
         scope=item.scope,
         storyId=item.story_id,
+        mediaType=item.media_type,
         title=item.title,
         description=item.description,
         tags=list(bundle.tags),
@@ -730,9 +816,64 @@ def _library_item_response(
         origin=bundle.asset.origin_kind,
         mimeType=bundle.blob.mime_type,
         byteSize=bundle.blob.byte_size,
+        backgroundReferences=bundle.usage.background_references,
+        galleryReferences=bundle.usage.gallery_references,
         createdAt=item.created_at,
         updatedAt=item.updated_at,
     )
+
+
+def _library_facets_response(
+    facets: models.MediaLibraryFacets,
+) -> MediaLibraryFacetsResponse:
+    return MediaLibraryFacetsResponse(
+        mediaTypes=[
+            MediaLibraryFacetValueResponse(value=value.value, count=value.count)
+            for value in facets.media_types
+        ],
+        tags=[
+            MediaLibraryFacetValueResponse(value=value.value, count=value.count)
+            for value in facets.tags
+        ],
+        scopes=[
+            MediaLibraryFacetValueResponse(value=value.value, count=value.count)
+            for value in facets.scopes
+        ],
+        origins=[
+            MediaLibraryFacetValueResponse(value=value.value, count=value.count)
+            for value in facets.origins
+        ],
+        stories=[
+            MediaLibraryStoryFacetResponse(storyId=value.story_id, count=value.count)
+            for value in facets.stories
+        ],
+    )
+
+
+def _library_batch_response(
+    result: models.MediaLibraryBatchResult,
+) -> MediaLibraryBatchResponse:
+    return MediaLibraryBatchResponse(
+        succeededItemIds=list(result.succeeded_item_ids),
+        failed=[
+            MediaLibraryBatchFailureResponse(
+                itemId=failure.item_id,
+                errorCode=failure.error_code,
+                message=failure.message,
+            )
+            for failure in result.failed
+        ],
+    )
+
+
+def _split_query_values(raw: str | None) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    return tuple(dict.fromkeys(
+        value.strip()
+        for value in raw.replace("，", ",").split(",")
+        if value.strip()
+    ))
 
 
 def _background_evaluation_response(

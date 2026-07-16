@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from peewee import Database, IntegrityError, SQL
+from peewee import Database, IntegrityError, SQL, fn
 
 from rpg_data import models
 from rpg_data.repositories._utils import (
@@ -344,6 +344,7 @@ class MediaRepository:
         *,
         scope: str | None = None,
         story_id: int | None = None,
+        media_types: Iterable[str] | None = None,
     ) -> list[models.MediaLibraryItem]:
         query = MediaLibraryItemRecord.select().where(
             MediaLibraryItemRecord.workspace == str(workspace_id)
@@ -352,6 +353,9 @@ class MediaRepository:
             query = query.where(MediaLibraryItemRecord.scope == str(scope))
         if story_id is not None:
             query = query.where(MediaLibraryItemRecord.story == int(story_id))
+        normalized_types = tuple(str(value) for value in media_types or ())
+        if normalized_types:
+            query = query.where(MediaLibraryItemRecord.media_type.in_(normalized_types))
         return [
             to_media_library_item(row)
             for row in query.order_by(
@@ -361,6 +365,194 @@ class MediaRepository:
             )
         ]
 
+    def list_library_items_page(
+        self,
+        workspace_id: str,
+        *,
+        query_text: str = "",
+        media_types: Iterable[str] = (),
+        tags: Iterable[str] = (),
+        scope: str | None = None,
+        story_id: int | None = None,
+        origins: Iterable[str] = (),
+        sort: str = "updated_desc",
+        page: int = 1,
+        page_size: int = 48,
+    ) -> tuple[list[models.MediaLibraryItem], int]:
+        query = (
+            MediaLibraryItemRecord
+            .select(MediaLibraryItemRecord)
+            .join(MediaAssetRecord)
+            .join(MediaBlobRecord)
+            .where(MediaLibraryItemRecord.workspace == str(workspace_id))
+        )
+        normalized_types = tuple(str(value) for value in media_types)
+        normalized_origins = tuple(str(value) for value in origins)
+        if normalized_types:
+            query = query.where(MediaLibraryItemRecord.media_type.in_(normalized_types))
+        if normalized_origins:
+            query = query.where(MediaAssetRecord.origin_kind.in_(normalized_origins))
+        if scope is not None:
+            query = query.where(MediaLibraryItemRecord.scope == str(scope))
+        if story_id is not None:
+            query = query.where(MediaLibraryItemRecord.story == int(story_id))
+        for tag in tags:
+            normalized_tag = str(tag).strip().casefold()
+            if not normalized_tag:
+                continue
+            matching_items = (
+                MediaLibraryItemTagRecord
+                .select(MediaLibraryItemTagRecord.item)
+                .where(MediaLibraryItemTagRecord.normalized_tag == normalized_tag)
+            )
+            query = query.where(MediaLibraryItemRecord.id.in_(matching_items))
+        normalized_query = str(query_text).strip().casefold()
+        if normalized_query:
+            tag_matches = (
+                MediaLibraryItemTagRecord
+                .select(MediaLibraryItemTagRecord.item)
+                .where(MediaLibraryItemTagRecord.normalized_tag.contains(normalized_query))
+            )
+            query = query.where(
+                fn.LOWER(MediaLibraryItemRecord.title).contains(normalized_query)
+                | fn.LOWER(MediaLibraryItemRecord.description).contains(normalized_query)
+                | MediaLibraryItemRecord.id.in_(tag_matches)
+            )
+        total = int(query.count())
+        orderings = {
+            "updated_desc": (
+                MediaLibraryItemRecord.updated_at.desc(),
+                MediaLibraryItemRecord.id.desc(),
+            ),
+            "created_desc": (
+                MediaLibraryItemRecord.created_at.desc(),
+                MediaLibraryItemRecord.id.desc(),
+            ),
+            "title_asc": (
+                fn.LOWER(MediaLibraryItemRecord.title).asc(),
+                MediaLibraryItemRecord.id.asc(),
+            ),
+            "size_desc": (
+                MediaBlobRecord.byte_size.desc(),
+                MediaLibraryItemRecord.id.desc(),
+            ),
+        }
+        rows = query.order_by(*orderings[str(sort)]).paginate(int(page), int(page_size))
+        return [to_media_library_item(row) for row in rows], total
+
+    def get_library_facets(self, workspace_id: str) -> models.MediaLibraryFacets:
+        workspace = str(workspace_id)
+        type_rows = (
+            MediaLibraryItemRecord
+            .select(
+                MediaLibraryItemRecord.media_type,
+                fn.COUNT(MediaLibraryItemRecord.id),
+            )
+            .where(MediaLibraryItemRecord.workspace == workspace)
+            .group_by(MediaLibraryItemRecord.media_type)
+            .tuples()
+        )
+        scope_rows = (
+            MediaLibraryItemRecord
+            .select(MediaLibraryItemRecord.scope, fn.COUNT(MediaLibraryItemRecord.id))
+            .where(MediaLibraryItemRecord.workspace == workspace)
+            .group_by(MediaLibraryItemRecord.scope)
+            .tuples()
+        )
+        origin_rows = (
+            MediaLibraryItemRecord
+            .select(MediaAssetRecord.origin_kind, fn.COUNT(MediaLibraryItemRecord.id))
+            .join(MediaAssetRecord)
+            .where(MediaLibraryItemRecord.workspace == workspace)
+            .group_by(MediaAssetRecord.origin_kind)
+            .tuples()
+        )
+        tag_rows = (
+            MediaLibraryItemTagRecord
+            .select(
+                fn.MIN(MediaLibraryItemTagRecord.tag),
+                fn.COUNT(MediaLibraryItemTagRecord.item),
+            )
+            .join(MediaLibraryItemRecord)
+            .where(MediaLibraryItemRecord.workspace == workspace)
+            .group_by(MediaLibraryItemTagRecord.normalized_tag)
+            .order_by(fn.COUNT(MediaLibraryItemTagRecord.item).desc())
+            .tuples()
+        )
+        story_rows = (
+            MediaLibraryItemRecord
+            .select(MediaLibraryItemRecord.story, fn.COUNT(MediaLibraryItemRecord.id))
+            .where(
+                (MediaLibraryItemRecord.workspace == workspace)
+                & (MediaLibraryItemRecord.story.is_null(False))
+            )
+            .group_by(MediaLibraryItemRecord.story)
+            .tuples()
+        )
+        return models.MediaLibraryFacets(
+            media_types=tuple(
+                models.MediaLibraryFacetValue(value=str(value), count=int(count))
+                for value, count in type_rows
+            ),
+            tags=tuple(
+                models.MediaLibraryFacetValue(value=str(value), count=int(count))
+                for value, count in tag_rows
+            ),
+            scopes=tuple(
+                models.MediaLibraryFacetValue(value=str(value), count=int(count))
+                for value, count in scope_rows
+            ),
+            origins=tuple(
+                models.MediaLibraryFacetValue(value=str(value), count=int(count))
+                for value, count in origin_rows
+            ),
+            stories=tuple(
+                models.MediaLibraryStoryFacet(story_id=int(value), count=int(count))
+                for value, count in story_rows
+            ),
+        )
+
+    def get_library_usage(
+        self,
+        asset_ids: Iterable[str],
+    ) -> dict[str, models.MediaLibraryUsage]:
+        normalized_ids = tuple(dict.fromkeys(str(value) for value in asset_ids))
+        if not normalized_ids:
+            return {}
+        background_counts = {
+            str(asset_id): int(count)
+            for asset_id, count in (
+                SessionMediaBackgroundRecord
+                .select(
+                    SessionMediaBackgroundRecord.asset,
+                    fn.COUNT(SessionMediaBackgroundRecord.session),
+                )
+                .where(SessionMediaBackgroundRecord.asset.in_(normalized_ids))
+                .group_by(SessionMediaBackgroundRecord.asset)
+                .tuples()
+            )
+        }
+        gallery_counts = {
+            str(asset_id): int(count)
+            for asset_id, count in (
+                SessionMediaGalleryItemRecord
+                .select(
+                    SessionMediaGalleryItemRecord.asset,
+                    fn.COUNT(SessionMediaGalleryItemRecord.id),
+                )
+                .where(SessionMediaGalleryItemRecord.asset.in_(normalized_ids))
+                .group_by(SessionMediaGalleryItemRecord.asset)
+                .tuples()
+            )
+        }
+        return {
+            asset_id: models.MediaLibraryUsage(
+                background_references=background_counts.get(asset_id, 0),
+                gallery_references=gallery_counts.get(asset_id, 0),
+            )
+            for asset_id in normalized_ids
+        }
+
     def get_story_default_library_item(
         self,
         story_id: int,
@@ -368,6 +560,7 @@ class MediaRepository:
         row = MediaLibraryItemRecord.get_or_none(
             (MediaLibraryItemRecord.story == int(story_id))
             & (MediaLibraryItemRecord.scope == models.MEDIA_LIBRARY_SCOPE_STORY)
+            & (MediaLibraryItemRecord.media_type == models.MEDIA_LIBRARY_TYPE_BACKGROUND)
             & (MediaLibraryItemRecord.is_default == True)  # noqa: E712
         )
         return to_media_library_item(row) if row is not None else None
@@ -377,7 +570,7 @@ class MediaRepository:
             MediaLibraryItemTagRecord
             .select(MediaLibraryItemTagRecord.tag)
             .where(MediaLibraryItemTagRecord.item == str(item_id))
-            .order_by(MediaLibraryItemTagRecord.tag)
+            .order_by(MediaLibraryItemTagRecord.normalized_tag)
         )
         return tuple(str(row.tag) for row in rows)
 
@@ -395,6 +588,7 @@ class MediaRepository:
         relative_path: str,
         scope: str,
         story_id: int | None,
+        media_type: str,
         title: str,
         description: str,
         tags: tuple[str, ...],
@@ -427,7 +621,13 @@ class MediaRepository:
                         version=MediaLibraryItemRecord.version + 1,
                         updated_at=SQL("CURRENT_TIMESTAMP"),
                     )
-                    .where(MediaLibraryItemRecord.story == int(story_id))
+                    .where(
+                        (MediaLibraryItemRecord.story == int(story_id))
+                        & (
+                            MediaLibraryItemRecord.media_type
+                            == models.MEDIA_LIBRARY_TYPE_BACKGROUND
+                        )
+                    )
                     .execute()
                 )
             row = MediaLibraryItemRecord.create(
@@ -436,13 +636,17 @@ class MediaRepository:
                 asset=asset.id,
                 scope=str(scope),
                 story=story_id,
+                media_type=str(media_type),
                 title=str(title),
                 description=str(description),
                 is_default=bool(is_default),
             )
             if tags:
                 MediaLibraryItemTagRecord.insert_many([
-                    {"item": str(item_id), "tag": tag}
+                    {
+                        "item": str(item_id),
+                        "tag": tag,
+                    }
                     for tag in tags
                 ]).execute()
         return to_media_library_item(row), asset, blob, blob_created
@@ -451,6 +655,9 @@ class MediaRepository:
         self,
         item_id: str,
         *,
+        scope: str,
+        story_id: int | None,
+        media_type: str,
         title: str,
         description: str,
         tags: tuple[str, ...],
@@ -462,7 +669,7 @@ class MediaRepository:
             )
             if row is None:
                 return None
-            if is_default and row.story_id is not None:
+            if is_default and story_id is not None:
                 (
                     MediaLibraryItemRecord
                     .update(
@@ -471,11 +678,18 @@ class MediaRepository:
                         updated_at=SQL("CURRENT_TIMESTAMP"),
                     )
                     .where(
-                        (MediaLibraryItemRecord.story == int(row.story_id))
+                        (MediaLibraryItemRecord.story == int(story_id))
+                        & (
+                            MediaLibraryItemRecord.media_type
+                            == models.MEDIA_LIBRARY_TYPE_BACKGROUND
+                        )
                         & (MediaLibraryItemRecord.id != str(item_id))
                     )
                     .execute()
                 )
+            row.scope = str(scope)
+            row.story = story_id
+            row.media_type = str(media_type)
             row.title = str(title)
             row.description = str(description)
             row.is_default = bool(is_default)
@@ -490,7 +704,10 @@ class MediaRepository:
             )
             if tags:
                 MediaLibraryItemTagRecord.insert_many([
-                    {"item": str(item_id), "tag": tag}
+                    {
+                        "item": str(item_id),
+                        "tag": tag,
+                    }
                     for tag in tags
                 ]).execute()
         return self.get_library_item(item_id)
@@ -729,12 +946,16 @@ class MediaRepository:
                 asset=asset.id,
                 scope=models.MEDIA_LIBRARY_SCOPE_STORY,
                 story=int(story_id),
+                media_type=models.MEDIA_LIBRARY_TYPE_BACKGROUND,
                 title=str(library_title),
                 description=str(library_description),
                 is_default=False,
             )
             MediaLibraryItemTagRecord.insert_many([
-                {"item": str(library_item_id), "tag": tag}
+                {
+                    "item": str(library_item_id),
+                    "tag": tag,
+                }
                 for tag in library_tags
             ]).execute()
             updated = (

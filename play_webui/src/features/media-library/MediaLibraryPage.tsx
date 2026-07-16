@@ -1,70 +1,111 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckCircle2,
-  Database,
-  ImagePlus,
-  Images,
-  Loader2,
-  Pencil,
-  RefreshCcw,
-  Sparkles,
-  Trash2,
-  Upload,
-} from 'lucide-react'
-import { MediaImageFrame } from '@/components/common/MediaImageFrame'
+import { CheckCircle2, Database, Images, Loader2, RefreshCcw, Tags, Trash2, Upload } from 'lucide-react'
+import { ConfirmDialog } from '@/components/common/Dialog'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import {
   analyzeMediaLibraryImage,
-  deleteMediaLibraryItem,
+  batchDeleteMediaLibraryItems,
+  batchUpdateMediaLibraryItems,
   getMediaLibrary,
-  mediaLibraryContentUrl,
+  getMediaLibraryFacets,
   reconcileMediaLibrary,
   updateMediaLibraryItem,
   uploadMediaLibraryItem,
 } from '@/lib/api/media'
-import { ApiError } from '@/lib/api/errors'
 import { listStories } from '@/lib/api/stories'
 import type {
   MediaLibraryItem,
   MediaLibraryMetadataInput,
+  MediaLibraryOrigin,
   MediaLibraryScope,
+  MediaLibrarySort,
+  MediaLibraryType,
 } from '@/types/media'
+import { MEDIA_LIBRARY_TYPES } from '@/types/media'
+import { MEDIA_TYPE_LABELS, parseTags } from './constants'
+import { MediaLibraryFilters } from './MediaLibraryFilters'
+import { MediaLibraryGrid } from './MediaLibraryGrid'
+import { MediaDetailDrawer, MediaImportDialog } from './MediaLibraryPanels'
 
-type ScopeFilter = 'all' | MediaLibraryScope
-const IMAGE_ANALYSIS_UNSUPPORTED = 'MEDIA_IMAGE_ANALYSIS_UNSUPPORTED'
-
-function parseTags(value: string) {
-  return [...new Set(value.split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean))]
-}
-
-function formatBytes(value: number) {
-  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`
-  return `${(value / 1024 / 1024).toFixed(1)} MB`
-}
+const PAGE_SIZE = 48
+const MAX_SELECTION = 100
 
 function MediaLibraryContent() {
   const { currentWorkspace } = useAppShell()
   const queryClient = useQueryClient()
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all')
-  const [storyFilter, setStoryFilter] = useState<number | null>(null)
-  const [file, setFile] = useState<File | null>(null)
-  const [scope, setScope] = useState<MediaLibraryScope>('story')
+  const [hydrated, setHydrated] = useState(false)
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [mediaType, setMediaType] = useState<MediaLibraryType | 'all'>('all')
+  const [scope, setScope] = useState<MediaLibraryScope | 'all'>('all')
   const [storyId, setStoryId] = useState<number | null>(null)
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [tagsText, setTagsText] = useState('')
-  const [isDefault, setIsDefault] = useState(false)
-  const [editing, setEditing] = useState<MediaLibraryItem | null>(null)
-  const [editTitle, setEditTitle] = useState('')
-  const [editDescription, setEditDescription] = useState('')
-  const [editTags, setEditTags] = useState('')
-  const [editDefault, setEditDefault] = useState(false)
+  const [origin, setOrigin] = useState<MediaLibraryOrigin | 'all'>('all')
+  const [sort, setSort] = useState<MediaLibrarySort>('updated_desc')
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [page, setPage] = useState(1)
+  const [importOpen, setImportOpen] = useState(false)
+  const [detailItem, setDetailItem] = useState<MediaLibraryItem | null>(null)
+  const [selectedItems, setSelectedItems] = useState<Map<string, MediaLibraryItem>>(new Map())
+  const [deleteTargets, setDeleteTargets] = useState<Map<string, MediaLibraryItem> | null>(null)
+  const [batchType, setBatchType] = useState<MediaLibraryType | ''>('')
+  const [batchAddTags, setBatchAddTags] = useState('')
+  const [batchRemoveTags, setBatchRemoveTags] = useState('')
   const [message, setMessage] = useState('')
-  const [analysisNotice, setAnalysisNotice] = useState('')
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const requestedType = params.get('mediaType')
+    const requestedScope = params.get('scope')
+    const requestedOrigin = params.get('origin')
+    const requestedSort = params.get('sort')
+    const requestedStory = Number(params.get('storyId'))
+    const requestedPage = Number(params.get('page'))
+    const requestedSearch = params.get('q') ?? ''
+    setSearch(requestedSearch)
+    setDebouncedSearch(requestedSearch)
+    if (MEDIA_LIBRARY_TYPES.includes(requestedType as MediaLibraryType)) setMediaType(requestedType as MediaLibraryType)
+    if (requestedScope === 'story' || requestedScope === 'workspace') setScope(requestedScope)
+    if (requestedOrigin === 'generated' || requestedOrigin === 'upload') setOrigin(requestedOrigin)
+    if (['updated_desc', 'created_desc', 'title_asc', 'size_desc'].includes(requestedSort ?? '')) setSort(requestedSort as MediaLibrarySort)
+    if (Number.isFinite(requestedStory) && requestedStory > 0) setStoryId(requestedStory)
+    if (Number.isFinite(requestedPage) && requestedPage > 0) setPage(requestedPage)
+    setSelectedTags((params.get('tags') ?? '').split(',').map((tag) => tag.trim()).filter(Boolean))
+    setHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (debouncedSearch !== search) {
+        setDebouncedSearch(search.trim())
+        setPage(1)
+        setSelectedItems(new Map())
+      }
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [debouncedSearch, search])
+
+  useEffect(() => {
+    if (!hydrated) return
+    const params = new URLSearchParams()
+    if (debouncedSearch) params.set('q', debouncedSearch)
+    if (mediaType !== 'all') params.set('mediaType', mediaType)
+    if (scope !== 'all') params.set('scope', scope)
+    if (storyId !== null) params.set('storyId', String(storyId))
+    if (origin !== 'all') params.set('origin', origin)
+    if (selectedTags.length) params.set('tags', selectedTags.join(','))
+    if (sort !== 'updated_desc') params.set('sort', sort)
+    if (page !== 1) params.set('page', String(page))
+    const query = params.toString()
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
+  }, [debouncedSearch, hydrated, mediaType, origin, page, scope, selectedTags, sort, storyId])
+
+  useEffect(() => {
+    setSelectedItems(new Map())
+    setDetailItem(null)
+  }, [currentWorkspace])
 
   const storiesQuery = useQuery({
     queryKey: ['play-stories', currentWorkspace],
@@ -72,236 +113,234 @@ function MediaLibraryContent() {
     enabled: Boolean(currentWorkspace),
   })
   const stories = useMemo(() => storiesQuery.data ?? [], [storiesQuery.data])
-
   useEffect(() => {
-    const requested = Number(new URLSearchParams(window.location.search).get('storyId'))
-    if (Number.isFinite(requested) && requested > 0) {
-      setStoryFilter(requested)
-      setStoryId(requested)
-      setScopeFilter('story')
+    if (storyId !== null && stories.length && !stories.some((story) => story.id === storyId)) {
+      setStoryId(null)
+      setPage(1)
     }
-  }, [])
+  }, [stories, storyId])
 
-  useEffect(() => {
-    if (!stories.length) return
-    if (storyId === null || !stories.some((story) => story.id === storyId)) {
-      setStoryId(stories[0].id)
-    }
-    if (storyFilter !== null && !stories.some((story) => story.id === storyFilter)) {
-      setStoryFilter(null)
-    }
-  }, [stories, storyFilter, storyId])
-
-  const libraryKey = ['play-media-library', currentWorkspace, scopeFilter, storyFilter] as const
+  const libraryOptions = useMemo(() => ({
+    q: debouncedSearch || undefined,
+    mediaTypes: mediaType === 'all' ? undefined : [mediaType],
+    tags: selectedTags.length ? selectedTags : undefined,
+    scope: scope === 'all' ? undefined : scope,
+    storyId: storyId ?? undefined,
+    origins: origin === 'all' ? undefined : [origin],
+    sort,
+    page,
+    pageSize: PAGE_SIZE,
+  }), [debouncedSearch, mediaType, origin, page, scope, selectedTags, sort, storyId])
   const libraryQuery = useQuery({
-    queryKey: libraryKey,
-    queryFn: () => getMediaLibrary(currentWorkspace ?? '', {
-      scope: scopeFilter === 'all' ? undefined : scopeFilter,
-      storyId: scopeFilter === 'story' && storyFilter !== null ? storyFilter : undefined,
-    }),
+    queryKey: ['play-media-library', currentWorkspace, libraryOptions],
+    queryFn: () => getMediaLibrary(currentWorkspace ?? '', libraryOptions),
     enabled: Boolean(currentWorkspace),
     retry: false,
   })
-
-  const invalidateLibrary = () => Promise.all([
-    queryClient.invalidateQueries({ queryKey: ['play-media-library'] }),
-    queryClient.invalidateQueries({ queryKey: ['play-session-media-story-library'] }),
-    queryClient.invalidateQueries({ queryKey: ['play-session-media-gallery'] }),
-    queryClient.invalidateQueries({ queryKey: ['play-session-media-background'] }),
-  ])
-
-  const analyzeMutation = useMutation({
-    mutationFn: (image: File) => {
-      if (!currentWorkspace) throw new Error('请先选择 Workspace')
-      return analyzeMediaLibraryImage(currentWorkspace, image)
-    },
-    onMutate: () => setAnalysisNotice(''),
-    onSuccess: (metadata) => {
-      setTitle(metadata.title)
-      setDescription(metadata.description)
-      setTagsText(metadata.tags.join('，'))
-      setAnalysisNotice('智能识别完成，已覆盖标题、描述与 Tags；你可以继续修改。')
-    },
+  const facetsQuery = useQuery({
+    queryKey: ['play-media-library-facets', currentWorkspace],
+    queryFn: () => getMediaLibraryFacets(currentWorkspace ?? ''),
+    enabled: Boolean(currentWorkspace),
+    retry: false,
   })
+  useEffect(() => {
+    if (!libraryQuery.data) return
+    const pageCount = Math.max(1, Math.ceil(libraryQuery.data.total / PAGE_SIZE))
+    if (page > pageCount) setPage(pageCount)
+  }, [libraryQuery.data, page])
 
-  const uploadMutation = useMutation({
-    mutationFn: ({ image, manifest }: { image: File; manifest: MediaLibraryMetadataInput }) => {
-      if (!currentWorkspace) throw new Error('请先选择 Workspace')
-      return uploadMediaLibraryItem(currentWorkspace, image, manifest)
-    },
-    onSuccess: () => {
-      setFile(null)
-      setTitle('')
-      setDescription('')
-      setTagsText('')
-      setIsDefault(false)
-      setAnalysisNotice('')
-      analyzeMutation.reset()
-      if (fileInputRef.current) fileInputRef.current.value = ''
-      setMessage('图片已导入媒体库')
-      void invalidateLibrary()
-    },
-  })
-
-  const updateMutation = useMutation({
-    mutationFn: (item: MediaLibraryItem) => {
-      if (!currentWorkspace) throw new Error('请先选择 Workspace')
-      return updateMediaLibraryItem(currentWorkspace, item.itemId, {
-        title: editTitle.trim(),
-        description: editDescription.trim(),
-        tags: parseTags(editTags),
-        isDefault: item.scope === 'story' && editDefault,
-      })
-    },
-    onSuccess: () => {
-      setEditing(null)
-      setMessage('素材信息已更新')
-      void invalidateLibrary()
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (item: MediaLibraryItem) => {
-      if (!currentWorkspace) throw new Error('请先选择 Workspace')
-      return deleteMediaLibraryItem(currentWorkspace, item.itemId)
-    },
-    onSuccess: () => {
-      setMessage('素材已删除')
-      void invalidateLibrary()
-    },
-  })
+  async function invalidateLibrary() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['play-media-library'] }),
+      queryClient.invalidateQueries({ queryKey: ['play-media-library-facets'] }),
+      queryClient.invalidateQueries({ queryKey: ['play-session-media-story-library'] }),
+      queryClient.invalidateQueries({ queryKey: ['play-session-media-gallery'] }),
+      queryClient.invalidateQueries({ queryKey: ['play-session-media-background'] }),
+    ])
+  }
 
   const reconcileMutation = useMutation({
-    mutationFn: (workspaceId: string) => reconcileMediaLibrary(workspaceId),
-    onMutate: () => setMessage(''),
+    mutationFn: () => {
+      if (!currentWorkspace) throw new Error('请先选择 Workspace')
+      return reconcileMediaLibrary(currentWorkspace)
+    },
     onSuccess: (result) => {
-      setMessage(
-        result.removedBlobs === 0
-          ? '同步完成，未发现异常索引'
-          : `同步完成：扫描 ${result.scannedBlobs} 个 Blob，清理 ${result.removedAssets} 个 Asset，清除 ${result.clearedBackgrounds} 个会话背景`,
-      )
+      setMessage(result.removedBlobs ? `同步完成，清理 ${result.removedAssets} 个失效 Asset` : '同步完成，未发现异常索引')
+      void invalidateLibrary()
+    },
+  })
+  const batchUpdateMutation = useMutation({
+    mutationFn: () => {
+      if (!currentWorkspace) throw new Error('请先选择 Workspace')
+      return batchUpdateMediaLibraryItems(currentWorkspace, {
+        itemIds: [...selectedItems.keys()],
+        mediaType: batchType || undefined,
+        addTags: parseTags(batchAddTags),
+        removeTags: parseTags(batchRemoveTags),
+      })
+    },
+    onSuccess: (result) => {
+      setMessage(result.failed.length ? `已更新 ${result.succeededItemIds.length} 项，${result.failed.length} 项失败` : `已更新 ${result.succeededItemIds.length} 项资源`)
+      const failedIds = new Set(result.failed.map((failure) => failure.itemId))
+      setSelectedItems((current) => new Map([...current].filter(([itemId]) => failedIds.has(itemId))))
+      setBatchType('')
+      setBatchAddTags('')
+      setBatchRemoveTags('')
+      void invalidateLibrary()
+    },
+  })
+  const deleteMutation = useMutation({
+    mutationFn: (targets: Map<string, MediaLibraryItem>) => {
+      if (!currentWorkspace) throw new Error('请先选择 Workspace')
+      return batchDeleteMediaLibraryItems(currentWorkspace, [...targets.keys()])
+    },
+    onSuccess: (result) => {
+      const failedIds = new Set(result.failed.map((failure) => failure.itemId))
+      setMessage(result.failed.length ? `已删除 ${result.succeededItemIds.length} 项，${result.failed.length} 项因引用保护未删除` : `已删除 ${result.succeededItemIds.length} 项资源`)
+      setSelectedItems((current) => new Map([...current].filter(([itemId]) => failedIds.has(itemId))))
+      if (detailItem && result.succeededItemIds.includes(detailItem.itemId)) setDetailItem(null)
+      setDeleteTargets(null)
       void invalidateLibrary()
     },
   })
 
-  const tags = parseTags(tagsText)
-  const canUpload = Boolean(
-    file
-    && title.trim()
-    && description.trim()
-    && tags.length >= 1
-    && tags.length <= 20
-    && (scope === 'workspace_fallback' || storyId !== null),
-  )
+  function changeFilter(action: () => void) {
+    action()
+    setPage(1)
+    setSelectedItems(new Map())
+  }
 
-  function submitUpload() {
-    if (!file || !canUpload) return
-    uploadMutation.mutate({
-      image: file,
-      manifest: {
-        scope,
-        storyId: scope === 'story' ? storyId : null,
-        title: title.trim(),
-        description: description.trim(),
-        tags,
-        isDefault: scope === 'story' && isDefault,
-      },
+  function toggleSelection(item: MediaLibraryItem) {
+    setSelectedItems((current) => {
+      const next = new Map(current)
+      if (next.has(item.itemId)) next.delete(item.itemId)
+      else if (next.size < MAX_SELECTION) next.set(item.itemId, item)
+      else setMessage(`一次最多选择 ${MAX_SELECTION} 项`)
+      return next
     })
   }
 
-  function selectFile(nextFile: File | null) {
-    setFile(nextFile)
-    setAnalysisNotice('')
-    analyzeMutation.reset()
-  }
-
-  function beginEdit(item: MediaLibraryItem) {
-    setEditing(item)
-    setEditTitle(item.title)
-    setEditDescription(item.description)
-    setEditTags(item.tags.join('，'))
-    setEditDefault(item.isDefault)
-  }
-
-  const storyNames = new Map(stories.map((story) => [story.id, story.title]))
-  const items = libraryQuery.data?.items ?? []
-  const analysisUnsupported = analyzeMutation.error instanceof ApiError
-    && analyzeMutation.error.errorCode === IMAGE_ANALYSIS_UNSUPPORTED
+  const deleteSummary = useMemo(() => {
+    const items = [...(deleteTargets?.values() ?? [])]
+    return {
+      count: items.length,
+      backgrounds: items.reduce((sum, item) => sum + item.backgroundReferences, 0),
+      galleries: items.reduce((sum, item) => sum + item.galleryReferences, 0),
+    }
+  }, [deleteTargets])
+  const batchHasAction = Boolean(batchType || parseTags(batchAddTags).length || parseTags(batchRemoveTags).length)
 
   return (
     <div className="min-w-0 px-5 py-8 xl:px-7">
       <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-violet-600">
-            <Images size={15} /> rpg_media library
-          </p>
+          <p className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-violet-600"><Images size={15} /> rpg_media workspace</p>
           <h1 className="text-3xl font-black text-slate-950 dark:text-white">媒体库</h1>
-          <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
-            统一管理会话生成与单张导入的环境背景。文件写入 Workspace 的 assets/images，数据库只保存 Blob 索引和素材语义。
-          </p>
+          <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">用用途类型承载稳定业务语义，用 Tags 描述角色、地点、风格与场景。原图继续以内容哈希去重存储。</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void libraryQuery.refetch()} disabled={libraryQuery.isFetching || reconcileMutation.isPending} className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-600 shadow-sm disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-            <RefreshCcw size={15} className={libraryQuery.isFetching ? 'animate-spin' : ''} />刷新
-          </button>
-          <button
-            type="button"
-            title="扫描整个 Workspace，只清理源文件缺失的数据库索引；不会导入或删除未索引文件。"
-            disabled={!currentWorkspace || reconcileMutation.isPending}
-            onClick={() => currentWorkspace && reconcileMutation.mutate(currentWorkspace)}
-            className="inline-flex h-10 w-fit items-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-black text-white shadow-sm disabled:opacity-60"
-          >
-            {reconcileMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Database size={15} />}
-            {reconcileMutation.isPending ? '同步中…' : '同步素材'}
-          </button>
+          <button type="button" onClick={() => void libraryQuery.refetch()} disabled={libraryQuery.isFetching} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><RefreshCcw size={15} className={libraryQuery.isFetching ? 'animate-spin' : ''} />刷新</button>
+          <button type="button" onClick={() => reconcileMutation.mutate()} disabled={!currentWorkspace || reconcileMutation.isPending} title="只清理源文件缺失的数据库索引" className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">{reconcileMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Database size={15} />}同步素材</button>
+          <button type="button" onClick={() => setImportOpen(true)} disabled={!currentWorkspace} className="inline-flex h-10 items-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-200 disabled:opacity-50 dark:shadow-violet-950/40"><Upload size={15} />导入图片</button>
         </div>
       </header>
 
-      {message ? <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700"><CheckCircle2 size={16} />{message}</div> : null}
-      {reconcileMutation.isError ? <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">同步失败：{reconcileMutation.error instanceof Error ? reconcileMutation.error.message : 'Media Service 暂不可用'}</div> : null}
+      {message ? <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"><CheckCircle2 size={16} />{message}<button type="button" onClick={() => setMessage('')} className="ml-auto text-xs">关闭</button></div> : null}
+      {reconcileMutation.isError ? <p className="mb-4 rounded-xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">{reconcileMutation.error instanceof Error ? reconcileMutation.error.message : '同步失败'}</p> : null}
 
-      <div className="grid gap-5 2xl:grid-cols-[390px_minmax(0,1fr)] 2xl:items-start">
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 2xl:sticky 2xl:top-24">
-          <div className="mb-5 flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-100 text-violet-700"><ImagePlus size={20} /></span>
-            <div><h2 className="font-black text-slate-950 dark:text-white">导入单张素材</h2><p className="text-xs font-semibold text-slate-400">PNG / JPEG / WebP · 最多 32 MiB</p></div>
+      <MediaLibraryFilters
+        search={search}
+        onSearchChange={setSearch}
+        mediaType={mediaType}
+        onMediaTypeChange={(value) => changeFilter(() => setMediaType(value))}
+        scope={scope}
+        onScopeChange={(value) => changeFilter(() => { setScope(value); if (value === 'workspace') setStoryId(null) })}
+        storyId={storyId}
+        onStoryIdChange={(value) => changeFilter(() => { setStoryId(value); if (value !== null) setScope('story') })}
+        origin={origin}
+        onOriginChange={(value) => changeFilter(() => setOrigin(value))}
+        sort={sort}
+        onSortChange={(value) => changeFilter(() => setSort(value))}
+        selectedTags={selectedTags}
+        onAddTag={(tag) => changeFilter(() => setSelectedTags((current) => [...current, tag]))}
+        onRemoveTag={(tag) => changeFilter(() => setSelectedTags((current) => current.filter((value) => value !== tag)))}
+        onClear={() => changeFilter(() => { setSearch(''); setDebouncedSearch(''); setMediaType('all'); setScope('all'); setStoryId(null); setOrigin('all'); setSelectedTags([]); setSort('updated_desc') })}
+        stories={stories}
+        facets={facetsQuery.data}
+      />
+
+      {selectedItems.size ? (
+        <section className="my-4 rounded-2xl border border-violet-200 bg-violet-50 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
+            <div className="shrink-0"><p className="text-sm font-black text-violet-900 dark:text-violet-100">已选择 {selectedItems.size} / {MAX_SELECTION} 项</p><button type="button" onClick={() => setSelectedItems(new Map())} className="mt-1 text-xs font-bold text-violet-600 dark:text-violet-300">取消选择</button></div>
+            <label className="text-xs font-black text-violet-700 dark:text-violet-200">批量用途<select value={batchType} onChange={(event) => setBatchType(event.target.value as MediaLibraryType | '')} className="mt-1 h-10 w-full rounded-lg border border-violet-200 bg-white px-3 text-sm font-bold text-slate-700 dark:border-violet-500/30 dark:bg-slate-900 dark:text-slate-100"><option value="">保持不变</option>{MEDIA_LIBRARY_TYPES.map((value) => <option key={value} value={value}>{MEDIA_TYPE_LABELS[value]}</option>)}</select></label>
+            <label className="min-w-48 flex-1 text-xs font-black text-violet-700 dark:text-violet-200">追加 Tags<input value={batchAddTags} onChange={(event) => setBatchAddTags(event.target.value)} placeholder="逗号分隔" className="mt-1 h-10 w-full rounded-lg border border-violet-200 bg-white px-3 text-sm font-semibold dark:border-violet-500/30 dark:bg-slate-900" /></label>
+            <label className="min-w-48 flex-1 text-xs font-black text-violet-700 dark:text-violet-200">移除 Tags<input value={batchRemoveTags} onChange={(event) => setBatchRemoveTags(event.target.value)} placeholder="逗号分隔" className="mt-1 h-10 w-full rounded-lg border border-violet-200 bg-white px-3 text-sm font-semibold dark:border-violet-500/30 dark:bg-slate-900" /></label>
+            <button type="button" onClick={() => batchUpdateMutation.mutate()} disabled={!batchHasAction || batchUpdateMutation.isPending} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-black text-white disabled:opacity-40">{batchUpdateMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Tags size={15} />}应用整理</button>
+            <button type="button" onClick={() => setDeleteTargets(new Map(selectedItems))} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-4 text-sm font-black text-rose-600 dark:bg-slate-900"><Trash2 size={15} />批量删除</button>
           </div>
-          <div className="grid gap-4">
-            <label className="text-xs font-black text-slate-500">图片<input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /></label>
-            <button type="button" onClick={() => file && analyzeMutation.mutate(file)} disabled={!currentWorkspace || !file || analyzeMutation.isPending || uploadMutation.isPending} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 text-sm font-black text-violet-700 transition hover:bg-violet-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-200 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"><Sparkles size={15} />{analyzeMutation.isPending ? '识别中…' : '智能识别'}</button>
-            {analysisNotice ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold leading-5 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">{analysisNotice}</p> : null}
-            {analysisUnsupported ? <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">当前配置的 LLM 不支持图片识别，请手动填写标题、描述与 Tags 后继续导入。</p> : null}
-            {analyzeMutation.isError && !analysisUnsupported ? <p className="text-xs font-bold text-rose-600">智能识别失败：{analyzeMutation.error instanceof Error ? analyzeMutation.error.message : 'Media Service 暂不可用'}</p> : null}
-            <label className="text-xs font-black text-slate-500">作用域<select value={scope} onChange={(event) => { const value = event.target.value as MediaLibraryScope; setScope(value); if (value === 'workspace_fallback') setIsDefault(false) }} className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-950"><option value="story">Story 专属</option><option value="workspace_fallback">Workspace 通用兜底</option></select></label>
-            {scope === 'story' ? <label className="text-xs font-black text-slate-500">Story<select value={storyId ?? ''} onChange={(event) => setStoryId(Number(event.target.value) || null)} className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-950"><option value="">选择 Story</option>{stories.map((story) => <option key={story.id} value={story.id}>{story.title}</option>)}</select></label> : null}
-            <label className="text-xs font-black text-slate-500">标题<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /></label>
-            <label className="text-xs font-black text-slate-500">描述<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={4000} className="mt-2 min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold leading-6 dark:border-slate-700 dark:bg-slate-950" /></label>
-            <label className="text-xs font-black text-slate-500">Tags（1–20 个，逗号或换行分隔）<textarea value={tagsText} onChange={(event) => setTagsText(event.target.value)} className="mt-2 min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /><span className="mt-1 block text-right text-[11px] text-slate-400">{tags.length} / 20</span></label>
-            {scope === 'story' ? <label className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-200"><input type="checkbox" checked={isDefault} onChange={(event) => setIsDefault(event.target.checked)} className="h-4 w-4 accent-violet-600" />设为该 Story 默认背景</label> : null}
-            <button type="button" onClick={submitUpload} disabled={!canUpload || uploadMutation.isPending} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-violet-600 text-sm font-black text-white shadow-lg shadow-violet-200 disabled:bg-slate-300 dark:shadow-violet-950/40"><Upload size={16} />{uploadMutation.isPending ? '导入中...' : '导入媒体库'}</button>
-            {uploadMutation.isError ? <p className="text-xs font-bold text-rose-600">{uploadMutation.error instanceof Error ? uploadMutation.error.message : '导入失败'}</p> : null}
-          </div>
+          {batchUpdateMutation.isError ? <p className="mt-3 text-xs font-bold text-rose-600">{batchUpdateMutation.error instanceof Error ? batchUpdateMutation.error.message : '批量更新失败'}</p> : null}
         </section>
+      ) : <div className="h-4" />}
 
-        <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div><h2 className="font-black text-slate-950 dark:text-white">全部图片资产</h2><p className="mt-1 text-xs font-semibold text-slate-400">{items.length} 项 · Workspace {currentWorkspace ?? '未选择'}</p></div>
-            <div className="flex flex-wrap gap-2">
-              <select value={scopeFilter} onChange={(event) => { const value = event.target.value as ScopeFilter; setScopeFilter(value); if (value !== 'story') setStoryFilter(null) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black dark:border-slate-700 dark:bg-slate-950"><option value="all">全部作用域</option><option value="story">Story 专属</option><option value="workspace_fallback">Workspace 兜底</option></select>
-              {scopeFilter === 'story' ? <select value={storyFilter ?? ''} onChange={(event) => setStoryFilter(Number(event.target.value) || null)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black dark:border-slate-700 dark:bg-slate-950"><option value="">全部 Story</option>{stories.map((story) => <option key={story.id} value={story.id}>{story.title}</option>)}</select> : null}
-            </div>
-          </div>
-          {libraryQuery.isError ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-sm font-bold text-rose-700">Media Service 暂不可用：{libraryQuery.error instanceof Error ? libraryQuery.error.message : '加载失败'}</p> : null}
-          {libraryQuery.isLoading ? <div className="flex min-h-52 items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div> : null}
-          {!libraryQuery.isLoading && !libraryQuery.isError && !items.length ? <div className="flex min-h-52 flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 text-center text-sm font-bold text-slate-400"><Images size={32} className="mb-3" />当前筛选下还没有素材</div> : null}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {items.map((item) => <article key={item.itemId} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950"><MediaImageFrame src={mediaLibraryContentUrl(item.workspaceId, item.itemId)} alt={item.title} className="aspect-video">{item.isDefault ? <span className="absolute left-2 top-2 rounded-full bg-violet-600 px-2 py-1 text-[10px] font-black text-white">Story 默认</span> : null}<span className="absolute right-2 top-2 rounded-full bg-slate-950/75 px-2 py-1 text-[10px] font-black text-white">{item.origin === 'generated' ? '会话生成' : '离线导入'}</span></MediaImageFrame><div className="p-4"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><h3 className="truncate text-sm font-black text-slate-950 dark:text-white">{item.title}</h3><p className="mt-1 text-[11px] font-bold text-slate-400">{item.scope === 'story' ? storyNames.get(item.storyId ?? -1) ?? `Story #${item.storyId}` : 'Workspace 通用兜底'} · {formatBytes(item.byteSize)}</p></div></div><p className="mt-3 line-clamp-3 min-h-[3.75rem] text-xs font-semibold leading-5 text-slate-500 dark:text-slate-300">{item.description}</p><div className="mt-3 flex flex-wrap gap-1">{item.tags.map((tag) => <span key={tag} className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300">{tag}</span>)}</div><div className="mt-4 flex gap-2"><button type="button" onClick={() => beginEdit(item)} className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white text-xs font-black text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><Pencil size={12} />编辑</button><button type="button" disabled={deleteMutation.isPending} onClick={() => { const suffix = item.origin === 'generated' ? '这也会将它从原 Session 的图片素材中移除。' : ''; if (window.confirm(`删除素材“${item.title}”？${suffix}`)) deleteMutation.mutate(item) }} className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-rose-200 bg-white px-3 text-xs font-black text-rose-600 disabled:opacity-50 dark:bg-slate-900"><Trash2 size={12} />删除</button></div></div></article>)}
-          </div>
-          {deleteMutation.isError ? <p className="mt-4 text-xs font-bold text-rose-600">{deleteMutation.error instanceof Error ? deleteMutation.error.message : '删除失败'}</p> : null}
-        </section>
-      </div>
+      <MediaLibraryGrid
+        items={libraryQuery.data?.items ?? []}
+        total={libraryQuery.data?.total ?? 0}
+        page={libraryQuery.data?.page ?? page}
+        pageSize={libraryQuery.data?.pageSize ?? PAGE_SIZE}
+        loading={libraryQuery.isLoading}
+        error={libraryQuery.isError ? (libraryQuery.error instanceof Error ? libraryQuery.error.message : '加载失败') : null}
+        selectedIds={new Set(selectedItems.keys())}
+        onToggle={toggleSelection}
+        onOpen={setDetailItem}
+        onPageChange={setPage}
+      />
 
-      {editing ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4"><section className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"><h2 className="text-lg font-black text-slate-950 dark:text-white">编辑素材信息</h2><div className="mt-5 grid gap-4"><label className="text-xs font-black text-slate-500">标题<input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /></label><label className="text-xs font-black text-slate-500">描述<textarea value={editDescription} onChange={(event) => setEditDescription(event.target.value)} className="mt-2 min-h-28 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /></label><label className="text-xs font-black text-slate-500">Tags<textarea value={editTags} onChange={(event) => setEditTags(event.target.value)} className="mt-2 min-h-20 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /></label>{editing.scope === 'story' ? <label className="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" checked={editDefault} onChange={(event) => setEditDefault(event.target.checked)} />Story 默认背景</label> : null}</div>{updateMutation.isError ? <p className="mt-3 text-xs font-bold text-rose-600">{updateMutation.error instanceof Error ? updateMutation.error.message : '更新失败'}</p> : null}<div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setEditing(null)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-600">取消</button><button type="button" disabled={!editTitle.trim() || !editDescription.trim() || !parseTags(editTags).length || updateMutation.isPending} onClick={() => updateMutation.mutate(editing)} className="h-10 rounded-lg bg-violet-600 px-4 text-sm font-black text-white disabled:bg-slate-300">保存</button></div></section></div> : null}
+      <MediaImportDialog
+        open={importOpen}
+        stories={stories}
+        onClose={() => setImportOpen(false)}
+        onAnalyze={(file) => {
+          if (!currentWorkspace) return Promise.reject(new Error('请先选择 Workspace'))
+          return analyzeMediaLibraryImage(currentWorkspace, file)
+        }}
+        onUpload={async (file, input) => {
+          if (!currentWorkspace) throw new Error('请先选择 Workspace')
+          await uploadMediaLibraryItem(currentWorkspace, file, input)
+          setMessage('图片已导入媒体库')
+          await invalidateLibrary()
+        }}
+      />
+      <MediaDetailDrawer
+        item={detailItem}
+        stories={stories}
+        onClose={() => setDetailItem(null)}
+        onSave={async (item, input: MediaLibraryMetadataInput) => {
+          if (!currentWorkspace) throw new Error('请先选择 Workspace')
+          const updated = await updateMediaLibraryItem(currentWorkspace, item.itemId, input)
+          setDetailItem(updated)
+          setSelectedItems((current) => {
+            if (!current.has(item.itemId)) return current
+            const next = new Map(current)
+            next.set(item.itemId, updated)
+            return next
+          })
+          setMessage('素材信息已更新')
+          await invalidateLibrary()
+        }}
+        onDelete={(item) => setDeleteTargets(new Map([[item.itemId, item]]))}
+      />
+
+      {deleteTargets ? (
+        <ConfirmDialog
+          title={deleteSummary.count > 1 ? '批量删除资源' : '删除资源'}
+          heading={`将永久删除 ${deleteSummary.count} 项资源`}
+          body={<><p>删除会移除对应 Asset；最后一个 Asset 引用消失时还会回收 Blob 文件。</p>{deleteSummary.galleries ? <p className="mt-2">其中关联 {deleteSummary.galleries} 个 Session Gallery 项，将一并移除。</p> : null}{deleteSummary.backgrounds ? <p className="mt-2 font-black">有 {deleteSummary.backgrounds} 个背景引用，相关资源会受到保护并返回失败。</p> : null}{deleteMutation.isError ? <p className="mt-2 font-black">{deleteMutation.error instanceof Error ? deleteMutation.error.message : '删除失败'}</p> : null}</>}
+          pending={deleteMutation.isPending}
+          onClose={() => setDeleteTargets(null)}
+          onConfirm={() => deleteMutation.mutate(deleteTargets)}
+        />
+      ) : null}
     </div>
   )
 }

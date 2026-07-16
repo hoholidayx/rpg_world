@@ -90,6 +90,7 @@ export type MediaGalleryItem = {
   sha256: string
   mimeType: string
   byteSize: number
+  mediaType: MediaLibraryType
   visualBrief: VisualBrief
   source: MediaSourceReference
   createdAt: string
@@ -147,7 +148,22 @@ export type MediaBackgroundEvaluation = {
   finishedAt: string
 }
 
-export type MediaLibraryScope = 'story' | 'workspace_fallback'
+export const MEDIA_LIBRARY_TYPES = [
+  'background',
+  'avatar',
+  'character_sprite',
+  'scene_illustration',
+  'map',
+  'item',
+  'ui',
+  'reference',
+  'other',
+] as const
+
+export type MediaLibraryType = (typeof MEDIA_LIBRARY_TYPES)[number]
+export type MediaLibraryScope = 'story' | 'workspace'
+export type MediaLibraryOrigin = 'generated' | 'upload'
+export type MediaLibrarySort = 'updated_desc' | 'created_desc' | 'title_asc' | 'size_desc'
 
 export type MediaLibraryItem = {
   itemId: string
@@ -155,19 +171,47 @@ export type MediaLibraryItem = {
   workspaceId: string
   scope: MediaLibraryScope
   storyId: number | null
+  mediaType: MediaLibraryType
   title: string
   description: string
   tags: string[]
   isDefault: boolean
-  origin: 'generated' | 'upload'
+  origin: MediaLibraryOrigin
   mimeType: string
   byteSize: number
+  backgroundReferences: number
+  galleryReferences: number
   createdAt: string
   updatedAt: string
 }
 
 export type MediaLibrary = {
   items: MediaLibraryItem[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export type MediaLibraryFacetValue = { value: string; count: number }
+
+export type MediaLibraryFacets = {
+  mediaTypes: MediaLibraryFacetValue[]
+  tags: MediaLibraryFacetValue[]
+  scopes: MediaLibraryFacetValue[]
+  origins: MediaLibraryFacetValue[]
+  stories: Array<{ storyId: number; count: number }>
+}
+
+export type MediaLibraryQuery = {
+  q?: string
+  mediaTypes?: MediaLibraryType[]
+  tags?: string[]
+  scope?: MediaLibraryScope
+  storyId?: number
+  origins?: MediaLibraryOrigin[]
+  sort?: MediaLibrarySort
+  page?: number
+  pageSize?: number
 }
 
 export type MediaImageMetadata = {
@@ -189,10 +233,16 @@ export type MediaLibraryReconcileResult = {
 export type MediaLibraryMetadataInput = {
   scope: MediaLibraryScope
   storyId: number | null
+  mediaType: MediaLibraryType
   title: string
   description: string
   tags: string[]
   isDefault: boolean
+}
+
+export type MediaLibraryBatchResult = {
+  succeededItemIds: string[]
+  failed: Array<{ itemId: string; errorCode: string; message: string }>
 }
 
 export type CreateMediaJobInput = {

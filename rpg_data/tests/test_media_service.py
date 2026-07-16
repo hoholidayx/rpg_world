@@ -388,3 +388,85 @@ def test_manual_clear_supersedes_running_background_evaluation(tmp_path) -> None
     assert result.status == models.MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED
     assert gateway.media.get_background(session.id) is None
     assert gateway.media.get_background_state(session.id).auto_suppressed is True
+
+
+def test_media_library_taxonomy_pagination_facets_and_background_guard(tmp_path) -> None:
+    gateway, session = _session_with_turns(tmp_path)
+
+    def create_asset(*, suffix: str, title: str, media_type: str, tags: tuple[str, ...]):
+        return gateway.media.create_library_asset(
+            workspace_id="demo_workspace",
+            scope=models.MEDIA_LIBRARY_SCOPE_STORY,
+            story_id=1,
+            media_type=media_type,
+            title=title,
+            description=f"{title} description",
+            tags=tags,
+            is_default=False,
+            sha256=suffix * 64,
+            canonical_ext="png",
+            mime_type="image/png",
+            byte_size=128,
+            relative_path=f"assets/images/{suffix * 64}.png",
+            visual_brief_json=f'{{"sceneDescription":"{title}"}}',
+        )[0]
+
+    background = create_asset(
+        suffix="1",
+        title="Moonlit forest",
+        media_type=models.MEDIA_LIBRARY_TYPE_BACKGROUND,
+        tags=("Forest", "Night"),
+    )
+    avatar = create_asset(
+        suffix="2",
+        title="Forest guardian",
+        media_type=models.MEDIA_LIBRARY_TYPE_AVATAR,
+        tags=("forest", "Portrait"),
+    )
+    create_asset(
+        suffix="3",
+        title="Ancient map",
+        media_type=models.MEDIA_LIBRARY_TYPE_MAP,
+        tags=("forest", "map"),
+    )
+
+    page = gateway.media.list_library_assets_page(
+        "demo_workspace",
+        query="guardian",
+        media_types=(models.MEDIA_LIBRARY_TYPE_AVATAR,),
+        tags=("portrait",),
+        page=1,
+        page_size=1,
+    )
+
+    assert page.total == 1
+    assert [bundle.item.id for bundle in page.items] == [avatar.item.id]
+    assert page.items[0].item.media_type == models.MEDIA_LIBRARY_TYPE_AVATAR
+    facets = gateway.media.get_library_facets("demo_workspace")
+    assert {facet.value: facet.count for facet in facets.media_types} == {
+        "avatar": 1,
+        "background": 1,
+        "map": 1,
+    }
+    assert {facet.value.casefold(): facet.count for facet in facets.tags}["forest"] == 3
+
+    gateway.media.set_background(session.id, background.asset.id)
+    background_page = gateway.media.list_library_assets_page(
+        "demo_workspace",
+        media_types=(models.MEDIA_LIBRARY_TYPE_BACKGROUND,),
+    )
+    assert background_page.items[0].usage.background_references == 1
+    with pytest.raises(MediaAssetInUseError):
+        gateway.media.update_library_asset(
+            "demo_workspace",
+            background.item.id,
+            scope=background.item.scope,
+            story_id=background.item.story_id,
+            media_type=models.MEDIA_LIBRARY_TYPE_AVATAR,
+            title=background.item.title,
+            description=background.item.description,
+            tags=background.tags,
+            is_default=False,
+        )
+    with pytest.raises(FileNotFoundError, match="not manually selectable"):
+        gateway.media.set_background(session.id, avatar.asset.id)

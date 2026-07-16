@@ -24,6 +24,10 @@ from media_service.schemas import (
     MediaGalleryItemResponse,
     MediaGalleryResponse,
     MediaLibraryDeleteResponse,
+    MediaLibraryBatchDeleteRequest,
+    MediaLibraryBatchResponse,
+    MediaLibraryBatchUpdateRequest,
+    MediaLibraryFacetsResponse,
     MediaImageMetadataResponse,
     MediaLibraryItemResponse,
     MediaLibraryReconcileResponse,
@@ -48,16 +52,40 @@ _MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 )
 async def list_media_library(
     workspace_id: str,
+    q: str = Query(default=""),
+    media_types: str | None = Query(default=None, alias="mediaTypes"),
+    tags: str | None = Query(default=None),
     scope: str | None = Query(default=None),
     story_id: int | None = Query(default=None, alias="storyId"),
+    origins: str | None = Query(default=None),
+    sort: str = Query(default="updated_desc"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=48, alias="pageSize", ge=1, le=100),
 ) -> MediaLibraryResponse:
     return await _media_call(
         get_media_client().list_library_assets(
             workspace_id,
+            query=q,
+            media_types=_split_query_values(media_types),
+            tags=_split_query_values(tags),
             scope=scope,
             story_id=story_id,
+            origins=_split_query_values(origins),
+            sort=sort,
+            page=page,
+            page_size=page_size,
         )
     )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/media/library/facets",
+    response_model=MediaLibraryFacetsResponse,
+)
+async def get_media_library_facets(
+    workspace_id: str,
+) -> MediaLibraryFacetsResponse:
+    return await _media_call(get_media_client().get_library_facets(workspace_id))
 
 
 @router.post(
@@ -107,6 +135,7 @@ async def upload_media_library_asset(
     workspace_id: str,
     file: UploadFile = File(...),
     scope: str = Form(...),
+    media_type: str = Form(..., alias="mediaType"),
     title: str = Form(...),
     description: str = Form(...),
     tags: str = Form(...),
@@ -131,6 +160,7 @@ async def upload_media_library_asset(
                 content=content,
                 scope=scope,
                 story_id=story_id,
+                media_type=media_type,
                 title=title,
                 description=description,
                 tags=[str(tag) for tag in parsed_tags],
@@ -143,6 +173,32 @@ async def upload_media_library_asset(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
         await file.close()
+
+
+@router.patch(
+    "/workspaces/{workspace_id}/media/library/batch",
+    response_model=MediaLibraryBatchResponse,
+)
+async def batch_update_media_library(
+    workspace_id: str,
+    body: MediaLibraryBatchUpdateRequest,
+) -> MediaLibraryBatchResponse:
+    return await _media_call(
+        get_media_client().batch_update_library_assets(workspace_id, body)
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/media/library/batch-delete",
+    response_model=MediaLibraryBatchResponse,
+)
+async def batch_delete_media_library(
+    workspace_id: str,
+    body: MediaLibraryBatchDeleteRequest,
+) -> MediaLibraryBatchResponse:
+    return await _media_call(
+        get_media_client().batch_delete_library_assets(workspace_id, body)
+    )
 
 
 @router.patch(
@@ -373,6 +429,16 @@ async def stream_media_asset(
         media_type=stream.media_type,
         headers=headers,
     )
+
+
+def _split_query_values(raw: str | None) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    return tuple(dict.fromkeys(
+        value.strip()
+        for value in raw.replace("，", ",").split(",")
+        if value.strip()
+    ))
 
 
 async def _media_call(awaitable: Awaitable[ResponseT]) -> ResponseT:

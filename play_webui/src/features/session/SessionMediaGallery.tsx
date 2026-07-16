@@ -130,6 +130,7 @@ function GalleryCard({
   onDelete: () => void
 }) {
   const isBackground = backgroundAssetId === item.assetId
+  const canUseAsBackground = item.mediaType === 'background'
   return (
     <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
       <MediaImageFrame
@@ -148,12 +149,12 @@ function GalleryCard({
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || !canUseAsBackground}
             onClick={isBackground ? onClearBackground : onSetBackground}
             className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-xs font-black text-slate-600 transition hover:border-violet-300 hover:text-violet-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
           >
             {isBackground ? <Ban size={14} /> : <Wallpaper size={14} />}
-            {isBackground ? '清除背景' : '设为背景'}
+            {isBackground ? '清除背景' : canUseAsBackground ? '设为背景' : '非背景素材'}
           </button>
           <button
             type="button"

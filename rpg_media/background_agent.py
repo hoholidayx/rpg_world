@@ -77,13 +77,13 @@ class LLMMediaBackgroundAgent:
                     )
                 if name not in {
                     "search_story_backgrounds",
-                    "search_workspace_fallbacks",
+                    "search_workspace_backgrounds",
                 }:
                     raise ValueError(f"unknown media background tool: {name}")
                 scope = (
                     models.MEDIA_LIBRARY_SCOPE_STORY
                     if name == "search_story_backgrounds"
-                    else models.MEDIA_LIBRARY_SCOPE_WORKSPACE_FALLBACK
+                    else models.MEDIA_LIBRARY_SCOPE_WORKSPACE
                 )
                 tags_raw = arguments.get("tags", [])
                 if not isinstance(tags_raw, list):
@@ -205,7 +205,7 @@ _TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "search_workspace_fallbacks",
+            "name": "search_workspace_backgrounds",
             "description": "Search generic fallback backgrounds in the current Workspace.",
             "parameters": {
                 "type": "object",

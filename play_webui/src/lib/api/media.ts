@@ -8,6 +8,9 @@ import type {
   MediaJob,
   MediaBackgroundEvaluation,
   MediaLibrary,
+  MediaLibraryBatchResult,
+  MediaLibraryFacets,
+  MediaLibraryQuery,
   MediaImageMetadata,
   MediaLibraryItem,
   MediaLibraryMetadataInput,
@@ -118,13 +121,24 @@ function mediaLibraryPath(workspaceId: string) {
 
 export function getMediaLibrary(
   workspaceId: string,
-  options: { scope?: MediaLibraryMetadataInput['scope']; storyId?: number } = {},
+  options: MediaLibraryQuery = {},
 ) {
   const params = new URLSearchParams()
+  if (options.q) params.set('q', options.q)
+  if (options.mediaTypes?.length) params.set('mediaTypes', options.mediaTypes.join(','))
+  if (options.tags?.length) params.set('tags', options.tags.join(','))
   if (options.scope) params.set('scope', options.scope)
   if (options.storyId !== undefined) params.set('storyId', String(options.storyId))
+  if (options.origins?.length) params.set('origins', options.origins.join(','))
+  if (options.sort) params.set('sort', options.sort)
+  if (options.page) params.set('page', String(options.page))
+  if (options.pageSize) params.set('pageSize', String(options.pageSize))
   const query = params.toString()
   return playApiFetch<MediaLibrary>(`${mediaLibraryPath(workspaceId)}${query ? `?${query}` : ''}`)
+}
+
+export function getMediaLibraryFacets(workspaceId: string) {
+  return playApiFetch<MediaLibraryFacets>(`${mediaLibraryPath(workspaceId)}/facets`)
 }
 
 export function reconcileMediaLibrary(workspaceId: string) {
@@ -152,6 +166,7 @@ export async function uploadMediaLibraryItem(
   const form = new FormData()
   form.set('file', file)
   form.set('scope', input.scope)
+  form.set('mediaType', input.mediaType)
   form.set('title', input.title)
   form.set('description', input.description)
   form.set('tags', JSON.stringify(input.tags))
@@ -168,12 +183,39 @@ export async function uploadMediaLibraryItem(
 export function updateMediaLibraryItem(
   workspaceId: string,
   itemId: string,
-  input: Omit<MediaLibraryMetadataInput, 'scope' | 'storyId'>,
+  input: MediaLibraryMetadataInput,
 ) {
   return playApiFetch<MediaLibraryItem>(
     `${mediaLibraryPath(workspaceId)}/${encodeURIComponent(itemId)}`,
     { method: 'PATCH', body: JSON.stringify(input) },
   )
+}
+
+export function batchUpdateMediaLibraryItems(
+  workspaceId: string,
+  input: {
+    itemIds: string[]
+    mediaType?: MediaLibraryMetadataInput['mediaType']
+    addTags?: string[]
+    removeTags?: string[]
+  },
+) {
+  return playApiFetch<MediaLibraryBatchResult>(`${mediaLibraryPath(workspaceId)}/batch`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      itemIds: input.itemIds,
+      mediaType: input.mediaType,
+      addTags: input.addTags ?? [],
+      removeTags: input.removeTags ?? [],
+    }),
+  })
+}
+
+export function batchDeleteMediaLibraryItems(workspaceId: string, itemIds: string[]) {
+  return playApiFetch<MediaLibraryBatchResult>(`${mediaLibraryPath(workspaceId)}/batch-delete`, {
+    method: 'POST',
+    body: JSON.stringify({ itemIds }),
+  })
 }
 
 export function deleteMediaLibraryItem(workspaceId: string, itemId: string) {

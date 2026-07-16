@@ -21,6 +21,10 @@ from media_service.schemas import (
     MediaGalleryItemResponse,
     MediaGalleryResponse,
     MediaLibraryDeleteResponse,
+    MediaLibraryBatchDeleteRequest,
+    MediaLibraryBatchResponse,
+    MediaLibraryBatchUpdateRequest,
+    MediaLibraryFacetsResponse,
     MediaImageMetadataResponse,
     MediaLibraryItemResponse,
     MediaLibraryReconcileResponse,
@@ -78,17 +82,44 @@ class MediaClient:
         *,
         scope: str | None = None,
         story_id: int | None = None,
+        query: str = "",
+        media_types: tuple[str, ...] = (),
+        tags: tuple[str, ...] = (),
+        origins: tuple[str, ...] = (),
+        sort: str = "updated_desc",
+        page: int = 1,
+        page_size: int = 48,
     ) -> MediaLibraryResponse:
         params: dict[str, str | int] = {}
+        if query:
+            params["q"] = query
+        if media_types:
+            params["mediaTypes"] = ",".join(media_types)
+        if tags:
+            params["tags"] = ",".join(tags)
         if scope is not None:
             params["scope"] = scope
         if story_id is not None:
             params["storyId"] = story_id
+        if origins:
+            params["origins"] = ",".join(origins)
+        params["sort"] = sort
+        params["page"] = page
+        params["pageSize"] = page_size
         return await self._send_model(
             "GET",
             f"/workspaces/{workspace_id}/library",
             MediaLibraryResponse,
             params=params,
+        )
+
+    async def get_library_facets(
+        self,
+        workspace_id: str,
+    ) -> MediaLibraryFacetsResponse:
+        return await self._get_model(
+            f"/workspaces/{workspace_id}/library/facets",
+            MediaLibraryFacetsResponse,
         )
 
     async def reconcile_library_assets(
@@ -138,6 +169,7 @@ class MediaClient:
         content: bytes,
         scope: str,
         story_id: int | None,
+        media_type: str,
         title: str,
         description: str,
         tags: list[str],
@@ -145,6 +177,7 @@ class MediaClient:
     ) -> MediaLibraryItemResponse:
         form = {
             "scope": scope,
+            "mediaType": media_type,
             "title": title,
             "description": description,
             "tags": json.dumps(tags, ensure_ascii=False),
@@ -195,6 +228,30 @@ class MediaClient:
             "DELETE",
             f"/workspaces/{workspace_id}/library/{item_id}",
             MediaLibraryDeleteResponse,
+        )
+
+    async def batch_update_library_assets(
+        self,
+        workspace_id: str,
+        body: MediaLibraryBatchUpdateRequest,
+    ) -> MediaLibraryBatchResponse:
+        return await self._send_model(
+            "PATCH",
+            f"/workspaces/{workspace_id}/library/batch",
+            MediaLibraryBatchResponse,
+            body=body,
+        )
+
+    async def batch_delete_library_assets(
+        self,
+        workspace_id: str,
+        body: MediaLibraryBatchDeleteRequest,
+    ) -> MediaLibraryBatchResponse:
+        return await self._send_model(
+            "POST",
+            f"/workspaces/{workspace_id}/library/batch-delete",
+            MediaLibraryBatchResponse,
+            body=body,
         )
 
     async def list_providers(self, session_id: str) -> MediaProviderCatalogResponse:

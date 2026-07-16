@@ -437,6 +437,7 @@ class MediaLibraryItemRecord(BaseRecord):
         unique=True,
     )
     scope = TextField()
+    media_type = TextField(default="background")
     story = ForeignKeyField(
         StoryRecord,
         backref="media_library_items",
@@ -463,6 +464,7 @@ class MediaLibraryItemTagRecord(BaseRecord):
         on_delete="CASCADE",
     )
     tag = TextField()
+    normalized_tag = TextField()
     created_at = TextField()
 
     class Meta:
