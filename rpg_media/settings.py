@@ -13,6 +13,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 @dataclass(frozen=True)
 class DemoBriefSettings:
+    """Deterministic planner defaults retained only for explicit test injection."""
     scene_description_prefix: str = "依据所选剧情还原这一幕："
     environment: str = "沉浸式奇幻角色扮演场景"
     composition: str = "电影感广角构图，主体与环境层次清晰"
@@ -46,29 +47,6 @@ class RPGMediaSettings(ProfiledYamlSettings):
         self.settings_path = _SETTINGS_PATH
         self.label = "rpg_media/settings.yaml"
         super().__init__(profile_name)
-
-    @property
-    def demo_brief(self) -> DemoBriefSettings:
-        raw = self._mapping("brief_planner").get("demo", {})
-        if not isinstance(raw, dict):
-            raw = {}
-        return DemoBriefSettings(
-            scene_description_prefix=str(
-                raw.get("scene_description_prefix", "依据所选剧情还原这一幕：")
-            ),
-            environment=str(raw.get("environment", "沉浸式奇幻角色扮演场景")),
-            composition=str(
-                raw.get("composition", "电影感广角构图，主体与环境层次清晰")
-            ),
-            mood_lighting=str(
-                raw.get("mood_lighting", "叙事性光影，氛围浓郁但细节可辨")
-            ),
-            style=str(raw.get("style", "高质量电影概念艺术")),
-            negative_constraints=str(
-                raw.get("negative_constraints", "文字，水印，标志，界面元素，低清晰度")
-            ),
-            aspect_ratio=str(raw.get("aspect_ratio", "16:9")),
-        )
 
     @property
     def providers(self) -> MediaProviderSettings:

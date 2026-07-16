@@ -13,6 +13,9 @@ base:
     # 主 Agent 与子 Agent 共用的 OpenAI-compatible 模型。
     deepseek_v4_flash:
       provider: openai
+      # 当前 DeepSeek 接口仅接收文本；未来视觉 Provider 在此声明 [text, image]。
+      input_modalities:
+        - text
       openai:
         # OpenAI-compatible 模型名。
         model: deepseek-v4-flash
@@ -106,6 +109,18 @@ base:
     media.scene_background_match:
       kind: chat
       provider_key: deepseek_v4_flash
+
+    # 单张图片语义识别。默认纯文本 Provider 会返回能力不支持，便于 WebUI 手工降级；
+    # 后续只需把该 biz 切到声明 [text, image] 的 OpenAI-compatible Provider。
+    media.image_metadata:
+      kind: chat
+      provider_key: deepseek_v4_flash
+
+    # 手动生图前的可编辑视觉简报，复用现有文本模型。
+    media.visual_brief:
+      kind: chat
+      provider_key: deepseek_v4_flash
+      temperature: 0.2
 
     # 记忆向量嵌入模型。
     memory.embed:

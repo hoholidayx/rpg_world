@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import secrets
 import uuid
@@ -17,6 +19,7 @@ from llm_client.codec import chunk_to_wire, response_to_wire
 from llm_service.base_provider import DocumentScoreProvider, LLMProvider
 from llm_service.config import list_provider_options, load_llm_settings, resolve_biz_config
 from llm_service.manager import LLMManager
+from llm_service.errors import LLMInputModalityUnsupportedError
 from llm_service.pointwise import score_documents_with_chat
 from llm_service.schemas import (
     LLMCatalogResponse,
@@ -110,6 +113,7 @@ async def catalog(biz_key: str, request: Request) -> LLMCatalogResponse:
                 backend=item.backend,
                 model=item.model,
                 contextWindow=item.context_window,
+                inputModalities=list(item.input_modalities),
             )
             for item in options
         ],
@@ -123,7 +127,7 @@ async def catalog(biz_key: str, request: Request) -> LLMCatalogResponse:
 )
 async def chat(body: LLMChatRequest, request: Request) -> LLMChatResponse:
     try:
-        provider = _chat_provider(body.biz_key, body.provider_key)
+        provider = _chat_provider(body.biz_key, body.provider_key, body.messages)
         result = await provider.chat(body.messages, tools=body.tools)
     except Exception as exc:
         raise _http_error(request, exc) from exc
@@ -133,7 +137,7 @@ async def chat(body: LLMChatRequest, request: Request) -> LLMChatResponse:
 @app.post(f"{_prefix()}/chat/stream", dependencies=[Depends(_authorize)])
 async def chat_stream(body: LLMChatRequest, request: Request) -> StreamingResponse:
     try:
-        provider = _chat_provider(body.biz_key, body.provider_key)
+        provider = _chat_provider(body.biz_key, body.provider_key, body.messages)
     except Exception as exc:
         raise _http_error(request, exc) from exc
 
@@ -225,11 +229,76 @@ def _provider(biz_key: str, provider_key: str | None) -> LLMProvider:
     return provider
 
 
-def _chat_provider(biz_key: str, provider_key: str | None) -> LLMProvider:
+def _chat_provider(
+    biz_key: str,
+    provider_key: str | None,
+    messages: list[dict[str, object]],
+) -> LLMProvider:
     cfg = resolve_biz_config(biz_key, provider_key=provider_key)
     if cfg.kind not in {"chat", "planner"}:
         raise ValueError(f"LLM biz {biz_key!r} does not support chat")
+    required_modalities = _validate_chat_messages(messages)
+    for modality in required_modalities:
+        if modality not in cfg.input_modalities:
+            raise LLMInputModalityUnsupportedError(modality, cfg.provider_key)
     return _provider(biz_key, provider_key)
+
+
+def _validate_chat_messages(messages: list[dict[str, object]]) -> set[str]:
+    required = {"text"}
+    for message_index, message in enumerate(messages):
+        content = message.get("content")
+        if content is None or isinstance(content, str):
+            continue
+        if not isinstance(content, list):
+            raise ValueError(f"messages[{message_index}].content must be a string or array")
+        for part_index, part in enumerate(content):
+            if not isinstance(part, dict):
+                raise ValueError(
+                    f"messages[{message_index}].content[{part_index}] must be an object"
+                )
+            part_type = str(part.get("type", "")).strip()
+            if part_type == "text":
+                if not isinstance(part.get("text"), str):
+                    raise ValueError(
+                        f"messages[{message_index}].content[{part_index}].text must be a string"
+                    )
+                continue
+            if part_type != "image_url":
+                raise ValueError(
+                    f"messages[{message_index}].content[{part_index}].type is unsupported"
+                )
+            image_url = part.get("image_url")
+            if not isinstance(image_url, dict) or not isinstance(image_url.get("url"), str):
+                raise ValueError(
+                    f"messages[{message_index}].content[{part_index}].image_url.url is required"
+                )
+            _validate_image_data_url(image_url["url"])
+            required.add("image")
+    return required
+
+
+def _validate_image_data_url(value: str) -> None:
+    prefix, separator, encoded = value.partition(",")
+    if separator != "," or prefix not in {
+        "data:image/png;base64",
+        "data:image/jpeg;base64",
+        "data:image/webp;base64",
+    }:
+        raise ValueError("image_url must be a PNG, JPEG, or WebP base64 data URL")
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("image_url contains invalid base64 data") from exc
+    signatures = {
+        "data:image/png;base64": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
+        "data:image/jpeg;base64": lambda data: data.startswith(b"\xff\xd8\xff"),
+        "data:image/webp;base64": lambda data: (
+            len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP"
+        ),
+    }
+    if not signatures[prefix](payload):
+        raise ValueError("image_url content does not match its declared image type")
 
 
 def _validate_config() -> None:
@@ -261,6 +330,8 @@ def _http_error(
 
 
 def _error_code(exc: Exception) -> str:
+    if isinstance(exc, LLMInputModalityUnsupportedError):
+        return "LLM_INPUT_MODALITY_UNSUPPORTED"
     if isinstance(exc, (ValueError, NotImplementedError)):
         return "LLM_REQUEST_INVALID"
     if isinstance(exc, TimeoutError):

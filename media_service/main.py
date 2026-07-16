@@ -25,6 +25,7 @@ from media_service.schemas import (
     MediaHealthResponse,
     MediaLibraryItemResponse,
     MediaLibraryDeleteResponse,
+    MediaImageMetadataResponse,
     MediaLibraryReconcileResponse,
     MediaLibraryResponse,
     MediaLibraryUpdateRequest,
@@ -190,6 +191,33 @@ async def reconcile_library_assets(
 
 
 @app.post(
+    f"{_prefix()}/workspaces/{{workspace_id}}/library/analyze",
+    response_model=MediaImageMetadataResponse,
+)
+async def analyze_library_image(
+    workspace_id: str,
+    file: UploadFile = File(...),
+) -> MediaImageMetadataResponse:
+    try:
+        payload = await file.read(_MAX_UPLOAD_BYTES + 1)
+        if len(payload) > _MAX_UPLOAD_BYTES:
+            raise ValueError("media library image exceeds the 32 MiB upload limit")
+        metadata = await get_runtime().facade.analyze_library_image(
+            workspace_id,
+            data=payload,
+        )
+    except Exception as exc:
+        raise _http_error(exc) from exc
+    finally:
+        await file.close()
+    return MediaImageMetadataResponse(
+        title=metadata.title,
+        description=metadata.description,
+        tags=list(metadata.tags),
+    )
+
+
+@app.post(
     f"{_prefix()}/workspaces/{{workspace_id}}/library",
     response_model=MediaLibraryItemResponse,
 )
@@ -343,7 +371,7 @@ async def create_brief(
     body: MediaBriefRequest,
 ) -> MediaBriefResponse:
     try:
-        result = get_runtime().facade.create_visual_brief(
+        result = await get_runtime().facade.create_visual_brief(
             session_id,
             start_turn_id=body.start_turn_id,
             end_turn_id=body.end_turn_id,
@@ -738,11 +766,19 @@ def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, MediaError):
-        status_code = 409 if exc.code in {
+        if exc.code in {
             "MEDIA_SOURCE_CHANGED",
             "MEDIA_ASSET_IN_USE",
             "MEDIA_JOB_NOT_RETRYABLE",
-        } else 422
+        }:
+            status_code = 409
+        elif exc.code in {
+            "MEDIA_IMAGE_ANALYSIS_FAILED",
+            "MEDIA_VISUAL_BRIEF_FAILED",
+        }:
+            status_code = 502
+        else:
+            status_code = 422
         return HTTPException(
             status_code=status_code,
             detail={"errorCode": exc.code, "message": str(exc)},

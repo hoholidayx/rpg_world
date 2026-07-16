@@ -10,12 +10,14 @@ import {
   Loader2,
   Pencil,
   RefreshCcw,
+  Sparkles,
   Trash2,
   Upload,
 } from 'lucide-react'
 import { MediaImageFrame } from '@/components/common/MediaImageFrame'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import {
+  analyzeMediaLibraryImage,
   deleteMediaLibraryItem,
   getMediaLibrary,
   mediaLibraryContentUrl,
@@ -23,6 +25,7 @@ import {
   updateMediaLibraryItem,
   uploadMediaLibraryItem,
 } from '@/lib/api/media'
+import { ApiError } from '@/lib/api/errors'
 import { listStories } from '@/lib/api/stories'
 import type {
   MediaLibraryItem,
@@ -31,6 +34,7 @@ import type {
 } from '@/types/media'
 
 type ScopeFilter = 'all' | MediaLibraryScope
+const IMAGE_ANALYSIS_UNSUPPORTED = 'MEDIA_IMAGE_ANALYSIS_UNSUPPORTED'
 
 function parseTags(value: string) {
   return [...new Set(value.split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean))]
@@ -60,6 +64,7 @@ function MediaLibraryContent() {
   const [editTags, setEditTags] = useState('')
   const [editDefault, setEditDefault] = useState(false)
   const [message, setMessage] = useState('')
+  const [analysisNotice, setAnalysisNotice] = useState('')
 
   const storiesQuery = useQuery({
     queryKey: ['play-stories', currentWorkspace],
@@ -105,6 +110,20 @@ function MediaLibraryContent() {
     queryClient.invalidateQueries({ queryKey: ['play-session-media-background'] }),
   ])
 
+  const analyzeMutation = useMutation({
+    mutationFn: (image: File) => {
+      if (!currentWorkspace) throw new Error('请先选择 Workspace')
+      return analyzeMediaLibraryImage(currentWorkspace, image)
+    },
+    onMutate: () => setAnalysisNotice(''),
+    onSuccess: (metadata) => {
+      setTitle(metadata.title)
+      setDescription(metadata.description)
+      setTagsText(metadata.tags.join('，'))
+      setAnalysisNotice('智能识别完成，已覆盖标题、描述与 Tags；你可以继续修改。')
+    },
+  })
+
   const uploadMutation = useMutation({
     mutationFn: ({ image, manifest }: { image: File; manifest: MediaLibraryMetadataInput }) => {
       if (!currentWorkspace) throw new Error('请先选择 Workspace')
@@ -116,6 +135,8 @@ function MediaLibraryContent() {
       setDescription('')
       setTagsText('')
       setIsDefault(false)
+      setAnalysisNotice('')
+      analyzeMutation.reset()
       if (fileInputRef.current) fileInputRef.current.value = ''
       setMessage('图片已导入媒体库')
       void invalidateLibrary()
@@ -188,6 +209,12 @@ function MediaLibraryContent() {
     })
   }
 
+  function selectFile(nextFile: File | null) {
+    setFile(nextFile)
+    setAnalysisNotice('')
+    analyzeMutation.reset()
+  }
+
   function beginEdit(item: MediaLibraryItem) {
     setEditing(item)
     setEditTitle(item.title)
@@ -198,6 +225,8 @@ function MediaLibraryContent() {
 
   const storyNames = new Map(stories.map((story) => [story.id, story.title]))
   const items = libraryQuery.data?.items ?? []
+  const analysisUnsupported = analyzeMutation.error instanceof ApiError
+    && analyzeMutation.error.errorCode === IMAGE_ANALYSIS_UNSUPPORTED
 
   return (
     <div className="min-w-0 px-5 py-8 xl:px-7">
@@ -238,7 +267,11 @@ function MediaLibraryContent() {
             <div><h2 className="font-black text-slate-950 dark:text-white">导入单张素材</h2><p className="text-xs font-semibold text-slate-400">PNG / JPEG / WebP · 最多 32 MiB</p></div>
           </div>
           <div className="grid gap-4">
-            <label className="text-xs font-black text-slate-500">图片<input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /></label>
+            <label className="text-xs font-black text-slate-500">图片<input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /></label>
+            <button type="button" onClick={() => file && analyzeMutation.mutate(file)} disabled={!currentWorkspace || !file || analyzeMutation.isPending || uploadMutation.isPending} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 text-sm font-black text-violet-700 transition hover:bg-violet-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-200 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"><Sparkles size={15} />{analyzeMutation.isPending ? '识别中…' : '智能识别'}</button>
+            {analysisNotice ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold leading-5 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">{analysisNotice}</p> : null}
+            {analysisUnsupported ? <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">当前配置的 LLM 不支持图片识别，请手动填写标题、描述与 Tags 后继续导入。</p> : null}
+            {analyzeMutation.isError && !analysisUnsupported ? <p className="text-xs font-bold text-rose-600">智能识别失败：{analyzeMutation.error instanceof Error ? analyzeMutation.error.message : 'Media Service 暂不可用'}</p> : null}
             <label className="text-xs font-black text-slate-500">作用域<select value={scope} onChange={(event) => { const value = event.target.value as MediaLibraryScope; setScope(value); if (value === 'workspace_fallback') setIsDefault(false) }} className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-950"><option value="story">Story 专属</option><option value="workspace_fallback">Workspace 通用兜底</option></select></label>
             {scope === 'story' ? <label className="text-xs font-black text-slate-500">Story<select value={storyId ?? ''} onChange={(event) => setStoryId(Number(event.target.value) || null)} className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-950"><option value="">选择 Story</option>{stories.map((story) => <option key={story.id} value={story.id}>{story.title}</option>)}</select></label> : null}
             <label className="text-xs font-black text-slate-500">标题<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold dark:border-slate-700 dark:bg-slate-950" /></label>

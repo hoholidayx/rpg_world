@@ -8,6 +8,7 @@ import type {
   MediaJob,
   MediaBackgroundEvaluation,
   MediaLibrary,
+  MediaImageMetadata,
   MediaLibraryItem,
   MediaLibraryMetadataInput,
   MediaLibraryReconcileResult,
@@ -15,7 +16,7 @@ import type {
   MediaSourceTurns,
 } from '@/types/media'
 import { playApiFetch } from './client'
-import { readApiError } from './errors'
+import { createApiError, readApiError } from './errors'
 
 function mediaPath(sessionId: string) {
   return `/sessions/${encodeURIComponent(sessionId)}/media`
@@ -130,6 +131,17 @@ export function reconcileMediaLibrary(workspaceId: string) {
   return playApiFetch<MediaLibraryReconcileResult>(`${mediaLibraryPath(workspaceId)}/reconcile`, {
     method: 'POST',
   })
+}
+
+export async function analyzeMediaLibraryImage(workspaceId: string, file: File) {
+  const form = new FormData()
+  form.set('file', file)
+  const response = await fetch(
+    `${getPlayApiBaseUrl()}${mediaLibraryPath(workspaceId)}/analyze`,
+    { method: 'POST', body: form },
+  )
+  if (!response.ok) throw await createApiError(response)
+  return response.json() as Promise<MediaImageMetadata>
 }
 
 export async function uploadMediaLibraryItem(

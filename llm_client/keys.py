@@ -9,6 +9,8 @@ MEMORY_QUERY_PLANNER_BIZ_KEY = "memory.query_planner"
 MEMORY_RERANK_BIZ_KEY = "memory.rerank"
 
 MEDIA_SCENE_BACKGROUND_MATCH_BIZ_KEY = "media.scene_background_match"
+MEDIA_IMAGE_METADATA_BIZ_KEY = "media.image_metadata"
+MEDIA_VISUAL_BRIEF_BIZ_KEY = "media.visual_brief"
 
 PROVIDER_OPENAI = "openai"
 PROVIDER_LLAMA = "llama"

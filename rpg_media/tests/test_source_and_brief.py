@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
 from rpg_media.brief import DemoVisualBriefPlanner
@@ -47,7 +49,8 @@ def test_visible_excerpt_uses_first_middle_last_sixteen_characters() -> None:
     assert all(len(part) == 16 for part in parts)
 
 
-def test_demo_planner_is_configuration_driven(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_demo_planner_is_configuration_driven(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "brief.sqlite3")
     session = gateway.catalog.create_session("demo_workspace", 1, title="brief")
     assert session is not None
@@ -73,7 +76,7 @@ def test_demo_planner_is_configuration_driven(tmp_path) -> None:
         )
     )
 
-    brief = planner.plan(source)
+    brief = await planner.plan(source)
 
     assert brief.scene_description == "SCENE: Alice 推开覆雪的石门。"
     assert brief.environment == "snow"

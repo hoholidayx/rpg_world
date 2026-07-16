@@ -101,6 +101,11 @@ def catalog_from_wire(value: Mapping[str, object]) -> LLMBizCatalog:
             backend=str(item.get("backend") or ""),
             model=str(item.get("model") or ""),
             context_window=_optional_int(item.get("contextWindow")),
+            input_modalities=tuple(
+                str(modality).strip().lower()
+                for modality in item.get("inputModalities", ["text"])
+                if str(modality).strip()
+            ),
         )
         for item in raw_options
         if isinstance(item, Mapping)

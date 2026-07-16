@@ -170,6 +170,12 @@ export type MediaLibrary = {
   items: MediaLibraryItem[]
 }
 
+export type MediaImageMetadata = {
+  title: string
+  description: string
+  tags: string[]
+}
+
 export type MediaLibraryReconcileResult = {
   workspaceId: string
   scannedBlobs: number

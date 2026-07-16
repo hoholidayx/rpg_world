@@ -79,6 +79,10 @@ class LLMProviderOption:
     backend: str
     model: str
     context_window: int | None
+    input_modalities: tuple[str, ...] = ("text",)
+
+    def supports_input_modality(self, modality: str) -> bool:
+        return str(modality).strip().lower() in self.input_modalities
 
 
 @dataclass(frozen=True)

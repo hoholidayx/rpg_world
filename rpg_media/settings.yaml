@@ -1,16 +1,6 @@
 default_profile: local
 
 base:
-  brief_planner:
-    demo:
-      scene_description_prefix: "依据所选剧情还原这一幕："
-      environment: "沉浸式奇幻角色扮演场景"
-      composition: "电影感广角构图，主体与环境层次清晰"
-      mood_lighting: "叙事性光影，氛围浓郁但细节可辨"
-      style: "高质量电影概念艺术"
-      negative_constraints: "文字，水印，标志，界面元素，低清晰度"
-      aspect_ratio: "16:9"
-
   providers:
     default_key: local_file
     local_file:

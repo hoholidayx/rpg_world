@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from pathlib import Path
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Mapping, Protocol, TypeVar
 
 from rpg_data import models
@@ -15,7 +15,7 @@ from rpg_data.services.gateway import DataServiceGateway
 from rpg_data.services.media import MediaAssetInUseError, MediaDataService, MediaSourceRangeError
 from rpg_data.services.status import StatusTableService
 from rpg_media.background_agent import BackgroundMatcher, LLMMediaBackgroundAgent
-from rpg_media.brief import DemoVisualBriefPlanner, VisualBriefPlanner
+from rpg_media.brief import LLMVisualBriefPlanner, VisualBriefPlanner
 from rpg_media.errors import (
     MediaAssetInUseDomainError,
     MediaError,
@@ -23,7 +23,8 @@ from rpg_media.errors import (
     MediaProviderUnavailableError,
     MediaSourceChangedError,
 )
-from rpg_media.image_store import WorkspaceImageStore
+from rpg_media.image_store import WorkspaceImageStore, inspect_image_bytes
+from rpg_media.metadata import ImageMetadataAnalyzer, LLMImageMetadataAnalyzer
 from rpg_media.providers.catalog import MediaProviderCatalog, build_provider_catalog
 from rpg_media.settings import RPGMediaSettings, settings
 from rpg_media.source import (
@@ -36,6 +37,7 @@ from rpg_media.source import (
 from rpg_media.types import (
     MediaBackgroundView,
     MediaGenerationRequest,
+    MediaImageMetadata,
     MediaProviderDescriptor,
     MediaSourceTurnView,
     SessionGalleryAsset,
@@ -65,6 +67,7 @@ class MediaFacade:
         image_store: WorkspaceImageStore | None = None,
         status: StatusTableService | None = None,
         background_matcher: BackgroundMatcher | None = None,
+        image_analyzer: ImageMetadataAnalyzer | None = None,
     ) -> None:
         self._data = data
         self._catalog = catalog
@@ -76,6 +79,7 @@ class MediaFacade:
             data,
             asset_exists=self._blob_file_exists,
         )
+        self._image_analyzer = image_analyzer or LLMImageMetadataAnalyzer()
 
     @classmethod
     def from_gateway(
@@ -85,14 +89,16 @@ class MediaFacade:
         media_settings: RPGMediaSettings | None = None,
         providers: MediaProviderCatalog | None = None,
         planner: VisualBriefPlanner | None = None,
+        image_analyzer: ImageMetadataAnalyzer | None = None,
     ) -> "MediaFacade":
         configured = media_settings or settings
         return cls(
             data=gateway.media,
             catalog=gateway.catalog,
-            planner=planner or DemoVisualBriefPlanner(configured.demo_brief),
+            planner=planner or LLMVisualBriefPlanner(),
             providers=providers or build_provider_catalog(configured.providers),
             status=gateway.status,
+            image_analyzer=image_analyzer,
         )
 
     @property
@@ -105,7 +111,7 @@ class MediaFacade:
     def list_source_turns(self, session_id: str) -> list[MediaSourceTurnView]:
         return source_turn_views(self._data.list_source_turns(session_id))
 
-    def create_visual_brief(
+    async def create_visual_brief(
         self,
         session_id: str,
         *,
@@ -118,7 +124,17 @@ class MediaFacade:
             start_turn_id=start_turn_id,
             end_turn_id=end_turn_id,
         )
-        return VisualBriefResult(source=source, brief=self._planner.plan(source))
+        return VisualBriefResult(source=source, brief=await self._planner.plan(source))
+
+    async def analyze_library_image(
+        self,
+        workspace_id: str,
+        *,
+        data: bytes,
+    ) -> MediaImageMetadata:
+        self._catalog.get_workspace_runtime_dir(str(workspace_id))
+        inspected = await asyncio.to_thread(inspect_image_bytes, data)
+        return await self._image_analyzer.analyze(inspected)
 
     def create_job(
         self,

@@ -525,8 +525,76 @@ def test_provider_options_are_ordered_selectable_and_safe_to_expose(
     assert options[0].context_window == 8192
     assert options[1].model == "remote-model"
     assert options[1].context_window == 64000
+    assert options[0].input_modalities == ("text",)
+    assert options[1].input_modalities == ("text",)
     assert not hasattr(options[1], "api_key")
     assert not hasattr(options[1], "base_url")
+
+
+def test_provider_input_modalities_are_typed_and_exposed(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers="""
+    vision:
+      provider: openai
+      input_modalities:
+        - text
+        - image
+      openai:
+        model: vision-model
+""",
+        biz="""
+    media.image_metadata:
+      kind: chat
+      provider_key: vision
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    cfg = resolve_biz_config("media.image_metadata")
+    options = list_provider_options("media.image_metadata")
+
+    assert cfg.input_modalities == ("text", "image")
+    assert options[0].input_modalities == ("text", "image")
+    assert resolve_llm_config("media.image_metadata").input_modalities == ("text", "image")
+
+
+@pytest.mark.parametrize(
+    ("modalities", "error"),
+    [
+        ("image", "must include 'text'"),
+        ("text\n        - audio", "must be one of"),
+        ("text\n        - text", "must not contain duplicates"),
+    ],
+)
+def test_provider_input_modalities_reject_invalid_values(
+    tmp_path: Path,
+    monkeypatch,
+    modalities: str,
+    error: str,
+) -> None:
+    path = tmp_path / "llm.yaml"
+    _write_llm_config(
+        path,
+        providers=f"""
+    vision:
+      provider: openai
+      input_modalities:
+        - {modalities}
+      openai:
+        model: vision-model
+""",
+        biz="""
+    media.image_metadata:
+      kind: chat
+      provider_key: vision
+""",
+    )
+    _use_llm(path, monkeypatch)
+
+    with pytest.raises(ValueError, match=error):
+        resolve_biz_config("media.image_metadata")
 
 
 @pytest.mark.parametrize(

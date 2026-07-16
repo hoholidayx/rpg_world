@@ -31,6 +31,7 @@ def _handler(request: httpx.Request) -> httpx.Response:
                         "backend": "openai",
                         "model": "model-a",
                         "contextWindow": 1000,
+                        "inputModalities": ["text", "image"],
                     }
                 ],
             },
@@ -66,6 +67,8 @@ async def test_async_client_catalog_and_auth_mapping() -> None:
     catalog = await client.get_catalog("agent.main")
     assert catalog.default_provider_key == "chat-a"
     assert catalog.option().context_window == 1000
+    assert catalog.option().input_modalities == ("text", "image")
+    assert catalog.option().supports_input_modality("image") is True
     await client.aclose()
 
     bad = LLMServiceClient(

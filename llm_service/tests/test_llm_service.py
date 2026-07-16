@@ -17,6 +17,7 @@ from llm_client.auth import (
 from llm_client.types import DocumentScore, DocumentScoreProvider, LLMProvider, LLMResponse, ProviderChunk
 from llm_service import main as service_main
 from llm_service.llama_provider import LlamaCompletionProvider
+from llm_service.errors import LLMInputModalityUnsupportedError
 from llm_service.models import LlamaModelCache, build_qwen_rerank_prompt, model_cache_key
 from llm_service.runtime import (
     DirectLlamaRuntime,
@@ -429,6 +430,33 @@ async def test_llama_completion_provider_builds_tool_call():
     assert response.tool_calls[0]["function"]["name"] == "scene_time"
 
 
+@pytest.mark.asyncio
+async def test_llama_completion_rejects_image_before_model_call():
+    class FakeModel:
+        async def complete_async(self, *_args, **_kwargs):
+            raise AssertionError("model must not receive image input")
+
+    provider = LlamaCompletionProvider(
+        model_path="fake.gguf",
+        model=FakeModel(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(LLMInputModalityUnsupportedError):
+        await provider.chat(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "describe"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="},
+                        },
+                    ],
+                }
+            ]
+        )
+
+
 class _FakeProvider(LLMProvider, DocumentScoreProvider):
     def get_default_model(self) -> str:
         return "fake-model"
@@ -503,6 +531,51 @@ def test_http_contract_auth_chat_stream_embedding_and_rerank(monkeypatch):
         )
         assert chat.status_code == 200
         assert chat.json()["content"] == "reply"
+
+        unsupported = client.post(
+            "/llm/v1/chat",
+            headers=headers,
+            json={
+                "bizKey": "agent.main",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "describe"},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": "data:image/png;base64,iVBORw0KGgo="
+                                },
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        assert unsupported.status_code == 422
+        assert unsupported.json()["detail"]["errorCode"] == "LLM_INPUT_MODALITY_UNSUPPORTED"
+
+        remote_url = client.post(
+            "/llm/v1/chat",
+            headers=headers,
+            json={
+                "bizKey": "agent.main",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "https://example.test/image.png"},
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        assert remote_url.status_code == 422
+        assert remote_url.json()["detail"]["errorCode"] == "LLM_REQUEST_INVALID"
 
         stream = client.post(
             "/llm/v1/chat/stream",

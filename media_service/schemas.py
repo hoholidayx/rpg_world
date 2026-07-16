@@ -216,6 +216,12 @@ class MediaLibraryUpdateRequest(MediaSchema):
     is_default: bool = Field(default=False, alias="isDefault")
 
 
+class MediaImageMetadataResponse(MediaSchema):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=4000)
+    tags: list[str] = Field(min_length=1, max_length=20)
+
+
 class MediaLibraryItemResponse(MediaSchema):
     item_id: str = Field(alias="itemId")
     asset_id: str = Field(alias="assetId")

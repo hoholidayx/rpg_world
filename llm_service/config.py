@@ -32,6 +32,8 @@ from llm_service.keys import (
     PROVIDER_LLAMA,
     PROVIDER_OPENAI,
     RERANK_MODEL_TYPES,
+    LLM_INPUT_MODALITIES,
+    LLM_INPUT_MODALITY_TEXT,
 )
 
 _LLM_SETTINGS_PATH = Path(__file__).resolve().parent / "llm.yaml"
@@ -49,6 +51,7 @@ class LLMProviderOption:
     backend: str
     model: str
     context_window: int | None
+    input_modalities: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,7 @@ class ResolvedLLMConfig:
     kind: str
     openai: ConfigDict
     llama: ConfigDict
+    input_modalities: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -135,6 +139,7 @@ def resolve_llm_config(
         kind=cfg.kind,
         openai=dict(cfg.openai_cfg),
         llama=dict(cfg.llama_cfg),
+        input_modalities=cfg.input_modalities,
     )
 
 
@@ -232,6 +237,32 @@ class BizConfig:
                 f"{label} must be one of {', '.join(sorted(LLM_KINDS))}; got {kind!r}"
             )
         return kind
+
+    @property
+    def input_modalities(self) -> tuple[str, ...]:
+        """Ordered input capabilities declared by the selected provider."""
+        label = f"{LLMConfigKey.PROVIDERS}.{self._provider_key}.{LLMConfigKey.INPUT_MODALITIES}"
+        raw_value = self._raw.get(LLMConfigKey.INPUT_MODALITIES)
+        if raw_value is None:
+            return (LLM_INPUT_MODALITY_TEXT,)
+        if not isinstance(raw_value, list):
+            raise ValueError(f"{label} must be a list")
+        modalities: list[str] = []
+        for index, raw_modality in enumerate(raw_value):
+            if not isinstance(raw_modality, str) or not raw_modality.strip():
+                raise ValueError(f"{label}[{index}] must be a non-empty string")
+            modality = raw_modality.strip().lower()
+            if modality not in LLM_INPUT_MODALITIES:
+                raise ValueError(
+                    f"{label}[{index}] must be one of {', '.join(sorted(LLM_INPUT_MODALITIES))}; "
+                    f"got {modality!r}"
+                )
+            if modality in modalities:
+                raise ValueError(f"{label} must not contain duplicates")
+            modalities.append(modality)
+        if LLM_INPUT_MODALITY_TEXT not in modalities:
+            raise ValueError(f"{label} must include {LLM_INPUT_MODALITY_TEXT!r}")
+        return tuple(modalities)
 
     @property
     def rerank_model_type(self) -> str:
@@ -523,6 +554,7 @@ def _resolve_biz_entry(
         effective[LLMConfigKey.RERANK_MODEL_TYPE] = biz_cfg[LLMConfigKey.RERANK_MODEL_TYPE]
 
     resolved = BizConfig(biz_key, provider_key, provider_option_keys, effective)
+    resolved.input_modalities
     if kind == LLM_KIND_RERANK:
         resolved.rerank_model_type
     return resolved
@@ -586,6 +618,7 @@ def list_provider_options(biz_key: str) -> tuple[LLMProviderOption, ...]:
                 backend=cfg.provider,
                 model=model,
                 context_window=context_window,
+                input_modalities=cfg.input_modalities,
             )
         )
     return tuple(options)

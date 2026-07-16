@@ -21,6 +21,7 @@ class LLMProviderOptionResponse(WireModel):
     backend: str
     model: str
     context_window: int | None = Field(default=None, alias="contextWindow")
+    input_modalities: list[str] = Field(default_factory=lambda: ["text"], alias="inputModalities")
 
 
 class LLMCatalogResponse(WireModel):

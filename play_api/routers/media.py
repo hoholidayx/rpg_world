@@ -24,6 +24,7 @@ from media_service.schemas import (
     MediaGalleryItemResponse,
     MediaGalleryResponse,
     MediaLibraryDeleteResponse,
+    MediaImageMetadataResponse,
     MediaLibraryItemResponse,
     MediaLibraryReconcileResponse,
     MediaLibraryResponse,
@@ -69,6 +70,33 @@ async def reconcile_media_library(
     return await _media_call(
         get_media_client().reconcile_library_assets(workspace_id)
     )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/media/library/analyze",
+    response_model=MediaImageMetadataResponse,
+)
+async def analyze_media_library_image(
+    workspace_id: str,
+    file: UploadFile = File(...),
+) -> MediaImageMetadataResponse:
+    try:
+        content = await file.read(_MAX_UPLOAD_BYTES + 1)
+        if len(content) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="media library image exceeds the 32 MiB upload limit",
+            )
+        return await _media_call(
+            get_media_client().analyze_library_image(
+                workspace_id,
+                filename=file.filename or "image",
+                content_type=file.content_type or "application/octet-stream",
+                content=content,
+            )
+        )
+    finally:
+        await file.close()
 
 
 @router.post(

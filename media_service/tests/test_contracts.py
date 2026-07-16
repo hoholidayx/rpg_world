@@ -9,10 +9,11 @@ from media_service.worker import MediaJobWorker
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
 from rpg_media.brief import DemoVisualBriefPlanner
+from rpg_media.errors import MediaImageAnalysisUnsupportedError
 from rpg_media.facade import MediaFacade
 from rpg_media.providers.catalog import MediaProviderCatalog
 from rpg_media.providers.local_file import LocalFileProvider
-from rpg_media.types import MediaBackgroundDecision
+from rpg_media.types import MediaBackgroundDecision, MediaImageMetadata
 
 PNG = b"\x89PNG\r\n\x1a\nservice"
 
@@ -36,7 +37,17 @@ class _LibraryMatcher:
         )
 
 
-def _runtime(tmp_path):  # noqa: ANN202
+class _ImageAnalyzer:
+    async def analyze(self, image):  # noqa: ANN001, ANN201
+        assert image.mime_type == "image/png"
+        return MediaImageMetadata(
+            title="月光森林",
+            description="月光照亮林间石门。",
+            tags=("森林", "夜晚"),
+        )
+
+
+def _runtime(tmp_path, *, image_analyzer=None):  # noqa: ANN001, ANN202
     gateway = get_data_service_gateway(tmp_path / "service.sqlite3")
     gateway.database.execute_sql(
         "UPDATE rpg_workspaces SET root_path = ? WHERE id = 'demo_workspace'",
@@ -64,6 +75,7 @@ def _runtime(tmp_path):  # noqa: ANN202
         ),
         status=gateway.status,
         background_matcher=_LibraryMatcher(gateway.media),
+        image_analyzer=image_analyzer or _ImageAnalyzer(),
     )
     worker = MediaJobWorker(
         data=gateway.media,
@@ -222,6 +234,18 @@ def test_library_upload_and_async_background_contract(tmp_path) -> None:
     set_runtime_for_tests(runtime)
     try:
         with TestClient(app) as client:
+            analyzed = client.post(
+                "/media/v1/workspaces/demo_workspace/library/analyze",
+                files={"file": ("forest.png", PNG, "image/png")},
+            )
+            assert analyzed.status_code == 200
+            assert analyzed.json() == {
+                "title": "月光森林",
+                "description": "月光照亮林间石门。",
+                "tags": ["森林", "夜晚"],
+            }
+            assert gateway.media.list_workspace_blobs("demo_workspace") == []
+
             uploaded = client.post(
                 "/media/v1/workspaces/demo_workspace/library",
                 data={
@@ -315,6 +339,29 @@ def test_library_upload_and_async_background_contract(tmp_path) -> None:
             )
             assert content.status_code == 200
             assert content.content == PNG
+    finally:
+        set_runtime_for_tests(None)
+
+
+def test_library_analysis_unsupported_is_a_non_persistent_business_error(tmp_path) -> None:
+    class UnsupportedAnalyzer:
+        async def analyze(self, image):  # noqa: ANN001, ANN201
+            raise MediaImageAnalysisUnsupportedError()
+
+    gateway, _session, _message, runtime = _runtime(
+        tmp_path,
+        image_analyzer=UnsupportedAnalyzer(),
+    )
+    set_runtime_for_tests(runtime)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/media/v1/workspaces/demo_workspace/library/analyze",
+                files={"file": ("forest.png", PNG, "image/png")},
+            )
+            assert response.status_code == 422
+            assert response.json()["detail"]["errorCode"] == "MEDIA_IMAGE_ANALYSIS_UNSUPPORTED"
+            assert gateway.media.list_workspace_blobs("demo_workspace") == []
     finally:
         set_runtime_for_tests(None)
 

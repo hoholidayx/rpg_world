@@ -12,6 +12,7 @@ from pathlib import Path
 from loguru import logger
 
 from llm_service.base_provider import DocumentScoreProvider, LLMProvider
+from llm_service.errors import LLMInputModalityUnsupportedError
 from llm_service.runtime import (
     DirectLlamaCompletionModel,
     DirectLlamaEmbeddingModel,
@@ -60,6 +61,7 @@ class LlamaCompletionProvider(LLMProvider):
         messages: list[dict],
         tools: list[dict] | None = None,
     ) -> LLMResponse:
+        _reject_image_input(messages)
         prompt = _build_prompt(messages, tools)
         raw = await self._model.complete_async(
             prompt,
@@ -90,6 +92,7 @@ class LlamaCompletionProvider(LLMProvider):
         messages: list[dict],
         tools: list[dict] | None = None,
     ) -> AsyncIterator[ProviderChunk]:
+        _reject_image_input(messages)
         if tools:
             response = await self.chat(messages, tools=tools)
             yield ProviderChunk(
@@ -162,7 +165,7 @@ def _build_prompt(messages: list[dict], tools: list[dict] | None) -> str:
     parts: list[str] = []
     for message in messages:
         role = str(message.get("role") or "user").upper()
-        content = str(message.get("content") or "")
+        content = _text_content(message.get("content"))
         parts.append(f"{role}:\n{content}")
 
     if tools:
@@ -175,6 +178,29 @@ def _build_prompt(messages: list[dict], tools: list[dict] | None) -> str:
         )
     parts.append("ASSISTANT:")
     return "\n\n".join(parts)
+
+
+def _reject_image_input(messages: list[dict]) -> None:
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        if any(isinstance(part, dict) and part.get("type") == "image_url" for part in content):
+            raise LLMInputModalityUnsupportedError("image", "llama")
+
+
+def _text_content(content: object) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return str(content)
 
 
 def _extract_completion_text(raw: object) -> str:

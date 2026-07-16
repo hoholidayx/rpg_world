@@ -21,6 +21,7 @@ from media_service.schemas import (
     MediaGalleryItemResponse,
     MediaGalleryResponse,
     MediaLibraryDeleteResponse,
+    MediaImageMetadataResponse,
     MediaLibraryItemResponse,
     MediaLibraryReconcileResponse,
     MediaLibraryResponse,
@@ -99,6 +100,34 @@ class MediaClient:
             f"/workspaces/{workspace_id}/library/reconcile",
             MediaLibraryReconcileResponse,
         )
+
+    async def analyze_library_image(
+        self,
+        workspace_id: str,
+        *,
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ) -> MediaImageMetadataResponse:
+        try:
+            response = await self._http_client().post(
+                self._url(f"/workspaces/{workspace_id}/library/analyze"),
+                files={
+                    "file": (
+                        filename or "image",
+                        bytes(content),
+                        content_type or "application/octet-stream",
+                    )
+                },
+            )
+            response.raise_for_status()
+            return MediaImageMetadataResponse.model_validate(response.json())
+        except httpx.ConnectError as exc:
+            raise MediaServiceUnavailable(f"Media service unavailable: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise _client_http_error(exc.response) from exc
+        except httpx.HTTPError as exc:
+            raise MediaClientError(str(exc)) from exc
 
     async def upload_library_asset(
         self,

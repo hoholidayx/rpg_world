@@ -16,6 +16,7 @@ from media_service.schemas import (
     MediaGalleryItemResponse,
     MediaGalleryResponse,
     MediaLibraryDeleteResponse,
+    MediaImageMetadataResponse,
     MediaLibraryItemResponse,
     MediaLibraryReconcileResponse,
     MediaLibraryResponse,
@@ -132,6 +133,15 @@ class _FakeMediaClient:
             removedLibraryItems=2,
             removedGalleryItems=1,
             clearedBackgrounds=1,
+        )
+
+    async def analyze_library_image(self, workspace_id, **kwargs):  # noqa: ANN001, ANN201
+        assert workspace_id == "demo_workspace"
+        assert kwargs["content"] == b"png-bytes"
+        return MediaImageMetadataResponse(
+            title="Forest",
+            description="Moonlit forest",
+            tags=["forest", "night"],
         )
 
     async def upload_library_asset(self, workspace_id, **kwargs):  # noqa: ANN001, ANN201
@@ -311,6 +321,13 @@ def test_play_media_proxy_contract_and_content_stream(tmp_path, monkeypatch) -> 
         assert reconciled.json()["removedAssets"] == 2
         assert reconciled.json()["clearedBackgrounds"] == 1
 
+        analyzed = client.post(
+            "/play-api/v1/workspaces/demo_workspace/media/library/analyze",
+            files={"file": ("forest.png", b"png-bytes", "image/png")},
+        )
+        assert analyzed.status_code == 200
+        assert analyzed.json()["tags"] == ["forest", "night"]
+
         uploaded = client.post(
             "/play-api/v1/workspaces/demo_workspace/media/library",
             data={
@@ -364,6 +381,15 @@ class _InUseMediaClient(_FakeMediaClient):
         )
 
 
+class _UnsupportedAnalysisMediaClient(_FakeMediaClient):
+    async def analyze_library_image(self, workspace_id, **kwargs):  # noqa: ANN001, ANN201
+        raise MediaClientError(
+            "no image support",
+            status_code=422,
+            error_code="MEDIA_IMAGE_ANALYSIS_UNSUPPORTED",
+        )
+
+
 def test_media_business_error_is_preserved(tmp_path, monkeypatch) -> None:
     _prepare(tmp_path, monkeypatch, _InUseMediaClient())
     with TestClient(app) as client:
@@ -372,3 +398,14 @@ def test_media_business_error_is_preserved(tmp_path, monkeypatch) -> None:
         )
         assert response.status_code == 409
         assert response.json()["detail"]["errorCode"] == "MEDIA_ASSET_IN_USE"
+
+
+def test_media_image_analysis_unsupported_is_preserved(tmp_path, monkeypatch) -> None:
+    _prepare(tmp_path, monkeypatch, _UnsupportedAnalysisMediaClient())
+    with TestClient(app) as client:
+        response = client.post(
+            "/play-api/v1/workspaces/demo_workspace/media/library/analyze",
+            files={"file": ("forest.png", b"png-bytes", "image/png")},
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"]["errorCode"] == "MEDIA_IMAGE_ANALYSIS_UNSUPPORTED"

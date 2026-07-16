@@ -145,6 +145,46 @@ class VisualBriefResult:
 
 
 @dataclass(frozen=True)
+class MediaImageMetadata:
+    title: str
+    description: str
+    tags: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        title = self.title.strip()
+        description = self.description.strip()
+        normalized_tags: list[str] = []
+        seen: set[str] = set()
+        for raw_tag in self.tags:
+            tag = str(raw_tag).strip()
+            normalized = tag.casefold()
+            if not tag or normalized in seen:
+                continue
+            seen.add(normalized)
+            normalized_tags.append(tag)
+        if not title or len(title) > 200:
+            raise ValueError("image metadata title must contain 1 to 200 characters")
+        if not description or len(description) > 4000:
+            raise ValueError("image metadata description must contain 1 to 4000 characters")
+        if not 1 <= len(normalized_tags) <= 20:
+            raise ValueError("image metadata must contain between 1 and 20 tags")
+        object.__setattr__(self, "title", title)
+        object.__setattr__(self, "description", description)
+        object.__setattr__(self, "tags", tuple(normalized_tags))
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, object]) -> "MediaImageMetadata":
+        tags = raw.get("tags", ())
+        if not isinstance(tags, (list, tuple)):
+            raise ValueError("image metadata tags must be an array")
+        return cls(
+            title=str(raw.get("title", "")),
+            description=str(raw.get("description", "")),
+            tags=tuple(str(tag) for tag in tags),
+        )
+
+
+@dataclass(frozen=True)
 class MediaProviderDescriptor:
     key: str
     display_name: str

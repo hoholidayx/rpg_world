@@ -49,7 +49,7 @@ def _facade(tmp_path):  # noqa: ANN202
 @pytest.mark.asyncio
 async def test_manual_brief_job_gallery_background_and_stale_flow(tmp_path) -> None:
     gateway, session, message, facade, workspace_root = _facade(tmp_path)
-    brief_result = facade.create_visual_brief(
+    brief_result = await facade.create_visual_brief(
         session.id,
         start_turn_id=1,
         end_turn_id=1,
@@ -110,9 +110,10 @@ async def test_manual_brief_job_gallery_background_and_stale_flow(tmp_path) -> N
     assert not content_path.exists()
 
 
-def test_job_creation_rejects_changed_source(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_job_creation_rejects_changed_source(tmp_path) -> None:
     gateway, session, message, facade, _workspace_root = _facade(tmp_path)
-    result = facade.create_visual_brief(
+    result = await facade.create_visual_brief(
         session.id,
         start_turn_id=1,
         end_turn_id=1,
@@ -135,7 +136,7 @@ def test_job_creation_rejects_changed_source(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_missing_workspace_image_prunes_gallery_library_and_background(tmp_path) -> None:
     gateway, session, _message, facade, _workspace_root = _facade(tmp_path)
-    brief_result = facade.create_visual_brief(
+    brief_result = await facade.create_visual_brief(
         session.id,
         start_turn_id=1,
         end_turn_id=1,

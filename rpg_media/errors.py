@@ -41,3 +41,21 @@ class MediaAssetInUseDomainError(MediaError):
             "MEDIA_ASSET_IN_USE",
             f"Media asset is still used by a typed binding: {asset_id}",
         )
+
+
+class MediaImageAnalysisUnsupportedError(MediaError):
+    def __init__(self) -> None:
+        super().__init__(
+            "MEDIA_IMAGE_ANALYSIS_UNSUPPORTED",
+            "The configured LLM provider does not support image input.",
+        )
+
+
+class MediaImageAnalysisFailedError(MediaError):
+    def __init__(self, message: str) -> None:
+        super().__init__("MEDIA_IMAGE_ANALYSIS_FAILED", str(message))
+
+
+class MediaVisualBriefFailedError(MediaError):
+    def __init__(self, message: str) -> None:
+        super().__init__("MEDIA_VISUAL_BRIEF_FAILED", str(message))
