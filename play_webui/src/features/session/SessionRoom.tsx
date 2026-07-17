@@ -359,6 +359,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       queryClient.removeQueries({ queryKey: ['play-session-media-background', sessionId] })
       queryClient.removeQueries({ queryKey: ['play-session-media-providers', sessionId] })
       queryClient.removeQueries({ queryKey: ['play-session-media-source-turns', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-dream-proposal', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-dream-proposals', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-dream-memories', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-dream-evidence-history', sessionId] })
       queryClient.invalidateQueries({ queryKey: ['play-sessions'] })
       if (result.runtimeCleanup === 'pending') {
         setDeleteRedirecting(true)
@@ -528,6 +532,10 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               onOpenRPModulesDialog={() => {
                 layout.setSettingsOpen(false)
                 setRPModulesDialogOpen(true)
+              }}
+              onOpenDreamMemory={() => {
+                layout.setSettingsOpen(false)
+                router.push(`/session/${encodeURIComponent(sessionId)}/dream`)
               }}
               onDeleteSession={() => {
                 layout.setSettingsOpen(false)

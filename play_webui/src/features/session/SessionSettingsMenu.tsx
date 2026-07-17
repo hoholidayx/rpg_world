@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Boxes, Brain, CaseSensitive, PanelLeftClose, PanelRightClose, Settings, Trash2, UserRound, Wrench } from 'lucide-react'
+import { Boxes, Brain, CaseSensitive, CloudMoon, PanelLeftClose, PanelRightClose, Settings, Trash2, UserRound, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import {
   SESSION_FONT_SCALE_DEFAULT,
@@ -57,6 +57,7 @@ export function SessionSettingsMenu({
   playerCharacter,
   onOpenRoleDialog,
   onOpenRPModulesDialog,
+  onOpenDreamMemory,
   onDeleteSession,
 }: {
   open: boolean
@@ -74,6 +75,7 @@ export function SessionSettingsMenu({
   playerCharacter?: SessionPlayerCharacter | null
   onOpenRoleDialog: () => void
   onOpenRPModulesDialog: () => void
+  onOpenDreamMemory: () => void
   onDeleteSession: () => void
 }) {
   return (
@@ -136,6 +138,22 @@ export function SessionSettingsMenu({
               </span>
               <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
                 编辑
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenDreamMemory}
+              className="mb-1 grid w-full grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-violet-50 dark:hover:bg-violet-500/10"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200">
+                <CloudMoon size={16} />
+              </span>
+              <span className="min-w-0">
+                <strong className="block text-sm font-black text-slate-900 dark:text-slate-100">Dream Memory</strong>
+                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">提炼与审阅主 Agent 长期记忆</span>
+              </span>
+              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-black text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200">
+                管理
               </span>
             </button>
             <div className="mb-1 rounded-lg px-3 py-3">

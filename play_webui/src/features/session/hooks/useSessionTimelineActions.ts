@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { deleteSessionMessage, truncateSessionTurn, type getSession } from '@/lib/api/sessions'
 import type { SessionPlayerCharacter } from '@/types/session'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
@@ -78,6 +79,7 @@ export function useSessionTimelineActions({
   showToast: (message: string) => void
   logger: SessionRoomLogger
 }) {
+  const queryClient = useQueryClient()
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
 
@@ -193,6 +195,10 @@ export function useSessionTimelineActions({
     if (replacingLastTurn && message) {
       try {
         await truncateSessionTurn(sessionId, message.turnId)
+        queryClient.removeQueries({
+          queryKey: ['play-session-dream-evidence-history', sessionId],
+          exact: true,
+        })
         setOptimisticTruncateFromTurn(message.turnId)
         logger.info('timeline truncate before regeneration completed', {
           source,
@@ -236,6 +242,7 @@ export function useSessionTimelineActions({
     lastTurnId,
     logger,
     playerCharacter,
+    queryClient,
     narrativeStyleId,
     refreshContextPreview,
     sessionId,
@@ -359,6 +366,10 @@ export function useSessionTimelineActions({
     })
     try {
       await deleteSessionMessage(sessionId, message.messageId)
+      queryClient.removeQueries({
+        queryKey: ['play-session-dream-evidence-history', sessionId],
+        exact: true,
+      })
       const refreshed = await refreshSessionData({ silent: true })
       logger.info('timeline delete completed', {
         turnId: message.turnId,
@@ -375,7 +386,7 @@ export function useSessionTimelineActions({
       })
       showToast(error instanceof Error ? error.message : '删除失败')
     }
-  }, [logger, refreshSessionData, sessionId, showToast])
+  }, [logger, queryClient, refreshSessionData, sessionId, showToast])
 
   const handleDelete = useCallback((message: SessionTimelineMessage) => {
     if (!message.canDelete) {

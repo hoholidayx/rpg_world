@@ -1,4 +1,5 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { stopSessionStream } from '@/lib/api/chat'
 import { formatStreamErrorText } from '@/lib/stream/formatStreamError'
 import { consumeChatStream } from '@/lib/stream/sse'
@@ -87,6 +88,7 @@ export function useSessionStreamTurn({
   onCommittedNarrativeStyle: (styleId: NarrativeStyleId) => void
   onTurnCommitted: (turnId: number) => void
 }) {
+  const queryClient = useQueryClient()
   const [sending, setSending] = useState(false)
   const [stoppingRequestId, setStoppingRequestId] = useState<string | null>(null)
   const activeStreamRef = useRef<ActiveStream | null>(null)
@@ -109,6 +111,10 @@ export function useSessionStreamTurn({
         source: active.source,
         turnId: active.turnId,
       })
+      queryClient.removeQueries({
+        queryKey: ['play-session-dream-evidence-history', sessionId],
+        exact: true,
+      })
       active.controller.abort()
       activeStreamRef.current = null
       void stopSessionStream(sessionId, active.requestId).catch((error) => {
@@ -120,7 +126,7 @@ export function useSessionStreamTurn({
         })
       })
     }
-  }, [logger, sessionId])
+  }, [logger, queryClient, sessionId])
 
   const markStreamStopped = useCallback((assistantMessageId: string, turnId: number) => {
     setLocalMessages((current) =>
@@ -549,6 +555,10 @@ export function useSessionStreamTurn({
       )
       if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) return
       if (streamFailure) throw new Error(streamFailure)
+      queryClient.removeQueries({
+        queryKey: ['play-session-dream-evidence-history', sessionId],
+        exact: true,
+      })
       const refreshed = await refreshSessionData({
         silent: true,
         clearLastTurnUsage: clearCommandInput,
@@ -559,6 +569,11 @@ export function useSessionStreamTurn({
           : HISTORY_REFRESH_MODE.ACTIVE,
         scrollToBottom: clearCommandInput,
       })
+      if (clearCommandInput) {
+        queryClient.removeQueries({ queryKey: ['play-session-dream-proposal', sessionId] })
+        queryClient.removeQueries({ queryKey: ['play-session-dream-proposals', sessionId] })
+        queryClient.removeQueries({ queryKey: ['play-session-dream-memories', sessionId] })
+      }
       logger.info('stream refresh after completion', {
         requestId,
         source,
@@ -617,6 +632,7 @@ export function useSessionStreamTurn({
     markStreamStopped,
     onCommittedNarrativeStyle,
     onTurnCommitted,
+    queryClient,
     refreshContextPreview,
     refreshSessionData,
     sessionId,
@@ -667,6 +683,10 @@ export function useSessionStreamTurn({
       }
       if (result.status === TURN_CANCEL_STATUS.NOT_RUNNING) {
         stopSettledRequestIdsRef.current.add(active.requestId)
+        queryClient.removeQueries({
+          queryKey: ['play-session-dream-evidence-history', sessionId],
+          exact: true,
+        })
         await refreshSessionData({ silent: true })
         if (!silent) showToast('生成已结束，已刷新状态')
         return false
@@ -686,6 +706,10 @@ export function useSessionStreamTurn({
       if (stillActive) {
         if (!silent) showToast('停止失败，生成仍在继续')
       } else {
+        queryClient.removeQueries({
+          queryKey: ['play-session-dream-evidence-history', sessionId],
+          exact: true,
+        })
         await refreshSessionData({ silent: true })
         if (!silent) showToast('停止失败，已刷新状态')
       }
@@ -696,7 +720,7 @@ export function useSessionStreamTurn({
         setStoppingRequestId((current) => (current === active.requestId ? null : current))
       }
     }
-  }, [logger, markStreamStopped, refreshSessionData, sessionId, showToast])
+  }, [logger, markStreamStopped, queryClient, refreshSessionData, sessionId, showToast])
 
   const handleExitSession = useCallback(() => {
     const active = activeStreamRef.current
@@ -709,6 +733,10 @@ export function useSessionStreamTurn({
       activeStreamRef.current = null
       stoppingRequestIdRef.current = null
       setStoppingRequestId(null)
+      queryClient.removeQueries({
+        queryKey: ['play-session-dream-evidence-history', sessionId],
+        exact: true,
+      })
       active.controller.abort()
       void stopSessionStream(sessionId, active.requestId).catch((error) => {
         logger.warn('stream exit stop failed', {
@@ -720,7 +748,7 @@ export function useSessionStreamTurn({
       })
     }
     onExit()
-  }, [logger, onExit, sessionId])
+  }, [logger, onExit, queryClient, sessionId])
 
   const prepareForSessionDeletion = useCallback(() => {
     const active = activeStreamRef.current
