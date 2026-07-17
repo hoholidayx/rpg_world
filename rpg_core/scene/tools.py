@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rpg_core.agent.tools.base import BaseTool
+from rpg_core.tooling.base import BaseTool
 
 if TYPE_CHECKING:
     from rpg_core.scene.tracker import SceneTracker

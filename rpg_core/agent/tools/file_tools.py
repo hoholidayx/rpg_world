@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from rpg_core.agent.tools.base import BaseTool
+from rpg_core.tooling.base import BaseTool
 
 _MAX_READ_SIZE = 100 * 1024  # 100 KB
 _GREP_MAX_FILES = 200

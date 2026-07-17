@@ -8,12 +8,10 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from rpg_core.agent.resources import AgentContextResources
-from rpg_core.agent.tools import (
-    BaseTool,
+from rpg_core.agent.tools.file_tools import (
     GrepTool,
     ListFilesTool,
     ReadFileTool,
-    ToolRegistry,
     WriteFileTool,
 )
 from rpg_core.agent.tools.state import StateToolSet, resolve_state_tool_set
@@ -24,6 +22,8 @@ from rpg_core.settings import settings
 from rpg_core.status.tools import (
     STATUS_TABLE_SET_VALUES_TOOL_NAME,
 )
+from rpg_core.tooling.base import BaseTool
+from rpg_core.tooling.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from rpg_core.rp_modules import RPModuleTurnRuntime

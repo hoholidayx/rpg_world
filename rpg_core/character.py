@@ -1,4 +1,4 @@
-"""Thin agent-facing adapter for session character reads."""
+"""Thin core adapter for character cards mounted to a session's story."""
 
 from __future__ import annotations
 

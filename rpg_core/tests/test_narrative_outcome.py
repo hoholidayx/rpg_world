@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_core.agent.tools import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.rp_modules.narrative_outcome import (
     NarrativeOutcomeModule,
     NarrativeOutcomeSampler,

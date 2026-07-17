@@ -19,7 +19,7 @@ from rpg_core.agent.mailbox import AgentMailbox
 from rpg_core.agent.model_runtime import MainModelRuntime
 from rpg_core.agent.session_service import AgentSessionService
 from rpg_core.agent.tool_service import AgentToolService
-from rpg_core.agent.tools import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.agent.turn import TurnMode, TurnRequest
 from rpg_core.agent.turn.factory import TurnRuntimeFactory
 from rpg_core.agent.turn.hooks import (

@@ -19,7 +19,7 @@ from rpg_core.context.fixed_layer.contributors.player_character import (
 from rpg_core.context.rendering import render_jinja_template
 
 if TYPE_CHECKING:
-    from rpg_core.character.manager import CharacterManager
+    from rpg_core.character import CharacterManager
 
 
 def render_character_section_body(characters: list[JsonObject]) -> str:

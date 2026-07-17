@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING
 
-from rpg_core.agent.tools import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.context import FixedLayerSection, RPModuleRuntimeSection
 from rpg_core.rp_modules.models import (
     ModuleActivationEvent,

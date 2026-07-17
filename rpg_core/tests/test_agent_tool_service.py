@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from rpg_core.agent.resources import AgentContextResources
 from rpg_core.agent.tool_service import AgentToolService
-from rpg_core.agent.tools import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.agent.turn import (
     TurnExecutionPolicy,
     TurnExecutionSnapshot,

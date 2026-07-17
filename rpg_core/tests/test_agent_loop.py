@@ -7,7 +7,7 @@ import pytest
 from llm_service.types import LLMResponse, ProviderChunk
 from rpg_core.agent.agent_types import StreamEventKind
 from rpg_core.agent.loop import run_chat_loop, run_chat_loop_stream
-from rpg_core.agent.tools import ToolRegistry
+from rpg_core.tooling.registry import ToolRegistry
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.rp_modules.dice.tools import DiceCheckDCTool, DiceRoller
 from rpg_core.settings import DiceModuleSettings

@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from rpg_core.agent.tools import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.rp_modules import registry as registry_module
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,

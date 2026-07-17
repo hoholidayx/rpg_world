@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from rpg_data import models
-from rpg_core.agent.tools.base import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.status.manager import StatusValueUpdateResult
 
 STATUS_TABLE_SET_VALUES_TOOL_NAME = "status_table_set_values"

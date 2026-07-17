@@ -1,4 +1,4 @@
-"""Thin agent-facing adapter for session lorebook reads."""
+"""Thin core adapter for lorebook entries mounted to a session's story."""
 
 from __future__ import annotations
 

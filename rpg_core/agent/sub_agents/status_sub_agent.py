@@ -49,8 +49,8 @@ from rpg_core.agent.sub_agents.status_sub_agent_models import (
     StatusSubAgentStage,
     StatusSubAgentToolRecord,
 )
-from rpg_core.agent.tools import BaseTool
-from rpg_core.agent.tools.registry import ToolRegistry
+from rpg_core.tooling.base import BaseTool
+from rpg_core.tooling.registry import ToolRegistry
 from rpg_core.agent.tools.state import STATE_TOOL_NAMES, StateToolSet
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.context.fingerprint import (

@@ -6,7 +6,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from rpg_core.agent.tools.base import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.scene.tools import SCENE_TOOL_NAMES
 from rpg_core.status.tools import (
     STATUS_TABLE_SET_VALUES_TOOL_NAME,

@@ -13,7 +13,7 @@ from loguru import logger
 
 from llm_client.types import LLMProvider
 from rpg_core.context.rpg_context import Message, Role
-from rpg_core.agent.tools import ToolRegistry
+from rpg_core.tooling.registry import ToolRegistry
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     CallRecord,

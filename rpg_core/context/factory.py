@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from rpg_core.character.manager import CharacterManager
-    from rpg_core.lorebook.manager import LorebookManager
+    from rpg_core.character import CharacterManager
+    from rpg_core.lorebook import LorebookManager
     from rpg_core.scene.tracker import SceneTracker
     from rpg_core.status.manager import StatusManager
 

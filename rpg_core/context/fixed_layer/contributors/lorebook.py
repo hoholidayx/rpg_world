@@ -15,7 +15,7 @@ from rpg_core.context.fixed_layer.models import (
 from rpg_core.context.rendering import render_jinja_template
 
 if TYPE_CHECKING:
-    from rpg_core.lorebook.manager import LorebookManager
+    from rpg_core.lorebook import LorebookManager
 
 
 def render_lorebook_section_body(lorebook_entries: list[JsonObject]) -> str:

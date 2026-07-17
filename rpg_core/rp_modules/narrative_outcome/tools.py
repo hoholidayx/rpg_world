@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import random
 
-from rpg_core.agent.tools import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.rp_modules.narrative_outcome.models import (
     NARRATIVE_OUTCOME_DEFINITIONS,
     NarrativeOutcomeSelection,

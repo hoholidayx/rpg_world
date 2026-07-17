@@ -32,6 +32,8 @@ PUBLIC_EXPORTS = (
     ("rpg_core.lorebook", "LorebookManager"),
     ("rpg_core.session", "SessionManager"),
     ("rpg_core.status", "StatusManager"),
+    ("rpg_core.tooling", "BaseTool"),
+    ("rpg_core.tooling", "ToolRegistry"),
 )
 
 

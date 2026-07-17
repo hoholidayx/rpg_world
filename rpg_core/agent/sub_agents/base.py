@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from loguru import logger
 
-from rpg_core.agent.tools.base import BaseTool
+from rpg_core.tooling.base import BaseTool
 from llm_client.types import LLMProvider
 
 if TYPE_CHECKING:

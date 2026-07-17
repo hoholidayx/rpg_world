@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 
-from rpg_core.agent.tools import BaseTool
+from rpg_core.tooling.base import BaseTool
 from rpg_core.rp_modules.dice.models import DiceRollResult
 from rpg_core.rp_modules.dice.parser import parse_dice_expression
 from rpg_core.settings import DiceModuleSettings

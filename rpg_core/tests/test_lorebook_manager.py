@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from rpg_data.models import SessionLorebookEntry
-from rpg_core.lorebook.manager import LorebookManager
+from rpg_core.lorebook import LorebookManager
 
 
 class FakeLorebookService:
@@ -70,7 +70,7 @@ def test_lorebook_manager_delegates_to_service_without_path_or_cache() -> None:
 
 
 def test_lorebook_manager_defaults_to_gateway_service(monkeypatch) -> None:
-    import rpg_core.lorebook.manager as manager_module
+    import rpg_core.lorebook as manager_module
 
     service = FakeLorebookService([_entry("Gateway")])
     calls = 0

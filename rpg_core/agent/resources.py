@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping, cast
 
 if TYPE_CHECKING:
-    from rpg_core.character.manager import CharacterManager
+    from rpg_core.character import CharacterManager
     from rpg_core.context import RPGContextBuilder
-    from rpg_core.lorebook.manager import LorebookManager
+    from rpg_core.lorebook import LorebookManager
     from rpg_core.scene import SceneTracker
     from rpg_core.status.manager import StatusManager
     from rp_memory.memory_manager import MemoryManager

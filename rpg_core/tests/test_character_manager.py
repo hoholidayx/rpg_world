@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from rpg_data.models import SessionCharacter, SessionCharacterDetail
-from rpg_core.character.manager import CharacterManager
+from rpg_core.character import CharacterManager
 
 
 class FakeCharacterService:
@@ -94,7 +94,7 @@ def test_character_manager_delegates_to_service_without_path_or_cache() -> None:
 
 
 def test_character_manager_defaults_to_gateway_service(monkeypatch) -> None:
-    import rpg_core.character.manager as manager_module
+    import rpg_core.character as manager_module
 
     service = FakeCharacterService([_character("Gateway")])
     calls = 0
