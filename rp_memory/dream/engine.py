@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from rp_memory.dream.model import DreamModel
 from rp_memory.dream.source import DreamSourceSelector
@@ -23,6 +24,12 @@ from rp_memory.dream.types import (
 _MAX_HIERARCHICAL_REDUCE_ROUNDS = 8
 
 
+@dataclass(frozen=True)
+class _HierarchicalMergeResult:
+    candidates: tuple[DreamCandidate, ...]
+    truncated: bool = False
+
+
 class DreamEngine:
     def __init__(
         self,
@@ -34,7 +41,9 @@ class DreamEngine:
     ) -> None:
         self._model = model
         self._selector = selector or DreamSourceSelector()
-        self._map_concurrency = max(1, int(map_concurrency))
+        # Keep the public/config name for compatibility, but use the limit for
+        # every parallel LLM stage rather than Map alone.
+        self._llm_concurrency = max(1, int(map_concurrency))
         self._reduce_candidate_batch_size = min(
             MAX_DREAM_PROPOSAL_ITEMS,
             max(2, int(reduce_candidate_batch_size)),
@@ -63,7 +72,7 @@ class DreamEngine:
                 analyzed_batch_count=0,
                 candidate_count=0,
             )
-        semaphore = asyncio.Semaphore(self._map_concurrency)
+        semaphore = asyncio.Semaphore(self._llm_concurrency)
 
         async def map_one(index: int):
             async with semaphore:
@@ -83,15 +92,29 @@ class DreamEngine:
         )
         initial_candidate_count = len(candidates)
         candidates = _dedupe_exact_candidates(candidates)
-        candidates = await self._hierarchical_merge(candidates, depth=selection.depth)
-
-        items = await self._model.propose(
+        merge_result = await self._hierarchical_merge(
             candidates,
-            selection.snapshot.active_memories,
             depth=selection.depth,
-            retirement_policy=selection.retirement_policy,
-            invalidated_memory_ids=invalidated_ids,
+            semaphore=semaphore,
         )
+        retirement_policy = selection.retirement_policy
+        if (
+            merge_result.truncated
+            and retirement_policy == DreamRetirementPolicy.FULL_RECONCILIATION
+        ):
+            # The source history was complete, but the final candidate view is
+            # not. Absence from this bounded view can no longer prove that an
+            # active ledger fact disappeared from the full history.
+            retirement_policy = DreamRetirementPolicy.CONTRADICTION_ONLY
+
+        async with semaphore:
+            items = await self._model.propose(
+                merge_result.candidates,
+                selection.snapshot.active_memories,
+                depth=selection.depth,
+                retirement_policy=retirement_policy,
+                invalidated_memory_ids=invalidated_ids,
+            )
         return DreamGenerationResult(
             items=items,
             analyzed_batch_count=len(selection.batches),
@@ -103,7 +126,8 @@ class DreamEngine:
         candidates: tuple[DreamCandidate, ...],
         *,
         depth: DreamDepth,
-    ) -> tuple[DreamCandidate, ...]:
+        semaphore: asyncio.Semaphore,
+    ) -> _HierarchicalMergeResult:
         current = candidates
         round_count = 0
         while len(current) > self._reduce_candidate_batch_size:
@@ -112,8 +136,15 @@ class DreamEngine:
                 current[start : start + self._reduce_candidate_batch_size]
                 for start in range(0, len(current), self._reduce_candidate_batch_size)
             ]
+
+            async def merge_one(
+                group: tuple[DreamCandidate, ...],
+            ) -> tuple[DreamCandidate, ...]:
+                async with semaphore:
+                    return await self._model.merge_candidates(group, depth=depth)
+
             merged_groups = await _gather_cancel_on_error(
-                *(self._model.merge_candidates(group, depth=depth) for group in groups)
+                *(merge_one(group) for group in groups)
             )
             merged = _dedupe_exact_candidates(
                 tuple(item for group in merged_groups for item in group)
@@ -122,12 +153,15 @@ class DreamEngine:
                 len(merged) >= len(current)
                 or round_count >= _MAX_HIERARCHICAL_REDUCE_ROUNDS
             ):
-                return _select_high_value_candidates(
-                    merged,
-                    limit=self._reduce_candidate_batch_size,
+                return _HierarchicalMergeResult(
+                    candidates=_select_high_value_candidates(
+                        merged,
+                        limit=self._reduce_candidate_batch_size,
+                    ),
+                    truncated=len(merged) > self._reduce_candidate_batch_size,
                 )
             current = merged
-        return current
+        return _HierarchicalMergeResult(candidates=current)
 
 
 def _dedupe_exact_candidates(

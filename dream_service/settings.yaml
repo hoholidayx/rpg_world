@@ -17,6 +17,7 @@ base:
   engine:
     max_map_turns: 12
     max_map_chars: 24000
+    # Compatibility name: caps Map, Reduce, and Proposal LLM calls.
     map_concurrency: 2
     reduce_candidate_batch_size: 32
   logging:

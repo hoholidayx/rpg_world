@@ -586,6 +586,57 @@ class _DistinctSameProviderKeyModel(_DreamModel):
         return ()
 
 
+class _MergeConcurrencyModel(_DistinctSameProviderKeyModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_merge_calls = 0
+        self.max_active_merge_calls = 0
+        self.two_merge_calls_started = asyncio.Event()
+        self.release_merge_calls = asyncio.Event()
+
+    async def merge_candidates(self, candidates, *, depth):  # noqa: ANN001, ANN202
+        self.active_merge_calls += 1
+        self.max_active_merge_calls = max(
+            self.max_active_merge_calls,
+            self.active_merge_calls,
+        )
+        if self.active_merge_calls >= 2:
+            self.two_merge_calls_started.set()
+        try:
+            await self.release_merge_calls.wait()
+            return tuple(candidates)
+        finally:
+            self.active_merge_calls -= 1
+
+
+class _RetirementPolicyModel(_DistinctSameProviderKeyModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.observed_retirement_policy: DreamRetirementPolicy | None = None
+
+    async def propose(
+        self,
+        candidates,
+        active_memories,
+        *,
+        depth,
+        retirement_policy,
+        invalidated_memory_ids,
+    ):  # noqa: ANN001, ANN202
+        self.observed_retirement_policy = retirement_policy
+        if retirement_policy == DreamRetirementPolicy.FULL_RECONCILIATION:
+            return (
+                DreamProposalItemDraft(
+                    action=DreamProposalAction.RETIRE,
+                    target_memory_id=active_memories[0].memory_id,
+                    fact=None,
+                    evidence=(),
+                    reason="candidate absence",
+                ),
+            )
+        return ()
+
+
 async def test_engine_exact_dedupe_ignores_provider_key_for_distinct_facts() -> None:
     model = _DistinctSameProviderKeyModel()
     engine = DreamEngine(
@@ -641,6 +692,76 @@ async def test_engine_bounds_non_converging_reduce_by_candidate_value() -> None:
         "distinct-5",
         "distinct-4",
     ]
+
+
+async def test_engine_limits_parallel_reduce_calls_with_map_concurrency() -> None:
+    model = _MergeConcurrencyModel()
+    engine = DreamEngine(
+        model=model,
+        selector=DreamSourceSelector(max_map_turns=1),
+        map_concurrency=2,
+        reduce_candidate_batch_size=2,
+    )
+    selection = engine.prepare(
+        _snapshot(
+            messages=tuple(
+                _message(index, index, f"turn {index}")
+                for index in range(1, 9)
+            ),
+            story_memories=(),
+            summary_batches=(),
+        ),
+        depth=DreamDepth.DEEP,
+        scope=DreamScope.FULL,
+    )
+
+    generation = asyncio.create_task(engine.generate(selection))
+    try:
+        await asyncio.wait_for(model.two_merge_calls_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert model.max_active_merge_calls == 2
+    finally:
+        model.release_merge_calls.set()
+        await generation
+
+
+async def test_engine_disables_absence_retirement_when_reduce_truncates() -> None:
+    model = _RetirementPolicyModel()
+    engine = DreamEngine(
+        model=model,
+        selector=DreamSourceSelector(max_map_turns=1),
+        reduce_candidate_batch_size=2,
+    )
+    message = _message(1, 1, "still-supported fact")
+    active_memory = DreamLedgerMemory(
+        memory_id="memory-1",
+        fact=DreamFact("still supported", "event", "confirmed", 0.7),
+        evidence=(message.evidence,),
+    )
+    selection = engine.prepare(
+        _snapshot(
+            messages=(
+                message,
+                *tuple(
+                    _message(index, index, f"turn {index}")
+                    for index in range(2, 7)
+                ),
+            ),
+            story_memories=(),
+            summary_batches=(),
+            active_memories=(active_memory,),
+        ),
+        depth=DreamDepth.DEEP,
+        scope=DreamScope.FULL,
+    )
+
+    result = await engine.generate(selection)
+
+    assert result.items == ()
+    assert (
+        model.observed_retirement_policy
+        == DreamRetirementPolicy.CONTRADICTION_ONLY
+    )
 
 
 async def test_engine_caps_exact_dedupe_evidence_deterministically() -> None:
