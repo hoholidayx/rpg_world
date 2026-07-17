@@ -170,6 +170,11 @@ class SummaryCompressor:
                     conv=batch_messages, batch_id=batch_id, user_rounds=batch_user_rounds
                 )
                 if result:
+                    turn_ids = [
+                        int(message.turn_id)
+                        for message in batch_messages
+                        if int(message.turn_id) > 0
+                    ]
                     path = self._batch_store.save_batch_summary(
                         batch_id=batch_id,
                         title=result.get("title", ""),
@@ -178,6 +183,11 @@ class SummaryCompressor:
                         time=result.get("time", ""),
                         location=result.get("location", ""),
                         characters=result.get("characters", []),
+                        source_turn_start=min(turn_ids) if turn_ids else None,
+                        source_turn_end=max(turn_ids) if turn_ids else None,
+                        source_message_ids=[
+                            message.uid for message in batch_messages if message.uid > 0
+                        ],
                     )
                     batch_files.append(path.name)
                     batch_paths.append(path)

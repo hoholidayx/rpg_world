@@ -41,6 +41,11 @@ last_batch_id: 2
         """---
 batch_id: 2
 title: "盐霜钥匙"
+source_turn_start: 4
+source_turn_end: 7
+source_message_ids:
+  - 41
+  - 42
 time: "雨夜 23:40"
 location: "雾港钟楼"
 characters:
@@ -64,6 +69,9 @@ characters:
     assert index.batches[0].characters == ("林晚", "伊凡")
     assert index.batches[0].time == "雨夜 23:40"
     assert index.batches[0].location == "雾港钟楼"
+    assert index.batches[0].source_turn_start == 4
+    assert index.batches[0].source_turn_end == 7
+    assert index.batches[0].source_message_ids == (41, 42)
     assert SummaryReader(session_root).get("002") == index.batches[0]
 
 

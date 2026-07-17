@@ -30,6 +30,9 @@ class SummaryDocument:
     time: str = ""
     location: str = ""
     characters: tuple[str, ...] = ()
+    source_turn_start: int | None = None
+    source_turn_end: int | None = None
+    source_message_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,15 @@ class SummaryReader:
                 time=_normalized_text(front_matter.get("time")),
                 location=_normalized_text(front_matter.get("location")),
                 characters=_characters(front_matter.get("characters")),
+                source_turn_start=_optional_positive_int(
+                    front_matter.get("source_turn_start")
+                ),
+                source_turn_end=_optional_positive_int(
+                    front_matter.get("source_turn_end")
+                ),
+                source_message_ids=_positive_ints(
+                    front_matter.get("source_message_ids")
+                ),
                 updated_at=_updated_at(path),
             )
         except Exception as exc:
@@ -162,6 +174,22 @@ def _optional_non_negative_int(value: object) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed >= 0 else None
+
+
+def _optional_positive_int(value: object) -> int | None:
+    parsed = _optional_non_negative_int(value)
+    return parsed if parsed is not None and parsed > 0 else None
+
+
+def _positive_ints(value: object) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        return ()
+    result: list[int] = []
+    for item in value:
+        parsed = _optional_positive_int(item)
+        if parsed is not None and parsed not in result:
+            result.append(parsed)
+    return tuple(result)
 
 
 def _normalized_text(value: object) -> str:

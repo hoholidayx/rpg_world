@@ -1,6 +1,10 @@
 ---
 batch_id: {{ batch_id }}
 title: "{{ title | e }}"
+{% if source_turn_start is not none %}source_turn_start: {{ source_turn_start }}
+{% endif %}{% if source_turn_end is not none %}source_turn_end: {{ source_turn_end }}
+{% endif %}source_message_ids:{% for message_id in source_message_ids | default([], true) %}
+  - {{ message_id }}{% else %} []{% endfor %}
 time: "{{ time | default('', true) | e }}"
 location: "{{ location | default('', true) | e }}"
 characters:{% for char in characters | default([], true) %}

@@ -551,6 +551,11 @@ class MemorySubAgent(BaseSubAgent):
                     call_stats=call_stats,
                 )
                 if result:
+                    turn_ids = [
+                        int(message.turn_id)
+                        for message in batch_slice
+                        if int(message.turn_id) > 0
+                    ]
                     file_path = self._batch_store.save_batch_summary(
                         batch_id=batch_id,
                         title=result["title"],
@@ -559,6 +564,11 @@ class MemorySubAgent(BaseSubAgent):
                         time=result.get("time", ""),
                         location=result.get("location", ""),
                         characters=result.get("characters", []),
+                        source_turn_start=min(turn_ids) if turn_ids else None,
+                        source_turn_end=max(turn_ids) if turn_ids else None,
+                        source_message_ids=[
+                            message.uid for message in batch_slice if message.uid > 0
+                        ],
                     )
                     batch_files.append(file_path.name)
                     batch_paths.append(file_path)

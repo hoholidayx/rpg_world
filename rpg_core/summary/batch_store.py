@@ -51,6 +51,9 @@ class BatchSummaryStore:
         time: str = "",
         location: str = "",
         characters: list[str] | None = None,
+        source_turn_start: int | None = None,
+        source_turn_end: int | None = None,
+        source_message_ids: list[int] | None = None,
     ) -> Path:
         """写入批次摘要 md 文件。返回文件路径。"""
         slug = self._slugify_title(title)
@@ -67,6 +70,9 @@ class BatchSummaryStore:
             location=location,
             characters=characters or [],
             summary_text=summary_text,
+            source_turn_start=source_turn_start,
+            source_turn_end=source_turn_end,
+            source_message_ids=source_message_ids or [],
         )
 
         self._write_atomic(file_path, body)

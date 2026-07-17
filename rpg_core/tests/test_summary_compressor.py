@@ -25,14 +25,14 @@ async def test_summary_compressor_marks_processed_without_truncating_history():
     session = SessionManager(session_id="s1", workspace="data/test_workspace", history_enabled=False)
     session.replace_history([
         Message(Role.SYSTEM, "system"),
-        Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
-        Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
-        Message(Role.USER, "u2", turn_id=2, seq_in_turn=1),
-        Message(Role.ASSISTANT, "a2", turn_id=2, seq_in_turn=2),
-        Message(Role.USER, "u3", turn_id=3, seq_in_turn=1),
-        Message(Role.ASSISTANT, "a3", turn_id=3, seq_in_turn=2),
-        Message(Role.USER, "u4", turn_id=4, seq_in_turn=1),
-        Message(Role.ASSISTANT, "a4", turn_id=4, seq_in_turn=2),
+        Message(Role.USER, "u1", uid=101, turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a1", uid=102, turn_id=1, seq_in_turn=2),
+        Message(Role.USER, "u2", uid=103, turn_id=2, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a2", uid=104, turn_id=2, seq_in_turn=2),
+        Message(Role.USER, "u3", uid=105, turn_id=3, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a3", uid=106, turn_id=3, seq_in_turn=2),
+        Message(Role.USER, "u4", uid=107, turn_id=4, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a4", uid=108, turn_id=4, seq_in_turn=2),
     ], persist=False)
 
     result = await compressor.maybe_compress(session)
@@ -46,6 +46,9 @@ async def test_summary_compressor_marks_processed_without_truncating_history():
     assert memory_sub_agent.batch_calls
     assert memory_sub_agent.overall_calls
     assert batch_store.batch_summaries[0]["title"] == "batch-2"
+    assert batch_store.batch_summaries[0]["source_turn_start"] == 1
+    assert batch_store.batch_summaries[0]["source_turn_end"] == 2
+    assert batch_store.batch_summaries[0]["source_message_ids"] == [101, 102, 103, 104]
 
     second = await compressor.maybe_compress(session)
     assert second.triggered is False

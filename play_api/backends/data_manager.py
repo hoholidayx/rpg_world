@@ -719,6 +719,12 @@ def _summary_document_payload(
         turn_range = turn_ranges.get(document.batch_id)
         if turn_range is not None:
             turn_start, turn_end = turn_range
+        elif (
+            document.source_turn_start is not None
+            and document.source_turn_end is not None
+        ):
+            turn_start = document.source_turn_start
+            turn_end = document.source_turn_end
     elif document.kind == "overall":
         eligible_ranges = [
             turn_range
