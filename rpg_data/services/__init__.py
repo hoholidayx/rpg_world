@@ -3,6 +3,15 @@
 from rpg_data.services.backup import BackupMessageComponent, BackupService
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterManagementService, CharacterReadService
+from rpg_data.services.dream_memory import (
+    DreamActiveMemoryLimitError,
+    DreamDataError,
+    DreamEvidenceInvalidError,
+    DreamMemoryService,
+    DreamProposalConflictError,
+    DreamProposalStaleError,
+    DreamProposalStateError,
+)
 from rpg_data.services.gateway import (
     DataServiceGateway,
     get_data_service_gateway,
@@ -39,6 +48,13 @@ __all__ = [
     "LorebookManagementService",
     "LorebookReadService",
     "MessageService",
+    "DreamActiveMemoryLimitError",
+    "DreamDataError",
+    "DreamEvidenceInvalidError",
+    "DreamMemoryService",
+    "DreamProposalConflictError",
+    "DreamProposalStaleError",
+    "DreamProposalStateError",
     "MediaAssetInUseError",
     "MediaDataService",
     "MediaSourceRangeError",

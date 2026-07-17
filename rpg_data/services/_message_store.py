@@ -311,6 +311,10 @@ class BaseSessionMessageStore:
             fields["metadata_json"] = str(metadata_json)
         if not fields:
             return self.get(message_id)
+        # ``version`` is part of Dream evidence identity and incremental source
+        # manifests. Any supported message mutation creates a new immutable
+        # message revision, even when the content hash itself is unchanged.
+        fields["version"] = self._record_model.version + 1
         fields["updated_at"] = SQL("CURRENT_TIMESTAMP")
         updated = (
             self._record_model

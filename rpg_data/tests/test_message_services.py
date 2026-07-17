@@ -72,6 +72,7 @@ def test_message_service_crud_replace_and_truncate(tmp_path: Path) -> None:
         assert updated is not None
         assert updated.content == "updated"
         assert updated.tool_call_id == "tc1"
+        assert updated.version == second.version + 1
 
         mapped = messages.append_mapping(
             session_id,
@@ -307,6 +308,7 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         assert duplicate.created_at == second.created_at
         assert duplicate.salience == 0.9
         assert duplicate.source_turn_end == 4
+        assert duplicate.version == second.version + 1
         assert duplicate.to_context_dict()["metadata"] == {"kind": "test"}
 
         round_trip = story_memory.add_details_and_mark_processed(
@@ -316,6 +318,7 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         )
         assert [row.id for row in round_trip] == [second.id]
         assert round_trip[0].dedupe_key == duplicate.dedupe_key
+        assert round_trip[0].version == duplicate.version
         assert len(story_memory.list("s_forest001")) == 2
 
         assert story_memory.set_dream_processed([first.id], dream_processed=True) == 1
@@ -368,6 +371,12 @@ def test_story_memory_batch_and_progress_commit_atomically(tmp_path: Path) -> No
             message_ids=[row.id for row in rows],
         )
         assert len(saved) == 1
+        source_manifest = json.loads(saved[0].source_messages_manifest_json)
+        assert [item["messageId"] for item in source_manifest] == [
+            row.id for row in rows
+        ]
+        assert all(item["messageVersion"] == 1 for item in source_manifest)
+        assert all(len(item["contentHash"]) == 64 for item in source_manifest)
         assert all(messages.get(row.id).story_memory_processed for row in rows)
 
         with pytest.raises(ValueError, match="belong to the session"):
@@ -377,6 +386,52 @@ def test_story_memory_batch_and_progress_commit_atomically(tmp_path: Path) -> No
                 message_ids=[999999],
             )
         assert [row.text for row in story_memory.list(session_id)] == ["角色听说北门已经关闭。"]
+    finally:
+        database.close()
+
+
+def test_story_memory_source_manifest_preserves_large_backlog(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        story_memory = StoryMemoryService(database)
+        session_id = _create_test_session(database, "s_story_large_backlog")
+        rows = []
+        for index in range(65):
+            turn_id = index // 2 + 1
+            seq_in_turn = index % 2 + 1
+            role = (
+                models.MESSAGE_ROLE_USER
+                if seq_in_turn == 1
+                else models.MESSAGE_ROLE_ASSISTANT
+            )
+            rows.append(
+                messages.append(
+                    session_id,
+                    role,
+                    f"message-{index}",
+                    turn_id=turn_id,
+                    seq_in_turn=seq_in_turn,
+                )
+            )
+
+        saved = story_memory.add_details_and_mark_processed(
+            session_id,
+            [{
+                "text": "长时间积压的剧情已完成归纳。",
+                "turn_id": 33,
+                "source_turn_start": 1,
+                "source_turn_end": 33,
+            }],
+            message_ids=[row.id for row in rows],
+        )
+
+        source_manifest = json.loads(saved[0].source_messages_manifest_json)
+        assert len(source_manifest) == 65
+        assert [item["messageId"] for item in source_manifest] == [
+            row.id for row in rows
+        ]
+        assert all(messages.get(row.id).story_memory_processed for row in rows)
     finally:
         database.close()
 

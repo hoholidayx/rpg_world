@@ -6,6 +6,7 @@ from peewee import Database
 
 from rpg_data import models
 from rpg_data.repositories.session_repo import SessionRepository
+from rpg_data.services.dream_memory import DreamMemoryService
 from rpg_data.services.message import MessageService
 from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
@@ -27,6 +28,7 @@ class SessionResetService:
         narrative_outcomes: NarrativeOutcomeService | None = None,
         session_roles: SessionRoleService | None = None,
         story_memory: StoryMemoryService | None = None,
+        dream: DreamMemoryService | None = None,
         status: StatusTableService | None = None,
         media: MediaDataService | None = None,
     ) -> None:
@@ -36,6 +38,7 @@ class SessionResetService:
         self._narrative_outcomes = narrative_outcomes or NarrativeOutcomeService(database)
         self._session_roles = session_roles or SessionRoleService(database)
         self._story_memory = story_memory or StoryMemoryService(database)
+        self._dream = dream or DreamMemoryService(database)
         self._status = status or StatusTableService(database)
         self._media = media or MediaDataService(database)
 
@@ -54,6 +57,7 @@ class SessionResetService:
             messages_cleared = self._messages.clear(normalized_session_id)
             outcomes_cleared = self._narrative_outcomes.clear(normalized_session_id)
             story_memories_cleared = self._story_memory.clear(normalized_session_id)
+            dream_result = self._dream.clear(normalized_session_id)
             status_result = self._status.reset_session_tables(
                 normalized_session_id
             )
@@ -67,6 +71,8 @@ class SessionResetService:
             messages_cleared=messages_cleared,
             narrative_outcomes_cleared=outcomes_cleared,
             story_memories_cleared=story_memories_cleared,
+            dream_memories_cleared=dream_result.memories_cleared,
+            dream_proposals_cleared=dream_result.proposals_cleared,
             template_status_tables_cleared=status_result.template_tables_cleared,
             template_status_tables_initialized=(
                 status_result.template_tables_initialized

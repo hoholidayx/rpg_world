@@ -34,6 +34,13 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_session_messages",
             "rpg_session_backup_messages",
             "rpg_session_story_memories",
+            "rpg_session_dream_proposals",
+            "rpg_session_dream_proposal_items",
+            "rpg_session_dream_proposal_item_evidence",
+            "rpg_session_persistent_memories",
+            "rpg_session_persistent_memory_revisions",
+            "rpg_session_persistent_memory_evidence",
+            "rpg_session_dream_states",
             "rpg_session_narrative_outcomes",
             "rpg_rp_module_catalog",
             "rpg_story_rp_modules",
@@ -87,6 +94,12 @@ def test_run_migrations_creates_initial_tables() -> None:
         session_message_columns = set(session_message_info)
         backup_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_backup_messages)")}
         story_memory_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_story_memories)")}
+        dream_item_columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(rpg_session_dream_proposal_items)"
+            )
+        }
         narrative_outcome_columns = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(rpg_session_narrative_outcomes)")
@@ -180,7 +193,21 @@ def test_run_migrations_creates_initial_tables() -> None:
             "dream_processed",
             "metadata_schema_version",
             "metadata_json",
+            "source_messages_manifest_json",
         }.issubset(story_memory_columns)
+        assert {
+            "proposal_id",
+            "action",
+            "target_memory_id",
+            "base_revision_number",
+            "dedupe_key",
+            "selected",
+            "text",
+            "memory_kind",
+            "epistemic_status",
+            "salience",
+            "reason",
+        }.issubset(dream_item_columns)
         assert {
             "session_id",
             "turn_id",
@@ -339,6 +366,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0012", "0012_media_library_taxonomy.sql"),
             ("0013", "0013_tts.sql"),
             ("0014", "0014_story_memory_metadata.sql"),
+            ("0015", "0015_dream_memory.sql"),
         ]
     finally:
         conn.close()
@@ -347,12 +375,16 @@ def test_run_migrations_is_idempotent() -> None:
 def test_story_memory_metadata_migration_hard_cuts_legacy_rows(monkeypatch) -> None:
     conn = db.connect(":memory:")
     migrations = migration_runner._iter_migration_files()
-    assert migrations[-1].name == "0014_story_memory_metadata.sql"
+    story_memory_index = next(
+        index
+        for index, migration in enumerate(migrations)
+        if migration.name == "0014_story_memory_metadata.sql"
+    )
     try:
         monkeypatch.setattr(
             migration_runner,
             "_iter_migration_files",
-            lambda: migrations[:-1],
+            lambda: migrations[:story_memory_index],
         )
         migration_runner.run_migrations(conn)
         conn.execute(

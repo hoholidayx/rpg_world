@@ -65,6 +65,7 @@ class StoryMemoryService:
         dedupe_key: str = "",
         metadata_schema_version: int = 1,
         metadata_json: str = "{}",
+        source_messages_manifest_json: str = "[]",
     ) -> models.SessionStoryMemory:
         payload = _normalize_detail(
             text=text,
@@ -78,6 +79,7 @@ class StoryMemoryService:
             dedupe_key=dedupe_key,
             metadata_schema_version=metadata_schema_version,
             metadata_json=metadata_json,
+            source_messages_manifest_json=source_messages_manifest_json,
         )
         with self._database.atomic():
             return self._upsert_detail(session_id, payload)
@@ -93,17 +95,30 @@ class StoryMemoryService:
         payloads = [_coerce_detail(detail) for detail in details]
         ids = sorted({_required_positive_int(value, "message_id") for value in message_ids})
         with self._database.atomic():
+            source_rows: list[SessionMessageRecord] = []
             if ids:
-                matched = int(
+                source_rows = list(
                     SessionMessageRecord.select()
                     .where(
                         (SessionMessageRecord.session == session_id)
                         & (SessionMessageRecord.id.in_(ids))
                     )
-                    .count()
+                    .order_by(SessionMessageRecord.id)
                 )
-                if matched != len(ids):
+                if len(source_rows) != len(ids):
                     raise ValueError("story-memory source messages must belong to the session")
+                source_manifest = _source_messages_manifest_json(source_rows)
+                source_turn_start = min(int(row.turn_id) for row in source_rows)
+                source_turn_end = max(int(row.turn_id) for row in source_rows)
+                for payload in payloads:
+                    if (
+                        int(payload["source_turn_start"]) > source_turn_start
+                        or int(payload["source_turn_end"]) < source_turn_end
+                    ):
+                        raise ValueError(
+                            "story-memory source turn range must cover every source message"
+                        )
+                    payload["source_messages_manifest_json"] = source_manifest
             rows = [self._upsert_detail(session_id, payload) for payload in payloads]
             if ids:
                 SessionMessageRecord.update(
@@ -145,6 +160,7 @@ class StoryMemoryService:
         if existing is None:
             row = SessionStoryMemoryRecord.create(session=session_id, **payload)
             return to_session_story_memory(SessionStoryMemoryRecord.get_by_id(row.id))
+        semantic_before = _story_memory_semantic_signature(existing)
         existing.turn_id = max(int(existing.turn_id), int(payload["turn_id"]))
         existing.text = str(payload["text"])
         existing.memory_kind = str(payload["memory_kind"])
@@ -165,6 +181,15 @@ class StoryMemoryService:
             str(existing.metadata_json or "{}"),
             str(payload["metadata_json"]),
         )
+        incoming_source_manifest = _normalize_source_messages_manifest_json(
+            payload["source_messages_manifest_json"]
+        )
+        if incoming_source_manifest != "[]":
+            # A repeated extraction of the same normalized fact is fresh
+            # support, not an ever-growing union with potentially stale rows.
+            existing.source_messages_manifest_json = incoming_source_manifest
+        if _story_memory_semantic_signature(existing) != semantic_before:
+            existing.version = int(existing.version) + 1
         existing.updated_at = SQL("CURRENT_TIMESTAMP")
         existing.save()
         return to_session_story_memory(SessionStoryMemoryRecord.get_by_id(existing.id))
@@ -201,6 +226,25 @@ class StoryMemoryService:
             raise FileNotFoundError(f"Session not found: {session_id}")
 
 
+def _story_memory_semantic_signature(
+    row: SessionStoryMemoryRecord,
+) -> tuple[object, ...]:
+    """Fields that change the derived story-memory source, excluding checkpoints."""
+
+    return (
+        int(row.turn_id),
+        str(row.text),
+        str(row.memory_kind),
+        str(row.epistemic_status),
+        float(row.salience),
+        int(row.source_turn_start),
+        int(row.source_turn_end),
+        int(row.metadata_schema_version),
+        str(row.metadata_json or "{}"),
+        str(row.source_messages_manifest_json or "[]"),
+    )
+
+
 def _coerce_detail(
     detail: models.SessionStoryMemory | dict[str, object],
 ) -> dict[str, object]:
@@ -217,6 +261,7 @@ def _coerce_detail(
             "dedupe_key": detail.dedupe_key,
             "metadata_schema_version": detail.metadata_schema_version,
             "metadata_json": detail.metadata_json,
+            "source_messages_manifest_json": detail.source_messages_manifest_json,
         }
 
     metadata_json = detail.get("metadata_json", "")
@@ -234,6 +279,9 @@ def _coerce_detail(
         dedupe_key=str(detail.get("dedupe_key", "") or ""),
         metadata_schema_version=detail.get("metadata_schema_version", 1),
         metadata_json=str(metadata_json or "{}"),
+        source_messages_manifest_json=str(
+            detail.get("source_messages_manifest_json", "[]") or "[]"
+        ),
     )
 
 
@@ -250,6 +298,7 @@ def _normalize_detail(
     dedupe_key: object,
     metadata_schema_version: object,
     metadata_json: object,
+    source_messages_manifest_json: object,
 ) -> dict[str, object]:
     normalized_turn_id = _required_positive_int(turn_id, "turn_id")
     start = _required_positive_int(
@@ -283,6 +332,9 @@ def _normalize_detail(
         raise ValueError("story memory metadata_json must be a JSON object") from exc
     if not isinstance(metadata, dict):
         raise ValueError("story memory metadata_json must be a JSON object")
+    source_manifest_json = _normalize_source_messages_manifest_json(
+        source_messages_manifest_json
+    )
     normalized_text = " ".join(str(text or "").split())
     if not normalized_text:
         raise ValueError("story memory text must not be empty")
@@ -299,7 +351,63 @@ def _normalize_detail(
         "dream_processed": bool(dream_processed),
         "metadata_schema_version": schema_version,
         "metadata_json": json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+        "source_messages_manifest_json": source_manifest_json,
     }
+
+
+def _source_messages_manifest_json(
+    rows: Iterable[SessionMessageRecord],
+) -> str:
+    return _normalize_source_messages_manifest_json(
+        json.dumps(
+            [
+                {
+                    "messageId": int(row.id),
+                    "turnId": int(row.turn_id),
+                    "messageVersion": int(row.version),
+                    "contentHash": hashlib.sha256(
+                        str(row.content or "").encode("utf-8")
+                    ).hexdigest(),
+                }
+                for row in rows
+            ],
+            ensure_ascii=False,
+        )
+    )
+
+
+def _normalize_source_messages_manifest_json(value: object) -> str:
+    try:
+        payload = json.loads(str(value or "[]"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("story memory source manifest must be a JSON array") from exc
+    if not isinstance(payload, list):
+        raise ValueError("story memory source manifest must be a JSON array")
+    normalized: dict[int, dict[str, object]] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError("story memory source manifest entries must be objects")
+        message_id = _required_positive_int(item.get("messageId"), "messageId")
+        if message_id in normalized:
+            raise ValueError("story memory source manifest message IDs must be unique")
+        content_hash = str(item.get("contentHash", "") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", content_hash):
+            raise ValueError("story memory source contentHash must be SHA-256")
+        normalized[message_id] = {
+            "messageId": message_id,
+            "turnId": _required_positive_int(item.get("turnId"), "turnId"),
+            "messageVersion": _required_positive_int(
+                item.get("messageVersion"),
+                "messageVersion",
+            ),
+            "contentHash": content_hash,
+        }
+    return json.dumps(
+        [normalized[message_id] for message_id in sorted(normalized)],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 def _normalize_dedupe_key(raw: str, memory_kind: str, text: str) -> str:

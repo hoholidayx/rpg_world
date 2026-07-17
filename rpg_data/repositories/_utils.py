@@ -486,6 +486,7 @@ def to_session_story_memory(row: records.SessionStoryMemoryRecord) -> models.Ses
         dream_processed=bool(row.dream_processed),
         metadata_schema_version=int(row.metadata_schema_version),
         metadata_json=str(row.metadata_json or "{}"),
+        source_messages_manifest_json=str(row.source_messages_manifest_json or "[]"),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),

@@ -54,6 +54,20 @@ __all__ = [
     "SessionResetResult",
     "SessionStatusResetResult",
     "SessionStoryMemory",
+    "DreamApplyResult",
+    "DreamEvidenceDraft",
+    "DreamProposal",
+    "DreamProposalItem",
+    "DreamProposalItemDraft",
+    "DreamProposalItemEvidence",
+    "DreamProposalItemPatch",
+    "DreamResetResult",
+    "DreamSourceSnapshot",
+    "DreamState",
+    "PersistentMemory",
+    "PersistentMemoryBundle",
+    "PersistentMemoryEvidence",
+    "PersistentMemoryRevision",
     "SessionStatusTable",
     "Story",
     "StoryRPModule",
@@ -96,6 +110,34 @@ __all__ = [
     "MESSAGE_ROLES",
     "STORY_MEMORY_KINDS",
     "STORY_MEMORY_EPISTEMIC_STATUSES",
+    "DREAM_ACTIONS",
+    "DREAM_ACTION_ADD",
+    "DREAM_ACTION_RETIRE",
+    "DREAM_ACTION_REVISE",
+    "DREAM_ACTION_SUPERSEDE",
+    "DREAM_DEPTHS",
+    "DREAM_DEPTH_DEEP",
+    "DREAM_DEPTH_SHALLOW",
+    "DREAM_LIFECYCLES",
+    "DREAM_LIFECYCLE_ACTIVE",
+    "DREAM_LIFECYCLE_RETIRED",
+    "DREAM_LIFECYCLE_SUPERSEDED",
+    "DREAM_MAX_ACTIVE_MEMORIES",
+    "DREAM_MAX_EVIDENCE_PER_ITEM",
+    "DREAM_MAX_MEMORY_TEXT_CHARS",
+    "DREAM_MAX_PROPOSAL_ITEMS",
+    "DREAM_MAX_REASON_CHARS",
+    "DREAM_PROPOSAL_STATUSES",
+    "DREAM_PROPOSAL_STATUS_APPLIED",
+    "DREAM_PROPOSAL_STATUS_FAILED",
+    "DREAM_PROPOSAL_STATUS_GENERATING",
+    "DREAM_PROPOSAL_STATUS_INTERRUPTED",
+    "DREAM_PROPOSAL_STATUS_READY",
+    "DREAM_PROPOSAL_STATUS_REJECTED",
+    "DREAM_PROPOSAL_STATUS_STALE",
+    "DREAM_SCOPES",
+    "DREAM_SCOPE_FULL",
+    "DREAM_SCOPE_INCREMENTAL",
     "MEDIA_JOB_ACTIVE_STATUSES",
     "MEDIA_JOB_FINAL_STATUSES",
     "MEDIA_JOB_STATUSES",
@@ -214,6 +256,51 @@ STORY_MEMORY_EPISTEMIC_STATUSES = frozenset({
     "uncertain",
     "contradicted",
 })
+DREAM_DEPTH_SHALLOW = "shallow"
+DREAM_DEPTH_DEEP = "deep"
+DREAM_DEPTHS = frozenset({DREAM_DEPTH_SHALLOW, DREAM_DEPTH_DEEP})
+DREAM_SCOPE_INCREMENTAL = "incremental"
+DREAM_SCOPE_FULL = "full"
+DREAM_SCOPES = frozenset({DREAM_SCOPE_INCREMENTAL, DREAM_SCOPE_FULL})
+DREAM_PROPOSAL_STATUS_GENERATING = "generating"
+DREAM_PROPOSAL_STATUS_READY = "ready"
+DREAM_PROPOSAL_STATUS_APPLIED = "applied"
+DREAM_PROPOSAL_STATUS_REJECTED = "rejected"
+DREAM_PROPOSAL_STATUS_FAILED = "failed"
+DREAM_PROPOSAL_STATUS_INTERRUPTED = "interrupted"
+DREAM_PROPOSAL_STATUS_STALE = "stale"
+DREAM_PROPOSAL_STATUSES = frozenset({
+    DREAM_PROPOSAL_STATUS_GENERATING,
+    DREAM_PROPOSAL_STATUS_READY,
+    DREAM_PROPOSAL_STATUS_APPLIED,
+    DREAM_PROPOSAL_STATUS_REJECTED,
+    DREAM_PROPOSAL_STATUS_FAILED,
+    DREAM_PROPOSAL_STATUS_INTERRUPTED,
+    DREAM_PROPOSAL_STATUS_STALE,
+})
+DREAM_ACTION_ADD = "add"
+DREAM_ACTION_REVISE = "revise"
+DREAM_ACTION_SUPERSEDE = "supersede"
+DREAM_ACTION_RETIRE = "retire"
+DREAM_ACTIONS = frozenset({
+    DREAM_ACTION_ADD,
+    DREAM_ACTION_REVISE,
+    DREAM_ACTION_SUPERSEDE,
+    DREAM_ACTION_RETIRE,
+})
+DREAM_LIFECYCLE_ACTIVE = "active"
+DREAM_LIFECYCLE_RETIRED = "retired"
+DREAM_LIFECYCLE_SUPERSEDED = "superseded"
+DREAM_LIFECYCLES = frozenset({
+    DREAM_LIFECYCLE_ACTIVE,
+    DREAM_LIFECYCLE_RETIRED,
+    DREAM_LIFECYCLE_SUPERSEDED,
+})
+DREAM_MAX_ACTIVE_MEMORIES = 64
+DREAM_MAX_MEMORY_TEXT_CHARS = 1000
+DREAM_MAX_EVIDENCE_PER_ITEM = 64
+DREAM_MAX_PROPOSAL_ITEMS = 128
+DREAM_MAX_REASON_CHARS = 1000
 MEDIA_JOB_STATUS_QUEUED = "queued"
 MEDIA_JOB_STATUS_RUNNING = "running"
 MEDIA_JOB_STATUS_CANCELLING = "cancelling"
@@ -579,6 +666,8 @@ class SessionResetResult:
     messages_cleared: int = 0
     narrative_outcomes_cleared: int = 0
     story_memories_cleared: int = 0
+    dream_memories_cleared: int = 0
+    dream_proposals_cleared: int = 0
     template_status_tables_cleared: int = 0
     template_status_tables_initialized: int = 0
     session_native_status_tables_reset: int = 0
@@ -1065,6 +1154,7 @@ class SessionStoryMemory:
     dream_processed: bool = False
     metadata_schema_version: int = 1
     metadata_json: str = "{}"
+    source_messages_manifest_json: str = "[]"
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
@@ -1090,6 +1180,201 @@ class SessionStoryMemory:
             "metadata_schema_version": self.metadata_schema_version,
             "metadata": metadata if isinstance(metadata, dict) else {},
         }
+
+
+@dataclass(frozen=True)
+class DreamEvidenceDraft:
+    message_id: int
+    turn_id: int
+    message_version: int
+    content_hash: str
+
+
+@dataclass(frozen=True)
+class DreamProposalItemDraft:
+    action: str
+    dedupe_key: str
+    text: str = ""
+    memory_kind: str = "event"
+    epistemic_status: str = "confirmed"
+    salience: float = 0.5
+    reason: str = ""
+    target_memory_id: str | None = None
+    base_revision_number: int | None = None
+    selected: bool = True
+    sort_order: int = 0
+    evidence: tuple[DreamEvidenceDraft, ...] = ()
+
+
+@dataclass(frozen=True)
+class DreamProposalItemPatch:
+    item_id: str
+    selected: bool | None = None
+    text: str | None = None
+    memory_kind: str | None = None
+    epistemic_status: str | None = None
+    salience: float | None = None
+
+
+@dataclass(frozen=True)
+class DreamProposalItemEvidence:
+    id: int
+    proposal_item_id: str
+    message_id: int
+    turn_id: int
+    message_version: int
+    content_hash: str
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class DreamProposalItem:
+    id: str
+    proposal_id: str
+    action: str
+    dedupe_key: str
+    selected: bool
+    text: str
+    memory_kind: str
+    epistemic_status: str
+    salience: float
+    reason: str = ""
+    target_memory_id: str | None = None
+    base_revision_number: int | None = None
+    sort_order: int = 0
+    evidence: tuple[DreamProposalItemEvidence, ...] = ()
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class DreamProposal:
+    id: str
+    session_id: str
+    depth: str
+    scope: str
+    status: str
+    history_fingerprint: str
+    source_fingerprint: str
+    ledger_revision: int
+    next_messages_manifest_json: str = "{}"
+    next_story_memories_manifest_json: str = "{}"
+    next_summary_batches_manifest_json: str = "{}"
+    source_story_memory_ids: tuple[int, ...] = ()
+    error_code: str = ""
+    error_message: str = ""
+    items: tuple[DreamProposalItem, ...] = ()
+    applied_at: str = ""
+    rejected_at: str = ""
+    finished_at: str = ""
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class PersistentMemory:
+    id: str
+    session_id: str
+    dedupe_key: str
+    lifecycle: str
+    current_revision_number: int
+    superseded_by_memory_id: str | None = None
+    created_from_proposal_id: str | None = None
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class PersistentMemoryEvidence:
+    id: int
+    revision_id: int
+    message_id: int
+    turn_id: int
+    message_version: int
+    content_hash: str
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class PersistentMemoryRevision:
+    id: int
+    memory_id: str
+    revision_number: int
+    text: str
+    memory_kind: str
+    epistemic_status: str
+    salience: float
+    source_proposal_id: str | None = None
+    evidence: tuple[PersistentMemoryEvidence, ...] = ()
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class PersistentMemoryBundle:
+    memory: PersistentMemory
+    current_revision: PersistentMemoryRevision
+    revisions: tuple[PersistentMemoryRevision, ...] = ()
+    evidence_valid: bool = False
+
+    @property
+    def text(self) -> str:
+        return self.current_revision.text
+
+    @property
+    def memory_kind(self) -> str:
+        return self.current_revision.memory_kind
+
+    @property
+    def epistemic_status(self) -> str:
+        return self.current_revision.epistemic_status
+
+    @property
+    def salience(self) -> float:
+        return self.current_revision.salience
+
+
+@dataclass(frozen=True)
+class DreamState:
+    session_id: str
+    ledger_revision: int = 0
+    messages_manifest_json: str = "{}"
+    story_memories_manifest_json: str = "{}"
+    summary_batches_manifest_json: str = "{}"
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class DreamApplyResult:
+    proposal: DreamProposal
+    ledger_revision: int
+    active_memory_count: int
+    created_memory_ids: tuple[str, ...] = ()
+    revised_memory_ids: tuple[str, ...] = ()
+    retired_memory_ids: tuple[str, ...] = ()
+    superseded_memory_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DreamResetResult:
+    session_id: str
+    memories_cleared: int = 0
+    proposals_cleared: int = 0
+    states_cleared: int = 0
+
+
+@dataclass(frozen=True)
+class DreamSourceSnapshot:
+    session_id: str
+    messages: tuple[SessionMessage, ...]
+    story_memories: tuple[SessionStoryMemory, ...]
+    active_memories: tuple[PersistentMemoryBundle, ...]
+    state: DreamState
+    history_fingerprint: str
+    story_memory_fingerprint: str
 
 
 @dataclass(frozen=True)

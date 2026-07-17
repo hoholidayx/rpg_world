@@ -36,12 +36,19 @@ __all__ = [
     "NarrativeStyleRecord",
     "RPModuleCatalogRecord",
     "SessionBackupMessageRecord",
+    "SessionDreamProposalItemEvidenceRecord",
+    "SessionDreamProposalItemRecord",
+    "SessionDreamProposalRecord",
+    "SessionDreamStateRecord",
     "SessionMessageRecord",
     "SessionMediaBackgroundRecord",
     "SessionMediaBackgroundStateRecord",
     "SessionMediaGalleryItemRecord",
     "SessionNarrativeOutcomeRecord",
     "SessionProfileRecord",
+    "SessionPersistentMemoryEvidenceRecord",
+    "SessionPersistentMemoryRecord",
+    "SessionPersistentMemoryRevisionRecord",
     "SessionRPModuleOverrideRecord",
     "SessionRecord",
     "SessionStoryMemoryRecord",
@@ -351,6 +358,7 @@ class SessionStoryMemoryRecord(BaseRecord):
     dream_processed = BooleanField(default=False)
     metadata_schema_version = IntegerField(default=1, constraints=[Check("metadata_schema_version > 0")])
     metadata_json = TextField(default="{}")
+    source_messages_manifest_json = TextField(default="[]")
     version = IntegerField(default=1)
     created_at = TextField()
     updated_at = TextField()
@@ -358,6 +366,188 @@ class SessionStoryMemoryRecord(BaseRecord):
     class Meta:
         table_name = "rpg_session_story_memories"
         indexes = ((('session', 'dedupe_key'), True),)
+
+
+class SessionDreamProposalRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="dream_proposals",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    depth = TextField()
+    scope = TextField()
+    status = TextField(default="generating")
+    history_fingerprint = CharField()
+    source_fingerprint = CharField()
+    ledger_revision = IntegerField(default=0)
+    next_messages_manifest_json = TextField(default="{}")
+    next_story_memories_manifest_json = TextField(default="{}")
+    next_summary_batches_manifest_json = TextField(default="{}")
+    source_story_memory_ids_json = TextField(default="[]")
+    error_code = TextField(default="")
+    error_message = TextField(default="")
+    applied_at = TextField(null=True)
+    rejected_at = TextField(null=True)
+    finished_at = TextField(null=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_dream_proposals"
+
+
+class SessionPersistentMemoryRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="persistent_memories",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    dedupe_key = CharField()
+    lifecycle = TextField(default="active")
+    current_revision_number = IntegerField(default=1)
+    superseded_by_memory = ForeignKeyField(
+        "self",
+        backref="superseded_memories",
+        column_name="superseded_by_memory_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    created_from_proposal = ForeignKeyField(
+        SessionDreamProposalRecord,
+        backref="created_memories",
+        column_name="created_from_proposal_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_persistent_memories"
+        indexes = ((('session', 'dedupe_key'), True),)
+
+
+class SessionPersistentMemoryRevisionRecord(BaseRecord):
+    id = AutoField()
+    memory = ForeignKeyField(
+        SessionPersistentMemoryRecord,
+        backref="revisions",
+        column_name="memory_id",
+        on_delete="CASCADE",
+    )
+    revision_number = IntegerField()
+    text = TextField()
+    memory_kind = TextField()
+    epistemic_status = TextField()
+    salience = FloatField()
+    source_proposal = ForeignKeyField(
+        SessionDreamProposalRecord,
+        backref="memory_revisions",
+        column_name="source_proposal_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    created_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_persistent_memory_revisions"
+        indexes = ((('memory', 'revision_number'), True),)
+
+
+class SessionPersistentMemoryEvidenceRecord(BaseRecord):
+    id = AutoField()
+    revision = ForeignKeyField(
+        SessionPersistentMemoryRevisionRecord,
+        backref="evidence_rows",
+        column_name="revision_id",
+        on_delete="CASCADE",
+    )
+    message_id = IntegerField()
+    turn_id = IntegerField()
+    message_version = IntegerField()
+    content_hash = CharField()
+    created_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_persistent_memory_evidence"
+        indexes = ((('revision', 'message_id'), True),)
+
+
+class SessionDreamProposalItemRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    proposal = ForeignKeyField(
+        SessionDreamProposalRecord,
+        backref="items",
+        column_name="proposal_id",
+        on_delete="CASCADE",
+    )
+    action = TextField()
+    target_memory = ForeignKeyField(
+        SessionPersistentMemoryRecord,
+        backref="proposal_items",
+        column_name="target_memory_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    base_revision_number = IntegerField(null=True)
+    dedupe_key = CharField()
+    selected = BooleanField(default=True)
+    text = TextField(default="")
+    memory_kind = TextField(default="event")
+    epistemic_status = TextField(default="confirmed")
+    salience = FloatField(default=0.5)
+    reason = TextField(default="")
+    sort_order = IntegerField(default=0)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_dream_proposal_items"
+
+
+class SessionDreamProposalItemEvidenceRecord(BaseRecord):
+    id = AutoField()
+    proposal_item = ForeignKeyField(
+        SessionDreamProposalItemRecord,
+        backref="evidence_rows",
+        column_name="proposal_item_id",
+        on_delete="CASCADE",
+    )
+    message_id = IntegerField()
+    turn_id = IntegerField()
+    message_version = IntegerField()
+    content_hash = CharField()
+    created_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_dream_proposal_item_evidence"
+        indexes = ((('proposal_item', 'message_id'), True),)
+
+
+class SessionDreamStateRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        primary_key=True,
+        backref="dream_state",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    ledger_revision = IntegerField(default=0)
+    messages_manifest_json = TextField(default="{}")
+    story_memories_manifest_json = TextField(default="{}")
+    summary_batches_manifest_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_dream_states"
 
 
 class SessionNarrativeOutcomeRecord(BaseRecord):
@@ -1054,6 +1244,13 @@ RECORD_MODELS = (
     SessionMessageRecord,
     SessionBackupMessageRecord,
     SessionStoryMemoryRecord,
+    SessionDreamProposalRecord,
+    SessionPersistentMemoryRecord,
+    SessionPersistentMemoryRevisionRecord,
+    SessionPersistentMemoryEvidenceRecord,
+    SessionDreamProposalItemRecord,
+    SessionDreamProposalItemEvidenceRecord,
+    SessionDreamStateRecord,
     RPModuleCatalogRecord,
     StoryRPModuleRecord,
     SessionRPModuleOverrideRecord,
