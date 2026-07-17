@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "review_status": "seed_pending_two_person_review",
+  "description": "Project-maintained RP recall cases. Gold and forbidden evidence are fixed independently of the retriever under test.",
+  "samples": [
+    {
+      "sample_id": "alias_pronoun",
+      "documents": [
+        {"id": "alias:1", "text": "艾琳的地下联络代号是银狐。"},
+        {"id": "alias:2", "text": "艾琳答应在钟楼敲响三次钟后打开密道。"},
+        {"id": "alias:3", "text": "格里姆负责看守港口仓库。"}
+      ],
+      "questions": [
+        {
+          "id": "alias:q1",
+          "question": "她答应在什么信号后打开密道？",
+          "recent_turns": ["GM: 银狐刚刚离开了酒馆。"],
+          "gold_evidence": ["alias:2"],
+          "forbidden_evidence": ["alias:3"]
+        }
+      ]
+    },
+    {
+      "sample_id": "relative_time",
+      "documents": [
+        {"id": "time:1", "text": "第一天夜晚，艾琳约定三天后在雾港钟楼会合。"},
+        {"id": "time:2", "text": "第二天清晨，队伍仍在北门旅店。"},
+        {"id": "time:3", "text": "第五天中午，格里姆计划前往旧矿井。"}
+      ],
+      "questions": [
+        {
+          "id": "time:q1",
+          "question": "三天后的约定是什么？",
+          "scene_time": "第一天夜晚",
+          "scene_location": "雾港",
+          "gold_evidence": ["time:1"],
+          "forbidden_evidence": ["time:3"]
+        }
+      ]
+    },
+    {
+      "sample_id": "reported_vs_confirmed",
+      "documents": [
+        {"id": "epistemic:1", "text": "水手声称北门已经封锁，但无人验证。", "metadata": {"memory_kind": "world_fact", "epistemic_status": "reported"}},
+        {"id": "epistemic:2", "text": "守卫现场确认东门已经封锁。", "metadata": {"memory_kind": "world_fact", "epistemic_status": "confirmed"}},
+        {"id": "epistemic:3", "text": "商人推测南门可能在午夜关闭。", "metadata": {"memory_kind": "world_fact", "epistemic_status": "inferred"}}
+      ],
+      "questions": [
+        {
+          "id": "epistemic:q1",
+          "question": "哪个入口已被现场确认封锁？",
+          "gold_evidence": ["epistemic:2"],
+          "forbidden_evidence": ["epistemic:1", "epistemic:3"]
+        },
+        {
+          "id": "epistemic:q2",
+          "question": "关于北门，水手声称了什么？",
+          "gold_evidence": ["epistemic:1"],
+          "forbidden_evidence": []
+        }
+      ]
+    },
+    {
+      "sample_id": "attempt_vs_success",
+      "documents": [
+        {"id": "attempt:1", "text": "洛恩尝试撬开铁门，但工具折断，铁门仍然关闭。", "metadata": {"memory_kind": "event", "epistemic_status": "confirmed"}},
+        {"id": "attempt:2", "text": "艾琳使用守卫钥匙成功打开了侧门。", "metadata": {"memory_kind": "event", "epistemic_status": "confirmed"}},
+        {"id": "attempt:3", "text": "格里姆计划寻找地下入口。", "metadata": {"memory_kind": "commitment", "epistemic_status": "confirmed"}}
+      ],
+      "questions": [
+        {
+          "id": "attempt:q1",
+          "question": "谁成功打开了一扇门？",
+          "gold_evidence": ["attempt:2"],
+          "forbidden_evidence": ["attempt:1", "attempt:3"]
+        },
+        {
+          "id": "attempt:q2",
+          "question": "洛恩撬门的尝试结果如何？",
+          "gold_evidence": ["attempt:1"],
+          "forbidden_evidence": []
+        }
+      ]
+    },
+    {
+      "sample_id": "commitment_vs_completion",
+      "documents": [
+        {"id": "commitment:1", "text": "艾琳承诺明晚把药剂送到旅店。", "metadata": {"memory_kind": "commitment", "epistemic_status": "confirmed"}},
+        {"id": "commitment:2", "text": "格里姆已经把地图交给洛恩。", "metadata": {"memory_kind": "event", "epistemic_status": "confirmed"}},
+        {"id": "commitment:3", "text": "药剂目前仍在艾琳手中。", "metadata": {"memory_kind": "state_change", "epistemic_status": "confirmed"}}
+      ],
+      "questions": [
+        {
+          "id": "commitment:q1",
+          "question": "谁已经完成了交付？",
+          "gold_evidence": ["commitment:2"],
+          "forbidden_evidence": ["commitment:1"]
+        },
+        {
+          "id": "commitment:q2",
+          "question": "艾琳承诺何时送药剂？",
+          "gold_evidence": ["commitment:1"],
+          "forbidden_evidence": []
+        }
+      ]
+    },
+    {
+      "sample_id": "contradiction",
+      "documents": [
+        {"id": "contradiction:1", "text": "早先传闻失踪的船长已经死亡。", "metadata": {"memory_kind": "event", "epistemic_status": "contradicted"}},
+        {"id": "contradiction:2", "text": "队伍随后亲眼见到船长活着返回雾港。", "metadata": {"memory_kind": "event", "epistemic_status": "confirmed"}},
+        {"id": "contradiction:3", "text": "船长的旧船仍停在东码头。", "metadata": {"memory_kind": "state_change", "epistemic_status": "confirmed"}}
+      ],
+      "questions": [
+        {
+          "id": "contradiction:q1",
+          "question": "船长目前是否还活着？",
+          "gold_evidence": ["contradiction:2"],
+          "forbidden_evidence": ["contradiction:1"]
+        }
+      ]
+    },
+    {
+      "sample_id": "player_identity",
+      "documents": [
+        {"id": "identity:1", "text": "玩家角色洛恩持有银色钥匙。"},
+        {"id": "identity:2", "text": "同名 NPC 洛恩·灰眼持有黑曜石匕首。"},
+        {"id": "identity:3", "text": "艾琳保管着钟楼通行证。"}
+      ],
+      "questions": [
+        {
+          "id": "identity:q1",
+          "question": "我持有什么钥匙？",
+          "player_character": "洛恩",
+          "gold_evidence": ["identity:1"],
+          "forbidden_evidence": ["identity:2"]
+        }
+      ]
+    },
+    {
+      "sample_id": "overall_duplicate",
+      "documents": [
+        {"id": "overall:1", "text": "整体摘要：艾琳在钟楼发现密道。", "metadata": {"type": "overall", "file": "/summaries/overall.md"}},
+        {"id": "overall:2", "text": "第三批剧情：艾琳在钟楼发现密道入口刻有银狐标记。", "metadata": {"type": "batch", "file": "/summaries/003-clocktower.md"}},
+        {"id": "overall:3", "text": "第一批剧情：队伍抵达雾港。", "metadata": {"type": "batch", "file": "/summaries/001-arrival.md"}}
+      ],
+      "questions": [
+        {
+          "id": "overall:q1",
+          "question": "钟楼密道入口有什么标记？",
+          "gold_evidence": ["overall:2"],
+          "forbidden_evidence": ["overall:1"]
+        }
+      ]
+    },
+    {
+      "sample_id": "item_ownership",
+      "documents": [
+        {"id": "item:1", "text": "洛恩把月石交给艾琳保管。"},
+        {"id": "item:2", "text": "艾琳随后把月石锁进旅店保险箱。"},
+        {"id": "item:3", "text": "格里姆持有一枚红宝石戒指。"}
+      ],
+      "questions": [
+        {
+          "id": "item:q1",
+          "question": "月石现在在哪里？",
+          "gold_evidence": ["item:2"],
+          "forbidden_evidence": ["item:1", "item:3"]
+        }
+      ]
+    },
+    {
+      "sample_id": "no_answer",
+      "documents": [
+        {"id": "none:1", "text": "队伍知道北门和东门的位置。"},
+        {"id": "none:2", "text": "第五天落石导致旧矿井入口坍塌。"}
+      ],
+      "questions": [
+        {
+          "id": "none:q1",
+          "question": "失落王冠被谁藏在了哪里？",
+          "no_answer": true,
+          "gold_evidence": [],
+          "forbidden_evidence": ["none:1", "none:2"]
+        }
+      ]
+    }
+  ]
+}

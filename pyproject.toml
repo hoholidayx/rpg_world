@@ -89,6 +89,7 @@ exclude = [
 ]
 
 [tool.setuptools.package-data]
+rp_memory = ["benchmark/*.json", "benchmark/*.md"]
 rpg_core = ["jinja/**/*.jinja"]
 rpg_data = ["migrations/*.sql"]
 rpg_media = ["settings.yaml"]
