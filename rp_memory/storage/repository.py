@@ -43,6 +43,15 @@ class MemoryRepository:
         )
         return int(cur.lastrowid)
 
+    def chunk_created_at_by_file(self, file_path: str) -> dict[int, float]:
+        return {
+            int(chunk_idx): float(created_at)
+            for chunk_idx, created_at in self._conn.execute(
+                "SELECT chunk_idx, created_at FROM chunks WHERE file = ?",
+                (file_path,),
+            ).fetchall()
+        }
+
     def delete_chunk_by_source(self, source: str) -> list[int]:
         rows = self._conn.execute(
             "SELECT id FROM chunks WHERE source = ?",
@@ -162,6 +171,37 @@ class MemoryRepository:
     def clear_chunks(self) -> None:
         self._conn.execute("DELETE FROM chunks")
 
+    def clear_indexed_files(self) -> None:
+        self._conn.execute("DELETE FROM indexed_files")
+
+    def mark_vector_files_pending(self) -> None:
+        """Keep vector rebuild intent durable across process interruption."""
+        self._conn.execute(
+            "UPDATE indexed_files SET status = 'text_only' WHERE status = 'indexed'"
+        )
+
+    def get_index_metadata(self, key: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT value FROM index_metadata WHERE key = ?",
+            (key,),
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    def set_index_metadata(self, key: str, value: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO index_metadata (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+
+    def has_pending_vector_files(self) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM indexed_files WHERE status IN ('text_only', 'error') LIMIT 1"
+        ).fetchone()
+        return row is not None
+
     def close(self) -> None:
         try:
             self._conn.close()
@@ -199,6 +239,10 @@ class MemoryRepository:
             );
             CREATE INDEX IF NOT EXISTS idx_indexed_files_source
                 ON indexed_files(source_id);
+            CREATE TABLE IF NOT EXISTS index_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
         col_info = conn.execute("PRAGMA table_info(chunks)").fetchall()

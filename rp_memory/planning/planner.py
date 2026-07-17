@@ -11,47 +11,15 @@ from loguru import logger
 
 from commons.types import JsonObject, JsonValue
 from llm_client.types import LLMProvider
+from rp_memory.bigram_tokenizer import tokenize_bigram
+from rp_memory.keyword_tokenizer import is_keyword_stopword
 from rp_memory.planning.plan import QueryPlan, make_empty_plan
+from rp_memory.recall_query import RecallQueryContext
 
 
 _MAX_QUERY_VARIANTS = 5
 _MAX_RAW_MD_TERMS = 12
 _MAX_QUERY_CHARS = 80
-_STOPWORDS = frozenset(
-    {
-        "的",
-        "了",
-        "呢",
-        "吗",
-        "么",
-        "啊",
-        "吧",
-        "和",
-        "与",
-        "及",
-        "或",
-        "在",
-        "是",
-        "有",
-        "这个",
-        "那个",
-        "怎么",
-        "什么",
-        "一下",
-        "一个",
-        "the",
-        "a",
-        "an",
-        "and",
-        "or",
-        "of",
-        "to",
-        "in",
-        "is",
-    }
-)
-
-
 class QueryPlanError(Exception):
     """Raised when a query planner cannot produce a valid plan."""
 
@@ -60,6 +28,9 @@ class BaseQueryPlanner(ABC):
     @abstractmethod
     async def plan(self, query: str) -> QueryPlan:
         """Return a structured query plan."""
+
+    async def plan_context(self, context: RecallQueryContext) -> QueryPlan:
+        return await self.plan(context.current_input)
 
 
 class RuleBasedQueryPlanner(BaseQueryPlanner):
@@ -71,6 +42,9 @@ class RuleBasedQueryPlanner(BaseQueryPlanner):
 
     async def plan(self, query: str) -> QueryPlan:
         return self.plan_sync(query)
+
+    async def plan_context(self, context: RecallQueryContext) -> QueryPlan:
+        return _augment_with_context(self.plan_sync(context.current_input), context)
 
     def plan_sync(self, query: str) -> QueryPlan:
         normalized = _normalize(query)
@@ -93,7 +67,7 @@ class RuleBasedQueryPlanner(BaseQueryPlanner):
             parts = self._tokenizer.lcut(text)
         except Exception as exc:
             logger.warning("[RuleBasedQueryPlanner] jieba unavailable, regex fallback: {}", exc)
-            parts = re.findall(r"[A-Za-z0-9_]+(?:[.\-+][A-Za-z0-9_]+)*|[\u4e00-\u9fff]+", text)
+            parts = tokenize_bigram(text)
         terms: list[str] = []
         for part in parts:
             term = part.strip()
@@ -161,6 +135,13 @@ class FallbackQueryPlanner(BaseQueryPlanner):
             logger.warning("[QueryPlanner] primary planner failed, fallback: {}", exc)
             return await self._fallback.plan(query)
 
+    async def plan_context(self, context: RecallQueryContext) -> QueryPlan:
+        try:
+            return await self._primary.plan_context(context)
+        except Exception as exc:
+            logger.warning("[QueryPlanner] primary contextual planner failed, fallback: {}", exc)
+            return await self._fallback.plan_context(context)
+
 
 def _build_prompt(query: str) -> str:
     return (
@@ -170,6 +151,63 @@ def _build_prompt(query: str) -> str:
         "keyword_queries 用于 keyword FTS，应是短查询短语，不要预分词。\n"
         "raw_md_terms 用于 markdown 字符串召回，应是有意义的中文词或英文术语。\n"
         f"用户查询：{query}"
+    )
+
+
+def build_context_prompt(context: RecallQueryContext) -> str:
+    return (
+        "你是 RPG 长期记忆检索查询规划器。根据当前输入、最近两个 IC/GM turn、"
+        "玩家身份和当前场景，解决代词、角色别名与相对时间引用。\n"
+        "只输出 JSON 对象，不要输出解释。\n"
+        "字段：keyword_queries、expanded_queries、raw_md_terms、query_type。\n"
+        "不要把传闻改写成事实，也不要假设尝试已经成功。\n\n"
+        f"{context.planner_prompt()}"
+    )
+
+
+def plan_from_context_mapping(
+    context: RecallQueryContext,
+    data: JsonObject,
+    *,
+    planner_source: str,
+    fallback_planner: BaseQueryPlanner | None,
+) -> QueryPlan:
+    plan = _plan_from_mapping(
+        context.current_input,
+        _normalize(context.current_input),
+        data,
+        planner_source=planner_source,
+        fallback_planner=fallback_planner,
+    )
+    return _augment_with_context(plan, context)
+
+
+def _augment_with_context(plan: QueryPlan, context: RecallQueryContext) -> QueryPlan:
+    expansions = _dedupe([
+        *plan.expanded_queries,
+        *context.deterministic_expansions(),
+    ])[:_MAX_QUERY_VARIANTS]
+    keyword_context = [
+        value
+        for value in (context.player_character, context.scene_location, context.scene_time)
+        if value
+    ]
+    keyword_queries = _dedupe([
+        *plan.keyword_queries,
+        *keyword_context,
+    ])[:_MAX_QUERY_VARIANTS]
+    raw_terms = _filter_meaningful_terms(_dedupe([
+        *plan.raw_md_terms,
+        *_extract_terms(" ".join(keyword_context)),
+    ]))[:_MAX_RAW_MD_TERMS]
+    return QueryPlan(
+        original_query=context.current_input,
+        normalized_query=plan.normalized_query,
+        keyword_queries=tuple(keyword_queries),
+        expanded_queries=tuple(expansions),
+        raw_md_terms=tuple(raw_terms),
+        query_type=plan.query_type,
+        planner_source=plan.planner_source,
     )
 
 
@@ -219,7 +257,7 @@ def _extract_terms(text: str) -> list[str]:
         parts = tokenizer.lcut(text)
     except Exception as exc:
         logger.warning("[RuleBasedQueryPlanner] jieba unavailable, regex fallback: {}", exc)
-        parts = re.findall(r"[A-Za-z0-9_]+(?:[.\-+][A-Za-z0-9_]+)*|[\u4e00-\u9fff]+", text)
+        parts = tokenize_bigram(text)
     terms: list[str] = []
     for part in parts:
         term = part.strip()
@@ -283,7 +321,7 @@ def _is_cjk(text: str) -> bool:
 
 
 def _is_meaningful_term(term: str) -> bool:
-    if not term or term in _STOPWORDS:
+    if not term or is_keyword_stopword(term):
         return False
     return bool(re.search(r"[A-Za-z0-9_\u4e00-\u9fff]", term))
 

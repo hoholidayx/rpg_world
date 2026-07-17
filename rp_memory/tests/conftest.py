@@ -31,6 +31,9 @@ class FakeEmbedding:
     async def dimension(self) -> int:
         return len(self.vectors[0]) if self.vectors else 0
 
+    def get_default_model(self) -> str:
+        return "fake-embedding"
+
 
 class FakeStore:
     def __init__(self) -> None:

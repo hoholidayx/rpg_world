@@ -91,7 +91,7 @@ class KeywordRetriever(BaseRetriever):
         return [
             (
                 candidate.content,
-                candidate.final_score or candidate.keyword_score or candidate.exact_score,
+                candidate.keyword_score if candidate.keyword_score != 0.0 else candidate.exact_score,
                 dict(candidate.metadata),
             )
             for candidate in candidates

@@ -9,7 +9,10 @@ from rp_memory.planning.planner import (
     _build_prompt,
     _parse_json_object,
     _plan_from_mapping,
+    build_context_prompt,
+    plan_from_context_mapping,
 )
+from rp_memory.recall_query import RecallQueryContext
 
 if TYPE_CHECKING:
     from llm_client.types import LLMProvider
@@ -53,6 +56,23 @@ class OpenAIQueryPlanner(BaseQueryPlanner):
         return _plan_from_mapping(
             query,
             normalized,
+            data,
+            planner_source=self._planner_source,
+            fallback_planner=self._fallback_planner,
+        )
+
+    async def plan_context(self, context: RecallQueryContext):
+        if not context.current_input.strip():
+            return await self.plan("")
+        response = await self._provider.chat(
+            [
+                {"role": "system", "content": "You are an RP memory query planner."},
+                {"role": "user", "content": build_context_prompt(context)},
+            ]
+        )
+        data = _parse_json_object(response.content)
+        return plan_from_context_mapping(
+            context,
             data,
             planner_source=self._planner_source,
             fallback_planner=self._fallback_planner,

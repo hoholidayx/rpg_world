@@ -92,7 +92,8 @@ class RPGGameAgent:
             context_service=self._context_service,
             tool_service=self._tool_service,
             memory_recall=MemoryRecallHook(
-                lambda: self._lifecycle.resources
+                lambda: self._lifecycle.resources,
+                self._lifecycle.session_manager,
             ),
         )
         orchestrator = TurnOrchestrator(

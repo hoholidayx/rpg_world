@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.planning.plan import QueryPlan
+from rp_memory.retrieval.filters import excluded_from_recall
 from rp_memory.retrieval.retriever import BaseRetriever, _similarity
 
 if TYPE_CHECKING:
@@ -46,6 +47,8 @@ class SqlVecRetriever(BaseRetriever):
         raw = await asyncio.to_thread(self._store.search, vecs[0], top_k)
         candidates: list[MemoryCandidate] = []
         for record, distance in raw:
+            if excluded_from_recall(record.metadata):
+                continue
             candidates.append(
                 MemoryCandidate(
                     memory_id=record.id,
@@ -57,13 +60,57 @@ class SqlVecRetriever(BaseRetriever):
         return candidates
 
     async def search_plan(self, plan: QueryPlan, top_k: int = 5) -> list[MemoryCandidate]:
-        return await self.search(
+        queries = _dedupe_queries([
             plan.normalized_query or plan.original_query,
-            top_k=top_k,
-        )
+            *plan.expanded_queries,
+        ])
+        if not queries:
+            return []
+        vectors = await self._embedding.embed(queries)
+        if len(vectors) != len(queries):
+            raise ValueError(
+                "embedding response count does not match contextual queries: "
+                f"queries={len(queries)} vectors={len(vectors)}"
+            )
+        merged: dict[int, MemoryCandidate] = {}
+        for query, vector in zip(queries, vectors, strict=True):
+            raw = await asyncio.to_thread(self._store.search, vector, top_k)
+            for record, distance in raw:
+                if excluded_from_recall(record.metadata):
+                    continue
+                score = _similarity(distance)
+                existing = merged.get(record.id)
+                if existing is None:
+                    merged[record.id] = MemoryCandidate(
+                        memory_id=record.id,
+                        content=record.text,
+                        metadata=dict(record.metadata),
+                        vector_score=score,
+                        debug={"vector_best_query": query},
+                    )
+                elif score > existing.vector_score:
+                    existing.vector_score = score
+                    existing.debug["vector_best_query"] = query
+        return sorted(
+            merged.values(),
+            key=lambda candidate: candidate.vector_score,
+            reverse=True,
+        )[: max(1, int(top_k))]
 
     def _format(self, candidates: list[MemoryCandidate]) -> list[tuple[str, float, dict]]:
         return [
-            (candidate.content, candidate.final_score or candidate.vector_score, dict(candidate.metadata))
+            (candidate.content, candidate.vector_score, dict(candidate.metadata))
             for candidate in candidates
         ]
+
+
+def _dedupe_queries(queries: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        value = " ".join(str(query or "").split())
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result

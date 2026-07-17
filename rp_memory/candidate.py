@@ -23,10 +23,10 @@ class MemoryCandidate:
     granularity_score: float = 0.0
     recency_score: float = 0.0
     hybrid_score: float = 0.0
-    rerank_score: float = 0.0
+    rerank_score: float | None = None
     debug: DebugInfo = field(default_factory=dict)
 
     @property
     def final_score(self) -> float:
         """Return the score used for final ordering."""
-        return self.rerank_score or self.hybrid_score
+        return self.hybrid_score if self.rerank_score is None else self.rerank_score

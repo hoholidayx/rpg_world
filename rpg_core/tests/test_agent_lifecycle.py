@@ -165,6 +165,7 @@ def lifecycle_deps(monkeypatch):  # noqa: ANN201
         SimpleNamespace(
             status_sub_agent_config={"enabled": True},
             memory_sub_agent_config={"enabled": True},
+            memory_story_max_items=8,
             memory_keep_rounds=4,
             memory_compression_enabled=True,
             memory_compress_batch_size=2,

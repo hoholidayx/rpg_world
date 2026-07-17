@@ -10,6 +10,7 @@ from rp_memory.candidate import MemoryCandidate
 from rp_memory.planning.plan import QueryPlan
 from rp_memory.planning.planner import BaseQueryPlanner, RuleBasedQueryPlanner
 from rp_memory.rerank.base import MemoryReranker
+from rp_memory.retrieval.filters import excluded_from_recall
 from rp_memory.retrieval.keyword_retriever import KeywordRetriever
 from rp_memory.retrieval.raw_md_retriever import RawMarkdownRetriever
 from rp_memory.retrieval.retriever import BaseRetriever
@@ -42,6 +43,8 @@ class HybridRetriever(BaseRetriever):
         raw_md_min_results: int = 0,
         keyword_tokenizer: str = "jieba",
         rerank_candidate_k: int = 8,
+        vector_candidate_k: int = 50,
+        keyword_candidate_k: int = 50,
     ) -> None:
         self._sqlvec_retriever = sqlvec_retriever
         self._keyword_retriever = keyword_retriever
@@ -59,6 +62,8 @@ class HybridRetriever(BaseRetriever):
         self._raw_md_min_results = max(0, int(raw_md_min_results or 0))
         self._keyword_tokenizer = keyword_tokenizer
         self._rerank_candidate_k = max(1, int(rerank_candidate_k))
+        self._vector_candidate_k = max(1, int(vector_candidate_k))
+        self._keyword_candidate_k = max(1, int(keyword_candidate_k))
 
     async def _plan_query(self, query: str) -> QueryPlan:
         return await self._query_planner.plan(query)
@@ -110,13 +115,13 @@ class HybridRetriever(BaseRetriever):
         return await self._search_plan_candidates(plan, top_k)
 
     async def _search_plan_candidates(self, plan: QueryPlan, top_k: int) -> list[MemoryCandidate]:
-        retrieval_limit = self._retrieval_limit(top_k)
+        raw_candidate_limit = self._raw_candidate_limit(top_k)
         failures: list[str] = []
         if self._sqlvec_retriever is not None:
             try:
                 sqlvec_candidates = await self._sqlvec_retriever.search_plan(
                     plan,
-                    top_k=retrieval_limit,
+                    top_k=self._vector_candidate_k,
                 )
             except Exception as exc:
                 self._log_stage_error("sqlvec search", exc)
@@ -127,7 +132,7 @@ class HybridRetriever(BaseRetriever):
 
         keyword_candidates, keyword_failed = await self._safe_keyword_candidates(
             plan,
-            retrieval_limit,
+            self._keyword_candidate_k,
         )
         if keyword_failed:
             failures.append("keyword_failed")
@@ -139,19 +144,24 @@ class HybridRetriever(BaseRetriever):
                 raw_md_reason = "store_unavailable"
         elif self._raw_md_mode == "always":
             raw_md_triggered = True
-            raw_md_candidates = await self._safe_raw_md_candidates(plan, retrieval_limit)
+            raw_md_candidates = await self._safe_raw_md_candidates(plan, raw_candidate_limit)
             raw_md_reason = "always"
         elif self._raw_md_mode == "fallback_only":
-            threshold = self._raw_md_min_results if self._raw_md_min_results > 0 else retrieval_limit
+            default_threshold = (
+                max(top_k, self._rerank_candidate_k)
+                if self._reranker is not None
+                else max(1, top_k)
+            )
+            threshold = self._raw_md_min_results if self._raw_md_min_results > 0 else default_threshold
             main_count = _candidate_count(sqlvec_candidates, keyword_candidates)
             if failures:
                 raw_md_triggered = True
                 raw_md_reason = failures[0]
-                raw_md_candidates = await self._safe_raw_md_candidates(plan, retrieval_limit)
+                raw_md_candidates = await self._safe_raw_md_candidates(plan, raw_candidate_limit)
             elif main_count < threshold:
                 raw_md_triggered = True
                 raw_md_reason = "insufficient_candidates"
-                raw_md_candidates = await self._safe_raw_md_candidates(plan, retrieval_limit)
+                raw_md_candidates = await self._safe_raw_md_candidates(plan, raw_candidate_limit)
             else:
                 raw_md_reason = "disabled"
 
@@ -165,7 +175,10 @@ class HybridRetriever(BaseRetriever):
             self._merge_candidate(merged, candidate, "raw_md")
         after_raw_merge = len(merged)
 
-        candidates = list(merged.values())
+        candidates = [
+            candidate for candidate in merged.values()
+            if not excluded_from_recall(candidate.metadata)
+        ]
         from loguru import logger
 
         logger.info(
@@ -218,7 +231,7 @@ class HybridRetriever(BaseRetriever):
             self._log_stage_error("raw markdown search", exc)
             return []
 
-    def _retrieval_limit(self, top_k: int) -> int:
+    def _raw_candidate_limit(self, top_k: int) -> int:
         if self._reranker is None:
             return max(top_k, 1)
         return max(top_k, self._rerank_candidate_k, 1)
@@ -331,7 +344,7 @@ class HybridRetriever(BaseRetriever):
                 logger.info("[HybridRetriever] rerank done — candidates={}", len(candidates))
                 for rank, candidate in enumerate(candidates, start=1):
                     logger.info(
-                        "[HybridRetriever] rerank candidate — rank={} id={} final={:.4f} rerank={:.4f} hybrid={:.4f} debug={}",
+                        "[HybridRetriever] rerank candidate — rank={} id={} final={:.4f} rerank={} hybrid={:.4f} debug={}",
                         rank,
                         candidate.memory_id,
                         candidate.final_score,
@@ -380,7 +393,12 @@ def _as_float(value: object) -> float:
 
 
 def _candidate_count(*groups: list[MemoryCandidate]) -> int:
-    return len({candidate.memory_id for group in groups for candidate in group})
+    return len({
+        candidate.memory_id
+        for group in groups
+        for candidate in group
+        if not excluded_from_recall(candidate.metadata)
+    })
 
 
 def _normalize_raw_md_mode(mode: str) -> str:

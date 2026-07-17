@@ -2,6 +2,6 @@
 ## 剧情记忆
 
 {% for item in story_details %}
-- {{ item.text }}
+- [{{ item.memory_kind | default('event') }}; {{ item.epistemic_status | default('confirmed') }}] {{ item.text }}
 {% endfor %}
 {% endif %}

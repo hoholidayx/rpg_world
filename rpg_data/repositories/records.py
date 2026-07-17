@@ -13,6 +13,7 @@ from peewee import (
     Database,
     DatabaseProxy,
     ForeignKeyField,
+    FloatField,
     IntegerField,
     Model,
     SqliteDatabase,
@@ -341,7 +342,14 @@ class SessionStoryMemoryRecord(BaseRecord):
     )
     turn_id = IntegerField(constraints=[Check("turn_id > 0")])
     text = TextField(default="")
+    memory_kind = TextField(default="event")
+    epistemic_status = TextField(default="confirmed")
+    salience = FloatField(default=0.5, constraints=[Check("salience >= 0.0 AND salience <= 1.0")])
+    source_turn_start = IntegerField(constraints=[Check("source_turn_start > 0")])
+    source_turn_end = IntegerField(constraints=[Check("source_turn_end >= source_turn_start")])
+    dedupe_key = TextField(constraints=[Check("length(dedupe_key) = 64")])
     dream_processed = BooleanField(default=False)
+    metadata_schema_version = IntegerField(default=1, constraints=[Check("metadata_schema_version > 0")])
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
     created_at = TextField()
@@ -349,6 +357,7 @@ class SessionStoryMemoryRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_session_story_memories"
+        indexes = ((('session', 'dedupe_key'), True),)
 
 
 class SessionNarrativeOutcomeRecord(BaseRecord):

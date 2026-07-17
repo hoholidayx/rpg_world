@@ -9,10 +9,10 @@ import pytest
 import rpg_core.agent.sub_agents.memory_sub_agent as memory_module
 from rpg_core.agent.agent_types import LLMResponse, LLMUsage
 from rpg_core.agent.sub_agents.memory_sub_agent import (
-    MEMORY_LLM_SOURCE_RECALL,
+    MEMORY_LLM_SOURCE_STORY,
     MemoryAgentResult,
     MemorySubAgent,
-    RECALL_SCHEMA,
+    STORY_DETAIL_SCHEMA,
 )
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session.manager import SessionManager
@@ -118,15 +118,15 @@ async def test_memory_sub_agent_logs_request_shape_and_cache_by_pipeline(
 ) -> None:
     class Provider:
         async def chat(self, _messages, *, tools):  # noqa: ANN001
-            assert tools == [RECALL_SCHEMA]
+            assert tools == [STORY_DETAIL_SCHEMA]
             return LLMResponse(
                 content="",
                 tool_calls=[{
                     "id": "call_1",
                     "type": "function",
                     "function": {
-                        "name": "extract_recalls",
-                        "arguments": '{"recalls": ["memory"]}',
+                        "name": "extract_story_details",
+                        "arguments": '{"story_details": []}',
                     },
                 }],
                 finish_reason="tool_calls",
@@ -158,20 +158,20 @@ async def test_memory_sub_agent_logs_request_shape_and_cache_by_pipeline(
             {"role": "system", "content": "stable memory system"},
             {"role": "user", "content": "dynamic memory input"},
         ],
-        RECALL_SCHEMA,
-        source=MEMORY_LLM_SOURCE_RECALL,
+        STORY_DETAIL_SCHEMA,
+        source=MEMORY_LLM_SOURCE_STORY,
     )
 
-    assert decision == {"recalls": ["memory"]}
+    assert decision == {"story_details": []}
     assert record is not None
-    assert record.source == MEMORY_LLM_SOURCE_RECALL
+    assert record.source == MEMORY_LLM_SOURCE_STORY
 
     fingerprint = next(
         call
         for call in info.call_args_list
         if "LLM request fingerprint" in call.args[0]
     )
-    assert fingerprint.args[1] == MEMORY_LLM_SOURCE_RECALL
+    assert fingerprint.args[1] == MEMORY_LLM_SOURCE_STORY
     assert [item["role"] for item in fingerprint.args[11]] == ["system", "user"]
     assert [item["chars"] for item in fingerprint.args[11]] == [
         len("stable memory system"),
@@ -185,4 +185,4 @@ async def test_memory_sub_agent_logs_request_shape_and_cache_by_pipeline(
         for call in info.call_args_list
         if "LLM cache usage" in call.args[0]
     )
-    assert cache_usage.args[1:] == (MEMORY_LLM_SOURCE_RECALL, 50, 30, 62.5)
+    assert cache_usage.args[1:] == (MEMORY_LLM_SOURCE_STORY, 50, 30, 62.5)

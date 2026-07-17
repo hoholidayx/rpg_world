@@ -105,12 +105,18 @@ class VectorStore:
 
         conn = self._repo.conn
         try:
+            existing_created_at = self._repo.chunk_created_at_by_file(file_path)
             stale_ids = self._repo.delete_chunk_by_file(file_path)
             self._delete_secondary_rows(stale_ids)
 
             for i, rec in enumerate(records):
                 emb = embeddings[i] if embeddings is not None and i < len(embeddings) else None
-                rowid = self._repo.upsert_chunk(rec)
+                rowid = self._repo.upsert_chunk(
+                    rec,
+                    created_at=existing_created_at.get(
+                        int(rec.metadata.get("chunk_idx", 0))
+                    ),
+                )
                 if self._vector_index is not None:
                     if emb is None:
                         raise VectorStoreError("missing embedding for vector insert")
@@ -201,7 +207,42 @@ class VectorStore:
             self._vector_index.clear()
         self._text_index.clear()
         self._repo.clear_chunks()
+        self._repo.clear_indexed_files()
         self._repo.conn.commit()
+
+    def ensure_content_fingerprint(self, fingerprint: str) -> bool:
+        """Hard-reset derived indexes when chunk/text configuration changes."""
+        current = self._repo.get_index_metadata("content_fingerprint")
+        if current == fingerprint:
+            return False
+        self.clear()
+        self._repo.set_index_metadata("content_fingerprint", fingerprint)
+        self._repo.set_index_metadata("vector_fingerprint", "")
+        self._repo.conn.commit()
+        return True
+
+    def ensure_vector_fingerprint(self, fingerprint: str) -> bool:
+        """Clear vector rows when model or dimension differs from the index."""
+        current = self._repo.get_index_metadata("vector_fingerprint")
+        if current == fingerprint:
+            return False
+        if self._vector_index is not None:
+            self._vector_index.clear()
+        else:
+            # A text-only startup may still open a database containing the
+            # Python fallback table from an earlier vector-capable run.
+            if _table_exists(self._repo.conn, "vec_embeddings"):
+                self._repo.conn.execute("DELETE FROM vec_embeddings")
+        # Clearing rows and marking files pending must commit together. If the
+        # process exits before reindexing, the next startup can still detect
+        # that text-indexed files are missing vectors and retry them.
+        self._repo.mark_vector_files_pending()
+        self._repo.set_index_metadata("vector_fingerprint", fingerprint)
+        self._repo.conn.commit()
+        return True
+
+    def has_pending_vector_files(self) -> bool:
+        return self._repo.has_pending_vector_files()
 
     def close(self) -> None:
         self._repo.close()
@@ -239,3 +280,11 @@ class VectorStore:
 
     def _has_vector_index(self) -> bool:
         return self._vector_index is not None and self._vector_index.enabled
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1",
+        (table_name,),
+    ).fetchone()
+    return row is not None

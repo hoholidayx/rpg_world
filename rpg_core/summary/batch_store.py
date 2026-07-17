@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import uuid
 from pathlib import Path
 from typing import Callable
 
@@ -67,7 +69,7 @@ class BatchSummaryStore:
             summary_text=summary_text,
         )
 
-        file_path.write_text(body, encoding="utf-8")
+        self._write_atomic(file_path, body)
         logger.debug("[BatchSummaryStore] saved batch #{}: {}", batch_id, file_name)
         self._load_index()
         return file_path
@@ -82,6 +84,12 @@ class BatchSummaryStore:
             if entry.get("batch_id") == batch_id:
                 return entry.get("body", "")
         return None
+
+    def next_batch_id(self) -> int:
+        """返回下一个可用 batch_id（最大已有值 + 1，或 0）。"""
+        if not self._index:
+            return 0
+        return max(e.get("batch_id", 0) for e in self._index) + 1
 
     # ── 整体归纳 ───────────────────────────────────────────────────
 
@@ -125,11 +133,27 @@ class BatchSummaryStore:
         )
 
         path = self.get_overall_path()
-        path.write_text(body, encoding="utf-8")
+        self._write_atomic(path, body)
         logger.debug(
             "[BatchSummaryStore] saved overall.md (last_batch_id={})", last_batch_id
         )
         return path
+
+    def snapshot_overall(self) -> str | None:
+        path = self.get_overall_path()
+        return path.read_text(encoding="utf-8") if path.exists() else None
+
+    def restore_overall(self, snapshot: str | None) -> None:
+        path = self.get_overall_path()
+        if snapshot is None:
+            path.unlink(missing_ok=True)
+        else:
+            self._write_atomic(path, snapshot)
+
+    def delete_batch_files(self, paths: list[Path]) -> None:
+        for path in paths:
+            path.unlink(missing_ok=True)
+        self._load_index()
 
     # ── 通用 ──────────────────────────────────────────────────────
 
@@ -158,12 +182,6 @@ class BatchSummaryStore:
         slug = re.sub(r"-{2,}", "-", slug).strip("-")
         return slug[:40] if len(slug) > 40 else slug
 
-    def _next_batch_id(self) -> int:
-        """返回下一个可用 batch_id（最大已有值 + 1，或 0）。"""
-        if not self._index:
-            return 0
-        return max(e.get("batch_id", 0) for e in self._index) + 1
-
     def _parse_front_matter(self, text: str) -> tuple[dict, str]:
         """拆分 YAML front matter 和 markdown 正文。返回 (fm_dict, body)。"""
         return parse_markdown_front_matter(text)
@@ -181,6 +199,15 @@ class BatchSummaryStore:
             get_watcher().register(self._dir.resolve(), self.reload)
         except Exception as exc:
             logger.debug("[BatchSummaryStore] watcher registration skipped: {}", exc)
+
+    @staticmethod
+    def _write_atomic(path: Path, content: str) -> None:
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(content, encoding="utf-8")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _load_index(self) -> None:
         """扫描 summaries/ 目录，重建批次索引。"""

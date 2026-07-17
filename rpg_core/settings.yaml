@@ -23,7 +23,7 @@ base:
     scene:
       allow_runtime_key_changes: false
 
-    # 记忆子 Agent 的摘要、召回、剧情记忆触发参数。
+    # 记忆子 Agent 的摘要与剧情记忆参数；召回条数由 memory.top_k 统一控制。
     memory_sub_agent:
       enabled: true
       summary:
@@ -33,12 +33,11 @@ base:
         keep_rounds: 5
         # 是否启用自动摘要压缩。
         compression_enabled: false
-      recall:
-        # 每次上下文召回最多注入的记忆条数。
-        max_items: 5
       story:
         # N 轮后触发剧情记忆提取；0 表示关闭自动触发。
         trigger_rounds: 0
+        # 单次最多提取的长期剧情记忆条数。
+        max_items: 8
 
     # 状态子 Agent 开关。
     status_sub_agent:

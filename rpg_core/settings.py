@@ -19,6 +19,7 @@ from commons.settings import (
     PROFILE_ENV,
     ProfiledYamlSettings,
     forgiving_float,
+    forgiving_int,
 )
 from commons.types import ConfigDict
 from rpg_core.rp_module_constants import (
@@ -281,7 +282,7 @@ class Settings(ProfiledYamlSettings):
         """memory_sub_agent 完整配置 dict。
 
         ``llm_provider`` 与 ``shared/openai/llama`` 控制子 Agent LLM 来源；
-        ``summary/recall/story`` 是记忆管线配置，不属于 provider 配置。
+        ``summary/story`` 是记忆管线配置，不属于 provider 配置。
         """
         return self.agent_settings.get("memory_sub_agent", {})
 
@@ -293,19 +294,19 @@ class Settings(ProfiledYamlSettings):
         return self.memory_sub_agent_config.get("summary", {})
 
     @property
-    def memory_recall_config(self) -> ConfigDict:
-        """recall 管线配置：max_items。"""
-        return self.memory_sub_agent_config.get("recall", {})
-
-    @property
     def memory_story_config(self) -> ConfigDict:
-        """story 管线配置：trigger_rounds。"""
+        """story 管线配置：trigger_rounds / max_items。"""
         return self.memory_sub_agent_config.get("story", {})
 
     @property
     def memory_story_trigger_rounds(self) -> int:
         """N 轮新对话后自动触发剧情记忆提取，0 表示关闭。"""
         return self.memory_story_config.get("trigger_rounds", 0)
+
+    @property
+    def memory_story_max_items(self) -> int:
+        """单次剧情记忆提取允许持久化的最大条数。"""
+        return max(1, forgiving_int(self.memory_story_config.get("max_items", 8), 8))
 
     @property
     def memory_compress_batch_size(self) -> int:

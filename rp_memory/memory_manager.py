@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from commons.types import Metadata
 from loguru import logger
+from rp_memory.recall_query import RecallQueryContext
 
 if TYPE_CHECKING:
     from llm_client.types import LLMProvider
@@ -148,6 +151,16 @@ class MemoryManager:
                     self._query_planner,
                     reranker=None,
                 )
+            if self._store is not None and self._mem_cfg is not None:
+                fingerprint = _content_index_fingerprint(self._mem_cfg)
+                changed = await asyncio.to_thread(
+                    self._store.ensure_content_fingerprint,
+                    fingerprint,
+                )
+                if changed:
+                    logger.warning(
+                        "[MemoryManager] content index fingerprint changed; derived index reset"
+                    )
             if (
                 self._index_manager is None
                 and self._store is not None
@@ -165,7 +178,7 @@ class MemoryManager:
             self._initialized = True
             logger.info("[MemoryManager] initialized in text-index-first mode")
 
-    async def recall(self, query: str) -> list[RecallItem]:
+    async def recall(self, query: str | RecallQueryContext) -> list[RecallItem]:
         await self.initialize()
         await self._refresh_remote_capabilities()
         async with self._operation_lock:
@@ -173,13 +186,14 @@ class MemoryManager:
             if self._retriever is None:
                 self._recalled_store.set_items([])
                 return []
+            context = query if isinstance(query, RecallQueryContext) else RecallQueryContext.from_query(query)
             logger.info(
                 "[MemoryManager] recall start — query={!r} top_k={}",
-                query,
+                context.current_input,
                 self._top_k,
             )
             try:
-                plan = await self._query_planner.plan(query)
+                plan = await self._query_planner.plan_context(context)
             except Exception as exc:
                 logger.warning("[MemoryManager] recall planner failed: {}", exc)
                 self._recalled_store.set_items([])
@@ -191,7 +205,7 @@ class MemoryManager:
                     raw = await retrieve_plan(plan, self._top_k)
                 else:
                     raw = await self._retriever.retrieve(
-                        plan.normalized_query or query,
+                        plan.normalized_query or context.current_input,
                         self._top_k,
                     )
             except Exception as exc:
@@ -202,7 +216,7 @@ class MemoryManager:
             self._recalled_store.set_items([item.text for item in items])
         logger.info(
             "[MemoryManager] recall done — query={!r} items={}",
-            query,
+            context.current_input,
             len(items),
         )
         for index, item in enumerate(items):
@@ -275,9 +289,11 @@ class MemoryManager:
         if cfg is None:
             return
         if self._embedding_ready and self._planner_ready and self._reranker_ready:
+            await self._retry_pending_vector_files()
             return
         async with self._remote_lock:
             if self._embedding_ready and self._planner_ready and self._reranker_ready:
+                await self._retry_pending_vector_files()
                 return
             from llm_client.keys import (
                 MEMORY_EMBED_BIZ_KEY,
@@ -322,6 +338,7 @@ class MemoryManager:
                     )
 
             vector_upgraded = False
+            vector_reindex_required = False
             async with self._operation_lock:
                 if dimension > 0 and self._store is not None:
                     vector_upgraded = await asyncio.to_thread(
@@ -331,6 +348,19 @@ class MemoryManager:
                     if vector_upgraded:
                         self._embedding = embedding
                         self._embedding_ready = True
+                        vector_reindex_required = await asyncio.to_thread(
+                            self._store.ensure_vector_fingerprint,
+                            _vector_index_fingerprint(
+                                embedding.get_default_model(),
+                                dimension,
+                            ),
+                        )
+                        vector_reindex_required = (
+                            vector_reindex_required
+                            or await asyncio.to_thread(
+                                self._store.has_pending_vector_files
+                            )
+                        )
                         if self._index_manager is not None:
                             self._index_manager.set_embedding(embedding)
 
@@ -358,8 +388,15 @@ class MemoryManager:
                     self._query_planner,
                     reranker=self._reranker,
                 )
-            if vector_upgraded and self._index_manager is not None:
+            if vector_upgraded and vector_reindex_required and self._index_manager is not None:
                 await self._index_manager.reindex_all()
+
+    async def _retry_pending_vector_files(self) -> None:
+        if self._store is None or self._index_manager is None or self._embedding is None:
+            return
+        pending = await asyncio.to_thread(self._store.has_pending_vector_files)
+        if pending:
+            await self._index_manager.sync_all(force=False)
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -495,6 +532,8 @@ class MemoryManager:
                 raw_md_min_results=mem_cfg.raw_md_min_results,
                 keyword_tokenizer=mem_cfg.keyword_tokenizer,
                 rerank_candidate_k=mem_cfg.rerank_candidate_k,
+                vector_candidate_k=mem_cfg.vector_k,
+                keyword_candidate_k=mem_cfg.keyword_k,
             )
         return sqlvec_retriever
 
@@ -568,6 +607,36 @@ class MemoryManager:
             )
             raw.append((candidate.content, candidate.final_score, metadata))
         return MemoryManager._items(raw)
+
+
+def _content_index_fingerprint(mem_cfg: "MemorySettings") -> str:
+    payload = {
+        "schema_version": 3,
+        "chunk_size": int(mem_cfg.chunk_size),
+        "chunk_overlap": int(mem_cfg.chunk_overlap),
+        "keyword_tokenizer": str(mem_cfg.keyword_tokenizer),
+        "jieba_dict": str(mem_cfg.jieba_dict or ""),
+    }
+    return _fingerprint(payload)
+
+
+def _vector_index_fingerprint(model: str, dimension: int) -> str:
+    return _fingerprint({
+        "schema_version": 1,
+        "model": str(model),
+        "dimension": int(dimension),
+        "normalization": "provider_default",
+    })
+
+
+def _fingerprint(payload: dict[str, object]) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _log_query_plan(stage: str, plan) -> None:  # noqa: ANN001

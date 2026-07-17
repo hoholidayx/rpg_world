@@ -211,6 +211,7 @@ class AgentRuntimeLifecycle:
             summary_store=builder.summary_store,
             story_store=builder.story_memory_store,
             batch_store=builder.batch_summary_store,
+            max_story_items=settings.memory_story_max_items,
             max_window_rounds=settings.memory_keep_rounds,
         )
         self._compressor = SummaryCompressor(

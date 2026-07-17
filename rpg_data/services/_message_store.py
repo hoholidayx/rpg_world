@@ -441,6 +441,43 @@ class BaseSessionMessageStore:
             .execute()
         )
 
+    def mark_summary_batches_processed(
+        self,
+        session_id: str,
+        batches: Iterable[tuple[Iterable[int], int]],
+    ) -> int:
+        """Advance multiple summary batches in one SQLite transaction."""
+        normalized = [(_normalize_ids(ids), int(batch_id)) for ids, batch_id in batches]
+        normalized = [(ids, batch_id) for ids, batch_id in normalized if ids]
+        if not normalized:
+            return 0
+        all_ids = {message_id for ids, _ in normalized for message_id in ids}
+        with self._database.atomic():
+            matched = int(
+                self._record_model.select()
+                .where(
+                    (self._record_model.session == session_id)
+                    & (self._record_model.id.in_(all_ids))
+                )
+                .count()
+            )
+            if matched != len(all_ids):
+                raise ValueError("summary source messages must belong to the session")
+            updated = 0
+            for ids, batch_id in normalized:
+                updated += int(
+                    self._record_model.update(
+                        summary_processed=True,
+                        summary_batch_id=batch_id,
+                        summary_processed_at=SQL("CURRENT_TIMESTAMP"),
+                        updated_at=SQL("CURRENT_TIMESTAMP"),
+                    ).where(
+                        (self._record_model.session == session_id)
+                        & (self._record_model.id.in_(ids))
+                    ).execute()
+                )
+            return updated
+
     def mark_story_memory_processed(
         self,
         session_id: str,

@@ -9,6 +9,7 @@ from rp_memory.retrieval.scoring import normalize_values
 MEMORY_RERANK_SYSTEM_PROMPT = "你是记忆检索重排器。只输出评分行。"
 MEMORY_RERANK_POINTWISE_INSTRUCTIONS = (
     "任务：判断候选记忆是否能回答用户查询。\n"
+    "RP：传闻/推测/不确定≠事实，尝试≠成功，承诺/计划≠完成；查询正问该类型时可高相关。\n"
     "分数：0无关，30弱相关，60相关，80强相关，100精确命中。\n"
     "输出格式：<0-100整数>\\t<8字内原因>\n"
     "禁止输出其他内容。"
@@ -17,9 +18,15 @@ MEMORY_RERANK_POINTWISE_INSTRUCTIONS = (
 
 def build_pointwise_prompt(query: str, candidate: MemoryCandidate, *, max_candidate_chars: int = 2400) -> str:
     content = _truncate_candidate_content(candidate.content, max_candidate_chars)
+    epistemic_status = str(candidate.metadata.get("epistemic_status", "") or "")
+    memory_kind = str(candidate.metadata.get("memory_kind", "") or "")
+    metadata_line = ""
+    if memory_kind or epistemic_status:
+        metadata_line = f"类型：{memory_kind or '未知'}；认知：{epistemic_status or '未知'}\n"
     return (
         f"{MEMORY_RERANK_POINTWISE_INSTRUCTIONS}\n\n"
         f"查询：{query}\n"
+        f"{metadata_line}"
         f"候选：{content}\n"
         "评分："
     )

@@ -298,7 +298,13 @@ class VectorIndexManager:
                 logger.warning("[VectorIndex] %s — embed error: %s", file_path.name, exc)
                 return False
 
-        file_state.status = "indexed" if records else "empty"
+        file_state.status = (
+            "indexed"
+            if records and self._embedding is not None
+            else "text_only"
+            if records
+            else "empty"
+        )
         file_state.chunk_count = len(records)
         file_state.last_error = ""
         try:
@@ -395,20 +401,24 @@ class VectorIndexManager:
                 file_state.file,
             )
 
-    @staticmethod
-    def _same_stat(previous: IndexedFileState, current_stat: object) -> bool:
-        return previous.status in {"indexed", "empty"} and (
+    def _same_stat(self, previous: IndexedFileState, current_stat: object) -> bool:
+        return self._can_skip_status(previous.status) and (
             previous.mtime_ns == int(current_stat.st_mtime_ns)
             and previous.size == int(current_stat.st_size)
         )
 
-    @staticmethod
     def _is_unchanged(
+        self,
         previous: IndexedFileState,
         current: IndexedFileState,
     ) -> bool:
-        return previous.status in {"indexed", "empty"} and (
+        return self._can_skip_status(previous.status) and (
             previous.mtime_ns == current.mtime_ns
             and previous.size == current.size
             and previous.content_hash == current.content_hash
         )
+
+    def _can_skip_status(self, status: str) -> bool:
+        if status == "text_only":
+            return self._embedding is None
+        return status in {"indexed", "empty"}

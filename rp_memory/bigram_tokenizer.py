@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 
-_TECH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+(?:[.\-+][A-Za-z0-9_]+)*")
+TECH_TOKEN_RE = re.compile(
+    r"[A-Za-z0-9_]+(?:[.\-+][A-Za-z0-9_]+)*(?:\+{1,2}|#)?"
+)
 
 
 def tokenize_bigram(text: str) -> list[str]:
@@ -35,7 +37,7 @@ def tokenize_bigram(text: str) -> list[str]:
             continue
 
         flush_chinese()
-        match = _TECH_TOKEN_RE.match(text, index)
+        match = TECH_TOKEN_RE.match(text, index)
         if match:
             token = match.group(0)
             tokens.append(token)

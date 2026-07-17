@@ -174,17 +174,61 @@ class MemoryRecallHook:
     def __init__(
         self,
         resources: Callable[[], AgentContextResources],
+        session_manager: "SessionManager",
     ) -> None:
         self._resources = resources
+        self._session_manager = session_manager
 
-    async def run(self, user_input: str) -> None:
+    async def run(
+        self,
+        user_input: str,
+        *,
+        player_character: "TurnPlayerCharacterSnapshot | None" = None,
+        scene_tracker: "SceneTracker | None" = None,
+    ) -> None:
         manager = self._resources().memory_manager
         if manager is None:
             return
         try:
-            await manager.recall(user_input)
+            from rp_memory.recall_query import RecallQueryContext
+
+            scene = scene_tracker.get_recall_context() if scene_tracker is not None else {}
+            await manager.recall(
+                RecallQueryContext(
+                    current_input=user_input,
+                    recent_turns=self._recent_ic_gm_turns(),
+                    player_character=player_character.name if player_character is not None else "",
+                    scene_time=str(scene.get("time", "")),
+                    scene_location=str(scene.get("location", "")),
+                )
+            )
         except Exception as exc:
             logger.opt(exception=exc).warning(_TAG + " memory recall failed")
+
+    def _recent_ic_gm_turns(self) -> tuple[str, ...]:
+        from rpg_core.agent.turn.models import TurnMode
+
+        messages = [
+            message
+            for message in self._session_manager.history
+            if not message.is_system() and not message.is_tool()
+        ]
+        groups = []
+        for group in self._session_manager.iter_turn_groups(messages):
+            modes = {str(message.mode or TurnMode.IC.value).lower() for message in group}
+            if modes and modes.issubset({TurnMode.IC.value, TurnMode.GM.value}):
+                groups.append(group)
+        rendered: list[str] = []
+        for index, group in enumerate(groups[-2:], start=1):
+            lines = [f"Turn {index}:"]
+            for message in group:
+                label = "Player" if message.is_user() else "GM"
+                content = " ".join(str(message.content or "").split())
+                if content:
+                    lines.append(f"{label}: {content[:500]}")
+            if len(lines) > 1:
+                rendered.append("\n".join(lines))
+        return tuple(rendered)
 
 
 class PostCommitHooks:

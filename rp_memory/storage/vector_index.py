@@ -128,12 +128,16 @@ class VectorIndex:
     def _open_vector_table(self) -> None:
         import sqlite_vec
 
+        stored_dimension = self._repository.get_index_metadata("vector_dimension")
+        dimension_changed = stored_dimension != str(self._dim)
         try:
             sqlite_vec.load(self._repository.conn)
             logger.info("[VectorIndex] sqlite_vec extension loaded")
         except Exception as exc:
             logger.warning("[VectorIndex] sqlite_vec.load() failed: {} (type={})", exc, type(exc).__name__)
             self._backend = "python"
+            if dimension_changed:
+                self._repository.conn.execute("DROP TABLE IF EXISTS vec_embeddings")
             self._repository.conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS vec_embeddings (
@@ -143,11 +147,17 @@ class VectorIndex:
                 """
             )
             logger.info("[VectorIndex] fallback to python backend (vec_embeddings table created)")
+            self._repository.set_index_metadata("vector_dimension", str(self._dim))
+            self._repository.conn.commit()
             logger.info("[VectorIndex] backend ready: {}", self._backend)
             return
 
         try:
             self._backend = "sqlite_vec"
+            if dimension_changed:
+                self._repository.conn.executescript(
+                    "DROP TABLE IF EXISTS vec_chunks; DROP TABLE IF EXISTS vec_embeddings;"
+                )
             self._repository.conn.executescript(
                 "DROP TABLE IF EXISTS vec_embeddings;"
             )
@@ -156,10 +166,14 @@ class VectorIndex:
                 f"USING vec0(embedding float[{self._dim}] distance_metric=cosine);"
             )
             logger.info("[VectorIndex] vec_chunks virtual table created (backend=sqlite_vec)")
+            self._repository.set_index_metadata("vector_dimension", str(self._dim))
+            self._repository.conn.commit()
             logger.info("[VectorIndex] backend ready: {}", self._backend)
         except Exception as exc:
             logger.error("[VectorIndex] vec_chunks creation failed: {} (type={})", exc, type(exc).__name__)
             self._backend = "python"
+            if dimension_changed:
+                self._repository.conn.execute("DROP TABLE IF EXISTS vec_embeddings")
             self._repository.conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS vec_embeddings (
@@ -169,6 +183,8 @@ class VectorIndex:
                 """
             )
             logger.info("[VectorIndex] fallback to python backend after vec_chunks failure")
+            self._repository.set_index_metadata("vector_dimension", str(self._dim))
+            self._repository.conn.commit()
             logger.info("[VectorIndex] backend ready: {}", self._backend)
 
     def _search_python(

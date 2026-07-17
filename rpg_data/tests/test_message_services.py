@@ -280,6 +280,11 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
             "dream this",
             turn_id=3,
             dream_processed=True,
+            memory_kind="clue",
+            epistemic_status="reported",
+            salience=0.8,
+            source_turn_start=2,
+            source_turn_end=3,
             metadata_json='{"kind":"test"}',
         )
 
@@ -287,6 +292,31 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         assert [row.id for row in story_memory.list("s_forest001", dream_processed=True)] == [second.id]
         assert story_memory.get(first.id).to_context_dict()["turn_id"] == 2
         assert story_memory.get(second.id).to_context_dict()["metadata"] == {"kind": "test"}
+        assert story_memory.get(second.id).memory_kind == "clue"
+        assert story_memory.get(second.id).epistemic_status == "reported"
+        assert story_memory.get(second.id).source_turn_start == 2
+
+        duplicate = story_memory.add_detail(
+            "s_forest001",
+            "dream this",
+            turn_id=4,
+            memory_kind="clue",
+            salience=0.9,
+        )
+        assert duplicate.id == second.id
+        assert duplicate.created_at == second.created_at
+        assert duplicate.salience == 0.9
+        assert duplicate.source_turn_end == 4
+        assert duplicate.to_context_dict()["metadata"] == {"kind": "test"}
+
+        round_trip = story_memory.add_details_and_mark_processed(
+            "s_forest001",
+            [duplicate],
+            message_ids=[],
+        )
+        assert [row.id for row in round_trip] == [second.id]
+        assert round_trip[0].dedupe_key == duplicate.dedupe_key
+        assert len(story_memory.list("s_forest001")) == 2
 
         assert story_memory.set_dream_processed([first.id], dream_processed=True) == 1
         assert {row.id for row in story_memory.list("s_forest001", dream_processed=True)} == {
@@ -308,6 +338,45 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         with pytest.raises(InvalidTurnMetadataError):
             story_memory.set_details("s_forest001", [{"text": "invalid"}])
         assert [row.text for row in story_memory.list("s_forest001")] == ["replacement"]
+    finally:
+        database.close()
+
+
+def test_story_memory_batch_and_progress_commit_atomically(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        story_memory = StoryMemoryService(database)
+        session_id = _create_test_session(database, "s_story_atomic")
+        rows = [
+            messages.append(session_id, models.MESSAGE_ROLE_USER, "u", turn_id=1, seq_in_turn=1),
+            messages.append(session_id, models.MESSAGE_ROLE_ASSISTANT, "a", turn_id=1, seq_in_turn=2),
+        ]
+
+        saved = story_memory.add_details_and_mark_processed(
+            session_id,
+            [{
+                "text": "角色听说北门已经关闭。",
+                "turn_id": 1,
+                "memory_kind": "world_fact",
+                "epistemic_status": "reported",
+                "salience": 0.7,
+                "source_turn_start": 1,
+                "source_turn_end": 1,
+                "metadata": {"location": "北门"},
+            }],
+            message_ids=[row.id for row in rows],
+        )
+        assert len(saved) == 1
+        assert all(messages.get(row.id).story_memory_processed for row in rows)
+
+        with pytest.raises(ValueError, match="belong to the session"):
+            story_memory.add_details_and_mark_processed(
+                session_id,
+                [{"text": "不应写入", "turn_id": 2}],
+                message_ids=[999999],
+            )
+        assert [row.text for row in story_memory.list(session_id)] == ["角色听说北门已经关闭。"]
     finally:
         database.close()
 

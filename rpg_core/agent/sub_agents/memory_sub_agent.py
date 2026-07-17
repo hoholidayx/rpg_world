@@ -1,7 +1,7 @@
-"""MemorySubAgent — 总结归纳、记忆记录、召回子 Agent.
+"""MemorySubAgent — 剧情记忆提取与总结归纳子 Agent.
 
 继承 ``BaseSubAgent``，通过 ``SubAgentContext`` 获取世界书 + 角色卡上下文，
-确保记忆提取/召回/摘要判断不会 OOC。
+确保记忆提取与摘要判断不会 OOC。
 
 纯函数式设计：接受 ``context: dict``，处理，返回结果，不维护轮次状态。
 调用方决定传入什么内容、何时触发摘要。
@@ -12,13 +12,11 @@ Usage::
 
     agent = MemorySubAgent(
         provider_biz_key="agent.memory_sub_agent",
-        recalled_store=recalled_store,
         story_store=story_store,
         summary_store=summary_store,
     )
     agent.bind_context(sub_agent_context)
     result = await agent.process({
-        "recall": recent_conversation,
         "story": new_content,
         "summary": content_to_summarize,
     })
@@ -50,7 +48,6 @@ from rpg_core.settings import settings
 if TYPE_CHECKING:
     from rpg_core.agent.command import AgentCommandTarget
     from llm_client.types import LLMProvider
-    from rp_memory.recalled_memory import RecalledMemoryStore
     from rp_memory.story_memory import StoryMemoryStore
     from rpg_core.summary.store import SummaryStore
     from rpg_core.session.manager import SessionManager
@@ -62,7 +59,6 @@ COMMAND_NAME_COMPACT = "/compact"
 COMMAND_NAME_EXTRACT_STORY = "/extract_story_memory"
 """此子 Agent 注册到 CommandDispatcher 的斜杠命令名。"""
 
-MEMORY_LLM_SOURCE_RECALL = "memory_recall"
 MEMORY_LLM_SOURCE_STORY = "memory_story"
 MEMORY_LLM_SOURCE_SUMMARY = "memory_summary"
 MEMORY_LLM_SOURCE_BATCH_SUMMARY = "memory_batch_summary"
@@ -74,25 +70,6 @@ class MemoryPipelineError(RuntimeError):
 
 # ── function schemas (one per pipeline) ───────────────────────────────
 
-RECALL_SCHEMA: dict[str, object] = {
-    "type": "function",
-    "function": {
-        "name": "extract_recalls",
-        "description": "从对话中提取与当前上下文直接相关的召回项",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "recalls": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "与当前上下文直接相关的项。保守——只包含真正相关的。",
-                },
-            },
-            "required": ["recalls"],
-        },
-    },
-}
-
 STORY_DETAIL_SCHEMA: dict[str, object] = {
     "type": "function",
     "function": {
@@ -103,8 +80,41 @@ STORY_DETAIL_SCHEMA: dict[str, object] = {
             "properties": {
                 "story_details": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": "需要持久化为剧情记忆的 notable 细节。偏好具体、事实性的陈述。",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "单一、完整、可独立理解的剧情事实或主张。",
+                            },
+                            "memory_kind": {
+                                "type": "string",
+                                "enum": [
+                                    "character", "event", "relationship", "commitment",
+                                    "clue", "world_fact", "state_change",
+                                ],
+                            },
+                            "epistemic_status": {
+                                "type": "string",
+                                "enum": [
+                                    "confirmed", "reported", "inferred", "uncertain", "contradicted",
+                                ],
+                            },
+                            "salience": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                            },
+                            "entities": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "story_time": {"type": "string"},
+                            "location": {"type": "string"},
+                        },
+                        "required": ["text", "memory_kind", "epistemic_status", "salience"],
+                    },
+                    "description": "值得长期保存、并带有事实类型与认知状态的剧情记忆。",
                 },
             },
             "required": ["story_details"],
@@ -195,34 +205,32 @@ OVERALL_SCHEMA: dict[str, object] = {
 
 # ── system prompts (one per pipeline) ─────────────────────────────────
 
-RECALL_PROMPT = """\
-你是一个 RPG 游戏中的上下文相关性分析器。你的任务是扫描下方的对话，\
-找出与用户最新输入直接相关的上下文项。这些项会作为"召回记忆"注入，\
-帮助游戏主持人保持一致。
-
-重点关注：
-- 未解决的剧情线索或悬而未决的故事钩子
-- 最近的角色状态变化（受伤、情绪波动、获得新物品）
-- 用户当前互动的即时环境上下文
-- 最近的 NPC 言论或承诺
-
-调用 `extract_recalls`，最多包含 {max_items} 项。\
-保守——只包含真正相关的。\
-"""
-
 STORY_MEMORY_PROMPT = """\
-你是一个 RPG 的叙事细节提取器。扫描对话轮次，\
-提取值得长期保存的剧情记忆中的角色或剧情细节。
+你是一个严格的 RPG 长期记忆提取器。只提取对后续剧情一致性有长期价值、\
+且能从输入中找到依据的单一事实或主张。
 
-重点关注：
+提取范围：
 - 首次登场且有显著特征的角色
 - 重要的发现或揭示
 - 角色关系的发展变化
 - 玩家做出的重要选择
 - 通过叙事揭示的世界观细节
+- 明确的承诺、未解决线索和具有持续影响的状态变化
 
-调用 `extract_story_details`，最多包含 {max_items} 项。\
-偏好具体、事实性的陈述。避免模糊的观察。\
+事实边界：
+- 已经发生并被叙事确认的内容标记为 confirmed。
+- 角色说法、传闻或未经验证的信息标记为 reported；不要当作世界真相。
+- 合理推断标记为 inferred；证据不足标记为 uncertain。
+- 被后续内容明确推翻的信息标记为 contradicted。
+- “尝试、打算、希望”不等于成功；失败尝试不得写成已完成事件。
+- 承诺或计划使用 commitment，不得写成当前已经达成的状态。
+- 每项只表达一个事实，写明人物或实体名称，避免依赖代词。
+- 与 Existing Story Memory 语义相同的内容不要重复输出。
+
+salience 使用 0..1：只有会影响人物、关系、目标、线索、世界规则或持续状态的内容才应接近 1。
+entities、story_time、location 仅在输入有明确依据时填写；未知时留空。
+
+调用 `extract_story_details`，最多包含 {max_items} 项。允许返回空数组。\
 """
 
 SUMMARY_PROMPT = """\
@@ -249,6 +257,7 @@ BATCH_SUMMARY_PROMPT = """\
 3. time: 判断对话发生的时间点（剧情内时间）
 4. location: 主要场景地点
 5. characters: 参与的主要角色名
+6. 保留“传闻、推测、不确定、失败尝试、计划、承诺”等限定，不能改写成已确认或已完成事实
 
 调用 `generate_batch_summary` 并填入所有字段。
 """
@@ -267,6 +276,7 @@ OVERALL_PROMPT = """\
 2. 保持时间线和剧情发展的一致性
 3. 如果新内容修正了旧摘要中的错误，以新内容为准
 4. 输出完整的最新整体摘要（包含新旧全部内容的核心脉络）
+5. 保留事实的认知状态；不得把传闻/推测当作真相，也不得把尝试/承诺写成已经成功
 
 调用 `generate_overall_summary` 并填入摘要文本和关键事件。
 """
@@ -279,7 +289,6 @@ OVERALL_PROMPT = """\
 class MemoryAgentResult:
     """Result returned by :meth:`MemorySubAgent.process`."""
 
-    recalls_injected: int = 0
     story_details_added: int = 0
     summary_generated: bool = False
     skipped: bool = False
@@ -291,7 +300,7 @@ class MemoryAgentResult:
 
 
 class MemorySubAgent(BaseSubAgent):
-    """记忆子 Agent —— 三个独立处理管道：召回 / 剧情记忆 / 摘要。
+    """记忆子 Agent —— 剧情记忆与摘要两个独立处理管道。
 
     继承自 ``BaseSubAgent``，使用基类的 provider 管理、重入守卫以及
     SubAgentContext 绑定。每个 pipeline 的提示词中都会注入世界书 + 角色卡上下文。
@@ -301,8 +310,6 @@ class MemorySubAgent(BaseSubAgent):
 
     Parameters
     ----------
-    recalled_store:
-        召回记忆存储。
     story_store:
         剧情记忆存储。
     summary_store:
@@ -311,8 +318,8 @@ class MemorySubAgent(BaseSubAgent):
         交给 ``LLMClientManager`` 路由的业务键，例如 ``agent.memory_sub_agent``。
     enabled:
         总开关。
-    max_recall_items:
-        每轮最大召回项数。
+    max_story_items:
+        单次剧情记忆提取允许持久化的最大条数。
     max_window_rounds:
         传入 LLM 的最大对话窗口（用户轮次数）。
     """
@@ -320,12 +327,11 @@ class MemorySubAgent(BaseSubAgent):
     def __init__(
         self,
         *,
-        recalled_store: RecalledMemoryStore | None = None,
         story_store: StoryMemoryStore | None = None,
         summary_store: SummaryStore | None = None,
         provider_biz_key: str,
         enabled: bool = True,
-        max_recall_items: int = 5,
+        max_story_items: int = 8,
         max_window_rounds: int = 10,
         batch_store: "BatchSummaryStore | None" = None,
     ) -> None:
@@ -337,11 +343,10 @@ class MemorySubAgent(BaseSubAgent):
         # 通过基类 _get_provider() 延迟解析，不在构造期绑定具体实现。
         self._provider: LLMProvider | None = None
 
-        self._recalled_store = recalled_store
         self._story_store = story_store
         self._summary_store = summary_store
         self._batch_store = batch_store
-        self._max_recall_items = max_recall_items
+        self._max_story_items = max(1, int(max_story_items))
         self._max_window_rounds = max_window_rounds
 
     async def _get_provider(self) -> LLMProvider:
@@ -423,7 +428,8 @@ class MemorySubAgent(BaseSubAgent):
         if result.skipped:
             return {"reply": "剧情记忆提取跳过：处理器当前不可用。", "stats": None}
         added = result.story_details_added
-        session.mark_story_messages_processed(new_msgs)
+        if not session.history_enabled:
+            session.mark_story_messages_processed(new_msgs)
 
         stats = _build_call_stats(result)
         if stats:
@@ -486,7 +492,8 @@ class MemorySubAgent(BaseSubAgent):
         保留最近 *keep_rounds* 轮用户消息不动，将其余未处理历史按 *compress_rounds*
         为批次大小拆分，逐批调用 LLM 生成批次 md 文件（记忆唯一真源）。
         所有批次完成后，调用 LLM 生成/更新 overall.md（注入 context 的聚合概览）。
-        成功写入批次后标记对应消息为已处理，不截断历史。
+        所有批次与 overall 成功落盘后，统一标记对应消息为已处理；
+        任一步失败都会删除本轮批次并恢复 overall，不截断历史。
 
         Returns:
             包含 ``compress_rounds``、``kept_rounds``、``batch_files``、
@@ -527,14 +534,17 @@ class MemorySubAgent(BaseSubAgent):
 
         # 逐批生成批次摘要
         batch_files: list[str] = []
+        batch_paths = []
+        pending_progress: list[tuple[list[Message], int]] = []
         total_compressed = 0
         call_stats: list[CallRecord] = []
         processed_batch_ids: list[int] = []
-        next_batch_id = self._batch_store._next_batch_id()
+        overall_snapshot = self._batch_store.snapshot_overall()
+        next_batch_id = self._batch_store.next_batch_id()
         for offset, (_, batch_slice, user_rounds_in_batch) in enumerate(batches):
             batch_id = next_batch_id + offset
             try:
-                result = await self._pipeline_batch_summary(
+                result = await self.generate_batch_summary(
                     conv=batch_slice,
                     batch_id=batch_id,
                     user_rounds=user_rounds_in_batch,
@@ -551,7 +561,8 @@ class MemorySubAgent(BaseSubAgent):
                         characters=result.get("characters", []),
                     )
                     batch_files.append(file_path.name)
-                    session.mark_summary_messages_processed(batch_slice, batch_id=batch_id)
+                    batch_paths.append(file_path)
+                    pending_progress.append((batch_slice, batch_id))
                     total_compressed += user_rounds_in_batch
                     processed_batch_ids.append(batch_id)
             except Exception as exc:
@@ -565,24 +576,34 @@ class MemorySubAgent(BaseSubAgent):
             try:
                 existing_overall, last_batch_id = self._batch_store.load_overall()
                 new_batches = self._batch_store.get_new_content(last_batch_id)
-                if new_batches:
-                    overall_result = await self._pipeline_overall_summary(
-                        new_batches, existing_overall, call_stats=call_stats,
-                    )
-                    if overall_result:
-                        max_batch_id = max(processed_batch_ids)
-                        overall_path = self._batch_store.save_overall(
-                            content=overall_result.get("summary_text", ""),
-                            title=overall_result.get("title", ""),
-                            key_events=overall_result.get("key_events", []),
-                            last_batch_id=max_batch_id,
-                        )
-                        overall_file = overall_path.name
-                        logger.info(_TAG + " overall updated: {} (last_batch_id={})", overall_file, max_batch_id)
-                else:
-                    logger.info(_TAG + " overall skipped: no new batches since last_batch_id={}", last_batch_id)
+                if not new_batches:
+                    raise MemoryPipelineError("new summary batches missing from overall aggregation")
+                overall_result = await self.generate_overall_summary(
+                    new_batches, existing_overall, call_stats=call_stats,
+                )
+                if not overall_result or not str(overall_result.get("summary_text", "")).strip():
+                    raise MemoryPipelineError("overall summary returned no content")
+                max_batch_id = max(processed_batch_ids)
+                overall_path = self._batch_store.save_overall(
+                    content=overall_result.get("summary_text", ""),
+                    title=overall_result.get("title", ""),
+                    key_events=overall_result.get("key_events", []),
+                    last_batch_id=max_batch_id,
+                )
+                session.mark_summary_batches_processed(pending_progress)
+                overall_file = overall_path.name
+                logger.info(
+                    _TAG + " overall updated and progress committed: {} (last_batch_id={})",
+                    overall_file,
+                    max_batch_id,
+                )
             except Exception as exc:
                 logger.warning(_TAG + " overall summary failed: {}", exc)
+                self._batch_store.delete_batch_files(batch_paths)
+                self._batch_store.restore_overall(overall_snapshot)
+                batch_files = []
+                total_compressed = 0
+                processed_batch_ids = []
 
         before_len = len(session.history)
 
@@ -610,7 +631,6 @@ class MemorySubAgent(BaseSubAgent):
         ========= =========================  ============================
         key       值类型                     作用
         ========= =========================  ============================
-        ``recall`` ``list[Message]`` (optional)  扫描对话提取召回项
         ``story`` ``list[Message]`` (optional)  提取剧情细节追加持久化
         ``summary`` ``list[Message]`` (optional) 生成摘要追加到 SummaryStore
         ========= =========================  ============================
@@ -628,11 +648,6 @@ class MemorySubAgent(BaseSubAgent):
         try:
             result = MemoryAgentResult()
             call_stats: list[CallRecord] = []
-
-            if "recall" in context and self._recalled_store:
-                result.recalls_injected = await self._pipeline_recall(
-                    context["recall"], call_stats
-                )
 
             if "story" in context and self._story_store:
                 result.story_details_added = await self._pipeline_story_memory(
@@ -679,60 +694,21 @@ class MemorySubAgent(BaseSubAgent):
         result = await self.process({"story": new_msgs})
         if result.skipped:
             return
-        session.mark_story_messages_processed(new_msgs)
+        if not session.history_enabled:
+            session.mark_story_messages_processed(new_msgs)
 
     def update_store_refs(
         self,
-        recalled_store: RecalledMemoryStore | None = None,
         story_store: StoryMemoryStore | None = None,
         summary_store: SummaryStore | None = None,
     ) -> None:
         """更新 store 引用（RPG context reload 后调用）。"""
-        if recalled_store is not None:
-            self._recalled_store = recalled_store
         if story_store is not None:
             self._story_store = story_store
         if summary_store is not None:
             self._summary_store = summary_store
 
-    # ── Pipeline 1: 召回 ─────────────────────────────────────────────
-
-    async def _pipeline_recall(self, conv: list[Message], call_stats: list[CallRecord]) -> int:
-        """提取召回项，全量替换 RecalledMemoryStore。"""
-        window = self._format_conversation_window(conv, self._max_window_rounds)
-
-        system_content = self._build_system_context(
-            RECALL_PROMPT.replace("{max_items}", str(self._max_recall_items))
-        )
-
-        messages = [
-            Message(role=Role.SYSTEM, content=system_content).to_dict(),
-            Message(role=Role.USER, content=(
-                f"## Conversation\n\n{window}\n\n"
-                f"Call `extract_recalls` with relevant context items."
-            )).to_dict(),
-        ]
-
-        decision, call_rec = await self._call_llm(
-            messages,
-            RECALL_SCHEMA,
-            source=MEMORY_LLM_SOURCE_RECALL,
-        )
-        if call_rec:
-            call_stats.append(call_rec)
-        recalls = decision.get("recalls", [])[: self._max_recall_items]
-
-        if recalls and self._recalled_store:
-            try:
-                self._recalled_store.set_items(recalls)
-                logger.debug(_TAG + " injected {} recall items", len(recalls))
-                return len(recalls)
-            except Exception as exc:
-                logger.warning(_TAG + " failed to write recalls: {}", exc)
-
-        return 0
-
-    # ── Pipeline 2: 剧情记忆 ─────────────────────────────────────────
+    # ── Pipeline 1: 剧情记忆 ─────────────────────────────────────────
 
     async def _pipeline_story_memory(self, conv: list[Message], call_stats: list[CallRecord]) -> int:
         """提取剧情细节，追加到 StoryMemoryStore。"""
@@ -748,7 +724,9 @@ class MemorySubAgent(BaseSubAgent):
         if existing_items:
             logger.info(_TAG + " story pipeline: {} existing items for dedup", len(existing_items))
 
-        system_content = self._build_system_context(STORY_MEMORY_PROMPT)
+        system_content = self._build_system_context(
+            STORY_MEMORY_PROMPT.replace("{max_items}", str(self._max_story_items))
+        )
 
         messages = [
             Message(role=Role.SYSTEM, content=system_content).to_dict(),
@@ -778,30 +756,28 @@ class MemorySubAgent(BaseSubAgent):
         details = decision.get("story_details", [])
         if not isinstance(details, list):
             raise MemoryPipelineError("story memory response must contain a list")
-        turn_id = SessionManager.latest_turn_id(conv)
-
-        added = 0
-        if details and self._story_store:
-            write_errors: list[Exception] = []
-            for detail in details:
-                try:
-                    self._story_store.add_detail(detail, turn_id=turn_id)
-                    added += 1
-                except Exception as exc:
-                    write_errors.append(exc)
-                    logger.warning(
-                        _TAG + " failed to add story detail: {}", exc
-                    )
-            if write_errors:
-                raise MemoryPipelineError(
-                    f"failed to persist {len(write_errors)} story detail(s)"
-                ) from write_errors[0]
-            if added:
-                logger.debug(_TAG + " added {} story details", added)
-
+        normalized_details = [
+            _normalize_story_detail(detail)
+            for detail in details[: self._max_story_items]
+        ]
+        turn_ids = [int(message.turn_id) for message in conv if int(message.turn_id) > 0]
+        if not turn_ids:
+            raise MemoryPipelineError("story memory source messages require turn ids")
+        try:
+            added = self._story_store.add_details_and_mark_processed(
+                normalized_details,
+                turn_id=max(turn_ids),
+                source_turn_start=min(turn_ids),
+                source_turn_end=max(turn_ids),
+                message_ids=[message.uid for message in conv if message.uid > 0],
+            )
+        except Exception as exc:
+            raise MemoryPipelineError("failed to atomically persist story memory") from exc
+        if added:
+            logger.debug(_TAG + " added {} story details", added)
         return added
 
-    # ── Pipeline 3: 摘要 ─────────────────────────────────────────────
+    # ── Pipeline 2: 摘要 ─────────────────────────────────────────────
 
     async def _pipeline_summary(self, conv: list[Message], call_stats: list[CallRecord]) -> bool:
         """生成摘要文本，追加到 SummaryStore。"""
@@ -840,7 +816,7 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Pipeline 4: 批次摘要 ─────────────────────────────────────────
 
-    async def _pipeline_batch_summary(
+    async def generate_batch_summary(
         self,
         conv: list[Message],
         batch_id: int = 0,
@@ -899,7 +875,7 @@ class MemorySubAgent(BaseSubAgent):
 
     # ── Pipeline 5: 整体归纳 ─────────────────────────────────────────
 
-    async def _pipeline_overall_summary(
+    async def generate_overall_summary(
         self,
         new_batch_summaries: list[str],
         existing_body: str = "",
@@ -1088,6 +1064,35 @@ class MemorySubAgent(BaseSubAgent):
 
 
 # ── helpers ───────────────────────────────────────────────────────────
+
+
+def _normalize_story_detail(raw: object) -> dict[str, object]:
+    """Normalize legacy string responses and keep sparse RP fields in metadata."""
+    if isinstance(raw, str):
+        return {
+            "text": raw,
+            "memory_kind": "event",
+            "epistemic_status": "confirmed",
+            "salience": 0.5,
+            "metadata": {},
+        }
+    if not isinstance(raw, dict):
+        raise MemoryPipelineError("each story memory detail must be an object")
+    text = " ".join(str(raw.get("text", "") or "").split())
+    if not text:
+        raise MemoryPipelineError("story memory detail text must not be empty")
+    metadata: dict[str, object] = {}
+    for key in ("entities", "story_time", "location"):
+        value = raw.get(key)
+        if value not in (None, "", []):
+            metadata[key] = value
+    return {
+        "text": text,
+        "memory_kind": str(raw.get("memory_kind", "event") or "event"),
+        "epistemic_status": str(raw.get("epistemic_status", "confirmed") or "confirmed"),
+        "salience": raw.get("salience", 0.5),
+        "metadata": metadata,
+    }
 
 
 def _build_call_stats(result: MemoryAgentResult) -> dict[str, float | str | int] | None:

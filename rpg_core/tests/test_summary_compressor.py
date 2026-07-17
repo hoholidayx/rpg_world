@@ -52,6 +52,70 @@ async def test_summary_compressor_marks_processed_without_truncating_history():
 
 
 @pytest.mark.asyncio
+async def test_summary_overall_failure_removes_batches_and_keeps_progress_retryable():
+    class FailingOverall(FakeMemorySubAgent):
+        async def generate_overall_summary(self, new_batches, existing_overall):  # noqa: ANN001
+            return None
+
+    batch_store = FakeBatchStore()
+    compressor = SummaryCompressor(
+        batch_store=batch_store,
+        memory_sub_agent=FailingOverall(),  # type: ignore[arg-type]
+        enabled=True,
+        keep_recent_rounds=1,
+        compression_threshold=0,
+        compress_batch_size=2,
+    )
+    session = SessionManager(history_enabled=False)
+    session.replace_history([
+        Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
+        Message(Role.USER, "u2", turn_id=2, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a2", turn_id=2, seq_in_turn=2),
+    ], persist=False)
+
+    result = await compressor.maybe_compress(session)
+
+    assert result.triggered is True
+    assert result.summary_generated is False
+    assert result.batch_files is None
+    assert batch_store.batch_summaries == []
+    assert [group[0].turn_id for group in session.summary_turn_groups_for_compression(1)] == [1]
+
+
+@pytest.mark.asyncio
+async def test_summary_progress_failure_restores_files_and_overall():
+    class FailingProgressSession(SessionManager):
+        def mark_summary_batches_processed(self, batches):  # noqa: ANN001
+            raise RuntimeError("database write failed")
+
+    batch_store = FakeBatchStore()
+    batch_store.overall = ("previous overall", 1)
+    compressor = SummaryCompressor(
+        batch_store=batch_store,
+        memory_sub_agent=FakeMemorySubAgent(),  # type: ignore[arg-type]
+        enabled=True,
+        keep_recent_rounds=1,
+        compression_threshold=0,
+        compress_batch_size=2,
+    )
+    session = FailingProgressSession(history_enabled=False)
+    session.replace_history([
+        Message(Role.USER, "u1", turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a1", turn_id=1, seq_in_turn=2),
+        Message(Role.USER, "u2", turn_id=2, seq_in_turn=1),
+        Message(Role.ASSISTANT, "a2", turn_id=2, seq_in_turn=2),
+    ], persist=False)
+
+    result = await compressor.maybe_compress(session)
+
+    assert result.summary_generated is False
+    assert batch_store.batch_summaries == []
+    assert batch_store.overall == ("previous overall", 1)
+    assert [group[0].turn_id for group in session.summary_turn_groups_for_compression(1)] == [1]
+
+
+@pytest.mark.asyncio
 async def test_summary_compressor_noop_when_disabled_or_short():
     batch_store = FakeBatchStore()
     memory_sub_agent = FakeMemorySubAgent()

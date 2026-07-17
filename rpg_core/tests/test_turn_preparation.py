@@ -56,7 +56,7 @@ class _MemoryRecall:
     def __init__(self, events: list[str]) -> None:
         self.events = events
 
-    async def run(self, user_input: str) -> None:
+    async def run(self, user_input: str, **_kwargs) -> None:
         assert user_input == "current action"
         self.events.append("recall")
 
@@ -82,7 +82,7 @@ class _Transaction:
 
 
 def _runtime(events: list[str]) -> SimpleNamespace:
-    execution = object()
+    execution = SimpleNamespace(player_character=None)
     return SimpleNamespace(
         plan=SimpleNamespace(
             request=SimpleNamespace(text="current action"),

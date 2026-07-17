@@ -68,7 +68,11 @@ class TurnPreparation:
             seq_in_turn=stored_user_message.seq_in_turn,
         )
 
-        await self._memory_recall.run(request.text)
+        await self._memory_recall.run(
+            request.text,
+            player_character=runtime.plan.execution.player_character,
+            scene_tracker=scratch.scene_tracker,
+        )
 
         messages = self._context_service.build_transformed_context(
             current_user_message=current_user_message,

@@ -624,6 +624,27 @@ class SessionManager:
             self._in_memory_message_key(msg) for msg in messages
         )
 
+    def mark_summary_batches_processed(
+        self,
+        batches: list[tuple[list[Message], int]],
+    ) -> None:
+        """Atomically advance every successfully materialized summary batch."""
+        if not batches:
+            return
+        if self._history_enabled:
+            self._require_data_session().messages.mark_summary_batches_processed(
+                self._session_id,
+                [
+                    (self._message_ids(messages), batch_id)
+                    for messages, batch_id in batches
+                ],
+            )
+            return
+        for messages, _ in batches:
+            self._summary_processed_message_keys.update(
+                self._in_memory_message_key(message) for message in messages
+            )
+
     def story_turn_groups_since_last_extraction(self) -> list[list[Message]]:
         """Return logical turn groups not yet processed for story memory."""
         if self._history_enabled:

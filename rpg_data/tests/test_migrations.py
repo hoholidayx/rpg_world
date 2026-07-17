@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from rpg_data import db
+from rpg_data.migrations import runner as migration_runner
 from rpg_data.migrations.runner import run_migrations
 
 
@@ -170,7 +171,14 @@ def test_run_migrations_creates_initial_tables() -> None:
             "session_id",
             "turn_id",
             "text",
+            "memory_kind",
+            "epistemic_status",
+            "salience",
+            "source_turn_start",
+            "source_turn_end",
+            "dedupe_key",
             "dream_processed",
+            "metadata_schema_version",
             "metadata_json",
         }.issubset(story_memory_columns)
         assert {
@@ -330,7 +338,52 @@ def test_run_migrations_is_idempotent() -> None:
             ("0011", "0011_media_generated_library.sql"),
             ("0012", "0012_media_library_taxonomy.sql"),
             ("0013", "0013_tts.sql"),
+            ("0014", "0014_story_memory_metadata.sql"),
         ]
+    finally:
+        conn.close()
+
+
+def test_story_memory_metadata_migration_hard_cuts_legacy_rows(monkeypatch) -> None:
+    conn = db.connect(":memory:")
+    migrations = migration_runner._iter_migration_files()
+    assert migrations[-1].name == "0014_story_memory_metadata.sql"
+    try:
+        monkeypatch.setattr(
+            migration_runner,
+            "_iter_migration_files",
+            lambda: migrations[:-1],
+        )
+        migration_runner.run_migrations(conn)
+        conn.execute(
+            """
+            INSERT INTO rpg_session_story_memories (
+                session_id, turn_id, text, metadata_json
+            ) VALUES ('s_forest001', 1, 'legacy memory', '{"legacy":true}')
+            """
+        )
+        conn.commit()
+
+        monkeypatch.setattr(
+            migration_runner,
+            "_iter_migration_files",
+            lambda: migrations,
+        )
+        migration_runner.run_migrations(conn)
+
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_session_story_memories"
+        ).fetchone()["count"] == 0
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO rpg_session_story_memories (
+                    session_id, turn_id, text, source_turn_start,
+                    source_turn_end, dedupe_key
+                ) VALUES ('s_forest001', 1, 'invalid key', 1, 1, 'short')
+                """
+            )
+        conn.rollback()
     finally:
         conn.close()
 

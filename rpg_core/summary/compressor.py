@@ -4,7 +4,7 @@
 1. 当历史对话超出保留窗口时触发压缩
 2. 选择需要压缩的历史段（保留窗口之前的旧内容）
 3. 委托 MemorySubAgent 按批次生成摘要并写入 BatchSummaryStore
-4. 在主消息表上标记已写入摘要的消息行
+4. overall 与批次文件都成功后，在主消息表上原子标记摘要进度
 
 Architecture::
 
@@ -23,7 +23,7 @@ Architecture::
 
     基于完整非 system 历史计算最近 keep_recent_rounds 窗口
     窗口外仍有未处理消息的 turn 数 > compression_threshold → 触发
-    压缩后     = 批次摘要写入 BatchSummaryStore，消息行标记为已处理
+    压缩后     = 批次摘要与 overall 写入成功，消息行统一标记为已处理
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
 from rpg_core.agent.sub_agents.memory_candidates import select_summary_turn_groups
 
 if TYPE_CHECKING:
+    from rpg_core.context.rpg_context import Message
     from rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_core.session.manager import SessionManager
 
@@ -125,8 +126,8 @@ class SummaryCompressor:
     async def maybe_compress(self, session: "SessionManager") -> CompressResult:
         """检查是否需要压缩，是则执行分批压缩。
 
-        当压缩触发时，session 的历史不会被截断；成功写入 batch summary
-        的消息会被标记为 ``summary_processed``。
+        当压缩触发时，session 的历史不会被截断；本轮 batch summary 与
+        overall 都成功后，对应消息才会被标记为 ``summary_processed``。
 
         多次调用是安全的 —— 如果历史不够长，直接返回 ``triggered=False``。
         """
@@ -156,13 +157,16 @@ class SummaryCompressor:
         batches = SessionManager.split_into_turn_batches(compress_portion, self._compress_batch_size)
 
         batch_files: list[str] = []
+        batch_paths = []
+        pending_progress: list[tuple[list[Message], int]] = []
         processed_turns = 0
         processed_batch_ids: list[int] = []
-        next_batch_id = self._batch_store._next_batch_id()
+        overall_snapshot = self._batch_store.snapshot_overall()
+        next_batch_id = self._batch_store.next_batch_id()
         for offset, (_, batch_messages, batch_user_rounds) in enumerate(batches):
             batch_id = next_batch_id + offset
             try:
-                result = await self._memory_sub_agent._pipeline_batch_summary(
+                result = await self._memory_sub_agent.generate_batch_summary(
                     conv=batch_messages, batch_id=batch_id, user_rounds=batch_user_rounds
                 )
                 if result:
@@ -175,8 +179,9 @@ class SummaryCompressor:
                         location=result.get("location", ""),
                         characters=result.get("characters", []),
                     )
-                    session.mark_summary_messages_processed(batch_messages, batch_id=batch_id)
                     batch_files.append(path.name)
+                    batch_paths.append(path)
+                    pending_progress.append((batch_messages, batch_id))
                     processed_turns += batch_user_rounds
                     processed_batch_ids.append(batch_id)
                     logger.info(
@@ -199,29 +204,32 @@ class SummaryCompressor:
                 existing_overall, last_batch_id = self._batch_store.load_overall()
                 new_batches = self._batch_store.get_new_content(last_batch_id)
                 if not new_batches:
-                    logger.info(
-                        "[Compressor] overall skipped: no new batches since last_batch_id={}",
-                        last_batch_id,
-                    )
-                else:
-                    overall_result = await self._memory_sub_agent._pipeline_overall_summary(
-                        new_batches, existing_overall
-                    )
-                    if overall_result:
-                        max_batch_id = max(processed_batch_ids)
-                        overall_path = self._batch_store.save_overall(
-                            content=overall_result.get("summary_text", ""),
-                            title=overall_result.get("title", ""),
-                            key_events=overall_result.get("key_events", []),
-                            last_batch_id=max_batch_id,
-                        )
-                        overall_file = overall_path.name
-                        logger.info(
-                            "[Compressor] overall.md updated (last_batch_id={})",
-                            max_batch_id,
-                        )
+                    raise RuntimeError("new summary batches were not visible to overall aggregation")
+                overall_result = await self._memory_sub_agent.generate_overall_summary(
+                    new_batches, existing_overall
+                )
+                if not overall_result or not str(overall_result.get("summary_text", "")).strip():
+                    raise RuntimeError("overall summary returned no content")
+                max_batch_id = max(processed_batch_ids)
+                overall_path = self._batch_store.save_overall(
+                    content=overall_result.get("summary_text", ""),
+                    title=overall_result.get("title", ""),
+                    key_events=overall_result.get("key_events", []),
+                    last_batch_id=max_batch_id,
+                )
+                session.mark_summary_batches_processed(pending_progress)
+                overall_file = overall_path.name
+                logger.info(
+                    "[Compressor] overall.md updated and progress committed (last_batch_id={})",
+                    max_batch_id,
+                )
             except Exception as exc:
                 logger.warning("[Compressor] overall summary failed: {}", exc)
+                self._batch_store.delete_batch_files(batch_paths)
+                self._batch_store.restore_overall(overall_snapshot)
+                batch_files = []
+                processed_turns = 0
+                processed_batch_ids = []
 
         logger.info(
             "[Compressor] compressed {} turns, {} batch files",

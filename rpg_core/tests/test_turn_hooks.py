@@ -16,6 +16,8 @@ from rpg_core.agent.turn.hooks import (
     PostCommitHooks,
     StatusPreflightHook,
 )
+from rpg_core.session.manager import SessionManager
+from rpg_core.context.rpg_context import Message, Role
 
 
 class _StatusScratch:
@@ -148,7 +150,56 @@ async def test_memory_recall_hook_warns_and_continues_on_failure() -> None:
         memory_manager=_Memory(),
     )
 
-    await MemoryRecallHook(lambda: resources).run("hello")
+    await MemoryRecallHook(
+        lambda: resources,
+        SessionManager(history_enabled=False),
+    ).run("hello")
+
+
+@pytest.mark.asyncio
+async def test_memory_recall_hook_builds_turn_local_rp_query_context() -> None:
+    captured = []
+
+    class _Memory:
+        async def recall(self, context) -> None:  # noqa: ANN001
+            captured.append(context)
+
+    class _Scene:
+        @staticmethod
+        def get_recall_context():
+            return {"time": "第二天清晨", "location": "雾港"}
+
+    session = SessionManager(history_enabled=False)
+    session.replace_history([
+        Message(Role.USER, "old", mode="ic", turn_id=1, seq_in_turn=1),
+        Message(Role.ASSISTANT, "old answer", mode="ic", turn_id=1, seq_in_turn=2),
+        Message(Role.USER, "debug", mode="ooc", turn_id=2, seq_in_turn=1),
+        Message(Role.ASSISTANT, "debug answer", mode="ooc", turn_id=2, seq_in_turn=2),
+        Message(Role.USER, "艾琳提出钟楼会合", mode="gm", turn_id=3, seq_in_turn=1),
+        Message(Role.ASSISTANT, "她答应明早前往", mode="gm", turn_id=3, seq_in_turn=2),
+    ], persist=False)
+    resources = AgentContextResources(
+        builder=SimpleNamespace(),
+        character_manager=None,
+        lorebook_manager=None,
+        status_manager=None,
+        scene_tracker=None,
+        memory_manager=_Memory(),
+    )
+
+    await MemoryRecallHook(lambda: resources, session).run(
+        "她答应了什么？",
+        player_character=SimpleNamespace(name="洛恩"),
+        scene_tracker=_Scene(),  # type: ignore[arg-type]
+    )
+
+    assert captured[0].current_input == "她答应了什么？"
+    assert captured[0].player_character == "洛恩"
+    assert captured[0].scene_time == "第二天清晨"
+    assert captured[0].scene_location == "雾港"
+    assert len(captured[0].recent_turns) == 2
+    assert all("debug" not in turn for turn in captured[0].recent_turns)
+    assert "艾琳" in captured[0].recent_turns[-1]
 
 
 @pytest.mark.asyncio

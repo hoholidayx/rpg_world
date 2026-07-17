@@ -255,6 +255,13 @@ class MessageService:
             batch_id=batch_id,
         )
 
+    def mark_summary_batches_processed(
+        self,
+        session_id: str,
+        batches: Iterable[tuple[Iterable[int], int]],
+    ) -> int:
+        return self._store.mark_summary_batches_processed(session_id, batches)
+
     def list_story_memory_unprocessed_turn_groups(
         self,
         session_id: str,

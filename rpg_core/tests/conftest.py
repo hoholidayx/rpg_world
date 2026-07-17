@@ -120,7 +120,21 @@ class FakeBatchStore:
         self.overall = (kwargs.get("content", ""), kwargs.get("last_batch_id", 0))
         return Path("overall.md")
 
-    def _next_batch_id(self):
+    def snapshot_overall(self):
+        return self.overall
+
+    def restore_overall(self, snapshot):  # noqa: ANN001
+        self.overall = snapshot
+
+    def delete_batch_files(self, paths):  # noqa: ANN001
+        names = {path.name for path in paths}
+        self.batch_summaries = [
+            item
+            for item in self.batch_summaries
+            if f"batch_{item['batch_id']}.md" not in names
+        ]
+
+    def next_batch_id(self):
         return 2
 
 
@@ -140,7 +154,7 @@ class FakeMemorySubAgent:
         groups = SessionManager.iter_turn_groups(list(conv))
         return [(1, list(conv), len(groups))] if conv else []
 
-    async def _pipeline_batch_summary(self, conv, batch_id, user_rounds):  # noqa: ANN001
+    async def generate_batch_summary(self, conv, batch_id, user_rounds):  # noqa: ANN001
         self.batch_calls.append({"conv": conv, "batch_id": batch_id, "user_rounds": user_rounds})
         return {
             "title": f"batch-{batch_id}",
@@ -150,7 +164,7 @@ class FakeMemorySubAgent:
             "characters": ["A"],
         }
 
-    async def _pipeline_overall_summary(self, new_batches, existing_overall):  # noqa: ANN001
+    async def generate_overall_summary(self, new_batches, existing_overall):  # noqa: ANN001
         self.overall_calls.append({"new_batches": list(new_batches), "existing_overall": existing_overall})
         return {
             "title": "overall",

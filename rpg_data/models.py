@@ -94,6 +94,8 @@ __all__ = [
     "MESSAGE_ROLE_TOOL",
     "MESSAGE_ROLE_USER",
     "MESSAGE_ROLES",
+    "STORY_MEMORY_KINDS",
+    "STORY_MEMORY_EPISTEMIC_STATUSES",
     "MEDIA_JOB_ACTIVE_STATUSES",
     "MEDIA_JOB_FINAL_STATUSES",
     "MEDIA_JOB_STATUSES",
@@ -195,6 +197,22 @@ MESSAGE_ROLES = frozenset({
     MESSAGE_ROLE_USER,
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_TOOL,
+})
+STORY_MEMORY_KINDS = frozenset({
+    "character",
+    "event",
+    "relationship",
+    "commitment",
+    "clue",
+    "world_fact",
+    "state_change",
+})
+STORY_MEMORY_EPISTEMIC_STATUSES = frozenset({
+    "confirmed",
+    "reported",
+    "inferred",
+    "uncertain",
+    "contradicted",
 })
 MEDIA_JOB_STATUS_QUEUED = "queued"
 MEDIA_JOB_STATUS_RUNNING = "running"
@@ -1038,7 +1056,14 @@ class SessionStoryMemory:
     session_id: str
     turn_id: int
     text: str = ""
+    memory_kind: str = "event"
+    epistemic_status: str = "confirmed"
+    salience: float = 0.5
+    source_turn_start: int = 0
+    source_turn_end: int = 0
+    dedupe_key: str = ""
     dream_processed: bool = False
+    metadata_schema_version: int = 1
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""
@@ -1055,7 +1080,14 @@ class SessionStoryMemory:
             "id": self.id,
             "turn_id": self.turn_id,
             "text": self.text,
+            "memory_kind": self.memory_kind,
+            "epistemic_status": self.epistemic_status,
+            "salience": self.salience,
+            "source_turn_start": self.source_turn_start,
+            "source_turn_end": self.source_turn_end,
+            "dedupe_key": self.dedupe_key,
             "dream_processed": self.dream_processed,
+            "metadata_schema_version": self.metadata_schema_version,
             "metadata": metadata if isinstance(metadata, dict) else {},
         }
 

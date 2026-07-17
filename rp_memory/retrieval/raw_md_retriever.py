@@ -57,7 +57,7 @@ class RawMarkdownRetriever(BaseRetriever):
         return [
             (
                 candidate.content,
-                candidate.final_score or candidate.raw_md_score or candidate.exact_score,
+                candidate.raw_md_score if candidate.raw_md_score != 0.0 else candidate.exact_score,
                 dict(candidate.metadata),
             )
             for candidate in candidates

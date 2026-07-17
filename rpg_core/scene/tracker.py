@@ -214,6 +214,17 @@ class SceneTracker:
         """渲染只包含场景数据的快照，供持久化历史使用。"""
         return "\n".join((*self._snapshot_lines(), "[/scene]"))
 
+    def get_recall_context(self) -> dict[str, str]:
+        """Return only scene time/location fields used by memory query planning."""
+        attrs = self._current_attrs()
+        return {
+            "time": _first_scene_value(attrs, ("时间", "日期", "时刻", "time", "date")),
+            "location": _first_scene_value(
+                attrs,
+                ("地点", "位置", "场景", "location", "place"),
+            ),
+        }
+
     def _snapshot_lines(self) -> list[str]:
         lines = ["[scene]"]
         for k, v in self._current_attrs().items():
@@ -265,3 +276,12 @@ class SceneTracker:
         if attrs:
             tools.append(SetAttrTool(self))
         return tools
+
+
+def _first_scene_value(attrs: dict[str, str], keys: tuple[str, ...]) -> str:
+    lowered = {str(key).strip().casefold(): str(value).strip() for key, value in attrs.items()}
+    for key in keys:
+        value = lowered.get(key.casefold(), "")
+        if value:
+            return value
+    return ""

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +18,7 @@ from llm_service.openai_provider import OpenAIProvider
 from llm_service.llama_provider import LlamaLogitRerankProvider
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.memory_manager import MemoryManager, RecallItem
+from rp_memory.recall_query import RecallQueryContext
 from rp_memory import run as memory_run
 from rp_memory.storage.types import ChunkRecord, IndexedFileState
 from rp_memory.storage.vector_store import VectorStore
@@ -50,6 +52,215 @@ from rp_memory.storage.text_index import _keyword_relevance
 from rp_memory.vector_index_manager import VectorIndexManager, WatchSource
 from rp_memory.tests.conftest import FakeEmbedding, FakeFallbackSearch, FakeRetriever, FakeStore
 from rpg_core.settings import MemorySettings
+
+
+def test_explicit_zero_rerank_score_does_not_fall_back_to_hybrid():
+    candidate = MemoryCandidate(memory_id=1, content="x", hybrid_score=0.8, rerank_score=0.0)
+
+    assert candidate.final_score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_hybrid_uses_independent_candidate_budgets_before_final_top_k():
+    class Vector:
+        def __init__(self) -> None:
+            self.limits = []
+
+        async def search_plan(self, _plan, top_k):  # noqa: ANN001
+            self.limits.append(top_k)
+            return []
+
+    class Keyword:
+        def __init__(self) -> None:
+            self.limits = []
+
+        async def search_plan_async(self, _plan, top_k):  # noqa: ANN001
+            self.limits.append(top_k)
+            return []
+
+    vector = Vector()
+    keyword = Keyword()
+    retriever = HybridRetriever(
+        sqlvec_retriever=vector,  # type: ignore[arg-type]
+        keyword_retriever=keyword,  # type: ignore[arg-type]
+        raw_md_mode="disabled",
+        vector_candidate_k=17,
+        keyword_candidate_k=23,
+    )
+
+    await retriever.retrieve("query", top_k=2)
+
+    assert vector.limits == [17]
+    assert keyword.limits == [23]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_excludes_overall_summary_candidates():
+    class Keyword:
+        async def search_plan_async(self, _plan, top_k):  # noqa: ANN001
+            return [
+                MemoryCandidate(
+                    memory_id=1,
+                    content="duplicate overall",
+                    metadata={"type": "overall", "file": "/summaries/overall.md"},
+                    keyword_score=1.0,
+                ),
+                MemoryCandidate(
+                    memory_id=2,
+                    content="batch evidence",
+                    metadata={"type": "batch", "file": "/summaries/001-event.md"},
+                    keyword_score=0.8,
+                ),
+            ]
+
+    retriever = HybridRetriever(
+        keyword_retriever=Keyword(),  # type: ignore[arg-type]
+        raw_md_mode="disabled",
+    )
+
+    results = await retriever.retrieve("evidence", top_k=5)
+
+    assert [text for text, _, _ in results] == ["batch evidence"]
+
+
+@pytest.mark.asyncio
+async def test_rule_planner_augments_query_with_rp_turn_context():
+    planner = RuleBasedQueryPlanner()
+    context = RecallQueryContext(
+        current_input="他昨天答应了什么？",
+        recent_turns=("Turn 1:\nGM: 艾琳答应在钟楼会合。",),
+        player_character="洛恩",
+        scene_time="第二天清晨",
+        scene_location="雾港",
+    )
+
+    plan = await planner.plan_context(context)
+
+    assert plan.normalized_query == "他昨天答应了什么？"
+    assert "洛恩" in plan.keyword_queries
+    assert "雾港" in plan.keyword_queries
+    assert any("艾琳" in query for query in plan.expanded_queries)
+
+
+@pytest.mark.asyncio
+async def test_sqlvec_searches_current_and_context_expansions():
+    embedding = FakeEmbedding([[1.0, 0.0], [0.0, 1.0]])
+    store = FakeStore()
+    store.vector_rows = [
+        (FakeChunkRecord(1, "memory", {}), 0.2),
+    ]
+    retriever = SqlVecRetriever(store, embedding)  # type: ignore[arg-type]
+    plan = QueryPlan(
+        original_query="他答应了什么",
+        normalized_query="他答应了什么",
+        keyword_queries=("他答应了什么",),
+        expanded_queries=("艾琳 钟楼会合",),
+        raw_md_terms=("答应",),
+    )
+
+    results = await retriever.search_plan(plan, top_k=7)
+
+    assert embedding.calls == [["他答应了什么", "艾琳 钟楼会合"]]
+    assert store.search_calls == [([1.0, 0.0], 7), ([0.0, 1.0], 7)]
+    assert results[0].debug["vector_best_query"] == "他答应了什么"
+
+
+@pytest.mark.asyncio
+async def test_sqlvec_rejects_partial_contextual_embedding_response():
+    embedding = FakeEmbedding([[1.0, 0.0]])
+    retriever = SqlVecRetriever(FakeStore(), embedding)  # type: ignore[arg-type]
+    plan = QueryPlan(
+        original_query="current",
+        normalized_query="current",
+        keyword_queries=("current",),
+        expanded_queries=("context",),
+        raw_md_terms=(),
+    )
+
+    with pytest.raises(ValueError, match="response count"):
+        await retriever.search_plan(plan, top_k=5)
+
+
+@pytest.mark.asyncio
+async def test_sqlvec_excludes_overall_summary_without_hybrid_wrapper():
+    embedding = FakeEmbedding([[1.0, 0.0]])
+    store = FakeStore()
+    store.vector_rows = [
+        (FakeChunkRecord(1, "overall", {"type": "overall", "file": "overall.md"}), 0.1),
+        (FakeChunkRecord(2, "batch", {"type": "batch", "file": "001.md"}), 0.2),
+    ]
+    retriever = SqlVecRetriever(store, embedding)  # type: ignore[arg-type]
+
+    results = await retriever.search("query", top_k=5)
+
+    assert [candidate.content for candidate in results] == ["batch"]
+
+
+@pytest.mark.asyncio
+async def test_sqlvec_context_merge_resorts_and_enforces_top_k():
+    class QueryStore(FakeStore):
+        def search(self, query, top_k=5, filters=None):  # noqa: ANN001
+            self.search_calls.append((list(query), top_k))
+            if query == [1.0, 0.0]:
+                return [
+                    (FakeChunkRecord(1, "initial-low", {}), 0.8),
+                    (FakeChunkRecord(2, "initial-mid", {}), 0.4),
+                ]
+            return [
+                (FakeChunkRecord(3, "expanded-best", {}), 0.1),
+                (FakeChunkRecord(1, "initial-low", {}), 0.2),
+            ]
+
+    embedding = FakeEmbedding([[1.0, 0.0], [0.0, 1.0]])
+    retriever = SqlVecRetriever(QueryStore(), embedding)  # type: ignore[arg-type]
+    plan = QueryPlan(
+        original_query="current",
+        normalized_query="current",
+        keyword_queries=("current",),
+        expanded_queries=("context",),
+        raw_md_terms=(),
+    )
+
+    results = await retriever.search_plan(plan, top_k=2)
+
+    assert [candidate.memory_id for candidate in results] == [3, 1]
+    assert results[1].debug["vector_best_query"] == "context"
+
+
+def test_index_fingerprint_reset_and_reindex_preserve_created_at(tmp_path):
+    db_path = tmp_path / "memory.db"
+    store = VectorStore(db_path, dimension=None)
+    assert store.ensure_content_fingerprint("content-v1") is True
+    record = ChunkRecord(
+        id=1,
+        text="old text",
+        metadata={"source": "summaries", "file": "/summary/001.md", "chunk_idx": 0},
+    )
+    state = IndexedFileState(
+        file="/summary/001.md",
+        source_id="summaries",
+        mtime_ns=1,
+        size=8,
+        content_hash="hash-1",
+    )
+    store.replace_file(state.file, [record], None, state)
+    with sqlite3.connect(db_path) as conn:
+        created_before = conn.execute("SELECT created_at FROM chunks WHERE id = 1").fetchone()[0]
+
+    updated = ChunkRecord(id=1, text="new text", metadata=dict(record.metadata))
+    store.replace_file(state.file, [updated], None, state)
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute("SELECT text, created_at FROM chunks WHERE id = 1").fetchone()
+    assert row == ("new text", created_before)
+
+    assert store.ensure_vector_fingerprint("vector-v1") is True
+    assert store.has_pending_vector_files() is True
+
+    assert store.ensure_content_fingerprint("content-v2") is True
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM indexed_files").fetchone()[0] == 0
+    store.close()
 
 
 class FakeChunkRecord:
@@ -631,6 +842,22 @@ def test_keyword_tokenizers_support_jieba_bigram_and_both():
     assert both_tokens.count("猎人") == 1
 
 
+def test_jieba_keyword_tokenizer_filters_stopwords_and_preserves_technical_tokens():
+    tokenizer = JiebaKeywordTokenizer()
+
+    rp_tokens = tokenizer.tokenize("失落王冠被谁藏在了哪里？")
+    technical_tokens = tokenizer.tokenize("Where is GPT-4 in C++?")
+
+    assert {"被", "谁", "在", "了", "哪里"}.isdisjoint(rp_tokens)
+    assert {"失落", "王冠", "藏"}.issubset(rp_tokens)
+    assert {"where", "is", "in"}.isdisjoint(technical_tokens)
+    assert {"GPT-4", "gpt-4", "C++", "c++"}.issubset(technical_tokens)
+
+    tokenizer._tokenizer = None  # noqa: SLF001 - exercise the no-jieba fallback
+    fallback_tokens = tokenizer.tokenize("失落王冠与 C++")
+    assert {"失落", "王冠", "C++", "c++"}.issubset(fallback_tokens)
+
+
 def test_vector_store_keyword_search_uses_configured_tokenizer(tmp_path):
     store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None, keyword_tokenizer="bigram")
     store.upsert([
@@ -716,6 +943,30 @@ async def test_vector_index_manager_skips_hash_read_for_stat_unchanged_files(tmp
     await manager.sync_all()
 
     assert read_count == 1
+    store.close()
+
+
+async def test_vector_index_manager_upgrades_unchanged_text_only_file_to_vectors(tmp_path):
+    source_dir = tmp_path / "summaries"
+    source_dir.mkdir()
+    file_path = source_dir / "a.md"
+    file_path.write_text("alpha memory", encoding="utf-8")
+    store = VectorStore(db_path=tmp_path / "vectors.db", dimension=None)
+    manager = VectorIndexManager(
+        store=store,
+        embedding=None,
+        sources=[WatchSource(source_dir, "summaries", lambda p: p.suffix == ".md")],
+    )
+    await manager.sync_all()
+    assert _manifest_rows(store)[0][2] == "text_only"
+
+    embedding = FakeEmbedding([[0.1, 0.2, 0.3]])
+    assert store.enable_vector_index(3) is True
+    manager.set_embedding(embedding)
+    await manager.sync_all(force=False)
+
+    assert embedding.calls == [["alpha memory"]]
+    assert _manifest_rows(store)[0][2] == "indexed"
     store.close()
 
 
@@ -1400,6 +1651,9 @@ async def test_memory_manager_recall_logs_raw_md_plan_terms(monkeypatch, fake_re
                 raw_md_terms=("酒馆", "老板"),
                 planner_source="test",
             )
+
+        async def plan_context(self, context):  # noqa: ANN001
+            return await self.plan(context.current_input)
 
     monkeypatch.setattr(
         "rp_memory.memory_manager.logger.info",
