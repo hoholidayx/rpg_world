@@ -524,18 +524,18 @@ Status preflight 的单目标可恢复失败不会自动终止后续快速目标
 | 能力 | 文件 |
 |---|---|
 | facade / composition root | `rpg_core/agent/agent.py` |
-| mailbox 与 deferred 时序 | `rpg_core/agent/mailbox.py` |
+| mailbox 与 deferred 时序 | `rpg_core/agent/mailbox/service.py` |
 | turn 请求、快照与 policy | `rpg_core/agent/turn/models.py` |
 | plan 解析 | `rpg_core/agent/turn/planning.py` |
 | Context 门禁与 runtime 创建 | `rpg_core/agent/turn/factory.py` |
-| 固定 hooks | `rpg_core/agent/turn/hooks.py` |
+| 固定 hooks | `rpg_core/agent/turn/hooks/fixed.py` |
 | 主 Context / 工具准备 | `rpg_core/agent/turn/preparation.py` |
 | 同步/流式共享编排 | `rpg_core/agent/turn/orchestrator.py` |
 | 协议适配与 bypass | `rpg_core/agent/turn/service.py`、`preprocessor.py` |
-| transaction / scratch / commit | `rpg_core/agent/transaction/` |
-| StatusSubAgent 阶段实现 | `rpg_core/agent/sub_agents/status_sub_agent.py` |
-| StatusSubAgent 类型化结果 | `rpg_core/agent/sub_agents/status_sub_agent_models.py` |
-| 主工具装配与 schema 过滤 | `rpg_core/agent/tool_service.py` |
+| transaction / scratch / commit | `rpg_core/agent/turn/transaction/` |
+| StatusSubAgent 阶段实现 | `rpg_core/agent/sub_agents/status/agent.py` |
+| StatusSubAgent 类型化结果 | `rpg_core/agent/sub_agents/status/models.py` |
+| 主工具装配与 schema 过滤 | `rpg_core/agent/runtime/tools.py` |
 | 普通状态表工具与写策略 | `rpg_core/status/tools.py` |
-| deferred 协调器 | `rpg_core/agent/deferred_status.py` |
+| deferred 协调器 | `rpg_core/agent/runtime/deferred_status.py` |
 | Narrative Outcome runtime | `rpg_core/rp_modules/narrative_outcome/` |

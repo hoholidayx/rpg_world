@@ -23,7 +23,7 @@ from rpg_core.context.models import (
     UserExtensionBlock,
     UserMessageLayer,
 )
-from rpg_core.session.turns import slice_recent_turns
+from rpg_core.session.grouping import slice_recent_turns
 from rpg_core.status.context import prepare_status_context_tables
 
 if TYPE_CHECKING:

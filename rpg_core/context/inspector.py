@@ -13,7 +13,7 @@ from loguru import logger
 from rpg_core.context.layout import CONTEXT_LAYER_ORDER
 from rpg_core.context.models import LayerType, Message, RPGContext, Role
 from rpg_core.context.usage import estimate_rendered_context_usage
-from rpg_core.session.turns import count_roles, count_turns
+from rpg_core.session.grouping import count_roles, count_turns
 from rpg_core.utils.tokenizer import TokenCounter
 
 

@@ -108,7 +108,7 @@
 - 修改主 agent、LLM provider、session manager、context 或相关配置时，默认跑：
   `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q`。
 - 修改 Agent 组合、`rpg_core/agent/turn/`、transaction 或同步/流式编排时，至少先跑：
-  `uv run python -m pytest rpg_core/tests/test_agent.py rpg_core/tests/test_agent_mailbox.py rpg_core/tests/test_agent_lifecycle.py rpg_core/tests/test_main_model_runtime.py rpg_core/tests/test_agent_context_service.py rpg_core/tests/test_agent_tool_service.py rpg_core/tests/test_turn_hooks.py rpg_core/tests/test_turn_runtime_factory.py rpg_core/tests/test_turn_orchestration.py rpg_core/tests/test_turn_transaction.py -q`，并补跑 `uv run python -m pytest agent_service/tests -q`。
+  `uv run python -m pytest rpg_core/tests/agent/test_agent.py rpg_core/tests/agent/mailbox/test_agent_mailbox.py rpg_core/tests/agent/runtime/test_agent_lifecycle.py rpg_core/tests/agent/runtime/test_main_model_runtime.py rpg_core/tests/agent/runtime/test_agent_context_service.py rpg_core/tests/agent/runtime/test_agent_tool_service.py rpg_core/tests/agent/turn/test_turn_hooks.py rpg_core/tests/agent/turn/test_turn_runtime_factory.py rpg_core/tests/agent/turn/test_turn_orchestration.py rpg_core/tests/agent/turn/test_turn_transaction.py -q`，并补跑 `uv run python -m pytest agent_service/tests -q`。
 - 保留 `pytest.ini` 中的 `asyncio_mode = auto`。
 - pytest 默认会清理代理环境变量；需要保留代理时显式设置 `PYTEST_KEEP_PROXY=1`。
 

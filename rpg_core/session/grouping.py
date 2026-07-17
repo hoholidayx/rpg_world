@@ -7,6 +7,7 @@ depending on a concrete Agent or SubAgent implementation.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -100,6 +101,15 @@ def split_into_turn_batches(
 def latest_turn_id(messages: list[Message]) -> int:
     turn_ids = [message.turn_id for message in messages if message.turn_id > 0]
     return max(turn_ids, default=0)
+
+
+def count_roles(messages: Iterable[Message]) -> dict[str, int]:
+    counts = {"system": 0, "user": 0, "assistant": 0, "tool": 0}
+    for message in messages:
+        role = message.role.value
+        if role in counts:
+            counts[role] += 1
+    return counts
 
 
 def uses_fallback_grouping(messages: list[Message]) -> bool:

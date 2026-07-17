@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from rpg_core.session.grouping import (
+    count_roles as count_message_roles,
     count_turns as count_grouped_turns,
     has_explicit_turn_ids as contains_explicit_turn_ids,
     has_trustworthy_turn_ids as contains_trustworthy_turn_ids,
@@ -51,12 +52,7 @@ def split_into_turn_batches(
 
 
 def count_roles(messages: Iterable[Message]) -> dict[str, int]:
-    counts = {"system": 0, "user": 0, "assistant": 0, "tool": 0}
-    for msg in messages:
-        role = msg.role.value
-        if role in counts:
-            counts[role] += 1
-    return counts
+    return count_message_roles(messages)
 
 
 def latest_turn_id(messages: list[Message]) -> int:

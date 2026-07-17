@@ -65,7 +65,7 @@ def test_facade_exposes_stable_read_only_session_interfaces() -> None:
 
 
 def test_agent_module_is_a_small_composition_facade() -> None:
-    source_path = Path(__file__).parents[1] / "agent" / "agent.py"
+    source_path = Path(__file__).parents[2] / "agent" / "agent.py"
     source = source_path.read_text(encoding="utf-8")
 
     assert len(source.splitlines()) <= 500

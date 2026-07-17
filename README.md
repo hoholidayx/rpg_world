@@ -269,13 +269,16 @@ Telegram 渠道当前支持：
 | 模块 | 说明 |
 |---|---|
 | `agent/agent.py` | `RPGGameAgent` 组合根与公开门面，只组装组件并委托公开 API |
-| `agent/mailbox.py` / `session_service.py` / `lifecycle.py` | FIFO 队列与取消、会话操作、session-scoped runtime 生命周期 |
-| `agent/model_runtime.py` / `context_service.py` / `tool_service.py` | 主模型选择与 provider cache、Context/门禁/预览、工具与 schema 装配 |
-| `agent/turn/` | 单轮请求、不可变执行计划、固定阶段 hooks、运行态与同步/流式共享编排 |
-| `context/` | 结构化 RPG 上下文构建、LLM 边界渲染、上下文诊断 |
+| `agent/runtime/` | session-scoped lifecycle/resources、会话操作、主模型、Context 与工具服务 |
+| `agent/mailbox/` / `command/` | FIFO/取消与命令 dispatcher/handlers/models |
+| `agent/turn/` | 单轮请求、不可变执行计划、runner、固定 hooks、transaction 与同步/流式共享编排 |
+| `agent/sub_agents/memory/` / `status/` | 子 Agent 实现、结果模型、解析、候选或稳定 prompt/schema |
+| `context/` | canonical models、结构化构建、LLM 边界渲染、上下文诊断；`rpg_context.py` 仅兼容导出 |
+| `session/` | `SessionManager` 门面与 history/progress/grouping/models 职责拆分 |
+| `tooling/` | 跨 Agent/RP Module 共享的 `BaseTool` 与 `ToolRegistry` |
 | `scene/` | 场景状态跟踪（时间/地点/属性） |
-| `character/` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
-| `lorebook/` | 世界书只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
+| `character.py` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
+| `lorebook.py` | 世界书只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `status/` | 状态表薄适配，通过 `rpg_data` 按 session 读取 SQLite document 真源 |
 | `rp_modules/` | RP 玩法模块框架，当前包含 Narrative Outcome 剧情裁定与 Dice 低层随机模块 |
 | `summary/` | 对话摘要压缩 |
@@ -337,6 +340,7 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 
 `rpg_core/context/` 的主流程保持结构化数据，直到发送给 LLM 前才由 Jinja2 模板统一渲染：
 
+- `context/models.py` 是 `Message` / `Role`、各层数据和 `RPGContext` 的唯一实现；`context/rpg_context.py` 保留旧导入兼容并重导出相同类对象。
 - `RPGContextBuilder` 消费预组装的 `FixedLayerData`，并负责摘要、记忆、状态表和用户扩展块，产出结构化 `RPGContext`。
 - 主 Agent 的 `send()`、`send_stream()` 和 `context-preview` 统一通过 `SessionManager.context_history()` 读取历史投影：仅排除 `summary_processed=true` 的单条消息，不校验 `summary_batch_id`、batch 文件、`overall.md` 或 turn 完整性；当前 turn 的 user message 仍来自事务 scratch。
 - `FixedLayerAssembler` 通过 contributors 统一装配固定层 section，例如核心 RP 指令、文本输出格式、世界书、角色卡和已启用 RP Module 的静态契约。
@@ -838,7 +842,7 @@ Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace_id + story_
 
 ### 会话历史字段
 
-会话消息写入 `rpg_session_messages`，冷备份写入 `rpg_session_backup_messages`。数据库自增 `id` 映射为 `Message.uid`；`turn_id` 和 `seq_in_turn` 由 `SessionManager` 管理，持久化路径必须写入正数。主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一；冷备份表保持追加语义，不做唯一约束。
+会话消息写入 `rpg_session_messages`，冷备份写入 `rpg_session_backup_messages`。`SessionManager` 保持公开门面，内部由 `session/history.py` 管消息与持久化、`progress.py` 管 summary/story-memory 行标记、`grouping.py` 管 turn 算法。数据库自增 `id` 映射为 `Message.uid`；`turn_id` 和 `seq_in_turn` 由会话层管理，持久化路径必须写入正数。主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一；冷备份表保持追加语义，不做唯一约束。
 
 summary 和剧情记忆提取进度标记在 `rpg_session_messages` 对应消息行上；剧情记忆条目写入 `rpg_session_story_memories`，且必须关联正数 `turn_id`。summary 的 `keep_recent_rounds` 和批次切分仍按显式 turn/round 分组；异常 turn metadata 在写入或加载边界失败，不再恢复 user-anchor / pair 降级分组。
 
@@ -854,10 +858,10 @@ Agent Context 与历史展示分离：Play/Agent 的 `history` / `history-page` 
 uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests rpg_tts/tests tts_service/tests dream_service/tests -q
 ```
 
-当前测试会 mock LLM、Telegram SDK 和网络调用。若本地缺少 `pytest-asyncio`，`rpg_core/tests/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。覆盖范围包括：
+当前测试会 mock LLM、Telegram SDK 和网络调用。若本地缺少 `pytest-asyncio`，`rpg_core/tests/agent/command/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。覆盖范围包括：
 
 - `channels/tests/`：ChannelAdapter、CLI、Telegram 渠道和渠道侧会话流程。
-- `rpg_core/tests/`：Agent facade、Mailbox、Lifecycle、MainModel、Context/Tool service、turn hooks/runtime/orchestrator、transaction、命令、scene、session 与 summary。
+- `rpg_core/tests/`：按源码领域镜像组织；Agent 测试继续按 runtime/mailbox/command/sub_agents/turn/tools 分组，其余 Context、Session、Summary、RP Modules、Scene、Status 与 utils 各自归档。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank，以及 Dream 选源、分批、Map/Reduce 和 retirement policy。
 - `dream_service/tests/`：Dream source adapter、进程内生成生命周期、HTTP/Client 契约与错误隔离。
 - `rpg_data/tests/`：catalog、消息、状态、Dream proposal/ledger/revision/Evidence、原子 Apply 与 `/clear` 数据语义。
@@ -885,14 +889,14 @@ cd play_webui && npm run build
 
 ```bash
 uv run python -m pytest \
-  rpg_core/tests/test_agent.py \
-  rpg_core/tests/test_agent_mailbox.py \
-  rpg_core/tests/test_agent_lifecycle.py \
-  rpg_core/tests/test_agent_context_service.py \
-  rpg_core/tests/test_agent_tool_service.py \
-  rpg_core/tests/test_turn_hooks.py \
-  rpg_core/tests/test_turn_runtime_factory.py \
-  rpg_core/tests/test_turn_orchestration.py -q
+  rpg_core/tests/agent/test_agent.py \
+  rpg_core/tests/agent/mailbox/test_agent_mailbox.py \
+  rpg_core/tests/agent/runtime/test_agent_lifecycle.py \
+  rpg_core/tests/agent/runtime/test_agent_context_service.py \
+  rpg_core/tests/agent/runtime/test_agent_tool_service.py \
+  rpg_core/tests/agent/turn/test_turn_hooks.py \
+  rpg_core/tests/agent/turn/test_turn_runtime_factory.py \
+  rpg_core/tests/agent/turn/test_turn_orchestration.py -q
 uv run python -m pytest agent_service/tests -q
 INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q
 SERVICE_INTEGRATION_TEST=1 uv run python -m pytest tests/integration -m service_integration -q

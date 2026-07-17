@@ -92,6 +92,20 @@ def test_canonical_agent_modules_do_not_import_compatibility_facades() -> None:
     assert violations == []
 
 
+def test_core_internals_use_canonical_context_and_session_helpers() -> None:
+    compatibility_modules = {
+        "rpg_core.context.rpg_context",
+        "rpg_core.session.turns",
+    }
+    violations: list[str] = []
+    for path in _python_files(CORE):
+        for imported in _imports(path):
+            if imported in compatibility_modules:
+                violations.append(f"{path.relative_to(ROOT)}: {imported}")
+
+    assert violations == []
+
+
 def test_public_package_imports_do_not_initialize_runtime_or_database() -> None:
     script = """
 import importlib
