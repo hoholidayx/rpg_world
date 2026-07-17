@@ -218,8 +218,16 @@ class RPGDataDreamRepository(DreamRepository):
             )
         )
 
-    def interrupt_generating(self) -> int:
-        return self.gateway.dream.interrupt_generating()
+    def interrupt_generating(
+        self,
+        session_id: str | None = None,
+        *,
+        proposal_id: str | None = None,
+    ) -> int:
+        return self.gateway.dream.interrupt_generating(
+            session_id,
+            proposal_id=proposal_id,
+        )
 
     def update_proposal_items(
         self,

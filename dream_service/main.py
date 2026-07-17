@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from llm_client.manager import LLMClientManager
 
-from dream_service.contracts import DreamProposalItemUpdate, DreamRepository
+from dream_service.contracts import AsyncDreamRepository, DreamProposalItemUpdate
 from dream_service.repository import RPGDataDreamRepository
 from dream_service.runtime import DreamTaskManager
+from dream_service.worker import DreamRepositoryWorker
 from dream_service.schemas import (
     DreamHealthResponse,
     DreamMemoryListResponse,
@@ -40,7 +41,7 @@ class DreamRuntime:
     def __init__(
         self,
         *,
-        repository: DreamRepository,
+        repository: AsyncDreamRepository,
         tasks: DreamTaskManager,
     ) -> None:
         self.repository = repository
@@ -48,7 +49,7 @@ class DreamRuntime:
 
     @classmethod
     def create(cls) -> "DreamRuntime":
-        repository = RPGDataDreamRepository()
+        repository = DreamRepositoryWorker(RPGDataDreamRepository)
         config = settings.engine
         engine = DreamEngine(
             model=LLMDreamModel(),
@@ -64,9 +65,8 @@ class DreamRuntime:
             tasks=DreamTaskManager(repository=repository, engine=engine),
         )
 
-    def close(self) -> None:
-        if isinstance(self.repository, RPGDataDreamRepository):
-            self.repository.close()
+    async def close(self) -> None:
+        await self.repository.close()
 
 
 _runtime: DreamRuntime | None = None
@@ -102,13 +102,16 @@ async def lifespan(app: FastAPI):
     runtime: DreamRuntime | None = None
     try:
         runtime = get_runtime()
+        await runtime.repository.start()
         await runtime.tasks.start()
         yield
     finally:
         try:
             if runtime is not None:
-                await runtime.tasks.stop()
-                runtime.close()
+                try:
+                    await runtime.tasks.stop()
+                finally:
+                    await runtime.close()
         finally:
             if _runtime is runtime:
                 _runtime = None
@@ -137,6 +140,7 @@ async def create_proposal(
             session_id,
             depth=DreamDepth(request.depth),
             scope=DreamScope(request.scope),
+            recover_proposal_id=request.recover_proposal_id,
         )
     except Exception as exc:
         raise _http_error(exc) from exc
@@ -149,7 +153,7 @@ async def create_proposal(
 )
 async def list_proposals(session_id: str) -> DreamProposalListResponse:
     try:
-        proposals = get_runtime().repository.list_proposals(session_id)
+        proposals = await get_runtime().repository.list_proposals(session_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return proposal_list_response(proposals)
@@ -164,7 +168,7 @@ async def get_proposal(
     proposal_id: str,
 ) -> DreamProposalResponse:
     try:
-        proposal = get_runtime().repository.get_proposal(session_id, proposal_id)
+        proposal = await get_runtime().repository.get_proposal(session_id, proposal_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     if proposal is None:
@@ -193,7 +197,7 @@ async def update_proposal(
         for item in request.items
     )
     try:
-        proposal = get_runtime().repository.update_proposal_items(
+        proposal = await get_runtime().repository.update_proposal_items(
             session_id,
             proposal_id,
             updates,
@@ -212,7 +216,7 @@ async def apply_proposal(
     proposal_id: str,
 ) -> DreamProposalResponse:
     try:
-        proposal = get_runtime().repository.apply_proposal(session_id, proposal_id)
+        proposal = await get_runtime().repository.apply_proposal(session_id, proposal_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return proposal_response(proposal)
@@ -227,7 +231,7 @@ async def reject_proposal(
     proposal_id: str,
 ) -> DreamProposalResponse:
     try:
-        proposal = get_runtime().repository.reject_proposal(session_id, proposal_id)
+        proposal = await get_runtime().repository.reject_proposal(session_id, proposal_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return proposal_response(proposal)
@@ -242,7 +246,7 @@ async def list_memories(
     lifecycle: str | None = Query(default=None),
 ) -> DreamMemoryListResponse:
     try:
-        result = get_runtime().repository.list_memories(
+        result = await get_runtime().repository.list_memories(
             session_id,
             lifecycle=lifecycle,
         )
@@ -260,7 +264,7 @@ async def restore_memory(
     memory_id: str,
 ) -> DreamMemoryResponse:
     try:
-        result = get_runtime().repository.restore_memory(session_id, memory_id)
+        result = await get_runtime().repository.restore_memory(session_id, memory_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return memory_response(result)

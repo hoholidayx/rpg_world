@@ -101,6 +101,8 @@ class DreamProposalItemUpdate:
 
 
 class DreamRepository(Protocol):
+    """Synchronous repository owned by the Dream repository worker thread."""
+
     def build_source_snapshot(self, session_id: str) -> DreamSourceSnapshot: ...
 
     def create_proposal(self, selection: DreamSelection) -> DreamProposalView: ...
@@ -127,7 +129,12 @@ class DreamRepository(Protocol):
         error_message: str,
     ) -> DreamProposalView: ...
 
-    def interrupt_generating(self) -> int: ...
+    def interrupt_generating(
+        self,
+        session_id: str | None = None,
+        *,
+        proposal_id: str | None = None,
+    ) -> int: ...
 
     def update_proposal_items(
         self,
@@ -160,3 +167,81 @@ class DreamRepository(Protocol):
         session_id: str,
         memory_id: str,
     ) -> DreamMemoryView: ...
+
+    def close(self) -> None: ...
+
+
+class AsyncDreamRepository(Protocol):
+    """Loop-facing repository contract backed by one serialized worker."""
+
+    async def start(self) -> None: ...
+
+    async def build_source_snapshot(self, session_id: str) -> DreamSourceSnapshot: ...
+
+    async def create_proposal(
+        self,
+        selection: DreamSelection,
+    ) -> DreamProposalView: ...
+
+    async def get_proposal(
+        self,
+        session_id: str,
+        proposal_id: str,
+    ) -> DreamProposalView | None: ...
+
+    async def list_proposals(self, session_id: str) -> DreamProposalListView: ...
+
+    async def set_proposal_ready(
+        self,
+        proposal_id: str,
+        items: tuple[DreamProposalItemDraft, ...],
+    ) -> DreamProposalView: ...
+
+    async def set_proposal_failed(
+        self,
+        proposal_id: str,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> DreamProposalView: ...
+
+    async def interrupt_generating(
+        self,
+        session_id: str | None = None,
+        *,
+        proposal_id: str | None = None,
+    ) -> int: ...
+
+    async def update_proposal_items(
+        self,
+        session_id: str,
+        proposal_id: str,
+        updates: tuple[DreamProposalItemUpdate, ...],
+    ) -> DreamProposalView: ...
+
+    async def reject_proposal(
+        self,
+        session_id: str,
+        proposal_id: str,
+    ) -> DreamProposalView: ...
+
+    async def apply_proposal(
+        self,
+        session_id: str,
+        proposal_id: str,
+    ) -> DreamProposalView: ...
+
+    async def list_memories(
+        self,
+        session_id: str,
+        *,
+        lifecycle: str | None = None,
+    ) -> DreamMemoryListView: ...
+
+    async def restore_memory(
+        self,
+        session_id: str,
+        memory_id: str,
+    ) -> DreamMemoryView: ...
+
+    async def close(self) -> None: ...

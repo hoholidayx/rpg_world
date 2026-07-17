@@ -301,13 +301,20 @@ class DreamMemoryService:
             raise RuntimeError("Dream proposal disappeared after failure")
         return failed
 
-    def interrupt_generating(self, session_id: str | None = None) -> int:
+    def interrupt_generating(
+        self,
+        session_id: str | None = None,
+        *,
+        proposal_id: str | None = None,
+    ) -> int:
         where_clause = (
             SessionDreamProposalRecord.status
             == models.DREAM_PROPOSAL_STATUS_GENERATING
         )
         if session_id is not None:
             where_clause &= SessionDreamProposalRecord.session == str(session_id)
+        if proposal_id is not None:
+            where_clause &= SessionDreamProposalRecord.id == str(proposal_id)
         return int(
             SessionDreamProposalRecord.update(
                 status=models.DREAM_PROPOSAL_STATUS_INTERRUPTED,

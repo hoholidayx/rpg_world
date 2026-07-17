@@ -719,7 +719,17 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
         history_fingerprint=next_snapshot.history_fingerprint,
         source_fingerprint="b" * 64,
     )
-    assert dream.interrupt_generating() == 1
+    assert dream.interrupt_generating(
+        "s_forest001",
+        proposal_id="not-the-generating-proposal",
+    ) == 0
+    assert dream.get_proposal(generating.id).status == (
+        models.DREAM_PROPOSAL_STATUS_GENERATING
+    )
+    assert dream.interrupt_generating(
+        "s_forest001",
+        proposal_id=generating.id,
+    ) == 1
     assert dream.get_proposal(generating.id).status == (
         models.DREAM_PROPOSAL_STATUS_INTERRUPTED
     )

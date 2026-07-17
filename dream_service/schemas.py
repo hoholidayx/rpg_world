@@ -29,6 +29,11 @@ class DreamHealthResponse(DreamSchema):
 class DreamProposalCreateRequest(DreamSchema):
     depth: Literal["shallow", "deep"]
     scope: Literal["incremental", "full"]
+    recover_proposal_id: str | None = Field(
+        default=None,
+        alias="recoverProposalId",
+        min_length=1,
+    )
 
 
 class DreamEvidenceResponse(DreamSchema):
