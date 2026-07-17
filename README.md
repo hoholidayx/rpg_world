@@ -495,8 +495,10 @@ Dream 是手动、Session 级的离线归纳链路。Persistent Memory 的真源
 - **Shallow**：从仍能精确匹配当前主消息 ID/version/hash 的 story memory，以及来源消息仍完整属于原 batch 的 summary 提炼；派生材料只用于增量整理，不能因局部缺失全局退休旧事实。
 - **Deep**：以当前主消息表的 IC/GM user/assistant 历史为事实真源；Full 可全局校准，Incremental 只处理新增、修改、删除及 Evidence 受影响的记忆。
 - **Incremental / Full**：与 Shallow/Deep 独立组合，形成四种手动运行方式。
-- 每次运行先持久化 proposal。WebUI 可逐项选择并编辑文本、类型、认知状态和显著度；Apply 会重新校验历史/source/ledger 指纹并原子提交。
-- Dream 使用进程内异步生成任务。页面不自动轮询；服务重启把未完成任务标记为 `interrupted`，由用户手动刷新或重新生成。
+- Map、分层 Reduce 和最终 Proposal 共用 `map_concurrency` 并发上限；若 Reduce 不收敛而触发代码侧候选截断，Full Deep 会禁用基于“候选缺席”的退休，只保留显式证据驱动的修订或替换。
+- 每次运行先持久化 proposal。WebUI 可逐项选择并编辑文本、类型、认知状态和显著度；Apply 在串行 repository worker 中取得 SQLite `IMMEDIATE` 写锁，事务内重新捕获并再次确认 history/source/ledger 快照后原子提交。
+- Dream 使用进程内异步生成任务。页面不自动轮询；服务重启把未完成任务标记为 `interrupted`，运行中若终态落库连续失败也会尽力中断残留 `generating`。WebUI 的“检查并重试”会携带原 proposal ID：已完成时只刷新终态，仅在该 ID 仍为无本地 task 的孤儿 `generating` 时按原 depth/scope 新建替代任务，不重复消耗 LLM。
+- retired 事实仍保留稳定 Memory ID 和历史 revisions。后续 Dream 若从新的有效 Evidence 再次提取出同一规范化事实，ADD 会在原 ID 上追加新 revision 并恢复为 active；手动 Restore 仍只适用于旧 revision Evidence 尚有效的记录。
 - `/clear` 清空 Session Dream 账本、revision/Evidence、proposal 和增量 state/manifests；历史编辑/截断不会自动运行 Dream，但 Evidence 失效会立即阻止旧记忆继续进入 Context。
 
 Play WebUI 从 Session 设置菜单进入 Dream Memory 管理页。Dream Service v1 不提供入站鉴权，
@@ -695,7 +697,7 @@ Play WebUI 从 Session 设置菜单进入 Dream Memory 管理页。Dream Service
 | `media_service/settings.yaml` | Media 服务监听、MediaClient 地址/超时与 worker 并发参数 |
 | `rpg_tts/settings.yaml` | TTS 正文标准化版本、speech biz key 与单段字符上限 |
 | `tts_service/settings.yaml` | TTS 服务监听、TTSClient、LLMClient 与持久 worker |
-| `dream_service/settings.yaml` | Dream 服务监听、DreamClient、LLMClient 与 Map/Reduce 分批参数；64 条 active 是固定数据层不变量 |
+| `dream_service/settings.yaml` | Dream 服务监听、DreamClient、LLMClient 与 Map/Reduce 分批参数；`map_concurrency` 兼容保留旧命名并限制整条 Dream LLM 链路；64 条 active 是固定数据层不变量 |
 | `llm_service/settings.yaml` | LLM 服务监听、Bearer 令牌环境变量名、本地 llama 并行模型数、`llama_shutdown_grace_ms` 与日志 |
 | `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口和 context 正文门禁阈值 |
 | `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、speech 音色、温度、超时等 LLM 强相关配置 |
