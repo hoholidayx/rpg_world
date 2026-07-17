@@ -12,7 +12,7 @@ from rpg_core.rp_modules.models import ModuleContextRequest, RPModuleSelectionSn
 from rpg_core.rp_modules.narrative_outcome import NarrativeOutcomeModule
 
 if TYPE_CHECKING:
-    from rpg_core.agent.transaction import TurnScratch
+    from rpg_core.agent.turn.transaction import TurnScratch
 
 
 class RPModuleTurnRuntime:

@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 from rpg_core.agent.turn.models import TurnExecutionPlan, TurnRequest
 
 if TYPE_CHECKING:
-    from rpg_core.agent.context_service import AgentContextService
-    from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
-    from rpg_core.agent.model_runtime import MainModelRuntime
+    from rpg_core.agent.runtime.context import AgentContextService
+    from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
+    from rpg_core.agent.runtime.model import MainModelRuntime
 
 
 class TurnPlanResolver:

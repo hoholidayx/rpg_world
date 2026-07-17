@@ -12,7 +12,7 @@ from llm_client.keys import (
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
 )
-from rpg_core.agent.resources import (
+from rpg_core.agent.runtime.resources import (
     AgentContextResources,
     build_agent_context_resources,
 )
@@ -23,9 +23,9 @@ from rpg_core.summary.compressor import SummaryCompressor
 from rpg_core.utils.watcher import get_watcher
 
 if TYPE_CHECKING:
-    from rpg_core.agent.command import CommandDispatcher
+    from rpg_core.agent.command.dispatcher import CommandDispatcher
     from rpg_core.agent.mailbox import AgentMailbox
-    from rpg_core.agent.tool_service import AgentToolService
+    from rpg_core.agent.runtime.tools import AgentToolService
     from rpg_core.rp_modules import RPModuleRegistry
 
 ContextResourceFactory = Callable[..., AgentContextResources]

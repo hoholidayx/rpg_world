@@ -16,7 +16,7 @@ from rpg_core.rp_modules.models import (
 )
 
 if TYPE_CHECKING:
-    from rpg_core.agent.transaction import TurnScratch
+    from rpg_core.agent.turn.transaction import TurnScratch
 
 
 class RPModule(ABC):

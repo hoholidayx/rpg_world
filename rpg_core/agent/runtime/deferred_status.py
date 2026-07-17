@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
+    from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
 
 _TAG = "[DeferredStatusCoordinator]"
 

@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from commons.errors import MainContextWindowThresholdExceededError
-from rpg_core.agent import context_service as context_module
-from rpg_core.agent.context_service import AgentContextService
-from rpg_core.agent.resources import AgentContextResources
+import rpg_core.agent.runtime.context as context_module
+from rpg_core.agent.runtime.context import AgentContextService
+from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.turn import (
     TurnExecutionPolicy,
     TurnExecutionSnapshot,

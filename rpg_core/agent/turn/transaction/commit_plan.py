@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.agent.transaction.message_scratch import MessageScratch
-from rpg_core.agent.transaction.status_scratch import StatusDocumentChange, StatusDocumentScratch
+from rpg_core.agent.turn.transaction.message_scratch import MessageScratch
+from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentChange, StatusDocumentScratch
 from rpg_core.session import InvalidTurnMetadataError
 
 if TYPE_CHECKING:

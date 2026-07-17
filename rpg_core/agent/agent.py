@@ -5,24 +5,24 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from rpg_core.agent.agent_types import AgentStreamEvent, TurnCancelResult
-from rpg_core.agent.command import CommandDispatcher, CommandResult
-from rpg_core.agent.context_service import AgentContextService
-from rpg_core.agent.deferred_status import DeferredStatusCoordinator
-from rpg_core.agent.derivation_service import (
+from rpg_core.agent.protocol import AgentStreamEvent, TurnCancelResult
+from rpg_core.agent.command.dispatcher import CommandDispatcher
+from rpg_core.agent.command.models import CommandResult
+from rpg_core.agent.runtime.context import AgentContextService
+from rpg_core.agent.runtime.deferred_status import DeferredStatusCoordinator
+from rpg_core.agent.runtime.derivation import (
     AgentDerivationService,
     SessionDerivationPreparationResult,
 )
-from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
-from rpg_core.agent.loop import AgentReply, run_chat_loop, run_chat_loop_stream
-from rpg_core.agent.mailbox import AgentMailbox
-from rpg_core.agent.model_runtime import MainModelRuntime
-from rpg_core.agent.session_service import AgentSessionService
-from rpg_core.agent.tool_service import AgentToolService
+from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
+from rpg_core.agent.mailbox.service import AgentMailbox
+from rpg_core.agent.runtime.model import MainModelRuntime
+from rpg_core.agent.runtime.session import AgentSessionService
+from rpg_core.agent.runtime.tools import AgentToolService
 from rpg_core.tooling.base import BaseTool
 from rpg_core.agent.turn import TurnMode, TurnRequest
 from rpg_core.agent.turn.factory import TurnRuntimeFactory
-from rpg_core.agent.turn.hooks import (
+from rpg_core.agent.turn.hooks.fixed import (
     MemoryRecallHook,
     PostCommitHooks,
     StatusPreflightHook,
@@ -31,14 +31,15 @@ from rpg_core.agent.turn.hooks import (
 from rpg_core.agent.turn.orchestrator import TurnOrchestrator
 from rpg_core.agent.turn.planning import TurnPlanResolver
 from rpg_core.agent.turn.preparation import TurnPreparation
+from rpg_core.agent.turn.runner import AgentReply, run_chat_loop, run_chat_loop_stream
 from rpg_core.agent.turn.service import AgentTurnService
-from rpg_core.main_llm import MainLLMSelectionService
+from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 
 if TYPE_CHECKING:
     from rpg_data.models import SessionResetResult
-    from rpg_core.agent.command import CommandDef
-    from rpg_core.agent.loop import ToolCallRecord
+    from rpg_core.agent.command.models import CommandDef
+    from rpg_core.agent.turn.runner import ToolCallRecord
     from rpg_core.context.inspector import LayerInfo
     from rpg_core.context.rpg_context import Message
     from rpg_core.session import SessionManager

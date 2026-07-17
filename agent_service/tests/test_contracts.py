@@ -17,7 +17,7 @@ from commons.errors import (
 )
 from llm_client.client import LLMServiceClientError
 from llm_client.types import LLMBizCatalog, LLMProviderOption, LLMUsage
-import rpg_core.main_llm as main_llm_module
+import rpg_core.agent.runtime.main_llm as main_llm_module
 from rpg_core.agent.agent_types import (
     AgentStreamEvent,
     CallRecord,

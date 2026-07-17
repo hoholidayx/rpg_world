@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.agent.resources import AgentContextResources
+from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.sub_agents import (
     OutcomeDecision,
     StatusSubAgentPreflightOutcome,
@@ -19,13 +19,13 @@ from rpg_core.status.context import render_status_tables_context
 from rpg_core.status.tools import STATUS_TABLE_SET_VALUES_TOOL_NAME
 
 if TYPE_CHECKING:
-    from rpg_core.agent.agent_types import TurnStats
-    from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
-    from rpg_core.agent.loop import ToolCallRecord
+    from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
+    from rpg_core.agent.runtime.tools import AgentToolService
     from rpg_core.agent.sub_agents import StatusSubAgent
-    from rpg_core.agent.tool_service import AgentToolService
+    from rpg_core.agent.telemetry import TurnStats
     from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
-    from rpg_core.agent.transaction import TurnScratch
+    from rpg_core.agent.turn.runner import ToolCallRecord
+    from rpg_core.agent.turn.transaction import TurnScratch
     from rpg_core.rp_modules import RPModuleTurnRuntime
     from rpg_core.scene import SceneTracker
     from rpg_core.session import SessionManager

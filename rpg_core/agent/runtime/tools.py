@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.agent.resources import AgentContextResources
+from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.tools.file_tools import (
     GrepTool,
     ListFilesTool,

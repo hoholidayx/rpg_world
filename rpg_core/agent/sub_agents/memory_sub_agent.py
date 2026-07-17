@@ -31,8 +31,9 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.agent.agent_types import CallRecord, LLMResponse, LLMUsage
-from rpg_core.agent.command import CommandDef
+from llm_client.types import LLMResponse, LLMUsage
+from rpg_core.agent.telemetry import CallRecord
+from rpg_core.agent.command.models import CommandDef
 from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.session.grouping import (
     MemoryTurnInputTooLargeError,
@@ -49,7 +50,7 @@ from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
-    from rpg_core.agent.command import AgentCommandTarget
+    from rpg_core.agent.command.models import AgentCommandTarget
     from llm_client.types import LLMProvider
     from rp_memory.story_memory import StoryMemoryStore
     from rpg_core.summary.store import SummaryStore

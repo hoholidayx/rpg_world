@@ -7,7 +7,7 @@ import pytest
 
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
 from rpg_core.agent.sub_agents import StatusSubAgentPreflightOutcome
-from rpg_core.agent.transaction import AgentTurnTransaction
+from rpg_core.agent.turn.transaction import AgentTurnTransaction
 from rpg_core.agent.turn.models import (
     PreparedTurn,
     TurnExecutionPlan,

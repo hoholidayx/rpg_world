@@ -15,9 +15,9 @@ from rpg_core.context.rpg_context import Message
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
-    from rpg_core.agent.context_service import AgentContextService
-    from rpg_core.agent.tool_service import AgentToolService
-    from rpg_core.agent.turn.hooks import MemoryRecallHook
+    from rpg_core.agent.runtime.context import AgentContextService
+    from rpg_core.agent.runtime.tools import AgentToolService
+    from rpg_core.agent.turn.hooks.fixed import MemoryRecallHook
     from rpg_core.agent.turn.runtime import TurnRuntime
     from rpg_core.context.rpg_context import Message
 

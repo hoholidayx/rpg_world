@@ -10,7 +10,7 @@ from rpg_data.services import get_data_service_gateway
 
 if TYPE_CHECKING:
     from rpg_data.models import SessionStatusTable, StatusDeferredProgress, StatusTableDocument
-    from rpg_core.agent.transaction.status_scratch import StatusDocumentChange
+    from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentChange
     from rpg_data.services.status import StatusTableService
 
 

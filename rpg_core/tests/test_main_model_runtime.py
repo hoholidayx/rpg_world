@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from rpg_core.agent import model_runtime as runtime_module
-from rpg_core.agent.model_runtime import MainModelRuntime
+import rpg_core.agent.runtime.model as runtime_module
+from rpg_core.agent.runtime.model import MainModelRuntime
 
 
 class _SelectionService:

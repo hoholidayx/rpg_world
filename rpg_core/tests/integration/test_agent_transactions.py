@@ -6,7 +6,7 @@ import pytest
 
 from llm_client.types import ProviderChunk
 from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnCancelStatus
-from rpg_core.agent.transaction.status_scratch import StatusDocumentScratch
+from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentScratch
 from rpg_core.scene import SceneTracker
 from rpg_core.tests.integration.scripted_llm import response, tool_call
 

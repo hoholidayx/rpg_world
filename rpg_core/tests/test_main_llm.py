@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import rpg_core.main_llm as main_llm_module
+import rpg_core.agent.runtime.main_llm as main_llm_module
 from llm_client.types import LLMBizCatalog, LLMProviderOption
 from rpg_core.main_llm import InvalidMainLLMProviderKey, MainLLMSelectionService
 from rpg_data.repositories.story_repo import StoryRepository

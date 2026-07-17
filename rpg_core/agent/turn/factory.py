@@ -5,15 +5,15 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from rpg_core.agent.agent_types import TurnStats
-from rpg_core.agent.transaction import AgentTurnTransaction
+from rpg_core.agent.telemetry import TurnStats
+from rpg_core.agent.turn.transaction import AgentTurnTransaction
 from rpg_core.agent.turn.runtime import TurnRuntime
 
 if TYPE_CHECKING:
-    from rpg_core.agent.context_service import AgentContextService
-    from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
-    from rpg_core.agent.model_runtime import MainModelRuntime
-    from rpg_core.agent.turn.hooks import StatusPreflightHook
+    from rpg_core.agent.runtime.context import AgentContextService
+    from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
+    from rpg_core.agent.runtime.model import MainModelRuntime
+    from rpg_core.agent.turn.hooks.fixed import StatusPreflightHook
     from rpg_core.agent.turn.models import TurnExecutionPlan
 
 

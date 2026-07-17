@@ -7,7 +7,7 @@ from loguru import logger
 from llm_client.keys import AGENT_MAIN_BIZ_KEY
 from llm_client.manager import LLMClientManager
 from llm_client.types import LLMProvider
-from rpg_core.main_llm import MainLLMSelection, MainLLMSelectionService
+from rpg_core.agent.runtime.main_llm import MainLLMSelection, MainLLMSelectionService
 
 _TAG = "[MainModelRuntime]"
 

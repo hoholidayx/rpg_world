@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 import rpg_core.agent.turn.preparation as preparation_module
-import rpg_core.agent.loop as loop_module
+import rpg_core.agent.turn.runner as loop_module
 from llm_service.types import LLMResponse
-from rpg_core.agent.loop import run_chat_loop
+from rpg_core.agent.turn.runner import run_chat_loop
 from rpg_core.agent.turn.preparation import TurnPreparation
 from rpg_core.context.rpg_context import Message, Role
 

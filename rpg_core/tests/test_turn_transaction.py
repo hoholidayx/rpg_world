@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_core.agent.transaction import transaction as transaction_module
-from rpg_core.agent.transaction.commit_plan import TurnCommitPlan
-from rpg_core.agent.transaction.message_scratch import MessageScratch
-from rpg_core.agent.transaction.status_scratch import StatusDocumentScratch
+from rpg_core.agent.turn.transaction import transaction as transaction_module
+from rpg_core.agent.turn.transaction.commit_plan import TurnCommitPlan
+from rpg_core.agent.turn.transaction.message_scratch import MessageScratch
+from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentScratch
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session import InvalidTurnMetadataError, SessionManager
 

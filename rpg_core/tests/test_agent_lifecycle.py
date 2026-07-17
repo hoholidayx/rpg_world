@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from rpg_core.agent import lifecycle as lifecycle_module
-from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
-from rpg_core.agent.resources import AgentContextResources
+import rpg_core.agent.runtime.lifecycle as lifecycle_module
+from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
+from rpg_core.agent.runtime.resources import AgentContextResources
 
 
 class _MemoryManager:

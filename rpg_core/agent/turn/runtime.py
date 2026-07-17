@@ -9,12 +9,12 @@ from rpg_core.agent.turn.models import TurnExecutionPlan
 
 if TYPE_CHECKING:
     from llm_client.types import LLMProvider
-    from rpg_core.agent.agent_types import TurnStats
+    from rpg_core.agent.telemetry import TurnStats
     from rpg_core.agent.sub_agents import (
         StatusSubAgentPreflightOutcome,
         StatusSubAgentResult,
     )
-    from rpg_core.agent.transaction import AgentTurnTransaction, TurnScratch
+    from rpg_core.agent.turn.transaction import AgentTurnTransaction, TurnScratch
     from rpg_core.rp_modules import RPModuleTurnRuntime
 
 

@@ -28,7 +28,7 @@ from rpg_core.settings import NarrativeOutcomeModuleSettings
 from rpg_data import models as data_models
 
 if TYPE_CHECKING:
-    from rpg_core.agent.transaction import TurnScratch
+    from rpg_core.agent.turn.transaction import TurnScratch
 
 
 _EXPLICIT_RANDOM_CUES = (

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from commons.errors import MainContextWindowThresholdExceededError
-from rpg_core.agent.resources import AgentContextResources
+from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.turn import TurnExecutionSnapshot, TurnMode, TurnRequest
 from rpg_core.agent.turn.resolver import TurnSnapshotResolver
 from rpg_core.context.fixed_layer import FixedLayerAssembler
@@ -31,7 +31,7 @@ from rpg_core.settings import settings
 if TYPE_CHECKING:
     from rpg_core.context.inspector import LayerInfo
     from rpg_core.context.rpg_context import PersistentMemoryFact, RPGContext
-    from rpg_core.main_llm import MainLLMSelection
+    from rpg_core.agent.runtime.main_llm import MainLLMSelection
     from rpg_core.rp_modules import (
         RPModuleRegistry,
         RPModuleSelectionSnapshot,

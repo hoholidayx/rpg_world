@@ -16,20 +16,23 @@ from commons.errors import (
     MainContextWindowThresholdExceededError,
     format_turn_metadata_error_message,
 )
-from rpg_core.agent.agent_types import (
-    AgentStreamEvent,
+from rpg_core.agent.mailbox.models import (
     QueueItem,
     QueueKind,
+    _StreamSentinel,
+)
+from rpg_core.agent.protocol import (
+    AgentStreamEvent,
     StreamEventKind,
     TurnCancelResult,
     TurnCancelStatus,
-    _StreamSentinel,
 )
 from rpg_core.session import InvalidTurnMetadataError
 
 if TYPE_CHECKING:
-    from rpg_core.agent.command import CommandDispatcher, CommandResult
-    from rpg_core.agent.loop import AgentReply
+    from rpg_core.agent.command.dispatcher import CommandDispatcher
+    from rpg_core.agent.command.models import CommandResult
+    from rpg_core.agent.turn.runner import AgentReply
     from rpg_core.agent.turn.models import TurnRequest
     from rpg_core.agent.turn.service import AgentTurnService
 

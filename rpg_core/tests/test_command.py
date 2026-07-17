@@ -6,7 +6,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from rpg_core.agent import command as command_module
+import rpg_core.agent.command.handlers as command_module
 from rpg_core.agent.command import CommandDispatcher, format_command_help
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.settings import RPModuleSettings

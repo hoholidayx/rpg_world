@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_core.agent.resources import AgentContextResources
+from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.turn import (
     TurnExecutionPlan,
     TurnExecutionPolicy,

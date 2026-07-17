@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
+from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
+from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.sub_agents import StatusSubAgentPreflightOutcome
 from rpg_core.agent.turn.models import TurnRequest, TurnResult
 from rpg_core.agent.turn.resolver import PlayerCharacterRequiredError
@@ -17,9 +18,9 @@ from rpg_core.context.usage import aggregate_usage_records
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
-    from rpg_core.agent.loop import ToolCallRecord
+    from rpg_core.agent.turn.runner import ToolCallRecord
     from rpg_core.agent.turn.factory import TurnRuntimeFactory
-    from rpg_core.agent.turn.hooks import PostCommitHooks, TurnDiagnostics
+    from rpg_core.agent.turn.hooks.fixed import PostCommitHooks, TurnDiagnostics
     from rpg_core.agent.turn.planning import TurnPlanResolver
     from rpg_core.agent.turn.preparation import TurnPreparation
     from rpg_core.agent.turn.runtime import TurnRuntime

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from rpg_core.agent.agent_types import CallRecord
+from rpg_core.agent.telemetry import CallRecord
 
 
 class StatusSubAgentPreflightOutcome(StrEnum):

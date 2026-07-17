@@ -13,9 +13,9 @@ from rpg_core.context.rpg_context import Message
 
 if TYPE_CHECKING:
     from rpg_data.models import SessionResetResult
-    from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
+    from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
     from rpg_core.agent.mailbox import AgentMailbox
-    from rpg_core.agent.tool_service import AgentToolService
+    from rpg_core.agent.runtime.tools import AgentToolService
 
 _TAG = "[AgentSessionService]"
 

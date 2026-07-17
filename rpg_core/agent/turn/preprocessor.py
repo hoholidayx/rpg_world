@@ -10,7 +10,7 @@ from loguru import logger
 from rpg_core.agent.turn.models import TurnBypass, TurnRequest
 
 if TYPE_CHECKING:
-    from rpg_core.agent.command import CommandDispatcher
+    from rpg_core.agent.command.dispatcher import CommandDispatcher
 
 _TAG = "[TurnPreprocessor]"
 

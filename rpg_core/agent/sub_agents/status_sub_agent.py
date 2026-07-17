@@ -36,7 +36,8 @@ from rpg_data.models import (
     STATUS_UPDATE_FREQUENCY_MANUAL,
     STATUS_UPDATE_FREQUENCY_REALTIME,
 )
-from rpg_core.agent.agent_types import CallRecord, LLMResponse, LLMUsage, TurnStats
+from llm_client.types import LLMResponse, LLMUsage
+from rpg_core.agent.telemetry import CallRecord, TurnStats
 from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.agent.sub_agents.status_sub_agent_models import (
     DeferredStatusResult,

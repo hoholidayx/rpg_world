@@ -7,21 +7,18 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from rpg_core.agent.agent_types import (
-    AgentStreamEvent,
-    StreamEventKind,
-    TurnStats,
-    _StreamSentinel,
-)
-from rpg_core.agent.loop import AgentReply
+from rpg_core.agent.mailbox.models import _StreamSentinel
+from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
+from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.turn.models import TurnBypass, TurnRequest
 from rpg_core.agent.turn.preprocessor import TurnPreprocessor
+from rpg_core.agent.turn.runner import AgentReply
 from rpg_core.agent.turn.resolver import PlayerCharacterRequiredError
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
-    from rpg_core.agent.command import CommandDispatcher
-    from rpg_core.agent.loop import ToolCallRecord
+    from rpg_core.agent.command.dispatcher import CommandDispatcher
+    from rpg_core.agent.turn.runner import ToolCallRecord
     from rpg_core.agent.turn.orchestrator import TurnOrchestrator
 
 

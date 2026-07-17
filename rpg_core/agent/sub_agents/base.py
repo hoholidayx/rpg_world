@@ -26,7 +26,7 @@ from rpg_core.tooling.base import BaseTool
 from llm_client.types import LLMProvider
 
 if TYPE_CHECKING:
-    from rpg_core.agent.command import AgentCommandTarget, CommandDef
+    from rpg_core.agent.command.models import AgentCommandTarget, CommandDef
     from rpg_core.agent.sub_agents.context import SubAgentContext
     from rpg_core.context.fixed_layer.contributors.player_character import (
         PlayerCharacterContext,

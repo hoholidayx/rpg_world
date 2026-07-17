@@ -6,11 +6,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from rpg_core.context.rpg_context import Message, Role
-from rpg_core.agent.transaction.message_scratch import MessageScratch
-from rpg_core.agent.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
+from rpg_core.agent.turn.transaction.message_scratch import MessageScratch
+from rpg_core.agent.turn.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
 
 if TYPE_CHECKING:
-    from rpg_core.agent.agent_types import TurnStats
+    from rpg_core.agent.telemetry import TurnStats
     from rpg_core.rp_modules.narrative_outcome.models import StagedNarrativeOutcome
     from rpg_core.scene import SceneTracker
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
