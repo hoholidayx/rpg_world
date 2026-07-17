@@ -11,8 +11,12 @@ from pathlib import Path
 
 from loguru import logger
 
-from rp_memory.benchmark.locomo import prepare_locomo
-from rp_memory.benchmark.suite import default_options, execute_suite
+from rp_memory.benchmark.datasets import SUPPORTED_DATASETS, parse_datasets
+from rp_memory.benchmark.suite import (
+    default_options,
+    execute_suite,
+    prepare_selected_datasets,
+)
 
 
 def main() -> None:
@@ -22,12 +26,21 @@ def main() -> None:
 
     suite_parser = subparsers.add_parser(
         "suite",
-        help="run LoCoMo + RP Gold across offline and available configured paths",
+        help="run selected datasets across offline and available configured paths",
     )
     suite_parser.add_argument(
         "--record",
         action="store_true",
-        help="append a successful full run to tracked Markdown history",
+        help="write a successful full run as an independent tracked Markdown report",
+    )
+    suite_parser.add_argument(
+        "--datasets",
+        action="append",
+        metavar="NAME[,NAME...]",
+        help=(
+            "datasets to run; repeat or comma-separate values; default: locomo,rp-gold; "
+            f"supported: {','.join(SUPPORTED_DATASETS)}"
+        ),
     )
     suite_parser.add_argument(
         "--offline-only",
@@ -43,25 +56,46 @@ def main() -> None:
 
     prepare_parser = subparsers.add_parser(
         "prepare",
-        help="download, validate, and convert the pinned LoCoMo artifact",
+        help="download, validate, and convert selected pinned dataset artifacts",
     )
     prepare_parser.add_argument(
-        "--cache-dir",
+        "--data-dir",
         type=Path,
-        default=Path("data/benchmarks/locomo"),
+        default=Path("data/benchmarks"),
+    )
+    prepare_parser.add_argument(
+        "--datasets",
+        action="append",
+        metavar="NAME[,NAME...]",
+        help=(
+            "datasets to prepare; default: locomo,rp-gold; "
+            f"supported: {','.join(SUPPORTED_DATASETS)}"
+        ),
     )
     prepare_parser.add_argument("--force", action="store_true")
 
     args = parser.parse_args()
+    try:
+        selected = parse_datasets(args.datasets)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.command == "prepare":
-        paths = prepare_locomo(args.cache_dir.resolve(), force=args.force)
-        print(json.dumps({key: str(value.resolve()) for key, value in paths.items()}, indent=2))
+        prepared = prepare_selected_datasets(
+            args.data_dir.resolve(),
+            selected,
+            force=args.force,
+        )
+        print(json.dumps({
+            dataset: {key: str(value.resolve()) for key, value in paths.items()}
+            for dataset, paths in prepared.items()
+        }, ensure_ascii=False, indent=2, sort_keys=True))
         return
 
     command = "uv run python -m rp_memory.benchmark " + shlex.join(sys.argv[1:])
     execution = execute_suite(
         default_options(
             command=command,
+            datasets=selected,
             offline_only=args.offline_only,
             record=args.record,
             locomo_tier=args.locomo_tier,
@@ -72,6 +106,11 @@ def main() -> None:
         "successful": execution.result.successful,
         "report": str(execution.report_path),
         "historyRecorded": execution.history_recorded,
+        "trackedReport": (
+            str(execution.tracked_report_path)
+            if execution.tracked_report_path is not None
+            else None
+        ),
         "paths": {
             result.path_id: result.status.value
             for result in execution.result.paths

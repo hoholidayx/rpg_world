@@ -1,4 +1,4 @@
-"""Execute the fixed LoCoMo and RP Gold recall path matrix."""
+"""Execute selected recall datasets across the fixed path matrix."""
 
 from __future__ import annotations
 
@@ -417,6 +417,12 @@ async def _evaluate_dataset(
     index_root.mkdir(parents=True, exist_ok=True)
     metric_cases: list[tuple[list[str], list[str]]] = []
     rp_metric_cases: list[tuple[list[str], list[str], list[str]]] = []
+    category_metric_cases: dict[str, list[tuple[list[str], list[str]]]] = {}
+    category_rp_metric_cases: dict[
+        str,
+        list[tuple[list[str], list[str], list[str]]],
+    ] = {}
+    category_unscored: dict[str, int] = {}
     case_results: list[CaseResult] = []
     unscored = 0
     for sample in dataset.samples:
@@ -487,14 +493,17 @@ async def _evaluate_dataset(
                 no_answer = bool(question.get("no_answer", False))
                 question_id = str(question.get("id", "") or "")
                 question_text = str(question.get("question", "") or "")
+                category = str(question.get("category", "unknown") or "unknown")
                 if not gold and not no_answer:
                     unscored += 1
+                    category_unscored[category] = category_unscored.get(category, 0) + 1
                     case_results.append(
                         CaseResult(
                             dataset=dataset.dataset,
                             sample_id=sample_id,
                             question_id=question_id,
                             question=question_text,
+                            category=category,
                             gold_evidence=(),
                             forbidden_evidence=tuple(forbidden),
                             no_answer=False,
@@ -546,6 +555,10 @@ async def _evaluate_dataset(
                 ranked_ids = [item.evidence_id for item in rankings if item.evidence_id]
                 metric_cases.append((gold, ranked_ids))
                 rp_metric_cases.append((gold, forbidden, ranked_ids))
+                category_metric_cases.setdefault(category, []).append((gold, ranked_ids))
+                category_rp_metric_cases.setdefault(category, []).append(
+                    (gold, forbidden, ranked_ids)
+                )
                 issues = _case_issues(
                     gold,
                     forbidden,
@@ -559,6 +572,7 @@ async def _evaluate_dataset(
                         sample_id=sample_id,
                         question_id=question_id,
                         question=question_text,
+                        category=category,
                         gold_evidence=tuple(gold),
                         forbidden_evidence=tuple(forbidden),
                         no_answer=no_answer,
@@ -587,6 +601,21 @@ async def _evaluate_dataset(
         )
     )
     metrics: dict[str, object] = asdict(metric_values)
+    categories = set(category_metric_cases) | set(category_unscored)
+    category_metrics: dict[str, dict[str, object]] = {}
+    for category in sorted(categories):
+        if dataset.rp_constraints:
+            category_values = evaluate_rp_rankings(
+                category_rp_metric_cases.get(category, []),
+                top_k=spec.pipeline.top_k,
+            )
+        else:
+            category_values = evaluate_rankings(
+                category_metric_cases.get(category, []),
+                top_k=spec.pipeline.top_k,
+                unscored_cases=category_unscored.get(category, 0),
+            )
+        category_metrics[category] = asdict(category_values)
     traces = [
         case.planner_trace
         for case in case_results
@@ -596,6 +625,7 @@ async def _evaluate_dataset(
     for trace in traces:
         source_counts[trace.planner_source] = source_counts.get(trace.planner_source, 0) + 1
     metrics.update({
+        "category_metrics": category_metrics,
         "planner_trace_cases": len(traces),
         "planner_source_counts": source_counts,
         "expanded_query_cases": sum(bool(trace.expanded_queries) for trace in traces),

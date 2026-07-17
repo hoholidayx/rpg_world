@@ -20,8 +20,9 @@ from llm_client.types import (
     LLMProviderOption,
     LLMResponse,
 )
-from rp_memory.benchmark import locomo
+from rp_memory.benchmark import locomo, longmemeval
 from rp_memory.benchmark.capabilities import DetectedCapabilities, detect_capabilities
+from rp_memory.benchmark.datasets import parse_datasets
 from rp_memory.benchmark.metrics import evaluate_rankings, evaluate_rp_rankings
 from rp_memory.benchmark.models import (
     BenchmarkEnvironment,
@@ -34,8 +35,8 @@ from rp_memory.benchmark.models import (
     ProviderInfo,
     SuiteResult,
 )
-from rp_memory.benchmark.report import append_history
-from rp_memory.benchmark.rp_gold import load_rp_gold
+from rp_memory.benchmark.report import record_summary, render_full_report
+from rp_memory.benchmark.rp_gold import RP_GOLD_CATEGORIES, load_rp_gold
 from rp_memory.benchmark.runner import (
     build_path_specs,
     load_jsonl_dataset,
@@ -88,16 +89,105 @@ def test_rp_gold_cases_are_valid_and_track_forbidden_hits() -> None:
         top_k=2,
     )
 
-    assert len(samples) == 10
-    assert question_count == 13
-    assert len(no_answer_questions) == 1
-    assert no_answer_questions[0]["gold_evidence"] == []
+    category_counts = {
+        category: sum(
+            question["category"] == category
+            for sample in samples
+            for question in sample["questions"]
+        )
+        for category in RP_GOLD_CATEGORIES
+    }
+
+    assert len(samples) == 12
+    assert question_count == 60
+    assert len(no_answer_questions) == 5
+    assert all(question["gold_evidence"] == [] for question in no_answer_questions)
+    assert set(category_counts.values()) == {5}
     assert metrics.recall_at_k == 1.0
     assert metrics.hit_at_1 == 0.5
     assert metrics.forbidden_cases == 2
     assert metrics.forbidden_at_1_rate == 0.5
     assert metrics.forbidden_hit_rate == 0.5
     assert metrics.forbidden_before_gold_rate == 0.5
+
+
+def test_dataset_selection_is_explicit_and_stable() -> None:
+    assert parse_datasets(None) == ("locomo", "rp-gold")
+    assert parse_datasets(["rp-gold,longmemeval-s", "rp-gold"]) == (
+        "rp-gold",
+        "longmemeval-s",
+    )
+    with pytest.raises(ValueError, match="unsupported benchmark dataset"):
+        parse_datasets(["unknown"])
+
+
+def test_prepare_longmemeval_validates_and_converts_turn_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "longmemeval.json"
+    source.write_text(json.dumps([
+        {
+            "question_id": "q-1",
+            "question_type": "knowledge-update",
+            "question": "Where is the key now?",
+            "answer": "In the drawer.",
+            "question_date": "2026/01/03",
+            "haystack_dates": ["2026/01/01"],
+            "haystack_session_ids": ["session-1"],
+            "haystack_sessions": [[
+                {"role": "user", "content": "I put the key away.", "has_answer": False},
+                {"role": "assistant", "content": "The key is in the drawer.", "has_answer": True},
+            ]],
+            "answer_session_ids": ["session-1"],
+        },
+        {
+            "question_id": "q-2",
+            "question_type": "abstention",
+            "question": "What is the password?",
+            "answer": "Unknown.",
+            "question_date": "2026/01/04",
+            "haystack_dates": ["2026/01/02"],
+            "haystack_session_ids": ["session-2"],
+            "haystack_sessions": [[
+                {"role": "user", "content": "No password was recorded.", "has_answer": False},
+            ]],
+            "answer_session_ids": ["session-2"],
+        },
+    ]), encoding="utf-8")
+    monkeypatch.setattr(longmemeval, "LONGMEMEVAL_SIZE", source.stat().st_size)
+    monkeypatch.setattr(
+        longmemeval,
+        "LONGMEMEVAL_SHA256",
+        hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(longmemeval, "LONGMEMEVAL_RECORDS", 2)
+    monkeypatch.setattr(longmemeval, "LONGMEMEVAL_MAX_DOWNLOAD_BYTES", 1024 * 1024)
+
+    def copy_download(_url, destination):  # noqa: ANN001
+        shutil.copyfile(source, destination)
+
+    monkeypatch.setattr(longmemeval, "_download", copy_download)
+    paths = longmemeval.prepare_longmemeval(tmp_path / "cache")
+    converted = [
+        json.loads(line)
+        for line in paths["full"].read_text(encoding="utf-8").splitlines()
+    ]
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+
+    assert converted[0]["documents"][1]["id"] == "session-1:s1:t2"
+    assert converted[0]["questions"][0]["evidence"] == ["session-1:s1:t2"]
+    assert converted[1]["questions"][0]["evidence"] == []
+    assert manifest["records"] == 2
+    assert manifest["unscored_missing_has_answer"] == 1
+
+
+def test_longmemeval_download_rejects_declared_oversize(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(longmemeval, "LONGMEMEVAL_SIZE", 200)
+    monkeypatch.setattr(longmemeval, "LONGMEMEVAL_MAX_DOWNLOAD_BYTES", 100)
+
+    with pytest.raises(ValueError, match="expected size exceeds"):
+        longmemeval._download("https://example.invalid/data.json", tmp_path / "data.json")
 
 
 def test_prepare_locomo_validates_and_builds_deterministic_smoke_subset(
@@ -425,28 +515,47 @@ async def test_equivalent_local_pipelines_keep_identical_tie_ordering(tmp_path) 
     )
 
 
-def test_markdown_history_is_append_only_and_deduplicates_run_id(tmp_path) -> None:
+def test_markdown_record_creates_independent_chinese_report_and_index(tmp_path) -> None:
     suite = _successful_suite("fixed-run-id")
-    history_path = tmp_path / "history.md"
+    runs_dir = tmp_path / "runs"
+    index_path = tmp_path / "README.md"
     report_path = tmp_path / "result.md"
 
-    assert append_history(
+    tracked_path, created = record_summary(
         suite,
-        history_path=history_path,
+        runs_dir=runs_dir,
+        index_path=index_path,
         local_report_path=report_path,
-    ) is True
-    assert append_history(
+    )
+    duplicate_path, duplicate_created = record_summary(
         suite,
-        history_path=history_path,
+        runs_dir=runs_dir,
+        index_path=index_path,
         local_report_path=report_path,
-    ) is False
+    )
 
-    content = history_path.read_text(encoding="utf-8")
+    content = tracked_path.read_text(encoding="utf-8")
+    index = index_path.read_text(encoding="utf-8")
+    assert created is True
+    assert duplicate_created is False
+    assert duplicate_path == tracked_path
     assert content.count("<!-- run-id:fixed-run-id -->") == 1
+    assert "# RP Memory 召回基准总结" in content
+    assert "## 名词解释" in content
     assert "offline.keyword_rule" in content
     assert "0.500000" in content
-    assert "Service probe: `skipped_disabled` — test" in content
-    assert "\n\nMetrics:\n\n| Path | Status | Dataset" in content
+    assert "服务探测：`skipped_disabled` — test" in content
+    assert "`fixed-run-id`" in index
+    assert "runs/rp-memory-recall-fixed-run-id.md" in index
+
+
+def test_full_report_is_simplified_chinese_and_contains_glossary() -> None:
+    report = render_full_report(_successful_suite("full-report"))
+
+    assert report.startswith("# RP Memory 召回基准完整报告")
+    assert "## 测试环境" in report
+    assert "## 名词解释" in report
+    assert "Forbidden-before-gold" in report
 
 
 def _locomo_source(tmp_path: Path) -> Path:

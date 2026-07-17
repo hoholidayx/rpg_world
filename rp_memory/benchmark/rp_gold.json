@@ -1,188 +1,273 @@
 {
-  "version": 1,
+  "version": 2,
   "review_status": "seed_pending_two_person_review",
-  "description": "Project-maintained RP recall cases. Gold and forbidden evidence are fixed independently of the retriever under test.",
+  "description": "项目维护的 RP 召回专项集合。Gold 与 forbidden evidence 独立于被测检索器固定，完成双人独立审核前不作为发布门禁。",
   "samples": [
     {
-      "sample_id": "alias_pronoun",
+      "sample_id": "state_and_item_location",
       "documents": [
-        {"id": "alias:1", "text": "艾琳的地下联络代号是银狐。"},
-        {"id": "alias:2", "text": "艾琳答应在钟楼敲响三次钟后打开密道。"},
-        {"id": "alias:3", "text": "格里姆负责看守港口仓库。"}
+        {"id": "state:moon-old", "text": "洛恩最初把月石交给艾琳保管。"},
+        {"id": "state:moon-mid", "text": "艾琳随后把月石锁进旅店二楼保险箱。"},
+        {"id": "state:moon-now", "text": "旅店遭袭前，艾琳已把月石转移到地下酒窖的暗格。"},
+        {"id": "state:sword-old", "text": "黑铁长剑曾挂在兵营北墙的武器架。"},
+        {"id": "state:sword-now", "text": "守卫换岗后，黑铁长剑被带到城门值守室。"},
+        {"id": "state:potion-old", "text": "背包里原有一瓶蓝色解毒药剂。"},
+        {"id": "state:potion-now", "text": "洛恩中毒后喝掉了最后一瓶蓝色解毒药剂，空瓶被丢弃。"},
+        {"id": "state:key-old", "text": "银色钥匙暂时放在钟楼管理员桌上。"},
+        {"id": "state:key-now", "text": "艾琳离开钟楼时把银色钥匙收入自己的腰包。"},
+        {"id": "state:letter-old", "text": "密信被藏在书房第三层的红皮书中。"},
+        {"id": "state:letter-now", "text": "格里姆读完密信后当场将它烧成灰烬。"}
       ],
       "questions": [
-        {
-          "id": "alias:q1",
-          "question": "她答应在什么信号后打开密道？",
-          "recent_turns": ["GM: 银狐刚刚离开了酒馆。"],
-          "gold_evidence": ["alias:2"],
-          "forbidden_evidence": ["alias:3"]
-        }
+        {"id": "state:q1", "question": "月石现在藏在哪里？", "category": "state_and_item_location", "gold_evidence": ["state:moon-now"], "forbidden_evidence": ["state:moon-old", "state:moon-mid"], "rationale": "必须召回物品最后一次位置变化。", "review_notes": "待两名审核者独立确认位置时间线。"},
+        {"id": "state:q2", "question": "黑铁长剑目前在哪个房间？", "category": "state_and_item_location", "gold_evidence": ["state:sword-now"], "forbidden_evidence": ["state:sword-old"], "rationale": "旧存放点不应覆盖当前存放点。", "review_notes": "待两名审核者独立确认新旧位置。"},
+        {"id": "state:q3", "question": "队伍现在还有蓝色解毒药剂吗？", "category": "state_and_item_location", "gold_evidence": ["state:potion-now"], "forbidden_evidence": ["state:potion-old"], "rationale": "消耗事件应覆盖旧库存事实。", "review_notes": "待两名审核者独立确认消耗语义。"},
+        {"id": "state:q4", "question": "谁现在带着银色钥匙？", "category": "state_and_item_location", "gold_evidence": ["state:key-now"], "forbidden_evidence": ["state:key-old"], "rationale": "测试物品持有人的最后状态。", "review_notes": "待两名审核者独立确认当前持有人。"},
+        {"id": "state:q5", "question": "书房红皮书里的密信现在还在吗？", "category": "state_and_item_location", "gold_evidence": ["state:letter-now"], "forbidden_evidence": ["state:letter-old"], "rationale": "销毁事件应优先于历史藏匿位置。", "review_notes": "待两名审核者独立确认销毁结果。"}
       ]
     },
     {
-      "sample_id": "relative_time",
+      "sample_id": "latest_fact",
       "documents": [
-        {"id": "time:1", "text": "第一天夜晚，艾琳约定三天后在雾港钟楼会合。"},
-        {"id": "time:2", "text": "第二天清晨，队伍仍在北门旅店。"},
-        {"id": "time:3", "text": "第五天中午，格里姆计划前往旧矿井。"}
+        {"id": "latest:bridge-old", "text": "第一天巡逻报告石桥结构完好，可以通行。"},
+        {"id": "latest:bridge-new", "text": "第三天洪水冲垮石桥中央桥面，石桥已经无法通行。"},
+        {"id": "latest:captain-old", "text": "早先传闻失踪的船长已经死亡。", "metadata": {"epistemic_status": "contradicted"}},
+        {"id": "latest:captain-new", "text": "队伍随后亲眼见到船长活着返回雾港。", "metadata": {"epistemic_status": "confirmed"}},
+        {"id": "latest:gate-old", "text": "北门在日落时因警报关闭。"},
+        {"id": "latest:gate-new", "text": "警报解除后，北门已重新开放。"},
+        {"id": "latest:storm-old", "text": "气象官预报午夜会有强烈风暴。"},
+        {"id": "latest:storm-new", "text": "午夜前风向改变，气象官宣布风暴已经消散。"},
+        {"id": "latest:inn-old", "text": "旧账册记载白鹿旅店由玛拉经营。"},
+        {"id": "latest:inn-new", "text": "玛拉退休后把白鹿旅店正式交给女儿苏菲经营。"}
       ],
       "questions": [
-        {
-          "id": "time:q1",
-          "question": "三天后的约定是什么？",
-          "scene_time": "第一天夜晚",
-          "scene_location": "雾港",
-          "gold_evidence": ["time:1"],
-          "forbidden_evidence": ["time:3"]
-        }
+        {"id": "latest:q1", "question": "石桥目前还能通行吗？", "category": "latest_fact", "gold_evidence": ["latest:bridge-new"], "forbidden_evidence": ["latest:bridge-old"], "rationale": "当前事实必须采用最后一次有效更新。", "review_notes": "待两名审核者独立确认桥梁状态。"},
+        {"id": "latest:q2", "question": "船长现在是否还活着？", "category": "latest_fact", "gold_evidence": ["latest:captain-new"], "forbidden_evidence": ["latest:captain-old"], "rationale": "亲眼确认的新事实应覆盖被否定的旧传闻。", "review_notes": "待两名审核者独立确认矛盾更新。"},
+        {"id": "latest:q3", "question": "北门当前是开着还是关着？", "category": "latest_fact", "gold_evidence": ["latest:gate-new"], "forbidden_evidence": ["latest:gate-old"], "rationale": "测试短时间内反转的世界状态。", "review_notes": "待两名审核者独立确认开门事件在后。"},
+        {"id": "latest:q4", "question": "午夜的风暴最后发生了吗？", "category": "latest_fact", "gold_evidence": ["latest:storm-new"], "forbidden_evidence": ["latest:storm-old"], "rationale": "更新后的预报结论应替代较早预测。", "review_notes": "待两名审核者独立确认预报已撤销。"},
+        {"id": "latest:q5", "question": "谁现在经营白鹿旅店？", "category": "latest_fact", "gold_evidence": ["latest:inn-new"], "forbidden_evidence": ["latest:inn-old"], "rationale": "所有权或职责交接后的最新事实应优先。", "review_notes": "待两名审核者独立确认经营权交接。"}
       ]
     },
     {
-      "sample_id": "reported_vs_confirmed",
+      "sample_id": "epistemic_status",
       "documents": [
-        {"id": "epistemic:1", "text": "水手声称北门已经封锁，但无人验证。", "metadata": {"memory_kind": "world_fact", "epistemic_status": "reported"}},
-        {"id": "epistemic:2", "text": "守卫现场确认东门已经封锁。", "metadata": {"memory_kind": "world_fact", "epistemic_status": "confirmed"}},
-        {"id": "epistemic:3", "text": "商人推测南门可能在午夜关闭。", "metadata": {"memory_kind": "world_fact", "epistemic_status": "inferred"}}
+        {"id": "epi:road-rumor", "text": "酒客传言北方商路已经安全，但没有人去过。", "metadata": {"epistemic_status": "reported"}},
+        {"id": "epi:road-infer", "text": "商人根据车辙推测北方商路可能已经恢复。", "metadata": {"epistemic_status": "inferred"}},
+        {"id": "epi:road-confirm", "text": "斥候实地确认北方商路仍被山贼封锁。", "metadata": {"epistemic_status": "confirmed"}},
+        {"id": "epi:well-rumor", "text": "村民怀疑古井的水有毒。", "metadata": {"epistemic_status": "reported"}},
+        {"id": "epi:well-confirm", "text": "炼金师检测后确认古井水没有毒。", "metadata": {"epistemic_status": "confirmed"}},
+        {"id": "epi:prince-rumor", "text": "街头流言称王子秘密离开了王都。", "metadata": {"epistemic_status": "reported"}},
+        {"id": "epi:prince-confirm", "text": "宫廷侍从当面确认王子仍在王宫养伤。", "metadata": {"epistemic_status": "confirmed"}},
+        {"id": "epi:seal-infer", "text": "洛恩猜测密室封印已经失效。", "metadata": {"epistemic_status": "inferred"}},
+        {"id": "epi:seal-confirm", "text": "法师检查符文后确认密室封印仍然有效。", "metadata": {"epistemic_status": "confirmed"}},
+        {"id": "epi:ship-rumor", "text": "码头工声称黑帆船装满了黄金。", "metadata": {"epistemic_status": "reported"}},
+        {"id": "epi:ship-confirm", "text": "海关清点后确认黑帆船装的是普通盐砖。", "metadata": {"epistemic_status": "confirmed"}}
       ],
       "questions": [
-        {
-          "id": "epistemic:q1",
-          "question": "哪个入口已被现场确认封锁？",
-          "gold_evidence": ["epistemic:2"],
-          "forbidden_evidence": ["epistemic:1", "epistemic:3"]
-        },
-        {
-          "id": "epistemic:q2",
-          "question": "关于北门，水手声称了什么？",
-          "gold_evidence": ["epistemic:1"],
-          "forbidden_evidence": []
-        }
+        {"id": "epi:q1", "question": "关于北方商路，斥候确认了什么？", "category": "epistemic_status", "gold_evidence": ["epi:road-confirm"], "forbidden_evidence": ["epi:road-rumor", "epi:road-infer"], "rationale": "确认事实不能被传闻或推测污染。", "review_notes": "待两名审核者独立确认 epistemic 层级。"},
+        {"id": "epi:q2", "question": "古井水经过检测后是否有毒？", "category": "epistemic_status", "gold_evidence": ["epi:well-confirm"], "forbidden_evidence": ["epi:well-rumor"], "rationale": "检测结果优先于未经验证的怀疑。", "review_notes": "待两名审核者独立确认检测结论。"},
+        {"id": "epi:q3", "question": "王子目前被可靠确认在哪里？", "category": "epistemic_status", "gold_evidence": ["epi:prince-confirm"], "forbidden_evidence": ["epi:prince-rumor"], "rationale": "可靠来源与街头流言必须区分。", "review_notes": "待两名审核者独立确认来源可靠性。"},
+        {"id": "epi:q4", "question": "法师检查后的密室封印状态是什么？", "category": "epistemic_status", "gold_evidence": ["epi:seal-confirm"], "forbidden_evidence": ["epi:seal-infer"], "rationale": "现场检查应优先于角色猜测。", "review_notes": "待两名审核者独立确认推测与确认边界。"},
+        {"id": "epi:q5", "question": "海关确认黑帆船装载了什么？", "category": "epistemic_status", "gold_evidence": ["epi:ship-confirm"], "forbidden_evidence": ["epi:ship-rumor"], "rationale": "正式清点结果应排除夸张传闻。", "review_notes": "待两名审核者独立确认货物事实。"}
       ]
     },
     {
       "sample_id": "attempt_vs_success",
       "documents": [
-        {"id": "attempt:1", "text": "洛恩尝试撬开铁门，但工具折断，铁门仍然关闭。", "metadata": {"memory_kind": "event", "epistemic_status": "confirmed"}},
-        {"id": "attempt:2", "text": "艾琳使用守卫钥匙成功打开了侧门。", "metadata": {"memory_kind": "event", "epistemic_status": "confirmed"}},
-        {"id": "attempt:3", "text": "格里姆计划寻找地下入口。", "metadata": {"memory_kind": "commitment", "epistemic_status": "confirmed"}}
+        {"id": "attempt:door-fail", "text": "洛恩尝试撬开铁门，但工具折断，铁门仍然关闭。"},
+        {"id": "attempt:door-success", "text": "艾琳随后用守卫钥匙成功打开了铁门。"},
+        {"id": "attempt:spell-fail", "text": "法师第一次施放净化术失败，祭坛的黑雾没有变化。"},
+        {"id": "attempt:spell-success", "text": "法师更换媒介后成功驱散祭坛黑雾。"},
+        {"id": "attempt:climb-fail", "text": "格里姆试图攀上东塔，但在半途滑落回地面。"},
+        {"id": "attempt:climb-success", "text": "格里姆借助绳索第二次攀爬并成功抵达东塔顶。"},
+        {"id": "attempt:persuade-fail", "text": "艾琳请求守卫放行，守卫拒绝并扣住通行证。"},
+        {"id": "attempt:persuade-success", "text": "洛恩出示城主手令后说服守卫放队伍入城。"},
+        {"id": "attempt:track-fail", "text": "暴雨冲掉足迹，猎人第一次追踪没有找到方向。"},
+        {"id": "attempt:track-success", "text": "猎人在断枝上发现布条，最终追踪到山洞入口。"}
       ],
       "questions": [
-        {
-          "id": "attempt:q1",
-          "question": "谁成功打开了一扇门？",
-          "gold_evidence": ["attempt:2"],
-          "forbidden_evidence": ["attempt:1", "attempt:3"]
-        },
-        {
-          "id": "attempt:q2",
-          "question": "洛恩撬门的尝试结果如何？",
-          "gold_evidence": ["attempt:1"],
-          "forbidden_evidence": []
-        }
+        {"id": "attempt:q1", "question": "铁门最后是怎样被打开的？", "category": "attempt_vs_success", "gold_evidence": ["attempt:door-success"], "forbidden_evidence": ["attempt:door-fail"], "rationale": "失败尝试不能被表达成成功结果。", "review_notes": "待两名审核者独立确认开门结果。"},
+        {"id": "attempt:q2", "question": "祭坛黑雾最终被驱散了吗？", "category": "attempt_vs_success", "gold_evidence": ["attempt:spell-success"], "forbidden_evidence": ["attempt:spell-fail"], "rationale": "同一行动的重试结果需要区分。", "review_notes": "待两名审核者独立确认第二次施法成功。"},
+        {"id": "attempt:q3", "question": "格里姆是否成功到达东塔顶？", "category": "attempt_vs_success", "gold_evidence": ["attempt:climb-success"], "forbidden_evidence": ["attempt:climb-fail"], "rationale": "后续成功应覆盖较早失败。", "review_notes": "待两名审核者独立确认攀爬顺序。"},
+        {"id": "attempt:q4", "question": "谁最终让守卫放队伍入城？", "category": "attempt_vs_success", "gold_evidence": ["attempt:persuade-success"], "forbidden_evidence": ["attempt:persuade-fail"], "rationale": "请求失败与说服成功不能混淆。", "review_notes": "待两名审核者独立确认成功行动者。"},
+        {"id": "attempt:q5", "question": "猎人最后追踪到了哪里？", "category": "attempt_vs_success", "gold_evidence": ["attempt:track-success"], "forbidden_evidence": ["attempt:track-fail"], "rationale": "无结果的第一次追踪不能替代最终发现。", "review_notes": "待两名审核者独立确认追踪终点。"}
       ]
     },
     {
       "sample_id": "commitment_vs_completion",
       "documents": [
-        {"id": "commitment:1", "text": "艾琳承诺明晚把药剂送到旅店。", "metadata": {"memory_kind": "commitment", "epistemic_status": "confirmed"}},
-        {"id": "commitment:2", "text": "格里姆已经把地图交给洛恩。", "metadata": {"memory_kind": "event", "epistemic_status": "confirmed"}},
-        {"id": "commitment:3", "text": "药剂目前仍在艾琳手中。", "metadata": {"memory_kind": "state_change", "epistemic_status": "confirmed"}}
+        {"id": "commit:map-promise", "text": "格里姆承诺天亮前把地图交给洛恩。"},
+        {"id": "commit:map-done", "text": "格里姆已在午夜把地图交到洛恩手中。"},
+        {"id": "commit:potion-promise", "text": "艾琳答应明晚把药剂送到旅店。"},
+        {"id": "commit:potion-pending", "text": "到了明晚，药剂仍在艾琳手中，尚未送出。"},
+        {"id": "commit:debt-promise", "text": "商人保证本周偿还五十枚金币。"},
+        {"id": "commit:debt-done", "text": "商人随后当着公证人的面付清了五十枚金币。"},
+        {"id": "commit:scout-plan", "text": "斥候计划日落前侦察北坡。"},
+        {"id": "commit:scout-done", "text": "斥候在黄昏返回并提交了北坡侦察图。"},
+        {"id": "commit:repair-promise", "text": "铁匠承诺三天内修好银盾。"},
+        {"id": "commit:repair-pending", "text": "第三天结束时银盾仍在炉边，修复尚未完成。"}
       ],
       "questions": [
-        {
-          "id": "commitment:q1",
-          "question": "谁已经完成了交付？",
-          "gold_evidence": ["commitment:2"],
-          "forbidden_evidence": ["commitment:1"]
-        },
-        {
-          "id": "commitment:q2",
-          "question": "艾琳承诺何时送药剂？",
-          "gold_evidence": ["commitment:1"],
-          "forbidden_evidence": []
-        }
+        {"id": "commit:q1", "question": "格里姆交付地图的承诺完成了吗？", "category": "commitment_vs_completion", "gold_evidence": ["commit:map-done"], "forbidden_evidence": ["commit:map-promise"], "rationale": "承诺与已完成动作必须分开。", "review_notes": "待两名审核者独立确认地图已交付。"},
+        {"id": "commit:q2", "question": "艾琳已经把药剂送到旅店了吗？", "category": "commitment_vs_completion", "gold_evidence": ["commit:potion-pending"], "forbidden_evidence": ["commit:potion-promise"], "rationale": "承诺不能被错误当作已经履行。", "review_notes": "待两名审核者独立确认药剂仍未送出。"},
+        {"id": "commit:q3", "question": "商人的五十金币债务是否已经偿清？", "category": "commitment_vs_completion", "gold_evidence": ["commit:debt-done"], "forbidden_evidence": ["commit:debt-promise"], "rationale": "实际付款是完成状态的证据。", "review_notes": "待两名审核者独立确认债务完成。"},
+        {"id": "commit:q4", "question": "斥候完成北坡侦察了吗？", "category": "commitment_vs_completion", "gold_evidence": ["commit:scout-done"], "forbidden_evidence": ["commit:scout-plan"], "rationale": "计划与完成后的交付物应区分。", "review_notes": "待两名审核者独立确认侦察图代表完成。"},
+        {"id": "commit:q5", "question": "铁匠是否按承诺修好了银盾？", "category": "commitment_vs_completion", "gold_evidence": ["commit:repair-pending"], "forbidden_evidence": ["commit:repair-promise"], "rationale": "到期未完成不能被承诺措辞掩盖。", "review_notes": "待两名审核者独立确认修复仍未完成。"}
       ]
     },
     {
-      "sample_id": "contradiction",
+      "sample_id": "player_vs_npc",
       "documents": [
-        {"id": "contradiction:1", "text": "早先传闻失踪的船长已经死亡。", "metadata": {"memory_kind": "event", "epistemic_status": "contradicted"}},
-        {"id": "contradiction:2", "text": "队伍随后亲眼见到船长活着返回雾港。", "metadata": {"memory_kind": "event", "epistemic_status": "confirmed"}},
-        {"id": "contradiction:3", "text": "船长的旧船仍停在东码头。", "metadata": {"memory_kind": "state_change", "epistemic_status": "confirmed"}}
+        {"id": "identity:key-player", "text": "玩家角色洛恩持有银色钥匙。"},
+        {"id": "identity:key-npc", "text": "同名 NPC 洛恩·灰眼持有黑曜石匕首。"},
+        {"id": "identity:origin-player", "text": "玩家角色洛恩出生在雾港。"},
+        {"id": "identity:origin-npc", "text": "NPC 洛恩·灰眼来自北境冻原。"},
+        {"id": "identity:wound-player", "text": "玩家角色洛恩的左臂在矿井战斗中受伤。"},
+        {"id": "identity:wound-npc", "text": "NPC 洛恩·灰眼的右眼有旧伤。"},
+        {"id": "identity:ally-player", "text": "玩家角色洛恩与艾琳结成了盟友。"},
+        {"id": "identity:ally-npc", "text": "NPC 洛恩·灰眼效忠于黑帆船长。"},
+        {"id": "identity:room-player", "text": "玩家角色洛恩目前住在白鹿旅店二楼。"},
+        {"id": "identity:room-npc", "text": "NPC 洛恩·灰眼躲在港口仓库。"}
       ],
       "questions": [
-        {
-          "id": "contradiction:q1",
-          "question": "船长目前是否还活着？",
-          "gold_evidence": ["contradiction:2"],
-          "forbidden_evidence": ["contradiction:1"]
-        }
+        {"id": "identity:q1", "question": "我持有什么钥匙？", "player_character": "洛恩", "category": "player_vs_npc", "gold_evidence": ["identity:key-player"], "forbidden_evidence": ["identity:key-npc"], "rationale": "第一人称必须绑定玩家角色而非同名 NPC。", "review_notes": "待两名审核者独立确认玩家身份。"},
+        {"id": "identity:q2", "question": "我的出生地在哪里？", "player_character": "洛恩", "category": "player_vs_npc", "gold_evidence": ["identity:origin-player"], "forbidden_evidence": ["identity:origin-npc"], "rationale": "同名角色的背景不能串线。", "review_notes": "待两名审核者独立确认出生地归属。"},
+        {"id": "identity:q3", "question": "我哪条手臂受伤了？", "player_character": "洛恩", "category": "player_vs_npc", "gold_evidence": ["identity:wound-player"], "forbidden_evidence": ["identity:wound-npc"], "rationale": "玩家伤势不能被同名 NPC 特征污染。", "review_notes": "待两名审核者独立确认伤势对象。"},
+        {"id": "identity:q4", "question": "我的盟友是谁？", "player_character": "洛恩", "category": "player_vs_npc", "gold_evidence": ["identity:ally-player"], "forbidden_evidence": ["identity:ally-npc"], "rationale": "关系必须归属正确角色实体。", "review_notes": "待两名审核者独立确认盟友关系。"},
+        {"id": "identity:q5", "question": "我现在住在哪里？", "player_character": "洛恩", "category": "player_vs_npc", "gold_evidence": ["identity:room-player"], "forbidden_evidence": ["identity:room-npc"], "rationale": "当前位置不能采用同名 NPC 的藏身处。", "review_notes": "待两名审核者独立确认居住地点。"}
       ]
     },
     {
-      "sample_id": "player_identity",
+      "sample_id": "alias_and_pronoun",
       "documents": [
-        {"id": "identity:1", "text": "玩家角色洛恩持有银色钥匙。"},
-        {"id": "identity:2", "text": "同名 NPC 洛恩·灰眼持有黑曜石匕首。"},
-        {"id": "identity:3", "text": "艾琳保管着钟楼通行证。"}
+        {"id": "alias:silver-map", "text": "艾琳的地下联络代号是银狐。"},
+        {"id": "alias:silver-fact", "text": "银狐答应在钟楼敲响三次后打开密道。"},
+        {"id": "alias:raven-map", "text": "格里姆在佣兵团中被称为渡鸦。"},
+        {"id": "alias:raven-fact", "text": "渡鸦把备用弩藏在北墙第三块松砖后。"},
+        {"id": "alias:rose-map", "text": "女爵塞琳在密信中使用红玫瑰这个署名。"},
+        {"id": "alias:rose-fact", "text": "红玫瑰要求使者在月末烧毁账本。"},
+        {"id": "alias:smith-map", "text": "铁匠布兰因左手装有铜护套而被叫作铜手。"},
+        {"id": "alias:smith-fact", "text": "铜手已经修复了队伍的银盾。"},
+        {"id": "alias:owl-map", "text": "学者米拉发表禁书时使用夜枭作为笔名。"},
+        {"id": "alias:owl-fact", "text": "夜枭在禁书末页画出了旧王陵入口。"}
       ],
       "questions": [
-        {
-          "id": "identity:q1",
-          "question": "我持有什么钥匙？",
-          "player_character": "洛恩",
-          "gold_evidence": ["identity:1"],
-          "forbidden_evidence": ["identity:2"]
-        }
+        {"id": "alias:q1", "question": "艾琳答应在什么信号后打开密道？", "recent_turns": ["GM: 银狐刚离开酒馆。"], "category": "alias_and_pronoun", "gold_evidence": ["alias:silver-map", "alias:silver-fact"], "forbidden_evidence": ["alias:raven-fact"], "rationale": "需要把本名与代号映射后召回承诺。", "review_notes": "待两名审核者独立确认银狐指代艾琳。"},
+        {"id": "alias:q2", "question": "他把备用弩藏在哪里？", "recent_turns": ["GM: 渡鸦提醒你不要靠近北墙。"], "category": "alias_and_pronoun", "gold_evidence": ["alias:raven-map", "alias:raven-fact"], "forbidden_evidence": ["alias:silver-fact"], "rationale": "代词与佣兵别名共同决定目标实体。", "review_notes": "待两名审核者独立确认他指渡鸦。"},
+        {"id": "alias:q3", "question": "塞琳要求使者何时销毁账本？", "category": "alias_and_pronoun", "gold_evidence": ["alias:rose-map", "alias:rose-fact"], "forbidden_evidence": ["alias:owl-fact"], "rationale": "署名别名需映射回真实人物。", "review_notes": "待两名审核者独立确认红玫瑰指塞琳。"},
+        {"id": "alias:q4", "question": "布兰已经修好了什么？", "category": "alias_and_pronoun", "gold_evidence": ["alias:smith-map", "alias:smith-fact"], "forbidden_evidence": ["alias:raven-fact"], "rationale": "外号与本名之间必须正确关联。", "review_notes": "待两名审核者独立确认铜手指布兰。"},
+        {"id": "alias:q5", "question": "米拉在禁书末页画了什么？", "category": "alias_and_pronoun", "gold_evidence": ["alias:owl-map", "alias:owl-fact"], "forbidden_evidence": ["alias:rose-fact"], "rationale": "笔名线索应连接到作者的具体行为。", "review_notes": "待两名审核者独立确认夜枭指米拉。"}
       ]
     },
     {
-      "sample_id": "overall_duplicate",
+      "sample_id": "relative_and_scene_time",
       "documents": [
-        {"id": "overall:1", "text": "整体摘要：艾琳在钟楼发现密道。", "metadata": {"type": "overall", "file": "/summaries/overall.md"}},
-        {"id": "overall:2", "text": "第三批剧情：艾琳在钟楼发现密道入口刻有银狐标记。", "metadata": {"type": "batch", "file": "/summaries/003-clocktower.md"}},
-        {"id": "overall:3", "text": "第一批剧情：队伍抵达雾港。", "metadata": {"type": "batch", "file": "/summaries/001-arrival.md"}}
+        {"id": "time:meet", "text": "第一天夜晚，艾琳约定三天后在雾港钟楼会合。"},
+        {"id": "time:meet-distractor", "text": "第五天中午，格里姆计划前往旧矿井。"},
+        {"id": "time:ship", "text": "第二天清晨，船长通知队伍后天日落时黑帆船启航。"},
+        {"id": "time:ship-distractor", "text": "第二天午夜，一艘商船驶入雾港。"},
+        {"id": "time:market", "text": "春祭前一晚，商人说明次日正午秘密集市开门。"},
+        {"id": "time:market-distractor", "text": "冬至集市通常在黎明开门。"},
+        {"id": "time:ritual", "text": "月蚀开始时，祭司要求半个时辰后点燃祭坛火盆。"},
+        {"id": "time:ritual-distractor", "text": "日出后守卫点燃了城墙烽火。"},
+        {"id": "time:deadline", "text": "第七天上午，公会给洛恩两天时间交还遗物。"},
+        {"id": "time:deadline-distractor", "text": "第八天晚上，艾琳归还了一本借阅的法典。"}
       ],
       "questions": [
-        {
-          "id": "overall:q1",
-          "question": "钟楼密道入口有什么标记？",
-          "gold_evidence": ["overall:2"],
-          "forbidden_evidence": ["overall:1"]
-        }
+        {"id": "time:q1", "question": "三天后的约定是什么？", "scene_time": "第一天夜晚", "scene_location": "雾港", "category": "relative_and_scene_time", "gold_evidence": ["time:meet"], "forbidden_evidence": ["time:meet-distractor"], "rationale": "相对时间必须结合约定发生时点。", "review_notes": "待两名审核者独立确认三天后对应第四天。"},
+        {"id": "time:q2", "question": "黑帆船将在什么时候启航？", "scene_time": "第二天清晨", "category": "relative_and_scene_time", "gold_evidence": ["time:ship"], "forbidden_evidence": ["time:ship-distractor"], "rationale": "后天日落必须绑定第二天清晨的参照点。", "review_notes": "待两名审核者独立确认启航时间表达。"},
+        {"id": "time:q3", "question": "秘密集市何时开门？", "scene_time": "春祭前一晚", "category": "relative_and_scene_time", "gold_evidence": ["time:market"], "forbidden_evidence": ["time:market-distractor"], "rationale": "场景节日时间不能被一般规律替换。", "review_notes": "待两名审核者独立确认次日正午。"},
+        {"id": "time:q4", "question": "祭坛火盆应在月蚀开始多久后点燃？", "scene_time": "月蚀刚开始", "category": "relative_and_scene_time", "gold_evidence": ["time:ritual"], "forbidden_evidence": ["time:ritual-distractor"], "rationale": "测试以场景事件为锚点的相对时长。", "review_notes": "待两名审核者独立确认半个时辰。"},
+        {"id": "time:q5", "question": "洛恩最晚应在什么时候交还遗物？", "scene_time": "第七天上午", "category": "relative_and_scene_time", "gold_evidence": ["time:deadline"], "forbidden_evidence": ["time:deadline-distractor"], "rationale": "截止时间需要从当前场景日推导。", "review_notes": "待两名审核者独立确认两天期限。"}
       ]
     },
     {
-      "sample_id": "item_ownership",
+      "sample_id": "multi_evidence",
       "documents": [
-        {"id": "item:1", "text": "洛恩把月石交给艾琳保管。"},
-        {"id": "item:2", "text": "艾琳随后把月石锁进旅店保险箱。"},
-        {"id": "item:3", "text": "格里姆持有一枚红宝石戒指。"}
+        {"id": "multi:door-key", "text": "钟楼密门只能由刻有银狐纹章的钥匙开启。"},
+        {"id": "multi:key-owner", "text": "艾琳现在保管着刻有银狐纹章的钥匙。"},
+        {"id": "multi:key-noise", "text": "洛恩持有一把没有纹章的铜钥匙。"},
+        {"id": "multi:route-a", "text": "北桥坍塌后，前往王都必须先经过杉木渡口。"},
+        {"id": "multi:route-b", "text": "杉木渡口只在每天日出到正午之间摆渡。"},
+        {"id": "multi:route-noise", "text": "南桥仍可通往海边村庄。"},
+        {"id": "multi:cure-a", "text": "银叶毒需要月泉水和烘干的白蓟草共同配制解药。"},
+        {"id": "multi:cure-b", "text": "队伍已在神殿取得月泉水，但还没有白蓟草。"},
+        {"id": "multi:cure-noise", "text": "蓝蘑菇可以治疗普通发热。"},
+        {"id": "multi:alliance-a", "text": "赤岩部族只会与归还祖传战旗的人结盟。"},
+        {"id": "multi:alliance-b", "text": "祖传战旗目前锁在黑帆船长的船舱。"},
+        {"id": "multi:alliance-noise", "text": "赤岩部族与北境商人保持贸易。"},
+        {"id": "multi:vault-a", "text": "王陵宝库入口位于旧王像背后。"},
+        {"id": "multi:vault-b", "text": "移动旧王像必须同时按下东西两侧的石钮。"},
+        {"id": "multi:vault-noise", "text": "王陵前厅有一座无法移动的王后像。"}
       ],
       "questions": [
-        {
-          "id": "item:q1",
-          "question": "月石现在在哪里？",
-          "gold_evidence": ["item:2"],
-          "forbidden_evidence": ["item:1", "item:3"]
-        }
+        {"id": "multi:q1", "question": "谁能用什么物品打开钟楼密门？", "category": "multi_evidence", "gold_evidence": ["multi:door-key", "multi:key-owner"], "forbidden_evidence": ["multi:key-noise"], "rationale": "答案需要合并门锁规则与钥匙持有人两条证据。", "review_notes": "待两名审核者独立确认两条证据缺一不可。"},
+        {"id": "multi:q2", "question": "队伍何时能经北线前往王都？", "category": "multi_evidence", "gold_evidence": ["multi:route-a", "multi:route-b"], "forbidden_evidence": ["multi:route-noise"], "rationale": "路线和摆渡时间需要联合召回。", "review_notes": "待两名审核者独立确认路线约束。"},
+        {"id": "multi:q3", "question": "配制银叶毒解药还缺什么材料？", "category": "multi_evidence", "gold_evidence": ["multi:cure-a", "multi:cure-b"], "forbidden_evidence": ["multi:cure-noise"], "rationale": "配方与当前库存共同决定缺失材料。", "review_notes": "待两名审核者独立确认缺少白蓟草。"},
+        {"id": "multi:q4", "question": "要让赤岩部族结盟，队伍需要去哪里取得什么？", "category": "multi_evidence", "gold_evidence": ["multi:alliance-a", "multi:alliance-b"], "forbidden_evidence": ["multi:alliance-noise"], "rationale": "结盟条件和目标当前位置必须组合。", "review_notes": "待两名审核者独立确认战旗位置。"},
+        {"id": "multi:q5", "question": "怎样进入王陵宝库？", "category": "multi_evidence", "gold_evidence": ["multi:vault-a", "multi:vault-b"], "forbidden_evidence": ["multi:vault-noise"], "rationale": "入口位置与机关操作构成完整答案。", "review_notes": "待两名审核者独立确认两步信息。"}
       ]
     },
     {
       "sample_id": "no_answer",
       "documents": [
-        {"id": "none:1", "text": "队伍知道北门和东门的位置。"},
-        {"id": "none:2", "text": "第五天落石导致旧矿井入口坍塌。"}
+        {"id": "none:gates", "text": "队伍知道北门和东门的位置。"},
+        {"id": "none:mine", "text": "第五天落石导致旧矿井入口坍塌。"},
+        {"id": "none:captain", "text": "黑帆船长目前停留在雾港。"},
+        {"id": "none:herbs", "text": "艾琳采集了白蓟草和银叶。"},
+        {"id": "none:weather", "text": "今晚雾港天气晴朗。"},
+        {"id": "none:coins", "text": "公会金库现有三百枚金币。"}
       ],
       "questions": [
-        {
-          "id": "none:q1",
-          "question": "失落王冠被谁藏在了哪里？",
-          "no_answer": true,
-          "gold_evidence": [],
-          "forbidden_evidence": ["none:1", "none:2"]
-        }
+        {"id": "none:q1", "question": "失落王冠被谁藏在了哪里？", "category": "no_answer", "no_answer": true, "gold_evidence": [], "forbidden_evidence": ["none:gates", "none:mine"], "rationale": "语料没有王冠信息，应避免拼凑答案。", "review_notes": "待两名审核者独立确认语料无王冠。"},
+        {"id": "none:q2", "question": "船长的母亲叫什么名字？", "category": "no_answer", "no_answer": true, "gold_evidence": [], "forbidden_evidence": ["none:captain"], "rationale": "仅知道船长位置，不能推断亲属姓名。", "review_notes": "待两名审核者独立确认缺少亲属信息。"},
+        {"id": "none:q3", "question": "哪种草药可以治愈龙焰诅咒？", "category": "no_answer", "no_answer": true, "gold_evidence": [], "forbidden_evidence": ["none:herbs"], "rationale": "出现草药名不等于存在诅咒疗法。", "review_notes": "待两名审核者独立确认无治疗关系。"},
+        {"id": "none:q4", "question": "明天王都的气温是多少？", "category": "no_answer", "no_answer": true, "gold_evidence": [], "forbidden_evidence": ["none:weather"], "rationale": "地点、日期和气温均无对应证据。", "review_notes": "待两名审核者独立确认天气证据不适用。"},
+        {"id": "none:q5", "question": "公会把金币借给了哪位贵族？", "category": "no_answer", "no_answer": true, "gold_evidence": [], "forbidden_evidence": ["none:coins"], "rationale": "库存事实不能推导不存在的借款事件。", "review_notes": "待两名审核者独立确认无借款记录。"}
+      ]
+    },
+    {
+      "sample_id": "story_session_isolation",
+      "documents": [
+        {"id": "isolation:a-key", "text": "Story 苍白王座 / Session A：洛恩持有象牙钥匙。", "metadata": {"story_id": "pale_throne", "session_id": "session_a"}},
+        {"id": "isolation:b-key", "text": "Story 苍白王座 / Session B：洛恩已把象牙钥匙交给艾琳。", "metadata": {"story_id": "pale_throne", "session_id": "session_b"}},
+        {"id": "isolation:a-inn", "text": "Story 苍白王座 / Session A：白鹿旅店仍由玛拉经营。", "metadata": {"story_id": "pale_throne", "session_id": "session_a"}},
+        {"id": "isolation:b-inn", "text": "Story 苍白王座 / Session B：白鹿旅店在火灾中被废弃。", "metadata": {"story_id": "pale_throne", "session_id": "session_b"}},
+        {"id": "isolation:c-captain", "text": "Story 黑潮 / Session C：黑帆船长是队伍的盟友。", "metadata": {"story_id": "black_tide", "session_id": "session_c"}},
+        {"id": "isolation:d-captain", "text": "Story 苍白王座 / Session D：黑帆船长是通缉中的敌人。", "metadata": {"story_id": "pale_throne", "session_id": "session_d"}},
+        {"id": "isolation:c-gate", "text": "Story 黑潮 / Session C：雾港东门已经开放。", "metadata": {"story_id": "black_tide", "session_id": "session_c"}},
+        {"id": "isolation:d-gate", "text": "Story 苍白王座 / Session D：雾港东门被军队封锁。", "metadata": {"story_id": "pale_throne", "session_id": "session_d"}},
+        {"id": "isolation:e-role", "text": "Story 星火 / Session E：玩家角色艾琳是一名炼金师。", "metadata": {"story_id": "spark", "session_id": "session_e"}},
+        {"id": "isolation:f-role", "text": "Story 星火 / Session F：玩家角色艾琳是一名游侠。", "metadata": {"story_id": "spark", "session_id": "session_f"}}
+      ],
+      "questions": [
+        {"id": "isolation:q1", "question": "在苍白王座 Session A 中，洛恩现在持有哪把钥匙？", "category": "story_session_isolation", "gold_evidence": ["isolation:a-key"], "forbidden_evidence": ["isolation:b-key"], "rationale": "同一故事不同 session 的物品状态必须隔离。", "review_notes": "待两名审核者独立确认 Session A。"},
+        {"id": "isolation:q2", "question": "在苍白王座 Session B 中，白鹿旅店目前怎样了？", "category": "story_session_isolation", "gold_evidence": ["isolation:b-inn"], "forbidden_evidence": ["isolation:a-inn"], "rationale": "同一地点的平行 session 状态不能串线。", "review_notes": "待两名审核者独立确认 Session B。"},
+        {"id": "isolation:q3", "question": "在黑潮 Session C 中，黑帆船长与队伍是什么关系？", "category": "story_session_isolation", "gold_evidence": ["isolation:c-captain"], "forbidden_evidence": ["isolation:d-captain"], "rationale": "不同 story 的人物关系必须隔离。", "review_notes": "待两名审核者独立确认黑潮故事。"},
+        {"id": "isolation:q4", "question": "在苍白王座 Session D 中，雾港东门当前状态是什么？", "category": "story_session_isolation", "gold_evidence": ["isolation:d-gate"], "forbidden_evidence": ["isolation:c-gate"], "rationale": "不同故事和 session 的世界状态不可混用。", "review_notes": "待两名审核者独立确认 Session D。"},
+        {"id": "isolation:q5", "question": "在星火 Session E 中，玩家角色艾琳的职业是什么？", "category": "story_session_isolation", "gold_evidence": ["isolation:e-role"], "forbidden_evidence": ["isolation:f-role"], "rationale": "相同角色名在平行 session 中的设定应隔离。", "review_notes": "待两名审核者独立确认 Session E。"}
+      ]
+    },
+    {
+      "sample_id": "scene_status_narrative_boundary",
+      "documents": [
+        {"id": "boundary:scene-plan", "text": "艾琳提议下一幕去王宫大厅与摄政王谈判。", "metadata": {"memory_kind": "narrative_intent"}},
+        {"id": "boundary:scene-now", "text": "当前场景：队伍仍在雾港白鹿旅店二楼客房。", "metadata": {"memory_kind": "scene", "status_kind": "scene"}},
+        {"id": "boundary:hp-flavor", "text": "洛恩咬牙说自己还能再战一整夜。", "metadata": {"memory_kind": "narrative"}},
+        {"id": "boundary:hp-status", "text": "角色状态：洛恩当前生命值为 3/10，处于重伤。", "metadata": {"memory_kind": "status", "status_kind": "normal"}},
+        {"id": "boundary:door-intent", "text": "格里姆表示等守卫离开后就会打开北门。", "metadata": {"memory_kind": "commitment"}},
+        {"id": "boundary:door-status", "text": "场景状态：北门目前锁闭，守卫仍在岗。", "metadata": {"memory_kind": "scene", "status_kind": "scene"}},
+        {"id": "boundary:coin-flavor", "text": "商人夸口说自己富可敌国。", "metadata": {"memory_kind": "narrative"}},
+        {"id": "boundary:coin-status", "text": "商人状态表：随身金币为 12 枚。", "metadata": {"memory_kind": "status", "status_kind": "normal"}},
+        {"id": "boundary:weather-foreshadow", "text": "远处乌云让水手担心夜里可能有暴风雨。", "metadata": {"memory_kind": "narrative_foreshadow"}},
+        {"id": "boundary:weather-scene", "text": "当前场景天气：雾港晴朗，微风。", "metadata": {"memory_kind": "scene", "status_kind": "scene"}}
+      ],
+      "questions": [
+        {"id": "boundary:q1", "question": "队伍当前实际位于哪里？", "category": "scene_status_narrative_boundary", "gold_evidence": ["boundary:scene-now"], "forbidden_evidence": ["boundary:scene-plan"], "rationale": "未来剧情提议不能替代当前场景。", "review_notes": "待两名审核者独立确认 scene 真值。"},
+        {"id": "boundary:q2", "question": "洛恩当前的实际生命状态如何？", "category": "scene_status_narrative_boundary", "gold_evidence": ["boundary:hp-status"], "forbidden_evidence": ["boundary:hp-flavor"], "rationale": "角色台词不能覆盖结构化状态值。", "review_notes": "待两名审核者独立确认 HP 状态。"},
+        {"id": "boundary:q3", "question": "北门现在是否已经打开？", "category": "scene_status_narrative_boundary", "gold_evidence": ["boundary:door-status"], "forbidden_evidence": ["boundary:door-intent"], "rationale": "行动意图不等于已发生的场景变化。", "review_notes": "待两名审核者独立确认北门仍锁闭。"},
+        {"id": "boundary:q4", "question": "商人状态表记录他随身有多少金币？", "category": "scene_status_narrative_boundary", "gold_evidence": ["boundary:coin-status"], "forbidden_evidence": ["boundary:coin-flavor"], "rationale": "叙事夸张不能替代状态表数值。", "review_notes": "待两名审核者独立确认金币数值。"},
+        {"id": "boundary:q5", "question": "当前场景的实际天气是什么？", "category": "scene_status_narrative_boundary", "gold_evidence": ["boundary:weather-scene"], "forbidden_evidence": ["boundary:weather-foreshadow"], "rationale": "天气伏笔和可能性不能当作实时场景状态。", "review_notes": "待两名审核者独立确认当前晴朗。"}
       ]
     }
   ]

@@ -116,6 +116,7 @@ class CaseResult:
     sample_id: str
     question_id: str
     question: str
+    category: str
     gold_evidence: tuple[str, ...]
     forbidden_evidence: tuple[str, ...]
     no_answer: bool
