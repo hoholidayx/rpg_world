@@ -62,7 +62,7 @@ def build_rpg_context(
     recalled_store = RecalledMemoryStore()
     builder.set_recalled_memory_store(recalled_store)
     builder.set_persistent_memory_store(
-        PersistentMemoryStore(session_root / "persistent_memory.json")
+        PersistentMemoryStore(session_id)
     )
 
     # ── MemoryManager（封装向量记忆检索） ─────────────────────────

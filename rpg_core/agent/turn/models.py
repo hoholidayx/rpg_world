@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.agent_types import TurnStats
     from rpg_core.agent.loop import ToolCallRecord
     from rpg_core.agent.tools import ToolRegistry
-    from rpg_core.context.rpg_context import Message
+    from rpg_core.context.rpg_context import Message, PersistentMemoryFact
     from rpg_core.main_llm import MainLLMSelection
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
 
@@ -120,6 +120,7 @@ class TurnExecutionPlan:
     execution: TurnExecutionSnapshot
     main_llm: "MainLLMSelection"
     rp_modules: "RPModuleSelectionSnapshot"
+    persistent_memory: tuple["PersistentMemoryFact", ...] = ()
 
     @property
     def request(self) -> TurnRequest:

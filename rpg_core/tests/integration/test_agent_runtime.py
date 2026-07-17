@@ -199,10 +199,6 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     runtime_dir = integration_data_gateway.catalog.get_session_runtime_dir(session_id)
     summary_dir = runtime_dir / "summaries"
     (summary_dir / "old-summary.md").write_text("old summary", encoding="utf-8")
-    (runtime_dir / "persistent_memory.json").write_text(
-        '[{"title":"old","content":"memory"}]',
-        encoding="utf-8",
-    )
     nested_file = runtime_dir / "unknown" / "nested.bin"
     nested_file.parent.mkdir(parents=True)
     nested_file.write_bytes(b"old runtime data")
@@ -256,7 +252,6 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         native_after.document.rows[0].update_frequency
         == models.STATUS_UPDATE_FREQUENCY_DEFERRED
     )
-    assert not (runtime_dir / "persistent_memory.json").exists()
     assert not nested_file.exists()
     assert list(summary_dir.glob("*.md")) == []
     assert json.loads((runtime_dir / "rpg_summaries.json").read_text(encoding="utf-8")) == []

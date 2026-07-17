@@ -11,6 +11,7 @@ from rpg_core.context.rpg_context import (
     FixedLayerData,
     HotHistoryLayer,
     Message,
+    PersistentMemoryFact,
     PersistentMemoryLayer,
     RecalledMemoryLayer,
     RPGContext,
@@ -70,16 +71,16 @@ class RPGContextBuilder:
         [N+5]  user       User Message                     always new
 
     Provider prefix caching follows the serialized/tokenized request, not these
-    dataclass layers. ``ContextRenderer`` currently coalesces every system layer
-    into one leading system message for chat-template compatibility, then appends
-    non-system history and the current user message. A volatile system-layer
-    change can therefore preserve the stable beginning of that system message,
-    but prevent later history from belonging to the same reusable prefix.
+    dataclass layers. ``ContextRenderer`` emits every rendered non-history layer
+    as its own ordered message and expands Hot History in place. A volatile
+    layer change can preserve every serialized message before it, but prevents
+    that layer and all following messages from belonging to the same reusable
+    provider prefix.
 
-    Story Memory lifecycle: records accumulate in day-to-day play, then get
-    distilled into Persistent Memory during offline summary — after which
-    the store is cleared and the cycle repeats.  This moves the expensive
-    cache-miss (PM write) out of the online path.
+    Story Memory and Summary are derived Dream inputs.  The independent Dream
+    service reconciles them or the current main history into the SQL-backed
+    Persistent Memory ledger; this builder only reads its evidence-valid active
+    projection and never performs consolidation writes.
     """
 
     def __init__(
@@ -113,6 +114,26 @@ class RPGContextBuilder:
 
     def set_batch_summary_store(self, store: BatchSummaryStore) -> None:
         self._batch_summary_store = store
+
+    async def load_persistent_memory_snapshot(
+        self,
+    ) -> tuple[PersistentMemoryFact, ...]:
+        """Load one immutable SQL projection for a turn or preview."""
+
+        if self._persist_memory is None or not self.config.enable_persistent_memory:
+            return ()
+        items = await self._persist_memory.load_snapshot()
+        return tuple(
+            PersistentMemoryFact(
+                memory_id=item.memory_id,
+                revision_number=item.revision_number,
+                text=item.text,
+                memory_kind=item.memory_kind,
+                epistemic_status=item.epistemic_status,
+                salience=item.salience,
+            )
+            for item in items
+        )
 
     def close(self) -> None:
         """Release session-local store registrations and transient context."""
@@ -150,6 +171,7 @@ class RPGContextBuilder:
         status_mgr: StatusManager | None = None,
         scene_tracker: SceneTracker | None = None,
         rp_module_sections: list[RPModuleRuntimeSection] | None = None,
+        persistent_memory_snapshot: tuple[PersistentMemoryFact, ...] = (),
     ) -> RPGContext:
         """构建 5 层 RPGContext。
 
@@ -172,12 +194,7 @@ class RPGContextBuilder:
         resolved_fixed_layer = fixed_layer or FixedLayerData(world_name=self.world_name)
 
         # ── 3. Build Persistent Memory Layer ─────────────────────────
-        persistent_sections: list[dict[str, str]] = []
-        if self._persist_memory and self.config.enable_persistent_memory:
-            try:
-                persistent_sections = self._persist_memory.get_sections()
-            except Exception as exc:
-                logger.debug("[RPGContextBuilder] persistent memory layer skipped: {}", exc)
+        persistent_memories = list(persistent_memory_snapshot)
 
         # ── 4. Build Summary Layer (overall.md only) ──────────────────
         summary_text: str | None = None
@@ -231,7 +248,7 @@ class RPGContextBuilder:
         # ── 8. Assemble structured RPGContext ─────────────────────────
         return RPGContext(
             fixed_layer=resolved_fixed_layer,
-            persistent_memory=PersistentMemoryLayer(sections=persistent_sections),
+            persistent_memory=PersistentMemoryLayer(memories=persistent_memories),
             summary=SummaryLayer(text=summary_text),
             hot_history=HotHistoryLayer(messages=hot_history),
             story_memory=StoryMemoryLayer(details=story_details),

@@ -1,11 +1,7 @@
 {% if persistent_memory %}
 ## 常驻记忆
 
-{% for section in persistent_memory %}
-{% if section.title %}
-### {{ section.title }}
-{% endif %}
-{{ section.content }}
-
+{% for item in persistent_memory %}
+- [{{ item.memory_kind }}; {{ item.epistemic_status }}] {{ item.text }}
 {% endfor %}
 {% endif %}

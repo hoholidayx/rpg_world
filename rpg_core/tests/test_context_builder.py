@@ -13,6 +13,7 @@ from rpg_core.context.rpg_context import (
     HotHistoryLayer,
     LayerType,
     Message,
+    PersistentMemoryFact,
     PersistentMemoryLayer,
     RecalledMemoryLayer,
     RPGContext,
@@ -27,11 +28,11 @@ from rpg_core.context.rpg_context import (
 
 
 class FakePersistentStore:
-    def __init__(self, sections):
-        self.sections = sections
+    def __init__(self, memories):
+        self.memories = memories
 
-    def get_sections(self):
-        return list(self.sections)
+    async def load_snapshot(self):
+        return tuple(self.memories)
 
 
 class FakeStoryStore:
@@ -67,7 +68,7 @@ def _fake_render(template_name: str, **context: object) -> str:
         section_ids = ",".join(section.id for section in context["fixed_sections"])
         return f"fixed|{section_ids}"
     if template_name == "modules/persistent_memory.jinja":
-        return "pm|" + ",".join(section["content"] for section in context["persistent_memory"])
+        return "pm|" + ",".join(item.text for item in context["persistent_memory"])
     if template_name == "modules/overall_summary.jinja":
         return f"summary|{context['text']}"
     if template_name == "modules/story_memory.jinja":
@@ -99,7 +100,7 @@ def _patch_renderer(monkeypatch):
     monkeypatch.setattr(renderer_module, "render_jinja_template", _fake_render)
 
 
-def test_build_context_layers_and_user_extensions():
+async def test_build_context_layers_and_user_extensions():
     config = RPGContextConfig(
         hot_history_rounds=1,
         user_extension=[
@@ -110,12 +111,13 @@ def test_build_context_layers_and_user_extensions():
     builder = RPGContextBuilder(config=config, world_name="Test World")
     builder.set_summary_store(FakeSummaryStore(("overall summary", 1)))
     builder.set_persistent_memory_store(FakePersistentStore([
-        {"title": "一", "content": "p1"},
-        {"title": "二", "content": "p2"},
+        SimpleNamespace(memory_id="m1", revision_number=1, text="p1", memory_kind="event", epistemic_status="confirmed", salience=0.8),
+        SimpleNamespace(memory_id="m2", revision_number=2, text="p2", memory_kind="clue", epistemic_status="reported", salience=0.7),
     ]))
     builder.set_story_memory_store(FakeStoryStore([{"text": "story 1"}]))
     builder.set_recalled_memory_store(FakeRecalledStore(["recall 1"]))
     builder.set_batch_summary_store(FakeSummaryStore(("overall summary", 1)))
+    persistent_memory_snapshot = await builder.load_persistent_memory_snapshot()
 
     messages = [
         Message(Role.SYSTEM, "system"),
@@ -144,12 +146,13 @@ def test_build_context_layers_and_user_extensions():
             }],
         ),
         scene_tracker=FakeStatusTracker(),
+        persistent_memory_snapshot=persistent_memory_snapshot,
     )
 
     assert isinstance(ctx, RPGContext)
     assert isinstance(ctx.get_layer(LayerType.FIXED), FixedLayerData)
     assert ctx.fixed_layer.sections[0].id == "core"
-    assert [section["content"] for section in ctx.persistent_memory.sections] == ["p1", "p2"]
+    assert [item.text for item in ctx.persistent_memory.memories] == ["p1", "p2"]
     assert ctx.summary.text == "overall summary"
     assert [m.content for m in ctx.hot_history.messages] == ["u2", "a2"]
     assert ctx.story_memory.details == [{"text": "story 1"}]
@@ -279,7 +282,14 @@ def test_context_preserves_canonical_layers_and_history_message_order():
             sections=[FixedLayerSection(id="core", title="核心", content="fixed")]
         ),
         persistent_memory=PersistentMemoryLayer(
-            sections=[{"title": "常驻", "content": "persistent"}]
+            memories=[PersistentMemoryFact(
+                memory_id="m1",
+                revision_number=1,
+                text="persistent",
+                memory_kind="event",
+                epistemic_status="confirmed",
+                salience=0.9,
+            )]
         ),
         summary=SummaryLayer(text="summary"),
         hot_history=HotHistoryLayer(messages=[

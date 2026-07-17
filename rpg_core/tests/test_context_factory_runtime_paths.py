@@ -24,6 +24,6 @@ def test_context_factory_uses_catalog_session_runtime_dir(
 
     assert builder._summary_store._file == session_root / "rpg_summaries.json"
     assert builder._batch_summary_store._dir == session_root / "summaries"
-    assert builder._persist_memory._memory_file == session_root / "persistent_memory.json"
+    assert builder._persist_memory.session_id == "s_runtime"
     assert captured["session_dir"] == str(session_root)
     assert captured["get_vector_db_path"] == str(session_root / "memory_vectors.db")

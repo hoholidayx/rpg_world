@@ -44,6 +44,11 @@ class _Builder:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.persistent_memory_loads = 0
+
+    async def load_persistent_memory_snapshot(self):  # noqa: ANN201
+        self.persistent_memory_loads += 1
+        return ()
 
     def build(
         self,

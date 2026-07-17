@@ -37,7 +37,7 @@ class ContextRenderer:
         if type_ == LayerType.PERSISTENT_MEMORY and self._ctx.persistent_memory.active:
             return render_jinja_template(
                 "modules/persistent_memory.jinja",
-                persistent_memory=self._ctx.persistent_memory.sections,
+                persistent_memory=self._ctx.persistent_memory.memories,
             )
         if type_ == LayerType.SUMMARY and self._ctx.summary.active:
             return render_jinja_template("modules/overall_summary.jinja", text=self._ctx.summary.text)

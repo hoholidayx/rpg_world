@@ -179,12 +179,22 @@ class FixedLayerData:
 
 
 @dataclass(frozen=True)
+class PersistentMemoryFact:
+    memory_id: str
+    revision_number: int
+    text: str
+    memory_kind: str
+    epistemic_status: str
+    salience: float
+
+
+@dataclass(frozen=True)
 class PersistentMemoryLayer:
-    sections: list[dict[str, str]] = field(default_factory=list)
+    memories: list[PersistentMemoryFact] = field(default_factory=list)
 
     @property
     def active(self) -> bool:
-        return bool(self.sections)
+        return bool(self.memories)
 
 
 @dataclass(frozen=True)

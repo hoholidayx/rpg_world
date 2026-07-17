@@ -1,44 +1,74 @@
-"""PersistentMemoryStore — wraps persistent_memory.json for the Fixed Layer."""
+"""Read-only SQL projection for the main Agent Persistent Memory layer."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+import asyncio
+import logging
+from dataclasses import dataclass
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PersistentMemoryItem:
+    """One evidence-valid active memory projected for the main Context."""
+
+    memory_id: str
+    revision_number: int
+    text: str
+    memory_kind: str
+    epistemic_status: str
+    salience: float
 
 
 class PersistentMemoryStore:
-    """常驻记忆 —— 对应固定层的"常驻memory"模块。
+    """Read the current Session ledger through the typed ``rpg_data`` boundary."""
 
-    数据来自 {session_root}/persistent_memory.json，由 Dream 进程维护。
-    以结构化 section 列表存储（{title, content}），通过 Jinja 模板渲染到上下文。
-    """
+    def __init__(self, session_id: str) -> None:
+        self._session_id = str(session_id)
+        self._last_snapshot: tuple[PersistentMemoryItem, ...] = ()
+        self._refresh_lock = asyncio.Lock()
 
-    def __init__(self, file_path: Path) -> None:
-        self._memory_file = file_path
+    @property
+    def session_id(self) -> str:
+        return self._session_id
 
-    def get_content(self) -> str:
-        """向后兼容：以纯文本形式返回全部内容。
+    async def load_snapshot(self) -> tuple[PersistentMemoryItem, ...]:
+        """Load one immutable projection off-loop, retaining a stale fallback."""
 
-        新代码应使用 :meth:`get_sections` 获取结构化数据。
-        """
+        async with self._refresh_lock:
+            try:
+                memories = tuple(await asyncio.to_thread(self._load_memories))
+            except Exception:
+                logger.warning(
+                    "persistent memory projection refresh failed; using stale snapshot",
+                    exc_info=True,
+                )
+                return self._last_snapshot
+            self._last_snapshot = memories
+            return memories
+
+    def _load_memories(self) -> list[PersistentMemoryItem]:
+        from rpg_data.services import get_data_service_gateway
+
+        gateway = get_data_service_gateway()
+        database = gateway.database
         try:
-            return self._memory_file.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return ""
-
-    def get_sections(self) -> list[dict[str, str]]:
-        """返回结构化 section 列表 ``[{title, content}, …]``。
-
-        期望 JSON 格式为 ``[{"title": "…", "content": "…"}, …]``。
-        文件不存在或 JSON 解析失败时报错并直接抛出异常。
-        """
-        try:
-            raw = self._memory_file.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return []
-
-        data = json.loads(raw)
-        if isinstance(data, list):
-            return data
-        # 兜底：整个文件当一段 content
-        return [{"title": "", "content": str(data)}] if data else []
+            bundles = gateway.dream.list_context_memories(self._session_id)
+            return [
+                PersistentMemoryItem(
+                    memory_id=bundle.memory.id,
+                    revision_number=bundle.current_revision.revision_number,
+                    text=bundle.text,
+                    memory_kind=bundle.memory_kind,
+                    epistemic_status=bundle.epistemic_status,
+                    salience=bundle.salience,
+                )
+                for bundle in bundles
+            ]
+        finally:
+            # Peewee connections are thread-local. Close the worker's handle;
+            # the shared gateway/database object remains initialized.
+            if not database.is_closed():
+                database.close()

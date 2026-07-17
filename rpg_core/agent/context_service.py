@@ -30,7 +30,7 @@ from rpg_core.settings import settings
 
 if TYPE_CHECKING:
     from rpg_core.context.inspector import LayerInfo
-    from rpg_core.context.rpg_context import RPGContext
+    from rpg_core.context.rpg_context import PersistentMemoryFact, RPGContext
     from rpg_core.main_llm import MainLLMSelection
     from rpg_core.rp_modules import (
         RPModuleRegistry,
@@ -101,6 +101,7 @@ class AgentContextService:
         user_input: str = "",
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
+        persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
     ) -> list[Message]:
         context = self.build_main_context(
             current_user_message=current_user_message,
@@ -110,6 +111,7 @@ class AgentContextService:
             include_staged_turn_runtime=True,
             rp_module_runtime=rp_module_runtime,
             turn_execution=turn_execution,
+            persistent_memory_snapshot=persistent_memory_snapshot,
         )
         messages = context.to_message_objects()
         self._log_verbose_context(context)
@@ -125,6 +127,7 @@ class AgentContextService:
         include_staged_turn_runtime: bool = False,
         rp_module_runtime: "RPModuleTurnRuntime | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
+        persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
     ) -> "RPGContext":
         resources = self._resources()
         fixed_layer = self._assemble_fixed_layer(
@@ -155,6 +158,7 @@ class AgentContextService:
                 rp_module_runtime=rp_module_runtime,
                 turn_execution=turn_execution,
             ),
+            persistent_memory_snapshot=persistent_memory_snapshot,
         )
         return context
 
@@ -164,6 +168,7 @@ class AgentContextService:
         *,
         rp_module_snapshot: "RPModuleSelectionSnapshot | None" = None,
         turn_execution: TurnExecutionSnapshot | None = None,
+        persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
     ) -> "RPGContext":
         resources = self._resources()
         scene_ctx = (
@@ -191,6 +196,7 @@ class AgentContextService:
                 scene_tracker=resources.scene_tracker,
                 user_input=user_input,
                 turn_execution=turn_execution,
+                persistent_memory_snapshot=persistent_memory_snapshot,
             )
 
         runtime = registry.create_runtime(
@@ -204,6 +210,7 @@ class AgentContextService:
                 user_input=user_input,
                 rp_module_runtime=runtime,
                 turn_execution=turn_execution,
+                persistent_memory_snapshot=persistent_memory_snapshot,
             )
         finally:
             runtime.close()
@@ -214,6 +221,7 @@ class AgentContextService:
         *,
         rp_module_snapshot: "RPModuleSelectionSnapshot",
         turn_execution: TurnExecutionSnapshot,
+        persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
     ) -> None:
         context_limit = selection.effective.context_window
         if context_limit is None or context_limit <= 0:
@@ -231,6 +239,7 @@ class AgentContextService:
             "",
             rp_module_snapshot=rp_module_snapshot,
             turn_execution=turn_execution,
+            persistent_memory_snapshot=persistent_memory_snapshot,
         )
         usage = estimate_rendered_context_usage(
             current_context.to_message_objects(),
@@ -272,6 +281,21 @@ class AgentContextService:
             context_limit=context_limit,
             threshold_ratio=threshold_ratio,
         )
+
+    async def load_persistent_memory_snapshot(
+        self,
+    ) -> tuple["PersistentMemoryFact", ...]:
+        """Load an immutable SQL projection without blocking the Agent loop."""
+
+        try:
+            return await self._resources().builder.load_persistent_memory_snapshot()
+        except Exception as exc:
+            logger.warning(
+                _TAG + " persistent memory load skipped: session_id={}, error={}",
+                self._session_id(),
+                exc,
+            )
+            return ()
 
     async def inspect_info(
         self,
@@ -336,6 +360,7 @@ class AgentContextService:
         mode: TurnMode | str | None,
         narrative_style_id: int | None,
     ) -> ContextInspector:
+        persistent_memory_snapshot = await self.load_persistent_memory_snapshot()
         execution = self.resolve_turn_execution(
             TurnRequest.create(
                 user_input,
@@ -346,6 +371,7 @@ class AgentContextService:
         context = self.build_for_inspection(
             user_input,
             turn_execution=execution,
+            persistent_memory_snapshot=persistent_memory_snapshot,
         )
         selection = await self._main_llm_selection(self._session_id())
         return ContextInspector(

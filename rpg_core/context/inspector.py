@@ -128,7 +128,7 @@ class ContextInspector:
             )
         if type_ == LayerType.PERSISTENT_MEMORY:
             return (
-                f"{len(self._ctx.persistent_memory.sections)} 段常驻记忆"
+                f"{len(self._ctx.persistent_memory.memories)} 条常驻记忆"
                 if self._ctx.persistent_memory.active
                 else "-"
             )
