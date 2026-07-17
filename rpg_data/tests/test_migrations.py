@@ -42,6 +42,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_session_persistent_memory_evidence",
             "rpg_session_dream_states",
             "rpg_session_narrative_outcomes",
+            "rpg_session_derivation_jobs",
             "rpg_rp_module_catalog",
             "rpg_story_rp_modules",
             "rpg_session_rp_module_overrides",
@@ -116,6 +117,21 @@ def test_run_migrations_creates_initial_tables() -> None:
         profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_profiles)")}
 
         assert "story_memory_last_turn_id" not in session_columns
+        assert "lifecycle" in session_columns
+        derivation_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(rpg_session_derivation_jobs)")
+        }
+        assert {
+            "source_session_id",
+            "target_session_id",
+            "branch_turn_id",
+            "status",
+            "stage",
+            "context_used_tokens",
+            "context_limit",
+            "context_threshold_exceeded",
+        }.issubset(derivation_columns)
         assert "last_story_turn_index" not in session_columns
         assert "session_key" not in session_columns
         assert {
@@ -367,6 +383,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0013", "0013_tts.sql"),
             ("0014", "0014_story_memory_metadata.sql"),
             ("0015", "0015_dream_memory.sql"),
+            ("0016", "0016_session_derivations.sql"),
         ]
     finally:
         conn.close()

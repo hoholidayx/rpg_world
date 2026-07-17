@@ -111,6 +111,7 @@ async def test_duplicate_session_deletion_is_rejected() -> None:
 @pytest.mark.asyncio
 async def test_session_deletion_guard_is_released_when_close_is_cancelled() -> None:
     agent = AgentManager.get_or_create(session_id="s1")
+    original_close = agent.close
 
     async def cancel_close() -> None:
         raise asyncio.CancelledError
@@ -121,3 +122,43 @@ async def test_session_deletion_guard_is_released_when_close_is_cancelled() -> N
         await AgentManager.begin_session_deletion("s1")
 
     assert "s1" not in AgentManager._deleting_sessions
+    assert AgentManager._instances["s1"] is agent
+    agent.close = original_close
+
+
+@pytest.mark.asyncio
+async def test_drop_session_retains_runtime_when_close_fails() -> None:
+    agent = AgentManager.get_or_create(session_id="s1")
+    AgentManager._initialized_targets.add("s1")
+    original_close = agent.close
+
+    async def fail_close() -> None:
+        raise RuntimeError("close failed")
+
+    agent.close = fail_close
+    with pytest.raises(RuntimeError, match="close failed"):
+        await AgentManager.drop_session("s1")
+
+    assert AgentManager._instances["s1"] is agent
+    assert "s1" in AgentManager._initialized_targets
+    agent.close = original_close
+
+
+@pytest.mark.asyncio
+async def test_reset_closes_all_and_retains_only_failed_runtime() -> None:
+    failed = AgentManager.get_or_create(session_id="failed")
+    closed = AgentManager.get_or_create(session_id="closed")
+    AgentManager._initialized_targets.update({"failed", "closed"})
+    original_close = failed.close
+
+    async def fail_close() -> None:
+        raise RuntimeError("close failed")
+
+    failed.close = fail_close
+    with pytest.raises(RuntimeError, match="close failed"):
+        await AgentManager.areset()
+
+    assert AgentManager._instances == {"failed": failed}
+    assert AgentManager._initialized_targets == {"failed"}
+    assert closed.close_calls == 1
+    failed.close = original_close

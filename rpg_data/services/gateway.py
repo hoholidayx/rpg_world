@@ -22,6 +22,7 @@ from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_role import SessionRoleService
 from rpg_data.services.session_deletion import SessionDeletionService
+from rpg_data.services.session_derivation import SessionDerivationService
 from rpg_data.services.session_reset import SessionResetService
 from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryService
@@ -56,6 +57,7 @@ class DataServiceGateway:
         self._rp_modules: RPModuleService | None = None
         self._session_roles: SessionRoleService | None = None
         self._session_deletion: SessionDeletionService | None = None
+        self._session_derivations: SessionDerivationService | None = None
         self._session_reset: SessionResetService | None = None
         self._session_composer: SessionComposerService | None = None
         self._backup: BackupService | None = None
@@ -219,6 +221,21 @@ class DataServiceGateway:
         return self._session_deletion
 
     @property
+    def session_derivations(self) -> SessionDerivationService:
+        database = self.database
+        if self._session_derivations is None:
+            logger.debug(
+                "creating session derivation service db_path=%s",
+                self._database_path,
+            )
+            self._session_derivations = SessionDerivationService(
+                database,
+                status=self.status,
+            )
+        self._ensure_bound()
+        return self._session_derivations
+
+    @property
     def session_composer(self) -> SessionComposerService:
         database = self.database
         if self._session_composer is None:
@@ -294,6 +311,7 @@ class DataServiceGateway:
         self._rp_modules = None
         self._session_roles = None
         self._session_deletion = None
+        self._session_derivations = None
         self._session_reset = None
         self._session_composer = None
         self._backup = None

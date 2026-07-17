@@ -88,22 +88,35 @@ class AgentManager:
     @classmethod
     async def areset(cls) -> None:
         """Close and reset every cached agent runtime."""
-        agents = tuple(cls._instances.values())
-        cls._instances.clear()
-        cls._initialized = False
-        cls._initialized_targets.clear()
+        first_error: BaseException | None = None
+        for session_id, agent in tuple(cls._instances.items()):
+            try:
+                await agent.close()
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+                continue
+            if cls._instances.get(session_id) is agent:
+                cls._instances.pop(session_id, None)
+                cls._initialized_targets.discard(session_id)
+        cls._initialized = bool(cls._initialized_targets)
         cls._deleting_sessions.clear()
-        for agent in agents:
-            await agent.close()
+        if first_error is not None:
+            raise first_error
 
     @classmethod
     async def drop_session(cls, session_id: str) -> None:
         """Remove cached agent runtime for one globally unique session."""
-        agent = cls._instances.pop(session_id, None)
-        cls._initialized_targets.discard(session_id)
-        cls._initialized = bool(cls._initialized_targets)
+        agent = cls._instances.get(session_id)
         if agent is not None:
             await agent.close()
+            if cls._instances.get(session_id) is agent:
+                cls._instances.pop(session_id, None)
+                cls._initialized_targets.discard(session_id)
+                cls._initialized = bool(cls._initialized_targets)
+        else:
+            cls._initialized_targets.discard(session_id)
+            cls._initialized = bool(cls._initialized_targets)
 
     @classmethod
     async def begin_session_deletion(cls, session_id: str) -> None:
@@ -115,12 +128,17 @@ class AgentManager:
                 f"Session {session_id!r} is already being deleted"
             )
         cls._deleting_sessions.add(key)
-        agent = cls._instances.pop(key, None)
-        cls._initialized_targets.discard(key)
-        cls._initialized = bool(cls._initialized_targets)
+        agent = cls._instances.get(key)
         try:
             if agent is not None:
                 await agent.close()
+                if cls._instances.get(key) is agent:
+                    cls._instances.pop(key, None)
+                    cls._initialized_targets.discard(key)
+                    cls._initialized = bool(cls._initialized_targets)
+            else:
+                cls._initialized_targets.discard(key)
+                cls._initialized = bool(cls._initialized_targets)
         except BaseException:
             cls._deleting_sessions.discard(key)
             raise

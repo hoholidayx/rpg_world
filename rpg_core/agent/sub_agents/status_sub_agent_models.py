@@ -30,6 +30,7 @@ class StatusSubAgentStage(StrEnum):
     OUTCOME = "outcome"
     REALTIME = "realtime"
     EVENT_DRIVEN = "event_driven"
+    BOOTSTRAP = "bootstrap"
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,18 @@ class DeferredStatusResult:
     batches: int = 0
     fields: int = 0
     changed: int = 0
+
+
+@dataclass
+class StatusBootstrapResult:
+    """Result of deterministic, outcome-free derivation state bootstrap."""
+
+    updated: bool = False
+    failed: bool = False
+    processed_turns: int = 0
+    records: list[StatusSubAgentToolRecord] = field(default_factory=list)
+    call_stats: list[CallRecord] = field(default_factory=list)
+    deferred_progress: dict[int, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

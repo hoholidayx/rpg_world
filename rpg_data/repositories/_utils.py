@@ -136,6 +136,7 @@ def to_session(row: records.SessionRecord) -> models.Session:
         id=str(row.id),
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
+        lifecycle=str(row.lifecycle or models.SESSION_LIFECYCLE_READY),
         state_json=str(row.state_json or "{}"),
         version=int(row.version),
         created_at=str(row.created_at),

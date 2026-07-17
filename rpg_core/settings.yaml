@@ -29,6 +29,8 @@ base:
       summary:
         # 每批压缩的用户轮次数。
         compress_batch_size: 5
+        # 单批消息正文字符上限；只在完整 turn 边界拆批。
+        max_batch_chars: 32000
         # 压缩后保留的最近对话轮数。
         keep_rounds: 5
         # 是否启用自动摘要压缩。
@@ -36,12 +38,18 @@ base:
       story:
         # N 轮后触发剧情记忆提取；0 表示关闭自动触发。
         trigger_rounds: 0
+        # 全量 pending 提取时，每批最多包含的已提交 turn 数。
+        batch_turns: 10
+        # 单批消息正文字符上限；单个 turn 超限时明确失败，不截断正文。
+        max_batch_chars: 32000
         # 单次最多提取的长期剧情记忆条数。
         max_items: 8
 
     # 状态子 Agent 开关。
     status_sub_agent:
       enabled: true
+      # 普通 preflight 与派生初始化读取的最近完整 IC/GM turn 数。
+      history_rounds: 5
       deferred:
         # deferred 字段未单独配置时，累计多少个已提交 turn 后归纳。
         default_interval_turns: 5

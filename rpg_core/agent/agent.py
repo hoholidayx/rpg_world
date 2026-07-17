@@ -9,6 +9,10 @@ from rpg_core.agent.agent_types import AgentStreamEvent, TurnCancelResult
 from rpg_core.agent.command import CommandDispatcher, CommandResult
 from rpg_core.agent.context_service import AgentContextService
 from rpg_core.agent.deferred_status import DeferredStatusCoordinator
+from rpg_core.agent.derivation_service import (
+    AgentDerivationService,
+    SessionDerivationPreparationResult,
+)
 from rpg_core.agent.lifecycle import AgentRuntimeLifecycle
 from rpg_core.agent.loop import AgentReply, run_chat_loop, run_chat_loop_stream
 from rpg_core.agent.mailbox import AgentMailbox
@@ -127,12 +131,17 @@ class RPGGameAgent:
             stream_error_event=AgentMailbox.stream_error_event,
         )
         deferred_status = DeferredStatusCoordinator(self._lifecycle)
+        self._derivation_service = AgentDerivationService(
+            lifecycle=self._lifecycle,
+            context_service=self._context_service,
+        )
         self._mailbox = AgentMailbox(
             session_id=lambda: self._lifecycle.session_id,
             model=lambda: self._model_runtime.model,
             turn_service=self._turn_service,
             command_dispatcher=self._command_dispatcher,
             truncate_history=self._session_service.truncate_history_from_turn_now,
+            materialize_derivation=self._derivation_service.materialize,
             deferred_status=deferred_status.run,
         )
         self._session_service.bind_mailbox(self._mailbox)
@@ -205,6 +214,21 @@ class RPGGameAgent:
     async def execute_command(self, command: str) -> CommandResult:
         await self.initialize()
         return await self._mailbox.execute_command(command)
+
+    async def materialize_derivation(self, job_id: str) -> object:
+        """Create a derivation target at this source mailbox boundary."""
+
+        await self.initialize()
+        return await self._mailbox.materialize_derivation(job_id)
+
+    async def prepare_derivation_target(
+        self,
+        job_id: str,
+    ) -> SessionDerivationPreparationResult:
+        """Prepare this provisioning target without entering the turn pipeline."""
+
+        await self.initialize()
+        return await self._derivation_service.prepare_target(job_id)
 
     def list_commands(self) -> list["CommandDef"]:
         return self._command_dispatcher.list_commands()

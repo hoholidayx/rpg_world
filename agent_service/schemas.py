@@ -85,6 +85,11 @@ class AgentSessionCreateRequest(_BaseSchema):
     player_character_id: int | None = None
 
 
+class AgentSessionDerivationCreateRequest(AgentRequestBase):
+    branch_turn_id: int = Field(gt=0)
+    title: str = ""
+
+
 class AgentHealthResponse(_BaseSchema):
     status: str = "ok"
     llm_service: str = "unknown"
@@ -154,6 +159,23 @@ class AgentSessionDeleteResponse(_BaseSchema):
     status: Literal["deleted"] = "deleted"
     session_id: str
     runtime_cleanup: Literal["deleted", "absent", "pending"]
+
+
+class AgentSessionDerivationJobResponse(_BaseSchema):
+    job_id: str
+    source_session_id: str
+    target_session_id: str | None = None
+    branch_turn_id: int
+    status: Literal["queued", "running", "ready", "failed", "interrupted"]
+    stage: str
+    error_code: str = ""
+    error_message: str = ""
+    context_usage: JsonObject | None = None
+    context_threshold_exceeded: bool = False
+    created_at: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    updated_at: str = ""
 
 
 class AgentTurnCancelResponse(_BaseSchema):
@@ -292,6 +314,23 @@ class AgentSessionDeletePayload(TypedDict):
     status: Literal["deleted"]
     session_id: str
     runtime_cleanup: Literal["deleted", "absent", "pending"]
+
+
+class AgentSessionDerivationJobPayload(TypedDict):
+    job_id: str
+    source_session_id: str
+    target_session_id: str | None
+    branch_turn_id: int
+    status: Literal["queued", "running", "ready", "failed", "interrupted"]
+    stage: str
+    error_code: str
+    error_message: str
+    context_usage: JsonObject | None
+    context_threshold_exceeded: bool
+    created_at: str
+    started_at: str
+    finished_at: str
+    updated_at: str
 
 
 class AgentMainLLMProviderOptionPayload(TypedDict):

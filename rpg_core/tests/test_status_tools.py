@@ -434,7 +434,7 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
     monkeypatch.setattr(
         status_module,
         "settings",
-        SimpleNamespace(verbose_logging=True),
+        SimpleNamespace(verbose_logging=True, status_history_rounds=5),
     )
     monkeypatch.setattr(status_module.logger, "info", info)
 

@@ -51,6 +51,7 @@ class AgentMailbox:
         turn_service: "AgentTurnService",
         command_dispatcher: "CommandDispatcher",
         truncate_history: Callable[[int], dict[str, object]],
+        materialize_derivation: Callable[[str], object] | None = None,
         deferred_status: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._session_id = session_id
@@ -58,6 +59,7 @@ class AgentMailbox:
         self._turn_service = turn_service
         self._command_dispatcher = command_dispatcher
         self._truncate_history = truncate_history
+        self._materialize_derivation = materialize_derivation
         self._deferred_status = deferred_status
         self._queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         self._consumer_task: asyncio.Task | None = None
@@ -217,6 +219,27 @@ class AgentMailbox:
         )
         return await future
 
+    async def materialize_derivation(self, job_id: str) -> object:
+        """Run target creation after every earlier item for this source session."""
+
+        self._ensure_open()
+        if self._materialize_derivation is None:
+            raise RuntimeError("session derivation is not configured")
+        future = self._create_future()
+        await self._queue.put(
+            QueueItem(
+                kind=QueueKind.MATERIALIZE_DERIVATION,
+                future=future,
+                derivation_job_id=str(job_id),
+            )
+        )
+        logger.debug(
+            _TAG + " derivation materialization enqueued: session_id={}, job_id={}",
+            self._session_id(),
+            job_id,
+        )
+        return await future
+
     async def cancel_current_turn(
         self,
         request_id: str | None = None,
@@ -314,6 +337,14 @@ class AgentMailbox:
                         if item.turn_id is None:
                             raise ValueError("turn_id is required")
                         item.future.set_result(self._truncate_history(item.turn_id))
+                    case QueueKind.MATERIALIZE_DERIVATION:
+                        if not item.derivation_job_id:
+                            raise ValueError("derivation_job_id is required")
+                        if self._materialize_derivation is None:
+                            raise RuntimeError("session derivation is not configured")
+                        item.future.set_result(
+                            self._materialize_derivation(item.derivation_job_id)
+                        )
             except asyncio.CancelledError:
                 self._fail_item(
                     item,

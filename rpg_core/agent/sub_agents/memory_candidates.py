@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from rpg_core.context.rpg_context import Message
 from rpg_core.session.manager import SessionManager
 from rpg_core.agent.turn.models import TurnMode
@@ -9,14 +11,97 @@ from rpg_core.agent.turn.models import TurnMode
 _ALLOWED_MEMORY_MODES = frozenset({TurnMode.IC.value, TurnMode.GM.value})
 
 
+@dataclass(frozen=True)
+class MemoryTurnBatch:
+    """One ordered, turn-aligned batch of memory candidates."""
+
+    messages: tuple[Message, ...]
+    turn_count: int
+
+
+class MemoryTurnInputTooLargeError(ValueError):
+    """One indivisible turn exceeds an LLM batch's character budget."""
+
+    def __init__(self, *, turn_id: int, character_count: int, limit: int) -> None:
+        self.turn_id = int(turn_id)
+        self.character_count = int(character_count)
+        self.limit = int(limit)
+        super().__init__(
+            "turn input exceeds batch character limit: "
+            f"turn_id={self.turn_id}, characters={self.character_count}, limit={self.limit}"
+        )
+
+
+def batch_memory_turn_groups(
+    groups: list[list[Message]],
+    *,
+    batch_turns: int,
+    max_batch_chars: int | None = None,
+) -> tuple[MemoryTurnBatch, ...]:
+    """Split logical turn groups by count and size without cutting a turn."""
+    if isinstance(batch_turns, bool) or not isinstance(batch_turns, int) or batch_turns <= 0:
+        raise ValueError("batch_turns must be a positive integer")
+    if (
+        max_batch_chars is not None
+        and (
+            isinstance(max_batch_chars, bool)
+            or not isinstance(max_batch_chars, int)
+            or max_batch_chars <= 0
+        )
+    ):
+        raise ValueError("max_batch_chars must be a positive integer")
+
+    batches: list[MemoryTurnBatch] = []
+    batch_groups: list[list[Message]] = []
+    batch_chars = 0
+
+    def flush() -> None:
+        nonlocal batch_groups, batch_chars
+        if not batch_groups:
+            return
+        batches.append(
+            MemoryTurnBatch(
+                messages=tuple(
+                    message for group in batch_groups for message in group
+                ),
+                turn_count=len(batch_groups),
+            )
+        )
+        batch_groups = []
+        batch_chars = 0
+
+    for group in groups:
+        group_chars = sum(len(str(message.content or "")) for message in group)
+        if max_batch_chars is not None and group_chars > max_batch_chars:
+            turn_id = int(group[0].turn_id) if group else 0
+            raise MemoryTurnInputTooLargeError(
+                turn_id=turn_id,
+                character_count=group_chars,
+                limit=max_batch_chars,
+            )
+        if batch_groups and (
+            len(batch_groups) >= batch_turns
+            or (
+                max_batch_chars is not None
+                and batch_chars + group_chars > max_batch_chars
+            )
+        ):
+            flush()
+        batch_groups.append(group)
+        batch_chars += group_chars
+    flush()
+    return tuple(batches)
+
+
 def select_summary_turn_groups(
     session: SessionManager,
     *,
     keep_recent_turns: int,
+    mark_excluded: bool = True,
 ) -> list[list[Message]]:
-    """Mark OOC summary rows and return eligible IC/GM groups."""
+    """Return eligible IC/GM groups, optionally advancing excluded OOC rows."""
     included, excluded = _partition_mode_groups(session.summary_unprocessed_turn_groups())
-    if excluded:
+    if excluded and mark_excluded:
         session.mark_summary_messages_processed(
             [message for group in excluded for message in group],
             batch_id=None,

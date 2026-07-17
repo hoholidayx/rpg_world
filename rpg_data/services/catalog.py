@@ -61,6 +61,7 @@ class CatalogService:
         sessions = self._sessions.list(
             workspace_id=workspace_id,
             story_id=story_id,
+            lifecycle=models.SESSION_LIFECYCLE_READY,
         )
         logger.debug(
             "listed sessions workspace_id=%s story_id=%s count=%s session_ids=%s",

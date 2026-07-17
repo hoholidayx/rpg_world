@@ -65,7 +65,16 @@ class FakeCatalog:
         return models.Session("created", workspace, story_id, title=title, description=description)
 
     def get_session(self, session_id: str):
-        return models.Session(session_id, "workspace", 1)
+        return models.Session(
+            session_id,
+            "workspace",
+            1,
+            lifecycle=(
+                models.SESSION_LIFECYCLE_PROVISIONING
+                if session_id == "provisioning"
+                else models.SESSION_LIFECYCLE_READY
+            ),
+        )
 
 
 class FakeGateway:
@@ -226,6 +235,23 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
     assert (await backend.list_sessions("workspace", 1))[0]["id"] == "session"
     assert (await backend.create_session("workspace", 1, title="Title"))["title"] == "Title"
     assert (await backend.get_session("session"))["id"] == "session"
+    assert await backend.get_session("provisioning") is None
+    assert await backend.list_session_summaries("provisioning") is None
+    assert await backend.get_session_summary("provisioning", "overall") is None
+    assert await backend.list_session_status_tables("provisioning") is None
+    document = models.StatusTableDocument.from_rows()
+    assert await backend.create_session_status_table(
+        "provisioning",
+        name="hidden",
+        status_kind=models.STATUS_KIND_NORMAL,
+        document=document,
+    ) is None
+    assert await backend.update_session_status_table(
+        "provisioning",
+        1,
+        name="hidden",
+    ) is None
+    assert await backend.delete_session_status_table("provisioning", 1) is None
     assert (await backend.list_characters("workspace"))[0]["name"] == "Character"
     assert (await backend.list_characters("workspace"))[0]["details"][0]["tags"] == ["tag"]
     assert (await backend.create_character("workspace", name="New"))["name"] == "New"

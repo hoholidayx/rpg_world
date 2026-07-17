@@ -619,6 +619,55 @@ def test_deferred_update_and_progress_commit_atomically(tmp_path) -> None:
     assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 2
 
 
+def test_bootstrap_state_commits_documents_and_all_deferred_progress_atomically(tmp_path) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "bootstrap_ws")
+    service = gateway.status
+    session = gateway.catalog.create_session(workspace_id, story.id, title="Bootstrap")
+    assert session is not None
+    base = models.StatusTableDocument.from_rows(rows=[
+        models.StatusTableRow("生命", "10"),
+        models.StatusTableRow(
+            "长期信任",
+            "低",
+            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
+        ),
+    ])
+    table = service.create_table(str(session.id), "角色状态", document=base)
+    updated = base.with_existing_values([("生命", "8"), ("长期信任", "中")])
+
+    service.commit_bootstrap_state(
+        str(session.id),
+        [models.StatusBootstrapDocument(
+            table_id=table.id,
+            status_kind=models.STATUS_KIND_NORMAL,
+            document=updated,
+            base_document=base,
+        )],
+        deferred_progress={table.id: ("长期信任",)},
+        boundary_turn_id=12,
+    )
+
+    assert service.get_table_by_id(table.id).document == updated
+    assert service.list_deferred_progress(str(session.id)) == [
+        models.StatusDeferredProgress(table.id, "长期信任", 12)
+    ]
+
+    with pytest.raises(PermissionError, match="not deferred"):
+        service.commit_bootstrap_state(
+            str(session.id),
+            [models.StatusBootstrapDocument(
+                table_id=table.id,
+                status_kind=models.STATUS_KIND_NORMAL,
+                document=base,
+                base_document=updated,
+            )],
+            deferred_progress={table.id: ("生命",)},
+            boundary_turn_id=13,
+        )
+    assert service.get_table_by_id(table.id).document == updated
+    assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 12
+
+
 def test_scene_not_mounted_is_not_visible_to_session(tmp_path) -> None:
     gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "no_scene_ws")
     service = gateway.status

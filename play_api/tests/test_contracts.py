@@ -871,6 +871,40 @@ def test_delete_session_endpoint_forwards_to_agent_owner(tmp_path, monkeypatch) 
     assert ("delete-session", "s_forest001") in fake_agent.calls
 
 
+def test_provisioning_session_is_hidden_from_play_session_and_status_routes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    gateway = get_data_service_gateway()
+    job = gateway.session_derivations.create_job("s_forest001", 1)
+    gateway.session_derivations.start_job(job.id)
+    target = gateway.session_derivations.seed_target_session(job.id).session
+    table_id = gateway.status.list_tables(target.id)[0].id
+
+    with TestClient(app) as client:
+        responses = [
+            client.get(f"/play-api/v1/sessions/{target.id}"),
+            client.get(f"/play-api/v1/sessions/{target.id}/status-tables"),
+            client.post(
+                f"/play-api/v1/sessions/{target.id}/status-tables",
+                json={"name": "hidden", "rows": []},
+            ),
+            client.patch(
+                f"/play-api/v1/sessions/{target.id}/status-tables/{table_id}",
+                json={"name": "hidden"},
+            ),
+            client.delete(
+                f"/play-api/v1/sessions/{target.id}/status-tables/{table_id}"
+            ),
+        ]
+
+    assert all(response.status_code == 404 for response in responses)
+    assert gateway.catalog.get_session(target.id) is not None
+
+
 def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))

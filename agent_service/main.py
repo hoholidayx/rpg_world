@@ -42,6 +42,9 @@ from agent_service.schemas import (
     AgentSessionCreateResponse,
     AgentSessionDeletePayload,
     AgentSessionDeleteResponse,
+    AgentSessionDerivationCreateRequest,
+    AgentSessionDerivationJobPayload,
+    AgentSessionDerivationJobResponse,
     AgentSessionEnsureRequest,
     AgentSessionMutationRequest,
     AgentSessionOverviewPayload,
@@ -54,6 +57,7 @@ from agent_service.schemas import (
     AgentStopRequest,
     AgentTurnCancelResponse,
 )
+from agent_service.derivation_worker import SessionDerivationWorker
 from agent_service.settings import settings as process_settings
 from commons.errors import (
     LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
@@ -81,7 +85,10 @@ from rpg_core.main_llm import (
 )
 from rpg_core.session import InvalidTurnMetadataError, SessionManager, validate_turn_metadata
 from rpg_data import models
-from rpg_data.services import get_data_service_gateway
+from rpg_data.services import SessionDerivationDataError, get_data_service_gateway
+
+
+_derivation_worker: SessionDerivationWorker | None = None
 
 
 def _service_prefix() -> str:
@@ -90,6 +97,7 @@ def _service_prefix() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _derivation_worker
     cfg = process_settings.llm_client
     await LLMClientManager.aconfigure(
         base_url=cfg.base_url,
@@ -97,11 +105,27 @@ async def lifespan(app: FastAPI):
         request_timeout_ms=cfg.request_timeout_ms,
         stream_timeout_ms=cfg.stream_timeout_ms,
     )
+    _derivation_worker = SessionDerivationWorker(
+        gateway=get_data_service_gateway(),
+    )
+    await _derivation_worker.start()
     try:
         yield
     finally:
-        await AgentManager.areset()
-        await LLMClientManager.areset()
+        worker = _derivation_worker
+        try:
+            if worker is not None:
+                await worker.stop()
+        finally:
+            try:
+                await AgentManager.areset()
+            finally:
+                try:
+                    if worker is not None:
+                        await worker.interrupt_stale_jobs()
+                finally:
+                    _derivation_worker = None
+                    await LLMClientManager.areset()
 
 
 app = FastAPI(title="RPG World Agent Service", lifespan=lifespan)
@@ -258,6 +282,7 @@ async def get_session_main_llm(
     session_id: str = Query(...),
 ) -> AgentMainLLMSelectionPayload:
     session_id = _require_session_id(session_id)
+    _require_ready_catalog_session(session_id)
     try:
         selection = await _main_llm_selection_service().resolve_session(session_id)
     except LLMServiceClientError as exc:
@@ -274,6 +299,7 @@ async def get_session_main_llm(
 async def set_session_main_llm(
     body: AgentMainLLMSessionUpdateRequest,
 ) -> AgentMainLLMSelectionPayload:
+    _require_ready_catalog_session(_require_session_id(body.session_id))
     try:
         selection = await _main_llm_selection_service().set_session_provider_key(
             body.session_id,
@@ -314,9 +340,7 @@ async def get_session_overview(
 ) -> AgentSessionOverviewPayload:
     session_id = _require_session_id(session_id)
     gateway = get_data_service_gateway()
-    session = gateway.catalog.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+    session = _require_ready_catalog_session(session_id)
     story = gateway.catalog.get_session_story(session_id)
     if story is None:
         raise HTTPException(status_code=404, detail=f"Story for session {session_id!r} not found")
@@ -373,9 +397,8 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayload
     gateway = get_data_service_gateway()
 
     if body.session_id:
-        session = gateway.catalog.get_session(body.session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail=f"Session {body.session_id!r} not found")
+        normalized_session_id = _require_session_id(body.session_id)
+        session = _require_ready_catalog_session(normalized_session_id)
         if str(session.workspace_id) != workspace_id or int(session.story_id) != story_id:
             raise HTTPException(status_code=400, detail=f"Session {body.session_id!r} does not belong to workspace/story")
     else:
@@ -436,6 +459,60 @@ async def reload_history(body: AgentSessionMutationRequest) -> JsonObject:
     return {"status": "reloaded", "session_id": body.session_id}
 
 
+@app.post(
+    f"{_service_prefix()}/chat/session/derivations",
+    response_model=AgentSessionDerivationJobResponse,
+    status_code=202,
+)
+async def create_session_derivation(
+    body: AgentSessionDerivationCreateRequest,
+) -> AgentSessionDerivationJobPayload:
+    gateway = get_data_service_gateway()
+    if gateway.catalog.get_session(body.session_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {body.session_id!r} not found",
+        )
+    service = gateway.session_derivations
+    try:
+        job = service.create_job(
+            body.session_id,
+            body.branch_turn_id,
+            requested_title=body.title,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionDerivationDataError as exc:
+        status_code = 409 if exc.code == "DERIVATION_SOURCE_NOT_READY" else 422
+        if exc.code == "DERIVATION_SOURCE_BUSY":
+            status_code = 409
+        raise _session_derivation_http_error(exc, status_code=status_code) from exc
+    worker = _derivation_worker
+    if worker is None or not worker.running:
+        service.fail_job(
+            job.id,
+            error_code="DERIVATION_WORKER_UNAVAILABLE",
+            error_message="Session derivation worker is unavailable",
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Session derivation worker is unavailable",
+        )
+    worker.wake()
+    return _derivation_job_payload(job)
+
+
+@app.get(
+    f"{_service_prefix()}/chat/session/derivations/{{job_id}}",
+    response_model=AgentSessionDerivationJobResponse,
+)
+async def get_session_derivation(job_id: str) -> AgentSessionDerivationJobPayload:
+    job = get_data_service_gateway().session_derivations.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Derivation job not found: {job_id}")
+    return _derivation_job_payload(job)
+
+
 @app.delete(
     f"{_service_prefix()}/chat/session",
     response_model=AgentSessionDeleteResponse,
@@ -445,7 +522,13 @@ async def delete_session(
 ) -> AgentSessionDeletePayload:
     normalized_session_id = _require_session_id(session_id)
     gateway = get_data_service_gateway()
-    if gateway.catalog.get_session(normalized_session_id) is None:
+    try:
+        session = gateway.session_deletion.validate_regular_deletion(
+            normalized_session_id
+        )
+    except SessionDerivationDataError as exc:
+        raise _session_derivation_http_error(exc) from exc
+    if session is None:
         raise HTTPException(
             status_code=404,
             detail=f"Session {normalized_session_id!r} not found",
@@ -484,6 +567,8 @@ async def delete_session(
         }
     except HTTPException:
         raise
+    except SessionDerivationDataError as exc:
+        raise _session_derivation_http_error(exc) from exc
     except Exception as exc:
         logger.exception(
             "[AgentService] session deletion failed: session_id={}",
@@ -684,12 +769,24 @@ async def chat_stop(body: AgentStopRequest) -> AgentTurnCancelResponse:
 
 def _get_agent(session_id: str):
     session_id = _require_session_id(session_id)
-    if get_data_service_gateway().catalog.get_session(session_id) is None:
-        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+    _require_ready_catalog_session(session_id)
     try:
         return AgentManager.get_or_create(session_id=session_id)
     except SessionDeletionInProgressError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _require_ready_catalog_session(session_id: str) -> models.Session:
+    session = get_data_service_gateway().catalog.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+    if session.lifecycle != models.SESSION_LIFECYCLE_READY:
+        error = SessionDerivationDataError(
+            "DERIVATION_TARGET_PROVISIONING",
+            f"Session is still provisioning: {session_id}",
+        )
+        raise _session_derivation_http_error(error)
+    return session
 
 
 def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> models.Session:
@@ -855,6 +952,17 @@ def _turn_metadata_http_error(exc: InvalidTurnMetadataError) -> HTTPException:
     return HTTPException(status_code=TURN_METADATA_INVALID_STATUS_CODE, detail=str(exc))
 
 
+def _session_derivation_http_error(
+    exc: SessionDerivationDataError,
+    *,
+    status_code: int = 409,
+) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"error_code": exc.code, "message": str(exc)},
+    )
+
+
 def _llm_dependency_http_error(exc: LLMServiceClientError) -> HTTPException:
     return HTTPException(
         status_code=LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
@@ -999,6 +1107,36 @@ def _command_result_to_dict(result: CommandResult) -> AgentCommandResultPayload:
     if result.stats is not None:
         payload["stats"] = cast(JsonObject, dict(result.stats))
     return payload
+
+
+def _derivation_job_payload(
+    job: models.SessionDerivationJob,
+) -> AgentSessionDerivationJobPayload:
+    context_usage: JsonObject | None = None
+    if job.context_used_tokens is not None and job.context_limit is not None:
+        context_usage = {
+            "usedTokens": int(job.context_used_tokens),
+            "contextLimit": int(job.context_limit),
+        }
+    return {
+        "job_id": job.id,
+        "source_session_id": job.source_session_id,
+        "target_session_id": job.target_session_id,
+        "branch_turn_id": job.branch_turn_id,
+        "status": cast(
+            Literal["queued", "running", "ready", "failed", "interrupted"],
+            job.status,
+        ),
+        "stage": job.stage,
+        "error_code": job.error_code,
+        "error_message": job.error_message,
+        "context_usage": context_usage,
+        "context_threshold_exceeded": job.context_threshold_exceeded,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "updated_at": job.updated_at,
+    }
 
 
 def _stats_to_dict(stats: TurnStats) -> AgentStatsPayload:

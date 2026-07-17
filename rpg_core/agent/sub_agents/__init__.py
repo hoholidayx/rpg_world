@@ -11,11 +11,18 @@ from rpg_core.agent.sub_agents.context import SubAgentContext
 from rpg_core.agent.sub_agents.memory_sub_agent import (
     MemoryAgentResult,
     MemorySubAgent,
+    StoryMemoryExtractionResult,
+    StoryMemoryExtractionStatus,
 )
 from rpg_core.agent.sub_agents.status_sub_agent import StatusSubAgent
+from rpg_core.agent.sub_agents.status_bootstrap import (
+    StatusBootstrapCoordinator,
+    select_status_bootstrap_history,
+)
 from rpg_core.agent.sub_agents.status_sub_agent_models import (
     DeferredStatusResult,
     OutcomeDecision,
+    StatusBootstrapResult,
     StatusRouteResult,
     StatusRouteTarget,
     StatusSubAgentPreflightOutcome,
@@ -30,9 +37,14 @@ __all__ = [
     "SubAgentContext",
     "MemoryAgentResult",
     "MemorySubAgent",
+    "StoryMemoryExtractionResult",
+    "StoryMemoryExtractionStatus",
     "StatusSubAgent",
+    "StatusBootstrapCoordinator",
+    "select_status_bootstrap_history",
     "DeferredStatusResult",
     "OutcomeDecision",
+    "StatusBootstrapResult",
     "StatusRouteResult",
     "StatusRouteTarget",
     "StatusSubAgentPreflightOutcome",

@@ -33,6 +33,7 @@ from rpg_data.models import (
     STATUS_ROW_UPDATE_RULE_KEY,
     STATUS_UPDATE_FREQUENCY_DEFERRED,
     STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
+    STATUS_UPDATE_FREQUENCY_MANUAL,
     STATUS_UPDATE_FREQUENCY_REALTIME,
 )
 from rpg_core.agent.agent_types import CallRecord, LLMResponse, LLMUsage, TurnStats
@@ -40,6 +41,7 @@ from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.agent.sub_agents.status_sub_agent_models import (
     DeferredStatusResult,
     OutcomeDecision,
+    StatusBootstrapResult,
     StatusRouteResult,
     StatusRouteTarget,
     StatusSubAgentRecordStatus,
@@ -368,11 +370,13 @@ class StatusSubAgent(BaseSubAgent):
         scene_context: str,
         context_tables: list[dict[str, object]],
         user_input: str,
-        max_history_rounds: int = 5,
+        max_history_rounds: int | None = None,
         turn_stats: TurnStats | None = None,
         player_character: "TurnPlayerCharacterSnapshot | None" = None,
     ) -> StatusSubAgentResult:
         """Run the fixed outcome -> route -> selected-update pipeline."""
+        if max_history_rounds is None:
+            max_history_rounds = settings.status_history_rounds
         if self._busy:
             logger.debug(_TAG + " preflight skipped: reason=reentrancy_guard")
             return StatusSubAgentResult()
@@ -478,6 +482,181 @@ class StatusSubAgent(BaseSubAgent):
                 result.updated,
                 result.failed,
             )
+            self._active_status_allowed_keys = None
+            self._active_scene_allowed = True
+            self._busy = False
+
+    async def bootstrap_state(
+        self,
+        *,
+        history: list[Message],
+        scene_context: str,
+        context_tables: list[dict[str, object]],
+        max_history_rounds: int | None = None,
+        turn_stats: TurnStats | None = None,
+        player_character: "TurnPlayerCharacterSnapshot | None" = None,
+    ) -> StatusBootstrapResult:
+        """Rebuild all writable state targets from committed branch history.
+
+        This path deliberately skips Outcome and routing.  The caller must bind
+        scratch-backed state tools and commit only after ``failed`` is false.
+        Any target failure restores the whole scratch checkpoint.
+        """
+        rounds = (
+            settings.status_history_rounds
+            if max_history_rounds is None
+            else int(max_history_rounds)
+        )
+        if rounds <= 0:
+            raise ValueError("max_history_rounds must be positive")
+        processed_turns = len(SessionManager.iter_turn_groups(history))
+        result = StatusBootstrapResult(processed_turns=processed_turns)
+        if self._busy:
+            result.failed = True
+            return result
+
+        deferred_progress: dict[int, tuple[str, ...]] = {}
+        batches: list[_RoutedStatusUpdateBatch] = []
+        scene_tool_names = frozenset(
+            name for name in self._state_tool_set.names if name in SCENE_TOOL_NAMES
+        )
+        if scene_tool_names:
+            batches.append(_RoutedStatusUpdateBatch(
+                source="status_bootstrap:scene",
+                selected_context=scene_context,
+                schema_names=scene_tool_names,
+                allowed_status_keys=None,
+                is_scene=True,
+            ))
+        for table in context_tables:
+            table_id = int(table.get("id", 0))
+            document = table.get("document")
+            rows = document.get("rows", []) if isinstance(document, dict) else []
+            allowed: list[str] = []
+            deferred: list[str] = []
+            for row in rows if isinstance(rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                key = str(row.get("key") or "")
+                frequency = str(
+                    row.get(STATUS_ROW_UPDATE_FREQUENCY_KEY)
+                    or STATUS_UPDATE_FREQUENCY_REALTIME
+                )
+                if not key or frequency == STATUS_UPDATE_FREQUENCY_MANUAL:
+                    continue
+                allowed.append(key)
+                if frequency == STATUS_UPDATE_FREQUENCY_DEFERRED:
+                    deferred.append(key)
+            if deferred and table_id > 0:
+                deferred_progress[table_id] = tuple(deferred)
+            if table_id <= 0 or not allowed:
+                continue
+            allowed_keys = frozenset(allowed)
+            batches.append(_RoutedStatusUpdateBatch(
+                source=f"status_bootstrap:table:{table_id}",
+                selected_context=self._render_selected_table(table, allowed_keys),
+                schema_names=frozenset({STATUS_TABLE_SET_VALUES_TOOL_NAME}),
+                allowed_status_keys={table_id: allowed_keys},
+            ))
+        result.deferred_progress = deferred_progress
+        writable_batches = [
+            batch
+            for batch in batches
+            if self._schemas_for_names(set(batch.schema_names))
+        ]
+        if not writable_batches or processed_turns == 0:
+            return result
+        if not self._enabled:
+            result.failed = True
+            logger.warning(
+                _TAG
+                + " bootstrap required but status sub-agent is disabled: "
+                "processed_turns={} writable_targets={}",
+                processed_turns,
+                len(writable_batches),
+            )
+            return result
+
+        self._busy = True
+        checkpoint = (
+            self._mutation_checkpoint()
+            if self._mutation_checkpoint is not None
+            else None
+        )
+        recent = self._format_history_window(history, rounds)
+        try:
+            for batch in writable_batches:
+                self._active_scene_allowed = batch.is_scene
+                self._active_status_allowed_keys = batch.allowed_status_keys
+                schemas = self._schemas_for_names(set(batch.schema_names))
+                if not schemas:
+                    continue
+                messages = [
+                    Message(
+                        role=Role.SYSTEM,
+                        content=self._build_system_context(
+                            "你是 RPG 派生会话状态初始化器。只根据给出的已提交历史，"
+                            "归纳当前目标在分支边界时的最终值。不得执行剧情裁定或猜测随机结果；"
+                            "只能修改工具 schema 允许的已有字段；不确定时不要调用工具。",
+                            player_character=player_character,
+                        ),
+                    ).to_dict(),
+                    Message(
+                        role=Role.USER,
+                        content=(
+                            f"## Committed Branch History\n{recent}\n\n"
+                            f"## State Target\n{batch.selected_context}\n\n"
+                            "根据完整历史窗口归纳该目标的边界状态。没有明确依据时保持原值。"
+                        ),
+                    ).to_dict(),
+                ]
+                llm_result, call_record = await self._chat_with_stats(
+                    messages,
+                    schemas,
+                    source=batch.source,
+                )
+                self._append_call_record(result.call_stats, turn_stats, call_record)
+                for name, args in (
+                    _normalize_tool_call(call)
+                    for call in self._tool_calls(llm_result)
+                ):
+                    if name not in batch.schema_names:
+                        raise PermissionError(
+                            "bootstrap tool is outside the current target scope"
+                        )
+                    record = await self._execute_tool_call(
+                        name,
+                        args,
+                        track_mutation=True,
+                    )
+                    record.stage = StatusSubAgentStage.BOOTSTRAP
+                    result.records.append(record)
+                    if not record.success:
+                        raise RuntimeError(
+                            f"bootstrap tool failed: {name}: {record.result}"
+                        )
+            result.updated = any(record.changed for record in result.records)
+            return result
+        except Exception as exc:
+            result.failed = True
+            try:
+                if self._mutation_restore is None or self._mutation_checkpoint is None:
+                    if any(record.changed for record in result.records):
+                        raise _StatusPrewriteRollbackError(
+                            "status bootstrap mutation boundary is unavailable"
+                        )
+                else:
+                    self._mutation_restore(checkpoint)
+                    for record in result.records:
+                        record.mark_rolled_back()
+            except Exception as restore_exc:
+                raise _StatusPrewriteRollbackError(
+                    "failed to restore status bootstrap checkpoint"
+                ) from restore_exc
+            logger.opt(exception=exc).warning(_TAG + " bootstrap failed")
+            result.updated = False
+            return result
+        finally:
             self._active_status_allowed_keys = None
             self._active_scene_allowed = True
             self._busy = False
@@ -1217,7 +1396,7 @@ class StatusSubAgent(BaseSubAgent):
         history: list[Message],
         state_context: str,
         user_input: str,
-        max_history_rounds: int = 5,
+        max_history_rounds: int | None = None,
         turn_stats: TurnStats | None = None,
         player_character: "TurnPlayerCharacterSnapshot | None" = None,
     ) -> StatusSubAgentResult:
@@ -1240,6 +1419,8 @@ class StatusSubAgent(BaseSubAgent):
         -------
         ``StatusSubAgentResult``，包含是否更新以及工具调用记录。
         """
+        if max_history_rounds is None:
+            max_history_rounds = settings.status_history_rounds
         if self._busy:
             logger.debug(_TAG + " legacy update skipped: reason=reentrancy_guard")
             return StatusSubAgentResult()
@@ -1836,7 +2017,7 @@ class StatusSubAgent(BaseSubAgent):
             label = {Role.USER.value: "User", Role.ASSISTANT.value: "Assistant"}.get(
                 role, role.capitalize()
             )
-            lines.append(f"{label}: {content[:500]}")
+            lines.append(f"{label}: {content}")
 
         return "\n\n".join(lines) if lines else "(no recent conversation)"
 

@@ -169,6 +169,7 @@ def lifecycle_deps(monkeypatch):  # noqa: ANN201
             memory_keep_rounds=4,
             memory_compression_enabled=True,
             memory_compress_batch_size=2,
+            memory_summary_max_batch_chars=32_000,
             rp_module_settings=None,
         ),
     )

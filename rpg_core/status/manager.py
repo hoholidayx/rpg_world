@@ -10,6 +10,7 @@ from rpg_data.services import get_data_service_gateway
 
 if TYPE_CHECKING:
     from rpg_data.models import SessionStatusTable, StatusDeferredProgress, StatusTableDocument
+    from rpg_core.agent.transaction.status_scratch import StatusDocumentChange
     from rpg_data.services.status import StatusTableService
 
 
@@ -119,6 +120,35 @@ class StatusManager:
                 base_document=base_document,
             )
         )
+
+    def commit_bootstrap_state(
+        self,
+        changes: Iterable["StatusDocumentChange"],
+        *,
+        deferred_progress: dict[int, tuple[str, ...]],
+        boundary_turn_id: int,
+    ) -> list[dict[str, object]]:
+        """Publish all bootstrap state and deferred markers in one SQL transaction."""
+        from rpg_data.models import StatusBootstrapDocument
+
+        documents = tuple(
+            StatusBootstrapDocument(
+                table_id=change.table_id,
+                status_kind=change.status_kind,
+                document=change.document,
+                base_document=change.base_document,
+            )
+            for change in changes
+        )
+        return [
+            _table_to_dict(table)
+            for table in self._service.commit_bootstrap_state(
+                self.session_id,
+                documents,
+                deferred_progress=deferred_progress,
+                boundary_turn_id=boundary_turn_id,
+            )
+        ]
 
     # ------------------------------------------------------------------
     # Generic table writes

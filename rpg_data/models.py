@@ -44,6 +44,8 @@ __all__ = [
     "RPModuleCatalogEntry",
     "SessionRPModuleOverride",
     "Session",
+    "SessionDerivationJob",
+    "SessionDerivationSeedResult",
     "SessionCharacter",
     "SessionCharacterDetail",
     "SessionLorebookEntry",
@@ -82,6 +84,7 @@ __all__ = [
     "StatusRowRef",
     "StatusTableData",
     "StatusDeferredProgress",
+    "StatusBootstrapDocument",
     "StatusTableDocument",
     "StatusTableRow",
     "StatusTableTemplate",
@@ -194,6 +197,15 @@ __all__ = [
     "SESSION_RUNTIME_CLEANUP_ABSENT",
     "SESSION_RUNTIME_CLEANUP_DELETED",
     "SESSION_RUNTIME_CLEANUP_PENDING",
+    "SESSION_LIFECYCLE_PROVISIONING",
+    "SESSION_LIFECYCLE_READY",
+    "SESSION_DERIVATION_JOB_STATUSES",
+    "SESSION_DERIVATION_JOB_STATUS_FAILED",
+    "SESSION_DERIVATION_JOB_STATUS_INTERRUPTED",
+    "SESSION_DERIVATION_JOB_STATUS_QUEUED",
+    "SESSION_DERIVATION_JOB_STATUS_READY",
+    "SESSION_DERIVATION_JOB_STATUS_RUNNING",
+    "SESSION_DERIVATION_STAGES",
     "Workspace",
     "parse_status_document",
     "serialize_status_document",
@@ -209,6 +221,33 @@ PLAYER_CHARACTER_STATUS_INVALID = "invalid"
 SESSION_RUNTIME_CLEANUP_DELETED = "deleted"
 SESSION_RUNTIME_CLEANUP_ABSENT = "absent"
 SESSION_RUNTIME_CLEANUP_PENDING = "pending"
+SESSION_LIFECYCLE_PROVISIONING = "provisioning"
+SESSION_LIFECYCLE_READY = "ready"
+SESSION_DERIVATION_JOB_STATUS_QUEUED = "queued"
+SESSION_DERIVATION_JOB_STATUS_RUNNING = "running"
+SESSION_DERIVATION_JOB_STATUS_READY = "ready"
+SESSION_DERIVATION_JOB_STATUS_FAILED = "failed"
+SESSION_DERIVATION_JOB_STATUS_INTERRUPTED = "interrupted"
+SESSION_DERIVATION_JOB_STATUSES = frozenset({
+    SESSION_DERIVATION_JOB_STATUS_QUEUED,
+    SESSION_DERIVATION_JOB_STATUS_RUNNING,
+    SESSION_DERIVATION_JOB_STATUS_READY,
+    SESSION_DERIVATION_JOB_STATUS_FAILED,
+    SESSION_DERIVATION_JOB_STATUS_INTERRUPTED,
+})
+SESSION_DERIVATION_STAGES = frozenset({
+    "queued",
+    "snapshotting",
+    "copying",
+    "rebuilding_status",
+    "extracting_story_memory",
+    "summarizing",
+    "evaluating_context",
+    "finalizing",
+    "ready",
+    "failed",
+    "interrupted",
+})
 STATUS_KIND_SCENE = "scene"
 STATUS_KIND_NORMAL = "normal"
 STATUS_ORIGIN_TEMPLATE_COPY = "template_copy"
@@ -623,6 +662,7 @@ class Session:
     workspace_id: str
     story_id: int
     state_json: str = "{}"
+    lifecycle: str = SESSION_LIFECYCLE_READY
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
@@ -634,6 +674,34 @@ class Session:
     profile_metadata_json: str = "{}"
     profile_created_at: str = ""
     profile_updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionDerivationJob:
+    id: str
+    source_session_id: str
+    branch_turn_id: int
+    requested_title: str = ""
+    target_session_id: str | None = None
+    status: str = SESSION_DERIVATION_JOB_STATUS_QUEUED
+    stage: str = SESSION_DERIVATION_JOB_STATUS_QUEUED
+    error_code: str = ""
+    error_message: str = ""
+    context_used_tokens: int | None = None
+    context_limit: int | None = None
+    context_threshold_exceeded: bool = False
+    started_at: str = ""
+    finished_at: str = ""
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionDerivationSeedResult:
+    job: SessionDerivationJob
+    session: Session
+    copied_message_count: int
 
 
 @dataclass(frozen=True)
@@ -1672,6 +1740,16 @@ class StatusDeferredProgress:
     session_status_table_id: int
     field_key: str
     last_processed_turn_id: int = 0
+
+
+@dataclass(frozen=True)
+class StatusBootstrapDocument:
+    """One status document staged by a derivation bootstrap."""
+
+    table_id: int
+    status_kind: str
+    document: "StatusTableDocument"
+    base_document: "StatusTableDocument"
 
 
 @dataclass(frozen=True)

@@ -35,6 +35,12 @@ class DataManagerBackend:
     def close(self) -> None:
         self._gateway.close()
 
+    def _ready_session(self, session_id: str) -> models.Session | None:
+        session = self._gateway.catalog.get_session(session_id)
+        if session is None or session.lifecycle != models.SESSION_LIFECYCLE_READY:
+            return None
+        return session
+
     async def list_workspaces(self) -> list[dict[str, object]]:
         return [_workspace_summary(workspace) for workspace in self._gateway.catalog.list_workspaces()]
 
@@ -118,7 +124,7 @@ class DataManagerBackend:
         self,
         session_id: str,
     ) -> dict[str, object] | None:
-        session = self._gateway.catalog.get_session(session_id)
+        session = self._ready_session(session_id)
         if session is None:
             return None
         return _session_summary(session, self._gateway)
@@ -127,7 +133,7 @@ class DataManagerBackend:
         self,
         session_id: str,
     ) -> dict[str, object] | None:
-        if self._gateway.catalog.get_session(session_id) is None:
+        if self._ready_session(session_id) is None:
             return None
         reader = SummaryReader(
             self._gateway.catalog.resolve_session_runtime_dir(session_id)
@@ -151,7 +157,7 @@ class DataManagerBackend:
         session_id: str,
         summary_key: str | int,
     ) -> dict[str, object] | None:
-        if self._gateway.catalog.get_session(session_id) is None:
+        if self._ready_session(session_id) is None:
             return None
         reader = SummaryReader(
             self._gateway.catalog.resolve_session_runtime_dir(session_id)
@@ -631,7 +637,7 @@ class DataManagerBackend:
         session_id: str,
         status_kind: str | None = None,
     ) -> list[dict[str, object]] | None:
-        if self._gateway.catalog.get_session(session_id) is None:
+        if self._ready_session(session_id) is None:
             return None
         return [
             _session_status_table_summary(table)
@@ -649,7 +655,7 @@ class DataManagerBackend:
         sort_order: int = 0,
         metadata: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
-        if self._gateway.catalog.get_session(session_id) is None:
+        if self._ready_session(session_id) is None:
             return None
         table = self._gateway.status.create_table(
             session_id,
@@ -672,6 +678,8 @@ class DataManagerBackend:
         description: str | None = None,
         sort_order: int | None = None,
     ) -> dict[str, object] | None:
+        if self._ready_session(session_id) is None:
+            return None
         try:
             table = self._gateway.status.get_table_by_id(table_id)
         except FileNotFoundError:
@@ -688,6 +696,8 @@ class DataManagerBackend:
         return _session_status_table_summary(table)
 
     async def delete_session_status_table(self, session_id: str, table_id: int) -> bool | None:
+        if self._ready_session(session_id) is None:
+            return None
         try:
             table = self._gateway.status.get_table_by_id(table_id)
         except FileNotFoundError:

@@ -147,6 +147,7 @@ async def reset_llm_manager():
 
 class FakeMemorySubAgent:
     def __init__(self) -> None:
+        self.enabled = True
         self.batch_calls: list[dict[str, object]] = []
         self.overall_calls: list[dict[str, object]] = []
 

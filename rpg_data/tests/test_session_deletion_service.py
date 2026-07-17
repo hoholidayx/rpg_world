@@ -128,7 +128,11 @@ def test_delete_restores_runtime_when_database_delete_fails(tmp_path, monkeypatc
     def fail_delete(_session_id: str) -> bool:
         raise RuntimeError("database delete failed")
 
-    monkeypatch.setattr(gateway.session_deletion._sessions, "delete", fail_delete)
+    monkeypatch.setattr(
+        gateway.session_deletion._sessions,
+        "delete_ready_without_active_derivation",
+        fail_delete,
+    )
 
     with pytest.raises(RuntimeError, match="database delete failed"):
         gateway.session_deletion.delete(session.id)

@@ -246,6 +246,8 @@ class QueueKind(StrEnum):
     """``execute_command()`` 请求。"""
     TRUNCATE_HISTORY = "truncate_history"
     """截断当前会话历史。"""
+    MATERIALIZE_DERIVATION = "materialize_derivation"
+    """在当前 session mailbox 一致性边界创建派生目标。"""
 
 
 class TurnCancelStatus(StrEnum):
@@ -303,6 +305,7 @@ class QueueItem:
     command: str | None = None
     event_queue: AsyncQueue | None = None
     turn_id: int | None = None
+    derivation_job_id: str | None = None
 
     @property
     def request_id(self) -> str | None:

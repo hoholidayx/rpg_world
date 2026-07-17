@@ -31,6 +31,7 @@ from rpg_core.agent.loop import AgentReply
 from rpg_core.context.rpg_context import Message, Role
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data import models
+from rpg_data.services import SessionDerivationDataError
 
 
 class FakeAgent:
@@ -270,6 +271,13 @@ class FakeCatalog:
         }
         cls.sessions = {
             "s1": models.Session("s1", "ws", 1, title="Existing"),
+            "provisioning": models.Session(
+                "provisioning",
+                "ws",
+                1,
+                title="Hidden",
+                lifecycle=models.SESSION_LIFECYCLE_PROVISIONING,
+            ),
             "foreign": models.Session("foreign", "other", 2, title="Foreign"),
         }
         cls.created_count = 0
@@ -350,7 +358,9 @@ class FakeCatalog:
         return [
             session
             for session in cls.sessions.values()
-            if session.workspace_id == workspace_id and int(session.story_id) == story_id
+            if session.workspace_id == workspace_id
+            and int(session.story_id) == story_id
+            and session.lifecycle == models.SESSION_LIFECYCLE_READY
         ]
 
 
@@ -438,7 +448,20 @@ class InvalidTurnMessages:
 
 class FakeSessionDeletion:
     @staticmethod
+    def validate_regular_deletion(session_id: str) -> models.Session | None:
+        session = FakeCatalog.sessions.get(session_id)
+        if session is None:
+            return None
+        if session.lifecycle != models.SESSION_LIFECYCLE_READY:
+            raise SessionDerivationDataError(
+                "DERIVATION_TARGET_PROVISIONING",
+                f"Session is still provisioning: {session_id}",
+            )
+        return session
+
+    @staticmethod
     def delete(session_id: str) -> models.SessionDeleteResult | None:
+        FakeSessionDeletion.validate_regular_deletion(session_id)
         if FakeCatalog.sessions.pop(session_id, None) is None:
             return None
         return models.SessionDeleteResult(
@@ -447,16 +470,31 @@ class FakeSessionDeletion:
         )
 
 
+class FakeSessionDerivations:
+    """Empty derivation queue used by unrelated Agent Service contract tests."""
+
+    @staticmethod
+    def list_jobs(*statuses: str) -> list[models.SessionDerivationJob]:
+        del statuses
+        return []
+
+    @staticmethod
+    def interrupt_running_jobs() -> list[models.SessionDerivationJob]:
+        return []
+
+
 class FakeGateway:
     catalog = FakeCatalog
     messages = FakeMessages
     session_roles = FakeSessionRoles
     session_deletion = FakeSessionDeletion
+    session_derivations = FakeSessionDerivations
 
 
 class InvalidHistoryGateway:
     catalog = FakeCatalog
     messages = InvalidTurnMessages
+    session_derivations = FakeSessionDerivations
 
 
 class FakeSessionManager:
@@ -712,6 +750,44 @@ def test_agent_service_contracts(monkeypatch) -> None:
         )
         assert missing_history.status_code == 404
         assert missing_history.json()["detail"] == "Session 'missing_session' not found"
+
+        provisioning_requests = [
+            client.get(
+                "/agent/v1/chat/history",
+                params={"session_id": "provisioning"},
+            ),
+            client.get(
+                "/agent/v1/chat/session/overview",
+                params={"session_id": "provisioning"},
+            ),
+            client.post(
+                "/agent/v1/chat/session/ensure",
+                json={
+                    "workspace_id": "ws",
+                    "story_id": 1,
+                    "session_id": "provisioning",
+                },
+            ),
+            client.get(
+                "/agent/v1/chat/main-llm/session",
+                params={"session_id": "provisioning"},
+            ),
+            client.post(
+                "/agent/v1/chat/main-llm/session",
+                json={"session_id": "provisioning", "provider_key": None},
+            ),
+            client.delete(
+                "/agent/v1/chat/session",
+                params={"session_id": "provisioning"},
+            ),
+        ]
+        assert all(response.status_code == 409 for response in provisioning_requests)
+        assert all(
+            response.json()["detail"]["error_code"]
+            == "DERIVATION_TARGET_PROVISIONING"
+            for response in provisioning_requests
+        )
+        assert "provisioning" in FakeCatalog.sessions
 
         mismatch = client.post(
             "/agent/v1/chat/session/ensure",

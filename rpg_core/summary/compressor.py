@@ -29,13 +29,18 @@ Architecture::
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from loguru import logger
 from rpg_core.session.manager import SessionManager
 
 from rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
-from rpg_core.agent.sub_agents.memory_candidates import select_summary_turn_groups
+from rpg_core.agent.sub_agents.memory_candidates import (
+    MemoryTurnInputTooLargeError,
+    batch_memory_turn_groups,
+    select_summary_turn_groups,
+)
 
 if TYPE_CHECKING:
     from rpg_core.context.rpg_context import Message
@@ -43,9 +48,19 @@ if TYPE_CHECKING:
     from rpg_core.session.manager import SessionManager
 
 
+class CompressionStatus(str, Enum):
+    """Terminal state of a summary compression attempt."""
+
+    SKIPPED = "skipped"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 @dataclass
 class CompressResult:
     """压缩操作结果。"""
+
+    status: CompressionStatus = CompressionStatus.SKIPPED
 
     triggered: bool = False
     """本轮是否触发了压缩。"""
@@ -61,6 +76,13 @@ class CompressResult:
 
     summary_generated: bool = False
     """是否成功生成了摘要并写入 BatchSummaryStore。"""
+
+    error_code: str | None = None
+    error_message: str | None = None
+
+    @property
+    def failed(self) -> bool:
+        return self.status is CompressionStatus.FAILED
 
 
 class SummaryCompressor:
@@ -103,6 +125,7 @@ class SummaryCompressor:
         keep_recent_rounds: int = 20,
         compression_threshold: int = 10,
         compress_batch_size: int = 10,
+        max_batch_chars: int = 32_000,
     ) -> None:
         self._batch_store = batch_store
         self._memory_sub_agent = memory_sub_agent
@@ -110,6 +133,13 @@ class SummaryCompressor:
         self._keep_recent_rounds = keep_recent_rounds
         self._compression_threshold = compression_threshold
         self._compress_batch_size = compress_batch_size
+        if (
+            isinstance(max_batch_chars, bool)
+            or not isinstance(max_batch_chars, int)
+            or max_batch_chars <= 0
+        ):
+            raise ValueError("max_batch_chars must be a positive integer")
+        self._max_batch_chars = max_batch_chars
 
     # ── public API ─────────────────────────────────────────────────────
 
@@ -123,7 +153,12 @@ class SummaryCompressor:
         self._batch_store = batch_store
         self._memory_sub_agent = memory_sub_agent
 
-    async def maybe_compress(self, session: "SessionManager") -> CompressResult:
+    async def maybe_compress(
+        self,
+        session: "SessionManager",
+        *,
+        strict: bool = False,
+    ) -> CompressResult:
         """检查是否需要压缩，是则执行分批压缩。
 
         当压缩触发时，session 的历史不会被截断；本轮 batch summary 与
@@ -131,10 +166,26 @@ class SummaryCompressor:
 
         多次调用是安全的 —— 如果历史不够长，直接返回 ``triggered=False``。
         """
-        # A globally disabled MemorySubAgent owns no processing side effects.
-        if self._memory_sub_agent is None or not bool(
-            getattr(self._memory_sub_agent, "enabled", True)
-        ):
+        processor_available = (
+            self._memory_sub_agent is not None and self._memory_sub_agent.enabled
+        )
+        # A globally disabled MemorySubAgent owns no normal processing side
+        # effects. Strict provisioning still needs to distinguish a genuine
+        # no-op from required work that cannot run.
+        if not processor_available:
+            if strict and self._enabled:
+                pending_groups = select_summary_turn_groups(
+                    session,
+                    keep_recent_turns=self._keep_recent_rounds,
+                    mark_excluded=False,
+                )
+                if len(pending_groups) > self._compression_threshold:
+                    return CompressResult(
+                        status=CompressionStatus.FAILED,
+                        triggered=True,
+                        error_code="SUMMARY_PROCESSOR_UNAVAILABLE",
+                        error_message="summary processor is unavailable or disabled",
+                    )
             return CompressResult()
 
         compress_groups = select_summary_turn_groups(
@@ -147,14 +198,32 @@ class SummaryCompressor:
         if not self._enabled:
             return CompressResult()
 
-        if self._batch_store is None:
-            return CompressResult()
         user_rounds_in_compress = len(compress_groups)
         if user_rounds_in_compress <= self._compression_threshold:
             return CompressResult()
+        if self._batch_store is None:
+            if strict:
+                return CompressResult(
+                    status=CompressionStatus.FAILED,
+                    triggered=True,
+                    error_code="SUMMARY_STORE_UNAVAILABLE",
+                    error_message="summary batch store is unavailable",
+                )
+            return CompressResult()
 
-        compress_portion = [msg for group in compress_groups for msg in group]
-        batches = SessionManager.split_into_turn_batches(compress_portion, self._compress_batch_size)
+        try:
+            batches = batch_memory_turn_groups(
+                compress_groups,
+                batch_turns=self._compress_batch_size,
+                max_batch_chars=self._max_batch_chars,
+            )
+        except MemoryTurnInputTooLargeError as exc:
+            return CompressResult(
+                status=CompressionStatus.FAILED,
+                triggered=True,
+                error_code="SUMMARY_INPUT_TOO_LARGE",
+                error_message=str(exc),
+            )
 
         batch_files: list[str] = []
         batch_paths = []
@@ -163,45 +232,63 @@ class SummaryCompressor:
         processed_batch_ids: list[int] = []
         overall_snapshot = self._batch_store.snapshot_overall()
         next_batch_id = self._batch_store.next_batch_id()
-        for offset, (_, batch_messages, batch_user_rounds) in enumerate(batches):
+        batch_error: Exception | None = None
+        for offset, batch in enumerate(batches):
             batch_id = next_batch_id + offset
+            batch_messages = list(batch.messages)
+            batch_user_rounds = batch.turn_count
             try:
                 result = await self._memory_sub_agent.generate_batch_summary(
                     conv=batch_messages, batch_id=batch_id, user_rounds=batch_user_rounds
                 )
-                if result:
-                    turn_ids = [
-                        int(message.turn_id)
-                        for message in batch_messages
-                        if int(message.turn_id) > 0
-                    ]
-                    path = self._batch_store.save_batch_summary(
-                        batch_id=batch_id,
-                        title=result.get("title", ""),
-                        user_rounds=batch_user_rounds,
-                        summary_text=result.get("summary_text", ""),
-                        time=result.get("time", ""),
-                        location=result.get("location", ""),
-                        characters=result.get("characters", []),
-                        source_turn_start=min(turn_ids) if turn_ids else None,
-                        source_turn_end=max(turn_ids) if turn_ids else None,
-                        source_message_ids=[
-                            message.uid for message in batch_messages if message.uid > 0
-                        ],
-                    )
-                    batch_files.append(path.name)
-                    batch_paths.append(path)
-                    pending_progress.append((batch_messages, batch_id))
-                    processed_turns += batch_user_rounds
-                    processed_batch_ids.append(batch_id)
-                    logger.info(
-                        "[Compressor] batch #{}: {} turns -> {}",
-                        batch_id, batch_user_rounds, path.name,
-                    )
+                if not result or not str(result.get("summary_text", "")).strip():
+                    raise RuntimeError("batch summary returned no content")
+                turn_ids = [
+                    int(message.turn_id)
+                    for message in batch_messages
+                    if int(message.turn_id) > 0
+                ]
+                path = self._batch_store.save_batch_summary(
+                    batch_id=batch_id,
+                    title=result.get("title", ""),
+                    user_rounds=batch_user_rounds,
+                    summary_text=result.get("summary_text", ""),
+                    time=result.get("time", ""),
+                    location=result.get("location", ""),
+                    characters=result.get("characters", []),
+                    source_turn_start=min(turn_ids) if turn_ids else None,
+                    source_turn_end=max(turn_ids) if turn_ids else None,
+                    source_message_ids=[
+                        message.uid for message in batch_messages if message.uid > 0
+                    ],
+                )
+                batch_files.append(path.name)
+                batch_paths.append(path)
+                pending_progress.append((batch_messages, batch_id))
+                processed_turns += batch_user_rounds
+                processed_batch_ids.append(batch_id)
+                logger.info(
+                    "[Compressor] batch #{}: {} turns -> {}",
+                    batch_id, batch_user_rounds, path.name,
+                )
             except Exception as exc:
+                batch_error = exc
                 logger.warning(
                     "[Compressor] batch #{} failed: {}", batch_id, exc
                 )
+                # Normal post-commit processing commits the successful prefix
+                # through overall below. Strict provisioning rolls the whole
+                # attempt back and reports the failure to its caller.
+                if strict:
+                    self._batch_store.delete_batch_files(batch_paths)
+                    self._batch_store.restore_overall(overall_snapshot)
+                    return CompressResult(
+                        status=CompressionStatus.FAILED,
+                        triggered=True,
+                        error_code="SUMMARY_BATCH_FAILED",
+                        error_message=str(exc) or type(exc).__name__,
+                    )
+                break
 
         # 5. 整体归纳（增量更新 overall.md）
         overall_file: str | None = None
@@ -209,16 +296,33 @@ class SummaryCompressor:
             logger.warning(
                 "[Compressor] all batches failed; summary processed flags unchanged"
             )
+            return CompressResult(
+                status=CompressionStatus.FAILED,
+                triggered=True,
+                error_code="SUMMARY_BATCH_FAILED",
+                error_message=(
+                    str(batch_error) if batch_error is not None
+                    else "no batch summary was written"
+                ),
+            )
         else:
             try:
                 existing_overall, last_batch_id = self._batch_store.load_overall()
                 new_batches = self._batch_store.get_new_content(last_batch_id)
                 if not new_batches:
                     raise RuntimeError("new summary batches were not visible to overall aggregation")
-                overall_result = await self._memory_sub_agent.generate_overall_summary(
-                    new_batches, existing_overall
-                )
-                if not overall_result or not str(overall_result.get("summary_text", "")).strip():
+                overall_result: dict | None = None
+                rolling_overall = existing_overall
+                for new_batch in new_batches:
+                    overall_result = await self._memory_sub_agent.generate_overall_summary(
+                        [new_batch], rolling_overall
+                    )
+                    if not overall_result or not str(
+                        overall_result.get("summary_text", "")
+                    ).strip():
+                        raise RuntimeError("overall summary returned no content")
+                    rolling_overall = str(overall_result["summary_text"]).strip()
+                if overall_result is None:
                     raise RuntimeError("overall summary returned no content")
                 max_batch_id = max(processed_batch_ids)
                 overall_path = self._batch_store.save_overall(
@@ -240,6 +344,12 @@ class SummaryCompressor:
                 batch_files = []
                 processed_turns = 0
                 processed_batch_ids = []
+                return CompressResult(
+                    status=CompressionStatus.FAILED,
+                    triggered=True,
+                    error_code="SUMMARY_OVERALL_FAILED",
+                    error_message=str(exc) or type(exc).__name__,
+                )
 
         logger.info(
             "[Compressor] compressed {} turns, {} batch files",
@@ -248,6 +358,7 @@ class SummaryCompressor:
         )
 
         return CompressResult(
+            status=CompressionStatus.SUCCEEDED,
             triggered=True,
             user_rounds_compressed=processed_turns,
             batch_files=batch_files or None,

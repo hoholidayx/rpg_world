@@ -115,6 +115,47 @@ async def test_mailbox_serializes_truncate_after_send() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mailbox_materializes_derivation_after_earlier_item() -> None:
+    turns = _Turns()
+    turns.block_send = True
+
+    def materialize(job_id: str) -> dict[str, str]:
+        turns.order.append(f"materialize-{job_id}")
+        return {"job_id": job_id}
+
+    mailbox = AgentMailbox(
+        session_id=lambda: "s_mailbox",
+        model=lambda: "test-model",
+        turn_service=turns,
+        command_dispatcher=_Commands(),
+        truncate_history=lambda _turn_id: {},
+        materialize_derivation=materialize,
+    )
+    mailbox.start()
+    try:
+        send_task = asyncio.create_task(mailbox.send(TurnRequest.create("go")))
+        await turns.send_started.wait()
+        materialize_task = asyncio.create_task(
+            mailbox.materialize_derivation("job-1")
+        )
+        await asyncio.sleep(0)
+        assert not materialize_task.done()
+
+        turns.release_send.set()
+        await send_task
+
+        assert await materialize_task == {"job_id": "job-1"}
+        assert turns.order == [
+            "send-start",
+            "send-end",
+            "materialize-job-1",
+        ]
+    finally:
+        turns.release_send.set()
+        await mailbox.close()
+
+
+@pytest.mark.asyncio
 async def test_mailbox_delivers_reply_then_serializes_deferred_work_before_next_item() -> None:
     turns = _Turns()
     turns.committed_turn_id = 1

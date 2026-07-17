@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -34,6 +35,8 @@ from rpg_core.agent.agent_types import CallRecord, LLMResponse, LLMUsage
 from rpg_core.agent.command import CommandDef
 from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.agent.sub_agents.memory_candidates import (
+    MemoryTurnInputTooLargeError,
+    batch_memory_turn_groups,
     select_story_memory_turn_groups,
     select_summary_turn_groups,
 )
@@ -63,6 +66,13 @@ MEMORY_LLM_SOURCE_STORY = "memory_story"
 MEMORY_LLM_SOURCE_SUMMARY = "memory_summary"
 MEMORY_LLM_SOURCE_BATCH_SUMMARY = "memory_batch_summary"
 MEMORY_LLM_SOURCE_OVERALL_SUMMARY = "memory_overall_summary"
+
+# Story Memory is append-only between explicit maintenance operations. Keep
+# the semantic-dedupe hint useful without allowing its prompt contribution to
+# grow linearly for the lifetime of a session. Exact dedupe remains enforced
+# by the SQL-backed store for every item, including entries outside this hint.
+STORY_MEMORY_DEDUPE_MAX_ITEMS = 64
+STORY_MEMORY_DEDUPE_MAX_ITEM_CHARS = 500
 
 
 class MemoryPipelineError(RuntimeError):
@@ -296,6 +306,36 @@ class MemoryAgentResult:
     """此过程涉及的 LLM 调用记录（usage / timing）。"""
 
 
+class StoryMemoryExtractionStatus(str, Enum):
+    """Terminal state of a pending story-memory extraction run."""
+
+    SUCCEEDED = "succeeded"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class StoryMemoryExtractionResult:
+    """Typed result shared by command, post-commit and derivation callers."""
+
+    status: StoryMemoryExtractionStatus
+    pending_turns: int = 0
+    completed_turns: int = 0
+    completed_batches: int = 0
+    story_details_added: int = 0
+    call_stats: tuple[CallRecord, ...] = ()
+    error_code: str | None = None
+    error_message: str | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status is StoryMemoryExtractionStatus.SUCCEEDED
+
+    @property
+    def failed(self) -> bool:
+        return self.status is StoryMemoryExtractionStatus.FAILED
+
+
 # ── sub-agent ─────────────────────────────────────────────────────────
 
 
@@ -373,6 +413,130 @@ class MemorySubAgent(BaseSubAgent):
         self._story_store = story_store
         self._batch_store = batch_store
 
+    async def extract_pending_story_memory(
+        self,
+        session: SessionManager,
+        *,
+        strict: bool = False,
+        batch_turns: int | None = None,
+        max_batch_chars: int | None = None,
+    ) -> StoryMemoryExtractionResult:
+        """Extract every pending IC/GM turn in bounded, turn-aligned batches.
+
+        Each successful batch persists its memories and source-message progress
+        atomically through ``StoryMemoryStore``. A later failure therefore
+        stops the run without undoing completed batches, and leaves the failed
+        batch plus all later batches retryable. ``strict`` makes unavailable
+        collaborators or a busy sub-agent an explicit failure for provisioning
+        workflows instead of a benign skip.
+        """
+        if self._story_store is None:
+            status = (
+                StoryMemoryExtractionStatus.FAILED
+                if strict
+                else StoryMemoryExtractionStatus.SKIPPED
+            )
+            return StoryMemoryExtractionResult(
+                status=status,
+                error_code="STORY_MEMORY_STORE_UNAVAILABLE" if strict else None,
+                error_message="story memory store is not configured" if strict else None,
+            )
+
+        groups = select_story_memory_turn_groups(session)
+        pending_turns = len(groups)
+        if not groups:
+            return StoryMemoryExtractionResult(
+                status=StoryMemoryExtractionStatus.SKIPPED,
+            )
+
+        size = (
+            settings.memory_story_batch_turns
+            if batch_turns is None
+            else batch_turns
+        )
+        char_limit = (
+            settings.memory_story_max_batch_chars
+            if max_batch_chars is None
+            else max_batch_chars
+        )
+        try:
+            batches = batch_memory_turn_groups(
+                groups,
+                batch_turns=size,
+                max_batch_chars=char_limit,
+            )
+        except MemoryTurnInputTooLargeError as exc:
+            return StoryMemoryExtractionResult(
+                status=StoryMemoryExtractionStatus.FAILED,
+                pending_turns=pending_turns,
+                error_code="STORY_MEMORY_INPUT_TOO_LARGE",
+                error_message=str(exc),
+            )
+        completed_turns = 0
+        completed_batches = 0
+        details_added = 0
+        call_stats: list[CallRecord] = []
+
+        for batch in batches:
+            messages = list(batch.messages)
+            try:
+                result = await self.process({"story": messages})
+                if result.skipped:
+                    return StoryMemoryExtractionResult(
+                        status=(
+                            StoryMemoryExtractionStatus.FAILED
+                            if strict
+                            else StoryMemoryExtractionStatus.SKIPPED
+                        ),
+                        pending_turns=pending_turns,
+                        completed_turns=completed_turns,
+                        completed_batches=completed_batches,
+                        story_details_added=details_added,
+                        call_stats=tuple(call_stats),
+                        error_code=(
+                            "STORY_MEMORY_PROCESSOR_BUSY" if strict else None
+                        ),
+                        error_message=(
+                            "story memory processor is busy or disabled"
+                            if strict
+                            else None
+                        ),
+                    )
+                # SQL-backed stores advance the flags in the same transaction
+                # as memory writes. In-memory sessions need the equivalent
+                # progress update here.
+                if not session.history_enabled:
+                    session.mark_story_messages_processed(messages)
+                completed_turns += batch.turn_count
+                completed_batches += 1
+                details_added += result.story_details_added
+                call_stats.extend(result.call_stats)
+            except Exception as exc:
+                logger.opt(exception=exc).warning(
+                    _TAG + " story-memory batch {} failed after {} completed batches",
+                    completed_batches + 1,
+                    completed_batches,
+                )
+                return StoryMemoryExtractionResult(
+                    status=StoryMemoryExtractionStatus.FAILED,
+                    pending_turns=pending_turns,
+                    completed_turns=completed_turns,
+                    completed_batches=completed_batches,
+                    story_details_added=details_added,
+                    call_stats=tuple(call_stats),
+                    error_code="STORY_MEMORY_BATCH_FAILED",
+                    error_message=str(exc) or type(exc).__name__,
+                )
+
+        return StoryMemoryExtractionResult(
+            status=StoryMemoryExtractionStatus.SUCCEEDED,
+            pending_turns=pending_turns,
+            completed_turns=completed_turns,
+            completed_batches=completed_batches,
+            story_details_added=details_added,
+            call_stats=tuple(call_stats),
+        )
+
     # ── Command interface ─────────────────────────────────────────────
 
     def get_command_def(self) -> list[CommandDef] | None:
@@ -413,25 +577,25 @@ class MemorySubAgent(BaseSubAgent):
         if agent is None:
             return {"reply": "未绑定主 Agent，无法执行 story_memory"}
 
-        session = agent.session_manager
-        new_groups = select_story_memory_turn_groups(session)
-        new_msgs = [message for group in new_groups for message in group]
-        if not new_msgs:
-            logger.info(_TAG + " story_memory skipped: no new messages since last extraction")
-            return {"reply": "剧情记忆提取跳过：没有新消息需要处理。", "stats": None}
+        extraction = await self.extract_pending_story_memory(agent.session_manager)
+        if extraction.status is StoryMemoryExtractionStatus.SKIPPED:
+            if extraction.pending_turns > 0:
+                logger.info(_TAG + " story_memory skipped: processor unavailable")
+                return {"reply": "剧情记忆提取跳过：处理器当前不可用。", "stats": None}
+            logger.info(
+                _TAG + " story_memory skipped: no new messages since last extraction"
+            )
+            return {
+                "reply": "剧情记忆提取跳过：没有新消息需要处理。",
+                "stats": None,
+            }
+        if extraction.failed:
+            raise MemoryPipelineError(
+                extraction.error_message or "story memory extraction failed"
+            )
 
-        logger.info(
-            _TAG + " story_memory processing {} new messages (turn-aware)",
-            len(new_msgs),
-        )
-        result = await self.process({"story": new_msgs})
-        if result.skipped:
-            return {"reply": "剧情记忆提取跳过：处理器当前不可用。", "stats": None}
-        added = result.story_details_added
-        if not session.history_enabled:
-            session.mark_story_messages_processed(new_msgs)
-
-        stats = _build_call_stats(result)
+        added = extraction.story_details_added
+        stats = _build_call_stats_from_records(extraction.call_stats)
         if stats:
             logger.info(
                 _TAG + " story_memory done: added={}, tokens={}, duration={:.0f}ms",
@@ -588,10 +752,18 @@ class MemorySubAgent(BaseSubAgent):
                 new_batches = self._batch_store.get_new_content(last_batch_id)
                 if not new_batches:
                     raise MemoryPipelineError("new summary batches missing from overall aggregation")
-                overall_result = await self.generate_overall_summary(
-                    new_batches, existing_overall, call_stats=call_stats,
-                )
-                if not overall_result or not str(overall_result.get("summary_text", "")).strip():
+                overall_result: dict | None = None
+                rolling_overall = existing_overall
+                for new_batch in new_batches:
+                    overall_result = await self.generate_overall_summary(
+                        [new_batch], rolling_overall, call_stats=call_stats,
+                    )
+                    if not overall_result or not str(
+                        overall_result.get("summary_text", "")
+                    ).strip():
+                        raise MemoryPipelineError("overall summary returned no content")
+                    rolling_overall = str(overall_result["summary_text"]).strip()
+                if overall_result is None:
                     raise MemoryPipelineError("overall summary returned no content")
                 max_batch_id = max(processed_batch_ids)
                 overall_path = self._batch_store.save_overall(
@@ -697,15 +869,11 @@ class MemorySubAgent(BaseSubAgent):
             _TAG + " auto story extraction: {} new turns >= trigger {}",
             new_turns, trigger,
         )
-        new_msgs = [message for group in new_groups for message in group]
-        if not new_msgs:
-            return
-
-        result = await self.process({"story": new_msgs})
-        if result.skipped:
-            return
-        if not session.history_enabled:
-            session.mark_story_messages_processed(new_msgs)
+        result = await self.extract_pending_story_memory(session)
+        if result.failed:
+            raise MemoryPipelineError(
+                result.error_message or "story memory extraction failed"
+            )
 
     def update_store_refs(
         self,
@@ -725,14 +893,22 @@ class MemorySubAgent(BaseSubAgent):
         logger.info(_TAG + " story pipeline starting: {} messages in window", len(conv))
         window = self._format_conversation_window(conv)
 
-        # 已有剧情记忆（去重参考）——不限制条数，保留全量参考
+        # Existing memories are only an LLM semantic-dedupe hint. The bounded
+        # recent tail prevents this request from growing forever; SQL exact
+        # dedupe still covers the complete store at persistence time.
         existing_items = self._story_store.get_all() if self._story_store else []
         existing = _format_store_items(
             existing_items,
             key=lambda d: d.get("text", str(d)) if isinstance(d, dict) else str(d),
+            max_items=STORY_MEMORY_DEDUPE_MAX_ITEMS,
+            max_item_chars=STORY_MEMORY_DEDUPE_MAX_ITEM_CHARS,
         )
         if existing_items:
-            logger.info(_TAG + " story pipeline: {} existing items for dedup", len(existing_items))
+            logger.info(
+                _TAG + " story pipeline: {} existing items, {} included for semantic dedup",
+                len(existing_items),
+                min(len(existing_items), STORY_MEMORY_DEDUPE_MAX_ITEMS),
+            )
 
         system_content = self._build_system_context(
             STORY_MEMORY_PROMPT.replace("{max_items}", str(self._max_story_items))
@@ -763,7 +939,11 @@ class MemorySubAgent(BaseSubAgent):
                 call_rec.usage.completion_tokens if call_rec.usage else 0,
                 call_rec.duration_ms,
             )
-        details = decision.get("story_details", [])
+        if "story_details" not in decision:
+            raise MemoryPipelineError(
+                "story memory response must explicitly contain story_details"
+            )
+        details = decision["story_details"]
         if not isinstance(details, list):
             raise MemoryPipelineError("story memory response must contain a list")
         normalized_details = [
@@ -1014,9 +1194,26 @@ class MemorySubAgent(BaseSubAgent):
             return {}, call_record
 
         try:
-            parsed = json.loads(tool_calls[0]["function"]["arguments"])
+            function = tool_calls[0]["function"]
+            if not isinstance(function, dict):
+                raise TypeError("memory tool call function must be an object")
+            expected_function = schema.get("function")
+            expected_name = (
+                str(expected_function.get("name", ""))
+                if isinstance(expected_function, dict)
+                else ""
+            )
+            actual_name = str(function.get("name", ""))
+            if not expected_name or actual_name != expected_name:
+                raise ValueError(
+                    "memory LLM returned an unexpected tool call: "
+                    f"expected {expected_name or '<missing>'}, got {actual_name or '<missing>'}"
+                )
+            parsed = json.loads(function["arguments"])
+            if not isinstance(parsed, dict):
+                raise TypeError("memory tool arguments must decode to an object")
             return parsed, call_record
-        except (KeyError, TypeError, json.JSONDecodeError, IndexError) as exc:
+        except (KeyError, TypeError, ValueError, IndexError) as exc:
             logger.warning(
                 _TAG + " failed to parse function args: {}", exc
             )
@@ -1068,7 +1265,7 @@ class MemorySubAgent(BaseSubAgent):
             label = {Role.USER.value: "User", Role.ASSISTANT.value: "Assistant"}.get(
                 role, role.capitalize()
             )
-            lines.append(f"{label}: {content[:500]}")
+            lines.append(f"{label}: {content}")
 
         return "\n\n".join(lines) if lines else "(no conversation content)"
 
@@ -1107,9 +1304,16 @@ def _normalize_story_detail(raw: object) -> dict[str, object]:
 
 def _build_call_stats(result: MemoryAgentResult) -> dict[str, float | str | int] | None:
     """从 ``MemoryAgentResult`` 提取 LLM 调用统计 dict。"""
-    if not result.call_stats:
+    return _build_call_stats_from_records(tuple(result.call_stats))
+
+
+def _build_call_stats_from_records(
+    records: tuple[CallRecord, ...],
+) -> dict[str, float | str | int] | None:
+    """Build the command-facing compact stats projection."""
+    if not records:
         return None
-    cr = result.call_stats[0]
+    cr = records[0]
     return {
         "total_duration_ms": cr.duration_ms,
         "model": cr.model,
@@ -1139,10 +1343,17 @@ def _format_store_items(
     *,
     key: type = str,
     max_items: int | None = None,
+    max_item_chars: int | None = None,
 ) -> str:
     """Format store items as a bullet list string."""
     if max_items is not None:
         items = items[-max_items:]
     if not items:
         return "(empty)"
-    return "\n".join(f"- {key(item)}" for item in items)
+    rendered: list[str] = []
+    for item in items:
+        value = str(key(item))
+        if max_item_chars is not None:
+            value = value[:max_item_chars]
+        rendered.append(f"- {value}")
+    return "\n".join(rendered)

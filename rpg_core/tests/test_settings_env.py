@@ -413,3 +413,116 @@ def test_openai_provider_stores_constructor_values_when_client_injected() -> Non
     assert provider._client is dummy_client
     assert provider._api_key == "explicit-key"
     assert provider._base_url == "https://example.test/v1"
+
+
+def test_story_memory_batch_turns_is_typed_and_defaults_to_ten(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(cfg)
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    defaults = settings_module.Settings().memory_story_settings
+    assert defaults.batch_turns == 10
+    assert defaults.max_batch_chars == 32_000
+
+    _write_settings(
+        cfg,
+        agent_extra=(
+            "    memory_sub_agent:\n"
+            "      story:\n"
+            "        trigger_rounds: 0\n"
+            "        max_items: 8\n"
+            "        batch_turns: 7\n"
+            "        max_batch_chars: 12345\n"
+        ),
+    )
+    configured = settings_module.Settings()
+    assert configured.memory_story_settings.batch_turns == 7
+    assert configured.memory_story_batch_turns == 7
+    assert configured.memory_story_max_batch_chars == 12_345
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "10"])
+def test_story_memory_batch_turns_rejects_invalid_values(
+    tmp_path: Path,
+    monkeypatch,
+    value: object,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    rendered = str(value).lower() if isinstance(value, bool) else repr(value)
+    _write_settings(
+        cfg,
+        agent_extra=(
+            "    memory_sub_agent:\n"
+            "      story:\n"
+            f"        batch_turns: {rendered}\n"
+        ),
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    with pytest.raises(ValueError, match="story.batch_turns must be a positive integer"):
+        settings_module.Settings()
+
+
+def test_summary_memory_settings_are_typed(tmp_path: Path, monkeypatch) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(
+        cfg,
+        agent_extra=(
+            "    memory_sub_agent:\n"
+            "      summary:\n"
+            "        compress_batch_size: 7\n"
+            "        keep_rounds: 0\n"
+            "        compression_enabled: false\n"
+            "        max_batch_chars: 12345\n"
+        ),
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    configured = settings_module.Settings()
+
+    assert configured.memory_compress_batch_size == 7
+    assert configured.memory_keep_rounds == 0
+    assert configured.memory_compression_enabled is False
+    assert configured.memory_summary_max_batch_chars == 12_345
+
+
+@pytest.mark.parametrize(
+    ("key", "rendered", "message"),
+    [
+        ("compress_batch_size", "0", "compress_batch_size must be a positive integer"),
+        ("keep_rounds", "true", "keep_rounds must be a non-negative integer"),
+        ("compression_enabled", "1", "compression_enabled must be a boolean"),
+        ("max_batch_chars", "'32000'", "max_batch_chars must be a positive integer"),
+    ],
+)
+def test_summary_memory_settings_reject_invalid_values(
+    tmp_path: Path,
+    monkeypatch,
+    key: str,
+    rendered: str,
+    message: str,
+) -> None:
+    cfg = tmp_path / "settings.yaml"
+    _write_settings(
+        cfg,
+        agent_extra=(
+            "    memory_sub_agent:\n"
+            "      summary:\n"
+            f"        {key}: {rendered}\n"
+        ),
+    )
+    monkeypatch.setattr(settings_module, "_SETTINGS_PATH", cfg)
+    monkeypatch.setattr(llm_config_module, "_LLM_SETTINGS_PATH", tmp_path / "llm.yaml")
+    monkeypatch.setenv("RPG_WORLD_PROFILE", "local")
+
+    with pytest.raises(ValueError, match=message):
+        settings_module.Settings()

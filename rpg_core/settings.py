@@ -120,6 +120,33 @@ class SceneSettings:
 
 
 @dataclass(frozen=True)
+class StatusSubAgentSettings:
+    """Status history-window policy shared by turns and derivation bootstrap."""
+
+    history_rounds: int = 5
+
+
+@dataclass(frozen=True)
+class MemoryStorySettings:
+    """Story-memory extraction policy."""
+
+    trigger_rounds: int = 0
+    max_items: int = 8
+    batch_turns: int = 10
+    max_batch_chars: int = 32_000
+
+
+@dataclass(frozen=True)
+class MemorySummarySettings:
+    """Summary compression policy."""
+
+    compress_batch_size: int = 10
+    keep_rounds: int = 5
+    compression_enabled: bool = True
+    max_batch_chars: int = 32_000
+
+
+@dataclass(frozen=True)
 class DiceModuleSettings:
     """Dice RP module settings."""
 
@@ -237,6 +264,9 @@ class Settings(ProfiledYamlSettings):
     def _validate_settings(self) -> None:
         self._validate_context_window_reject_threshold()
         self._validate_status_sub_agent_settings()
+        # Materialize memory settings so malformed batch limits fail at startup.
+        self.memory_story_settings
+        self.memory_summary_settings
         # Materialize the typed scene policy so malformed permissions fail at
         # startup rather than changing tool exposure during a turn.
         self.scene_settings
@@ -252,6 +282,7 @@ class Settings(ProfiledYamlSettings):
             )
 
     def _validate_status_sub_agent_settings(self) -> None:
+        _ = self.status_sub_agent_settings
         _ = self.status_deferred_default_interval_turns
 
     @property
@@ -299,34 +330,138 @@ class Settings(ProfiledYamlSettings):
         return self.memory_sub_agent_config.get("story", {})
 
     @property
+    def memory_story_settings(self) -> MemoryStorySettings:
+        """Typed story-memory extraction settings."""
+        raw = self.memory_story_config
+        if not isinstance(raw, dict):
+            raise ValueError("agent.memory_sub_agent.story must be a mapping")
+
+        trigger_rounds = raw.get("trigger_rounds", 0)
+        max_items = raw.get("max_items", 8)
+        batch_turns = raw.get("batch_turns", 10)
+        max_batch_chars = raw.get("max_batch_chars", 32_000)
+        for key, value, allow_zero in (
+            ("trigger_rounds", trigger_rounds, True),
+            ("max_items", max_items, False),
+            ("batch_turns", batch_turns, False),
+            ("max_batch_chars", max_batch_chars, False),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < (0 if allow_zero else 1)
+            ):
+                qualifier = "a non-negative" if allow_zero else "a positive"
+                raise ValueError(
+                    f"agent.memory_sub_agent.story.{key} must be {qualifier} integer"
+                )
+        return MemoryStorySettings(
+            trigger_rounds=trigger_rounds,
+            max_items=max_items,
+            batch_turns=batch_turns,
+            max_batch_chars=max_batch_chars,
+        )
+
+    @property
+    def memory_summary_settings(self) -> MemorySummarySettings:
+        """Typed summary compression settings."""
+        raw = self.memory_summary_config
+        if not isinstance(raw, dict):
+            raise ValueError("agent.memory_sub_agent.summary must be a mapping")
+
+        compress_batch_size = raw.get("compress_batch_size", 10)
+        keep_rounds = raw.get("keep_rounds", 5)
+        compression_enabled = raw.get("compression_enabled", True)
+        max_batch_chars = raw.get("max_batch_chars", 32_000)
+        for key, value, allow_zero in (
+            ("compress_batch_size", compress_batch_size, False),
+            ("keep_rounds", keep_rounds, True),
+            ("max_batch_chars", max_batch_chars, False),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < (0 if allow_zero else 1)
+            ):
+                qualifier = "a non-negative" if allow_zero else "a positive"
+                raise ValueError(
+                    f"agent.memory_sub_agent.summary.{key} must be {qualifier} integer"
+                )
+        if not isinstance(compression_enabled, bool):
+            raise ValueError(
+                "agent.memory_sub_agent.summary.compression_enabled must be a boolean"
+            )
+        return MemorySummarySettings(
+            compress_batch_size=compress_batch_size,
+            keep_rounds=keep_rounds,
+            compression_enabled=compression_enabled,
+            max_batch_chars=max_batch_chars,
+        )
+
+    @property
     def memory_story_trigger_rounds(self) -> int:
         """N 轮新对话后自动触发剧情记忆提取，0 表示关闭。"""
-        return self.memory_story_config.get("trigger_rounds", 0)
+        return self.memory_story_settings.trigger_rounds
 
     @property
     def memory_story_max_items(self) -> int:
         """单次剧情记忆提取允许持久化的最大条数。"""
-        return max(1, forgiving_int(self.memory_story_config.get("max_items", 8), 8))
+        return self.memory_story_settings.max_items
+
+    @property
+    def memory_story_batch_turns(self) -> int:
+        """Maximum number of logical turns in one story-memory LLM batch."""
+        return self.memory_story_settings.batch_turns
+
+    @property
+    def memory_story_max_batch_chars(self) -> int:
+        """Maximum message-body characters in one story-memory LLM batch."""
+        return self.memory_story_settings.max_batch_chars
 
     @property
     def memory_compress_batch_size(self) -> int:
         """每批压缩的用户轮次数。"""
-        return self.memory_summary_config.get("compress_batch_size", 10)
+        return self.memory_summary_settings.compress_batch_size
 
     @property
     def memory_keep_rounds(self) -> int:
         """压缩后保留的最近对话轮数。"""
-        return self.memory_summary_config.get("keep_rounds", 5)
+        return self.memory_summary_settings.keep_rounds
 
     @property
     def memory_compression_enabled(self) -> bool:
         """是否启用自动压缩。"""
-        return self.memory_summary_config.get("compression_enabled", True)
+        return self.memory_summary_settings.compression_enabled
+
+    @property
+    def memory_summary_max_batch_chars(self) -> int:
+        """Maximum message-body characters in one summary LLM batch."""
+        return self.memory_summary_settings.max_batch_chars
 
     @property
     def status_sub_agent_config(self) -> ConfigDict:
         """status_sub_agent 完整配置 dict，包含显式 LLM provider 选择。"""
         return self.agent_settings.get("status_sub_agent", {})
+
+    @property
+    def status_sub_agent_settings(self) -> StatusSubAgentSettings:
+        raw = self.status_sub_agent_config
+        if not isinstance(raw, dict):
+            raise ValueError("agent.status_sub_agent must be a mapping")
+        history_rounds = raw.get("history_rounds", 5)
+        if (
+            isinstance(history_rounds, bool)
+            or not isinstance(history_rounds, int)
+            or history_rounds <= 0
+        ):
+            raise ValueError(
+                "agent.status_sub_agent.history_rounds must be a positive integer"
+            )
+        return StatusSubAgentSettings(history_rounds=history_rounds)
+
+    @property
+    def status_history_rounds(self) -> int:
+        return self.status_sub_agent_settings.history_rounds
 
     @property
     def status_deferred_default_interval_turns(self) -> int:

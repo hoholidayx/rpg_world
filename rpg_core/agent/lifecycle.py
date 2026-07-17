@@ -221,6 +221,7 @@ class AgentRuntimeLifecycle:
             keep_recent_rounds=settings.memory_keep_rounds,
             compression_threshold=settings.memory_keep_rounds,
             compress_batch_size=settings.memory_compress_batch_size,
+            max_batch_chars=settings.memory_summary_max_batch_chars,
         )
         self._refresh_sub_agent_bindings()
 

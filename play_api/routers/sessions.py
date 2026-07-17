@@ -35,6 +35,10 @@ from rpg_core.turns import normalize_turn_mode
 from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
+derivation_router = APIRouter(
+    prefix="/session-derivations",
+    tags=["play-sessions"],
+)
 T = TypeVar("T")
 HistoryTransformSource = Literal["api", "agent_internal"]
 
@@ -82,6 +86,35 @@ class PlaySessionDeleteResult(BaseModel):
     runtime_cleanup: Literal["deleted", "absent", "pending"] = Field(
         alias="runtimeCleanup"
     )
+
+
+class PlaySessionDerivationCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    branch_turn_id: int = Field(alias="turnId", gt=0)
+    title: str = ""
+
+
+class PlaySessionDerivationJob(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    job_id: str = Field(alias="jobId")
+    source_session_id: str = Field(alias="sourceSessionId")
+    target_session_id: str | None = Field(default=None, alias="targetSessionId")
+    branch_turn_id: int = Field(alias="turnId")
+    status: Literal["queued", "running", "ready", "failed", "interrupted"]
+    stage: str
+    error_code: str = Field(default="", alias="errorCode")
+    error_message: str = Field(default="", alias="errorMessage")
+    context_usage: dict[str, object] | None = Field(default=None, alias="contextUsage")
+    context_threshold_exceeded: bool = Field(
+        default=False,
+        alias="contextThresholdExceeded",
+    )
+    created_at: str = Field(default="", alias="createdAt")
+    started_at: str = Field(default="", alias="startedAt")
+    finished_at: str = Field(default="", alias="finishedAt")
+    updated_at: str = Field(default="", alias="updatedAt")
 
 
 class PlayPlayerCharacterBindRequest(BaseModel):
@@ -524,6 +557,38 @@ async def delete_session(session_id: str) -> PlaySessionDeleteResult:
         sessionId=agent_session_id,
         runtimeCleanup=str(result.get("runtime_cleanup") or "absent"),
     )
+
+
+@router.post(
+    "/{session_id}/derivations",
+    response_model=PlaySessionDerivationJob,
+    status_code=202,
+)
+async def create_session_derivation(
+    session_id: str,
+    payload: PlaySessionDerivationCreateRequest,
+) -> PlaySessionDerivationJob:
+    session = await resolve_session_or_404(session_id)
+    _workspace, _story_id, source_session_id = _session_context(session)
+    result = await _agent_call(
+        get_agent_backend().create_session_derivation(
+            source_session_id,
+            payload.branch_turn_id,
+            title=payload.title,
+        )
+    )
+    return PlaySessionDerivationJob.model_validate(result)
+
+
+@derivation_router.get(
+    "/{job_id}",
+    response_model=PlaySessionDerivationJob,
+)
+async def get_session_derivation(job_id: str) -> PlaySessionDerivationJob:
+    result = await _agent_call(
+        get_agent_backend().get_session_derivation(job_id)
+    )
+    return PlaySessionDerivationJob.model_validate(result)
 
 
 @router.patch("/{session_id}/player-character", response_model=PlaySessionSummary)

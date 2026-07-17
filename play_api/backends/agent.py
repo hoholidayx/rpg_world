@@ -153,6 +153,26 @@ class AgentBackend:
         del workspace, story_id
         return dict(await agent_client.get_agent_client().delete_session(session_id))
 
+    async def create_session_derivation(
+        self,
+        source_session_id: str,
+        branch_turn_id: int,
+        *,
+        title: str = "",
+    ) -> dict[str, object]:
+        return dict(
+            await agent_client.get_agent_client().create_session_derivation(
+                source_session_id,
+                branch_turn_id,
+                title=title,
+            )
+        )
+
+    async def get_session_derivation(self, job_id: str) -> dict[str, object]:
+        return dict(
+            await agent_client.get_agent_client().get_session_derivation(job_id)
+        )
+
     async def stream(
         self,
         workspace: str,

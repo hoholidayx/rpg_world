@@ -33,6 +33,13 @@ from rpg_data.services.session_role import (
     SessionRoleService,
 )
 from rpg_data.services.session_deletion import SessionDeletionService
+from rpg_data.services.session_derivation import (
+    SessionDerivationDataError,
+    SessionDerivationProvisioningError,
+    SessionDerivationSourceBusyError,
+    SessionDerivationTargetBusyError,
+    SessionDerivationService,
+)
 from rpg_data.services.session_reset import SessionResetService
 from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryService
@@ -65,6 +72,11 @@ __all__ = [
     "SessionPlayerCharacterState",
     "SessionRoleService",
     "SessionDeletionService",
+    "SessionDerivationDataError",
+    "SessionDerivationProvisioningError",
+    "SessionDerivationSourceBusyError",
+    "SessionDerivationTargetBusyError",
+    "SessionDerivationService",
     "SessionResetService",
     "SessionComposerService",
     "StoryMemoryService",

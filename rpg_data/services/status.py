@@ -734,6 +734,118 @@ class StatusTableService:
                 )
         return _to_session_table(row)
 
+    def commit_bootstrap_state(
+        self,
+        session_id: str,
+        documents: Iterable[models.StatusBootstrapDocument],
+        *,
+        deferred_progress: Mapping[int, Iterable[str]],
+        boundary_turn_id: int,
+    ) -> list[models.SessionStatusTable]:
+        """Atomically publish derivation-bootstrap documents and progress.
+
+        All LLM work happens against an in-memory scratch.  This method is the
+        only durable boundary, so a validation or SQL failure cannot expose a
+        partially bootstrapped session.
+        """
+        if boundary_turn_id <= 0:
+            raise ValueError("boundary_turn_id must be positive")
+
+        staged = tuple(documents)
+        if len({item.table_id for item in staged}) != len(staged):
+            raise ValueError("bootstrap documents contain duplicate table IDs")
+        progress_by_table = {
+            int(table_id): tuple(dict.fromkeys(
+                str(key) for key in keys if str(key)
+            ))
+            for table_id, keys in deferred_progress.items()
+        }
+        affected_ids = {item.table_id for item in staged} | set(progress_by_table)
+        rows: dict[int, SessionStatusTableRecord] = {}
+        current_documents: dict[int, models.StatusTableDocument] = {}
+
+        for table_id in affected_ids:
+            row = self._get_session_table_row(table_id)
+            if str(row.session_id) != str(session_id):
+                raise FileNotFoundError(
+                    f"Session status table is unavailable: {session_id}/{table_id}"
+                )
+            rows[table_id] = row
+            current_documents[table_id] = _parse_row_document(row)
+
+        for item in staged:
+            row = rows[item.table_id]
+            actual_kind = models.validate_status_kind(str(row.status_kind))
+            expected_kind = models.validate_status_kind(item.status_kind)
+            if actual_kind != expected_kind:
+                raise ValueError(
+                    "Status table kind changed before bootstrap write: "
+                    f"expected {expected_kind}, got {actual_kind}"
+                )
+            item.document.validated()
+            if current_documents[item.table_id] != item.base_document:
+                logger.warning(
+                    "overwriting concurrently changed status table with last-write-wins "
+                    "session_id=%s table_id=%s source=derivation_bootstrap",
+                    session_id,
+                    item.table_id,
+                )
+
+        for table_id, keys in progress_by_table.items():
+            row = rows[table_id]
+            if str(row.status_kind) != models.STATUS_KIND_NORMAL:
+                raise PermissionError(
+                    "Deferred bootstrap progress only supports normal status tables"
+                )
+            document = next(
+                (
+                    item.document
+                    for item in staged
+                    if item.table_id == table_id
+                ),
+                current_documents[table_id],
+            ).validated()
+            for key in keys:
+                field = document.row_for_key(key)
+                if field is None:
+                    raise KeyError(f"Status table key not found: {key}")
+                if field.update_frequency != models.STATUS_UPDATE_FREQUENCY_DEFERRED:
+                    raise PermissionError(f"Status field is not deferred: {key}")
+
+        with self._database.atomic():
+            for item in staged:
+                row = rows[item.table_id]
+                row.document_json = models.serialize_status_document(
+                    _document_for_kind(str(row.status_kind), item.document)
+                )
+                row.updated_at = SQL("CURRENT_TIMESTAMP")
+                row.save()
+            for table_id, keys in progress_by_table.items():
+                for key in keys:
+                    (
+                        SessionStatusDeferredProgressRecord
+                        .insert(
+                            session_status_table=table_id,
+                            field_key=key,
+                            last_processed_turn_id=boundary_turn_id,
+                            updated_at=SQL("CURRENT_TIMESTAMP"),
+                        )
+                        .on_conflict(
+                            conflict_target=(
+                                SessionStatusDeferredProgressRecord.session_status_table,
+                                SessionStatusDeferredProgressRecord.field_key,
+                            ),
+                            update={
+                                SessionStatusDeferredProgressRecord.last_processed_turn_id:
+                                    boundary_turn_id,
+                                SessionStatusDeferredProgressRecord.updated_at:
+                                    SQL("CURRENT_TIMESTAMP"),
+                            },
+                        )
+                        .execute()
+                    )
+        return [_to_session_table(rows[item.table_id]) for item in staged]
+
     def update_table(
         self,
         table_id: int,

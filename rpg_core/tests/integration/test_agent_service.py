@@ -331,7 +331,7 @@ async def test_agent_service_delete_failure_restores_runtime_and_allows_recreati
 
     monkeypatch.setattr(
         integration_data_gateway.session_deletion._sessions,
-        "delete",
+        "delete_ready_without_active_derivation",
         fail_delete,
     )
     failed = await agent_service_client.delete(

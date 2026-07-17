@@ -40,6 +40,7 @@ __all__ = [
     "SessionDreamProposalItemRecord",
     "SessionDreamProposalRecord",
     "SessionDreamStateRecord",
+    "SessionDerivationJobRecord",
     "SessionMessageRecord",
     "SessionMediaBackgroundRecord",
     "SessionMediaBackgroundStateRecord",
@@ -256,12 +257,43 @@ class SessionRecord(BaseRecord):
         on_delete="CASCADE",
     )
     state_json = TextField(default="{}")
+    lifecycle = TextField(default="ready")
     version = IntegerField(default=1)
     created_at = TextField()
     updated_at = TextField()
 
     class Meta:
         table_name = "rpg_sessions"
+
+
+class SessionDerivationJobRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    source_session = ForeignKeyField(
+        SessionRecord,
+        backref="derivation_jobs",
+        column_name="source_session_id",
+        on_delete="CASCADE",
+    )
+    # Deliberately not a foreign key: failed-job diagnostics retain the allocated
+    # target ID after the incomplete target session is removed.
+    target_session_id = CharField(null=True)
+    branch_turn_id = IntegerField()
+    requested_title = TextField(default="")
+    status = TextField(default="queued")
+    stage = TextField(default="queued")
+    error_code = TextField(default="")
+    error_message = TextField(default="")
+    context_used_tokens = IntegerField(null=True)
+    context_limit = IntegerField(null=True)
+    context_threshold_exceeded = BooleanField(default=False)
+    started_at = TextField(null=True)
+    finished_at = TextField(null=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_derivation_jobs"
 
 
 class SessionProfileRecord(BaseRecord):
@@ -1241,6 +1273,7 @@ RECORD_MODELS = (
     StoryQuickReplyRecord,
     SessionRecord,
     SessionProfileRecord,
+    SessionDerivationJobRecord,
     SessionMessageRecord,
     SessionBackupMessageRecord,
     SessionStoryMemoryRecord,

@@ -10,6 +10,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from rpg_data import models
+
 if TYPE_CHECKING:
     from rpg_data.models import SessionResetResult
     from rpg_data.services import SessionPlayerCharacterBindResult
@@ -164,6 +166,7 @@ async def _cmd_session_switch(agent: AgentCommandTarget, args: list[str]) -> str
     target = gateway.catalog.get_session(sid)
     if (
         target is None
+        or target.lifecycle != models.SESSION_LIFECYCLE_READY
         or str(target.workspace_id) != str(current_session.workspace_id)
         or int(target.story_id) != int(current_session.story_id)
     ):

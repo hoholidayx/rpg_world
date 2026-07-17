@@ -255,6 +255,37 @@ class TestCommandDispatcher:
         assert "- s2 （当前）" in result.reply
 
     @pytest.mark.asyncio
+    async def test_session_switch_hides_provisioning_target(self, monkeypatch):
+        fake_agent = SimpleNamespace(
+            session_id="s1",
+            switch_session=AsyncMock(),
+        )
+        target = models.Session(
+            "target",
+            "workspace",
+            1,
+            lifecycle=models.SESSION_LIFECYCLE_PROVISIONING,
+        )
+        fake_gateway = SimpleNamespace(
+            catalog=SimpleNamespace(get_session=lambda session_id: target),
+        )
+        monkeypatch.setattr(
+            command_module,
+            "_current_catalog_session",
+            lambda agent: (
+                fake_gateway,
+                models.Session("s1", "workspace", 1),
+            ),
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/session_switch target")
+
+        assert result.reply == "[会话不存在: target]"
+        fake_agent.switch_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_rp_module_commands_are_dispatched(self, tmp_path):
         from rpg_data.services import get_data_service_gateway
 

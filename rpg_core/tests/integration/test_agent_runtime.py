@@ -898,15 +898,26 @@ async def test_summary_compression_writes_batches_and_flags_without_truncating_h
                 )
             ],
         ),
-        response(
-            "",
-            model="memory-model",
-            tool_calls=[
-                tool_call(
-                    "generate_overall_summary",
-                    '{"title":"总览","summary_text":"两轮整体摘要","key_events":["发现线索"]}',
-                )
-            ],
+            response(
+                "",
+                model="memory-model",
+                tool_calls=[
+                    tool_call(
+                        "generate_overall_summary",
+                        '{"title":"阶段总览","summary_text":"第一轮整体摘要",'
+                        '"key_events":["发现线索"]}',
+                    )
+                ],
+            ),
+            response(
+                "",
+                model="memory-model",
+                tool_calls=[
+                    tool_call(
+                        "generate_overall_summary",
+                        '{"title":"总览","summary_text":"两轮整体摘要","key_events":["发现线索"]}',
+                    )
+                ],
         ),
     )
 

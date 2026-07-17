@@ -35,7 +35,13 @@ class SessionRepository:
         player_character_id: int | None = None,
         player_character_snapshot_json: str = "{}",
         metadata_json: str = "{}",
+        lifecycle: str = models.SESSION_LIFECYCLE_READY,
     ) -> models.Session:
+        if lifecycle not in {
+            models.SESSION_LIFECYCLE_PROVISIONING,
+            models.SESSION_LIFECYCLE_READY,
+        }:
+            raise ValueError(f"Unsupported session lifecycle: {lifecycle}")
         created_id = session_id or _new_session_id()
         while True:
             try:
@@ -45,6 +51,7 @@ class SessionRepository:
                         workspace=workspace_id,
                         story=story_id,
                         state_json=state_json,
+                        lifecycle=lifecycle,
                     )
                     SessionProfileRecord.create(
                         session=created_id,
@@ -67,6 +74,7 @@ class SessionRepository:
         *,
         workspace_id: str | None = None,
         story_id: int | None = None,
+        lifecycle: str | None = None,
     ) -> list[models.Session]:
         query = (
             SessionRecord
@@ -77,6 +85,8 @@ class SessionRepository:
             query = query.where(SessionRecord.workspace == workspace_id)
         if story_id is not None:
             query = query.where(SessionRecord.story == story_id)
+        if lifecycle is not None:
+            query = query.where(SessionRecord.lifecycle == lifecycle)
         return [
             to_session(row)
             for row in query.order_by(
@@ -104,9 +114,82 @@ class SessionRepository:
             .execute()
         )
 
+    def delete_ready_without_active_derivation(self, session_id: str) -> bool:
+        """Atomically delete a public-ready session only when no job owns it."""
+
+        cursor = self._database.execute_sql(
+            """
+            DELETE FROM rpg_sessions
+            WHERE id = ?
+              AND lifecycle = ?
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM rpg_session_derivation_jobs
+                    WHERE status IN (?, ?)
+                      AND (source_session_id = ? OR target_session_id = ?)
+              )
+            """,
+            (
+                str(session_id),
+                models.SESSION_LIFECYCLE_READY,
+                models.SESSION_DERIVATION_JOB_STATUS_QUEUED,
+                models.SESSION_DERIVATION_JOB_STATUS_RUNNING,
+                str(session_id),
+                str(session_id),
+            ),
+        )
+        return bool(cursor.rowcount)
+
+    def delete_provisioning_for_derivation(
+        self,
+        session_id: str,
+        job_id: str,
+    ) -> bool:
+        """Atomically delete only the running job's provisioning target."""
+
+        cursor = self._database.execute_sql(
+            """
+            DELETE FROM rpg_sessions
+            WHERE id = ?
+              AND lifecycle = ?
+              AND EXISTS (
+                    SELECT 1
+                    FROM rpg_session_derivation_jobs
+                    WHERE id = ?
+                      AND target_session_id = ?
+                      AND status = ?
+              )
+            """,
+            (
+                str(session_id),
+                models.SESSION_LIFECYCLE_PROVISIONING,
+                str(job_id),
+                str(session_id),
+                models.SESSION_DERIVATION_JOB_STATUS_RUNNING,
+            ),
+        )
+        return bool(cursor.rowcount)
+
     def update_timestamp(self, session_id: str) -> models.Session | None:
         row = update_timestamp(SessionRecord, session_id)
         return to_session(row) if row is not None else None
+
+    def set_lifecycle(self, session_id: str, lifecycle: str) -> models.Session | None:
+        if lifecycle not in {
+            models.SESSION_LIFECYCLE_PROVISIONING,
+            models.SESSION_LIFECYCLE_READY,
+        }:
+            raise ValueError(f"Unsupported session lifecycle: {lifecycle}")
+        updated = (
+            SessionRecord.update(
+                lifecycle=lifecycle,
+                version=SessionRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(SessionRecord.id == session_id)
+            .execute()
+        )
+        return self.get(session_id) if updated else None
 
     def set_main_llm_provider_key(
         self,

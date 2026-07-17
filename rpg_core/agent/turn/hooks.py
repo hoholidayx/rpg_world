@@ -257,7 +257,13 @@ class PostCommitHooks:
         if compressor is not None:
             try:
                 result = await compressor.maybe_compress(self._session_manager)
-                if result.triggered:
+                if result.failed:
+                    logger.warning(
+                        _TAG + " post-commit auto-compress failed: code={} message={}",
+                        result.error_code,
+                        result.error_message,
+                    )
+                elif result.triggered:
                     logger.info(
                         _TAG + " auto-compressed: {} turns, {} batches",
                         result.user_rounds_compressed,

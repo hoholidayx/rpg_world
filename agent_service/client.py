@@ -20,6 +20,7 @@ from agent_service.schemas import (
     AgentReplyPayload,
     AgentSessionCreatePayload,
     AgentSessionDeletePayload,
+    AgentSessionDerivationJobPayload,
     AgentSessionPayloadDict,
     AgentSessionOverviewPayload,
     AgentSessionsPayload,
@@ -331,6 +332,32 @@ class AgentClient:
             params={"session_id": session_id},
         )
         return cast(AgentSessionDeletePayload, result)
+
+    async def create_session_derivation(
+        self,
+        source_session_id: str,
+        branch_turn_id: int,
+        *,
+        title: str = "",
+    ) -> AgentSessionDerivationJobPayload:
+        result = await self._post(
+            "/chat/session/derivations",
+            json={
+                "session_id": source_session_id,
+                "branch_turn_id": int(branch_turn_id),
+                "title": title,
+            },
+        )
+        return cast(AgentSessionDerivationJobPayload, result)
+
+    async def get_session_derivation(
+        self,
+        job_id: str,
+    ) -> AgentSessionDerivationJobPayload:
+        result = await self._get(
+            f"/chat/session/derivations/{job_id}",
+        )
+        return cast(AgentSessionDerivationJobPayload, result)
 
     async def execute_command(
         self,
