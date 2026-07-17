@@ -469,8 +469,14 @@ class DreamMemoryService:
                 )
                 for item in items:
                     if item.action == models.DREAM_ACTION_ADD:
-                        memory_id = self._create_memory_from_item(proposal, item)
-                        created_ids.append(memory_id)
+                        memory_id, revived = self._create_or_revive_memory_from_item(
+                            proposal,
+                            item,
+                        )
+                        if revived:
+                            revised_ids.append(memory_id)
+                        else:
+                            created_ids.append(memory_id)
                     elif item.action == models.DREAM_ACTION_REVISE:
                         memory_id = self._revise_memory_from_item(proposal, item)
                         revised_ids.append(memory_id)
@@ -1130,13 +1136,13 @@ class DreamMemoryService:
                     f"Dream proposal creates duplicate memory key: {dedupe_key}"
                 )
             seen_new_keys.add(dedupe_key)
-            if (
-                SessionPersistentMemoryRecord.select()
-                .where(
-                    (SessionPersistentMemoryRecord.session == proposal.session_id)
-                    & (SessionPersistentMemoryRecord.dedupe_key == dedupe_key)
-                )
-                .exists()
+            existing = self._memory_with_dedupe_key(
+                str(proposal.session_id),
+                dedupe_key,
+            )
+            if existing is not None and not (
+                str(item.action) == models.DREAM_ACTION_ADD
+                and str(existing.lifecycle) == models.DREAM_LIFECYCLE_RETIRED
             ):
                 raise DreamProposalStateError(
                     f"Persistent memory key already exists: {dedupe_key}"
@@ -1187,15 +1193,11 @@ class DreamMemoryService:
                         f"Proposal creates duplicate memory key: {dedupe_key}"
                     )
                 new_dedupe_keys.add(dedupe_key)
-                existing = (
-                    SessionPersistentMemoryRecord.select()
-                    .where(
-                        (SessionPersistentMemoryRecord.session == session_id)
-                        & (SessionPersistentMemoryRecord.dedupe_key == dedupe_key)
-                    )
-                    .first()
-                )
-                if existing is not None:
+                existing = self._memory_with_dedupe_key(session_id, dedupe_key)
+                if existing is not None and not (
+                    action == models.DREAM_ACTION_ADD
+                    and str(existing.lifecycle) == models.DREAM_LIFECYCLE_RETIRED
+                ):
                     raise DreamProposalStateError(
                         f"Persistent memory key already exists: {dedupe_key}"
                     )
@@ -1212,6 +1214,37 @@ class DreamMemoryService:
                 f"proposal would create {active_count}"
             )
         return active_count
+
+    def _create_or_revive_memory_from_item(
+        self,
+        proposal: SessionDreamProposalRecord,
+        item: SessionDreamProposalItemRecord,
+    ) -> tuple[str, bool]:
+        existing = self._memory_with_dedupe_key(
+            str(proposal.session_id),
+            str(item.dedupe_key),
+        )
+        if existing is None:
+            return self._create_memory_from_item(proposal, item), False
+        if str(existing.lifecycle) != models.DREAM_LIFECYCLE_RETIRED:
+            raise DreamProposalStaleError(
+                f"Persistent memory key is no longer retired: {item.dedupe_key}"
+            )
+
+        revision_number = int(existing.current_revision_number) + 1
+        self._create_revision(
+            proposal,
+            item,
+            str(existing.id),
+            revision_number,
+        )
+        existing.current_revision_number = revision_number
+        existing.lifecycle = models.DREAM_LIFECYCLE_ACTIVE
+        existing.superseded_by_memory = None
+        existing.version = int(existing.version) + 1
+        existing.updated_at = SQL("CURRENT_TIMESTAMP")
+        existing.save()
+        return str(existing.id), True
 
     def _create_memory_from_item(
         self,
@@ -1493,6 +1526,20 @@ class DreamMemoryService:
                 )
             )
             .count()
+        )
+
+    def _memory_with_dedupe_key(
+        self,
+        session_id: str,
+        dedupe_key: str,
+    ) -> SessionPersistentMemoryRecord | None:
+        return (
+            SessionPersistentMemoryRecord.select()
+            .where(
+                (SessionPersistentMemoryRecord.session == str(session_id))
+                & (SessionPersistentMemoryRecord.dedupe_key == str(dedupe_key))
+            )
+            .first()
         )
 
     def _get_or_create_state_record(self, session_id: str) -> SessionDreamStateRecord:
