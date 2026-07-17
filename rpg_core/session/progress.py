@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.context.rpg_context import Message
+from rpg_core.context.models import Message
 from rpg_core.session.grouping import iter_turn_groups, uses_fallback_grouping
 from rpg_core.session.models import SessionRuntimeState
 

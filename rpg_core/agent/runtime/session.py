@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.context.rpg_context import Message
+from rpg_core.context.models import Message
 
 if TYPE_CHECKING:
     from rpg_data.models import SessionResetResult

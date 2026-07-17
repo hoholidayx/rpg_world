@@ -68,7 +68,7 @@ from rpg_core.agent.sub_agents.status.prompts import (
 from rpg_core.tooling.base import BaseTool
 from rpg_core.tooling.registry import ToolRegistry
 from rpg_core.agent.tools.state import STATE_TOOL_NAMES, StateToolSet
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.context.fingerprint import (
     build_request_fingerprint,
     request_fingerprint_log_values,

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.telemetry import TurnStats
     from rpg_core.agent.turn.runner import ToolCallRecord
     from rpg_core.tooling.registry import ToolRegistry
-    from rpg_core.context.rpg_context import Message, PersistentMemoryFact
+    from rpg_core.context.models import Message, PersistentMemoryFact
     from rpg_core.agent.runtime.main_llm import MainLLMSelection
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
 

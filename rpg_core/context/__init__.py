@@ -11,7 +11,7 @@ from rpg_core.context.fixed_layer import (
 from rpg_core.context.inspector import ContextInspector, LayerInfo
 from rpg_core.context.renderer import ContextRenderer
 from rpg_core.context.usage import ContextUsageSnapshot
-from rpg_core.context.rpg_context import (
+from rpg_core.context.models import (
     FixedLayerData,
     HotHistoryLayer,
     LayerType,

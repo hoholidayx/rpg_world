@@ -20,7 +20,7 @@ from rpg_core.status.tools import StatusTableSetValuesTool, StatusWritePolicy
 if TYPE_CHECKING:
     from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
     from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
-    from rpg_core.context.rpg_context import Message
+    from rpg_core.context.models import Message
     from rpg_core.status.manager import StatusManager
 
 

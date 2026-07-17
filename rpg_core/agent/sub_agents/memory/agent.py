@@ -56,7 +56,7 @@ from rpg_core.context.fingerprint import (
     build_request_fingerprint,
     request_fingerprint_log_values,
 )
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
 

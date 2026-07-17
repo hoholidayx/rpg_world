@@ -20,7 +20,7 @@ from rpg_core.session.turn_metadata import (
 )
 
 if TYPE_CHECKING:
-    from rpg_core.context.rpg_context import Message
+    from rpg_core.context.models import Message
 
 
 def has_explicit_turn_ids(messages: list[Message]) -> bool:

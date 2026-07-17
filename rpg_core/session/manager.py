@@ -6,7 +6,7 @@ import re
 
 from loguru import logger
 
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.session.grouping import (
     count_turns as count_grouped_turns,
     has_explicit_turn_ids as contains_explicit_turn_ids,

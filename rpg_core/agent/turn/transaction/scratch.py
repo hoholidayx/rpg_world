@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.agent.turn.transaction.message_scratch import MessageScratch
 from rpg_core.agent.turn.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
 

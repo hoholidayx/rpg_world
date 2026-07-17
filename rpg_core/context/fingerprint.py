@@ -8,7 +8,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 
 
 @dataclass(frozen=True)

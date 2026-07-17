@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.session.grouping import latest_turn_id
 from rpg_core.session.models import ContextHistorySnapshot, SessionRuntimeState
 from rpg_core.session.progress import SessionProgress

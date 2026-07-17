@@ -41,7 +41,7 @@ from rpg_core.session.grouping import (
 )
 
 if TYPE_CHECKING:
-    from rpg_core.context.rpg_context import Message
+    from rpg_core.context.models import Message
     from rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_core.session.manager import SessionManager
 

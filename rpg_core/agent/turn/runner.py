@@ -14,7 +14,7 @@ from loguru import logger
 from llm_client.types import LLMProvider, LLMResponse, LLMUsage
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.telemetry import CallRecord, TurnStats
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.tooling.registry import ToolRegistry
 from rpg_core.settings import settings
 

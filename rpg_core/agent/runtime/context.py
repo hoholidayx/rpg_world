@@ -24,13 +24,13 @@ from rpg_core.context.fixed_layer.contributors import (
     TurnExecutionFixedLayerContributor,
 )
 from rpg_core.context.inspector import ContextInspector
-from rpg_core.context.rpg_context import FixedLayerData, Message, Role
+from rpg_core.context.models import FixedLayerData, Message, Role
 from rpg_core.context.usage import estimate_rendered_context_usage
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
     from rpg_core.context.inspector import LayerInfo
-    from rpg_core.context.rpg_context import PersistentMemoryFact, RPGContext
+    from rpg_core.context.models import PersistentMemoryFact, RPGContext
     from rpg_core.agent.runtime.main_llm import MainLLMSelection
     from rpg_core.rp_modules import (
         RPModuleRegistry,

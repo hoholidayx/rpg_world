@@ -15,7 +15,7 @@ from typing import Literal, Protocol, Sequence
 from loguru import logger
 
 from llm_client.types import LLMUsage
-from rpg_core.context.rpg_context import Message
+from rpg_core.context.models import Message
 from rpg_core.utils.tokenizer import TokenCounter
 
 ContextUsageSource = Literal["provider_usage", "context_preview", "fallback_estimate", "unavailable"]

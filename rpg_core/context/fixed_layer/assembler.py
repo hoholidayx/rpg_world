@@ -10,7 +10,7 @@ from commons.types import JsonObject
 from rpg_core.context.fixed_layer.models import FixedLayerContributor, FixedLayerSection
 
 if TYPE_CHECKING:
-    from rpg_core.context.rpg_context import FixedLayerData
+    from rpg_core.context.models import FixedLayerData
 
 
 class FixedLayerAssembler:
@@ -31,7 +31,7 @@ class FixedLayerAssembler:
         )
 
     def assemble(self) -> "FixedLayerData":
-        from rpg_core.context.rpg_context import FixedLayerData
+        from rpg_core.context.models import FixedLayerData
 
         sections: list[FixedLayerSection] = []
         lorebook_entries: list[JsonObject] = []

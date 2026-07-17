@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rpg_core.context.rpg_context import LayerType, Role
+from rpg_core.context.models import LayerType, Role
 
 
 @dataclass(frozen=True)

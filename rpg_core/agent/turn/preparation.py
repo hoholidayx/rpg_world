@@ -11,7 +11,7 @@ from rpg_core.context.fingerprint import (
     build_request_fingerprint,
     request_fingerprint_log_values,
 )
-from rpg_core.context.rpg_context import Message
+from rpg_core.context.models import Message
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.runtime.tools import AgentToolService
     from rpg_core.agent.turn.hooks.fixed import MemoryRecallHook
     from rpg_core.agent.turn.runtime import TurnRuntime
-    from rpg_core.context.rpg_context import Message
+    from rpg_core.context.models import Message
 
 _TAG = "[TurnPreparation]"
 

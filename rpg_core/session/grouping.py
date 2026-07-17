@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rpg_core.agent.turn.models import TurnMode
-from rpg_core.context.rpg_context import Message
+from rpg_core.context.models import Message
 from rpg_core.session.turn_metadata import has_trustworthy_turn_metadata
 
 if TYPE_CHECKING:

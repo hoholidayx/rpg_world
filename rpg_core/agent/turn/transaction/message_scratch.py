@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from rpg_core.agent.turn.models import DEFAULT_TURN_MODE
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 
 
 @dataclass

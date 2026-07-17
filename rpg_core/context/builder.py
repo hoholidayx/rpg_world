@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from rpg_core.context.config import RPGContextConfig
-from rpg_core.context.rpg_context import (
+from rpg_core.context.models import (
     FixedLayerData,
     HotHistoryLayer,
     Message,

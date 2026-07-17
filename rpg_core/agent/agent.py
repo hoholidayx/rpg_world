@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.command.models import CommandDef
     from rpg_core.agent.turn.runner import ToolCallRecord
     from rpg_core.context.inspector import LayerInfo
-    from rpg_core.context.rpg_context import Message
+    from rpg_core.context.models import Message
     from rpg_core.session import SessionManager
 
 

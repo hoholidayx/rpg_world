@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from rpg_core.context.layout import CONTEXT_LAYER_ORDER
 from rpg_core.context.rendering import render_jinja_template
-from rpg_core.context.rpg_context import LayerType, Message, RPGContext, UserExtensionBlock
+from rpg_core.context.models import LayerType, Message, RPGContext, UserExtensionBlock
 
 
 class ContextRenderer:

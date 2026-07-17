@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from rpg_core.context.rpg_context import Message
+from rpg_core.context.models import Message
 
 
 @dataclass(frozen=True)

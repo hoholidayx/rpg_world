@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from rpg_core.context.rpg_context import Role
+from rpg_core.context.models import Role
 from rpg_core.scene import SceneTracker
 from rpg_core.agent.turn.models import TurnMode, normalize_turn_mode
 from rpg_core.agent.turn.transaction.commit_plan import TurnCommitPlan
@@ -20,7 +20,7 @@ from rpg_core.agent.turn.transaction.scratch import TurnScratch
 
 if TYPE_CHECKING:
     from rpg_core.agent.telemetry import TurnStats
-    from rpg_core.context.rpg_context import Message
+    from rpg_core.context.models import Message
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager
 
