@@ -7,6 +7,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping
 
+from commons.dream_identity import dream_derived_source_fingerprint
 from commons.text_identity import stable_text_identity_key
 
 
@@ -176,10 +177,12 @@ class DreamDerivedSource:
 
     @property
     def fingerprint(self) -> str:
-        return (
-            f"{self.version}:{self.content_hash}:"
-            f"{self.source_turn_start}:{self.source_turn_end}:"
-            f"{','.join(str(item) for item in self.evidence_message_ids)}"
+        return dream_derived_source_fingerprint(
+            version=self.version,
+            content_hash=self.content_hash,
+            source_turn_start=self.source_turn_start,
+            source_turn_end=self.source_turn_end,
+            evidence_message_ids=self.evidence_message_ids,
         )
 
 

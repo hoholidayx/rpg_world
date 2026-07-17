@@ -8,12 +8,14 @@ from commons.text_identity import stable_text_identity_key
 from rpg_data import models
 from rpg_data.services import (
     DreamActiveMemoryLimitError,
+    DreamEvidenceInvalidError,
     DreamMemoryService,
     DreamProposalConflictError,
     DreamProposalStaleError,
     get_data_service_gateway,
     reset_data_service_gateways,
 )
+from rpg_data.services.dream_source_identity import story_memory_source_identity
 
 
 @pytest.fixture(autouse=True)
@@ -472,6 +474,10 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
     )
     snapshot = dream.build_source_snapshot("s_forest001")
     message = snapshot.messages[0]
+    story_identity = story_memory_source_identity(
+        story_memory,
+        {item.id: item for item in snapshot.messages},
+    )
     proposal = dream.create_proposal(
         "s_forest001",
         depth="shallow",
@@ -480,11 +486,7 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
         source_fingerprint="d" * 64,
         next_story_memories_manifest_json={
             str(story_memory.id): {
-                "fingerprint": (
-                    f"{story_memory.version}:"
-                    f"{hashlib.sha256(story_memory.text.encode('utf-8')).hexdigest()}:"
-                    f"{story_memory.source_turn_start}:{story_memory.source_turn_end}"
-                ),
+                "fingerprint": story_identity.fingerprint,
                 "turnStart": story_memory.source_turn_start,
                 "turnEnd": story_memory.source_turn_end,
             }
@@ -565,8 +567,11 @@ def test_apply_rechecks_story_memory_version_inside_transaction(tmp_path) -> Non
         turn_id=1,
     )
     message = dream.build_source_snapshot("s_forest001").messages[0]
-    fingerprint = hashlib.sha256(story.text.encode("utf-8")).hexdigest()
     snapshot = dream.build_source_snapshot("s_forest001")
+    story_identity = story_memory_source_identity(
+        story,
+        {item.id: item for item in snapshot.messages},
+    )
     proposal = dream.create_proposal(
         "s_forest001",
         depth="shallow",
@@ -575,10 +580,7 @@ def test_apply_rechecks_story_memory_version_inside_transaction(tmp_path) -> Non
         source_fingerprint="f" * 64,
         next_story_memories_manifest_json={
             str(story.id): {
-                "fingerprint": (
-                    f"{story.version}:{fingerprint}:"
-                    f"{story.source_turn_start}:{story.source_turn_end}"
-                ),
+                "fingerprint": story_identity.fingerprint,
                 "turnStart": story.source_turn_start,
                 "turnEnd": story.source_turn_end,
             }

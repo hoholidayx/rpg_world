@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from dream_service.repository import RPGDataDreamRepository
 from rpg_data import models
+from rpg_data.services.dream_memory import DreamProposalStaleError
 from rpg_data.services.gateway import get_data_service_gateway, reset_data_service_gateways
 from rp_memory.dream.source import DreamSourceSelector
 from rp_memory.dream.types import (
@@ -75,6 +78,9 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
         scope=DreamScope.FULL,
     )
     assert selection.source_story_memory_ids == (story_memory.id,)
+    story_source = snapshot.story_memories[0]
+    assert story_source.evidence_message_ids == (first.id, second.id)
+    assert story_source.fingerprint.endswith(f":{first.id},{second.id}")
     assert snapshot.player_character_name == role.snapshot.name
     assert selection.batches[0].player_character_name == role.snapshot.name
     assert {source.source_id for source in snapshot.summary_batches} == {"0"}
@@ -121,6 +127,113 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
     assert memories.items[0].current_revision.text == "守卫把铜钥匙交给阿澈。"
     assert memories.items[0].evidence[0].message_id == second.id
     assert gateway.story_memory.get(story_memory.id).dream_processed is True
+
+    gateway.close()
+    reset_data_service_gateways()
+
+
+def test_apply_rolls_back_and_marks_stale_when_source_changes_during_apply(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    gateway = get_data_service_gateway(tmp_path / "dream.sqlite3")
+    workspace_root = tmp_path / "workspace"
+    gateway.database.execute_sql(
+        "UPDATE rpg_workspaces SET root_path = ? WHERE id = 'demo_workspace'",
+        (str(workspace_root),),
+    )
+    session = gateway.catalog.create_session("demo_workspace", 1, title="dream")
+    assert session is not None
+    user = gateway.messages.append(
+        session.id,
+        models.MESSAGE_ROLE_USER,
+        "阿澈抵达月光港。",
+        turn_id=1,
+        seq_in_turn=1,
+    )
+    assistant = gateway.messages.append(
+        session.id,
+        models.MESSAGE_ROLE_ASSISTANT,
+        "守卫把铜钥匙交给阿澈。",
+        turn_id=1,
+        seq_in_turn=2,
+    )
+    gateway.messages.mark_summary_processed(
+        session.id,
+        (user.id, assistant.id),
+        batch_id=0,
+    )
+    summary_dir = gateway.catalog.resolve_session_runtime_dir(session.id) / "summaries"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = summary_dir / "000-arrival.md"
+
+    def write_summary(body: str) -> None:
+        summary_path.write_text(
+            "---\nbatch_id: 0\nsource_turn_start: 1\nsource_turn_end: 1\n"
+            f"source_message_ids:\n  - {user.id}\n  - {assistant.id}\n---\n\n"
+            f"{body}\n",
+            encoding="utf-8",
+        )
+
+    write_summary("阿澈抵达港口并取得铜钥匙。")
+    repository = RPGDataDreamRepository(gateway)
+    snapshot = repository.build_source_snapshot(session.id)
+    selection = DreamSourceSelector().select(
+        snapshot,
+        depth=DreamDepth.SHALLOW,
+        scope=DreamScope.FULL,
+    )
+    proposal = repository.create_proposal(selection)
+    repository.set_proposal_ready(
+        proposal.proposal_id,
+        (
+            DreamProposalItemDraft(
+                action=DreamProposalAction.ADD,
+                target_memory_id=None,
+                fact=DreamFact(
+                    text="守卫把铜钥匙交给阿澈。",
+                    memory_kind="clue",
+                    epistemic_status="confirmed",
+                    salience=0.8,
+                ),
+                evidence=(
+                    next(
+                        message.evidence
+                        for message in snapshot.messages
+                        if message.message_id == assistant.id
+                    ),
+                ),
+                reason="关键线索。",
+            ),
+        ),
+    )
+
+    original_build = repository.build_source_snapshot
+    apply_snapshot_calls = 0
+
+    def build_with_concurrent_source_change(session_id: str):  # noqa: ANN202
+        nonlocal apply_snapshot_calls
+        apply_snapshot_calls += 1
+        if apply_snapshot_calls == 2:
+            write_summary("阿澈抵达港口并取得一把已生锈的铜钥匙。")
+        return original_build(session_id)
+
+    monkeypatch.setattr(
+        repository,
+        "build_source_snapshot",
+        build_with_concurrent_source_change,
+    )
+    with pytest.raises(
+        DreamProposalStaleError,
+        match="sources changed during proposal apply",
+    ):
+        repository.apply_proposal(session.id, proposal.proposal_id)
+
+    stored = repository.get_proposal(session.id, proposal.proposal_id)
+    assert stored is not None
+    assert stored.status == "stale"
+    assert repository.list_memories(session.id).active_count == 0
+    assert apply_snapshot_calls == 2
 
     gateway.close()
     reset_data_service_gateways()
@@ -255,6 +368,29 @@ def test_repository_preserves_valid_evidence_without_rebinding_replacement(
     )
     assert selection.source_story_memory_ids == (story_memory.id,)
     assert selection.batches
+    proposal = repository.create_proposal(selection)
+    repository.set_proposal_ready(
+        proposal.proposal_id,
+        (
+            DreamProposalItemDraft(
+                action=DreamProposalAction.ADD,
+                target_memory_id=None,
+                fact=DreamFact(
+                    text="守卫交出的旧钥匙仍由阿澈持有。",
+                    memory_kind="clue",
+                    epistemic_status="confirmed",
+                    salience=0.7,
+                ),
+                evidence=(
+                    next(
+                        message.evidence
+                        for message in after.messages
+                        if message.message_id == assistant.id
+                    ),
+                ),
+            ),
+        ),
+    )
 
     refreshed_story_memory = gateway.story_memory.add_details_and_mark_processed(
         session.id,
@@ -270,6 +406,8 @@ def test_repository_preserves_valid_evidence_without_rebinding_replacement(
     assert refreshed_story_memory.id == story_memory.id
     assert refreshed_story_memory.version == story_memory.version + 1
     assert refreshed_source.evidence_message_ids == (replacement.id, assistant.id)
+    with pytest.raises(DreamProposalStaleError):
+        repository.apply_proposal(session.id, proposal.proposal_id)
 
     gateway.close()
     reset_data_service_gateways()

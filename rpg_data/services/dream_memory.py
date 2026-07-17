@@ -26,6 +26,7 @@ from rpg_data.repositories.records import (
     SessionStoryMemoryRecord,
     bind_database,
 )
+from rpg_data.services.dream_source_identity import story_memory_source_identity
 
 __all__ = [
     "DreamActiveMemoryLimitError",
@@ -1412,15 +1413,22 @@ class DreamMemoryService:
             return False
         if not isinstance(manifest, dict):
             return False
+        message_rows = list(
+            SessionMessageRecord.select()
+            .where(SessionMessageRecord.session == proposal.session_id)
+        )
+        messages_by_id = {
+            int(row.id): to_session_message(row) for row in message_rows
+        }
         for row in rows:
             entry = manifest.get(str(row.id))
             if not isinstance(entry, dict):
                 return False
             expected = str(entry.get("fingerprint") or "")
-            actual = (
-                f"{int(row.version)}:{_content_hash(str(row.text or ''))}:"
-                f"{int(row.source_turn_start)}:{int(row.source_turn_end)}"
-            )
+            actual = story_memory_source_identity(
+                to_session_story_memory(row),
+                messages_by_id,
+            ).fingerprint
             if expected != actual:
                 return False
         return True

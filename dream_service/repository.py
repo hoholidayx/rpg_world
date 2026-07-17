@@ -11,6 +11,11 @@ from typing import Mapping
 import yaml
 
 from rpg_data import models
+from rpg_data.services.dream_memory import (
+    DreamEvidenceInvalidError,
+    DreamProposalStaleError,
+)
+from rpg_data.services.dream_source_identity import story_memory_source_identity
 from rpg_data.services.gateway import DataServiceGateway, get_data_service_gateway
 from rpg_data.services.session_role import SessionPlayerCharacterState
 
@@ -44,6 +49,10 @@ from rp_memory.dream.types import (
 _FRONT_MATTER = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|\Z)", re.DOTALL)
 
 
+class _SourceChangedDuringApply(RuntimeError):
+    pass
+
+
 class RPGDataDreamRepository(DreamRepository):
     """Translate only through public rpg_data models and service methods."""
 
@@ -55,7 +64,7 @@ class RPGDataDreamRepository(DreamRepository):
         messages = tuple(_message_source(item) for item in source.messages)
         source_message_by_id = {item.id: item for item in source.messages}
         messages_by_turn: dict[int, tuple[int, ...]] = {}
-        eligible_messages_by_id: dict[int, DreamMessageSource] = {}
+        eligible_messages_by_id: dict[int, models.SessionMessage] = {}
         summary_message_ids: dict[int, tuple[int, ...]] = {}
         summary_turn_ranges: dict[int, tuple[int, int]] = {}
         for message in messages:
@@ -68,8 +77,8 @@ class RPGDataDreamRepository(DreamRepository):
                 *messages_by_turn.get(message.turn_id, ()),
                 message.message_id,
             )
-            eligible_messages_by_id[message.message_id] = message
             source_message = source_message_by_id[message.message_id]
+            eligible_messages_by_id[message.message_id] = source_message
             if (
                 not source_message.summary_processed
                 or source_message.summary_batch_id is None
@@ -247,13 +256,52 @@ class RPGDataDreamRepository(DreamRepository):
         session_id: str,
         proposal_id: str,
     ) -> DreamProposalView:
-        self._require_proposal(session_id, proposal_id)
-        current = self.build_source_snapshot(session_id)
-        result = self.gateway.dream.apply_proposal(
-            proposal_id,
-            history_fingerprint=current.history_fingerprint,
-            source_fingerprint=current.source_fingerprint,
-        )
+        deferred_error: DreamProposalStaleError | DreamEvidenceInvalidError | None = None
+        try:
+            with self.gateway.database.atomic("IMMEDIATE"):
+                self._require_proposal(session_id, proposal_id)
+                current = self.build_source_snapshot(session_id)
+                try:
+                    result = self.gateway.dream.apply_proposal(
+                        proposal_id,
+                        history_fingerprint=current.history_fingerprint,
+                        source_fingerprint=current.source_fingerprint,
+                    )
+                except (DreamProposalStaleError, DreamEvidenceInvalidError) as exc:
+                    # rpg_data records the terminal stale state before raising.
+                    # Keep that nested transaction committed by deferring the
+                    # public exception until the outer IMMEDIATE transaction ends.
+                    deferred_error = exc
+                    result = None
+                if deferred_error is None:
+                    confirmed = self.build_source_snapshot(session_id)
+                    if (
+                        confirmed.history_fingerprint != current.history_fingerprint
+                        or confirmed.source_fingerprint != current.source_fingerprint
+                    ):
+                        raise _SourceChangedDuringApply
+        except _SourceChangedDuringApply:
+            # The successful nested Apply was rolled back with the outer
+            # transaction. Re-enter the public data boundary with a deliberately
+            # stale history fingerprint so the proposal itself becomes stale.
+            try:
+                forced_stale_history = (
+                    ("0" if current.history_fingerprint[0] != "0" else "1")
+                    + current.history_fingerprint[1:]
+                )
+                self.gateway.dream.apply_proposal(
+                    proposal_id,
+                    history_fingerprint=forced_stale_history,
+                    source_fingerprint=current.source_fingerprint,
+                )
+            except DreamProposalStaleError:
+                pass
+            raise DreamProposalStaleError(
+                "Dream sources changed during proposal apply"
+            ) from None
+        if deferred_error is not None:
+            raise deferred_error
+        assert result is not None
         return _proposal_view(result.proposal)
 
     def list_memories(
@@ -317,8 +365,9 @@ def _message_source(message: models.SessionMessage) -> DreamMessageSource:
 
 def _story_memory_source(
     memory: models.SessionStoryMemory,
-    messages_by_id: Mapping[int, DreamMessageSource],
+    messages_by_id: Mapping[int, models.SessionMessage],
 ) -> DreamDerivedSource:
+    identity = story_memory_source_identity(memory, messages_by_id)
     return DreamDerivedSource(
         source_id=str(memory.id),
         kind=DreamSourceKind.STORY_MEMORY,
@@ -327,60 +376,7 @@ def _story_memory_source(
         content_hash=_content_hash(memory.text),
         source_turn_start=memory.source_turn_start,
         source_turn_end=memory.source_turn_end,
-        evidence_message_ids=_story_memory_evidence_ids(
-            memory,
-            messages_by_id,
-        ),
-    )
-
-
-def _story_memory_evidence_ids(
-    memory: models.SessionStoryMemory,
-    messages_by_id: Mapping[int, DreamMessageSource],
-) -> tuple[int, ...]:
-    try:
-        payload = json.loads(memory.source_messages_manifest_json or "[]")
-    except json.JSONDecodeError:
-        return ()
-    if not isinstance(payload, list) or not payload:
-        return ()
-    result: list[int] = []
-    seen_message_ids: set[int] = set()
-    for item in payload:
-        if not isinstance(item, dict):
-            return ()
-        message_id = _optional_positive_int(item.get("messageId"))
-        turn_id = _optional_positive_int(item.get("turnId"))
-        version = _optional_positive_int(item.get("messageVersion"))
-        content_hash = str(item.get("contentHash", "") or "").strip().lower()
-        if (
-            message_id is None
-            or turn_id is None
-            or version is None
-            or not re.fullmatch(r"[0-9a-f]{64}", content_hash)
-            or message_id in seen_message_ids
-        ):
-            return ()
-        seen_message_ids.add(message_id)
-        current = messages_by_id.get(message_id)
-        if (
-            current is None
-            or current.turn_id != turn_id
-            or current.version != version
-            or current.content_hash != content_hash
-            or not memory.source_turn_start <= turn_id <= memory.source_turn_end
-        ):
-            continue
-        result.append(message_id)
-    return tuple(
-        sorted(
-            result,
-            key=lambda message_id: (
-                messages_by_id[message_id].turn_id,
-                messages_by_id[message_id].seq_in_turn,
-                message_id,
-            ),
-        )
+        evidence_message_ids=identity.evidence_message_ids,
     )
 
 
