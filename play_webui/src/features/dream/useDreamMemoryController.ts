@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   applyDreamProposal,
@@ -16,6 +16,7 @@ import { getSession, getSessionHistory } from '@/lib/api/sessions'
 import type {
   DreamDepth,
   DreamMemoryLifecycle,
+  DreamMemoryList,
   DreamProposal,
   DreamProposalList,
   DreamProposalItemPatch,
@@ -26,8 +27,20 @@ function proposalKey(sessionId: string, proposalId: string) {
   return ['play-session-dream-proposal', sessionId, proposalId] as const
 }
 
+function proposalKeyPrefix(sessionId: string) {
+  return ['play-session-dream-proposal', sessionId] as const
+}
+
 function proposalListKey(sessionId: string) {
   return ['play-session-dream-proposals', sessionId] as const
+}
+
+function memoryListKey(sessionId: string) {
+  return ['play-session-dream-memories', sessionId] as const
+}
+
+function evidenceHistoryKey(sessionId: string) {
+  return ['play-session-dream-evidence-history', sessionId] as const
 }
 
 function operationErrorMessage(error: unknown) {
@@ -44,6 +57,7 @@ export function useDreamMemoryController(sessionId: string) {
   const [lifecycle, setLifecycle] = useState<DreamMemoryLifecycle>('active')
   const [notice, setNotice] = useState('')
   const [operationError, setOperationError] = useState('')
+  const refreshGenerationRef = useRef(0)
 
   useEffect(() => {
     const candidate = new URLSearchParams(window.location.search).get('proposalId')?.trim() ?? ''
@@ -57,7 +71,7 @@ export function useDreamMemoryController(sessionId: string) {
     retry: false,
   })
   const memoriesQuery = useQuery({
-    queryKey: ['play-session-dream-memories', sessionId],
+    queryKey: memoryListKey(sessionId),
     queryFn: () => listDreamMemories(sessionId),
     retry: false,
     refetchOnWindowFocus: false,
@@ -80,7 +94,7 @@ export function useDreamMemoryController(sessionId: string) {
     refetchOnReconnect: false,
   })
   const evidenceHistoryQuery = useQuery({
-    queryKey: ['play-session-dream-evidence-history', sessionId],
+    queryKey: evidenceHistoryKey(sessionId),
     queryFn: () => getSessionHistory(sessionId),
     enabled: false,
     retry: false,
@@ -183,17 +197,59 @@ export function useDreamMemoryController(sessionId: string) {
     await Promise.all(tasks)
   }, [proposalId, queryClient, sessionId])
 
+  const cancelDreamQueries = useCallback(async () => {
+    refreshGenerationRef.current += 1
+    await Promise.all([
+      queryClient.cancelQueries({
+        queryKey: proposalKeyPrefix(sessionId),
+      }),
+      queryClient.cancelQueries({
+        queryKey: proposalListKey(sessionId),
+        exact: true,
+      }),
+      queryClient.cancelQueries({
+        queryKey: memoryListKey(sessionId),
+        exact: true,
+      }),
+      queryClient.cancelQueries({
+        queryKey: evidenceHistoryKey(sessionId),
+        exact: true,
+      }),
+    ])
+  }, [queryClient, sessionId])
+
+  const prepareMutation = useCallback(async () => {
+    setOperationError('')
+    setNotice('')
+    await cancelDreamQueries()
+  }, [cancelDreamQueries])
+
+  const refetchMemoryList = useCallback(async () => {
+    await queryClient.refetchQueries({
+      queryKey: memoryListKey(sessionId),
+      exact: true,
+      type: 'active',
+    }, {
+      throwOnError: true,
+    })
+    return queryClient.getQueryData<DreamMemoryList>(memoryListKey(sessionId))
+  }, [queryClient, sessionId])
+
   const createMutation = useMutation({
-    mutationFn: () => createDreamProposal(sessionId, { depth, scope }),
-    onMutate: () => {
-      setOperationError('')
-      setNotice('')
-    },
-    onSuccess: (proposal) => {
+    mutationFn: (recoverProposalId: string | undefined) => createDreamProposal(
+      sessionId,
+      { depth, scope, recoverProposalId },
+    ),
+    onMutate: prepareMutation,
+    onSuccess: (proposal, recoverProposalId) => {
       setOperationError('')
       updateProposalList(proposal, true)
       selectProposal(proposal.proposalId, proposal)
-      setNotice('Dream 已提交。生成期间不会自动轮询，请稍后手动刷新状态。')
+      if (recoverProposalId && proposal.proposalId === recoverProposalId) {
+        setNotice('Dream 状态已刷新，未重复创建生成任务。')
+      } else {
+        setNotice('Dream 已提交。生成期间不会自动轮询，请稍后手动刷新状态。')
+      }
     },
     onError: async (error) => {
       setOperationError(operationErrorMessage(error))
@@ -205,10 +261,7 @@ export function useDreamMemoryController(sessionId: string) {
       if (!proposalId) throw new Error('尚未选择 Dream proposal')
       return patchDreamProposal(sessionId, proposalId, { items: draftItems })
     },
-    onMutate: () => {
-      setOperationError('')
-      setNotice('')
-    },
+    onMutate: prepareMutation,
     onSuccess: (proposal) => {
       setOperationError('')
       queryClient.setQueryData(proposalKey(sessionId, proposal.proposalId), proposal)
@@ -228,25 +281,26 @@ export function useDreamMemoryController(sessionId: string) {
       }
       return applyDreamProposal(sessionId, proposalId)
     },
-    onMutate: () => {
-      setOperationError('')
-      setNotice('')
-    },
-    onSuccess: (proposal) => {
+    onMutate: prepareMutation,
+    onSuccess: async (proposal) => {
       setOperationError('')
       queryClient.setQueryData(proposalKey(sessionId, proposal.proposalId), proposal)
       updateProposalList(proposal)
       void queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] })
       setNotice('Dream 已应用，正在刷新持久记忆账本。')
-      void listDreamMemories(sessionId).then((memories) => {
-        queryClient.setQueryData(['play-session-dream-memories', sessionId], memories)
-        setNotice(`Dream 已应用，当前共有 ${memories.activeCount} 条生效记忆。`)
-      }).catch(() => {
+      try {
+        const memories = await refetchMemoryList()
+        setNotice(memories
+          ? `Dream 已应用，当前共有 ${memories.activeCount} 条生效记忆。`
+          : 'Dream 已应用，持久记忆账本已刷新。')
+      } catch {
         void queryClient.invalidateQueries({
-          queryKey: ['play-session-dream-memories', sessionId],
+          queryKey: memoryListKey(sessionId),
+          exact: true,
+          refetchType: 'none',
         })
         setNotice('Dream 已成功应用，但账本刷新失败；请稍后手动刷新。')
-      })
+      }
     },
     onError: async (error) => {
       setOperationError(operationErrorMessage(error))
@@ -258,10 +312,7 @@ export function useDreamMemoryController(sessionId: string) {
       if (!proposalId) throw new Error('尚未选择 Dream proposal')
       return rejectDreamProposal(sessionId, proposalId)
     },
-    onMutate: () => {
-      setOperationError('')
-      setNotice('')
-    },
+    onMutate: prepareMutation,
     onSuccess: (proposal) => {
       setOperationError('')
       queryClient.setQueryData(proposalKey(sessionId, proposal.proposalId), proposal)
@@ -275,16 +326,23 @@ export function useDreamMemoryController(sessionId: string) {
   })
   const restoreMutation = useMutation({
     mutationFn: (memoryId: string) => restoreDreamMemory(sessionId, memoryId),
-    onMutate: () => {
+    onMutate: prepareMutation,
+    onSuccess: async () => {
       setOperationError('')
-      setNotice('')
-    },
-    onSuccess: () => {
-      setOperationError('')
-      void memoriesQuery.refetch()
       void queryClient.invalidateQueries({ queryKey: ['play-session-context-preview', sessionId] })
       setLifecycle('active')
-      setNotice('记忆已恢复并重新进入主 Agent Context。')
+      setNotice('记忆已恢复，正在刷新持久记忆账本。')
+      try {
+        await refetchMemoryList()
+        setNotice('记忆已恢复并重新进入主 Agent Context。')
+      } catch {
+        void queryClient.invalidateQueries({
+          queryKey: memoryListKey(sessionId),
+          exact: true,
+          refetchType: 'none',
+        })
+        setNotice('记忆已恢复，但账本刷新失败；请稍后手动刷新。')
+      }
     },
     onError: async (error) => {
       setOperationError(operationErrorMessage(error))
@@ -302,6 +360,8 @@ export function useDreamMemoryController(sessionId: string) {
   }, [])
 
   const refresh = useCallback(async () => {
+    const refreshGeneration = refreshGenerationRef.current + 1
+    refreshGenerationRef.current = refreshGeneration
     setOperationError('')
     setNotice('')
     const tasks: Promise<unknown>[] = [memoriesQuery.refetch(), proposalsQuery.refetch()]
@@ -310,7 +370,9 @@ export function useDreamMemoryController(sessionId: string) {
       tasks.push(evidenceHistoryQuery.refetch())
     }
     await Promise.all(tasks)
-    setNotice('状态已刷新。')
+    if (refreshGenerationRef.current === refreshGeneration) {
+      setNotice('状态已刷新。')
+    }
   }, [evidenceHistoryQuery, memoriesQuery, proposalId, proposalQuery, proposalsQuery])
 
   const proposal = proposalQuery.data ?? null
@@ -365,7 +427,9 @@ export function useDreamMemoryController(sessionId: string) {
       || applyMutation.isPending
       || rejectMutation.isPending
       || restoreMutation.isPending,
-    createProposal: createMutation.mutate,
+    createProposal: (recoverProposalId?: string) => {
+      createMutation.mutate(recoverProposalId)
+    },
     saveProposal: saveMutation.mutate,
     applyProposal: applyMutation.mutate,
     rejectProposal: rejectMutation.mutate,

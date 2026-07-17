@@ -6,7 +6,13 @@ export function DreamRunPanel({ controller }: { controller: DreamMemoryControlle
   const { proposal } = controller
   const proposals = controller.proposalsQuery.data?.items ?? []
   const currentGenerating = proposal?.status === 'generating'
-  const generating = proposals.some((item) => item.status === 'generating') || currentGenerating
+  const generatingProposal = currentGenerating
+    ? proposal
+    : proposals.find((item) => item.status === 'generating')
+  const generating = Boolean(generatingProposal)
+  const displayedDepth = generatingProposal?.depth ?? controller.depth
+  const displayedScope = generatingProposal?.scope ?? controller.scope
+  const busy = controller.mutating || controller.refreshing
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
@@ -37,9 +43,9 @@ export function DreamRunPanel({ controller }: { controller: DreamMemoryControlle
           <span className="relative">
             <Brain className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-violet-500" size={16} />
             <select
-              value={controller.depth}
+              value={displayedDepth}
               onChange={(event) => controller.setDepth(event.target.value as typeof controller.depth)}
-              disabled={controller.mutating || generating}
+              disabled={busy || generating}
               className="h-11 w-full appearance-none rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-bold text-slate-800 outline-none transition focus:border-violet-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="shallow">浅睡 · 从 summary / story memory 提炼</option>
@@ -52,9 +58,9 @@ export function DreamRunPanel({ controller }: { controller: DreamMemoryControlle
           <span className="relative">
             <Sparkles className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-amber-500" size={16} />
             <select
-              value={controller.scope}
+              value={displayedScope}
               onChange={(event) => controller.setScope(event.target.value as typeof controller.scope)}
-              disabled={controller.mutating || generating}
+              disabled={busy || generating}
               className="h-11 w-full appearance-none rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-bold text-slate-800 outline-none transition focus:border-violet-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="incremental">增量 · 只处理新变化</option>
@@ -64,18 +70,24 @@ export function DreamRunPanel({ controller }: { controller: DreamMemoryControlle
         </label>
         <button
           type="button"
-          onClick={() => controller.createProposal()}
-          disabled={controller.mutating || generating}
+          onClick={() => controller.createProposal(generatingProposal?.proposalId)}
+          disabled={busy}
           className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none dark:shadow-violet-950/40 dark:disabled:bg-slate-700"
         >
           {controller.mutating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-          生成提案
+          {generating ? '检查并重试' : '生成提案'}
         </button>
       </div>
 
-      {controller.depth === 'deep' && controller.scope === 'full' ? (
+      {displayedDepth === 'deep' && displayedScope === 'full' ? (
         <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           深睡全量会扫描当前完整主历史，耗时与模型用量最高；它也是唯一可以根据“全历史已无证据”建议全局退休记忆的模式。
+        </p>
+      ) : null}
+
+      {generating ? (
+        <p className="mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold leading-6 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200">
+          账本显示有提案正在生成。可先手动刷新；若状态长时间未变，点击“检查并重试”会先核对服务端状态。仅当原 proposal 仍是孤儿 generating 时才按原条件重建；已终态只刷新页面，真实运行中则返回冲突。
         </p>
       ) : null}
 
@@ -84,7 +96,7 @@ export function DreamRunPanel({ controller }: { controller: DreamMemoryControlle
           <span className="inline-flex items-center gap-1.5"><History size={14} />当前 / 历史提案</span>
           <select
             value={controller.proposalId}
-            disabled={!proposals.length || controller.mutating}
+            disabled={!proposals.length || busy}
             onChange={(event) => {
               const selected = proposals.find((item) => item.proposalId === event.target.value)
               controller.selectProposal(event.target.value, selected)

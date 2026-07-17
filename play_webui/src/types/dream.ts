@@ -80,6 +80,7 @@ export type DreamProposalList = {
 export type DreamProposalCreateInput = {
   depth: DreamDepth
   scope: DreamScope
+  recoverProposalId?: string
 }
 
 export type DreamProposalItemPatch = {

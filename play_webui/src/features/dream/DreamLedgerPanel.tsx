@@ -60,7 +60,7 @@ function MemoryCard({ memory, controller }: { memory: DreamMemory; controller: D
             <button
               type="button"
               onClick={() => controller.restoreMemory(memory.memoryId)}
-              disabled={!memory.evidenceValid || controller.mutating}
+              disabled={!memory.evidenceValid || controller.mutating || controller.refreshing}
               title={memory.evidenceValid ? '恢复为生效记忆' : '证据已失效，不能恢复'}
               className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-2.5 py-1.5 text-xs font-black text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
             >

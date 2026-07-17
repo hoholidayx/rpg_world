@@ -31,7 +31,9 @@ function ProposalItemEditor({
 }) {
   const draft = controller.draftItems.find((candidate) => candidate.itemId === item.itemId)
   if (!draft) return null
-  const selectable = controller.proposal?.status === 'ready' && !controller.mutating
+  const selectable = controller.proposal?.status === 'ready'
+    && !controller.mutating
+    && !controller.refreshing
   const factEditable = selectable && item.action !== 'retire'
   const targetMemory = controller.memoriesQuery.data?.items.find(
     (memory) => memory.memoryId === item.targetMemoryId,
@@ -137,7 +139,8 @@ function ProposalItemEditor({
           <button
             type="button"
             onClick={() => void controller.loadEvidenceHistory()}
-            className="rounded-full border border-slate-200 bg-white px-2 py-1 text-violet-700 transition hover:border-violet-300 dark:border-slate-700 dark:bg-slate-950 dark:text-violet-200"
+            disabled={controller.refreshing || controller.mutating}
+            className="rounded-full border border-slate-200 bg-white px-2 py-1 text-violet-700 transition hover:border-violet-300 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-violet-200"
           >
             查看当前消息定位
           </button>
@@ -238,7 +241,7 @@ export function DreamProposalPanel({ controller }: { controller: DreamMemoryCont
                 <button
                   type="button"
                   onClick={() => controller.rejectProposal()}
-                  disabled={controller.mutating}
+                  disabled={controller.mutating || controller.refreshing}
                   className="inline-flex h-10 items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-sm font-black text-rose-700 transition hover:bg-rose-50 disabled:opacity-50 dark:border-rose-500/30 dark:bg-slate-950 dark:text-rose-200"
                 >
                   <XCircle size={15} />拒绝整份
@@ -246,7 +249,7 @@ export function DreamProposalPanel({ controller }: { controller: DreamMemoryCont
                 <button
                   type="button"
                   onClick={() => controller.saveProposal()}
-                  disabled={controller.mutating}
+                  disabled={controller.mutating || controller.refreshing}
                   className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:text-violet-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                 >
                   <Save size={15} />保存编辑
@@ -254,7 +257,7 @@ export function DreamProposalPanel({ controller }: { controller: DreamMemoryCont
                 <button
                   type="button"
                   onClick={() => controller.applyProposal()}
-                  disabled={controller.mutating}
+                  disabled={controller.mutating || controller.refreshing}
                   className="inline-flex h-10 items-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-black text-white transition hover:bg-violet-700 disabled:bg-slate-400"
                 >
                   {controller.mutating ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
