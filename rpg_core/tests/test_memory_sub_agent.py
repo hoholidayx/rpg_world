@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import rpg_core.agent.sub_agents.memory_sub_agent as memory_module
+import rpg_core.agent.sub_agents.memory.agent as memory_module
 from rpg_core.agent.agent_types import LLMResponse, LLMUsage
-from rpg_core.agent.sub_agents.memory_sub_agent import (
+from rpg_core.agent.sub_agents.memory.agent import (
     MEMORY_LLM_SOURCE_STORY,
     MemoryAgentResult,
     MemorySubAgent,

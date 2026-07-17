@@ -16,7 +16,9 @@ from rpg_core.agent.runtime.resources import (
     AgentContextResources,
     build_agent_context_resources,
 )
-from rpg_core.agent.sub_agents import MemorySubAgent, StatusSubAgent, SubAgentContext
+from rpg_core.agent.sub_agents.context import SubAgentContext
+from rpg_core.agent.sub_agents.memory.agent import MemorySubAgent
+from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
 from rpg_core.session import SessionManager
 from rpg_core.settings import settings
 from rpg_core.summary.compressor import SummaryCompressor

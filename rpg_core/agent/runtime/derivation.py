@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from rpg_core.agent.sub_agents.status_bootstrap import StatusBootstrapCoordinator
+from rpg_core.agent.sub_agents.status.bootstrap import StatusBootstrapCoordinator
 from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
 from rpg_core.settings import settings
 

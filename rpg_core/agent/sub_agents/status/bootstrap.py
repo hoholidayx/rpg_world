@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from rpg_data import models
 from rpg_core.agent.telemetry import TurnStats
-from rpg_core.agent.sub_agents.status_sub_agent_models import StatusBootstrapResult
+from rpg_core.agent.sub_agents.status.models import StatusBootstrapResult
 from rpg_core.agent.turn.transaction.status_scratch import (
     ScratchStatusManager,
     StatusDocumentScratch,
@@ -18,7 +18,7 @@ from rpg_core.settings import settings
 from rpg_core.status.tools import StatusTableSetValuesTool, StatusWritePolicy
 
 if TYPE_CHECKING:
-    from rpg_core.agent.sub_agents.status_sub_agent import StatusSubAgent
+    from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
     from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
     from rpg_core.context.rpg_context import Message
     from rpg_core.status.manager import StatusManager

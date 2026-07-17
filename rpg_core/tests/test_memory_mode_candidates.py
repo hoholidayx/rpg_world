@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rpg_core.agent.sub_agents.memory_candidates import (
+from rpg_core.agent.sub_agents.memory.candidates import (
     select_story_memory_turn_groups,
     select_summary_turn_groups,
 )

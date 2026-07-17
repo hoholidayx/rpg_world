@@ -10,7 +10,7 @@ from rpg_core.agent.turn.models import TurnExecutionPlan
 if TYPE_CHECKING:
     from llm_client.types import LLMProvider
     from rpg_core.agent.telemetry import TurnStats
-    from rpg_core.agent.sub_agents import (
+    from rpg_core.agent.sub_agents.status.models import (
         StatusSubAgentPreflightOutcome,
         StatusSubAgentResult,
     )

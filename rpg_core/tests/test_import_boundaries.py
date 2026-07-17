@@ -121,7 +121,7 @@ def test_rpg_core_runtime_keeps_business_data_out_of_direct_files() -> None:
         "rpg_core/settings.py",
         "rpg_core/context/builder.py",
         "rpg_core/context/factory.py",
-        "rpg_core/agent/sub_agents/memory_sub_agent.py",
+        "rpg_core/agent/sub_agents/memory/agent.py",
         "rpg_core/agent/tools/file_tools.py",
     }
     allowed_prefixes = (

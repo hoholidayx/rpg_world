@@ -39,8 +39,8 @@ def _patch_loaded_settings_refs(integration_settings) -> dict[str, object]:
         "rpg_core.agent.agent",
         "rpg_core.agent.turn.runner",
         "rpg_core.agent.manager",
-        "rpg_core.agent.sub_agents.status_sub_agent",
-        "rpg_core.agent.sub_agents.memory_sub_agent",
+        "rpg_core.agent.sub_agents.status.agent",
+        "rpg_core.agent.sub_agents.memory.agent",
         "rpg_core.summary.compressor",
         "rpg_core.session.manager",
     )

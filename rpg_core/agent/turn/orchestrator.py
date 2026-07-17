@@ -11,7 +11,7 @@ from loguru import logger
 
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.telemetry import TurnStats
-from rpg_core.agent.sub_agents import StatusSubAgentPreflightOutcome
+from rpg_core.agent.sub_agents.status.models import StatusSubAgentPreflightOutcome
 from rpg_core.agent.turn.models import TurnRequest, TurnResult
 from rpg_core.agent.turn.resolver import PlayerCharacterRequiredError
 from rpg_core.context.usage import aggregate_usage_records

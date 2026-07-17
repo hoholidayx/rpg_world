@@ -25,8 +25,6 @@ Usage::
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -35,6 +33,19 @@ from llm_client.types import LLMResponse, LLMUsage
 from rpg_core.agent.telemetry import CallRecord
 from rpg_core.agent.command.models import CommandDef
 from rpg_core.agent.sub_agents.base import BaseSubAgent
+from rpg_core.agent.sub_agents.memory.models import (
+    MemoryAgentResult,
+    MemoryPipelineError,
+    StoryMemoryExtractionResult,
+    StoryMemoryExtractionStatus,
+)
+from rpg_core.agent.sub_agents.memory.parsing import (
+    build_call_stats as _build_call_stats,
+    build_call_stats_from_records as _build_call_stats_from_records,
+    format_store_items as _format_store_items,
+    normalize_story_detail as _normalize_story_detail,
+    parse_int_arg as _parse_int_arg,
+)
 from rpg_core.session.grouping import (
     MemoryTurnInputTooLargeError,
     batch_memory_turn_groups,
@@ -75,9 +86,6 @@ MEMORY_LLM_SOURCE_OVERALL_SUMMARY = "memory_overall_summary"
 STORY_MEMORY_DEDUPE_MAX_ITEMS = 64
 STORY_MEMORY_DEDUPE_MAX_ITEM_CHARS = 500
 
-
-class MemoryPipelineError(RuntimeError):
-    """Raised when an LLM or persistence failure must keep progress retryable."""
 
 # ── function schemas (one per pipeline) ───────────────────────────────
 
@@ -291,50 +299,6 @@ OVERALL_PROMPT = """\
 
 调用 `generate_overall_summary` 并填入摘要文本和关键事件。
 """
-
-
-# ── result ────────────────────────────────────────────────────────────
-
-
-@dataclass
-class MemoryAgentResult:
-    """Result returned by :meth:`MemorySubAgent.process`."""
-
-    story_details_added: int = 0
-    summary_generated: bool = False
-    skipped: bool = False
-    call_stats: list[CallRecord] = field(default_factory=list)
-    """此过程涉及的 LLM 调用记录（usage / timing）。"""
-
-
-class StoryMemoryExtractionStatus(str, Enum):
-    """Terminal state of a pending story-memory extraction run."""
-
-    SUCCEEDED = "succeeded"
-    SKIPPED = "skipped"
-    FAILED = "failed"
-
-
-@dataclass(frozen=True)
-class StoryMemoryExtractionResult:
-    """Typed result shared by command, post-commit and derivation callers."""
-
-    status: StoryMemoryExtractionStatus
-    pending_turns: int = 0
-    completed_turns: int = 0
-    completed_batches: int = 0
-    story_details_added: int = 0
-    call_stats: tuple[CallRecord, ...] = ()
-    error_code: str | None = None
-    error_message: str | None = None
-
-    @property
-    def succeeded(self) -> bool:
-        return self.status is StoryMemoryExtractionStatus.SUCCEEDED
-
-    @property
-    def failed(self) -> bool:
-        return self.status is StoryMemoryExtractionStatus.FAILED
 
 
 # ── sub-agent ─────────────────────────────────────────────────────────
@@ -1269,92 +1233,3 @@ class MemorySubAgent(BaseSubAgent):
             lines.append(f"{label}: {content}")
 
         return "\n\n".join(lines) if lines else "(no conversation content)"
-
-
-# ── helpers ───────────────────────────────────────────────────────────
-
-
-def _normalize_story_detail(raw: object) -> dict[str, object]:
-    """Normalize legacy string responses and keep sparse RP fields in metadata."""
-    if isinstance(raw, str):
-        return {
-            "text": raw,
-            "memory_kind": "event",
-            "epistemic_status": "confirmed",
-            "salience": 0.5,
-            "metadata": {},
-        }
-    if not isinstance(raw, dict):
-        raise MemoryPipelineError("each story memory detail must be an object")
-    text = " ".join(str(raw.get("text", "") or "").split())
-    if not text:
-        raise MemoryPipelineError("story memory detail text must not be empty")
-    metadata: dict[str, object] = {}
-    for key in ("entities", "story_time", "location"):
-        value = raw.get(key)
-        if value not in (None, "", []):
-            metadata[key] = value
-    return {
-        "text": text,
-        "memory_kind": str(raw.get("memory_kind", "event") or "event"),
-        "epistemic_status": str(raw.get("epistemic_status", "confirmed") or "confirmed"),
-        "salience": raw.get("salience", 0.5),
-        "metadata": metadata,
-    }
-
-
-def _build_call_stats(result: MemoryAgentResult) -> dict[str, float | str | int] | None:
-    """从 ``MemoryAgentResult`` 提取 LLM 调用统计 dict。"""
-    return _build_call_stats_from_records(tuple(result.call_stats))
-
-
-def _build_call_stats_from_records(
-    records: tuple[CallRecord, ...],
-) -> dict[str, float | str | int] | None:
-    """Build the command-facing compact stats projection."""
-    if not records:
-        return None
-    cr = records[0]
-    return {
-        "total_duration_ms": cr.duration_ms,
-        "model": cr.model,
-        "prompt_tokens": cr.usage.prompt_tokens if cr.usage else 0,
-        "completion_tokens": cr.usage.completion_tokens if cr.usage else 0,
-        "total_tokens": cr.usage.total_tokens if cr.usage else 0,
-        "cached_tokens": cr.usage.cached_tokens if cr.usage else 0,
-    }
-
-
-def _parse_int_arg(args: list[str], index: int) -> tuple[int | None, str | None]:
-    """从命令参数列表中安全解析 ``int`` 值。
-
-    Returns:
-        ``(value, error)`` — 成功时 error 为 ``None``，失败时 value 为 ``None``。
-    """
-    if index >= len(args):
-        return None, None  # 参数不存在不算错误
-    try:
-        return int(args[index]), None
-    except ValueError:
-        return None, args[index]
-
-
-def _format_store_items(
-    items: list[dict],
-    *,
-    key: type = str,
-    max_items: int | None = None,
-    max_item_chars: int | None = None,
-) -> str:
-    """Format store items as a bullet list string."""
-    if max_items is not None:
-        items = items[-max_items:]
-    if not items:
-        return "(empty)"
-    rendered: list[str] = []
-    for item in items:
-        value = str(key(item))
-        if max_item_chars is not None:
-            value = value[:max_item_chars]
-        rendered.append(f"- {value}")
-    return "\n".join(rendered)

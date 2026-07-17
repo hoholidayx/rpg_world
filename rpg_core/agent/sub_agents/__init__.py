@@ -8,18 +8,18 @@
 
 from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.agent.sub_agents.context import SubAgentContext
-from rpg_core.agent.sub_agents.memory_sub_agent import (
+from rpg_core.agent.sub_agents.memory.agent import (
     MemoryAgentResult,
     MemorySubAgent,
     StoryMemoryExtractionResult,
     StoryMemoryExtractionStatus,
 )
-from rpg_core.agent.sub_agents.status_sub_agent import StatusSubAgent
-from rpg_core.agent.sub_agents.status_bootstrap import (
+from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
+from rpg_core.agent.sub_agents.status.bootstrap import (
     StatusBootstrapCoordinator,
     select_status_bootstrap_history,
 )
-from rpg_core.agent.sub_agents.status_sub_agent_models import (
+from rpg_core.agent.sub_agents.status.models import (
     DeferredStatusResult,
     OutcomeDecision,
     StatusBootstrapResult,
