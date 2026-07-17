@@ -9,6 +9,7 @@ import pytest
 import run_all
 import run_agent
 import run_cli
+import run_dream
 import run_llm
 import run_media
 import run_play_api
@@ -27,7 +28,14 @@ def _run_all_spec(*, name: str = "agent", port: int = 8010) -> run_all.ServiceSp
 def test_run_all_uses_distinct_ports_for_every_service():
     specs = run_all._service_specs()
 
-    assert [spec.name for spec in specs] == ["llm", "agent", "media", "tts", "play_api"]
+    assert [spec.name for spec in specs] == [
+        "llm",
+        "agent",
+        "dream",
+        "media",
+        "tts",
+        "play_api",
+    ]
     assert len({spec.listen_address[1] for spec in specs}) == len(specs)
     run_all._validate_service_ports(specs)
 
@@ -199,6 +207,7 @@ def test_run_agent_main_invokes_uvicorn(monkeypatch):
     ("module", "process_name", "app_path"),
     [
         (run_llm, "llm", "llm_service.main:app"),
+        (run_dream, "dream", "dream_service.main:app"),
         (run_media, "media", "media_service.main:app"),
         (run_tts, "tts", "tts_service.main:app"),
     ],

@@ -19,10 +19,11 @@ from threading import Event
 from typing import Any
 
 from agent_service.settings import settings as agent_settings
+from dream_service.settings import settings as dream_settings
 from llm_service.settings import settings as llm_settings
 from media_service.settings import settings as media_settings
-from tts_service.settings import settings as tts_settings
 from play_api.settings import play_settings
+from tts_service.settings import settings as tts_settings
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent
@@ -98,6 +99,16 @@ def _service_specs() -> tuple[ServiceSpec, ...]:
                 agent_settings.service.host,
                 agent_settings.service.port,
                 agent_settings.service.api_prefix,
+            ),
+        ),
+        ServiceSpec(
+            name="dream",
+            module="run_dream",
+            listen_address=(dream_settings.service.host, dream_settings.service.port),
+            health_url=_health_url(
+                dream_settings.service.host,
+                dream_settings.service.port,
+                dream_settings.service.api_prefix,
             ),
         ),
         ServiceSpec(
@@ -529,7 +540,10 @@ def run_stack(*, startup_timeout: float, shutdown_timeout: float) -> int:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Start LLM, Agent, Media and Play API as independent child processes."
+        description=(
+            "Start LLM, Agent, Dream, Media, TTS and Play API as independent "
+            "child processes."
+        )
     )
     parser.add_argument(
         "--startup-timeout",

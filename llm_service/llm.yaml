@@ -120,6 +120,15 @@ base:
       kind: chat
       provider_key: deepseek_v4_flash
 
+    # Dream 记忆服务的浅层派生源归纳与深层主历史校准。
+    dream.shallow:
+      kind: chat
+      provider_key: deepseek_v4_flash
+
+    dream.deep:
+      kind: chat
+      provider_key: deepseek_v4_flash
+
     # Media 服务的离线场景背景匹配 Agent；不跟随主 Agent 的动态选择。
     media.scene_background_match:
       kind: chat

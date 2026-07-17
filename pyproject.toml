@@ -49,6 +49,7 @@ rpg-world-llm = "run_llm:main"
 rpg-world-play-api = "run_play_api:main"
 rpg-world-media = "run_media:main"
 rpg-world-tts = "run_tts:main"
+rpg-world-dream = "run_dream:main"
 rpg-world-up = "run_all:main"
 rpg-world-cli = "run_cli:cli"
 rpg-world-telegram = "run_telegram:cli"
@@ -62,6 +63,7 @@ py-modules = [
     "run_play_api",
     "run_media",
     "run_tts",
+    "run_dream",
     "run_telegram",
 ]
 
@@ -74,6 +76,7 @@ include = [
     "play_api*",
     "media_service*",
     "tts_service*",
+    "dream_service*",
     "rpg_tts*",
     "rpg_core*",
     "rpg_data*",
@@ -95,6 +98,7 @@ rpg_data = ["migrations/*.sql"]
 rpg_media = ["settings.yaml"]
 media_service = ["settings.yaml"]
 tts_service = ["settings.yaml"]
+dream_service = ["settings.yaml"]
 rpg_tts = ["settings.yaml"]
 llm_service = ["settings.yaml", "llm.yaml"]
 
@@ -104,4 +108,5 @@ markers = [
     "integration: backend integration tests gated by INTEGRATION_TEST=1",
     "service_integration: cross-process HTTP integration tests gated by SERVICE_INTEGRATION_TEST=1",
     "live_llm: opt-in real-provider smoke tests gated by LIVE_LLM_TEST=1",
+    "dream_live: opt-in Dream tests using the configured real LLM provider, gated by DREAM_LIVE_TEST=1",
 ]

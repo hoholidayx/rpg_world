@@ -1,0 +1,33 @@
+default_profile: local
+
+base:
+  service:
+    host: 127.0.0.1
+    port: 8014
+    api_prefix: /dream/v1
+    reload: false
+  dream_client:
+    base_url: http://127.0.0.1:8014/dream/v1
+    request_timeout_ms: 60000
+  llm_client:
+    base_url: http://127.0.0.1:8012/llm/v1
+    token_env: RPG_WORLD_LLM_SERVICE_TOKEN
+    request_timeout_ms: 120000
+    stream_timeout_ms: 300000
+  engine:
+    max_map_turns: 12
+    max_map_chars: 24000
+    map_concurrency: 2
+    reduce_candidate_batch_size: 32
+  logging:
+    log_level: DEBUG
+    directory: logs
+    rotation_size_mb: 20
+    retention_count: 10
+    compression: zip
+    console_enabled: true
+
+profiles:
+  local: {}
+  test: {}
+  prod: {}
