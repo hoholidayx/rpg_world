@@ -168,6 +168,7 @@ def render_history_section(suite: SuiteResult, *, local_report_path: Path) -> st
         "",
     ]
     lines.extend(_compact_capability_table(suite))
+    lines.extend(("", "Metrics:", ""))
     lines.extend(_metrics_table(suite.paths))
     lines.extend(_planner_activity(suite.paths))
     gold_issues = _gold_issue_summary(suite.paths)
@@ -221,22 +222,26 @@ def _capability_section(suite: SuiteResult) -> list[str]:
 
 
 def _compact_capability_table(suite: SuiteResult) -> list[str]:
+    matrix = suite.capability_matrix
     lines = [
         "Capability matrix:",
         "",
-        "| Capability | Status | Provider | Backend/model | Dimension |",
-        "|---|---|---|---|---:|",
+        f"Service probe: `{matrix.service_status.value}` — {_cell(matrix.service_reason)}",
+        "",
+        "| Capability | Status | Provider | Backend/model | Dimension | Reason |",
+        "|---|---|---|---|---:|---|",
     ]
-    for probe in suite.capability_matrix.probes:
+    for probe in matrix.probes:
         provider = probe.provider
         lines.append(
-            "| {cap} | `{status}` | `{provider}` | `{backend}` / `{model}` | {dimension} |".format(
+            "| {cap} | `{status}` | `{provider}` | `{backend}` / `{model}` | {dimension} | {reason} |".format(
                 cap=_cell(probe.capability),
                 status=probe.status.value,
                 provider=_cell(provider.provider_key if provider else "-"),
                 backend=_cell(provider.backend if provider else "-"),
                 model=_cell(provider.model if provider else "-"),
                 dimension=provider.dimension if provider and provider.dimension is not None else "-",
+                reason=_cell(probe.reason),
             )
         )
     return lines

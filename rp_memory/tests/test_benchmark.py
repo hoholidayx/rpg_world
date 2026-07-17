@@ -445,6 +445,8 @@ def test_markdown_history_is_append_only_and_deduplicates_run_id(tmp_path) -> No
     assert content.count("<!-- run-id:fixed-run-id -->") == 1
     assert "offline.keyword_rule" in content
     assert "0.500000" in content
+    assert "Service probe: `skipped_disabled` — test" in content
+    assert "\n\nMetrics:\n\n| Path | Status | Dataset" in content
 
 
 def _locomo_source(tmp_path: Path) -> Path:
