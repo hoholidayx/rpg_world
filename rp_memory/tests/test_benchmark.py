@@ -375,6 +375,56 @@ async def test_runtime_embedding_failure_is_recorded_as_degraded_fallback(
     assert by_path["configured.effective"].status is BenchmarkStatus.DEGRADED_RUNTIME_FALLBACK
 
 
+@pytest.mark.asyncio
+async def test_equivalent_local_pipelines_keep_identical_tie_ordering(tmp_path) -> None:
+    dataset_path = tmp_path / "ties.jsonl"
+    dataset_path.write_text(
+        json.dumps({
+            "sample_id": "ties",
+            "documents": [
+                {"id": f"E{index}", "text": "钟楼线索"}
+                for index in range(1, 8)
+            ],
+            "questions": [{
+                "id": "ties:q1",
+                "question": "钟楼线索",
+                "evidence": ["E1"],
+            }],
+        }, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    detected = DetectedCapabilities(
+        matrix=CapabilityMatrix(
+            service_status=BenchmarkStatus.SKIPPED_SERVICE_UNREACHABLE,
+            service_reason="connection refused",
+            probes=(CapabilityProbe(
+                "embedding",
+                BenchmarkStatus.SKIPPED_SERVICE_UNREACHABLE,
+                "connection refused",
+            ),),
+        ),
+        handles={},
+    )
+
+    results = await run_benchmark_paths(
+        (load_jsonl_dataset(dataset_path),),
+        MemorySettings(enabled=True, raw_md_mode="fallback_only"),
+        detected,
+        index_root=tmp_path / "indexes",
+        offline_only=False,
+    )
+    by_path = {result.path_id: result for result in results}
+    local_rankings = by_path["offline.local_fallback"].datasets[0].cases[0].rankings
+    effective_rankings = by_path["configured.effective"].datasets[0].cases[0].rankings
+
+    assert [item.evidence_id for item in local_rankings] == [
+        item.evidence_id for item in effective_rankings
+    ]
+    assert by_path["offline.local_fallback"].datasets[0].metrics == (
+        by_path["configured.effective"].datasets[0].metrics
+    )
+
+
 def test_markdown_history_is_append_only_and_deduplicates_run_id(tmp_path) -> None:
     suite = _successful_suite("fixed-run-id")
     history_path = tmp_path / "history.md"

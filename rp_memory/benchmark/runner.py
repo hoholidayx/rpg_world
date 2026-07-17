@@ -147,6 +147,23 @@ class _TrackingReranker(MemoryReranker):
         return result
 
 
+class _BenchmarkRawMarkdownRetriever(RawMarkdownRetriever):
+    """Align raw-file candidates with path-independent benchmark evidence IDs."""
+
+    async def search_plan_async(
+        self,
+        plan: QueryPlan,
+        top_k: int = 5,
+    ) -> list[MemoryCandidate]:
+        candidates = await super().search_plan_async(plan, top_k=top_k)
+        for candidate in candidates:
+            benchmark_id = candidate.metadata.get("benchmark_memory_id")
+            if benchmark_id is None:
+                raise ValueError("benchmark raw candidate is missing benchmark_memory_id")
+            candidate.memory_id = int(benchmark_id)
+        return candidates
+
+
 def load_jsonl_dataset(path: Path, *, dataset: str = "locomo") -> BenchmarkDataset:
     samples = tuple(
         json.loads(line)
@@ -440,7 +457,7 @@ async def _evaluate_dataset(
             keyword = KeywordRetriever(store, limit=spec.pipeline.keyword_candidate_k)
             raw_retriever = None
             if spec.pipeline.raw_md_mode != "disabled":
-                raw_retriever = RawMarkdownRetriever(
+                raw_retriever = _BenchmarkRawMarkdownRetriever(
                     RawMarkdownGrepSearch(
                         [raw_dir],
                         rule_based_planner=RuleBasedQueryPlanner(
@@ -850,6 +867,7 @@ def _materialize_documents(
     if not isinstance(documents, list):
         raise ValueError(f"{dataset}/{sample_id} documents must be a list")
     records: list[ChunkRecord] = []
+    memory_ids: set[int] = set()
     for index, document in enumerate(documents, start=1):
         if not isinstance(document, dict):
             raise ValueError(f"{dataset}/{sample_id} document must be an object")
@@ -857,37 +875,43 @@ def _materialize_documents(
         text = str(document.get("text", "") or "")
         if not evidence_id or not text.strip():
             raise ValueError(f"{dataset}/{sample_id} document id/text must not be empty")
+        memory_id = _stable_memory_id(dataset, sample_id, evidence_id)
+        if memory_id in memory_ids:
+            raise ValueError(f"{dataset}/{sample_id} benchmark memory ID collision")
+        memory_ids.add(memory_id)
         raw_path = raw_dir / f"{index:04d}-{_safe_component(evidence_id)}.md"
         raw_metadata = document.get("metadata", {})
         if not isinstance(raw_metadata, dict):
             raise ValueError(f"{dataset}/{sample_id}/{evidence_id} metadata must be an object")
         front_matter = {
-            "evidence_id": evidence_id,
-            "source": dataset,
             **{
                 key: value
                 for key, value in raw_metadata.items()
                 if isinstance(value, (str, int, float, bool))
             },
+            "evidence_id": evidence_id,
+            "source": dataset,
+            "benchmark_memory_id": memory_id,
         }
         raw_path.write_text(
             _render_raw_document(front_matter, text),
             encoding="utf-8",
         )
-        metadata: dict[str, object] = {
+        metadata: dict[str, object] = dict(raw_metadata)
+        metadata.update({
             "source": dataset,
             "file": str(raw_path),
             "benchmark_raw_file": str(raw_path),
             "chunk_idx": 0,
             "evidence_id": evidence_id,
-        }
+            "benchmark_memory_id": memory_id,
+        })
         for key in ("session", "date"):
             if document.get(key) not in (None, ""):
                 metadata[key] = document[key]
-        metadata.update(raw_metadata)
         records.append(
             ChunkRecord(
-                id=_stable_memory_id(raw_path),
+                id=memory_id,
                 text=text,
                 metadata=metadata,
             )
@@ -988,9 +1012,14 @@ def _render_raw_document(metadata: dict[str, object], text: str) -> str:
     return "\n".join(lines)
 
 
-def _stable_memory_id(path: Path) -> int:
-    digest = hashlib.sha256(f"{path.resolve()}:0".encode()).hexdigest()[:16]
-    return int(digest, 16) % (2**63)
+def _stable_memory_id(dataset: str, sample_id: str, evidence_id: str) -> int:
+    identity = json.dumps(
+        [dataset, sample_id, evidence_id],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
+    return int(digest, 16) % (2**63 - 1) + 1
 
 
 def _provider_info(providers: tuple[ProviderInfo, ...], capability: str) -> ProviderInfo | None:
