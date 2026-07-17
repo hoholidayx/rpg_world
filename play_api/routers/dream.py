@@ -38,6 +38,7 @@ async def create_dream_proposal(
             session_id,
             depth=body.depth,
             scope=body.scope,
+            recover_proposal_id=body.recover_proposal_id,
         )
     )
 

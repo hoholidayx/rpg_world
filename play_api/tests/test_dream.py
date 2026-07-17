@@ -94,8 +94,17 @@ class _FakeDreamClient:
     async def aclose(self) -> None:
         self.calls.append(("close",))
 
-    async def create_proposal(self, session_id, *, depth, scope):  # noqa: ANN001, ANN201
-        self.calls.append(("create", session_id, depth, scope))
+    async def create_proposal(  # noqa: ANN001, ANN201
+        self,
+        session_id,
+        *,
+        depth,
+        scope,
+        recover_proposal_id=None,
+    ):
+        self.calls.append(
+            ("create", session_id, depth, scope, recover_proposal_id)
+        )
         return _proposal("generating")
 
     async def get_proposal(self, session_id, proposal_id):  # noqa: ANN001, ANN201
@@ -152,7 +161,11 @@ def test_play_dream_proxy_contract(tmp_path, monkeypatch) -> None:
     with TestClient(app) as client:
         created = client.post(
             "/play-api/v1/sessions/s_forest001/dream/proposals",
-            json={"depth": "shallow", "scope": "incremental"},
+            json={
+                "depth": "shallow",
+                "scope": "incremental",
+                "recoverProposalId": "orphan",
+            },
         )
         assert created.status_code == 202
         assert created.json()["proposalId"] == "proposal1"
@@ -220,7 +233,13 @@ def test_play_dream_proxy_contract(tmp_path, monkeypatch) -> None:
         assert restored.status_code == 200
         assert restored.json()["lifecycle"] == "active"
 
-    assert ("create", "s_forest001", "shallow", "incremental") in fake.calls
+    assert (
+        "create",
+        "s_forest001",
+        "shallow",
+        "incremental",
+        "orphan",
+    ) in fake.calls
     assert ("list-proposals", "s_forest001") in fake.calls
     assert ("list", "s_forest001", "retired") in fake.calls
 

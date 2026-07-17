@@ -45,6 +45,7 @@ async def test_client_proposal_contract_and_patch_aliases() -> None:
         "s1",
         depth="shallow",
         scope="incremental",
+        recover_proposal_id="orphan",
     )
     await client.update_proposal(
         "s1",
@@ -63,6 +64,10 @@ async def test_client_proposal_contract_and_patch_aliases() -> None:
     assert created.proposal_id == "p1"
     assert listed.items[0].proposal_id == "p1"
     assert requests[0].url.path.endswith("/sessions/s1/dream/proposals")
+    assert requests[0].content == (
+        b'{"depth":"shallow","scope":"incremental",'
+        b'"recoverProposalId":"orphan"}'
+    )
     assert requests[1].content == b'{"items":[{"itemId":"i1","selected":true,"memoryKind":"clue"}]}'
     assert requests[2].url.path.endswith("/sessions/s1/dream/proposals")
     await client.aclose()

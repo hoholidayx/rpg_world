@@ -67,11 +67,15 @@ class DreamClient:
         *,
         depth: str,
         scope: str,
+        recover_proposal_id: str | None = None,
     ) -> DreamProposalResponse:
+        payload = {"depth": depth, "scope": scope}
+        if recover_proposal_id is not None:
+            payload["recoverProposalId"] = recover_proposal_id
         response = await self._request(
             "POST",
             f"/sessions/{session_id}/dream/proposals",
-            json={"depth": depth, "scope": scope},
+            json=payload,
         )
         return self._parse_response(response, DreamProposalResponse)
 
