@@ -35,6 +35,10 @@ CI 或发布门禁。
 
 混合融合与重排分数只表示单次查询内部的相对顺序，不是概率，也不能跨查询比较。
 
+结果判读依据本次实际执行的路径生成：embedding 路径未成功执行时说明离线关键词基线的
+能力边界；存在成功执行的向量路径时，优先列出并关注该路径指标。横向回归应比较相同路径，
+只有对应能力状态为 `executed` 时，才能评价该模型能力的效果。
+
 <!-- benchmark-runs:start -->
 | 开始时间（UTC） | Run ID | Git revision | 工作区 | 数据集核心指标 | 能力状态 | 报告 |
 |---|---|---|---|---|---|---|
@@ -436,7 +440,17 @@ def _assessment_section(suite: SuiteResult) -> list[str]:
     )
     if baseline is None or not baseline.datasets:
         return []
+    vector_paths = _executed_vector_paths(suite.paths)
     lines = ["", "## 结果判读", ""]
+    if not vector_paths:
+        lines.extend((
+            "- 本次没有成功执行 embedding 检索路径；`offline.keyword_rule` 是不包含 embedding、"
+            "LLM Planner 或 rerank 的纯离线关键词基线。它适合稳定回归候选覆盖，但无法判断旧状态与"
+            "当前状态、承诺与完成、尝试与结果等事实阶段；因此该路径的 Forbidden 指标只用于诊断"
+            "词法候选污染，不能代表完整模型配置路径的质量。",
+            "- 不同检索路径的指标不能直接混合归因。只有对应能力状态为 `executed` 时，"
+            "才能评价 embedding、Planner 或 rerank 的实际效果；横向回归应优先比较相同路径。",
+        ))
     for dataset in baseline.datasets:
         metrics = dataset.metrics
         evaluated = int(metrics.get("evaluated_cases", 0) or 0)
@@ -447,10 +461,16 @@ def _assessment_section(suite: SuiteResult) -> list[str]:
             f"`{_metric(metrics.get('recall_at_k'))}`，计分 `{evaluated}/{cases}`"
         )
         if dataset.dataset == "rp-gold":
+            detail = (
+                "该数值来自上述离线关键词基线，较高值主要反映词法召回会同时保留主题相关但"
+                "事实阶段错误的候选；"
+                if not vector_paths
+                else ""
+            )
             lines.append(
                 f"- RP Gold：{summary}；Forbidden@5 "
-                f"`{_metric(metrics.get('forbidden_hit_rate'))}`。"
-                "Forbidden 污染仍明显，且 Gold 尚未完成双人审核，因此当前结果不足以作为发布质量门禁。"
+                f"`{_metric(metrics.get('forbidden_hit_rate'))}`。{detail}"
+                "Gold 尚未完成双人审核，因此当前结果不足以作为发布质量门禁。"
             )
         elif dataset.dataset == "longmemeval-s":
             lines.append(
@@ -459,6 +479,23 @@ def _assessment_section(suite: SuiteResult) -> list[str]:
             )
         else:
             lines.append(f"- {dataset.dataset}：{summary}；指标用于相对比较，不单独构成 RP 质量结论。")
+    for path in vector_paths:
+        for dataset in path.datasets:
+            metrics = dataset.metrics
+            metric_summary = (
+                f"Hit@1 `{_metric(metrics.get('hit_at_1'))}`，Recall@5 "
+                f"`{_metric(metrics.get('recall_at_k'))}`，MRR `{_metric(metrics.get('mrr'))}`"
+            )
+            forbidden = metrics.get("forbidden_hit_rate")
+            forbidden_summary = (
+                f"，Forbidden@5 `{_metric(forbidden)}`"
+                if forbidden is not None
+                else ""
+            )
+            lines.append(
+                f"- 向量路径 `{path.path_id}` / {dataset.dataset}：{metric_summary}"
+                f"{forbidden_summary}；该路径已成功执行 embedding，应以这些指标评价向量召回质量。"
+            )
     probes = {probe.capability: probe for probe in suite.capability_matrix.probes}
     for capability, label in (
         ("embedding", "向量召回"),
@@ -473,6 +510,18 @@ def _assessment_section(suite: SuiteResult) -> list[str]:
                 f"- {label}：`{probe.status.value}`，本次未包含该路径；原因：{_cell(probe.reason)}"
             )
     return lines
+
+
+def _executed_vector_paths(
+    paths: tuple[BenchmarkPathResult, ...],
+) -> tuple[BenchmarkPathResult, ...]:
+    return tuple(
+        path
+        for path in paths
+        if path.status.value == "executed"
+        and path.datasets
+        and "vector" in path.pipeline.retrievers
+    )
 
 
 def _path_details(paths: tuple[BenchmarkPathResult, ...]) -> list[str]:

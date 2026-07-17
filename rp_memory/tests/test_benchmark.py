@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -556,6 +556,51 @@ def test_full_report_is_simplified_chinese_and_contains_glossary() -> None:
     assert "## 测试环境" in report
     assert "## 名词解释" in report
     assert "Forbidden-before-gold" in report
+    assert "本次没有成功执行 embedding 检索路径" in report
+    assert "不包含 embedding、LLM Planner 或 rerank 的纯离线关键词基线" in report
+    assert "不能代表完整模型配置路径的质量" in report
+    assert "只有对应能力状态为 `executed` 时" in report
+
+
+def test_report_focuses_vector_metrics_when_embedding_path_executed() -> None:
+    suite = _successful_suite("embedding-report")
+    provider = ProviderInfo(
+        capability="embedding",
+        biz_key=MEMORY_EMBED_BIZ_KEY,
+        provider_key="embedding-default",
+        backend="llama_cpp",
+        model="embedding.gguf",
+        is_default=True,
+        dimension=1024,
+    )
+    baseline = suite.paths[0]
+    embedding_path = BenchmarkPathResult(
+        path_id="configured.embedding.embedding-default",
+        status=BenchmarkStatus.EXECUTED,
+        reason="ready",
+        pipeline=replace(
+            baseline.pipeline,
+            retrievers=("vector", "keyword"),
+            providers=(provider,),
+        ),
+        datasets=baseline.datasets,
+    )
+    suite = replace(
+        suite,
+        capability_matrix=CapabilityMatrix(
+            BenchmarkStatus.EXECUTED,
+            "ready",
+            (CapabilityProbe("embedding", BenchmarkStatus.EXECUTED, "ready", provider),),
+        ),
+        paths=(*suite.paths, embedding_path),
+    )
+
+    report = render_full_report(suite)
+
+    assert "本次没有成功执行 embedding 检索路径" not in report
+    assert "不能代表完整模型配置路径的质量" not in report
+    assert "向量路径 `configured.embedding.embedding-default` / locomo" in report
+    assert "该路径已成功执行 embedding，应以这些指标评价向量召回质量" in report
 
 
 def _locomo_source(tmp_path: Path) -> Path:

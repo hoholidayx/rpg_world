@@ -112,8 +112,10 @@
 
 ## 结果判读
 
+- `offline.keyword_rule` 是不包含 embedding、LLM Planner 或 rerank 的纯离线关键词基线。它适合稳定回归候选覆盖，但无法判断旧状态与当前状态、承诺与完成、尝试与结果等事实阶段；因此该路径的 Forbidden 指标只用于诊断词法候选污染，不能代表完整模型配置路径的质量。
+- 不同检索路径的指标不能直接混合归因。只有对应能力状态为 `executed` 时，才能评价 embedding、Planner 或 rerank 的实际效果；横向回归应优先比较相同路径。
 - locomo：Hit@1 `0.335015`，Recall@5 `0.572149`，计分 `1982/1986`；指标用于相对比较，不单独构成 RP 质量结论。
-- RP Gold：Hit@1 `0.709091`，Recall@5 `0.981818`，计分 `60/60`；Forbidden@5 `0.716667`。Forbidden 污染仍明显，且 Gold 尚未完成双人审核，因此当前结果不足以作为发布质量门禁。
+- RP Gold：Hit@1 `0.709091`，Recall@5 `0.981818`，计分 `60/60`；Forbidden@5 `0.716667`。该数值来自上述离线关键词基线，较高值主要反映词法召回会同时保留主题相关但事实阶段错误的候选；Gold 尚未完成双人审核，因此当前结果不足以作为发布质量门禁。
 - 向量召回：`skipped_service_unreachable`，本次未包含该路径；原因：LLM service unavailable: All connection attempts failed
 - Planner 扩展查询：`skipped_disabled`，本次未包含该路径；原因：memory.query_planner_enabled is false
 - rerank：`skipped_disabled`，本次未包含该路径；原因：memory.rerank_enabled is false
