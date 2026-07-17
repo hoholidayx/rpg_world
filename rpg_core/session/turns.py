@@ -5,9 +5,17 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from rpg_core.session.grouping import (
+    count_turns as count_grouped_turns,
+    has_explicit_turn_ids as contains_explicit_turn_ids,
+    has_trustworthy_turn_ids as contains_trustworthy_turn_ids,
+    iter_turn_groups as group_messages_by_turn,
+    latest_turn_id as find_latest_turn_id,
+    slice_recent_turns as select_recent_turns,
+    split_into_turn_batches as build_turn_batches,
+)
 from rpg_core.session.turn_metadata import (
     InvalidTurnMetadataError,
-    has_trustworthy_turn_metadata,
     validate_turn_metadata,
 )
 
@@ -16,42 +24,30 @@ if TYPE_CHECKING:
 
 
 def has_explicit_turn_ids(messages: list[Message]) -> bool:
-    from rpg_core.session.manager import SessionManager
-
-    return SessionManager.has_explicit_turn_ids(messages)
+    return contains_explicit_turn_ids(messages)
 
 
 def has_trustworthy_turn_ids(messages: list[Message]) -> bool:
-    from rpg_core.session.manager import SessionManager
-
-    return SessionManager.has_trustworthy_turn_ids(messages)
+    return contains_trustworthy_turn_ids(messages)
 
 
 def iter_turn_groups(messages: list[Message]) -> list[list[Message]]:
-    from rpg_core.session.manager import SessionManager
-
-    return SessionManager.iter_turn_groups(messages)
+    return group_messages_by_turn(messages)
 
 
 def count_turns(messages: list[Message]) -> int:
-    from rpg_core.session.manager import SessionManager
-
-    return SessionManager.count_turns(messages)
+    return count_grouped_turns(messages)
 
 
 def slice_recent_turns(messages: list[Message], keep_turns: int) -> list[Message]:
-    from rpg_core.session.manager import SessionManager
-
-    return SessionManager.slice_recent_turns(messages, keep_turns)
+    return select_recent_turns(messages, keep_turns)
 
 
 def split_into_turn_batches(
     messages: list[Message],
     batch_turn_size: int,
 ) -> list[tuple[int, list[Message], int]]:
-    from rpg_core.session.manager import SessionManager
-
-    return SessionManager.split_into_turn_batches(messages, batch_turn_size)
+    return build_turn_batches(messages, batch_turn_size)
 
 
 def count_roles(messages: Iterable[Message]) -> dict[str, int]:
@@ -64,6 +60,4 @@ def count_roles(messages: Iterable[Message]) -> dict[str, int]:
 
 
 def latest_turn_id(messages: list[Message]) -> int:
-    from rpg_core.session.manager import SessionManager
-
-    return SessionManager.latest_turn_id(messages)
+    return find_latest_turn_id(messages)
