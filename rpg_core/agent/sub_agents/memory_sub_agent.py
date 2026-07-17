@@ -34,7 +34,7 @@ from loguru import logger
 from rpg_core.agent.agent_types import CallRecord, LLMResponse, LLMUsage
 from rpg_core.agent.command import CommandDef
 from rpg_core.agent.sub_agents.base import BaseSubAgent
-from rpg_core.agent.sub_agents.memory_candidates import (
+from rpg_core.session.grouping import (
     MemoryTurnInputTooLargeError,
     batch_memory_turn_groups,
     select_story_memory_turn_groups,

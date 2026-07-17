@@ -30,13 +30,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
-from rpg_core.session.manager import SessionManager
 
-from rpg_core.agent.sub_agents.memory_sub_agent import MemorySubAgent
-from rpg_core.agent.sub_agents.memory_candidates import (
+from rpg_core.session.grouping import (
     MemoryTurnInputTooLargeError,
     batch_memory_turn_groups,
     select_summary_turn_groups,
@@ -46,6 +44,28 @@ if TYPE_CHECKING:
     from rpg_core.context.rpg_context import Message
     from rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_core.session.manager import SessionManager
+
+
+class SummaryProcessor(Protocol):
+    """Agent-independent contract required by ``SummaryCompressor``."""
+
+    @property
+    def enabled(self) -> bool: ...
+
+    async def generate_batch_summary(
+        self,
+        conv: list[Message],
+        batch_id: int = 0,
+        user_rounds: int = 0,
+        call_stats: list[object] | None = None,
+    ) -> dict | None: ...
+
+    async def generate_overall_summary(
+        self,
+        new_batch_summaries: list[str],
+        existing_body: str = "",
+        call_stats: list[object] | None = None,
+    ) -> dict | None: ...
 
 
 class CompressionStatus(str, Enum):
@@ -120,7 +140,7 @@ class SummaryCompressor:
     def __init__(
         self,
         batch_store: "BatchSummaryStore | None" = None,
-        memory_sub_agent: MemorySubAgent | None = None,
+        memory_sub_agent: SummaryProcessor | None = None,
         enabled: bool = True,
         keep_recent_rounds: int = 20,
         compression_threshold: int = 10,
@@ -147,7 +167,7 @@ class SummaryCompressor:
         self,
         *,
         batch_store: "BatchSummaryStore | None",
-        memory_sub_agent: MemorySubAgent | None,
+        memory_sub_agent: SummaryProcessor | None,
     ) -> None:
         """Rebind session-scoped stores without changing compression policy."""
         self._batch_store = batch_store
