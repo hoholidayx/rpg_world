@@ -9,6 +9,8 @@ CI 或发布门禁。
 <!-- benchmark-runs:start -->
 | 开始时间（UTC） | Run ID | Git revision | 工作区 | 数据集核心指标 | 能力状态 | 报告 |
 |---|---|---|---|---|---|---|
+| `2026-07-17T06:04:13.067575Z` | `20260717T060413Z-e12c7ecd` | `abccb93f0b71` | dirty | locomo: H1 0.335015, R5 0.572149; rp-gold: H1 0.709091, R5 0.981818 | `planner=skipped_disabled, reranker=skipped_disabled, embedding=skipped_service_unreachable` | [查看](runs/rp-memory-recall-20260717T060413Z-e12c7ecd.md) |
+| `2026-07-17T06:01:56.037039Z` | `20260717T060156Z-2e8f8f0b` | `abccb93f0b71` | dirty | locomo: H1 0.335015, R5 0.572149; rp-gold: H1 0.709091, R5 0.981818 | `embedding=skipped_disabled, planner=skipped_disabled, reranker=skipped_disabled` | [查看](runs/rp-memory-recall-20260717T060156Z-2e8f8f0b.md) |
 | `2026-07-17T04:54:25.289499Z` | `20260717T045425Z-e5690bb6` | `2611e827401f` | dirty | locomo: H1 0.335015, R5 0.572149; rp-gold: H1 0.916667, R5 1.000000 | `embedding=skipped_service_unreachable, planner=skipped_disabled, reranker=skipped_disabled` | [查看](runs/rp-memory-recall-20260717T045425Z-e5690bb6.md) |
 | `2026-07-17T04:45:04.288731Z` | `20260717T044504Z-08cc0e0c` | `c21e888cc0ae` | dirty | locomo: H1 0.335015, R5 0.571645; rp-gold: H1 0.916667, R5 1.000000 | `embedding=skipped_service_unreachable, planner=skipped_disabled, reranker=skipped_disabled` | [查看](runs/rp-memory-recall-20260717T044504Z-08cc0e0c.md) |
 <!-- benchmark-runs:end -->
