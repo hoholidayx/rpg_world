@@ -13,11 +13,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from play_api.backends import close_data_manager_backend, get_data_manager_backend
+from play_api.dream_client import close_dream_client
 from play_api.media_client import close_media_client
 from play_api.tts_client import close_tts_client
 from play_api.settings import play_settings
 from play_api.routers import (
     characters,
+    dream,
     lorebook,
     main_llm,
     media,
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await close_dream_client()
         await close_media_client()
         await close_tts_client()
         close_data_manager_backend()
@@ -56,6 +59,7 @@ app.add_middleware(
 _PLAY_API_PREFIX = play_settings.service.api_prefix
 app.include_router(workspace.router, prefix=_PLAY_API_PREFIX)
 app.include_router(characters.router, prefix=_PLAY_API_PREFIX)
+app.include_router(dream.router, prefix=_PLAY_API_PREFIX)
 app.include_router(lorebook.router, prefix=_PLAY_API_PREFIX)
 app.include_router(main_llm.router, prefix=_PLAY_API_PREFIX)
 app.include_router(media.router, prefix=_PLAY_API_PREFIX)
