@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Bell, Copy, MoonStar, Trash2, X } from 'lucide-react'
+import { Bell, GitBranch, MoonStar, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { usePlayEventStore } from '@/stores/playEventStore'
 import { formatNotificationTime, toNotificationEntry } from './notificationModel'
@@ -160,7 +160,7 @@ export function NotificationCenter() {
               </span>
               <p className="mt-3 text-sm font-bold text-slate-700 dark:text-slate-200">暂时没有通知</p>
               <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                Dream 与会话复制完成后会显示在这里。
+                Dream 与会话分支完成后会显示在这里。
               </p>
             </div>
           )}
@@ -179,7 +179,7 @@ function NotificationRow({
   unread: boolean
   onDismiss: () => void
 }) {
-  const Icon: LucideIcon = entry.category === 'dream' ? MoonStar : Copy
+  const Icon: LucideIcon = entry.category === 'dream' ? MoonStar : GitBranch
   const styles = statusStyles[entry.status]
 
   return (

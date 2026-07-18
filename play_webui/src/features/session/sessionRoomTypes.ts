@@ -103,6 +103,7 @@ export type SessionTimelineMessage = {
   canRetry?: boolean
   canEdit?: boolean
   canDelete?: boolean
+  canDerive?: boolean
 }
 
 export type ConfirmRequest = {

@@ -31,7 +31,7 @@ export function toNotificationEntry(event: PlayEvent): NotificationEntry {
   }
 
   const targetDescription = event.payload.targetSessionId
-    ? `源会话 ${event.payload.sourceSessionId} → 目标会话 ${event.payload.targetSessionId}`
+    ? `源会话 ${event.payload.sourceSessionId} → 分支会话 ${event.payload.targetSessionId}`
     : `源会话 ${event.payload.sourceSessionId} · Turn ${event.payload.turnId}`
   const thresholdDetail = event.payload.contextThresholdExceeded
     ? '源会话上下文已达到复制阈值。'
@@ -72,9 +72,9 @@ function dreamTitle(depthLabel: string, status: PlayEventTerminalStatus) {
 }
 
 function derivationTitle(status: PlayEventTerminalStatus) {
-  if (status === 'ready') return '会话复制已完成'
-  if (status === 'failed') return '会话复制失败'
-  return '会话复制已中断'
+  if (status === 'ready') return '会话分支已就绪'
+  if (status === 'failed') return '会话分支创建失败'
+  return '会话分支创建已中断'
 }
 
 function errorDetail(errorCode: string, errorMessage: string) {

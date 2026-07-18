@@ -107,6 +107,7 @@ function MessageActions({
   onCopy,
   onRetry,
   onEdit,
+  onDerive,
   onDelete,
   tts,
   onToggleTTS,
@@ -117,6 +118,7 @@ function MessageActions({
   onCopy: (message: SessionTimelineMessage) => void
   onRetry: (message: SessionTimelineMessage) => void
   onEdit: (message: SessionTimelineMessage) => void
+  onDerive: (message: SessionTimelineMessage) => void
   onDelete: (message: SessionTimelineMessage) => void
   tts?: TTSMessagePlayback
   onToggleTTS: (message: SessionTimelineMessage) => void
@@ -124,7 +126,9 @@ function MessageActions({
   const canCopy = message.canCopy ?? Boolean(message.content.trim())
   const canRetry = Boolean(message.canRetry)
   const canEdit = Boolean(message.canEdit)
+  const canDerive = Boolean(message.canDerive)
   const canDelete = Boolean(message.canDelete)
+  const hasMoreActions = canDerive || canDelete
   const canSpeak = (
     message.role === SESSION_TIMELINE_ROLE.ASSISTANT
     && message.status === SESSION_MESSAGE_STATUS.DONE
@@ -166,22 +170,38 @@ function MessageActions({
           <Pencil size={14} />
         </MiniButton>
       ) : null}
-      {canDelete ? (
+      {hasMoreActions ? (
         <MiniButton label="更多" onClick={onToggleMore}>
           <MoreHorizontal size={15} />
         </MiniButton>
       ) : null}
-      {moreOpen && canDelete ? (
-        <div className="absolute right-0 top-full z-20 mt-2 w-32 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-200/80 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40">
-          <button
-            type="button"
-            onClick={() => onDelete(message)}
-            disabled={!canDelete}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-bold text-rose-600 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
-          >
-            <Trash2 size={14} />
-            删除
-          </button>
+      {moreOpen && hasMoreActions ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-20 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-200/80 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/40"
+        >
+          {canDerive ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => onDerive(message)}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-bold text-violet-700 transition hover:bg-violet-50 dark:text-violet-200 dark:hover:bg-violet-500/10"
+            >
+              <GitBranch size={14} />
+              从此处分支
+            </button>
+          ) : null}
+          {canDelete ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => onDelete(message)}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-bold text-rose-600 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
+            >
+              <Trash2 size={14} />
+              删除
+            </button>
+          ) : null}
         </div>
       ) : null}
       {tts?.phase === 'error' && tts.error ? (
@@ -329,6 +349,7 @@ function TimelineMessage({
   onCopy,
   onRetry,
   onEdit,
+  onDerive,
   onDelete,
   onEditDraftChange,
   onEditCancel,
@@ -344,6 +365,7 @@ function TimelineMessage({
   onCopy: (message: SessionTimelineMessage) => void
   onRetry: (message: SessionTimelineMessage) => void
   onEdit: (message: SessionTimelineMessage) => void
+  onDerive: (message: SessionTimelineMessage) => void
   onDelete: (message: SessionTimelineMessage) => void
   onEditDraftChange: (value: string) => void
   onEditCancel: () => void
@@ -405,6 +427,7 @@ function TimelineMessage({
               onCopy={onCopy}
               onRetry={onRetry}
               onEdit={onEdit}
+              onDerive={onDerive}
               onDelete={onDelete}
               tts={tts}
               onToggleTTS={onToggleTTS}
@@ -473,6 +496,7 @@ export function SessionTimeline({
   onCopy,
   onRetry,
   onEdit,
+  onDerive,
   onDelete,
   onEditCancel,
   onEditSend,
@@ -497,6 +521,7 @@ export function SessionTimeline({
   onCopy: (message: SessionTimelineMessage) => void
   onRetry: (message: SessionTimelineMessage) => void
   onEdit: (message: SessionTimelineMessage) => void
+  onDerive: (message: SessionTimelineMessage) => void
   onDelete: (message: SessionTimelineMessage) => void
   onEditCancel: () => void
   onEditSend: (message: SessionTimelineMessage) => void
@@ -776,6 +801,10 @@ export function SessionTimeline({
                   onCopy={onCopy}
                   onRetry={onRetry}
                   onEdit={onEdit}
+                  onDerive={(item) => {
+                    setOpenMoreId(null)
+                    onDerive(item)
+                  }}
                   onDelete={(item) => {
                     setOpenMoreId(null)
                     onDelete(item)

@@ -48,6 +48,25 @@ export type SessionDeleteResult = {
   runtimeCleanup: 'deleted' | 'absent' | 'pending'
 }
 
+export type SessionDerivationStatus = 'queued' | 'running' | 'ready' | 'failed' | 'interrupted'
+
+export type SessionDerivationJob = {
+  jobId: string
+  sourceSessionId: string
+  targetSessionId: string | null
+  turnId: number
+  status: SessionDerivationStatus
+  stage: string
+  errorCode: string
+  errorMessage: string
+  contextUsage: Record<string, unknown> | null
+  contextThresholdExceeded: boolean
+  createdAt: string
+  startedAt: string
+  finishedAt: string
+  updatedAt: string
+}
+
 export type SessionPlayerCharacter = {
   characterId: number
   mountId: number

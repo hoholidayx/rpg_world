@@ -7,12 +7,14 @@ import { AlignJustify, Images, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { buildDreamPageHref } from '@/features/dream/dreamNavigation'
+import { NotificationCenter } from '@/features/notifications/NotificationCenter'
 import { sessionContextUsageConfig } from '@/lib/config/appConfig'
 import { deleteSession } from '@/lib/api/sessions'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import type { SessionPlayerCharacter } from '@/types/session'
 import { SessionComposer } from './SessionComposer'
+import { SessionDerivationDialog } from './SessionDerivationDialog'
 import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
 import { SessionMediaBackground } from './SessionMediaBackground'
@@ -20,6 +22,7 @@ import { SessionMediaGallery } from './SessionMediaGallery'
 import { SessionRPModulesDialog } from './SessionRPModulesDialog'
 import { SessionTimeline } from './SessionTimeline'
 import { useSessionRoomData } from './hooks/useSessionRoomData'
+import { useSessionDerivation } from './hooks/useSessionDerivation'
 import { useSessionRoomLayout } from './hooks/useSessionRoomLayout'
 import { useSessionMainLLM } from './hooks/useSessionMainLLM'
 import { useSessionMedia } from './hooks/useSessionMedia'
@@ -405,6 +408,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     showToast,
     logger,
   })
+  const derivation = useSessionDerivation({
+    sessionId,
+    showToast,
+    logger,
+  })
 
   const handleConfirm = () => {
     const action = confirmRequest?.onConfirm
@@ -498,6 +506,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               <TableProperties size={18} />
             </button>
             <ThemeSwitcher menuAlign="right" menuSide="bottom" triggerSize="compact" />
+            <NotificationCenter />
             <button
               type="button"
               onClick={() => setMediaGalleryOpen(true)}
@@ -573,6 +582,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           onCopy={timelineActions.handleCopy}
           onRetry={timelineActions.handleRetry}
           onEdit={timelineActions.handleStartEdit}
+          onDerive={derivation.openDialog}
           onDelete={timelineActions.handleDelete}
           onEditCancel={timelineActions.cancelEdit}
           onEditSend={timelineActions.handleSendEdit}
@@ -641,6 +651,18 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         onCloseDrawer={() => data.setActiveRailDrawer(null)}
       />
 
+      <SessionDerivationDialog
+        open={derivation.open}
+        sourceSessionId={sessionId}
+        sourceTitle={data.session?.title ?? ''}
+        turnId={derivation.turnId}
+        title={derivation.title}
+        pending={derivation.pending}
+        error={derivation.error}
+        onTitleChange={derivation.setTitle}
+        onClose={derivation.closeDialog}
+        onSubmit={derivation.submit}
+      />
       {confirmRequest ? (
         <ConfirmDialog
           title={confirmRequest.title}

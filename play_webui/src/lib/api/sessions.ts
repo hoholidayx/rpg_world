@@ -1,4 +1,11 @@
-import type { HistoryPage, SessionDeleteResult, SessionSummary, Turn, WorkspaceSummary } from '@/types/session'
+import type {
+  HistoryPage,
+  SessionDeleteResult,
+  SessionDerivationJob,
+  SessionSummary,
+  Turn,
+  WorkspaceSummary,
+} from '@/types/session'
 import { playApiFetch, withWorkspace } from './client'
 
 export function listWorkspaces() {
@@ -26,6 +33,16 @@ export function deleteSession(sessionId: string) {
   return playApiFetch<SessionDeleteResult>(`/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',
   })
+}
+
+export function createSessionDerivation(sessionId: string, turnId: number, title = '') {
+  return playApiFetch<SessionDerivationJob>(
+    `/sessions/${encodeURIComponent(sessionId)}/derivations`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ turnId, title }),
+    },
+  )
 }
 
 export function bindSessionPlayerCharacter(sessionId: string, playerCharacterId: number) {

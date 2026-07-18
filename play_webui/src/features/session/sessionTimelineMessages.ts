@@ -151,6 +151,10 @@ export function mapHistoryToMessages({
       const role = timelineRole(message.role)
       const persistent = Boolean(message.messageId)
       const turnActionRole = role === HISTORY_MESSAGE_ROLE.USER || role === HISTORY_MESSAGE_ROLE.ASSISTANT
+      const turnEndingAssistant = (
+        messageIndex === turn.messages.length - 1
+        && role === HISTORY_MESSAGE_ROLE.ASSISTANT
+      )
       const content = role === HISTORY_MESSAGE_ROLE.USER ? stripLeadingSceneBlock(message.content) : message.content
 
       return {
@@ -172,6 +176,7 @@ export function mapHistoryToMessages({
         canRetry: persistent && role === HISTORY_MESSAGE_ROLE.USER,
         canEdit: persistent && role === HISTORY_MESSAGE_ROLE.USER,
         canDelete: persistent && turnActionRole,
+        canDerive: persistent && turnEndingAssistant,
       }
     })
     if (!turn.outcome) return messages
