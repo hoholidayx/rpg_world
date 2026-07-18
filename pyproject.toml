@@ -74,6 +74,7 @@ include = [
     "agent_service*",
     "channels*",
     "play_api*",
+    "play_events*",
     "media_service*",
     "tts_service*",
     "dream_service*",

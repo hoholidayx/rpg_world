@@ -134,7 +134,7 @@ class DreamRepository(Protocol):
         session_id: str | None = None,
         *,
         proposal_id: str | None = None,
-    ) -> int: ...
+    ) -> tuple[DreamProposalView, ...]: ...
 
     def update_proposal_items(
         self,
@@ -210,7 +210,7 @@ class AsyncDreamRepository(Protocol):
         session_id: str | None = None,
         *,
         proposal_id: str | None = None,
-    ) -> int: ...
+    ) -> tuple[DreamProposalView, ...]: ...
 
     async def update_proposal_items(
         self,

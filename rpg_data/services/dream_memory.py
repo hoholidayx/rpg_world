@@ -39,6 +39,7 @@ __all__ = [
 ]
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_SQLITE_IN_CHUNK_SIZE = 500
 _CONTEXT_KIND_ORDER = {
     kind: index
     for index, kind in enumerate(
@@ -307,6 +308,21 @@ class DreamMemoryService:
         *,
         proposal_id: str | None = None,
     ) -> int:
+        return len(
+            self.interrupt_generating_proposals(
+                session_id,
+                proposal_id=proposal_id,
+            )
+        )
+
+    def interrupt_generating_proposals(
+        self,
+        session_id: str | None = None,
+        *,
+        proposal_id: str | None = None,
+    ) -> tuple[models.DreamProposal, ...]:
+        """Atomically interrupt and return the rows that actually transitioned."""
+
         where_clause = (
             SessionDreamProposalRecord.status
             == models.DREAM_PROPOSAL_STATUS_GENERATING
@@ -315,17 +331,47 @@ class DreamMemoryService:
             where_clause &= SessionDreamProposalRecord.session == str(session_id)
         if proposal_id is not None:
             where_clause &= SessionDreamProposalRecord.id == str(proposal_id)
-        return int(
-            SessionDreamProposalRecord.update(
-                status=models.DREAM_PROPOSAL_STATUS_INTERRUPTED,
-                error_code="DREAM_GENERATION_INTERRUPTED",
-                finished_at=SQL("CURRENT_TIMESTAMP"),
-                updated_at=SQL("CURRENT_TIMESTAMP"),
-                version=SessionDreamProposalRecord.version + 1,
+        with self._database.atomic("IMMEDIATE"):
+            proposal_ids = tuple(
+                str(row.id)
+                for row in SessionDreamProposalRecord.select(
+                    SessionDreamProposalRecord.id
+                )
+                .where(where_clause)
+                .order_by(
+                    SessionDreamProposalRecord.created_at,
+                    SessionDreamProposalRecord.id,
+                )
             )
-            .where(where_clause)
-            .execute()
-        )
+            if not proposal_ids:
+                return ()
+            (
+                SessionDreamProposalRecord.update(
+                    status=models.DREAM_PROPOSAL_STATUS_INTERRUPTED,
+                    error_code="DREAM_GENERATION_INTERRUPTED",
+                    finished_at=SQL("CURRENT_TIMESTAMP"),
+                    updated_at=SQL("CURRENT_TIMESTAMP"),
+                    version=SessionDreamProposalRecord.version + 1,
+                )
+                .where(where_clause)
+                .execute()
+            )
+            rows: dict[str, SessionDreamProposalRecord] = {}
+            for offset in range(0, len(proposal_ids), _SQLITE_IN_CHUNK_SIZE):
+                chunk = proposal_ids[offset : offset + _SQLITE_IN_CHUNK_SIZE]
+                rows.update(
+                    {
+                        str(row.id): row
+                        for row in SessionDreamProposalRecord.select().where(
+                            SessionDreamProposalRecord.id.in_(chunk)
+                        )
+                    }
+                )
+            return tuple(
+                self._to_proposal(rows[item_id])
+                for item_id in proposal_ids
+                if item_id in rows
+            )
 
     def update_proposal_items(
         self,

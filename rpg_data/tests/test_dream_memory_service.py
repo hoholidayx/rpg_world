@@ -726,10 +726,14 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
     assert dream.get_proposal(generating.id).status == (
         models.DREAM_PROPOSAL_STATUS_GENERATING
     )
-    assert dream.interrupt_generating(
+    interrupted = dream.interrupt_generating_proposals(
         "s_forest001",
         proposal_id=generating.id,
-    ) == 1
+    )
+    assert len(interrupted) == 1
+    assert interrupted[0].id == generating.id
+    assert interrupted[0].status == models.DREAM_PROPOSAL_STATUS_INTERRUPTED
+    assert interrupted[0].finished_at
     assert dream.get_proposal(generating.id).status == (
         models.DREAM_PROPOSAL_STATUS_INTERRUPTED
     )

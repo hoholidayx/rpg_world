@@ -7,6 +7,7 @@ from pathlib import Path
 from commons.process_logging import ProcessLoggingSettings, parse_process_logging_settings
 from commons.settings import ProfiledYamlSettings, forgiving_int, optional_bool
 from llm_client.auth import DEFAULT_LLM_SERVICE_TOKEN_ENV, resolve_llm_service_token
+from play_events.auth import DEFAULT_PLAY_EVENT_TOKEN_ENV, resolve_play_event_token
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 
@@ -43,6 +44,18 @@ class DreamEngineSettings:
     max_map_chars: int = 24000
     map_concurrency: int = 2
     reduce_candidate_batch_size: int = 32
+
+
+@dataclass(frozen=True)
+class PlayEventPublisherSettings:
+    enabled: bool = True
+    endpoint_url: str = "http://127.0.0.1:8001/play-api/v1/internal/events"
+    token_env: str = DEFAULT_PLAY_EVENT_TOKEN_ENV
+    timeout_ms: int = 2000
+
+    @property
+    def token(self) -> str:
+        return resolve_play_event_token(self.token_env)
 
 
 class DreamServiceSettings(ProfiledYamlSettings):
@@ -120,6 +133,25 @@ class DreamServiceSettings(ProfiledYamlSettings):
                     32,
                 ),
             ),
+        )
+
+    @property
+    def play_events(self) -> PlayEventPublisherSettings:
+        raw = self._mapping("play_events")
+        return PlayEventPublisherSettings(
+            enabled=optional_bool(raw.get("enabled", True), True),
+            endpoint_url=str(
+                raw.get(
+                    "endpoint_url",
+                    "http://127.0.0.1:8001/play-api/v1/internal/events",
+                )
+                or "http://127.0.0.1:8001/play-api/v1/internal/events"
+            ).rstrip("/"),
+            token_env=str(
+                raw.get("token_env", DEFAULT_PLAY_EVENT_TOKEN_ENV)
+                or DEFAULT_PLAY_EVENT_TOKEN_ENV
+            ),
+            timeout_ms=max(1, forgiving_int(raw.get("timeout_ms", 2000), 2000)),
         )
 
     @property

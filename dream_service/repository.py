@@ -223,10 +223,13 @@ class RPGDataDreamRepository(DreamRepository):
         session_id: str | None = None,
         *,
         proposal_id: str | None = None,
-    ) -> int:
-        return self.gateway.dream.interrupt_generating(
-            session_id,
-            proposal_id=proposal_id,
+    ) -> tuple[DreamProposalView, ...]:
+        return tuple(
+            _proposal_view(proposal)
+            for proposal in self.gateway.dream.interrupt_generating_proposals(
+                session_id,
+                proposal_id=proposal_id,
+            )
         )
 
     def update_proposal_items(

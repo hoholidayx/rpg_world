@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from llm_client.manager import LLMClientManager
+from play_events import PlayEventPublisher
+from play_events.auth import uses_default_play_event_token
 
 from dream_service.contracts import AsyncDreamRepository, DreamProposalItemUpdate
+from dream_service.notifications import DreamTerminalNotificationSink
+from dream_service.play_event_notifications import DreamPlayEventSink
 from dream_service.repository import RPGDataDreamRepository
 from dream_service.runtime import DreamTaskManager
 from dream_service.worker import DreamRepositoryWorker
@@ -36,6 +41,8 @@ from rpg_data.services.dream_memory import (
     DreamProposalStateError,
 )
 
+logger = logging.getLogger("dream_service.main")
+
 
 class DreamRuntime:
     def __init__(
@@ -48,7 +55,10 @@ class DreamRuntime:
         self.tasks = tasks
 
     @classmethod
-    def create(cls) -> "DreamRuntime":
+    def create(
+        cls,
+        notification_sink: DreamTerminalNotificationSink | None = None,
+    ) -> "DreamRuntime":
         repository = DreamRepositoryWorker(RPGDataDreamRepository)
         config = settings.engine
         engine = DreamEngine(
@@ -62,7 +72,11 @@ class DreamRuntime:
         )
         return cls(
             repository=repository,
-            tasks=DreamTaskManager(repository=repository, engine=engine),
+            tasks=DreamTaskManager(
+                repository=repository,
+                engine=engine,
+                notification_sink=notification_sink,
+            ),
         )
 
     async def close(self) -> None:
@@ -100,8 +114,25 @@ async def lifespan(app: FastAPI):
         stream_timeout_ms=llm.stream_timeout_ms,
     )
     runtime: DreamRuntime | None = None
+    event_publisher: PlayEventPublisher | None = None
     try:
-        runtime = get_runtime()
+        event_cfg = settings.play_events
+        notification_sink = None
+        if event_cfg.enabled:
+            if uses_default_play_event_token(event_cfg.token_env):
+                logger.warning(
+                    "%s is not set; using the local Play event token fallback",
+                    event_cfg.token_env,
+                )
+            event_publisher = PlayEventPublisher(
+                endpoint_url=event_cfg.endpoint_url,
+                token=event_cfg.token,
+                timeout_ms=event_cfg.timeout_ms,
+            )
+            notification_sink = DreamPlayEventSink(event_publisher)
+        if _runtime is None:
+            _runtime = DreamRuntime.create(notification_sink)
+        runtime = _runtime
         await runtime.repository.start()
         await runtime.tasks.start()
         yield
@@ -115,7 +146,11 @@ async def lifespan(app: FastAPI):
         finally:
             if _runtime is runtime:
                 _runtime = None
-            await LLMClientManager.areset()
+            try:
+                if event_publisher is not None:
+                    await event_publisher.close()
+            finally:
+                await LLMClientManager.areset()
 
 
 app = FastAPI(title="RPG World Dream Service", lifespan=lifespan)

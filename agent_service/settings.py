@@ -14,6 +14,10 @@ from llm_client.auth import (
     DEFAULT_LLM_SERVICE_TOKEN_ENV,
     resolve_llm_service_token,
 )
+from play_events.auth import (
+    DEFAULT_PLAY_EVENT_TOKEN_ENV,
+    resolve_play_event_token,
+)
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"
 
@@ -43,6 +47,18 @@ class LLMClientSettings:
     @property
     def token(self) -> str:
         return resolve_llm_service_token(self.token_env)
+
+
+@dataclass(frozen=True)
+class PlayEventPublisherSettings:
+    enabled: bool = True
+    endpoint_url: str = "http://127.0.0.1:8001/play-api/v1/internal/events"
+    token_env: str = DEFAULT_PLAY_EVENT_TOKEN_ENV
+    timeout_ms: int = 2000
+
+    @property
+    def token(self) -> str:
+        return resolve_play_event_token(self.token_env)
 
 
 class AgentServiceSettings(ProfiledYamlSettings):
@@ -92,6 +108,25 @@ class AgentServiceSettings(ProfiledYamlSettings):
                 raw.get("stream_timeout_ms", 300000),
                 300000,
             ),
+        )
+
+    @property
+    def play_events(self) -> PlayEventPublisherSettings:
+        raw = self._mapping("play_events")
+        return PlayEventPublisherSettings(
+            enabled=optional_bool(raw.get("enabled", True), True),
+            endpoint_url=str(
+                raw.get(
+                    "endpoint_url",
+                    "http://127.0.0.1:8001/play-api/v1/internal/events",
+                )
+                or "http://127.0.0.1:8001/play-api/v1/internal/events"
+            ).rstrip("/"),
+            token_env=str(
+                raw.get("token_env", DEFAULT_PLAY_EVENT_TOKEN_ENV)
+                or DEFAULT_PLAY_EVENT_TOKEN_ENV
+            ),
+            timeout_ms=max(1, forgiving_int(raw.get("timeout_ms", 2000), 2000)),
         )
 
     @property

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from dream_service.settings import _loopback_host, settings
+from dream_service.settings import PlayEventPublisherSettings, _loopback_host, settings
+from play_events.auth import DEFAULT_PLAY_EVENT_TOKEN, DEFAULT_PLAY_EVENT_TOKEN_ENV
 
 
 @pytest.mark.parametrize(
@@ -29,3 +30,11 @@ def test_dream_service_rejects_non_loopback_bind(configured: str) -> None:
 
 def test_default_dream_service_bind_is_loopback() -> None:
     assert _loopback_host(settings.service.host) == settings.service.host
+
+
+def test_dream_play_event_token_uses_shared_resolution(monkeypatch) -> None:
+    monkeypatch.delenv(DEFAULT_PLAY_EVENT_TOKEN_ENV, raising=False)
+    assert PlayEventPublisherSettings().token == DEFAULT_PLAY_EVENT_TOKEN
+
+    monkeypatch.setenv(DEFAULT_PLAY_EVENT_TOKEN_ENV, "event-token")
+    assert PlayEventPublisherSettings().token == "event-token"

@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 import pytest
 
 from dream_service.contracts import DreamProposalView
+from dream_service.notifications import DreamTerminalNotification
 from dream_service.runtime import DreamTaskManager
 from rp_memory.dream.errors import DreamAlreadyRunningError
 from rp_memory.dream.types import (
@@ -20,6 +21,17 @@ class _Selection:
     snapshot: object
     depth: DreamDepth
     scope: DreamScope
+
+
+class _NotificationSink:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.notifications: list[DreamTerminalNotification] = []
+
+    async def publish(self, notification: DreamTerminalNotification) -> None:
+        if self.fail:
+            raise RuntimeError("notification unavailable")
+        self.notifications.append(notification)
 
 
 class _Repository:
@@ -37,11 +49,11 @@ class _Repository:
         session_id: str | None = None,
         *,
         proposal_id: str | None = None,
-    ) -> int:
+    ) -> tuple[DreamProposalView, ...]:
         self.interrupt_calls += 1
         self.interrupt_sessions.append(session_id)
         self.interrupt_proposals.append(proposal_id)
-        return 1 if self.interrupt_calls == 1 else 0
+        return ()
 
     async def build_source_snapshot(self, session_id: str):  # noqa: ANN202
         return type("Snapshot", (), {"session_id": session_id})()
@@ -75,6 +87,7 @@ class _Repository:
             self.proposals[proposal_id],
             status="ready",
         )
+        return self.proposals[proposal_id]
 
     async def set_proposal_failed(
         self,
@@ -90,6 +103,7 @@ class _Repository:
             error_code=error_code,
             error_message=error_message,
         )
+        return self.proposals[proposal_id]
 
 
 class _BlockingEngine:
@@ -167,6 +181,83 @@ async def test_task_manager_persists_generation_failure() -> None:
         await asyncio.sleep(0)
     assert repository.failed == [(proposal.proposal_id, "DREAM_GENERATION_FAILED")]
     await manager.stop()
+
+
+async def test_task_manager_publishes_ready_and_isolates_sink_failure() -> None:
+    repository = _Repository()
+    engine = _BlockingEngine()
+    notifications = _NotificationSink(fail=True)
+    manager = DreamTaskManager(  # type: ignore[arg-type]
+        repository=repository,
+        engine=engine,
+        notification_sink=notifications,
+    )
+    await manager.start()
+    proposal = await manager.create_proposal(
+        "s1",
+        depth=DreamDepth.SHALLOW,
+        scope=DreamScope.FULL,
+    )
+    await engine.started.wait()
+    engine.release.set()
+    for _ in range(20):
+        if repository.proposals[proposal.proposal_id].status == "ready":
+            break
+        await asyncio.sleep(0)
+
+    assert repository.proposals[proposal.proposal_id].status == "ready"
+    await manager.stop()
+
+
+async def test_task_manager_publishes_ready_and_failed_terminals() -> None:
+    ready_repository = _Repository()
+    ready_engine = _BlockingEngine()
+    ready_notifications = _NotificationSink()
+    ready_manager = DreamTaskManager(  # type: ignore[arg-type]
+        repository=ready_repository,
+        engine=ready_engine,
+        notification_sink=ready_notifications,
+    )
+    await ready_manager.start()
+    ready = await ready_manager.create_proposal(
+        "s1",
+        depth=DreamDepth.SHALLOW,
+        scope=DreamScope.FULL,
+    )
+    await ready_engine.started.wait()
+    ready_engine.release.set()
+    for _ in range(20):
+        if ready_notifications.notifications:
+            break
+        await asyncio.sleep(0)
+    assert [
+        (item.proposal_id, item.status)
+        for item in ready_notifications.notifications
+    ] == [(ready.proposal_id, "ready")]
+    await ready_manager.stop()
+
+    failed_repository = _Repository()
+    failed_notifications = _NotificationSink()
+    failed_manager = DreamTaskManager(  # type: ignore[arg-type]
+        repository=failed_repository,
+        engine=_FailingEngine(),
+        notification_sink=failed_notifications,
+    )
+    await failed_manager.start()
+    failed = await failed_manager.create_proposal(
+        "s2",
+        depth=DreamDepth.DEEP,
+        scope=DreamScope.INCREMENTAL,
+    )
+    for _ in range(20):
+        if failed_notifications.notifications:
+            break
+        await asyncio.sleep(0)
+    assert [
+        (item.proposal_id, item.status)
+        for item in failed_notifications.notifications
+    ] == [(failed.proposal_id, "failed")]
+    await failed_manager.stop()
 
 
 async def test_task_manager_replaces_orphaned_task_after_clear_or_delete() -> None:
@@ -321,11 +412,11 @@ class _OrphanCoordinatingRepository(_Repository):
         session_id: str | None = None,
         *,
         proposal_id: str | None = None,
-    ) -> int:
+    ) -> tuple[DreamProposalView, ...]:
         self.interrupt_calls += 1
         self.interrupt_sessions.append(session_id)
         self.interrupt_proposals.append(proposal_id)
-        interrupted = 0
+        interrupted: list[DreamProposalView] = []
         for stored_proposal_id, proposal in tuple(self.proposals.items()):
             if (
                 proposal.status == "generating"
@@ -335,12 +426,14 @@ class _OrphanCoordinatingRepository(_Repository):
                     or stored_proposal_id == proposal_id
                 )
             ):
-                self.proposals[stored_proposal_id] = replace(
+                terminal = replace(
                     proposal,
                     status="interrupted",
+                    error_code="DREAM_GENERATION_INTERRUPTED",
                 )
-                interrupted += 1
-        return interrupted
+                self.proposals[stored_proposal_id] = terminal
+                interrupted.append(terminal)
+        return tuple(interrupted)
 
 
 async def test_create_interrupts_sql_orphan_without_local_task() -> None:
@@ -376,6 +469,61 @@ async def test_create_interrupts_sql_orphan_without_local_task() -> None:
     assert repository.interrupt_sessions == ["s1"]
     engine.release.set()
     await manager.stop()
+
+
+async def test_startup_interruption_publishes_persisted_terminal_view() -> None:
+    repository = _OrphanCoordinatingRepository()
+    repository.proposals["orphan"] = DreamProposalView(
+        proposal_id="orphan",
+        session_id="s1",
+        depth="deep",
+        scope="full",
+        status="generating",
+        ledger_revision=0,
+        items=(),
+        error_code="",
+        error_message="",
+        created_at="",
+        updated_at="",
+        finished_at="",
+    )
+    notifications = _NotificationSink()
+    manager = DreamTaskManager(  # type: ignore[arg-type]
+        repository=repository,
+        engine=_BlockingEngine(),
+        notification_sink=notifications,
+    )
+
+    await manager.start()
+
+    assert [item.status for item in notifications.notifications] == ["interrupted"]
+    assert notifications.notifications[0].proposal_id == "orphan"
+    await manager.stop()
+
+
+async def test_shutdown_interruption_publishes_persisted_terminal_view() -> None:
+    repository = _OrphanCoordinatingRepository()
+    engine = _BlockingEngine()
+    notifications = _NotificationSink()
+    manager = DreamTaskManager(  # type: ignore[arg-type]
+        repository=repository,
+        engine=engine,
+        notification_sink=notifications,
+    )
+    await manager.start()
+    proposal = await manager.create_proposal(
+        "s1",
+        depth=DreamDepth.DEEP,
+        scope=DreamScope.FULL,
+    )
+    await engine.started.wait()
+
+    await manager.stop()
+
+    assert [
+        (item.proposal_id, item.status)
+        for item in notifications.notifications
+    ] == [(proposal.proposal_id, "interrupted")]
 
 
 class _UnwritableStateRepository(_OrphanCoordinatingRepository):
@@ -557,7 +705,7 @@ class _FallbackInterruptFailureRepository(_UnwritableStateRepository):
         session_id: str | None = None,
         *,
         proposal_id: str | None = None,
-    ) -> int:
+    ) -> tuple[DreamProposalView, ...]:
         if proposal_id is not None and self.failed_targeted_interrupts == 0:
             self.failed_targeted_interrupts += 1
             raise RuntimeError("interrupt state unavailable")

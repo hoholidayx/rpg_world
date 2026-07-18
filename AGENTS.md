@@ -11,10 +11,13 @@
 - 本地 llama 仍是 LLM Service 进程内 runtime，不恢复子进程 worker。每个不可变模型缓存键使用一个 actor 线程串行执行；`request_timeout_ms` 包含排队和运行时间，completion/stream/rerank 在安全边界协作取消。无法中断的原生 embedding/eval 超时后允许 actor 自然排空，同模型后续任务继续等待；关闭等待 `llama_shutdown_grace_ms` 后只记录仍在排空的 native call。
 - LLM Service `/health` 故意免 Bearer 鉴权，只表示进程存活和配置已加载，不验证调用方 token；catalog、chat、embedding、rerank 等业务接口仍必须鉴权。不要把 health 成功解释成凭据有效。
 - `RPG_WORLD_LLM_SERVICE_TOKEN` 未设置时，LLM Service 记录 warning 并与调用方共同回退到 `rpg-world-local-token`，不得阻止进程启动；该默认值只用于本地开发，非本地部署应显式设置环境变量覆盖。
+- `RPG_WORLD_PLAY_EVENT_TOKEN` 未设置时 Agent、Dream 与 Play API 共同回退到 `rpg-world-local-event-token` 并 warning；该默认值只用于本地开发。令牌只保护内部事件 POST，不得暴露给 WebUI EventSource。
 - 保持 `play_api/`、`channels/` 为接入层，`rpg_core/` 为无框架核心层；不要把 HTTP、Telegram、CLI 细节侵入核心模块。
 - `rpg_media/` 是与 `rpg_core/` 同级的无框架高级能力模块；`media_service/` 独立持有图片 Provider、持久任务 worker 和媒体 HTTP 边界。Play WebUI 只能经 Play API → `MediaClient` 访问它，Play API 不得直接读取工作区图片文件，Media service 不得导入 Agent runtime 或持有 llama worker。
 - `rpg_tts/` 与 `rpg_core/`、`rpg_media/` 同级，负责正文清洗、分段、缓存指纹与 MP3 存储；`tts_service/` 独立持有持久任务 worker 和 HTTP 边界。TTS 只按已提交 assistant `message_id` 派生语音，不得进入 Agent turn、正文 SSE、message metadata 或 localStorage；OpenAI Speech 仍通过 `llm_client` 由 LLM Service 唯一持有 Provider 与密钥。
 - `rp_memory.dream` 是无框架的 Session 级离线归纳领域；`dream_service/` 独立持有 HTTP 边界、进程内 async 生成任务和 loop-owned `llm_client`，默认监听 `127.0.0.1:8014/dream/v1`。Dream v1 无入站鉴权，配置必须强制使用 localhost/loopback IP，非 loopback host 启动失败。Play WebUI 只能经 Play API → `DreamClient` 访问它；Dream service 不得导入 Agent runtime、`MemorySubAgent` 或 `llm_service`，故障不得影响聊天或 Context 构建。
+- Dream 与 Session Derivation 的后台终态通知必须独立于 Agent 正文 SSE：领域 worker 只依赖类型化 NotificationSink，在 `ready | failed | interrupted` 成功落库后通知；service composition root 才能注入 `play_events` HTTP publisher。`rpg_data` 不得导入事件模块、持有 publisher 或 WebUI 语义。发布失败只能 warning，不得改变任务终态。
+- Play API 独占进程内后台事件 Hub：内部 `POST /play-api/v1/internal/events` 使用 `RPG_WORLD_PLAY_EVENT_TOKEN` Bearer 鉴权，全局 `GET /play-api/v1/events/stream` 供根 WebUI EventSource 使用。首版是单进程/单 worker、无 outbox/补发/消费确认的 best-effort 链路；GET Proposal/Derivation Job 仍为事实真源。WebUI 只在根 `Providers` 建立一条连接并把最近事件保存在内存，不得据此自动轮询/刷新、显示交互或写 localStorage，直到产品单独设计交互。
 - Play WebUI 会话内链路只使用全局短 `session_id` 定位；创建 session 时在 `rpg_data` 绑定 `workspace_id + story_id`，之后由 Play API 反查上下文并调用 Agent 服务。不要恢复前端每次传 `workspace + story_id + session_id` 的三元 locator。
 - 玩家扮演角色是 session 级绑定，保存在 `rpg_session_profiles.player_character_id` 和 `player_character_snapshot_json`。WebUI 的选择/切换和 CLI/Telegram 文本渠道都必须统一走 Agent 服务的 `/role_bind <序号>` 命令链路；Play API 只能转发到 Agent service 后刷新 summary，不要直接在 Play API/DataManager 中写绑定。
 - CLI / Telegram 也必须通过 `rpg_data` catalog 解析会话：配置使用 `workspace_id + story_id + optional session_id + session_title`；未配置 `session_id` 时由 Agent service 创建系统生成 ID 的 session，配置了则只校验并加载既有 session。不要恢复 `workspace` 字段、`cli_direct` 默认 ID 或用户自定义 session ID 创建入口。
@@ -104,7 +107,7 @@
 - 修改 Telegram 适配、会话流程或渲染逻辑时，必须补 `channels/tests/test_telegram.py`。
 - 修改 API/Play WebUI 管理能力时，补 `play_api/tests/` 契约测试并运行 `cd play_webui && npm run build`。
 - 修改核心上下文、summary、session 行为时，补 `rpg_core/tests/`；修改 memory/Dream 领域行为时，补 `rp_memory/tests/`；修改 Dream SQL 账本、服务或代理边界时分别补 `rpg_data/tests/`、`dream_service/tests/`、`play_api/tests/test_dream.py`。
-- Dream 默认专项基线为 `uv run python -m pytest rp_memory/tests/test_dream.py rpg_data/tests/test_dream_memory_service.py dream_service/tests play_api/tests/test_dream.py -q`。真实 DeepSeek V4 Flash 验收需要先在独立终端运行 `RPG_WORLD_PROFILE=test uv run python -m run_llm`，再在另一终端显式 opt-in：`RPG_WORLD_PROFILE=test DREAM_LIVE_TEST=1 uv run python -m pytest dream_service/tests/integration -m dream_live -q`；测试结束后关闭 LLM Service，不得把 API key 写入测试、文档或日志。
+- Dream 默认专项基线为 `uv run python -m pytest rp_memory/tests/test_dream.py rpg_data/tests/test_dream_memory_service.py dream_service/tests play_api/tests/test_dream.py play_api/tests/test_events.py -q`。真实 DeepSeek V4 Flash 验收需要先在独立终端运行 `RPG_WORLD_PROFILE=test uv run python -m run_llm`，再在另一终端显式 opt-in：`RPG_WORLD_PROFILE=test DREAM_LIVE_TEST=1 uv run python -m pytest dream_service/tests/integration -m dream_live -q`；测试结束后关闭 LLM Service，不得把 API key 写入测试、文档或日志。
 - 修改主 agent、LLM provider、session manager、context 或相关配置时，默认跑：
   `INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q`。
 - 修改 Agent 组合、`rpg_core/agent/turn/`、transaction 或同步/流式编排时，至少先跑：
@@ -113,7 +116,7 @@
 - pytest 默认会清理代理环境变量；需要保留代理时显式设置 `PYTEST_KEEP_PROXY=1`。
 
 ## 配置与数据
-- 配置按进程/模块拆分：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听与客户端默认值，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听与日志，`dream_service/settings.yaml` 管 Dream 监听、DreamClient/LLMClient 与 Map/Reduce 分批，`rpg_media/settings.yaml` 管简报与图片 Provider，`media_service/settings.yaml` 管 Media 服务、客户端和 worker，`rpg_tts/settings.yaml` 管正文清洗与分段，`tts_service/settings.yaml` 管 TTS 服务、客户端和 worker。Dream 的 64 条 active 是固定数据层不变量，不得通过部署配置提高。
+- 配置按进程/模块拆分：`rpg_core/settings.yaml` 管核心业务配置，`agent_service/settings.yaml` 管 Agent 服务监听、客户端和 Derivation 终态 publisher，`channels/settings.yaml` 管 CLI/Telegram 行为，`play_api/settings.yaml` 管 Play API 监听、事件 Hub 与日志，`dream_service/settings.yaml` 管 Dream 监听、客户端、Map/Reduce 和终态 publisher，`rpg_media/settings.yaml` 管简报与图片 Provider，`media_service/settings.yaml` 管 Media 服务、客户端和 worker，`rpg_tts/settings.yaml` 管正文清洗与分段，`tts_service/settings.yaml` 管 TTS 服务、客户端和 worker。Dream 的 64 条 active 是固定数据层不变量，不得通过部署配置提高。
 - Play WebUI 通用配置入口是 `play_webui/play_webui.config.json`，前端通过 typed loader 读取；历史分页配置位于 `session.historyPagination`，正文门禁阈值位于 `session.contextUsage.inputBlockThresholdRatio`。Core 兜底阈值独立配置在 `rpg_core/settings.yaml` 的 `agent.context_window_reject_threshold_ratio`；两者合法范围均为 `(0, 1]`、默认均为 `0.9`，WebUI 非法值回退 `0.9`，Core 非法值必须启动失败。
 - `llm_service/settings.yaml` 管 LLM 服务监听、Bearer 鉴权和本地 llama runtime；`llm_service/llm.yaml` 只由 LLM Service 读取，管理 Provider、密钥、模型、上下文窗口、speech 音色和超时等 LLM 强相关配置。
 - Dream Map/Reduce 分别只通过 `dream.shallow` / `dream.deep` biz key 调用 LLM；允许在本地忽略的 `llm_service/llm.test.yaml` 中把二者覆盖到当前配置的 `deepseek_v4_flash`，业务代码不得读取 Provider 配置或密钥。

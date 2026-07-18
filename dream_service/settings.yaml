@@ -20,6 +20,11 @@ base:
     # Compatibility name: caps Map, Reduce, and Proposal LLM calls.
     map_concurrency: 2
     reduce_candidate_batch_size: 32
+  play_events:
+    enabled: true
+    endpoint_url: http://127.0.0.1:8001/play-api/v1/internal/events
+    token_env: RPG_WORLD_PLAY_EVENT_TOKEN
+    timeout_ms: 2000
   logging:
     log_level: DEBUG
     directory: logs

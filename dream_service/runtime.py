@@ -7,6 +7,11 @@ import logging
 from dataclasses import dataclass
 
 from dream_service.contracts import AsyncDreamRepository, DreamProposalView
+from dream_service.notifications import (
+    DreamTerminalNotification,
+    DreamTerminalNotificationSink,
+    NullDreamTerminalNotificationSink,
+)
 from rp_memory.dream.engine import DreamEngine
 from rp_memory.dream.errors import DreamAlreadyRunningError, DreamError
 from rp_memory.dream.types import DreamDepth, DreamScope
@@ -32,12 +37,16 @@ class DreamTaskManager:
         *,
         repository: AsyncDreamRepository,
         engine: DreamEngine,
+        notification_sink: DreamTerminalNotificationSink | None = None,
         orphan_check_interval_seconds: float = 0.5,
         state_persist_attempts: int = 3,
         state_persist_retry_delay_seconds: float = 0.05,
     ) -> None:
         self.repository = repository
         self.engine = engine
+        self._notifications = (
+            notification_sink or NullDreamTerminalNotificationSink()
+        )
         self._orphan_check_interval_seconds = max(
             0.01,
             float(orphan_check_interval_seconds),
@@ -51,9 +60,12 @@ class DreamTaskManager:
         self._lock = asyncio.Lock()
 
     async def start(self) -> None:
-        interrupted = await self.repository.interrupt_generating()
+        interrupted = await self._interrupt_generating()
         if interrupted:
-            logger.warning("interrupted stale Dream proposals count=%s", interrupted)
+            logger.warning(
+                "interrupted stale Dream proposals count=%s",
+                len(interrupted),
+            )
 
     async def stop(self) -> None:
         tasks = tuple(active.task for active in self._tasks_by_session.values())
@@ -62,11 +74,11 @@ class DreamTaskManager:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks_by_session.clear()
-        interrupted = await self.repository.interrupt_generating()
+        interrupted = await self._interrupt_generating()
         if interrupted:
             logger.warning(
                 "interrupted Dream proposals during shutdown count=%s",
-                interrupted,
+                len(interrupted),
             )
 
     async def create_proposal(
@@ -115,7 +127,7 @@ class DreamTaskManager:
                 self._tasks_by_session.pop(session_id, None)
 
             if recovery is not None:
-                interrupted = await self.repository.interrupt_generating(
+                interrupted = await self._interrupt_generating(
                     session_id,
                     proposal_id=recovery.proposal_id,
                 )
@@ -141,16 +153,16 @@ class DreamTaskManager:
                     "proposal_id=%s interrupted=%s",
                     session_id,
                     recovered.proposal_id,
-                    interrupted,
+                    len(interrupted),
                 )
             else:
-                interrupted = await self.repository.interrupt_generating(session_id)
+                interrupted = await self._interrupt_generating(session_id)
                 if interrupted:
                     logger.warning(
                         "interrupted orphaned Dream proposal before create "
                         "session_id=%s count=%s",
                         session_id,
-                        interrupted,
+                        len(interrupted),
                     )
             snapshot = await self.repository.build_source_snapshot(session_id)
             selection = self.engine.prepare(snapshot, depth=depth, scope=scope)
@@ -265,7 +277,11 @@ class DreamTaskManager:
         last_error: Exception | None = None
         for attempt in range(1, self._state_persist_attempts + 1):
             try:
-                await self.repository.set_proposal_ready(proposal.proposal_id, items)
+                stored = await self.repository.set_proposal_ready(
+                    proposal.proposal_id,
+                    items,
+                )
+                await self._publish_terminal(stored)
                 return
             except Exception as exc:
                 last_error = exc
@@ -275,6 +291,7 @@ class DreamTaskManager:
                     stored is None or stored.status != "generating"
                 ):
                     if stored is not None and stored.status == "ready":
+                        await self._publish_terminal(stored)
                         return
                     raise
                 if attempt < self._state_persist_attempts:
@@ -292,11 +309,12 @@ class DreamTaskManager:
         last_error: Exception | None = None
         for attempt in range(1, self._state_persist_attempts + 1):
             try:
-                await self.repository.set_proposal_failed(
+                stored = await self.repository.set_proposal_failed(
                     proposal.proposal_id,
                     error_code=error_code,
                     error_message=error_message,
                 )
+                await self._publish_terminal(stored)
                 return
             except Exception as exc:
                 last_error = exc
@@ -305,6 +323,8 @@ class DreamTaskManager:
                 if lookup.succeeded and (
                     stored is None or stored.status != "generating"
                 ):
+                    if stored is not None and stored.status == "failed":
+                        await self._publish_terminal(stored)
                     return
                 if attempt < self._state_persist_attempts:
                     await asyncio.sleep(self._state_persist_retry_delay_seconds)
@@ -339,7 +359,7 @@ class DreamTaskManager:
     ) -> None:  # noqa: ANN001
         """Best-effort release of a SQL ``generating`` row after terminal writes fail."""
         try:
-            interrupted = await self.repository.interrupt_generating(
+            interrupted = await self._interrupt_generating(
                 proposal.session_id,
                 proposal_id=proposal.proposal_id,
             )
@@ -357,7 +377,44 @@ class DreamTaskManager:
                 "proposal_id=%s session_id=%s count=%s",
                 proposal.proposal_id,
                 proposal.session_id,
-                interrupted,
+                len(interrupted),
+            )
+
+    async def _interrupt_generating(
+        self,
+        session_id: str | None = None,
+        *,
+        proposal_id: str | None = None,
+    ) -> tuple[DreamProposalView, ...]:
+        proposals = await self.repository.interrupt_generating(
+            session_id,
+            proposal_id=proposal_id,
+        )
+        for proposal in proposals:
+            await self._publish_terminal(proposal)
+        return proposals
+
+    async def _publish_terminal(self, proposal: DreamProposalView) -> None:
+        try:
+            await self._notifications.publish(
+                DreamTerminalNotification(
+                    proposal_id=proposal.proposal_id,
+                    session_id=proposal.session_id,
+                    depth=proposal.depth,
+                    scope=proposal.scope,
+                    status=proposal.status,
+                    error_code=proposal.error_code,
+                    error_message=proposal.error_message,
+                    finished_at=proposal.finished_at,
+                    updated_at=proposal.updated_at,
+                )
+            )
+        except Exception:
+            logger.warning(
+                "Dream terminal notification failed proposal_id=%s session_id=%s",
+                proposal.proposal_id,
+                proposal.session_id,
+                exc_info=True,
             )
 
     def _forget(

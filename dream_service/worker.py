@@ -96,7 +96,7 @@ class DreamRepositoryWorker(AsyncDreamRepository):
         session_id: str | None = None,
         *,
         proposal_id: str | None = None,
-    ) -> int:
+    ) -> tuple[DreamProposalView, ...]:
         return await self._submit(
             lambda repository: repository.interrupt_generating(
                 session_id,

@@ -38,6 +38,13 @@ base:
     request_timeout_ms: 60000
     stream_timeout_ms: 300000
 
+  # ── Derivation 终态推送到 Play API ───────────────────────────────
+  play_events:
+    enabled: true
+    endpoint_url: http://127.0.0.1:8001/play-api/v1/internal/events
+    token_env: RPG_WORLD_PLAY_EVENT_TOKEN
+    timeout_ms: 2000
+
   # ── Agent 服务日志配置 ───────────────────────────────────────────
   logging:
     # uvicorn 日志级别。当前阶段默认 DEBUG，便于排查 Agent 服务问题。

@@ -274,6 +274,8 @@ class SessionDerivationWorker:
                     error_code=job.error_code,
                     error_message=job.error_message,
                     context_threshold_exceeded=job.context_threshold_exceeded,
+                    finished_at=job.finished_at,
+                    updated_at=job.updated_at,
                 )
             )
         except Exception as exc:

@@ -8,7 +8,7 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class SessionDerivationNotification:
-    """Stable payload that a future user-notification adapter can consume."""
+    """Stable payload consumed by an injected terminal-notification adapter."""
 
     job_id: str
     source_session_id: str
@@ -18,16 +18,18 @@ class SessionDerivationNotification:
     error_code: str = ""
     error_message: str = ""
     context_threshold_exceeded: bool = False
+    finished_at: str = ""
+    updated_at: str = ""
 
 
 class SessionDerivationNotificationSink(Protocol):
-    """Boundary for future WebUI/global notification delivery."""
+    """Transport-neutral boundary for terminal notification delivery."""
 
     async def publish(self, notification: SessionDerivationNotification) -> None: ...
 
 
 class NullSessionDerivationNotificationSink:
-    """Default backend-only implementation used until a UI channel exists."""
+    """No-op implementation used when delivery is disabled or under test."""
 
     async def publish(self, notification: SessionDerivationNotification) -> None:
         del notification

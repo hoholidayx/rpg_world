@@ -58,6 +58,7 @@ from agent_service.schemas import (
     AgentTurnCancelResponse,
 )
 from agent_service.derivation_worker import SessionDerivationWorker
+from agent_service.play_event_notifications import SessionDerivationPlayEventSink
 from agent_service.settings import settings as process_settings
 from commons.errors import (
     LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
@@ -72,6 +73,8 @@ from commons.errors import (
 from commons.types import JsonObject, JsonValue
 from llm_client.manager import LLMClientManager
 from llm_client.client import LLMServiceClientError
+from play_events import PlayEventPublisher
+from play_events.auth import uses_default_play_event_token
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload, usage_payload_from_records
@@ -106,11 +109,27 @@ async def lifespan(app: FastAPI):
         request_timeout_ms=cfg.request_timeout_ms,
         stream_timeout_ms=cfg.stream_timeout_ms,
     )
+    event_cfg = process_settings.play_events
+    event_publisher: PlayEventPublisher | None = None
+    notification_sink = None
+    if event_cfg.enabled:
+        if uses_default_play_event_token(event_cfg.token_env):
+            logger.warning(
+                "{} is not set; using the local Play event token fallback",
+                event_cfg.token_env,
+            )
+        event_publisher = PlayEventPublisher(
+            endpoint_url=event_cfg.endpoint_url,
+            token=event_cfg.token,
+            timeout_ms=event_cfg.timeout_ms,
+        )
+        notification_sink = SessionDerivationPlayEventSink(event_publisher)
     _derivation_worker = SessionDerivationWorker(
         gateway=get_data_service_gateway(),
+        notification_sink=notification_sink,
     )
-    await _derivation_worker.start()
     try:
+        await _derivation_worker.start()
         yield
     finally:
         worker = _derivation_worker
@@ -126,7 +145,11 @@ async def lifespan(app: FastAPI):
                         await worker.interrupt_stale_jobs()
                 finally:
                     _derivation_worker = None
-                    await LLMClientManager.areset()
+                    try:
+                        if event_publisher is not None:
+                            await event_publisher.close()
+                    finally:
+                        await LLMClientManager.areset()
 
 
 app = FastAPI(title="RPG World Agent Service", lifespan=lifespan)

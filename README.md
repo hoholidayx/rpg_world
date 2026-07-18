@@ -33,6 +33,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-18：后台终态事件链路。** Dream proposal 与 Session Derivation 在 SQL 终态提交后，通过专用异步 publisher 把 `ready / failed / interrupted` 发送到 Play API 的进程内广播 Hub；Play WebUI 在根 Provider 建立唯一全局 EventSource。本期只完成接收链路，不增加 Toast、自动刷新或通知中心。
 - **2026-07-17：Dream 长期记忆系统。** 新增独立 `dream_service` 与 Session 级类型化 Persistent Memory 账本。Play WebUI 可手动执行 Shallow/Deep × Incremental/Full 四种 Dream，逐项检查和编辑 proposal 后原子应用；主 Agent 只读取 Evidence 仍有效的 active revisions，不再读取 `persistent_memory.json`。
 - **2026-07-15：LLM Service 完全独立进程化。** 新增 `run_llm.py`、受 Bearer 保护的 `/llm/v1` 业务 HTTP/SSE 边界和独立 `llm_client` 契约包。只有 LLM Service 读取 `llm.yaml`、Provider 密钥并持有 OpenAI/llama runtime；Agent 与 Memory 只通过远端客户端调用，旧 llama 子进程协议已删除。
 - **2026-07-15：Agent / Memory / LLM 统一异步线程模型。** `llm_client` 改为 loop-owned 纯异步客户端，Agent 与 Memory 直接 await catalog、provider、embedding 和 recall；Memory 使用 session 级 async coordinator，watchdog 线程只入队。llama 的队列等待与运行期统一受 `request_timeout_ms` 控制，并在 completion、stream、rerank 安全边界协作取消。
@@ -48,6 +49,9 @@ uv sync
 # 可选：非本地部署应为 LLM Service 与调用方配置相同的静态令牌。
 # 未设置时双方共同使用内置的 rpg-world-local-token，LLM Service 会警告。
 export RPG_WORLD_LLM_SERVICE_TOKEN=replace-with-a-secret
+# Agent、Dream 与 Play API 的后台事件内部入口必须使用同一个令牌。
+# 未设置时共同回退到仅适合本地开发的默认值并记录 warning。
+export RPG_WORLD_PLAY_EVENT_TOKEN=replace-with-another-secret
 # 启用 SessionRoom OpenAI Speech TTS 时设置；仅 LLM Service 读取。
 export OPENAI_API_KEY_TTS=replace-with-an-openai-key
 
@@ -286,6 +290,7 @@ Telegram 渠道当前支持：
 | 顶层 `llm_service/` | LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析与本地 llama runtime |
 | 顶层 `rp_memory/dream/` | 无框架的 Shallow/Deep 选源、Map/Reduce、Evidence 校验与 proposal 规划领域 |
 | 顶层 `dream_service/` | 独立 Dream HTTP 进程、DreamClient 与进程内 async 生成任务 |
+| 顶层 `play_events/` | Dream/Derivation 共用的无框架事件 wire contract、内部令牌解析与 loop-owned HTTP publisher |
 | 顶层 `rpg_media/` | 来源快照、VisualBrief、图片 Provider 契约、内容寻址存储与媒体用例 |
 | 顶层 `media_service/` | 独立 Media HTTP 进程、MediaClient 与数据库持久任务 worker |
 | 顶层 `rpg_tts/` | 正文标准化、确定性分段、缓存指纹与 MP3 内容寻址存储 |
@@ -502,12 +507,32 @@ Dream 是手动、Session 级的离线归纳链路。Persistent Memory 的真源
 - Map、分层 Reduce 和最终 Proposal 共用 `map_concurrency` 并发上限；若 Reduce 不收敛而触发代码侧候选截断，Full Deep 会禁用基于“候选缺席”的退休，只保留显式证据驱动的修订或替换。
 - 每次运行先持久化 proposal。WebUI 可逐项选择并编辑文本、类型、认知状态和显著度；Apply 在串行 repository worker 中取得 SQLite `IMMEDIATE` 写锁，事务内重新捕获并再次确认 history/source/ledger 快照后原子提交。
 - Dream 使用进程内异步生成任务。页面不自动轮询；服务重启把未完成任务标记为 `interrupted`，运行中若终态落库连续失败也会尽力中断残留 `generating`。WebUI 的“检查并重试”会携带原 proposal ID：已完成时只刷新终态，仅在该 ID 仍为无本地 task 的孤儿 `generating` 时按原 depth/scope 新建替代任务，不重复消耗 LLM。
+- Dream proposal 与 Session Derivation 只在 `ready / failed / interrupted` 落库后发布紧凑终态事件。通知失败不回滚任务；完整结果仍必须通过原 GET 接口读取。
 - retired 事实仍保留稳定 Memory ID 和历史 revisions。后续 Dream 若从新的有效 Evidence 再次提取出同一规范化事实，ADD 会在原 ID 上追加新 revision 并恢复为 active；手动 Restore 仍只适用于旧 revision Evidence 尚有效的记录。
 - `/clear` 清空 Session Dream 账本、revision/Evidence、proposal 和增量 state/manifests；历史编辑/截断不会自动运行 Dream，但 Evidence 失效会立即阻止旧记忆继续进入 Context。
 
 Play WebUI 从 Session 设置菜单进入 Dream Memory 管理页。Dream Service v1 不提供入站鉴权，
 因此服务配置强制使用 loopback 地址（默认 `http://127.0.0.1:8014/dream/v1`），非 loopback
 监听会在配置加载时失败；它不可用时只影响该管理页，不影响正常游玩。
+
+### Play 后台终态事件
+
+后台事件使用独立于 Agent 正文 SSE 的全局链路：
+
+```text
+DreamTaskManager / SessionDerivationWorker
+  -> 领域 NotificationSink
+  -> play_events.PlayEventPublisher
+  -> POST /play-api/v1/internal/events
+  -> Play API 进程内 Hub
+  -> GET /play-api/v1/events/stream
+  -> 根 Providers 下唯一 PlayEventBridge
+```
+
+- `POST /internal/events` 使用 `RPG_WORLD_PLAY_EVENT_TOKEN` Bearer 鉴权；浏览器订阅端不携带该内部令牌。
+- 每个订阅者使用容量 64 的内存队列，慢订阅满载时丢弃最旧事件；SSE 约每 15 秒发送 heartbeat，并声明 3 秒重连间隔。
+- 事件不写 SQL outbox，不补发、不确认消费。断线期间的状态恢复仍依赖 Dream Proposal / Derivation Job GET 接口。
+- 首版要求 Play API 单进程、单 worker。WebUI 只严格解析并在 Zustand 内存保存最近 50 条事件，不做 Toast、导航、自动 Query invalidation 或 localStorage。
 
 ### 运行链路
 
@@ -694,19 +719,21 @@ Play WebUI 从 Session 设置菜单进入 Dream Memory 管理页。Dream Service
 | 文件 | 职责 |
 |---|---|
 | `rpg_core/settings.yaml` | 核心业务配置：Agent 行为、scene 的 LLM 结构写权限、主 Context 正文拒绝阈值、memory 检索参数、核心日志 |
-| `agent_service/settings.yaml` | Agent 服务监听参数、AgentClient 默认值、LLMClient 地址/超时/令牌环境变量名、Agent 服务日志 |
+| `agent_service/settings.yaml` | Agent 服务监听参数、AgentClient/LLMClient，以及 Derivation 终态事件 publisher 地址、超时和令牌环境变量名 |
 | `channels/settings.yaml` | CLI / Telegram 渠道行为、Telegram bot、渠道日志 |
-| `play_api/settings.yaml` | Play API 监听参数、Play API 日志 |
+| `play_api/settings.yaml` | Play API 监听参数、后台事件 subscriber 队列/heartbeat/retry 与 Play API 日志 |
 | `rpg_media/settings.yaml` | VisualBrief Demo planner、默认图片 Provider 与 Local file Demo 图片目录 |
 | `media_service/settings.yaml` | Media 服务监听、MediaClient 地址/超时与 worker 并发参数 |
 | `rpg_tts/settings.yaml` | TTS 正文标准化版本、speech biz key 与单段字符上限 |
 | `tts_service/settings.yaml` | TTS 服务监听、TTSClient、LLMClient 与持久 worker |
-| `dream_service/settings.yaml` | Dream 服务监听、DreamClient、LLMClient 与 Map/Reduce 分批参数；`map_concurrency` 兼容保留旧命名并限制整条 Dream LLM 链路；64 条 active 是固定数据层不变量 |
+| `dream_service/settings.yaml` | Dream 服务监听、DreamClient/LLMClient、Map/Reduce 参数及终态事件 publisher；64 条 active 是固定数据层不变量 |
 | `llm_service/settings.yaml` | LLM 服务监听、Bearer 令牌环境变量名、本地 llama 并行模型数、`llama_shutdown_grace_ms` 与日志 |
 | `play_webui/play_webui.config.json` | Play WebUI 通用配置入口，例如 SessionRoom 历史分页窗口和 context 正文门禁阈值 |
 | `llm_service/llm.yaml` | LLM provider、模型、上下文窗口、speech 音色、温度、超时等 LLM 强相关配置 |
 
 `RPG_WORLD_LLM_SERVICE_TOKEN` 存在时会覆盖默认令牌，LLM Service 与所有调用进程必须使用相同值。环境变量缺失或仅含空白时，各进程共同使用内置的 `rpg-world-local-token`，LLM Service 记录 warning 但继续启动；该默认值只适合本地开发，非本地部署应显式覆盖。Agent Service 可以在 LLM Service 暂不可用时启动并将 health 标为 degraded，实际推理请求会以独立错误快速失败。LLM Service 自身的 `/health` 故意免 Bearer 鉴权，只表示进程与配置健康；health 成功不代表调用方 token 正确，token 会在 catalog、chat、embedding、rerank、speech 等受保护请求上验证。
+
+`RPG_WORLD_PLAY_EVENT_TOKEN` 由 Agent、Dream 和 Play API 共同读取，用于保护 `/play-api/v1/internal/events`。缺失时三者共同回退到 `rpg-world-local-event-token` 并记录 warning；该默认值同样只用于本地开发。浏览器的 `/events/stream` 订阅不读取或暴露该令牌。
 
 独立入口会统一接管 Loguru、Python `logging` 和 Uvicorn 日志，同时保留控制台输出，并在项目根目录写入 `logs/agent.log`、`llm.log`、`dream.log`、`media.log`、`tts.log`、`play_api.log`、`telegram.log` 或 `cli.log`。默认每个文件达到 20 MB 后滚动，保留最近 10 个 ZIP 压缩归档；`logs/` 不纳入版本控制。各进程的 `logging` 配置均支持 `directory`、`rotation_size_mb`、`retention_count`、`compression` 和 `console_enabled` 覆盖。
 
@@ -881,7 +908,8 @@ uv run python -m pytest \
   rp_memory/tests/test_dream.py \
   rpg_data/tests/test_dream_memory_service.py \
   dream_service/tests \
-  play_api/tests/test_dream.py -q
+  play_api/tests/test_dream.py \
+  play_api/tests/test_events.py -q
 cd play_webui && npm run build
 ```
 

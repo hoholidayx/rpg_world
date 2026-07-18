@@ -20,6 +20,14 @@ base:
     # 是否启用 uvicorn reload。
     reload: false
 
+  # ── WebUI 后台终态事件流 ─────────────────────────────────────────
+  events:
+    # Agent/Dream 发布内部事件所使用的 Bearer token 环境变量。
+    token_env: RPG_WORLD_PLAY_EVENT_TOKEN
+    subscriber_queue_capacity: 64
+    heartbeat_seconds: 15
+    retry_ms: 3000
+
   # ── Play API 日志配置 ────────────────────────────────────────────
   logging:
     # uvicorn 日志级别。当前阶段默认 DEBUG，便于排查 Play API 请求。

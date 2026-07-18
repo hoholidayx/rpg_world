@@ -159,6 +159,12 @@ class FakeNotificationSink:
         self.notifications.append(notification)
 
 
+class FailingNotificationSink:
+    async def publish(self, notification: SessionDerivationNotification) -> None:
+        del notification
+        raise RuntimeError("notification unavailable")
+
+
 class FakeSourceAgent:
     def __init__(self, service: FakeDerivationService) -> None:
         self.service = service
@@ -236,6 +242,33 @@ async def test_derivation_worker_completes_ready_job(monkeypatch) -> None:
     assert target.prepared == [queued.id]
     assert len(notifications.notifications) == 1
     assert notifications.notifications[0].status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_derivation_notification_failure_does_not_change_ready_job(
+    monkeypatch,
+) -> None:
+    queued = _job()
+    service = FakeDerivationService(queued)
+    FakeWorkerAgentManager.agents = {
+        "source_1": FakeSourceAgent(service),
+        "target_1": FakeTargetAgent(),
+    }
+    FakeWorkerAgentManager.dropped = []
+    FakeWorkerAgentManager.drop_error = None
+    monkeypatch.setattr(worker_module, "AgentManager", FakeWorkerAgentManager)
+    worker = SessionDerivationWorker(
+        gateway=SimpleNamespace(
+            session_derivations=service,
+            session_deletion=FakeSessionDeletion(),
+        ),
+        notification_sink=FailingNotificationSink(),
+    )
+
+    assert await worker._execute(queued) is True
+    completed = service.get_job(queued.id)
+    assert completed is not None
+    assert completed.status == models.SESSION_DERIVATION_JOB_STATUS_READY
 
 
 @pytest.mark.asyncio
@@ -427,8 +460,9 @@ async def test_worker_rescans_queued_jobs_after_stale_recovery(monkeypatch) -> N
 
 
 class FakeLifespanWorker:
-    def __init__(self, *, gateway: object) -> None:
+    def __init__(self, *, gateway: object, notification_sink: object = None) -> None:
         self.gateway = gateway
+        self.notification_sink = notification_sink
         self.running = False
         self.wake_count = 0
 
@@ -458,8 +492,13 @@ async def test_lifespan_runs_stale_and_llm_cleanup_when_agent_reset_fails(
     events: list[str] = []
 
     class Worker:
-        def __init__(self, *, gateway: object) -> None:
-            del gateway
+        def __init__(
+            self,
+            *,
+            gateway: object,
+            notification_sink: object = None,
+        ) -> None:
+            del gateway, notification_sink
 
         async def start(self) -> None:
             events.append("worker_start")
