@@ -126,7 +126,7 @@ class AgentRuntimeLifecycle:
         """Rebuild managers/stores and rebind all dependent collaborators."""
         if not self._initialized:
             return
-        await self._replace_resources(self._session_id)
+        await self._replace_resources()
         if self._resources.memory_manager is not None:
             await self._resources.memory_manager.initialize()
         tool_service.refresh_base_registry()
@@ -141,24 +141,6 @@ class AgentRuntimeLifecycle:
 
         self._refresh_sub_agent_bindings()
 
-    async def switch_session(
-        self,
-        session_id: str,
-        *,
-        tool_service: "AgentToolService",
-    ) -> None:
-        """Switch the complete runtime while preserving provider reuse semantics."""
-        if self._session_id == session_id:
-            return
-        self._session_id = session_id
-        await self._replace_resources(session_id)
-        if self._resources.memory_manager is not None:
-            await self._resources.memory_manager.initialize()
-        get_watcher().start()
-        self._session_manager.switch_to(session_id)
-        tool_service.refresh_base_registry()
-        logger.info(_TAG + " switched to session: {}", session_id)
-
     async def reindex_memory(self) -> bool:
         manager = self._resources.memory_manager
         if manager is None:
@@ -172,8 +154,8 @@ class AgentRuntimeLifecycle:
             session_id=session_id,
         )
 
-    async def _replace_resources(self, session_id: str) -> None:
-        replacement = self._build_resources(session_id)
+    async def _replace_resources(self) -> None:
+        replacement = self._build_resources(self._session_id)
         await self._resources.close()
         self._resources = replacement
         builder = self._resources.builder

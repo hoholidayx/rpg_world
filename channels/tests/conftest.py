@@ -17,11 +17,10 @@ from rpg_core.agent.command import CommandDef, CommandResult
 class FakeAgent:
     """Mock RPGGameAgent，不调真实 LLM。
 
-    模拟 ``send()``、``send_stream()``、``switch_session()`` 等核心方法。
+    模拟 ``send()``、``send_stream()`` 与类型化会话 locator 返回。
     """
 
     def __init__(self) -> None:
-        self.current_session: str | None = None
         self.calls: list[tuple[str, tuple[str, ...]]] = []
         self.history: list[dict] = []
         self._initialized = True
@@ -37,14 +36,14 @@ class FakeAgent:
     async def initialize(self) -> None:
         pass
 
-    async def switch_session(self, session_id: str) -> None:
-        self.current_session = session_id
-
     async def send(self, *args: str) -> dict[str, object]:
         self.calls.append(("send", tuple(args)))
         text = args[-1]
         reply = f"[mock] reply to: {text}"
-        return {"reply": reply, "stats": {}}
+        result: dict[str, object] = {"reply": reply, "stats": {}}
+        if text.startswith("/session_switch "):
+            result["active_session"] = text.split(maxsplit=1)[1]
+        return result
 
     async def send_stream(self, text: str) -> AsyncIterator[AgentStreamEvent]:
         """模拟流式输出：一条 text 事件 + 一条 done 事件。"""
@@ -55,6 +54,11 @@ class FakeAgent:
         yield AgentStreamEvent(
             kind=StreamEventKind.DONE,
             content=f"[mock] reply to: {text}",
+            active_session=(
+                text.split(maxsplit=1)[1]
+                if text.startswith("/session_switch ")
+                else None
+            ),
         )
 
     async def stream(
@@ -81,10 +85,13 @@ class FakeAgent:
     async def execute_command(self, *args: str) -> dict[str, object] | CommandResult:
         self.calls.append(("execute_command", tuple(args)))
         command = args[-1]
-        active_session = args[0] if args else ""
+        result: dict[str, object] = {
+            "reply": f"[mock cmd] {command}",
+            "handled": True,
+        }
         if command.startswith("/session_switch "):
-            active_session = command.split(maxsplit=1)[1]
-        return {"reply": f"[mock cmd] {command}", "handled": True, "active_session": active_session}
+            result["active_session"] = command.split(maxsplit=1)[1]
+        return result
 
     async def list_sessions(self, _workspace_id: str, _story_id: int) -> dict[str, object]:
         return {"sessions": [{"session_id": "tg_default", "title": "Telegram"}]}

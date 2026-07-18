@@ -22,7 +22,6 @@ class TestCommandDispatcher:
             get_context_markdown=AsyncMock(return_value="context"),
             session_id="s1",
             reindex_memory=lambda: False,
-            switch_session=AsyncMock(),
         )
         dispatcher = CommandDispatcher(agent=fake_agent)
         dispatcher.register_default_builtins()
@@ -228,7 +227,6 @@ class TestCommandDispatcher:
             get_context_markdown=AsyncMock(return_value="context"),
             session_id="s2",
             reindex_memory=lambda: False,
-            switch_session=AsyncMock(),
             list_commands=lambda: [],
         )
         dispatcher = CommandDispatcher(agent=fake_agent)
@@ -258,7 +256,6 @@ class TestCommandDispatcher:
     async def test_session_switch_hides_provisioning_target(self, monkeypatch):
         fake_agent = SimpleNamespace(
             session_id="s1",
-            switch_session=AsyncMock(),
         )
         target = models.Session(
             "target",
@@ -283,7 +280,35 @@ class TestCommandDispatcher:
         result = await dispatcher.dispatch("/session_switch target")
 
         assert result.reply == "[会话不存在: target]"
-        fake_agent.switch_session.assert_not_awaited()
+        assert result.active_session is None
+        assert fake_agent.session_id == "s1"
+
+    @pytest.mark.asyncio
+    async def test_session_switch_returns_locator_without_mutating_source_agent(
+        self,
+        monkeypatch,
+    ):
+        fake_agent = SimpleNamespace(session_id="s1")
+        target = models.Session("target", "workspace", 1)
+        fake_gateway = SimpleNamespace(
+            catalog=SimpleNamespace(get_session=lambda session_id: target),
+        )
+        monkeypatch.setattr(
+            command_module,
+            "_current_catalog_session",
+            lambda agent: (
+                fake_gateway,
+                models.Session("s1", "workspace", 1),
+            ),
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/session_switch target")
+
+        assert result.reply == "[已切换到会话: target]"
+        assert result.active_session == "target"
+        assert fake_agent.session_id == "s1"
 
     @pytest.mark.asyncio
     async def test_rp_module_commands_are_dispatched(self, tmp_path):

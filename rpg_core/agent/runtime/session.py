@@ -271,12 +271,6 @@ class AgentSessionService:
     async def reload_rpg_context(self) -> None:
         await self._lifecycle.reload_resources(self._tool_service)
 
-    async def switch_session(self, session_id: str) -> None:
-        await self._lifecycle.switch_session(
-            session_id,
-            tool_service=self._tool_service,
-        )
-
     async def reindex_memory(self) -> bool:
         return await self._lifecycle.reindex_memory()
 

@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
 
-from rpg_core.session.grouping import (
+from rpg_core.summary.candidates import (
     MemoryTurnInputTooLargeError,
     batch_memory_turn_groups,
     select_summary_turn_groups,
@@ -57,14 +57,12 @@ class SummaryProcessor(Protocol):
         conv: list[Message],
         batch_id: int = 0,
         user_rounds: int = 0,
-        call_stats: list[object] | None = None,
     ) -> dict | None: ...
 
     async def generate_overall_summary(
         self,
         new_batch_summaries: list[str],
         existing_body: str = "",
-        call_stats: list[object] | None = None,
     ) -> dict | None: ...
 
 

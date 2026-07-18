@@ -776,7 +776,7 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
         )
     )
     _log_turn_usage(session_id=agent_session_id, usage=result.get("usage"), mode=payload.mode)
-    return {
+    response: dict[str, object] = {
         "turnId": f"turn_{agent_session_id}",
         "status": "completed",
         "workspace": workspace,
@@ -790,6 +790,10 @@ async def create_turn(session_id: str, payload: PlayChatRequest) -> dict[str, ob
         "usage": result.get("usage"),
         "agent": result,
     }
+    active_session = result.get("activeSession") or result.get("active_session")
+    if active_session:
+        response["activeSession"] = str(active_session)
+    return response
 
 
 @router.post("/{session_id}/turns/{turn_id}/truncate")

@@ -394,6 +394,7 @@ class AgentReplyPayload(AgentReplyPayloadBase, total=False):
     stats: AgentStatsPayload
     usage: JsonObject
     committed_turn_id: int
+    active_session: str
 
 
 class AgentCommandResultPayloadBase(TypedDict):
@@ -419,3 +420,4 @@ class AgentStreamEventPayload(TypedDict):
     model: NotRequired[str]
     finish_reason: NotRequired[str]
     committed_turn_id: NotRequired[int]
+    active_session: NotRequired[str]

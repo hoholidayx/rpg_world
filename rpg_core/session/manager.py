@@ -196,18 +196,6 @@ class SessionManager:
     def delete_message(self, message_id: int) -> Message:
         return self._history_service.delete_message(message_id)
 
-    # ── Session switch and metadata ────────────────────────────────────
-
-    def switch_to(self, session_id: str) -> None:
-        """Switch to a different rpg_data session and reload history."""
-        self.validate_session_id(session_id)
-        self._session_id = session_id
-        self.replace_history([], persist=False)
-        self._progress.reset_in_memory_processing_keys()
-        if self._history_enabled:
-            self.load()
-        logger.debug(_TAG + " switched to session '{}'", session_id)
-
     @property
     def meta(self) -> dict[str, object]:
         if not self._history_enabled:

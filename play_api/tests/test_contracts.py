@@ -260,7 +260,7 @@ class _FakeAgentClient:
 
     async def send(self, session_id: str, text: str) -> dict[str, object]:
         self.calls.append(("send", session_id))
-        return {
+        result: dict[str, object] = {
             "reply": f"agent reply: {text}",
             "usage": {
                 "prompt_tokens": 9,
@@ -272,6 +272,9 @@ class _FakeAgentClient:
                 "createdAt": "2026-01-01T00:00:00+00:00",
             },
         }
+        if text.startswith("/session_switch "):
+            result["active_session"] = text.split(maxsplit=1)[1]
+        return result
 
     async def reload_history(self, session_id: str) -> dict[str, object]:
         self.calls.append(("reload-history", session_id))
@@ -357,6 +360,11 @@ class _StreamingAgentClient(_FakeAgentClient):
             finish_reason="stop",
             duration_ms=12.3,
             committed_turn_id=4,
+            active_session=(
+                text.split(maxsplit=1)[1]
+                if text.startswith("/session_switch ")
+                else None
+            ),
         )
 
 
@@ -831,6 +839,48 @@ def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
         "committedTurnId": 4,
     }
     assert ("stream", "s_forest001", "hello", "req-play") in fake_agent.calls
+
+
+def test_stream_endpoint_keeps_source_envelope_and_exposes_active_session(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_client, "_client", _StreamingAgentClient())
+    reset_delete_confirmation_tokens()
+
+    with TestClient(app) as client:
+        with client.stream(
+            "POST",
+            "/play-api/v1/sessions/s_forest001/stream",
+            json={"text": "/session_switch s_target"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+    completed = _sse_payloads(body)[-1]
+    assert completed["sessionId"] == "s_forest001"
+    assert completed["payload"]["activeSession"] == "s_target"
+
+
+def test_turn_endpoint_exposes_active_session_without_changing_source_envelope(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_client, "_client", _FakeAgentClient())
+    reset_delete_confirmation_tokens()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/play-api/v1/sessions/s_forest001/turn",
+            json={"text": "/session_switch s_target"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["sessionId"] == "s_forest001"
+    assert response.json()["activeSession"] == "s_target"
 
 
 def test_stop_endpoint_forwards_request_id(tmp_path, monkeypatch) -> None:

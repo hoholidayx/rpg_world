@@ -93,6 +93,23 @@ def test_domain_packages_do_not_depend_on_agent_runtime_or_subagents() -> None:
     assert violations == []
 
 
+def test_session_and_summary_domains_do_not_depend_on_agent() -> None:
+    violations: list[str] = []
+    for path in _python_files(CORE / "session", CORE / "summary"):
+        for imported in _imports(path):
+            if imported == "rpg_core.agent" or imported.startswith("rpg_core.agent."):
+                violations.append(f"{path.relative_to(ROOT)}: {imported}")
+
+    assert violations == []
+
+
+def test_agent_turn_reexports_shared_session_mode_identity() -> None:
+    from rpg_core.agent.turn import TurnMode as AgentTurnMode
+    from rpg_core.session.modes import TurnMode as SessionTurnMode
+
+    assert AgentTurnMode is SessionTurnMode
+
+
 def test_shared_tooling_does_not_depend_on_agent_runtime() -> None:
     violations: list[str] = []
     for path in _python_files(CORE / "tooling"):

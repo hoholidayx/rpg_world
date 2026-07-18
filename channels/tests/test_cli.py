@@ -112,6 +112,42 @@ class TestCLIAdapter:
         assert reply is not None
         assert "[mock]" in reply
 
+    async def test_buffered_session_switch_updates_followup_locator(self):
+        agent = FakeAgent()
+        adapter = CLIAdapter(
+            agent_client=agent,
+            streaming=False,
+            session_id="source",
+            workspace="data/ws",
+        )
+        adapter._console.print = MagicMock()
+
+        await adapter._handle_message("direct", "user", "/session_switch target")
+        await adapter._handle_message("direct", "user", "followup")
+
+        assert agent.calls[-2:] == [
+            ("send", ("source", "/session_switch target")),
+            ("send", ("target", "followup")),
+        ]
+
+    async def test_streamed_session_switch_updates_followup_locator(self):
+        agent = FakeAgent()
+        adapter = CLIAdapter(
+            agent_client=agent,
+            streaming=True,
+            session_id="source",
+            workspace="data/ws",
+        )
+        adapter._console.print = MagicMock()
+
+        await adapter._handle_message("direct", "user", "/session_switch target")
+        await adapter._handle_message("direct", "user", "followup")
+
+        assert agent.calls[-2:] == [
+            ("stream", ("source", "/session_switch target")),
+            ("stream", ("target", "followup")),
+        ]
+
     async def test_handle_message_no_agent_client(self):
         adapter = CLIAdapter()
         reply = await adapter._handle_message("direct", "user", "hi")

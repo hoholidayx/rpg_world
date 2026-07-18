@@ -266,9 +266,6 @@ class RPGGameAgent:
     async def reload_rpg_context(self) -> None:
         await self._session_service.reload_rpg_context()
 
-    async def switch_session(self, session_id: str) -> None:
-        await self._session_service.switch_session(session_id)
-
     async def reindex_memory(self) -> bool:
         return await self._session_service.reindex_memory()
 

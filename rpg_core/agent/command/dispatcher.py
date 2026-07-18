@@ -101,7 +101,7 @@ class CommandDispatcher:
         self.register_builtin(
             "/session_switch",
             "切换到指定会话",
-            "用法：/session_switch <id>。切换后对话历史、上下文等全部指向新会话。",
+            "用法：/session_switch <id>。校验目标后由当前渠道把后续请求切换到该会话。",
             cmd_session_switch,
         )
         self.register_builtin(

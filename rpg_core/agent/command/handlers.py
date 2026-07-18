@@ -72,7 +72,10 @@ async def cmd_session_create(agent: AgentCommandTarget, args: list[str]) -> str:
     return f"[会话已创建: {created.id}]"
 
 
-async def cmd_session_switch(agent: AgentCommandTarget, args: list[str]) -> str:
+async def cmd_session_switch(
+    agent: AgentCommandTarget,
+    args: list[str],
+) -> str | CommandResult:
     from rpg_core.session import SessionManager
 
     if not args:
@@ -91,8 +94,11 @@ async def cmd_session_switch(agent: AgentCommandTarget, args: list[str]) -> str:
         or int(target.story_id) != int(current_session.story_id)
     ):
         return f"[会话不存在: {sid}]"
-    await agent.switch_session(sid)
-    return f"[已切换到会话: {sid}]"
+    return CommandResult(
+        reply=f"[已切换到会话: {sid}]",
+        handled=True,
+        active_session=sid,
+    )
 
 
 async def cmd_role_bind(

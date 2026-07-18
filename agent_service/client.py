@@ -545,6 +545,7 @@ def _event_from_dict(data: JsonObject) -> AgentStreamEvent:
         finish_reason=_optional_string(data.get("finish_reason")),
         duration_ms=float(data.get("duration_ms", 0.0) or 0.0),
         committed_turn_id=_optional_int(data.get("committed_turn_id")),
+        active_session=_optional_string(data.get("active_session")),
     )
 
 

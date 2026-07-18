@@ -337,6 +337,9 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     showToast,
     logger,
     onExit: () => router.push('/sessions'),
+    onActiveSession: (activeSession) => {
+      router.push(`/session/${encodeURIComponent(activeSession)}`)
+    },
     onCommittedNarrativeStyle: handleCommittedNarrativeStyle,
     onTurnCommitted: handleMediaTurnCommitted,
   })

@@ -50,6 +50,7 @@ export type PlayToolResultPayload = {
 export type PlayTurnCompletedPayload = {
   text: string
   committedTurnId?: number
+  activeSession?: string
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number

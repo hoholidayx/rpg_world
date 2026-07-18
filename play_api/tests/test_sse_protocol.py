@@ -81,6 +81,7 @@ def test_turn_completed_payload_keeps_text_and_committed_turn() -> None:
         "content": "reply",
         "finish_reason": "stop",
         "committed_turn_id": 7,
+        "active_session": "s2",
     })
 
     assert mapped is not None
@@ -89,6 +90,7 @@ def test_turn_completed_payload_keeps_text_and_committed_turn() -> None:
         "text": "reply",
         "finishReason": "stop",
         "committedTurnId": 7,
+        "activeSession": "s2",
     }
 
 

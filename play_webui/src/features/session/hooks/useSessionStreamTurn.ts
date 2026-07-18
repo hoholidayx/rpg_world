@@ -67,6 +67,7 @@ export function useSessionStreamTurn({
   showToast,
   logger,
   onExit,
+  onActiveSession,
   onCommittedNarrativeStyle,
   onTurnCommitted,
 }: {
@@ -85,6 +86,7 @@ export function useSessionStreamTurn({
   showToast: (message: string) => void
   logger: SessionRoomLogger
   onExit: () => void
+  onActiveSession: (sessionId: string) => void
   onCommittedNarrativeStyle: (styleId: NarrativeStyleId) => void
   onTurnCommitted: (turnId: number) => void
 }) {
@@ -512,6 +514,7 @@ export function useSessionStreamTurn({
     let streamFailure: string | null = null
     let contextThresholdRejected = false
     let contextThresholdMessage = ''
+    let activeSession: string | null = null
     try {
       await consumeChatStream(
         {
@@ -543,6 +546,12 @@ export function useSessionStreamTurn({
               onTurnCommitted(event.payload.committedTurnId)
             }
             if (
+              event.type === PLAY_STREAM_EVENT_TYPE.TURN_COMPLETED
+              && event.payload.activeSession
+            ) {
+              activeSession = event.payload.activeSession
+            }
+            if (
               event.type === PLAY_STREAM_EVENT_TYPE.ERROR
               && event.payload.errorCode === MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE
             ) {
@@ -555,6 +564,15 @@ export function useSessionStreamTurn({
       )
       if (stoppingRequestIdRef.current === requestId || stopSettledRequestIdsRef.current.has(requestId)) return
       if (streamFailure) throw new Error(streamFailure)
+      if (activeSession && activeSession !== sessionId) {
+        logger.info('session locator changed', {
+          requestId,
+          sourceSessionId: sessionId,
+          activeSession,
+        })
+        onActiveSession(activeSession)
+        return
+      }
       queryClient.removeQueries({
         queryKey: ['play-session-dream-evidence-history', sessionId],
         exact: true,
@@ -630,6 +648,7 @@ export function useSessionStreamTurn({
     contextPreviewUsage,
     logger,
     markStreamStopped,
+    onActiveSession,
     onCommittedNarrativeStyle,
     onTurnCommitted,
     queryClient,

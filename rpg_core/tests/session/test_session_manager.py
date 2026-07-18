@@ -302,7 +302,7 @@ def test_history_mutations_reload_and_reset_processing_flags(
     assert mgr.story_messages_since_last_extraction() == []
 
 
-def test_switch_to_reload_history(make_data_session, workspace):
+def test_reload_history_keeps_session_identity(make_data_session, workspace):
     make_data_session("s1")
     make_data_session("s2")
     mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
@@ -313,8 +313,9 @@ def test_switch_to_reload_history(make_data_session, workspace):
     other.load()
     other.append(Role.USER, "world")
 
-    mgr.switch_to("s2")
-    assert [m.content for m in mgr.history] == ["world"]
+    mgr.load()
+    assert mgr.session_id == "s1"
+    assert [m.content for m in mgr.history] == ["hello"]
     assert "story_memory_last_turn_id" not in mgr.meta
 
 

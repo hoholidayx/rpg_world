@@ -111,7 +111,11 @@ class AgentTurnService:
     def _reply_for_bypass(bypass: TurnBypass) -> AgentReply:
         stats = TurnStats(started_at=time.monotonic())
         stats.finished_at = time.monotonic()
-        return AgentReply(text=bypass.text, stats=stats)
+        return AgentReply(
+            text=bypass.text,
+            stats=stats,
+            active_session=bypass.active_session,
+        )
 
     async def _emit_bypass(
         self,
@@ -131,6 +135,7 @@ class AgentTurnService:
                 kind=StreamEventKind.DONE,
                 content=bypass.text,
                 model=self._model(),
+                active_session=bypass.active_session,
             )
         )
         await event_queue.put(_StreamSentinel())

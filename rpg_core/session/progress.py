@@ -211,10 +211,6 @@ class SessionProgress:
         self._state.story_memory_processed_message_keys.intersection_update(current_keys)
         self._state.summary_processed_message_keys.intersection_update(current_keys)
 
-    def reset_in_memory_processing_keys(self) -> None:
-        self._state.story_memory_processed_message_keys.clear()
-        self._state.summary_processed_message_keys.clear()
-
     def _conversation_turn_groups(
         self,
         messages: list[Message],

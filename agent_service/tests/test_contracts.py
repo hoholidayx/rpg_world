@@ -58,7 +58,16 @@ class FakeAgent:
             usage=LLMUsage(prompt_tokens=11, completion_tokens=7, total_tokens=18, prompt_cache_hit_tokens=3),
             duration_ms=12.3,
         ))
-        return AgentReply(text=f"reply:{message}", stats=stats)
+        active_session = (
+            message.split(maxsplit=1)[1]
+            if message.startswith("/session_switch ")
+            else None
+        )
+        return AgentReply(
+            text=f"reply:{message}",
+            stats=stats,
+            active_session=active_session,
+        )
 
     async def reload_history(self) -> None:
         self.history = [Message(Role.USER, "reloaded", turn_id=1, seq_in_turn=1)]
@@ -86,6 +95,11 @@ class FakeAgent:
             model="stream-model",
             finish_reason="stop",
             duration_ms=9.5,
+            active_session=(
+                message.split(maxsplit=1)[1]
+                if message.startswith("/session_switch ")
+                else None
+            ),
         )
 
     async def cancel_current_turn(self, request_id: str | None = None) -> TurnCancelResult:
@@ -98,7 +112,11 @@ class FakeAgent:
     async def execute_command(self, command: str) -> CommandResult:
         parts = command.split()
         if parts[:1] == ["/session_switch"] and len(parts) > 1:
-            self._session_id = parts[1]
+            return CommandResult(
+                reply=f"cmd:{command}",
+                handled=True,
+                active_session=parts[1],
+            )
         if parts[:1] == ["/role_bind"] and len(parts) > 1:
             bind_result = FakeGateway.session_roles.bind_by_index(self._session_id, int(parts[1]))
             return CommandResult(
@@ -822,6 +840,14 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert send.json()["usage"]["source"] == "provider_usage"
         assert send.json()["usage"]["accuracy"] == "accurate"
 
+        switch_send = client.post(
+            "/agent/v1/chat/send",
+            json={"session_id": "s1", "message": "/session_switch s2"},
+        )
+        assert switch_send.status_code == 200
+        assert switch_send.json()["active_session"] == "s2"
+        assert FakeAgentManager.instances["s1"].session_id == "s1"
+
         reload_history = client.post(
             "/agent/v1/chat/session/reload-history",
             json={"session_id": "s1"},
@@ -846,7 +872,7 @@ def test_agent_service_contracts(monkeypatch) -> None:
             json={"session_id": "s1", "command": "/role_bind 2"},
         )
         assert generic_bind.status_code == 200
-        assert set(generic_bind.json()) == {"reply", "handled", "active_session"}
+        assert set(generic_bind.json()) == {"reply", "handled"}
 
         invalid_bind = client.post(
             "/agent/v1/chat/session/player-character",
@@ -887,6 +913,7 @@ def test_agent_service_contracts(monkeypatch) -> None:
         )
         assert command.status_code == 200
         assert command.json()["active_session"] == "s2"
+        assert FakeAgentManager.instances["s1"].session_id == "s1"
 
         with client.stream(
             "POST",

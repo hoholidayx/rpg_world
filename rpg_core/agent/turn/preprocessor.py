@@ -34,7 +34,11 @@ class TurnPreprocessor:
         if dispatcher is not None and dispatcher.is_command(request.text):
             result = await dispatcher.dispatch(request.text)
             if result.handled:
-                return TurnBypass(text=result.reply, reason="command")
+                return TurnBypass(
+                    text=result.reply,
+                    reason="command",
+                    active_session=result.active_session,
+                )
 
         role_guard_reply = self._player_character_guard()
         if not role_guard_reply:

@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING
+
+from rpg_core.session.modes import (
+    DEFAULT_TURN_MODE,
+    TurnMode,
+    normalize_turn_mode,
+)
 
 if TYPE_CHECKING:
     from rpg_core.agent.telemetry import TurnStats
@@ -13,25 +18,6 @@ if TYPE_CHECKING:
     from rpg_core.context.models import Message, PersistentMemoryFact
     from rpg_core.agent.runtime.main_llm import MainLLMSelection
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
-
-
-class TurnMode(StrEnum):
-    """Supported semantic modes for a normal text turn."""
-
-    IC = "ic"
-    OOC = "ooc"
-    GM = "gm"
-
-
-DEFAULT_TURN_MODE = TurnMode.IC
-
-
-def normalize_turn_mode(value: object) -> TurnMode:
-    normalized = str(value or "").strip().lower() or DEFAULT_TURN_MODE.value
-    try:
-        return TurnMode(normalized)
-    except ValueError as exc:
-        raise ValueError(f"invalid turn mode: {normalized}") from exc
 
 
 @dataclass(frozen=True)
@@ -133,6 +119,7 @@ class TurnBypass:
 
     text: str
     reason: str
+    active_session: str | None = None
 
 
 @dataclass(frozen=True)

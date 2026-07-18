@@ -46,7 +46,7 @@ from rpg_core.agent.sub_agents.memory.parsing import (
     normalize_story_detail as _normalize_story_detail,
     parse_int_arg as _parse_int_arg,
 )
-from rpg_core.session.grouping import (
+from rpg_core.summary.candidates import (
     MemoryTurnInputTooLargeError,
     batch_memory_turn_groups,
     select_story_memory_turn_groups,

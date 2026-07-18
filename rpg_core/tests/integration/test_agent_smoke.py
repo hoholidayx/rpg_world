@@ -6,6 +6,7 @@ import re
 import pytest
 
 from rpg_data import models
+from rpg_core.agent.manager import AgentManager
 from rpg_core.agent.protocol import StreamEventKind
 from rpg_core.context.models import LayerType, Role
 
@@ -147,7 +148,10 @@ async def test_status_tables_and_scene_enter_agent_context(integration_status_ag
 
 
 @pytest.mark.asyncio
-async def test_session_create_and_switch_isolate_history(integration_agent, integration_data_gateway):
+async def test_session_create_and_switch_locator_isolate_history(
+    integration_agent,
+    integration_data_gateway,
+):
     create_result = await asyncio.wait_for(
         integration_agent.execute_command("/session_create alt_session"),
         timeout=120,
@@ -180,16 +184,18 @@ async def test_session_create_and_switch_isolate_history(integration_agent, inte
     )
     assert switch_result.handled is True
     assert "已切换" in switch_result.reply
-    assert integration_agent.session_id == created_session_id
-    assert integration_agent.history == []
+    assert switch_result.active_session == created_session_id
+    assert integration_agent.session_id == "integration_smoke"
+    assert [m.turn_id for m in integration_agent.history] == [1, 1]
 
+    target_agent = AgentManager.get_or_create(created_session_id)
     second_reply = await asyncio.wait_for(
-        integration_agent.send("Reply in one short sentence again."),
+        target_agent.send("Reply in one short sentence again."),
         timeout=120,
     )
     assert second_reply.stats is not None
     assert second_reply.stats.total_tokens > 0
-    assert [m.turn_id for m in integration_agent.history] == [1, 1]
+    assert [m.turn_id for m in target_agent.history] == [1, 1]
 
     default_rows = integration_data_gateway.messages.list("integration_smoke")
     alt_rows = integration_data_gateway.messages.list(created_session_id)

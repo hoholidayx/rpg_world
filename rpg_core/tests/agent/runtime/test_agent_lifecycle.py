@@ -209,44 +209,6 @@ async def test_lifecycle_initialize_is_idempotent(lifecycle_deps) -> None:
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_switch_rebuilds_resources_and_rebinds_subagents(
-    lifecycle_deps,
-) -> None:
-    built: list[str] = []
-
-    def factory(*, world_name: str, session_id: str) -> AgentContextResources:
-        del world_name
-        built.append(session_id)
-        return _resources(session_id)
-
-    lifecycle = AgentRuntimeLifecycle(
-        session_id="old",
-        world_name="World",
-        history_enabled=False,
-        command_dispatcher=_Commands(),
-        resource_factory=factory,
-    )
-    tools = _ToolService()
-    await lifecycle.initialize(tool_service=tools, mailbox=_Mailbox())
-    status_sub_agent = lifecycle.status_sub_agent
-    old_resources = lifecycle.resources
-
-    await lifecycle.switch_session("new", tool_service=tools)
-
-    assert lifecycle.session_id == "new"
-    assert lifecycle.session_manager.session_id == "new"
-    assert built == ["old", "new"]
-    assert lifecycle.resources.memory_manager.session_id == "new"
-    assert lifecycle.resources.memory_manager.init_calls == 1
-    assert old_resources.memory_manager.close_calls == 1
-    assert old_resources.builder.close_calls == 1
-    assert status_sub_agent.providers[0].session_id == "new"
-    assert len(status_sub_agent.contexts) == 2
-    assert tools.refresh_calls == 2
-    assert lifecycle_deps.start.call_count == 2
-
-
-@pytest.mark.asyncio
 async def test_lifecycle_release_and_reload_reinitializes_memory_and_tools(
     lifecycle_deps,
 ) -> None:
@@ -268,6 +230,8 @@ async def test_lifecycle_release_and_reload_reinitializes_memory_and_tools(
     assert old_resources.builder.close_calls >= 1
     assert lifecycle.resources is not old_resources
     assert lifecycle.resources.memory_manager.init_calls == 1
+    assert lifecycle.session_id == "s1"
+    assert lifecycle.session_manager.session_id == "s1"
     assert tools.refresh_calls == 2
 
 

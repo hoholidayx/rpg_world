@@ -43,6 +43,7 @@ class AgentStreamEvent:
     committed_turn_id: int | None = None
     reasoning_content: str | None = None
     stats: TurnStats | None = None
+    active_session: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {"kind": self.kind.value}
@@ -81,6 +82,8 @@ class AgentStreamEvent:
             if self.committed_turn_id <= 0:
                 raise ValueError("committed_turn_id must be a positive integer")
             data["committed_turn_id"] = int(self.committed_turn_id)
+        if self.active_session:
+            data["active_session"] = self.active_session
         return data
 
 

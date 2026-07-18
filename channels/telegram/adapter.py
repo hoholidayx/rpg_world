@@ -725,8 +725,7 @@ class TelegramAdapter(ChannelAdapter):
             await self.send_text(chat_id, f"未知命令: {command.split()[0]}")
             return
 
-        if command.startswith("/session_switch ") and reply.startswith("[已切换到会话: "):
-            active_session = active_session or command.split(maxsplit=1)[1]
+        if active_session:
             self._session_flow.pin_session(chat_id, active_session)
 
         if reply:

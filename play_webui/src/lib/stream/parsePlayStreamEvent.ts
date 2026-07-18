@@ -85,6 +85,7 @@ function validatePayload(type: PlayStreamEventType, payload: Record<string, unkn
       assertRequiredString(payload, 'text', type, raw)
       assertOptionalString(payload, 'model', type, raw)
       assertOptionalString(payload, 'finishReason', type, raw)
+      assertOptionalString(payload, 'activeSession', type, raw)
       if (
         payload.committedTurnId !== undefined
         && (

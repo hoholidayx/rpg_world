@@ -164,6 +164,7 @@ class CLIAdapter(ChannelAdapter):
                             f"\n[yellow]── round {event.round_index} ──[/yellow]",
                         )
                 elif event.kind == StreamEventKind.DONE:
+                    self._apply_active_session(event.active_session)
                     if event.content:
                         self._console.print(event.content)
                     self._console.print("")
@@ -189,6 +190,8 @@ class CLIAdapter(ChannelAdapter):
         except Exception as exc:
             self._console.print(f"[red][error] {exc}[/red]")
             return ""
+
+        self._apply_active_session(reply.get("active_session"))
 
         # ── StatusSubAgent records ──────────────────────────
         status_records = reply.get("status_sub_agent_records") or []
@@ -238,6 +241,11 @@ class CLIAdapter(ChannelAdapter):
         reply_text = str(reply.get("reply", ""))
         self._console.print(f"\n{reply_text}\n")
         return reply_text
+
+    def _apply_active_session(self, value: object) -> None:
+        active_session = str(value or "").strip()
+        if active_session:
+            self._session_id_override = active_session
 
     async def _handle_message(
         self, chat_id: str, user_id: str, text: str,

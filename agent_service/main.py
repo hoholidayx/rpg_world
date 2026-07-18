@@ -710,7 +710,6 @@ async def chat_command(body: AgentCommandRequest) -> AgentCommandResultPayload:
             detail=f"未知命令: {command.split()[0] if command else '(empty)'}",
         )
     data = _command_result_to_dict(result)
-    data["active_session"] = agent.session_id
     return data
 
 
@@ -1005,6 +1004,8 @@ def _turn_metadata_stream_error(exc: InvalidTurnMetadataError) -> AgentStreamEve
 
 def _reply_to_dict(reply: AgentReply, *, session_id: str = "-") -> AgentReplyPayload:
     result: AgentReplyPayload = {"reply": reply.text}
+    if reply.active_session:
+        result["active_session"] = reply.active_session
     if reply.committed_turn_id is not None:
         if reply.committed_turn_id <= 0:
             raise ValueError("committed_turn_id must be a positive integer")
@@ -1107,6 +1108,8 @@ def _command_result_to_dict(result: CommandResult) -> AgentCommandResultPayload:
     payload: AgentCommandResultPayload = {"reply": result.reply, "handled": result.handled}
     if result.stats is not None:
         payload["stats"] = cast(JsonObject, dict(result.stats))
+    if result.active_session:
+        payload["active_session"] = result.active_session
     return payload
 
 

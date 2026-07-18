@@ -701,6 +701,29 @@ class TestTelegramAdapter:
         assert adapter.get_session_id("123") == "my_tel"
         adapter.send_text.assert_awaited_once_with("123", "[已切换到会话: my_tel]")
 
+    async def test_on_command_session_switch_does_not_parse_reply_text_fallback(
+        self,
+        adapter: TelegramAdapter,
+    ):
+        agent = FakeAgent()
+        agent.execute_command = AsyncMock(
+            return_value={
+                "reply": "[已切换到会话: my_tel]",
+                "handled": True,
+            },
+        )
+        adapter.bind_agent_client(agent)
+        adapter.send_text = AsyncMock()
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "/session_switch my_tel"
+        update.effective_chat.id = 123
+        update.effective_user.id = 456
+
+        await adapter._on_command(update, object())
+
+        assert adapter.get_session_id("123") == "tg_default"
+
     async def test_session_id_validation_has_length_limit(self):
         from rpg_core.session import SessionManager
 
