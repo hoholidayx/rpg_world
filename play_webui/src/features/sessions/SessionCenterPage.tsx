@@ -7,29 +7,32 @@ import type { ReactNode } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
-  BookOpen,
-  CalendarClock,
   CheckCircle2,
-  Clock3,
+  Eye,
   FilePlus2,
-  FolderOpen,
   Loader2,
   Play,
   RefreshCw,
   Search,
   Sparkles,
   Trash2,
+  UserRound,
 } from 'lucide-react'
 import { ConfirmDialog, Dialog } from '@/components/common/Dialog'
+import { SideDrawer } from '@/components/common/SideDrawer'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import { getCurrentScene } from '@/lib/api/scene'
-import { createSession, deleteSession, getSessionHistory, listSessions } from '@/lib/api/sessions'
-import { listSessionStatusTables } from '@/lib/api/statusTables'
+import { createSession, deleteSession, getSessionHistoryPage, listSessions } from '@/lib/api/sessions'
 import { listStories } from '@/lib/api/stories'
 import { cn } from '@/lib/utils/cn'
 import type { Scene } from '@/types/scene'
-import { SESSION_ACTIVITY, type SessionComputedActivity, type SessionSummary, type Turn } from '@/types/session'
-import { STATUS_KIND, STATUS_ORIGIN, type StatusTable } from '@/types/statusTables'
+import {
+  HISTORY_MESSAGE_ROLE,
+  SESSION_ACTIVITY,
+  type HistoryPage,
+  type SessionComputedActivity,
+  type SessionSummary,
+} from '@/types/session'
 import type { StorySummary } from '@/types/story'
 
 type ActivityFilter = 'all' | SessionComputedActivity
@@ -92,18 +95,16 @@ function pickCoverClass(value: string | number) {
   return coverClasses[total % coverClasses.length]
 }
 
+function sessionInitial(item: Pick<SessionCenterItem, 'id' | 'title'>) {
+  return Array.from(item.title?.trim() || item.id)[0]?.toUpperCase() || 'S'
+}
+
 function latestTimestamp(session: SessionSummary) {
   return Math.max(getTimestamp(session.updatedAt), getTimestamp(session.createdAt))
 }
 
-function isThisWeek(timestamp: number) {
-  if (!timestamp) return false
-  const now = new Date()
-  const start = new Date(now)
-  const dayOffset = (start.getDay() + 6) % 7
-  start.setDate(start.getDate() - dayOffset)
-  start.setHours(0, 0, 0, 0)
-  return timestamp >= start.getTime()
+function playerCharacterLabel(item: Pick<SessionCenterItem, 'playerCharacter'>) {
+  return item.playerCharacter?.name || '待绑定角色'
 }
 
 function toErrorMessage(reason: unknown) {
@@ -117,12 +118,15 @@ function toSessionCenterItem(
 ): SessionCenterItem {
   const latestAt = latestTimestamp(session)
   const createdAtMs = getTimestamp(session.createdAt)
-  const computedActivity: SessionComputedActivity = latestAt && now - latestAt <= RECENT_WINDOW_MS ? SESSION_ACTIVITY.RECENT : SESSION_ACTIVITY.STALE
+  const computedActivity: SessionComputedActivity = latestAt && now - latestAt <= RECENT_WINDOW_MS
+    ? SESSION_ACTIVITY.RECENT
+    : SESSION_ACTIVITY.STALE
   const storySummary = story.summary ?? ''
   const searchText = [
     session.id,
     session.title ?? '',
     session.description ?? '',
+    session.playerCharacter?.name ?? '',
     story.title,
     storySummary,
   ].join(' ').toLowerCase()
@@ -148,321 +152,334 @@ function sceneSummary(scene?: Scene | null) {
   ].filter(Boolean)
   const attrs = Object.entries(scene.attrs ?? {})
     .filter(([, value]) => value)
-    .slice(0, 4)
+    .slice(0, 5)
     .map(([key, value]) => `${key}：${value}`)
 
   return [...parts, ...attrs].join('；') || '暂无场景数据'
 }
 
-function latestTurnSummary(turns?: Turn[] | null) {
-  const latest = turns?.[turns.length - 1]
-  if (!latest) return '暂无回合记录'
-  const latestMessage = [...latest.messages].reverse().find((message) => message.content.trim())
-  return latestMessage?.content || '暂无回合记录'
-}
-
-function tableOriginSummary(tables?: StatusTable[] | null) {
-  if (!tables?.length) return '暂无状态表'
-  const templateCopy = tables.filter((table) => table.origin === STATUS_ORIGIN.TEMPLATE_COPY).length
-  const sessionNative = tables.filter((table) => table.origin === STATUS_ORIGIN.SESSION_NATIVE).length
-  const unknown = tables.length - templateCopy - sessionNative
-  return [
-    templateCopy ? `模板副本 ${templateCopy}` : '',
-    sessionNative ? `会话新建 ${sessionNative}` : '',
-    unknown ? `未知来源 ${unknown}` : '',
-  ].filter(Boolean).join('，')
-}
-
-function Panel({
-  title,
-  description,
-  action,
-  children,
-}: {
-  title: string
-  description?: string
-  action?: ReactNode
-  children: ReactNode
-}) {
-  return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-      <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4">
-        <div className="min-w-0">
-          <h2 className="text-lg font-black text-slate-950">{title}</h2>
-          {description ? <p className="mt-1 text-sm leading-6 text-slate-500">{description}</p> : null}
-        </div>
-        {action}
-      </header>
-      {children}
-    </section>
-  )
-}
-
-function MetricCard({
-  label,
-  value,
-  note,
-  icon: Icon,
-}: {
-  label: string
-  value: number
-  note: string
-  icon: typeof BookOpen
-}) {
-  return (
-    <section className="min-h-24 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3 text-xs font-black uppercase text-slate-500">
-        <span>{label}</span>
-        <Icon size={18} className="text-slate-400" />
-      </div>
-      <p className="mt-3 text-3xl font-black leading-none text-slate-950">{value}</p>
-      <p className="mt-2 text-xs font-semibold text-slate-400">{note}</p>
-    </section>
-  )
-}
-
-function SessionArtwork({ item, className = 'h-28' }: { item: Pick<SessionCenterItem, 'id' | 'storyId'>; className?: string }) {
-  return (
-    <div className={cn('relative overflow-hidden bg-gradient-to-br', pickCoverClass(`${item.storyId}-${item.id}`), className)}>
-      <div className="absolute bottom-[-24px] left-5 h-20 w-24 rounded-t-full bg-white/15" />
-      <div className="absolute bottom-0 left-20 h-20 w-8 rounded-t-full bg-white/60 shadow-[60px_20px_0_-8px_rgba(255,255,255,0.34),108px_16px_0_-10px_rgba(255,255,255,0.24)]" />
-      <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-slate-950/45 to-transparent" />
-    </div>
-  )
+function latestTurnSummary(history?: HistoryPage | null) {
+  const latest = history?.turns.at(-1)
+  if (!latest) return '暂无已提交回合'
+  const messages = [...latest.messages].reverse()
+  const latestMessage = messages.find((message) => (
+    message.role === HISTORY_MESSAGE_ROLE.ASSISTANT && message.content.trim()
+  )) ?? messages.find((message) => message.content.trim())
+  return latestMessage?.content || '暂无已提交回合'
 }
 
 function ActivityBadge({ activity }: { activity: SessionComputedActivity }) {
   const meta = activityMeta[activity]
   return (
-    <span className={cn('inline-flex h-7 items-center gap-2 rounded-full px-3 text-xs font-black', meta.badgeClass)}>
+    <span className={cn('inline-flex h-7 shrink-0 items-center gap-2 rounded-full px-3 text-xs font-black', meta.badgeClass)}>
       <span className={cn('h-2 w-2 rounded-full', meta.dotClass)} />
       {meta.label}
     </span>
   )
 }
 
-function ContinueCard({
+function SessionArtwork({
   item,
-  selected,
-  onSelect,
-  onEnter,
+  className = 'h-32',
 }: {
-  item: SessionCenterItem
-  selected: boolean
-  onSelect: () => void
-  onEnter: () => void
+  item: Pick<SessionCenterItem, 'id' | 'storyId' | 'title'>
+  className?: string
 }) {
   return (
-    <article
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onSelect()
-        }
-      }}
-      className={cn(
-        'min-w-0 overflow-hidden rounded-lg border bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg',
-        selected ? 'border-violet-500 shadow-[0_0_0_3px_rgba(124,58,237,0.12)]' : 'border-slate-200',
-      )}
-      aria-label={`选择会话 ${item.title || item.id}`}
-    >
-      <SessionArtwork item={item} />
-      <div className="p-4">
-        <div className="mb-3 flex items-center justify-between gap-2">
+    <div className={cn('relative overflow-hidden rounded-xl bg-gradient-to-br', pickCoverClass(`${item.storyId}-${item.id}`), className)}>
+      <div className="absolute -right-8 -top-14 h-36 w-36 rounded-full border-[24px] border-white/10" />
+      <div className="absolute bottom-[-32px] left-8 h-24 w-28 rounded-t-full bg-white/15" />
+      <div className="absolute bottom-0 left-24 h-20 w-9 rounded-t-full bg-white/50 shadow-[66px_18px_0_-8px_rgba(255,255,255,0.28),118px_14px_0_-10px_rgba(255,255,255,0.18)]" />
+      <span className="absolute right-6 top-1/2 -translate-y-1/2 text-7xl font-black text-white/25">
+        {sessionInitial(item)}
+      </span>
+      <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-950/55 to-transparent" />
+    </div>
+  )
+}
+
+function SessionAvatar({ item }: { item: SessionCenterItem }) {
+  return (
+    <span className={cn(
+      'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-sm font-black text-white shadow-sm',
+      pickCoverClass(`${item.storyId}-${item.id}`),
+    )}>
+      {sessionInitial(item)}
+    </span>
+  )
+}
+
+function SessionListItem({
+  item,
+  onEnter,
+  onDetails,
+}: {
+  item: SessionCenterItem
+  onEnter: () => void
+  onDetails: () => void
+}) {
+  const description = item.description || item.storySummary || '暂无会话描述'
+  const playerCharacter = playerCharacterLabel(item)
+
+  return (
+    <article className="border-t border-slate-200 bg-white transition hover:bg-violet-50/25">
+      <div className="hidden min-h-[92px] grid-cols-[44px_minmax(180px,1.35fr)_minmax(140px,0.75fr)_minmax(130px,0.65fr)_112px_150px] items-center gap-3 px-4 py-4 xl:grid">
+        <SessionAvatar item={item} />
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={onEnter}
+            className="block max-w-full truncate text-left text-sm font-black text-slate-950 transition hover:text-violet-700"
+          >
+            {item.title || item.id}
+          </button>
+          <p className="mt-1 truncate text-xs font-semibold text-slate-400">{item.id}</p>
+          <p className="mt-1 truncate text-xs font-semibold text-slate-500">{description}</p>
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-black text-slate-900">{item.storyTitle}</p>
+          <p className="mt-1 flex items-center gap-1.5 truncate text-xs font-semibold text-slate-500">
+            <UserRound size={13} className="shrink-0" />
+            <span className="truncate">{playerCharacter}</span>
+          </p>
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-slate-800">{formatDate(item.updatedAt ?? item.createdAt)}</p>
+          <p className="mt-1 truncate text-xs font-semibold text-slate-400">创建于 {formatDate(item.createdAt)}</p>
+        </div>
+        <ActivityBadge activity={item.computedActivity} />
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={onDetails}
+            className="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 transition hover:border-violet-300 hover:text-violet-700"
+            aria-label={`查看会话 ${item.title || item.id} 详情`}
+          >
+            <Eye size={14} />
+            详情
+          </button>
+          <button
+            type="button"
+            onClick={onEnter}
+            className="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-slate-950 px-2 text-xs font-black text-white transition hover:bg-slate-800"
+          >
+            <Play size={13} />
+            进入
+          </button>
+        </div>
+      </div>
+
+      <div className="p-4 xl:hidden">
+        <div className="flex items-start gap-3">
+          <SessionAvatar item={item} />
+          <div className="min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={onEnter}
+              className="block max-w-full truncate text-left text-base font-black text-slate-950 transition hover:text-violet-700"
+            >
+              {item.title || item.id}
+            </button>
+            <p className="mt-1 truncate text-xs font-semibold text-slate-400">{item.id}</p>
+          </div>
           <ActivityBadge activity={item.computedActivity} />
-          <span className="truncate text-xs font-black text-slate-400">{item.id}</span>
         </div>
-        <h3 className="truncate text-base font-black text-slate-950">{item.title || item.id}</h3>
-        <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{item.description || item.storySummary || '暂无会话描述'}</p>
+        <p className="mt-3 line-clamp-2 text-sm font-semibold leading-6 text-slate-500">{description}</p>
+        <div className="mt-3 grid gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-3">
+          <div className="min-w-0">
+            <span className="block text-[10px] font-black uppercase tracking-wide text-slate-400">故事</span>
+            <span className="mt-1 block truncate text-xs font-bold text-slate-800">{item.storyTitle}</span>
+          </div>
+          <div className="min-w-0">
+            <span className="block text-[10px] font-black uppercase tracking-wide text-slate-400">玩家角色</span>
+            <span className="mt-1 block truncate text-xs font-bold text-slate-800">{playerCharacter}</span>
+          </div>
+          <div className="min-w-0">
+            <span className="block text-[10px] font-black uppercase tracking-wide text-slate-400">最近更新</span>
+            <span className="mt-1 block truncate text-xs font-bold text-slate-800">{formatDate(item.updatedAt ?? item.createdAt)}</span>
+          </div>
+        </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <div className="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
-            <b className="block truncate text-sm text-slate-950">{item.storyTitle}</b>
-            <span className="mt-1 block text-xs font-bold text-slate-500">story</span>
-          </div>
-          <div className="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
-            <b className="block truncate text-sm text-slate-950">{formatDate(item.updatedAt ?? item.createdAt)}</b>
-            <span className="mt-1 block text-xs font-bold text-slate-500">updated</span>
-          </div>
+          <button
+            type="button"
+            onClick={onDetails}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:text-violet-700"
+          >
+            <Eye size={15} />
+            查看详情
+          </button>
+          <button
+            type="button"
+            onClick={onEnter}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-black text-white transition hover:bg-slate-800"
+          >
+            <Play size={15} />
+            进入会话
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            onEnter()
-          }}
-          className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-black text-white transition hover:bg-slate-800"
-        >
-          <Play size={15} />
-          进入会话
-        </button>
       </div>
     </article>
   )
 }
 
-function SessionRow({
-  item,
-  selected,
-  onSelect,
-  onEnter,
+function DetailSection({
+  title,
+  note,
+  loading = false,
+  error,
+  onRetry,
+  children,
 }: {
-  item: SessionCenterItem
-  selected: boolean
-  onSelect: () => void
-  onEnter: () => void
+  title: string
+  note: string
+  loading?: boolean
+  error?: string | null
+  onRetry?: () => void
+  children: ReactNode
 }) {
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onSelect()
-        }
-      }}
-      className={cn(
-        'grid min-h-[72px] cursor-pointer grid-cols-[38px_minmax(0,1fr)_auto] items-center gap-3 border-t border-slate-200 bg-white px-4 py-3 text-left transition hover:bg-violet-50/30 lg:grid-cols-[38px_minmax(0,1.25fr)_minmax(150px,0.8fr)_minmax(140px,0.8fr)_124px_88px]',
-        selected ? 'bg-violet-50/60' : '',
-      )}
-      aria-label={`选择会话 ${item.title || item.id}`}
-    >
-      <span className={cn('flex h-10 w-10 items-center justify-center rounded-lg text-sm font-black', item.computedActivity === SESSION_ACTIVITY.RECENT ? 'bg-teal-100 text-teal-700' : 'bg-sky-100 text-sky-700')}>
-        S
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-black text-slate-950">{item.title || item.id}</span>
-        <span className="mt-1 block truncate text-xs font-semibold text-slate-400">{item.id} · 更新 {formatDate(item.updatedAt ?? item.createdAt)}</span>
-      </span>
-      <span className="hidden min-w-0 lg:block">
-        <span className="block truncate text-sm font-black text-slate-950">{item.storyTitle}</span>
-        <span className="mt-1 block truncate text-xs font-semibold text-slate-400">story #{item.storyId}</span>
-      </span>
-      <span className="hidden min-w-0 lg:block">
-        <span className="block truncate text-sm font-semibold text-slate-700">{item.description || item.storySummary || '暂无描述'}</span>
-        <span className="mt-1 block truncate text-xs font-semibold text-slate-400">session profile</span>
-      </span>
-      <span className="hidden lg:block">
-        <ActivityBadge activity={item.computedActivity} />
-      </span>
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation()
-          onEnter()
-        }}
-        className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black text-white transition hover:bg-slate-800"
-      >
-        进入
-      </button>
-    </div>
-  )
-}
-
-function DetailField({ label, note, children }: { label: string; note: string; children: ReactNode }) {
-  return (
-    <section className="mt-4">
-      <div className="mb-2 flex items-center justify-between gap-3 text-xs font-black uppercase text-slate-500">
-        <span>{label}</span>
-        <span>{note}</span>
+    <section className="mt-5">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className="text-xs font-black uppercase tracking-[0.1em] text-slate-500">{title}</h3>
+        <span className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-400">{note}</span>
       </div>
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-6 text-slate-700">
-        {children}
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-700">
+        {loading ? (
+          <div className="space-y-2" aria-label={`${title}加载中`}>
+            <div className="h-3 w-full animate-pulse rounded bg-slate-200" />
+            <div className="h-3 w-3/4 animate-pulse rounded bg-slate-200" />
+          </div>
+        ) : error ? (
+          <div className="flex items-start justify-between gap-3 text-amber-700">
+            <span>{error}</span>
+            {onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="shrink-0 rounded-md border border-amber-200 bg-white px-2 py-1 text-xs font-black transition hover:border-amber-300"
+              >
+                重试
+              </button>
+            ) : null}
+          </div>
+        ) : children}
       </div>
     </section>
   )
 }
 
-function SessionInspector({
+function SessionDetailDrawer({
+  open,
+  suspended,
   item,
   scene,
-  statusTables,
-  turns,
-  loading,
-  errors,
+  history,
+  sceneLoading,
+  historyLoading,
+  sceneError,
+  historyError,
+  onRetryScene,
+  onRetryHistory,
+  onClose,
   onEnter,
   onDelete,
 }: {
+  open: boolean
+  suspended: boolean
   item: SessionCenterItem | null
   scene?: Scene | null
-  statusTables?: StatusTable[] | null
-  turns?: Turn[] | null
-  loading: boolean
-  errors: string[]
+  history?: HistoryPage | null
+  sceneLoading: boolean
+  historyLoading: boolean
+  sceneError: string | null
+  historyError: string | null
+  onRetryScene: () => void
+  onRetryHistory: () => void
+  onClose: () => void
   onEnter: () => void
   onDelete: () => void
 }) {
-  if (!item) {
-    return (
-      <aside className="overflow-hidden rounded-lg border border-dashed border-slate-300 bg-white/70 px-5 py-12 text-center text-sm font-semibold text-slate-500">
-        选择一个会话查看详情
-      </aside>
-    )
-  }
-
-  const sceneCount = statusTables?.filter((table) => table.statusKind === STATUS_KIND.SCENE).length ?? 0
-  const normalCount = statusTables?.filter((table) => table.statusKind === STATUS_KIND.NORMAL).length ?? 0
-
   return (
-    <aside className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg shadow-slate-200/70">
-      <SessionArtwork item={item} className="h-28" />
-      <div className="p-5">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="line-clamp-2 text-xl font-black leading-7 text-slate-950">{item.title || item.id}</h2>
-            <p className="mt-1 truncate text-xs font-bold text-slate-400">{item.id} · {item.workspace} · story #{item.storyId}</p>
-          </div>
-          {loading ? <Loader2 size={18} className="mt-1 shrink-0 animate-spin text-slate-400" /> : null}
-        </div>
-
-        <ActivityBadge activity={item.computedActivity} />
-
-        {errors.length ? (
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-700">
-            {errors.join(' / ')}
-          </div>
-        ) : null}
-
-        <DetailField label="当前场景" note="scene">
-          {sceneSummary(scene)}
-        </DetailField>
-        <DetailField label="最近回合" note={turns?.length ? `turn ${turns[turns.length - 1]?.turnId}` : 'turn'}>
-          {latestTurnSummary(turns)}
-        </DetailField>
-        <DetailField label="运行状态" note="status tables">
-          scene {sceneCount} 张，normal {normalCount} 张；{tableOriginSummary(statusTables)}
-        </DetailField>
-        <DetailField label="关联故事" note="story">
-          {item.storyTitle}：{item.storySummary || '暂无故事摘要'}
-        </DetailField>
-
-        <button
-          type="button"
-          onClick={onEnter}
-          className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700"
-        >
-          <Play size={16} />
-          进入会话
-        </button>
-        <div className="mt-5 border-t border-slate-200 pt-4">
+    <SideDrawer
+      open={open}
+      suspended={suspended}
+      side="right"
+      eyebrow="会话详情"
+      title={item?.title || item?.id || '会话详情'}
+      description={item ? `${item.storyTitle} · ${item.id}` : undefined}
+      meta={item ? <ActivityBadge activity={item.computedActivity} /> : undefined}
+      onClose={onClose}
+      panelClassName="max-w-[560px]"
+      footer={item ? (
+        <div className="flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={onDelete}
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 text-sm font-black text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-4 text-sm font-black text-rose-700 transition hover:border-rose-300 hover:bg-rose-50"
           >
-            <Trash2 size={16} />
-            删除会话
+            <Trash2 size={15} />
+            删除
           </button>
-          <p className="mt-2 text-center text-xs font-semibold leading-5 text-slate-400">
-            永久删除该会话及其全部游玩数据
-          </p>
+          <button
+            type="button"
+            onClick={onEnter}
+            className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 sm:flex-none"
+          >
+            <Play size={15} />
+            进入会话
+          </button>
         </div>
-      </div>
-    </aside>
+      ) : undefined}
+    >
+      {item ? (
+        <>
+          <SessionArtwork item={item} />
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-3">
+              <span className="block text-[10px] font-black uppercase tracking-wide text-slate-400">玩家角色</span>
+              <span className="mt-1 block truncate text-sm font-black text-slate-900">{playerCharacterLabel(item)}</span>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-3">
+              <span className="block text-[10px] font-black uppercase tracking-wide text-slate-400">最近更新</span>
+              <span className="mt-1 block truncate text-sm font-black text-slate-900">{formatDate(item.updatedAt ?? item.createdAt)}</span>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-3">
+              <span className="block text-[10px] font-black uppercase tracking-wide text-slate-400">所属故事</span>
+              <span className="mt-1 block truncate text-sm font-black text-slate-900">{item.storyTitle}</span>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-3">
+              <span className="block text-[10px] font-black uppercase tracking-wide text-slate-400">创建时间</span>
+              <span className="mt-1 block truncate text-sm font-black text-slate-900">{formatDate(item.createdAt)}</span>
+            </div>
+          </div>
+
+          <DetailSection title="会话描述" note="profile">
+            {item.description || '暂无会话描述'}
+          </DetailSection>
+          <DetailSection title="故事概览" note="story">
+            <span className="line-clamp-5">{item.storySummary || '暂无故事摘要'}</span>
+          </DetailSection>
+          <DetailSection
+            title="当前场景"
+            note="scene"
+            loading={sceneLoading}
+            error={sceneError}
+            onRetry={onRetryScene}
+          >
+            {sceneSummary(scene)}
+          </DetailSection>
+          <DetailSection
+            title="最后一轮"
+            note={history?.endTurnId ? `turn ${history.endTurnId}` : 'committed turn'}
+            loading={historyLoading}
+            error={historyError}
+            onRetry={onRetryHistory}
+          >
+            <span className="line-clamp-8 whitespace-pre-wrap break-words">{latestTurnSummary(history)}</span>
+          </DetailSection>
+        </>
+      ) : null}
+    </SideDrawer>
   )
 }
 
@@ -552,6 +569,29 @@ function NewSessionDialog({
   )
 }
 
+function SessionListSkeleton() {
+  return (
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <div className="h-6 w-32 animate-pulse rounded bg-slate-200" />
+        <div className="mt-2 h-4 w-64 max-w-full animate-pulse rounded bg-slate-100" />
+      </div>
+      <div className="grid gap-3 border-b border-slate-200 p-4 md:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((item) => <div key={item} className="h-11 animate-pulse rounded-lg bg-slate-100" />)}
+      </div>
+      {[0, 1, 2, 3].map((item) => (
+        <div key={item} className="flex h-24 items-center gap-4 border-t border-slate-100 px-5">
+          <div className="h-11 w-11 animate-pulse rounded-xl bg-slate-200" />
+          <div className="flex-1">
+            <div className="h-4 w-48 max-w-full animate-pulse rounded bg-slate-200" />
+            <div className="mt-3 h-3 w-72 max-w-full animate-pulse rounded bg-slate-100" />
+          </div>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 function SessionCenterContent() {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -560,7 +600,8 @@ function SessionCenterContent() {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all')
   const [storyFilter, setStoryFilter] = useState('all')
   const [sortMode, setSortMode] = useState<SortMode>('active')
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [detailSessionId, setDetailSessionId] = useState<string | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createStoryId, setCreateStoryId] = useState<number | null>(null)
   const [createTitle, setCreateTitle] = useState('')
@@ -612,35 +653,29 @@ function SessionCenterContent() {
       })
   }, [activityFilter, allItems, search, sortMode, storyFilter])
 
-  const selectedItem = useMemo(
-    () => allItems.find((item) => item.id === selectedSessionId) ?? filteredItems[0] ?? allItems[0] ?? null,
-    [allItems, filteredItems, selectedSessionId],
+  const detailItem = useMemo(
+    () => allItems.find((item) => item.id === detailSessionId) ?? null,
+    [allItems, detailSessionId],
   )
-
-  useEffect(() => {
-    if (!selectedItem) {
-      if (selectedSessionId !== null) setSelectedSessionId(null)
-      return
-    }
-    if (selectedItem.id !== selectedSessionId) setSelectedSessionId(selectedItem.id)
-  }, [selectedItem, selectedSessionId])
-
-  const selectedSessionIdForQuery = selectedItem?.id ?? ''
+  const detailQueryEnabled = Boolean(detailOpen && detailItem)
+  const detailSessionIdForQuery = detailQueryEnabled ? detailItem?.id ?? '' : ''
   const sceneQuery = useQuery({
-    queryKey: ['play-session-scene', selectedSessionIdForQuery],
-    queryFn: () => getCurrentScene(selectedSessionIdForQuery),
-    enabled: Boolean(selectedItem),
-  })
-  const statusTablesQuery = useQuery({
-    queryKey: ['play-session-status-tables', selectedSessionIdForQuery],
-    queryFn: () => listSessionStatusTables(selectedSessionIdForQuery),
-    enabled: Boolean(selectedItem),
+    queryKey: ['play-session-scene', detailSessionIdForQuery],
+    queryFn: () => getCurrentScene(detailSessionIdForQuery),
+    enabled: detailQueryEnabled,
+    refetchOnWindowFocus: false,
   })
   const historyQuery = useQuery({
-    queryKey: ['play-session-history', selectedSessionIdForQuery],
-    queryFn: () => getSessionHistory(selectedSessionIdForQuery),
-    enabled: Boolean(selectedItem),
+    queryKey: ['play-session-history-page', detailSessionIdForQuery, 'session-center-detail', 1],
+    queryFn: () => getSessionHistoryPage(detailSessionIdForQuery, { limit: 1 }),
+    enabled: detailQueryEnabled,
+    refetchOnWindowFocus: false,
   })
+
+  useEffect(() => {
+    setDetailOpen(false)
+    setDetailSessionId(null)
+  }, [currentWorkspace])
 
   const createSessionMutation = useMutation({
     mutationFn: ({ storyId, title }: { storyId: number; title: string }) => {
@@ -675,7 +710,10 @@ function SessionCenterContent() {
       queryClient.removeQueries({ queryKey: ['session-rp-modules', item.id] })
       queryClient.invalidateQueries({ queryKey: ['play-sessions', currentWorkspace] })
       queryClient.invalidateQueries({ queryKey: ['play-story-library-aggregate', currentWorkspace, item.storyId] })
-      setSelectedSessionId(null)
+      if (detailSessionId === item.id) {
+        setDetailOpen(false)
+        setDetailSessionId(null)
+      }
       setDeleteTarget(null)
       setDeleteNotice({
         pendingCleanup: result.runtimeCleanup === 'pending',
@@ -689,19 +727,22 @@ function SessionCenterContent() {
   const aggregatesLoading = sessionQueries.some((query) => query.isLoading)
   const initialSessionsLoading = aggregatesLoading && allItems.length === 0
   const aggregateErrors = aggregates.filter((aggregate) => aggregate.error)
-  const recentCount = allItems.filter((item) => item.computedActivity === SESSION_ACTIVITY.RECENT).length
-  const storyCountWithSessions = new Set(allItems.map((item) => item.storyId)).size
-  const createdThisWeek = allItems.filter((item) => isThisWeek(item.createdAtMs)).length
-  const continueItems = allItems.slice(0, 3)
-  const detailErrors = [
-    sceneQuery.isError ? `场景加载失败：${toErrorMessage(sceneQuery.error)}` : '',
-    statusTablesQuery.isError ? `状态表加载失败：${toErrorMessage(statusTablesQuery.error)}` : '',
-    historyQuery.isError ? `历史加载失败：${toErrorMessage(historyQuery.error)}` : '',
-  ].filter(Boolean)
+  const hasActiveFilters = Boolean(search.trim()) || activityFilter !== 'all' || storyFilter !== 'all'
 
   function enterSession(item: Pick<SessionCenterItem, 'id'> | null) {
     if (!item) return
     router.push(`/session/${item.id}`)
+  }
+
+  function openDetails(item: SessionCenterItem) {
+    setDetailSessionId(item.id)
+    setDetailOpen(true)
+  }
+
+  function clearFilters() {
+    setSearch('')
+    setActivityFilter('all')
+    setStoryFilter('all')
   }
 
   function openCreateDialog() {
@@ -728,8 +769,8 @@ function SessionCenterContent() {
   }
 
   return (
-    <div className="min-w-0 px-5 py-8 xl:px-7">
-      <section className="mb-6 grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+    <div className="min-w-0 px-4 py-7 sm:px-5 xl:px-7 xl:py-8">
+      <section className="mb-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
         <div>
           <p className="mb-2 flex items-center gap-2 text-sm font-black text-slate-500">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
@@ -737,7 +778,7 @@ function SessionCenterContent() {
           </p>
           <h1 className="text-3xl font-black text-slate-950">会话中心</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            从最近更新的 session 继续游玩，也可以按 story、更新时间和本地搜索检索完整会话列表；会话内链路只使用全局短 session_id。
+            在一个列表中查找、管理并继续所有会话；默认按最近更新时间排列。
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -768,7 +809,7 @@ function SessionCenterContent() {
 
       {deleteNotice ? (
         <section className={cn(
-          'mb-5 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm font-semibold leading-6',
+          'mb-4 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm font-semibold leading-6',
           deleteNotice.pendingCleanup
             ? 'border-amber-200 bg-amber-50 text-amber-800'
             : 'border-emerald-200 bg-emerald-50 text-emerald-800',
@@ -780,80 +821,18 @@ function SessionCenterContent() {
         </section>
       ) : null}
 
-      <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(280px,1fr)_auto_auto_auto] xl:items-center" aria-label="筛选会话">
-        <label className="flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-500 shadow-sm focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
-          <Search size={17} />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜索 session_id、标题、描述、故事"
-            className="min-w-0 flex-1 bg-transparent text-slate-900 outline-none placeholder:text-slate-400"
-          />
-        </label>
-        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm" role="tablist" aria-label="会话活跃度">
-          {[
-            ['all', '全部'],
-            [SESSION_ACTIVITY.RECENT, '最近活跃'],
-            [SESSION_ACTIVITY.STALE, '较久未更新'],
-          ].map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setActivityFilter(value as ActivityFilter)}
-              className={cn(
-                'h-8 rounded-md px-3 text-xs font-black transition',
-                activityFilter === value ? 'bg-slate-950 text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-950',
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <select
-          value={storyFilter}
-          onChange={(event) => setStoryFilter(event.target.value)}
-          className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-          aria-label="故事筛选"
-        >
-          <option value="all">全部故事</option>
-          {stories.map((story) => <option key={story.id} value={story.id}>{story.title}</option>)}
-        </select>
-        <select
-          value={sortMode}
-          onChange={(event) => setSortMode(event.target.value as SortMode)}
-          className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-          aria-label="排序"
-        >
-          <option value="active">最近活跃优先</option>
-          <option value="created">最近创建优先</option>
-          <option value="title">会话标题 A-Z</option>
-          <option value="story">故事标题 A-Z</option>
-        </select>
-      </section>
-
-      <section className="mb-6 grid gap-3 md:grid-cols-2 2xl:grid-cols-4" aria-label="会话中心概览">
-        <MetricCard label="全部会话" value={allItems.length} note="当前 workspace 聚合结果" icon={BookOpen} />
-        <MetricCard label="最近活跃" value={recentCount} note={`${RECENT_WINDOW_DAYS} 天内有更新`} icon={Clock3} />
-        <MetricCard label="关联故事" value={storyCountWithSessions} note={`${stories.length} 个 story 可筛选`} icon={FolderOpen} />
-        <MetricCard label="本周新建" value={createdThisWeek} note="按 createdAt 统计" icon={CalendarClock} />
-      </section>
-
       {!currentWorkspace ? (
-        <section className="rounded-lg border border-dashed border-slate-300 bg-white/70 px-6 py-12 text-center text-sm font-semibold text-slate-500">
+        <section className="rounded-xl border border-dashed border-slate-300 bg-white/70 px-6 py-12 text-center text-sm font-semibold text-slate-500">
           请选择 workspace 后查看会话中心
         </section>
       ) : storiesQuery.isError ? (
-        <section className="rounded-lg border border-rose-200 bg-rose-50 px-6 py-6 text-sm font-semibold text-rose-700">
+        <section className="rounded-xl border border-rose-200 bg-rose-50 px-6 py-6 text-sm font-semibold text-rose-700">
           故事列表加载失败：{toErrorMessage(storiesQuery.error)}
         </section>
       ) : storiesQuery.isLoading ? (
-        <section className="grid gap-4">
-          {[0, 1, 2].map((item) => (
-            <div key={item} className="h-28 animate-pulse rounded-lg border border-slate-200 bg-white shadow-sm" />
-          ))}
-        </section>
+        <SessionListSkeleton />
       ) : stories.length === 0 ? (
-        <section className="rounded-lg border border-dashed border-slate-300 bg-white/70 px-6 py-12 text-center">
+        <section className="rounded-xl border border-dashed border-slate-300 bg-white/70 px-6 py-12 text-center">
           <Sparkles size={28} className="mx-auto text-violet-600" />
           <h2 className="mt-3 text-lg font-black text-slate-950">还没有故事</h2>
           <p className="mt-2 text-sm font-semibold text-slate-500">会话必须绑定 story。先创建故事后，就可以从这里开局。</p>
@@ -865,122 +844,178 @@ function SessionCenterContent() {
             新建故事
           </Link>
         </section>
+      ) : initialSessionsLoading ? (
+        <SessionListSkeleton />
+      ) : allItems.length === 0 ? (
+        <div className="grid gap-4">
+          {aggregateErrors.length ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-700">
+              <span className="mr-2 inline-flex align-[-2px]"><AlertCircle size={16} /></span>
+              部分 story 会话加载失败：{aggregateErrors.map((item) => `${item.story.title}（${item.error}）`).join('；')}
+            </div>
+          ) : null}
+          <section className="rounded-xl border border-dashed border-slate-300 bg-white/70 px-6 py-12 text-center">
+            <CheckCircle2 size={28} className="mx-auto text-violet-600" />
+            <h2 className="mt-3 text-lg font-black text-slate-950">还没有会话</h2>
+            <p className="mt-2 text-sm font-semibold text-slate-500">选择一个 story 创建新会话后，就可以从这里继续游玩。</p>
+            <button
+              type="button"
+              onClick={openCreateDialog}
+              className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-black text-white transition hover:bg-violet-700"
+            >
+              <FilePlus2 size={16} />
+              新建会话
+            </button>
+          </section>
+        </div>
       ) : (
-        <>
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-950">全部会话</h2>
+              <p className="mt-1 text-sm font-semibold leading-6 text-slate-500">搜索、筛选或直接进入最近更新的故事进度。</p>
+            </div>
+            <span className="inline-flex h-8 items-center rounded-full bg-slate-100 px-3 text-xs font-black text-slate-600" aria-live="polite">
+              显示 {filteredItems.length} / {allItems.length}
+            </span>
+          </header>
+
+          <div className="border-b border-slate-200 bg-slate-50/50 p-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_auto_minmax(160px,auto)_minmax(170px,auto)]" aria-label="筛选会话">
+              <label className="flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-500 shadow-sm focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
+                <Search size={17} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="搜索会话、故事或玩家角色"
+                  className="min-w-0 flex-1 bg-transparent text-slate-900 outline-none placeholder:text-slate-400"
+                />
+              </label>
+              <div className="grid h-11 grid-cols-3 rounded-lg border border-slate-200 bg-white p-1 shadow-sm" role="group" aria-label="会话活跃度">
+                {[
+                  ['all', '全部'],
+                  [SESSION_ACTIVITY.RECENT, '最近活跃'],
+                  [SESSION_ACTIVITY.STALE, '较久未更新'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setActivityFilter(value as ActivityFilter)}
+                    aria-pressed={activityFilter === value}
+                    className={cn(
+                      'whitespace-nowrap rounded-md px-2 text-xs font-black transition',
+                      activityFilter === value ? 'bg-slate-950 text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-950',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <select
+                value={storyFilter}
+                onChange={(event) => setStoryFilter(event.target.value)}
+                className="h-11 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                aria-label="故事筛选"
+              >
+                <option value="all">全部故事</option>
+                {stories.map((story) => <option key={story.id} value={story.id}>{story.title}</option>)}
+              </select>
+              <select
+                value={sortMode}
+                onChange={(event) => setSortMode(event.target.value as SortMode)}
+                className="h-11 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                aria-label="排序"
+              >
+                <option value="active">最近活跃优先</option>
+                <option value="created">最近创建优先</option>
+                <option value="title">会话标题 A-Z</option>
+                <option value="story">故事标题 A-Z</option>
+              </select>
+            </div>
+            <div className="mt-3 flex min-h-6 flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-500">
+              <span>{filteredItems.length === allItems.length ? `共 ${allItems.length} 个会话` : `当前筛选出 ${filteredItems.length} 个会话`}</span>
+              {hasActiveFilters ? (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="font-black text-violet-700 transition hover:text-violet-900"
+                >
+                  清除筛选
+                </button>
+              ) : null}
+            </div>
+          </div>
+
           {aggregatesLoading ? (
-            <p className="mb-3 flex items-center gap-2 text-xs font-bold text-slate-400">
+            <p className="flex items-center gap-2 border-b border-slate-200 px-5 py-2 text-xs font-bold text-slate-400">
               <Loader2 size={14} className="animate-spin" />
-              正在按 story 聚合会话
+              正在加载其余 story 的会话
             </p>
           ) : null}
           {aggregateErrors.length ? (
-            <section className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+            <div className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-700">
               <span className="mr-2 inline-flex align-[-2px]"><AlertCircle size={16} /></span>
               部分 story 会话加载失败：{aggregateErrors.map((item) => `${item.story.title}（${item.error}）`).join('；')}
-            </section>
+            </div>
           ) : null}
 
-          {initialSessionsLoading ? (
-            <section className="grid gap-4">
-              {[0, 1, 2].map((item) => (
-                <div key={item} className="h-28 animate-pulse rounded-lg border border-slate-200 bg-white shadow-sm" />
+          {filteredItems.length ? (
+            <div>
+              <div className="hidden min-h-11 grid-cols-[44px_minmax(180px,1.35fr)_minmax(140px,0.75fr)_minmax(130px,0.65fr)_112px_150px] items-center gap-3 bg-slate-50 px-4 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid">
+                <span />
+                <span>会话</span>
+                <span>故事与角色</span>
+                <span>最近更新</span>
+                <span>状态</span>
+                <span>操作</span>
+              </div>
+              {filteredItems.map((item) => (
+                <SessionListItem
+                  key={item.id}
+                  item={item}
+                  onEnter={() => enterSession(item)}
+                  onDetails={() => openDetails(item)}
+                />
               ))}
-            </section>
-          ) : allItems.length === 0 ? (
-            <section className="rounded-lg border border-dashed border-slate-300 bg-white/70 px-6 py-12 text-center">
-              <CheckCircle2 size={28} className="mx-auto text-violet-600" />
-              <h2 className="mt-3 text-lg font-black text-slate-950">还没有会话</h2>
-              <p className="mt-2 text-sm font-semibold text-slate-500">选择一个 story 创建新会话后，会自动进入 `/session/{'{session_id}'}`。</p>
+            </div>
+          ) : (
+            <section className="border-t border-dashed border-slate-200 px-6 py-12 text-center">
+              <Search size={24} className="mx-auto text-slate-400" />
+              <h3 className="mt-3 text-base font-black text-slate-900">没有匹配的会话</h3>
+              <p className="mt-2 text-sm font-semibold text-slate-500">调整关键词或清除当前筛选后再试。</p>
               <button
                 type="button"
-                onClick={openCreateDialog}
-                className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-violet-600 px-4 text-sm font-black text-white transition hover:bg-violet-700"
+                onClick={clearFilters}
+                className="mt-4 inline-flex h-9 items-center rounded-lg border border-violet-200 bg-violet-50 px-4 text-sm font-black text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
               >
-                <FilePlus2 size={16} />
-                新建会话
+                清除筛选
               </button>
             </section>
-          ) : (
-            <div className="grid gap-5">
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-stretch">
-                <Panel
-                  title="继续游玩"
-                  description="最近高价值入口，按会话更新时间优先展示。"
-                  action={(
-                    <button
-                      type="button"
-                      onClick={() => queryClient.invalidateQueries({ queryKey: ['play-sessions', currentWorkspace] })}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:border-violet-300 hover:text-violet-700"
-                    >
-                      <RefreshCw size={14} />
-                      刷新
-                    </button>
-                  )}
-                >
-                  <div className="grid gap-3 p-4 2xl:grid-cols-3">
-                    {continueItems.map((item) => (
-                      <ContinueCard
-                        key={item.id}
-                        item={item}
-                        selected={item.id === selectedItem?.id}
-                        onSelect={() => setSelectedSessionId(item.id)}
-                        onEnter={() => enterSession(item)}
-                      />
-                    ))}
-                  </div>
-                </Panel>
-
-                <SessionInspector
-                  item={selectedItem}
-                  scene={sceneQuery.data ?? null}
-                  statusTables={statusTablesQuery.data ?? null}
-                  turns={historyQuery.data ?? null}
-                  loading={sceneQuery.isLoading || statusTablesQuery.isLoading || historyQuery.isLoading}
-                  errors={detailErrors}
-                  onEnter={() => enterSession(selectedItem)}
-                  onDelete={() => {
-                    if (!selectedItem) return
-                    deleteSessionMutation.reset()
-                    setDeleteNotice(null)
-                    setDeleteTarget(selectedItem)
-                  }}
-                />
-              </div>
-
-              <Panel
-                title="完整会话列表"
-                description="完整列表更适合管理和调试；筛选、排序和搜索都在前端本地完成。"
-              >
-                {filteredItems.length ? (
-                  <div className="overflow-hidden">
-                    <div className="hidden min-h-11 grid-cols-[38px_minmax(0,1.25fr)_minmax(150px,0.8fr)_minmax(140px,0.8fr)_124px_88px] items-center gap-3 bg-slate-50 px-4 text-xs font-black uppercase text-slate-500 lg:grid">
-                      <span />
-                      <span>会话</span>
-                      <span>故事</span>
-                      <span>描述</span>
-                      <span>状态</span>
-                      <span>操作</span>
-                    </div>
-                    {filteredItems.map((item) => (
-                      <SessionRow
-                        key={item.id}
-                        item={item}
-                        selected={item.id === selectedItem?.id}
-                        onSelect={() => setSelectedSessionId(item.id)}
-                        onEnter={() => enterSession(item)}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <section className="border-t border-dashed border-slate-200 px-6 py-12 text-center text-sm font-semibold text-slate-500">
-                    没有匹配当前搜索和筛选的会话
-                  </section>
-                )}
-              </Panel>
-            </div>
           )}
-        </>
+        </section>
       )}
+
+      <SessionDetailDrawer
+        open={detailOpen && Boolean(detailItem)}
+        suspended={Boolean(deleteTarget)}
+        item={detailItem}
+        scene={sceneQuery.data ?? null}
+        history={historyQuery.data ?? null}
+        sceneLoading={sceneQuery.isLoading}
+        historyLoading={historyQuery.isLoading}
+        sceneError={sceneQuery.isError ? `场景加载失败：${toErrorMessage(sceneQuery.error)}` : null}
+        historyError={historyQuery.isError ? `回合加载失败：${toErrorMessage(historyQuery.error)}` : null}
+        onRetryScene={() => { void sceneQuery.refetch() }}
+        onRetryHistory={() => { void historyQuery.refetch() }}
+        onClose={() => setDetailOpen(false)}
+        onEnter={() => enterSession(detailItem)}
+        onDelete={() => {
+          if (!detailItem) return
+          deleteSessionMutation.reset()
+          setDeleteNotice(null)
+          setDeleteTarget(detailItem)
+        }}
+      />
 
       {createDialogOpen ? (
         <NewSessionDialog
