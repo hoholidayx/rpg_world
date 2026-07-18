@@ -8,6 +8,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import {
   AlertCircle,
   CheckCircle2,
+  CloudMoon,
   Eye,
   FilePlus2,
   Loader2,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react'
 import { ConfirmDialog, Dialog } from '@/components/common/Dialog'
 import { SideDrawer } from '@/components/common/SideDrawer'
+import { buildDreamPageHref } from '@/features/dream/dreamNavigation'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
 import { getCurrentScene } from '@/lib/api/scene'
 import { createSession, deleteSession, getSessionHistoryPage, listSessions } from '@/lib/api/sessions'
@@ -223,7 +225,7 @@ function SessionListItem({
 
   return (
     <article className="border-t border-slate-200 bg-white transition hover:bg-violet-50/25">
-      <div className="hidden min-h-[92px] grid-cols-[44px_minmax(180px,1.35fr)_minmax(140px,0.75fr)_minmax(130px,0.65fr)_112px_150px] items-center gap-3 px-4 py-4 xl:grid">
+      <div className="hidden min-h-[92px] grid-cols-[44px_minmax(180px,1.35fr)_minmax(140px,0.75fr)_minmax(130px,0.65fr)_112px_210px] items-center gap-3 px-4 py-4 xl:grid">
         <SessionAvatar item={item} />
         <div className="min-w-0">
           <button
@@ -248,7 +250,16 @@ function SessionListItem({
           <p className="mt-1 truncate text-xs font-semibold text-slate-400">创建于 {formatDate(item.createdAt)}</p>
         </div>
         <ActivityBadge activity={item.computedActivity} />
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
+          <Link
+            href={buildDreamPageHref(item.id, '/sessions')}
+            className="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 transition hover:border-violet-300 hover:text-violet-700"
+            aria-label={`管理会话 ${item.title || item.id} 的 Dream 记忆`}
+            title="Dream 记忆"
+          >
+            <CloudMoon size={14} />
+            记忆
+          </Link>
           <button
             type="button"
             onClick={onDetails}
@@ -299,7 +310,16 @@ function SessionListItem({
             <span className="mt-1 block truncate text-xs font-bold text-slate-800">{formatDate(item.updatedAt ?? item.createdAt)}</span>
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <Link
+            href={buildDreamPageHref(item.id, '/sessions')}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:text-violet-700"
+            aria-label={`管理会话 ${item.title || item.id} 的 Dream 记忆`}
+            title="Dream 记忆"
+          >
+            <CloudMoon size={15} />
+            记忆
+          </Link>
           <button
             type="button"
             onClick={onDetails}
@@ -961,7 +981,7 @@ function SessionCenterContent() {
 
           {filteredItems.length ? (
             <div>
-              <div className="hidden min-h-11 grid-cols-[44px_minmax(180px,1.35fr)_minmax(140px,0.75fr)_minmax(130px,0.65fr)_112px_150px] items-center gap-3 bg-slate-50 px-4 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid">
+              <div className="hidden min-h-11 grid-cols-[44px_minmax(180px,1.35fr)_minmax(140px,0.75fr)_minmax(130px,0.65fr)_112px_210px] items-center gap-3 bg-slate-50 px-4 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid">
                 <span />
                 <span>会话</span>
                 <span>故事与角色</span>

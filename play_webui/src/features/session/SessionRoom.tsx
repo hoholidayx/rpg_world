@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlignJustify, Images, LogOut, TableProperties } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
+import { buildDreamPageHref } from '@/features/dream/dreamNavigation'
 import { sessionContextUsageConfig } from '@/lib/config/appConfig'
 import { deleteSession } from '@/lib/api/sessions'
 import { cn } from '@/lib/utils/cn'
@@ -538,7 +539,8 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
               }}
               onOpenDreamMemory={() => {
                 layout.setSettingsOpen(false)
-                router.push(`/session/${encodeURIComponent(sessionId)}/dream`)
+                const returnTo = `/session/${encodeURIComponent(sessionId)}`
+                router.push(buildDreamPageHref(sessionId, returnTo))
               }}
               onDeleteSession={() => {
                 layout.setSettingsOpen(false)

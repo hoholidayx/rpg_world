@@ -3,12 +3,19 @@
 import Link from 'next/link'
 import { ArrowLeft, CloudMoon, ShieldCheck } from 'lucide-react'
 import { AppShell } from '@/features/layout/AppShell'
+import type { DreamReturnTarget } from './dreamNavigation'
 import { DreamLedgerPanel } from './DreamLedgerPanel'
 import { DreamProposalPanel } from './DreamProposalPanel'
 import { DreamRunPanel } from './DreamRunPanel'
 import { useDreamMemoryController } from './useDreamMemoryController'
 
-function DreamMemoryContent({ sessionId }: { sessionId: string }) {
+function DreamMemoryContent({
+  sessionId,
+  returnTarget,
+}: {
+  sessionId: string
+  returnTarget: DreamReturnTarget
+}) {
   const controller = useDreamMemoryController(sessionId)
   const session = controller.sessionQuery.data
 
@@ -18,10 +25,10 @@ function DreamMemoryContent({ sessionId }: { sessionId: string }) {
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
             <Link
-              href={`/session/${encodeURIComponent(sessionId)}`}
+              href={returnTarget.href}
               className="mb-3 inline-flex items-center gap-1 text-xs font-black text-slate-500 transition hover:text-violet-700 dark:text-slate-300 dark:hover:text-violet-200"
             >
-              <ArrowLeft size={14} />返回会话
+              <ArrowLeft size={14} />{returnTarget.label}
             </Link>
             <div className="flex items-center gap-3">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
@@ -64,10 +71,16 @@ function DreamMemoryContent({ sessionId }: { sessionId: string }) {
   )
 }
 
-export function DreamMemoryPage({ sessionId }: { sessionId: string }) {
+export function DreamMemoryPage({
+  sessionId,
+  returnTarget,
+}: {
+  sessionId: string
+  returnTarget: DreamReturnTarget
+}) {
   return (
     <AppShell>
-      <DreamMemoryContent sessionId={sessionId} />
+      <DreamMemoryContent sessionId={sessionId} returnTarget={returnTarget} />
     </AppShell>
   )
 }
