@@ -33,7 +33,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
-- **2026-07-18：后台终态事件链路。** Dream proposal 与 Session Derivation 在 SQL 终态提交后，通过专用异步 publisher 把 `ready / failed / interrupted` 发送到 Play API 的进程内广播 Hub；Play WebUI 在根 Provider 建立唯一全局 EventSource。本期只完成接收链路，不增加 Toast、自动刷新或通知中心。
+- **2026-07-18：后台终态通知链路。** Dream proposal 与 Session Derivation 在 SQL 终态提交后，通过专用异步 publisher 把 `ready / failed / interrupted` 发送到 Play API 的进程内广播 Hub；Play WebUI 在根 Provider 建立唯一全局 EventSource，并在顶栏独立通知中心展示最近事件。通知只保存在页面内存，可标记已读和清除；不增加 Toast、自动刷新或任务状态回写。
 - **2026-07-17：Dream 长期记忆系统。** 新增独立 `dream_service` 与 Session 级类型化 Persistent Memory 账本。Play WebUI 可手动执行 Shallow/Deep × Incremental/Full 四种 Dream，逐项检查和编辑 proposal 后原子应用；主 Agent 只读取 Evidence 仍有效的 active revisions，不再读取 `persistent_memory.json`。
 - **2026-07-15：LLM Service 完全独立进程化。** 新增 `run_llm.py`、受 Bearer 保护的 `/llm/v1` 业务 HTTP/SSE 边界和独立 `llm_client` 契约包。只有 LLM Service 读取 `llm.yaml`、Provider 密钥并持有 OpenAI/llama runtime；Agent 与 Memory 只通过远端客户端调用，旧 llama 子进程协议已删除。
 - **2026-07-15：Agent / Memory / LLM 统一异步线程模型。** `llm_client` 改为 loop-owned 纯异步客户端，Agent 与 Memory 直接 await catalog、provider、embedding 和 recall；Memory 使用 session 级 async coordinator，watchdog 线程只入队。llama 的队列等待与运行期统一受 `request_timeout_ms` 控制，并在 completion、stream、rerank 安全边界协作取消。
@@ -532,7 +532,7 @@ DreamTaskManager / SessionDerivationWorker
 - `POST /internal/events` 使用 `RPG_WORLD_PLAY_EVENT_TOKEN` Bearer 鉴权；浏览器订阅端不携带该内部令牌。
 - 每个订阅者使用容量 64 的内存队列，慢订阅满载时丢弃最旧事件；SSE 约每 15 秒发送 heartbeat，并声明 3 秒重连间隔。
 - 事件不写 SQL outbox，不补发、不确认消费。断线期间的状态恢复仍依赖 Dream Proposal / Derivation Job GET 接口。
-- 首版要求 Play API 单进程、单 worker。WebUI 只严格解析并在 Zustand 内存保存最近 50 条事件，不做 Toast、导航、自动 Query invalidation 或 localStorage。
+- 首版要求 Play API 单进程、单 worker。WebUI 严格解析并在 Zustand 内存保存最近 50 条事件；独立通知模块只负责展示、未读和清除状态，清除不会确认消费或修改后台任务。通知中心不做 Toast、导航、自动 Query invalidation 或 localStorage。
 
 ### 运行链路
 

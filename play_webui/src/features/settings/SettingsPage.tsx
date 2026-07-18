@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Eye, MessagesSquare, Sparkles, Trash2, type LucideIcon } from 'lucide-react'
+import { NotificationCenter } from '@/features/notifications/NotificationCenter'
 import { listWorkspaces } from '@/lib/api/sessions'
 import { ContextPreviewSettingsContainer } from './context-preview/ContextPreviewSettingsContainer'
 import { DataCleanupSettingsContainer } from './cleanup/DataCleanupSettingsContainer'
@@ -74,9 +75,12 @@ export function SettingsPage() {
             SSE ready
           </span>
         </div>
-        <div className="flex items-center gap-3 rounded-full px-2 py-1 text-sm font-medium text-slate-900">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">P</span>
-          <span className="hidden sm:inline">Player One</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <NotificationCenter />
+          <div className="flex items-center gap-3 rounded-full px-1 py-1 text-sm font-medium text-slate-900">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">P</span>
+            <span className="hidden sm:inline">Player One</span>
+          </div>
         </div>
       </header>
 

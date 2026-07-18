@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
+import { NotificationCenter } from '@/features/notifications/NotificationCenter'
 import { listWorkspaces } from '@/lib/api/sessions'
 import type { WorkspaceSummary } from '@/types/session'
 
@@ -231,11 +232,14 @@ export function AppShell({ children }: AppShellProps) {
             SSE ready
           </span>
         </div>
-        <button className="flex shrink-0 items-center gap-1 rounded-full px-1 py-1 text-sm font-medium text-slate-900 transition hover:bg-slate-100 sm:gap-3 sm:px-2">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">P</span>
-          <span className="hidden sm:inline">Player One</span>
-          <ChevronDown size={16} className="hidden text-slate-400 sm:block" />
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <NotificationCenter />
+          <button className="flex shrink-0 items-center gap-1 rounded-full px-1 py-1 text-sm font-medium text-slate-900 transition hover:bg-slate-100 sm:gap-3 sm:px-2">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">P</span>
+            <span className="hidden sm:inline">Player One</span>
+            <ChevronDown size={16} className="hidden text-slate-400 sm:block" />
+          </button>
+        </div>
       </header>
 
       {mobileNavOpen ? (
