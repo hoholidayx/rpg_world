@@ -7,6 +7,7 @@ import { parsePlayEvent } from './playEvents'
 
 export function PlayEventBridge() {
   useEffect(() => {
+    const development = process.env.NODE_ENV !== 'production'
     const store = usePlayEventStore.getState()
     store.setConnectionStatus('connecting')
     const baseUrl = getPlayApiBaseUrl().replace(/\/$/, '')
@@ -14,23 +15,42 @@ export function PlayEventBridge() {
 
     source.onopen = () => {
       usePlayEventStore.getState().setConnectionStatus('open')
+      if (development) console.info('[PlayEvents] stream opened')
     }
     source.onerror = () => {
-      usePlayEventStore.getState().setConnectionStatus(
-        source.readyState === EventSource.CONNECTING ? 'connecting' : 'disconnected',
-      )
+      const connectionStatus = source.readyState === EventSource.CONNECTING
+        ? 'connecting'
+        : 'disconnected'
+      usePlayEventStore.getState().setConnectionStatus(connectionStatus)
+      if (development) {
+        console.warn('[PlayEvents] stream error', {
+          connectionStatus,
+          readyState: source.readyState,
+        })
+      }
     }
     source.onmessage = (message) => {
       try {
         const event = parsePlayEvent(JSON.parse(message.data) as unknown)
         if (event !== null) {
           usePlayEventStore.getState().receive(event)
-        } else if (process.env.NODE_ENV !== 'production') {
+          if (development) {
+            console.info('[PlayEvents] terminal event stored', {
+              eventId: event.eventId,
+              eventType: event.eventType,
+              sessionId: event.sessionId,
+              status: event.payload.status,
+            })
+          }
+        } else if (development) {
           console.warn('Ignored invalid Play event payload')
         }
-      } catch {
-        if (process.env.NODE_ENV !== 'production') {
-          console.warn('Ignored malformed Play event JSON')
+      } catch (error) {
+        if (development) {
+          console.warn(
+            'Ignored malformed Play event JSON',
+            error instanceof Error ? error.message : String(error),
+          )
         }
       }
     }
@@ -38,6 +58,7 @@ export function PlayEventBridge() {
     return () => {
       source.close()
       usePlayEventStore.getState().setConnectionStatus('disconnected')
+      if (development) console.info('[PlayEvents] stream closed')
     }
   }, [])
 

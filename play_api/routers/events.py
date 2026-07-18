@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -25,6 +26,7 @@ from play_events import (
 )
 
 router = APIRouter(tags=["events"])
+logger = logging.getLogger("play_api.events")
 
 
 class _WireModel(BaseModel):
@@ -195,12 +197,23 @@ async def publish_event(
     if authorization is None or not hmac.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail="Invalid Play event token")
     try:
-        subscribers = await runtime.hub.publish(event.to_contract())
+        contract = event.to_contract()
+        subscribers = await runtime.hub.publish(contract)
     except PlayEventHubClosedError as exc:
         raise HTTPException(
             status_code=503,
             detail="Play event stream is unavailable",
         ) from exc
+    log = logger.warning if subscribers == 0 else logger.info
+    log(
+        "accepted Play event into hub event_id=%s event_type=%s "
+        "session_id=%s status=%s subscribers=%s",
+        contract.event_id,
+        contract.event_type.value,
+        contract.session_id,
+        contract.payload.status.value,
+        subscribers,
+    )
     return PlayEventAcceptedResponse(
         eventId=event.event_id,
         subscribers=subscribers,
@@ -210,6 +223,7 @@ async def publish_event(
 @router.get("/events/stream")
 async def stream_events(request: Request) -> StreamingResponse:
     runtime = _runtime(request)
+    stream_id = uuid4().hex[:12]
     try:
         queue = await runtime.hub.subscribe()
     except PlayEventHubClosedError as exc:
@@ -217,6 +231,7 @@ async def stream_events(request: Request) -> StreamingResponse:
             status_code=503,
             detail="Play event stream is unavailable",
         ) from exc
+    logger.info("opened Play event stream stream_id=%s", stream_id)
 
     async def generate() -> AsyncIterator[str]:
         try:
@@ -232,6 +247,14 @@ async def stream_events(request: Request) -> StreamingResponse:
                     continue
                 if event is None:
                     return
+                logger.debug(
+                    "yielding Play event to stream stream_id=%s event_id=%s "
+                    "event_type=%s session_id=%s",
+                    stream_id,
+                    event.event_id,
+                    event.event_type.value,
+                    event.session_id,
+                )
                 data = json.dumps(
                     event.to_wire(),
                     ensure_ascii=False,
@@ -240,6 +263,7 @@ async def stream_events(request: Request) -> StreamingResponse:
                 yield f"id: {event.event_id}\ndata: {data}\n\n"
         finally:
             await runtime.hub.unsubscribe(queue)
+            logger.info("closed Play event stream stream_id=%s", stream_id)
 
     return StreamingResponse(
         generate(),

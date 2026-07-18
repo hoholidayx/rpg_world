@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 
 from play_events.contracts import PlayEvent
+
+
+logger = logging.getLogger(__name__)
 
 
 class PlayEventPublisher:
@@ -49,6 +53,7 @@ class PlayEventPublisher:
             json=event.to_wire(),
         )
         response.raise_for_status()
+        self._log_acknowledgement(event, response)
 
     async def close(self) -> None:
         self._bind_loop()
@@ -68,3 +73,40 @@ class PlayEventPublisher:
             raise RuntimeError(
                 "Play event publisher cannot be reused across event loops"
             )
+
+    @staticmethod
+    def _log_acknowledgement(
+        event: PlayEvent,
+        response: httpx.Response,
+    ) -> None:
+        try:
+            acknowledgement = response.json()
+        except ValueError:
+            logger.debug(
+                "Play event publish acknowledgement is not JSON event_id=%s event_type=%s",
+                event.event_id,
+                event.event_type.value,
+            )
+            return
+        subscribers = (
+            acknowledgement.get("subscribers")
+            if isinstance(acknowledgement, dict)
+            else None
+        )
+        if not isinstance(subscribers, int) or isinstance(subscribers, bool):
+            logger.debug(
+                "Play event publish acknowledgement has no subscriber count "
+                "event_id=%s event_type=%s",
+                event.event_id,
+                event.event_type.value,
+            )
+            return
+        log = logger.warning if subscribers == 0 else logger.info
+        log(
+            "Play event publish acknowledged event_id=%s event_type=%s "
+            "session_id=%s subscribers=%s",
+            event.event_id,
+            event.event_type.value,
+            event.session_id,
+            subscribers,
+        )
