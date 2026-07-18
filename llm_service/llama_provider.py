@@ -11,7 +11,13 @@ from pathlib import Path
 
 from loguru import logger
 
-from llm_service.base_provider import DocumentScoreProvider, LLMProvider
+from llm_client.types import (
+    DocumentScore,
+    DocumentScoreProvider,
+    LLMProvider,
+    LLMResponse,
+    ProviderChunk,
+)
 from llm_service.errors import LLMInputModalityUnsupportedError
 from llm_service.runtime import (
     DirectLlamaCompletionModel,
@@ -19,7 +25,6 @@ from llm_service.runtime import (
     DirectLlamaRerankModel,
     LlamaRuntimeTimeoutError,
 )
-from llm_service.types import DocumentScore, LLMResponse, ProviderChunk
 
 _TAG = "[LlamaCompletionProvider]"
 

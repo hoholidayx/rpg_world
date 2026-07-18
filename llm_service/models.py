@@ -6,8 +6,8 @@ import math
 from pathlib import Path
 from typing import Callable
 
+from commons.types import JsonValue
 from llm_service.types import (
-    JsonValue,
     LlamaCacheKey,
     LlamaLogits,
     LlamaModelConfig,

@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from channels.base import ChannelAdapter
-from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.agent.protocol import StreamEventKind
 from rpg_core.agent.sub_agents import StatusSubAgentRecordStatus
 from rpg_core.utils.stats_formatter import format_event_stats
 

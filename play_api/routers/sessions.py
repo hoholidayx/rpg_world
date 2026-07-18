@@ -31,7 +31,7 @@ from rpg_core.session.turn_metadata import (
     has_trustworthy_turn_metadata,
     validate_turn_metadata,
 )
-from rpg_core.turns import normalize_turn_mode
+from rpg_core.agent.turn.models import normalize_turn_mode
 from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])

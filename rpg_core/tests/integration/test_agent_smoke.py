@@ -6,8 +6,8 @@ import re
 import pytest
 
 from rpg_data import models
-from rpg_core.agent.agent_types import StreamEventKind
-from rpg_core.context.rpg_context import LayerType, Role
+from rpg_core.agent.protocol import StreamEventKind
+from rpg_core.context.models import LayerType, Role
 
 pytestmark = pytest.mark.integration
 

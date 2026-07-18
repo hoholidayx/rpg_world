@@ -15,7 +15,7 @@ if TYPE_CHECKING:
         StatusSubAgentResult,
     )
     from rpg_core.agent.turn.transaction import AgentTurnTransaction, TurnScratch
-    from rpg_core.rp_modules import RPModuleTurnRuntime
+    from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
 
 
 @dataclass

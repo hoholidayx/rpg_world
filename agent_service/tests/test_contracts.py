@@ -18,17 +18,16 @@ from commons.errors import (
 from llm_client.client import LLMServiceClientError
 from llm_client.types import LLMBizCatalog, LLMProviderOption, LLMUsage
 import rpg_core.agent.runtime.main_llm as main_llm_module
-from rpg_core.agent.agent_types import (
+from rpg_core.agent.protocol import (
     AgentStreamEvent,
-    CallRecord,
     StreamEventKind,
     TurnCancelResult,
     TurnCancelStatus,
-    TurnStats,
 )
+from rpg_core.agent.telemetry import CallRecord, TurnStats
 from rpg_core.agent.command import CommandDef, CommandResult
-from rpg_core.agent.loop import AgentReply
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.agent.turn.runner import AgentReply
+from rpg_core.context.models import Message, Role
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data import models
 from rpg_data.services import SessionDerivationDataError

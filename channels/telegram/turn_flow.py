@@ -13,7 +13,7 @@ from typing import Protocol
 from loguru import logger
 
 from agent_service.client import AgentClient
-from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
+from rpg_core.agent.protocol import StreamEventKind, TurnCancelStatus
 
 from channels.telegram.render import (
     chunk_rendered_text,

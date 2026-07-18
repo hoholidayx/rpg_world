@@ -29,7 +29,7 @@ from agent_service.schemas import (
 from agent_service.settings import settings
 from commons.types import JsonObject
 from llm_client.types import LLMUsage
-from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
+from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 
 
 class AgentClientError(RuntimeError):

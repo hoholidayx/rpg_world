@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from agent_service.client import AgentClient
-from rpg_core.agent.agent_types import StreamEventKind
-from rpg_core.agent.loop import AgentReply
+from rpg_core.agent.protocol import StreamEventKind
+from rpg_core.agent.turn.runner import AgentReply
 
 
 class ChannelAdapter(ABC):

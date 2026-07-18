@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.agent.protocol import StreamEventKind
 from rpg_core.agent.turn.models import TurnRequest
 from rpg_core.agent.turn.resolver import PlayerCharacterRequiredError
 from rpg_core.agent.turn.service import AgentTurnService

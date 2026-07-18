@@ -13,7 +13,7 @@ from agent_service.derivation_notifications import (
     SessionDerivationNotificationSink,
 )
 from rpg_core.agent.manager import AgentManager
-from rpg_core.agent.derivation_service import SessionDerivationPreparationError
+from rpg_core.agent.runtime.derivation import SessionDerivationPreparationError
 from rpg_data.services import SessionDerivationDataError
 
 if TYPE_CHECKING:

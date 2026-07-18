@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import rpg_core.agent.sub_agents.memory.agent as memory_module
-from rpg_core.agent.agent_types import LLMResponse, LLMUsage
+from llm_client.types import LLMResponse, LLMUsage
 from rpg_core.agent.sub_agents.memory.agent import (
     MEMORY_LLM_SOURCE_STORY,
     MemoryAgentResult,
@@ -15,7 +15,7 @@ from rpg_core.agent.sub_agents.memory.agent import (
     STORY_DETAIL_SCHEMA,
     StoryMemoryExtractionStatus,
 )
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.session.manager import SessionManager
 
 

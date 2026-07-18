@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
     from rpg_core.agent.turn.runner import ToolCallRecord
     from rpg_core.agent.turn.transaction import TurnScratch
-    from rpg_core.rp_modules import RPModuleTurnRuntime
+    from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
     from rpg_core.scene import SceneTracker
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager

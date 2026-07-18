@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 
-from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
+from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 
 from channels.telegram.turn_flow import (
     TelegramTurnBusyReason,

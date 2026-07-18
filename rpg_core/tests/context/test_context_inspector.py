@@ -6,7 +6,7 @@ import rpg_core.context.renderer as renderer_module
 from rpg_core.context.fixed_layer import FixedLayerSection
 from rpg_core.context.fixed_layer.contributors import CoreRPContractContributor, StaticFixedLayerContributor
 from rpg_core.context.inspector import ContextInspector
-from rpg_core.context.rpg_context import (
+from rpg_core.context.models import (
     FixedLayerData,
     HotHistoryLayer,
     LayerType,
@@ -21,7 +21,7 @@ from rpg_core.context.rpg_context import (
     UserMessageLayer,
 )
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload
-from rpg_core.rp_module_constants import RP_MODULE_DICE_SECTION_ID, RP_MODULE_DICE_SOURCE
+from rpg_core.rp_modules.constants import RP_MODULE_DICE_SECTION_ID, RP_MODULE_DICE_SOURCE
 
 
 def _fake_render(template_name: str, **context: object) -> str:

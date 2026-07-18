@@ -18,7 +18,7 @@ from typing import TypeAlias
 
 from openai import AsyncOpenAI
 
-from llm_service.base_provider import DocumentScoreProvider, LLMProvider
+from llm_client.types import DocumentScoreProvider, LLMProvider
 from llm_service.config import BizConfig, resolve_biz_config
 from llm_service.keys import (
     LLM_KIND_EMBEDDING,

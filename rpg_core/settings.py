@@ -22,7 +22,7 @@ from commons.settings import (
     forgiving_int,
 )
 from commons.types import ConfigDict
-from rpg_core.rp_module_constants import (
+from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
 )

@@ -272,8 +272,8 @@ Telegram 渠道当前支持：
 | `agent/runtime/` | session-scoped lifecycle/resources、会话操作、主模型、Context 与工具服务 |
 | `agent/mailbox/` / `command/` | FIFO/取消与命令 dispatcher/handlers/models |
 | `agent/turn/` | 单轮请求、不可变执行计划、runner、固定 hooks、transaction 与同步/流式共享编排 |
-| `agent/sub_agents/memory/` / `status/` | 子 Agent 实现、结果模型、解析、候选或稳定 prompt/schema |
-| `context/` | canonical models、结构化构建、LLM 边界渲染、上下文诊断；`rpg_context.py` 仅兼容导出 |
+| `agent/sub_agents/memory/` / `status/` | 子 Agent 实现、结果模型、解析和稳定 prompt/schema |
+| `context/` | canonical models、结构化构建、LLM 边界渲染与上下文诊断 |
 | `session/` | `SessionManager` 门面与 history/progress/grouping/models 职责拆分 |
 | `tooling/` | 跨 Agent/RP Module 共享的 `BaseTool` 与 `ToolRegistry` |
 | `scene/` | 场景状态跟踪（时间/地点/属性） |
@@ -340,7 +340,7 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 
 `rpg_core/context/` 的主流程保持结构化数据，直到发送给 LLM 前才由 Jinja2 模板统一渲染：
 
-- `context/models.py` 是 `Message` / `Role`、各层数据和 `RPGContext` 的唯一实现；`context/rpg_context.py` 保留旧导入兼容并重导出相同类对象。
+- `context/models.py` 是 `Message` / `Role`、各层数据和 `RPGContext` 的唯一实现；调用方直接从 canonical 模块导入，不保留旧路径重导出。
 - `RPGContextBuilder` 消费预组装的 `FixedLayerData`，并负责摘要、记忆、状态表和用户扩展块，产出结构化 `RPGContext`。
 - 主 Agent 的 `send()`、`send_stream()` 和 `context-preview` 统一通过 `SessionManager.context_history()` 读取历史投影：仅排除 `summary_processed=true` 的单条消息，不校验 `summary_batch_id`、batch 文件、`overall.md` 或 turn 完整性；当前 turn 的 user message 仍来自事务 scratch。
 - `FixedLayerAssembler` 通过 contributors 统一装配固定层 section，例如核心 RP 指令、文本输出格式、世界书、角色卡和已启用 RP Module 的静态契约。

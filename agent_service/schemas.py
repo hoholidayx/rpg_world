@@ -7,9 +7,9 @@ from typing import Literal, NotRequired, TypedDict
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from commons.types import JsonObject, JsonValue
-from rpg_core.agent.agent_types import TurnCancelStatus
+from rpg_core.agent.protocol import TurnCancelStatus
 from rpg_core.session.manager import DEFAULT_SESSION_ID, SessionManager
-from rpg_core.turns import normalize_turn_mode
+from rpg_core.agent.turn.models import normalize_turn_mode
 
 
 class _BaseSchema(BaseModel):

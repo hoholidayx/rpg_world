@@ -8,8 +8,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from play_api.routers._locator import resolve_session_or_404
-from rpg_core.rp_modules import RPModuleRegistry
 from rpg_core.rp_modules.constants import RP_MODULE_NARRATIVE_OUTCOME_NAME
+from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.rp_modules.models import RPModuleSelection, RPModuleSelectionSnapshot
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_DEFINITIONS
 from rpg_core.settings import settings

@@ -8,7 +8,7 @@ import rpg_core.context.renderer as renderer_module
 from rpg_core.context.builder import RPGContextBuilder
 from rpg_core.context.config import ExtensionModuleDef, RPGContextConfig
 from rpg_core.context.fixed_layer import FixedLayerSection
-from rpg_core.context.rpg_context import (
+from rpg_core.context.models import (
     FixedLayerData,
     HotHistoryLayer,
     LayerType,

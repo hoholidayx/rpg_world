@@ -4,8 +4,7 @@ import random
 
 import pytest
 
-from rpg_core.tooling.base import BaseTool
-from rpg_core.rp_modules import registry as registry_module
+import rpg_core.rp_modules.registry as registry_module
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
@@ -13,6 +12,7 @@ from rpg_core.rp_modules.constants import (
     RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
 )
 from rpg_core.rp_modules.models import ModuleContextRequest
+from rpg_core.tooling.base import BaseTool
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.settings import (
     DiceModuleSettings,

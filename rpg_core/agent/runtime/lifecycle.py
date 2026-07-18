@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.command.dispatcher import CommandDispatcher
     from rpg_core.agent.mailbox import AgentMailbox
     from rpg_core.agent.runtime.tools import AgentToolService
-    from rpg_core.rp_modules import RPModuleRegistry
+    from rpg_core.rp_modules.registry import RPModuleRegistry
 
 ContextResourceFactory = Callable[..., AgentContextResources]
 
@@ -193,7 +193,7 @@ class AgentRuntimeLifecycle:
             self._setup_rp_module_registry()
 
     def _setup_rp_module_registry(self) -> None:
-        from rpg_core.rp_modules import RPModuleRegistry
+        from rpg_core.rp_modules.registry import RPModuleRegistry
 
         self._rp_module_registry = RPModuleRegistry(
             settings=getattr(settings, "rp_module_settings", None),

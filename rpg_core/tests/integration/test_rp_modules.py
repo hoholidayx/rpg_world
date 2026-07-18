@@ -7,13 +7,13 @@ import pytest
 from llm_client import manager as llm_manager_module
 from llm_client.types import LLMBizCatalog, LLMProviderOption
 from rpg_core.agent.agent import RPGGameAgent
-from rpg_core.context.rpg_context import LayerType
+from rpg_core.context.models import LayerType
 from rpg_core.context.fixed_layer.contributors import (
     RP_OUTPUT_TAG_NARRATION,
     TEXT_OUTPUT_FORMAT_NAME,
     TEXT_OUTPUT_FORMAT_SECTION_ID,
 )
-from rpg_core.rp_module_constants import (
+from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,

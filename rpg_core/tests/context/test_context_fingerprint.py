@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from rpg_core.context.fingerprint import build_request_fingerprint
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 
 
 def _schema(description: str = "update state") -> dict[str, object]:

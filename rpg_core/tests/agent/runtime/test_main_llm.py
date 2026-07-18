@@ -6,7 +6,10 @@ import pytest
 
 import rpg_core.agent.runtime.main_llm as main_llm_module
 from llm_client.types import LLMBizCatalog, LLMProviderOption
-from rpg_core.main_llm import InvalidMainLLMProviderKey, MainLLMSelectionService
+from rpg_core.agent.runtime.main_llm import (
+    InvalidMainLLMProviderKey,
+    MainLLMSelectionService,
+)
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services.gateway import DataServiceGateway

@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
+from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
+from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.sub_agents import StatusSubAgentPreflightOutcome
 from rpg_core.agent.turn.transaction import AgentTurnTransaction
 from rpg_core.agent.turn.models import (
@@ -23,7 +24,7 @@ from rpg_core.agent.turn.resolver import (
     TurnSnapshotResolver,
 )
 from rpg_core.agent.turn.runtime import TurnRuntime
-from rpg_core.context.rpg_context import Role
+from rpg_core.context.models import Role
 from rpg_core.session import SessionManager
 
 

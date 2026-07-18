@@ -5,8 +5,8 @@ import asyncio
 import pytest
 
 from commons.errors import TURN_METADATA_INVALID_ERROR_CODE
-from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
-from rpg_core.agent.loop import AgentReply
+from rpg_core.agent.protocol import StreamEventKind, TurnCancelStatus
+from rpg_core.agent.turn.runner import AgentReply
 from rpg_core.agent.mailbox import AgentMailbox, AgentMailboxClosedError
 from rpg_core.agent.turn import TurnRequest
 from rpg_core.session import InvalidTurnMetadataError

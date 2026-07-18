@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from rpg_core.agent.agent import RPGGameAgent
-from rpg_core.agent.loop import AgentReply
+from rpg_core.agent.turn.runner import AgentReply
 from rpg_core.agent.turn import TurnMode
 
 

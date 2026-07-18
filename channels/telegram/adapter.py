@@ -44,7 +44,7 @@ from channels.telegram.turn_flow import (
     TelegramTurnBusyReason,
     TelegramTurnFlow,
 )
-from rpg_core.agent.agent_types import TurnCancelStatus
+from rpg_core.agent.protocol import TurnCancelStatus
 
 if TYPE_CHECKING:
     from agent_service.client import AgentClient

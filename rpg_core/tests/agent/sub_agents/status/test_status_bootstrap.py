@@ -11,7 +11,7 @@ from rpg_core.agent.sub_agents import (
     SubAgentContext,
     select_status_bootstrap_history,
 )
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.scene import SceneTracker
 
 

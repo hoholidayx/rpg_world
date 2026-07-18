@@ -8,8 +8,7 @@ import httpx
 from loguru import logger
 from openai import AsyncOpenAI
 
-from llm_service.base_provider import LLMProvider
-from llm_service.types import LLMResponse, LLMUsage, ProviderChunk
+from llm_client.types import LLMProvider, LLMResponse, LLMUsage, ProviderChunk
 
 
 def _build_usage(raw, raw_dict: dict[str, object] | None) -> LLMUsage | None:

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import rpg_core.agent.runtime.derivation as derivation_module
-from rpg_core.agent.derivation_service import (
+from rpg_core.agent.runtime.derivation import (
     AgentDerivationService,
     SessionDerivationPreparationError,
 )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.session.manager import SessionManager
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 

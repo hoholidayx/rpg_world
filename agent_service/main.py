@@ -72,12 +72,13 @@ from commons.errors import (
 from commons.types import JsonObject, JsonValue
 from llm_client.manager import LLMClientManager
 from llm_client.client import LLMServiceClientError
-from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind, TurnStats
+from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
+from rpg_core.agent.telemetry import TurnStats
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload, usage_payload_from_records
 from rpg_core.agent.command import CommandResult
-from rpg_core.agent.loop import AgentReply
+from rpg_core.agent.turn.runner import AgentReply
 from rpg_core.agent.manager import AgentManager, SessionDeletionInProgressError
-from rpg_core.main_llm import (
+from rpg_core.agent.runtime.main_llm import (
     InvalidMainLLMProviderKey,
     MainLLMProviderCatalog,
     MainLLMSelection,

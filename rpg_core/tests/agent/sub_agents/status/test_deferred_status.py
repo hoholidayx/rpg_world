@@ -15,7 +15,7 @@ from rpg_core.agent.sub_agents import (
     StatusSubAgent,
     SubAgentContext,
 )
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.session import SessionManager
 
 

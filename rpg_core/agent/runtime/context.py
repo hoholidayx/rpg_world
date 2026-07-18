@@ -32,11 +32,9 @@ if TYPE_CHECKING:
     from rpg_core.context.inspector import LayerInfo
     from rpg_core.context.models import PersistentMemoryFact, RPGContext
     from rpg_core.agent.runtime.main_llm import MainLLMSelection
-    from rpg_core.rp_modules import (
-        RPModuleRegistry,
-        RPModuleSelectionSnapshot,
-        RPModuleTurnRuntime,
-    )
+    from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
+    from rpg_core.rp_modules.registry import RPModuleRegistry
+    from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
     from rpg_core.scene import SceneTracker
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager
@@ -83,7 +81,7 @@ class AgentContextService:
         if registry is not None:
             return registry.resolve_snapshot(self._session_id())
 
-        from rpg_core.rp_modules import RPModuleSelectionSnapshot
+        from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
 
         return RPModuleSelectionSnapshot(
             session_id=self._session_id(),

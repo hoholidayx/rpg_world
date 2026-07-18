@@ -4,7 +4,7 @@ import pytest
 from types import SimpleNamespace
 
 from rpg_core.summary.compressor import CompressionStatus, SummaryCompressor
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.session.manager import SessionManager
 from rpg_core.tests.conftest import FakeBatchStore, FakeMemorySubAgent
 

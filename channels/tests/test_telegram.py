@@ -20,7 +20,7 @@ from channels.telegram.render import (
     render_markdown_to_telegram_html,
 )
 from channels.tests.conftest import FakeAgent
-from rpg_core.agent.agent_types import AgentStreamEvent, StreamEventKind
+from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind
 from rpg_core.agent.command import CommandDef
 
 

@@ -17,8 +17,8 @@ from llm_client.keys import (
     MEMORY_RERANK_BIZ_KEY,
 )
 from llm_client.types import ProviderChunk
-from rpg_core.agent.agent_types import StreamEventKind
-from rpg_core.main_llm import MainLLMSelectionService
+from rpg_core.agent.protocol import StreamEventKind
+from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
 from rpg_core.tests.integration.scripted_llm import (
     CONFIG_PROVIDER_KEY,
     SESSION_PROVIDER_KEY,

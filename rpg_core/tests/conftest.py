@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rp_memory.candidate import MemoryCandidate
 from rp_memory.planning.plan import QueryPlan
 from rpg_core.session.manager import SessionManager

@@ -17,7 +17,7 @@ from rpg_core.agent.turn import (
     TurnRequest,
 )
 from rpg_core.context.fixed_layer.contributors import PLAYER_CHARACTER_SECTION_ID
-from rpg_core.context.rpg_context import (
+from rpg_core.context.models import (
     FixedLayerData,
     HotHistoryLayer,
     Message,

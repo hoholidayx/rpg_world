@@ -26,7 +26,7 @@ from rpg_core.tooling.base import BaseTool
 from rpg_core.tooling.registry import ToolRegistry
 
 if TYPE_CHECKING:
-    from rpg_core.rp_modules import RPModuleTurnRuntime
+    from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
     from rpg_core.scene import SceneTracker
     from rpg_core.status.manager import StatusManager
 

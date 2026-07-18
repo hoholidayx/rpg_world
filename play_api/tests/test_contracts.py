@@ -12,7 +12,7 @@ from play_api.main import app
 from play_api.delete_tokens import reset_delete_confirmation_tokens
 from play_api.routers.sessions import _agent_call, _turns_from_history
 from play_api.sse_protocol import AgentEventKind, PLAY_SSE_SCHEMA_VERSION, PlaySSEType
-from rpg_core.agent.agent_types import TurnCancelStatus
+from rpg_core.agent.protocol import TurnCancelStatus
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways

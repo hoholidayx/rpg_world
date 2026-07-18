@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from rpg_core.agent.runtime.session import AgentSessionService
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.session import SessionManager
 
 

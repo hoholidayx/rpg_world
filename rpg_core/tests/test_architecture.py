@@ -1,4 +1,4 @@
-"""Static architecture contracts for the ``rpg_core`` package layout."""
+"""Static architecture contracts for the canonical Python module layout."""
 
 from __future__ import annotations
 
@@ -18,22 +18,58 @@ CORE = ROOT / "rpg_core"
 PUBLIC_EXPORTS = (
     ("rpg_core.agent.agent", "RPGGameAgent"),
     ("rpg_core.agent.manager", "AgentManager"),
-    ("rpg_core.agent.agent_types", "AgentStreamEvent"),
-    ("rpg_core.agent.agent_types", "TurnStats"),
-    ("rpg_core.agent.loop", "AgentReply"),
+    ("rpg_core.agent.protocol", "AgentStreamEvent"),
+    ("rpg_core.agent.telemetry", "TurnStats"),
+    ("rpg_core.agent.turn.runner", "AgentReply"),
     ("rpg_core.agent.command", "CommandDispatcher"),
-    ("rpg_core.agent.derivation_service", "SessionDerivationPreparationError"),
+    ("rpg_core.agent.runtime.derivation", "SessionDerivationPreparationError"),
     ("rpg_core.agent.sub_agents", "StatusSubAgentRecordStatus"),
-    ("rpg_core.main_llm", "MainLLMSelectionService"),
-    ("rpg_core.turns", "TurnRequest"),
+    ("rpg_core.agent.runtime.main_llm", "MainLLMSelectionService"),
+    ("rpg_core.agent.turn.models", "TurnRequest"),
     ("rpg_core.context", "RPGContext"),
-    ("rpg_core.context.rpg_context", "Message"),
+    ("rpg_core.context.models", "Message"),
     ("rpg_core.character", "CharacterManager"),
     ("rpg_core.lorebook", "LorebookManager"),
     ("rpg_core.session", "SessionManager"),
     ("rpg_core.status", "StatusManager"),
     ("rpg_core.tooling", "BaseTool"),
     ("rpg_core.tooling", "ToolRegistry"),
+)
+
+REMOVED_COMPATIBILITY_MODULES = {
+    "llm_service.base_provider",
+    "rpg_core.agent.agent_types",
+    "rpg_core.agent.derivation_service",
+    "rpg_core.agent.loop",
+    "rpg_core.agent.sub_agents.memory.candidates",
+    "rpg_core.agent.tools.base",
+    "rpg_core.agent.tools.registry",
+    "rpg_core.context.rpg_context",
+    "rpg_core.main_llm",
+    "rpg_core.rp_module_constants",
+    "rpg_core.session.turns",
+    "rpg_core.turns",
+}
+
+REMOVED_COMPATIBILITY_FILES = tuple(
+    ROOT / f"{module_name.replace('.', '/')}.py"
+    for module_name in sorted(REMOVED_COMPATIBILITY_MODULES)
+)
+
+PRODUCTION_ROOTS = (
+    ROOT / "agent_service",
+    ROOT / "channels",
+    ROOT / "dream_service",
+    ROOT / "llm_client",
+    ROOT / "llm_service",
+    ROOT / "media_service",
+    ROOT / "play_api",
+    ROOT / "rp_memory",
+    ROOT / "rpg_core",
+    ROOT / "rpg_data",
+    ROOT / "rpg_media",
+    ROOT / "rpg_tts",
+    ROOT / "tts_service",
 )
 
 
@@ -67,40 +103,31 @@ def test_shared_tooling_does_not_depend_on_agent_runtime() -> None:
     assert violations == []
 
 
-def test_canonical_agent_modules_do_not_import_compatibility_facades() -> None:
-    compatibility_modules = {
-        "rpg_core.agent.agent_types",
-        "rpg_core.agent.loop",
-        "rpg_core.main_llm",
-        "rpg_core.turns",
-    }
-    canonical_roots = (
-        CORE / "agent" / "runtime",
-        CORE / "agent" / "mailbox",
-        CORE / "agent" / "command",
-        CORE / "agent" / "turn" / "hooks",
-        CORE / "agent" / "turn" / "transaction",
-        CORE / "agent" / "sub_agents" / "memory",
-        CORE / "agent" / "sub_agents" / "status",
-    )
-    violations: list[str] = []
-    for path in _python_files(*canonical_roots):
-        for imported in _imports(path):
-            if imported in compatibility_modules:
-                violations.append(f"{path.relative_to(ROOT)}: {imported}")
+def test_removed_compatibility_modules_do_not_exist() -> None:
+    present = [
+        str(path.relative_to(ROOT))
+        for path in REMOVED_COMPATIBILITY_FILES
+        if path.exists()
+    ]
+
+    assert present == []
+
+
+def test_production_has_no_import_only_facade_modules() -> None:
+    violations = [
+        str(path.relative_to(ROOT))
+        for path in _python_files(*PRODUCTION_ROOTS)
+        if path.name != "__init__.py" and _is_import_only_module(path)
+    ]
 
     assert violations == []
 
 
-def test_core_internals_use_canonical_context_and_session_helpers() -> None:
-    compatibility_modules = {
-        "rpg_core.context.rpg_context",
-        "rpg_core.session.turns",
-    }
+def test_production_code_does_not_import_removed_compatibility_modules() -> None:
     violations: list[str] = []
-    for path in _python_files(CORE):
+    for path in _python_files(*PRODUCTION_ROOTS):
         for imported in _imports(path):
-            if imported in compatibility_modules:
+            if imported in REMOVED_COMPATIBILITY_MODULES:
                 violations.append(f"{path.relative_to(ROOT)}: {imported}")
 
     assert violations == []
@@ -170,3 +197,25 @@ def _imports(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module)
     return imported
+
+
+def _is_import_only_module(path: Path) -> bool:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            continue
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if all(
+                isinstance(target, ast.Name) and target.id == "__all__"
+                for target in targets
+            ):
+                continue
+        return False
+    return True

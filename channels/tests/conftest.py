@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from rpg_core.agent.agent_types import (
+from rpg_core.agent.protocol import (
     AgentStreamEvent,
     StreamEventKind,
 )

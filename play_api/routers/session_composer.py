@@ -9,7 +9,7 @@ from peewee import IntegrityError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from play_api.routers._locator import resolve_session_or_404
-from rpg_core.turns import normalize_turn_mode
+from rpg_core.agent.turn.models import normalize_turn_mode
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway
 

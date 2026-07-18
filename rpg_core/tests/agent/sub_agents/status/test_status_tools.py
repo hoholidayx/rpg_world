@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import rpg_core.agent.sub_agents.status.agent as status_module
-from llm_service.types import LLMResponse, LLMUsage
+from llm_client.types import LLMResponse, LLMUsage
 from rpg_data.models import STATUS_KIND_NORMAL, STATUS_KIND_SCENE, StatusTableDocument, StatusTableRow
 from rpg_core.agent.turn.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
 from rpg_core.agent.sub_agents import (
@@ -16,7 +16,7 @@ from rpg_core.agent.sub_agents import (
     SubAgentContext,
 )
 from rpg_core.tooling.base import BaseTool
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_TOOL_NAME
 from rpg_core.scene import SceneTracker
 from rpg_core.status.tools import StatusTableSetValuesTool, StatusTableToolProvider, StatusWritePolicy

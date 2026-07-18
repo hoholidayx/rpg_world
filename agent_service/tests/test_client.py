@@ -7,7 +7,7 @@ import pytest
 
 import agent_service.client as client_module
 from agent_service.client import AgentClient, AgentClientError
-from rpg_core.agent.agent_types import StreamEventKind, TurnCancelStatus
+from rpg_core.agent.protocol import StreamEventKind, TurnCancelStatus
 
 
 class FakeResponse:

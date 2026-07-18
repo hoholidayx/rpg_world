@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpg_core.agent.agent_types import TurnStats
+from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.sub_agents import (
     StatusSubAgentPreflightOutcome,
@@ -17,7 +17,7 @@ from rpg_core.agent.turn.hooks import (
     StatusPreflightHook,
 )
 from rpg_core.session.manager import SessionManager
-from rpg_core.context.rpg_context import Message, Role
+from rpg_core.context.models import Message, Role
 
 
 class _StatusScratch:

@@ -11,7 +11,7 @@ from agent_service import derivation_worker as worker_module
 from agent_service import main as service_main
 from agent_service.derivation_notifications import SessionDerivationNotification
 from agent_service.derivation_worker import SessionDerivationWorker
-from rpg_core.agent.derivation_service import SessionDerivationPreparationError
+from rpg_core.agent.runtime.derivation import SessionDerivationPreparationError
 from rpg_data import models
 from rpg_data.services import SessionDerivationSourceBusyError
 

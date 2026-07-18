@@ -7,7 +7,7 @@ import pytest_asyncio
 
 from llm_client.manager import LLMClientManager
 from rpg_core.agent.agent import RPGGameAgent
-from rpg_core.agent.agent_types import StreamEventKind
+from rpg_core.agent.protocol import StreamEventKind
 from rpg_core.tests.integration.conftest import (
     _create_integration_session,
     _shutdown_agent,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from rp_memory.candidate import MemoryCandidate
-from rpg_core.context.rpg_context import Message
+from rpg_core.context.models import Message
 from llm_client.manager import LLMClientManager
 
 

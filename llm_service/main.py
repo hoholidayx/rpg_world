@@ -16,7 +16,7 @@ from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 
 from llm_client.codec import chunk_to_wire, response_to_wire
-from llm_service.base_provider import DocumentScoreProvider, LLMProvider
+from llm_client.types import DocumentScoreProvider, LLMProvider
 from llm_service.config import (
     get_biz_config,
     list_provider_options,

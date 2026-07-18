@@ -1,7 +1,7 @@
 """Inspection helpers for structured RPG contexts.
 
-This module is intentionally outside ``rpg_context.py`` so debug/UI output does
-not add maintenance cost to the LLM context data model.
+This module is intentionally separate from ``models.py`` so debug/UI output
+does not add maintenance cost to the LLM context data model.
 """
 
 from __future__ import annotations
