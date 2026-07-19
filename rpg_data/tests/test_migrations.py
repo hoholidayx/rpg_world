@@ -51,6 +51,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_narrative_styles",
             "rpg_story_narrative_styles",
             "rpg_story_quick_replies",
+            "rpg_story_openings",
             "rpg_characters",
             "rpg_character_details",
             "rpg_lorebook_entries",
@@ -155,6 +156,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "main_llm_provider_key",
             "player_character_id",
             "player_character_snapshot_json",
+            "story_opening_id",
         }.issubset(profile_columns)
         assert "narrative_outcome_weights_json" not in profile_columns
         catalog_names = {
@@ -401,7 +403,60 @@ def test_run_migrations_is_idempotent() -> None:
             ("0015", "0015_dream_memory.sql"),
             ("0016", "0016_session_derivations.sql"),
             ("0017", "0017_story_memory_evidence.sql"),
+            ("0018", "0018_story_openings.sql"),
         ]
+    finally:
+        conn.close()
+
+
+def test_story_openings_migration_copies_legacy_templates_and_backfills_sessions(
+    monkeypatch,
+) -> None:
+    conn = db.connect(":memory:")
+    migrations = migration_runner._iter_migration_files()
+    opening_index = next(
+        index
+        for index, migration in enumerate(migrations)
+        if migration.name == "0018_story_openings.sql"
+    )
+    try:
+        monkeypatch.setattr(
+            migration_runner,
+            "_iter_migration_files",
+            lambda: migrations[:opening_index],
+        )
+        migration_runner.run_migrations(conn)
+        conn.execute(
+            "UPDATE rpg_stories SET first_message = ? WHERE id = 1",
+            ("  迁移后的开局 {USER_PLAY_ROLE_NAME}。  ",),
+        )
+        conn.commit()
+
+        monkeypatch.setattr(
+            migration_runner,
+            "_iter_migration_files",
+            lambda: migrations,
+        )
+        migration_runner.run_migrations(conn)
+
+        opening = conn.execute(
+            "SELECT id, title, message, sort_order FROM rpg_story_openings WHERE story_id = 1"
+        ).fetchone()
+        profile = conn.execute(
+            "SELECT story_opening_id FROM rpg_session_profiles WHERE session_id = 's_forest001'"
+        ).fetchone()
+        assert dict(opening) == {
+            "id": opening["id"],
+            "title": "默认开局",
+            "message": "迁移后的开局 {USER_PLAY_ROLE_NAME}。",
+            "sort_order": 0,
+        }
+        assert profile["story_opening_id"] == opening["id"]
+
+        conn.execute("DELETE FROM rpg_story_openings WHERE id = ?", (opening["id"],))
+        assert conn.execute(
+            "SELECT story_opening_id FROM rpg_session_profiles WHERE session_id = 's_forest001'"
+        ).fetchone()["story_opening_id"] is None
     finally:
         conn.close()
 

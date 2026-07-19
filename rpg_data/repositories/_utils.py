@@ -105,6 +105,20 @@ def to_story_quick_reply(row: records.StoryQuickReplyRecord) -> models.StoryQuic
     )
 
 
+def to_story_opening(row: records.StoryOpeningRecord) -> models.StoryOpening:
+    return models.StoryOpening(
+        id=int(row.id),
+        workspace_id=str(row.workspace_id),
+        story_id=int(row.story_id),
+        title=str(row.title),
+        message=str(row.message),
+        sort_order=int(row.sort_order),
+        version=int(row.version),
+        created_at=str(row.created_at),
+        updated_at=str(row.updated_at),
+    )
+
+
 def to_story(row: records.StoryRecord) -> models.Story:
     return models.Story(
         id=int(row.id),
@@ -112,7 +126,6 @@ def to_story(row: records.StoryRecord) -> models.Story:
         title=str(row.title),
         summary=str(row.summary or ""),
         story_prompt=str(row.story_prompt or ""),
-        first_message=str(row.first_message or ""),
         main_llm_provider_key=(
             str(row.main_llm_provider_key)
             if row.main_llm_provider_key is not None
@@ -158,6 +171,11 @@ def to_session(row: records.SessionRecord) -> models.Session:
             if profile is not None
             else "{}"
         ),
+        story_opening_id=(
+            int(profile.story_opening_id)
+            if profile is not None and profile.story_opening_id is not None
+            else None
+        ),
         profile_metadata_json=str(profile.metadata_json or "{}") if profile is not None else "{}",
         profile_created_at=str(profile.created_at) if profile is not None else "",
         profile_updated_at=str(profile.updated_at) if profile is not None else "",
@@ -176,6 +194,7 @@ def to_session_profile(row: records.SessionProfileRecord) -> models.SessionProfi
         ),
         player_character_id=int(row.player_character_id) if row.player_character_id is not None else None,
         player_character_snapshot_json=str(row.player_character_snapshot_json or "{}"),
+        story_opening_id=int(row.story_opening_id) if row.story_opening_id is not None else None,
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),
         created_at=str(row.created_at),

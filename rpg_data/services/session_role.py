@@ -12,9 +12,10 @@ from rpg_data import models
 from rpg_data.repositories.records import (
     CharacterRecord,
     StoryCharacterRecord,
-    StoryRecord,
+    StoryOpeningRecord,
     bind_database,
 )
+from rpg_data.repositories._utils import to_story_opening
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.services.backup import BackupService
 from rpg_data.services.message import MessageService
@@ -39,6 +40,13 @@ class SessionPlayerCharacterState:
 class SessionPlayerCharacterBindResult:
     state: SessionPlayerCharacterState
     first_message: str = ""
+    story_opening_id: int | None = None
+
+
+@dataclass(frozen=True)
+class SessionOpeningOption:
+    opening: models.StoryOpening
+    rendered_message: str
 
 
 class SessionRoleService:
@@ -134,35 +142,51 @@ class SessionRoleService:
         )
         return options
 
+    def list_opening_options(
+        self,
+        session_id: str,
+        character_id: int,
+    ) -> list[SessionOpeningOption]:
+        session = self._require_session(session_id)
+        player = self._require_player_option(session_id, character_id).snapshot
+        return [
+            SessionOpeningOption(
+                opening=opening,
+                rendered_message=render_story_text_template(
+                    opening.message,
+                    user_play_role_name=player.name,
+                ),
+            )
+            for opening in self._list_story_openings(int(session.story_id))
+        ]
+
     def bind_player_character(
         self,
         session_id: str,
         character_id: int,
+        *,
+        story_opening_id: int | None = None,
     ) -> SessionPlayerCharacterBindResult:
         session = self._require_session(session_id)
         target_id = int(character_id)
-        options = self.list_options(session_id)
-        option = next((item for item in options if item.snapshot.character_id == target_id), None)
-        if option is None:
-            logger.warning(
-                "player character bind rejected: character not mounted session_id=%s workspace_id=%s story_id=%s character_id=%s option_count=%s",
-                session_id,
-                session.workspace_id,
-                session.story_id,
-                target_id,
-                len(options),
-            )
-            raise ValueError(f"player character is not mounted to this session story: {target_id}")
+        option = self._require_player_option(session_id, target_id)
 
         snapshot_json = _snapshot_json(option.snapshot)
-        prepared_first_message = (
-            self._prepare_first_message(
-                session_id,
-                option.snapshot,
-            )
-            if session.player_character_id is None
-            else ""
+        initial_binding = (
+            session.player_character_id is None
+            and self._messages.count(session_id) == 0
         )
+        selected_opening = (
+            self._resolve_story_opening(
+                int(session.story_id),
+                story_opening_id,
+            )
+            if initial_binding
+            else None
+        )
+        if not initial_binding and story_opening_id is not None:
+            raise ValueError("story opening can only be selected for an empty unbound session")
+        prepared_first_message = self._render_opening(selected_opening, option.snapshot)
         logger.info(
             "binding player character session_id=%s workspace_id=%s story_id=%s character_id=%s mount_id=%s",
             session_id,
@@ -172,10 +196,19 @@ class SessionRoleService:
             option.snapshot.mount_id,
         )
         with self._database.atomic():
-            updated = self._sessions.update_player_character(
-                session_id,
-                player_character_id=target_id,
-                player_character_snapshot_json=snapshot_json,
+            updated = (
+                self._sessions.bind_initial_player_character(
+                    session_id,
+                    player_character_id=target_id,
+                    player_character_snapshot_json=snapshot_json,
+                    story_opening_id=(selected_opening.id if selected_opening else None),
+                )
+                if initial_binding
+                else self._sessions.update_player_character(
+                    session_id,
+                    player_character_id=target_id,
+                    player_character_snapshot_json=snapshot_json,
+                )
             )
             if updated is None:
                 logger.warning("player character bind lost session during update session_id=%s", session_id)
@@ -185,6 +218,7 @@ class SessionRoleService:
                 prepared_first_message,
                 story_id=int(session.story_id),
                 trigger="player_bind",
+                story_opening_id=(selected_opening.id if selected_opening else None),
             )
 
         logger.info(
@@ -199,6 +233,7 @@ class SessionRoleService:
                 player=option.snapshot,
             ),
             first_message=first_message,
+            story_opening_id=(selected_opening.id if selected_opening else None),
         )
 
     def append_first_message_for_reset(self, session_id: str) -> str:
@@ -212,14 +247,26 @@ class SessionRoleService:
             )
             return ""
 
-        first_message = self._prepare_first_message(session_id, state.player)
         session = self._require_session(session_id)
+        selected_opening = self._resolve_story_opening(
+            int(session.story_id),
+            session.story_opening_id,
+            fallback_if_missing=True,
+        )
+        first_message = self._render_opening(selected_opening, state.player)
         with self._database.atomic():
+            updated = self._sessions.update_story_opening(
+                session_id,
+                selected_opening.id if selected_opening else None,
+            )
+            if updated is None:
+                raise FileNotFoundError(f"Session not found: {session_id}")
             return self._append_prepared_first_message_if_empty(
                 session_id,
                 first_message,
                 story_id=int(session.story_id),
                 trigger="session_reset",
+                story_opening_id=(selected_opening.id if selected_opening else None),
             )
 
     def render_role_bind_prompt(self, session_id: str, *, error: str = "") -> str:
@@ -253,7 +300,14 @@ class SessionRoleService:
         lines.append("示例：/role_bind 2")
         return "\n".join(lines)
 
-    def bind_by_index(self, session_id: str, index: int) -> SessionPlayerCharacterBindResult:
+    def bind_by_index(
+        self,
+        session_id: str,
+        index: int,
+        opening_index: int | None = None,
+        *,
+        story_opening_id: int | None = None,
+    ) -> SessionPlayerCharacterBindResult:
         options = self.list_options(session_id)
         if index < 1 or index > len(options):
             logger.warning(
@@ -269,35 +323,18 @@ class SessionRoleService:
             index,
             options[index - 1].snapshot.character_id,
         )
-        return self.bind_player_character(session_id, options[index - 1].snapshot.character_id)
-
-    def _prepare_first_message(
-        self,
-        session_id: str,
-        player: models.SessionPlayerCharacterSnapshot,
-    ) -> str:
-        message_count = self._messages.count(session_id)
-        if message_count > 0:
-            logger.debug(
-                "skip first message append because history exists session_id=%s message_count=%s",
-                session_id,
-                message_count,
-            )
-            return ""
-        session = self._require_session(session_id)
-        story = StoryRecord.get_or_none(StoryRecord.id == session.story_id)
-        first_message = str(story.first_message or "").strip() if story is not None else ""
-        if not first_message:
-            logger.debug(
-                "skip first message append because story has no first_message session_id=%s story_id=%s",
-                session_id,
-                session.story_id,
-            )
-            return ""
-
-        return render_story_text_template(
-            first_message,
-            user_play_role_name=player.name,
+        if opening_index is not None and story_opening_id is not None:
+            raise ValueError("opening index and story opening id cannot both be provided")
+        if opening_index is not None:
+            session = self._require_session(session_id)
+            openings = self._list_story_openings(int(session.story_id))
+            if opening_index < 1 or opening_index > len(openings):
+                raise ValueError(f"无效开局序号: {opening_index}")
+            story_opening_id = openings[opening_index - 1].id
+        return self.bind_player_character(
+            session_id,
+            options[index - 1].snapshot.character_id,
+            story_opening_id=story_opening_id,
         )
 
     def _append_prepared_first_message_if_empty(
@@ -307,6 +344,7 @@ class SessionRoleService:
         *,
         story_id: int,
         trigger: str,
+        story_opening_id: int | None,
     ) -> str:
         if not first_message:
             return ""
@@ -319,7 +357,13 @@ class SessionRoleService:
             )
             return ""
 
-        metadata_json = json.dumps({"source": "story_first_message"}, ensure_ascii=False)
+        metadata_json = json.dumps(
+            {
+                "source": "story_opening",
+                "storyOpeningId": story_opening_id,
+            },
+            ensure_ascii=False,
+        )
         self._messages.append(
             session_id,
             models.MESSAGE_ROLE_ASSISTANT,
@@ -346,6 +390,80 @@ class SessionRoleService:
             len(first_message),
         )
         return first_message
+
+    def _require_player_option(
+        self,
+        session_id: str,
+        character_id: int,
+    ) -> PlayerCharacterOption:
+        session = self._require_session(session_id)
+        target_id = int(character_id)
+        options = self.list_options(session_id)
+        option = next(
+            (item for item in options if item.snapshot.character_id == target_id),
+            None,
+        )
+        if option is None:
+            logger.warning(
+                "player character bind rejected: character not mounted session_id=%s workspace_id=%s story_id=%s character_id=%s option_count=%s",
+                session_id,
+                session.workspace_id,
+                session.story_id,
+                target_id,
+                len(options),
+            )
+            raise ValueError(
+                f"player character is not mounted to this session story: {target_id}"
+            )
+        return option
+
+    def _list_story_openings(self, story_id: int) -> list[models.StoryOpening]:
+        rows = (
+            StoryOpeningRecord
+            .select()
+            .where(StoryOpeningRecord.story == int(story_id))
+            .order_by(StoryOpeningRecord.sort_order, StoryOpeningRecord.id)
+        )
+        return [to_story_opening(row) for row in rows]
+
+    def _resolve_story_opening(
+        self,
+        story_id: int,
+        story_opening_id: int | None,
+        *,
+        fallback_if_missing: bool = False,
+    ) -> models.StoryOpening | None:
+        openings = self._list_story_openings(story_id)
+        if story_opening_id is None:
+            return openings[0] if openings else None
+        selected = next(
+            (opening for opening in openings if opening.id == int(story_opening_id)),
+            None,
+        )
+        if selected is None:
+            if fallback_if_missing:
+                logger.warning(
+                    "saved story opening is unavailable; falling back to default story_id=%s story_opening_id=%s",
+                    story_id,
+                    story_opening_id,
+                )
+                return openings[0] if openings else None
+            raise ValueError(
+                f"story opening is not mounted to this session story: {story_opening_id}"
+            )
+        return selected
+
+    @staticmethod
+    def _render_opening(
+        opening: models.StoryOpening | None,
+        player: models.SessionPlayerCharacterSnapshot,
+    ) -> str:
+        if opening is None:
+            return ""
+        return render_story_text_template(
+            opening.message,
+            user_play_role_name=player.name,
+        )
 
     def _require_session(self, session_id: str) -> models.Session:
         session = self._sessions.get(session_id)

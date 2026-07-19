@@ -190,23 +190,44 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 
 - 1 个 workspace 下可以有多个 story。
 - 1 个 story 下可以有多个 session。
-- Story 主数据中，`summary` 是短摘要，`first_message` 是会话开场首条消息模板，`story_prompt` 是 story 专属固定系统提示词。两类模板当前只支持 `{USER_PLAY_ROLE_NAME}` 白名单变量，数据库与 API 始终返回原始模板；未知变量在保存时返回校验错误，不执行 Jinja、表达式或递归替换。首消息在首次成功绑定且历史为空时渲染，Story Prompt 在每个 turn 的不可变 snapshot 中渲染一次。当前硬切换 schema 变更直接体现在 `0001_initial.sql`，demo 与分页测试数据分别放在 `0002_demo.sql`、`0003_pagination_demo.sql`；`0007_player_role_templates.sql` 只条件更新仍保持旧默认值的 Demo 数据。
+- Story 主数据中，`summary` 是短摘要，`story_prompt` 是 Story 专属固定系统提示词；会话开局由 `rpg_story_openings` 保存 0–3 条带标题、稳定 ID 和顺序的 Opening。旧 `rpg_stories.first_message` 物理列仅供 `0018_story_openings.sql` 迁移读取。Opening 正文与 Story Prompt 当前只支持 `{USER_PLAY_ROLE_NAME}` 白名单变量，数据库与 API 始终返回原始模板；未知变量在保存时返回校验错误，不执行 Jinja、表达式或递归替换。第一条 Opening 是非 Web 渠道和未显式选择时的默认项。
 - 角色卡和世界书条目属于 workspace，通过挂载表关联到 story；同一个角色卡或世界书条目可以挂载到多个 story。
 - 状态表模板属于 workspace，通过 `rpg_story_status_tables` 挂载到 story；挂载记录可选绑定同一 story 的一个角色。一个角色可绑定多张状态表，但单张 story 状态表挂载最多绑定一个角色。
 - Play 侧公开 `session_id` 是全局唯一短 ID，创建入口由 `rpg_data` 生成，当前生成格式为 `s_` + 10 位小写字母/数字；创建 session 时绑定 `workspace_id + story_id`，之后会话内接口只传 `session_id`。
 - CLI / Telegram 启动时也先通过 Agent service 的 `ensure_session(workspace_id, story_id, session_id, title)` 解析会话；`session_id` 为空时创建系统生成 ID 的 session，非空时只校验并加载既有 session。
-- `rpg_session_profiles` 保存会话标题、描述、`player_character_id` 和 `player_character_snapshot_json`；`rpg_sessions.id` 保持稳定，用作 URL 和 Agent session id。
+- `rpg_session_profiles` 保存会话标题、描述、`player_character_id`、`player_character_snapshot_json` 和稳定的 `story_opening_id`；`rpg_sessions.id` 保持稳定，用作 URL 和 Agent session id。
 
 玩家扮演角色绑定是 session 级能力：
 
 - 状态只暴露 `bound | invalid`。缺失绑定、角色不存在、未挂载到当前 story、snapshot 损坏或 snapshot mount/story 不匹配，都统一视为 `invalid`。
 - Play WebUI 新建或进入 session 后统一在 SessionRoom 内处理选角；invalid 时打开不可取消弹窗，绑定前禁用输入区。设置菜单可以切换当前扮演角色，切换只影响后续 user 消息展示和后续 prompt 语义，不重写历史。
 - CLI / Telegram / Agent API 允许建立空 session；绑定前普通消息只返回固定编号角色列表，不调用 LLM、不写 user history。
-- 绑定与切换统一走 Agent 命令 `/role_bind <序号>`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 会转发到 Agent service，由 Agent service 将角色 ID 映射为当前 story 已挂载角色序号并执行同一命令；不要在 Play API/DataManager 中直接写绑定。
-- 首次成功绑定且 main history 为空、story `first_message` 非空时，`SessionRoleService` 会按刚绑定的角色渲染模板，再将同一条 assistant 开场消息写入 main 和 backup history；普通历史删除或后续切换角色时不会重复追加。`/clear` 完整重置是例外：有效绑定会按当前模板重新写入 turn 1 开场，下一次玩家输入从 turn 2 开始。
+- 绑定与切换统一走 Agent 命令 `/role_bind <角色序号> [开局序号]`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 会转发到 Agent service，由 Agent service 将角色 ID 映射为当前 story 已挂载角色序号，并以稳定 Opening ID 执行同一命令；不要在 Play API/DataManager 中直接写绑定。
+- 首次成功绑定且 main history 为空时，`SessionRoleService` 会按刚绑定的角色渲染选中 Opening，再将同一条 assistant 开场消息写入 main 和 backup history；角色与 `story_opening_id` 在一次事务中提交。普通历史删除或后续切换角色时不会重复追加。`/clear` 完整重置沿用 Session 保存的稳定 Opening ID 并读取 Story 最新正文；选项已删除时回退当前第一条，无 Opening 时不写开场。
 - 玩家身份在 Context 门禁前固化进 `TurnExecutionSnapshot`，由门禁、主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是身份唯一真源；角色卡只在 Context 投影时标注为 `PLAYER_CHARACTER` 或 `NPC`，不依赖角色 metadata。当前绑定覆盖冲突的旧历史、摘要和记忆，但不会自动改写这些既有数据。
 
-Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream`、`/chat/stop` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`history-page`、`scene`、`commands`、`turn`、`stream`、`stop`、`player-character`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
+Story 的创建与更新请求使用完整、有序的 `openings` 数组；新建 Opening 可省略 `id`，编辑已有 Opening 时应原样带回稳定 ID：
+
+```json
+{
+  "openings": [
+    {
+      "id": 12,
+      "title": "雨夜来客",
+      "message": "雨声停下时，{USER_PLAY_ROLE_NAME} 推开了咖啡馆的门。"
+    }
+  ]
+}
+```
+
+SessionRoom 的首次进入流程分为读取候选与最终提交两步：
+
+- `GET /play-api/v1/sessions/{session_id}/opening-options?playerCharacterId={character_id}` 只按候选角色渲染预览，不写角色、Opening 或历史。
+- Story 有 0 条或 1 条 Opening 时直接使用缺省项；有 2–3 条时才显示第二步选择面板，未改动选择时默认第一条。
+- `PATCH /play-api/v1/sessions/{session_id}/player-character` 最终一次提交角色与可选 Opening：`{"playerCharacterId": 1, "storyOpeningId": 12}`。数据层会再次校验稳定 ID 仍属于当前 Story，再原子写入绑定和首条消息。
+- CLI、Telegram 和未传 `storyOpeningId` 的调用方使用第一条 Opening。该流程不改变 turn SSE、历史分页或消息正文协议。
+
+Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream`、`/chat/stop` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`history-page`、`scene`、`commands`、`turn`、`stream`、`stop`、`opening-options`、`player-character`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。
 
 会话中心详情面板和 Session Room 设置菜单提供永久删除入口，并统一使用确认弹窗。`DELETE /play-api/v1/sessions/{session_id}` 转发到 Agent service：先阻止该 session 的新请求、取消活动及排队生成并释放 watcher/SQLite，再删除 catalog 行、全部级联数据（包括 append-only 冷备）和 runtime 目录。它与保留 session 身份的 `/clear` 不同；运行目录清理失败时返回 `runtimeCleanup="pending"`，隔离目录可继续在数据清理中处理。
 

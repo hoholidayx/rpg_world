@@ -13,7 +13,7 @@ import { sessionContextUsageConfig } from '@/lib/config/appConfig'
 import { deleteSession } from '@/lib/api/sessions'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
-import type { SessionPlayerCharacter } from '@/types/session'
+import type { SessionOpeningOption, SessionPlayerCharacter } from '@/types/session'
 import { SessionComposer } from './SessionComposer'
 import { SessionDerivationDialog } from './SessionDerivationDialog'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
@@ -218,7 +218,121 @@ function PlayerCharacterDialog({
               disabled={!canSubmit}
               className="h-10 rounded-lg bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none dark:shadow-violet-950/40 dark:disabled:bg-slate-700"
             >
-              {pending ? '绑定中...' : required ? '确认角色' : '切换角色'}
+              {pending ? '处理中...' : required ? '继续' : '切换角色'}
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
+function SessionOpeningDialog({
+  open,
+  characterName,
+  options,
+  selectedOpeningId,
+  pending,
+  error,
+  onSelect,
+  onSubmit,
+  onBack,
+}: {
+  open: boolean
+  characterName: string
+  options: SessionOpeningOption[]
+  selectedOpeningId: number | null
+  pending: boolean
+  error: string | null
+  onSelect: (openingId: number) => void
+  onSubmit: () => void
+  onBack: () => void
+}) {
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-8 backdrop-blur-sm">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-opening-title"
+        className="flex max-h-[calc(100vh-4rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/50"
+      >
+        <header className="border-b border-slate-200 bg-slate-50 px-6 py-5 dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-600 dark:text-violet-300">第 2 步 · 会话开局</p>
+              <h2 id="session-opening-title" className="mt-1 text-xl font-black text-slate-950 dark:text-slate-100">
+                选择故事的起点
+              </h2>
+              <p className="mt-1 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
+                你将扮演「{characterName || '所选角色'}」。开局只决定本 Session 的第一条故事消息，之后仍是自由推演。
+              </p>
+            </div>
+            <span className="rounded-full bg-violet-100 px-3 py-1.5 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+              {options.length} 个可选起点
+            </span>
+          </div>
+        </header>
+
+        <div className="overflow-y-auto px-6 py-5">
+          {error ? (
+            <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+              {error}
+            </p>
+          ) : null}
+          <div className="grid gap-3">
+            {options.map((option, index) => {
+              const selected = selectedOpeningId === option.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => onSelect(option.id)}
+                  disabled={pending}
+                  className={cn(
+                    'rounded-lg border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-70',
+                    selected
+                      ? 'border-violet-400 bg-violet-50 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.16)] dark:border-violet-500/60 dark:bg-violet-500/15'
+                      : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/40 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10',
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="min-w-0">
+                      <span className="mr-2 text-xs font-black uppercase tracking-wider text-slate-400">Opening {index + 1}</span>
+                      <strong className="text-base font-black text-slate-950 dark:text-slate-100">{option.title}</strong>
+                    </span>
+                    <span className={cn('h-5 w-5 shrink-0 rounded-full border-2', selected ? 'border-[6px] border-violet-600' : 'border-slate-300 dark:border-slate-600')} />
+                  </span>
+                  <span className="mt-3 block whitespace-pre-wrap text-sm font-semibold leading-7 text-slate-600 dark:text-slate-300">
+                    {option.renderedMessage}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
+          <p className="text-xs font-semibold text-slate-400 dark:text-slate-300">
+            未选择时默认使用第一条；确认后角色与开局会一起提交。
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={pending}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-200 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:text-violet-200"
+            >
+              返回选择角色
+            </button>
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={!selectedOpeningId || pending}
+              className="h-10 rounded-lg bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-100 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none dark:shadow-violet-950/40 dark:disabled:bg-slate-700"
+            >
+              {pending ? '正在开始...' : '从这里开始'}
             </button>
           </div>
         </footer>
@@ -319,7 +433,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       setNarrativeStyleId(null)
     }
   }, [composerConfig, narrativeStyleId])
-  const roleSelectionBlocked = !data.session || data.playerCharacterInvalid || role.bindingRole
+  const roleSelectionBlocked = (
+    !data.session
+    || data.playerCharacterInvalid
+    || role.roleDialogRequired
+    || role.openingDialogOpen
+    || role.bindingRole
+  )
   const contextPreviewUsage = roleSelectionBlocked ? null : data.contextPreviewUsage
   const contextInputBlocked = !roleSelectionBlocked && isContextInputBlocked(
     contextPreviewUsage,
@@ -735,6 +855,17 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         onSelect={role.setSelectedRoleCharacterId}
         onSubmit={role.submitRoleDialog}
         onClose={role.closeRoleDialog}
+      />
+      <SessionOpeningDialog
+        open={role.openingDialogOpen}
+        characterName={data.characters.find((character) => character.id === role.pendingRoleCharacterId)?.name ?? ''}
+        options={role.openingOptions}
+        selectedOpeningId={role.selectedOpeningId}
+        pending={role.bindingRole}
+        error={role.roleBindError}
+        onSelect={role.setSelectedOpeningId}
+        onSubmit={role.submitOpeningDialog}
+        onBack={role.backToRoleDialog}
       />
       <SessionRPModulesDialog
         open={rpModulesDialogOpen}

@@ -5,13 +5,16 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   CheckCircle2,
   Cpu,
   Globe2,
   Images,
   Loader2,
   Play,
+  Plus,
   Save,
   TableProperties,
   Trash2,
@@ -29,7 +32,7 @@ import type { CharacterCard } from '@/types/characters'
 import type { LorebookEntry } from '@/types/lorebook'
 import type { SessionSummary } from '@/types/session'
 import { STATUS_KIND, type StoryStatusMount } from '@/types/statusTables'
-import type { StoryInput, StorySummary } from '@/types/story'
+import type { StoryInput, StoryOpeningInput, StorySummary } from '@/types/story'
 import { StoryRPModulesPanel } from './StoryRPModulesPanel'
 import { StoryComposerPanel } from './StoryComposerPanel'
 
@@ -38,7 +41,7 @@ type DraftState = StoryInput
 const emptyDraft: DraftState = {
   title: '',
   summary: '',
-  firstMessage: '',
+  openings: [],
   storyPrompt: '',
 }
 
@@ -74,9 +77,21 @@ function draftFromStory(story: StorySummary): DraftState {
   return {
     title: story.title,
     summary: story.summary ?? '',
-    firstMessage: story.firstMessage ?? '',
+    openings: story.openings.map((opening) => ({
+      id: opening.id,
+      title: opening.title,
+      message: opening.message,
+    })),
     storyPrompt: story.storyPrompt ?? '',
   }
+}
+
+function openingsEqual(first: StoryOpeningInput[], second: StoryOpeningInput[]) {
+  return first.length === second.length && first.every((opening, index) => (
+    opening.id === second[index]?.id
+    && opening.title === second[index]?.title
+    && opening.message === second[index]?.message
+  ))
 }
 
 function isDirty(story: StorySummary | null, draft: DraftState) {
@@ -85,7 +100,7 @@ function isDirty(story: StorySummary | null, draft: DraftState) {
   return (
     original.title !== draft.title
     || original.summary !== draft.summary
-    || original.firstMessage !== draft.firstMessage
+    || !openingsEqual(original.openings, draft.openings)
     || original.storyPrompt !== draft.storyPrompt
   )
 }
@@ -96,21 +111,42 @@ function dirtyFields(story: StorySummary | null, draft: DraftState) {
   return [
     original.title !== draft.title ? 'title' : '',
     original.summary !== draft.summary ? 'summary' : '',
-    original.firstMessage !== draft.firstMessage ? 'first_message' : '',
+    !openingsEqual(original.openings, draft.openings) ? 'openings' : '',
     original.storyPrompt !== draft.storyPrompt ? 'story_prompt' : '',
   ].filter(Boolean)
 }
 
-function parseDraft(value: string | null): DraftState | null {
+function parseDraft(
+  value: string | null,
+  fallbackOpeningId?: number,
+): DraftState | null {
   if (!value) return null
   try {
     const parsed = JSON.parse(value)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    const input = parsed as Partial<DraftState>
+    const input = parsed as Partial<DraftState> & { firstMessage?: unknown }
+    const parsedOpenings = Array.isArray(input.openings)
+      ? input.openings.flatMap((opening) => {
+        if (!opening || typeof opening !== 'object' || Array.isArray(opening)) return []
+        const item = opening as Partial<StoryOpeningInput>
+        if (typeof item.title !== 'string' || typeof item.message !== 'string') return []
+        return [{
+          ...(typeof item.id === 'number' && Number.isInteger(item.id) && item.id > 0 ? { id: item.id } : {}),
+          title: item.title,
+          message: item.message,
+        }]
+      })
+      : typeof input.firstMessage === 'string' && input.firstMessage.trim()
+        ? [{
+          ...(fallbackOpeningId ? { id: fallbackOpeningId } : {}),
+          title: '默认开局',
+          message: input.firstMessage,
+        }]
+        : []
     return {
       title: typeof input.title === 'string' ? input.title : '',
       summary: typeof input.summary === 'string' ? input.summary : '',
-      firstMessage: typeof input.firstMessage === 'string' ? input.firstMessage : '',
+      openings: parsedOpenings.slice(0, 3),
       storyPrompt: typeof input.storyPrompt === 'string' ? input.storyPrompt : '',
     }
   } catch {
@@ -272,11 +308,64 @@ function StoryEditContent({
   const [error, setError] = useState<string | null>(null)
   const [mainLLMError, setMainLLMError] = useState<string | null>(null)
 
-  function appendPlayerRoleTemplate(field: 'firstMessage' | 'storyPrompt') {
+  function appendStoryPromptTemplate() {
     setDraft((current) => ({
       ...current,
-      [field]: `${current[field]}${PLAYER_ROLE_NAME_TEMPLATE}`,
+      storyPrompt: `${current.storyPrompt}${PLAYER_ROLE_NAME_TEMPLATE}`,
     }))
+  }
+
+  function appendOpeningTemplate(index: number) {
+    setDraft((current) => ({
+      ...current,
+      openings: current.openings.map((opening, openingIndex) => (
+        openingIndex === index
+          ? { ...opening, message: `${opening.message}${PLAYER_ROLE_NAME_TEMPLATE}` }
+          : opening
+      )),
+    }))
+  }
+
+  function addOpening() {
+    setDraft((current) => {
+      if (current.openings.length >= 3) return current
+      return {
+        ...current,
+        openings: [
+          ...current.openings,
+          {
+            title: `开局 ${current.openings.length + 1}`,
+            message: '',
+          },
+        ],
+      }
+    })
+  }
+
+  function updateOpening(index: number, patch: Partial<StoryOpeningInput>) {
+    setDraft((current) => ({
+      ...current,
+      openings: current.openings.map((opening, openingIndex) => (
+        openingIndex === index ? { ...opening, ...patch } : opening
+      )),
+    }))
+  }
+
+  function removeOpening(index: number) {
+    setDraft((current) => ({
+      ...current,
+      openings: current.openings.filter((_opening, openingIndex) => openingIndex !== index),
+    }))
+  }
+
+  function moveOpening(index: number, direction: -1 | 1) {
+    setDraft((current) => {
+      const target = index + direction
+      if (target < 0 || target >= current.openings.length) return current
+      const openings = [...current.openings]
+      ;[openings[index], openings[target]] = [openings[target], openings[index]]
+      return { ...current, openings }
+    })
   }
 
   const storiesQuery = useQuery({
@@ -327,7 +416,7 @@ function StoryEditContent({
   const sessions = useMemo(() => sortSessions(sessionsQuery.data ?? []), [sessionsQuery.data])
   const sceneMountCount = statusMounts.filter((mount) => mount.statusKind === STATUS_KIND.SCENE).length
   const dirty = isCreate
-    ? Boolean(draft.title.trim() || draft.summary || draft.firstMessage || draft.storyPrompt)
+    ? Boolean(draft.title.trim() || draft.summary || draft.openings.length || draft.storyPrompt)
     : isDirty(story, draft)
   const changedFields = isCreate
     ? ['new_story_draft']
@@ -373,7 +462,10 @@ function StoryEditContent({
 
   useEffect(() => {
     if (isCreate || !story || !draftStorageKey) return
-    const savedDraft = parseDraft(window.localStorage.getItem(draftStorageKey))
+    const savedDraft = parseDraft(
+      window.localStorage.getItem(draftStorageKey),
+      story.openings[0]?.id,
+    )
     setDraft(savedDraft ?? draftFromStory(story))
     setDraftReady(true)
     setDraftSavedAt(savedDraft ? new Date().toISOString() : null)
@@ -405,7 +497,7 @@ function StoryEditContent({
       const input = {
         title: draft.title.trim(),
         summary: draft.summary,
-        firstMessage: draft.firstMessage,
+        openings: draft.openings,
         storyPrompt: draft.storyPrompt,
       }
       if (isCreate) return createStory(currentWorkspace, input)
@@ -467,6 +559,27 @@ function StoryEditContent({
     if (!draft.title.trim()) {
       setError('title 不能为空')
       return
+    }
+    if (draft.openings.length > 3) {
+      setError('每个 Story 最多配置 3 条开局')
+      return
+    }
+    const openingTitles = new Set<string>()
+    for (const [index, opening] of draft.openings.entries()) {
+      const title = opening.title.trim()
+      if (!title) {
+        setError(`开局 ${index + 1} 的标题不能为空`)
+        return
+      }
+      if (!opening.message.trim()) {
+        setError(`开局 ${index + 1} 的正文不能为空`)
+        return
+      }
+      if (openingTitles.has(title)) {
+        setError(`开局标题不能重复：${title}`)
+        return
+      }
+      openingTitles.add(title)
     }
     saveMutation.mutate()
   }
@@ -683,33 +796,75 @@ function StoryEditContent({
               ) : null}
 
               <Panel
-                title="开场与固定提示词"
-                description="first_message 与 story_prompt 支持安全的玩家角色变量；原始模板保存在 Story 中，实际内容按 session 绑定角色渲染。"
-                action={<Chip tone="violet">rpg_stories</Chip>}
+                title="会话开局与固定提示词"
+                description="一个 Story 可配置 0–3 条带标题的开局；多条时玩家会在首次选择角色后继续选择开局。模板按所选玩家角色渲染。"
+                action={<Chip tone="violet">{draft.openings.length} / 3 openings</Chip>}
               >
                 <div className="grid gap-4">
-                  <FieldShell label="first_message" hint="会话开场" full>
-                    <textarea
-                      value={draft.firstMessage}
-                      onChange={(event) => setDraft((current) => ({ ...current, firstMessage: event.target.value }))}
-                      className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-7 text-slate-800 outline-none transition focus:border-teal-300 focus:ring-4 focus:ring-teal-100"
-                    />
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <section className="grid gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-black text-slate-900">开局选项</h3>
+                        <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">
+                          排在第一位的是默认开局；CLI、Telegram 和未显式选择的调用方会使用它。
+                        </p>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => appendPlayerRoleTemplate('firstMessage')}
-                        className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 font-mono text-xs font-bold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                        onClick={addOpening}
+                        disabled={draft.openings.length >= 3}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        插入 {PLAYER_ROLE_NAME_TEMPLATE}
+                        <Plus size={14} />添加开局
                       </button>
-                      <span className="text-xs font-semibold leading-5 text-slate-400">
-                        仅在历史为空的首次绑定时渲染并写入；不会回写已有 session。
-                      </span>
                     </div>
-                    <p className="mt-2 text-xs font-semibold leading-5 text-amber-600">
+                    {draft.openings.length ? draft.openings.map((opening, index) => (
+                      <article key={opening.id ?? `new-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <header className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-xs font-black text-violet-700">{index + 1}</span>
+                            <strong className="text-sm text-slate-900">{index === 0 ? '默认开局' : `候选开局 ${index + 1}`}</strong>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button type="button" aria-label="上移开局" disabled={index === 0} onClick={() => moveOpening(index, -1)} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:text-violet-700 disabled:opacity-35"><ArrowUp size={14} /></button>
+                            <button type="button" aria-label="下移开局" disabled={index === draft.openings.length - 1} onClick={() => moveOpening(index, 1)} className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:text-violet-700 disabled:opacity-35"><ArrowDown size={14} /></button>
+                            <button type="button" aria-label="删除开局" onClick={() => removeOpening(index)} className="flex h-8 w-8 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-500 transition hover:bg-rose-50"><Trash2 size={14} /></button>
+                          </div>
+                        </header>
+                        <label className="block">
+                          <span className="mb-2 block text-xs font-black uppercase text-slate-500">标题</span>
+                          <input
+                            value={opening.title}
+                            onChange={(event) => updateOpening(index, { title: event.target.value })}
+                            placeholder="例如：雨夜来客"
+                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-4 focus:ring-teal-100"
+                          />
+                        </label>
+                        <label className="mt-3 block">
+                          <span className="mb-2 block text-xs font-black uppercase text-slate-500">开局正文</span>
+                          <textarea
+                            value={opening.message}
+                            onChange={(event) => updateOpening(index, { message: event.target.value })}
+                            className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm leading-7 text-slate-800 outline-none transition focus:border-teal-300 focus:ring-4 focus:ring-teal-100"
+                          />
+                        </label>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <button type="button" onClick={() => appendOpeningTemplate(index)} className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 font-mono text-xs font-bold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100">
+                            插入 {PLAYER_ROLE_NAME_TEMPLATE}
+                          </button>
+                          <span className="text-xs font-semibold leading-5 text-slate-400">只在空会话首次绑定时写入；不会回写已有 Session。</span>
+                        </div>
+                      </article>
+                    )) : (
+                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center">
+                        <p className="text-sm font-black text-slate-700">当前 Story 没有开局消息</p>
+                        <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">玩家绑定角色后会直接进入空会话。</p>
+                      </div>
+                    )}
+                    <p className="text-xs font-semibold leading-5 text-amber-600">
                       可能被玩家选择的角色不要固定写成与玩家对话的 NPC；优先使用中立旁白和玩家角色变量。
                     </p>
-                  </FieldShell>
+                  </section>
                   <FieldShell label="story_prompt" hint="固定故事提示词" full>
                     <textarea
                       value={draft.storyPrompt}
@@ -719,7 +874,7 @@ function StoryEditContent({
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => appendPlayerRoleTemplate('storyPrompt')}
+                        onClick={appendStoryPromptTemplate}
                         className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 font-mono text-xs font-bold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                       >
                         插入 {PLAYER_ROLE_NAME_TEMPLATE}

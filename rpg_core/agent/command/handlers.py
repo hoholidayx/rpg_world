@@ -109,12 +109,33 @@ async def cmd_role_bind(
         return "角色绑定不可用。"
     if not args:
         return agent.render_role_bind_prompt()
+    if len(args) > 2:
+        return "[错误] 用法：/role_bind <角色序号> [开局序号]"
     try:
         index = int(args[0])
     except ValueError:
         return agent.render_role_bind_prompt(error=f"无效角色序号: {args[0]}")
+    opening_index: int | None = None
+    story_opening_id: int | None = None
+    if len(args) == 2:
+        try:
+            if args[1].startswith("opening_id="):
+                story_opening_id = int(args[1].removeprefix("opening_id="))
+                if story_opening_id <= 0:
+                    raise ValueError
+            else:
+                opening_index = int(args[1])
+        except ValueError:
+            return agent.render_role_bind_prompt(error=f"无效开局序号: {args[1]}")
     try:
-        result = agent.bind_player_character_by_index(index)
+        result = (
+            agent.bind_player_character_by_index(
+                index,
+                story_opening_id=story_opening_id,
+            )
+            if story_opening_id is not None
+            else agent.bind_player_character_by_index(index, opening_index)
+        )
     except ValueError as exc:
         return agent.render_role_bind_prompt(error=str(exc))
     player = result.state.player

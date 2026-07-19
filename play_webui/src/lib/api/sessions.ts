@@ -2,6 +2,7 @@ import type {
   HistoryPage,
   SessionDeleteResult,
   SessionDerivationJob,
+  SessionOpeningOptions,
   SessionSummary,
   Turn,
   WorkspaceSummary,
@@ -45,10 +46,24 @@ export function createSessionDerivation(sessionId: string, turnId: number, title
   )
 }
 
-export function bindSessionPlayerCharacter(sessionId: string, playerCharacterId: number) {
+export function getSessionOpeningOptions(sessionId: string, playerCharacterId: number) {
+  const params = new URLSearchParams({ playerCharacterId: String(playerCharacterId) })
+  return playApiFetch<SessionOpeningOptions>(
+    `/sessions/${encodeURIComponent(sessionId)}/opening-options?${params.toString()}`,
+  )
+}
+
+export function bindSessionPlayerCharacter(
+  sessionId: string,
+  playerCharacterId: number,
+  storyOpeningId?: number,
+) {
   return playApiFetch<SessionSummary>(`/sessions/${encodeURIComponent(sessionId)}/player-character`, {
     method: 'PATCH',
-    body: JSON.stringify({ playerCharacterId }),
+    body: JSON.stringify({
+      playerCharacterId,
+      ...(storyOpeningId === undefined ? {} : { storyOpeningId }),
+    }),
   })
 }
 

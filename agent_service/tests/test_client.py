@@ -144,6 +144,23 @@ async def test_client_bind_player_character_uses_standard_payload() -> None:
         {"json": {"session_id": "s1", "player_character_id": 42}},
     )
 
+    await AgentClient(base_url="http://agent").bind_player_character(
+        "s2",
+        43,
+        story_opening_id=7,
+    )
+    assert FakeAsyncClient.calls[-1] == (
+        "POST",
+        "http://agent/chat/session/player-character",
+        {
+            "json": {
+                "session_id": "s2",
+                "player_character_id": 43,
+                "story_opening_id": 7,
+            }
+        },
+    )
+
 
 async def test_client_truncate_turn_uses_standard_payload() -> None:
     result = await AgentClient(base_url="http://agent").truncate_turn("s1", 2)

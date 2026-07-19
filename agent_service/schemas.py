@@ -51,6 +51,7 @@ class AgentCommandRequest(AgentRequestBase):
 
 class AgentPlayerCharacterBindRequest(AgentRequestBase):
     player_character_id: int
+    story_opening_id: int | None = Field(default=None, gt=0)
 
 
 class AgentMainLLMStoryUpdateRequest(_BaseSchema):
@@ -140,6 +141,7 @@ class AgentPlayerCharacterBindResponse(_BaseSchema):
     session_id: str
     player_character_id: int
     player_character: AgentPlayerCharacterInfoResponse
+    story_opening_id: int | None = None
     first_message: str = ""
     reply: str
 
@@ -295,6 +297,7 @@ class AgentPlayerCharacterBindPayload(TypedDict):
     session_id: str
     player_character_id: int
     player_character: AgentPlayerCharacterInfoPayload
+    story_opening_id: int | None
     first_message: str
     reply: str
 

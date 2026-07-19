@@ -237,8 +237,18 @@ class RPGGameAgent:
     def render_role_bind_prompt(self, *, error: str = "") -> str:
         return self._session_service.render_role_bind_prompt(error=error)
 
-    def bind_player_character_by_index(self, index: int):
-        return self._session_service.bind_player_character_by_index(index)
+    def bind_player_character_by_index(
+        self,
+        index: int,
+        opening_index: int | None = None,
+        *,
+        story_opening_id: int | None = None,
+    ):
+        return self._session_service.bind_player_character_by_index(
+            index,
+            opening_index,
+            story_opening_id=story_opening_id,
+        )
 
     @property
     def history(self) -> list["Message"]:

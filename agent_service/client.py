@@ -298,10 +298,17 @@ class AgentClient:
         self,
         session_id: str,
         player_character_id: int,
+        story_opening_id: int | None = None,
     ) -> AgentPlayerCharacterBindPayload:
+        payload: JsonObject = {
+            "session_id": session_id,
+            "player_character_id": int(player_character_id),
+        }
+        if story_opening_id is not None:
+            payload["story_opening_id"] = int(story_opening_id)
         result = await self._post(
             "/chat/session/player-character",
-            json={"session_id": session_id, "player_character_id": int(player_character_id)},
+            json=payload,
         )
         return cast(AgentPlayerCharacterBindPayload, result)
 

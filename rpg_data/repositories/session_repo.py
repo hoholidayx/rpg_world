@@ -34,6 +34,7 @@ class SessionRepository:
         state_json: str = "{}",
         player_character_id: int | None = None,
         player_character_snapshot_json: str = "{}",
+        story_opening_id: int | None = None,
         metadata_json: str = "{}",
         lifecycle: str = models.SESSION_LIFECYCLE_READY,
     ) -> models.Session:
@@ -59,6 +60,7 @@ class SessionRepository:
                         description=description,
                         player_character_id=player_character_id,
                         player_character_snapshot_json=player_character_snapshot_json,
+                        story_opening=story_opening_id,
                         metadata_json=metadata_json,
                     )
                 break
@@ -225,6 +227,33 @@ class SessionRepository:
         player_character_id: int | None,
         player_character_snapshot_json: str,
     ) -> models.Session | None:
+        return self._update_player_character_profile(
+            session_id,
+            player_character_id=player_character_id,
+            player_character_snapshot_json=player_character_snapshot_json,
+        )
+
+    def bind_initial_player_character(
+        self,
+        session_id: str,
+        *,
+        player_character_id: int,
+        player_character_snapshot_json: str,
+        story_opening_id: int | None,
+    ) -> models.Session | None:
+        return self._update_player_character_profile(
+            session_id,
+            player_character_id=player_character_id,
+            player_character_snapshot_json=player_character_snapshot_json,
+            story_opening_id=story_opening_id,
+            update_story_opening=True,
+        )
+
+    def update_story_opening(
+        self,
+        session_id: str,
+        story_opening_id: int | None,
+    ) -> models.Session | None:
         with self._database.atomic():
             if not SessionRecord.select().where(SessionRecord.id == session_id).exists():
                 return None
@@ -232,11 +261,45 @@ class SessionRepository:
             (
                 SessionProfileRecord
                 .update(
-                    player_character_id=player_character_id,
-                    player_character_snapshot_json=player_character_snapshot_json,
+                    story_opening=story_opening_id,
                     version=SessionProfileRecord.version + 1,
                     updated_at=SQL("CURRENT_TIMESTAMP"),
                 )
+                .where(SessionProfileRecord.session == session_id)
+                .execute()
+            )
+            (
+                SessionRecord
+                .update(updated_at=SQL("CURRENT_TIMESTAMP"))
+                .where(SessionRecord.id == session_id)
+                .execute()
+            )
+        return self.get(session_id)
+
+    def _update_player_character_profile(
+        self,
+        session_id: str,
+        *,
+        player_character_id: int | None,
+        player_character_snapshot_json: str,
+        story_opening_id: int | None = None,
+        update_story_opening: bool = False,
+    ) -> models.Session | None:
+        fields: dict[str, object] = {
+            "player_character_id": player_character_id,
+            "player_character_snapshot_json": player_character_snapshot_json,
+            "version": SessionProfileRecord.version + 1,
+            "updated_at": SQL("CURRENT_TIMESTAMP"),
+        }
+        if update_story_opening:
+            fields["story_opening"] = story_opening_id
+        with self._database.atomic():
+            if not SessionRecord.select().where(SessionRecord.id == session_id).exists():
+                return None
+            SessionProfileRecord.get_or_create(session=session_id)
+            (
+                SessionProfileRecord
+                .update(**fields)
                 .where(SessionProfileRecord.session == session_id)
                 .execute()
             )

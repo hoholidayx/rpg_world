@@ -118,7 +118,17 @@ class FakeAgent:
                 active_session=parts[1],
             )
         if parts[:1] == ["/role_bind"] and len(parts) > 1:
-            bind_result = FakeGateway.session_roles.bind_by_index(self._session_id, int(parts[1]))
+            opening_arg = parts[2] if len(parts) > 2 else ""
+            bind_result = FakeGateway.session_roles.bind_by_index(
+                self._session_id,
+                int(parts[1]),
+                int(opening_arg) if opening_arg and not opening_arg.startswith("opening_id=") else None,
+                story_opening_id=(
+                    int(opening_arg.removeprefix("opening_id="))
+                    if opening_arg.startswith("opening_id=")
+                    else None
+                ),
+            )
             return CommandResult(
                 reply=f"cmd:{command}",
                 handled=True,
@@ -283,7 +293,15 @@ class FakeCatalog:
     @classmethod
     def reset(cls) -> None:
         cls.stories = {
-            1: models.Story(1, "ws", "Main Story"),
+            1: models.Story(
+                1,
+                "ws",
+                "Main Story",
+                openings=(
+                    models.StoryOpening(501, "ws", 1, "Default", "Welcome"),
+                    models.StoryOpening(502, "ws", 1, "Alternate", "Alternate"),
+                ),
+            ),
             2: models.Story(2, "other", "Foreign Story"),
         }
         cls.sessions = {
@@ -423,13 +441,25 @@ class FakeSessionRoles:
         ]
 
     @classmethod
-    def bind_by_index(cls, session_id: str, index: int) -> SimpleNamespace:
+    def bind_by_index(
+        cls,
+        session_id: str,
+        index: int,
+        opening_index: int | None = None,
+        *,
+        story_opening_id: int | None = None,
+    ) -> SimpleNamespace:
         options = cls.list_options(session_id)
         option = options[index - 1]
         cls.state[session_id] = option.snapshot
         return SimpleNamespace(
             state=SimpleNamespace(status=models.PLAYER_CHARACTER_STATUS_BOUND, player=option.snapshot),
             first_message="Welcome Bob" if index == 1 else "",
+            story_opening_id=(
+                story_opening_id
+                if story_opening_id is not None
+                else 501 if opening_index is None else 500 + opening_index
+            ),
         )
 
     @classmethod
@@ -864,8 +894,21 @@ def test_agent_service_contracts(monkeypatch) -> None:
         assert bind_player.json()["status"] == "bound"
         assert bind_player.json()["reply"] == "cmd:/role_bind 1"
         assert bind_player.json()["player_character"] == {"character_id": 101, "name": "Bob"}
+        assert bind_player.json()["story_opening_id"] == 501
         assert bind_player.json()["first_message"] == "Welcome Bob"
         assert FakeSessionRoles.state["s1"].character_id == 101
+
+        alternate_bind = client.post(
+            "/agent/v1/chat/session/player-character",
+            json={
+                "session_id": "generated_1",
+                "player_character_id": 101,
+                "story_opening_id": 502,
+            },
+        )
+        assert alternate_bind.status_code == 200
+        assert alternate_bind.json()["reply"] == "cmd:/role_bind 1 opening_id=502"
+        assert alternate_bind.json()["story_opening_id"] == 502
 
         generic_bind = client.post(
             "/agent/v1/chat/command",

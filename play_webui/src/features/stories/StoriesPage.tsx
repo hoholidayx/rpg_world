@@ -126,7 +126,8 @@ function buildSearchText(
   const lorebookText = aggregate.lorebookEntries.map((entry) => `${entry.name} ${entry.description} ${entry.content} ${entry.tags.join(' ')}`).join(' ')
   const statusText = aggregate.statusMounts.map((mount) => `${mount.tableName} ${mount.description} ${mount.statusKind}`).join(' ')
   const sessionText = aggregate.sessions.map((session) => `${session.title ?? ''} ${session.description ?? ''}`).join(' ')
-  return `${story.title} ${story.summary ?? ''} ${story.storyPrompt} ${story.firstMessage} ${characterText} ${lorebookText} ${statusText} ${sessionText}`.toLowerCase()
+  const openingText = story.openings.map((opening) => `${opening.title} ${opening.message}`).join(' ')
+  return `${story.title} ${story.summary ?? ''} ${story.storyPrompt} ${openingText} ${characterText} ${lorebookText} ${statusText} ${sessionText}`.toLowerCase()
 }
 
 function toLibraryItem(story: StorySummary, aggregate: StoryAggregate): StoryLibraryViewItem {

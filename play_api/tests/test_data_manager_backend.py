@@ -14,7 +14,13 @@ class FakeCatalog:
         return [models.Workspace("workspace", "Workspace", "data/workspace")]
 
     def list_stories(self, workspace: str):
-        return [models.Story(1, workspace, "Story", story_prompt="Prompt", first_message="First")]
+        return [models.Story(
+            1,
+            workspace,
+            "Story",
+            story_prompt="Prompt",
+            openings=(models.StoryOpening(1, workspace, 1, "Default", "First"),),
+        )]
 
     def create_story(
         self,
@@ -23,7 +29,7 @@ class FakeCatalog:
         title: str,
         summary: str = "",
         story_prompt: str = "",
-        first_message: str = "",
+        openings=(),
     ):
         if workspace != "workspace":
             return None
@@ -33,7 +39,10 @@ class FakeCatalog:
             title,
             summary=summary,
             story_prompt=story_prompt,
-            first_message=first_message,
+            openings=tuple(
+                models.StoryOpening(index + 2, workspace, 2, item.title, item.message, index)
+                for index, item in enumerate(openings)
+            ),
         )
 
     def update_story(
@@ -44,7 +53,7 @@ class FakeCatalog:
         title: str | None = None,
         summary: str | None = None,
         story_prompt: str | None = None,
-        first_message: str | None = None,
+        openings=None,
     ):
         if workspace != "workspace":
             return None
@@ -54,7 +63,14 @@ class FakeCatalog:
             title or "Story",
             summary=summary or "Updated summary",
             story_prompt=story_prompt or "Prompt",
-            first_message=first_message or "First",
+            openings=(
+                (models.StoryOpening(1, workspace, story_id, "Default", "First"),)
+                if openings is None
+                else tuple(
+                    models.StoryOpening(index + 2, workspace, story_id, item.title, item.message, index)
+                    for index, item in enumerate(openings)
+                )
+            ),
             version=2,
         )
 
@@ -227,7 +243,7 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
     assert await backend.list_workspaces() == [{"id": "workspace", "name": "Workspace", "description": None}]
     assert (await backend.list_stories("workspace"))[0]["title"] == "Story"
     assert (await backend.list_stories("workspace"))[0]["story_prompt"] == "Prompt"
-    assert (await backend.list_stories("workspace"))[0]["first_message"] == "First"
+    assert (await backend.list_stories("workspace"))[0]["openings"][0]["message"] == "First"
     assert (await backend.create_story("workspace", title="New Story"))["title"] == "New Story"
     assert (await backend.create_story("missing", title="New Story")) is None
     assert (await backend.update_story("workspace", 1, summary="Updated summary"))["summary"] == "Updated summary"

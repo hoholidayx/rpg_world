@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from rpg_core.summary.reader import SummaryDocument, SummaryReader
@@ -57,14 +58,14 @@ class DataManagerBackend:
         title: str,
         summary: str = "",
         story_prompt: str = "",
-        first_message: str = "",
+        openings: Sequence[models.StoryOpeningInput] = (),
     ) -> dict[str, object] | None:
         story = self._gateway.catalog.create_story(
             workspace,
             title=title,
             summary=summary,
             story_prompt=story_prompt,
-            first_message=first_message,
+            openings=openings,
         )
         if story is None:
             return None
@@ -78,7 +79,7 @@ class DataManagerBackend:
         title: str | None = None,
         summary: str | None = None,
         story_prompt: str | None = None,
-        first_message: str | None = None,
+        openings: Sequence[models.StoryOpeningInput] | None = None,
     ) -> dict[str, object] | None:
         story = self._gateway.catalog.update_story(
             workspace,
@@ -86,11 +87,39 @@ class DataManagerBackend:
             title=title,
             summary=summary,
             story_prompt=story_prompt,
-            first_message=first_message,
+            openings=openings,
         )
         if story is None:
             return None
         return _story_summary(story)
+
+    async def list_session_opening_options(
+        self,
+        session_id: str,
+        player_character_id: int,
+    ) -> dict[str, object] | None:
+        session = self._ready_session(session_id)
+        if session is None:
+            return None
+        options = self._gateway.session_roles.list_opening_options(
+            session_id,
+            player_character_id,
+        )
+        return {
+            "can_select_opening": (
+                session.player_character_id is None
+                and self._gateway.messages.count(session_id) == 0
+            ),
+            "items": [
+                {
+                    "id": option.opening.id,
+                    "title": option.opening.title,
+                    "rendered_message": option.rendered_message,
+                    "sort_order": option.opening.sort_order,
+                }
+                for option in options
+            ],
+        }
 
     async def list_sessions(
         self,
@@ -831,7 +860,15 @@ def _story_summary(story: models.Story) -> dict[str, object]:
         "title": str(story.title),
         "summary": str(story.summary or "") or None,
         "story_prompt": str(story.story_prompt or ""),
-        "first_message": str(story.first_message or ""),
+        "openings": [
+            {
+                "id": opening.id,
+                "title": opening.title,
+                "message": opening.message,
+                "sort_order": opening.sort_order,
+            }
+            for opening in story.openings
+        ],
         "created_at": str(story.created_at),
         "updated_at": str(story.updated_at),
     }
@@ -847,6 +884,7 @@ def _session_summary(session: models.Session, gateway: DataServiceGateway | None
         "description": str(session.description or "") or None,
         "player_character": player_state["player"],
         "player_character_status": player_state["status"],
+        "story_opening_id": session.story_opening_id,
         "created_at": str(session.created_at),
         "updated_at": str(session.updated_at),
     }

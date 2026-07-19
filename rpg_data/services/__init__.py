@@ -28,6 +28,7 @@ from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_role import (
     PlayerCharacterOption,
+    SessionOpeningOption,
     SessionPlayerCharacterBindResult,
     SessionPlayerCharacterState,
     SessionRoleService,
@@ -68,6 +69,7 @@ __all__ = [
     "NarrativeOutcomeService",
     "RPModuleService",
     "PlayerCharacterOption",
+    "SessionOpeningOption",
     "SessionPlayerCharacterBindResult",
     "SessionPlayerCharacterState",
     "SessionRoleService",

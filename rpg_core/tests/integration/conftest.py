@@ -197,10 +197,26 @@ def _create_integration_session(
             story = stories.create(
                 workspace_id,
                 story_title,
-                first_message=first_message,
+                openings=(
+                    models.StoryOpeningInput(
+                        title="Integration Opening",
+                        message=first_message,
+                    ),
+                ) if first_message else (),
             )
-        elif first_message and story.first_message != first_message:
-            story = stories.update(story.id, first_message=first_message)
+        elif first_message and (
+            not story.openings or story.openings[0].message != first_message
+        ):
+            story = stories.update(
+                story.id,
+                openings=(
+                    models.StoryOpeningInput(
+                        id=story.openings[0].id if story.openings else None,
+                        title=(story.openings[0].title if story.openings else "Integration Opening"),
+                        message=first_message,
+                    ),
+                ),
+            )
             assert story is not None
 
         session = sessions.get(session_id)

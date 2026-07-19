@@ -244,15 +244,15 @@ def test_reset_without_valid_binding_does_not_append_first_message(tmp_path) -> 
     assert gateway.backup.messages.count(session.id) == 0
 
 
-def test_reset_rolls_back_when_legacy_first_message_cannot_render(tmp_path) -> None:
+def test_reset_rolls_back_when_story_opening_cannot_render(tmp_path) -> None:
     gateway, session_id, _bound_player, _template_name, _native = _prepared_session(
         tmp_path
     )
     session = gateway.catalog.get_session(session_id)
     assert session is not None
     gateway.database.execute_sql(
-        "UPDATE rpg_stories SET first_message = ? WHERE id = ?",
-        ("欢迎，{UNKNOWN_ROLE}。", session.story_id),
+        "UPDATE rpg_story_openings SET message = ? WHERE id = ?",
+        ("欢迎，{UNKNOWN_ROLE}。", session.story_opening_id),
     )
     messages_before = gateway.messages.list(session_id)
     tables_before = gateway.status.list_tables(session_id)

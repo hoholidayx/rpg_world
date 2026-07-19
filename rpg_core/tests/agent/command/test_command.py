@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import rpg_core.agent.command.handlers as command_module
 from rpg_core.agent.command import CommandDispatcher, format_command_help
@@ -176,7 +176,7 @@ class TestCommandDispatcher:
         )
         fake_agent = SimpleNamespace(
             render_role_bind_prompt=lambda error="": "角色列表",
-            bind_player_character_by_index=lambda index: bind_result,
+            bind_player_character_by_index=lambda index, opening_index=None: bind_result,
         )
         dispatcher = CommandDispatcher(agent=fake_agent)
         dispatcher.register_default_builtins()
@@ -191,7 +191,7 @@ class TestCommandDispatcher:
     async def test_role_bind_returns_switch_confirmation(self):
         fake_agent = SimpleNamespace(
             render_role_bind_prompt=lambda error="": "角色列表",
-            bind_player_character_by_index=lambda index: SimpleNamespace(
+            bind_player_character_by_index=lambda index, opening_index=None: SimpleNamespace(
                 state=SimpleNamespace(player=SimpleNamespace(name="Bob")),
                 first_message="",
             ),
@@ -206,6 +206,46 @@ class TestCommandDispatcher:
             "已绑定/切换扮演角色：Bob。 "
             "后续消息将使用该身份；已有历史不会被改写。"
         )
+
+    @pytest.mark.asyncio
+    async def test_role_bind_forwards_optional_opening_index(self):
+        bind_result = SimpleNamespace(
+            state=SimpleNamespace(player=SimpleNamespace(name="Alice")),
+            first_message="第二开局",
+        )
+        bind = Mock(return_value=bind_result)
+        fake_agent = SimpleNamespace(
+            render_role_bind_prompt=lambda error="": "角色列表",
+            bind_player_character_by_index=bind,
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/role_bind 1 2")
+
+        assert result.handled is True
+        bind.assert_called_once_with(1, 2)
+        assert result.role_bind_result is bind_result
+
+    @pytest.mark.asyncio
+    async def test_role_bind_forwards_internal_stable_opening_id(self):
+        bind_result = SimpleNamespace(
+            state=SimpleNamespace(player=SimpleNamespace(name="Alice")),
+            first_message="稳定开局",
+        )
+        bind = Mock(return_value=bind_result)
+        fake_agent = SimpleNamespace(
+            render_role_bind_prompt=lambda error="": f"角色列表 {error}".strip(),
+            bind_player_character_by_index=bind,
+        )
+        dispatcher = CommandDispatcher(agent=fake_agent)
+        dispatcher.register_default_builtins()
+
+        result = await dispatcher.dispatch("/role_bind 1 opening_id=502")
+
+        assert result.handled is True
+        bind.assert_called_once_with(1, story_opening_id=502)
+        assert result.role_bind_result is bind_result
 
     def test_session_id_validation_has_length_limit(self):
         from rpg_core.session import SessionManager

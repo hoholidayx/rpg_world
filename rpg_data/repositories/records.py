@@ -59,6 +59,7 @@ __all__ = [
     "StoryCharacterRecord",
     "StoryLorebookEntryRecord",
     "StoryNarrativeStyleRecord",
+    "StoryOpeningRecord",
     "StoryQuickReplyRecord",
     "StoryStatusTableRecord",
     "TTSBlobRecord",
@@ -166,6 +167,32 @@ class StoryRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_stories"
+
+
+class StoryOpeningRecord(BaseRecord):
+    id = AutoField()
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="story_openings",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="openings",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    title = TextField()
+    message = TextField()
+    sort_order = IntegerField(default=0)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_openings"
+        indexes = ((('story', 'title'), True),)
 
 
 class NarrativeStyleRecord(BaseRecord):
@@ -310,6 +337,13 @@ class SessionProfileRecord(BaseRecord):
     main_llm_provider_key = TextField(null=True)
     player_character_id = IntegerField(null=True)
     player_character_snapshot_json = TextField(default="{}")
+    story_opening = ForeignKeyField(
+        StoryOpeningRecord,
+        null=True,
+        backref="session_profiles",
+        column_name="story_opening_id",
+        on_delete="SET NULL",
+    )
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
     created_at = TextField()
@@ -1286,6 +1320,7 @@ RECORD_MODELS = (
     WorkspaceRecord,
     WorkspaceTurnModeRecord,
     StoryRecord,
+    StoryOpeningRecord,
     NarrativeStyleRecord,
     StoryNarrativeStyleRecord,
     StoryQuickReplyRecord,

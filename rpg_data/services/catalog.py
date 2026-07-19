@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from peewee import Database
@@ -103,10 +104,10 @@ class CatalogService:
         title: str,
         summary: str = "",
         story_prompt: str = "",
-        first_message: str = "",
+        openings: Sequence[models.StoryOpeningInput] = (),
     ) -> models.Story | None:
         validate_story_text_template(story_prompt)
-        validate_story_text_template(first_message)
+        normalized_openings = _normalize_story_openings(openings)
         workspace = self._workspaces.get(workspace_id)
         if workspace is None:
             logger.warning("create story rejected missing workspace_id=%s", workspace_id)
@@ -118,7 +119,7 @@ class CatalogService:
                 title,
                 summary=summary,
                 story_prompt=story_prompt,
-                first_message=first_message,
+                openings=normalized_openings,
             )
             self._rp_modules.mount_story_defaults(story.id)
             self._session_composer.mount_all_workspace_styles(workspace_id, story.id)
@@ -133,12 +134,15 @@ class CatalogService:
         title: str | None = None,
         summary: str | None = None,
         story_prompt: str | None = None,
-        first_message: str | None = None,
+        openings: Sequence[models.StoryOpeningInput] | None = None,
     ) -> models.Story | None:
         if story_prompt is not None:
             validate_story_text_template(story_prompt)
-        if first_message is not None:
-            validate_story_text_template(first_message)
+        normalized_openings = (
+            _normalize_story_openings(openings)
+            if openings is not None
+            else None
+        )
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
             logger.warning("update story rejected missing story workspace_id=%s story_id=%s", workspace_id, story_id)
@@ -150,8 +154,16 @@ class CatalogService:
                 title=title,
                 summary=summary,
                 story_prompt=story_prompt,
-                first_message=first_message,
+                openings=normalized_openings,
             )
+
+    def list_story_openings(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> list[models.StoryOpening] | None:
+        story = self.get_story(workspace_id, story_id)
+        return list(story.openings) if story is not None else None
 
     def set_story_main_llm_provider_key(
         self,
@@ -300,3 +312,40 @@ class CatalogService:
 
 def _session_runtime_relative_path(story_id: int, session_id: str) -> str:
     return f"stories/{story_id}/{session_id}"
+
+
+def _normalize_story_openings(
+    openings: Sequence[models.StoryOpeningInput],
+) -> tuple[models.StoryOpeningInput, ...]:
+    if len(openings) > models.MAX_STORY_OPENINGS:
+        raise ValueError(
+            f"story supports at most {models.MAX_STORY_OPENINGS} openings"
+        )
+    normalized: list[models.StoryOpeningInput] = []
+    titles: set[str] = set()
+    ids: set[int] = set()
+    for item in openings:
+        opening_id = item.id
+        if opening_id is not None:
+            if isinstance(opening_id, bool) or int(opening_id) <= 0:
+                raise ValueError("story opening id must be a positive integer")
+            opening_id = int(opening_id)
+            if opening_id in ids:
+                raise ValueError(f"duplicate story opening id: {opening_id}")
+            ids.add(opening_id)
+        title = str(item.title or "").strip()
+        message = str(item.message or "").strip()
+        if not title:
+            raise ValueError("story opening title must not be empty")
+        if not message:
+            raise ValueError("story opening message must not be empty")
+        if title in titles:
+            raise ValueError(f"duplicate story opening title: {title}")
+        titles.add(title)
+        validate_story_text_template(message)
+        normalized.append(models.StoryOpeningInput(
+            id=opening_id,
+            title=title,
+            message=message,
+        ))
+    return tuple(normalized)

@@ -1,12 +1,25 @@
 import type { SessionSummary } from './session'
 
+export type StoryOpening = {
+  id: number
+  title: string
+  message: string
+  sortOrder: number
+}
+
+export type StoryOpeningInput = {
+  id?: number
+  title: string
+  message: string
+}
+
 export type StorySummary = {
   id: number
   workspace: string
   title: string
   summary?: string | null
   storyPrompt: string
-  firstMessage: string
+  openings: StoryOpening[]
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -15,7 +28,7 @@ export type StoryInput = {
   title: string
   summary: string
   storyPrompt: string
-  firstMessage: string
+  openings: StoryOpeningInput[]
 }
 
 export const STORY_COMPUTED_STATUS = {

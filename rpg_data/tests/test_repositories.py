@@ -98,7 +98,12 @@ def test_repositories_create_workspace_story_session_and_query_sessions(
                 "campaign",
                 "北境森林",
                 story_prompt="固定故事提示词",
-                first_message="你在北境森林醒来。",
+                openings=(
+                    models.StoryOpeningInput(
+                        title="森林苏醒",
+                        message="你在北境森林醒来。",
+                    ),
+                ),
             )
             second_story = rpg_stories.create("campaign", "学院旧梦")
             forest_main = rpg_sessions.create(
@@ -131,19 +136,30 @@ def test_repositories_create_workspace_story_session_and_query_sessions(
         assert rpg_workspaces.get("campaign").name == "Campaign"
         assert workspace.root_path == "data/campaign"
         assert first_story.story_prompt == "固定故事提示词"
-        assert first_story.first_message == "你在北境森林醒来。"
+        assert [(opening.title, opening.message) for opening in first_story.openings] == [
+            ("森林苏醒", "你在北境森林醒来。")
+        ]
         assert [row.title for row in rpg_stories.list("campaign")] == ["北境森林", "学院旧梦"]
         updated_story = rpg_stories.update(
             first_story.id,
             summary="新的短摘要",
             story_prompt="更新后的固定故事提示词",
-            first_message="你在雾港醒来。",
+            openings=(
+                models.StoryOpeningInput(
+                    id=first_story.openings[0].id,
+                    title="雾港苏醒",
+                    message="你在雾港醒来。",
+                ),
+            ),
         )
         assert updated_story is not None
         assert updated_story.title == "北境森林"
         assert updated_story.summary == "新的短摘要"
         assert updated_story.story_prompt == "更新后的固定故事提示词"
-        assert updated_story.first_message == "你在雾港醒来。"
+        assert [(opening.title, opening.message) for opening in updated_story.openings] == [
+            ("雾港苏醒", "你在雾港醒来。")
+        ]
+        assert updated_story.openings[0].id == first_story.openings[0].id
         assert updated_story.version == first_story.version + 1
 
         workspace_sessions = rpg_sessions.list(workspace_id="campaign")

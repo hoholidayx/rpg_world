@@ -120,14 +120,21 @@ class AgentBackend:
         story_id: int,
         session_id: str,
         player_character_id: int,
+        *,
+        story_opening_id: int | None = None,
     ) -> dict[str, object]:
         del workspace, story_id
         logger.info(
-            "[PlayAPI] forwarding player character bind to Agent service: session_id={}, character_id={}",
+            "[PlayAPI] forwarding player character bind to Agent service: session_id={}, character_id={}, story_opening_id={}",
             session_id,
             player_character_id,
+            story_opening_id,
         )
-        result = await agent_client.get_agent_client().bind_player_character(session_id, player_character_id)
+        result = await agent_client.get_agent_client().bind_player_character(
+            session_id,
+            player_character_id,
+            story_opening_id=story_opening_id,
+        )
         logger.info(
             "[PlayAPI] Agent service player character bind completed: session_id={}, character_id={}, status={}",
             session_id,

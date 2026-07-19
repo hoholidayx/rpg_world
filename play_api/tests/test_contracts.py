@@ -280,10 +280,24 @@ class _FakeAgentClient:
         self.calls.append(("reload-history", session_id))
         return {"status": "reloaded"}
 
-    async def bind_player_character(self, session_id: str, player_character_id: int) -> dict[str, object]:
-        self.calls.append(("bind-player-character", session_id, str(player_character_id)))
+    async def bind_player_character(
+        self,
+        session_id: str,
+        player_character_id: int,
+        story_opening_id: int | None = None,
+    ) -> dict[str, object]:
+        self.calls.append((
+            "bind-player-character",
+            session_id,
+            str(player_character_id),
+            str(story_opening_id or ""),
+        ))
         try:
-            get_data_service_gateway().session_roles.bind_player_character(session_id, player_character_id)
+            get_data_service_gateway().session_roles.bind_player_character(
+                session_id,
+                player_character_id,
+                story_opening_id=story_opening_id,
+            )
         except ValueError as exc:
             raise AgentClientError(str(exc), status_code=422) from exc
         except FileNotFoundError as exc:
@@ -1065,7 +1079,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert stories.status_code == 200
     assert stories.json()[0]["title"] == "北境森林 Demo"
     assert stories.json()[0]["storyPrompt"] == "用于验证 workspace、story、session、角色卡与 lorebook 挂载关系的演示故事。"
-    assert "北境森林的霜雾" in stories.json()[0]["firstMessage"]
+    assert "北境森林的霜雾" in stories.json()[0]["openings"][0]["message"]
     assert "description" not in stories.json()[0]
     assert client.get("/play-api/v1/workspaces/missing/stories").status_code == 404
     new_story = client.post(
@@ -1074,7 +1088,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
             "title": "雾港钟楼",
             "summary": "潮湿港口的失踪案。",
             "storyPrompt": "固定故事提示词，仅存储展示。",
-            "firstMessage": "你听见远处钟声。",
+            "openings": [{"title": "钟声", "message": "你听见远处钟声。"}],
         },
     )
     assert new_story.status_code == 200
@@ -1082,21 +1096,25 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert new_story.json()["title"] == "雾港钟楼"
     assert new_story.json()["summary"] == "潮湿港口的失踪案。"
     assert new_story.json()["storyPrompt"] == "固定故事提示词，仅存储展示。"
-    assert new_story.json()["firstMessage"] == "你听见远处钟声。"
+    assert new_story.json()["openings"][0]["title"] == "钟声"
+    assert new_story.json()["openings"][0]["message"] == "你听见远处钟声。"
     templated_story = client.post(
         "/play-api/v1/workspaces/demo_workspace/stories",
         json={
             "title": "角色模板故事",
             "storyPrompt": "当前玩家是 {USER_PLAY_ROLE_NAME}。",
-            "firstMessage": "欢迎，{USER_PLAY_ROLE_NAME}。",
+            "openings": [{"title": "欢迎", "message": "欢迎，{USER_PLAY_ROLE_NAME}。"}],
         },
     )
     assert templated_story.status_code == 200
     assert templated_story.json()["storyPrompt"] == "当前玩家是 {USER_PLAY_ROLE_NAME}。"
-    assert templated_story.json()["firstMessage"] == "欢迎，{USER_PLAY_ROLE_NAME}。"
+    assert templated_story.json()["openings"][0]["message"] == "欢迎，{USER_PLAY_ROLE_NAME}。"
     invalid_template = client.post(
         "/play-api/v1/workspaces/demo_workspace/stories",
-        json={"title": "非法模板", "firstMessage": "欢迎，{UNKNOWN_ROLE}。"},
+        json={
+            "title": "非法模板",
+            "openings": [{"title": "坏模板", "message": "欢迎，{UNKNOWN_ROLE}。"}],
+        },
     )
     assert invalid_template.status_code == 422
     assert "UNKNOWN_ROLE" in invalid_template.text
@@ -1119,7 +1137,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert patched_story.json()["title"] == "雾港钟楼"
     assert patched_story.json()["summary"] == "钟楼与沉船旧账。"
     assert patched_story.json()["storyPrompt"] == "更新后的固定故事提示词。"
-    assert patched_story.json()["firstMessage"] == "你听见远处钟声。"
+    assert patched_story.json()["openings"][0]["message"] == "你听见远处钟声。"
     assert client.patch(
         f"/play-api/v1/workspaces/demo_workspace/stories/{new_story.json()['id']}",
         json={"title": ""},
@@ -1317,14 +1335,29 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert story_characters.json()[0]["mountId"] is not None
     assert client.get("/play-api/v1/workspaces/demo_workspace/stories/999/characters").status_code == 404
     bob = next(character for character in story_characters.json() if character["name"] == "Bob")
+    opening_options = client.get(
+        f"/play-api/v1/sessions/{created.json()['id']}/opening-options",
+        params={"playerCharacterId": bob["id"]},
+    )
+    assert opening_options.status_code == 200
+    assert opening_options.json()["canSelectOpening"] is True
+    assert opening_options.json()["defaultOpeningId"] == opening_options.json()["items"][0]["id"]
+    assert "Bob" in opening_options.json()["items"][0]["renderedMessage"]
+    selected_opening_id = opening_options.json()["defaultOpeningId"]
     bound_created = client.patch(
         f"/play-api/v1/sessions/{created.json()['id']}/player-character",
-        json={"playerCharacterId": bob["id"]},
+        json={"playerCharacterId": bob["id"], "storyOpeningId": selected_opening_id},
     )
     assert bound_created.status_code == 200
     assert bound_created.json()["playerCharacterStatus"] == "bound"
     assert bound_created.json()["playerCharacter"]["name"] == "Bob"
-    assert ("bind-player-character", created.json()["id"], str(bob["id"])) in agent_client.get_agent_client().calls
+    assert bound_created.json()["storyOpeningId"] == selected_opening_id
+    assert (
+        "bind-player-character",
+        created.json()["id"],
+        str(bob["id"]),
+        str(selected_opening_id),
+    ) in agent_client.get_agent_client().calls
     invalid_bind = client.patch(
         f"/play-api/v1/sessions/{created.json()['id']}/player-character",
         json={"playerCharacterId": 99999},

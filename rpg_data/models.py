@@ -76,6 +76,8 @@ __all__ = [
     "PersistentMemoryRevision",
     "SessionStatusTable",
     "Story",
+    "StoryOpening",
+    "StoryOpeningInput",
     "StoryRPModule",
     "NarrativeStyle",
     "StoryNarrativeStyle",
@@ -116,6 +118,7 @@ __all__ = [
     "MESSAGE_ROLE_USER",
     "MESSAGE_ROLES",
     "STORY_MEMORY_KINDS",
+    "MAX_STORY_OPENINGS",
     "STORY_MEMORY_EPISTEMIC_STATUSES",
     "DREAM_ACTIONS",
     "DREAM_ACTION_ADD",
@@ -283,6 +286,7 @@ MESSAGE_ROLES = frozenset({
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_TOOL,
 })
+MAX_STORY_OPENINGS = 3
 STORY_MEMORY_KINDS = frozenset({
     "character",
     "event",
@@ -645,6 +649,26 @@ class SessionRPModuleOverride:
 
 
 @dataclass(frozen=True)
+class StoryOpening:
+    id: int
+    workspace_id: str
+    story_id: int
+    title: str
+    message: str
+    sort_order: int = 0
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class StoryOpeningInput:
+    title: str
+    message: str
+    id: int | None = None
+
+
+@dataclass(frozen=True)
 class Story:
     id: int
     workspace_id: str
@@ -652,7 +676,7 @@ class Story:
     summary: str = ""
     # Story-level fixed system prompt injected through the fixed layer.
     story_prompt: str = ""
-    first_message: str = ""
+    openings: tuple[StoryOpening, ...] = ()
     main_llm_provider_key: str | None = None
     metadata_json: str = "{}"
     version: int = 1
@@ -675,6 +699,7 @@ class Session:
     main_llm_provider_key: str | None = None
     player_character_id: int | None = None
     player_character_snapshot_json: str = "{}"
+    story_opening_id: int | None = None
     profile_metadata_json: str = "{}"
     profile_created_at: str = ""
     profile_updated_at: str = ""
@@ -716,6 +741,7 @@ class SessionProfile:
     main_llm_provider_key: str | None = None
     player_character_id: int | None = None
     player_character_snapshot_json: str = "{}"
+    story_opening_id: int | None = None
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""

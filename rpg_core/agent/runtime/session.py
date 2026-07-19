@@ -48,7 +48,13 @@ class AgentSessionService:
             error=error,
         )
 
-    def bind_player_character_by_index(self, index: int):
+    def bind_player_character_by_index(
+        self,
+        index: int,
+        opening_index: int | None = None,
+        *,
+        story_opening_id: int | None = None,
+    ):
         from rpg_data.services import get_data_service_gateway
 
         session_id = self._lifecycle.session_id
@@ -60,6 +66,12 @@ class AgentSessionService:
         result = get_data_service_gateway().session_roles.bind_by_index(
             session_id,
             int(index),
+            int(opening_index) if opening_index is not None else None,
+            story_opening_id=(
+                int(story_opening_id)
+                if story_opening_id is not None
+                else None
+            ),
         )
         self._lifecycle.session_manager.load()
         self._lifecycle.refresh_sub_agent_bindings()

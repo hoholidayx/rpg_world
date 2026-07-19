@@ -178,6 +178,7 @@ class SessionDerivationService:
                 description="",
                 player_character_id=source.player_character_id,
                 player_character_snapshot_json=source.player_character_snapshot_json,
+                story_opening_id=source.story_opening_id,
                 lifecycle=models.SESSION_LIFECYCLE_PROVISIONING,
             )
             if source.main_llm_provider_key is not None:

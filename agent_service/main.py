@@ -619,7 +619,11 @@ async def bind_player_character(
         body.player_character_id,
     )
     try:
-        result = await _bind_agent_player_character(body.session_id, body.player_character_id)
+        result = await _bind_agent_player_character(
+            body.session_id,
+            body.player_character_id,
+            story_opening_id=body.story_opening_id,
+        )
     except HTTPException:
         raise
     except FileNotFoundError as exc:
@@ -653,6 +657,7 @@ async def bind_player_character(
             "character_id": int(player.character_id),
             "name": str(player.name),
         },
+        "story_opening_id": bind_result.story_opening_id,
         "first_message": str(bind_result.first_message or ""),
         "reply": result.reply,
     }
@@ -839,10 +844,19 @@ async def _bind_session_player_character_if_present(session_id: str, player_char
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-async def _bind_agent_player_character(session_id: str, player_character_id: int) -> CommandResult:
+async def _bind_agent_player_character(
+    session_id: str,
+    player_character_id: int,
+    *,
+    story_opening_id: int | None = None,
+) -> CommandResult:
     session_id = _require_session_id(session_id)
     character_id = int(player_character_id)
-    command = _role_bind_command_for_character_id(session_id, character_id)
+    command = _role_bind_command_for_character_id(
+        session_id,
+        character_id,
+        story_opening_id=story_opening_id,
+    )
     logger.debug(
         "[AgentService] resolved player character bind command: session_id={}, character_id={}, command={}",
         session_id,
@@ -886,7 +900,12 @@ async def _bind_agent_player_character(session_id: str, player_character_id: int
     return result
 
 
-def _role_bind_command_for_character_id(session_id: str, player_character_id: int) -> str:
+def _role_bind_command_for_character_id(
+    session_id: str,
+    player_character_id: int,
+    *,
+    story_opening_id: int | None = None,
+) -> str:
     options = get_data_service_gateway().session_roles.list_options(session_id)
     logger.debug(
         "[AgentService] resolving role bind index: session_id={}, character_id={}, option_count={}",
@@ -896,7 +915,20 @@ def _role_bind_command_for_character_id(session_id: str, player_character_id: in
     )
     for index, option in enumerate(options, start=1):
         if int(option.snapshot.character_id) == int(player_character_id):
-            return f"/role_bind {index}"
+            if story_opening_id is None:
+                return f"/role_bind {index}"
+            story = get_data_service_gateway().catalog.get_session_story(session_id)
+            if story is None:
+                raise FileNotFoundError(f"Story not found for session: {session_id}")
+            for opening in story.openings:
+                if opening.id == int(story_opening_id):
+                    # Keep the stable ID through command dispatch. The data
+                    # layer validates it again at the final bind boundary, so
+                    # a concurrent Story reorder cannot select another item.
+                    return f"/role_bind {index} opening_id={int(story_opening_id)}"
+            raise ValueError(
+                f"story opening is not mounted to this session story: {story_opening_id}"
+            )
     logger.warning(
         "[AgentService] role bind index not found: session_id={}, character_id={}, option_count={}",
         session_id,

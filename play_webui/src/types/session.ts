@@ -38,6 +38,7 @@ export type SessionSummary = {
   description?: string | null
   playerCharacter?: SessionPlayerCharacter | null
   playerCharacterStatus: PlayerCharacterStatus
+  storyOpeningId?: number | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -75,6 +76,19 @@ export type SessionPlayerCharacter = {
   avatarUrl: string
   roleLabel: string
   updatedAt: string
+}
+
+export type SessionOpeningOption = {
+  id: number
+  title: string
+  renderedMessage: string
+  sortOrder: number
+}
+
+export type SessionOpeningOptions = {
+  items: SessionOpeningOption[]
+  defaultOpeningId: number | null
+  canSelectOpening: boolean
 }
 
 export type Turn = {

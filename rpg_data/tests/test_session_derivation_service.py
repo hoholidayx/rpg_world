@@ -112,6 +112,7 @@ def test_derivation_seeds_only_history_and_required_session_configuration(
     assert target.description == ""
     assert target.player_character_id == source.player_character_id
     assert target.player_character_snapshot_json == source.player_character_snapshot_json
+    assert target.story_opening_id == source.story_opening_id
     assert target.main_llm_provider_key == "main_provider_test"
     assert target.id not in {
         row.id

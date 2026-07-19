@@ -74,6 +74,7 @@ class PlaySessionSummary(BaseModel):
     description: str | None = None
     player_character: PlayPlayerCharacterSnapshot | None = Field(default=None, alias="playerCharacter")
     player_character_status: Literal["bound", "invalid"] = Field(default="invalid", alias="playerCharacterStatus")
+    story_opening_id: int | None = Field(default=None, alias="storyOpeningId")
     created_at: str | None = Field(default=None, alias="createdAt")
     updated_at: str | None = Field(default=None, alias="updatedAt")
 
@@ -121,6 +122,24 @@ class PlayPlayerCharacterBindRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     player_character_id: int = Field(alias="playerCharacterId")
+    story_opening_id: int | None = Field(default=None, alias="storyOpeningId", gt=0)
+
+
+class PlaySessionOpeningOption(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    title: str
+    rendered_message: str = Field(alias="renderedMessage")
+    sort_order: int = Field(alias="sortOrder")
+
+
+class PlaySessionOpeningOptions(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    items: list[PlaySessionOpeningOption] = Field(default_factory=list)
+    default_opening_id: int | None = Field(default=None, alias="defaultOpeningId")
+    can_select_opening: bool = Field(alias="canSelectOpening")
 
 
 class PlayCommand(BaseModel):
@@ -343,6 +362,7 @@ def _session_summary(session: dict[str, object]) -> PlaySessionSummary:
             if str(session.get("player_character_status") or "") == "bound"
             else "invalid"
         ),
+        story_opening_id=_positive_int(session.get("story_opening_id")),
         created_at=str(session.get("created_at") or now),
         updated_at=str(session.get("updated_at") or now),
     )
@@ -658,11 +678,12 @@ async def bind_player_character(session_id: str, payload: PlayPlayerCharacterBin
     session = await resolve_session_or_404(session_id)
     workspace, story_id, agent_session_id = _session_context(session)
     logger.info(
-        "[PlayAPI] player character bind requested: session_id={}, workspace={}, story_id={}, character_id={}",
+        "[PlayAPI] player character bind requested: session_id={}, workspace={}, story_id={}, character_id={}, story_opening_id={}",
         agent_session_id,
         workspace,
         story_id,
         payload.player_character_id,
+        payload.story_opening_id,
     )
     await _agent_call(
         get_agent_backend().bind_player_character(
@@ -670,6 +691,7 @@ async def bind_player_character(session_id: str, payload: PlayPlayerCharacterBin
             story_id,
             agent_session_id,
             payload.player_character_id,
+            story_opening_id=payload.story_opening_id,
         )
     )
     updated = await get_data_manager_backend().get_session(agent_session_id)
@@ -682,6 +704,35 @@ async def bind_player_character(session_id: str, payload: PlayPlayerCharacterBin
         (updated.get("player_character") or {}).get("character_id") if isinstance(updated.get("player_character"), dict) else None,
     )
     return _session_summary(updated)
+
+
+@router.get(
+    "/{session_id}/opening-options",
+    response_model=PlaySessionOpeningOptions,
+)
+async def list_session_opening_options(
+    session_id: str,
+    player_character_id: int = Query(alias="playerCharacterId", gt=0),
+) -> PlaySessionOpeningOptions:
+    session = await resolve_session_or_404(session_id)
+    _workspace, _story_id, agent_session_id = _session_context(session)
+    try:
+        result = await get_data_manager_backend().list_session_opening_options(
+            agent_session_id,
+            player_character_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    raw_items = result.get("items")
+    items = raw_items if isinstance(raw_items, list) else []
+    options = [PlaySessionOpeningOption.model_validate(item) for item in items]
+    return PlaySessionOpeningOptions(
+        items=options,
+        default_opening_id=options[0].id if options else None,
+        can_select_opening=bool(result.get("can_select_opening")),
+    )
 
 
 @router.get("/{session_id}/history", response_model=list[PlayTurn])

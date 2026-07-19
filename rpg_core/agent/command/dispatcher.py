@@ -113,7 +113,7 @@ class CommandDispatcher:
         self.register_builtin(
             "/role_bind",
             "绑定或切换玩家扮演角色",
-            "用法：/role_bind <序号>。序号来自当前故事已挂载角色列表；绑定前普通消息不会进入 LLM。",
+            "用法：/role_bind <角色序号> [开局序号]。未指定开局时使用 Story 的第一条；绑定前普通消息不会进入 LLM。",
             cmd_role_bind,
         )
 

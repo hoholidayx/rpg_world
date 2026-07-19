@@ -42,6 +42,204 @@ def test_session_role_binding_and_first_message() -> None:
         gateway.close()
 
 
+def test_session_role_lists_rendered_openings_and_selects_one_atomically() -> None:
+    gateway = DataServiceGateway(":memory:")
+    try:
+        gateway.initialize()
+        story = gateway.catalog.create_story(
+            "demo_workspace",
+            title="三开局角色测试",
+            openings=(
+                models.StoryOpeningInput(title="第一幕", message="{USER_PLAY_ROLE_NAME} 在门外。"),
+                models.StoryOpeningInput(title="第二幕", message="{USER_PLAY_ROLE_NAME} 在雨中。"),
+                models.StoryOpeningInput(title="第三幕", message="{USER_PLAY_ROLE_NAME} 在梦里。"),
+            ),
+        )
+        assert story is not None
+        bob_mount = gateway.character_management.mount_character(
+            "demo_workspace",
+            story.id,
+            1,
+        )
+        assert bob_mount is not None
+        session = gateway.catalog.create_session(
+            "demo_workspace",
+            story.id,
+            title="选择第二开局",
+        )
+        assert session is not None
+
+        options = gateway.session_roles.list_opening_options(session.id, 1)
+        assert [item.opening.title for item in options] == ["第一幕", "第二幕", "第三幕"]
+        assert [item.rendered_message for item in options] == [
+            "Bob 在门外。",
+            "Bob 在雨中。",
+            "Bob 在梦里。",
+        ]
+        assert gateway.catalog.get_session(session.id).player_character_id is None
+        assert gateway.messages.count(session.id) == 0
+
+        selected = gateway.session_roles.bind_by_index(
+            session.id,
+            1,
+            story_opening_id=story.openings[1].id,
+        )
+
+        stored = gateway.catalog.get_session(session.id)
+        assert selected.story_opening_id == story.openings[1].id
+        assert selected.first_message == "Bob 在雨中。"
+        assert stored is not None
+        assert stored.player_character_id == 1
+        assert stored.story_opening_id == story.openings[1].id
+        assert gateway.messages.list(session.id)[0].content == "Bob 在雨中。"
+        assert gateway.backup.messages.list(session.id)[0].content == "Bob 在雨中。"
+    finally:
+        gateway.close()
+
+
+def test_session_role_defaults_first_opening_and_supports_story_without_opening() -> None:
+    gateway = DataServiceGateway(":memory:")
+    try:
+        gateway.initialize()
+        story = gateway.catalog.get_story("demo_workspace", 1)
+        assert story is not None and story.openings
+        default_session = gateway.catalog.create_session(
+            "demo_workspace",
+            story.id,
+            title="默认开局",
+        )
+        assert default_session is not None
+        default_result = gateway.session_roles.bind_player_character(
+            default_session.id,
+            1,
+        )
+        assert default_result.story_opening_id == story.openings[0].id
+        assert gateway.catalog.get_session(default_session.id).story_opening_id == story.openings[0].id
+
+        empty_story = gateway.catalog.create_story(
+            "demo_workspace",
+            title="空开局角色测试",
+        )
+        assert empty_story is not None
+        assert gateway.character_management.mount_character(
+            "demo_workspace",
+            empty_story.id,
+            1,
+        ) is not None
+        empty_session = gateway.catalog.create_session(
+            "demo_workspace",
+            empty_story.id,
+            title="空开局",
+        )
+        assert empty_session is not None
+        empty_result = gateway.session_roles.bind_player_character(empty_session.id, 1)
+        assert empty_result.story_opening_id is None
+        assert empty_result.first_message == ""
+        assert gateway.messages.count(empty_session.id) == 0
+    finally:
+        gateway.close()
+
+
+def test_non_initial_role_switch_rejects_opening_selection_without_changes() -> None:
+    gateway = DataServiceGateway(":memory:")
+    try:
+        gateway.initialize()
+        story = gateway.catalog.get_story("demo_workspace", 1)
+        assert story is not None and story.openings
+        session = gateway.catalog.create_session("demo_workspace", story.id, title="禁止重选开局")
+        assert session is not None
+        gateway.session_roles.bind_player_character(session.id, 1)
+        before = gateway.catalog.get_session(session.id)
+        message_count = gateway.messages.count(session.id)
+
+        with pytest.raises(ValueError, match="only be selected"):
+            gateway.session_roles.bind_player_character(
+                session.id,
+                2,
+                story_opening_id=story.openings[0].id,
+            )
+
+        after = gateway.catalog.get_session(session.id)
+        assert after is not None and before is not None
+        assert after.player_character_id == before.player_character_id
+        assert after.story_opening_id == before.story_opening_id
+        assert gateway.messages.count(session.id) == message_count
+    finally:
+        gateway.close()
+
+
+def test_reset_reuses_selected_opening_id_with_latest_body_and_falls_back_after_delete() -> None:
+    gateway = DataServiceGateway(":memory:")
+    try:
+        gateway.initialize()
+        original = gateway.catalog.get_story("demo_workspace", 1)
+        assert original is not None and original.openings
+        story = gateway.catalog.update_story(
+            "demo_workspace",
+            original.id,
+            openings=(
+                models.StoryOpeningInput(
+                    id=original.openings[0].id,
+                    title="默认线",
+                    message="默认线：{USER_PLAY_ROLE_NAME}",
+                ),
+                models.StoryOpeningInput(
+                    title="秘密线",
+                    message="秘密线旧正文：{USER_PLAY_ROLE_NAME}",
+                ),
+            ),
+        )
+        assert story is not None
+        session = gateway.catalog.create_session("demo_workspace", story.id, title="稳定开局")
+        assert session is not None
+        selected_id = story.openings[1].id
+        gateway.session_roles.bind_player_character(
+            session.id,
+            1,
+            story_opening_id=selected_id,
+        )
+
+        story = gateway.catalog.update_story(
+            "demo_workspace",
+            story.id,
+            openings=(
+                models.StoryOpeningInput(
+                    id=story.openings[0].id,
+                    title="默认线",
+                    message="默认线：{USER_PLAY_ROLE_NAME}",
+                ),
+                models.StoryOpeningInput(
+                    id=selected_id,
+                    title="秘密线",
+                    message="秘密线新正文：{USER_PLAY_ROLE_NAME}",
+                ),
+            ),
+        )
+        assert story is not None
+        first_reset = gateway.session_reset.reset(session.id)
+        assert first_reset.first_message == "秘密线新正文：Bob"
+        assert gateway.catalog.get_session(session.id).story_opening_id == selected_id
+
+        story = gateway.catalog.update_story(
+            "demo_workspace",
+            story.id,
+            openings=(
+                models.StoryOpeningInput(
+                    id=story.openings[0].id,
+                    title="默认线",
+                    message="默认线更新：{USER_PLAY_ROLE_NAME}",
+                ),
+            ),
+        )
+        assert story is not None
+        assert gateway.catalog.get_session(session.id).story_opening_id is None
+        second_reset = gateway.session_reset.reset(session.id)
+        assert second_reset.first_message == "默认线更新：Bob"
+        assert gateway.catalog.get_session(session.id).story_opening_id == story.openings[0].id
+    finally:
+        gateway.close()
+
+
 def test_session_role_renders_alice_first_message_without_mutating_template() -> None:
     gateway = DataServiceGateway(":memory:")
     try:
@@ -52,7 +250,13 @@ def test_session_role_renders_alice_first_message_without_mutating_template() ->
         gateway.catalog.update_story(
             "demo_workspace",
             story.id,
-            first_message=template,
+            openings=(
+                models.StoryOpeningInput(
+                    id=story.openings[0].id,
+                    title=story.openings[0].title,
+                    message=template,
+                ),
+            ),
         )
         session = gateway.catalog.create_session(
             "demo_workspace",
@@ -76,7 +280,7 @@ def test_session_role_renders_alice_first_message_without_mutating_template() ->
         assert gateway.backup.messages.list(session.id)[0].content == "欢迎，Alice。"
         stored_story = gateway.catalog.get_story("demo_workspace", story.id)
         assert stored_story is not None
-        assert stored_story.first_message == template
+        assert stored_story.openings[0].message == template
     finally:
         gateway.close()
 
@@ -112,14 +316,14 @@ def test_role_switch_after_clear_does_not_reappend_first_message() -> None:
         gateway.close()
 
 
-def test_invalid_legacy_first_message_does_not_partially_bind() -> None:
+def test_invalid_story_opening_does_not_partially_bind() -> None:
     gateway = DataServiceGateway(":memory:")
     try:
         gateway.initialize()
         session = gateway.catalog.create_session("demo_workspace", 1, title="Invalid Template")
         assert session is not None
         gateway.database.execute_sql(
-            "UPDATE rpg_stories SET first_message = ? WHERE id = ?",
+            "UPDATE rpg_story_openings SET message = ? WHERE story_id = ? AND sort_order = 0",
             ("欢迎，{UNKNOWN_ROLE}。", session.story_id),
         )
         alice = next(
