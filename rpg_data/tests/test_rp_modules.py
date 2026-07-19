@@ -9,6 +9,7 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
 
     assert [item.module_name for item in service.list_catalog()] == [
         "narrative_outcome",
+        "plot_scheduler",
         "dice",
     ]
     story_modules = service.list_story_modules("demo_workspace", 1)
@@ -63,5 +64,6 @@ def test_new_story_mounts_all_current_default_modules(tmp_path) -> None:
     assert mounted is not None
     assert {item.module_name for item in mounted} == {
         "narrative_outcome",
+        "plot_scheduler",
         "dice",
     }

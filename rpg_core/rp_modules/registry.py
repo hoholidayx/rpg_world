@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
+    RP_MODULE_PLOT_SCHEDULER_NAME,
 )
 from rpg_core.rp_modules.dice import DiceModule
 from rpg_core.rp_modules.models import (
@@ -18,10 +19,12 @@ from rpg_core.rp_modules.models import (
 )
 from rpg_core.rp_modules.narrative_outcome import NarrativeOutcomeModule
 from rpg_core.rp_modules.narrative_outcome.models import NarrativeOutcomeSelection
+from rpg_core.rp_modules.plot_scheduler import PlotSchedulerModule
 from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
 from rpg_core.settings import (
     DiceModuleSettings,
     NarrativeOutcomeModuleSettings,
+    PlotSchedulerModuleSettings,
     RPModuleSettings,
 )
 from rpg_data import models as data_models
@@ -50,6 +53,16 @@ class RPModuleRegistry:
                 config_validator=self._validate_narrative_config,
                 system_config_resolver=self._narrative_system_config,
                 module_factory=self._create_narrative_module,
+            ),
+            RPModuleDefinition(
+                name=RP_MODULE_PLOT_SCHEDULER_NAME,
+                display_name="剧情动态调度",
+                description="按照 scene 时间动态注入剧情大纲节点与事件池事件。",
+                sort_order=15,
+                configurable_fields=(),
+                config_validator=self._validate_plot_scheduler_config,
+                system_config_resolver=self._plot_scheduler_system_config,
+                module_factory=self._create_plot_scheduler_module,
             ),
             RPModuleDefinition(
                 name=RP_MODULE_DICE_NAME,
@@ -278,6 +291,12 @@ class RPModuleRegistry:
         return {"default_dc": value}
 
     @staticmethod
+    def _validate_plot_scheduler_config(raw: Mapping[str, object]) -> dict[str, object]:
+        if raw:
+            raise ValueError("plot_scheduler does not expose Story/Session config fields")
+        return {}
+
+    @staticmethod
     def _narrative_system_config(settings: object) -> tuple[bool, dict[str, object]]:
         current = settings.narrative_outcome
         return current.enabled, {
@@ -289,6 +308,16 @@ class RPModuleRegistry:
     def _dice_system_config(settings: object) -> tuple[bool, dict[str, object]]:
         current = settings.dice
         return current.enabled, {"default_dc": current.default_dc}
+
+    @staticmethod
+    def _plot_scheduler_system_config(
+        settings: object,
+    ) -> tuple[bool, dict[str, object]]:
+        current = settings.plot_scheduler
+        return current.enabled, {
+            "judge_history_turns": current.judge_history_turns,
+            "soft_retry_intervening_turns": current.soft_retry_intervening_turns,
+        }
 
     def _create_narrative_module(
         self,
@@ -332,6 +361,24 @@ class RPModuleRegistry:
             rng=self._rng_factory(),
         )
 
+    def _create_plot_scheduler_module(
+        self,
+        session_id: str,
+        selected: RPModuleSelection,
+    ) -> PlotSchedulerModule:
+        return PlotSchedulerModule(
+            session_id=session_id,
+            settings=PlotSchedulerModuleSettings(
+                enabled=True,
+                judge_history_turns=int(
+                    selected.effective_config["judge_history_turns"]
+                ),
+                soft_retry_intervening_turns=int(
+                    selected.effective_config["soft_retry_intervening_turns"]
+                ),
+            ),
+        )
+
     @staticmethod
     def _format_modules(snapshot: RPModuleSelectionSnapshot) -> str:
         lines = ["RP Modules:"]
@@ -363,6 +410,8 @@ class RPModuleRegistry:
         if selected.name == RP_MODULE_NARRATIVE_OUTCOME_NAME:
             lines.append("工具: rp_story_outcome")
             lines.append("策略: 当前主流程唯一的剧情随机决策模块。")
+        if selected.name == RP_MODULE_PLOT_SCHEDULER_NAME:
+            lines.append("策略: scene 时间驱动；动态指令只在已分配的 turn scratch 中生成。")
         return "\n".join(lines)
 
 

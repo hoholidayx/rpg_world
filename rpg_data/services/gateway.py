@@ -19,6 +19,7 @@ from rpg_data.services.lorebook import LorebookManagementService, LorebookReadSe
 from rpg_data.services.message import MessageService
 from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
+from rpg_data.services.plot_scheduling import PlotSchedulingService
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_role import SessionRoleService
 from rpg_data.services.session_deletion import SessionDeletionService
@@ -54,6 +55,7 @@ class DataServiceGateway:
         self._dream: DreamMemoryService | None = None
         self._media: MediaDataService | None = None
         self._narrative_outcomes: NarrativeOutcomeService | None = None
+        self._plot_scheduling: PlotSchedulingService | None = None
         self._rp_modules: RPModuleService | None = None
         self._session_roles: SessionRoleService | None = None
         self._session_deletion: SessionDeletionService | None = None
@@ -170,6 +172,15 @@ class DataServiceGateway:
         return self._narrative_outcomes
 
     @property
+    def plot_scheduling(self) -> PlotSchedulingService:
+        database = self.database
+        if self._plot_scheduling is None:
+            logger.debug("creating plot scheduling service db_path=%s", self._database_path)
+            self._plot_scheduling = PlotSchedulingService(database)
+        self._ensure_bound()
+        return self._plot_scheduling
+
+    @property
     def rp_modules(self) -> RPModuleService:
         database = self.database
         if self._rp_modules is None:
@@ -196,6 +207,7 @@ class DataServiceGateway:
                 database,
                 messages=self.messages,
                 narrative_outcomes=self.narrative_outcomes,
+                plot_scheduling=self.plot_scheduling,
                 session_roles=self.session_roles,
                 story_memory=self.story_memory,
                 dream=self.dream,
@@ -231,6 +243,7 @@ class DataServiceGateway:
             self._session_derivations = SessionDerivationService(
                 database,
                 status=self.status,
+                plot_scheduling=self.plot_scheduling,
             )
         self._ensure_bound()
         return self._session_derivations
@@ -308,6 +321,7 @@ class DataServiceGateway:
         self._dream = None
         self._media = None
         self._narrative_outcomes = None
+        self._plot_scheduling = None
         self._rp_modules = None
         self._session_roles = None
         self._session_deletion = None

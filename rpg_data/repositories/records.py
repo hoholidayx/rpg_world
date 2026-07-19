@@ -35,6 +35,9 @@ __all__ = [
     "MediaBackgroundEvaluationRecord",
     "NarrativeStyleRecord",
     "RPModuleCatalogRecord",
+    "SessionPlotEventOverrideRecord",
+    "SessionPlotOutlineNodeOverrideRecord",
+    "SessionPlotScheduleDecisionRecord",
     "SessionBackupMessageRecord",
     "SessionDreamProposalItemEvidenceRecord",
     "SessionDreamProposalItemRecord",
@@ -60,6 +63,10 @@ __all__ = [
     "StoryLorebookEntryRecord",
     "StoryNarrativeStyleRecord",
     "StoryOpeningRecord",
+    "StoryPlotEventPoolRecord",
+    "StoryPlotEventRecord",
+    "StoryPlotOutlineNodeRecord",
+    "StoryPlotOutlineRecord",
     "StoryQuickReplyRecord",
     "StoryStatusTableRecord",
     "TTSBlobRecord",
@@ -1083,6 +1090,185 @@ class SessionRPModuleOverrideRecord(BaseRecord):
         indexes = ((('session', 'module_name'), True),)
 
 
+class StoryPlotEventPoolRecord(BaseRecord):
+    id = AutoField()
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="plot_event_pools",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    name = TextField()
+    description = TextField(default="")
+    selection_mode = TextField(default="random")
+    priority = IntegerField(default=0)
+    enabled = BooleanField(default=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_plot_event_pools"
+
+
+class StoryPlotEventRecord(BaseRecord):
+    id = AutoField()
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="plot_events",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    pool = ForeignKeyField(
+        StoryPlotEventPoolRecord,
+        backref="events",
+        column_name="pool_id",
+        on_delete="RESTRICT",
+    )
+    title = TextField()
+    description = TextField(default="")
+    directive = TextField()
+    suitability_hint = TextField(default="")
+    dispatch_mode = TextField(default="soft")
+    scheduled_time_json = TextField(null=True)
+    position = IntegerField(default=0)
+    enabled = BooleanField(default=True)
+    allow_repeat = BooleanField(default=False)
+    repeat_cooldown_minutes = IntegerField(default=0)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_plot_events"
+
+
+class StoryPlotOutlineRecord(BaseRecord):
+    id = AutoField()
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="plot_outlines",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    name = TextField()
+    description = TextField(default="")
+    priority = IntegerField(default=0)
+    enabled = BooleanField(default=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_plot_outlines"
+
+
+class StoryPlotOutlineNodeRecord(BaseRecord):
+    id = AutoField()
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="plot_outline_nodes",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    outline = ForeignKeyField(
+        StoryPlotOutlineRecord,
+        backref="nodes",
+        column_name="outline_id",
+        on_delete="CASCADE",
+    )
+    event = ForeignKeyField(
+        StoryPlotEventRecord,
+        backref="outline_nodes",
+        column_name="event_id",
+        on_delete="RESTRICT",
+    )
+    scheduled_time_json = TextField()
+    dispatch_mode = TextField(default="soft")
+    position = IntegerField(default=0)
+    enabled = BooleanField(default=True)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_plot_outline_nodes"
+
+
+class SessionPlotEventOverrideRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="plot_event_overrides",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    event = ForeignKeyField(
+        StoryPlotEventRecord,
+        backref="session_overrides",
+        column_name="event_id",
+        on_delete="CASCADE",
+    )
+    disabled = BooleanField(default=True)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_plot_event_overrides"
+        primary_key = CompositeKey("session", "event")
+
+
+class SessionPlotOutlineNodeOverrideRecord(BaseRecord):
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="plot_outline_node_overrides",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    node = ForeignKeyField(
+        StoryPlotOutlineNodeRecord,
+        backref="session_overrides",
+        column_name="node_id",
+        on_delete="CASCADE",
+    )
+    disabled = BooleanField(default=True)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_plot_outline_node_overrides"
+        primary_key = CompositeKey("session", "node")
+
+
+class SessionPlotScheduleDecisionRecord(BaseRecord):
+    id = AutoField()
+    session = ForeignKeyField(
+        SessionRecord,
+        backref="plot_schedule_decisions",
+        column_name="session_id",
+        on_delete="CASCADE",
+    )
+    turn_id = IntegerField()
+    source_kind = TextField()
+    source_id = IntegerField()
+    event_id = IntegerField()
+    container_id = IntegerField()
+    decision_status = TextField()
+    dispatch_mode = TextField()
+    scene_time_json = TextField()
+    scene_time_ordinal = IntegerField()
+    event_snapshot_json = TextField()
+    reason = TextField(default="")
+    error_code = TextField(default="")
+    error_message = TextField(default="")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_plot_schedule_decisions"
+        indexes = ((('session', 'turn_id', 'source_kind'), True),)
+
+
 class CharacterRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
@@ -1341,6 +1527,13 @@ RECORD_MODELS = (
     RPModuleCatalogRecord,
     StoryRPModuleRecord,
     SessionRPModuleOverrideRecord,
+    StoryPlotEventPoolRecord,
+    StoryPlotEventRecord,
+    StoryPlotOutlineRecord,
+    StoryPlotOutlineNodeRecord,
+    SessionPlotEventOverrideRecord,
+    SessionPlotOutlineNodeOverrideRecord,
+    SessionPlotScheduleDecisionRecord,
     SessionNarrativeOutcomeRecord,
     MediaBlobRecord,
     MediaAssetRecord,

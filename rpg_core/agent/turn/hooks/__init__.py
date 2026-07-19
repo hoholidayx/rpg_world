@@ -6,10 +6,12 @@ from rpg_core.agent.turn.hooks.fixed import (
     StatusPreflightHook,
     TurnDiagnostics,
 )
+from rpg_core.agent.turn.hooks.plot_scheduling import PlotSchedulingPreflightHook
 
 __all__ = [
     "MemoryRecallHook",
     "PostCommitHooks",
     "StatusPreflightHook",
+    "PlotSchedulingPreflightHook",
     "TurnDiagnostics",
 ]

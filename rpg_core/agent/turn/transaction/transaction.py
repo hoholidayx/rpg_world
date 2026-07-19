@@ -97,19 +97,21 @@ class AgentTurnTransaction:
             message_scratch=self.scratch.message_scratch,
             status_scratch=self.scratch.status_scratch,
             narrative_outcome=self.scratch.narrative_outcome,
+            plot_schedule_decisions=tuple(self.scratch.plot_schedule_decisions),
         )
 
     def commit(self) -> list[StatusDocumentChange]:
         changes = self.build_commit_plan().commit()
         self._committed = True
         logger.debug(
-            _TAG + " committed turn: turn_id={} messages={} status_documents={} narrative_outcome={}",
+            _TAG + " committed turn: turn_id={} messages={} status_documents={} narrative_outcome={} plot_schedule_decisions={}",
             self._turn_id,
             len(self.scratch.staged_messages),
             len(changes),
             self.scratch.narrative_outcome.outcome_code
             if self.scratch.narrative_outcome is not None
             else None,
+            len(self.scratch.plot_schedule_decisions),
         )
         return changes
 

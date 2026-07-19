@@ -25,6 +25,7 @@ from commons.types import ConfigDict
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
+    RP_MODULE_PLOT_SCHEDULER_NAME,
 )
 from rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
 from rpg_data.models import NarrativeOutcomeWeights
@@ -168,6 +169,33 @@ class NarrativeOutcomeModuleSettings:
 
 
 @dataclass(frozen=True)
+class PlotSchedulerModuleSettings:
+    """Plot scheduling judgment and retry limits."""
+
+    enabled: bool = True
+    judge_history_turns: int = 5
+    soft_retry_intervening_turns: int = 1
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("plot_scheduler.enabled must be a boolean")
+        if (
+            isinstance(self.judge_history_turns, bool)
+            or not isinstance(self.judge_history_turns, int)
+            or self.judge_history_turns < 1
+        ):
+            raise ValueError("plot_scheduler.judge_history_turns must be a positive integer")
+        if (
+            isinstance(self.soft_retry_intervening_turns, bool)
+            or not isinstance(self.soft_retry_intervening_turns, int)
+            or self.soft_retry_intervening_turns < 0
+        ):
+            raise ValueError(
+                "plot_scheduler.soft_retry_intervening_turns must be a non-negative integer"
+            )
+
+
+@dataclass(frozen=True)
 class RPModuleSettings:
     """RP Modules business settings."""
 
@@ -175,6 +203,9 @@ class RPModuleSettings:
     dice: DiceModuleSettings = field(default_factory=DiceModuleSettings)
     narrative_outcome: NarrativeOutcomeModuleSettings = field(
         default_factory=NarrativeOutcomeModuleSettings
+    )
+    plot_scheduler: PlotSchedulerModuleSettings = field(
+        default_factory=PlotSchedulerModuleSettings
     )
 
 
@@ -227,6 +258,9 @@ class Settings(ProfiledYamlSettings):
         narrative_raw = modules.get(RP_MODULE_NARRATIVE_OUTCOME_NAME, {})
         if not isinstance(narrative_raw, dict):
             narrative_raw = {}
+        plot_scheduler_raw = modules.get(RP_MODULE_PLOT_SCHEDULER_NAME, {})
+        if not isinstance(plot_scheduler_raw, dict):
+            plot_scheduler_raw = {}
 
         default_weights_raw = narrative_raw.get("default_weights")
         if default_weights_raw is None:
@@ -258,6 +292,17 @@ class Settings(ProfiledYamlSettings):
                     narrative_raw.get("auto_adjudication_enabled", True)
                 ),
                 default_weights=default_weights,
+            ),
+            plot_scheduler=PlotSchedulerModuleSettings(
+                enabled=plot_scheduler_raw.get("enabled", True),
+                judge_history_turns=plot_scheduler_raw.get(
+                    "judge_history_turns",
+                    5,
+                ),
+                soft_retry_intervening_turns=plot_scheduler_raw.get(
+                    "soft_retry_intervening_turns",
+                    1,
+                ),
             ),
         )
 

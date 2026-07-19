@@ -12,6 +12,7 @@ from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentChange,
 from rpg_core.session import InvalidTurnMetadataError
 
 if TYPE_CHECKING:
+    from rpg_data.models import StagedPlotScheduleDecision
     from rpg_core.rp_modules.narrative_outcome.models import StagedNarrativeOutcome
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager
@@ -28,6 +29,7 @@ class TurnCommitPlan:
     message_scratch: MessageScratch
     status_scratch: StatusDocumentScratch
     narrative_outcome: "StagedNarrativeOutcome | None" = None
+    plot_schedule_decisions: tuple["StagedPlotScheduleDecision", ...] = ()
 
     def commit(self) -> list[StatusDocumentChange]:
         snapshot = self.session.history
@@ -37,6 +39,7 @@ class TurnCommitPlan:
                 with gateway.database.atomic():
                     self._append_messages()
                     self._commit_narrative_outcome(gateway)
+                    self._commit_plot_schedule(gateway)
                     changes = self.status_scratch.commit(self.status_mgr)
             else:
                 # Non-persistent sessions are test/in-memory mode. They restore
@@ -80,6 +83,15 @@ class TurnCommitPlan:
             sample_value=staged.sample_value,
             effective_weights=staged.effective_weights,
             effective_source=staged.effective_source,
+        )
+
+    def _commit_plot_schedule(self, gateway) -> None:
+        if not self.plot_schedule_decisions:
+            return
+        gateway.plot_scheduling.record_decisions(
+            self.session.session_id,
+            self.message_scratch.turn_id,
+            self.plot_schedule_decisions,
         )
 
     def _staged_turn_metadata(self) -> list[dict[str, object]]:

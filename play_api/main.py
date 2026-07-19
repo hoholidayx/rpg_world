@@ -27,6 +27,7 @@ from play_api.routers import (
     lorebook,
     main_llm,
     media,
+    plot_scheduling,
     rp_modules,
     session_composer,
     ops,
@@ -86,6 +87,7 @@ app.include_router(events.router, prefix=_PLAY_API_PREFIX)
 app.include_router(lorebook.router, prefix=_PLAY_API_PREFIX)
 app.include_router(main_llm.router, prefix=_PLAY_API_PREFIX)
 app.include_router(media.router, prefix=_PLAY_API_PREFIX)
+app.include_router(plot_scheduling.router, prefix=_PLAY_API_PREFIX)
 app.include_router(rp_modules.router, prefix=_PLAY_API_PREFIX)
 app.include_router(session_composer.router, prefix=_PLAY_API_PREFIX)
 app.include_router(ops.router, prefix=_PLAY_API_PREFIX)

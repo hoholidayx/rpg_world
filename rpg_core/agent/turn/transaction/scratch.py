@@ -10,6 +10,8 @@ from rpg_core.agent.turn.transaction.message_scratch import MessageScratch
 from rpg_core.agent.turn.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
 
 if TYPE_CHECKING:
+    from rpg_data.models import StagedPlotScheduleDecision
+    from rpg_core.rp_modules.plot_scheduler.models import PlotScheduleInjection
     from rpg_core.agent.telemetry import TurnStats
     from rpg_core.rp_modules.narrative_outcome.models import StagedNarrativeOutcome
     from rpg_core.scene import SceneTracker
@@ -32,6 +34,8 @@ class TurnScratch:
     narrative_outcome: "StagedNarrativeOutcome | None" = None
     rp_module_snapshot: "RPModuleSelectionSnapshot | None" = None
     rp_module_runtime: "RPModuleTurnRuntime | None" = None
+    plot_schedule_decisions: list["StagedPlotScheduleDecision"] = field(default_factory=list)
+    plot_schedule_injections: list["PlotScheduleInjection"] = field(default_factory=list)
 
     @property
     def turn_id(self) -> int:

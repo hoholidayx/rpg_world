@@ -73,18 +73,12 @@ class StatusPreflightHook:
             return None
 
         def create_checkpoint() -> object:
-            scene_time = (
-                turn_scratch.scene_tracker.get_time_state()
-                if turn_scratch.scene_tracker is not None
-                else None
-            )
-            return turn_scratch.status_scratch.create_checkpoint(), scene_time
+            return turn_scratch.status_scratch.create_checkpoint()
 
         def restore_checkpoint(checkpoint: object) -> None:
-            status_checkpoint, scene_time = checkpoint  # type: ignore[misc]
-            turn_scratch.status_scratch.restore_checkpoint(status_checkpoint)
-            if turn_scratch.scene_tracker is not None and scene_time is not None:
-                turn_scratch.scene_tracker.set_time_state(scene_time)
+            turn_scratch.status_scratch.restore_checkpoint(checkpoint)
+            if turn_scratch.scene_tracker is not None:
+                turn_scratch.scene_tracker.load_from_status_table()
 
         with sub_agent.use_turn_tools(
             tools,

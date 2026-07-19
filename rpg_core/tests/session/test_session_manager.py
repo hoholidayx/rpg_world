@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from commons.scene_time import SceneTime
+from rpg_data import models
 from rpg_core.context.models import Message, Role
 from rpg_core.session.manager import SessionManager
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
@@ -300,6 +302,41 @@ def test_history_mutations_reload_and_reset_processing_flags(
     assert [row.content for row in rpg_data_gateway.messages.list("s1")] == ["u1", "a1"]
     assert rpg_data_gateway.backup.messages.count("s1") == 5
     assert mgr.story_messages_since_last_extraction() == []
+
+
+def test_assistant_edit_removes_plot_schedule_decision(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
+    make_data_session("s1")
+    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr.load()
+    turn_id = mgr.begin_turn()
+    mgr.append(Role.USER, "u1", turn_id=turn_id)
+    mgr.append(Role.ASSISTANT, "a1", turn_id=turn_id)
+    mgr.end_turn(turn_id)
+    assistant = next(message for message in mgr.history if message.content == "a1")
+    rpg_data_gateway.plot_scheduling.record_decisions(
+        "s1",
+        turn_id,
+        [
+            models.StagedPlotScheduleDecision(
+                source_kind=models.PLOT_SOURCE_POOL,
+                source_id=1,
+                event_id=1,
+                container_id=1,
+                decision_status=models.PLOT_DECISION_TRIGGERED,
+                dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                scene_time=SceneTime(1, 1, 1, 8),
+                event_snapshot={"eventTitle": "测试事件"},
+            )
+        ],
+    )
+
+    mgr.update_message_content(assistant.uid, "a1 edited")
+
+    assert rpg_data_gateway.plot_scheduling.list_session_decisions("s1") == []
 
 
 def test_reload_history_keeps_session_identity(make_data_session, workspace):

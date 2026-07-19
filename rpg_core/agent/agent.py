@@ -28,6 +28,7 @@ from rpg_core.agent.turn.hooks.fixed import (
     StatusPreflightHook,
     TurnDiagnostics,
 )
+from rpg_core.agent.turn.hooks.plot_scheduling import PlotSchedulingPreflightHook
 from rpg_core.agent.turn.orchestrator import TurnOrchestrator
 from rpg_core.agent.turn.planning import TurnPlanResolver
 from rpg_core.agent.turn.preparation import TurnPreparation
@@ -93,6 +94,10 @@ class RPGGameAgent:
             status_sub_agent=lambda: self._lifecycle.status_sub_agent,
             tool_service=self._tool_service,
         )
+        plot_scheduling_preflight = PlotSchedulingPreflightHook(
+            context_service=self._context_service,
+            session_manager=self._lifecycle.session_manager,
+        )
         preparation = TurnPreparation(
             context_service=self._context_service,
             tool_service=self._tool_service,
@@ -113,6 +118,7 @@ class RPGGameAgent:
                 context_service=self._context_service,
                 model_runtime=self._model_runtime,
                 status_preflight=status_preflight,
+                plot_scheduling_preflight=plot_scheduling_preflight,
             ),
             preparation=preparation,
             post_commit_hooks=PostCommitHooks(

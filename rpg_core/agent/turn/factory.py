@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
     from rpg_core.agent.runtime.model import MainModelRuntime
     from rpg_core.agent.turn.hooks.fixed import StatusPreflightHook
+    from rpg_core.agent.turn.hooks.plot_scheduling import (
+        PlotSchedulingPreflightHook,
+    )
     from rpg_core.agent.turn.models import TurnExecutionPlan
 
 
@@ -27,11 +30,13 @@ class TurnRuntimeFactory:
         context_service: "AgentContextService",
         model_runtime: "MainModelRuntime",
         status_preflight: "StatusPreflightHook",
+        plot_scheduling_preflight: "PlotSchedulingPreflightHook | None" = None,
     ) -> None:
         self._lifecycle = lifecycle
         self._context_service = context_service
         self._model_runtime = model_runtime
         self._status_preflight = status_preflight
+        self._plot_scheduling_preflight = plot_scheduling_preflight
 
     async def create(self, plan: "TurnExecutionPlan") -> TurnRuntime:
         self._context_service.enforce_window_threshold(
@@ -39,6 +44,7 @@ class TurnRuntimeFactory:
             rp_module_snapshot=plan.rp_modules,
             turn_execution=plan.execution,
             persistent_memory_snapshot=plan.persistent_memory,
+            plot_schedule_snapshot=plan.plot_schedule,
         )
         provider = await self._model_runtime.provider_for(
             self._lifecycle.session_id,
@@ -76,6 +82,13 @@ class TurnRuntimeFactory:
                 scratch,
                 runtime.preflight_result,
             )
+            if self._plot_scheduling_preflight is not None:
+                await self._plot_scheduling_preflight.run(
+                    plan=plan,
+                    turn_scratch=scratch,
+                    turn_stats=stats,
+                    rp_module_runtime=runtime.rp_module_runtime,
+                )
             return runtime
         except BaseException:
             runtime.discard()

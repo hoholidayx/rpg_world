@@ -24,7 +24,9 @@ from rpg_core.context.fixed_layer.contributors import (
     TurnExecutionFixedLayerContributor,
 )
 from rpg_core.context.inspector import ContextInspector
-from rpg_core.context.models import FixedLayerData, Message, Role
+from rpg_core.context.models import FixedLayerData, LayerType, Message, Role, RPGContext
+from rpg_core.context.renderer import ContextRenderer
+from rpg_core.status.context import render_status_tables_context
 from rpg_core.context.usage import estimate_rendered_context_usage
 from rpg_core.settings import settings
 
@@ -35,6 +37,7 @@ if TYPE_CHECKING:
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
     from rpg_core.rp_modules.registry import RPModuleRegistry
     from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
+    from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshot
     from rpg_core.scene import SceneTracker
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager
@@ -114,6 +117,75 @@ class AgentContextService:
         messages = context.to_message_objects()
         self._log_verbose_context(context)
         return messages
+
+    def build_plot_judge_messages(
+        self,
+        *,
+        judge_prompt: str,
+        current_user_input: str,
+        history_turns: int,
+        status_manager: "StatusManager | None",
+        scene_tracker: "SceneTracker | None",
+        rp_module_runtime: "RPModuleTurnRuntime | None",
+        turn_execution: TurnExecutionSnapshot,
+    ) -> list[Message]:
+        """Build the scheduler's bounded raw context without memory projections."""
+        fixed_layer = self._assemble_fixed_layer(
+            rp_module_runtime.get_fixed_sections()
+            if rp_module_runtime is not None
+            else None,
+            turn_execution=turn_execution,
+        )
+        fixed_text = ContextRenderer(
+            RPGContext(fixed_layer=fixed_layer)
+        ).render_layer(LayerType.FIXED)
+        messages: list[Message] = []
+        if fixed_text:
+            messages.append(Message(Role.SYSTEM, fixed_text))
+        messages.append(Message(Role.SYSTEM, judge_prompt))
+
+        state_sections: list[str] = []
+        if scene_tracker is not None:
+            state_sections.append(scene_tracker.get_context())
+        if status_manager is not None:
+            status_text = render_status_tables_context(
+                status_manager.list_context_tables()
+            )
+            if status_text:
+                state_sections.append(status_text)
+        if state_sections:
+            messages.append(
+                Message(
+                    Role.SYSTEM,
+                    "当前 Scene 与状态表：\n" + "\n\n".join(state_sections),
+                )
+            )
+
+        messages.extend(self._recent_raw_ic_gm_messages(history_turns))
+        messages.append(Message(Role.USER, str(current_user_input or "")))
+        return messages
+
+    def _recent_raw_ic_gm_messages(self, turn_count: int) -> list[Message]:
+        from rpg_core.agent.turn.models import TurnMode
+
+        groups: list[list[Message]] = []
+        for group in self._session_manager.iter_turn_groups(
+            self._session_manager.history
+        ):
+            conversation = [
+                item
+                for item in group
+                if not item.is_system() and not item.is_tool()
+            ]
+            modes = {
+                str(item.mode or TurnMode.IC.value).lower()
+                for item in conversation
+            }
+            if modes and modes.issubset({TurnMode.IC.value, TurnMode.GM.value}):
+                # Keep the entire persisted turn, including any tool messages.
+                groups.append(list(group))
+        selected = groups[-max(1, int(turn_count)):]
+        return [message for group in selected for message in group]
 
     def build_main_context(
         self,
@@ -220,6 +292,7 @@ class AgentContextService:
         rp_module_snapshot: "RPModuleSelectionSnapshot",
         turn_execution: TurnExecutionSnapshot,
         persistent_memory_snapshot: tuple["PersistentMemoryFact", ...] = (),
+        plot_schedule_snapshot: "PlotScheduleSnapshot | None" = None,
     ) -> None:
         context_limit = selection.effective.context_window
         if context_limit is None or context_limit <= 0:
@@ -252,12 +325,23 @@ class AgentContextService:
             )
             return
 
-        usage_ratio = usage.used_tokens / context_limit
+        reserved_tokens = (
+            self._token_counter.count(plot_schedule_snapshot.context_gate_reserve_text)
+            if (
+                plot_schedule_snapshot is not None
+                and plot_schedule_snapshot.enabled
+                and turn_execution.policy.expose_rp_modules
+                and turn_execution.request.mode is not TurnMode.OOC
+            )
+            else 0
+        )
+        effective_used_tokens = usage.used_tokens + reserved_tokens
+        usage_ratio = effective_used_tokens / context_limit
         logger.debug(
             _TAG + " context threshold evaluated: session_id={}, provider={}, used={}, limit={}, ratio={:.4f}, threshold={:.4f}, source={}",
             self._session_id(),
             selection.effective_provider_key,
-            usage.used_tokens,
+            effective_used_tokens,
             context_limit,
             usage_ratio,
             threshold_ratio,
@@ -269,13 +353,13 @@ class AgentContextService:
             _TAG + " normal input rejected by context threshold: session_id={}, provider={}, used={}, limit={}, ratio={:.4f}, threshold={:.4f}",
             self._session_id(),
             selection.effective_provider_key,
-            usage.used_tokens,
+            effective_used_tokens,
             context_limit,
             usage_ratio,
             threshold_ratio,
         )
         raise MainContextWindowThresholdExceededError(
-            used_tokens=usage.used_tokens,
+            used_tokens=effective_used_tokens,
             context_limit=context_limit,
             threshold_ratio=threshold_ratio,
         )

@@ -12,6 +12,7 @@ from typing import TypeAlias
 from llm_client.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
+    AGENT_PLOT_SCHEDULER_BIZ_KEY,
     AGENT_STATUS_SUB_AGENT_BIZ_KEY,
     MEMORY_EMBED_BIZ_KEY,
     MEMORY_QUERY_PLANNER_BIZ_KEY,
@@ -204,6 +205,7 @@ class ScriptedLLMManager:
         }
         self.status = ScriptedChatProvider("status-model")
         self.memory = ScriptedChatProvider("memory-model")
+        self.plot_scheduler = ScriptedChatProvider("plot-scheduler-model")
         self.planner = ScriptedChatProvider("planner-model")
         self.rerank = ScriptedChatProvider("rerank-model")
         self.embedding = ScriptedEmbeddingProvider()
@@ -221,6 +223,7 @@ class ScriptedLLMManager:
         providers: dict[str, LLMProvider] = {
             AGENT_STATUS_SUB_AGENT_BIZ_KEY: self.status,
             AGENT_MEMORY_SUB_AGENT_BIZ_KEY: self.memory,
+            AGENT_PLOT_SCHEDULER_BIZ_KEY: self.plot_scheduler,
             MEMORY_EMBED_BIZ_KEY: self.embedding,
             MEMORY_QUERY_PLANNER_BIZ_KEY: self.planner,
             MEMORY_RERANK_BIZ_KEY: self.rerank,

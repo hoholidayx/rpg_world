@@ -163,14 +163,15 @@ def test_run_migrations_creates_initial_tables() -> None:
             row["module_name"]
             for row in conn.execute("SELECT module_name FROM rpg_rp_module_catalog")
         }
-        assert catalog_names == {"narrative_outcome", "dice"}
+        assert catalog_names == {"narrative_outcome", "plot_scheduler", "dice"}
         mounted = {
             row["module_name"]
             for row in conn.execute(
                 "SELECT module_name FROM rpg_story_rp_modules WHERE story_id = 1"
             )
         }
-        assert mounted == catalog_names
+        # New default modules only mount onto stories created after their migration.
+        assert mounted == {"narrative_outcome", "dice"}
         assert {
             "session_id",
             "role",
@@ -404,6 +405,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0016", "0016_session_derivations.sql"),
             ("0017", "0017_story_memory_evidence.sql"),
             ("0018", "0018_story_openings.sql"),
+            ("0019", "0019_plot_scheduling.sql"),
         ]
     finally:
         conn.close()

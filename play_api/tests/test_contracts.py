@@ -424,6 +424,7 @@ def test_rp_module_config_inheritance_validation_and_history_page(
         assert catalog.status_code == 200
         assert [item["moduleName"] for item in catalog.json()["modules"]] == [
             "narrative_outcome",
+            "plot_scheduler",
             "dice",
         ]
 

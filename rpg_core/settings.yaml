@@ -67,6 +67,12 @@ base:
           success_with_cost: 40
           setback: 25
           critical_failure: 5
+      plot_scheduler:
+        enabled: true
+        # 软约束适宜性判断读取的最近完整 IC/GM turn 数。
+        judge_history_turns: 5
+        # 软判断延期后至少跳过多少个已提交 IC/GM turn。
+        soft_retry_intervening_turns: 1
       dice:
         enabled: true
         default_dc: 12

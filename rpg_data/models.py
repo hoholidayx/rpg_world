@@ -6,6 +6,31 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Mapping
 
+from rpg_data.plot_models import (
+    PLOT_DECISION_DEFERRED,
+    PLOT_DECISION_ERROR,
+    PLOT_DECISION_PAGE_SIZE_MAX,
+    PLOT_DECISION_STATUSES,
+    PLOT_DECISION_TRIGGERED,
+    PLOT_DISPATCH_FORCED,
+    PLOT_DISPATCH_MODES,
+    PLOT_DISPATCH_SOFT,
+    PLOT_POOL_MODES,
+    PLOT_POOL_RANDOM,
+    PLOT_POOL_SEQUENTIAL,
+    PLOT_SOURCE_KINDS,
+    PLOT_SOURCE_OUTLINE,
+    PLOT_SOURCE_POOL,
+    SessionPlotOverrides,
+    SessionPlotScheduleDecision,
+    StagedPlotScheduleDecision,
+    StoryPlotEvent,
+    StoryPlotEventPool,
+    StoryPlotOutline,
+    StoryPlotOutlineNode,
+    StoryPlotSchedule,
+)
+
 __all__ = [
     "Character",
     "CharacterDetail",
@@ -42,6 +67,14 @@ __all__ = [
     "NarrativeOutcomeRecord",
     "NarrativeOutcomeWeights",
     "RPModuleCatalogEntry",
+    "SessionPlotOverrides",
+    "SessionPlotScheduleDecision",
+    "StagedPlotScheduleDecision",
+    "StoryPlotEvent",
+    "StoryPlotEventPool",
+    "StoryPlotOutline",
+    "StoryPlotOutlineNode",
+    "StoryPlotSchedule",
     "SessionRPModuleOverride",
     "Session",
     "SessionDerivationJob",
@@ -95,6 +128,20 @@ __all__ = [
     "StatusTableRow",
     "StatusTableTemplate",
     "STATUS_KIND_NORMAL",
+    "PLOT_DECISION_DEFERRED",
+    "PLOT_DECISION_ERROR",
+    "PLOT_DECISION_PAGE_SIZE_MAX",
+    "PLOT_DECISION_STATUSES",
+    "PLOT_DECISION_TRIGGERED",
+    "PLOT_DISPATCH_FORCED",
+    "PLOT_DISPATCH_MODES",
+    "PLOT_DISPATCH_SOFT",
+    "PLOT_POOL_MODES",
+    "PLOT_POOL_RANDOM",
+    "PLOT_POOL_SEQUENTIAL",
+    "PLOT_SOURCE_KINDS",
+    "PLOT_SOURCE_OUTLINE",
+    "PLOT_SOURCE_POOL",
     "STATUS_KIND_SCENE",
     "STATUS_ORIGIN_SESSION_NATIVE",
     "STATUS_ORIGIN_TEMPLATE_COPY",
@@ -763,6 +810,7 @@ class SessionResetResult:
     session_id: str
     messages_cleared: int = 0
     narrative_outcomes_cleared: int = 0
+    plot_schedule_decisions_cleared: int = 0
     story_memories_cleared: int = 0
     dream_memories_cleared: int = 0
     dream_proposals_cleared: int = 0

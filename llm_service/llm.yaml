@@ -120,6 +120,11 @@ base:
       kind: chat
       provider_key: deepseek_v4_flash
 
+    # 软约束剧情事件的适宜性判断；不跟随主 Agent 的 Session 模型覆盖。
+    agent.plot_scheduler:
+      kind: chat
+      provider_key: deepseek_v4_flash
+
     # Dream 记忆服务的浅层派生源归纳与深层主历史校准。
     dream.shallow:
       kind: chat

@@ -345,6 +345,9 @@ class _SceneStatusManager:
     def get_active_scene_table_ref(self):  # noqa: ANN201
         return 2, (models.STATUS_KIND_SCENE, "当前场景")
 
+    def get_scene_attrs(self) -> dict[str, str]:
+        return dict(self.documents[2].data_rows)
+
     def get_table_by_id(self, table_id: int) -> dict[str, object]:
         return self._table(table_id)
 

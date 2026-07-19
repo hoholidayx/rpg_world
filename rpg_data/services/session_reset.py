@@ -10,6 +10,7 @@ from rpg_data.services.dream_memory import DreamMemoryService
 from rpg_data.services.message import MessageService
 from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
+from rpg_data.services.plot_scheduling import PlotSchedulingService
 from rpg_data.services.session_role import SessionRoleService
 from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
@@ -26,6 +27,7 @@ class SessionResetService:
         *,
         messages: MessageService | None = None,
         narrative_outcomes: NarrativeOutcomeService | None = None,
+        plot_scheduling: PlotSchedulingService | None = None,
         session_roles: SessionRoleService | None = None,
         story_memory: StoryMemoryService | None = None,
         dream: DreamMemoryService | None = None,
@@ -36,6 +38,7 @@ class SessionResetService:
         self._sessions = SessionRepository(database)
         self._messages = messages or MessageService(database)
         self._narrative_outcomes = narrative_outcomes or NarrativeOutcomeService(database)
+        self._plot_scheduling = plot_scheduling or PlotSchedulingService(database)
         self._session_roles = session_roles or SessionRoleService(database)
         self._story_memory = story_memory or StoryMemoryService(database)
         self._dream = dream or DreamMemoryService(database)
@@ -56,6 +59,9 @@ class SessionResetService:
         with self._database.atomic():
             messages_cleared = self._messages.clear(normalized_session_id)
             outcomes_cleared = self._narrative_outcomes.clear(normalized_session_id)
+            plot_decisions_cleared = self._plot_scheduling.clear_session_decisions(
+                normalized_session_id
+            )
             story_memories_cleared = self._story_memory.clear(normalized_session_id)
             dream_result = self._dream.clear(normalized_session_id)
             status_result = self._status.reset_session_tables(
@@ -70,6 +76,7 @@ class SessionResetService:
             session_id=normalized_session_id,
             messages_cleared=messages_cleared,
             narrative_outcomes_cleared=outcomes_cleared,
+            plot_schedule_decisions_cleared=plot_decisions_cleared,
             story_memories_cleared=story_memories_cleared,
             dream_memories_cleared=dream_result.memories_cleared,
             dream_proposals_cleared=dream_result.proposals_cleared,

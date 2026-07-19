@@ -42,6 +42,10 @@ class _Scene:
     def set_time_state(self, value: str) -> None:
         self.time = value
 
+    def load_from_status_table(self) -> bool:
+        self.time = "old"
+        return True
+
     def get_context(self) -> str:
         return "scene"
 

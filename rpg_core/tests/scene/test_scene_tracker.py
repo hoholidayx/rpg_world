@@ -202,3 +202,23 @@ def test_scene_tracker_opt_in_preserves_structural_tools_and_limit():
     assert mgr.get_scene_attrs()["天气"] == "雨"
     tracker.delete_attr("天气")
     assert "天气" not in mgr.get_scene_attrs()
+
+
+def test_scene_tracker_invalidates_time_when_runtime_key_is_deleted():
+    mgr = FakeStatusManager(
+        {
+            "id": 13,
+            "status_kind": "scene",
+            "name": "当前场景",
+            "headers": ["属性", "值"],
+            "rows": [["时间", "第 1 年 1 月 1 日 8 时"], ["位置", "森林"]],
+        }
+    )
+    tracker = SceneTracker(allow_runtime_key_changes=True)
+    tracker.bind_status_manager(mgr)
+    assert tracker.load_from_status_table() is True
+
+    tracker.delete_attr("时间")
+
+    assert tracker.get_scene_time() is None
+    assert tracker.scene_time_error == "当前场景缺少非空“时间”字段"

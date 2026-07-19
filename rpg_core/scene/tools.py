@@ -49,22 +49,31 @@ class SetTimeTool(BaseTool):
             "properties": {
                 "year": {
                     "type": "integer",
+                    "minimum": 1,
                     "description": "年份，例如 3 表示「第 3 年」",
                 },
                 "month": {
                     "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12,
                     "description": "月份，1-12",
                 },
                 "day": {
                     "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31,
                     "description": "日期，1-31",
                 },
                 "hour": {
                     "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23,
                     "description": "小时，24h 制（0=午夜, 9=上午9点, 14=下午2点, 23=晚上11点）",
                 },
                 "minute": {
                     "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59,
                     "description": "分钟，0-59",
                 },
             },

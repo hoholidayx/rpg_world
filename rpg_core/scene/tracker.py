@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Mapping
 
+from commons.scene_time import SceneTime
+
 if TYPE_CHECKING:
     from rpg_core.status.manager import StatusManager
 
@@ -38,12 +40,8 @@ class SceneTracker:
     def __init__(self, *, allow_runtime_key_changes: bool = False) -> None:
         self._allow_runtime_key_changes = allow_runtime_key_changes
 
-        # 结构化时间字段
-        self._year: int = 1
-        self._month: int = 1
-        self._day: int = 1
-        self._hour: int = 6
-        self._minute: int = 0
+        self._scene_time: SceneTime | None = SceneTime(1, 1, 1, 6)
+        self._scene_time_error = ""
 
         # StatusManager 引用（None = 不持久化）
         self._status_mgr: StatusManager | None = None
@@ -76,6 +74,10 @@ class SceneTracker:
     def load_from_status_table(self) -> bool:
         """绑定 active scene 表引用；不缓存表内容。"""
         if self._status_mgr is None:
+            self._scene_table_id = None
+            self._table_key = None
+            self._scene_time = None
+            self._scene_time_error = "当前 Session 没有 Scene 状态表"
             return False
 
         mgr = self._status_mgr
@@ -83,43 +85,52 @@ class SceneTracker:
         if scene_ref is None:
             self._scene_table_id = None
             self._table_key = None
+            self._scene_time = None
+            self._scene_time_error = "当前 Session 没有 Scene 状态表"
             return False
 
         self._scene_table_id, self._table_key = scene_ref
+        raw_time = self._current_attrs().get(self.TIME_ATTR, "").strip()
+        if not raw_time:
+            self._scene_time = None
+            self._scene_time_error = "当前场景缺少非空“时间”字段"
+        else:
+            try:
+                self._scene_time = SceneTime.parse(raw_time)
+                self._scene_time_error = ""
+            except ValueError as exc:
+                self._scene_time = None
+                self._scene_time_error = str(exc)
         return True
 
     # ── 时间操作 ─────────────────────────────────────────────────────
 
     def _format_time(self) -> str:
         """结构化时间 → 显示字符串（24h 制）。"""
-        parts = []
-        if self._year:
-            parts.append(f"第 {self._year} 年")
-        if self._month:
-            parts.append(f"{self._month} 月")
-        if self._day:
-            parts.append(f"{self._day} 日")
-        if self._hour is not None:
-            parts.append(f"{self._hour} 时")
-        if self._minute:
-            parts.append(f"{self._minute} 分")
-        return " ".join(parts)
+        if self._scene_time is None:
+            return ""
+        return self._scene_time.format()
 
-    def get_time_state(self) -> dict[str, int]:
+    def get_time_state(self) -> dict[str, int] | None:
         """Return the structured scene time fields for scratch tracker cloning."""
-        return {
-            "year": self._year,
-            "month": self._month,
-            "day": self._day,
-            "hour": self._hour,
-            "minute": self._minute,
-        }
+        return self._scene_time.to_dict() if self._scene_time is not None else None
 
-    def set_time_state(self, state: Mapping[str, int]) -> None:
+    def set_time_state(self, state: Mapping[str, int] | SceneTime | None) -> None:
         """Restore structured scene time fields from another tracker."""
-        for field in self.TIME_STATE_FIELDS:
-            if field in state:
-                setattr(self, f"_{field}", int(state[field]))
+        if state is None:
+            self._scene_time = None
+            self._scene_time_error = "Scene 时间不可用"
+            return
+        self._scene_time = state if isinstance(state, SceneTime) else SceneTime.from_mapping(state)
+        self._scene_time_error = ""
+
+    def get_scene_time(self) -> SceneTime | None:
+        """Return the parsed scene time, or ``None`` when persisted data is invalid."""
+        return self._scene_time
+
+    @property
+    def scene_time_error(self) -> str:
+        return self._scene_time_error
 
     def set_time(self, **kwargs: int) -> dict[str, str]:
         """直接设置绝对时间值（非增量推进）。
@@ -133,12 +144,31 @@ class SceneTracker:
         其余关键字参数直接写入状态表（不参与 _format_time）。
         """
         pending_attrs: dict[str, str] = {}
-        next_time_state = self.get_time_state()
+        time_values: dict[str, int] = {}
         for k, v in kwargs.items():
             if k in self.TIME_STATE_FIELDS:
-                next_time_state[k] = v
+                if isinstance(v, bool) or not isinstance(v, int):
+                    raise ValueError(f"SceneTime {k} must be an integer")
+                time_values[k] = v
             else:
                 pending_attrs[k] = str(v)
+
+        if self._scene_time is None:
+            required = {"year", "month", "day", "hour"}
+            missing = sorted(required - set(time_values))
+            if missing:
+                raise ValueError(
+                    "当前 scene 时间无效，修复时必须同时提供 year/month/day/hour"
+                )
+            next_scene_time = SceneTime(
+                year=time_values["year"],
+                month=time_values["month"],
+                day=time_values["day"],
+                hour=time_values["hour"],
+                minute=time_values.get("minute", 0),
+            )
+        else:
+            next_scene_time = self._scene_time.update(**time_values)
 
         if (
             not self._allow_runtime_key_changes
@@ -156,9 +186,9 @@ class SceneTracker:
                     + "、".join(sorted(missing_keys))
                 )
 
-        self.set_time_state(next_time_state)
-
-        attrs = self._runtime_set_attr(self.TIME_ATTR, self._format_time())
+        attrs = self._runtime_set_attr(self.TIME_ATTR, next_scene_time.format())
+        self._scene_time = next_scene_time
+        self._scene_time_error = ""
         for key, value in pending_attrs.items():
             attrs = self._runtime_set_attr(key, value)
         return attrs
@@ -184,7 +214,15 @@ class SceneTracker:
                 f"场景属性已达上限（{self.MAX_ATTRS} 个），"
                 f"请先删除不再需要的属性再新增"
             )
-        return self._runtime_set_attr(key, value)
+        parsed_time: SceneTime | None = None
+        if key == self.TIME_ATTR:
+            parsed_time = SceneTime.parse(value)
+            value = parsed_time.format()
+        result = self._runtime_set_attr(key, value)
+        if parsed_time is not None:
+            self._scene_time = parsed_time
+            self._scene_time_error = ""
+        return result
 
     def delete_attr(self, key: str) -> dict[str, str]:
         """删除场景属性；失败时返回 rpg_data 当前状态。"""
@@ -193,7 +231,11 @@ class SceneTracker:
         if self._status_mgr is not None and self._scene_table_id is not None:
             try:
                 table = self._status_mgr.runtime_delete_key_value(self._scene_table_id, key)
-                return self._attrs_from_table(table)
+                attrs = self._attrs_from_table(table)
+                if key == self.TIME_ATTR and self.TIME_ATTR not in attrs:
+                    self._scene_time = None
+                    self._scene_time_error = "当前场景缺少非空“时间”字段"
+                return attrs
             except (FileNotFoundError, PermissionError):
                 return self._current_attrs()
         return self._current_attrs()

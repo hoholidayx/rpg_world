@@ -4,6 +4,7 @@
 通过 StatusManager 持久化到 rpg_data active scene 状态表。
 """
 
+from commons.scene_time import SceneTime
 from rpg_core.scene.tracker import SceneTracker
 from rpg_core.scene.tools import (
     DeleteAttrTool,
@@ -17,6 +18,7 @@ from rpg_core.scene.tools import (
 
 __all__ = [
     "SceneTracker",
+    "SceneTime",
     "DeleteAttrTool",
     "SCENE_ATTR_TOOL_NAME",
     "SCENE_DELETE_ATTR_TOOL_NAME",

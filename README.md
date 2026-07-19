@@ -33,6 +33,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-20：Story 剧情动态调度。** 新增内置 `plot_scheduler` RP Module、Story 级线性剧情大纲与事件池、Session 禁用覆盖和原子调度账本。每个 IC/GM turn 最多选择一个到期大纲节点与一个池事件；强制项到时直接进入动态层，软约束项使用独立 LLM 路由结合完整 fixed layer、状态表和最近 5 个原始 turn 判断适宜性。调度元数据受硬上限保护，Context 门禁在 scratch 前预留最多两条动态指令。Play WebUI 增加“剧情调度”独立入口，集中管理定义、Scene 时间、覆盖与判断历史，不改变主正文 SSE。
 - **2026-07-18：后台终态通知链路。** Dream proposal 与 Session Derivation 在 SQL 终态提交后，通过专用异步 publisher 把 `ready / failed / interrupted` 发送到 Play API 的进程内广播 Hub；Play WebUI 在根 Provider 建立唯一全局 EventSource，并在顶栏独立通知中心展示最近事件。通知只保存在页面内存，可标记已读和清除；不增加 Toast、自动刷新或任务状态回写。
 - **2026-07-17：Dream 长期记忆系统。** 新增独立 `dream_service` 与 Session 级类型化 Persistent Memory 账本。Play WebUI 可手动执行 Shallow/Deep × Incremental/Full 四种 Dream，逐项检查和编辑 proposal 后原子应用；主 Agent 只读取 Evidence 仍有效的 active revisions，不再读取 `persistent_memory.json`。
 - **2026-07-15：LLM Service 完全独立进程化。** 新增 `run_llm.py`、受 Bearer 保护的 `/llm/v1` 业务 HTTP/SSE 边界和独立 `llm_client` 契约包。只有 LLM Service 读取 `llm.yaml`、Provider 密钥并持有 OpenAI/llama runtime；Agent 与 Memory 只通过远端客户端调用，旧 llama 子进程协议已删除。
@@ -358,7 +359,7 @@ Mailbox → 命令/角色 guard → 不可变 TurnExecutionPlan
 
 turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool service 与固定 hooks；生产代码通过公开接口协作，不访问 Agent、builder 或 SubAgent 私有状态。
 
-`AgentTurnTransaction` 是“内存 scratch + 短 commit 点”，不是跨 LLM 调用的长数据库事务。user/assistant message、Narrative Outcome、scene/status 都先暂存；快速状态阶段按 scene/单表目标独立 checkpoint，目标失败只恢复该目标并继续后续目标及主 runner。主 runner 完整成功后才统一提交仍保留的 scratch，流式 DONE 只在 commit 成功后发送；主 turn 取消或失败仍丢弃全部 scratch。story-memory、summary 和 deferred 属于 commit 后任务，不回滚已提交 turn。
+`AgentTurnTransaction` 是“内存 scratch + 短 commit 点”，不是跨 LLM 调用的长数据库事务。user/assistant message、Narrative Outcome、Plot Scheduler 判断、scene/status 都先暂存；快速状态阶段按 scene/单表目标独立 checkpoint，目标失败只恢复该目标并继续后续目标及主 runner。主 runner 完整成功后才统一提交仍保留的 scratch，流式 DONE 只在 commit 成功后发送；主 turn 取消或失败仍丢弃全部 scratch。story-memory、summary 和 deferred 属于 commit 后任务，不回滚已提交 turn。
 
 完整阶段顺序、mode 差异、Outcome/Route/Update 隔离、scene 规则、字段 allowlist、同步/流式时序、失败隔离和 LLM 调用数量见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。该文档是编排细节的单一说明入口。
 
@@ -374,7 +375,7 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 - `ContextInspector` 只服务 `/context`、日志和调试输出，不进入主业务数据模型。
 - `context/usage.py` 封装最终渲染 messages 的共享 token 估算和 provider usage 归一化。`context-preview` 只返回下一轮主 Context 估算并驱动圆环/正文门禁；准确 usage 只来自正常 `/turn` 返回或 `/stream` 的 `turn_completed.payload.usage`，仅用于回复气泡和详情复盘，当前不落库。
 - 主 Agent LLM 选择使用 `config default < story override < session override`：Story 详情编辑页立即保存故事默认，SessionRoom context 圆环左侧设置会话覆盖；生成中切换只影响下一 turn，不触发自动压缩。
-- `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。`narrative_outcome` 负责主 Agent 的剧情分支随机裁定；`dice` 只保留表达式解析和手动调试命令；`text_output_format` 仍由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
+- `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。`narrative_outcome` 负责主 Agent 的剧情分支随机裁定；`plot_scheduler` 按 Scene 时间选择大纲节点与事件池事件；`dice` 只保留表达式解析和手动调试命令；`text_output_format` 仍由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
 - 内置模块登记在 `rpg_rp_module_catalog`。Story 挂载是 Session 的能力上限，新 Story 默认挂载当前全部内置模块；Session 可覆盖模块启用状态和稀疏配置，但不能重新启用 Story 已停用的模块。每次 preview/turn 都解析独立不可变快照，生成中的配置修改只影响下一 turn。
 - `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Narrative Outcome 平时依靠 fixed contract 判断隐式变数；检测到明确随机意图时加入本轮强制裁定指令。若 StatusSubAgent 已预裁定，本轮不再注入 Narrative Outcome fixed section，只在动态层注入最终结果和明确的状态工具边界。
 
@@ -405,6 +406,43 @@ RP Modules 采用上下文分层策略：
 - 高频或临时模块状态才进入 `RP_MODULES` 动态层；Narrative Outcome 为明确随机意图加入本轮强制指令，并把 StatusSubAgent 已暂存的裁定结果注入主 Agent 首次调用。
 - 未预裁定时，主 LLM 的 RP schema 只暴露高层 `rp_story_outcome(reason, actor?)`；已预裁定时，该工具同时从主 Agent schema 和可执行 registry 移除。两种情况都不暴露表达式、DC、随机数、权重或低层 Dice 工具。
 - `/rp_modules`、`/rp_module` 始终由 `CommandDispatcher` 在 LLM 前拦截；`/roll`、`/check_dc` 只在当前 Story/Session 的 Dice 模块有效启用时动态出现。所有命令都不进入对话历史。
+
+#### Plot Scheduler：剧情大纲与事件池
+
+`plot_scheduler` 是 Story 级剧情编排模块，不是固定剧本执行器，也不改变正文 SSE。Story 可以同时维护多个命名线性大纲和多个事件池：
+
+- 大纲节点引用一个 Story 事件，并保存严格的 `SceneTime`、节点顺序与 `forced | soft` 调度模式。每条启用大纲只检查第一个尚未触发且未被 Session 禁用的节点；同轮所有大纲最多仲裁出一个到期节点。
+- 每个事件归属一个池，池按显式 priority 仲裁，池内使用 `random`（默认）或 `sequential`。无首次时间的事件立即可候选；有时间时只有达到或超过该时间才首次候选。
+- 大纲触发状态与池触发状态相互独立。大纲节点永不重复；池事件可选择重复，重复时必须配置正数世界内分钟冷却；同一个事件不会在同一 turn 被两个 lane 重复注入。池 lane 以稳定 `event_id` 记录已触发、延期与冷却；后续把事件移到其它池不会重置这些状态。
+- Session 可以分别禁用池事件或大纲节点。事件禁用只影响池调度，节点禁用只影响该大纲位置，不修改 Story 定义。
+
+Scene 时间统一使用 `第 Y 年 M 月 D 日 H 时 [M 分]`，与当前 `status_kind="scene"` 状态表的“时间”字段严格对应。内部采用固定 12 月 × 31 日虚拟历法换算世界内分钟；缺失或格式错误时，本轮调度记录 warning 并安全跳过，不使用系统时钟或默认时间。
+
+普通 IC/GM turn 的固定顺序是：
+
+```text
+Context gate
+  → turn scratch
+  → StatusPreflightHook
+  → PlotSchedulingPreflightHook
+  → MemoryRecallHook
+  → main runner
+  → message + outcome + plot decisions + scene/status 原子提交
+  → post-commit hooks
+```
+
+强制候选达到时间后直接暂存为 `triggered` 并进入本轮 `RP_MODULES / 本轮剧情调度`。软候选使用独立 `agent.plot_scheduler` LLM 业务路由判断当前是否适合开始；输入包含完整 fixed layer（Story Prompt、世界书、角色卡等）、当前 Scene、全部普通状态表、最近默认 5 个完整原始 IC/GM turn 和当前玩家输入，不读取 Summary、Story Memory、Persistent Memory 或 Recall 投影。Judge 理由有硬长度上限；主 Context 门禁按当前定义中最长两条 directive、事件/容器名称和有界元数据保守预留。适合时注入，不适合记录 `deferred`，Provider/结构化响应失败记录 `error`；后二者都不会中断主 turn，并至少跳过一个完整已提交 IC/GM turn 后才重试。同轮若大纲已接受，池事件判断会同时看到该指令并检查兼容性。
+
+每个 turn 最多原子记录一条 `outline` 和一条 `pool` 决策。主 runner 取消、Provider 失败、流缺失 DONE 或 commit 失败时，判断与注入随 scratch 一起丢弃；主历史编辑、删除、截断和重试会同步删除对应决策。`/clear` 清空判断/触发账本但保留 Session 禁用覆盖；Session 派生复制分支点以前的 `triggered` 记录和全部禁用覆盖，不复制 `deferred / error`。
+
+Play WebUI 左侧“剧情调度”页面提供三类大面板：大纲时间线、事件池定义、会话运行态。运行态只读取 Scene 时间、禁用覆盖和已提交决策，不触发 LLM、不轮询，也不向 SessionRoom 增加 HUD。决策历史以 `id DESC` + `beforeId` 稳定分页，单页最多 200 条；同一 turn 的 outline/pool 两条记录不会因分页丢失。管理接口集中在：
+
+- `GET/POST/PATCH/DELETE /play-api/v1/workspaces/{workspace_id}/stories/{story_id}/plot-scheduling/*`
+- `GET /play-api/v1/sessions/{session_id}/plot-scheduling`
+- `PUT /play-api/v1/sessions/{session_id}/plot-scheduling/event-overrides/{event_id}`
+- `PUT /play-api/v1/sessions/{session_id}/plot-scheduling/node-overrides/{node_id}`
+
+迁移 `0019_plot_scheduling.sql` 只把模块加入内置 catalog；符合 RP Module 既有规则，它不会追溯挂载到旧 Story。新 Story 默认挂载，旧 Story 可在剧情调度页面显式挂载。
 
 #### Narrative Outcome：五级剧情分支随机机制
 
@@ -471,6 +509,10 @@ rp_modules:
         success_with_cost: 40
         setback: 25
         critical_failure: 5
+    plot_scheduler:
+      enabled: true
+      judge_history_turns: 5
+      soft_retry_intervening_turns: 1
     dice:
       enabled: true
       default_dc: 12

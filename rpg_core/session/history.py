@@ -202,6 +202,7 @@ class SessionHistory:
             with gateway.database.atomic():
                 gateway.messages.clear(self._session_id())
                 gateway.narrative_outcomes.clear(self._session_id())
+                gateway.plot_scheduling.clear_session_decisions(self._session_id())
         self.replace([], persist=False)
         logger.debug(_TAG + " cleared history for session '{}'", self._session_id())
 
@@ -217,6 +218,7 @@ class SessionHistory:
                 with gateway.database.atomic():
                     gateway.messages.clear(self._session_id())
                     gateway.narrative_outcomes.clear(self._session_id())
+                    gateway.plot_scheduling.clear_session_decisions(self._session_id())
             self._state.messages = []
             self._rebuild_turn_state()
             return before
@@ -235,6 +237,10 @@ class SessionHistory:
                     gateway.messages.truncate_before_id(self._session_id(), boundary_uid)
                     for turn_id in removed_turn_ids:
                         gateway.narrative_outcomes.delete_for_turn(
+                            self._session_id(),
+                            turn_id,
+                        )
+                        gateway.plot_scheduling.delete_decisions_for_turn(
                             self._session_id(),
                             turn_id,
                         )
@@ -305,6 +311,10 @@ class SessionHistory:
                     self._session_id(),
                     boundary_turn,
                 )
+                gateway.plot_scheduling.delete_decisions_from_turn(
+                    self._session_id(),
+                    boundary_turn,
+                )
             self.load()
             return removed
 
@@ -352,6 +362,10 @@ class SessionHistory:
                     self._session_id(),
                     current.turn_id,
                 )
+            gateway.plot_scheduling.delete_decisions_for_turn(
+                self._session_id(),
+                current.turn_id,
+            )
         self.load()
         return Message.from_dict(updated_row.to_message_dict())
 
@@ -378,6 +392,10 @@ class SessionHistory:
                 self._session_id(),
                 current.turn_id,
             )
+            gateway.plot_scheduling.delete_decisions_for_turn(
+                self._session_id(),
+                current.turn_id,
+            )
         self.load()
         return Message.from_dict(current.to_message_dict())
 
@@ -396,6 +414,10 @@ class SessionHistory:
                     (message.to_persistence_dict() for message in self._state.messages),
                 )
                 gateway.narrative_outcomes.retain_turns(
+                    self._session_id(),
+                    (message.turn_id for message in self._state.messages),
+                )
+                gateway.plot_scheduling.retain_decision_turns(
                     self._session_id(),
                     (message.turn_id for message in self._state.messages),
                 )

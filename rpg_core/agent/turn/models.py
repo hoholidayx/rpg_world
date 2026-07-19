@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from rpg_core.session.modes import (
@@ -10,6 +10,7 @@ from rpg_core.session.modes import (
     TurnMode,
     normalize_turn_mode,
 )
+from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshot
 
 if TYPE_CHECKING:
     from rpg_core.agent.telemetry import TurnStats
@@ -106,6 +107,9 @@ class TurnExecutionPlan:
     execution: TurnExecutionSnapshot
     main_llm: "MainLLMSelection"
     rp_modules: "RPModuleSelectionSnapshot"
+    plot_schedule: PlotScheduleSnapshot = field(
+        default_factory=lambda: PlotScheduleSnapshot.disabled("")
+    )
     persistent_memory: tuple["PersistentMemoryFact", ...] = ()
 
     @property

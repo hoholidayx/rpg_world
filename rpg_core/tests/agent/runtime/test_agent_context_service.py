@@ -17,6 +17,7 @@ from rpg_core.agent.turn import (
     TurnRequest,
 )
 from rpg_core.context.fixed_layer.contributors import PLAYER_CHARACTER_SECTION_ID
+from rpg_core.context import FixedLayerSection
 from rpg_core.context.models import (
     FixedLayerData,
     HotHistoryLayer,
@@ -30,6 +31,10 @@ from rpg_core.session import SessionManager
 
 
 class _Counter:
+    @staticmethod
+    def count(text: str) -> int:
+        return len(text)
+
     @staticmethod
     def count_messages(messages: list[Message]) -> int:
         return sum(len(message.content) for message in messages)
@@ -232,6 +237,25 @@ def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -
         turn_execution=_execution(),
     )
     assert seen_inputs == [""]
+    with pytest.raises(MainContextWindowThresholdExceededError):
+        service.enforce_window_threshold(
+            selection,
+            rp_module_snapshot=SimpleNamespace(),
+            turn_execution=_execution(),
+            plot_schedule_snapshot=SimpleNamespace(
+                enabled=True,
+                context_gate_reserve_text="12",
+            ),
+        )
+    service.enforce_window_threshold(
+        selection,
+        rp_module_snapshot=SimpleNamespace(),
+        turn_execution=_execution(mode=TurnMode.OOC),
+        plot_schedule_snapshot=SimpleNamespace(
+            enabled=True,
+            context_gate_reserve_text="12",
+        ),
+    )
 
     service.build_for_inspection = lambda *_args, **_kwargs: SimpleNamespace(  # type: ignore[method-assign]
         to_message_objects=lambda: [Message(Role.USER, "123456789")]
@@ -242,6 +266,72 @@ def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -
             rp_module_snapshot=SimpleNamespace(),
             turn_execution=_execution(),
         )
+
+
+def test_plot_judge_context_uses_fixed_state_and_latest_complete_ic_gm_turns() -> None:
+    session = SessionManager(history_enabled=False)
+    session.replace_history(
+        [
+            Message(Role.USER, "ic user", mode="ic", turn_id=1, seq_in_turn=1),
+            Message(Role.ASSISTANT, "ic reply", mode="ic", turn_id=1, seq_in_turn=2),
+            Message(Role.USER, "ooc user", mode="ooc", turn_id=2, seq_in_turn=1),
+            Message(Role.ASSISTANT, "ooc reply", mode="ooc", turn_id=2, seq_in_turn=2),
+            Message(Role.USER, "gm user", mode="gm", turn_id=3, seq_in_turn=1),
+            Message(Role.ASSISTANT, "gm reply", mode="gm", turn_id=3, seq_in_turn=2),
+        ],
+        persist=False,
+    )
+    service = _service(_Builder(), session=session)
+    service._assemble_fixed_layer = MagicMock(  # type: ignore[method-assign]
+        return_value=FixedLayerData(
+            sections=[
+                FixedLayerSection(
+                    id="fixed-marker",
+                    title="固定层",
+                    source="test",
+                    priority=1,
+                    content="完整 fixed marker",
+                )
+            ]
+        )
+    )
+    runtime = SimpleNamespace(get_fixed_sections=lambda: ["rp fixed marker"])
+    scene = SimpleNamespace(get_context=lambda: "[scene]\n位置: 大厅\n[/scene]")
+    status = SimpleNamespace(
+        list_context_tables=lambda: [
+            {
+                "id": 1,
+                "name": "角色状态",
+                "status_kind": "normal",
+                "description": "测试",
+                "headers": ["属性", "值"],
+                "rows": [["生命", "8"]],
+            }
+        ]
+    )
+    execution = _execution(mode=TurnMode.GM)
+
+    messages = service.build_plot_judge_messages(
+        judge_prompt="judge marker",
+        current_user_input="current marker",
+        history_turns=1,
+        status_manager=status,
+        scene_tracker=scene,
+        rp_module_runtime=runtime,
+        turn_execution=execution,
+    )
+
+    contents = [message.content for message in messages]
+    assert "完整 fixed marker" in contents[0]
+    assert contents[1] == "judge marker"
+    assert "位置: 大厅" in contents[2]
+    assert "生命" in contents[2]
+    assert contents[-3:] == ["gm user", "gm reply", "current marker"]
+    assert all("ooc" not in content and "ic user" not in content for content in contents)
+    service._assemble_fixed_layer.assert_called_once_with(
+        ["rp fixed marker"],
+        turn_execution=execution,
+    )
 
 
 def test_verbose_context_logging_only_logs_main_llm_context_once(monkeypatch) -> None:

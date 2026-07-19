@@ -668,6 +668,10 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
 @pytest.mark.asyncio
 async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> None:
     manager = FakeRuntimeStatusManager()
+    manager.documents[2] = _document(
+        ("时间", "第 1 年 1 月 1 日 6 时"),
+        ("位置", "森林"),
+    )
     scratch, runtime = _scratch_runtime(manager)
     scene_tracker = SceneTracker(allow_runtime_key_changes=True)
     scene_tracker.bind_status_manager(runtime)
@@ -756,7 +760,10 @@ async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> N
     assert scene_tracker.get_time_state()["hour"] == 6
     assert [change.table_id for change in scratch.staged_changes] == [1]
     assert runtime.get_table_by_id(1)["rows"] == [["生命", "8"]]
-    assert runtime.get_table_by_id(2)["rows"] == [["位置", "森林"]]
+    assert runtime.get_table_by_id(2)["rows"] == [
+        ["时间", "第 1 年 1 月 1 日 6 时"],
+        ["位置", "森林"],
+    ]
     assert [record.status for record in result.records] == [
         StatusSubAgentRecordStatus.ROLLED_BACK_DUE_TO_FAILURE,
         StatusSubAgentRecordStatus.ERROR,

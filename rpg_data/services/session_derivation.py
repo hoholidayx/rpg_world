@@ -18,6 +18,7 @@ from rpg_data.repositories.rp_module_repo import RPModuleRepository
 from rpg_data.repositories.session_derivation_repo import SessionDerivationRepository
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.services.status import StatusTableService
+from rpg_data.services.plot_scheduling import PlotSchedulingService
 
 __all__ = [
     "SessionDerivationDataError",
@@ -70,6 +71,7 @@ class SessionDerivationService:
         database: Database,
         *,
         status: StatusTableService | None = None,
+        plot_scheduling: PlotSchedulingService | None = None,
     ) -> None:
         self._database = database
         bind_database(database)
@@ -77,6 +79,7 @@ class SessionDerivationService:
         self._sessions = SessionRepository(database)
         self._rp_modules = RPModuleRepository(database)
         self._status = status or StatusTableService(database)
+        self._plot_scheduling = plot_scheduling or PlotSchedulingService(database)
 
     def create_job(
         self,
@@ -188,6 +191,11 @@ class SessionDerivationService:
                 ) or target
             self._copy_rp_module_overrides(source.id, target.id)
             self._copy_messages(messages, target.id)
+            self._plot_scheduling.copy_derivation_state(
+                source.id,
+                target.id,
+                job.branch_turn_id,
+            )
             self._status.initialize_session_tables(target.id)
             updated_job = self._jobs.update(
                 job.id,
