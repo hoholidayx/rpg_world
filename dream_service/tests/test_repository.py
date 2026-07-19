@@ -53,6 +53,7 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
             "source_turn_end": 1,
             "memory_kind": "clue",
             "salience": 0.8,
+            "evidence_message_ids": [second.id],
         },),
         message_ids=(first.id, second.id),
     )[0]
@@ -79,8 +80,8 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
     )
     assert selection.source_story_memory_ids == (story_memory.id,)
     story_source = snapshot.story_memories[0]
-    assert story_source.evidence_message_ids == (first.id, second.id)
-    assert story_source.fingerprint.endswith(f":{first.id},{second.id}")
+    assert story_source.evidence_message_ids == (second.id,)
+    assert story_source.fingerprint.endswith(f":{second.id}")
     assert snapshot.player_character_name == role.snapshot.name
     assert selection.batches[0].player_character_name == role.snapshot.name
     assert {source.source_id for source in snapshot.summary_batches} == {"0"}
@@ -337,7 +338,11 @@ def test_repository_preserves_valid_evidence_without_rebinding_replacement(
     )
     story_memory = gateway.story_memory.add_details_and_mark_processed(
         session.id,
-        ({"text": "阿澈取得旧钥匙。", "turn_id": 1},),
+        ({
+            "text": "阿澈取得旧钥匙。",
+            "turn_id": 1,
+            "evidence_message_ids": [original_user.id, assistant.id],
+        },),
         message_ids=(original_user.id, assistant.id),
     )[0]
     repository = RPGDataDreamRepository(gateway)
@@ -394,7 +399,11 @@ def test_repository_preserves_valid_evidence_without_rebinding_replacement(
 
     refreshed_story_memory = gateway.story_memory.add_details_and_mark_processed(
         session.id,
-        ({"text": "阿澈取得旧钥匙。", "turn_id": 1},),
+        ({
+            "text": "阿澈取得旧钥匙。",
+            "turn_id": 1,
+            "evidence_message_ids": [replacement.id, assistant.id],
+        },),
         message_ids=(replacement.id, assistant.id),
     )[0]
     refreshed = repository.build_source_snapshot(session.id)

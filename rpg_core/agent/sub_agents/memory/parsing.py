@@ -7,19 +7,27 @@ from rpg_core.agent.telemetry import CallRecord
 
 
 def normalize_story_detail(raw: object) -> dict[str, object]:
-    if isinstance(raw, str):
-        return {
-            "text": raw,
-            "memory_kind": "event",
-            "epistemic_status": "confirmed",
-            "salience": 0.5,
-            "metadata": {},
-        }
     if not isinstance(raw, dict):
         raise MemoryPipelineError("each story memory detail must be an object")
     text = " ".join(str(raw.get("text", "") or "").split())
     if not text:
         raise MemoryPipelineError("story memory detail text must not be empty")
+    raw_evidence_ids = raw.get("evidence_message_ids")
+    if not isinstance(raw_evidence_ids, list) or not raw_evidence_ids:
+        raise MemoryPipelineError(
+            "each story memory detail must contain evidence_message_ids"
+        )
+    evidence_message_ids: list[int] = []
+    for value in raw_evidence_ids:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise MemoryPipelineError(
+                "story memory evidence_message_ids must be positive integers"
+            )
+        if value in evidence_message_ids:
+            raise MemoryPipelineError(
+                "story memory evidence_message_ids must be unique"
+            )
+        evidence_message_ids.append(value)
     metadata: dict[str, object] = {}
     for key in ("entities", "story_time", "location"):
         value = raw.get(key)
@@ -30,6 +38,7 @@ def normalize_story_detail(raw: object) -> dict[str, object]:
         "memory_kind": str(raw.get("memory_kind", "event") or "event"),
         "epistemic_status": str(raw.get("epistemic_status", "confirmed") or "confirmed"),
         "salience": raw.get("salience", 0.5),
+        "evidence_message_ids": evidence_message_ids,
         "metadata": metadata,
     }
 

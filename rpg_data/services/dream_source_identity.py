@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -54,26 +53,20 @@ def _valid_story_memory_evidence_ids(
     memory: models.SessionStoryMemory,
     messages_by_id: Mapping[int, models.SessionMessage],
 ) -> tuple[int, ...]:
-    try:
-        payload = json.loads(memory.source_messages_manifest_json or "[]")
-    except json.JSONDecodeError:
-        return ()
-    if not isinstance(payload, list) or not payload:
+    if not memory.evidence:
         return ()
 
     result: list[int] = []
     seen_message_ids: set[int] = set()
-    for item in payload:
-        if not isinstance(item, dict):
-            return ()
-        message_id = _optional_positive_int(item.get("messageId"))
-        turn_id = _optional_positive_int(item.get("turnId"))
-        version = _optional_positive_int(item.get("messageVersion"))
-        content_hash = str(item.get("contentHash", "") or "").strip().lower()
+    for item in memory.evidence:
+        message_id = item.message_id
+        turn_id = item.turn_id
+        version = item.message_version
+        content_hash = str(item.content_hash or "").strip().lower()
         if (
-            message_id is None
-            or turn_id is None
-            or version is None
+            message_id <= 0
+            or turn_id <= 0
+            or version <= 0
             or _SHA256_RE.fullmatch(content_hash) is None
             or message_id in seen_message_ids
         ):
@@ -103,13 +96,3 @@ def _valid_story_memory_evidence_ids(
             ),
         )
     )
-
-
-def _optional_positive_int(value: object) -> int | None:
-    if value is None or value == "" or isinstance(value, bool):
-        return None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None

@@ -43,6 +43,7 @@ class StoryMemoryStore:
             "source_turn_end",
             "dedupe_key",
             "metadata_schema_version",
+            "evidence_message_ids",
         }
         core = {key: value for key, value in detail.items() if key in allowed}
         self._service().add_detail(

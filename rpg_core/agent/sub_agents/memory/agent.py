@@ -124,6 +124,16 @@ STORY_DETAIL_SCHEMA: dict[str, object] = {
                                 "minimum": 0,
                                 "maximum": 1,
                             },
+                            "evidence_message_ids": {
+                                "type": "array",
+                                "items": {"type": "integer", "minimum": 1},
+                                "minItems": 1,
+                                "uniqueItems": True,
+                                "description": (
+                                    "直接支持该事实的 Conversation message_id；"
+                                    "只选择本批输入中明确列出的 ID。"
+                                ),
+                            },
                             "entities": {
                                 "type": "array",
                                 "items": {"type": "string"},
@@ -131,7 +141,13 @@ STORY_DETAIL_SCHEMA: dict[str, object] = {
                             "story_time": {"type": "string"},
                             "location": {"type": "string"},
                         },
-                        "required": ["text", "memory_kind", "epistemic_status", "salience"],
+                        "required": [
+                            "text",
+                            "memory_kind",
+                            "epistemic_status",
+                            "salience",
+                            "evidence_message_ids",
+                        ],
                     },
                     "description": "值得长期保存、并带有事实类型与认知状态的剧情记忆。",
                 },
@@ -245,6 +261,8 @@ STORY_MEMORY_PROMPT = """\
 - 承诺或计划使用 commitment，不得写成当前已经达成的状态。
 - 每项只表达一个事实，写明人物或实体名称，避免依赖代词。
 - 与 Existing Story Memory 语义相同的内容不要重复输出。
+- 每项必须填写 evidence_message_ids，只引用 Conversation Content 中明确标出的 message_id。
+- Evidence 应是直接支持该项事实的最小消息集合；不要把整批消息一律附给每项，也不要引用 Existing Story Memory。
 
 salience 使用 0..1：只有会影响人物、关系、目标、线索、世界规则或持续状态的内容才应接近 1。
 entities、story_time、location 仅在输入有明确依据时填写；未知时留空。
@@ -856,7 +874,10 @@ class MemorySubAgent(BaseSubAgent):
     async def _pipeline_story_memory(self, conv: list[Message], call_stats: list[CallRecord]) -> int:
         """提取剧情细节，追加到 StoryMemoryStore。"""
         logger.info(_TAG + " story pipeline starting: {} messages in window", len(conv))
-        window = self._format_conversation_window(conv)
+        window = self._format_conversation_window(
+            conv,
+            include_message_identity=True,
+        )
 
         # Existing memories are only an LLM semantic-dedupe hint. The bounded
         # recent tail prevents this request from growing forever; SQL exact
@@ -915,7 +936,26 @@ class MemorySubAgent(BaseSubAgent):
             _normalize_story_detail(detail)
             for detail in details[: self._max_story_items]
         ]
-        turn_ids = [int(message.turn_id) for message in conv if int(message.turn_id) > 0]
+        source_messages = [
+            message
+            for message in conv
+            if message.role in (Role.USER, Role.ASSISTANT)
+            and message.mode in ("ic", "gm")
+        ]
+        source_message_ids = {
+            int(message.uid) for message in source_messages if message.uid > 0
+        }
+        for detail in normalized_details:
+            evidence_ids = set(detail["evidence_message_ids"])
+            if not evidence_ids.issubset(source_message_ids):
+                raise MemoryPipelineError(
+                    "story memory Evidence must reference messages in the current IC/GM batch"
+                )
+        turn_ids = [
+            int(message.turn_id)
+            for message in source_messages
+            if int(message.turn_id) > 0
+        ]
         if not turn_ids:
             raise MemoryPipelineError("story memory source messages require turn ids")
         try:
@@ -924,7 +964,9 @@ class MemorySubAgent(BaseSubAgent):
                 turn_id=max(turn_ids),
                 source_turn_start=min(turn_ids),
                 source_turn_end=max(turn_ids),
-                message_ids=[message.uid for message in conv if message.uid > 0],
+                message_ids=[
+                    message.uid for message in source_messages if message.uid > 0
+                ],
             )
         except Exception as exc:
             raise MemoryPipelineError("failed to atomically persist story memory") from exc
@@ -1216,6 +1258,8 @@ class MemorySubAgent(BaseSubAgent):
         self,
         history: list[Message],
         max_rounds: int | None = None,
+        *,
+        include_message_identity: bool = False,
     ) -> str:
         """Format conversation as readable ``Role: text`` lines, windowed."""
         if max_rounds is not None:
@@ -1230,6 +1274,13 @@ class MemorySubAgent(BaseSubAgent):
             label = {Role.USER.value: "User", Role.ASSISTANT.value: "Assistant"}.get(
                 role, role.capitalize()
             )
-            lines.append(f"{label}: {content}")
+            if include_message_identity:
+                message_id = str(msg.uid) if msg.uid > 0 else "unavailable"
+                lines.append(
+                    f"[message_id={message_id}; turn_id={msg.turn_id}; "
+                    f"mode={msg.mode}; role={label}]\n{content}"
+                )
+            else:
+                lines.append(f"{label}: {content}")
 
         return "\n\n".join(lines) if lines else "(no conversation content)"

@@ -55,6 +55,8 @@ __all__ = [
     "SessionDeleteResult",
     "SessionResetResult",
     "SessionStatusResetResult",
+    "MemoryFact",
+    "MemoryEvidence",
     "SessionStoryMemory",
     "DreamApplyResult",
     "DreamEvidenceDraft",
@@ -1208,6 +1210,27 @@ class SessionMessage:
 
 
 @dataclass(frozen=True)
+class MemoryFact:
+    """Common fact payload shared by Story and Persistent Memory projections."""
+
+    text: str
+    memory_kind: str
+    epistemic_status: str
+    salience: float
+    dedupe_key: str
+
+
+@dataclass(frozen=True)
+class MemoryEvidence:
+    """Immutable identity of one authoritative Session message."""
+
+    message_id: int
+    turn_id: int
+    message_version: int
+    content_hash: str
+
+
+@dataclass(frozen=True)
 class SessionStoryMemory:
     id: int
     session_id: str
@@ -1222,7 +1245,7 @@ class SessionStoryMemory:
     dream_processed: bool = False
     metadata_schema_version: int = 1
     metadata_json: str = "{}"
-    source_messages_manifest_json: str = "[]"
+    evidence: tuple[MemoryEvidence, ...] = ()
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
@@ -1234,13 +1257,14 @@ class SessionStoryMemory:
             metadata = json.loads(self.metadata_json or "{}")
         except json.JSONDecodeError:
             metadata = {}
+        fact = self.fact
         return {
             "id": self.id,
             "turn_id": self.turn_id,
-            "text": self.text,
-            "memory_kind": self.memory_kind,
-            "epistemic_status": self.epistemic_status,
-            "salience": self.salience,
+            "text": fact.text,
+            "memory_kind": fact.memory_kind,
+            "epistemic_status": fact.epistemic_status,
+            "salience": fact.salience,
             "source_turn_start": self.source_turn_start,
             "source_turn_end": self.source_turn_end,
             "dedupe_key": self.dedupe_key,
@@ -1249,13 +1273,20 @@ class SessionStoryMemory:
             "metadata": metadata if isinstance(metadata, dict) else {},
         }
 
+    @property
+    def fact(self) -> MemoryFact:
+        return MemoryFact(
+            text=self.text,
+            memory_kind=self.memory_kind,
+            epistemic_status=self.epistemic_status,
+            salience=self.salience,
+            dedupe_key=self.dedupe_key,
+        )
+
 
 @dataclass(frozen=True)
-class DreamEvidenceDraft:
-    message_id: int
-    turn_id: int
-    message_version: int
-    content_hash: str
+class DreamEvidenceDraft(MemoryEvidence):
+    """Evidence selected for a Dream proposal item."""
 
 
 @dataclass(frozen=True)
@@ -1355,13 +1386,9 @@ class PersistentMemory:
 
 
 @dataclass(frozen=True)
-class PersistentMemoryEvidence:
+class PersistentMemoryEvidence(MemoryEvidence):
     id: int
     revision_id: int
-    message_id: int
-    turn_id: int
-    message_version: int
-    content_hash: str
     created_at: str = ""
 
 
@@ -1401,6 +1428,16 @@ class PersistentMemoryBundle:
     @property
     def salience(self) -> float:
         return self.current_revision.salience
+
+    @property
+    def fact(self) -> MemoryFact:
+        return MemoryFact(
+            text=self.text,
+            memory_kind=self.memory_kind,
+            epistemic_status=self.epistemic_status,
+            salience=self.salience,
+            dedupe_key=self.memory.dedupe_key,
+        )
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import replace
 
@@ -203,10 +205,11 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     nested_file.parent.mkdir(parents=True)
     nested_file.write_bytes(b"old runtime data")
     vector_db = runtime_dir / "memory_vectors.db"
-    assert vector_db.is_file()
+    # RAG is disabled by default, so seed an existing derived index explicitly.
     with sqlite3.connect(vector_db) as connection:
         connection.execute("CREATE TABLE clear_marker (value TEXT)")
         connection.execute("INSERT INTO clear_marker VALUES ('old')")
+    assert vector_db.is_file()
 
     backup_count = integration_data_gateway.backup.messages.count(session_id)
     state_before = integration_data_gateway.session_roles.get_state(session_id)
@@ -255,12 +258,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     assert not nested_file.exists()
     assert list(summary_dir.glob("*.md")) == []
     assert json.loads((runtime_dir / "rpg_summaries.json").read_text(encoding="utf-8")) == []
-    assert vector_db.is_file()
-    with sqlite3.connect(vector_db) as connection:
-        marker = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='clear_marker'"
-        ).fetchone()
-    assert marker is None
+    assert not vector_db.exists()
 
     state_after = integration_data_gateway.session_roles.get_state(session_id)
     assert state_after == state_before
@@ -473,30 +471,135 @@ async def test_story_memory_extraction_runs_after_commit_and_marks_message_rows(
     )
     session_id = "integration_story_memory"
     agent = await integration_agent_factory(session_id)
-    scripted_llm_manager.memory.queue_chat(
-        response(
+    def extract_with_prompt_evidence(messages, _tools):  # noqa: ANN001
+        source_ids = [
+            int(value)
+            for value in re.findall(
+                r"message_id=(\d+)",
+                str(messages[1]["content"]),
+            )
+        ]
+        return response(
             "",
             model="memory-model",
             tool_calls=[
                 tool_call(
                     "extract_story_details",
-                    '{"story_details":["测试者在大厅发现了一枚银色钥匙。"]}',
+                    json.dumps(
+                        {
+                            "story_details": [{
+                                "text": "测试者在大厅发现了一枚银色钥匙。",
+                                "memory_kind": "clue",
+                                "epistemic_status": "confirmed",
+                                "salience": 0.8,
+                                "evidence_message_ids": source_ids,
+                            }]
+                        },
+                        ensure_ascii=False,
+                    ),
                 )
             ],
         )
-    )
+
+    scripted_llm_manager.memory.queue_chat(extract_with_prompt_evidence)
 
     reply = await agent.send("我捡起银色钥匙")
 
     assert reply.text == "config-model response"
     memories = integration_data_gateway.story_memory.list(session_id)
     assert [item.text for item in memories] == ["测试者在大厅发现了一枚银色钥匙。"]
+    assert [item.message_id for item in memories[0].evidence] == [
+        row.id for row in integration_data_gateway.messages.list(session_id)
+    ]
     rows = integration_data_gateway.messages.list(session_id)
     assert rows and all(row.story_memory_processed for row in rows)
     assert any(
         call.biz_key == AGENT_MEMORY_SUB_AGENT_BIZ_KEY and call.provider_key is None
         for call in scripted_llm_manager.calls
     )
+
+
+@pytest.mark.asyncio
+async def test_default_agent_disables_online_rag_but_keeps_story_and_persistent_memory(
+    integration_agent_factory,
+    integration_data_gateway,
+    scripted_llm_manager,
+):
+    from rpg_data import models
+
+    session_id = "integration_memory_disabled"
+    agent = await integration_agent_factory(session_id)
+
+    assert agent._lifecycle.resources.memory_manager is None  # noqa: SLF001
+
+    scripted_llm_manager.main_provider().queue_chat(
+        response("测试大厅的北门由银色机关控制。", model="config-model")
+    )
+    first = await agent.send("记住这条用于长期事实证据的消息。")
+    assert first.committed_turn_id == 1
+    assert first.text == "测试大厅的北门由银色机关控制。"
+
+    snapshot = integration_data_gateway.dream.build_source_snapshot(session_id)
+    evidence_message = snapshot.messages[-1]
+    source_fingerprint = "f" * 64
+    proposal = integration_data_gateway.dream.create_proposal(
+        session_id,
+        depth=models.DREAM_DEPTH_SHALLOW,
+        scope=models.DREAM_SCOPE_INCREMENTAL,
+        history_fingerprint=snapshot.history_fingerprint,
+        source_fingerprint=source_fingerprint,
+    )
+    ready = integration_data_gateway.dream.set_proposal_ready(
+        proposal.id,
+        (
+            models.DreamProposalItemDraft(
+                action="add",
+                dedupe_key="a" * 64,
+                text="测试大厅的北门由银色机关控制。",
+                memory_kind="world_fact",
+                epistemic_status="confirmed",
+                salience=0.9,
+                evidence=(
+                    models.DreamEvidenceDraft(
+                        message_id=evidence_message.id,
+                        turn_id=evidence_message.turn_id,
+                        message_version=evidence_message.version,
+                        content_hash=hashlib.sha256(
+                            evidence_message.content.encode("utf-8")
+                        ).hexdigest(),
+                    ),
+                ),
+            ),
+        ),
+    )
+    integration_data_gateway.dream.apply_proposal(
+        ready.id,
+        history_fingerprint=snapshot.history_fingerprint,
+        source_fingerprint=source_fingerprint,
+    )
+    integration_data_gateway.story_memory.add_detail(
+        session_id,
+        "测试者在大厅拾取了一枚银色钥匙。",
+        turn_id=1,
+    )
+
+    second = await agent.send("继续探索大厅。")
+    provider_context = "\n".join(
+        str(message.get("content") or "")
+        for message in scripted_llm_manager.main_provider().calls[-1].messages
+    )
+
+    assert second.committed_turn_id == 2
+    assert "## 剧情记忆" in provider_context
+    assert "测试者在大厅拾取了一枚银色钥匙。" in provider_context
+    assert "## 常驻记忆" in provider_context
+    assert "测试大厅的北门由银色机关控制。" in provider_context
+    assert "## 召回记忆" not in provider_context
+    assert {
+        MEMORY_EMBED_BIZ_KEY,
+        MEMORY_QUERY_PLANNER_BIZ_KEY,
+        MEMORY_RERANK_BIZ_KEY,
+    }.isdisjoint(call.biz_key for call in scripted_llm_manager.calls)
 
 
 @pytest.mark.asyncio
@@ -510,6 +613,7 @@ async def test_memory_recall_falls_back_locally_then_retries_remote_capability(
     session_id = "integration_memory_retry"
     remote_memory_settings = replace(
         integration_settings.memory_settings,
+        enabled=True,
         query_planner_enabled=True,
         rerank_enabled=True,
     )

@@ -12,7 +12,11 @@ from peewee import Database, IntegrityError, SQL
 
 from commons.text_identity import stable_text_identity_key
 from rpg_data import models
-from rpg_data.repositories._utils import to_session_message, to_session_story_memory
+from rpg_data.repositories._utils import (
+    to_memory_evidence,
+    to_session_message,
+    to_session_story_memory,
+)
 from rpg_data.repositories.records import (
     SessionDreamProposalItemEvidenceRecord,
     SessionDreamProposalItemRecord,
@@ -23,6 +27,7 @@ from rpg_data.repositories.records import (
     SessionPersistentMemoryRecord,
     SessionPersistentMemoryRevisionRecord,
     SessionRecord,
+    SessionStoryMemoryEvidenceRecord,
     SessionStoryMemoryRecord,
     bind_database,
 )
@@ -822,10 +827,11 @@ class DreamMemoryService:
             .where(SessionStoryMemoryRecord.session == normalized_session_id)
             .order_by(SessionStoryMemoryRecord.id)
         )
+        story_memories = _story_memories_from_rows(story_rows)
         return models.DreamSourceSnapshot(
             session_id=normalized_session_id,
             messages=tuple(to_session_message(row) for row in message_rows),
-            story_memories=tuple(to_session_story_memory(row) for row in story_rows),
+            story_memories=story_memories,
             active_memories=tuple(
                 self.list_memories(
                     normalized_session_id,
@@ -834,7 +840,7 @@ class DreamMemoryService:
             ),
             state=self.get_state(normalized_session_id),
             history_fingerprint=_history_fingerprint_from_rows(message_rows),
-            story_memory_fingerprint=_story_memory_fingerprint_from_rows(story_rows),
+            story_memory_fingerprint=_story_memory_fingerprint(story_memories),
         )
 
     def clear(self, session_id: str) -> models.DreamResetResult:
@@ -1506,13 +1512,13 @@ class DreamMemoryService:
         messages_by_id = {
             int(row.id): to_session_message(row) for row in message_rows
         }
-        for row in rows:
-            entry = manifest.get(str(row.id))
+        for memory in _story_memories_from_rows(rows):
+            entry = manifest.get(str(memory.id))
             if not isinstance(entry, dict):
                 return False
             expected = str(entry.get("fingerprint") or "")
             actual = story_memory_source_identity(
-                to_session_story_memory(row),
+                memory,
                 messages_by_id,
             ).fingerprint
             if expected != actual:
@@ -1795,20 +1801,59 @@ def _history_fingerprint_from_rows(rows: Sequence[SessionMessageRecord]) -> str:
     return _json_fingerprint(payload)
 
 
-def _story_memory_fingerprint_from_rows(
+def _story_memories_from_rows(
     rows: Sequence[SessionStoryMemoryRecord],
+) -> tuple[models.SessionStoryMemory, ...]:
+    if not rows:
+        return ()
+    memory_ids = [int(row.id) for row in rows]
+    evidence_by_memory: dict[int, list[models.MemoryEvidence]] = {}
+    evidence_rows = (
+        SessionStoryMemoryEvidenceRecord.select()
+        .where(SessionStoryMemoryEvidenceRecord.story_memory.in_(memory_ids))
+        .order_by(
+            SessionStoryMemoryEvidenceRecord.story_memory,
+            SessionStoryMemoryEvidenceRecord.turn_id,
+            SessionStoryMemoryEvidenceRecord.message_id,
+        )
+    )
+    for evidence_row in evidence_rows:
+        evidence_by_memory.setdefault(
+            int(evidence_row.story_memory_id),
+            [],
+        ).append(to_memory_evidence(evidence_row))
+    return tuple(
+        to_session_story_memory(
+            row,
+            evidence=tuple(evidence_by_memory.get(int(row.id), ())),
+        )
+        for row in rows
+    )
+
+
+def _story_memory_fingerprint(
+    memories: Sequence[models.SessionStoryMemory],
 ) -> str:
     payload = [
         {
-            "id": int(row.id),
-            "version": int(row.version),
-            "dedupe_key": str(row.dedupe_key),
-            "turn_id": int(row.turn_id),
-            "source_turn_start": int(row.source_turn_start),
-            "source_turn_end": int(row.source_turn_end),
-            "text_hash": _content_hash(str(row.text or "")),
+            "id": memory.id,
+            "version": memory.version,
+            "dedupe_key": memory.dedupe_key,
+            "turn_id": memory.turn_id,
+            "source_turn_start": memory.source_turn_start,
+            "source_turn_end": memory.source_turn_end,
+            "text_hash": _content_hash(memory.text),
+            "evidence": [
+                {
+                    "message_id": item.message_id,
+                    "turn_id": item.turn_id,
+                    "message_version": item.message_version,
+                    "content_hash": item.content_hash,
+                }
+                for item in memory.evidence
+            ],
         }
-        for row in rows
+        for memory in memories
     ]
     return _json_fingerprint(payload)
 

@@ -311,14 +311,6 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         assert duplicate.version == second.version + 1
         assert duplicate.to_context_dict()["metadata"] == {"kind": "test"}
 
-        round_trip = story_memory.add_details_and_mark_processed(
-            "s_forest001",
-            [duplicate],
-            message_ids=[],
-        )
-        assert [row.id for row in round_trip] == [second.id]
-        assert round_trip[0].dedupe_key == duplicate.dedupe_key
-        assert round_trip[0].version == duplicate.version
         assert len(story_memory.list("s_forest001")) == 2
 
         assert story_memory.set_dream_processed([first.id], dream_processed=True) == 1
@@ -366,23 +358,25 @@ def test_story_memory_batch_and_progress_commit_atomically(tmp_path: Path) -> No
                 "salience": 0.7,
                 "source_turn_start": 1,
                 "source_turn_end": 1,
+                "evidence_message_ids": [rows[1].id],
                 "metadata": {"location": "北门"},
             }],
             message_ids=[row.id for row in rows],
         )
         assert len(saved) == 1
-        source_manifest = json.loads(saved[0].source_messages_manifest_json)
-        assert [item["messageId"] for item in source_manifest] == [
-            row.id for row in rows
-        ]
-        assert all(item["messageVersion"] == 1 for item in source_manifest)
-        assert all(len(item["contentHash"]) == 64 for item in source_manifest)
+        assert [item.message_id for item in saved[0].evidence] == [rows[1].id]
+        assert saved[0].evidence[0].message_version == 1
+        assert len(saved[0].evidence[0].content_hash) == 64
         assert all(messages.get(row.id).story_memory_processed for row in rows)
 
         with pytest.raises(ValueError, match="belong to the session"):
             story_memory.add_details_and_mark_processed(
                 session_id,
-                [{"text": "不应写入", "turn_id": 2}],
+                [{
+                    "text": "不应写入",
+                    "turn_id": 2,
+                    "evidence_message_ids": [999999],
+                }],
                 message_ids=[999999],
             )
         assert [row.text for row in story_memory.list(session_id)] == ["角色听说北门已经关闭。"]
@@ -390,7 +384,7 @@ def test_story_memory_batch_and_progress_commit_atomically(tmp_path: Path) -> No
         database.close()
 
 
-def test_story_memory_source_manifest_preserves_large_backlog(tmp_path: Path) -> None:
+def test_story_memory_evidence_preserves_large_backlog(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
         messages = MessageService(database)
@@ -422,16 +416,108 @@ def test_story_memory_source_manifest_preserves_large_backlog(tmp_path: Path) ->
                 "turn_id": 33,
                 "source_turn_start": 1,
                 "source_turn_end": 33,
+                "evidence_message_ids": [row.id for row in rows],
             }],
             message_ids=[row.id for row in rows],
         )
 
-        source_manifest = json.loads(saved[0].source_messages_manifest_json)
-        assert len(source_manifest) == 65
-        assert [item["messageId"] for item in source_manifest] == [
+        assert len(saved[0].evidence) == 65
+        assert [item.message_id for item in saved[0].evidence] == [
             row.id for row in rows
         ]
         assert all(messages.get(row.id).story_memory_processed for row in rows)
+    finally:
+        database.close()
+
+
+def test_story_memory_exact_upsert_replaces_evidence_instead_of_union(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        story_memory = StoryMemoryService(database)
+        session_id = _create_test_session(database, "s_story_evidence_replace")
+        first_source = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "守卫第一次交出铜钥匙。",
+            turn_id=1,
+            seq_in_turn=1,
+        )
+        second_source = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "守卫再次确认铜钥匙已交给阿澈。",
+            turn_id=2,
+            seq_in_turn=1,
+        )
+        detail = {
+            "text": "守卫把铜钥匙交给阿澈。",
+            "turn_id": 1,
+            "memory_kind": "clue",
+            "evidence_message_ids": [first_source.id],
+        }
+        first = story_memory.add_details_and_mark_processed(
+            session_id,
+            (detail,),
+            message_ids=(first_source.id,),
+        )[0]
+        detail["turn_id"] = 2
+        detail["evidence_message_ids"] = [second_source.id]
+        refreshed = story_memory.add_details_and_mark_processed(
+            session_id,
+            (detail,),
+            message_ids=(second_source.id,),
+        )[0]
+
+        assert refreshed.id == first.id
+        assert refreshed.version == first.version + 1
+        assert [item.message_id for item in refreshed.evidence] == [second_source.id]
+        assert refreshed.source_turn_start == refreshed.source_turn_end == 2
+    finally:
+        database.close()
+
+
+def test_story_memory_fact_evidence_and_progress_roll_back_together(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        messages = MessageService(database)
+        story_memory = StoryMemoryService(database)
+        session_id = _create_test_session(database, "s_story_atomic_rollback")
+        batch_source = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_USER,
+            "当前批次",
+            turn_id=1,
+            seq_in_turn=1,
+        )
+        outside_source = messages.append(
+            session_id,
+            models.MESSAGE_ROLE_ASSISTANT,
+            "不属于当前批次",
+            turn_id=2,
+            seq_in_turn=1,
+        )
+
+        with pytest.raises(ValueError, match="current source batch"):
+            story_memory.add_details_and_mark_processed(
+                session_id,
+                (
+                    {
+                        "text": "本应随事务回滚。",
+                        "turn_id": 1,
+                        "evidence_message_ids": [batch_source.id],
+                    },
+                    {
+                        "text": "引用批次外来源。",
+                        "turn_id": 2,
+                        "evidence_message_ids": [outside_source.id],
+                    },
+                ),
+                message_ids=(batch_source.id,),
+            )
+
+        assert story_memory.list(session_id) == []
+        assert messages.get(batch_source.id).story_memory_processed is False
     finally:
         database.close()
 

@@ -56,17 +56,20 @@ class PersistentMemoryStore:
         database = gateway.database
         try:
             bundles = gateway.dream.list_context_memories(self._session_id)
-            return [
-                PersistentMemoryItem(
-                    memory_id=bundle.memory.id,
-                    revision_number=bundle.current_revision.revision_number,
-                    text=bundle.text,
-                    memory_kind=bundle.memory_kind,
-                    epistemic_status=bundle.epistemic_status,
-                    salience=bundle.salience,
+            result: list[PersistentMemoryItem] = []
+            for bundle in bundles:
+                fact = bundle.fact
+                result.append(
+                    PersistentMemoryItem(
+                        memory_id=bundle.memory.id,
+                        revision_number=bundle.current_revision.revision_number,
+                        text=fact.text,
+                        memory_kind=fact.memory_kind,
+                        epistemic_status=fact.epistemic_status,
+                        salience=fact.salience,
+                    )
                 )
-                for bundle in bundles
-            ]
+            return result
         finally:
             # Peewee connections are thread-local. Close the worker's handle;
             # the shared gateway/database object remains initialized.

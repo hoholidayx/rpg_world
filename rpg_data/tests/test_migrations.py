@@ -34,6 +34,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "rpg_session_messages",
             "rpg_session_backup_messages",
             "rpg_session_story_memories",
+            "rpg_session_story_memory_evidence",
             "rpg_session_dream_proposals",
             "rpg_session_dream_proposal_items",
             "rpg_session_dream_proposal_item_evidence",
@@ -95,6 +96,12 @@ def test_run_migrations_creates_initial_tables() -> None:
         session_message_columns = set(session_message_info)
         backup_message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_backup_messages)")}
         story_memory_columns = {row["name"] for row in conn.execute("PRAGMA table_info(rpg_session_story_memories)")}
+        story_memory_evidence_columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(rpg_session_story_memory_evidence)"
+            )
+        }
         dream_item_columns = {
             row["name"]
             for row in conn.execute(
@@ -209,8 +216,16 @@ def test_run_migrations_creates_initial_tables() -> None:
             "dream_processed",
             "metadata_schema_version",
             "metadata_json",
-            "source_messages_manifest_json",
         }.issubset(story_memory_columns)
+        assert "source_messages_manifest_json" not in story_memory_columns
+        assert {
+            "story_memory_id",
+            "message_id",
+            "turn_id",
+            "message_version",
+            "content_hash",
+            "created_at",
+        }.issubset(story_memory_evidence_columns)
         assert {
             "proposal_id",
             "action",
@@ -271,6 +286,7 @@ def test_run_migrations_creates_initial_tables() -> None:
             "idx_rpg_session_story_memories_session_id_id",
             "idx_rpg_session_story_memories_turn",
             "idx_rpg_session_story_memories_dream",
+            "idx_rpg_session_story_memory_evidence_message",
             "idx_rpg_session_narrative_outcomes_session_turn",
             "idx_rpg_story_narrative_styles_story",
             "ux_rpg_story_narrative_styles_base",
@@ -384,6 +400,7 @@ def test_run_migrations_is_idempotent() -> None:
             ("0014", "0014_story_memory_metadata.sql"),
             ("0015", "0015_dream_memory.sql"),
             ("0016", "0016_session_derivations.sql"),
+            ("0017", "0017_story_memory_evidence.sql"),
         ]
     finally:
         conn.close()
@@ -433,6 +450,82 @@ def test_story_memory_metadata_migration_hard_cuts_legacy_rows(monkeypatch) -> N
                 """
             )
         conn.rollback()
+    finally:
+        conn.close()
+
+
+def test_story_memory_evidence_migration_backfills_manifest(monkeypatch) -> None:
+    conn = db.connect(":memory:")
+    migrations = migration_runner._iter_migration_files()
+    evidence_index = next(
+        index
+        for index, migration in enumerate(migrations)
+        if migration.name == "0017_story_memory_evidence.sql"
+    )
+    try:
+        monkeypatch.setattr(
+            migration_runner,
+            "_iter_migration_files",
+            lambda: migrations[:evidence_index],
+        )
+        migration_runner.run_migrations(conn)
+        content_hash = "a" * 64
+        conn.execute(
+            """
+            INSERT INTO rpg_session_story_memories (
+                session_id, turn_id, text, memory_kind, epistemic_status,
+                salience, source_turn_start, source_turn_end, dedupe_key,
+                source_messages_manifest_json
+            ) VALUES (?, 2, 'legacy evidence', 'event', 'confirmed', 0.8, 2, 2, ?, ?)
+            """,
+            (
+                "s_forest001",
+                "b" * 64,
+                (
+                    '[{"messageId":7,"turnId":2,"messageVersion":3,'
+                    f'"contentHash":"{content_hash}"}}]'
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO rpg_session_story_memories (
+                session_id, turn_id, text, memory_kind, epistemic_status,
+                salience, source_turn_start, source_turn_end, dedupe_key,
+                source_messages_manifest_json
+            ) VALUES (?, 3, 'corrupted legacy evidence', 'event', 'confirmed', 0.4, 3, 3, ?, ?)
+            """,
+            ("s_forest001", "c" * 64, "{not-json"),
+        )
+        conn.commit()
+
+        monkeypatch.setattr(
+            migration_runner,
+            "_iter_migration_files",
+            lambda: migrations,
+        )
+        migration_runner.run_migrations(conn)
+
+        evidence = conn.execute(
+            """
+            SELECT message_id, turn_id, message_version, content_hash
+            FROM rpg_session_story_memory_evidence
+            """
+        ).fetchone()
+        assert dict(evidence) == {
+            "message_id": 7,
+            "turn_id": 2,
+            "message_version": 3,
+            "content_hash": content_hash,
+        }
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM rpg_session_story_memories"
+        ).fetchone()["count"] == 2
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(rpg_session_story_memories)")
+        }
+        assert "source_messages_manifest_json" not in columns
     finally:
         conn.close()
 

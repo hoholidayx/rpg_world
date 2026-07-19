@@ -31,13 +31,17 @@ class CapturingStoryStore:
     def __init__(self, items: list[dict[str, object]] | None = None) -> None:
         self.items = list(items or [])
         self.persist_calls = 0
+        self.persisted_details: list[dict[str, object]] = []
+        self.persist_kwargs: dict[str, object] = {}
 
     def get_all(self) -> list[dict[str, object]]:
         return list(self.items)
 
-    def add_details_and_mark_processed(self, details, **_kwargs) -> int:  # noqa: ANN001
+    def add_details_and_mark_processed(self, details, **kwargs) -> int:  # noqa: ANN001
         self.persist_calls += 1
-        return len(list(details))
+        self.persisted_details = list(details)
+        self.persist_kwargs = dict(kwargs)
+        return len(self.persisted_details)
 
 
 async def _run_execute_story_memory(workspace: str) -> int:
@@ -340,6 +344,89 @@ async def test_strict_story_memory_accepts_explicit_empty_details_and_advances()
 
 
 @pytest.mark.asyncio
+async def test_story_memory_requires_and_persists_per_fact_evidence_ids() -> None:
+    store = CapturingStoryStore()
+    sub_agent = MemorySubAgent(
+        story_store=store,  # type: ignore[arg-type]
+        provider_biz_key="agent.memory_sub_agent",
+    )
+    captured_prompt = ""
+
+    async def capture(messages, _schema, **_kwargs):  # noqa: ANN001
+        nonlocal captured_prompt
+        captured_prompt = str(messages[1]["content"])
+        return {
+            "story_details": [{
+                "text": "守卫把铜钥匙交给阿澈。",
+                "memory_kind": "clue",
+                "epistemic_status": "confirmed",
+                "salience": 0.9,
+                "evidence_message_ids": [12],
+            }]
+        }, None
+
+    sub_agent._call_llm = capture  # type: ignore[method-assign]
+    added = await sub_agent._pipeline_story_memory(
+        [
+            Message(Role.USER, "阿澈询问钥匙。", uid=11, turn_id=2, seq_in_turn=1),
+            Message(Role.ASSISTANT, "守卫把铜钥匙交给阿澈。", uid=12, turn_id=2, seq_in_turn=2),
+        ],
+        [],
+    )
+
+    assert added == 1
+    assert store.persisted_details[0]["evidence_message_ids"] == [12]
+    assert store.persist_kwargs["message_ids"] == [11, 12]
+    assert "[message_id=11; turn_id=2; mode=ic; role=User]" in captured_prompt
+    assert "[message_id=12; turn_id=2; mode=ic; role=Assistant]" in captured_prompt
+    item_schema = STORY_DETAIL_SCHEMA["function"]["parameters"]["properties"][
+        "story_details"
+    ]["items"]
+    assert "evidence_message_ids" in item_schema["required"]
+    assert item_schema["properties"]["evidence_message_ids"]["minItems"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "detail",
+    [
+        {
+            "text": "没有 Evidence。",
+            "memory_kind": "event",
+            "epistemic_status": "confirmed",
+            "salience": 0.5,
+        },
+        {
+            "text": "引用批次外消息。",
+            "memory_kind": "event",
+            "epistemic_status": "confirmed",
+            "salience": 0.5,
+            "evidence_message_ids": [999],
+        },
+    ],
+)
+async def test_story_memory_rejects_missing_or_out_of_batch_evidence(
+    detail: dict[str, object],
+) -> None:
+    store = CapturingStoryStore()
+    sub_agent = MemorySubAgent(
+        story_store=store,  # type: ignore[arg-type]
+        provider_biz_key="agent.memory_sub_agent",
+    )
+
+    async def capture(_messages, _schema, **_kwargs):  # noqa: ANN001
+        return {"story_details": [detail]}, None
+
+    sub_agent._call_llm = capture  # type: ignore[method-assign]
+    with pytest.raises(memory_module.MemoryPipelineError):
+        await sub_agent._pipeline_story_memory(
+            [Message(Role.USER, "source", uid=1, turn_id=1, seq_in_turn=1)],
+            [],
+        )
+    assert store.persist_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_disabled_story_memory_skips_non_strict_but_fails_strict() -> None:
     session = SessionManager(history_enabled=False)
     session.replace_history([
@@ -403,6 +490,10 @@ async def test_story_memory_and_summary_prompts_keep_long_message_tail() -> None
 
 @pytest.mark.asyncio
 async def test_story_memory_semantic_dedupe_prompt_has_hard_limits() -> None:
+    assert (
+        "与 Existing Story Memory 语义相同的内容不要重复输出。"
+        in memory_module.STORY_MEMORY_PROMPT
+    )
     item_count = memory_module.STORY_MEMORY_DEDUPE_MAX_ITEMS + 7
     items = [
         {

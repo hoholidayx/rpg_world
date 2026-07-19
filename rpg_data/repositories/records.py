@@ -52,6 +52,7 @@ __all__ = [
     "SessionPersistentMemoryRevisionRecord",
     "SessionRPModuleOverrideRecord",
     "SessionRecord",
+    "SessionStoryMemoryEvidenceRecord",
     "SessionStoryMemoryRecord",
     "SessionStatusTableRecord",
     "SessionStatusDeferredProgressRecord",
@@ -390,7 +391,6 @@ class SessionStoryMemoryRecord(BaseRecord):
     dream_processed = BooleanField(default=False)
     metadata_schema_version = IntegerField(default=1, constraints=[Check("metadata_schema_version > 0")])
     metadata_json = TextField(default="{}")
-    source_messages_manifest_json = TextField(default="[]")
     version = IntegerField(default=1)
     created_at = TextField()
     updated_at = TextField()
@@ -398,6 +398,24 @@ class SessionStoryMemoryRecord(BaseRecord):
     class Meta:
         table_name = "rpg_session_story_memories"
         indexes = ((('session', 'dedupe_key'), True),)
+
+
+class SessionStoryMemoryEvidenceRecord(BaseRecord):
+    story_memory = ForeignKeyField(
+        SessionStoryMemoryRecord,
+        backref="evidence_rows",
+        column_name="story_memory_id",
+        on_delete="CASCADE",
+    )
+    message_id = IntegerField(constraints=[Check("message_id > 0")])
+    turn_id = IntegerField(constraints=[Check("turn_id > 0")])
+    message_version = IntegerField(constraints=[Check("message_version > 0")])
+    content_hash = CharField(constraints=[Check("length(content_hash) = 64")])
+    created_at = TextField()
+
+    class Meta:
+        table_name = "rpg_session_story_memory_evidence"
+        indexes = ((('story_memory', 'message_id'), True),)
 
 
 class SessionDreamProposalRecord(BaseRecord):
@@ -1277,6 +1295,7 @@ RECORD_MODELS = (
     SessionMessageRecord,
     SessionBackupMessageRecord,
     SessionStoryMemoryRecord,
+    SessionStoryMemoryEvidenceRecord,
     SessionDreamProposalRecord,
     SessionPersistentMemoryRecord,
     SessionPersistentMemoryRevisionRecord,

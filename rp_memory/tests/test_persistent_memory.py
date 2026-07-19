@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from rpg_data.models import MemoryFact
 from rp_memory.persist_memory import PersistentMemoryStore
 
 
@@ -17,10 +18,13 @@ async def test_persistent_memory_store_reads_typed_context_projection(
     bundle = SimpleNamespace(
         memory=SimpleNamespace(id="memory-1"),
         current_revision=SimpleNamespace(revision_number=2),
-        text="北境森林仍被永夜笼罩。",
-        memory_kind="world_fact",
-        epistemic_status="confirmed",
-        salience=0.9,
+        fact=MemoryFact(
+            text="北境森林仍被永夜笼罩。",
+            memory_kind="world_fact",
+            epistemic_status="confirmed",
+            salience=0.9,
+            dedupe_key="a" * 64,
+        ),
     )
     service = SimpleNamespace(
         list_context_memories=lambda session_id: (

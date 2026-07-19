@@ -83,6 +83,10 @@ async def test_live_deepseek_dream_proposal_is_typed_and_applicable(
                 "source_turn_end": 1,
                 "memory_kind": "commitment",
                 "salience": 0.95,
+                "evidence_message_ids": [
+                    user_message.id,
+                    assistant_message.id,
+                ],
             },),
             message_ids=(user_message.id, assistant_message.id),
         )

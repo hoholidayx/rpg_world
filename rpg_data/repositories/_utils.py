@@ -472,7 +472,22 @@ def _parse_narrative_outcome_weights(
     return models.NarrativeOutcomeWeights.from_mapping(payload)
 
 
-def to_session_story_memory(row: records.SessionStoryMemoryRecord) -> models.SessionStoryMemory:
+def to_memory_evidence(
+    row: records.SessionStoryMemoryEvidenceRecord,
+) -> models.MemoryEvidence:
+    return models.MemoryEvidence(
+        message_id=int(row.message_id),
+        turn_id=int(row.turn_id),
+        message_version=int(row.message_version),
+        content_hash=str(row.content_hash),
+    )
+
+
+def to_session_story_memory(
+    row: records.SessionStoryMemoryRecord,
+    *,
+    evidence: tuple[models.MemoryEvidence, ...] = (),
+) -> models.SessionStoryMemory:
     return models.SessionStoryMemory(
         id=int(row.id),
         session_id=str(row.session_id),
@@ -487,7 +502,7 @@ def to_session_story_memory(row: records.SessionStoryMemoryRecord) -> models.Ses
         dream_processed=bool(row.dream_processed),
         metadata_schema_version=int(row.metadata_schema_version),
         metadata_json=str(row.metadata_json or "{}"),
-        source_messages_manifest_json=str(row.source_messages_manifest_json or "[]"),
+        evidence=evidence,
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),

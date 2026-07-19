@@ -259,6 +259,17 @@ profiles:
     assert not hasattr(mem, "embedding_provider")
 
 
+@pytest.mark.parametrize("profile", ["local", "test", "prod"])
+def test_repo_profiles_disable_online_memory_rag(monkeypatch, profile: str) -> None:
+    monkeypatch.setenv("RPG_WORLD_PROFILE", profile)
+
+    memory = settings_module.Settings().memory_settings
+
+    assert memory.enabled is False
+    assert memory.query_planner_enabled is False
+    assert memory.rerank_enabled is False
+
+
 def test_profile_must_be_set_before_settings_construction(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "settings.yaml"
     _write_settings(

@@ -6,20 +6,38 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from peewee import Database, SQL
 
 from commons.errors import InvalidTurnMetadataError
 from rpg_data import models
-from rpg_data.repositories._utils import get_or_none, to_session_story_memory
+from rpg_data.repositories._utils import (
+    get_or_none,
+    to_memory_evidence,
+    to_session_story_memory,
+)
 from rpg_data.repositories.records import (
     SessionMessageRecord,
     SessionRecord,
+    SessionStoryMemoryEvidenceRecord,
     SessionStoryMemoryRecord,
     bind_database,
 )
 
 __all__ = ["StoryMemoryService"]
+
+_EVIDENCE_ROLES = frozenset(
+    {models.MESSAGE_ROLE_USER, models.MESSAGE_ROLE_ASSISTANT}
+)
+_EVIDENCE_MODES = frozenset({models.TURN_MODE_IC, models.TURN_MODE_GM})
+
+
+@dataclass(frozen=True)
+class _CoercedDetail:
+    payload: dict[str, object]
+    evidence_message_ids: tuple[int, ...] | None = None
+    evidence: tuple[models.MemoryEvidence, ...] | None = None
 
 
 class StoryMemoryService:
@@ -38,17 +56,17 @@ class StoryMemoryService:
         where_clause = SessionStoryMemoryRecord.session == session_id
         if dream_processed is not None:
             where_clause &= SessionStoryMemoryRecord.dream_processed == bool(dream_processed)
-        query = (
+        rows = list(
             SessionStoryMemoryRecord
             .select()
             .where(where_clause)
             .order_by(SessionStoryMemoryRecord.id)
         )
-        return [to_session_story_memory(row) for row in query]
+        return _to_story_memories(rows)
 
     def get(self, memory_id: int) -> models.SessionStoryMemory | None:
         row = get_or_none(SessionStoryMemoryRecord, memory_id)
-        return to_session_story_memory(row) if row is not None else None
+        return _to_story_memory(row) if row is not None else None
 
     def add_detail(
         self,
@@ -65,7 +83,7 @@ class StoryMemoryService:
         dedupe_key: str = "",
         metadata_schema_version: int = 1,
         metadata_json: str = "{}",
-        source_messages_manifest_json: str = "[]",
+        evidence_message_ids: Iterable[int] | None = None,
     ) -> models.SessionStoryMemory:
         payload = _normalize_detail(
             text=text,
@@ -79,10 +97,18 @@ class StoryMemoryService:
             dedupe_key=dedupe_key,
             metadata_schema_version=metadata_schema_version,
             metadata_json=metadata_json,
-            source_messages_manifest_json=source_messages_manifest_json,
         )
         with self._database.atomic():
-            return self._upsert_detail(session_id, payload)
+            evidence = None
+            if evidence_message_ids is not None:
+                ids = _normalize_evidence_message_ids(evidence_message_ids)
+                evidence = tuple(
+                    _message_evidence(row)
+                    for row in _load_source_rows(session_id, ids)
+                )
+                if evidence:
+                    _set_exact_source_range(payload, evidence)
+            return self._upsert_detail(session_id, payload, evidence=evidence)
 
     def add_details_and_mark_processed(
         self,
@@ -91,35 +117,37 @@ class StoryMemoryService:
         *,
         message_ids: Iterable[int],
     ) -> list[models.SessionStoryMemory]:
-        """Upsert extracted details and advance their source messages atomically."""
-        payloads = [_coerce_detail(detail) for detail in details]
-        ids = sorted({_required_positive_int(value, "message_id") for value in message_ids})
+        """Persist per-fact Evidence and source-message progress atomically."""
+        coerced = [_coerce_detail(detail) for detail in details]
+        ids = _normalize_evidence_message_ids(message_ids)
         with self._database.atomic():
-            source_rows: list[SessionMessageRecord] = []
-            if ids:
-                source_rows = list(
-                    SessionMessageRecord.select()
-                    .where(
-                        (SessionMessageRecord.session == session_id)
-                        & (SessionMessageRecord.id.in_(ids))
+            source_rows = _load_source_rows(session_id, ids)
+            source_by_id = {int(row.id): row for row in source_rows}
+            rows: list[models.SessionStoryMemory] = []
+            for detail in coerced:
+                evidence_ids = detail.evidence_message_ids
+                if not evidence_ids:
+                    raise ValueError(
+                        "each extracted story memory must cite evidence_message_ids"
                     )
-                    .order_by(SessionMessageRecord.id)
+                if not set(evidence_ids).issubset(source_by_id):
+                    raise ValueError(
+                        "story-memory Evidence must belong to the current source batch"
+                    )
+                selected_ids = set(evidence_ids)
+                evidence = tuple(
+                    _message_evidence(row)
+                    for row in source_rows
+                    if int(row.id) in selected_ids
                 )
-                if len(source_rows) != len(ids):
-                    raise ValueError("story-memory source messages must belong to the session")
-                source_manifest = _source_messages_manifest_json(source_rows)
-                source_turn_start = min(int(row.turn_id) for row in source_rows)
-                source_turn_end = max(int(row.turn_id) for row in source_rows)
-                for payload in payloads:
-                    if (
-                        int(payload["source_turn_start"]) > source_turn_start
-                        or int(payload["source_turn_end"]) < source_turn_end
-                    ):
-                        raise ValueError(
-                            "story-memory source turn range must cover every source message"
-                        )
-                    payload["source_messages_manifest_json"] = source_manifest
-            rows = [self._upsert_detail(session_id, payload) for payload in payloads]
+                _set_exact_source_range(detail.payload, evidence)
+                rows.append(
+                    self._upsert_detail(
+                        session_id,
+                        detail.payload,
+                        evidence=evidence,
+                    )
+                )
             if ids:
                 SessionMessageRecord.update(
                     story_memory_processed=True,
@@ -136,18 +164,35 @@ class StoryMemoryService:
         session_id: str,
         details: Iterable[models.SessionStoryMemory | dict[str, object]],
     ) -> list[models.SessionStoryMemory]:
-        payloads = [_coerce_detail(detail) for detail in details]
+        coerced = [_coerce_detail(detail) for detail in details]
         with self._database.atomic():
             self.clear(session_id)
-            return [
-                self._upsert_detail(session_id, payload)
-                for payload in payloads
-            ]
+            rows: list[models.SessionStoryMemory] = []
+            for detail in coerced:
+                evidence = detail.evidence
+                if evidence is None and detail.evidence_message_ids is not None:
+                    evidence = tuple(
+                        _message_evidence(row)
+                        for row in _load_source_rows(
+                            session_id,
+                            detail.evidence_message_ids,
+                        )
+                    )
+                rows.append(
+                    self._upsert_detail(
+                        session_id,
+                        detail.payload,
+                        evidence=evidence,
+                    )
+                )
+            return rows
 
     def _upsert_detail(
         self,
         session_id: str,
         payload: dict[str, object],
+        *,
+        evidence: tuple[models.MemoryEvidence, ...] | None = None,
     ) -> models.SessionStoryMemory:
         existing = (
             SessionStoryMemoryRecord.select()
@@ -159,20 +204,36 @@ class StoryMemoryService:
         )
         if existing is None:
             row = SessionStoryMemoryRecord.create(session=session_id, **payload)
-            return to_session_story_memory(SessionStoryMemoryRecord.get_by_id(row.id))
-        semantic_before = _story_memory_semantic_signature(existing)
-        existing.turn_id = max(int(existing.turn_id), int(payload["turn_id"]))
+            if evidence is not None:
+                _replace_evidence(int(row.id), evidence)
+            return _to_story_memory(SessionStoryMemoryRecord.get_by_id(row.id))
+        previous_evidence = _evidence_for_memory(int(existing.id))
+        semantic_before = _story_memory_semantic_signature(
+            existing,
+            previous_evidence,
+        )
+        existing.turn_id = (
+            int(payload["turn_id"])
+            if evidence is not None
+            else max(int(existing.turn_id), int(payload["turn_id"]))
+        )
         existing.text = str(payload["text"])
         existing.memory_kind = str(payload["memory_kind"])
         existing.epistemic_status = str(payload["epistemic_status"])
         existing.salience = max(float(existing.salience), float(payload["salience"]))
-        existing.source_turn_start = min(
-            int(existing.source_turn_start), int(payload["source_turn_start"])
+        if evidence is not None:
+            existing.source_turn_start = int(payload["source_turn_start"])
+            existing.source_turn_end = int(payload["source_turn_end"])
+        else:
+            existing.source_turn_start = min(
+                int(existing.source_turn_start), int(payload["source_turn_start"])
+            )
+            existing.source_turn_end = max(
+                int(existing.source_turn_end), int(payload["source_turn_end"])
+            )
+        existing.dream_processed = bool(existing.dream_processed) or bool(
+            payload["dream_processed"]
         )
-        existing.source_turn_end = max(
-            int(existing.source_turn_end), int(payload["source_turn_end"])
-        )
-        existing.dream_processed = bool(existing.dream_processed) or bool(payload["dream_processed"])
         existing.metadata_schema_version = max(
             int(existing.metadata_schema_version),
             int(payload["metadata_schema_version"]),
@@ -181,18 +242,21 @@ class StoryMemoryService:
             str(existing.metadata_json or "{}"),
             str(payload["metadata_json"]),
         )
-        incoming_source_manifest = _normalize_source_messages_manifest_json(
-            payload["source_messages_manifest_json"]
-        )
-        if incoming_source_manifest != "[]":
-            # A repeated extraction of the same normalized fact is fresh
-            # support, not an ever-growing union with potentially stale rows.
-            existing.source_messages_manifest_json = incoming_source_manifest
-        if _story_memory_semantic_signature(existing) != semantic_before:
+        effective_evidence = previous_evidence if evidence is None else evidence
+        if (
+            _story_memory_semantic_signature(existing, effective_evidence)
+            != semantic_before
+        ):
             existing.version = int(existing.version) + 1
         existing.updated_at = SQL("CURRENT_TIMESTAMP")
         existing.save()
-        return to_session_story_memory(SessionStoryMemoryRecord.get_by_id(existing.id))
+        if evidence is not None and _evidence_signature(evidence) != _evidence_signature(
+            previous_evidence
+        ):
+            # Exact-dedupe refreshes the source set instead of accumulating an
+            # unbounded union of old and potentially stale Evidence.
+            _replace_evidence(int(existing.id), evidence)
+        return _to_story_memory(SessionStoryMemoryRecord.get_by_id(existing.id))
 
     def clear(self, session_id: str) -> int:
         return int(
@@ -228,6 +292,7 @@ class StoryMemoryService:
 
 def _story_memory_semantic_signature(
     row: SessionStoryMemoryRecord,
+    evidence: Iterable[models.MemoryEvidence],
 ) -> tuple[object, ...]:
     """Fields that change the derived story-memory source, excluding checkpoints."""
 
@@ -241,47 +306,55 @@ def _story_memory_semantic_signature(
         int(row.source_turn_end),
         int(row.metadata_schema_version),
         str(row.metadata_json or "{}"),
-        str(row.source_messages_manifest_json or "[]"),
+        _evidence_signature(evidence),
     )
 
 
 def _coerce_detail(
     detail: models.SessionStoryMemory | dict[str, object],
-) -> dict[str, object]:
+) -> _CoercedDetail:
     if isinstance(detail, models.SessionStoryMemory):
-        return {
-            "text": detail.text,
-            "turn_id": detail.turn_id,
-            "dream_processed": detail.dream_processed,
-            "memory_kind": detail.memory_kind,
-            "epistemic_status": detail.epistemic_status,
-            "salience": detail.salience,
-            "source_turn_start": detail.source_turn_start,
-            "source_turn_end": detail.source_turn_end,
-            "dedupe_key": detail.dedupe_key,
-            "metadata_schema_version": detail.metadata_schema_version,
-            "metadata_json": detail.metadata_json,
-            "source_messages_manifest_json": detail.source_messages_manifest_json,
-        }
+        return _CoercedDetail(
+            payload=_normalize_detail(
+                text=detail.text,
+                turn_id=detail.turn_id,
+                dream_processed=detail.dream_processed,
+                memory_kind=detail.memory_kind,
+                epistemic_status=detail.epistemic_status,
+                salience=detail.salience,
+                source_turn_start=detail.source_turn_start,
+                source_turn_end=detail.source_turn_end,
+                dedupe_key=detail.dedupe_key,
+                metadata_schema_version=detail.metadata_schema_version,
+                metadata_json=detail.metadata_json,
+            ),
+            evidence=tuple(detail.evidence),
+            evidence_message_ids=tuple(item.message_id for item in detail.evidence),
+        )
 
     metadata_json = detail.get("metadata_json", "")
     if not metadata_json and "metadata" in detail:
         metadata_json = json.dumps(detail.get("metadata") or {}, ensure_ascii=False)
-    return _normalize_detail(
-        text=str(detail.get("text", "") or ""),
-        turn_id=_required_positive_int(detail.get("turn_id"), "turn_id"),
-        dream_processed=bool(detail.get("dream_processed", False)),
-        memory_kind=str(detail.get("memory_kind", "event") or "event"),
-        epistemic_status=str(detail.get("epistemic_status", "confirmed") or "confirmed"),
-        salience=detail.get("salience", 0.5),
-        source_turn_start=detail.get("source_turn_start"),
-        source_turn_end=detail.get("source_turn_end"),
-        dedupe_key=str(detail.get("dedupe_key", "") or ""),
-        metadata_schema_version=detail.get("metadata_schema_version", 1),
-        metadata_json=str(metadata_json or "{}"),
-        source_messages_manifest_json=str(
-            detail.get("source_messages_manifest_json", "[]") or "[]"
+    evidence_message_ids = (
+        _normalize_evidence_message_ids(detail.get("evidence_message_ids"))
+        if "evidence_message_ids" in detail
+        else None
+    )
+    return _CoercedDetail(
+        payload=_normalize_detail(
+            text=str(detail.get("text", "") or ""),
+            turn_id=_required_positive_int(detail.get("turn_id"), "turn_id"),
+            dream_processed=bool(detail.get("dream_processed", False)),
+            memory_kind=str(detail.get("memory_kind", "event") or "event"),
+            epistemic_status=str(detail.get("epistemic_status", "confirmed") or "confirmed"),
+            salience=detail.get("salience", 0.5),
+            source_turn_start=detail.get("source_turn_start"),
+            source_turn_end=detail.get("source_turn_end"),
+            dedupe_key=str(detail.get("dedupe_key", "") or ""),
+            metadata_schema_version=detail.get("metadata_schema_version", 1),
+            metadata_json=str(metadata_json or "{}"),
         ),
+        evidence_message_ids=evidence_message_ids,
     )
 
 
@@ -298,7 +371,6 @@ def _normalize_detail(
     dedupe_key: object,
     metadata_schema_version: object,
     metadata_json: object,
-    source_messages_manifest_json: object,
 ) -> dict[str, object]:
     normalized_turn_id = _required_positive_int(turn_id, "turn_id")
     start = _required_positive_int(
@@ -332,9 +404,6 @@ def _normalize_detail(
         raise ValueError("story memory metadata_json must be a JSON object") from exc
     if not isinstance(metadata, dict):
         raise ValueError("story memory metadata_json must be a JSON object")
-    source_manifest_json = _normalize_source_messages_manifest_json(
-        source_messages_manifest_json
-    )
     normalized_text = " ".join(str(text or "").split())
     if not normalized_text:
         raise ValueError("story memory text must not be empty")
@@ -351,63 +420,173 @@ def _normalize_detail(
         "dream_processed": bool(dream_processed),
         "metadata_schema_version": schema_version,
         "metadata_json": json.dumps(metadata, ensure_ascii=False, sort_keys=True),
-        "source_messages_manifest_json": source_manifest_json,
     }
 
 
-def _source_messages_manifest_json(
-    rows: Iterable[SessionMessageRecord],
-) -> str:
-    return _normalize_source_messages_manifest_json(
-        json.dumps(
-            [
-                {
-                    "messageId": int(row.id),
-                    "turnId": int(row.turn_id),
-                    "messageVersion": int(row.version),
-                    "contentHash": hashlib.sha256(
-                        str(row.content or "").encode("utf-8")
-                    ).hexdigest(),
-                }
-                for row in rows
-            ],
-            ensure_ascii=False,
+def _normalize_evidence_message_ids(values: object) -> tuple[int, ...]:
+    if values is None or isinstance(values, (str, bytes)):
+        raise ValueError("evidence_message_ids must be an array of positive integers")
+    try:
+        raw_values = list(values)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise ValueError(
+            "evidence_message_ids must be an array of positive integers"
+        ) from exc
+    normalized = tuple(
+        _required_positive_int(value, "evidence_message_id")
+        for value in raw_values
+    )
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("evidence_message_ids must be unique")
+    return normalized
+
+
+def _load_source_rows(
+    session_id: str,
+    message_ids: Iterable[int],
+) -> list[SessionMessageRecord]:
+    ids = tuple(message_ids)
+    if not ids:
+        return []
+    rows = list(
+        SessionMessageRecord.select()
+        .where(
+            (SessionMessageRecord.session == session_id)
+            & (SessionMessageRecord.id.in_(ids))
+        )
+        .order_by(
+            SessionMessageRecord.turn_id,
+            SessionMessageRecord.seq_in_turn,
+            SessionMessageRecord.id,
+        )
+    )
+    if len(rows) != len(ids):
+        raise ValueError("story-memory source messages must belong to the session")
+    if any(
+        str(row.role) not in _EVIDENCE_ROLES
+        or str(row.mode) not in _EVIDENCE_MODES
+        for row in rows
+    ):
+        raise ValueError("story-memory Evidence must reference IC/GM user or assistant messages")
+    return rows
+
+
+def _message_evidence(row: SessionMessageRecord) -> models.MemoryEvidence:
+    return models.MemoryEvidence(
+        message_id=int(row.id),
+        turn_id=int(row.turn_id),
+        message_version=int(row.version),
+        content_hash=hashlib.sha256(
+            str(row.content or "").encode("utf-8")
+        ).hexdigest(),
+    )
+
+
+def _set_exact_source_range(
+    payload: dict[str, object],
+    evidence: Iterable[models.MemoryEvidence],
+) -> None:
+    items = tuple(evidence)
+    if not items:
+        return
+    turns = tuple(item.turn_id for item in items)
+    payload["turn_id"] = max(turns)
+    payload["source_turn_start"] = min(turns)
+    payload["source_turn_end"] = max(turns)
+
+
+def _evidence_signature(
+    evidence: Iterable[models.MemoryEvidence],
+) -> tuple[tuple[int, int, int, str], ...]:
+    normalized: dict[int, tuple[int, int, int, str]] = {}
+    for item in evidence:
+        message_id = _required_positive_int(item.message_id, "message_id")
+        if message_id in normalized:
+            raise ValueError("story-memory Evidence message IDs must be unique")
+        content_hash = str(item.content_hash or "").strip().lower()
+        if re.fullmatch(r"[0-9a-f]{64}", content_hash) is None:
+            raise ValueError("story-memory Evidence content_hash must be SHA-256")
+        normalized[message_id] = (
+            message_id,
+            _required_positive_int(item.turn_id, "turn_id"),
+            _required_positive_int(item.message_version, "message_version"),
+            content_hash,
+        )
+    return tuple(
+        sorted(
+            normalized.values(),
+            key=lambda item: (item[1], item[0]),
         )
     )
 
 
-def _normalize_source_messages_manifest_json(value: object) -> str:
-    try:
-        payload = json.loads(str(value or "[]"))
-    except json.JSONDecodeError as exc:
-        raise ValueError("story memory source manifest must be a JSON array") from exc
-    if not isinstance(payload, list):
-        raise ValueError("story memory source manifest must be a JSON array")
-    normalized: dict[int, dict[str, object]] = {}
-    for item in payload:
-        if not isinstance(item, dict):
-            raise ValueError("story memory source manifest entries must be objects")
-        message_id = _required_positive_int(item.get("messageId"), "messageId")
-        if message_id in normalized:
-            raise ValueError("story memory source manifest message IDs must be unique")
-        content_hash = str(item.get("contentHash", "") or "").strip().lower()
-        if not re.fullmatch(r"[0-9a-f]{64}", content_hash):
-            raise ValueError("story memory source contentHash must be SHA-256")
-        normalized[message_id] = {
-            "messageId": message_id,
-            "turnId": _required_positive_int(item.get("turnId"), "turnId"),
-            "messageVersion": _required_positive_int(
-                item.get("messageVersion"),
-                "messageVersion",
-            ),
-            "contentHash": content_hash,
-        }
-    return json.dumps(
-        [normalized[message_id] for message_id in sorted(normalized)],
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
+def _replace_evidence(
+    story_memory_id: int,
+    evidence: Iterable[models.MemoryEvidence],
+) -> None:
+    signature = _evidence_signature(evidence)
+    SessionStoryMemoryEvidenceRecord.delete().where(
+        SessionStoryMemoryEvidenceRecord.story_memory == story_memory_id
+    ).execute()
+    for message_id, turn_id, message_version, content_hash in signature:
+        SessionStoryMemoryEvidenceRecord.create(
+            story_memory=story_memory_id,
+            message_id=message_id,
+            turn_id=turn_id,
+            message_version=message_version,
+            content_hash=content_hash,
+            created_at=SQL("CURRENT_TIMESTAMP"),
+        )
+
+
+def _evidence_for_memory(story_memory_id: int) -> tuple[models.MemoryEvidence, ...]:
+    rows = (
+        SessionStoryMemoryEvidenceRecord.select()
+        .where(SessionStoryMemoryEvidenceRecord.story_memory == story_memory_id)
+        .order_by(
+            SessionStoryMemoryEvidenceRecord.turn_id,
+            SessionStoryMemoryEvidenceRecord.message_id,
+        )
     )
+    return tuple(to_memory_evidence(row) for row in rows)
+
+
+def _to_story_memory(row: SessionStoryMemoryRecord) -> models.SessionStoryMemory:
+    return to_session_story_memory(
+        row,
+        evidence=_evidence_for_memory(int(row.id)),
+    )
+
+
+def _to_story_memories(
+    rows: Iterable[SessionStoryMemoryRecord],
+) -> list[models.SessionStoryMemory]:
+    items = list(rows)
+    if not items:
+        return []
+    memory_ids = [int(row.id) for row in items]
+    evidence_by_memory: dict[int, list[models.MemoryEvidence]] = {}
+    evidence_rows = (
+        SessionStoryMemoryEvidenceRecord.select()
+        .where(SessionStoryMemoryEvidenceRecord.story_memory.in_(memory_ids))
+        .order_by(
+            SessionStoryMemoryEvidenceRecord.story_memory,
+            SessionStoryMemoryEvidenceRecord.turn_id,
+            SessionStoryMemoryEvidenceRecord.message_id,
+        )
+    )
+    for evidence_row in evidence_rows:
+        evidence_by_memory.setdefault(
+            int(evidence_row.story_memory_id),
+            [],
+        ).append(to_memory_evidence(evidence_row))
+    return [
+        to_session_story_memory(
+            row,
+            evidence=tuple(evidence_by_memory.get(int(row.id), ())),
+        )
+        for row in items
+    ]
 
 
 def _normalize_dedupe_key(raw: str, memory_kind: str, text: str) -> str:
