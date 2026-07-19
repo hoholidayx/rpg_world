@@ -8,7 +8,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from peewee import Database, SQL
+from peewee import Database, SQL, fn
 
 from commons.errors import InvalidTurnMetadataError
 from rpg_data import models
@@ -63,6 +63,72 @@ class StoryMemoryService:
             .order_by(SessionStoryMemoryRecord.id)
         )
         return _to_story_memories(rows)
+
+    def list_page(
+        self,
+        session_id: str,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        memory_kind: str | None = None,
+        dream_processed: bool | None = None,
+    ) -> models.SessionStoryMemoryPage:
+        if page <= 0:
+            raise ValueError("story-memory page must be positive")
+        if page_size <= 0 or page_size > 100:
+            raise ValueError("story-memory page_size must be between 1 and 100")
+        normalized_kind = str(memory_kind or "").strip()
+        if normalized_kind and normalized_kind not in models.STORY_MEMORY_KINDS:
+            raise ValueError("unsupported story-memory memory_kind")
+
+        session_clause = SessionStoryMemoryRecord.session == session_id
+        filtered_clause = session_clause
+        if normalized_kind:
+            filtered_clause &= SessionStoryMemoryRecord.memory_kind == normalized_kind
+        if dream_processed is not None:
+            filtered_clause &= SessionStoryMemoryRecord.dream_processed == bool(dream_processed)
+
+        filtered_query = SessionStoryMemoryRecord.select().where(filtered_clause)
+        total = filtered_query.count()
+        rows = list(
+            filtered_query
+            .order_by(
+                SessionStoryMemoryRecord.updated_at.desc(),
+                SessionStoryMemoryRecord.id.desc(),
+            )
+            .paginate(page, page_size)
+        )
+        total_facts = (
+            SessionStoryMemoryRecord.select()
+            .where(session_clause)
+            .count()
+        )
+        dream_processed_facts = (
+            SessionStoryMemoryRecord.select()
+            .where(
+                session_clause
+                & SessionStoryMemoryRecord.dream_processed
+            )
+            .count()
+        )
+        latest_updated_at = (
+            SessionStoryMemoryRecord
+            .select(fn.MAX(SessionStoryMemoryRecord.updated_at))
+            .where(session_clause)
+            .scalar()
+        )
+        return models.SessionStoryMemoryPage(
+            items=tuple(_to_story_memories(rows)),
+            page=page,
+            page_size=page_size,
+            total=total,
+            stats=models.SessionStoryMemoryStats(
+                total_facts=total_facts,
+                dream_processed_facts=dream_processed_facts,
+                pending_dream_facts=total_facts - dream_processed_facts,
+                latest_updated_at=str(latest_updated_at or ""),
+            ),
+        )
 
     def get(self, memory_id: int) -> models.SessionStoryMemory | None:
         row = get_or_none(SessionStoryMemoryRecord, memory_id)

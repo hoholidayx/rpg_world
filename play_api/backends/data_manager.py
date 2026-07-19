@@ -171,6 +171,63 @@ class DataManagerBackend:
             include_markdown=True,
         )
 
+    async def list_session_story_memories(
+        self,
+        session_id: str,
+        *,
+        page: int,
+        page_size: int,
+        memory_kind: str | None,
+        dream_processed: bool | None,
+    ) -> dict[str, object] | None:
+        if self._ready_session(session_id) is None:
+            return None
+        result = self._gateway.story_memory.list_page(
+            session_id,
+            page=page,
+            page_size=page_size,
+            memory_kind=memory_kind,
+            dream_processed=dream_processed,
+        )
+        stats = result.stats
+        return {
+            "items": [
+                {
+                    "id": item.id,
+                    "text": item.text,
+                    "memoryKind": item.memory_kind,
+                    "epistemicStatus": item.epistemic_status,
+                    "salience": item.salience,
+                    "sourceTurnStart": item.source_turn_start,
+                    "sourceTurnEnd": item.source_turn_end,
+                    "dreamProcessed": item.dream_processed,
+                    "evidence": [
+                        {
+                            "messageId": evidence.message_id,
+                            "turnId": evidence.turn_id,
+                        }
+                        for evidence in item.evidence
+                    ],
+                    "version": item.version,
+                    "createdAt": item.created_at,
+                    "updatedAt": item.updated_at,
+                }
+                for item in result.items
+            ],
+            "page": result.page,
+            "pageSize": result.page_size,
+            "total": result.total,
+            "stats": {
+                "totalFacts": stats.total_facts,
+                "dreamProcessedFacts": stats.dream_processed_facts,
+                "pendingDreamFacts": stats.pending_dream_facts,
+                "unprocessedSourceTurns": self._gateway.messages.count_story_memory_unprocessed_turns(
+                    session_id
+                ),
+                "latestUpdatedAt": stats.latest_updated_at or None,
+            },
+        }
+
     async def scan_unindexed_runtime(self, workspace: str) -> dict[str, list[dict[str, str]]] | None:
         return scan_unindexed_runtime_data(self._gateway.database, workspace)
 

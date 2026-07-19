@@ -98,6 +98,9 @@ class MessageService:
             after_turn_id=after_turn_id,
         )
 
+    def list_turn(self, session_id: str, turn_id: int) -> list[models.SessionMessage]:
+        return self._store.list_turn(session_id, turn_id)
+
     def has_turn_before(self, session_id: str, turn_id: int) -> bool:
         return self._store.has_turn_before(session_id, turn_id)
 

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Boxes, Brain, CaseSensitive, CloudMoon, PanelLeftClose, PanelRightClose, Settings, Trash2, UserRound, Wrench } from 'lucide-react'
+import { Boxes, Brain, CaseSensitive, CloudMoon, Settings, Trash2, UserRound, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import {
   SESSION_FONT_SCALE_DEFAULT,
@@ -43,13 +43,10 @@ function ToggleSetting({
 
 export function SessionSettingsMenu({
   open,
-  leftCollapsed,
-  rightCollapsed,
   fontScale,
   showThinking,
   showTools,
   onToggleOpen,
-  onToggleSide,
   onFontScaleChange,
   onResetFontScale,
   onShowThinkingChange,
@@ -61,13 +58,10 @@ export function SessionSettingsMenu({
   onDeleteSession,
 }: {
   open: boolean
-  leftCollapsed: boolean
-  rightCollapsed: boolean
   fontScale: SessionFontScale
   showThinking: boolean
   showTools: boolean
   onToggleOpen: () => void
-  onToggleSide: (side: 'left' | 'right') => void
   onFontScaleChange: (fontScale: number) => void
   onResetFontScale: () => void
   onShowThinkingChange: (show: boolean) => void
@@ -190,38 +184,6 @@ export function SessionSettingsMenu({
                 </button>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => onToggleSide('left')}
-              className="grid w-full grid-cols-[34px_minmax(0,1fr)_42px] items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
-            >
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-                <PanelLeftClose size={16} />
-              </span>
-              <span className="min-w-0">
-                <strong className="block text-sm font-black text-slate-900 dark:text-slate-100">左侧栏</strong>
-                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">场景与固定状态</span>
-              </span>
-              <span className={cn('h-5 w-10 rounded-full p-0.5 transition', leftCollapsed ? 'bg-slate-200 dark:bg-slate-700' : 'bg-teal-500')}>
-                <span className={cn('block h-4 w-4 rounded-full bg-white transition', leftCollapsed ? 'translate-x-0' : 'translate-x-5')} />
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onToggleSide('right')}
-              className="grid w-full grid-cols-[34px_minmax(0,1fr)_42px] items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
-            >
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200">
-                <PanelRightClose size={16} />
-              </span>
-              <span className="min-w-0">
-                <strong className="block text-sm font-black text-slate-900 dark:text-slate-100">右侧栏</strong>
-                <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-300">会话速览与故事归纳</span>
-              </span>
-              <span className={cn('h-5 w-10 rounded-full p-0.5 transition', rightCollapsed ? 'bg-slate-200 dark:bg-slate-700' : 'bg-teal-500')}>
-                <span className={cn('block h-4 w-4 rounded-full bg-white transition', rightCollapsed ? 'translate-x-0' : 'translate-x-5')} />
-              </span>
-            </button>
             <div className="my-2 border-t border-slate-200 dark:border-slate-800" />
             <div className="px-3 pb-1 pt-2">
               <strong className="block text-xs font-black uppercase text-slate-400 dark:text-slate-500">诊断显示</strong>

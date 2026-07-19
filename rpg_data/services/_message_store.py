@@ -144,6 +144,21 @@ class BaseSessionMessageStore:
         )
         return [to_session_message(row) for row in query]
 
+    def list_turn(self, session_id: str, turn_id: int) -> list[models.SessionMessage]:
+        query = (
+            self._record_model
+            .select()
+            .where(
+                (self._record_model.session == session_id)
+                & (self._record_model.turn_id == int(turn_id))
+            )
+            .order_by(
+                self._record_model.seq_in_turn,
+                self._record_model.id,
+            )
+        )
+        return [to_session_message(row) for row in query]
+
     def has_turn_before(self, session_id: str, turn_id: int) -> bool:
         return bool(
             self._record_model

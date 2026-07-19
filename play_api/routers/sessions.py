@@ -7,7 +7,7 @@ from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Literal, TypeVar
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -260,6 +260,68 @@ class PlaySummaryDetail(PlaySummaryPreview):
 class PlaySummaryIndex(BaseModel):
     overall: PlaySummaryPreview | None = None
     batches: list[PlaySummaryPreview] = Field(default_factory=list)
+
+
+StoryMemoryKind = Literal[
+    "character",
+    "event",
+    "relationship",
+    "commitment",
+    "clue",
+    "world_fact",
+    "state_change",
+]
+StoryMemoryEpistemicStatus = Literal[
+    "confirmed",
+    "reported",
+    "inferred",
+    "uncertain",
+    "contradicted",
+]
+
+
+class PlayStoryMemoryEvidence(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    message_id: int = Field(alias="messageId")
+    turn_id: int = Field(alias="turnId")
+
+
+class PlayStoryMemoryItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    text: str
+    memory_kind: StoryMemoryKind = Field(alias="memoryKind")
+    epistemic_status: StoryMemoryEpistemicStatus = Field(alias="epistemicStatus")
+    salience: float
+    source_turn_start: int = Field(alias="sourceTurnStart")
+    source_turn_end: int = Field(alias="sourceTurnEnd")
+    dream_processed: bool = Field(alias="dreamProcessed")
+    evidence: list[PlayStoryMemoryEvidence] = Field(default_factory=list)
+    version: int
+    created_at: str = Field(alias="createdAt")
+    updated_at: str = Field(alias="updatedAt")
+
+
+class PlayStoryMemoryStats(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_facts: int = Field(alias="totalFacts")
+    dream_processed_facts: int = Field(alias="dreamProcessedFacts")
+    pending_dream_facts: int = Field(alias="pendingDreamFacts")
+    unprocessed_source_turns: int = Field(alias="unprocessedSourceTurns")
+    latest_updated_at: str | None = Field(default=None, alias="latestUpdatedAt")
+
+
+class PlayStoryMemoryPage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    items: list[PlayStoryMemoryItem] = Field(default_factory=list)
+    page: int
+    page_size: int = Field(alias="pageSize")
+    total: int
+    stats: PlayStoryMemoryStats
 
 
 def _session_summary(session: dict[str, object]) -> PlaySessionSummary:
@@ -681,6 +743,29 @@ async def get_session_history_page(
     )
 
 
+@router.get("/{session_id}/turns/{turn_id}", response_model=PlayTurn)
+async def get_session_turn(
+    session_id: str,
+    turn_id: int = Path(gt=0),
+) -> PlayTurn:
+    _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
+    rows = get_data_service_gateway().messages.list_turn(agent_session_id, turn_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="turn not found")
+
+    raw_history = [_history_payload_from_row(row) for row in rows]
+    try:
+        turns = _attach_narrative_outcomes(
+            agent_session_id,
+            _turns_from_history(raw_history, source="api"),
+        )
+    except InvalidTurnMetadataError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if len(turns) != 1 or turns[0].turn_id != turn_id:
+        raise HTTPException(status_code=409, detail="turn history is inconsistent")
+    return turns[0]
+
+
 @router.get("/{session_id}/scene", response_model=PlayScene)
 async def get_current_scene(session_id: str) -> PlayScene:
     _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
@@ -695,6 +780,27 @@ async def list_session_summaries(session_id: str) -> PlaySummaryIndex:
     if payload is None:
         raise HTTPException(status_code=404, detail="session not found")
     return PlaySummaryIndex.model_validate(payload)
+
+
+@router.get("/{session_id}/story-memories", response_model=PlayStoryMemoryPage)
+async def list_session_story_memories(
+    session_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
+    memory_kind: StoryMemoryKind | None = Query(default=None, alias="memoryKind"),
+    dream_processed: bool | None = Query(default=None, alias="dreamProcessed"),
+) -> PlayStoryMemoryPage:
+    await resolve_session_or_404(session_id)
+    payload = await get_data_manager_backend().list_session_story_memories(
+        session_id,
+        page=page,
+        page_size=page_size,
+        memory_kind=memory_kind,
+        dream_processed=dream_processed,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return PlayStoryMemoryPage.model_validate(payload)
 
 
 @router.get(

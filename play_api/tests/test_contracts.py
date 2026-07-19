@@ -653,6 +653,15 @@ def test_history_page_endpoint_returns_turn_window(tmp_path, monkeypatch) -> Non
     assert after.json()["hasBefore"] is True
     assert after.json()["hasAfter"] is True
 
+    exact = client.get(f"/play-api/v1/sessions/{session_id}/turns/3")
+    missing = client.get(f"/play-api/v1/sessions/{session_id}/turns/99")
+
+    assert exact.status_code == 200
+    assert exact.json()["turnId"] == 3
+    assert [message["content"] for message in exact.json()["messages"]] == ["u3", "a3"]
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "turn not found"
+
 
 def test_history_page_endpoint_validates_query_and_rejects_dirty_writes(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
@@ -785,6 +794,90 @@ def test_session_summary_endpoints_return_previews_and_lazy_detail(tmp_path, mon
     assert empty_response.status_code == 200
     assert empty_response.json() == {"overall": None, "batches": []}
     assert missing_session_response.status_code == 404
+
+
+def test_session_story_memory_endpoint_pages_filters_and_reports_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    reset_data_service_gateways()
+    reset_delete_confirmation_tokens()
+    gateway = get_data_service_gateway()
+    session_id = "s_forest001"
+    gateway.story_memory.clear(session_id)
+    gateway.messages.clear(session_id)
+
+    first_turn = [
+        gateway.messages.append(session_id, "user", "发现门锁。", turn_id=1, seq_in_turn=1),
+        gateway.messages.append(session_id, "assistant", "门锁上有月纹。", turn_id=1, seq_in_turn=2),
+    ]
+    second_turn = [
+        gateway.messages.append(session_id, "user", "检查月纹。", turn_id=2, seq_in_turn=1),
+        gateway.messages.append(session_id, "assistant", "月纹指向北塔。", turn_id=2, seq_in_turn=2),
+    ]
+    first = gateway.story_memory.add_details_and_mark_processed(
+        session_id,
+        [{
+            "text": "门锁带有月纹。",
+            "turn_id": 1,
+            "memory_kind": "event",
+            "evidence_message_ids": [first_turn[1].id],
+        }],
+        message_ids=[row.id for row in first_turn],
+    )[0]
+    second = gateway.story_memory.add_detail(
+        session_id,
+        "月纹指向北塔。",
+        turn_id=2,
+        memory_kind="clue",
+        epistemic_status="confirmed",
+        salience=0.9,
+        dream_processed=True,
+        evidence_message_ids=[second_turn[1].id],
+    )
+
+    with TestClient(app) as client:
+        page_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/story-memories",
+            params={"pageSize": 1},
+        )
+        filter_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/story-memories",
+            params={"memoryKind": "event", "dreamProcessed": "false"},
+        )
+        missing_response = client.get(
+            "/play-api/v1/sessions/missing/story-memories"
+        )
+        invalid_kind_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/story-memories",
+            params={"memoryKind": "invalid"},
+        )
+        invalid_page_response = client.get(
+            f"/play-api/v1/sessions/{session_id}/story-memories",
+            params={"page": 0},
+        )
+
+    assert page_response.status_code == 200
+    payload = page_response.json()
+    assert payload["page"] == 1
+    assert payload["pageSize"] == 1
+    assert payload["total"] == 2
+    assert [item["id"] for item in payload["items"]] == [second.id]
+    assert payload["items"][0]["evidence"] == [
+        {"messageId": second_turn[1].id, "turnId": 2}
+    ]
+    assert payload["stats"] == {
+        "totalFacts": 2,
+        "dreamProcessedFacts": 1,
+        "pendingDreamFacts": 1,
+        "unprocessedSourceTurns": 1,
+        "latestUpdatedAt": payload["stats"]["latestUpdatedAt"],
+    }
+    assert payload["stats"]["latestUpdatedAt"]
+    assert filter_response.status_code == 200
+    assert [item["id"] for item in filter_response.json()["items"]] == [first.id]
+    assert missing_response.status_code == 404
+    assert invalid_kind_response.status_code == 422
+    assert invalid_page_response.status_code == 422
 
 
 def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:

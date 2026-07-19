@@ -58,6 +58,8 @@ __all__ = [
     "MemoryFact",
     "MemoryEvidence",
     "SessionStoryMemory",
+    "SessionStoryMemoryPage",
+    "SessionStoryMemoryStats",
     "DreamApplyResult",
     "DreamEvidenceDraft",
     "DreamProposal",
@@ -1282,6 +1284,23 @@ class SessionStoryMemory:
             salience=self.salience,
             dedupe_key=self.dedupe_key,
         )
+
+
+@dataclass(frozen=True)
+class SessionStoryMemoryStats:
+    total_facts: int
+    dream_processed_facts: int
+    pending_dream_facts: int
+    latest_updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionStoryMemoryPage:
+    items: tuple[SessionStoryMemory, ...]
+    page: int
+    page_size: int
+    total: int
+    stats: SessionStoryMemoryStats
 
 
 @dataclass(frozen=True)

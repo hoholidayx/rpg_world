@@ -49,7 +49,7 @@ export function usePinnedStatusTables({
   useEffect(() => {
     if (!ready || initializedSessionRef.current === sessionId) return
     const currentIds = new Set(tables.map((table) => table.id))
-    let nextIds = tables.map((table) => table.id)
+    let nextIds: number[] = []
     let shouldPersist = false
     try {
       const stored = window.localStorage.getItem(storageKey(sessionId))
@@ -60,10 +60,12 @@ export function usePinnedStatusTables({
         if (parsed !== null) {
           nextIds = parsed.filter((id) => currentIds.has(id))
           shouldPersist = nextIds.length !== parsed.length
+        } else {
+          shouldPersist = true
         }
       }
     } catch {
-      // Fall back to the first-visit in-memory default when storage is unavailable.
+      // Browser storage is optional; new sessions start with no pinned normal tables.
     }
     initializedSessionRef.current = sessionId
     setPinnedIds(nextIds)

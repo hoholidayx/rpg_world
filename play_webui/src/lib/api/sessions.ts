@@ -74,6 +74,12 @@ export function getSessionHistoryPage(
   )
 }
 
+export function getSessionTurn(sessionId: string, turnId: number) {
+  return playApiFetch<Turn>(
+    `/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`,
+  )
+}
+
 export function truncateSessionTurn(sessionId: string, turnId: number) {
   return playApiFetch<{ status: string; turnId: number; removed: number }>(
     `/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/truncate`,

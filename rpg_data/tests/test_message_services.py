@@ -189,6 +189,7 @@ def test_message_service_turn_window_pagination(tmp_path: Path) -> None:
         latest = messages.list_turn_window(session_id, limit=2)
         before = messages.list_turn_window(session_id, limit=2, before_turn_id=4)
         after = messages.list_turn_window(session_id, limit=2, after_turn_id=2)
+        exact = messages.list_turn(session_id, 3)
 
         assert [(row.turn_id, row.content) for row in latest] == [
             (4, "u4"),
@@ -208,6 +209,11 @@ def test_message_service_turn_window_pagination(tmp_path: Path) -> None:
             (4, "u4"),
             (4, "a4"),
         ]
+        assert [(row.turn_id, row.content) for row in exact] == [
+            (3, "u3"),
+            (3, "a3"),
+        ]
+        assert messages.list_turn(session_id, 99) == []
         assert messages.has_turn_before(session_id, 2)
         assert not messages.has_turn_before(session_id, 1)
         assert messages.has_turn_after(session_id, 4)
@@ -333,6 +339,58 @@ def test_story_memory_service_crud(tmp_path: Path) -> None:
         with pytest.raises(InvalidTurnMetadataError):
             story_memory.set_details("s_forest001", [{"text": "invalid"}])
         assert [row.text for row in story_memory.list("s_forest001")] == ["replacement"]
+    finally:
+        database.close()
+
+
+def test_story_memory_service_lists_filtered_pages_and_session_stats(tmp_path: Path) -> None:
+    database = _migrated_database(tmp_path)
+    try:
+        story_memory = StoryMemoryService(database)
+        session_id = _create_test_session(database, "s_story_page")
+        first = story_memory.add_detail(
+            session_id,
+            "第一条事件",
+            turn_id=1,
+            memory_kind="event",
+        )
+        second = story_memory.add_detail(
+            session_id,
+            "关键线索",
+            turn_id=2,
+            memory_kind="clue",
+            dream_processed=True,
+        )
+        third = story_memory.add_detail(
+            session_id,
+            "关系变化",
+            turn_id=3,
+            memory_kind="relationship",
+        )
+
+        page = story_memory.list_page(session_id, page=1, page_size=2)
+        assert [item.id for item in page.items] == [third.id, second.id]
+        assert page.total == 3
+        assert page.page == 1
+        assert page.page_size == 2
+        assert page.stats.total_facts == 3
+        assert page.stats.dream_processed_facts == 1
+        assert page.stats.pending_dream_facts == 2
+        assert page.stats.latest_updated_at
+
+        filtered = story_memory.list_page(
+            session_id,
+            memory_kind="event",
+            dream_processed=False,
+        )
+        assert [item.id for item in filtered.items] == [first.id]
+        assert filtered.total == 1
+        assert filtered.stats.total_facts == 3
+
+        with pytest.raises(ValueError, match="memory_kind"):
+            story_memory.list_page(session_id, memory_kind="invalid")
+        with pytest.raises(ValueError, match="page_size"):
+            story_memory.list_page(session_id, page_size=101)
     finally:
         database.close()
 

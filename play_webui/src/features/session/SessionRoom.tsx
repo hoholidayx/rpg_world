@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlignJustify, Images, LogOut, TableProperties } from 'lucide-react'
+import { BookOpenText, Images, LogOut, UsersRound } from 'lucide-react'
 import { ConfirmDialog } from '@/components/common/Dialog'
 import { ThemeSwitcher } from '@/components/theme/ThemeSwitcher'
 import { buildDreamPageHref } from '@/features/dream/dreamNavigation'
@@ -15,17 +16,20 @@ import type { CharacterCard } from '@/types/characters'
 import type { SessionPlayerCharacter } from '@/types/session'
 import { SessionComposer } from './SessionComposer'
 import { SessionDerivationDialog } from './SessionDerivationDialog'
-import { SessionLeftRail, SessionRightRail } from './SessionSideRails'
 import { SessionSettingsMenu } from './SessionSettingsMenu'
 import { SessionMediaBackground } from './SessionMediaBackground'
 import { SessionMediaGallery } from './SessionMediaGallery'
 import { SessionRPModulesDialog } from './SessionRPModulesDialog'
+import { SessionStatusHud } from './SessionStatusHud'
+import { SessionStoryPanel, type SessionStoryTab } from './SessionStoryPanel'
 import { SessionTimeline } from './SessionTimeline'
+import { SessionWorldPanel, type SessionWorldTab } from './SessionWorldPanel'
 import { useSessionRoomData } from './hooks/useSessionRoomData'
 import { useSessionDerivation } from './hooks/useSessionDerivation'
 import { useSessionRoomLayout } from './hooks/useSessionRoomLayout'
 import { useSessionMainLLM } from './hooks/useSessionMainLLM'
 import { useSessionMedia } from './hooks/useSessionMedia'
+import { usePinnedStatusTables } from './hooks/usePinnedStatusTables'
 import { useSessionRoleBinding } from './hooks/useSessionRoleBinding'
 import { useSessionStreamTurn } from './hooks/useSessionStreamTurn'
 import { useSessionTimelineActions } from './hooks/useSessionTimelineActions'
@@ -43,6 +47,17 @@ import {
   type NarrativeStyleId,
   type SessionInputMode,
 } from './sessionRoomTypes'
+
+type SessionWorkspaceState =
+  | { kind: 'world'; tab: SessionWorldTab; focusTableId?: number }
+  | { kind: 'story'; tab: SessionStoryTab }
+  | null
+
+function sortedStatusTables<T extends { sortOrder: number; id: number }>(tables: T[]) {
+  return [...tables].sort((first, second) => (
+    first.sortOrder - second.sortOrder || first.id - second.id
+  ))
+}
 
 function Toast({ message }: { message: string }) {
   return (
@@ -223,6 +238,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const [toastMessage, setToastMessage] = useState('')
   const [rpModulesDialogOpen, setRPModulesDialogOpen] = useState(false)
   const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
+  const [workspacePanel, setWorkspacePanel] = useState<SessionWorkspaceState>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteRedirecting, setDeleteRedirecting] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -238,6 +254,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     setComposerText('')
     setInputMode('ic')
     setNarrativeStyleId(null)
+    setWorkspacePanel(null)
     logger.info('session room entered', { status: 'session_changed' })
   }, [logger, sessionId])
 
@@ -255,6 +272,15 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
     narrativeStyleId,
     showToast,
     logger,
+  })
+  const orderedNormalStatusTables = useMemo(
+    () => sortedStatusTables(data.normalStatusTablesQuery.data ?? []),
+    [data.normalStatusTablesQuery.data],
+  )
+  const pinnedStatus = usePinnedStatusTables({
+    sessionId,
+    tables: orderedNormalStatusTables,
+    ready: data.normalStatusTablesQuery.isSuccess,
   })
   const requestConfirm = useCallback((request: ConfirmRequest) => {
     setConfirmRequest(request)
@@ -316,9 +342,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   })
   const mediaBackground = media.backgroundQuery.data?.background ?? null
   const mediaBackgroundRevision = media.backgroundQuery.data?.revisionToken ?? 'none'
-  const handleMediaTurnCommitted = useCallback((turnId: number) => {
+  const handleTurnCommitted = useCallback((turnId: number) => {
     media.requestBackgroundEvaluation(turnId, true)
-  }, [media.requestBackgroundEvaluation])
+    void queryClient.invalidateQueries({
+      queryKey: ['play-session-story-memories', sessionId],
+      refetchType: 'none',
+    })
+  }, [media.requestBackgroundEvaluation, queryClient, sessionId])
 
   const handleComposerTextChange = useCallback((value: string) => {
     setComposerText(value)
@@ -345,7 +375,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       router.push(`/session/${encodeURIComponent(activeSession)}`)
     },
     onCommittedNarrativeStyle: handleCommittedNarrativeStyle,
-    onTurnCommitted: handleMediaTurnCommitted,
+    onTurnCommitted: handleTurnCommitted,
   })
 
   const deleteSessionMutation = useMutation({
@@ -359,6 +389,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       queryClient.removeQueries({ queryKey: ['play-session-composer', sessionId] })
       queryClient.removeQueries({ queryKey: ['play-session-summaries', sessionId] })
       queryClient.removeQueries({ queryKey: ['play-session-summary', sessionId] })
+      queryClient.removeQueries({ queryKey: ['play-session-story-memories', sessionId] })
       queryClient.removeQueries({ queryKey: ['play-session-context-preview', sessionId] })
       queryClient.removeQueries({ queryKey: ['session-main-llm', sessionId] })
       queryClient.removeQueries({ queryKey: ['session-rp-modules', sessionId] })
@@ -422,50 +453,11 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   return (
     <main
-      style={layout.gridStyle}
       data-workspace={data.session?.workspace ?? ''}
       data-story-id={data.session?.storyId ?? ''}
       data-session-id={sessionId}
-      className="min-h-screen bg-[#f7f8fc] text-slate-900 dark:bg-[#0b1020] dark:text-slate-100 lg:grid lg:h-screen lg:min-h-0 lg:grid-cols-[var(--session-grid-columns)] lg:overflow-hidden"
+      className="min-h-screen bg-[#f7f8fc] text-slate-900 dark:bg-[#0b1020] dark:text-slate-100 lg:h-screen lg:min-h-0 lg:overflow-hidden"
     >
-      {layout.mobilePanel ? (
-        <button
-          type="button"
-          aria-label="关闭侧栏"
-          onClick={() => layout.setMobilePanel(null)}
-          className="fixed inset-0 z-30 bg-slate-950/20 backdrop-blur-[1px] dark:bg-slate-950/60 lg:hidden"
-        />
-      ) : null}
-
-      <SessionLeftRail
-        sessionId={sessionId}
-        sceneTables={data.sceneTablesQuery.data ?? []}
-        sceneTablesLoading={data.sceneTablesQuery.isLoading}
-        normalTables={data.normalStatusTablesQuery.data ?? []}
-        normalTablesLoading={data.normalStatusTablesQuery.isLoading}
-        normalTablesReady={data.normalStatusTablesQuery.isSuccess}
-        characters={data.characters}
-        charactersLoading={data.charactersQuery.isLoading}
-        scene={data.sceneQuery.data}
-        playerCharacter={data.playerCharacter}
-        collapsed={layout.leftCollapsed}
-        mobileOpen={layout.mobilePanel === 'left'}
-        activeDrawer={data.activeRailDrawer}
-        onCloseMobile={() => layout.setMobilePanel(null)}
-        onToggleCollapsed={layout.toggleLeftCollapsed}
-        onOpenDrawer={data.setActiveRailDrawer}
-        onCloseDrawer={() => data.setActiveRailDrawer(null)}
-      />
-      <button
-        type="button"
-        aria-label="调整左侧栏宽度"
-        onPointerDown={layout.startDrag('left')}
-        disabled={layout.leftCollapsed}
-        className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 disabled:cursor-default disabled:opacity-40 dark:bg-slate-800 dark:hover:bg-violet-500/10 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
-      >
-        <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400 dark:bg-slate-600 dark:group-hover:bg-violet-400" />
-      </button>
-
       <section
         style={layout.sessionExperienceStyle}
         className="relative isolate flex min-h-screen min-w-0 flex-col overflow-hidden lg:h-screen lg:min-h-0"
@@ -475,42 +467,65 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
           background={mediaBackground}
           revisionToken={mediaBackgroundRevision}
         />
-        <header className="relative z-20 flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
-          <div className="min-w-0">
-            <h1 className="truncate text-lg font-black text-slate-950 dark:text-slate-100 sm:text-xl">{data.session?.title ?? '加载会话中'}</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-400 dark:text-slate-400">
-              <span>
-                story <code className="font-mono text-slate-600 dark:text-slate-300">#{data.session?.storyId ?? '-'}</code>
-              </span>
-              <span>
-                session <code className="font-mono text-slate-600 dark:text-slate-300">{data.session?.id ?? sessionId}</code>
-              </span>
-              {data.session?.updatedAt ? <span>更新 {formatDateTime(data.session.updatedAt)}</span> : null}
+        <header className="relative z-20 flex min-h-[73px] flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-3 py-3 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90 sm:px-5">
+          <div className="flex min-w-0 w-full items-center gap-3 sm:w-auto sm:flex-1">
+            <Link
+              href="/"
+              aria-label="返回 RPG World Play 首页"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-black text-white shadow-lg shadow-violet-200 transition hover:scale-105 dark:shadow-violet-950/40"
+            >
+              R
+            </Link>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-black text-slate-950 dark:text-slate-100 sm:text-xl">{data.session?.title ?? '加载会话中'}</h1>
+              <div className="mt-1 hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-400 dark:text-slate-400 sm:flex">
+                <span>story <code className="font-mono text-slate-600 dark:text-slate-300">#{data.session?.storyId ?? '-'}</code></span>
+                <span>session <code className="font-mono text-slate-600 dark:text-slate-300">{data.session?.id ?? sessionId}</code></span>
+                {data.session?.updatedAt ? <span>更新 {formatDateTime(data.session.updatedAt)}</span> : null}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full max-w-full items-center gap-2 overflow-x-auto pb-0.5 sm:w-auto">
             <button
               type="button"
-              onClick={() => layout.setMobilePanel('left')}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:hidden"
-              aria-label="打开场景与固定状态栏"
+              onClick={() => {
+                layout.setSettingsOpen(false)
+                setWorkspacePanel({ kind: 'world', tab: 'characters' })
+              }}
+              className={cn(
+                'flex h-10 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900',
+                workspacePanel?.kind === 'world'
+                  ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/60 dark:bg-violet-500/15 dark:text-violet-200'
+                  : 'border-slate-200 text-slate-700 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:text-slate-300',
+              )}
+              aria-label="打开角色与状态面板"
             >
-              <AlignJustify size={18} />
+              <UsersRound size={17} />
+              <span className="hidden xl:inline">角色与状态</span>
             </button>
             <button
               type="button"
-              onClick={() => layout.setMobilePanel('right')}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200 lg:hidden"
-              aria-label="打开会话速览与故事归纳栏"
+              onClick={() => {
+                layout.setSettingsOpen(false)
+                setWorkspacePanel({ kind: 'story', tab: 'summaries' })
+              }}
+              className={cn(
+                'flex h-10 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-black shadow-sm transition dark:bg-slate-900',
+                workspacePanel?.kind === 'story'
+                  ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-500/15 dark:text-indigo-200'
+                  : 'border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:text-slate-300',
+              )}
+              aria-label="打开故事与记忆面板"
             >
-              <TableProperties size={18} />
+              <BookOpenText size={17} />
+              <span className="hidden xl:inline">故事与记忆</span>
             </button>
             <ThemeSwitcher menuAlign="right" menuSide="bottom" triggerSize="compact" />
             <NotificationCenter />
             <button
               type="button"
               onClick={() => setMediaGalleryOpen(true)}
-              className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+              className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
               aria-label="打开 Session 图像工作室"
             >
               <Images size={16} />
@@ -519,24 +534,19 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             <button
               type="button"
               onClick={stream.handleExitSession}
-              className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+              className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10 dark:hover:text-violet-200"
+              aria-label="退出当前会话"
             >
               <LogOut size={16} />
-              退出
+              <span className="hidden sm:inline">退出</span>
             </button>
             <SessionSettingsMenu
               open={layout.settingsOpen}
-              leftCollapsed={layout.leftCollapsed}
-              rightCollapsed={layout.rightCollapsed}
               fontScale={layout.fontScale}
               showThinking={layout.showThinking}
               showTools={layout.showTools}
               playerCharacter={data.playerCharacter}
               onToggleOpen={() => layout.setSettingsOpen((current) => !current)}
-              onToggleSide={(side) => {
-                if (side === 'left') layout.toggleLeftCollapsed()
-                else layout.toggleRightCollapsed()
-              }}
               onFontScaleChange={layout.setFontScale}
               onResetFontScale={layout.resetFontScale}
               onShowThinkingChange={layout.setShowThinking}
@@ -560,6 +570,13 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
             />
           </div>
         </header>
+
+        <SessionStatusHud
+          sceneTables={data.sceneTablesQuery.data ?? []}
+          pinnedTables={pinnedStatus.pinnedTables}
+          panelOpen={workspacePanel !== null}
+          onOpenStatusPanel={(tableId) => setWorkspacePanel({ kind: 'world', tab: 'status', focusTableId: tableId })}
+        />
 
         <SessionTimeline
           sessionId={sessionId}
@@ -623,32 +640,34 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
         </div>
       </section>
 
-      <button
-        type="button"
-        aria-label="调整右侧栏宽度"
-        onPointerDown={layout.startDrag('right')}
-        disabled={layout.rightCollapsed}
-        className="group hidden cursor-col-resize bg-slate-100 transition hover:bg-violet-50 disabled:cursor-default disabled:opacity-40 lg:flex lg:h-screen lg:items-stretch lg:justify-center"
-      >
-        <span className="my-auto h-16 w-1 rounded-full bg-slate-300 transition group-hover:bg-violet-400" />
-      </button>
-      <SessionRightRail
-        session={data.session}
+      <SessionWorldPanel
+        open={workspacePanel?.kind === 'world'}
+        activeTab={workspacePanel?.kind === 'world' ? workspacePanel.tab : 'characters'}
+        focusTableId={workspacePanel?.kind === 'world' ? workspacePanel.focusTableId : undefined}
+        sceneTables={data.sceneTablesQuery.data ?? []}
+        sceneTablesLoading={data.sceneTablesQuery.isLoading}
+        normalTables={orderedNormalStatusTables}
+        normalTablesLoading={data.normalStatusTablesQuery.isLoading || !pinnedStatus.initialized}
+        characters={data.characters}
+        charactersLoading={data.charactersQuery.isLoading}
         scene={data.sceneQuery.data}
-        lastTurnId={data.lastTurnId}
-        summaryIndex={data.summaryIndexQuery.data}
-        summariesLoading={data.summaryIndexQuery.isLoading}
-        summariesError={data.summaryIndexQuery.isError}
-        summaryDetail={data.summaryDetailQuery.data}
-        summaryDetailLoading={data.summaryDetailQuery.isLoading || data.summaryDetailQuery.isFetching}
-        summaryDetailError={data.summaryDetailQuery.isError}
-        collapsed={layout.rightCollapsed}
-        mobileOpen={layout.mobilePanel === 'right'}
-        activeDrawer={data.activeRailDrawer}
-        onCloseMobile={() => layout.setMobilePanel(null)}
-        onToggleCollapsed={layout.toggleRightCollapsed}
-        onOpenDrawer={data.setActiveRailDrawer}
-        onCloseDrawer={() => data.setActiveRailDrawer(null)}
+        playerCharacter={data.playerCharacter}
+        pinnedIdSet={pinnedStatus.pinnedIdSet}
+        onTogglePinned={pinnedStatus.togglePinned}
+        onTabChange={(tab, focusTableId) => setWorkspacePanel({ kind: 'world', tab, focusTableId })}
+        onClose={() => setWorkspacePanel(null)}
+      />
+      <SessionStoryPanel
+        sessionId={sessionId}
+        open={workspacePanel?.kind === 'story'}
+        activeTab={workspacePanel?.kind === 'story' ? workspacePanel.tab : 'summaries'}
+        onTabChange={(tab) => setWorkspacePanel({ kind: 'story', tab })}
+        onClose={() => setWorkspacePanel(null)}
+        onManageDream={() => {
+          setWorkspacePanel(null)
+          const returnTo = `/session/${encodeURIComponent(sessionId)}`
+          router.push(buildDreamPageHref(sessionId, returnTo))
+        }}
       />
 
       <SessionDerivationDialog
