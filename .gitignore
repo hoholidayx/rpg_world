@@ -45,6 +45,8 @@ data/**/sessions/
 data/**/stories/
 data/**/template_status/
 data/benchmarks/
+/data/import/
+/data/imports/
 
 # Logs and temp files
 *.log
