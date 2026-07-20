@@ -5,6 +5,7 @@ import pytest
 from commons.scene_time import SceneTime
 from rpg_data import models
 from rpg_core.context.models import Message, Role
+from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
 from rpg_core.session.manager import SessionManager
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 
@@ -317,7 +318,7 @@ def test_assistant_edit_removes_plot_schedule_decision(
     mgr.append(Role.ASSISTANT, "a1", turn_id=turn_id)
     mgr.end_turn(turn_id)
     assistant = next(message for message in mgr.history if message.content == "a1")
-    rpg_data_gateway.plot_scheduling.record_decisions(
+    PlotScheduleLedgerService(rpg_data_gateway.plot_scheduling).record(
         "s1",
         turn_id,
         [

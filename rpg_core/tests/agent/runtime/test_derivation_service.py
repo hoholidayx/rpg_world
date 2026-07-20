@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import rpg_core.agent.runtime.derivation as derivation_module
+from rpg_data import models as data_models
 from rpg_core.agent.runtime.derivation import (
     AgentDerivationService,
     SessionDerivationPreparationError,
@@ -17,7 +18,7 @@ class _DerivationDataService:
     def __init__(self, job: object, order: list[str]) -> None:
         self.job = job
         self.order = order
-        self.seed_calls: list[str] = []
+        self.seed_calls: list[tuple[str, bool, frozenset[str]]] = []
         self.context_usage: dict[str, object] | None = None
 
     def get_job(self, job_id: str):  # noqa: ANN201
@@ -28,8 +29,16 @@ class _DerivationDataService:
         assert job_id == "job-1"
         self.order.append(f"stage:{stage}")
 
-    def seed_target_session(self, job_id: str):  # noqa: ANN201
-        self.seed_calls.append(job_id)
+    def seed_target_session(
+        self,
+        job_id: str,
+        *,
+        copy_plot_overrides: bool,
+        plot_decision_statuses: frozenset[str],
+    ):  # noqa: ANN201
+        self.seed_calls.append(
+            (job_id, copy_plot_overrides, plot_decision_statuses)
+        )
         return SimpleNamespace(session=SimpleNamespace(id="target-session"))
 
     def set_context_usage(self, job_id: str, **usage: object) -> None:
@@ -171,6 +180,25 @@ def test_materialize_rejects_job_for_another_source_session(
     assert caught.value.code == "DERIVATION_SOURCE_MISMATCH"
     assert data_service.seed_calls == []
     assert order == []
+
+
+def test_materialize_applies_core_plot_derivation_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, data_service, order = _build_service(monkeypatch)
+    service._lifecycle.session_id = "source-session"
+
+    result = service.materialize("job-1")
+
+    assert result.session.id == "target-session"
+    assert data_service.seed_calls == [
+        (
+            "job-1",
+            True,
+            frozenset((data_models.PLOT_DECISION_TRIGGERED,)),
+        )
+    ]
+    assert order == ["stage:copying"]
 
 
 @pytest.mark.asyncio

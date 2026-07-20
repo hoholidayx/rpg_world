@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -213,7 +214,14 @@ class AgentSessionService:
                 runtime_dir.rename(quarantine_dir)
                 runtime_moved = True
 
-            result = gateway.session_reset.reset(session_id)
+            with gateway.transaction():
+                plot_decisions_cleared = gateway.plot_scheduling.clear_decisions(
+                    session_id
+                )
+                result = replace(
+                    gateway.session_reset.reset(session_id),
+                    plot_schedule_decisions_cleared=plot_decisions_cleared,
+                )
             database_reset = True
 
             if runtime_moved:

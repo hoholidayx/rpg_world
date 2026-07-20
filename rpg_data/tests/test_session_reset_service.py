@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from commons.scene_time import SceneTime
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
 
@@ -242,6 +243,31 @@ def test_reset_without_valid_binding_does_not_append_first_message(tmp_path) -> 
     assert result.first_message == ""
     assert gateway.messages.list(session.id) == []
     assert gateway.backup.messages.count(session.id) == 0
+
+
+def test_data_reset_does_not_choose_plot_ledger_retention_policy(tmp_path) -> None:
+    gateway = get_data_service_gateway(tmp_path / "session-reset-plot.sqlite3")
+    gateway.plot_scheduling.append_decisions(
+        "s_forest001",
+        1,
+        (
+            models.StagedPlotScheduleDecision(
+                source_kind=models.PLOT_SOURCE_POOL,
+                source_id=1,
+                event_id=1,
+                container_id=1,
+                decision_status=models.PLOT_DECISION_TRIGGERED,
+                dispatch_mode=models.PLOT_DISPATCH_FORCED,
+                scene_time=SceneTime(1, 1, 1, 8),
+                event_snapshot={"eventTitle": "数据层不决定是否清理"},
+            ),
+        ),
+    )
+
+    result = gateway.session_reset.reset("s_forest001")
+
+    assert result.plot_schedule_decisions_cleared == 0
+    assert len(gateway.plot_scheduling.list_session_decisions("s_forest001")) == 1
 
 
 def test_reset_rolls_back_when_story_opening_cannot_render(tmp_path) -> None:

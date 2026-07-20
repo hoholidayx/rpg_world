@@ -644,6 +644,7 @@ Narrative Outcome 是当前剧情分支随机机制：
 
 Plot Scheduler 是 Story 级剧情动态调度模块：
 
+- Plot Scheduler 的业务 owner 是 `rpg_core/rp_modules/plot_scheduler`。定义管理的默认位置、移动/重排、重复/冷却、时间线和删除占用规则，以及 turn ledger 校验、派生复制与 `/clear` 保留策略都由 Core 的类型化 application service/policy 决定；`rpg_data` 只提供定义、Session 覆盖和决策账本的 typed CRUD、只读投影、调用方指定的复制过滤与通用事务，不得恢复调度或继承策略。
 - Story 可同时挂载多条线性大纲和多个事件池。大纲节点引用稳定 Story 事件并保存固定 `SceneTime`；事件池按 priority 仲裁，池内使用 `random | sequential`。每个 IC/GM turn 最多选一个到期大纲节点和一个池事件，OOC 完全旁路。
 - `forced` 候选到时直接暂存为 triggered；`soft` 候选通过 `agent.plot_scheduler` 独立 biz key 调用 LLM。Judge 只读完整 fixed layer、当前 scratch scene/普通状态表、最近 N 个完整原始 IC/GM turn 和当前输入，不读 Summary、Story Memory、Persistent Memory 或 Recall。Judge `reason` 由 schema 与 parser 双重限长，避免无界元数据突破主 Context 门禁预留。
 - 门禁在 scratch 创建前按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。

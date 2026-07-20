@@ -3,15 +3,30 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from commons.scene_time import SceneTime
 from play_api.routers._locator import resolve_session_or_404
+from rpg_core.rp_modules.plot_scheduler import (
+    CreatePlotEventCommand,
+    CreatePlotNodeCommand,
+    CreatePlotOutlineCommand,
+    CreatePlotPoolCommand,
+    PLOT_PATCH_UNSET,
+    PlotDefinitionInUseError,
+    PlotPatchUnset,
+    PlotScheduleConflictError,
+    PlotScheduleManagementService,
+    UpdatePlotEventCommand,
+    UpdatePlotNodeCommand,
+    UpdatePlotOutlineCommand,
+    UpdatePlotPoolCommand,
+)
 from rpg_data import models
-from rpg_data.services import PlotDefinitionInUseError, get_data_service_gateway
+from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(tags=["play-plot-scheduling"])
 _T = TypeVar("_T")
@@ -238,7 +253,7 @@ class PlotDecisionResponse(BaseModel):
     dispatch_mode: str = Field(alias="dispatchMode")
     scene_time: SceneTimePayload = Field(alias="sceneTime")
     scene_time_ordinal: int = Field(alias="sceneTimeOrdinal")
-    event_snapshot: dict[str, Any] = Field(alias="eventSnapshot")
+    event_snapshot: dict[str, object] = Field(alias="eventSnapshot")
     reason: str
     error_code: str = Field(alias="errorCode")
     error_message: str = Field(alias="errorMessage")
@@ -264,8 +279,14 @@ def _service_call(call: Callable[[], _T]) -> _T:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PlotDefinitionInUseError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PlotScheduleConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _plot_management() -> PlotScheduleManagementService:
+    return PlotScheduleManagementService(get_data_service_gateway().plot_scheduling)
 
 
 def _time_response(value: SceneTime | None) -> SceneTimePayload | None:
@@ -379,20 +400,152 @@ def _decision_response(
     )
 
 
-def _event_values(payload: PlotEventInput | PlotEventPatch) -> dict[str, object]:
-    values = payload.model_dump(exclude_unset=True)
-    scheduled = values.get("scheduled_time")
-    if isinstance(scheduled, dict):
-        values["scheduled_time"] = SceneTime.from_mapping(scheduled)
-    return values
+def _required_patch_value(
+    payload: BaseModel,
+    field_name: str,
+    value: _T | None,
+) -> _T | PlotPatchUnset:
+    if field_name not in payload.model_fields_set:
+        return PLOT_PATCH_UNSET
+    if value is None:
+        raise ValueError(f"{field_name} cannot be null")
+    return value
 
 
-def _node_values(payload: PlotNodeInput | PlotNodePatch) -> dict[str, object]:
-    values = payload.model_dump(exclude_unset=True)
-    scheduled = values.get("scheduled_time")
-    if isinstance(scheduled, dict):
-        values["scheduled_time"] = SceneTime.from_mapping(scheduled)
-    return values
+def _event_time_patch(
+    payload: PlotEventPatch,
+) -> SceneTime | None | PlotPatchUnset:
+    if "scheduled_time" not in payload.model_fields_set:
+        return PLOT_PATCH_UNSET
+    if payload.scheduled_time is None:
+        return None
+    return payload.scheduled_time.to_scene_time()
+
+
+def _node_time_patch(payload: PlotNodePatch) -> SceneTime | PlotPatchUnset:
+    value = _required_patch_value(
+        payload,
+        "scheduled_time",
+        payload.scheduled_time,
+    )
+    if value is PLOT_PATCH_UNSET:
+        return PLOT_PATCH_UNSET
+    return value.to_scene_time()
+
+
+def _pool_update_command(
+    workspace_id: str,
+    story_id: int,
+    pool_id: int,
+    payload: PlotPoolPatch,
+) -> UpdatePlotPoolCommand:
+    return UpdatePlotPoolCommand(
+        workspace_id=workspace_id,
+        story_id=story_id,
+        pool_id=pool_id,
+        name=_required_patch_value(payload, "name", payload.name),
+        description=_required_patch_value(
+            payload,
+            "description",
+            payload.description,
+        ),
+        selection_mode=_required_patch_value(
+            payload,
+            "selection_mode",
+            payload.selection_mode,
+        ),
+        priority=_required_patch_value(payload, "priority", payload.priority),
+        enabled=_required_patch_value(payload, "enabled", payload.enabled),
+    )
+
+
+def _event_update_command(
+    workspace_id: str,
+    story_id: int,
+    event_id: int,
+    payload: PlotEventPatch,
+) -> UpdatePlotEventCommand:
+    return UpdatePlotEventCommand(
+        workspace_id=workspace_id,
+        story_id=story_id,
+        event_id=event_id,
+        pool_id=_required_patch_value(payload, "pool_id", payload.pool_id),
+        title=_required_patch_value(payload, "title", payload.title),
+        directive=_required_patch_value(payload, "directive", payload.directive),
+        description=_required_patch_value(
+            payload,
+            "description",
+            payload.description,
+        ),
+        suitability_hint=_required_patch_value(
+            payload,
+            "suitability_hint",
+            payload.suitability_hint,
+        ),
+        dispatch_mode=_required_patch_value(
+            payload,
+            "dispatch_mode",
+            payload.dispatch_mode,
+        ),
+        scheduled_time=_event_time_patch(payload),
+        position=_required_patch_value(payload, "position", payload.position),
+        enabled=_required_patch_value(payload, "enabled", payload.enabled),
+        allow_repeat=_required_patch_value(
+            payload,
+            "allow_repeat",
+            payload.allow_repeat,
+        ),
+        repeat_cooldown_minutes=_required_patch_value(
+            payload,
+            "repeat_cooldown_minutes",
+            payload.repeat_cooldown_minutes,
+        ),
+    )
+
+
+def _outline_update_command(
+    workspace_id: str,
+    story_id: int,
+    outline_id: int,
+    payload: PlotOutlinePatch,
+) -> UpdatePlotOutlineCommand:
+    return UpdatePlotOutlineCommand(
+        workspace_id=workspace_id,
+        story_id=story_id,
+        outline_id=outline_id,
+        name=_required_patch_value(payload, "name", payload.name),
+        description=_required_patch_value(
+            payload,
+            "description",
+            payload.description,
+        ),
+        priority=_required_patch_value(payload, "priority", payload.priority),
+        enabled=_required_patch_value(payload, "enabled", payload.enabled),
+    )
+
+
+def _node_update_command(
+    workspace_id: str,
+    story_id: int,
+    outline_id: int,
+    node_id: int,
+    payload: PlotNodePatch,
+) -> UpdatePlotNodeCommand:
+    return UpdatePlotNodeCommand(
+        workspace_id=workspace_id,
+        story_id=story_id,
+        outline_id=outline_id,
+        node_id=node_id,
+        event_id=_required_patch_value(payload, "event_id", payload.event_id),
+        scheduled_time=_node_time_patch(payload),
+        dispatch_mode=_required_patch_value(
+            payload,
+            "dispatch_mode",
+            payload.dispatch_mode,
+        ),
+        position=_required_patch_value(payload, "position", payload.position),
+        enabled=_required_patch_value(payload, "enabled", payload.enabled),
+    )
 
 
 @router.get(
@@ -403,7 +556,7 @@ async def get_story_plot_schedule(
     workspace_id: str,
     story_id: int,
 ) -> PlotScheduleResponse:
-    schedule = get_data_service_gateway().plot_scheduling.get_story_schedule(
+    schedule = _plot_management().get_story_schedule(
         workspace_id,
         story_id,
     )
@@ -422,11 +575,20 @@ async def create_plot_pool(
     story_id: int,
     payload: PlotPoolInput,
 ) -> PlotPoolResponse:
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.create_pool(
-        workspace_id,
-        story_id,
-        **payload.model_dump(),
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.create_pool(
+            CreatePlotPoolCommand(
+                workspace_id=workspace_id,
+                story_id=story_id,
+                name=payload.name,
+                description=payload.description,
+                selection_mode=payload.selection_mode,
+                priority=payload.priority,
+                enabled=payload.enabled,
+            )
+        )
+    )
     return _pool_response(value)
 
 
@@ -440,12 +602,12 @@ async def update_plot_pool(
     pool_id: int,
     payload: PlotPoolPatch,
 ) -> PlotPoolResponse:
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.update_pool(
-        workspace_id,
-        story_id,
-        pool_id,
-        **payload.model_dump(exclude_unset=True),
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.update_pool(
+            _pool_update_command(workspace_id, story_id, pool_id, payload)
+        )
+    )
     return _pool_response(value)
 
 
@@ -454,9 +616,8 @@ async def update_plot_pool(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_plot_pool(workspace_id: str, story_id: int, pool_id: int) -> Response:
-    _service_call(lambda: get_data_service_gateway().plot_scheduling.delete_pool(
-        workspace_id, story_id, pool_id
-    ))
+    service = _plot_management()
+    _service_call(lambda: service.delete_pool(workspace_id, story_id, pool_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -470,9 +631,30 @@ async def create_plot_event(
     story_id: int,
     payload: PlotEventInput,
 ) -> PlotEventResponse:
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.create_event(
-        workspace_id, story_id, **_event_values(payload)
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.create_event(
+            CreatePlotEventCommand(
+                workspace_id=workspace_id,
+                story_id=story_id,
+                pool_id=payload.pool_id,
+                title=payload.title,
+                directive=payload.directive,
+                description=payload.description,
+                suitability_hint=payload.suitability_hint,
+                dispatch_mode=payload.dispatch_mode,
+                scheduled_time=(
+                    payload.scheduled_time.to_scene_time()
+                    if payload.scheduled_time is not None
+                    else None
+                ),
+                position=payload.position,
+                enabled=payload.enabled,
+                allow_repeat=payload.allow_repeat,
+                repeat_cooldown_minutes=payload.repeat_cooldown_minutes,
+            )
+        )
+    )
     return _event_response(value)
 
 
@@ -486,9 +668,12 @@ async def update_plot_event(
     event_id: int,
     payload: PlotEventPatch,
 ) -> PlotEventResponse:
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.update_event(
-        workspace_id, story_id, event_id, **_event_values(payload)
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.update_event(
+            _event_update_command(workspace_id, story_id, event_id, payload)
+        )
+    )
     return _event_response(value)
 
 
@@ -497,9 +682,8 @@ async def update_plot_event(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_plot_event(workspace_id: str, story_id: int, event_id: int) -> Response:
-    _service_call(lambda: get_data_service_gateway().plot_scheduling.delete_event(
-        workspace_id, story_id, event_id
-    ))
+    service = _plot_management()
+    _service_call(lambda: service.delete_event(workspace_id, story_id, event_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -513,9 +697,15 @@ async def reorder_plot_events(
     pool_id: int,
     payload: ReorderPayload,
 ) -> list[PlotEventResponse]:
-    values = _service_call(lambda: get_data_service_gateway().plot_scheduling.reorder_events(
-        workspace_id, story_id, pool_id, payload.ids
-    ))
+    service = _plot_management()
+    values = _service_call(
+        lambda: service.reorder_events(
+            workspace_id,
+            story_id,
+            pool_id,
+            payload.ids,
+        )
+    )
     return [_event_response(value) for value in values]
 
 
@@ -529,9 +719,19 @@ async def create_plot_outline(
     story_id: int,
     payload: PlotOutlineInput,
 ) -> PlotOutlineResponse:
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.create_outline(
-        workspace_id, story_id, **payload.model_dump()
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.create_outline(
+            CreatePlotOutlineCommand(
+                workspace_id=workspace_id,
+                story_id=story_id,
+                name=payload.name,
+                description=payload.description,
+                priority=payload.priority,
+                enabled=payload.enabled,
+            )
+        )
+    )
     return _outline_response(value)
 
 
@@ -545,12 +745,12 @@ async def update_plot_outline(
     outline_id: int,
     payload: PlotOutlinePatch,
 ) -> PlotOutlineResponse:
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.update_outline(
-        workspace_id,
-        story_id,
-        outline_id,
-        **payload.model_dump(exclude_unset=True),
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.update_outline(
+            _outline_update_command(workspace_id, story_id, outline_id, payload)
+        )
+    )
     return _outline_response(value)
 
 
@@ -563,9 +763,8 @@ async def delete_plot_outline(
     story_id: int,
     outline_id: int,
 ) -> Response:
-    _service_call(lambda: get_data_service_gateway().plot_scheduling.delete_outline(
-        workspace_id, story_id, outline_id
-    ))
+    service = _plot_management()
+    _service_call(lambda: service.delete_outline(workspace_id, story_id, outline_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -580,9 +779,21 @@ async def create_plot_node(
     outline_id: int,
     payload: PlotNodeInput,
 ) -> PlotNodeResponse:
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.create_node(
-        workspace_id, story_id, outline_id, **_node_values(payload)
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.create_node(
+            CreatePlotNodeCommand(
+                workspace_id=workspace_id,
+                story_id=story_id,
+                outline_id=outline_id,
+                event_id=payload.event_id,
+                scheduled_time=payload.scheduled_time.to_scene_time(),
+                dispatch_mode=payload.dispatch_mode,
+                position=payload.position,
+                enabled=payload.enabled,
+            )
+        )
+    )
     return _node_response(value)
 
 
@@ -597,13 +808,18 @@ async def update_plot_node(
     node_id: int,
     payload: PlotNodePatch,
 ) -> PlotNodeResponse:
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.update_node(
-        workspace_id,
-        story_id,
-        outline_id,
-        node_id,
-        **_node_values(payload),
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.update_node(
+            _node_update_command(
+                workspace_id,
+                story_id,
+                outline_id,
+                node_id,
+                payload,
+            )
+        )
+    )
     return _node_response(value)
 
 
@@ -617,9 +833,10 @@ async def delete_plot_node(
     outline_id: int,
     node_id: int,
 ) -> Response:
-    _service_call(lambda: get_data_service_gateway().plot_scheduling.delete_node(
-        workspace_id, story_id, outline_id, node_id
-    ))
+    service = _plot_management()
+    _service_call(
+        lambda: service.delete_node(workspace_id, story_id, outline_id, node_id)
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -633,9 +850,15 @@ async def reorder_plot_nodes(
     outline_id: int,
     payload: ReorderPayload,
 ) -> list[PlotNodeResponse]:
-    values = _service_call(lambda: get_data_service_gateway().plot_scheduling.reorder_nodes(
-        workspace_id, story_id, outline_id, payload.ids
-    ))
+    service = _plot_management()
+    values = _service_call(
+        lambda: service.reorder_nodes(
+            workspace_id,
+            story_id,
+            outline_id,
+            payload.ids,
+        )
+    )
     return [_node_response(value) for value in values]
 
 
@@ -649,7 +872,7 @@ async def get_session_plot_schedule(
     before_id: int | None = Query(default=None, alias="beforeId", gt=0),
 ) -> SessionPlotScheduleResponse:
     await resolve_session_or_404(session_id)
-    service = get_data_service_gateway().plot_scheduling
+    service = _plot_management()
     schedule, overrides = _service_call(lambda: service.get_session_schedule(session_id))
     decisions = _service_call(lambda: service.list_session_decisions(
         session_id,
@@ -690,9 +913,14 @@ async def set_session_plot_event_override(
     payload: PlotOverridePayload,
 ) -> PlotOverridesResponse:
     await resolve_session_or_404(session_id)
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.set_session_event_disabled(
-        session_id, event_id, payload.disabled
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.set_session_event_disabled(
+            session_id,
+            event_id,
+            payload.disabled,
+        )
+    )
     return _overrides_response(value)
 
 
@@ -706,7 +934,12 @@ async def set_session_plot_node_override(
     payload: PlotOverridePayload,
 ) -> PlotOverridesResponse:
     await resolve_session_or_404(session_id)
-    value = _service_call(lambda: get_data_service_gateway().plot_scheduling.set_session_node_disabled(
-        session_id, node_id, payload.disabled
-    ))
+    service = _plot_management()
+    value = _service_call(
+        lambda: service.set_session_node_disabled(
+            session_id,
+            node_id,
+            payload.disabled,
+        )
+    )
     return _overrides_response(value)

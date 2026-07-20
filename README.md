@@ -411,6 +411,8 @@ RP Modules 采用上下文分层策略：
 
 `plot_scheduler` 是 Story 级剧情编排模块，不是固定剧本执行器，也不改变正文 SSE。Story 可以同时维护多个命名线性大纲和多个事件池：
 
+模块的业务 owner 是 `rpg_core/rp_modules/plot_scheduler`：默认位置、跨池移动、重复/冷却、时间线顺序、完整重排、删除占用、turn 决策批次以及派生/清理策略都由 Core 的类型化 application service 与 ledger policy 决定。`rpg_data` 只提供 Plot 定义、Session 覆盖和决策账本的类型化 CRUD、只读投影、调用方指定的复制条件与事务边界；Play API 也必须经 Core 管理入口写入定义。
+
 - 大纲节点引用一个 Story 事件，并保存严格的 `SceneTime`、节点顺序与 `forced | soft` 调度模式。每条启用大纲只检查第一个尚未触发且未被 Session 禁用的节点；同轮所有大纲最多仲裁出一个到期节点。
 - 每个事件归属一个池，池按显式 priority 仲裁，池内使用 `random`（默认）或 `sequential`。无首次时间的事件立即可候选；有时间时只有达到或超过该时间才首次候选。
 - 大纲触发状态与池触发状态相互独立。大纲节点永不重复；池事件可选择重复，重复时必须配置正数世界内分钟冷却；同一个事件不会在同一 turn 被两个 lane 重复注入。池 lane 以稳定 `event_id` 记录已触发、延期与冷却；后续把事件移到其它池不会重置这些状态。

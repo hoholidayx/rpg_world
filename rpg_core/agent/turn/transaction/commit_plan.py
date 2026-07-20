@@ -9,10 +9,12 @@ from loguru import logger
 
 from rpg_core.agent.turn.transaction.message_scratch import MessageScratch
 from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentChange, StatusDocumentScratch
+from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
 from rpg_core.session import InvalidTurnMetadataError
 
 if TYPE_CHECKING:
     from rpg_data.models import StagedPlotScheduleDecision
+    from rpg_data.services.gateway import DataServiceGateway
     from rpg_core.rp_modules.narrative_outcome.models import StagedNarrativeOutcome
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager
@@ -70,7 +72,7 @@ class TurnCommitPlan:
                 seq_in_turn=message.seq_in_turn,
             )
 
-    def _commit_narrative_outcome(self, gateway) -> None:
+    def _commit_narrative_outcome(self, gateway: "DataServiceGateway") -> None:
         staged = self.narrative_outcome
         if staged is None:
             return
@@ -85,10 +87,10 @@ class TurnCommitPlan:
             effective_source=staged.effective_source,
         )
 
-    def _commit_plot_schedule(self, gateway) -> None:
+    def _commit_plot_schedule(self, gateway: "DataServiceGateway") -> None:
         if not self.plot_schedule_decisions:
             return
-        gateway.plot_scheduling.record_decisions(
+        PlotScheduleLedgerService(gateway.plot_scheduling).record(
             self.session.session_id,
             self.message_scratch.turn_id,
             self.plot_schedule_decisions,

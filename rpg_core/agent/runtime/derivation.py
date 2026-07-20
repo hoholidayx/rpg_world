@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from rpg_core.agent.sub_agents.status.bootstrap import StatusBootstrapCoordinator
 from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
+from rpg_core.rp_modules.plot_scheduler.ledger import PLOT_DERIVATION_COPY_POLICY
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -57,7 +58,12 @@ class AgentDerivationService:
                 "Derivation job does not belong to the source Agent mailbox",
             )
         service.set_stage(job_id, "copying")
-        return service.seed_target_session(job_id)
+        copy_policy = PLOT_DERIVATION_COPY_POLICY
+        return service.seed_target_session(
+            job_id,
+            copy_plot_overrides=copy_policy.copy_overrides,
+            plot_decision_statuses=copy_policy.decision_statuses,
+        )
 
     async def prepare_target(
         self,

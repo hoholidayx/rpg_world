@@ -1039,7 +1039,11 @@ def test_provisioning_session_is_hidden_from_play_session_and_status_routes(
     gateway = get_data_service_gateway()
     job = gateway.session_derivations.create_job("s_forest001", 1)
     gateway.session_derivations.start_job(job.id)
-    target = gateway.session_derivations.seed_target_session(job.id).session
+    target = gateway.session_derivations.seed_target_session(
+        job.id,
+        copy_plot_overrides=True,
+        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
+    ).session
     table_id = gateway.status.list_tables(target.id)[0].id
 
     with TestClient(app) as client:

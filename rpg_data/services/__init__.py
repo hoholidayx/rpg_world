@@ -26,8 +26,8 @@ from rpg_data.services.media import (
 )
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import (
-    PlotDefinitionInUseError,
-    PlotSchedulingService,
+    PlotScheduleDataIntegrityError,
+    PlotSchedulingDataService,
 )
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_role import (
@@ -71,8 +71,8 @@ __all__ = [
     "MediaDataService",
     "MediaSourceRangeError",
     "NarrativeOutcomeService",
-    "PlotDefinitionInUseError",
-    "PlotSchedulingService",
+    "PlotScheduleDataIntegrityError",
+    "PlotSchedulingDataService",
     "RPModuleService",
     "PlayerCharacterOption",
     "SessionOpeningOption",

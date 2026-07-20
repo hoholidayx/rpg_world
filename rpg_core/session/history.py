@@ -202,7 +202,7 @@ class SessionHistory:
             with gateway.database.atomic():
                 gateway.messages.clear(self._session_id())
                 gateway.narrative_outcomes.clear(self._session_id())
-                gateway.plot_scheduling.clear_session_decisions(self._session_id())
+                gateway.plot_scheduling.clear_decisions(self._session_id())
         self.replace([], persist=False)
         logger.debug(_TAG + " cleared history for session '{}'", self._session_id())
 
@@ -218,7 +218,7 @@ class SessionHistory:
                 with gateway.database.atomic():
                     gateway.messages.clear(self._session_id())
                     gateway.narrative_outcomes.clear(self._session_id())
-                    gateway.plot_scheduling.clear_session_decisions(self._session_id())
+                    gateway.plot_scheduling.clear_decisions(self._session_id())
             self._state.messages = []
             self._rebuild_turn_state()
             return before

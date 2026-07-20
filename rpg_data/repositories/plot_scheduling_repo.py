@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 
 from peewee import Database, SQL
 
@@ -151,22 +151,53 @@ class PlotSchedulingRepository:
         )
         return _to_event(StoryPlotEventRecord.get_by_id(row.id))
 
-    def update_event(self, event_id: int, **values: object) -> models.StoryPlotEvent | None:
-        payload = dict(values)
-        if "pool_id" in payload:
-            payload["pool"] = payload.pop("pool_id")
-        if "scheduled_time" in payload:
-            payload["scheduled_time_json"] = _serialize_time(
-                payload.pop("scheduled_time")  # type: ignore[arg-type]
-            )
-        payload["version"] = StoryPlotEventRecord.version + 1
-        payload["updated_at"] = SQL("CURRENT_TIMESTAMP")
+    def update_event(
+        self,
+        event_id: int,
+        *,
+        pool_id: int,
+        title: str,
+        description: str,
+        directive: str,
+        suitability_hint: str,
+        dispatch_mode: str,
+        scheduled_time: SceneTime | None,
+        position: int,
+        enabled: bool,
+        allow_repeat: bool,
+        repeat_cooldown_minutes: int,
+    ) -> models.StoryPlotEvent | None:
         changed = (
-            StoryPlotEventRecord.update(**payload)
+            StoryPlotEventRecord.update(
+                pool=int(pool_id),
+                title=title,
+                description=description,
+                directive=directive,
+                suitability_hint=suitability_hint,
+                dispatch_mode=dispatch_mode,
+                scheduled_time_json=_serialize_time(scheduled_time),
+                position=int(position),
+                enabled=bool(enabled),
+                allow_repeat=bool(allow_repeat),
+                repeat_cooldown_minutes=int(repeat_cooldown_minutes),
+                version=StoryPlotEventRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
             .where(StoryPlotEventRecord.id == int(event_id))
             .execute()
         )
         return self.get_event(event_id) if changed else None
+
+    def set_event_position(self, event_id: int, position: int) -> int:
+        return int(
+            StoryPlotEventRecord.update(
+                position=int(position),
+                version=StoryPlotEventRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(StoryPlotEventRecord.id == int(event_id))
+            .execute()
+        )
 
     def delete_event(self, event_id: int) -> int:
         return int(
@@ -301,24 +332,41 @@ class PlotSchedulingRepository:
         )
         return _to_node(StoryPlotOutlineNodeRecord.get_by_id(row.id))
 
-    def update_node(self, node_id: int, **values: object) -> models.StoryPlotOutlineNode | None:
-        payload = dict(values)
-        if "event_id" in payload:
-            payload["event"] = payload.pop("event_id")
-        if "outline_id" in payload:
-            payload["outline"] = payload.pop("outline_id")
-        if "scheduled_time" in payload:
-            payload["scheduled_time_json"] = _serialize_time(
-                payload.pop("scheduled_time")  # type: ignore[arg-type]
-            )
-        payload["version"] = StoryPlotOutlineNodeRecord.version + 1
-        payload["updated_at"] = SQL("CURRENT_TIMESTAMP")
+    def update_node(
+        self,
+        node_id: int,
+        *,
+        event_id: int,
+        scheduled_time: SceneTime,
+        dispatch_mode: str,
+        position: int,
+        enabled: bool,
+    ) -> models.StoryPlotOutlineNode | None:
         changed = (
-            StoryPlotOutlineNodeRecord.update(**payload)
+            StoryPlotOutlineNodeRecord.update(
+                event=int(event_id),
+                scheduled_time_json=_serialize_time(scheduled_time),
+                dispatch_mode=dispatch_mode,
+                position=int(position),
+                enabled=bool(enabled),
+                version=StoryPlotOutlineNodeRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
             .where(StoryPlotOutlineNodeRecord.id == int(node_id))
             .execute()
         )
         return self.get_node(node_id) if changed else None
+
+    def set_node_position(self, node_id: int, position: int) -> int:
+        return int(
+            StoryPlotOutlineNodeRecord.update(
+                position=int(position),
+                version=StoryPlotOutlineNodeRecord.version + 1,
+                updated_at=SQL("CURRENT_TIMESTAMP"),
+            )
+            .where(StoryPlotOutlineNodeRecord.id == int(node_id))
+            .execute()
+        )
 
     def delete_node(self, node_id: int) -> int:
         return int(
@@ -465,21 +513,23 @@ class PlotSchedulingRepository:
             .execute()
         )
 
-    def copy_triggered_decisions(
+    def copy_decisions(
         self,
         source_session_id: str,
         target_session_id: str,
         through_turn_id: int,
+        *,
+        decision_statuses: Collection[str],
     ) -> int:
+        statuses = tuple(sorted(set(decision_statuses)))
+        if not statuses:
+            return 0
         rows = (
             SessionPlotScheduleDecisionRecord.select()
             .where(
                 (SessionPlotScheduleDecisionRecord.session == str(source_session_id))
                 & (SessionPlotScheduleDecisionRecord.turn_id <= int(through_turn_id))
-                & (
-                    SessionPlotScheduleDecisionRecord.decision_status
-                    == models.PLOT_DECISION_TRIGGERED
-                )
+                & (SessionPlotScheduleDecisionRecord.decision_status.in_(statuses))
             )
             .order_by(SessionPlotScheduleDecisionRecord.id)
         )
@@ -498,8 +548,8 @@ class PlotSchedulingRepository:
                 scene_time_ordinal=int(row.scene_time_ordinal),
                 event_snapshot_json=str(row.event_snapshot_json),
                 reason=str(row.reason or ""),
-                error_code="",
-                error_message="",
+                error_code=str(row.error_code or ""),
+                error_message=str(row.error_message or ""),
             )
             count += 1
         return count

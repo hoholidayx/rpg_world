@@ -53,6 +53,38 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
         assert event.status_code == 201
         event_id = event.json()["id"]
 
+        scheduled_event = client.patch(
+            f"{story_path}/events/{event_id}",
+            json={
+                "scheduledTime": {
+                    "year": 1,
+                    "month": 1,
+                    "day": 1,
+                    "hour": 8,
+                    "minute": 30,
+                }
+            },
+        )
+        assert scheduled_event.status_code == 200
+        assert scheduled_event.json()["scheduledTime"]["minute"] == 30
+        renamed_event = client.patch(
+            f"{story_path}/events/{event_id}",
+            json={"title": "雨夜加急来信"},
+        )
+        assert renamed_event.status_code == 200
+        assert renamed_event.json()["scheduledTime"]["minute"] == 30
+        cleared_schedule = client.patch(
+            f"{story_path}/events/{event_id}",
+            json={"scheduledTime": None},
+        )
+        assert cleared_schedule.status_code == 200
+        assert cleared_schedule.json()["scheduledTime"] is None
+        invalid_null_title = client.patch(
+            f"{story_path}/events/{event_id}",
+            json={"title": None},
+        )
+        assert invalid_null_title.status_code == 422
+
         outline = client.post(
             f"{story_path}/outlines",
             json={"name": "雨夜主线", "priority": 20},
@@ -75,6 +107,11 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
         )
         assert node.status_code == 201
         node_id = node.json()["id"]
+        invalid_null_node_time = client.patch(
+            f"{story_path}/outlines/{outline_id}/nodes/{node_id}",
+            json={"scheduledTime": None},
+        )
+        assert invalid_null_node_time.status_code == 422
 
         aggregate = client.get(story_path)
         assert aggregate.status_code == 200
@@ -83,7 +120,7 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
         runtime = client.get("/play-api/v1/sessions/s_forest001/plot-scheduling")
         assert runtime.status_code == 200
         assert runtime.json()["sessionId"] == "s_forest001"
-        assert runtime.json()["schedule"]["events"][0]["title"] == "雨夜来信"
+        assert runtime.json()["schedule"]["events"][0]["title"] == "雨夜加急来信"
         assert runtime.json()["sceneTime"] is not None
         max_page = client.get(
             "/play-api/v1/sessions/s_forest001/plot-scheduling?limit=200"

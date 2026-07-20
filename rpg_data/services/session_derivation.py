@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 
 from peewee import Database
 
@@ -17,8 +18,8 @@ from rpg_data.repositories.records import (
 from rpg_data.repositories.rp_module_repo import RPModuleRepository
 from rpg_data.repositories.session_derivation_repo import SessionDerivationRepository
 from rpg_data.repositories.session_repo import SessionRepository
+from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.status import StatusTableService
-from rpg_data.services.plot_scheduling import PlotSchedulingService
 
 __all__ = [
     "SessionDerivationDataError",
@@ -71,7 +72,7 @@ class SessionDerivationService:
         database: Database,
         *,
         status: StatusTableService | None = None,
-        plot_scheduling: PlotSchedulingService | None = None,
+        plot_scheduling: PlotSchedulingDataService | None = None,
     ) -> None:
         self._database = database
         bind_database(database)
@@ -79,7 +80,7 @@ class SessionDerivationService:
         self._sessions = SessionRepository(database)
         self._rp_modules = RPModuleRepository(database)
         self._status = status or StatusTableService(database)
-        self._plot_scheduling = plot_scheduling or PlotSchedulingService(database)
+        self._plot_scheduling = plot_scheduling or PlotSchedulingDataService(database)
 
     def create_job(
         self,
@@ -152,6 +153,9 @@ class SessionDerivationService:
     def seed_target_session(
         self,
         job_id: str,
+        *,
+        copy_plot_overrides: bool,
+        plot_decision_statuses: Collection[str],
     ) -> models.SessionDerivationSeedResult:
         with self._database.atomic():
             job = self._require_running_job(job_id)
@@ -191,10 +195,13 @@ class SessionDerivationService:
                 ) or target
             self._copy_rp_module_overrides(source.id, target.id)
             self._copy_messages(messages, target.id)
-            self._plot_scheduling.copy_derivation_state(
+            if copy_plot_overrides:
+                self._plot_scheduling.copy_overrides(source.id, target.id)
+            self._plot_scheduling.copy_decisions(
                 source.id,
                 target.id,
                 job.branch_turn_id,
+                decision_statuses=plot_decision_statuses,
             )
             self._status.initialize_session_tables(target.id)
             updated_job = self._jobs.update(
