@@ -6,9 +6,9 @@ import hashlib
 import os
 import tempfile
 from pathlib import Path
+from typing import Protocol
 
 from rpg_data import models
-from rpg_data.services.catalog import CatalogService
 from rpg_data.settings import resolve_workspace_relative_path
 from rpg_media.errors import MediaInvalidImageError
 from rpg_media.types import InspectedImage, StoredImage
@@ -45,8 +45,12 @@ def inspect_image_bytes(data: bytes) -> InspectedImage:
     )
 
 
+class WorkspacePathPort(Protocol):
+    def get_workspace_runtime_dir(self, workspace_id: str) -> Path: ...
+
+
 class WorkspaceImageStore:
-    def __init__(self, catalog: CatalogService) -> None:
+    def __init__(self, catalog: WorkspacePathPort) -> None:
         self._catalog = catalog
 
     def put(self, workspace_id: str, data: bytes) -> StoredImage:

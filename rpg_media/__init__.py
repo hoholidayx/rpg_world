@@ -3,7 +3,7 @@
 from rpg_media.brief import DemoVisualBriefPlanner, LLMVisualBriefPlanner, VisualBriefPlanner
 from rpg_media.metadata import ImageMetadataAnalyzer, LLMImageMetadataAnalyzer
 from rpg_media.background_agent import BackgroundMatcher, LLMMediaBackgroundAgent
-from rpg_media.facade import MediaFacade
+from rpg_media.service import MediaApplicationService
 from rpg_media.types import VisualBrief
 
 __all__ = [
@@ -13,7 +13,7 @@ __all__ = [
     "LLMVisualBriefPlanner",
     "BackgroundMatcher",
     "LLMMediaBackgroundAgent",
-    "MediaFacade",
+    "MediaApplicationService",
     "VisualBrief",
     "VisualBriefPlanner",
 ]

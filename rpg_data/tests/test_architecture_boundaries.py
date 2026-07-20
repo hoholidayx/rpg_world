@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rpg_data import models
 from rpg_data.model.memory import DreamProposal, PersistentMemoryBundle
+from rpg_data.model.media import MediaJob, MediaLibraryAssetBundle
 from rpg_data.model.session import Session, SessionDerivationJob, SessionMessage
 from rpg_data.model.status import (
     SessionStatusTable,
@@ -14,6 +15,7 @@ from rpg_data.model.status import (
     StatusTableTemplate,
 )
 from rpg_data.services.dream_memory import DreamMemoryDataService
+from rpg_data.services.media import MediaDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
@@ -68,6 +70,14 @@ RECENT_APPLICATION_SERVICE_FILES = (
     "rpg_core/status/context_service.py",
     "rpg_core/status/administration.py",
     "rpg_core/status/manager.py",
+    "rpg_media/service.py",
+)
+
+MEDIA_BUSINESS_FILES = (
+    "rpg_media/service.py",
+    "rpg_media/source.py",
+    "rpg_media/background_agent.py",
+    "media_service/worker.py",
 )
 
 STATUS_APPLICATION_SERVICE_FILES = (
@@ -115,7 +125,6 @@ WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
     "rpg_core/agent/turn/transaction/commit_plan.py",
     "rpg_core/session/history.py",
     "rpg_core/session/progress.py",
-    "rpg_media/facade.py",
     "tts_service/main.py",
 })
 
@@ -170,6 +179,20 @@ def test_status_application_services_use_narrow_data_ports() -> None:
     assert violations == []
 
 
+def test_media_business_and_workers_use_narrow_data_ports() -> None:
+    forbidden = {
+        "rpg_data.services.gateway",
+        "rpg_data.services.media",
+    }
+    violations = [
+        relative_path
+        for relative_path in MEDIA_BUSINESS_FILES
+        if _imports(ROOT / relative_path) & forbidden
+    ]
+
+    assert violations == []
+
+
 def test_gateway_lookup_surface_does_not_grow() -> None:
     actual = {
         path.relative_to(ROOT).as_posix()
@@ -199,6 +222,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         DreamMemoryDataService,
         StoryMemoryDataService,
         StatusDataService,
+        MediaDataService,
     )
 
     assert all(service_type.__name__.endswith("DataService") for service_type in service_types)
@@ -213,6 +237,19 @@ def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.SessionStatusTable is SessionStatusTable
     assert models.StatusTableDocument is StatusTableDocument
     assert models.StatusTableTemplate is StatusTableTemplate
+    assert models.MediaJob is MediaJob
+    assert models.MediaLibraryAssetBundle is MediaLibraryAssetBundle
+
+
+def test_media_data_service_does_not_expose_business_policy_entrypoints() -> None:
+    forbidden = {
+        "apply_background_decision",
+        "interrupt_active_jobs",
+        "interrupt_background_evaluations",
+        "queue_background_evaluation",
+    }
+
+    assert forbidden.isdisjoint(vars(MediaDataService))
 
 
 def test_status_data_service_does_not_expose_business_policy_entrypoints() -> None:

@@ -152,7 +152,9 @@ def _build_media_app(config: dict[str, Any]):  # noqa: ANN202
     from media_service.main import MediaRuntime
     from media_service.worker import MediaJobWorker
     from rpg_data.services import get_data_service_gateway
-    from rpg_media.facade import MediaFacade
+    from rpg_core.scene.status import SceneStatusService
+    from rpg_media.brief import LLMVisualBriefPlanner
+    from rpg_media.service import MediaApplicationService
     from rpg_media.providers.catalog import MediaProviderCatalog
     from rpg_media.providers.local_file import LocalFileProvider
 
@@ -168,17 +170,20 @@ def _build_media_app(config: dict[str, Any]):  # noqa: ANN202
         ),
     )
     gateway = get_data_service_gateway()
-    facade = MediaFacade.from_gateway(
-        gateway,
+    media_service = MediaApplicationService(
+        data=gateway.media,
+        catalog=gateway.catalog,
+        planner=LLMVisualBriefPlanner(),
         providers=MediaProviderCatalog(
             (LocalFileProvider(Path(config["provider_dir"])),),
             default_key="local_file",
         ),
+        status=SceneStatusService(gateway.status),
     )
     runtime = MediaRuntime(
         gateway=gateway,
-        facade=facade,
-        worker=MediaJobWorker(data=gateway.media, facade=facade, concurrency=1),
+        service=media_service,
+        worker=MediaJobWorker(service=media_service, concurrency=1),
     )
     service_main.set_runtime_for_tests(runtime)
     return service_main.app

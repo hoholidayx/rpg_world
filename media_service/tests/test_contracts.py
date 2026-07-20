@@ -11,7 +11,7 @@ from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
 from rpg_media.brief import DemoVisualBriefPlanner
 from rpg_media.errors import MediaImageAnalysisUnsupportedError
-from rpg_media.facade import MediaFacade
+from rpg_media.service import MediaApplicationService
 from rpg_media.providers.catalog import MediaProviderCatalog
 from rpg_media.providers.local_file import LocalFileProvider
 from rpg_media.types import MediaBackgroundDecision, MediaImageMetadata
@@ -66,7 +66,7 @@ def _runtime(tmp_path, *, image_analyzer=None):  # noqa: ANN001, ANN202
     provider_dir = tmp_path / "provider"
     provider_dir.mkdir()
     (provider_dir / "image.png").write_bytes(PNG)
-    facade = MediaFacade(
+    service = MediaApplicationService(
         data=gateway.media,
         catalog=gateway.catalog,
         planner=DemoVisualBriefPlanner(),
@@ -79,13 +79,12 @@ def _runtime(tmp_path, *, image_analyzer=None):  # noqa: ANN001, ANN202
         image_analyzer=image_analyzer or _ImageAnalyzer(),
     )
     worker = MediaJobWorker(
-        data=gateway.media,
-        facade=facade,
+        service=service,
         concurrency=1,
     )
     return gateway, session, message, MediaRuntime(
         gateway=gateway,
-        facade=facade,
+        service=service,
         worker=worker,
     )
 
@@ -461,7 +460,7 @@ def test_media_service_reconcile_contract(tmp_path) -> None:
             )
             assert uploaded.status_code == 200
             item = uploaded.json()
-            path, _ = runtime.facade.resolve_library_asset_content(
+            path, _ = runtime.service.resolve_library_asset_content(
                 "demo_workspace",
                 item["itemId"],
             )

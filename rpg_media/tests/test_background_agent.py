@@ -96,9 +96,14 @@ async def test_background_agent_searches_story_then_selects_returned_asset() -> 
     data.search_library_assets.assert_called_once_with(
         workspace_id="demo_workspace",
         scope=models.MEDIA_LIBRARY_SCOPE_STORY,
-        story_id=1,
-        query="月光森林 夜晚",
-        tags=("森林", "夜晚"),
+            story_id=1,
+            query="月光森林 夜晚",
+            weights=models.MediaLibrarySearchWeights(
+                exact_tag=100,
+                title_contains=20,
+                description_contains=5,
+            ),
+            tags=("森林", "夜晚"),
         limit=20,
     )
     assert provider.messages[1][-1]["role"] == "tool"

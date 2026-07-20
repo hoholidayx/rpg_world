@@ -50,9 +50,12 @@ from media_service.worker import MediaBackgroundWorker, MediaJobWorker
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway
 from rpg_data.services.gateway import DataServiceGateway
-from rpg_data.services.media import MediaSourceRangeError
-from rpg_media.errors import MediaError
-from rpg_media.facade import MediaFacade
+from rpg_core.scene.status import SceneStatusService
+from rpg_media.brief import LLMVisualBriefPlanner
+from rpg_media.errors import MediaError, MediaSourceRangeError
+from rpg_media.providers.catalog import build_provider_catalog
+from rpg_media.service import MediaApplicationService
+from rpg_media.settings import settings as media_settings
 from rpg_media.types import MediaBackgroundView, SessionGalleryAsset, VisualBrief
 
 logger = logging.getLogger("media_service")
@@ -65,35 +68,38 @@ class MediaRuntime:
         self,
         *,
         gateway: DataServiceGateway,
-        facade: MediaFacade,
+        service: MediaApplicationService,
         worker: MediaJobWorker,
         background_worker: MediaBackgroundWorker | None = None,
     ) -> None:
         self.gateway = gateway
-        self.facade = facade
+        self.service = service
         self.worker = worker
         self.background_worker = background_worker or MediaBackgroundWorker(
-            data=gateway.media,
-            facade=facade,
+            service=service,
             concurrency=process_settings.background_worker.concurrency,
         )
 
     @classmethod
     def create(cls) -> "MediaRuntime":
         gateway = get_data_service_gateway()
-        facade = MediaFacade.from_gateway(gateway)
+        service = MediaApplicationService(
+            data=gateway.media,
+            catalog=gateway.catalog,
+            planner=LLMVisualBriefPlanner(),
+            providers=build_provider_catalog(media_settings.providers),
+            status=SceneStatusService(gateway.status),
+        )
         worker_settings = process_settings.worker
         return cls(
             gateway=gateway,
-            facade=facade,
+            service=service,
             worker=MediaJobWorker(
-                data=gateway.media,
-                facade=facade,
+                service=service,
                 concurrency=worker_settings.concurrency,
             ),
             background_worker=MediaBackgroundWorker(
-                data=gateway.media,
-                facade=facade,
+                service=service,
                 concurrency=process_settings.background_worker.concurrency,
             ),
         )
@@ -172,7 +178,7 @@ async def list_library_assets(
     page_size: int = Query(default=48, alias="pageSize", ge=1, le=100),
 ) -> MediaLibraryResponse:
     try:
-        result = get_runtime().facade.list_library_assets_page(
+        result = get_runtime().service.list_library_assets_page(
             workspace_id,
             query=q,
             media_types=_split_query_values(media_types),
@@ -200,7 +206,7 @@ async def list_library_assets(
 )
 async def get_library_facets(workspace_id: str) -> MediaLibraryFacetsResponse:
     try:
-        facets = get_runtime().facade.get_library_facets(workspace_id)
+        facets = get_runtime().service.get_library_facets(workspace_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return _library_facets_response(facets)
@@ -214,7 +220,7 @@ async def reconcile_library_assets(
     workspace_id: str,
 ) -> MediaLibraryReconcileResponse:
     try:
-        result = await get_runtime().facade.reconcile_library_assets(workspace_id)
+        result = await get_runtime().service.reconcile_library_assets(workspace_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return MediaLibraryReconcileResponse(
@@ -240,7 +246,7 @@ async def analyze_library_image(
         payload = await file.read(_MAX_UPLOAD_BYTES + 1)
         if len(payload) > _MAX_UPLOAD_BYTES:
             raise ValueError("media library image exceeds the 32 MiB upload limit")
-        metadata = await get_runtime().facade.analyze_library_image(
+        metadata = await get_runtime().service.analyze_library_image(
             workspace_id,
             data=payload,
         )
@@ -277,7 +283,7 @@ async def upload_library_asset(
         payload = await file.read(_MAX_UPLOAD_BYTES + 1)
         if len(payload) > _MAX_UPLOAD_BYTES:
             raise ValueError("media library image exceeds the 32 MiB upload limit")
-        bundle = await get_runtime().facade.upload_library_asset(
+        bundle = await get_runtime().service.upload_library_asset(
             workspace_id=workspace_id,
             scope=scope,
             story_id=story_id,
@@ -306,7 +312,7 @@ async def batch_update_library_assets(
     if body.media_type is None and not body.add_tags and not body.remove_tags:
         raise HTTPException(status_code=422, detail="batch update requires at least one action")
     try:
-        result = get_runtime().facade.batch_update_library_assets(
+        result = get_runtime().service.batch_update_library_assets(
             workspace_id,
             item_ids=tuple(body.item_ids),
             media_type=body.media_type,
@@ -327,7 +333,7 @@ async def batch_delete_library_assets(
     body: MediaLibraryBatchDeleteRequest,
 ) -> MediaLibraryBatchResponse:
     try:
-        result = get_runtime().facade.batch_delete_library_assets(
+        result = get_runtime().service.batch_delete_library_assets(
             workspace_id,
             item_ids=tuple(body.item_ids),
         )
@@ -346,7 +352,7 @@ async def update_library_asset(
     body: MediaLibraryUpdateRequest,
 ) -> MediaLibraryItemResponse:
     try:
-        bundle = get_runtime().facade.update_library_asset(
+        bundle = get_runtime().service.update_library_asset(
             workspace_id,
             item_id,
             scope=body.scope,
@@ -373,7 +379,7 @@ async def delete_library_asset(
     item_id: str,
 ) -> MediaLibraryDeleteResponse:
     try:
-        deleted = get_runtime().facade.delete_library_asset(workspace_id, item_id)
+        deleted = get_runtime().service.delete_library_asset(workspace_id, item_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     if not deleted:
@@ -384,7 +390,7 @@ async def delete_library_asset(
 @app.get(f"{_prefix()}/workspaces/{{workspace_id}}/library/{{item_id}}/content")
 async def get_library_asset_content(workspace_id: str, item_id: str) -> FileResponse:
     try:
-        path, mime_type = get_runtime().facade.resolve_library_asset_content(
+        path, mime_type = get_runtime().service.resolve_library_asset_content(
             workspace_id,
             item_id,
         )
@@ -410,7 +416,7 @@ async def list_providers(session_id: str) -> MediaProviderCatalogResponse:
     runtime = get_runtime()
     _require_session(runtime, session_id)
     return MediaProviderCatalogResponse(
-        defaultKey=runtime.facade.default_provider_key,
+        defaultKey=runtime.service.default_provider_key,
         providers=[
             MediaProviderResponse(
                 key=item.key,
@@ -419,7 +425,7 @@ async def list_providers(session_id: str) -> MediaProviderCatalogResponse:
                 available=item.available,
                 reason=item.reason,
             )
-            for item in runtime.facade.list_providers()
+            for item in runtime.service.list_providers()
         ],
     )
 
@@ -430,7 +436,7 @@ async def list_providers(session_id: str) -> MediaProviderCatalogResponse:
 )
 async def list_source_turns(session_id: str) -> MediaSourceTurnsResponse:
     try:
-        turns = get_runtime().facade.list_source_turns(session_id)
+        turns = get_runtime().service.list_source_turns(session_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return MediaSourceTurnsResponse(
@@ -455,7 +461,7 @@ async def create_brief(
     body: MediaBriefRequest,
 ) -> MediaBriefResponse:
     try:
-        result = await get_runtime().facade.create_visual_brief(
+        result = await get_runtime().service.create_visual_brief(
             session_id,
             start_turn_id=body.start_turn_id,
             end_turn_id=body.end_turn_id,
@@ -480,7 +486,7 @@ async def create_job(
 ) -> MediaJobResponse:
     runtime = get_runtime()
     try:
-        job = runtime.facade.create_job(
+        job = runtime.service.create_job(
             session_id,
             provider_key=body.provider_key,
             start_turn_id=body.start_turn_id,
@@ -501,7 +507,7 @@ async def create_job(
 )
 async def get_job(session_id: str, job_id: str) -> MediaJobResponse:
     try:
-        job = get_runtime().facade.get_job(session_id, job_id)
+        job = get_runtime().service.get_job(session_id, job_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     if job is None:
@@ -515,7 +521,7 @@ async def get_job(session_id: str, job_id: str) -> MediaJobResponse:
 )
 async def cancel_job(session_id: str, job_id: str) -> MediaJobResponse:
     try:
-        job = get_runtime().facade.cancel_job(session_id, job_id)
+        job = get_runtime().service.cancel_job(session_id, job_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     if job is None:
@@ -531,7 +537,7 @@ async def cancel_job(session_id: str, job_id: str) -> MediaJobResponse:
 async def retry_job(session_id: str, job_id: str) -> MediaJobResponse:
     runtime = get_runtime()
     try:
-        job = runtime.facade.retry_job(session_id, job_id)
+        job = runtime.service.retry_job(session_id, job_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     runtime.worker.wake()
@@ -545,9 +551,9 @@ async def retry_job(session_id: str, job_id: str) -> MediaJobResponse:
 async def get_gallery(session_id: str) -> MediaGalleryResponse:
     runtime = get_runtime()
     try:
-        items = runtime.facade.list_gallery(session_id)
-        active_jobs = runtime.facade.list_active_jobs(session_id)
-        recent_jobs = runtime.facade.list_jobs(session_id)[:30]
+        items = runtime.service.list_gallery(session_id)
+        active_jobs = runtime.service.list_active_jobs(session_id)
+        recent_jobs = runtime.service.list_jobs(session_id)[:30]
     except Exception as exc:
         raise _http_error(exc) from exc
     return MediaGalleryResponse(
@@ -564,8 +570,8 @@ async def get_gallery(session_id: str) -> MediaGalleryResponse:
 async def get_background(session_id: str) -> MediaBackgroundResponse:
     runtime = get_runtime()
     try:
-        background = runtime.facade.get_background(session_id)
-        latest = runtime.facade.get_latest_background_evaluation(session_id)
+        background = runtime.service.get_background(session_id)
+        latest = runtime.service.get_latest_background_evaluation(session_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return _background_response(background, latest)
@@ -581,8 +587,8 @@ async def set_background(
 ) -> MediaBackgroundResponse:
     runtime = get_runtime()
     try:
-        background = runtime.facade.set_background(session_id, body.asset_id)
-        latest = runtime.facade.get_latest_background_evaluation(session_id)
+        background = runtime.service.set_background(session_id, body.asset_id)
+        latest = runtime.service.get_latest_background_evaluation(session_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return _background_response(background, latest)
@@ -595,9 +601,9 @@ async def set_background(
 async def clear_background(session_id: str) -> MediaBackgroundResponse:
     runtime = get_runtime()
     try:
-        runtime.facade.clear_background(session_id)
-        background = runtime.facade.get_background(session_id)
-        latest = runtime.facade.get_latest_background_evaluation(session_id)
+        runtime.service.clear_background(session_id)
+        background = runtime.service.get_background(session_id)
+        latest = runtime.service.get_latest_background_evaluation(session_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return _background_response(background, latest)
@@ -613,7 +619,7 @@ async def queue_background_evaluation(
 ) -> MediaBackgroundEvaluationResponse:
     runtime = get_runtime()
     try:
-        evaluation = runtime.facade.queue_background_evaluation(
+        evaluation = runtime.service.queue_background_evaluation(
             session_id,
             observed_turn_id=body.observed_turn_id,
         )
@@ -632,7 +638,7 @@ async def get_background_evaluation(
     evaluation_id: str,
 ) -> MediaBackgroundEvaluationResponse:
     try:
-        evaluation = get_runtime().facade.get_background_evaluation(
+        evaluation = get_runtime().service.get_background_evaluation(
             session_id,
             evaluation_id,
         )
@@ -649,7 +655,7 @@ async def get_background_evaluation(
 )
 async def get_asset(session_id: str, asset_id: str) -> MediaGalleryItemResponse:
     try:
-        asset = get_runtime().facade.get_session_asset(session_id, asset_id)
+        asset = get_runtime().service.get_session_asset(session_id, asset_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     if asset is None:
@@ -663,7 +669,7 @@ async def get_asset(session_id: str, asset_id: str) -> MediaGalleryItemResponse:
 )
 async def delete_asset(session_id: str, asset_id: str) -> MediaAssetDeleteResponse:
     try:
-        deleted = get_runtime().facade.delete_asset(session_id, asset_id)
+        deleted = get_runtime().service.delete_asset(session_id, asset_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     if not deleted:
@@ -674,7 +680,7 @@ async def delete_asset(session_id: str, asset_id: str) -> MediaAssetDeleteRespon
 @app.get(f"{_prefix()}/sessions/{{session_id}}/assets/{{asset_id}}/content")
 async def get_asset_content(session_id: str, asset_id: str) -> FileResponse:
     try:
-        path, mime_type = get_runtime().facade.resolve_asset_content(
+        path, mime_type = get_runtime().service.resolve_asset_content(
             session_id,
             asset_id,
         )

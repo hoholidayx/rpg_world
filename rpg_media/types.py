@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Mapping
 
 from rpg_data import models
@@ -117,16 +118,28 @@ class MediaBackgroundSourceSnapshot:
     snapshot_json: str
 
 
+class MediaBackgroundDecisionKind(StrEnum):
+    KEEP = "keep"
+    SWITCH = "switch"
+
+
+MEDIA_BACKGROUND_DECISION_KEEP = MediaBackgroundDecisionKind.KEEP
+MEDIA_BACKGROUND_DECISION_SWITCH = MediaBackgroundDecisionKind.SWITCH
+
+
 @dataclass(frozen=True)
 class MediaBackgroundDecision:
-    decision: str
+    decision: MediaBackgroundDecisionKind
     reason: str
     asset_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.decision not in {"keep", "switch"}:
-            raise ValueError(f"invalid media background decision: {self.decision}")
-        if self.decision == "switch" and not self.asset_id:
+        try:
+            decision = MediaBackgroundDecisionKind(self.decision)
+        except ValueError as exc:
+            raise ValueError(f"invalid media background decision: {self.decision}") from exc
+        object.__setattr__(self, "decision", decision)
+        if decision is MediaBackgroundDecisionKind.SWITCH and not self.asset_id:
             raise ValueError("switch background decision requires asset_id")
 
 

@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from typing import Protocol
 
 from rpg_data import models
-from rpg_data.services.media import MediaDataService
+from rpg_media.errors import MediaSourceRangeError
 from rpg_media.types import (
     MediaBackgroundSourceSnapshot,
     MediaSourceSnapshot,
@@ -15,22 +16,53 @@ from rpg_media.types import (
 )
 
 _WHITESPACE_RE = re.compile(r"\s+")
+MAX_MEDIA_SOURCE_TURNS = 20
+
+
+class MediaSourceDataPort(Protocol):
+    def get_source_turns(
+        self,
+        session_id: str,
+        *,
+        start_turn_id: int,
+        end_turn_id: int,
+    ) -> list[models.MediaSourceTurn]: ...
+
+    def get_latest_source_turns(
+        self,
+        session_id: str,
+        *,
+        through_turn_id: int,
+        limit: int = 3,
+    ) -> list[models.MediaSourceTurn]: ...
 
 
 def build_source_snapshot(
-    media_data: MediaDataService,
+    media_data: MediaSourceDataPort,
     session_id: str,
     *,
     start_turn_id: int,
     end_turn_id: int,
 ) -> MediaSourceSnapshot:
+    start = int(start_turn_id)
+    end = int(end_turn_id)
+    if start <= 0 or end < start:
+        raise MediaSourceRangeError("media source turn range is invalid")
+    if end - start + 1 > MAX_MEDIA_SOURCE_TURNS:
+        raise MediaSourceRangeError(
+            f"media source may contain at most {MAX_MEDIA_SOURCE_TURNS} turns"
+        )
     turns = tuple(
         media_data.get_source_turns(
             session_id,
-            start_turn_id=start_turn_id,
-            end_turn_id=end_turn_id,
+            start_turn_id=start,
+            end_turn_id=end,
         )
     )
+    if [turn.turn_id for turn in turns] != list(range(start, end + 1)):
+        raise MediaSourceRangeError(
+            "media source must be a contiguous range of committed turns"
+        )
     messages = tuple(message for turn in turns for message in turn.messages)
     fingerprint_payload = [
         {
@@ -80,7 +112,7 @@ def build_source_snapshot(
 
 
 def build_background_source_snapshot(
-    media_data: MediaDataService,
+    media_data: MediaSourceDataPort,
     session: models.Session,
     *,
     target_turn_id: int,

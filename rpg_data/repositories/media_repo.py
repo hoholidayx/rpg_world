@@ -859,23 +859,28 @@ class MediaRepository:
             error_message=error_message,
         )
 
-    def interrupt_active_jobs(self) -> int:
+    def transition_jobs(
+        self,
+        *,
+        from_statuses: Iterable[str],
+        to_status: str,
+        error_code: str = "",
+        error_message: str = "",
+    ) -> int:
+        normalized_statuses = tuple(str(status) for status in from_statuses)
+        if not normalized_statuses:
+            return 0
         return int(
             MediaJobRecord
             .update(
-                status=models.MEDIA_JOB_STATUS_INTERRUPTED,
-                error_code="MEDIA_JOB_INTERRUPTED",
-                error_message="Media service restarted before the job finished.",
+                status=str(to_status),
+                error_code=str(error_code),
+                error_message=str(error_message),
                 finished_at=SQL("CURRENT_TIMESTAMP"),
                 version=MediaJobRecord.version + 1,
                 updated_at=SQL("CURRENT_TIMESTAMP"),
             )
-            .where(
-                MediaJobRecord.status.in_((
-                    models.MEDIA_JOB_STATUS_RUNNING,
-                    models.MEDIA_JOB_STATUS_CANCELLING,
-                ))
-            )
+            .where(MediaJobRecord.status.in_(normalized_statuses))
             .execute()
         )
 
@@ -1332,31 +1337,36 @@ class MediaRepository:
         )
         return self.get_background_evaluation(evaluation_id) if updated else None
 
-    def interrupt_running_background_evaluations(
+    def transition_background_evaluations(
         self,
+        *,
+        from_status: str,
+        to_status: str,
+        error_code: str = "",
+        error_message: str = "",
     ) -> list[models.MediaBackgroundEvaluation]:
         rows = list(
             MediaBackgroundEvaluationRecord
             .select()
             .where(
                 MediaBackgroundEvaluationRecord.status
-                == models.MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING
+                == str(from_status)
             )
         )
         if rows:
             (
                 MediaBackgroundEvaluationRecord
                 .update(
-                    status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_INTERRUPTED,
-                    error_code="MEDIA_BACKGROUND_EVALUATION_INTERRUPTED",
-                    error_message="Media service restarted during background evaluation.",
+                    status=str(to_status),
+                    error_code=str(error_code),
+                    error_message=str(error_message),
                     finished_at=SQL("CURRENT_TIMESTAMP"),
                     version=MediaBackgroundEvaluationRecord.version + 1,
                     updated_at=SQL("CURRENT_TIMESTAMP"),
                 )
                 .where(
                     MediaBackgroundEvaluationRecord.status
-                    == models.MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING
+                    == str(from_status)
                 )
                 .execute()
             )

@@ -5,7 +5,7 @@ import pytest
 from rpg_core.session.reset import SessionResetService
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
-from rpg_data.services.media import MediaAssetInUseError, MediaSourceRangeError
+from rpg_media.source import build_source_snapshot
 
 
 def _session_with_turns(tmp_path):  # noqa: ANN202
@@ -45,7 +45,40 @@ def _create_and_claim_job(gateway, session_id: str, *, retry_of: str | None = No
     return claimed
 
 
-def test_source_range_requires_contiguous_committed_turns(tmp_path) -> None:
+def _complete_media_job(
+    gateway,
+    *,
+    job_id: str,
+    sha256: str,
+    canonical_ext: str,
+    mime_type: str,
+    byte_size: int,
+    relative_path: str,
+):  # noqa: ANN001, ANN202
+    job = gateway.media.get_job_for_worker(job_id)
+    assert job is not None
+    session = gateway.catalog.get_session(job.session_id)
+    assert session is not None
+    return gateway.media.complete_job(
+        job_id=job_id,
+        write=models.MediaJobCompletionWrite(
+            workspace_id=session.workspace_id,
+            story_id=session.story_id,
+            sha256=sha256,
+            canonical_ext=canonical_ext,
+            mime_type=mime_type,
+            byte_size=byte_size,
+            relative_path=relative_path,
+            provider_asset_id="",
+            metadata_json="{}",
+            library_title="Generated image",
+            library_description=job.visual_brief_json,
+            library_tags=("generated",),
+        ),
+    )
+
+
+def test_source_turn_query_returns_persisted_rows_without_business_filtering(tmp_path) -> None:
     gateway, session = _session_with_turns(tmp_path)
 
     turns = gateway.media.get_source_turns(
@@ -71,8 +104,16 @@ def test_source_range_requires_contiguous_committed_turns(tmp_path) -> None:
         turn_id=3,
         seq_in_turn=1,
     )
-    with pytest.raises(MediaSourceRangeError, match="contiguous"):
-        gateway.media.get_source_turns(
+    turns = gateway.media.get_source_turns(
+        session.id,
+        start_turn_id=1,
+        end_turn_id=3,
+    )
+    assert [turn.turn_id for turn in turns] == [1, 3]
+
+    with pytest.raises(ValueError, match="contiguous"):
+        build_source_snapshot(
+            gateway.media,
             session.id,
             start_turn_id=1,
             end_turn_id=3,
@@ -82,7 +123,7 @@ def test_source_range_requires_contiguous_committed_turns(tmp_path) -> None:
 def test_blob_deduplicates_but_every_job_creates_an_independent_asset(tmp_path) -> None:
     gateway, session = _session_with_turns(tmp_path)
     first_job = _create_and_claim_job(gateway, session.id)
-    first = gateway.media.complete_job(
+    first = _complete_media_job(gateway,
         job_id=first_job.id,
         sha256="b" * 64,
         canonical_ext="png",
@@ -93,7 +134,7 @@ def test_blob_deduplicates_but_every_job_creates_an_independent_asset(tmp_path) 
     assert first is not None
 
     second_job = _create_and_claim_job(gateway, session.id, retry_of=first_job.id)
-    second = gateway.media.complete_job(
+    second = _complete_media_job(gateway,
         job_id=second_job.id,
         sha256="b" * 64,
         canonical_ext="png",
@@ -124,10 +165,10 @@ def test_blob_deduplicates_but_every_job_creates_an_independent_asset(tmp_path) 
     )
 
 
-def test_background_blocks_asset_deletion_and_last_asset_collects_blob(tmp_path) -> None:
+def test_background_reference_read_model_and_last_asset_blob_collection(tmp_path) -> None:
     gateway, session = _session_with_turns(tmp_path)
     job = _create_and_claim_job(gateway, session.id)
-    completed = gateway.media.complete_job(
+    completed = _complete_media_job(gateway,
         job_id=job.id,
         sha256="c" * 64,
         canonical_ext="webp",
@@ -136,10 +177,12 @@ def test_background_blocks_asset_deletion_and_last_asset_collects_blob(tmp_path)
         relative_path=f"assets/images/{'c' * 64}.webp",
     )
     assert completed is not None
-    gateway.media.set_background(session.id, completed.asset.id)
-
-    with pytest.raises(MediaAssetInUseError):
-        gateway.media.delete_session_asset(session.id, completed.asset.id)
+    gateway.media.set_background(
+        session.id,
+        completed.asset.id,
+        source_mode=models.MEDIA_BACKGROUND_SOURCE_MANUAL,
+    )
+    assert gateway.media.count_background_references(completed.asset.id) == 1
 
     gateway.media.clear_background(session.id)
     deleted = gateway.media.delete_session_asset(session.id, completed.asset.id)
@@ -151,7 +194,7 @@ def test_background_blocks_asset_deletion_and_last_asset_collects_blob(tmp_path)
 def test_session_reset_clears_jobs_gallery_and_background_but_preserves_asset(tmp_path) -> None:
     gateway, session = _session_with_turns(tmp_path)
     job = _create_and_claim_job(gateway, session.id)
-    completed = gateway.media.complete_job(
+    completed = _complete_media_job(gateway,
         job_id=job.id,
         sha256="d" * 64,
         canonical_ext="jpg",
@@ -160,7 +203,11 @@ def test_session_reset_clears_jobs_gallery_and_background_but_preserves_asset(tm
         relative_path=f"assets/images/{'d' * 64}.jpg",
     )
     assert completed is not None
-    gateway.media.set_background(session.id, completed.asset.id)
+    gateway.media.set_background(
+        session.id,
+        completed.asset.id,
+        source_mode=models.MEDIA_BACKGROUND_SOURCE_MANUAL,
+    )
 
     result = SessionResetService(gateway.sessions).reset(session.id)
 
@@ -192,7 +239,15 @@ def test_restart_interrupts_running_and_cancelling_but_leaves_queued(tmp_path) -
         visual_brief_json='{"sceneDescription":"gate"}',
     )
 
-    assert gateway.media.interrupt_active_jobs() == 1
+    assert gateway.media.transition_jobs(
+        from_statuses=(
+            models.MEDIA_JOB_STATUS_RUNNING,
+            models.MEDIA_JOB_STATUS_CANCELLING,
+        ),
+        to_status=models.MEDIA_JOB_STATUS_INTERRUPTED,
+        error_code="MEDIA_JOB_INTERRUPTED",
+        error_message="test interruption",
+    ) == 1
     interrupted = gateway.media.get_job(session.id, running.id)
     still_queued = gateway.media.get_job(session.id, queued.id)
     assert interrupted is not None
@@ -243,7 +298,7 @@ def test_library_uploads_share_blob_index_but_keep_independent_assets(tmp_path) 
 def test_reconcile_missing_blobs_cascades_shared_assets_and_is_idempotent(tmp_path) -> None:
     gateway, session = _session_with_turns(tmp_path)
     first_job = _create_and_claim_job(gateway, session.id)
-    first = gateway.media.complete_job(
+    first = _complete_media_job(gateway,
         job_id=first_job.id,
         sha256="6" * 64,
         canonical_ext="png",
@@ -253,7 +308,7 @@ def test_reconcile_missing_blobs_cascades_shared_assets_and_is_idempotent(tmp_pa
     )
     assert first is not None
     second_job = _create_and_claim_job(gateway, session.id, retry_of=first_job.id)
-    second = gateway.media.complete_job(
+    second = _complete_media_job(gateway,
         job_id=second_job.id,
         sha256="6" * 64,
         canonical_ext="png",
@@ -277,7 +332,11 @@ def test_reconcile_missing_blobs_cascades_shared_assets_and_is_idempotent(tmp_pa
         relative_path=f"assets/images/{'7' * 64}.webp",
         visual_brief_json='{"sceneDescription":"existing"}',
     )
-    gateway.media.set_background(session.id, first.asset.id)
+    gateway.media.set_background(
+        session.id,
+        first.asset.id,
+        source_mode=models.MEDIA_BACKGROUND_SOURCE_MANUAL,
+    )
 
     result = gateway.media.reconcile_missing_blobs(
         "demo_workspace",
@@ -314,7 +373,7 @@ def test_reconcile_missing_blobs_cascades_shared_assets_and_is_idempotent(tmp_pa
 def test_reconcile_missing_blobs_rolls_back_all_changes_on_delete_failure(tmp_path) -> None:
     gateway, session = _session_with_turns(tmp_path)
     job = _create_and_claim_job(gateway, session.id)
-    completed = gateway.media.complete_job(
+    completed = _complete_media_job(gateway,
         job_id=job.id,
         sha256="5" * 64,
         canonical_ext="jpg",
@@ -323,7 +382,11 @@ def test_reconcile_missing_blobs_rolls_back_all_changes_on_delete_failure(tmp_pa
         relative_path=f"assets/images/{'5' * 64}.jpg",
     )
     assert completed is not None
-    gateway.media.set_background(session.id, completed.asset.id)
+    gateway.media.set_background(
+        session.id,
+        completed.asset.id,
+        source_mode=models.MEDIA_BACKGROUND_SOURCE_MANUAL,
+    )
     gateway.database.execute_sql(
         """
         CREATE TRIGGER reject_media_blob_delete
@@ -349,46 +412,6 @@ def test_reconcile_missing_blobs_rolls_back_all_changes_on_delete_failure(tmp_pa
     assert gateway.media.get_job(session.id, job.id).output_asset_id == completed.asset.id
     assert gateway.media.get_workspace_blob_by_hash("demo_workspace", "5" * 64) is not None
 
-
-def test_manual_clear_supersedes_running_background_evaluation(tmp_path) -> None:
-    gateway, session = _session_with_turns(tmp_path)
-    library, _ = gateway.media.create_library_asset(
-        workspace_id="demo_workspace",
-        scope=models.MEDIA_LIBRARY_SCOPE_STORY,
-        story_id=1,
-        title="Forest",
-        description="A moonlit forest background",
-        tags=("forest",),
-        is_default=True,
-        sha256="9" * 64,
-        canonical_ext="png",
-        mime_type="image/png",
-        byte_size=128,
-        relative_path=f"assets/images/{'9' * 64}.png",
-        visual_brief_json='{"sceneDescription":"forest"}',
-    )
-    queued = gateway.media.queue_background_evaluation(
-        session_id=session.id,
-        observed_turn_id=3,
-        target_turn_id=3,
-        source_fingerprint="8" * 64,
-        source_snapshot_json="{}",
-    )
-    claimed = gateway.media.claim_next_background_evaluation()
-    assert claimed is not None and claimed.id == queued.id
-
-    gateway.media.clear_background(session.id)
-    result = gateway.media.apply_background_decision(
-        queued.id,
-        decision="switch",
-        selected_asset_id=library.asset.id,
-        reason="late result",
-    )
-
-    assert result is not None
-    assert result.status == models.MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED
-    assert gateway.media.get_background(session.id) is None
-    assert gateway.media.get_background_state(session.id).auto_suppressed is True
 
 
 def test_media_library_taxonomy_pagination_facets_and_background_guard(tmp_path) -> None:
@@ -451,23 +474,14 @@ def test_media_library_taxonomy_pagination_facets_and_background_guard(tmp_path)
     }
     assert {facet.value.casefold(): facet.count for facet in facets.tags}["forest"] == 3
 
-    gateway.media.set_background(session.id, background.asset.id)
+    gateway.media.set_background(
+        session.id,
+        background.asset.id,
+        source_mode=models.MEDIA_BACKGROUND_SOURCE_MANUAL,
+    )
     background_page = gateway.media.list_library_assets_page(
         "demo_workspace",
         media_types=(models.MEDIA_LIBRARY_TYPE_BACKGROUND,),
     )
     assert background_page.items[0].usage.background_references == 1
-    with pytest.raises(MediaAssetInUseError):
-        gateway.media.update_library_asset(
-            "demo_workspace",
-            background.item.id,
-            scope=background.item.scope,
-            story_id=background.item.story_id,
-            media_type=models.MEDIA_LIBRARY_TYPE_AVATAR,
-            title=background.item.title,
-            description=background.item.description,
-            tags=background.tags,
-            is_default=False,
-        )
-    with pytest.raises(FileNotFoundError, match="not manually selectable"):
-        gateway.media.set_background(session.id, avatar.asset.id)
+    assert gateway.media.count_background_references(background.asset.id) == 1

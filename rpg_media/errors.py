@@ -17,6 +17,10 @@ class MediaSourceChangedError(MediaError):
         )
 
 
+class MediaSourceRangeError(ValueError):
+    """The selected persisted turns do not satisfy Media source policy."""
+
+
 class MediaProviderUnavailableError(MediaError):
     def __init__(self, provider_key: str) -> None:
         super().__init__(

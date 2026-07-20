@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from rpg_data.services.media import MediaDataService
-from rpg_media.facade import MediaFacade
+from rpg_media.service import MediaApplicationService
 
 logger = logging.getLogger("media_service.worker")
 
@@ -15,12 +14,10 @@ class MediaJobWorker:
     def __init__(
         self,
         *,
-        data: MediaDataService,
-        facade: MediaFacade,
+        service: MediaApplicationService,
         concurrency: int = 1,
     ) -> None:
-        self._data = data
-        self._facade = facade
+        self._service = service
         self._concurrency = max(1, int(concurrency))
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
@@ -33,7 +30,7 @@ class MediaJobWorker:
     async def start(self) -> None:
         if self.running:
             return
-        interrupted = self._data.interrupt_active_jobs()
+        interrupted = self._service.interrupt_active_jobs()
         if interrupted:
             logger.warning("interrupted stale media jobs count=%s", interrupted)
         self._stop_event.clear()
@@ -52,7 +49,7 @@ class MediaJobWorker:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
-        interrupted = self._data.interrupt_active_jobs()
+        interrupted = self._service.interrupt_active_jobs()
         if interrupted:
             logger.warning("interrupted media jobs during shutdown count=%s", interrupted)
 
@@ -64,7 +61,7 @@ class MediaJobWorker:
             await self._wake_event.wait()
             self._wake_event.clear()
             while not self._stop_event.is_set():
-                job = self._data.claim_next_job()
+                job = self._service.claim_next_job()
                 if job is None:
                     break
                 logger.info(
@@ -75,7 +72,7 @@ class MediaJobWorker:
                     job.provider_key,
                 )
                 try:
-                    result = await self._facade.execute_job(job.id)
+                    result = await self._service.execute_job(job.id)
                     logger.info(
                         "media job finished worker=%s job_id=%s status=%s",
                         worker_index,
@@ -96,12 +93,10 @@ class MediaBackgroundWorker:
     def __init__(
         self,
         *,
-        data: MediaDataService,
-        facade: MediaFacade,
+        service: MediaApplicationService,
         concurrency: int = 1,
     ) -> None:
-        self._data = data
-        self._facade = facade
+        self._service = service
         self._concurrency = max(1, int(concurrency))
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
@@ -114,7 +109,7 @@ class MediaBackgroundWorker:
     async def start(self) -> None:
         if self.running:
             return
-        interrupted = self._data.interrupt_background_evaluations()
+        interrupted = self._service.interrupt_background_evaluations()
         if interrupted:
             logger.warning(
                 "interrupted stale media background evaluations count=%s",
@@ -139,7 +134,7 @@ class MediaBackgroundWorker:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
-        interrupted = self._data.interrupt_background_evaluations()
+        interrupted = self._service.interrupt_background_evaluations()
         if interrupted:
             logger.warning(
                 "interrupted media background evaluations during shutdown count=%s",
@@ -154,7 +149,7 @@ class MediaBackgroundWorker:
             await self._wake_event.wait()
             self._wake_event.clear()
             while not self._stop_event.is_set():
-                evaluation = self._data.claim_next_background_evaluation()
+                evaluation = self._service.claim_next_background_evaluation()
                 if evaluation is None:
                     break
                 logger.info(
@@ -165,7 +160,7 @@ class MediaBackgroundWorker:
                     evaluation.target_turn_id,
                 )
                 try:
-                    result = await self._facade.execute_background_evaluation(
+                    result = await self._service.execute_background_evaluation(
                         evaluation.id
                     )
                     logger.info(

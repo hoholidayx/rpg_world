@@ -137,18 +137,30 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     )
     claimed_media_job = integration_data_gateway.media.claim_next_job()
     assert claimed_media_job is not None and claimed_media_job.id == media_job.id
+    media_session = integration_data_gateway.catalog.get_session(session_id)
+    assert media_session is not None
     completed_media = integration_data_gateway.media.complete_job(
         job_id=media_job.id,
-        sha256="b" * 64,
-        canonical_ext="png",
-        mime_type="image/png",
-        byte_size=64,
-        relative_path=f"assets/images/{'b' * 64}.png",
+        write=models.MediaJobCompletionWrite(
+            workspace_id=media_session.workspace_id,
+            story_id=media_session.story_id,
+            sha256="b" * 64,
+            canonical_ext="png",
+            mime_type="image/png",
+            byte_size=64,
+            relative_path=f"assets/images/{'b' * 64}.png",
+            provider_asset_id="",
+            metadata_json="{}",
+            library_title="Generated image",
+            library_description="clear integration",
+            library_tags=("generated",),
+        ),
     )
     assert completed_media is not None
     integration_data_gateway.media.set_background(
         session_id,
         completed_media.asset.id,
+        source_mode=models.MEDIA_BACKGROUND_SOURCE_MANUAL,
     )
     selection = MainLLMSelectionService(integration_data_gateway)
     selected = await selection.set_session_provider_key(session_id, SESSION_PROVIDER_KEY)

@@ -52,6 +52,77 @@ from rpg_data.model.memory import (
     SessionStoryMemoryStats,
     StoryMemoryRowValues,
 )
+from rpg_data.model.media import (
+    MEDIA_ASSET_ORIGINS,
+    MEDIA_ASSET_ORIGIN_GENERATED,
+    MEDIA_ASSET_ORIGIN_UPLOAD,
+    MEDIA_BACKGROUND_EVALUATION_STATUSES,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_FAILED,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_INTERRUPTED,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_QUEUED,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED,
+    MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED,
+    MEDIA_BACKGROUND_SOURCES,
+    MEDIA_BACKGROUND_SOURCE_AUTO,
+    MEDIA_BACKGROUND_SOURCE_MANUAL,
+    MEDIA_JOB_ACTIVE_STATUSES,
+    MEDIA_JOB_FINAL_STATUSES,
+    MEDIA_JOB_STATUSES,
+    MEDIA_JOB_STATUS_CANCELLED,
+    MEDIA_JOB_STATUS_CANCELLING,
+    MEDIA_JOB_STATUS_FAILED,
+    MEDIA_JOB_STATUS_INTERRUPTED,
+    MEDIA_JOB_STATUS_QUEUED,
+    MEDIA_JOB_STATUS_RUNNING,
+    MEDIA_JOB_STATUS_SUCCEEDED,
+    MEDIA_LIBRARY_SCOPES,
+    MEDIA_LIBRARY_SCOPE_STORY,
+    MEDIA_LIBRARY_SCOPE_WORKSPACE,
+    MEDIA_LIBRARY_TYPES,
+    MEDIA_LIBRARY_TYPE_AVATAR,
+    MEDIA_LIBRARY_TYPE_BACKGROUND,
+    MEDIA_LIBRARY_TYPE_CHARACTER_SPRITE,
+    MEDIA_LIBRARY_TYPE_ITEM,
+    MEDIA_LIBRARY_TYPE_MAP,
+    MEDIA_LIBRARY_TYPE_OTHER,
+    MEDIA_LIBRARY_TYPE_REFERENCE,
+    MEDIA_LIBRARY_TYPE_SCENE_ILLUSTRATION,
+    MEDIA_LIBRARY_TYPE_UI,
+    MediaAsset,
+    MediaAssetDeleteResult,
+    MediaAssetOrigin,
+    MediaBackgroundEvaluation,
+    MediaBackgroundEvaluationStatus,
+    MediaBackgroundSource,
+    MediaBlob,
+    MediaDisplayAssetBundle,
+    MediaJob,
+    MediaJobCompletion,
+    MediaJobCompletionWrite,
+    MediaJobStatus,
+    MediaLibraryAssetBundle,
+    MediaLibraryBatchFailure,
+    MediaLibraryBatchResult,
+    MediaLibraryFacetValue,
+    MediaLibraryFacets,
+    MediaLibraryItem,
+    MediaLibraryPage,
+    MediaLibraryReconcileResult,
+    MediaLibraryScope,
+    MediaLibrarySearchWeights,
+    MediaLibraryStoryFacet,
+    MediaLibraryType,
+    MediaLibraryUsage,
+    MediaSourceMessage,
+    MediaSourceTurn,
+    SessionMediaAssetBundle,
+    SessionMediaBackground,
+    SessionMediaBackgroundState,
+    SessionMediaGalleryItem,
+    SessionMediaResetResult,
+)
 from rpg_data.model.session import (
     MESSAGE_ROLES,
     MESSAGE_ROLE_ASSISTANT,
@@ -142,6 +213,8 @@ __all__ = [
     "MediaBlob",
     "MediaJob",
     "MediaJobCompletion",
+    "MediaJobCompletionWrite",
+    "MediaJobStatus",
     "MediaLibraryAssetBundle",
     "MediaLibraryBatchFailure",
     "MediaLibraryBatchResult",
@@ -151,6 +224,12 @@ __all__ = [
     "MediaLibraryReconcileResult",
     "MediaLibraryStoryFacet",
     "MediaLibraryUsage",
+    "MediaLibrarySearchWeights",
+    "MediaLibraryScope",
+    "MediaLibraryType",
+    "MediaAssetOrigin",
+    "MediaBackgroundSource",
+    "MediaBackgroundEvaluationStatus",
     "MediaDisplayAssetBundle",
     "MediaLibraryItem",
     "MediaBackgroundEvaluation",
@@ -355,29 +434,6 @@ __all__ = [
 ]
 
 MAX_STORY_OPENINGS = 3
-MEDIA_JOB_STATUS_QUEUED = "queued"
-MEDIA_JOB_STATUS_RUNNING = "running"
-MEDIA_JOB_STATUS_CANCELLING = "cancelling"
-MEDIA_JOB_STATUS_SUCCEEDED = "succeeded"
-MEDIA_JOB_STATUS_FAILED = "failed"
-MEDIA_JOB_STATUS_CANCELLED = "cancelled"
-MEDIA_JOB_STATUS_INTERRUPTED = "interrupted"
-MEDIA_JOB_STATUSES = frozenset({
-    MEDIA_JOB_STATUS_QUEUED,
-    MEDIA_JOB_STATUS_RUNNING,
-    MEDIA_JOB_STATUS_CANCELLING,
-    MEDIA_JOB_STATUS_SUCCEEDED,
-    MEDIA_JOB_STATUS_FAILED,
-    MEDIA_JOB_STATUS_CANCELLED,
-    MEDIA_JOB_STATUS_INTERRUPTED,
-})
-MEDIA_JOB_ACTIVE_STATUSES = frozenset({
-    MEDIA_JOB_STATUS_QUEUED,
-    MEDIA_JOB_STATUS_RUNNING,
-    MEDIA_JOB_STATUS_CANCELLING,
-})
-MEDIA_JOB_FINAL_STATUSES = MEDIA_JOB_STATUSES - MEDIA_JOB_ACTIVE_STATUSES
-
 TTS_JOB_STATUS_QUEUED = "queued"
 TTS_JOB_STATUS_RUNNING = "running"
 TTS_JOB_STATUS_SUCCEEDED = "succeeded"
@@ -389,60 +445,6 @@ TTS_JOB_STATUSES = frozenset({
     TTS_JOB_STATUS_SUCCEEDED,
     TTS_JOB_STATUS_FAILED,
     TTS_JOB_STATUS_INTERRUPTED,
-})
-MEDIA_ASSET_ORIGIN_GENERATED = "generated"
-MEDIA_ASSET_ORIGIN_UPLOAD = "upload"
-MEDIA_ASSET_ORIGINS = frozenset({
-    MEDIA_ASSET_ORIGIN_GENERATED,
-    MEDIA_ASSET_ORIGIN_UPLOAD,
-})
-MEDIA_LIBRARY_SCOPE_STORY = "story"
-MEDIA_LIBRARY_SCOPE_WORKSPACE = "workspace"
-MEDIA_LIBRARY_SCOPES = frozenset({
-    MEDIA_LIBRARY_SCOPE_STORY,
-    MEDIA_LIBRARY_SCOPE_WORKSPACE,
-})
-MEDIA_LIBRARY_TYPE_BACKGROUND = "background"
-MEDIA_LIBRARY_TYPE_AVATAR = "avatar"
-MEDIA_LIBRARY_TYPE_CHARACTER_SPRITE = "character_sprite"
-MEDIA_LIBRARY_TYPE_SCENE_ILLUSTRATION = "scene_illustration"
-MEDIA_LIBRARY_TYPE_MAP = "map"
-MEDIA_LIBRARY_TYPE_ITEM = "item"
-MEDIA_LIBRARY_TYPE_UI = "ui"
-MEDIA_LIBRARY_TYPE_REFERENCE = "reference"
-MEDIA_LIBRARY_TYPE_OTHER = "other"
-MEDIA_LIBRARY_TYPES = frozenset({
-    MEDIA_LIBRARY_TYPE_BACKGROUND,
-    MEDIA_LIBRARY_TYPE_AVATAR,
-    MEDIA_LIBRARY_TYPE_CHARACTER_SPRITE,
-    MEDIA_LIBRARY_TYPE_SCENE_ILLUSTRATION,
-    MEDIA_LIBRARY_TYPE_MAP,
-    MEDIA_LIBRARY_TYPE_ITEM,
-    MEDIA_LIBRARY_TYPE_UI,
-    MEDIA_LIBRARY_TYPE_REFERENCE,
-    MEDIA_LIBRARY_TYPE_OTHER,
-})
-MEDIA_BACKGROUND_SOURCE_MANUAL = "manual"
-MEDIA_BACKGROUND_SOURCE_AUTO = "auto"
-MEDIA_BACKGROUND_SOURCES = frozenset({
-    MEDIA_BACKGROUND_SOURCE_MANUAL,
-    MEDIA_BACKGROUND_SOURCE_AUTO,
-})
-MEDIA_BACKGROUND_EVALUATION_STATUS_QUEUED = "queued"
-MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING = "running"
-MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED = "succeeded"
-MEDIA_BACKGROUND_EVALUATION_STATUS_FAILED = "failed"
-MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED = "superseded"
-MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL = "skipped_manual"
-MEDIA_BACKGROUND_EVALUATION_STATUS_INTERRUPTED = "interrupted"
-MEDIA_BACKGROUND_EVALUATION_STATUSES = frozenset({
-    MEDIA_BACKGROUND_EVALUATION_STATUS_QUEUED,
-    MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING,
-    MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED,
-    MEDIA_BACKGROUND_EVALUATION_STATUS_FAILED,
-    MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED,
-    MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL,
-    MEDIA_BACKGROUND_EVALUATION_STATUS_INTERRUPTED,
 })
 NARRATIVE_OUTCOME_CODES = (
     "critical_success",
@@ -689,229 +691,6 @@ class Story:
 
 
 
-@dataclass(frozen=True)
-class MediaSourceMessage:
-    """One immutable persisted-message component used by media source snapshots."""
-
-    id: int
-    version: int
-    role: str
-    content: str
-    turn_id: int
-    seq_in_turn: int
-
-    def __post_init__(self) -> None:
-        if self.id <= 0:
-            raise ValueError("media source message id must be positive")
-        if self.version <= 0:
-            raise ValueError("media source message version must be positive")
-        if self.role not in MESSAGE_ROLES:
-            raise ValueError(f"invalid media source message role: {self.role}")
-        if self.turn_id <= 0 or self.seq_in_turn <= 0:
-            raise ValueError("media source turn metadata must be positive")
-
-
-@dataclass(frozen=True)
-class MediaSourceTurn:
-    """Committed messages grouped under one positive turn id."""
-
-    turn_id: int
-    messages: tuple[MediaSourceMessage, ...] = field(default_factory=tuple)
-
-    def __post_init__(self) -> None:
-        if self.turn_id <= 0:
-            raise ValueError("media source turn id must be positive")
-        if not self.messages:
-            raise ValueError("media source turn must contain at least one message")
-        if any(message.turn_id != self.turn_id for message in self.messages):
-            raise ValueError("media source turn contains a message from another turn")
-
-
-@dataclass(frozen=True)
-class MediaBlob:
-    id: str
-    workspace_id: str
-    sha256: str
-    canonical_ext: str
-    mime_type: str
-    byte_size: int
-    relative_path: str
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class MediaAsset:
-    id: str
-    workspace_id: str
-    blob_id: str
-    provider_key: str
-    visual_brief_json: str
-    provider_asset_id: str = ""
-    generation_params_json: str = "{}"
-    metadata_json: str = "{}"
-    origin_kind: str = MEDIA_ASSET_ORIGIN_GENERATED
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-    def __post_init__(self) -> None:
-        if self.origin_kind not in MEDIA_ASSET_ORIGINS:
-            raise ValueError(f"invalid media asset origin: {self.origin_kind}")
-
-
-@dataclass(frozen=True)
-class MediaLibraryItem:
-    id: str
-    workspace_id: str
-    asset_id: str
-    scope: str
-    story_id: int | None
-    media_type: str
-    title: str
-    description: str
-    is_default: bool = False
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-    def __post_init__(self) -> None:
-        if self.scope not in MEDIA_LIBRARY_SCOPES:
-            raise ValueError(f"invalid media library scope: {self.scope}")
-        if self.scope == MEDIA_LIBRARY_SCOPE_STORY and self.story_id is None:
-            raise ValueError("story media library item requires story_id")
-        if self.scope == MEDIA_LIBRARY_SCOPE_WORKSPACE and self.story_id is not None:
-            raise ValueError("workspace media item must not bind a story")
-        if self.media_type not in MEDIA_LIBRARY_TYPES:
-            raise ValueError(f"invalid media library type: {self.media_type}")
-        if self.scope != MEDIA_LIBRARY_SCOPE_STORY and self.is_default:
-            raise ValueError("only story media items may be default backgrounds")
-        if self.media_type != MEDIA_LIBRARY_TYPE_BACKGROUND and self.is_default:
-            raise ValueError("only background media items may be story defaults")
-        if not self.title.strip() or not self.description.strip():
-            raise ValueError("media library title and description are required")
-
-
-@dataclass(frozen=True)
-class MediaLibraryAssetBundle:
-    item: MediaLibraryItem
-    asset: MediaAsset
-    blob: MediaBlob
-    tags: tuple[str, ...] = field(default_factory=tuple)
-    usage: "MediaLibraryUsage" = field(default_factory=lambda: MediaLibraryUsage())
-
-
-@dataclass(frozen=True)
-class MediaLibraryUsage:
-    background_references: int = 0
-    gallery_references: int = 0
-
-
-@dataclass(frozen=True)
-class MediaLibraryPage:
-    items: tuple[MediaLibraryAssetBundle, ...]
-    page: int
-    page_size: int
-    total: int
-
-
-@dataclass(frozen=True)
-class MediaLibraryFacetValue:
-    value: str
-    count: int
-
-
-@dataclass(frozen=True)
-class MediaLibraryStoryFacet:
-    story_id: int
-    count: int
-
-
-@dataclass(frozen=True)
-class MediaLibraryFacets:
-    media_types: tuple[MediaLibraryFacetValue, ...] = field(default_factory=tuple)
-    tags: tuple[MediaLibraryFacetValue, ...] = field(default_factory=tuple)
-    scopes: tuple[MediaLibraryFacetValue, ...] = field(default_factory=tuple)
-    origins: tuple[MediaLibraryFacetValue, ...] = field(default_factory=tuple)
-    stories: tuple[MediaLibraryStoryFacet, ...] = field(default_factory=tuple)
-
-
-@dataclass(frozen=True)
-class MediaLibraryBatchFailure:
-    item_id: str
-    error_code: str
-    message: str
-
-
-@dataclass(frozen=True)
-class MediaLibraryBatchResult:
-    succeeded_item_ids: tuple[str, ...] = field(default_factory=tuple)
-    failed: tuple[MediaLibraryBatchFailure, ...] = field(default_factory=tuple)
-
-
-@dataclass(frozen=True)
-class MediaLibraryReconcileResult:
-    workspace_id: str
-    scanned_blobs: int = 0
-    removed_blobs: int = 0
-    removed_assets: int = 0
-    removed_library_items: int = 0
-    removed_gallery_items: int = 0
-    cleared_backgrounds: int = 0
-
-    def __post_init__(self) -> None:
-        counts = (
-            self.scanned_blobs,
-            self.removed_blobs,
-            self.removed_assets,
-            self.removed_library_items,
-            self.removed_gallery_items,
-            self.cleared_backgrounds,
-        )
-        if any(count < 0 for count in counts):
-            raise ValueError("media library reconcile counts must not be negative")
-
-
-@dataclass(frozen=True)
-class MediaDisplayAssetBundle:
-    asset: MediaAsset
-    blob: MediaBlob
-    library_item: MediaLibraryItem | None = None
-    tags: tuple[str, ...] = field(default_factory=tuple)
-    gallery_item: SessionMediaGalleryItem | None = None
-
-
-@dataclass(frozen=True)
-class MediaJob:
-    id: str
-    session_id: str
-    provider_key: str
-    status: str
-    source_start_turn_id: int
-    source_end_turn_id: int
-    source_fingerprint: str
-    source_snapshot_json: str
-    visual_brief_json: str
-    generation_params_json: str = "{}"
-    output_asset_id: str | None = None
-    retry_of_job_id: str | None = None
-    error_code: str = ""
-    error_message: str = ""
-    started_at: str = ""
-    finished_at: str = ""
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-    def __post_init__(self) -> None:
-        if self.status not in MEDIA_JOB_STATUSES:
-            raise ValueError(f"invalid media job status: {self.status}")
-        if self.source_start_turn_id <= 0:
-            raise ValueError("media source start turn id must be positive")
-        if self.source_end_turn_id < self.source_start_turn_id:
-            raise ValueError("media source end turn id precedes start turn id")
-
 
 @dataclass(frozen=True)
 class TTSBlob:
@@ -976,114 +755,6 @@ class TTSMessageSource:
     workspace_root: str
     content: str
 
-
-@dataclass(frozen=True)
-class SessionMediaGalleryItem:
-    id: str
-    session_id: str
-    asset_id: str
-    source_start_turn_id: int
-    source_end_turn_id: int
-    source_fingerprint: str
-    source_snapshot_json: str
-    visual_brief_json: str
-    job_id: str | None = None
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class SessionMediaBackground:
-    session_id: str
-    asset_id: str
-    source_mode: str = MEDIA_BACKGROUND_SOURCE_MANUAL
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-    def __post_init__(self) -> None:
-        if self.source_mode not in MEDIA_BACKGROUND_SOURCES:
-            raise ValueError(f"invalid media background source: {self.source_mode}")
-
-
-@dataclass(frozen=True)
-class SessionMediaBackgroundState:
-    session_id: str
-    latest_observed_turn_id: int = 0
-    latest_source_fingerprint: str = ""
-    auto_suppressed: bool = False
-    suppressed_through_turn_id: int = 0
-    desired_turn_id: int = 0
-    desired_source_fingerprint: str = ""
-    last_applied_turn_id: int = 0
-    last_applied_fingerprint: str = ""
-    last_decision: str = ""
-    last_reason: str = ""
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class MediaBackgroundEvaluation:
-    id: str
-    session_id: str
-    status: str
-    target_turn_id: int
-    source_fingerprint: str
-    source_snapshot_json: str
-    decision: str = ""
-    selected_asset_id: str | None = None
-    reason: str = ""
-    error_code: str = ""
-    error_message: str = ""
-    started_at: str = ""
-    finished_at: str = ""
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-    def __post_init__(self) -> None:
-        if self.status not in MEDIA_BACKGROUND_EVALUATION_STATUSES:
-            raise ValueError(f"invalid media background evaluation status: {self.status}")
-        if self.target_turn_id <= 0:
-            raise ValueError("media background evaluation turn id must be positive")
-        if len(self.source_fingerprint) != 64:
-            raise ValueError("media background source fingerprint must be a SHA-256 digest")
-        if self.decision not in {"", "keep", "switch"}:
-            raise ValueError(f"invalid media background decision: {self.decision}")
-
-
-@dataclass(frozen=True)
-class SessionMediaResetResult:
-    session_id: str
-    jobs_cleared: int = 0
-    gallery_items_cleared: int = 0
-    backgrounds_cleared: int = 0
-
-
-@dataclass(frozen=True)
-class MediaAssetDeleteResult:
-    asset: MediaAsset
-    blob: MediaBlob
-    blob_deleted: bool
-
-
-@dataclass(frozen=True)
-class SessionMediaAssetBundle:
-    gallery_item: SessionMediaGalleryItem
-    asset: MediaAsset
-    blob: MediaBlob
-
-
-@dataclass(frozen=True)
-class MediaJobCompletion:
-    job: MediaJob
-    asset: MediaAsset
-    blob: MediaBlob
-    gallery_item: SessionMediaGalleryItem
-    blob_created: bool
 
 
 @dataclass(frozen=True)

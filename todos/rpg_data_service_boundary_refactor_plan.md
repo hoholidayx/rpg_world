@@ -160,9 +160,9 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 
 ### 6.1 Media
 
-- [ ] 将来源 turn 连续性、VisualBrief 来源策略、Library metadata 默认值、Asset 删除门禁、背景选择/评估规则迁入 `rpg_media` 与 `media_service` worker。
-- [ ] `rpg_data` 只保留 job/blob/asset/gallery/background/evaluation 的 CRUD、CAS claim、去重约束和调用方指定的原子 completion payload。
-- [ ] 文件魔数校验、SHA-256、文件落盘和 orphan 清理继续由 Media 领域/服务负责，不进入通用数据层。
+- [x] 将来源 turn 连续性、VisualBrief 来源策略、Library metadata 默认值、Asset 删除门禁、背景选择/评估规则迁入 `rpg_media` 与 `media_service` worker。
+- [x] `rpg_data` 只保留 job/blob/asset/gallery/background/evaluation 的 CRUD、CAS claim、去重约束和调用方指定的原子 completion payload。
+- [x] 文件魔数校验、SHA-256、文件落盘和 orphan 清理继续由 Media 领域/服务负责，不进入通用数据层。
 
 ### 6.2 TTS
 

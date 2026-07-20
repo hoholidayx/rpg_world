@@ -10,8 +10,12 @@ from llm_client.keys import MEDIA_SCENE_BACKGROUND_MATCH_BIZ_KEY
 from llm_client.manager import LLMClientManager
 from llm_client.types import LLMProvider
 from rpg_data import models
-from rpg_data.services.media import MediaDataService
-from rpg_media.types import MediaBackgroundDecision, MediaBackgroundSourceSnapshot
+from rpg_media.types import (
+    MEDIA_BACKGROUND_DECISION_KEEP,
+    MEDIA_BACKGROUND_DECISION_SWITCH,
+    MediaBackgroundDecision,
+    MediaBackgroundSourceSnapshot,
+)
 
 
 class BackgroundMatcher(Protocol):
@@ -21,10 +25,31 @@ class BackgroundMatcher(Protocol):
     ) -> MediaBackgroundDecision: ...
 
 
+class MediaLibrarySearchPort(Protocol):
+    def search_library_assets(
+        self,
+        *,
+        workspace_id: str,
+        scope: str,
+        story_id: int | None,
+        query: str,
+        weights: models.MediaLibrarySearchWeights,
+        tags: tuple[str, ...] = (),
+        limit: int = 20,
+    ) -> list[models.MediaLibraryAssetBundle]: ...
+
+
+_SEARCH_WEIGHTS = models.MediaLibrarySearchWeights(
+    exact_tag=100,
+    title_contains=20,
+    description_contains=5,
+)
+
+
 class LLMMediaBackgroundAgent:
     def __init__(
         self,
-        data: MediaDataService,
+        data: MediaLibrarySearchPort,
         *,
         provider: LLMProvider | None = None,
         asset_exists: Callable[[models.MediaBlob], bool] | None = None,
@@ -61,7 +86,7 @@ class LLMMediaBackgroundAgent:
                 call_id, name, arguments = _parse_tool_call(call)
                 if name == "keep_background":
                     return MediaBackgroundDecision(
-                        decision="keep",
+                        decision=MEDIA_BACKGROUND_DECISION_KEEP,
                         reason=_required_text(arguments, "reason"),
                     )
                 if name == "switch_background":
@@ -71,7 +96,7 @@ class LLMMediaBackgroundAgent:
                             "media background agent selected an asset that was not returned by search"
                         )
                     return MediaBackgroundDecision(
-                        decision="switch",
+                        decision=MEDIA_BACKGROUND_DECISION_SWITCH,
                         asset_id=asset_id,
                         reason=_required_text(arguments, "reason"),
                     )
@@ -99,6 +124,7 @@ class LLMMediaBackgroundAgent:
                             else None
                         ),
                         query=str(arguments.get("query", "")),
+                        weights=_SEARCH_WEIGHTS,
                         tags=tuple(str(tag) for tag in tags_raw),
                         limit=20,
                     )

@@ -11,11 +11,7 @@ from rpg_data.services.gateway import (
 )
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
 from rpg_data.services.message import MessageService
-from rpg_data.services.media import (
-    MediaAssetInUseError,
-    MediaDataService,
-    MediaSourceRangeError,
-)
+from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import (
     PlotScheduleDataIntegrityError,
@@ -38,9 +34,7 @@ __all__ = [
     "LorebookReadService",
     "MessageService",
     "DreamMemoryDataService",
-    "MediaAssetInUseError",
     "MediaDataService",
-    "MediaSourceRangeError",
     "NarrativeOutcomeService",
     "PlotScheduleDataIntegrityError",
     "PlotSchedulingDataService",

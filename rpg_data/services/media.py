@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from typing import ContextManager
 
 from peewee import Database
 
@@ -14,20 +15,8 @@ from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 
 __all__ = [
-    "MediaAssetInUseError",
     "MediaDataService",
-    "MediaSourceRangeError",
 ]
-
-MAX_MEDIA_SOURCE_TURNS = 20
-
-
-class MediaSourceRangeError(ValueError):
-    """Raised when a source selection is not a valid committed turn range."""
-
-
-class MediaAssetInUseError(ValueError):
-    """Raised when a typed media binding still references an asset."""
 
 
 class MediaDataService:
@@ -39,6 +28,11 @@ class MediaDataService:
         self._sessions = SessionRepository(database)
         self._stories = StoryRepository(database)
         self._workspaces = WorkspaceRepository(database)
+
+    def transaction(self) -> ContextManager[None]:
+        """Expose a short database transaction for caller-selected media writes."""
+
+        return self._database.atomic()
 
     def list_source_turns(self, session_id: str) -> list[models.MediaSourceTurn]:
         self._require_session(session_id)
@@ -52,27 +46,11 @@ class MediaDataService:
         end_turn_id: int,
     ) -> list[models.MediaSourceTurn]:
         self._require_session(session_id)
-        start = int(start_turn_id)
-        end = int(end_turn_id)
-        if start <= 0 or end < start:
-            raise MediaSourceRangeError("media source turn range is invalid")
-        count = end - start + 1
-        if count > MAX_MEDIA_SOURCE_TURNS:
-            raise MediaSourceRangeError(
-                f"media source may contain at most {MAX_MEDIA_SOURCE_TURNS} turns"
-            )
-        turns = self._repository.get_source_turns(
+        return self._repository.get_source_turns(
             str(session_id),
-            start_turn_id=start,
-            end_turn_id=end,
+            start_turn_id=int(start_turn_id),
+            end_turn_id=int(end_turn_id),
         )
-        actual_ids = [turn.turn_id for turn in turns]
-        expected_ids = list(range(start, end + 1))
-        if actual_ids != expected_ids:
-            raise MediaSourceRangeError(
-                "media source must be a contiguous range of committed turns"
-            )
-        return turns
 
     def get_latest_source_turns(
         self,
@@ -82,8 +60,6 @@ class MediaDataService:
         limit: int = 3,
     ) -> list[models.MediaSourceTurn]:
         self._require_session(session_id)
-        if int(through_turn_id) <= 0:
-            raise MediaSourceRangeError("media source turn id must be positive")
         return self._repository.get_latest_source_turns(
             str(session_id),
             through_turn_id=int(through_turn_id),
@@ -103,15 +79,7 @@ class MediaDataService:
         generation_params_json: str = "{}",
         retry_of_job_id: str | None = None,
     ) -> models.MediaJob:
-        self.get_source_turns(
-            session_id,
-            start_turn_id=source_start_turn_id,
-            end_turn_id=source_end_turn_id,
-        )
-        if not str(provider_key).strip():
-            raise ValueError("media provider key is required")
-        if len(str(source_fingerprint)) != 64:
-            raise ValueError("media source fingerprint must be a SHA-256 hex digest")
+        self._require_session(session_id)
         if retry_of_job_id is not None:
             retry_source = self._repository.get_session_job(
                 str(session_id),
@@ -173,23 +141,26 @@ class MediaDataService:
             error_message=str(error_message),
         )
 
-    def interrupt_active_jobs(self) -> int:
-        return self._repository.interrupt_active_jobs()
+    def transition_jobs(
+        self,
+        *,
+        from_statuses: Iterable[str],
+        to_status: str,
+        error_code: str = "",
+        error_message: str = "",
+    ) -> int:
+        return self._repository.transition_jobs(
+            from_statuses=from_statuses,
+            to_status=to_status,
+            error_code=error_code,
+            error_message=error_message,
+        )
 
     def complete_job(
         self,
         *,
         job_id: str,
-        sha256: str,
-        canonical_ext: str,
-        mime_type: str,
-        byte_size: int,
-        relative_path: str,
-        provider_asset_id: str = "",
-        metadata_json: str = "{}",
-        library_title: str = "Generated image",
-        library_description: str | None = None,
-        library_tags: tuple[str, ...] = ("generated",),
+        write: models.MediaJobCompletionWrite,
     ) -> models.MediaJobCompletion | None:
         job = self._repository.get_job(str(job_id))
         if job is None:
@@ -197,29 +168,29 @@ class MediaDataService:
         session = self._sessions.get(job.session_id)
         if session is None:
             return None
-        normalized_title, normalized_description, normalized_tags = _validate_library_metadata(
-            library_title,
-            library_description or job.visual_brief_json,
-            library_tags,
-        )
+        if (
+            write.workspace_id != session.workspace_id
+            or write.story_id != session.story_id
+        ):
+            raise ValueError("media completion owner does not match the job session")
         completed = self._repository.complete_job(
             job_id=job.id,
-            workspace_id=session.workspace_id,
+            workspace_id=write.workspace_id,
             blob_id=uuid.uuid4().hex,
-            sha256=str(sha256),
-            canonical_ext=str(canonical_ext),
-            mime_type=str(mime_type),
-            byte_size=int(byte_size),
-            relative_path=str(relative_path),
+            sha256=write.sha256,
+            canonical_ext=write.canonical_ext,
+            mime_type=write.mime_type,
+            byte_size=write.byte_size,
+            relative_path=write.relative_path,
             asset_id=uuid.uuid4().hex,
             gallery_item_id=uuid.uuid4().hex,
             library_item_id=uuid.uuid4().hex,
-            story_id=session.story_id,
-            library_title=normalized_title,
-            library_description=normalized_description,
-            library_tags=normalized_tags,
-            provider_asset_id=str(provider_asset_id),
-            metadata_json=str(metadata_json),
+            story_id=write.story_id,
+            library_title=write.library_title,
+            library_description=write.library_description,
+            library_tags=write.library_tags,
+            provider_asset_id=write.provider_asset_id,
+            metadata_json=write.metadata_json,
         )
         if completed is None:
             return None
@@ -320,16 +291,6 @@ class MediaDataService:
     ) -> tuple[models.MediaLibraryAssetBundle, bool]:
         self._require_library_owner(workspace_id, scope=scope, story_id=story_id)
         _validate_library_type(media_type)
-        if (
-            scope != models.MEDIA_LIBRARY_SCOPE_STORY
-            or media_type != models.MEDIA_LIBRARY_TYPE_BACKGROUND
-        ) and is_default:
-            raise ValueError("only story background media can be a default")
-        normalized_title, normalized_description, normalized_tags = _validate_library_metadata(
-            title,
-            description,
-            tags,
-        )
         item, asset, blob, blob_created = self._repository.create_library_asset(
             item_id=uuid.uuid4().hex,
             asset_id=uuid.uuid4().hex,
@@ -343,9 +304,9 @@ class MediaDataService:
             scope=str(scope),
             story_id=story_id,
             media_type=str(media_type),
-            title=normalized_title,
-            description=normalized_description,
-            tags=normalized_tags,
+            title=str(title),
+            description=str(description),
+            tags=tuple(str(tag) for tag in tags),
             is_default=bool(is_default),
             visual_brief_json=str(visual_brief_json),
         )
@@ -354,7 +315,7 @@ class MediaDataService:
                 item=item,
                 asset=asset,
                 blob=blob,
-                tags=normalized_tags,
+                tags=tuple(str(tag) for tag in tags),
             ),
             blob_created,
         )
@@ -483,32 +444,14 @@ class MediaDataService:
             return None
         self._require_library_owner(workspace_id, scope=scope, story_id=story_id)
         _validate_library_type(media_type)
-        if self._repository.count_background_references(existing.asset.id) and (
-            media_type != models.MEDIA_LIBRARY_TYPE_BACKGROUND
-            or scope != existing.item.scope
-            or story_id != existing.item.story_id
-        ):
-            raise MediaAssetInUseError(
-                f"media asset is referenced by a session background: {existing.asset.id}"
-            )
-        normalized_title, normalized_description, normalized_tags = _validate_library_metadata(
-            title,
-            description,
-            tags,
-        )
-        if (
-            scope != models.MEDIA_LIBRARY_SCOPE_STORY
-            or media_type != models.MEDIA_LIBRARY_TYPE_BACKGROUND
-        ) and is_default:
-            raise ValueError("only story background media can be a default")
         item = self._repository.update_library_item(
             str(item_id),
             scope=scope,
             story_id=story_id,
             media_type=media_type,
-            title=normalized_title,
-            description=normalized_description,
-            tags=normalized_tags,
+            title=str(title),
+            description=str(description),
+            tags=tuple(str(tag) for tag in tags),
             is_default=bool(is_default),
         )
         return self._library_bundle(item) if item is not None else None
@@ -521,13 +464,12 @@ class MediaDataService:
         existing = self.get_library_asset(workspace_id, item_id)
         if existing is None:
             return None
-        if self._repository.count_background_references(existing.asset.id):
-            raise MediaAssetInUseError(
-                f"media asset is referenced by a session background: {existing.asset.id}"
-            )
         with self._database.atomic():
             asset_id = self._repository.delete_library_item(str(item_id))
             return self._repository.delete_asset(asset_id) if asset_id is not None else None
+
+    def count_background_references(self, asset_id: str) -> int:
+        return self._repository.count_background_references(str(asset_id))
 
     def search_library_assets(
         self,
@@ -536,6 +478,7 @@ class MediaDataService:
         scope: str,
         story_id: int | None,
         query: str,
+        weights: models.MediaLibrarySearchWeights,
         tags: tuple[str, ...] = (),
         limit: int = 20,
     ) -> list[models.MediaLibraryAssetBundle]:
@@ -556,11 +499,11 @@ class MediaDataService:
             value = 0
             for term in terms:
                 if term in normalized_tags:
-                    value += 100
+                    value += weights.exact_tag
                 if term in title:
-                    value += 20
+                    value += weights.title_contains
                 if term in description:
-                    value += 5
+                    value += weights.description_contains
             return value, bundle.item.updated_at, bundle.item.id
 
         ranked = [bundle for bundle in candidates if score(bundle)[0] > 0]
@@ -582,53 +525,28 @@ class MediaDataService:
         self,
         session_id: str,
         asset_id: str,
+        *,
+        source_mode: str,
     ) -> models.SessionMediaBackground:
         self._require_session(session_id)
-        session = self._require_session(session_id)
-        gallery_item = self._repository.get_gallery_asset(str(session_id), str(asset_id))
-        library_item = self._repository.get_library_item_by_asset(str(asset_id))
-        library_allowed = (
-            library_item is not None
-            and library_item.scope == models.MEDIA_LIBRARY_SCOPE_STORY
-            and library_item.story_id == session.story_id
-            and library_item.media_type == models.MEDIA_LIBRARY_TYPE_BACKGROUND
-        )
-        gallery_allowed = (
-            gallery_item is not None
-            and (
-                library_item is None
-                or library_item.media_type == models.MEDIA_LIBRARY_TYPE_BACKGROUND
-            )
-        )
-        if not gallery_allowed and not library_allowed:
-            raise FileNotFoundError(f"Media asset is not manually selectable: {asset_id}")
         self._repository.ensure_background_state(str(session_id))
         return self._repository.set_background(
             str(session_id),
             str(asset_id),
-            source_mode=models.MEDIA_BACKGROUND_SOURCE_MANUAL,
+            source_mode=str(source_mode),
         )
 
     def clear_background(self, session_id: str) -> int:
         self._require_session(session_id)
-        latest_turn_id = self._repository.get_latest_source_turns(
-            str(session_id),
-            through_turn_id=2**63 - 1,
-            limit=1,
-        )
-        suppressed_through = latest_turn_id[-1].turn_id if latest_turn_id else 0
-        self._repository.update_background_state(
-            str(session_id),
-            auto_suppressed=True,
-            suppressed_through_turn_id=suppressed_through,
-            desired_turn_id=0,
-            desired_source_fingerprint="",
-            latest_observed_turn_id=max(
-                suppressed_through,
-                self._repository.ensure_background_state(str(session_id)).latest_observed_turn_id,
-            ),
-        )
         return self._repository.clear_background(str(session_id))
+
+    def update_background_state(
+        self,
+        session_id: str,
+        **values: int | str | bool,
+    ) -> models.SessionMediaBackgroundState:
+        self._require_session(session_id)
+        return self._repository.update_background_state(str(session_id), **values)
 
     def get_display_asset_for_session(
         self,
@@ -669,105 +587,6 @@ class MediaDataService:
             gallery_item=gallery_item,
         )
 
-    def queue_background_evaluation(
-        self,
-        *,
-        session_id: str,
-        observed_turn_id: int,
-        target_turn_id: int,
-        source_fingerprint: str,
-        source_snapshot_json: str,
-    ) -> models.MediaBackgroundEvaluation:
-        self._require_session(session_id)
-        if int(observed_turn_id) <= 0 or int(target_turn_id) <= 0:
-            raise MediaSourceRangeError("background evaluation turn id must be positive")
-        if int(observed_turn_id) > int(target_turn_id):
-            raise MediaSourceRangeError("observed turn has not been committed")
-        if len(str(source_fingerprint)) != 64:
-            raise ValueError("background source fingerprint must be a SHA-256 digest")
-        with self._database.atomic():
-            state = self._repository.ensure_background_state(str(session_id))
-            background = self._repository.get_background(str(session_id))
-            self._repository.update_background_state(
-                str(session_id),
-                latest_observed_turn_id=max(state.latest_observed_turn_id, int(target_turn_id)),
-                latest_source_fingerprint=str(source_fingerprint),
-            )
-            if (
-                background is not None
-                and background.source_mode == models.MEDIA_BACKGROUND_SOURCE_MANUAL
-            ):
-                return self._repository.create_background_evaluation(
-                    evaluation_id=uuid.uuid4().hex,
-                    session_id=str(session_id),
-                    status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL,
-                    target_turn_id=int(target_turn_id),
-                    source_fingerprint=str(source_fingerprint),
-                    source_snapshot_json=str(source_snapshot_json),
-                    decision="keep",
-                    reason="manual background is locked",
-                )
-            if (
-                state.auto_suppressed
-                and int(target_turn_id) <= state.suppressed_through_turn_id
-            ):
-                return self._repository.create_background_evaluation(
-                    evaluation_id=uuid.uuid4().hex,
-                    session_id=str(session_id),
-                    status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED,
-                    target_turn_id=int(target_turn_id),
-                    source_fingerprint=str(source_fingerprint),
-                    source_snapshot_json=str(source_snapshot_json),
-                    decision="keep",
-                    reason="automatic background is suppressed until a newer turn",
-                )
-            successful = self._repository.get_successful_background_evaluation(
-                str(session_id),
-                str(source_fingerprint),
-            )
-            if successful is not None:
-                return successful
-            active = self._repository.get_active_background_evaluation(
-                str(session_id),
-                str(source_fingerprint),
-            )
-            if active is not None:
-                self._repository.update_background_state(
-                    str(session_id),
-                    desired_turn_id=int(target_turn_id),
-                    desired_source_fingerprint=str(source_fingerprint),
-                )
-                return active
-            queued = self._repository.get_queued_background_evaluation(str(session_id))
-            if queued is not None:
-                updated = self._repository.update_queued_background_evaluation(
-                    queued.id,
-                    target_turn_id=int(target_turn_id),
-                    source_fingerprint=str(source_fingerprint),
-                    source_snapshot_json=str(source_snapshot_json),
-                )
-                if updated is not None:
-                    self._repository.update_background_state(
-                        str(session_id),
-                        desired_turn_id=int(target_turn_id),
-                        desired_source_fingerprint=str(source_fingerprint),
-                    )
-                    return updated
-            evaluation = self._repository.create_background_evaluation(
-                evaluation_id=uuid.uuid4().hex,
-                session_id=str(session_id),
-                status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_QUEUED,
-                target_turn_id=int(target_turn_id),
-                source_fingerprint=str(source_fingerprint),
-                source_snapshot_json=str(source_snapshot_json),
-            )
-            self._repository.update_background_state(
-                str(session_id),
-                desired_turn_id=int(target_turn_id),
-                desired_source_fingerprint=str(source_fingerprint),
-            )
-            return evaluation
-
     def get_background_evaluation(
         self,
         session_id: str,
@@ -792,119 +611,112 @@ class MediaDataService:
         self._require_session(session_id)
         return self._repository.get_latest_background_evaluation(str(session_id))
 
+    def get_successful_background_evaluation(
+        self,
+        session_id: str,
+        source_fingerprint: str,
+    ) -> models.MediaBackgroundEvaluation | None:
+        return self._repository.get_successful_background_evaluation(
+            str(session_id),
+            str(source_fingerprint),
+        )
+
+    def get_active_background_evaluation(
+        self,
+        session_id: str,
+        source_fingerprint: str,
+    ) -> models.MediaBackgroundEvaluation | None:
+        return self._repository.get_active_background_evaluation(
+            str(session_id),
+            str(source_fingerprint),
+        )
+
+    def get_queued_background_evaluation(
+        self,
+        session_id: str,
+    ) -> models.MediaBackgroundEvaluation | None:
+        return self._repository.get_queued_background_evaluation(str(session_id))
+
+    def create_background_evaluation(
+        self,
+        *,
+        session_id: str,
+        status: str,
+        target_turn_id: int,
+        source_fingerprint: str,
+        source_snapshot_json: str,
+        decision: str = "",
+        selected_asset_id: str | None = None,
+        reason: str = "",
+    ) -> models.MediaBackgroundEvaluation:
+        self._require_session(session_id)
+        return self._repository.create_background_evaluation(
+            evaluation_id=uuid.uuid4().hex,
+            session_id=str(session_id),
+            status=str(status),
+            target_turn_id=int(target_turn_id),
+            source_fingerprint=str(source_fingerprint),
+            source_snapshot_json=str(source_snapshot_json),
+            decision=str(decision),
+            selected_asset_id=selected_asset_id,
+            reason=str(reason),
+        )
+
+    def update_queued_background_evaluation(
+        self,
+        evaluation_id: str,
+        *,
+        target_turn_id: int,
+        source_fingerprint: str,
+        source_snapshot_json: str,
+    ) -> models.MediaBackgroundEvaluation | None:
+        return self._repository.update_queued_background_evaluation(
+            str(evaluation_id),
+            target_turn_id=int(target_turn_id),
+            source_fingerprint=str(source_fingerprint),
+            source_snapshot_json=str(source_snapshot_json),
+        )
+
     def claim_next_background_evaluation(
         self,
     ) -> models.MediaBackgroundEvaluation | None:
         return self._repository.claim_next_background_evaluation()
 
-    def fail_background_evaluation(
+    def finish_background_evaluation(
         self,
         evaluation_id: str,
         *,
-        error_code: str,
-        error_message: str,
+        status: str,
+        decision: str = "",
+        selected_asset_id: str | None = None,
+        reason: str = "",
+        error_code: str = "",
+        error_message: str = "",
     ) -> models.MediaBackgroundEvaluation | None:
         return self._repository.finish_background_evaluation(
             str(evaluation_id),
-            status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_FAILED,
+            status=str(status),
+            decision=str(decision),
+            selected_asset_id=selected_asset_id,
+            reason=str(reason),
             error_code=str(error_code),
             error_message=str(error_message),
         )
 
-    def apply_background_decision(
+    def transition_background_evaluations(
         self,
-        evaluation_id: str,
         *,
-        decision: str,
-        selected_asset_id: str | None,
-        reason: str,
-    ) -> models.MediaBackgroundEvaluation | None:
-        if decision not in {"keep", "switch"}:
-            raise ValueError(f"invalid media background decision: {decision}")
-        with self._database.atomic():
-            evaluation = self._repository.get_background_evaluation(str(evaluation_id))
-            if evaluation is None:
-                return None
-            if evaluation.status != models.MEDIA_BACKGROUND_EVALUATION_STATUS_RUNNING:
-                return evaluation
-            state = self._repository.ensure_background_state(evaluation.session_id)
-            if (
-                state.desired_turn_id != evaluation.target_turn_id
-                or state.desired_source_fingerprint != evaluation.source_fingerprint
-            ):
-                return self._repository.finish_background_evaluation(
-                    evaluation.id,
-                    status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_SUPERSEDED,
-                    decision=decision,
-                    selected_asset_id=selected_asset_id,
-                    reason="a newer background evaluation superseded this result",
-                )
-            background = self._repository.get_background(evaluation.session_id)
-            if (
-                background is not None
-                and background.source_mode == models.MEDIA_BACKGROUND_SOURCE_MANUAL
-            ):
-                return self._repository.finish_background_evaluation(
-                    evaluation.id,
-                    status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_SKIPPED_MANUAL,
-                    decision="keep",
-                    reason="manual background was selected during evaluation",
-                )
-            if decision == "switch":
-                if not selected_asset_id:
-                    raise ValueError("switch background decision requires asset_id")
-                session = self._require_session(evaluation.session_id)
-                library_item = self._repository.get_library_item_by_asset(selected_asset_id)
-                allowed = library_item is not None and (
-                    (
-                        library_item.scope == models.MEDIA_LIBRARY_SCOPE_STORY
-                        and library_item.story_id == session.story_id
-                    )
-                    or library_item.scope == models.MEDIA_LIBRARY_SCOPE_WORKSPACE
-                ) and library_item.media_type == models.MEDIA_LIBRARY_TYPE_BACKGROUND
-                if not allowed:
-                    raise PermissionError(
-                        f"background asset is outside the session media pools: {selected_asset_id}"
-                    )
-                self._repository.set_background(
-                    evaluation.session_id,
-                    selected_asset_id,
-                    source_mode=models.MEDIA_BACKGROUND_SOURCE_AUTO,
-                )
-            self._repository.update_background_state(
-                evaluation.session_id,
-                last_applied_turn_id=evaluation.target_turn_id,
-                last_applied_fingerprint=evaluation.source_fingerprint,
-                last_decision=decision,
-                last_reason=str(reason),
-                auto_suppressed=False,
-                suppressed_through_turn_id=0,
-            )
-            return self._repository.finish_background_evaluation(
-                evaluation.id,
-                status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED,
-                decision=decision,
-                selected_asset_id=selected_asset_id,
-                reason=str(reason),
-            )
-
-    def interrupt_background_evaluations(
-        self,
+        from_status: str,
+        to_status: str,
+        error_code: str = "",
+        error_message: str = "",
     ) -> list[models.MediaBackgroundEvaluation]:
-        interrupted = self._repository.interrupt_running_background_evaluations()
-        for evaluation in interrupted:
-            queued = self._repository.get_queued_background_evaluation(evaluation.session_id)
-            if queued is not None:
-                continue
-            self._repository.create_background_evaluation(
-                evaluation_id=uuid.uuid4().hex,
-                session_id=evaluation.session_id,
-                status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_QUEUED,
-                target_turn_id=evaluation.target_turn_id,
-                source_fingerprint=evaluation.source_fingerprint,
-                source_snapshot_json=evaluation.source_snapshot_json,
-            )
-        return interrupted
+        return self._repository.transition_background_evaluations(
+            from_status=str(from_status),
+            to_status=str(to_status),
+            error_code=str(error_code),
+            error_message=str(error_message),
+        )
 
     def delete_session_asset(
         self,
@@ -914,10 +726,6 @@ class MediaDataService:
         self._require_session(session_id)
         if self._repository.get_gallery_asset(str(session_id), str(asset_id)) is None:
             return None
-        if self._repository.count_background_references(str(asset_id)):
-            raise MediaAssetInUseError(
-                f"media asset is referenced by a session background: {asset_id}"
-            )
         return self._repository.delete_asset(str(asset_id))
 
     def clear_session_runtime(self, session_id: str) -> models.SessionMediaResetResult:
@@ -1004,25 +812,6 @@ class MediaDataService:
             )
             for item, asset, blob in resolved
         ]
-
-
-def _validate_library_metadata(
-    title: str,
-    description: str,
-    tags: tuple[str, ...],
-) -> tuple[str, str, tuple[str, ...]]:
-    normalized_title = str(title).strip()
-    normalized_description = str(description).strip()
-    if not normalized_title or not normalized_description:
-        raise ValueError("media library title and description are required")
-    normalized_tags = tuple(dict.fromkeys(
-        str(tag).strip().casefold()
-        for tag in tags
-        if str(tag).strip()
-    ))
-    if not 1 <= len(normalized_tags) <= 20:
-        raise ValueError("media library requires between 1 and 20 tags")
-    return normalized_title, normalized_description, normalized_tags
 
 
 def _validate_library_type(media_type: str) -> None:

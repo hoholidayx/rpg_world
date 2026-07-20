@@ -185,7 +185,7 @@ Dream service 是 Session 级离线记忆提炼边界，只持有 `rp_memory.dre
 
 Dream Proposal 状态机、恢复、Apply、Persistent Memory 生命周期与 Context projection 的唯一业务 owner 是 `rp_memory.dream`；Story Memory 的 normalize、exact dedupe、merge、Evidence、version 和 Context projection 统一归 `rp_memory.story_memory_service`。`rpg_data` 只通过 `dream_memory` / `story_memory` 提供 frozen DTO、CRUD、CAS、批量读写与无业务语义事务，不得恢复状态迁移、动作分支、active-limit、来源指纹、Evidence 有效性或 Story Memory 合并策略；业务调用方不得直接访问 `gateway.database` 或 Peewee record。
 
-`DataServiceGateway` 保持数据库生命周期与 Data Service 注册表职责，不需要移除；进程/Agent composition root 从 Registry 取得 `sessions`、`plot_scheduling`、`dream_memory`、`story_memory`、`status` 等具体 service 后逐项注入，领域/application service 不得持有整个 Gateway。公开类型化持久化边界统一使用 Service 语义，新的大业务聚合入口命名为 `*DataService`，Repository 仅为 `rpg_data` 内部 Peewee 实现；既有简单 Character/Lorebook CRUD 可保留明确的 `*ReadService` / `*ManagementService`，不要为后缀或形式统一机械复制 application service、adapter 和 DTO 转换层。`rpg_data` 的边界是“决定数据如何可靠、高效、原子存取”，不是“只能做简单 CRUD”：复杂查询、分页、批量、CAS、数据库级原子操作和高效 read model 都应留在数据层。Session、Memory 与 Status 的 canonical 存储契约位于 `rpg_data.model.session` / `rpg_data.model.memory` / `rpg_data.model.status`，旧 `rpg_data.models` 暂作兼容重导出；Media、TTS 类型等到其业务域实际整改时再迁移。
+`DataServiceGateway` 保持数据库生命周期与 Data Service 注册表职责，不需要移除；进程/Agent composition root 从 Registry 取得 `sessions`、`plot_scheduling`、`dream_memory`、`story_memory`、`status`、`media` 等具体 service 后逐项注入，领域/application service 不得持有整个 Gateway。公开类型化持久化边界统一使用 Service 语义，新的大业务聚合入口命名为 `*DataService`，Repository 仅为 `rpg_data` 内部 Peewee 实现；既有简单 Character/Lorebook CRUD 可保留明确的 `*ReadService` / `*ManagementService`，不要为后缀或形式统一机械复制 application service、adapter 和 DTO 转换层。`rpg_data` 的边界是“决定数据如何可靠、高效、原子存取”，不是“只能做简单 CRUD”：复杂查询、分页、批量、CAS、数据库级原子操作和高效 read model 都应留在数据层。Session、Memory、Status 与 Media 的 canonical 存储契约位于对应的 `rpg_data.model.*` 模块，旧 `rpg_data.models` 暂作兼容重导出；TTS 类型等到其业务域实际整改时再迁移。
 
 `rpg_data` 的正式分层、依赖、事务、类型所有权与 Review 规范见 [`docs/rpg-data-architecture.md`](docs/rpg-data-architecture.md)；`todos/` 中的整改计划只保留实施历史和待办顺序，不作为长期边界定义。
 
@@ -264,6 +264,8 @@ LLM Service
 来源快照保存 message ID、version、role、content、turn/seq，并以 SHA-256 指纹检测提交或重试前的历史变化。工作区图片只接受经魔数识别的 PNG、JPEG、WebP，原始内容写到 `{workspace_root}/assets/images/{sha256}.<ext>`。Blob 在数据库中按 `(workspace_id, sha256)` 去重；hash 不是业务 Asset ID，每次成功生成仍建立独立 UUID Asset，以保留不同的 Provider、简报、参数和来源语义。
 
 Media Job 默认由单 worker 消费，无自动重试；服务启动时扫描 `queued`，创建/重试通过进程内事件即时唤醒，队列排空后阻塞等待而不轮询数据库。重启把遗留 `running/cancelling` 标成 `interrupted`，用户可显式重试。Session Gallery、背景引用与消息历史完全分离，不写入正文、message metadata、turn/SSE 或 localStorage。背景使用中的 Asset 禁止删除；最后一个 Asset 引用删除后才回收 Blob 行和文件。`/clear` 清除 Session Job/Gallery/背景但保留 Workspace Asset/Blob，Session 永久删除也依靠外键清理 Session 关联而保留 Workspace 资产。
+
+上述来源、图库、删除、背景状态机与 worker 恢复规则统一由 `MediaApplicationService` 决定；`media_service` worker 不直接操作数据层。`MediaDataService` 只负责 typed CRUD/read model、CAS claim、引用查询、条件状态更新及调用方准备的原子 completion。
 
 ### 配置（`settings.yaml` / `llm.yaml` / WebUI config）
 

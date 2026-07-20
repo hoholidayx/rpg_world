@@ -10,7 +10,7 @@ from media_service.worker import MediaBackgroundWorker, MediaJobWorker
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
 from rpg_media.brief import DemoVisualBriefPlanner
-from rpg_media.facade import MediaFacade
+from rpg_media.service import MediaApplicationService
 from rpg_media.providers.catalog import MediaProviderCatalog
 from rpg_media.providers.local_file import LocalFileProvider
 from rpg_media.source import build_source_snapshot
@@ -19,55 +19,53 @@ from rpg_media.types import VisualBrief
 
 @pytest.mark.asyncio
 async def test_worker_sleeps_until_woken_and_returns_to_sleep_after_job() -> None:
-    data = Mock()
-    data.interrupt_active_jobs.return_value = 0
-    data.claim_next_job.return_value = None
-    facade = Mock()
-    facade.execute_job = AsyncMock(
+    service = Mock()
+    service.interrupt_active_jobs.return_value = 0
+    service.claim_next_job.return_value = None
+    service.execute_job = AsyncMock(
         return_value=SimpleNamespace(status=models.MEDIA_JOB_STATUS_SUCCEEDED)
     )
-    worker = MediaJobWorker(data=data, facade=facade, concurrency=1)
+    worker = MediaJobWorker(service=service, concurrency=1)
 
     await worker.start()
     try:
         for _ in range(100):
-            if data.claim_next_job.call_count:
+            if service.claim_next_job.call_count:
                 break
             await asyncio.sleep(0.001)
-        assert data.claim_next_job.call_count == 1
+        assert service.claim_next_job.call_count == 1
 
         await asyncio.sleep(0.3)
-        assert data.claim_next_job.call_count == 1
+        assert service.claim_next_job.call_count == 1
 
         job = SimpleNamespace(
             id="job1",
             session_id="session1",
             provider_key="local_file",
         )
-        data.claim_next_job.side_effect = [job, None]
+        service.claim_next_job.side_effect = [job, None]
         worker.wake()
         for _ in range(100):
-            if facade.execute_job.await_count == 1 and data.claim_next_job.call_count == 3:
+            if service.execute_job.await_count == 1 and service.claim_next_job.call_count == 3:
                 break
             await asyncio.sleep(0.001)
-        facade.execute_job.assert_awaited_once_with("job1")
-        assert data.claim_next_job.call_count == 3
+        service.execute_job.assert_awaited_once_with("job1")
+        assert service.claim_next_job.call_count == 3
 
         await asyncio.sleep(0.3)
-        assert data.claim_next_job.call_count == 3
+        assert service.claim_next_job.call_count == 3
     finally:
         await worker.stop()
 
 
 @pytest.mark.asyncio
 async def test_generation_worker_does_not_lose_wake_during_empty_claim() -> None:
-    data = Mock()
-    data.interrupt_active_jobs.return_value = 0
-    facade = Mock()
-    facade.execute_job = AsyncMock(
+    service = Mock()
+    service.interrupt_active_jobs.return_value = 0
+    service.execute_job = AsyncMock(
         return_value=SimpleNamespace(status=models.MEDIA_JOB_STATUS_SUCCEEDED)
     )
-    worker = MediaJobWorker(data=data, facade=facade, concurrency=1)
+    worker = MediaJobWorker(service=service, concurrency=1)
     job = SimpleNamespace(id="job-race", session_id="session1", provider_key="local")
     claims = 0
 
@@ -81,27 +79,26 @@ async def test_generation_worker_does_not_lose_wake_during_empty_claim() -> None
             return job
         return None
 
-    data.claim_next_job.side_effect = claim
+    service.claim_next_job.side_effect = claim
     await worker.start()
     try:
         for _ in range(100):
-            if facade.execute_job.await_count:
+            if service.execute_job.await_count:
                 break
             await asyncio.sleep(0.001)
-        facade.execute_job.assert_awaited_once_with("job-race")
+        service.execute_job.assert_awaited_once_with("job-race")
     finally:
         await worker.stop()
 
 
 @pytest.mark.asyncio
 async def test_background_worker_does_not_lose_wake_during_empty_claim() -> None:
-    data = Mock()
-    data.interrupt_background_evaluations.return_value = []
-    facade = Mock()
-    facade.execute_background_evaluation = AsyncMock(
+    service = Mock()
+    service.interrupt_background_evaluations.return_value = []
+    service.execute_background_evaluation = AsyncMock(
         return_value=SimpleNamespace(status=models.MEDIA_BACKGROUND_EVALUATION_STATUS_SUCCEEDED)
     )
-    worker = MediaBackgroundWorker(data=data, facade=facade, concurrency=1)
+    worker = MediaBackgroundWorker(service=service, concurrency=1)
     evaluation = SimpleNamespace(
         id="evaluation-race",
         session_id="session1",
@@ -119,14 +116,14 @@ async def test_background_worker_does_not_lose_wake_during_empty_claim() -> None
             return evaluation
         return None
 
-    data.claim_next_background_evaluation.side_effect = claim
+    service.claim_next_background_evaluation.side_effect = claim
     await worker.start()
     try:
         for _ in range(100):
-            if facade.execute_background_evaluation.await_count:
+            if service.execute_background_evaluation.await_count:
                 break
             await asyncio.sleep(0.001)
-        facade.execute_background_evaluation.assert_awaited_once_with("evaluation-race")
+        service.execute_background_evaluation.assert_awaited_once_with("evaluation-race")
     finally:
         await worker.stop()
 
@@ -150,7 +147,7 @@ async def test_worker_interrupts_stale_active_jobs_and_resumes_queued(tmp_path) 
     provider_dir = tmp_path / "provider"
     provider_dir.mkdir()
     (provider_dir / "sample.png").write_bytes(b"\x89PNG\r\n\x1a\nworker")
-    facade = MediaFacade(
+    service = MediaApplicationService(
         data=gateway.media,
         catalog=gateway.catalog,
         planner=DemoVisualBriefPlanner(),
@@ -185,8 +182,7 @@ async def test_worker_interrupts_stale_active_jobs_and_resumes_queued(tmp_path) 
         visual_brief_json=VisualBrief(scene_description="queued").to_json(),
     )
     worker = MediaJobWorker(
-        data=gateway.media,
-        facade=facade,
+        service=service,
         concurrency=1,
     )
 

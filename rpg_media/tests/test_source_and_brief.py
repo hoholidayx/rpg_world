@@ -5,6 +5,7 @@ import pytest
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
 from rpg_media.brief import DemoVisualBriefPlanner
+from rpg_media.errors import MediaSourceRangeError
 from rpg_media.settings import DemoBriefSettings
 from rpg_media.source import build_source_snapshot, visible_excerpt
 
@@ -37,6 +38,35 @@ def test_source_fingerprint_tracks_persisted_message_changes(tmp_path) -> None:
 
     assert before.fingerprint != after.fingerprint
     assert '"content":"月光照在石门上"' in before.snapshot_json
+
+
+def test_source_policy_rejects_gaps_and_more_than_twenty_turns(tmp_path) -> None:
+    gateway = get_data_service_gateway(tmp_path / "source-policy.sqlite3")
+    session = gateway.catalog.create_session("demo_workspace", 1, title="source policy")
+    assert session is not None
+    for turn_id in (*range(1, 22), 23):
+        gateway.messages.append(
+            session.id,
+            models.MESSAGE_ROLE_USER,
+            f"turn {turn_id}",
+            turn_id=turn_id,
+            seq_in_turn=1,
+        )
+
+    with pytest.raises(MediaSourceRangeError, match="at most 20"):
+        build_source_snapshot(
+            gateway.media,
+            session.id,
+            start_turn_id=1,
+            end_turn_id=21,
+        )
+    with pytest.raises(MediaSourceRangeError, match="contiguous"):
+        build_source_snapshot(
+            gateway.media,
+            session.id,
+            start_turn_id=20,
+            end_turn_id=23,
+        )
 
 
 def test_visible_excerpt_uses_first_middle_last_sixteen_characters() -> None:
