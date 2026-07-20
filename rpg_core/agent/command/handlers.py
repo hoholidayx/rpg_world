@@ -63,7 +63,7 @@ async def cmd_sessions(agent: AgentCommandTarget, args: list[str]) -> str:
 async def cmd_session_create(agent: AgentCommandTarget, args: list[str]) -> str:
     title = " ".join(args).strip() or "New Session"
     gateway, current_session = _current_catalog_session(agent)
-    created = SessionCatalogService(gateway).create_session(
+    created = SessionCatalogService(gateway.sessions).create_session(
         str(current_session.workspace_id),
         int(current_session.story_id),
         title=title,

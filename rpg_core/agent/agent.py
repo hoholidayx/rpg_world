@@ -35,6 +35,10 @@ from rpg_core.agent.turn.preparation import TurnPreparation
 from rpg_core.agent.turn.runner import AgentReply, run_chat_loop, run_chat_loop_stream
 from rpg_core.agent.turn.service import AgentTurnService
 from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
+from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshotResolver
+from rpg_core.session.derivation import SessionDerivationService
+from rpg_core.session.reset import SessionResetService
+from rpg_core.session.role import SessionRoleService
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 
 if TYPE_CHECKING:
@@ -58,7 +62,14 @@ class RPGGameAgent:
         token_counter: TokenCounter | None = None,
         main_llm_selection_service: MainLLMSelectionService | None = None,
     ) -> None:
+        from rpg_data.services import get_data_service_gateway
+
         token_counter = token_counter or TiktokenTokenCounter()
+        gateway = get_data_service_gateway()
+        session_data = gateway.sessions
+        role_service = SessionRoleService(session_data)
+        reset_service = SessionResetService(session_data)
+        derivation_service = SessionDerivationService(session_data)
         self._command_dispatcher = CommandDispatcher(agent=self)
         self._model_runtime = MainModelRuntime(
             selection_service=(
@@ -71,6 +82,7 @@ class RPGGameAgent:
             world_name=world_name,
             history_enabled=history_enabled,
             command_dispatcher=self._command_dispatcher,
+            role_reader=role_service,
         )
         self._context_service = AgentContextService(
             world_name=world_name,
@@ -80,6 +92,8 @@ class RPGGameAgent:
             rp_module_registry=lambda: self._lifecycle.rp_module_registry,
             main_llm_selection=self._model_runtime.resolve,
             token_counter=token_counter,
+            turn_snapshot_data=session_data,
+            role_snapshot_reader=role_service,
         )
         self._tool_service = AgentToolService(
             session_id=lambda: self._lifecycle.session_id,
@@ -89,6 +103,9 @@ class RPGGameAgent:
         self._session_service = AgentSessionService(
             lifecycle=self._lifecycle,
             tool_service=self._tool_service,
+            data=session_data,
+            role_service=role_service,
+            reset_service=reset_service,
         )
         status_preflight = StatusPreflightHook(
             status_sub_agent=lambda: self._lifecycle.status_sub_agent,
@@ -112,6 +129,9 @@ class RPGGameAgent:
                 lifecycle=self._lifecycle,
                 context_service=self._context_service,
                 model_runtime=self._model_runtime,
+                plot_schedule_resolver=PlotScheduleSnapshotResolver(
+                    gateway.plot_scheduling
+                ),
             ),
             runtime_factory=TurnRuntimeFactory(
                 lifecycle=self._lifecycle,
@@ -141,6 +161,8 @@ class RPGGameAgent:
         self._derivation_service = AgentDerivationService(
             lifecycle=self._lifecycle,
             context_service=self._context_service,
+            derivation_service=derivation_service,
+            role_service=role_service,
         )
         self._mailbox = AgentMailbox(
             session_id=lambda: self._lifecycle.session_id,

@@ -239,9 +239,9 @@ def _create_integration_session(
 
     if with_status:
         _mount_integration_status(gateway, workspace_id, story.id)
-        SessionStatusLifecycleService(gateway).initialize(session_id)
+        SessionStatusLifecycleService(gateway.sessions).initialize(session_id)
     if bind_role:
-        SessionRoleService(gateway).bind_player_character(session_id, character.id)
+        SessionRoleService(gateway.sessions).bind_player_character(session_id, character.id)
     return IntegrationCatalog(workspace_id, story, session, character)
 
 

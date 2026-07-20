@@ -3,13 +3,37 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import ContextManager, Protocol
 
-from rpg_core.session.role import SessionRoleService
-from rpg_core.session.status import SessionStatusLifecycleService
+from rpg_core.session.role import SessionRoleDataPort, SessionRoleService
+from rpg_core.session.status import (
+    SessionStatusDataPort,
+    SessionStatusLifecycleService,
+)
+from rpg_data import models as data_models
+from rpg_data.model.memory import DreamResetResult
+from rpg_data.model.session import Session
 
-if TYPE_CHECKING:
-    from rpg_data.services.gateway import DataServiceGateway
+
+class SessionResetDataPort(SessionRoleDataPort, SessionStatusDataPort, Protocol):
+    def transaction(self) -> ContextManager[None]: ...
+
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def clear_messages(self, session_id: str) -> int: ...
+
+    def clear_narrative_outcomes(self, session_id: str) -> int: ...
+
+    def clear_plot_decisions(self, session_id: str) -> int: ...
+
+    def clear_story_memories(self, session_id: str) -> int: ...
+
+    def clear_dream_memory(self, session_id: str) -> DreamResetResult: ...
+
+    def clear_media_runtime(
+        self,
+        session_id: str,
+    ) -> data_models.SessionMediaResetResult: ...
 
 
 @dataclass(frozen=True)
@@ -34,33 +58,33 @@ class SessionResetResult:
 class SessionResetService:
     """Choose and atomically apply the complete ``/clear`` mutation matrix."""
 
-    def __init__(self, gateway: "DataServiceGateway") -> None:
-        self._gateway = gateway
+    def __init__(self, data: SessionResetDataPort) -> None:
+        self._data = data
 
     def reset(self, session_id: str) -> SessionResetResult:
         normalized_session_id = str(session_id)
-        if self._gateway.catalog.get_session(normalized_session_id) is None:
+        if self._data.get_session(normalized_session_id) is None:
             raise FileNotFoundError(f"Session not found: {normalized_session_id}")
 
-        with self._gateway.transaction():
-            messages_cleared = self._gateway.messages.clear(normalized_session_id)
-            outcomes_cleared = self._gateway.narrative_outcomes.clear(
+        with self._data.transaction():
+            messages_cleared = self._data.clear_messages(normalized_session_id)
+            outcomes_cleared = self._data.clear_narrative_outcomes(
                 normalized_session_id
             )
-            plot_decisions_cleared = self._gateway.plot_scheduling.clear_decisions(
+            plot_decisions_cleared = self._data.clear_plot_decisions(
                 normalized_session_id
             )
-            story_memories_cleared = self._gateway.story_memory_data.clear(
+            story_memories_cleared = self._data.clear_story_memories(
                 normalized_session_id
             )
-            dream_result = self._gateway.dream_data.clear(normalized_session_id)
-            status_result = SessionStatusLifecycleService(self._gateway).reset(
+            dream_result = self._data.clear_dream_memory(normalized_session_id)
+            status_result = SessionStatusLifecycleService(self._data).reset(
                 normalized_session_id
             )
-            media_result = self._gateway.media.clear_session_runtime(
+            media_result = self._data.clear_media_runtime(
                 normalized_session_id
             )
-            opening_result = SessionRoleService(self._gateway).replay_opening_for_reset(
+            opening_result = SessionRoleService(self._data).replay_opening_for_reset(
                 normalized_session_id
             )
 

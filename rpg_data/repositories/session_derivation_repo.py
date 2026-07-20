@@ -6,7 +6,7 @@ import uuid
 
 from peewee import Database, SQL
 
-from rpg_data import models
+from rpg_data.model import session as models
 from rpg_data.repositories.records import SessionDerivationJobRecord, bind_database
 
 

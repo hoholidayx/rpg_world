@@ -162,7 +162,7 @@ def test_session_reset_clears_jobs_gallery_and_background_but_preserves_asset(tm
     assert completed is not None
     gateway.media.set_background(session.id, completed.asset.id)
 
-    result = SessionResetService(gateway).reset(session.id)
+    result = SessionResetService(gateway.sessions).reset(session.id)
 
     assert result.media_jobs_cleared == 1
     assert result.media_gallery_items_cleared == 1

@@ -79,13 +79,13 @@ def _create_ready(
 
 def _dream(gateway, *, max_active_memories=MAX_ACTIVE_MEMORIES):  # noqa: ANN001, ANN202
     return DreamApplicationService(
-        gateway.dream_data,
+        gateway.dream_memory,
         max_active_memories=max_active_memories,
     )
 
 
 def _story_memory(gateway):  # noqa: ANN001, ANN202
-    return StoryMemoryApplicationService(gateway.story_memory_data)
+    return StoryMemoryApplicationService(gateway.story_memory)
 
 
 def test_snapshot_proposal_apply_and_context_evidence_guard(tmp_path) -> None:
@@ -579,7 +579,7 @@ def test_active_limit_and_reset_clear_all_dream_rows(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-limit.sqlite3")
     with pytest.raises(ValueError, match="between 1 and 64"):
         DreamApplicationService(
-            gateway.dream_data,
+            gateway.dream_memory,
             max_active_memories=MAX_ACTIVE_MEMORIES + 1,
         )
     dream = _dream(gateway, max_active_memories=1)
@@ -620,7 +620,7 @@ def test_active_limit_and_reset_clear_all_dream_rows(tmp_path) -> None:
             source_fingerprint=second.source_fingerprint,
         )
 
-    result = SessionResetService(gateway).reset("s_forest001")
+    result = SessionResetService(gateway.sessions).reset("s_forest001")
 
     assert result.dream_memories_cleared == 1
     assert result.dream_proposals_cleared == 2

@@ -100,6 +100,7 @@ class FakeCatalog:
 class FakeGateway:
     def __init__(self) -> None:
         self.catalog = FakeCatalog()
+        self.sessions = self
         self.character_management = FakeCharacterManagement()
         self.lorebook_management = FakeLorebookManagement()
         self.initialize_calls = 0

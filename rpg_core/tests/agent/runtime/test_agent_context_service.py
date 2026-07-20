@@ -28,6 +28,10 @@ from rpg_core.context.models import (
     UserMessageLayer,
 )
 from rpg_core.session import SessionManager
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionPlayerCharacterState,
+)
 
 
 class _Counter:
@@ -89,6 +93,40 @@ class _Scene:
         return "<scene>大厅</scene>"
 
 
+class _TurnSnapshotData:
+    @staticmethod
+    def get_session(_session_id: str):  # noqa: ANN201
+        return None
+
+    @staticmethod
+    def get_session_story(_session_id: str):  # noqa: ANN201
+        return None
+
+    @staticmethod
+    def get_turn_mode(_workspace_id: str, _mode: str):  # noqa: ANN201
+        return None
+
+    @staticmethod
+    def resolve_session_style(
+        _session_id: str,
+        _override_style_id: int | None,
+    ):  # noqa: ANN201
+        return None
+
+
+class _RoleReader:
+    @staticmethod
+    def get_state(_session_id: str) -> SessionPlayerCharacterState:
+        return SessionPlayerCharacterState(
+            status=PlayerCharacterBindingStatus.INVALID,
+            player=None,
+        )
+
+    @staticmethod
+    def list_options(_session_id: str) -> list:
+        return []
+
+
 def _resources(builder: _Builder, scene=None, characters=None) -> AgentContextResources:  # noqa: ANN001
     return AgentContextResources(
         builder=builder,
@@ -113,6 +151,8 @@ def _service(builder: _Builder, *, session=None, scene=None, characters=None):  
             effective=SimpleNamespace(context_window=100)
         ),
         token_counter=_Counter(),
+        turn_snapshot_data=_TurnSnapshotData(),
+        role_snapshot_reader=_RoleReader(),
     )
 
 

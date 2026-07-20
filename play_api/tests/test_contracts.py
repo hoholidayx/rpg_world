@@ -297,7 +297,7 @@ class _FakeAgentClient:
         ))
         try:
             gateway = get_data_service_gateway()
-            SessionRoleService(gateway).bind_player_character(
+            SessionRoleService(gateway.sessions).bind_player_character(
                 session_id,
                 player_character_id,
                 story_opening_id=story_opening_id,
@@ -821,7 +821,7 @@ def test_session_story_memory_endpoint_pages_filters_and_reports_stats(tmp_path,
     reset_data_service_gateways()
     reset_delete_confirmation_tokens()
     gateway = get_data_service_gateway()
-    story_memory = StoryMemoryApplicationService(gateway.story_memory_data)
+    story_memory = StoryMemoryApplicationService(gateway.story_memory)
     session_id = "s_forest001"
     story_memory.clear(session_id)
     gateway.messages.clear(session_id)
@@ -1042,7 +1042,7 @@ def test_provisioning_session_is_hidden_from_play_session_and_status_routes(
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     reset_data_service_gateways()
     gateway = get_data_service_gateway()
-    derivations = SessionDerivationService(gateway)
+    derivations = SessionDerivationService(gateway.sessions)
     job = derivations.create_job("s_forest001", 1)
     derivations.start_job(job.id)
     target = derivations.materialize_target(job.id).session

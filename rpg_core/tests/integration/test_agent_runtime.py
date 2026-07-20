@@ -44,11 +44,11 @@ pytestmark = pytest.mark.integration
 
 
 def _story_memory(gateway):  # noqa: ANN001, ANN202
-    return StoryMemoryApplicationService(gateway.story_memory_data)
+    return StoryMemoryApplicationService(gateway.story_memory)
 
 
 def _dream(gateway):  # noqa: ANN001, ANN202
-    return DreamApplicationService(gateway.dream_data)
+    return DreamApplicationService(gateway.dream_memory)
 
 
 @pytest.mark.asyncio

@@ -32,11 +32,11 @@ def _isolate_runtime_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _derivations(gateway):  # noqa: ANN001, ANN202
-    return SessionDerivationService(gateway)
+    return SessionDerivationService(gateway.sessions)
 
 
 def _deletion(gateway):  # noqa: ANN001, ANN202
-    return SessionDeletionService(gateway)
+    return SessionDeletionService(gateway.sessions)
 
 
 def test_derivation_seeds_only_history_and_required_session_configuration(
@@ -286,7 +286,7 @@ def test_derivation_seed_rolls_back_target_and_copied_rows_on_failure(
     original_session_ids = {
         str(row.session_id) for row in SessionProfileRecord.select()
     }
-    data_service = gateway.session_derivations
+    data_service = gateway.sessions
     original_copy = data_service.copy_messages
 
     def fail_after_partial_copy(target_session_id, messages):  # noqa: ANN001
@@ -398,7 +398,7 @@ def test_conditional_deletes_cannot_remove_published_or_actively_owned_sessions(
     service = _derivations(gateway)
     job = service.create_job("s_forest001", 1)
 
-    assert gateway.session_deletion.delete_ready_without_active_derivation(
+    assert gateway.sessions.delete_ready_without_active_derivation(
         "s_forest001"
     ) is False
     assert gateway.catalog.get_session("s_forest001") is not None
@@ -407,7 +407,7 @@ def test_conditional_deletes_cannot_remove_published_or_actively_owned_sessions(
     target_id = service.materialize_target(job.id).session.id
     service.complete_job(job.id)
 
-    assert gateway.session_deletion.delete_provisioning_for_derivation(
+    assert gateway.sessions.delete_provisioning_for_derivation(
         target_id,
         job.id,
     ) is False

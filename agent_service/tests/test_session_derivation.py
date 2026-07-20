@@ -235,16 +235,13 @@ async def test_derivation_worker_completes_ready_job(monkeypatch) -> None:
     FakeWorkerAgentManager.drop_error = None
     monkeypatch.setattr(worker_module, "AgentManager", FakeWorkerAgentManager)
     notifications = FakeNotificationSink()
-    gateway = SimpleNamespace(
-        session_derivations=service,
-        session_deletion=FakeSessionDeletion(),
-    )
+    deletion = FakeSessionDeletion()
 
     worker = SessionDerivationWorker(
-        gateway=gateway,
+        session_data=object(),
         notification_sink=notifications,
         derivation_service=service,
-        deletion_service=gateway.session_deletion,
+        deletion_service=deletion,
     )
     await worker._execute(queued)
 
@@ -272,10 +269,7 @@ async def test_derivation_notification_failure_does_not_change_ready_job(
     FakeWorkerAgentManager.drop_error = None
     monkeypatch.setattr(worker_module, "AgentManager", FakeWorkerAgentManager)
     worker = SessionDerivationWorker(
-        gateway=SimpleNamespace(
-            session_derivations=service,
-            session_deletion=FakeSessionDeletion(),
-        ),
+        session_data=object(),
         notification_sink=FailingNotificationSink(),
         derivation_service=service,
         deletion_service=FakeSessionDeletion(),
@@ -303,13 +297,8 @@ async def test_derivation_worker_cleans_target_and_fails_when_prepare_fails(monk
     FakeWorkerAgentManager.drop_error = None
     monkeypatch.setattr(worker_module, "AgentManager", FakeWorkerAgentManager)
     deletion = FakeSessionDeletion()
-    gateway = SimpleNamespace(
-        session_derivations=service,
-        session_deletion=deletion,
-    )
-
     await SessionDerivationWorker(
-        gateway=gateway,
+        session_data=object(),
         derivation_service=service,
         deletion_service=deletion,
     )._execute(queued)
@@ -336,13 +325,8 @@ async def test_derivation_worker_keeps_job_running_when_runtime_close_fails(
     monkeypatch.setattr(worker_module, "AgentManager", FakeWorkerAgentManager)
     deletion = FakeSessionDeletion()
     notifications = FakeNotificationSink()
-    gateway = SimpleNamespace(
-        session_derivations=service,
-        session_deletion=deletion,
-    )
-
     worker = SessionDerivationWorker(
-        gateway=gateway,
+        session_data=object(),
         notification_sink=notifications,
         derivation_service=service,
         deletion_service=deletion,
@@ -382,13 +366,8 @@ async def test_derivation_worker_interrupts_stale_running_jobs(monkeypatch) -> N
     monkeypatch.setattr(worker_module, "AgentManager", FakeWorkerAgentManager)
     deletion = FakeSessionDeletion()
     notifications = FakeNotificationSink()
-    gateway = SimpleNamespace(
-        session_derivations=service,
-        session_deletion=deletion,
-    )
-
     worker = SessionDerivationWorker(
-        gateway=gateway,
+        session_data=object(),
         notification_sink=notifications,
         derivation_service=service,
         deletion_service=deletion,
@@ -444,10 +423,7 @@ async def test_derivation_worker_recovers_from_list_and_claim_errors(monkeypatch
     monkeypatch.setattr(worker_module, "AgentManager", FakeWorkerAgentManager)
     deletion = FakeSessionDeletion()
     worker = SessionDerivationWorker(
-        gateway=SimpleNamespace(
-            session_derivations=service,
-            session_deletion=deletion,
-        ),
+        session_data=object(),
         retry_delay_seconds=0.01,
         derivation_service=service,
         deletion_service=deletion,
@@ -478,7 +454,7 @@ async def test_worker_rescans_queued_jobs_after_stale_recovery(monkeypatch) -> N
 
     service = Service()
     worker = SessionDerivationWorker(
-        gateway=SimpleNamespace(session_derivations=service),
+        session_data=object(),
         derivation_service=service,
         deletion_service=FakeSessionDeletion(),
     )
@@ -496,8 +472,8 @@ async def test_worker_rescans_queued_jobs_after_stale_recovery(monkeypatch) -> N
 
 
 class FakeLifespanWorker:
-    def __init__(self, *, gateway: object, notification_sink: object = None) -> None:
-        self.gateway = gateway
+    def __init__(self, *, session_data: object, notification_sink: object = None) -> None:
+        self.session_data = session_data
         self.notification_sink = notification_sink
         self.running = False
         self.wake_count = 0
@@ -531,10 +507,10 @@ async def test_lifespan_runs_stale_and_llm_cleanup_when_agent_reset_fails(
         def __init__(
             self,
             *,
-            gateway: object,
+            session_data: object,
             notification_sink: object = None,
         ) -> None:
-            del gateway, notification_sink
+            del session_data, notification_sink
 
         async def start(self) -> None:
             events.append("worker_start")
@@ -562,7 +538,11 @@ async def test_lifespan_runs_stale_and_llm_cleanup_when_agent_reset_fails(
 
     monkeypatch.setattr(service_main, "SessionDerivationWorker", Worker)
     monkeypatch.setattr(service_main, "AgentManager", Manager)
-    monkeypatch.setattr(service_main, "get_data_service_gateway", object)
+    monkeypatch.setattr(
+        service_main,
+        "get_data_service_gateway",
+        lambda: SimpleNamespace(sessions=object()),
+    )
     monkeypatch.setattr(service_main.LLMClientManager, "aconfigure", configure)
     monkeypatch.setattr(service_main.LLMClientManager, "areset", reset)
 
@@ -594,7 +574,7 @@ def test_derivation_create_query_and_error_contracts(monkeypatch) -> None:
 
     gateway = SimpleNamespace(
         catalog=FakeCatalog(),
-        session_derivations=service,
+        sessions=service,
     )
     monkeypatch.setattr(service_main, "SessionDerivationWorker", FakeLifespanWorker)
     monkeypatch.setattr(service_main, "AgentManager", FakeLifespanAgentManager)

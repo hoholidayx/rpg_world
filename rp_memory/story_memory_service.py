@@ -10,15 +10,22 @@ from dataclasses import dataclass
 from typing import ContextManager, Protocol
 
 from commons.errors import InvalidTurnMetadataError
-from rpg_data import models
+from rpg_data.model import memory as models
+from rpg_data.model.session import (
+    MESSAGE_ROLE_ASSISTANT,
+    MESSAGE_ROLE_USER,
+    TURN_MODE_GM,
+    TURN_MODE_IC,
+    SessionMessage,
+)
 from rpg_data.transaction import DataTransactionMode
 from rp_memory.memory_types import EpistemicStatus, MemoryKind
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _EVIDENCE_ROLES = frozenset(
-    {models.MESSAGE_ROLE_USER, models.MESSAGE_ROLE_ASSISTANT}
+    {MESSAGE_ROLE_USER, MESSAGE_ROLE_ASSISTANT}
 )
-_EVIDENCE_MODES = frozenset({models.TURN_MODE_IC, models.TURN_MODE_GM})
+_EVIDENCE_MODES = frozenset({TURN_MODE_IC, TURN_MODE_GM})
 
 
 class StoryMemoryDataPort(Protocol):
@@ -80,7 +87,7 @@ class StoryMemoryDataPort(Protocol):
         self,
         session_id: str,
         message_ids: Sequence[int],
-    ) -> tuple[models.SessionMessage, ...]: ...
+    ) -> tuple[SessionMessage, ...]: ...
 
     def mark_messages_processed(
         self,
@@ -343,7 +350,7 @@ class StoryMemoryApplicationService:
         self,
         session_id: str,
         message_ids: tuple[int, ...],
-    ) -> tuple[models.SessionMessage, ...]:
+    ) -> tuple[SessionMessage, ...]:
         rows = self._data.list_source_messages(session_id, message_ids)
         if len(rows) != len(message_ids):
             raise ValueError("story-memory source messages must belong to the session")
@@ -640,7 +647,7 @@ def _semantic_signature_from_candidate(
     )
 
 
-def _message_evidence(message: models.SessionMessage) -> models.MemoryEvidence:
+def _message_evidence(message: SessionMessage) -> models.MemoryEvidence:
     return models.MemoryEvidence(
         message_id=message.id,
         turn_id=message.turn_id,

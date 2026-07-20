@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -38,10 +39,12 @@ class PersistentMemoryStore:
     def __init__(
         self,
         session_id: str,
-        context_reader: PersistentMemoryContextReader | None = None,
+        context_reader: PersistentMemoryContextReader,
+        close_worker_connection: Callable[[], None] | None = None,
     ) -> None:
         self._session_id = str(session_id)
         self._context_reader = context_reader
+        self._close_worker_connection = close_worker_connection
         self._last_snapshot: tuple[PersistentMemoryItem, ...] = ()
         self._refresh_lock = asyncio.Lock()
 
@@ -65,20 +68,13 @@ class PersistentMemoryStore:
             return memories
 
     def _load_memories(self) -> list[PersistentMemoryItem]:
-        from rp_memory.dream.application import DreamApplicationService
-
-        if self._context_reader is not None:
-            return self._project(self._context_reader)
-
-        from rpg_data.services import get_data_service_gateway
-
-        gateway = get_data_service_gateway()
         try:
-            return self._project(DreamApplicationService(gateway.dream_data))
+            return self._project(self._context_reader)
         finally:
-            # Peewee connections are thread-local. Close the worker's handle;
-            # the shared gateway/database object remains initialized.
-            gateway.close_thread_connection()
+            if self._close_worker_connection is not None:
+                # Peewee connections are thread-local. Close only the worker's
+                # handle; the shared gateway/database remains initialized.
+                self._close_worker_connection()
 
     def _project(
         self,

@@ -330,7 +330,7 @@ async def test_agent_service_delete_failure_restores_runtime_and_allows_recreati
         raise RuntimeError("database delete failed")
 
     monkeypatch.setattr(
-        integration_data_gateway.session_deletion._sessions,
+        integration_data_gateway.sessions._sessions,
         "delete_ready_without_active_derivation",
         fail_delete,
     )

@@ -15,7 +15,7 @@ from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 
 def _story_memory(gateway):  # noqa: ANN001, ANN202
-    return StoryMemoryApplicationService(gateway.story_memory_data)
+    return StoryMemoryApplicationService(gateway.story_memory)
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +28,7 @@ def _reset_gateways(tmp_path, monkeypatch):  # noqa: ANN001
 
 def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
     gateway = get_data_service_gateway(tmp_path / "session-reset.sqlite3")
-    session = SessionCatalogService(gateway).create_session(
+    session = SessionCatalogService(gateway.sessions).create_session(
         "demo_workspace",
         1,
         title="Reset target",
@@ -36,7 +36,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
     assert session is not None
     session_id = str(session.id)
 
-    role_result = SessionRoleService(gateway).bind_player_character(session_id, 1)
+    role_result = SessionRoleService(gateway.sessions).bind_player_character(session_id, 1)
     assert role_result.state.player is not None
     gateway.catalog.set_session_main_llm_provider_key(session_id, "session_chat")
     override = gateway.rp_modules.set_session_override(
@@ -129,7 +129,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     )
     backup_count = gateway.backup.messages.count(session_id)
 
-    result = SessionResetService(gateway).reset(session_id)
+    result = SessionResetService(gateway.sessions).reset(session_id)
 
     assert result.session_id == session_id
     assert result.messages_cleared >= 2
@@ -169,7 +169,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     assert native_after.document.rows[0].deferred_interval_turns == 2
 
     assert gateway.backup.messages.count(session_id) == backup_count + 1
-    state = SessionRoleService(gateway).get_state(session_id)
+    state = SessionRoleService(gateway.sessions).get_state(session_id)
     assert state.status == PlayerCharacterBindingStatus.BOUND
     assert state.player == bound_player
     session = gateway.catalog.get_session(session_id)
@@ -197,10 +197,10 @@ def test_reset_rolls_back_all_database_changes_when_status_rebuild_fails(
     def fail_reset(_session_id: str, _plan: models.SessionStatusResetPlan):  # noqa: ANN202
         raise RuntimeError("status rebuild failed")
 
-    monkeypatch.setattr(gateway.status, "apply_session_reset_plan", fail_reset)
+    monkeypatch.setattr(gateway.sessions, "apply_status_reset_plan", fail_reset)
 
     with pytest.raises(RuntimeError, match="status rebuild failed"):
-        SessionResetService(gateway).reset(session_id)
+        SessionResetService(gateway.sessions).reset(session_id)
 
     assert gateway.messages.list(session_id) == messages_before
     assert _story_memory(gateway).list(session_id) == memories_before
@@ -226,7 +226,7 @@ def test_reset_fails_atomically_when_native_table_name_conflicts_with_story_temp
     backup_count = gateway.backup.messages.count(session_id)
 
     with pytest.raises(ValueError, match="conflict.*会话原生表"):
-        SessionResetService(gateway).reset(session_id)
+        SessionResetService(gateway.sessions).reset(session_id)
 
     assert gateway.messages.list(session_id) == messages_before
     assert gateway.status.list_tables(session_id) == tables_before
@@ -235,7 +235,7 @@ def test_reset_fails_atomically_when_native_table_name_conflicts_with_story_temp
 
 def test_reset_without_valid_binding_does_not_append_first_message(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "session-reset-unbound.sqlite3")
-    session = SessionCatalogService(gateway).create_session(
+    session = SessionCatalogService(gateway.sessions).create_session(
         "demo_workspace",
         1,
         title="Unbound reset",
@@ -249,7 +249,7 @@ def test_reset_without_valid_binding_does_not_append_first_message(tmp_path) -> 
         seq_in_turn=1,
     )
 
-    result = SessionResetService(gateway).reset(session.id)
+    result = SessionResetService(gateway.sessions).reset(session.id)
 
     assert result.first_message == ""
     assert gateway.messages.list(session.id) == []
@@ -275,7 +275,7 @@ def test_core_reset_clears_plot_decision_ledger(tmp_path) -> None:
         ),
     )
 
-    result = SessionResetService(gateway).reset("s_forest001")
+    result = SessionResetService(gateway.sessions).reset("s_forest001")
 
     assert result.plot_schedule_decisions_cleared == 1
     assert gateway.plot_scheduling.list_session_decisions("s_forest001") == []
@@ -297,7 +297,7 @@ def test_reset_rolls_back_when_story_opening_cannot_render(tmp_path) -> None:
     backup_count = gateway.backup.messages.count(session_id)
 
     with pytest.raises(ValueError):
-        SessionResetService(gateway).reset(session_id)
+        SessionResetService(gateway.sessions).reset(session_id)
 
     assert gateway.messages.list(session_id) == messages_before
     assert gateway.status.list_tables(session_id) == tables_before

@@ -109,8 +109,8 @@ def test_story_mount_controls_session_copy_visibility(tmp_path) -> None:
     )
     service.mount_template(workspace_id, forest_story.id, template.id)
 
-    forest_session = SessionCatalogService(gateway).create_session(workspace_id, forest_story.id, title="Forest")
-    academy_session = SessionCatalogService(gateway).create_session(workspace_id, academy_story.id, title="Academy")
+    forest_session = SessionCatalogService(gateway.sessions).create_session(workspace_id, forest_story.id, title="Forest")
+    academy_session = SessionCatalogService(gateway.sessions).create_session(workspace_id, academy_story.id, title="Academy")
 
     assert forest_session is not None
     assert academy_session is not None
@@ -181,7 +181,7 @@ def test_story_status_mount_character_binding_and_session_metadata(tmp_path, cap
             character_mount_id=outsider_mount.mount.id,
         )
 
-    session = SessionCatalogService(gateway).create_session(workspace_id, forest_story.id, title="Role Metadata")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, forest_story.id, title="Role Metadata")
     assert session is not None
     copied = status.get_table(str(session.id), "Alice 装备")
     metadata = json.loads(copied.metadata_json)
@@ -264,7 +264,7 @@ def test_unresolved_character_bound_table_is_excluded_from_context(tmp_path, cap
         template.id,
         character_mount_id=character_mount.mount.id,
     )
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Unresolved Role")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Unresolved Role")
     assert session is not None
     copied = status.get_table(str(session.id), "Alice 状态")
     metadata = json.loads(copied.metadata_json)
@@ -320,7 +320,7 @@ def test_session_creation_rejects_bound_character_that_lost_name(tmp_path) -> No
 
     CharacterRecord.update(name="").where(CharacterRecord.id == character.id).execute()
     with pytest.raises(ValueError, match="non-empty character name"):
-        SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Should Roll Back")
+        SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Should Roll Back")
     assert all(session.title != "Should Roll Back" for session in gateway.catalog.list_sessions(workspace_id, story.id))
 
 
@@ -366,11 +366,11 @@ def test_session_copy_is_independent_from_template_and_other_sessions(tmp_path) 
     )
     service.mount_template(workspace_id, story.id, template.id)
 
-    first = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="First")
+    first = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="First")
     assert first is not None
 
     service.update_template(template.id, rows=[["封印", "破裂"]])
-    second = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Second")
+    second = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Second")
     assert second is not None
 
     first_table = service.get_table(str(first.id), "旗帜")
@@ -389,8 +389,8 @@ def test_session_scoped_save_warns_and_keeps_last_write(tmp_path, caplog) -> Non
     service = gateway.status
     template = service.create_template(workspace_id, "旗帜", rows=[["封印", "完整"]])
     service.mount_template(workspace_id, story.id, template.id)
-    first = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="First")
-    second = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Second")
+    first = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="First")
+    second = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Second")
     assert first is not None and second is not None
 
     table = service.get_table(str(first.id), "旗帜")
@@ -439,7 +439,7 @@ def test_table_id_selector_writes_are_visible_from_document(tmp_path) -> None:
         rows=[["封印", "完整"]],
     )
     service.mount_template(workspace_id, story.id, template.id)
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Selector")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Selector")
     assert session is not None
 
     table = service.get_table(str(session.id), "旗帜")
@@ -470,7 +470,7 @@ def test_key_value_write_updates_appends_and_rejects_duplicates(tmp_path) -> Non
         rows=[["位置", "森林"]],
     )
     service.mount_template(workspace_id, story.id, template.id)
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Key")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Key")
     assert session is not None
 
     table = service.get_active_scene_table(str(session.id))
@@ -508,7 +508,7 @@ def test_scene_is_story_mounted_and_active_scene_uses_first_sorted_table(tmp_pat
     service.mount_template(workspace_id, story.id, active_scene.id, sort_order=10)
     service.mount_template(workspace_id, story.id, normal.id, sort_order=30)
 
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Scene")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Scene")
     assert session is not None
     session_id = str(session.id)
 
@@ -538,7 +538,7 @@ def test_runtime_key_lock_allows_value_update_but_blocks_runtime_delete(tmp_path
         rows=[["位置", "森林"], ["天气", "雨"]],
     )
     service.mount_template(workspace_id, story.id, template.id)
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Runtime Lock")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Runtime Lock")
     assert session is not None
 
     table = service.get_active_scene_table(str(session.id))
@@ -561,7 +561,7 @@ def test_runtime_key_lock_allows_value_update_but_blocks_runtime_delete(tmp_path
 def test_session_native_table_crud(tmp_path) -> None:
     gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "native_ws")
     service = gateway.status
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Native")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Native")
     assert session is not None
 
     table = service.create_table(str(session.id), "临时状态", rows=[["钟声", "响起"]])
@@ -579,7 +579,7 @@ def test_session_native_table_crud(tmp_path) -> None:
 def test_deferred_update_and_progress_commit_atomically(tmp_path) -> None:
     gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "deferred_ws")
     service = gateway.status
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Deferred")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Deferred")
     assert session is not None
     document = models.StatusTableDocument.from_rows(rows=[
         models.StatusTableRow(
@@ -623,7 +623,7 @@ def test_deferred_update_and_progress_commit_atomically(tmp_path) -> None:
 def test_bootstrap_state_commits_documents_and_all_deferred_progress_atomically(tmp_path) -> None:
     gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "bootstrap_ws")
     service = gateway.status
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Bootstrap")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Bootstrap")
     assert session is not None
     base = models.StatusTableDocument.from_rows(rows=[
         models.StatusTableRow("生命", "10"),
@@ -680,7 +680,7 @@ def test_scene_not_mounted_is_not_visible_to_session(tmp_path) -> None:
         rows=[["位置", "森林"]],
     )
 
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="No Scene")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="No Scene")
     assert session is not None
 
     assert service.get_active_scene_table(str(session.id)) is None
@@ -699,7 +699,7 @@ def test_catalog_status_timing_works_when_catalog_is_accessed_first(tmp_path) ->
     )
     service.mount_template(workspace_id, story.id, template.id)
 
-    session = SessionCatalogService(gateway).create_session(workspace_id, story.id, title="Timing")
+    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Timing")
 
     assert session is not None
     assert service.get_table(str(session.id), "旗帜").rows == (("封印", "完整"),)

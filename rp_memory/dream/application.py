@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from typing import ContextManager, Protocol
 from uuid import uuid4
 
-from rpg_data import models
+from rpg_data.model import memory as models
+from rpg_data.model.session import SessionMessage
 from rpg_data.errors import (
     DataConditionalWriteError,
     DataIntegrityError,
@@ -70,7 +71,7 @@ class DreamDataPort(Protocol):
         session_id: str,
         *,
         message_ids: Sequence[int] | None = None,
-    ) -> tuple[models.SessionMessage, ...]: ...
+    ) -> tuple[SessionMessage, ...]: ...
 
     def list_story_memories(
         self,
@@ -196,7 +197,7 @@ class DreamApplyResult:
 @dataclass(frozen=True)
 class DreamLedgerSourceSnapshot:
     session_id: str
-    messages: tuple[models.SessionMessage, ...]
+    messages: tuple[SessionMessage, ...]
     story_memories: tuple[models.SessionStoryMemory, ...]
     active_memories: tuple[PersistentMemoryProjection, ...]
     state: models.DreamState
@@ -942,7 +943,7 @@ class DreamApplicationService:
     def _first_invalid_evidence(
         self,
         items: Sequence[models.DreamProposalItem],
-        messages: Sequence[models.SessionMessage],
+        messages: Sequence[SessionMessage],
     ) -> str:
         messages_by_id = {item.id: item for item in messages}
         for item in items:
@@ -967,7 +968,7 @@ class DreamApplicationService:
     def _proposal_story_memory_sources_match(
         self,
         proposal: models.DreamProposal,
-        messages: Sequence[models.SessionMessage],
+        messages: Sequence[SessionMessage],
     ) -> bool:
         if not proposal.source_story_memory_ids:
             return True
@@ -1171,7 +1172,7 @@ def _required_target(
 
 
 def history_fingerprint_for_messages(
-    messages: Sequence[models.SessionMessage],
+    messages: Sequence[SessionMessage],
 ) -> str:
     return history_fingerprint(messages)
 

@@ -6,19 +6,89 @@ import json
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import ContextManager, Protocol
 
 from rpg_core.story.template import render_story_text_template
 from rpg_data import models as data_models
-
-if TYPE_CHECKING:
-    from rpg_data.services.gateway import DataServiceGateway
+from rpg_data.model.session import (
+    MESSAGE_ROLE_ASSISTANT,
+    TURN_MODE_IC,
+    Session,
+    SessionCharacterMount,
+    SessionMessage,
+    SessionPlayerCharacterSnapshot,
+)
 
 logger = logging.getLogger("rpg_core.session.role")
 
 _OPENING_MESSAGE_SOURCE = "story_opening"
 _METADATA_SOURCE_KEY = "source"
 _METADATA_OPENING_ID_KEY = "storyOpeningId"
+
+
+class SessionRoleDataPort(Protocol):
+    def transaction(self) -> ContextManager[None]: ...
+
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def list_character_mounts(
+        self,
+        session_id: str,
+    ) -> list[SessionCharacterMount]: ...
+
+    def list_story_openings(
+        self,
+        session_id: str,
+    ) -> list[data_models.StoryOpening]: ...
+
+    def count_messages(self, session_id: str) -> int: ...
+
+    def append_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        *,
+        mode: str,
+        turn_id: int,
+        seq_in_turn: int,
+        metadata_json: str,
+    ) -> SessionMessage: ...
+
+    def append_backup_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        *,
+        mode: str,
+        turn_id: int,
+        seq_in_turn: int,
+        metadata_json: str,
+    ) -> SessionMessage: ...
+
+    def update_player_character(
+        self,
+        session_id: str,
+        *,
+        player_character_id: int,
+        player_character_snapshot_json: str,
+    ) -> Session | None: ...
+
+    def update_player_character_and_opening(
+        self,
+        session_id: str,
+        *,
+        player_character_id: int,
+        player_character_snapshot_json: str,
+        story_opening_id: int | None,
+    ) -> Session | None: ...
+
+    def update_story_opening(
+        self,
+        session_id: str,
+        story_opening_id: int | None,
+    ) -> Session | None: ...
 
 
 class PlayerCharacterBindingStatus(StrEnum):
@@ -28,14 +98,14 @@ class PlayerCharacterBindingStatus(StrEnum):
 
 @dataclass(frozen=True)
 class PlayerCharacterOption:
-    snapshot: data_models.SessionPlayerCharacterSnapshot
+    snapshot: SessionPlayerCharacterSnapshot
     summary: str
 
 
 @dataclass(frozen=True)
 class SessionPlayerCharacterState:
     status: PlayerCharacterBindingStatus
-    player: data_models.SessionPlayerCharacterSnapshot | None = None
+    player: SessionPlayerCharacterSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -60,9 +130,8 @@ class SessionOpeningReplayResult:
 class SessionRoleService:
     """Apply role validity, binding, Opening selection, and replay rules."""
 
-    def __init__(self, gateway: "DataServiceGateway") -> None:
-        self._gateway = gateway
-        self._data = gateway.session_roles
+    def __init__(self, data: SessionRoleDataPort) -> None:
+        self._data = data
 
     def get_state(self, session_id: str) -> SessionPlayerCharacterState:
         session = self._require_session(session_id)
@@ -134,7 +203,7 @@ class SessionRoleService:
         session = self._require_session(session_id)
         return (
             session.player_character_id is None
-            and self._gateway.messages.count(str(session_id)) == 0
+            and self._data.count_messages(str(session_id)) == 0
         )
 
     def bind_player_character(
@@ -151,7 +220,7 @@ class SessionRoleService:
             option = self.require_player_option(normalized_session_id, target_id)
             initial_binding = (
                 session.player_character_id is None
-                and self._gateway.messages.count(normalized_session_id) == 0
+                and self._data.count_messages(normalized_session_id) == 0
             )
             if not initial_binding and story_opening_id is not None:
                 raise ValueError(
@@ -302,30 +371,30 @@ class SessionRoleService:
         *,
         story_opening_id: int | None,
     ) -> str:
-        if not content or self._gateway.messages.count(session_id) > 0:
+        if not content or self._data.count_messages(session_id) > 0:
             return ""
         metadata_json = _opening_message_metadata(story_opening_id)
-        self._gateway.messages.append(
+        self._data.append_message(
             session_id,
-            data_models.MESSAGE_ROLE_ASSISTANT,
+            MESSAGE_ROLE_ASSISTANT,
             content,
-            mode=data_models.TURN_MODE_IC,
+            mode=TURN_MODE_IC,
             turn_id=1,
             seq_in_turn=1,
             metadata_json=metadata_json,
         )
-        self._gateway.backup.messages.append(
+        self._data.append_backup_message(
             session_id,
-            data_models.MESSAGE_ROLE_ASSISTANT,
+            MESSAGE_ROLE_ASSISTANT,
             content,
-            mode=data_models.TURN_MODE_IC,
+            mode=TURN_MODE_IC,
             turn_id=1,
             seq_in_turn=1,
             metadata_json=metadata_json,
         )
         return content
 
-    def _require_session(self, session_id: str) -> data_models.Session:
+    def _require_session(self, session_id: str) -> Session:
         session = self._data.get_session(str(session_id))
         if session is None:
             raise FileNotFoundError(f"Session not found: {session_id}")
@@ -333,7 +402,7 @@ class SessionRoleService:
 
 
 def encode_player_character_snapshot(
-    snapshot: data_models.SessionPlayerCharacterSnapshot,
+    snapshot: SessionPlayerCharacterSnapshot,
 ) -> str:
     payload: dict[str, str | int] = {
         "characterId": snapshot.character_id,
@@ -351,7 +420,7 @@ def decode_player_character_snapshot(
     raw: str,
     *,
     expected_character_id: int,
-) -> data_models.SessionPlayerCharacterSnapshot | None:
+) -> SessionPlayerCharacterSnapshot | None:
     payload = _json_object(raw)
     try:
         character_id = int(payload.get("characterId") or 0)
@@ -367,7 +436,7 @@ def decode_player_character_snapshot(
         or not name
     ):
         return None
-    return data_models.SessionPlayerCharacterSnapshot(
+    return SessionPlayerCharacterSnapshot(
         character_id=character_id,
         mount_id=mount_id,
         story_id=story_id,
@@ -379,12 +448,12 @@ def decode_player_character_snapshot(
 
 
 def _snapshot_from_mount(
-    mount: data_models.SessionCharacterMount,
-) -> data_models.SessionPlayerCharacterSnapshot:
+    mount: SessionCharacterMount,
+) -> SessionPlayerCharacterSnapshot:
     metadata = _json_object(mount.metadata_json)
     raw_ui = metadata.get("ui")
     ui = raw_ui if isinstance(raw_ui, dict) else {}
-    return data_models.SessionPlayerCharacterSnapshot(
+    return SessionPlayerCharacterSnapshot(
         character_id=mount.character_id,
         mount_id=mount.mount_id,
         story_id=mount.story_id,
@@ -395,7 +464,7 @@ def _snapshot_from_mount(
     )
 
 
-def _character_summary(mount: data_models.SessionCharacterMount) -> str:
+def _character_summary(mount: SessionCharacterMount) -> str:
     personality = mount.personality.strip()
     if personality:
         return " ".join(personality.split())[:96]
@@ -407,7 +476,7 @@ def _character_summary(mount: data_models.SessionCharacterMount) -> str:
 
 def _render_opening(
     opening: data_models.StoryOpening | None,
-    player: data_models.SessionPlayerCharacterSnapshot,
+    player: SessionPlayerCharacterSnapshot,
 ) -> str:
     if opening is None:
         return ""

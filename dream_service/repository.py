@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Mapping
 
@@ -15,8 +16,17 @@ from rpg_core.session.role import (
     SessionPlayerCharacterState,
     SessionRoleService,
 )
-from rpg_data import models
-from rpg_data.services.gateway import DataServiceGateway, get_data_service_gateway
+from rpg_data.model import memory as models
+from rpg_data.model.session import (
+    MESSAGE_ROLE_ASSISTANT,
+    MESSAGE_ROLE_USER,
+    TURN_MODE_GM,
+    TURN_MODE_IC,
+    SessionMessage,
+)
+from rpg_data.services.dream_memory import DreamMemoryDataService
+from rpg_data.services.gateway import get_data_service_gateway
+from rpg_data.services.session import SessionDataService
 
 from dream_service.contracts import (
     DreamEvidenceView,
@@ -57,26 +67,48 @@ from rp_memory.memory_types import EpistemicStatus, MemoryKind
 _FRONT_MATTER = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|\Z)", re.DOTALL)
 
 
+def build_rpg_data_dream_repository() -> "RPGDataDreamRepository":
+    """Create the thread-owned repository at the Dream composition boundary."""
+
+    gateway = get_data_service_gateway()
+    session_data = gateway.sessions
+    return RPGDataDreamRepository(
+        dream_memory_data=gateway.dream_memory,
+        session_data=session_data,
+        resolve_session_runtime_dir=session_data.resolve_session_runtime_dir,
+        close_data_services=gateway.close,
+    )
+
+
 class RPGDataDreamRepository(DreamRepository):
     """Translate only through public rpg_data models and service methods."""
 
-    def __init__(self, gateway: DataServiceGateway | None = None) -> None:
-        self.gateway = gateway or get_data_service_gateway()
-        self._dream = DreamApplicationService(self.gateway.dream_data)
+    def __init__(
+        self,
+        *,
+        dream_memory_data: DreamMemoryDataService,
+        session_data: SessionDataService,
+        resolve_session_runtime_dir: Callable[[str], Path],
+        close_data_services: Callable[[], None],
+    ) -> None:
+        self._dream = DreamApplicationService(dream_memory_data)
+        self._session_data = session_data
+        self._resolve_session_runtime_dir = resolve_session_runtime_dir
+        self._close_data_services = close_data_services
 
     def build_source_snapshot(self, session_id: str) -> DreamSourceSnapshot:
         source = self._dream.build_source_snapshot(session_id)
         messages = tuple(_message_source(item) for item in source.messages)
         source_message_by_id = {item.id: item for item in source.messages}
         messages_by_turn: dict[int, tuple[int, ...]] = {}
-        eligible_messages_by_id: dict[int, models.SessionMessage] = {}
+        eligible_messages_by_id: dict[int, SessionMessage] = {}
         summary_message_ids: dict[int, tuple[int, ...]] = {}
         summary_turn_ranges: dict[int, tuple[int, int]] = {}
         for message in messages:
             if (
                 message.role
-                not in {models.MESSAGE_ROLE_USER, models.MESSAGE_ROLE_ASSISTANT}
-                or message.mode not in {models.TURN_MODE_IC, models.TURN_MODE_GM}
+                not in {MESSAGE_ROLE_USER, MESSAGE_ROLE_ASSISTANT}
+                or message.mode not in {TURN_MODE_IC, TURN_MODE_GM}
             ):
                 continue
             messages_by_turn[message.turn_id] = (
@@ -109,12 +141,12 @@ class RPGDataDreamRepository(DreamRepository):
             for item in source.story_memories
         )
         summary_batches = _load_summary_sources(
-            self.gateway.catalog.resolve_session_runtime_dir(session_id),
+            self._resolve_session_runtime_dir(session_id),
             messages_by_turn,
             summary_message_ids=summary_message_ids,
             summary_turn_ranges=summary_turn_ranges,
         )
-        player_state = SessionRoleService(self.gateway).get_state(session_id)
+        player_state = SessionRoleService(self._session_data).get_state(session_id)
         player_character_name = (
             player_state.player.name
             if player_state.status is PlayerCharacterBindingStatus.BOUND
@@ -323,7 +355,7 @@ class RPGDataDreamRepository(DreamRepository):
         )
 
     def close(self) -> None:
-        self.gateway.close()
+        self._close_data_services()
 
     def _require_proposal(
         self,
@@ -336,7 +368,7 @@ class RPGDataDreamRepository(DreamRepository):
         return proposal
 
 
-def _message_source(message: models.SessionMessage) -> DreamMessageSource:
+def _message_source(message: SessionMessage) -> DreamMessageSource:
     return DreamMessageSource(
         message_id=message.id,
         version=message.version,
@@ -351,7 +383,7 @@ def _message_source(message: models.SessionMessage) -> DreamMessageSource:
 
 def _story_memory_source(
     memory: models.SessionStoryMemory,
-    messages_by_id: Mapping[int, models.SessionMessage],
+    messages_by_id: Mapping[int, SessionMessage],
 ) -> DreamDerivedSource:
     identity = story_memory_source_identity(memory, messages_by_id)
     return DreamDerivedSource(

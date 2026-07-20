@@ -183,7 +183,11 @@ TTS service 与 Media service 同级，只持有 `rpg_tts`、`rpg_data`、持久
 
 Dream service 是 Session 级离线记忆提炼边界，只持有 `rp_memory.dream`、`rpg_data` 与 loop-owned `llm_client`。它通过 `dream.shallow` / `dream.deep` biz key 获取远端 Provider facade，不导入 Agent runtime、`MemorySubAgent` 或 `llm_service`。Play API 只用 `DreamClient` 代理手动管理请求；Dream 中断不得影响 Agent Context 构建、聊天或其它服务。v1 不提供入站 Bearer 鉴权，配置层强制监听 localhost/loopback IP；非 loopback host 必须启动失败，不支持非本地暴露。
 
-Dream Proposal 状态机、恢复、Apply、Persistent Memory 生命周期与 Context projection 的唯一业务 owner 是 `rp_memory.dream`；Story Memory 的 normalize、exact dedupe、merge、Evidence、version 和 Context projection 统一归 `rp_memory.story_memory_service`。`rpg_data` 只通过 `dream_data` / `story_memory_data` 提供 frozen DTO、CRUD、CAS、批量读写与无业务语义事务，不得恢复状态迁移、动作分支、active-limit、来源指纹、Evidence 有效性或 Story Memory 合并策略；业务调用方不得直接访问 `gateway.database` 或 Peewee record。
+Dream Proposal 状态机、恢复、Apply、Persistent Memory 生命周期与 Context projection 的唯一业务 owner 是 `rp_memory.dream`；Story Memory 的 normalize、exact dedupe、merge、Evidence、version 和 Context projection 统一归 `rp_memory.story_memory_service`。`rpg_data` 只通过 `dream_memory` / `story_memory` 提供 frozen DTO、CRUD、CAS、批量读写与无业务语义事务，不得恢复状态迁移、动作分支、active-limit、来源指纹、Evidence 有效性或 Story Memory 合并策略；业务调用方不得直接访问 `gateway.database` 或 Peewee record。
+
+`DataServiceGateway` 保持数据库生命周期与 Data Service 注册表职责，不需要移除；进程/Agent composition root 从 Registry 取得 `sessions`、`plot_scheduling`、`dream_memory`、`story_memory` 等具体 service 后逐项注入，领域/application service 不得持有整个 Gateway。公开类型化持久化边界统一使用 Service 语义，新的大业务聚合入口命名为 `*DataService`，Repository 仅为 `rpg_data` 内部 Peewee 实现；既有简单 Character/Lorebook CRUD 可保留明确的 `*ReadService` / `*ManagementService`，不要为后缀或形式统一机械复制 application service、adapter 和 DTO 转换层。`rpg_data` 的边界是“决定数据如何可靠、高效、原子存取”，不是“只能做简单 CRUD”：复杂查询、分页、批量、CAS、数据库级原子操作和高效 read model 都应留在数据层。Session 与 Memory 的 canonical 存储契约位于 `rpg_data.model.session` / `rpg_data.model.memory`，旧 `rpg_data.models` 暂作兼容重导出；Status、Media、TTS 类型等到其业务域实际整改时再迁移。
+
+`rpg_data` 的正式分层、依赖、事务、类型所有权与 Review 规范见 [`docs/rpg-data-architecture.md`](docs/rpg-data-architecture.md)；`todos/` 中的整改计划只保留实施历史和待办顺序，不作为长期边界定义。
 
 后台终态事件不进入 Agent 正文 SSE。`SessionDerivationWorker` 与 `DreamTaskManager` 只依赖各自的类型化 NotificationSink，在 `ready / failed / interrupted` 成功落库后通知；service composition root 注入映射适配器，再由无框架 `play_events` 的 loop-owned async publisher 调用 Play API。`rpg_data` 不持有 publisher 或 WebUI 语义。通知是 best-effort，失败只记录 warning，GET Proposal/Derivation Job 仍是事实真源。
 
@@ -312,7 +316,7 @@ Story 主数据字段中，`summary` 是短摘要，`story_prompt` 是 Story 专
 
 状态表的 SQLite `document_json` 仍是模板表和会话表正文真源，SQL 同时保存模板、Story 挂载、Session 副本、来源关系、排序和 `status_kind`。`status_kind` 只允许 `scene | normal`；状态表必须挂载到 Story 后才能绑定该 Story 的可选角色挂载。新 Session 的复制策略由 `rpg_core.session.SessionCatalogService` / `SessionStatusLifecycleService` 决定，`rpg_data.StatusTableService` 只复制调用方明确给出的 mount ID，或原子应用调用方准备好的 typed reset plan。模板后续修改不影响既有 Session 副本。`rpg_data` bootstrap 仅为既有缺失副本执行兼容性 materialize，不承载新的 Session 创建策略，也不硬编码 demo 数据。Bootstrap 默认保留 SQL 未索引目录，只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才允许清理并记录结果。
 
-Session 生命周期业务统一归 `rpg_core.session`：角色有效性、首次绑定、Opening 默认/回退和渲染归 `SessionRoleService`；Story/Session 默认挂载归 `SessionCatalogService`；`/clear`、Derivation 状态机/继承、永久删除资格与 runtime 目录补偿分别归 reset、derivation、deletion application service。`rpg_data` 对应 service 只保留 typed CRUD、归属/完整性检查、条件更新、调用方指定的复制/删除和事务，不得恢复玩家文案、默认选择、状态机推进或清理矩阵。
+Session 生命周期业务统一归 `rpg_core.session`：角色有效性、首次绑定、Opening 默认/回退和渲染归 `SessionRoleService`；Story/Session 默认挂载归 `SessionCatalogService`；`/clear`、Derivation 状态机/继承、永久删除资格与 runtime 目录补偿分别归 reset、derivation、deletion application service。`rpg_data.sessions` 聚合角色/Opening read model、Session/profile/job 持久化、调用方指定的复制/删除、复杂查询与原子事务，但不得恢复玩家文案、默认选择、状态机推进或清理矩阵。
 
 `当前场景` 是 `status_kind="scene"` 的特殊状态表，展示名可以自定义，但仍必须挂载到 story 才会被 session 感知。多张 scene 表存在时，v1 消费排序第一张 active scene。LLM 结构写权限由 `agent.scene.allow_runtime_key_changes` 控制且默认关闭：现有字段继续完整注入并允许更新 value，但不能新增、删除或重命名 key；只有显式开启后才恢复非锁定 key 的运行时增删能力。该开关只收紧 Agent 工具，不改变 Play API / `rpg_data` 的手工管理 CRUD。
 
@@ -648,7 +652,7 @@ Narrative Outcome 是当前剧情分支随机机制：
 
 Plot Scheduler 是 Story 级剧情动态调度模块：
 
-- Plot Scheduler 的业务 owner 是 `rpg_core/rp_modules/plot_scheduler`。定义管理的默认位置、移动/重排、重复/冷却、时间线和删除占用规则，以及 turn ledger 校验、派生复制与 `/clear` 保留策略都由 Core 的类型化 application service/policy 决定；`rpg_data` 只提供定义、Session 覆盖和决策账本的 typed CRUD、只读投影、调用方指定的复制过滤与通用事务，不得恢复调度或继承策略。
+- Plot Scheduler 的业务 owner 是 `rpg_core/rp_modules/plot_scheduler`。定义管理的默认位置、移动/重排、重复/冷却、时间线和删除占用规则，以及 turn ledger 校验、派生复制与 `/clear` 保留策略都由 Core 的类型化 application service/policy 决定；`rpg_data.plot_scheduling` 提供定义、Session 覆盖和决策账本的类型化查询/写入、分页 read model、调用方指定的复制过滤与通用事务，不得恢复调度或继承策略。
 - Story 可同时挂载多条线性大纲和多个事件池。大纲节点引用稳定 Story 事件并保存固定 `SceneTime`；事件池按 priority 仲裁，池内使用 `random | sequential`。每个 IC/GM turn 最多选一个到期大纲节点和一个池事件，OOC 完全旁路。
 - `forced` 候选到时直接暂存为 triggered；`soft` 候选通过 `agent.plot_scheduler` 独立 biz key 调用 LLM。Judge 只读完整 fixed layer、当前 scratch scene/普通状态表、最近 N 个完整原始 IC/GM turn 和当前输入，不读 Summary、Story Memory、Persistent Memory 或 Recall。Judge `reason` 由 schema 与 parser 双重限长，避免无界元数据突破主 Context 门禁预留。
 - 门禁在 scratch 创建前按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。

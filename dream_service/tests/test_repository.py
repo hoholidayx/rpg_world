@@ -21,7 +21,16 @@ from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 
 def _story_memory(gateway):  # noqa: ANN001, ANN202
-    return StoryMemoryApplicationService(gateway.story_memory_data)
+    return StoryMemoryApplicationService(gateway.story_memory)
+
+
+def _repository(gateway):  # noqa: ANN001, ANN202
+    return RPGDataDreamRepository(
+        dream_memory_data=gateway.dream_memory,
+        session_data=gateway.sessions,
+        resolve_session_runtime_dir=gateway.sessions.resolve_session_runtime_dir,
+        close_data_services=gateway.close,
+    )
 
 
 def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
@@ -65,7 +74,7 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
         },),
         message_ids=(first.id, second.id),
     )[0]
-    role_service = SessionRoleService(gateway)
+    role_service = SessionRoleService(gateway.sessions)
     role = role_service.list_options(session.id)[0]
     role_service.bind_player_character(
         session.id,
@@ -80,7 +89,7 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    repository = RPGDataDreamRepository(gateway)
+    repository = _repository(gateway)
     snapshot = repository.build_source_snapshot(session.id)
     selection = DreamSourceSelector().select(
         snapshot,
@@ -186,7 +195,7 @@ def test_apply_rolls_back_and_marks_stale_when_source_changes_during_apply(
         )
 
     write_summary("阿澈抵达港口并取得铜钥匙。")
-    repository = RPGDataDreamRepository(gateway)
+    repository = _repository(gateway)
     snapshot = repository.build_source_snapshot(session.id)
     selection = DreamSourceSelector().select(
         snapshot,
@@ -269,7 +278,7 @@ def test_repository_filters_ooc_and_unsourced_old_summary(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    snapshot = RPGDataDreamRepository(gateway).build_source_snapshot(session.id)
+    snapshot = _repository(gateway).build_source_snapshot(session.id)
     selection = DreamSourceSelector().select(
         snapshot,
         depth=DreamDepth.SHALLOW,
@@ -318,7 +327,7 @@ def test_repository_rejects_legacy_summary_after_partial_batch_edit(tmp_path) ->
     assert edited.summary_batch_id is None
     assert gateway.messages.get(original_assistant.id).summary_batch_id == 0
 
-    snapshot = RPGDataDreamRepository(gateway).build_source_snapshot(session.id)
+    snapshot = _repository(gateway).build_source_snapshot(session.id)
     assert snapshot.summary_batches == ()
 
     gateway.close()
@@ -354,7 +363,7 @@ def test_repository_preserves_valid_evidence_without_rebinding_replacement(
         },),
         message_ids=(original_user.id, assistant.id),
     )[0]
-    repository = RPGDataDreamRepository(gateway)
+    repository = _repository(gateway)
     before = repository.build_source_snapshot(session.id)
     assert before.story_memories[0].evidence_message_ids == (
         original_user.id,

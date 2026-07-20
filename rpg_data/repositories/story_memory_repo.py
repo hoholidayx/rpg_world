@@ -6,7 +6,8 @@ from collections.abc import Iterable, Sequence
 
 from peewee import Database, SQL, fn
 
-from rpg_data import models
+from rpg_data.model import memory as models
+from rpg_data.model.session import SessionMessage
 from rpg_data.repositories._utils import (
     get_or_none,
     to_memory_evidence,
@@ -177,7 +178,7 @@ class StoryMemoryRepository:
         self,
         session_id: str,
         message_ids: Sequence[int],
-    ) -> tuple[models.SessionMessage, ...]:
+    ) -> tuple[SessionMessage, ...]:
         if not message_ids:
             return ()
         rows = (

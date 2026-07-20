@@ -128,7 +128,7 @@ class FakeAgent:
             )
         if parts[:1] == ["/role_bind"] and len(parts) > 1:
             opening_arg = parts[2] if len(parts) > 2 else ""
-            bind_result = FakeGateway.session_roles.bind_by_index(
+            bind_result = FakeSessionRoles.bind_by_index(
                 self._session_id,
                 int(parts[1]),
                 int(opening_arg) if opening_arg and not opening_arg.startswith("opening_id=") else None,
@@ -548,16 +548,20 @@ class FakeSessionDerivations:
         return []
 
 
+class FakeSessions:
+    @staticmethod
+    def list_derivation_jobs(*statuses: str) -> list[models.SessionDerivationJob]:
+        return FakeSessionDerivations.list_jobs(*statuses)
+
+
 class FakeGateway:
     catalog = FakeCatalog
     messages = FakeMessages
-    session_roles = FakeSessionRoles
-    session_deletion = FakeSessionDeletion
-    session_derivations = FakeSessionDerivations
+    sessions = FakeSessions
 
 
 class FakeSessionCatalogApplication:
-    def __init__(self, _gateway: object) -> None:
+    def __init__(self, _data: object) -> None:
         pass
 
     def create_session(
@@ -587,25 +591,24 @@ def _patch_session_application_services(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(
         service_main,
         "SessionRoleService",
-        lambda _gateway: FakeSessionRoles,
+        lambda _data: FakeSessionRoles,
     )
     monkeypatch.setattr(
         service_main,
         "SessionDeletionService",
-        lambda _gateway: FakeSessionDeletion,
+        lambda _data: FakeSessionDeletion,
     )
     monkeypatch.setattr(
         service_main,
         "SessionDerivationService",
-        lambda _gateway: FakeSessionDerivations,
+        lambda _data: FakeSessionDerivations,
     )
 
 
 class InvalidHistoryGateway:
     catalog = FakeCatalog
     messages = InvalidTurnMessages
-    session_deletion = FakeSessionDeletion
-    session_derivations = FakeSessionDerivations
+    sessions = FakeSessions
 
 
 class FakeSessionManager:

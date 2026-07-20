@@ -33,7 +33,7 @@ def _reset_gateways(tmp_path, monkeypatch):  # noqa: ANN001
 
 def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
     gateway = get_data_service_gateway(tmp_path / "session-delete.sqlite3")
-    catalog = SessionCatalogService(gateway)
+    catalog = SessionCatalogService(gateway.sessions)
     session = catalog.create_session("demo_workspace", 1, title="Delete me")
     survivor = catalog.create_session("demo_workspace", 1, title="Keep me")
     assert session is not None
@@ -53,7 +53,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         turn_id=1,
         seq_in_turn=1,
     )
-    StoryMemoryApplicationService(gateway.story_memory_data).add_detail(
+    StoryMemoryApplicationService(gateway.story_memory).add_detail(
         session.id,
         "memory",
         turn_id=1,
@@ -101,7 +101,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
 def test_delete_removes_catalog_children_and_runtime_directory(tmp_path) -> None:
     gateway, session, survivor, runtime_dir = _prepared_session(tmp_path)
 
-    result = SessionDeletionService(gateway).delete(session.id)
+    result = SessionDeletionService(gateway.sessions).delete(session.id)
 
     assert result == SessionDeleteResult(
         session_id=session.id,
@@ -126,7 +126,7 @@ def test_delete_succeeds_when_runtime_directory_is_absent(tmp_path) -> None:
 
     shutil.rmtree(runtime_dir)
 
-    result = SessionDeletionService(gateway).delete(session.id)
+    result = SessionDeletionService(gateway.sessions).delete(session.id)
 
     assert result is not None
     assert result.runtime_cleanup == SessionRuntimeCleanupStatus.ABSENT
@@ -141,13 +141,13 @@ def test_delete_restores_runtime_when_database_delete_fails(tmp_path, monkeypatc
         raise RuntimeError("database delete failed")
 
     monkeypatch.setattr(
-        gateway.session_deletion._sessions,
+        gateway.sessions._sessions,
         "delete_ready_without_active_derivation",
         fail_delete,
     )
 
     with pytest.raises(RuntimeError, match="database delete failed"):
-        SessionDeletionService(gateway).delete(session.id)
+        SessionDeletionService(gateway.sessions).delete(session.id)
 
     assert gateway.catalog.get_session(session.id) is not None
     assert marker.read_bytes() == b"delete"
@@ -165,7 +165,7 @@ def test_delete_reports_pending_when_quarantine_cleanup_fails(
 
     monkeypatch.setattr("rpg_core.session.deletion.shutil.rmtree", fail_cleanup)
 
-    result = SessionDeletionService(gateway).delete(session.id)
+    result = SessionDeletionService(gateway.sessions).delete(session.id)
 
     assert result is not None
     assert result.runtime_cleanup == SessionRuntimeCleanupStatus.PENDING
@@ -177,4 +177,4 @@ def test_delete_reports_pending_when_quarantine_cleanup_fails(
 def test_delete_missing_session_returns_none(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "session-delete-missing.sqlite3")
 
-    assert SessionDeletionService(gateway).delete("missing_session") is None
+    assert SessionDeletionService(gateway.sessions).delete("missing_session") is None

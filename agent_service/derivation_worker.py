@@ -23,8 +23,8 @@ from rpg_core.session.derivation import (
 from rpg_core.session.deletion import SessionDeletionService
 
 if TYPE_CHECKING:
-    from rpg_data.models import SessionDerivationJob
-    from rpg_data.services.gateway import DataServiceGateway
+    from rpg_data.model.session import SessionDerivationJob
+    from rpg_data.services.session import SessionDataService
 
 
 _TAG = "[SessionDerivationWorker]"
@@ -37,15 +37,16 @@ class SessionDerivationWorker:
     def __init__(
         self,
         *,
-        gateway: "DataServiceGateway",
+        session_data: "SessionDataService",
         notification_sink: SessionDerivationNotificationSink | None = None,
         retry_delay_seconds: float = _DEFAULT_RETRY_DELAY_SECONDS,
         derivation_service: SessionDerivationService | None = None,
         deletion_service: SessionDeletionService | None = None,
     ) -> None:
-        self._gateway = gateway
-        self._derivations = derivation_service or SessionDerivationService(gateway)
-        self._deletion = deletion_service or SessionDeletionService(gateway)
+        self._derivations = derivation_service or SessionDerivationService(
+            session_data
+        )
+        self._deletion = deletion_service or SessionDeletionService(session_data)
         self._notifications = (
             notification_sink or NullSessionDerivationNotificationSink()
         )

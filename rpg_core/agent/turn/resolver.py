@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 from rpg_core.agent.turn.models import (
     TurnExecutionPolicy,
@@ -15,15 +15,32 @@ from rpg_core.session.role import (
     PlayerCharacterBindingStatus,
     PlayerCharacterOption,
     SessionPlayerCharacterState,
-    SessionRoleService,
 )
 from rpg_core.story.template import (
     UNBOUND_PLAYER_ROLE_NAME,
     render_story_text_template,
 )
 
-if TYPE_CHECKING:
-    from rpg_data.services import DataServiceGateway
+from rpg_data import models as data_models
+from rpg_data.model.session import Session
+
+
+class TurnSnapshotDataPort(Protocol):
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def get_session_story(self, session_id: str) -> data_models.Story | None: ...
+
+    def get_turn_mode(
+        self,
+        workspace_id: str,
+        mode: str,
+    ) -> data_models.WorkspaceTurnMode | None: ...
+
+    def resolve_session_style(
+        self,
+        session_id: str,
+        override_style_id: int | None,
+    ) -> data_models.StoryNarrativeStyle | None: ...
 
 
 class SessionRoleSnapshotReader(Protocol):
@@ -39,11 +56,11 @@ class TurnSnapshotResolver:
         self,
         session_id: str,
         *,
-        gateway: "DataServiceGateway | None" = None,
-        role_service: SessionRoleSnapshotReader | None = None,
+        data: TurnSnapshotDataPort,
+        role_service: SessionRoleSnapshotReader,
     ) -> None:
         self._session_id = str(session_id)
-        self._gateway = gateway
+        self._data = data
         self._role_service = role_service
 
     def resolve(
@@ -52,9 +69,8 @@ class TurnSnapshotResolver:
         *,
         require_player_character: bool = False,
     ) -> TurnExecutionSnapshot:
-        gateway = self._get_gateway()
         policy = TurnExecutionPolicy.for_mode(request.mode)
-        session = gateway.catalog.get_session(self._session_id)
+        session = self._data.get_session(self._session_id)
         if session is None:
             if request.narrative_style_id is not None:
                 raise FileNotFoundError(
@@ -72,17 +88,14 @@ class TurnSnapshotResolver:
                 policy=policy,
             )
 
-        player_character = self._resolve_player_character(gateway)
+        player_character = self._resolve_player_character()
         if require_player_character and player_character is None:
-            raise PlayerCharacterRequiredError(
-                self._role_bind_prompt(gateway)
-            )
+            raise PlayerCharacterRequiredError(self._role_bind_prompt())
         rendered_story_prompt = self._render_story_prompt(
-            gateway,
             player_character,
         )
 
-        mode_config = gateway.session_composer.get_mode(
+        mode_config = self._data.get_turn_mode(
             session.workspace_id,
             request.mode.value,
         )
@@ -92,7 +105,7 @@ class TurnSnapshotResolver:
         if policy.apply_narrative_style or request.narrative_style_id is not None:
             # Explicit overrides remain validated in OOC mode even though the
             # OOC execution policy suppresses their prompt.
-            style = gateway.session_composer.resolve_session_style(
+            style = self._data.resolve_session_style(
                 self._session_id,
                 request.narrative_style_id,
             )
@@ -112,9 +125,8 @@ class TurnSnapshotResolver:
 
     def _resolve_player_character(
         self,
-        gateway: "DataServiceGateway",
     ) -> TurnPlayerCharacterSnapshot | None:
-        state = self._get_role_service(gateway).get_state(self._session_id)
+        state = self._role_service.get_state(self._session_id)
         if (
             state.status is not PlayerCharacterBindingStatus.BOUND
             or state.player is None
@@ -130,10 +142,9 @@ class TurnSnapshotResolver:
 
     def _render_story_prompt(
         self,
-        gateway: "DataServiceGateway",
         player_character: TurnPlayerCharacterSnapshot | None,
     ) -> str:
-        story = gateway.catalog.get_session_story(self._session_id)
+        story = self._data.get_session_story(self._session_id)
         raw_prompt = str(story.story_prompt or "") if story is not None else ""
         return render_story_text_template(
             raw_prompt,
@@ -144,27 +155,11 @@ class TurnSnapshotResolver:
             ),
         )
 
-    def _role_bind_prompt(self, gateway: "DataServiceGateway") -> str:
-        service = self._get_role_service(gateway)
+    def _role_bind_prompt(self) -> str:
         return render_role_bind_prompt(
-            service.list_options(self._session_id),
-            service.get_state(self._session_id),
+            self._role_service.list_options(self._session_id),
+            self._role_service.get_state(self._session_id),
         )
-
-    def _get_role_service(
-        self,
-        gateway: "DataServiceGateway",
-    ) -> SessionRoleSnapshotReader:
-        if self._role_service is None:
-            self._role_service = SessionRoleService(gateway)
-        return self._role_service
-
-    def _get_gateway(self) -> "DataServiceGateway":
-        if self._gateway is None:
-            from rpg_data.services import get_data_service_gateway
-
-            self._gateway = get_data_service_gateway()
-        return self._gateway
 
 
 class PlayerCharacterRequiredError(RuntimeError):

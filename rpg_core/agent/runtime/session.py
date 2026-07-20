@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
 
@@ -15,12 +15,19 @@ from rpg_core.session.role import SessionRoleService
 from rpg_core.session.reset import SessionResetService
 
 if TYPE_CHECKING:
+    from rpg_data.model.session import SessionMessage
     from rpg_core.session.reset import SessionResetResult
     from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
     from rpg_core.agent.mailbox import AgentMailbox
     from rpg_core.agent.runtime.tools import AgentToolService
 
 _TAG = "[AgentSessionService]"
+
+
+class AgentSessionDataPort(Protocol):
+    def resolve_session_runtime_dir(self, session_id: str) -> Path: ...
+
+    def list_messages(self, session_id: str) -> list["SessionMessage"]: ...
 
 
 class AgentSessionService:
@@ -31,9 +38,15 @@ class AgentSessionService:
         *,
         lifecycle: "AgentRuntimeLifecycle",
         tool_service: "AgentToolService",
+        data: AgentSessionDataPort,
+        role_service: SessionRoleService,
+        reset_service: SessionResetService,
     ) -> None:
         self._lifecycle = lifecycle
         self._tool_service = tool_service
+        self._data = data
+        self._role_service = role_service
+        self._reset_service = reset_service
         self._mailbox: AgentMailbox | None = None
 
     def bind_mailbox(self, mailbox: "AgentMailbox") -> None:
@@ -44,12 +57,9 @@ class AgentSessionService:
         return self._lifecycle.session_manager.history
 
     def render_role_bind_prompt(self, *, error: str = "") -> str:
-        from rpg_data.services import get_data_service_gateway
-
-        role_service = SessionRoleService(get_data_service_gateway())
         return render_role_bind_prompt(
-            role_service.list_options(self._lifecycle.session_id),
-            role_service.get_state(self._lifecycle.session_id),
+            self._role_service.list_options(self._lifecycle.session_id),
+            self._role_service.get_state(self._lifecycle.session_id),
             error=error,
         )
 
@@ -60,17 +70,14 @@ class AgentSessionService:
         *,
         story_opening_id: int | None = None,
     ):
-        from rpg_data.services import get_data_service_gateway
-
         session_id = self._lifecycle.session_id
         logger.info(
             _TAG + " binding player character by index: session_id={}, index={}",
             session_id,
             index,
         )
-        role_service = SessionRoleService(get_data_service_gateway())
         option = resolve_role_index(
-            role_service.list_options(session_id),
+            self._role_service.list_options(session_id),
             int(index),
         )
         selected_opening_id = (
@@ -81,7 +88,7 @@ class AgentSessionService:
                 "opening index and story opening id cannot both be provided"
             )
         if opening_index is not None:
-            openings = role_service.list_opening_options(
+            openings = self._role_service.list_opening_options(
                 session_id,
                 option.snapshot.character_id,
             )
@@ -89,7 +96,7 @@ class AgentSessionService:
             if opening_position < 1 or opening_position > len(openings):
                 raise ValueError(f"无效开局序号: {opening_position}")
             selected_opening_id = openings[opening_position - 1].opening.id
-        result = role_service.bind_player_character(
+        result = self._role_service.bind_player_character(
             session_id,
             option.snapshot.character_id,
             story_opening_id=selected_opening_id,
@@ -106,15 +113,13 @@ class AgentSessionService:
         return result
 
     def player_character_guard_reply(self) -> str:
-        from rpg_data.services import get_data_service_gateway
         from rpg_core.session.role import PlayerCharacterBindingStatus
 
         session_id = self._lifecycle.session_id
         if not session_id:
             return ""
-        service = SessionRoleService(get_data_service_gateway())
         try:
-            state = service.get_state(session_id)
+            state = self._role_service.get_state(session_id)
         except FileNotFoundError:
             logger.warning(
                 _TAG + " player character guard skipped missing session: session_id={}",
@@ -129,7 +134,7 @@ class AgentSessionService:
             state.status,
         )
         return render_role_bind_prompt(
-            service.list_options(session_id),
+            self._role_service.list_options(session_id),
             state,
         )
 
@@ -212,14 +217,11 @@ class AgentSessionService:
     async def reset_session(self) -> "SessionResetResult":
         """Reset gameplay data, runtime files, and session-scoped resources."""
 
-        from rpg_data.services import get_data_service_gateway
-
         if not self._lifecycle.initialized:
             raise RuntimeError("Agent runtime is not initialized")
 
         session_id = self._lifecycle.session_id
-        gateway = get_data_service_gateway()
-        runtime_dir = gateway.catalog.resolve_session_runtime_dir(session_id)
+        runtime_dir = self._data.resolve_session_runtime_dir(session_id)
         quarantine_dir = runtime_dir.with_name(
             f".{runtime_dir.name}.clear-{uuid.uuid4().hex}"
         )
@@ -237,7 +239,7 @@ class AgentSessionService:
                 runtime_dir.rename(quarantine_dir)
                 runtime_moved = True
 
-            result = SessionResetService(gateway).reset(session_id)
+            result = self._reset_service.reset(session_id)
             database_reset = True
 
             if runtime_moved:
@@ -311,10 +313,8 @@ class AgentSessionService:
     async def reindex_memory(self) -> bool:
         return await self._lifecycle.reindex_memory()
 
-    def _history_rows(self):
-        from rpg_data.services import get_data_service_gateway
-
-        return get_data_service_gateway().messages.list(self._lifecycle.session_id)
+    def _history_rows(self) -> list["SessionMessage"]:
+        return self._data.list_messages(self._lifecycle.session_id)
 
     def _clamp_deferred_progress(self, max_turn_id: int | None = None) -> None:
         if not self._lifecycle.initialized:

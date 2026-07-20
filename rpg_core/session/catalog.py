@@ -3,21 +3,93 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import ContextManager, Mapping, Protocol
 
 from rpg_core.story.template import validate_story_text_template
-from rpg_core.session.status import SessionStatusLifecycleService
+from rpg_core.session.status import (
+    SessionStatusDataPort,
+    SessionStatusLifecycleService,
+)
 from rpg_data import models as data_models
+from rpg_data.model.session import SESSION_LIFECYCLE_READY, Session
 
-if TYPE_CHECKING:
-    from rpg_data.services.gateway import DataServiceGateway
+
+class SessionCatalogDataPort(SessionStatusDataPort, Protocol):
+    def transaction(self) -> ContextManager[None]: ...
+
+    def create_story(
+        self,
+        workspace_id: str,
+        *,
+        title: str,
+        summary: str,
+        story_prompt: str,
+        openings: Sequence[data_models.StoryOpeningInput],
+    ) -> data_models.Story | None: ...
+
+    def update_story(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        title: str | None,
+        summary: str | None,
+        story_prompt: str | None,
+        openings: Sequence[data_models.StoryOpeningInput] | None,
+    ) -> data_models.Story | None: ...
+
+    def get_story(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> data_models.Story | None: ...
+
+    def create_session(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        session_id: str | None,
+        title: str,
+        description: str,
+        player_character_id: int | None,
+        player_character_snapshot_json: str,
+        story_opening_id: int | None,
+        lifecycle: str,
+    ) -> Session | None: ...
+
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def list_rp_module_catalog(self) -> list[data_models.RPModuleCatalogEntry]: ...
+
+    def set_story_rp_module(
+        self,
+        workspace_id: str,
+        story_id: int,
+        module_name: str,
+        *,
+        enabled: bool,
+        config: Mapping[str, object],
+    ) -> data_models.StoryRPModule | None: ...
+
+    def list_narrative_styles(
+        self,
+        workspace_id: str,
+    ) -> list[data_models.NarrativeStyle] | None: ...
+
+    def mount_story_style(
+        self,
+        workspace_id: str,
+        story_id: int,
+        style_id: int,
+    ) -> data_models.StoryNarrativeStyle | None: ...
 
 
 class SessionCatalogService:
     """Create catalog aggregates and apply their initial mount policies."""
 
-    def __init__(self, gateway: "DataServiceGateway") -> None:
-        self._gateway = gateway
+    def __init__(self, data: SessionCatalogDataPort) -> None:
+        self._data = data
 
     def create_story(
         self,
@@ -30,8 +102,8 @@ class SessionCatalogService:
     ) -> data_models.Story | None:
         normalized_openings = normalize_story_openings(openings)
         validate_story_text_template(story_prompt)
-        with self._gateway.transaction():
-            story = self._gateway.catalog.create_story(
+        with self._data.transaction():
+            story = self._data.create_story(
                 workspace_id,
                 title=title,
                 summary=summary,
@@ -40,9 +112,9 @@ class SessionCatalogService:
             )
             if story is None:
                 return None
-            for entry in self._gateway.rp_modules.list_catalog():
+            for entry in self._data.list_rp_module_catalog():
                 if entry.default_story_enabled:
-                    mounted = self._gateway.rp_modules.set_story_module(
+                    mounted = self._data.set_story_rp_module(
                         workspace_id,
                         story.id,
                         entry.module_name,
@@ -54,9 +126,9 @@ class SessionCatalogService:
                             "new Story disappeared while mounting RP Modules: "
                             f"{story.id}"
                         )
-            styles = self._gateway.session_composer.list_styles(workspace_id) or []
+            styles = self._data.list_narrative_styles(workspace_id) or []
             for style in styles:
-                mounted_style = self._gateway.session_composer.mount_story_style(
+                mounted_style = self._data.mount_story_style(
                     workspace_id,
                     story.id,
                     style.id,
@@ -66,7 +138,7 @@ class SessionCatalogService:
                         "new Story disappeared while mounting narrative styles: "
                         f"{story.id}"
                     )
-            return self._gateway.catalog.get_story(workspace_id, story.id)
+            return self._data.get_story(workspace_id, story.id)
 
     def update_story(
         self,
@@ -85,7 +157,7 @@ class SessionCatalogService:
             if openings is not None
             else None
         )
-        return self._gateway.catalog.update_story(
+        return self._data.update_story(
             workspace_id,
             story_id,
             title=title,
@@ -105,10 +177,10 @@ class SessionCatalogService:
         player_character_id: int | None = None,
         player_character_snapshot_json: str = "{}",
         story_opening_id: int | None = None,
-        lifecycle: str = data_models.SESSION_LIFECYCLE_READY,
-    ) -> data_models.Session | None:
-        with self._gateway.transaction():
-            session = self._gateway.catalog.create_session(
+        lifecycle: str = SESSION_LIFECYCLE_READY,
+    ) -> Session | None:
+        with self._data.transaction():
+            session = self._data.create_session(
                 workspace_id,
                 story_id,
                 session_id=session_id,
@@ -121,8 +193,8 @@ class SessionCatalogService:
             )
             if session is None:
                 return None
-            SessionStatusLifecycleService(self._gateway).initialize(session.id)
-            return self._gateway.catalog.get_session(session.id)
+            SessionStatusLifecycleService(self._data).initialize(session.id)
+            return self._data.get_session(session.id)
 
 
 def normalize_story_openings(

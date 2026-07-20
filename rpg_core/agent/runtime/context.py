@@ -11,7 +11,11 @@ from loguru import logger
 from commons.errors import MainContextWindowThresholdExceededError
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.turn import TurnExecutionSnapshot, TurnMode, TurnRequest
-from rpg_core.agent.turn.resolver import TurnSnapshotResolver
+from rpg_core.agent.turn.resolver import (
+    SessionRoleSnapshotReader,
+    TurnSnapshotDataPort,
+    TurnSnapshotResolver,
+)
 from rpg_core.context.fixed_layer import FixedLayerAssembler
 from rpg_core.context.fixed_layer.contributors import (
     CharacterFixedLayerContributor,
@@ -59,6 +63,8 @@ class AgentContextService:
         rp_module_registry: Callable[[], "RPModuleRegistry | None"],
         main_llm_selection: Callable[[str], Awaitable["MainLLMSelection"]],
         token_counter: "TokenCounter",
+        turn_snapshot_data: TurnSnapshotDataPort,
+        role_snapshot_reader: SessionRoleSnapshotReader,
     ) -> None:
         self._world_name = world_name
         self._session_id = session_id
@@ -67,6 +73,8 @@ class AgentContextService:
         self._rp_module_registry = rp_module_registry
         self._main_llm_selection = main_llm_selection
         self._token_counter = token_counter
+        self._turn_snapshot_data = turn_snapshot_data
+        self._role_snapshot_reader = role_snapshot_reader
 
     def resolve_turn_execution(
         self,
@@ -74,7 +82,11 @@ class AgentContextService:
         *,
         require_player_character: bool = False,
     ) -> TurnExecutionSnapshot:
-        return TurnSnapshotResolver(self._session_id()).resolve(
+        return TurnSnapshotResolver(
+            self._session_id(),
+            data=self._turn_snapshot_data,
+            role_service=self._role_snapshot_reader,
+        ).resolve(
             request,
             require_player_character=require_player_character,
         )

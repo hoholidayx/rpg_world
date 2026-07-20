@@ -1,4 +1,4 @@
-"""Typed CRUD facade for Plot Scheduler persistence."""
+"""Typed persistence service for the Plot Scheduler aggregate."""
 
 from __future__ import annotations
 

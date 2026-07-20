@@ -74,11 +74,11 @@ def _proposal_values(
     )
 
 
-def test_story_memory_data_crud_evidence_progress_and_rollback(
+def test_story_memory_crud_evidence_progress_and_rollback(
     tmp_path: Path,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "story-memory-data.sqlite3")
-    data = gateway.story_memory_data
+    data = gateway.story_memory
     source = gateway.messages.append(
         "s_forest001",
         models.MESSAGE_ROLE_ASSISTANT,
@@ -169,7 +169,7 @@ def test_dream_proposal_item_state_crud_and_conditional_updates(
     tmp_path: Path,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-proposal-data.sqlite3")
-    data = gateway.dream_data
+    data = gateway.dream_memory
     source = gateway.messages.list("s_forest001")[0]
     evidence = models.MemoryEvidence(
         message_id=source.id,
@@ -264,7 +264,7 @@ def test_persistent_memory_data_crud_uniqueness_and_audit_evidence(
     tmp_path: Path,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "persistent-memory-data.sqlite3")
-    data = gateway.dream_data
+    data = gateway.dream_memory
     source = gateway.messages.append(
         "s_forest001",
         models.MESSAGE_ROLE_ASSISTANT,
@@ -368,7 +368,7 @@ def test_dream_rows_rollback_clear_and_session_delete_cascade(
     tmp_path: Path,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-cleanup-data.sqlite3")
-    data = gateway.dream_data
+    data = gateway.dream_memory
 
     with pytest.raises(RuntimeError, match="rollback"):
         with data.transaction(DataTransactionMode.IMMEDIATE):
@@ -395,6 +395,6 @@ def test_dream_rows_rollback_clear_and_session_delete_cascade(
     data.create_proposal(replace(proposal_values, session_id=session.id))
     data.get_or_create_state(session.id)
 
-    assert gateway.session_deletion.delete(session.id) is True
+    assert gateway.sessions.delete_session(session.id) is True
     assert data.get_proposal("cascade-proposal") is None
     assert data.get_state(session.id) is None

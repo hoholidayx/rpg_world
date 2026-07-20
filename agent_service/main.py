@@ -133,7 +133,7 @@ async def lifespan(app: FastAPI):
         )
         notification_sink = SessionDerivationPlayEventSink(event_publisher)
     _derivation_worker = SessionDerivationWorker(
-        gateway=get_data_service_gateway(),
+        session_data=get_data_service_gateway().sessions,
         notification_sink=notification_sink,
     )
     try:
@@ -380,7 +380,7 @@ async def get_session_overview(
         (item for item in gateway.catalog.list_workspaces() if item.id == session.workspace_id),
         None,
     )
-    role_service = SessionRoleService(gateway)
+    role_service = SessionRoleService(gateway.sessions)
     state = role_service.get_state(session_id)
     options = role_service.list_options(session_id)
     player = state.player
@@ -435,7 +435,7 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayload
         if str(session.workspace_id) != workspace_id or int(session.story_id) != story_id:
             raise HTTPException(status_code=400, detail=f"Session {body.session_id!r} does not belong to workspace/story")
     else:
-        session = SessionCatalogService(gateway).create_session(
+        session = SessionCatalogService(gateway.sessions).create_session(
             workspace_id,
             story_id,
             title=str(body.title or ""),
@@ -506,7 +506,7 @@ async def create_session_derivation(
             status_code=404,
             detail=f"Session {body.session_id!r} not found",
         )
-    service = SessionDerivationService(gateway)
+    service = SessionDerivationService(gateway.sessions)
     try:
         job = service.create_job(
             body.session_id,
@@ -544,7 +544,7 @@ async def create_session_derivation(
     response_model=AgentSessionDerivationJobResponse,
 )
 async def get_session_derivation(job_id: str) -> AgentSessionDerivationJobPayload:
-    job = SessionDerivationService(get_data_service_gateway()).get_job(job_id)
+    job = SessionDerivationService(get_data_service_gateway().sessions).get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Derivation job not found: {job_id}")
     return _derivation_job_payload(job)
@@ -560,7 +560,7 @@ async def delete_session(
     normalized_session_id = _require_session_id(session_id)
     gateway = get_data_service_gateway()
     try:
-        session = SessionDeletionService(gateway).validate_regular_deletion(
+        session = SessionDeletionService(gateway.sessions).validate_regular_deletion(
             normalized_session_id
         )
     except SessionDerivationError as exc:
@@ -586,7 +586,7 @@ async def delete_session(
         ) from exc
 
     try:
-        result = SessionDeletionService(gateway).delete(normalized_session_id)
+        result = SessionDeletionService(gateway.sessions).delete(normalized_session_id)
         if result is None:
             raise HTTPException(
                 status_code=404,
@@ -833,7 +833,7 @@ def _require_ready_catalog_session(session_id: str) -> models.Session:
 def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> models.Session:
     workspace_id = _require_workspace(workspace_id)
     gateway = get_data_service_gateway()
-    session = SessionCatalogService(gateway).create_session(
+    session = SessionCatalogService(gateway.sessions).create_session(
         workspace_id,
         story_id,
         title=title,
@@ -893,7 +893,7 @@ async def _bind_agent_player_character(
         )
         raise ValueError(f"role bind command was not handled: {command}")
 
-    state = SessionRoleService(get_data_service_gateway()).get_state(session_id)
+    state = SessionRoleService(get_data_service_gateway().sessions).get_state(session_id)
     bound_character_id = (
         state.player.character_id if state.player is not None else None
     )
@@ -928,7 +928,7 @@ def _role_bind_command_for_character_id(
     story_opening_id: int | None = None,
 ) -> str:
     gateway = get_data_service_gateway()
-    options = SessionRoleService(gateway).list_options(session_id)
+    options = SessionRoleService(gateway.sessions).list_options(session_id)
     logger.debug(
         "[AgentService] resolving role bind index: session_id={}, character_id={}, option_count={}",
         session_id,

@@ -2,19 +2,111 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import ContextManager, Protocol
 
 from rpg_core.rp_modules.plot_scheduler.ledger import PLOT_DERIVATION_COPY_POLICY
-from rpg_core.session.catalog import SessionCatalogService
+from rpg_core.session.catalog import SessionCatalogDataPort, SessionCatalogService
 from rpg_data import models as data_models
-from rpg_data.services.session_derivation import (
-    SessionDerivationDataConflictError,
+from rpg_data.model.session import (
+    MESSAGE_ROLE_ASSISTANT,
+    SESSION_LIFECYCLE_PROVISIONING,
+    SESSION_LIFECYCLE_READY,
+    Session,
+    SessionDerivationJob,
+    SessionDerivationJobUpdate,
+    SessionMessage,
 )
+from rpg_data.services.session import SessionDataConflictError
 
-if TYPE_CHECKING:
-    from rpg_data.services.gateway import DataServiceGateway
+
+class SessionDerivationDataPort(SessionCatalogDataPort, Protocol):
+    def transaction(self) -> ContextManager[None]: ...
+
+    def create_derivation_job(
+        self,
+        source_session_id: str,
+        branch_turn_id: int,
+        *,
+        requested_title: str,
+    ) -> SessionDerivationJob: ...
+
+    def get_derivation_job(
+        self,
+        job_id: str,
+    ) -> SessionDerivationJob | None: ...
+
+    def list_derivation_jobs(
+        self,
+        *statuses: str,
+    ) -> list[SessionDerivationJob]: ...
+
+    def has_active_derivation_for_source(self, session_id: str) -> bool: ...
+
+    def update_derivation_job(
+        self,
+        job_id: str,
+        update: SessionDerivationJobUpdate,
+    ) -> SessionDerivationJob | None: ...
+
+    def update_derivation_job_if_status(
+        self,
+        job_id: str,
+        expected_status: str,
+        update: SessionDerivationJobUpdate,
+    ) -> SessionDerivationJob | None: ...
+
+    def list_messages_through_turn(
+        self,
+        session_id: str,
+        through_turn_id: int,
+    ) -> list[SessionMessage]: ...
+
+    def copy_messages(
+        self,
+        target_session_id: str,
+        messages: Iterable[SessionMessage],
+    ) -> int: ...
+
+    def copy_rp_module_overrides(
+        self,
+        target_session_id: str,
+        overrides: Iterable[data_models.SessionRPModuleOverride],
+    ) -> int: ...
+
+    def list_session_rp_module_overrides(
+        self,
+        session_id: str,
+    ) -> list[data_models.SessionRPModuleOverride] | None: ...
+
+    def copy_plot_overrides(
+        self,
+        source_session_id: str,
+        target_session_id: str,
+    ) -> None: ...
+
+    def copy_plot_decisions(
+        self,
+        source_session_id: str,
+        target_session_id: str,
+        through_turn_id: int,
+        *,
+        decision_statuses: Collection[str],
+    ) -> int: ...
+
+    def set_session_main_llm_provider_key(
+        self,
+        session_id: str,
+        provider_key: str | None,
+    ) -> Session | None: ...
+
+    def set_session_lifecycle(
+        self,
+        session_id: str,
+        lifecycle: str,
+    ) -> Session | None: ...
 
 
 class SessionDerivationStatus(StrEnum):
@@ -103,17 +195,16 @@ class SessionDerivationProvisioningError(SessionDerivationError):
 
 @dataclass(frozen=True)
 class SessionDerivationSeedResult:
-    job: data_models.SessionDerivationJob
-    session: data_models.Session
+    job: SessionDerivationJob
+    session: Session
     copied_message_count: int
 
 
 class SessionDerivationService:
     """Own the derivation job lifecycle and target inheritance policy."""
 
-    def __init__(self, gateway: "DataServiceGateway") -> None:
-        self._gateway = gateway
-        self._data = gateway.session_derivations
+    def __init__(self, data: SessionDerivationDataPort) -> None:
+        self._data = data
 
     def create_job(
         self,
@@ -121,14 +212,14 @@ class SessionDerivationService:
         branch_turn_id: int,
         *,
         requested_title: str = "",
-    ) -> data_models.SessionDerivationJob:
+    ) -> SessionDerivationJob:
         session_id = str(source_session_id)
         turn_id = _positive_turn_id(branch_turn_id)
-        with self._gateway.transaction():
-            source = self._gateway.catalog.get_session(session_id)
+        with self._data.transaction():
+            source = self._data.get_session(session_id)
             if (
                 source is None
-                or source.lifecycle != data_models.SESSION_LIFECYCLE_READY
+                or source.lifecycle != SESSION_LIFECYCLE_READY
             ):
                 raise SessionDerivationError(
                     SessionDerivationErrorCode.SOURCE_NOT_READY,
@@ -137,31 +228,31 @@ class SessionDerivationService:
             messages = self._data.list_messages_through_turn(session_id, turn_id)
             _require_complete_turn(session_id, turn_id, messages)
             try:
-                return self._data.create_job(
+                return self._data.create_derivation_job(
                     session_id,
                     turn_id,
                     requested_title=str(requested_title).strip(),
                 )
-            except SessionDerivationDataConflictError as exc:
+            except SessionDataConflictError as exc:
                 raise SessionDerivationSourceBusyError(session_id) from exc
 
-    def get_job(self, job_id: str) -> data_models.SessionDerivationJob | None:
-        return self._data.get_job(str(job_id))
+    def get_job(self, job_id: str) -> SessionDerivationJob | None:
+        return self._data.get_derivation_job(str(job_id))
 
     def list_jobs(
         self,
         *statuses: SessionDerivationStatus,
-    ) -> list[data_models.SessionDerivationJob]:
-        return self._data.list_jobs(*(status.value for status in statuses))
+    ) -> list[SessionDerivationJob]:
+        return self._data.list_derivation_jobs(*(status.value for status in statuses))
 
     def has_active_job(self, source_session_id: str) -> bool:
-        return self._data.has_active_for_source(str(source_session_id))
+        return self._data.has_active_derivation_for_source(str(source_session_id))
 
-    def start_job(self, job_id: str) -> data_models.SessionDerivationJob:
-        updated = self._data.update_job_if_status(
+    def start_job(self, job_id: str) -> SessionDerivationJob:
+        updated = self._data.update_derivation_job_if_status(
             str(job_id),
             SessionDerivationStatus.QUEUED.value,
-            data_models.SessionDerivationJobUpdate(
+            SessionDerivationJobUpdate(
                 status=SessionDerivationStatus.RUNNING.value,
                 stage=SessionDerivationStage.SNAPSHOTTING.value,
                 mark_started=True,
@@ -184,30 +275,30 @@ class SessionDerivationService:
         self,
         job_id: str,
         stage: SessionDerivationStage,
-    ) -> data_models.SessionDerivationJob:
+    ) -> SessionDerivationJob:
         if not stage.is_running_stage:
             raise ValueError(f"Stage is not a running stage: {stage.value}")
         job = self._require_running_job(job_id)
-        updated = self._data.update_job(
+        updated = self._data.update_derivation_job(
             job.id,
-            data_models.SessionDerivationJobUpdate(stage=stage.value),
+            SessionDerivationJobUpdate(stage=stage.value),
         )
         if updated is None:
             raise FileNotFoundError(f"Derivation job not found: {job_id}")
         return updated
 
     def materialize_target(self, job_id: str) -> SessionDerivationSeedResult:
-        with self._gateway.transaction():
+        with self._data.transaction():
             job = self._require_running_job(job_id)
             if job.target_session_id is not None:
                 raise SessionDerivationError(
                     SessionDerivationErrorCode.TARGET_ALREADY_CREATED,
                     f"Derivation target already exists: {job.target_session_id}",
                 )
-            source = self._gateway.catalog.get_session(job.source_session_id)
+            source = self._data.get_session(job.source_session_id)
             if (
                 source is None
-                or source.lifecycle != data_models.SESSION_LIFECYCLE_READY
+                or source.lifecycle != SESSION_LIFECYCLE_READY
             ):
                 raise SessionDerivationError(
                     SessionDerivationErrorCode.SOURCE_NOT_READY,
@@ -218,7 +309,7 @@ class SessionDerivationService:
                 job.branch_turn_id,
             )
             _require_complete_turn(source.id, job.branch_turn_id, messages)
-            target = SessionCatalogService(self._gateway).create_session(
+            target = SessionCatalogService(self._data).create_session(
                 source.workspace_id,
                 source.story_id,
                 title=job.requested_title or _derived_title(source.title),
@@ -226,7 +317,7 @@ class SessionDerivationService:
                 player_character_id=source.player_character_id,
                 player_character_snapshot_json=source.player_character_snapshot_json,
                 story_opening_id=source.story_opening_id,
-                lifecycle=data_models.SESSION_LIFECYCLE_PROVISIONING,
+                lifecycle=SESSION_LIFECYCLE_PROVISIONING,
             )
             if target is None:
                 raise RuntimeError(
@@ -234,30 +325,30 @@ class SessionDerivationService:
                 )
             if source.main_llm_provider_key is not None:
                 target = (
-                    self._gateway.catalog.set_session_main_llm_provider_key(
+                    self._data.set_session_main_llm_provider_key(
                         target.id,
                         source.main_llm_provider_key,
                     )
                     or target
                 )
             source_overrides = (
-                self._gateway.rp_modules.list_session_overrides(source.id) or []
+                self._data.list_session_rp_module_overrides(source.id) or []
             )
             self._data.copy_rp_module_overrides(target.id, source_overrides)
             copied_message_count = self._data.copy_messages(target.id, messages)
 
             copy_policy = PLOT_DERIVATION_COPY_POLICY
             if copy_policy.copy_overrides:
-                self._gateway.plot_scheduling.copy_overrides(source.id, target.id)
-            self._gateway.plot_scheduling.copy_decisions(
+                self._data.copy_plot_overrides(source.id, target.id)
+            self._data.copy_plot_decisions(
                 source.id,
                 target.id,
                 job.branch_turn_id,
                 decision_statuses=copy_policy.decision_statuses,
             )
-            updated_job = self._data.update_job(
+            updated_job = self._data.update_derivation_job(
                 job.id,
-                data_models.SessionDerivationJobUpdate(
+                SessionDerivationJobUpdate(
                     target_session_id=target.id,
                     stage=SessionDerivationStage.REBUILDING_STATUS.value,
                 ),
@@ -265,7 +356,7 @@ class SessionDerivationService:
             if updated_job is None:
                 raise RuntimeError(f"Derivation job disappeared: {job.id}")
 
-        seeded = self._gateway.catalog.get_session(target.id)
+        seeded = self._data.get_session(target.id)
         if seeded is None:
             raise RuntimeError(f"Seeded session disappeared: {target.id}")
         return SessionDerivationSeedResult(
@@ -281,15 +372,15 @@ class SessionDerivationService:
         used_tokens: int,
         context_limit: int,
         threshold_exceeded: bool,
-    ) -> data_models.SessionDerivationJob:
+    ) -> SessionDerivationJob:
         job = self._require_running_job(job_id)
         if used_tokens < 0 or context_limit <= 0:
             raise ValueError(
                 "Context usage must have used_tokens >= 0 and context_limit > 0"
             )
-        updated = self._data.update_job(
+        updated = self._data.update_derivation_job(
             job.id,
-            data_models.SessionDerivationJobUpdate(
+            SessionDerivationJobUpdate(
                 context_used_tokens=int(used_tokens),
                 context_limit=int(context_limit),
                 context_threshold_exceeded=bool(threshold_exceeded),
@@ -300,34 +391,34 @@ class SessionDerivationService:
             raise FileNotFoundError(f"Derivation job not found: {job_id}")
         return updated
 
-    def complete_job(self, job_id: str) -> data_models.SessionDerivationJob:
-        with self._gateway.transaction():
+    def complete_job(self, job_id: str) -> SessionDerivationJob:
+        with self._data.transaction():
             job = self._require_running_job(job_id)
             if job.target_session_id is None:
                 raise SessionDerivationError(
                     SessionDerivationErrorCode.TARGET_MISSING,
                     f"Derivation target has not been created: {job.id}",
                 )
-            target = self._gateway.catalog.get_session(job.target_session_id)
+            target = self._data.get_session(job.target_session_id)
             if (
                 target is None
                 or target.lifecycle
-                != data_models.SESSION_LIFECYCLE_PROVISIONING
+                != SESSION_LIFECYCLE_PROVISIONING
             ):
                 raise SessionDerivationError(
                     SessionDerivationErrorCode.TARGET_NOT_PROVISIONING,
                     "Provisioning target session not found: "
                     f"{job.target_session_id}",
                 )
-            ready = self._gateway.catalog.set_session_lifecycle(
+            ready = self._data.set_session_lifecycle(
                 target.id,
-                data_models.SESSION_LIFECYCLE_READY,
+                SESSION_LIFECYCLE_READY,
             )
             if ready is None:
                 raise RuntimeError(f"Derivation target disappeared: {target.id}")
-            updated = self._data.update_job(
+            updated = self._data.update_derivation_job(
                 job.id,
-                data_models.SessionDerivationJobUpdate(
+                SessionDerivationJobUpdate(
                     status=SessionDerivationStatus.READY.value,
                     stage=SessionDerivationStage.READY.value,
                     error_code="",
@@ -345,8 +436,8 @@ class SessionDerivationService:
         *,
         error_code: str,
         error_message: str,
-    ) -> data_models.SessionDerivationJob:
-        with self._gateway.transaction():
+    ) -> SessionDerivationJob:
+        with self._data.transaction():
             job = self._require_job(job_id)
             if job.status not in {
                 SessionDerivationStatus.QUEUED.value,
@@ -357,9 +448,9 @@ class SessionDerivationService:
                     f"Derivation job is already final: {job.id}/{job.status}",
                 )
             self._require_target_absent(job)
-            updated = self._data.update_job(
+            updated = self._data.update_derivation_job(
                 job.id,
-                data_models.SessionDerivationJobUpdate(
+                SessionDerivationJobUpdate(
                     status=SessionDerivationStatus.FAILED.value,
                     stage=SessionDerivationStage.FAILED.value,
                     error_code=str(error_code),
@@ -371,13 +462,13 @@ class SessionDerivationService:
                 raise RuntimeError(f"Derivation job disappeared: {job.id}")
             return updated
 
-    def interrupt_job(self, job_id: str) -> data_models.SessionDerivationJob:
-        with self._gateway.transaction():
+    def interrupt_job(self, job_id: str) -> SessionDerivationJob:
+        with self._data.transaction():
             job = self._require_running_job(job_id)
             self._require_target_absent(job)
-            updated = self._data.update_job(
+            updated = self._data.update_derivation_job(
                 job.id,
-                data_models.SessionDerivationJobUpdate(
+                SessionDerivationJobUpdate(
                     status=SessionDerivationStatus.INTERRUPTED.value,
                     stage=SessionDerivationStage.INTERRUPTED.value,
                     error_code=SessionDerivationErrorCode.WORKER_RESTARTED.value,
@@ -393,12 +484,12 @@ class SessionDerivationService:
 
     def _require_target_absent(
         self,
-        job: data_models.SessionDerivationJob,
+        job: SessionDerivationJob,
     ) -> None:
         target_id = job.target_session_id
         if (
             target_id is not None
-            and self._gateway.catalog.get_session(target_id) is not None
+            and self._data.get_session(target_id) is not None
         ):
             raise SessionDerivationError(
                 SessionDerivationErrorCode.TARGET_CLEANUP_REQUIRED,
@@ -406,8 +497,8 @@ class SessionDerivationService:
                 f"{target_id}",
             )
 
-    def _require_job(self, job_id: str) -> data_models.SessionDerivationJob:
-        job = self._data.get_job(str(job_id))
+    def _require_job(self, job_id: str) -> SessionDerivationJob:
+        job = self._data.get_derivation_job(str(job_id))
         if job is None:
             raise FileNotFoundError(f"Derivation job not found: {job_id}")
         return job
@@ -415,7 +506,7 @@ class SessionDerivationService:
     def _require_running_job(
         self,
         job_id: str,
-    ) -> data_models.SessionDerivationJob:
+    ) -> SessionDerivationJob:
         job = self._require_job(job_id)
         if job.status != SessionDerivationStatus.RUNNING.value:
             raise SessionDerivationError(
@@ -437,7 +528,7 @@ def _positive_turn_id(value: int) -> int:
 def _require_complete_turn(
     session_id: str,
     turn_id: int,
-    messages: list[data_models.SessionMessage],
+    messages: list[SessionMessage],
 ) -> None:
     turn = [message for message in messages if message.turn_id == turn_id]
     if not turn:
@@ -449,7 +540,7 @@ def _require_complete_turn(
     if any(
         current <= previous
         for previous, current in zip(sequences, sequences[1:])
-    ) or turn[-1].role != data_models.MESSAGE_ROLE_ASSISTANT:
+    ) or turn[-1].role != MESSAGE_ROLE_ASSISTANT:
         raise SessionDerivationError(
             SessionDerivationErrorCode.TURN_INCOMPLETE,
             f"Turn is not a complete committed turn: {session_id}/{turn_id}",

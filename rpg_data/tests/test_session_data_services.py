@@ -23,8 +23,8 @@ def test_session_role_data_service_reads_mounts_and_persists_explicit_profile(
 ) -> None:
     session = gateway.catalog.create_session("demo_workspace", 1, title="role data")
     assert session is not None
-    mounts = gateway.session_roles.list_character_mounts(session.id)
-    openings = gateway.session_roles.list_story_openings(session.id)
+    mounts = gateway.sessions.list_character_mounts(session.id)
+    openings = gateway.sessions.list_story_openings(session.id)
     assert mounts and openings
     mount = mounts[0]
     snapshot_json = json.dumps(
@@ -36,7 +36,7 @@ def test_session_role_data_service_reads_mounts_and_persists_explicit_profile(
         }
     )
 
-    updated = gateway.session_roles.update_player_character_and_opening(
+    updated = gateway.sessions.update_player_character_and_opening(
         session.id,
         player_character_id=mount.character_id,
         player_character_snapshot_json=snapshot_json,
@@ -54,11 +54,11 @@ def test_session_role_data_transaction_rolls_back_explicit_update(
 ) -> None:
     session = gateway.catalog.create_session("demo_workspace", 1, title="rollback")
     assert session is not None
-    mount = gateway.session_roles.list_character_mounts(session.id)[0]
+    mount = gateway.sessions.list_character_mounts(session.id)[0]
 
     with pytest.raises(RuntimeError, match="rollback"):
-        with gateway.session_roles.transaction():
-            gateway.session_roles.update_player_character(
+        with gateway.sessions.transaction():
+            gateway.sessions.update_player_character(
                 session.id,
                 player_character_id=mount.character_id,
                 player_character_snapshot_json='{"prepared":true}',
@@ -76,12 +76,12 @@ def test_derivation_data_service_crud_and_explicit_message_copy(
 ) -> None:
     target = gateway.catalog.create_session("demo_workspace", 1, title="target")
     assert target is not None
-    data = gateway.session_derivations
+    data = gateway.sessions
     source_messages = data.list_messages_through_turn("s_forest001", 1)
     assert source_messages
-    job = data.create_job("s_forest001", 1, requested_title="branch")
+    job = data.create_derivation_job("s_forest001", 1, requested_title="branch")
 
-    running = data.update_job_if_status(
+    running = data.update_derivation_job_if_status(
         job.id,
         models.SESSION_DERIVATION_JOB_STATUS_QUEUED,
         models.SessionDerivationJobUpdate(
@@ -94,9 +94,11 @@ def test_derivation_data_service_crud_and_explicit_message_copy(
 
     assert running is not None
     assert copied == len(source_messages)
-    assert data.get_job(job.id) == running
-    assert data.list_jobs(models.SESSION_DERIVATION_JOB_STATUS_RUNNING) == [running]
-    assert data.update_job_if_status(
+    assert data.get_derivation_job(job.id) == running
+    assert data.list_derivation_jobs(models.SESSION_DERIVATION_JOB_STATUS_RUNNING) == [running]
+    with pytest.raises(ValueError, match="Unsupported derivation status"):
+        data.list_derivation_jobs("unknown")
+    assert data.update_derivation_job_if_status(
         job.id,
         models.SESSION_DERIVATION_JOB_STATUS_QUEUED,
         models.SessionDerivationJobUpdate(stage="copying"),
@@ -118,8 +120,8 @@ def test_session_deletion_data_service_honors_caller_selected_predicates(
         lifecycle=models.SESSION_LIFECYCLE_PROVISIONING,
     )
     assert ready is not None and source is not None and target is not None
-    job = gateway.session_derivations.create_job(source.id, 1)
-    gateway.session_derivations.update_job(
+    job = gateway.sessions.create_derivation_job(source.id, 1)
+    gateway.sessions.update_derivation_job(
         job.id,
         models.SessionDerivationJobUpdate(
             target_session_id=target.id,
@@ -128,13 +130,13 @@ def test_session_deletion_data_service_honors_caller_selected_predicates(
         ),
     )
 
-    assert gateway.session_deletion.delete_ready_without_active_derivation(
+    assert gateway.sessions.delete_ready_without_active_derivation(
         source.id
     ) is False
-    assert gateway.session_deletion.delete_ready_without_active_derivation(
+    assert gateway.sessions.delete_ready_without_active_derivation(
         ready.id
     ) is True
-    assert gateway.session_deletion.delete_provisioning_for_derivation(
+    assert gateway.sessions.delete_provisioning_for_derivation(
         target.id,
         job.id,
     ) is True

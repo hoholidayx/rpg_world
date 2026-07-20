@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
 
@@ -21,6 +21,10 @@ from rpg_core.agent.sub_agents.memory.agent import MemorySubAgent
 from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
 from rpg_core.session import SessionManager
 from rpg_core.settings import settings
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionPlayerCharacterState,
+)
 from rpg_core.summary.compressor import SummaryCompressor
 from rpg_core.utils.watcher import get_watcher
 
@@ -35,6 +39,10 @@ ContextResourceFactory = Callable[..., AgentContextResources]
 _TAG = "[AgentRuntimeLifecycle]"
 
 
+class SessionRoleContextReader(Protocol):
+    def get_state(self, session_id: str) -> SessionPlayerCharacterState: ...
+
+
 class AgentRuntimeLifecycle:
     """Own initialization and rebinding of all session-scoped resources."""
 
@@ -45,11 +53,13 @@ class AgentRuntimeLifecycle:
         world_name: str,
         history_enabled: bool,
         command_dispatcher: "CommandDispatcher",
+        role_reader: SessionRoleContextReader,
         resource_factory: ContextResourceFactory = build_agent_context_resources,
     ) -> None:
         self._session_id = session_id
         self._world_name = world_name
         self._command_dispatcher = command_dispatcher
+        self._role_reader = role_reader
         self._resource_factory = resource_factory
         self._session_manager = SessionManager(
             session_id=session_id,
@@ -213,6 +223,7 @@ class AgentRuntimeLifecycle:
         context = _build_sub_agent_context(
             self._resources,
             session_id=self._session_id,
+            role_reader=self._role_reader,
         )
         if self._status_sub_agent is not None:
             providers = (
@@ -227,6 +238,7 @@ class AgentRuntimeLifecycle:
                 _build_sub_agent_context(
                     self._resources,
                     session_id=self._session_id,
+                    role_reader=self._role_reader,
                 )
             )
 
@@ -249,6 +261,7 @@ def _build_sub_agent_context(
     resources: AgentContextResources,
     *,
     session_id: str,
+    role_reader: SessionRoleContextReader,
 ) -> SubAgentContext:
     lorebook_entries: list[dict[str, object]] = []
     if resources.lorebook_manager is not None:
@@ -266,13 +279,7 @@ def _build_sub_agent_context(
 
     player_character = None
     try:
-        from rpg_core.session.role import (
-            PlayerCharacterBindingStatus,
-            SessionRoleService,
-        )
-        from rpg_data.services import get_data_service_gateway
-
-        state = SessionRoleService(get_data_service_gateway()).get_state(session_id)
+        state = role_reader.get_state(session_id)
         if state.status is PlayerCharacterBindingStatus.BOUND:
             player_character = state.player
     except FileNotFoundError:

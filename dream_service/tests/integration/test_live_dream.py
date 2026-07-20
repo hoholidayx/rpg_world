@@ -30,6 +30,15 @@ pytestmark = [
 ]
 
 
+def _repository(gateway):  # noqa: ANN001, ANN202
+    return RPGDataDreamRepository(
+        dream_memory_data=gateway.dream_memory,
+        session_data=gateway.sessions,
+        resolve_session_runtime_dir=gateway.sessions.resolve_session_runtime_dir,
+        close_data_services=gateway.close,
+    )
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _require_explicit_dream_live_selection(request) -> None:  # noqa: ANN001
     mark_expression = str(request.config.getoption("markexpr") or "")
@@ -76,7 +85,7 @@ async def test_live_deepseek_dream_proposal_is_typed_and_applicable(
             seq_in_turn=2,
         )
         StoryMemoryApplicationService(
-            gateway.story_memory_data
+            gateway.story_memory
         ).add_details_and_mark_processed(
             session.id,
             ({
@@ -94,7 +103,7 @@ async def test_live_deepseek_dream_proposal_is_typed_and_applicable(
             message_ids=(user_message.id, assistant_message.id),
         )
 
-        repository = RPGDataDreamRepository(gateway)
+        repository = _repository(gateway)
         engine = DreamEngine(
             model=LLMDreamModel(),
             selector=DreamSourceSelector(max_map_turns=3, max_map_chars=4000),

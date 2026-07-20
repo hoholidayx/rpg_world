@@ -9,13 +9,20 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from commons.dream_identity import dream_derived_source_fingerprint
-from rpg_data import models
+from rpg_data.model import memory as models
+from rpg_data.model.session import (
+    MESSAGE_ROLE_ASSISTANT,
+    MESSAGE_ROLE_USER,
+    TURN_MODE_GM,
+    TURN_MODE_IC,
+    SessionMessage,
+)
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _EVIDENCE_ROLES = frozenset(
-    {models.MESSAGE_ROLE_USER, models.MESSAGE_ROLE_ASSISTANT}
+    {MESSAGE_ROLE_USER, MESSAGE_ROLE_ASSISTANT}
 )
-_EVIDENCE_MODES = frozenset({models.TURN_MODE_IC, models.TURN_MODE_GM})
+_EVIDENCE_MODES = frozenset({TURN_MODE_IC, TURN_MODE_GM})
 
 
 @dataclass(frozen=True)
@@ -26,7 +33,7 @@ class StoryMemorySourceIdentity:
 
 def story_memory_source_identity(
     memory: models.SessionStoryMemory,
-    messages_by_id: Mapping[int, models.SessionMessage],
+    messages_by_id: Mapping[int, SessionMessage],
 ) -> StoryMemorySourceIdentity:
     evidence_message_ids = valid_story_memory_evidence_ids(memory, messages_by_id)
     return StoryMemorySourceIdentity(
@@ -43,7 +50,7 @@ def story_memory_source_identity(
 
 def valid_story_memory_evidence_ids(
     memory: models.SessionStoryMemory,
-    messages_by_id: Mapping[int, models.SessionMessage],
+    messages_by_id: Mapping[int, SessionMessage],
 ) -> tuple[int, ...]:
     if not memory.evidence:
         return ()
@@ -87,7 +94,7 @@ def valid_story_memory_evidence_ids(
 
 
 def evidence_matches(
-    message: models.SessionMessage | None,
+    message: SessionMessage | None,
     *,
     message_id: int,
     turn_id: int,
@@ -105,7 +112,7 @@ def evidence_matches(
     )
 
 
-def history_fingerprint(messages: Sequence[models.SessionMessage]) -> str:
+def history_fingerprint(messages: Sequence[SessionMessage]) -> str:
     return json_fingerprint(
         [
             {

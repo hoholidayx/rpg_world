@@ -15,11 +15,11 @@ from rpg_data.services.gateway import DataServiceGateway
 
 
 def _catalog(gateway: DataServiceGateway) -> SessionCatalogService:
-    return SessionCatalogService(gateway)
+    return SessionCatalogService(gateway.sessions)
 
 
 def _roles(gateway: DataServiceGateway) -> SessionRoleService:
-    return SessionRoleService(gateway)
+    return SessionRoleService(gateway.sessions)
 
 
 def test_session_role_binding_and_first_message() -> None:
@@ -234,7 +234,7 @@ def test_reset_reuses_selected_opening_id_with_latest_body_and_falls_back_after_
             ),
         )
         assert story is not None
-        first_reset = SessionResetService(gateway).reset(session.id)
+        first_reset = SessionResetService(gateway.sessions).reset(session.id)
         assert first_reset.first_message == "秘密线新正文：Bob"
         assert gateway.catalog.get_session(session.id).story_opening_id == selected_id
 
@@ -251,7 +251,7 @@ def test_reset_reuses_selected_opening_id_with_latest_body_and_falls_back_after_
         )
         assert story is not None
         assert gateway.catalog.get_session(session.id).story_opening_id is None
-        second_reset = SessionResetService(gateway).reset(session.id)
+        second_reset = SessionResetService(gateway.sessions).reset(session.id)
         assert second_reset.first_message == "默认线更新：Bob"
         assert gateway.catalog.get_session(session.id).story_opening_id == story.openings[0].id
     finally:

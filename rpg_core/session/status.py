@@ -2,37 +2,63 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from typing import Protocol
 
 from rpg_data import models as data_models
+from rpg_data.model.session import Session
 
-if TYPE_CHECKING:
-    from rpg_data.services.gateway import DataServiceGateway
+
+class SessionStatusDataPort(Protocol):
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def list_status_tables(
+        self,
+        session_id: str,
+    ) -> list[data_models.SessionStatusTable]: ...
+
+    def list_story_status_mounts(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> list[data_models.StoryStatusTable]: ...
+
+    def copy_story_status_mounts(
+        self,
+        session_id: str,
+        mount_ids: Iterable[int],
+    ) -> list[data_models.SessionStatusTable]: ...
+
+    def apply_status_reset_plan(
+        self,
+        session_id: str,
+        plan: data_models.SessionStatusResetPlan,
+    ) -> data_models.SessionStatusResetResult: ...
 
 
 class SessionStatusLifecycleService:
     """Choose status-table initialization and reset mutations in Core."""
 
-    def __init__(self, gateway: "DataServiceGateway") -> None:
-        self._gateway = gateway
+    def __init__(self, data: SessionStatusDataPort) -> None:
+        self._data = data
 
     def initialize(self, session_id: str) -> list[data_models.SessionStatusTable]:
         session = self._require_session(session_id)
-        existing = self._gateway.status.list_tables(session.id)
+        existing = self._data.list_status_tables(session.id)
         if existing:
             return existing
-        mounts = self._gateway.status.list_story_mounts(
+        mounts = self._data.list_story_status_mounts(
             session.workspace_id,
             session.story_id,
         )
-        return self._gateway.status.copy_story_mounts_to_session(
+        return self._data.copy_story_status_mounts(
             session.id,
             (mount.id for mount in mounts),
         )
 
     def reset(self, session_id: str) -> data_models.SessionStatusResetResult:
         session = self._require_session(session_id)
-        existing = self._gateway.status.list_tables(session.id)
+        existing = self._data.list_status_tables(session.id)
         template_tables = tuple(
             table
             for table in existing
@@ -53,7 +79,7 @@ class SessionStatusLifecycleService:
                 )
             )
 
-        mounts = self._gateway.status.list_story_mounts(
+        mounts = self._data.list_story_status_mounts(
             session.workspace_id,
             session.story_id,
         )
@@ -80,10 +106,10 @@ class SessionStatusLifecycleService:
             deferred_progress_table_ids=tuple(table.id for table in existing),
             story_mount_ids=tuple(mount.id for mount in mounts),
         )
-        return self._gateway.status.apply_session_reset_plan(session.id, plan)
+        return self._data.apply_status_reset_plan(session.id, plan)
 
-    def _require_session(self, session_id: str) -> data_models.Session:
-        session = self._gateway.catalog.get_session(str(session_id))
+    def _require_session(self, session_id: str) -> Session:
+        session = self._data.get_session(str(session_id))
         if session is None:
             raise FileNotFoundError(f"Session not found: {session_id}")
         return session

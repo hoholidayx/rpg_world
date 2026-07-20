@@ -66,7 +66,7 @@ class DataManagerBackend:
         story_prompt: str = "",
         openings: Sequence[models.StoryOpeningInput] = (),
     ) -> dict[str, object] | None:
-        story = SessionCatalogService(self._gateway).create_story(
+        story = SessionCatalogService(self._gateway.sessions).create_story(
             workspace,
             title=title,
             summary=summary,
@@ -87,7 +87,7 @@ class DataManagerBackend:
         story_prompt: str | None = None,
         openings: Sequence[models.StoryOpeningInput] | None = None,
     ) -> dict[str, object] | None:
-        story = SessionCatalogService(self._gateway).update_story(
+        story = SessionCatalogService(self._gateway.sessions).update_story(
             workspace,
             story_id,
             title=title,
@@ -107,7 +107,7 @@ class DataManagerBackend:
         session = self._ready_session(session_id)
         if session is None:
             return None
-        role_service = SessionRoleService(self._gateway)
+        role_service = SessionRoleService(self._gateway.sessions)
         options = role_service.list_opening_options(
             session_id,
             player_character_id,
@@ -143,7 +143,7 @@ class DataManagerBackend:
         title: str = "",
         description: str = "",
     ) -> dict[str, object] | None:
-        session = SessionCatalogService(self._gateway).create_session(
+        session = SessionCatalogService(self._gateway.sessions).create_session(
             workspace,
             story_id,
             title=title,
@@ -216,7 +216,7 @@ class DataManagerBackend:
         if self._ready_session(session_id) is None:
             return None
         result = StoryMemoryApplicationService(
-            self._gateway.story_memory_data
+            self._gateway.story_memory
         ).list_page(
             session_id,
             page=page,
@@ -902,7 +902,7 @@ def _player_character_state(session: models.Session, gateway: DataServiceGateway
             "status": PlayerCharacterBindingStatus.INVALID.value,
             "player": None,
         }
-    state = SessionRoleService(gateway).get_state(str(session.id))
+    state = SessionRoleService(gateway.sessions).get_state(str(session.id))
     return {
         "status": state.status.value,
         "player": _player_character_summary(state.player) if state.player is not None else None,

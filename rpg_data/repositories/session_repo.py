@@ -10,7 +10,7 @@ from peewee import IntegrityError
 from peewee import Database
 from peewee import SQL
 
-from rpg_data import models
+from rpg_data.model import session as models
 from rpg_data.repositories.records import SessionProfileRecord, SessionRecord, bind_database
 from rpg_data.repositories._utils import (
     to_session,

@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from rpg_data import models
+from rpg_data.model import memory as models
+from rpg_data.model.session import SessionMessage
 from rp_memory.dream.source_identity import evidence_matches
 from rp_memory.dream.types import PersistentMemoryLifecycle
 from rp_memory.memory_types import MemoryKind
@@ -51,7 +52,7 @@ class PersistentMemoryProjection:
 
 def revision_evidence_valid(
     revision: models.PersistentMemoryRevision,
-    messages_by_id: Mapping[int, models.SessionMessage],
+    messages_by_id: Mapping[int, SessionMessage],
 ) -> bool:
     if not revision.evidence:
         return False
@@ -69,7 +70,7 @@ def revision_evidence_valid(
 
 def project_evidence_validity(
     bundles: Sequence[models.PersistentMemoryBundle],
-    messages: Sequence[models.SessionMessage],
+    messages: Sequence[SessionMessage],
 ) -> tuple[PersistentMemoryProjection, ...]:
     messages_by_id = {item.id: item for item in messages}
     return tuple(

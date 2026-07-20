@@ -8,6 +8,10 @@ import pytest
 import rpg_core.agent.runtime.lifecycle as lifecycle_module
 from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
 from rpg_core.agent.runtime.resources import AgentContextResources
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionPlayerCharacterState,
+)
 
 
 class _MemoryManager:
@@ -128,6 +132,15 @@ class _Mailbox:
         self.start_calls += 1
 
 
+class _RoleReader:
+    @staticmethod
+    def get_state(_session_id: str) -> SessionPlayerCharacterState:
+        return SessionPlayerCharacterState(
+            status=PlayerCharacterBindingStatus.INVALID,
+            player=None,
+        )
+
+
 def _resources(session_id: str) -> AgentContextResources:
     return AgentContextResources(
         builder=_Builder(session_id),
@@ -193,6 +206,7 @@ async def test_lifecycle_initialize_is_idempotent(lifecycle_deps) -> None:
         world_name="World",
         history_enabled=False,
         command_dispatcher=commands,
+        role_reader=_RoleReader(),
         resource_factory=factory,
     )
 
@@ -217,6 +231,7 @@ async def test_lifecycle_release_and_reload_reinitializes_memory_and_tools(
         world_name="World",
         history_enabled=False,
         command_dispatcher=_Commands(),
+        role_reader=_RoleReader(),
         resource_factory=lambda **_kwargs: _resources("s1"),
     )
     tools = _ToolService()
@@ -251,6 +266,7 @@ async def test_lifecycle_can_refresh_sub_agent_bindings_without_rebuilding_resou
         world_name="World",
         history_enabled=False,
         command_dispatcher=_Commands(),
+        role_reader=_RoleReader(),
         resource_factory=factory,
     )
     await lifecycle.initialize(tool_service=_ToolService(), mailbox=_Mailbox())
@@ -270,6 +286,7 @@ async def test_lifecycle_reindex_memory_uses_typed_resources(lifecycle_deps) -> 
         world_name="World",
         history_enabled=False,
         command_dispatcher=_Commands(),
+        role_reader=_RoleReader(),
         resource_factory=lambda **_kwargs: _resources("s1"),
     )
 

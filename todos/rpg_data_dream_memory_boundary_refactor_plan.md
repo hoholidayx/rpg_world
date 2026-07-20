@@ -1,11 +1,13 @@
 # `rpg_data` Dream / Persistent Memory / Story Memory 边界重构落地计划
 
+> 本文是 P2 实施记录。长期有效的架构约束以 [`docs/rpg-data-architecture.md`](../docs/rpg-data-architecture.md) 为准。
+
 ## 0. 状态、顺序与范围
 
 - [x] P2 已完成实现与验证；本文件是 [`rpg_data_service_boundary_refactor_plan.md`](./rpg_data_service_boundary_refactor_plan.md) 的已落地模块记录。
 - [x] 前置整改 Plot Schedule 已提交：`ae37bf4`。
 - [x] 前置整改 Session 生命周期、角色绑定与开局已提交：`25b6f30`。
-- [x] 本模块完成后，下一整改项已切换为状态表与 Scene。
+- [x] 本模块完成时曾把状态表与 Scene 列为下一项；P2 后架构复核已将 P3 改为暂停，不在本轮实施。
 
 本轮把 Dream Proposal、Persistent Memory 账本和现有 Story Memory 视为一个耦合业务域处理：Dream 的 Shallow 来源直接消费 Story Memory，Apply 又会更新 Story Memory 的 Dream checkpoint，因此不能只迁移其中一半后长期保留双重业务入口。
 
@@ -172,7 +174,7 @@ Dream HTTP / DreamTaskManager / Agent / Play API
 - [x] `rpg_data/repositories/story_memory_repo.py`：Story Memory/Evidence 的行 CRUD、分页和批量读取。
 - [x] `rpg_data/services/dream_memory.py` 收缩并改名为 `DreamMemoryDataService`。
 - [x] `rpg_data/services/story_memory.py` 收缩并改名为 `StoryMemoryDataService`。
-- [x] `DataServiceGateway` 暴露明确的 `dream_data`、`story_memory_data`，迁移完成后删除旧业务语义属性或兼容 alias。
+- [x] `DataServiceGateway` 暴露明确的 `dream_memory`、`story_memory`，迁移完成后删除旧业务语义属性或兼容 alias。
 - [x] 增加 business-neutral 的 typed transaction mode，例如 `DataTransactionMode.DEFERRED | IMMEDIATE`；生产调用方不得再直接访问 `gateway.database.atomic("IMMEDIATE")`。
 
 数据层允许保留：
@@ -375,4 +377,4 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 - [x] Story Memory capture 只有一个 `rp_memory` 业务入口，并保持 fact/Evidence/progress 原子提交。
 - [x] 数据层只暴露 typed CRUD/CAS/transaction；领域层不接触 Peewee record。
 - [x] HTTP、SSE、通知、SQL schema、WebUI、Context 内容和现有测试可观察行为不变。
-- [x] 主整改计划勾选 P2，并把“状态表与 Scene”标为下一整改项。
+- [x] 主整改计划勾选 P2；后续架构收口已将“状态表与 Scene”改为暂停项。

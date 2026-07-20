@@ -9,6 +9,8 @@ from rpg_core.agent.runtime.session import AgentSessionService
 from rpg_core.context.models import Message, Role
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleLedgerService
 from rpg_core.session import SessionManager
+from rpg_core.session.reset import SessionResetService
+from rpg_core.session.role import SessionRoleService
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
 
@@ -20,6 +22,16 @@ class _StatusManager:
     def clamp_deferred_progress(self, max_turn_id: int) -> int:
         self.boundaries.append(max_turn_id)
         return 0
+
+
+class _UnusedSessionData:
+    @staticmethod
+    def list_messages(_session_id: str) -> list[models.SessionMessage]:
+        return []
+
+    @staticmethod
+    def resolve_session_runtime_dir(_session_id: str):  # noqa: ANN201
+        raise AssertionError("runtime directory is not used by this test")
 
 
 def test_history_truncate_clamps_deferred_progress() -> None:
@@ -37,7 +49,13 @@ def test_history_truncate_clamps_deferred_progress() -> None:
         session_manager=session,
         resources=SimpleNamespace(status_manager=status),
     )
-    service = AgentSessionService(lifecycle=lifecycle, tool_service=object())
+    service = AgentSessionService(
+        lifecycle=lifecycle,
+        tool_service=object(),
+        data=_UnusedSessionData(),
+        role_service=object(),
+        reset_service=object(),
+    )
 
     result = service.truncate_history_from_turn_now(2)
 
@@ -119,6 +137,9 @@ async def test_agent_reset_clears_plot_ledger_and_preserves_overrides(
     service = AgentSessionService(
         lifecycle=_ResetLifecycle(),
         tool_service=object(),
+        data=gateway.sessions,
+        role_service=SessionRoleService(gateway.sessions),
+        reset_service=SessionResetService(gateway.sessions),
     )
     try:
         result = await service.reset_session()

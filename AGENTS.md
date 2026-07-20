@@ -16,12 +16,14 @@
 
 ## `rpg_data` 数据层约束
 
-- `rpg_data` 只负责数据库连接/migration、Peewee record、typed DTO/dataclass、序列化、CRUD、分页/排序/只读投影、归属与数据完整性校验，以及调用方已经明确指定内容的事务、批量或条件写入。
+- `rpg_data` 负责数据如何可靠、高效、原子地存取，不应被窄化为简单 CRUD：数据库连接/migration、Peewee record、typed DTO、复杂关联查询、分页/排序、高效 read model、批量写入、CAS/条件更新、数据库级原子操作、序列化、归属与完整性校验都应留在数据层；业务层不得拼装 SQL 语义或制造 N+1/事务竞争。
 - `rpg_data` 不得决定产品行为：不做默认选择、调度/抽样、优先级合并、冷却/重试、状态机下一步、生命周期策略、派生/重置/删除保留矩阵、Prompt/模板渲染、玩家文案或跨聚合业务编排。
+- `DataServiceGateway` 是合法的数据库生命周期与 Data Service 注册表；composition root 可从中取得具体 service，但业务 service 必须依赖窄 Protocol/Data Service，不得持有整个 Gateway 作为 service locator。现有非组装层 Gateway lookup 与整 Gateway 注入分别由架构测试显式 allowlist，禁止新增。
+- `rpg_data` 的公开类型化持久化边界统一使用 Service 语义；Session、Plot、Dream/Memory 等新的大业务聚合入口命名为 `*DataService`，Repository/Peewee 实现只在 `rpg_data` 内部使用。既有简单 Character/Lorebook CRUD 可保留清晰的 `*ReadService` / `*ManagementService`，不为后缀或形式统一机械增加 application/facade/adapter 样板层。
 - 业务归属固定：Plot Scheduler 与 Narrative Outcome 在 `rpg_core/rp_modules`，Session/角色/Opening/状态/Scene 在 `rpg_core`，Dream/Story Memory/Persistent Memory 在 `rp_memory`，媒体与语音分别在 `rpg_media`、`rpg_tts`；service composition root 只负责依赖组装和进程适配。
-- 需要跨多次 CRUD 保持原子性时，由 `rpg_data` 提供无业务语义的 transaction/unit-of-work 或调用方指定的 bulk primitive，业务层决定事务内做什么。业务层不得直接使用 Peewee record，跨层结果使用 typed contract。
+- 需要跨多次数据操作保持原子性时，由 `rpg_data` 提供无业务语义的 transaction/unit-of-work 或调用方指定的 bulk primitive，业务层决定事务内做什么。业务层不得直接使用 Repository/Peewee record，跨层结果使用 typed contract；Session 与 Memory 存储契约优先从 `rpg_data.model.*` 引用，`rpg_data.models` 仅保留兼容重导出。
 - 数据层错误只表达 not found、integrity、conflict、conditional update failed 等数据事实；领域错误码、HTTP 状态和玩家提示由上层映射。`rpg_data` 不得导入业务模块、事件 publisher、WebUI 或渠道语义。
-- 现有越界按 [todos/rpg_data_service_boundary_refactor_plan.md](todos/rpg_data_service_boundary_refactor_plan.md) 分业务迁移；Plot Schedule 是当前拆层整改执行顺序中的首个处理项，不代表 RP Module 运行时优先级、模块排序或调度优先级。新代码不得扩大现有越界，修改相关 service 时优先迁出业务规则。
+- 完整范式与 Review 清单见 [docs/rpg-data-architecture.md](docs/rpg-data-architecture.md)。新代码不得扩大现有越界；后续整改只以迁出真实业务决策、收紧依赖或修复事务/查询问题为目标，不按文件长度或层次数量机械拆分。
 
 ## Agent 与 Turn 不变量
 
@@ -65,7 +67,7 @@
 - 每个 Session 的 Memory 操作由同一 async lock 串行，不同 Session 可并发。watchdog 线程只经 `loop.call_soon_threadsafe()` 入队，loop-owned consumer 执行索引与 SQLite 更新，文件/hash/chunk/SQLite 阻塞工作使用 `asyncio.to_thread()`。本地能力初始化不触发远端解析，远端失败保留本地 fallback 并在后续调用重试。
 - Dream 只生成 Session 级、长期稳定的世界内事实；OOC、用户偏好、Provider/系统配置和易变 Scene 不进入 Persistent Memory。运行维度固定为 `shallow | deep × incremental | full`，Shallow 只使用来源仍精确有效的 Story Memory/Summary，Deep 以当前主消息表 IC/GM user/assistant 为真源。
 - Dream 必须 proposal-first：生成只创建持久 proposal，WebUI 手动刷新且不轮询；用户可编辑 `text / memory_kind / epistemic_status / salience`，不可编辑动作目标与 Evidence。同 Session 最多一条 generating，进程重启将 orphan generating 标为 interrupted，不使用持久 worker 或自动模型重试。
-- Dream Proposal/恢复/Apply 与 Persistent Memory 生命周期只归 `rp_memory.dream`，Story Memory 规范化、exact dedupe、合并、Evidence 和 version 只归 `StoryMemoryApplicationService`；`rpg_data` 仅暴露 `dream_data` / `story_memory_data` typed CRUD/CAS/transaction。Apply 由领域层唯一编排 SQLite `IMMEDIATE`，写入前后各重捕获一次来源；第二次确认失败必须回滚 ledger，再独立把仍为 ready 的 Proposal 标为 stale。
+- Dream Proposal/恢复/Apply 与 Persistent Memory 生命周期只归 `rp_memory.dream`，Story Memory 规范化、exact dedupe、合并、Evidence 和 version 只归 `StoryMemoryApplicationService`；`rpg_data` 仅暴露 `dream_memory` / `story_memory` typed CRUD/CAS/transaction。Apply 由领域层唯一编排 SQLite `IMMEDIATE`，写入前后各重捕获一次来源；第二次确认失败必须回滚 ledger，再独立把仍为 ready 的 Proposal 标为 stale。
 - Memory identity 由代码按规范化 `memory_kind + epistemic_status + text` 生成。稳定 Memory ID 指向不可变 revision，Evidence 固定 message ID/version/content hash，生命周期仅 `active | retired | superseded`，每 Session 最多 64 条 active；命中 retired identity 时复用 ID 并新增 revision，active/superseded 冲突拒绝。Persistent Memory 唯一真源是 SQL ledger，Context 只投影 Evidence 仍有效的 active 当前 revision，不读写旧 `persistent_memory.json`。
 - Dream Map/Reduce/Proposal 共用有界 LLM 并发与候选硬上限；模型不收敛时确定性裁剪，Full Deep 发生实际截断时不得仅因候选缺席退休事实。Dream repository 在单独 worker 线程内创建/使用/关闭，不能阻塞 service loop。
 

@@ -10,8 +10,13 @@ from rp_memory.story_memory_service import StoryMemoryApplicationService
 class StoryMemoryStore:
     """剧情记忆 —— 对应动态层中"剧情记忆"模块。"""
 
-    def __init__(self, session_id: str) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        service: StoryMemoryApplicationService,
+    ) -> None:
         self._session_id = session_id
+        self._application = service
 
     # ── public API ────────────────────────────────────────
 
@@ -88,8 +93,4 @@ class StoryMemoryStore:
         self._service().clear(self._session_id)
 
     def _service(self) -> StoryMemoryApplicationService:
-        from rpg_data.services import get_data_service_gateway
-
-        return StoryMemoryApplicationService(
-            get_data_service_gateway().story_memory_data
-        )
+        return self._application

@@ -11,7 +11,9 @@ from play_events.auth import uses_default_play_event_token
 from dream_service.contracts import AsyncDreamRepository, DreamProposalItemUpdate
 from dream_service.notifications import DreamTerminalNotificationSink
 from dream_service.play_event_notifications import DreamPlayEventSink
-from dream_service.repository import RPGDataDreamRepository
+from dream_service.repository import (
+    build_rpg_data_dream_repository,
+)
 from dream_service.runtime import DreamTaskManager
 from dream_service.worker import DreamRepositoryWorker
 from dream_service.schemas import (
@@ -59,7 +61,7 @@ class DreamRuntime:
         cls,
         notification_sink: DreamTerminalNotificationSink | None = None,
     ) -> "DreamRuntime":
-        repository = DreamRepositoryWorker(RPGDataDreamRepository)
+        repository = DreamRepositoryWorker(build_rpg_data_dream_repository)
         config = settings.engine
         engine = DreamEngine(
             model=LLMDreamModel(),

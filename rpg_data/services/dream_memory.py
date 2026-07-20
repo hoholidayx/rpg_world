@@ -1,4 +1,4 @@
-"""Business-neutral Dream and Persistent Memory data facade."""
+"""Business-neutral Dream and Persistent Memory data service."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ from contextlib import contextmanager
 
 from peewee import Database, IntegrityError
 
-from rpg_data import models
+from rpg_data.model import memory as models
+from rpg_data.model.session import SessionMessage
 from rpg_data.errors import DataConditionalWriteError, DataIntegrityError
 from rpg_data.repositories.dream_memory_repo import DreamMemoryRepository
 from rpg_data.repositories.story_memory_repo import StoryMemoryRepository
@@ -41,7 +42,7 @@ class DreamMemoryDataService:
         session_id: str,
         *,
         message_ids: Sequence[int] | None = None,
-    ) -> tuple[models.SessionMessage, ...]:
+    ) -> tuple[SessionMessage, ...]:
         return self._records.list_messages(session_id, message_ids=message_ids)
 
     def list_story_memories(

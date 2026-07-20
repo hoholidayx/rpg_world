@@ -23,9 +23,7 @@ from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleService
-from rpg_data.services.session_role import SessionRoleDataService
-from rpg_data.services.session_deletion import SessionDeletionDataService
-from rpg_data.services.session_derivation import SessionDerivationDataService
+from rpg_data.services.session import SessionDataService
 from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.status import StatusTableService
@@ -42,7 +40,12 @@ logger = logging.getLogger("rpg_data.gateway")
 
 
 class DataServiceGateway:
-    """Own the shared database lifecycle for rpg_data services."""
+    """Own database lifecycle and lazily register public Data Services.
+
+    Composition roots may use this registry to obtain concrete services. Domain
+    services receive the resulting narrow service/Protocol dependency instead
+    of retaining the whole registry as a service locator.
+    """
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         self._database_path = _normalize_database_path(db_path)
@@ -53,17 +56,15 @@ class DataServiceGateway:
         self._lorebook: LorebookReadService | None = None
         self._lorebook_management: LorebookManagementService | None = None
         self._messages: MessageService | None = None
-        self._dream_data: DreamMemoryDataService | None = None
+        self._dream_memory: DreamMemoryDataService | None = None
         self._media: MediaDataService | None = None
         self._narrative_outcomes: NarrativeOutcomeService | None = None
         self._plot_scheduling: PlotSchedulingDataService | None = None
         self._rp_modules: RPModuleService | None = None
-        self._session_roles: SessionRoleDataService | None = None
-        self._session_deletion: SessionDeletionDataService | None = None
-        self._session_derivations: SessionDerivationDataService | None = None
+        self._sessions: SessionDataService | None = None
         self._session_composer: SessionComposerService | None = None
         self._backup: BackupService | None = None
-        self._story_memory_data: StoryMemoryDataService | None = None
+        self._story_memory: StoryMemoryDataService | None = None
         self._status: StatusTableService | None = None
         self._tts: TTSDataService | None = None
         self._initialized = False
@@ -136,16 +137,16 @@ class DataServiceGateway:
         return self._messages
 
     @property
-    def dream_data(self) -> DreamMemoryDataService:
+    def dream_memory(self) -> DreamMemoryDataService:
         database = self.database
-        if self._dream_data is None:
+        if self._dream_memory is None:
             logger.debug(
                 "creating Dream memory data service db_path=%s",
                 self._database_path,
             )
-            self._dream_data = DreamMemoryDataService(database)
+            self._dream_memory = DreamMemoryDataService(database)
         self._ensure_bound()
-        return self._dream_data
+        return self._dream_memory
 
     @property
     def media(self) -> MediaDataService:
@@ -200,37 +201,13 @@ class DataServiceGateway:
         return self._rp_modules
 
     @property
-    def session_roles(self) -> SessionRoleDataService:
+    def sessions(self) -> SessionDataService:
         database = self.database
-        if self._session_roles is None:
-            logger.debug("creating session role service db_path=%s", self._database_path)
-            self._session_roles = SessionRoleDataService(database)
+        if self._sessions is None:
+            logger.debug("creating Session data service db_path=%s", self._database_path)
+            self._sessions = SessionDataService(database)
         self._ensure_bound()
-        return self._session_roles
-
-    @property
-    def session_deletion(self) -> SessionDeletionDataService:
-        database = self.database
-        if self._session_deletion is None:
-            logger.debug(
-                "creating session deletion service db_path=%s",
-                self._database_path,
-            )
-            self._session_deletion = SessionDeletionDataService(database)
-        self._ensure_bound()
-        return self._session_deletion
-
-    @property
-    def session_derivations(self) -> SessionDerivationDataService:
-        database = self.database
-        if self._session_derivations is None:
-            logger.debug(
-                "creating session derivation service db_path=%s",
-                self._database_path,
-            )
-            self._session_derivations = SessionDerivationDataService(database)
-        self._ensure_bound()
-        return self._session_derivations
+        return self._sessions
 
     @property
     def session_composer(self) -> SessionComposerService:
@@ -251,16 +228,16 @@ class DataServiceGateway:
         return self._backup
 
     @property
-    def story_memory_data(self) -> StoryMemoryDataService:
+    def story_memory(self) -> StoryMemoryDataService:
         database = self.database
-        if self._story_memory_data is None:
+        if self._story_memory is None:
             logger.debug(
                 "creating Story Memory data service db_path=%s",
                 self._database_path,
             )
-            self._story_memory_data = StoryMemoryDataService(database)
+            self._story_memory = StoryMemoryDataService(database)
         self._ensure_bound()
-        return self._story_memory_data
+        return self._story_memory
 
     @property
     def status(self) -> StatusTableService:
@@ -305,17 +282,15 @@ class DataServiceGateway:
         self._lorebook = None
         self._lorebook_management = None
         self._messages = None
-        self._dream_data = None
+        self._dream_memory = None
         self._media = None
         self._narrative_outcomes = None
         self._plot_scheduling = None
         self._rp_modules = None
-        self._session_roles = None
-        self._session_deletion = None
-        self._session_derivations = None
+        self._sessions = None
         self._session_composer = None
         self._backup = None
-        self._story_memory_data = None
+        self._story_memory = None
         self._status = None
         self._tts = None
 

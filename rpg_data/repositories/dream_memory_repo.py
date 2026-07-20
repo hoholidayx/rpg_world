@@ -8,7 +8,8 @@ from typing import TypeVar
 
 from peewee import Database, SQL
 
-from rpg_data import models
+from rpg_data.model import memory as models
+from rpg_data.model.session import SessionMessage
 from rpg_data.repositories._utils import to_session_message
 from rpg_data.repositories.records import (
     SessionDreamProposalItemEvidenceRecord,
@@ -46,7 +47,7 @@ class DreamMemoryRepository:
         session_id: str,
         *,
         message_ids: Sequence[int] | None = None,
-    ) -> tuple[models.SessionMessage, ...]:
+    ) -> tuple[SessionMessage, ...]:
         where_clause = SessionMessageRecord.session == str(session_id)
         if message_ids is not None:
             if not message_ids:

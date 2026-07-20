@@ -19,7 +19,7 @@ def test_catalog_manages_zero_to_three_ordered_story_openings() -> None:
     gateway = DataServiceGateway(":memory:")
     try:
         gateway.initialize()
-        catalog = SessionCatalogService(gateway)
+        catalog = SessionCatalogService(gateway.sessions)
         empty = catalog.create_story(
             "demo_workspace",
             title="无开局故事",
@@ -80,7 +80,7 @@ def test_story_opening_update_rejects_foreign_id_without_partial_changes() -> No
     gateway = DataServiceGateway(":memory:")
     try:
         gateway.initialize()
-        catalog = SessionCatalogService(gateway)
+        catalog = SessionCatalogService(gateway.sessions)
         first = catalog.create_story(
             "demo_workspace",
             title="开局归属甲",

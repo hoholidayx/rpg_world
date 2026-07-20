@@ -1,27 +1,30 @@
 # `rpg_data` Service 业务逻辑拆层整改计划
 
+> 本文是实施顺序与完成记录。长期有效的架构约束以 [`docs/rpg-data-architecture.md`](../docs/rpg-data-architecture.md) 为准。
+
 ## 0. 状态与目标
 
 - [x] 首个已完成整改项：Plot Schedule
 - [x] 已完成整改项：Session 生命周期、角色绑定与开局
 - [x] 已完成整改项：Dream / Persistent Memory / Story Memory
-- [ ] **下一整改项：状态表与 Scene**
+- [x] 已完成阶段性架构收口：Gateway 注册表、聚合 Data Service、窄 Port、类型归属与静态守卫
+- [ ] **暂停项：状态表与 Scene（P3，本轮不实施）**
 - [ ] 后续整改项：Media 与 TTS
 - [ ] 后续整改项：Story Catalog、Composer 与 RP Module 配置
 - [ ] 后续整改项：消息、历史和通用账本收尾
 
-本计划用于把 `rpg_data` 收敛为无框架、无业务决策的数据访问模块。整改后，`rpg_data` 只负责数据库 DTO、序列化、查询、CRUD、数据完整性和调用方明确指定的原子持久化；业务规则、状态机、默认策略、跨聚合用例和玩家文案必须由对应领域模块或应用编排层持有。
+本计划用于把 `rpg_data` 收敛为无框架、无业务决策的数据访问模块。整改后，`rpg_data` 负责数据库 DTO、序列化、复杂查询/read model、CRUD、分页、批量、CAS、数据完整性和数据库级原子持久化；业务规则、状态机、默认策略、跨聚合用例和玩家文案必须由对应领域模块或应用编排层持有。
 
-Plot Schedule、Session P1 与 Dream/P2 已按整改执行顺序完成，下一项是状态表与 Scene。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重或剧情调度优先级。后续业务域继续逐项实施，避免一次同时改动状态、Media、TTS 等多条运行链路。
+Plot Schedule、Session P1 与 Dream/P2 已按整改执行顺序完成，本轮目标改为复核这些提交并收紧依赖，不继续启动状态表与 Scene P3。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重或剧情调度优先级。P3 只有在后续明确恢复时才实施，避免为了形式统一继续制造样板层。
 
 ## 1. 统一边界
 
 ### 1.1 `rpg_data` 允许保留
 
 - Peewee record、migration、数据库 DTO/dataclass 和稳定的存储枚举值。
-- 单表或关联表的创建、读取、更新、删除、分页、排序和只读投影。
+- 单表或复杂关联表的创建、读取、更新、删除、分页、排序和高效只读投影/read model。
 - ID、workspace/story/session 归属、外键、唯一约束、非空、数值范围、JSON/SceneTime 可序列化等数据边界校验。
-- 乐观/条件更新、队列 claim、数据库事务和数据库错误到通用数据错误的转换。
+- 乐观/CAS/条件更新、队列 claim、批量写入、数据库级原子操作、事务和数据库错误到通用数据错误的转换。
 - 调用方已经明确给出记录、过滤条件和目标值后的批量插入、复制、删除或状态写入。
 - 不改变业务含义的格式规范化，例如字符串去除首尾空白、稳定 JSON 编解码。
 
@@ -43,14 +46,16 @@ Play API / Agent service / Domain worker
 rpg_core / rp_memory / rpg_media / rpg_tts
                 |
                 v
-     rpg_data typed CRUD + transaction
+ rpg_data aggregate Data Service + query/CAS/transaction
                 |
                 v
              SQLite
 ```
 
 - `rpg_data` 不得反向导入 `rpg_core`、`rp_memory`、`rpg_media`、`rpg_tts`、`play_api` 或渠道模块。
-- 业务层可以依赖 `rpg_data` 的 typed contract 和 CRUD facade，但不得直接使用 Peewee record。
+- `DataServiceGateway` 保留为数据库生命周期与 Data Service 注册表；composition root 从中取得具体 service 后逐项注入，业务 service 不得持有整个 Gateway。
+- 业务层可以依赖 `rpg_data` 的 typed contract 和窄 Data Service/Protocol，但不得直接使用 Repository 或 Peewee record。
+- 公开持久化边界统一使用 Service 语义，新的大业务聚合入口命名为 `*DataService`；Repository 只在 `rpg_data` 内部使用，不为简单 CRUD 机械保留无边界价值的 facade/adapter 转发层，也不强制重命名清晰的既有 `*ReadService` / `*ManagementService`。
 - 需要跨多次 CRUD 保持原子性时，由 `rpg_data` 提供无业务语义的 transaction/unit-of-work 边界；业务层负责决定事务内执行哪些动作。
 - 数据层异常只表达 not found、integrity、conflict、conditional update failed 等数据事实；HTTP error code、玩家文案和领域错误由上层映射。
 
@@ -76,7 +81,7 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 - [x] 将重复事件配置、时间线非递减、完整重排、默认 position 和删除占用语义迁入该 application service。
 - [x] 将 turn 决策批次约束迁入 Plot Scheduler 的 typed policy/model；commit 前由核心层验证，数据层只写入已经准备好的 ledger rows。
 - [x] 保持现有 `PlotScheduleSelector`、soft suitability judge 和 runtime 注入逻辑在 `rpg_core`，不把它们下沉到数据层。
-- [x] 把现有数据 service 收缩为 Plot definition/read model、Session override 和 decision ledger 的 typed CRUD facade；方法名避免携带 `triggered-only`、`derive`、`retry` 等业务意图。
+- [x] 把现有数据 service 收敛为 Plot definition/read model、Session override 和 decision ledger 的聚合 Data Service；方法名避免携带 `triggered-only`、`derive`、`retry` 等业务意图。
 - [x] Repository 提供调用方指定过滤条件的决策查询/复制或 typed bulk insert，不再自行决定复制哪一种状态。
 - [x] Play API 的 Plot Schedule 管理路由改调核心 application service；请求/响应 schema 和现有 HTTP 路径保持不变。
 - [x] Agent snapshot resolver 继续通过只读 facade 一次取得 Story schedule、Session override 和 ledger；读取接口不得执行调度选择或修正数据。
@@ -133,7 +138,16 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 - [x] Dream Apply 仍由领域层完成两次指纹确认，并在一个 SQLite `IMMEDIATE` 事务中调用数据 primitives 原子落库。
 - [x] 保持 `rpg_data` 不导入 Dream worker、LLM client、NotificationSink 或 WebUI 语义。
 
-## 5. P3：状态表与 Scene
+## 4.1 P2 后架构收口
+
+- [x] 保留 `DataServiceGateway` 注册表，并将 Session 角色、派生、删除三个薄数据入口聚合为 `SessionDataService`。
+- [x] Session、Plot、Dream/Story Memory application service 改为显式窄 Protocol，不再接收 Gateway 或自行调用全局 getter。
+- [x] Agent、Dream worker、Context factory 与服务入口负责从 Gateway 取得具体 Data Service 并组装依赖。
+- [x] Session 与 Memory 存储契约迁到 `rpg_data.model.session` / `rpg_data.model.memory`，`rpg_data.models` 暂作兼容重导出；Status/Media/TTS 类型留待对应业务整改。
+- [x] 增加静态架构测试：禁止 `rpg_data` 反向导入业务模块、Repository/Record 外泄、近期 application service 依赖 Gateway，以及 Gateway lookup allowlist 增长。
+- [x] 明确复杂查询、分页、批量、CAS、数据库原子操作和高效 read model 留在数据层，不以缩短文件或消灭全部 service 为整改目标。
+
+## 5. P3：状态表与 Scene（暂停）
 
 - [ ] 将模板复制策略、Session native 表保留/清空策略、名称冲突规则和 deferred 更新推进迁入 `rpg_core/status`。
 - [ ] 将 scene 的专用规则、字段频率许可、runtime key 变化和 LLM 可写范围继续保留在 `rpg_core/scene`、StatusSubAgent 和工具层。
@@ -178,7 +192,7 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 1. [ ] 写出当前业务规则和调用方清单，锁定兼容行为。
 2. [ ] 在对应领域包建立 typed policy/application service，并先用现有数据 service 作为适配器。
 3. [ ] 把调用方切到新业务入口，确保 API/SSE/worker 合约不变。
-4. [ ] 将 `rpg_data` service 缩成 CRUD facade，必要时补充通用 transaction/bulk primitive。
+4. [ ] 将 `rpg_data` service 收敛为无业务决策的聚合 Data Service，保留必要的复杂查询/read model、CAS、transaction 和 bulk primitive。
 5. [ ] 把业务测试迁到领域包，把持久化测试留在 `rpg_data/tests`。
 6. [ ] 静态搜索旧方法和越界 import，删除完成迁移的兼容入口。
 7. [ ] 更新 `AGENTS.md`、`CLAUDE.md`、`README.md` 中对应业务 owner 和数据边界。

@@ -9,20 +9,18 @@ from rpg_core.agent.sub_agents.status.bootstrap import StatusBootstrapCoordinato
 from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
 from rpg_core.session.derivation import (
     SessionDerivationSeedResult,
-    SessionDerivationService,
     SessionDerivationStage,
 )
 from rpg_core.session.role import (
     PlayerCharacterBindingStatus,
     SessionPlayerCharacterState,
-    SessionRoleService,
 )
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
     from rpg_core.agent.runtime.context import AgentContextService
     from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
-    from rpg_data.models import SessionDerivationJob
+    from rpg_data.model.session import SessionDerivationJob
 
 
 class DerivationRuntimeApplication(Protocol):
@@ -73,8 +71,8 @@ class AgentDerivationService:
         *,
         lifecycle: "AgentRuntimeLifecycle",
         context_service: "AgentContextService",
-        derivation_service: DerivationRuntimeApplication | None = None,
-        role_service: SessionRoleReader | None = None,
+        derivation_service: DerivationRuntimeApplication,
+        role_service: SessionRoleReader,
     ) -> None:
         self._lifecycle = lifecycle
         self._context_service = context_service
@@ -195,19 +193,9 @@ class AgentDerivationService:
         )
 
     def _get_derivation_service(self) -> DerivationRuntimeApplication:
-        if self._derivation_service is None:
-            from rpg_data.services import get_data_service_gateway
-
-            self._derivation_service = SessionDerivationService(
-                get_data_service_gateway()
-            )
         return self._derivation_service
 
     def _get_role_service(self) -> SessionRoleReader:
-        if self._role_service is None:
-            from rpg_data.services import get_data_service_gateway
-
-            self._role_service = SessionRoleService(get_data_service_gateway())
         return self._role_service
 
     @staticmethod

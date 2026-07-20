@@ -22,14 +22,12 @@ class TurnPlanResolver:
         lifecycle: "AgentRuntimeLifecycle",
         context_service: "AgentContextService",
         model_runtime: "MainModelRuntime",
-        plot_schedule_resolver: PlotScheduleSnapshotResolver | None = None,
+        plot_schedule_resolver: PlotScheduleSnapshotResolver,
     ) -> None:
         self._lifecycle = lifecycle
         self._context_service = context_service
         self._model_runtime = model_runtime
-        self._plot_schedule_resolver = (
-            plot_schedule_resolver or PlotScheduleSnapshotResolver()
-        )
+        self._plot_schedule_resolver = plot_schedule_resolver
 
     async def resolve(self, request: TurnRequest) -> TurnExecutionPlan:
         execution = self._context_service.resolve_turn_execution(

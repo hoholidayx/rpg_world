@@ -59,7 +59,7 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
 
 def test_new_story_mounts_all_current_default_modules(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "new-story-rp-modules.sqlite3")
-    story = SessionCatalogService(gateway).create_story(
+    story = SessionCatalogService(gateway.sessions).create_story(
         "demo_workspace",
         title="New Story",
     )

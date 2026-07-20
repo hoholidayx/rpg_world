@@ -58,7 +58,7 @@ def test_session_composer_modes_styles_and_story_defaults(tmp_path: Path) -> Non
         assert new_style is not None
         assert len(service.list_story_styles("demo_workspace", 1) or []) == 3
 
-        new_story = SessionCatalogService(gateway).create_story(
+        new_story = SessionCatalogService(gateway.sessions).create_story(
             "demo_workspace",
             title="Composer Story",
         )

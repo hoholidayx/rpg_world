@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import ContextManager, Protocol
 
 from rpg_core.session.derivation import (
     SessionDerivationError,
@@ -19,9 +19,37 @@ from rpg_core.session.derivation import (
     SessionDerivationTargetBusyError,
 )
 from rpg_data import models as data_models
+from rpg_data.model.session import (
+    SESSION_LIFECYCLE_PROVISIONING,
+    SESSION_LIFECYCLE_READY,
+    Session,
+    SessionDerivationJob,
+)
 
-if TYPE_CHECKING:
-    from rpg_data.services.gateway import DataServiceGateway
+
+class SessionDeletionDataPort(Protocol):
+    def transaction(self) -> ContextManager[None]: ...
+
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def get_derivation_job(
+        self,
+        job_id: str,
+    ) -> SessionDerivationJob | None: ...
+
+    def has_active_derivation_for_source(self, session_id: str) -> bool: ...
+
+    def has_active_derivation_for_target(self, session_id: str) -> bool: ...
+
+    def resolve_session_runtime_dir(self, session_id: str) -> Path: ...
+
+    def delete_ready_without_active_derivation(self, session_id: str) -> bool: ...
+
+    def delete_provisioning_for_derivation(
+        self,
+        session_id: str,
+        job_id: str,
+    ) -> bool: ...
 
 logger = logging.getLogger("rpg_core.session.deletion")
 
@@ -41,24 +69,22 @@ class SessionDeleteResult:
 class SessionDeletionService:
     """Authorize deletion and compensate runtime-directory/SQL failures."""
 
-    def __init__(self, gateway: "DataServiceGateway") -> None:
-        self._gateway = gateway
-        self._data = gateway.session_deletion
+    def __init__(self, data: SessionDeletionDataPort) -> None:
+        self._data = data
 
     def validate_regular_deletion(
         self,
         session_id: str,
-    ) -> data_models.Session | None:
+    ) -> Session | None:
         normalized_session_id = str(session_id)
-        session = self._gateway.catalog.get_session(normalized_session_id)
+        session = self._data.get_session(normalized_session_id)
         if session is None:
             return None
-        derivations = self._gateway.session_derivations
-        if derivations.has_active_for_source(normalized_session_id):
+        if self._data.has_active_derivation_for_source(normalized_session_id):
             raise SessionDerivationSourceBusyError(normalized_session_id)
-        if derivations.has_active_for_target(normalized_session_id):
+        if self._data.has_active_derivation_for_target(normalized_session_id):
             raise SessionDerivationTargetBusyError(normalized_session_id)
-        if session.lifecycle != data_models.SESSION_LIFECYCLE_READY:
+        if session.lifecycle != SESSION_LIFECYCLE_READY:
             raise SessionDerivationProvisioningError(normalized_session_id)
         return session
 
@@ -75,7 +101,7 @@ class SessionDeletionService:
     ) -> SessionDeleteResult:
         normalized_job_id = str(job_id)
         normalized_target_id = str(target_session_id)
-        job = self._gateway.session_derivations.get_job(normalized_job_id)
+        job = self._data.get_derivation_job(normalized_job_id)
         if job is None:
             raise FileNotFoundError(f"Derivation job not found: {normalized_job_id}")
         if job.target_session_id != normalized_target_id:
@@ -89,13 +115,13 @@ class SessionDeletionService:
                 SessionDerivationErrorCode.INVALID_STATE,
                 f"Derivation job is not running: {job.id}/{job.status}",
             )
-        target = self._gateway.catalog.get_session(normalized_target_id)
+        target = self._data.get_session(normalized_target_id)
         if target is None:
             return SessionDeleteResult(
                 session_id=normalized_target_id,
                 runtime_cleanup=SessionRuntimeCleanupStatus.ABSENT,
             )
-        if target.lifecycle != data_models.SESSION_LIFECYCLE_PROVISIONING:
+        if target.lifecycle != SESSION_LIFECYCLE_PROVISIONING:
             raise SessionDerivationError(
                 SessionDerivationErrorCode.TARGET_ALREADY_READY,
                 f"Refusing to clean up a ready session: {target.id}",
@@ -107,12 +133,12 @@ class SessionDeletionService:
 
     def _delete_validated_session(
         self,
-        session: data_models.Session,
+        session: Session,
         *,
         derivation_job_id: str | None = None,
     ) -> SessionDeleteResult:
         session_id = str(session.id)
-        runtime_dir = self._gateway.catalog.resolve_session_runtime_dir(session_id)
+        runtime_dir = self._data.resolve_session_runtime_dir(session_id)
         quarantine_dir = runtime_dir.with_name(
             f".{runtime_dir.name}.delete-{uuid.uuid4().hex}"
         )
@@ -122,7 +148,7 @@ class SessionDeletionService:
             if runtime_dir.exists():
                 runtime_dir.rename(quarantine_dir)
                 runtime_moved = True
-            with self._gateway.transaction():
+            with self._data.transaction():
                 deleted = (
                     self._data.delete_ready_without_active_derivation(session_id)
                     if derivation_job_id is None
@@ -178,7 +204,7 @@ class SessionDeletionService:
                 f"Ready session conditional deletion failed: {session_id}"
             )
 
-        job = self._gateway.session_derivations.get_job(derivation_job_id)
+        job = self._data.get_derivation_job(derivation_job_id)
         if job is None:
             raise FileNotFoundError(
                 f"Derivation job not found: {derivation_job_id}"
@@ -194,12 +220,12 @@ class SessionDeletionService:
                 SessionDerivationErrorCode.INVALID_STATE,
                 f"Derivation job is not running: {job.id}/{job.status}",
             )
-        target = self._gateway.catalog.get_session(session_id)
+        target = self._data.get_session(session_id)
         if target is None:
             raise RuntimeError(
                 f"Provisioning target disappeared during deletion: {session_id}"
             )
-        if target.lifecycle != data_models.SESSION_LIFECYCLE_PROVISIONING:
+        if target.lifecycle != SESSION_LIFECYCLE_PROVISIONING:
             raise SessionDerivationError(
                 SessionDerivationErrorCode.TARGET_ALREADY_READY,
                 f"Refusing to clean up a ready session: {target.id}",

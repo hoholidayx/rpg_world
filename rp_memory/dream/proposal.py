@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from commons.text_identity import stable_text_identity_key
-from rpg_data import models
+from rpg_data.model import memory as models
 from rp_memory.dream.errors import DreamProposalStateError
 from rp_memory.dream.types import (
     DreamProposalAction,

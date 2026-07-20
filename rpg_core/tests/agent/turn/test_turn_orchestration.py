@@ -82,19 +82,41 @@ class _Composer:
         return SimpleNamespace(narrative_style_id=7, name="简洁", prompt="style:brief")
 
 
+class _SnapshotData:
+    def __init__(self, catalog: _Catalog, composer: _Composer) -> None:
+        self._catalog = catalog
+        self._composer = composer
+
+    def get_session(self, session_id: str):  # noqa: ANN201
+        return self._catalog.get_session(session_id)
+
+    def get_session_story(self, session_id: str):  # noqa: ANN201
+        return self._catalog.get_session_story(session_id)
+
+    def get_turn_mode(self, workspace_id: str, mode: str):  # noqa: ANN201
+        return self._composer.get_mode(workspace_id, mode)
+
+    def resolve_session_style(
+        self,
+        session_id: str,
+        style_id: int | None,
+    ):  # noqa: ANN201
+        return self._composer.resolve_session_style(session_id, style_id)
+
+
 def test_turn_snapshot_resolver_freezes_mode_and_style_selection() -> None:
     composer = _Composer()
-    gateway = SimpleNamespace(
-        catalog=_Catalog(SimpleNamespace(workspace_id="ws")),
-        session_composer=composer,
-        session_roles=_SessionRoles(),
+    roles = _SessionRoles()
+    data = _SnapshotData(
+        _Catalog(SimpleNamespace(workspace_id="ws")),
+        composer,
     )
     request = TurnRequest.create("行动", mode="gm", narrative_style_id=7)
 
     snapshot = TurnSnapshotResolver(
         "s1",
-        gateway=gateway,
-        role_service=gateway.session_roles,
+        data=data,
+        role_service=roles,
     ).resolve(request)
 
     assert snapshot.request is request
@@ -107,15 +129,15 @@ def test_turn_snapshot_resolver_freezes_mode_and_style_selection() -> None:
 
 def test_ooc_snapshot_validates_but_suppresses_explicit_style() -> None:
     composer = _Composer()
-    gateway = SimpleNamespace(
-        catalog=_Catalog(SimpleNamespace(workspace_id="ws")),
-        session_composer=composer,
-        session_roles=_SessionRoles(),
+    roles = _SessionRoles()
+    data = _SnapshotData(
+        _Catalog(SimpleNamespace(workspace_id="ws")),
+        composer,
     )
     snapshot = TurnSnapshotResolver(
         "s1",
-        gateway=gateway,
-        role_service=gateway.session_roles,
+        data=data,
+        role_service=roles,
     ).resolve(
         TurnRequest.create("解释规则", mode="ooc", narrative_style_id=7)
     )
@@ -134,18 +156,17 @@ def test_turn_snapshot_freezes_player_and_rendered_story_prompt() -> None:
         name="Alice",
     )
     roles = _SessionRoles(player)
-    gateway = SimpleNamespace(
-        catalog=_Catalog(
+    data = _SnapshotData(
+        _Catalog(
             SimpleNamespace(workspace_id="ws"),
             SimpleNamespace(story_prompt="玩家角色是 {USER_PLAY_ROLE_NAME}。"),
         ),
-        session_composer=_Composer(),
-        session_roles=roles,
+        _Composer(),
     )
 
     snapshot = TurnSnapshotResolver(
         "s1",
-        gateway=gateway,
+        data=data,
         role_service=roles,
     ).resolve(
         TurnRequest.create("行动"),
@@ -168,17 +189,17 @@ def test_turn_snapshot_freezes_player_and_rendered_story_prompt() -> None:
 
 
 def test_required_turn_snapshot_rejects_missing_player_before_runtime() -> None:
-    gateway = SimpleNamespace(
-        catalog=_Catalog(SimpleNamespace(workspace_id="ws")),
-        session_composer=_Composer(),
-        session_roles=_SessionRoles(),
+    roles = _SessionRoles()
+    data = _SnapshotData(
+        _Catalog(SimpleNamespace(workspace_id="ws")),
+        _Composer(),
     )
 
     with pytest.raises(PlayerCharacterRequiredError, match="请选择.*角色"):
         TurnSnapshotResolver(
             "s1",
-            gateway=gateway,
-            role_service=gateway.session_roles,
+            data=data,
+            role_service=roles,
         ).resolve(
             TurnRequest.create("行动"),
             require_player_character=True,
@@ -186,19 +207,19 @@ def test_required_turn_snapshot_rejects_missing_player_before_runtime() -> None:
 
 
 def test_unbound_inspection_renders_stable_story_prompt_placeholder() -> None:
-    gateway = SimpleNamespace(
-        catalog=_Catalog(
+    roles = _SessionRoles()
+    data = _SnapshotData(
+        _Catalog(
             SimpleNamespace(workspace_id="ws"),
             SimpleNamespace(story_prompt="当前玩家是 {USER_PLAY_ROLE_NAME}。"),
         ),
-        session_composer=_Composer(),
-        session_roles=_SessionRoles(),
+        _Composer(),
     )
 
     snapshot = TurnSnapshotResolver(
         "s1",
-        gateway=gateway,
-        role_service=gateway.session_roles,
+        data=data,
+        role_service=roles,
     ).resolve(
         TurnRequest.create("预览"),
     )
@@ -208,10 +229,14 @@ def test_unbound_inspection_renders_stable_story_prompt_placeholder() -> None:
 
 
 def test_explicit_style_requires_catalog_session() -> None:
-    gateway = SimpleNamespace(catalog=_Catalog(None), session_composer=_Composer())
+    data = _SnapshotData(_Catalog(None), _Composer())
 
     with pytest.raises(FileNotFoundError, match="resolving narrative style"):
-        TurnSnapshotResolver("missing", gateway=gateway).resolve(
+        TurnSnapshotResolver(
+            "missing",
+            data=data,
+            role_service=_SessionRoles(),
+        ).resolve(
             TurnRequest.create("行动", narrative_style_id=3)
         )
 

@@ -9,7 +9,7 @@ from typing import TypeAlias
 from peewee import Database, IntegrityError, SQL, fn
 
 from commons.errors import InvalidTurnMetadataError
-from rpg_data import models
+from rpg_data.model import session as models
 from rpg_data.repositories import records
 from rpg_data.repositories._utils import get_or_none, to_session_message
 from rpg_data.repositories.records import bind_database

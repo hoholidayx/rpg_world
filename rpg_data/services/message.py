@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from peewee import Database
 
 from commons.errors import InvalidTurnMetadataError
-from rpg_data import models
+from rpg_data.model import session as models
 from rpg_data.repositories.records import SessionMessageRecord
 from rpg_data.services._message_store import BaseSessionMessageStore, MessageInput
 

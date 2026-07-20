@@ -51,7 +51,7 @@ def test_catalog_rejects_unknown_story_variables_without_mutation() -> None:
         assert story is not None
 
         with pytest.raises(StoryTextTemplateError, match="UNKNOWN_ROLE"):
-            SessionCatalogService(gateway).update_story(
+            SessionCatalogService(gateway.sessions).update_story(
                 "demo_workspace",
                 story.id,
                 story_prompt="玩家是 {UNKNOWN_ROLE}",

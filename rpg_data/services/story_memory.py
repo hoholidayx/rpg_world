@@ -1,4 +1,4 @@
-"""Business-neutral Story Memory data facade."""
+"""Business-neutral Story Memory data service."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ from contextlib import contextmanager
 
 from peewee import Database, IntegrityError
 
-from rpg_data import models
+from rpg_data.model import memory as models
+from rpg_data.model.session import SessionMessage
 from rpg_data.errors import DataConditionalWriteError, DataIntegrityError
 from rpg_data.repositories.story_memory_repo import StoryMemoryRepository
 from rpg_data.transaction import DataTransactionMode
@@ -124,7 +125,7 @@ class StoryMemoryDataService:
         self,
         session_id: str,
         message_ids: Sequence[int],
-    ) -> tuple[models.SessionMessage, ...]:
+    ) -> tuple[SessionMessage, ...]:
         return self._records.list_source_messages(session_id, message_ids)
 
     def mark_messages_processed(

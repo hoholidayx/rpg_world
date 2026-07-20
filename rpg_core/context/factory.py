@@ -25,18 +25,19 @@ def build_rpg_context(
     ``RPGContextBuilder.build()``.
 
     ``workspace`` is kept for compatibility with older callers and is ignored.
-    Character, lorebook, and status indexes are read from the rpg_data catalog
-    by *session_id* and its bound story. Status table JSON content is resolved
-    from the rpg_data workspace root under
-    ``stories/{story_id}/{session_id}/status/``. Story memory and history are
-    loaded from rpg_data by *session_id*.
+    Character, lorebook, and status data are read from the rpg_data catalog by
+    *session_id* and its bound story. Status table documents, Story Memory, and
+    history use their SQLite sources of truth; only summary and online-memory
+    runtime artifacts are resolved from the Session runtime directory.
     """
     from rpg_core.settings import settings as rpg_settings
     from rpg_core.context.builder import RPGContextBuilder
     from rpg_core.context.config import RPGContextConfig
     from rp_memory.persist_memory import PersistentMemoryStore
+    from rp_memory.dream.application import DreamApplicationService
     from rp_memory.recalled_memory import RecalledMemoryStore
     from rp_memory.story_memory import StoryMemoryStore
+    from rp_memory.story_memory_service import StoryMemoryApplicationService
     from rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_core.summary.store import SummaryStore
     from rpg_data.services import get_data_service_gateway
@@ -47,7 +48,8 @@ def build_rpg_context(
         world_name=world_name,
     )
 
-    session_root = get_data_service_gateway().catalog.get_session_runtime_dir(session_id)
+    gateway = get_data_service_gateway()
+    session_root = gateway.catalog.get_session_runtime_dir(session_id)
 
     # ── Session-scoped Stores ─────────────────────────────────────────
     builder.set_summary_store(
@@ -57,12 +59,19 @@ def build_rpg_context(
         BatchSummaryStore(session_root)
     )
     builder.set_story_memory_store(
-        StoryMemoryStore(session_id)
+        StoryMemoryStore(
+            session_id,
+            StoryMemoryApplicationService(gateway.story_memory),
+        )
     )
     recalled_store = RecalledMemoryStore()
     builder.set_recalled_memory_store(recalled_store)
     builder.set_persistent_memory_store(
-        PersistentMemoryStore(session_id)
+        PersistentMemoryStore(
+            session_id,
+            DreamApplicationService(gateway.dream_memory),
+            close_worker_connection=gateway.close_thread_connection,
+        )
     )
 
     # ── MemoryManager（封装向量记忆检索） ─────────────────────────
