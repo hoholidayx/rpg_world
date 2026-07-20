@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from rpg_data.services.tts import TTSDataService
-from rpg_tts.facade import TTSFacade
+from rpg_tts.errors import TTS_ERROR_CODE_WORKER_ERROR
+from rpg_tts.service import TTSApplicationService
 
 logger = logging.getLogger("tts_service.worker")
 
@@ -13,12 +13,10 @@ class TTSJobWorker:
     def __init__(
         self,
         *,
-        data: TTSDataService,
-        facade: TTSFacade,
+        service: TTSApplicationService,
         concurrency: int = 1,
     ) -> None:
-        self._data = data
-        self._facade = facade
+        self._service = service
         self._concurrency = max(1, int(concurrency))
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
@@ -27,7 +25,7 @@ class TTSJobWorker:
     async def start(self) -> None:
         if self._tasks:
             return
-        self._data.interrupt_active_jobs()
+        self._service.interrupt_active_jobs()
         self._stop_event.clear()
         self._wake_event.set()
         self._tasks = [
@@ -42,7 +40,7 @@ class TTSJobWorker:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
-        self._data.interrupt_active_jobs()
+        self._service.interrupt_active_jobs()
 
     def wake(self) -> None:
         self._wake_event.set()
@@ -52,11 +50,11 @@ class TTSJobWorker:
             await self._wake_event.wait()
             self._wake_event.clear()
             while not self._stop_event.is_set():
-                job = self._data.claim_next_job()
+                job = self._service.claim_next_job()
                 if job is None:
                     break
                 try:
-                    await self._facade.execute_job(job.id)
+                    await self._service.execute_job(job.id)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -66,9 +64,9 @@ class TTSJobWorker:
                         job.id,
                     )
                     try:
-                        self._data.mark_failed(
+                        self._service.fail_job(
                             job.id,
-                            error_code="TTS_WORKER_ERROR",
+                            error_code=TTS_ERROR_CODE_WORKER_ERROR,
                             error_message=str(exc),
                         )
                     except Exception:

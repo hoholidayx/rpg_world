@@ -203,6 +203,24 @@ from rpg_data.model.status import (
     validate_status_update_policy,
     validate_story_status_mount_origin,
 )
+from rpg_data.model.tts import (
+    TTS_JOB_ACTIVE_STATUSES,
+    TTS_JOB_FINAL_STATUSES,
+    TTS_JOB_STATUSES,
+    TTS_JOB_STATUS_FAILED,
+    TTS_JOB_STATUS_INTERRUPTED,
+    TTS_JOB_STATUS_QUEUED,
+    TTS_JOB_STATUS_RUNNING,
+    TTS_JOB_STATUS_SUCCEEDED,
+    TTSAudioPart,
+    TTSBlob,
+    TTSCacheEntry,
+    TTSCompletedPart,
+    TTSJob,
+    TTSJobCompletionWrite,
+    TTSJobStatus,
+    TTSMessageSource,
+)
 
 __all__ = [
     "Character",
@@ -245,6 +263,11 @@ __all__ = [
     "TTSAudioPart",
     "TTSBlob",
     "TTSMessageSource",
+    "TTSCompletedPart",
+    "TTSJobCompletionWrite",
+    "TTSJobStatus",
+    "TTS_JOB_ACTIVE_STATUSES",
+    "TTS_JOB_FINAL_STATUSES",
     "NarrativeOutcomeRecord",
     "NarrativeOutcomeWeights",
     "RPModuleCatalogEntry",
@@ -434,18 +457,6 @@ __all__ = [
 ]
 
 MAX_STORY_OPENINGS = 3
-TTS_JOB_STATUS_QUEUED = "queued"
-TTS_JOB_STATUS_RUNNING = "running"
-TTS_JOB_STATUS_SUCCEEDED = "succeeded"
-TTS_JOB_STATUS_FAILED = "failed"
-TTS_JOB_STATUS_INTERRUPTED = "interrupted"
-TTS_JOB_STATUSES = frozenset({
-    TTS_JOB_STATUS_QUEUED,
-    TTS_JOB_STATUS_RUNNING,
-    TTS_JOB_STATUS_SUCCEEDED,
-    TTS_JOB_STATUS_FAILED,
-    TTS_JOB_STATUS_INTERRUPTED,
-})
 NARRATIVE_OUTCOME_CODES = (
     "critical_success",
     "success",
@@ -687,74 +698,6 @@ class Story:
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
-
-
-
-
-
-@dataclass(frozen=True)
-class TTSBlob:
-    id: str
-    workspace_id: str
-    sha256: str
-    mime_type: str
-    byte_size: int
-    relative_path: str
-    created_at: str = ""
-
-
-@dataclass(frozen=True)
-class TTSCacheEntry:
-    id: str
-    workspace_id: str
-    source_fingerprint: str
-    config_fingerprint: str
-    normalization_revision: str
-    part_count: int
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class TTSAudioPart:
-    id: str
-    cache_entry_id: str
-    blob_id: str
-    part_index: int
-    created_at: str = ""
-
-
-@dataclass(frozen=True)
-class TTSJob:
-    id: str
-    session_id: str
-    message_id: int
-    status: str
-    source_fingerprint: str
-    config_fingerprint: str
-    normalization_revision: str
-    cache_entry_id: str | None = None
-    error_code: str = ""
-    error_message: str = ""
-    started_at: str = ""
-    finished_at: str = ""
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-    def __post_init__(self) -> None:
-        if self.status not in TTS_JOB_STATUSES:
-            raise ValueError(f"invalid TTS job status: {self.status}")
-
-
-@dataclass(frozen=True)
-class TTSMessageSource:
-    session_id: str
-    message_id: int
-    workspace_id: str
-    workspace_root: str
-    content: str
-
 
 
 @dataclass(frozen=True)

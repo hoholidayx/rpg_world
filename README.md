@@ -36,6 +36,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 - **2026-07-20：Status / Scene 业务与数据层拆分。** 状态模板/挂载/Session 表管理、Scene 字段规则与 active Scene、角色名修复与 Context 可见性、运行时/deferred/bootstrap 写入资格统一归 `rpg_core`；`StatusDataService` 只保留 typed CRUD、关联 read model、deferred progress、last-write-wins 诊断和原子 document batch。Status 存储契约迁入 `rpg_data.model.status`，Gateway 属性和 HTTP/SSE/数据库结构保持不变。
 - **2026-07-21：Media 业务与数据层拆分。** 来源 turn/VisualBrief、图库 metadata、删除门禁、背景评估和 worker 恢复策略统一归 `MediaApplicationService`；`MediaDataService` 只保留 typed CRUD/read model、CAS、引用查询、去重和显式 completion。Media 存储契约迁入 `rpg_data.model.media`，HTTP 与数据库结构保持不变。
+- **2026-07-21：TTS 业务与数据层拆分。** 已提交 assistant message 资格、正文清洗/分段、fingerprint、cache 命中与失效、retry 资格和 worker interrupted 策略统一归 `TTSApplicationService`；`TTSDataService` 只保留 typed 查询/read model、Job/Cache/Blob/Part CRUD、条件 claim/transition、引用查询和原子 completion。TTS 存储契约迁入 `rpg_data.model.tts`，HTTP、数据库结构、文件目录和 Play API 协议保持不变。
 - **2026-07-20：`rpg_data` 依赖边界收口。** `DataServiceGateway` 保留为数据库生命周期与 Data Service 注册表，Session、Plot、Dream/Memory 的业务服务改为显式依赖窄 Protocol；`sessions` 作为大业务聚合 Data Service 取代角色、派生、删除三个薄入口。Session/Memory 存储类型拆入 `rpg_data.model.*`，旧 `rpg_data.models` 兼容重导出，并增加静态守卫防止 Repository/Peewee record 外泄、业务 service 持有 Gateway 或 Gateway lookup 面继续增长。复杂查询、分页、批量、CAS、数据库原子操作和高效 read model 仍归数据层。
 - **2026-07-20：Dream / Story Memory 业务与数据层拆分。** Dream Proposal 状态机、恢复、两阶段来源确认、Persistent Memory 生命周期和 Context 投影统一归 `rp_memory.dream`，Story Memory 的规范化、exact dedupe、合并、Evidence 与 version 归 `StoryMemoryApplicationService`；`rpg_data` 保留 typed 查询/read model、CRUD/CAS、批量与事务。Apply 继续使用 SQLite `IMMEDIATE`，第二次来源确认失败会回滚账本后独立标记 Proposal stale；SQL、HTTP、通知、SSE、WebUI 与 Context 可观察行为不变。
 - **2026-07-20：Session 业务与数据层拆分。** 角色绑定与 Opening、Story/Session 初始化、`/clear`、Session Derivation 和永久删除的业务规则迁入 `rpg_core.session`；`rpg_data` 只保留角色/Opening 查询、profile/job CRUD、条件删除、显式复制和调用方准备好的状态重置计划。Agent、Play API、Dream 与后台 worker 统一经 Core application service 调用，公开 HTTP/SSE 与数据库结构不变。
@@ -286,6 +287,8 @@ v1 的交互是“手动触发 + 可检查提示词 + 异步生成”：
 ### SessionRoom TTS
 
 `rpg_tts/` 是与 `rpg_core/`、`rpg_media/` 同级的无框架高级能力模块，负责从已提交 assistant 消息解析可朗读正文、确定性分段、缓存指纹和 MP3 内容寻址存储；FastAPI、持久任务 worker 与客户端位于独立的 `tts_service/`。SessionRoom 仅在玩家点击回复气泡的朗读按钮后，经 Play API → `TTSClient` 创建任务。TTS 不进入 Agent turn、正文 SSE、message metadata 或 localStorage。OpenAI Speech Provider、音色和密钥仍由 LLM Service 唯一持有，TTS Service 只通过 `llm_client` 调用；默认监听 `http://127.0.0.1:8013/tts/v1`。
+
+`TTSApplicationService` 是消息资格、正文标准化与分段、cache/retry/失效策略和 worker 生命周期的统一业务入口；HTTP adapter 与 worker 不直接访问数据层。`TTSDataService` 负责消息来源 read model、Job/Cache/Blob/Part typed persistence、条件 claim/transition、引用查询和原子 completion，canonical DTO 位于 `rpg_data.model.tts`。
 
 ### Telegram 渠道
 

@@ -14,12 +14,14 @@ from rpg_data.model.status import (
     StatusTableDocument,
     StatusTableTemplate,
 )
+from rpg_data.model.tts import TTSJob, TTSMessageSource
 from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.media import MediaDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.status import StatusDataService
+from rpg_data.services.tts import TTSDataService
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_ROOTS = (
@@ -71,6 +73,7 @@ RECENT_APPLICATION_SERVICE_FILES = (
     "rpg_core/status/administration.py",
     "rpg_core/status/manager.py",
     "rpg_media/service.py",
+    "rpg_tts/service.py",
 )
 
 MEDIA_BUSINESS_FILES = (
@@ -78,6 +81,11 @@ MEDIA_BUSINESS_FILES = (
     "rpg_media/source.py",
     "rpg_media/background_agent.py",
     "media_service/worker.py",
+)
+
+TTS_BUSINESS_FILES = (
+    "rpg_tts/service.py",
+    "tts_service/worker.py",
 )
 
 STATUS_APPLICATION_SERVICE_FILES = (
@@ -193,6 +201,20 @@ def test_media_business_and_workers_use_narrow_data_ports() -> None:
     assert violations == []
 
 
+def test_tts_business_and_worker_use_narrow_data_ports() -> None:
+    forbidden = {
+        "rpg_data.services.gateway",
+        "rpg_data.services.tts",
+    }
+    violations = [
+        relative_path
+        for relative_path in TTS_BUSINESS_FILES
+        if _imports(ROOT / relative_path) & forbidden
+    ]
+
+    assert violations == []
+
+
 def test_gateway_lookup_surface_does_not_grow() -> None:
     actual = {
         path.relative_to(ROOT).as_posix()
@@ -223,6 +245,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         StoryMemoryDataService,
         StatusDataService,
         MediaDataService,
+        TTSDataService,
     )
 
     assert all(service_type.__name__.endswith("DataService") for service_type in service_types)
@@ -239,6 +262,8 @@ def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.StatusTableTemplate is StatusTableTemplate
     assert models.MediaJob is MediaJob
     assert models.MediaLibraryAssetBundle is MediaLibraryAssetBundle
+    assert models.TTSJob is TTSJob
+    assert models.TTSMessageSource is TTSMessageSource
 
 
 def test_media_data_service_does_not_expose_business_policy_entrypoints() -> None:
@@ -250,6 +275,16 @@ def test_media_data_service_does_not_expose_business_policy_entrypoints() -> Non
     }
 
     assert forbidden.isdisjoint(vars(MediaDataService))
+
+
+def test_tts_data_service_does_not_expose_business_policy_entrypoints() -> None:
+    forbidden = {
+        "interrupt_active_jobs",
+        "mark_failed",
+        "retry_job",
+    }
+
+    assert forbidden.isdisjoint(vars(TTSDataService))
 
 
 def test_status_data_service_does_not_expose_business_policy_entrypoints() -> None:

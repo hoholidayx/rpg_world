@@ -1,5 +1,5 @@
 """Framework-free text-to-speech domain."""
 
-from rpg_tts.facade import TTSFacade
+from rpg_tts.service import TTSApplicationService
 
-__all__ = ["TTSFacade"]
+__all__ = ["TTSApplicationService"]

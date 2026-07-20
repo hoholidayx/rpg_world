@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from collections.abc import Iterable
+from typing import ContextManager
 
 from peewee import Database, IntegrityError, SQL
 
-from rpg_data import models
+from rpg_data.model import tts as models
 from rpg_data.repositories.records import (
     SessionMessageRecord,
     SessionRecord,
@@ -20,17 +21,13 @@ from rpg_data.repositories.records import (
 )
 
 
-@dataclass(frozen=True)
-class TTSCompletedPart:
-    sha256: str
-    byte_size: int
-    relative_path: str
-
-
 class TTSDataService:
     def __init__(self, database: Database) -> None:
         self._database = database
         bind_database(database)
+
+    def transaction(self) -> ContextManager[None]:
+        return self._database.atomic()
 
     def get_message_source(
         self,
@@ -50,10 +47,6 @@ class TTSDataService:
         )
         if row is None:
             raise FileNotFoundError(f"TTS source message not found: {message_id}")
-        if row.role != models.MESSAGE_ROLE_ASSISTANT:
-            raise ValueError("TTS only supports persisted assistant messages")
-        if not str(row.content).strip():
-            raise ValueError("TTS source message is empty")
         session = row.session
         workspace = session.workspace
         return models.TTSMessageSource(
@@ -61,7 +54,10 @@ class TTSDataService:
             message_id=int(row.id),
             workspace_id=str(workspace.id),
             workspace_root=str(workspace.root_path),
+            role=str(row.role),
             content=str(row.content),
+            turn_id=int(row.turn_id or 0),
+            seq_in_turn=int(row.seq_in_turn or 0),
         )
 
     def get_workspace_root(self, workspace_id: str) -> str:
@@ -81,7 +77,15 @@ class TTSDataService:
             )
         ]
 
-    def invalidate_blob(self, blob_id: str) -> bool:
+    def invalidate_blob(
+        self,
+        blob_id: str,
+        *,
+        job_status: models.TTSJobStatus,
+        error_code: str,
+        error_message: str,
+    ) -> bool:
+        target_status = models.TTSJobStatus(job_status)
         row = TTSBlobRecord.get_or_none(TTSBlobRecord.id == str(blob_id))
         if row is None:
             return False
@@ -96,10 +100,10 @@ class TTSDataService:
                 (
                     TTSJobRecord
                     .update(
-                        status=models.TTS_JOB_STATUS_FAILED,
+                        status=str(target_status),
                         cache_entry=None,
-                        error_code="TTS_CACHE_MISSING",
-                        error_message="Cached TTS audio is missing or corrupt",
+                        error_code=str(error_code),
+                        error_message=str(error_message),
                         finished_at=SQL("CURRENT_TIMESTAMP"),
                         updated_at=SQL("CURRENT_TIMESTAMP"),
                         version=TTSJobRecord.version + 1,
@@ -113,7 +117,15 @@ class TTSDataService:
             TTSBlobRecord.delete().where(TTSBlobRecord.id == row.id).execute()
         return True
 
-    def invalidate_cache(self, cache_entry_id: str) -> bool:
+    def invalidate_cache(
+        self,
+        cache_entry_id: str,
+        *,
+        job_status: models.TTSJobStatus,
+        error_code: str,
+        error_message: str,
+    ) -> bool:
+        target_status = models.TTSJobStatus(job_status)
         row = TTSCacheEntryRecord.get_or_none(
             TTSCacheEntryRecord.id == str(cache_entry_id)
         )
@@ -123,10 +135,10 @@ class TTSDataService:
             (
                 TTSJobRecord
                 .update(
-                    status=models.TTS_JOB_STATUS_FAILED,
+                    status=str(target_status),
                     cache_entry=None,
-                    error_code="TTS_CACHE_MISSING",
-                    error_message="Cached TTS audio is missing or corrupt",
+                    error_code=str(error_code),
+                    error_message=str(error_message),
                     finished_at=SQL("CURRENT_TIMESTAMP"),
                     updated_at=SQL("CURRENT_TIMESTAMP"),
                     version=TTSJobRecord.version + 1,
@@ -148,6 +160,22 @@ class TTSDataService:
             .first()
         )
 
+    def find_cache_entry(
+        self,
+        *,
+        workspace_id: str,
+        source_fingerprint: str,
+        config_fingerprint: str,
+        normalization_revision: str,
+    ) -> models.TTSCacheEntry | None:
+        row = self._cache_query(
+            workspace_id=str(workspace_id),
+            source_fingerprint=str(source_fingerprint),
+            config_fingerprint=str(config_fingerprint),
+            normalization_revision=str(normalization_revision),
+        ).first()
+        return _to_cache(row) if row is not None else None
+
     def create_or_get_job(
         self,
         *,
@@ -156,8 +184,29 @@ class TTSDataService:
         source_fingerprint: str,
         config_fingerprint: str,
         normalization_revision: str,
+        status: models.TTSJobStatus,
+        cache_entry_id: str | None,
     ) -> models.TTSJob:
+        target_status = models.TTSJobStatus(status)
         source = self.get_message_source(session_id, message_id)
+        if cache_entry_id is not None:
+            cache = TTSCacheEntryRecord.get_or_none(
+                TTSCacheEntryRecord.id == str(cache_entry_id)
+            )
+            if cache is None:
+                raise ValueError("TTS cache entry does not exist")
+            if str(cache.workspace_id) != source.workspace_id:
+                raise ValueError("TTS cache entry does not belong to the message workspace")
+            if (
+                str(cache.source_fingerprint) != str(source_fingerprint)
+                or str(cache.config_fingerprint) != str(config_fingerprint)
+                or str(cache.normalization_revision) != str(normalization_revision)
+            ):
+                raise ValueError("TTS cache entry identity does not match the job")
+        if target_status == models.TTSJobStatus.SUCCEEDED and cache_entry_id is None:
+            raise ValueError("succeeded TTS job requires a cache entry")
+        if cache_entry_id is not None and target_status != models.TTSJobStatus.SUCCEEDED:
+            raise ValueError("cached TTS job must use succeeded status")
         existing = self._job_query(
             session_id=session_id,
             message_id=message_id,
@@ -167,28 +216,21 @@ class TTSDataService:
         ).first()
         if existing is not None:
             return _to_job(existing)
-        cache = self._cache_query(
-            workspace_id=source.workspace_id,
-            source_fingerprint=source_fingerprint,
-            config_fingerprint=config_fingerprint,
-            normalization_revision=normalization_revision,
-        ).first()
-        status = (
-            models.TTS_JOB_STATUS_SUCCEEDED
-            if cache is not None
-            else models.TTS_JOB_STATUS_QUEUED
-        )
         try:
             row = TTSJobRecord.create(
                 id=uuid.uuid4().hex,
                 session=session_id,
                 message=message_id,
-                status=status,
+                status=str(target_status),
                 source_fingerprint=source_fingerprint,
                 config_fingerprint=config_fingerprint,
                 normalization_revision=normalization_revision,
-                cache_entry=cache.id if cache is not None else None,
-                finished_at=SQL("CURRENT_TIMESTAMP") if cache is not None else None,
+                cache_entry=cache_entry_id,
+                finished_at=(
+                    SQL("CURRENT_TIMESTAMP")
+                    if target_status not in models.TTS_JOB_ACTIVE_STATUSES
+                    else None
+                ),
             )
             row = TTSJobRecord.get_by_id(row.id)
         except IntegrityError:
@@ -241,25 +283,38 @@ class TTSDataService:
                 return None
         return self.get_job_for_worker(str(row.id))
 
-    def retry_job(self, session_id: str, job_id: str) -> models.TTSJob | None:
+    def transition_job(
+        self,
+        session_id: str,
+        job_id: str,
+        *,
+        from_statuses: Iterable[models.TTSJobStatus],
+        to_status: models.TTSJobStatus,
+        error_code: str = "",
+        error_message: str = "",
+        clear_started_at: bool = False,
+    ) -> models.TTSJob | None:
+        normalized_statuses = _normalize_statuses(from_statuses)
+        target_status = models.TTSJobStatus(to_status)
+        if not normalized_statuses:
+            return self.get_job(session_id, job_id)
+        values: dict[object, object] = {
+            TTSJobRecord.status: str(target_status),
+            TTSJobRecord.error_code: str(error_code),
+            TTSJobRecord.error_message: str(error_message),
+            TTSJobRecord.finished_at: None,
+            TTSJobRecord.updated_at: SQL("CURRENT_TIMESTAMP"),
+            TTSJobRecord.version: TTSJobRecord.version + 1,
+        }
+        if clear_started_at:
+            values[TTSJobRecord.started_at] = None
         updated = (
             TTSJobRecord
-            .update(
-                status=models.TTS_JOB_STATUS_QUEUED,
-                error_code="",
-                error_message="",
-                started_at=None,
-                finished_at=None,
-                updated_at=SQL("CURRENT_TIMESTAMP"),
-                version=TTSJobRecord.version + 1,
-            )
+            .update(values)
             .where(
                 (TTSJobRecord.id == str(job_id))
                 & (TTSJobRecord.session == str(session_id))
-                & (TTSJobRecord.status.in_([
-                    models.TTS_JOB_STATUS_FAILED,
-                    models.TTS_JOB_STATUS_INTERRUPTED,
-                ]))
+                & (TTSJobRecord.status.in_(normalized_statuses))
             )
             .execute()
         )
@@ -267,32 +322,49 @@ class TTSDataService:
             return self.get_job(session_id, job_id)
         return self.get_job(session_id, job_id)
 
-    def interrupt_active_jobs(self) -> int:
+    def transition_jobs(
+        self,
+        *,
+        from_statuses: Iterable[models.TTSJobStatus],
+        to_status: models.TTSJobStatus,
+        error_code: str = "",
+        error_message: str = "",
+    ) -> int:
+        normalized_statuses = _normalize_statuses(from_statuses)
+        target_status = models.TTSJobStatus(to_status)
+        if not normalized_statuses:
+            return 0
         return int(
             TTSJobRecord
             .update(
-                status=models.TTS_JOB_STATUS_INTERRUPTED,
-                error_code="TTS_JOB_INTERRUPTED",
-                error_message="TTS service stopped while the job was running",
+                status=str(target_status),
+                error_code=str(error_code),
+                error_message=str(error_message),
                 finished_at=SQL("CURRENT_TIMESTAMP"),
                 updated_at=SQL("CURRENT_TIMESTAMP"),
                 version=TTSJobRecord.version + 1,
             )
-            .where(TTSJobRecord.status == models.TTS_JOB_STATUS_RUNNING)
+            .where(TTSJobRecord.status.in_(normalized_statuses))
             .execute()
         )
 
-    def mark_failed(
+    def finish_job(
         self,
         job_id: str,
         *,
-        error_code: str,
-        error_message: str,
+        from_statuses: Iterable[models.TTSJobStatus],
+        status: models.TTSJobStatus,
+        error_code: str = "",
+        error_message: str = "",
     ) -> models.TTSJob | None:
+        normalized_statuses = _normalize_statuses(from_statuses)
+        target_status = models.TTSJobStatus(status)
+        if not normalized_statuses:
+            return self.get_job_for_worker(job_id)
         (
             TTSJobRecord
             .update(
-                status=models.TTS_JOB_STATUS_FAILED,
+                status=str(target_status),
                 error_code=str(error_code),
                 error_message=str(error_message),
                 finished_at=SQL("CURRENT_TIMESTAMP"),
@@ -301,7 +373,7 @@ class TTSDataService:
             )
             .where(
                 (TTSJobRecord.id == str(job_id))
-                & (TTSJobRecord.status == models.TTS_JOB_STATUS_RUNNING)
+                & (TTSJobRecord.status.in_(normalized_statuses))
             )
             .execute()
         )
@@ -310,12 +382,20 @@ class TTSDataService:
     def complete_job(
         self,
         job_id: str,
-        parts: tuple[TTSCompletedPart, ...],
+        write: models.TTSJobCompletionWrite,
     ) -> models.TTSJob | None:
         job = self.get_job_for_worker(job_id)
         if job is None or job.status != models.TTS_JOB_STATUS_RUNNING:
             return job
         source = self.get_message_source(job.session_id, job.message_id)
+        if write.workspace_id != source.workspace_id:
+            raise ValueError("TTS completion workspace does not match the source message")
+        if (
+            write.source_fingerprint != job.source_fingerprint
+            or write.config_fingerprint != job.config_fingerprint
+            or write.normalization_revision != job.normalization_revision
+        ):
+            raise ValueError("TTS completion identity does not match the job")
         with self._database.atomic():
             cache = self._cache_query(
                 workspace_id=source.workspace_id,
@@ -331,11 +411,11 @@ class TTSDataService:
                     normalization_revision=job.normalization_revision,
                     defaults={
                         "id": uuid.uuid4().hex,
-                        "part_count": len(parts),
+                        "part_count": len(write.parts),
                     },
                 )
                 if cache_created:
-                    for index, part in enumerate(parts):
+                    for index, part in enumerate(write.parts):
                         blob, _blob_created = TTSBlobRecord.get_or_create(
                             workspace=source.workspace_id,
                             sha256=part.sha256,
@@ -355,7 +435,7 @@ class TTSDataService:
             (
                 TTSJobRecord
                 .update(
-                    status=models.TTS_JOB_STATUS_SUCCEEDED,
+                    status=str(write.status),
                     cache_entry=cache.id,
                     error_code="",
                     error_message="",
@@ -377,7 +457,7 @@ class TTSDataService:
         job_id: str,
     ) -> list[tuple[models.TTSAudioPart, models.TTSBlob]]:
         job = self.get_job(session_id, job_id)
-        if job is None or job.status != models.TTS_JOB_STATUS_SUCCEEDED or not job.cache_entry_id:
+        if job is None or not job.cache_entry_id:
             return []
         rows = (
             TTSAudioPartRecord
@@ -425,12 +505,18 @@ def _text(value: object) -> str:
     return "" if value is None else str(value)
 
 
+def _normalize_statuses(
+    statuses: Iterable[models.TTSJobStatus],
+) -> tuple[str, ...]:
+    return tuple(str(models.TTSJobStatus(status)) for status in statuses)
+
+
 def _to_job(row: TTSJobRecord) -> models.TTSJob:
     return models.TTSJob(
         id=str(row.id),
         session_id=str(row.session_id),
         message_id=int(row.message_id),
-        status=str(row.status),
+        status=models.TTSJobStatus(str(row.status)),
         source_fingerprint=str(row.source_fingerprint),
         config_fingerprint=str(row.config_fingerprint),
         normalization_revision=str(row.normalization_revision),
@@ -452,6 +538,19 @@ def _to_part(row: TTSAudioPartRecord) -> models.TTSAudioPart:
         blob_id=str(row.blob_id),
         part_index=int(row.part_index),
         created_at=_text(row.created_at),
+    )
+
+
+def _to_cache(row: TTSCacheEntryRecord) -> models.TTSCacheEntry:
+    return models.TTSCacheEntry(
+        id=str(row.id),
+        workspace_id=str(row.workspace_id),
+        source_fingerprint=str(row.source_fingerprint),
+        config_fingerprint=str(row.config_fingerprint),
+        normalization_revision=str(row.normalization_revision),
+        part_count=int(row.part_count),
+        created_at=_text(row.created_at),
+        updated_at=_text(row.updated_at),
     )
 
 

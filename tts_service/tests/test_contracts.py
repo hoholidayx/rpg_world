@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from llm_client.types import LLMSpeechAudio, LLMSpeechProfile
 from rpg_data import models
 from rpg_data.services.gateway import DataServiceGateway
-from rpg_tts.facade import TTSFacade
+from rpg_tts.service import TTSApplicationService
 from tts_service.main import TTSRuntime, app, set_runtime_for_tests
 from tts_service.worker import TTSJobWorker
 
@@ -45,14 +45,14 @@ def test_tts_service_job_and_audio_contract(tmp_path) -> None:
         turn_id=1,
         seq_in_turn=1,
     )
-    facade = TTSFacade(
+    service = TTSApplicationService(
         data=gateway.tts,
         llm_manager=SimpleNamespace(client=_SpeechClient()),  # type: ignore[arg-type]
     )
     runtime = TTSRuntime(
         gateway=gateway,
-        facade=facade,
-        worker=TTSJobWorker(data=gateway.tts, facade=facade),
+        service=service,
+        worker=TTSJobWorker(service=service),
     )
     set_runtime_for_tests(runtime)
     try:

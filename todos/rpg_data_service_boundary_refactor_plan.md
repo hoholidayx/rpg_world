@@ -9,13 +9,13 @@
 - [x] 已完成整改项：Dream / Persistent Memory / Story Memory
 - [x] 已完成阶段性架构收口：Gateway 注册表、聚合 Data Service、窄 Port、类型归属与静态守卫
 - [x] 已完成整改项：状态表与 Scene（P3）
-- [ ] **下一整改项：Media 与 TTS（P4）**
-- [ ] 后续整改项：Story Catalog、Composer 与 RP Module 配置
+- [x] 已完成整改项：Media 与 TTS（P4）
+- [ ] **下一整改项：Story Catalog、Composer 与 RP Module 配置（P5）**
 - [ ] 后续整改项：消息、历史和通用账本收尾
 
 本计划用于把 `rpg_data` 收敛为无框架、无业务决策的数据访问模块。整改后，`rpg_data` 负责数据库 DTO、序列化、复杂查询/read model、CRUD、分页、批量、CAS、数据完整性和数据库级原子持久化；业务规则、状态机、默认策略、跨聚合用例和玩家文案必须由对应领域模块或应用编排层持有。
 
-Plot Schedule、Session P1、Dream/P2 与状态表/Scene P3 已按整改执行顺序完成，下一整改项为 Media/TTS P4。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重、剧情调度优先级或后台任务优先级。后续仍以迁出真实业务决策为准，不为了形式统一制造样板层。
+Plot Schedule、Session P1、Dream/P2、状态表/Scene P3 与 Media/TTS P4 已按整改执行顺序完成，下一整改项为 Story Catalog、Composer 与 RP Module 配置 P5。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重、剧情调度优先级或后台任务优先级。后续仍以迁出真实业务决策为准，不为了形式统一制造样板层。
 
 ## 1. 统一边界
 
@@ -166,9 +166,9 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 
 ### 6.2 TTS
 
-- [ ] 将“只允许已提交 assistant message”、正文清洗、fingerprint、分段、cache 命中和 retry 资格迁入 `rpg_tts`/`tts_service`。
-- [ ] `rpg_data` 只保留 job/cache/blob/part CRUD、条件 claim、引用查询和调用方准备好结果后的原子写入。
-- [ ] worker shutdown 时选择哪些状态需要 interrupted 由 TTS application service 决定，数据层执行指定的条件批量更新。
+- [x] 将“只允许已提交 assistant message”、正文清洗、fingerprint、分段、cache 命中和 retry 资格迁入 `rpg_tts`/`tts_service`。
+- [x] `rpg_data` 只保留 job/cache/blob/part CRUD、条件 claim、引用查询和调用方准备好结果后的原子写入。
+- [x] worker shutdown 时选择哪些状态需要 interrupted 由 TTS application service 决定，数据层执行指定的条件批量更新。
 
 ## 7. P5：Story Catalog、Composer 与 RP Module 配置
 

@@ -7,7 +7,7 @@ import pytest
 from llm_client.types import LLMSpeechAudio, LLMSpeechProfile
 from rpg_data import models
 from rpg_data.services.gateway import DataServiceGateway
-from rpg_tts.facade import TTSFacade
+from rpg_tts.service import TTSApplicationService
 from rpg_tts.text import normalize_spoken_text, split_spoken_text
 
 
@@ -50,7 +50,37 @@ def test_normalize_and_split_spoken_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_facade_generates_persistent_parts_and_reuses_cache(tmp_path) -> None:
+async def test_service_rejects_non_assistant_and_empty_sources(tmp_path) -> None:
+    gateway = DataServiceGateway(tmp_path / "tts-source-policy.sqlite3")
+    session = gateway.catalog.create_session("demo_workspace", 1, title="TTS policy")
+    user_message = gateway.messages.append(
+        session.id,
+        models.MESSAGE_ROLE_USER,
+        "player text",
+        turn_id=1,
+        seq_in_turn=1,
+    )
+    empty_assistant = gateway.messages.append(
+        session.id,
+        models.MESSAGE_ROLE_ASSISTANT,
+        "   ",
+        turn_id=2,
+        seq_in_turn=1,
+    )
+    service = TTSApplicationService(
+        data=gateway.tts,
+        llm_manager=SimpleNamespace(client=_FakeSpeechClient()),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError, match="assistant"):
+        await service.create_job(session.id, user_message.id)
+    with pytest.raises(ValueError, match="empty"):
+        await service.create_job(session.id, empty_assistant.id)
+    gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_service_generates_persistent_parts_and_reuses_cache(tmp_path) -> None:
     gateway = DataServiceGateway(tmp_path / "tts.sqlite3")
     gateway.database.execute_sql(
         "UPDATE rpg_workspaces SET root_path = ? WHERE id = 'demo_workspace'",
@@ -65,26 +95,26 @@ async def test_facade_generates_persistent_parts_and_reuses_cache(tmp_path) -> N
         seq_in_turn=1,
     )
     client = _FakeSpeechClient()
-    facade = TTSFacade(
+    service = TTSApplicationService(
         data=gateway.tts,
         llm_manager=SimpleNamespace(client=client),  # type: ignore[arg-type]
     )
 
-    queued = await facade.create_job(session.id, message.id)
+    queued = await service.create_job(session.id, message.id)
     assert queued.status == models.TTS_JOB_STATUS_QUEUED
     claimed = gateway.tts.claim_next_job()
     assert claimed is not None
-    completed = await facade.execute_job(claimed.id)
+    completed = await service.execute_job(claimed.id)
 
     assert completed is not None
     assert completed.status == models.TTS_JOB_STATUS_SUCCEEDED
     parts = gateway.tts.list_parts(session.id, completed.id)
     assert len(parts) == 1
-    assert facade.resolve_audio_part(session.id, completed.id, 0).read_bytes().startswith(b"ID3")
+    assert service.resolve_audio_part(session.id, completed.id, 0).read_bytes().startswith(b"ID3")
 
     orphan = tmp_path / "workspace" / "assets" / "audio" / f"{'f' * 64}.mp3"
     orphan.write_bytes(b"ID3orphan")
-    reconciled = await facade.reconcile_workspace("demo_workspace")
+    reconciled = await service.reconcile_workspace("demo_workspace")
     assert reconciled.removed_files == 1
     assert not orphan.exists()
 
@@ -96,30 +126,53 @@ async def test_facade_generates_persistent_parts_and_reuses_cache(tmp_path) -> N
         turn_id=1,
         seq_in_turn=1,
     )
-    cached = await facade.create_job(second_session.id, second_message.id)
+    cached = await service.create_job(second_session.id, second_message.id)
     assert cached.status == models.TTS_JOB_STATUS_SUCCEEDED
     assert len(client.texts) == 1
+
+    unchanged = await service.retry_job(second_session.id, cached.id)
+    assert unchanged is not None
+    assert unchanged.status == models.TTS_JOB_STATUS_SUCCEEDED
+
+    cached_path = service.resolve_audio_part(session.id, completed.id, 0)
+    cached_path.unlink()
+    retried = await service.retry_job(session.id, completed.id)
+    assert retried is not None
+    assert retried.id == completed.id
+    assert retried.status == models.TTS_JOB_STATUS_QUEUED
+    invalidated_peer = service.get_job(second_session.id, cached.id)
+    assert invalidated_peer is not None
+    assert invalidated_peer.status == models.TTS_JOB_STATUS_FAILED
+    assert invalidated_peer.error_code == "TTS_CACHE_MISSING"
     gateway.close()
 
 
-def test_tts_job_cascades_when_source_message_is_deleted(tmp_path) -> None:
-    gateway = DataServiceGateway(tmp_path / "tts-cascade.sqlite3")
-    session = gateway.catalog.create_session("demo_workspace", 1, title="TTS cascade")
+@pytest.mark.asyncio
+async def test_retry_creates_new_identity_when_source_changes(tmp_path) -> None:
+    gateway = DataServiceGateway(tmp_path / "tts-retry-source.sqlite3")
+    gateway.database.execute_sql(
+        "UPDATE rpg_workspaces SET root_path = ? WHERE id = 'demo_workspace'",
+        (str(tmp_path / "workspace"),),
+    )
+    session = gateway.catalog.create_session("demo_workspace", 1, title="TTS retry")
     message = gateway.messages.append(
         session.id,
         models.MESSAGE_ROLE_ASSISTANT,
-        "reply",
+        "before",
         turn_id=1,
         seq_in_turn=1,
     )
-    job = gateway.tts.create_or_get_job(
-        session_id=session.id,
-        message_id=message.id,
-        source_fingerprint="a" * 64,
-        config_fingerprint="b" * 64,
-        normalization_revision="v1",
+    service = TTSApplicationService(
+        data=gateway.tts,
+        llm_manager=SimpleNamespace(client=_FakeSpeechClient()),  # type: ignore[arg-type]
     )
+    original = await service.create_job(session.id, message.id)
+    gateway.messages.update(message.id, content="after")
 
-    assert gateway.messages.delete_for_session(session.id, message.id)
-    assert gateway.tts.get_job(session.id, job.id) is None
+    replacement = await service.retry_job(session.id, original.id)
+
+    assert replacement is not None
+    assert replacement.id != original.id
+    assert replacement.status == models.TTS_JOB_STATUS_QUEUED
+    assert replacement.source_fingerprint != original.source_fingerprint
     gateway.close()

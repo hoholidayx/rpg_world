@@ -179,13 +179,13 @@ Play API、CLI、Telegram 不创建 agent，不缓存 agent，不配置 llama，
 
 Media service 是另一个独立进程，只持有 `rpg_media`、`rpg_data`、图片 Provider 与数据库持久 worker；它不导入 Agent runtime，也不持有 llama worker。Play API 作为独立后端链路的接入边界：聊天走 `AgentClient`，媒体走 `MediaClient`，TTS 走 `TTSClient`。Media service 中断只使媒体接口返回 503，不得阻塞 SessionRoom、composer 或 Agent SSE。
 
-TTS service 与 Media service 同级，只持有 `rpg_tts`、`rpg_data`、持久 worker 和 `llm_client`。它按已提交 assistant `message_id` 读取正文，移除固定 RP 标签后分段生成内容寻址 MP3；不导入 Agent runtime，不写消息 metadata/SSE/localStorage。OpenAI Speech Provider、模型配置和密钥仍只由 LLM Service 持有。TTS service 中断只影响回复气泡的朗读控件。
+TTS service 与 Media service 同级，只持有 `rpg_tts`、`rpg_data`、持久 worker 和 `llm_client`。`TTSApplicationService` 统一决定已提交 assistant message 资格、正文清洗与分段、fingerprint、cache 命中/失效、retry 资格和 worker interrupted 策略；worker 只调用该 application service。`TTSDataService` 只提供 typed 查询/read model、Job/Cache/Blob/Part CRUD、条件 claim/transition、引用查询和调用方准备结果后的原子 completion。TTS 不导入 Agent runtime，不写消息 metadata/SSE/localStorage；OpenAI Speech Provider、模型配置和密钥仍只由 LLM Service 持有。TTS service 中断只影响回复气泡的朗读控件。
 
 Dream service 是 Session 级离线记忆提炼边界，只持有 `rp_memory.dream`、`rpg_data` 与 loop-owned `llm_client`。它通过 `dream.shallow` / `dream.deep` biz key 获取远端 Provider facade，不导入 Agent runtime、`MemorySubAgent` 或 `llm_service`。Play API 只用 `DreamClient` 代理手动管理请求；Dream 中断不得影响 Agent Context 构建、聊天或其它服务。v1 不提供入站 Bearer 鉴权，配置层强制监听 localhost/loopback IP；非 loopback host 必须启动失败，不支持非本地暴露。
 
 Dream Proposal 状态机、恢复、Apply、Persistent Memory 生命周期与 Context projection 的唯一业务 owner 是 `rp_memory.dream`；Story Memory 的 normalize、exact dedupe、merge、Evidence、version 和 Context projection 统一归 `rp_memory.story_memory_service`。`rpg_data` 只通过 `dream_memory` / `story_memory` 提供 frozen DTO、CRUD、CAS、批量读写与无业务语义事务，不得恢复状态迁移、动作分支、active-limit、来源指纹、Evidence 有效性或 Story Memory 合并策略；业务调用方不得直接访问 `gateway.database` 或 Peewee record。
 
-`DataServiceGateway` 保持数据库生命周期与 Data Service 注册表职责，不需要移除；进程/Agent composition root 从 Registry 取得 `sessions`、`plot_scheduling`、`dream_memory`、`story_memory`、`status`、`media` 等具体 service 后逐项注入，领域/application service 不得持有整个 Gateway。公开类型化持久化边界统一使用 Service 语义，新的大业务聚合入口命名为 `*DataService`，Repository 仅为 `rpg_data` 内部 Peewee 实现；既有简单 Character/Lorebook CRUD 可保留明确的 `*ReadService` / `*ManagementService`，不要为后缀或形式统一机械复制 application service、adapter 和 DTO 转换层。`rpg_data` 的边界是“决定数据如何可靠、高效、原子存取”，不是“只能做简单 CRUD”：复杂查询、分页、批量、CAS、数据库级原子操作和高效 read model 都应留在数据层。Session、Memory、Status 与 Media 的 canonical 存储契约位于对应的 `rpg_data.model.*` 模块，旧 `rpg_data.models` 暂作兼容重导出；TTS 类型等到其业务域实际整改时再迁移。
+`DataServiceGateway` 保持数据库生命周期与 Data Service 注册表职责，不需要移除；进程/Agent composition root 从 Registry 取得 `sessions`、`plot_scheduling`、`dream_memory`、`story_memory`、`status`、`media`、`tts` 等具体 service 后逐项注入，领域/application service 不得持有整个 Gateway。公开类型化持久化边界统一使用 Service 语义，新的大业务聚合入口命名为 `*DataService`，Repository 仅为 `rpg_data` 内部 Peewee 实现；既有简单 Character/Lorebook CRUD 可保留明确的 `*ReadService` / `*ManagementService`，不要为后缀或形式统一机械复制 application service、adapter 和 DTO 转换层。`rpg_data` 的边界是“决定数据如何可靠、高效、原子存取”，不是“只能做简单 CRUD”：复杂查询、分页、批量、CAS、数据库级原子操作和高效 read model 都应留在数据层。Session、Memory、Status、Media 与 TTS 的 canonical 存储契约位于对应的 `rpg_data.model.*` 模块，旧 `rpg_data.models` 暂作兼容重导出。
 
 `rpg_data` 的正式分层、依赖、事务、类型所有权与 Review 规范见 [`docs/rpg-data-architecture.md`](docs/rpg-data-architecture.md)；`todos/` 中的整改计划只保留实施历史和待办顺序，不作为长期边界定义。
 
@@ -869,10 +869,10 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 - `rpg_core/tests/`：按源码领域镜像组织；`agent/` 下继续按 runtime/mailbox/command/sub_agents/turn/tools 分组，Context、Session、Summary、RP Modules、Scene、Status 与 utils 使用各自目录。
 - `rp_memory/tests/`：memory 检索、索引、规划、rerank，以及 Dream 选源、分批、Map/Reduce 与 retirement policy。
 - `dream_service/tests/`：Dream source adapter、进程内任务生命周期、HTTP/Client 契约与错误隔离。
-- `rpg_data/tests/`：catalog、消息、状态和 Dream proposal/ledger/revision/Evidence 的事务语义。
+- `rpg_data/tests/`：catalog、消息、状态、Media/TTS 持久化和 Dream proposal/ledger/revision/Evidence 的事务语义。
 - `llm_service/tests/`：LLM HTTP/SSE 客户端契约、鉴权、provider 配置、manager 路由与 llama 本地 runtime。
 - `play_api/tests/`：Play API workspace/session/scene/turn/stream、Dream service 代理、characters、lorebook、status-tables 和 ops 等契约。
-- `rpg_media/tests/` / `media_service/tests/`：来源与简报、Provider/存储、Media facade、HTTP 契约和 worker 恢复/取消语义。
+- `rpg_media/tests/` / `media_service/tests/`：来源与简报、Provider/存储、Media application service、HTTP 契约和 worker 恢复/取消语义。
 - `rpg_tts/tests/` / `tts_service/tests/`：正文标准化与分段、MP3 存储、缓存、HTTP 契约和 worker 恢复语义。
 
 修改 Agent 组合或 turn pipeline 时使用以下专项集合，随后仍需运行完整基线与 Core integration：

@@ -6,10 +6,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from llm_client.manager import LLMClientManager
 
-from rpg_data import models
+from rpg_data.model import tts as models
 from rpg_data.services import get_data_service_gateway
 from rpg_data.services.gateway import DataServiceGateway
-from rpg_tts.facade import TTSFacade
+from rpg_tts.service import TTSApplicationService
 from tts_service.schemas import (
     TTSAudioPartResponse,
     TTSHealthResponse,
@@ -25,23 +25,22 @@ class TTSRuntime:
         self,
         *,
         gateway: DataServiceGateway,
-        facade: TTSFacade,
+        service: TTSApplicationService,
         worker: TTSJobWorker,
     ) -> None:
         self.gateway = gateway
-        self.facade = facade
+        self.service = service
         self.worker = worker
 
     @classmethod
     def create(cls) -> "TTSRuntime":
         gateway = get_data_service_gateway()
-        facade = TTSFacade(data=gateway.tts)
+        service = TTSApplicationService(data=gateway.tts)
         return cls(
             gateway=gateway,
-            facade=facade,
+            service=service,
             worker=TTSJobWorker(
-                data=gateway.tts,
-                facade=facade,
+                service=service,
                 concurrency=settings.worker.concurrency,
             ),
         )
@@ -106,7 +105,7 @@ async def health() -> TTSHealthResponse:
 )
 async def reconcile_workspace(workspace_id: str) -> TTSReconcileResponse:
     try:
-        result = await get_runtime().facade.reconcile_workspace(workspace_id)
+        result = await get_runtime().service.reconcile_workspace(workspace_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return TTSReconcileResponse(
@@ -123,7 +122,7 @@ async def reconcile_workspace(workspace_id: str) -> TTSReconcileResponse:
 )
 async def create_job(session_id: str, message_id: int) -> TTSJobResponse:
     try:
-        job = await get_runtime().facade.create_job(session_id, message_id)
+        job = await get_runtime().service.create_job(session_id, message_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     if job.status == models.TTS_JOB_STATUS_QUEUED:
@@ -136,7 +135,7 @@ async def create_job(session_id: str, message_id: int) -> TTSJobResponse:
     response_model=TTSJobResponse,
 )
 async def get_job(session_id: str, job_id: str) -> TTSJobResponse:
-    job = get_runtime().gateway.tts.get_job(session_id, job_id)
+    job = get_runtime().service.get_job(session_id, job_id)
     if job is None:
         raise HTTPException(
             status_code=404,
@@ -154,7 +153,7 @@ async def get_job(session_id: str, job_id: str) -> TTSJobResponse:
 )
 async def retry_job(session_id: str, job_id: str) -> TTSJobResponse:
     try:
-        job = await get_runtime().facade.retry_job(session_id, job_id)
+        job = await get_runtime().service.retry_job(session_id, job_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     if job is None:
@@ -175,7 +174,7 @@ async def retry_job(session_id: str, job_id: str) -> TTSJobResponse:
 )
 async def get_audio(session_id: str, job_id: str, part_index: int) -> FileResponse:
     try:
-        path = get_runtime().facade.resolve_audio_part(session_id, job_id, part_index)
+        path = get_runtime().service.resolve_audio_part(session_id, job_id, part_index)
     except Exception as exc:
         raise _http_error(exc) from exc
     if not path.is_file():
@@ -190,7 +189,7 @@ async def get_audio(session_id: str, job_id: str, part_index: int) -> FileRespon
 
 
 def _job_response(job: models.TTSJob) -> TTSJobResponse:
-    parts = get_runtime().gateway.tts.list_parts(job.session_id, job.id)
+    parts = get_runtime().service.list_parts(job.session_id, job.id)
     return TTSJobResponse(
         jobId=job.id,
         sessionId=job.session_id,
