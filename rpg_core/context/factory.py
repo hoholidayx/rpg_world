@@ -112,7 +112,7 @@ def build_rpg_context(
     try:
         from rpg_core.status import StatusManager
 
-        status_mgr = StatusManager(session_id)
+        status_mgr = StatusManager(session_id, gateway.status)
     except Exception as exc:
         logger.debug("[RPG World] StatusManager init skipped: {}", exc)
 

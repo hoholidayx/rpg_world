@@ -8,10 +8,16 @@ from pathlib import Path
 from rpg_data import models
 from rpg_data.model.memory import DreamProposal, PersistentMemoryBundle
 from rpg_data.model.session import Session, SessionDerivationJob, SessionMessage
+from rpg_data.model.status import (
+    SessionStatusTable,
+    StatusTableDocument,
+    StatusTableTemplate,
+)
 from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
+from rpg_data.services.status import StatusDataService
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_ROOTS = (
@@ -58,6 +64,18 @@ RECENT_APPLICATION_SERVICE_FILES = (
     "rp_memory/persist_memory.py",
     "rp_memory/story_memory.py",
     "rp_memory/story_memory_service.py",
+    "rpg_core/scene/status.py",
+    "rpg_core/status/context_service.py",
+    "rpg_core/status/administration.py",
+    "rpg_core/status/manager.py",
+)
+
+STATUS_APPLICATION_SERVICE_FILES = (
+    "rpg_core/scene/status.py",
+    "rpg_core/session/status.py",
+    "rpg_core/status/administration.py",
+    "rpg_core/status/context_service.py",
+    "rpg_core/status/manager.py",
 )
 
 # Gateway lookup is valid at process/composition boundaries. These legacy
@@ -84,7 +102,6 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "rpg_core/lorebook.py",
     "rpg_core/rp_modules/registry.py",
     "rpg_core/session/manager.py",
-    "rpg_core/status/manager.py",
     "tts_service/main.py",
 })
 
@@ -143,6 +160,16 @@ def test_recent_application_services_do_not_depend_on_gateway() -> None:
     assert violations == []
 
 
+def test_status_application_services_use_narrow_data_ports() -> None:
+    violations = [
+        relative_path
+        for relative_path in STATUS_APPLICATION_SERVICE_FILES
+        if "rpg_data.services.status" in _imports(ROOT / relative_path)
+    ]
+
+    assert violations == []
+
+
 def test_gateway_lookup_surface_does_not_grow() -> None:
     actual = {
         path.relative_to(ROOT).as_posix()
@@ -171,6 +198,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         PlotSchedulingDataService,
         DreamMemoryDataService,
         StoryMemoryDataService,
+        StatusDataService,
     )
 
     assert all(service_type.__name__.endswith("DataService") for service_type in service_types)
@@ -182,6 +210,25 @@ def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.SessionDerivationJob is SessionDerivationJob
     assert models.DreamProposal is DreamProposal
     assert models.PersistentMemoryBundle is PersistentMemoryBundle
+    assert models.SessionStatusTable is SessionStatusTable
+    assert models.StatusTableDocument is StatusTableDocument
+    assert models.StatusTableTemplate is StatusTableTemplate
+
+
+def test_status_data_service_does_not_expose_business_policy_entrypoints() -> None:
+    forbidden = {
+        "commit_bootstrap_state",
+        "commit_deferred_update",
+        "create_story_template",
+        "delete_story_template_mount",
+        "get_active_scene_table",
+        "get_scene_attrs",
+        "list_context_tables",
+        "runtime_delete_key_value",
+        "runtime_set_key_value",
+    }
+
+    assert forbidden.isdisjoint(vars(StatusDataService))
 
 
 def _production_python_files():

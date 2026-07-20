@@ -34,7 +34,8 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
-- **2026-07-20：`rpg_data` 依赖边界收口。** `DataServiceGateway` 保留为数据库生命周期与 Data Service 注册表，Session、Plot、Dream/Memory 的业务服务改为显式依赖窄 Protocol；`sessions` 作为大业务聚合 Data Service 取代角色、派生、删除三个薄入口。Session/Memory 存储类型拆入 `rpg_data.model.*`，旧 `rpg_data.models` 兼容重导出，并增加静态守卫防止 Repository/Peewee record 外泄、业务 service 持有 Gateway 或 Gateway lookup 面继续增长。复杂查询、分页、批量、CAS、数据库原子操作和高效 read model 仍归数据层；本轮不启动 Status/Scene P3。
+- **2026-07-20：Status / Scene 业务与数据层拆分。** 状态模板/挂载/Session 表管理、Scene 字段规则与 active Scene、角色名修复与 Context 可见性、运行时/deferred/bootstrap 写入资格统一归 `rpg_core`；`StatusDataService` 只保留 typed CRUD、关联 read model、deferred progress、last-write-wins 诊断和原子 document batch。Status 存储契约迁入 `rpg_data.model.status`，Gateway 属性和 HTTP/SSE/数据库结构保持不变。
+- **2026-07-20：`rpg_data` 依赖边界收口。** `DataServiceGateway` 保留为数据库生命周期与 Data Service 注册表，Session、Plot、Dream/Memory 的业务服务改为显式依赖窄 Protocol；`sessions` 作为大业务聚合 Data Service 取代角色、派生、删除三个薄入口。Session/Memory 存储类型拆入 `rpg_data.model.*`，旧 `rpg_data.models` 兼容重导出，并增加静态守卫防止 Repository/Peewee record 外泄、业务 service 持有 Gateway 或 Gateway lookup 面继续增长。复杂查询、分页、批量、CAS、数据库原子操作和高效 read model 仍归数据层。
 - **2026-07-20：Dream / Story Memory 业务与数据层拆分。** Dream Proposal 状态机、恢复、两阶段来源确认、Persistent Memory 生命周期和 Context 投影统一归 `rp_memory.dream`，Story Memory 的规范化、exact dedupe、合并、Evidence 与 version 归 `StoryMemoryApplicationService`；`rpg_data` 保留 typed 查询/read model、CRUD/CAS、批量与事务。Apply 继续使用 SQLite `IMMEDIATE`，第二次来源确认失败会回滚账本后独立标记 Proposal stale；SQL、HTTP、通知、SSE、WebUI 与 Context 可观察行为不变。
 - **2026-07-20：Session 业务与数据层拆分。** 角色绑定与 Opening、Story/Session 初始化、`/clear`、Session Derivation 和永久删除的业务规则迁入 `rpg_core.session`；`rpg_data` 只保留角色/Opening 查询、profile/job CRUD、条件删除、显式复制和调用方准备好的状态重置计划。Agent、Play API、Dream 与后台 worker 统一经 Core application service 调用，公开 HTTP/SSE 与数据库结构不变。
 - **2026-07-20：Story 剧情动态调度。** 新增内置 `plot_scheduler` RP Module、Story 级线性剧情大纲与事件池、Session 禁用覆盖和原子调度账本。每个 IC/GM turn 最多选择一个到期大纲节点与一个池事件；强制项到时直接进入动态层，软约束项使用独立 LLM 路由结合完整 fixed layer、状态表和最近 5 个原始 turn 判断适宜性。调度元数据受硬上限保护，Context 门禁在 scratch 前预留最多两条动态指令。Play WebUI 增加“剧情调度”独立入口，集中管理定义、Scene 时间、覆盖与判断历史，不改变主正文 SSE。
@@ -238,8 +239,9 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 
 会话中心详情面板和 Session Room 设置菜单提供永久删除入口，并统一使用确认弹窗。`DELETE /play-api/v1/sessions/{session_id}` 转发到 Agent service：先阻止该 session 的新请求、取消活动及排队生成并释放 watcher/SQLite，再删除 catalog 行、全部级联数据（包括 append-only 冷备）和 runtime 目录。它与保留 session 身份的 `/clear` 不同；运行目录清理失败时返回 `runtimeCleanup="pending"`，隔离目录可继续在数据清理中处理。
 
-状态表在 `rpg_data` 中采用 SQLite document 真源：
+状态表采用 SQLite document 真源；`rpg_data` 负责可靠存取，`rpg_core` 负责产品策略：
 
+- canonical 存储契约位于 `rpg_data.model.status`，`rpg_data.models` 只保留兼容重导出。`StatusDataService` 负责模板、Story 挂载、Session document、角色关联 read model、deferred progress 和原子批量写入；`StatusTableAdministrationService`、`SceneStatusService`、`StatusContextService` 与 `StatusManager` 分别承接管理后台用例、Scene、Context 和 Agent 运行时策略。
 - 模板表和会话表都在 SQL 行内保存封装后的 `document_json`，对外通过 `StatusTableDocument` / `StatusTableRow` 等 dataclass 暴露，不把原始 JSON 字符串作为正文数据返回。
 - SQLite 同时记录模板、story 挂载、session 副本、来源关系、排序、`metadata_json` 和 `status_kind`；`status_kind` 当前只允许 `scene` / `normal`。
 - 每个 `StatusTableRow` 可声明 `updateFrequency`、`updateRule` 和 `deferredIntervalTurns`。频率只允许 `realtime | event_driven | deferred | manual`；旧 document 缺少频率时按 `realtime` 读取，`event_driven` 必须填写非空规则，只有 `deferred` 可以配置正整数归纳周期。
@@ -252,7 +254,7 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 - migration `0008_status_update_frequency.sql` 新增 `rpg_session_status_deferred_progress`，以运行时表 ID + 字段 key 保存最后处理 turn。deferred 的 document 值与进度在同一数据库事务中提交；归纳失败不推进进度，truncate 只收缩进度边界且不回滚已经提交的状态值。`/clear` 删除全部进度和旧 Story 模板副本，再按当前挂载重建；`session_native` 表保留 ID、结构、metadata 和字段策略，仅将所有 value 置空。同名原生表与当前 Story 模板冲突时整个 reset 回滚。
 - `DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；service 不扫描目录补业务索引，也不维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。
 - Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
-- `当前场景` 是 `status_kind="scene"` 的特殊状态表，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。scene document 的所有字段固定为 `realtime`，保存边界拒绝 `event_driven` / `deferred` / `manual`。LLM 默认只能修改已有 key 的 value；`agent.scene.allow_runtime_key_changes=true` 才允许通过 scene 工具增删非锁定 key，管理端手工 CRUD 不受影响。
+- `当前场景` 是 `status_kind="scene"` 的特殊状态表，仍受 story 挂载约束；多张 scene 表存在时消费排序第一张。scene document 的所有字段固定为 `realtime`，Core 的管理、turn scratch、bootstrap 与 reset 写入边界都会拒绝 `event_driven` / `deferred` / `manual`。LLM 默认只能修改已有 key 的 value；`agent.scene.allow_runtime_key_changes=true` 才允许通过 scene 工具增删非锁定 key，管理端手工 CRUD 不受影响。
 - `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，workspace/story/session 运行目录使用 workspace-relative 路径时统一由 `rpg_data.settings` 解析并阻止路径逃逸。
 
 Play WebUI 的状态表页分为 `系统模板`、`故事状态模板` 和 `故事运行时` 三个视图。`系统模板` 管理工作区级模板及其 story 挂载；`故事状态模板` 管理当前 story 已挂载模板、故事内创建模板和可选角色绑定；`故事运行时` 只管理当前 session 的运行时副本。
@@ -311,7 +313,7 @@ Telegram 渠道当前支持：
 | `scene/` | 场景状态跟踪（时间/地点/属性） |
 | `character.py` | 角色卡只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
 | `lorebook.py` | 世界书只读适配，通过 `rpg_data` 按 session/story 读取挂载 |
-| `status/` | 状态表薄适配，通过 `rpg_data` 按 session 读取 SQLite document 真源 |
+| `status/` | 状态表管理/Context/运行时业务策略与 Agent facade，通过窄 Data Port 访问 SQLite document 真源 |
 | `rp_modules/` | RP 玩法模块框架，当前包含 Narrative Outcome 剧情裁定与 Dice 低层随机模块 |
 | `summary/` | 对话摘要压缩 |
 | 顶层 `llm_client/` | 供 Agent、Memory、Dream、TTS 及未来 Media planner 使用的稳定 HTTP/SSE 客户端、DTO 与 Provider facade |

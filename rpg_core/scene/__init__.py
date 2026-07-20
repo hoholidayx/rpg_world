@@ -5,6 +5,7 @@
 """
 
 from commons.scene_time import SceneTime
+from rpg_core.scene.status import SceneStatusService
 from rpg_core.scene.tracker import SceneTracker
 from rpg_core.scene.tools import (
     DeleteAttrTool,
@@ -18,6 +19,7 @@ from rpg_core.scene.tools import (
 
 __all__ = [
     "SceneTracker",
+    "SceneStatusService",
     "SceneTime",
     "DeleteAttrTool",
     "SCENE_ATTR_TOOL_NAME",

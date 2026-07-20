@@ -25,6 +25,7 @@ from rpg_core.rp_modules.plot_scheduler import (
     UpdatePlotOutlineCommand,
     UpdatePlotPoolCommand,
 )
+from rpg_core.scene.status import SceneStatusService
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway
 
@@ -881,7 +882,8 @@ async def get_session_plot_schedule(
     ))
     has_more = len(decisions) > limit
     decisions = decisions[:limit]
-    attrs = get_data_service_gateway().status.get_scene_attrs(session_id)
+    gateway = get_data_service_gateway()
+    attrs = SceneStatusService(gateway.status).get_attrs(session_id)
     scene_time: SceneTime | None = None
     scene_time_error = ""
     raw_time = str((attrs or {}).get("时间", "") or "").strip()

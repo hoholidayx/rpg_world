@@ -10,6 +10,12 @@ from typing import Mapping
 from peewee import Database, IntegrityError
 
 from rpg_data import models
+from rpg_data.model.status import (
+    SessionStatusResetPlan,
+    SessionStatusResetResult,
+    SessionStatusTable,
+    StoryStatusTable,
+)
 from rpg_data.repositories._utils import (
     serialize_rp_module_config,
     to_story_opening,
@@ -36,7 +42,7 @@ from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session_composer import SessionComposerService
-from rpg_data.services.status import StatusTableService
+from rpg_data.services.status import StatusDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 
 __all__ = [
@@ -66,7 +72,7 @@ class SessionDataService:
         self._composer = SessionComposerService(database)
         self._story_memory = StoryMemoryDataService(database)
         self._dream_memory = DreamMemoryDataService(database)
-        self._status = StatusTableService(database)
+        self._status = StatusDataService(database)
         self._media = MediaDataService(database)
 
     @contextmanager
@@ -354,21 +360,21 @@ class SessionDataService:
     def list_status_tables(
         self,
         session_id: str,
-    ) -> list[models.SessionStatusTable]:
+    ) -> list[SessionStatusTable]:
         return self._status.list_tables(str(session_id))
 
     def list_story_status_mounts(
         self,
         workspace_id: str,
         story_id: int,
-    ) -> list[models.StoryStatusTable]:
+    ) -> list[StoryStatusTable]:
         return self._status.list_story_mounts(str(workspace_id), int(story_id))
 
     def copy_story_status_mounts(
         self,
         session_id: str,
         mount_ids: Iterable[int],
-    ) -> list[models.SessionStatusTable]:
+    ) -> list[SessionStatusTable]:
         return self._status.copy_story_mounts_to_session(
             str(session_id),
             mount_ids,
@@ -377,8 +383,8 @@ class SessionDataService:
     def apply_status_reset_plan(
         self,
         session_id: str,
-        plan: models.SessionStatusResetPlan,
-    ) -> models.SessionStatusResetResult:
+        plan: SessionStatusResetPlan,
+    ) -> SessionStatusResetResult:
         return self._status.apply_session_reset_plan(str(session_id), plan)
 
     # Reset primitives ---------------------------------------------------

@@ -26,6 +26,7 @@ from rpg_core.session.role import (
     PlayerCharacterBindingStatus,
     SessionRoleService,
 )
+from rpg_core.status.manager import StatusManager
 from rpg_core.tests.integration.scripted_llm import (
     CONFIG_PROVIDER_KEY,
     SESSION_PROVIDER_KEY,
@@ -208,8 +209,10 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         "会话原生状态",
         document=deferred_document,
     )
-    integration_data_gateway.status.commit_deferred_update(
+    StatusManager(
         session_id,
+        integration_data_gateway.status,
+    ).commit_deferred_update(
         native_table.id,
         deferred_document.with_existing_values([("长期进度", "已推进")]),
         processed_keys=["长期进度"],

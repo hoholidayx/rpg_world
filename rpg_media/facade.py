@@ -13,7 +13,6 @@ from rpg_data import models
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.gateway import DataServiceGateway
 from rpg_data.services.media import MediaAssetInUseError, MediaDataService, MediaSourceRangeError
-from rpg_data.services.status import StatusTableService
 from rpg_media.background_agent import BackgroundMatcher, LLMMediaBackgroundAgent
 from rpg_media.brief import LLMVisualBriefPlanner, VisualBriefPlanner
 from rpg_media.errors import (
@@ -53,6 +52,12 @@ class _BlobBundle(Protocol):
     blob: models.MediaBlob
 
 
+class SceneAttrsReader(Protocol):
+    """Narrow Scene projection required by media background evaluation."""
+
+    def get_attrs(self, session_id: str) -> dict[str, str] | None: ...
+
+
 _BlobBundleT = TypeVar("_BlobBundleT", bound=_BlobBundle)
 
 
@@ -65,7 +70,7 @@ class MediaFacade:
         planner: VisualBriefPlanner,
         providers: MediaProviderCatalog,
         image_store: WorkspaceImageStore | None = None,
-        status: StatusTableService | None = None,
+        status: SceneAttrsReader | None = None,
         background_matcher: BackgroundMatcher | None = None,
         image_analyzer: ImageMetadataAnalyzer | None = None,
     ) -> None:
@@ -91,13 +96,15 @@ class MediaFacade:
         planner: VisualBriefPlanner | None = None,
         image_analyzer: ImageMetadataAnalyzer | None = None,
     ) -> "MediaFacade":
+        from rpg_core.scene.status import SceneStatusService
+
         configured = media_settings or settings
         return cls(
             data=gateway.media,
             catalog=gateway.catalog,
             planner=planner or LLMVisualBriefPlanner(),
             providers=providers or build_provider_catalog(configured.providers),
-            status=gateway.status,
+            status=SceneStatusService(gateway.status),
             image_analyzer=image_analyzer,
         )
 
@@ -614,7 +621,7 @@ class MediaFacade:
             session,
             target_turn_id=target_turn_id,
             scene_attrs=(
-                self._status.get_scene_attrs(session_id)
+                self._status.get_attrs(session_id)
                 if self._status is not None
                 else None
             ),

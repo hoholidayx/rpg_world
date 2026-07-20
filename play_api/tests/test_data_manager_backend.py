@@ -103,6 +103,7 @@ class FakeGateway:
         self.sessions = self
         self.character_management = FakeCharacterManagement()
         self.lorebook_management = FakeLorebookManagement()
+        self.status = object()
         self.initialize_calls = 0
         self.close_calls = 0
         self.database = object()

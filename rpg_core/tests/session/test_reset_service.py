@@ -9,6 +9,7 @@ from rpg_core.session.role import (
     PlayerCharacterBindingStatus,
     SessionRoleService,
 )
+from rpg_core.status.manager import StatusManager
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
 from rp_memory.story_memory_service import StoryMemoryApplicationService
@@ -105,8 +106,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         "会话原生表",
         document=deferred_document,
     )
-    gateway.status.commit_deferred_update(
-        session_id,
+    StatusManager(session_id, gateway.status).commit_deferred_update(
         native_table.id,
         deferred_document.with_existing_values([("长期进度", "已推进")]),
         processed_keys=["长期进度"],

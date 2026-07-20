@@ -5,8 +5,12 @@ import json
 import pytest
 
 from rpg_core.session.catalog import SessionCatalogService
+from rpg_core.scene.status import SceneStatusService
+from rpg_core.status.context_service import StatusContextService
+from rpg_core.status.administration import StatusTableAdministrationService
+from rpg_core.status.manager import StatusManager
 from rpg_data import models
-from rpg_data.models import StatusRowRef
+from rpg_data.model.status import StatusRowRef
 from rpg_data.repositories.records import CharacterRecord, SessionStatusTableRecord, StatusTableTemplateRecord
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
@@ -198,9 +202,10 @@ def test_story_status_mount_character_binding_and_session_metadata(tmp_path, cap
         metadata_json=json.dumps(metadata, ensure_ascii=False)
     ).where(SessionStatusTableRecord.id == copied.id).execute()
 
-    with caplog.at_level("WARNING", logger="rpg_data.status"):
+    with caplog.at_level("WARNING", logger="rpg_core.status.context_service"):
         context_table = next(
-            table for table in status.list_context_tables(str(session.id))
+            table
+            for table in StatusContextService(status).list_tables(str(session.id))
             if table.id == copied.id
         )
 
@@ -218,9 +223,10 @@ def test_story_status_mount_character_binding_and_session_metadata(tmp_path, cap
     ).where(SessionStatusTableRecord.id == copied.id).execute()
     caplog.clear()
 
-    with caplog.at_level("WARNING", logger="rpg_data.status"):
+    with caplog.at_level("WARNING", logger="rpg_core.status.context_service"):
         fallback_context_table = next(
-            table for table in status.list_context_tables(str(session.id))
+            table
+            for table in StatusContextService(status).list_tables(str(session.id))
             if table.id == copied.id
         )
 
@@ -242,8 +248,8 @@ def test_story_status_mount_character_binding_and_session_metadata(tmp_path, cap
     )
     caplog.clear()
 
-    with caplog.at_level("WARNING", logger="rpg_data.status"):
-        context_tables = status.list_context_tables(str(session.id))
+    with caplog.at_level("WARNING", logger="rpg_core.status.context_service"):
+        context_tables = StatusContextService(status).list_tables(str(session.id))
 
     assert copied.id not in {table.id for table in context_tables}
     assert "excluded character-bound status table from context" in caplog.text
@@ -275,8 +281,8 @@ def test_unresolved_character_bound_table_is_excluded_from_context(tmp_path, cap
         metadata_json=json.dumps(metadata, ensure_ascii=False)
     ).where(SessionStatusTableRecord.id == copied.id).execute()
 
-    with caplog.at_level("WARNING", logger="rpg_data.status"):
-        context_tables = status.list_context_tables(str(session.id))
+    with caplog.at_level("WARNING", logger="rpg_core.status.context_service"):
+        context_tables = StatusContextService(status).list_tables(str(session.id))
 
     assert copied.id not in {table.id for table in context_tables}
     assert "excluded character-bound status table from context" in caplog.text
@@ -334,24 +340,25 @@ def test_story_owned_status_template_can_be_deleted_by_mount(tmp_path) -> None:
     character_mount = characters.mount_character(workspace_id, story.id, character.id)
     assert character_mount is not None
 
-    owned_mount = status.create_story_template(
+    administration = StatusTableAdministrationService(status)
+    owned_mount = administration.create_story_template(
         workspace_id,
         story.id,
         "Keeper 状态",
         character_mount_id=character_mount.mount.id,
-        rows=[["姿态", "警戒"]],
+        document=_document(("姿态", "警戒")),
     )
     assert owned_mount.mount_origin == models.STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE
     assert owned_mount.story_character_mount_id == character_mount.mount.id
     assert status.get_template(owned_mount.status_table_id) is not None
 
-    status.delete_story_template_mount(workspace_id, story.id, owned_mount.id)
+    administration.delete_story_template(workspace_id, story.id, owned_mount.id)
     assert status.get_template(owned_mount.status_table_id) is None
 
     system_template = status.create_template(workspace_id, "系统模板", rows=[["旗帜", "亮起"]])
     system_mount = status.mount_template(workspace_id, story.id, system_template.id)
     with pytest.raises(ValueError):
-        status.delete_story_template_mount(workspace_id, story.id, system_mount.id)
+        administration.delete_story_template(workspace_id, story.id, system_mount.id)
     assert status.get_template(system_template.id) is not None
 
 
@@ -404,10 +411,10 @@ def test_session_scoped_save_warns_and_keeps_last_write(tmp_path, caplog) -> Non
             _document(("封印", "已修复")),
             expected_status_kind=models.STATUS_KIND_NORMAL,
             base_document=base_document,
-            write_source="agent_turn",
         )
 
-    assert saved.rows == (("封印", "已修复"),)
+    assert saved.table.rows == (("封印", "已修复"),)
+    assert saved.baseline_matched is False
     assert "last-write-wins" in caplog.text
 
     with pytest.raises(FileNotFoundError, match="unavailable"):
@@ -465,16 +472,14 @@ def test_key_value_write_updates_appends_and_rejects_duplicates(tmp_path) -> Non
 
     template = service.create_template(
         workspace_id,
-        "当前场景",
-        status_kind=models.STATUS_KIND_SCENE,
+        "普通状态",
         rows=[["位置", "森林"]],
     )
     service.mount_template(workspace_id, story.id, template.id)
     session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Key")
     assert session is not None
 
-    table = service.get_active_scene_table(str(session.id))
-    assert table is not None
+    table = service.get_table(str(session.id), "普通状态")
     assert service.set_key_value(table.id, "位置", "城堡").rows == (("位置", "城堡"),)
     assert service.set_key_value(table.id, "天气", "雨").rows == (("位置", "城堡"), ("天气", "雨"))
     assert service.delete_key_value(table.id, "位置").rows == (("天气", "雨"),)
@@ -487,17 +492,21 @@ def test_scene_is_story_mounted_and_active_scene_uses_first_sorted_table(tmp_pat
     gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "scene_ws")
     service = gateway.status
 
-    later_scene = service.create_template(
+    administration = StatusTableAdministrationService(service)
+    later_scene = administration.create_template(
         workspace_id,
         "备用场景",
         status_kind=models.STATUS_KIND_SCENE,
-        rows=[["位置", "营地"]],
+        document=_document(("位置", "营地")),
     )
-    active_scene = service.create_template(
+    active_scene = administration.create_template(
         workspace_id,
         "当前场景",
         status_kind=models.STATUS_KIND_SCENE,
-        rows=[["时间", "第 1 年 1 月 1 日 6 时"], ["位置", "森林"]],
+        document=_document(
+            ("时间", "第 1 年 1 月 1 日 6 时"),
+            ("位置", "森林"),
+        ),
     )
     normal = service.create_template(
         workspace_id,
@@ -512,50 +521,58 @@ def test_scene_is_story_mounted_and_active_scene_uses_first_sorted_table(tmp_pat
     assert session is not None
     session_id = str(session.id)
 
-    assert service.get_active_scene_table(session_id).name == "当前场景"
-    assert service.get_scene_attrs(session_id) == {
+    scene = SceneStatusService(service)
+    assert scene.get_active_table(session_id).name == "当前场景"
+    assert scene.get_attrs(session_id) == {
         "时间": "第 1 年 1 月 1 日 6 时",
         "位置": "森林",
     }
 
-    service.set_scene_attr(session_id, "天气", "雨")
-    assert service.get_scene_attrs(session_id)["天气"] == "雨"
+    manager = StatusManager(session_id, service)
+    table = scene.get_active_table(session_id)
+    assert table is not None
+    manager.runtime_set_key_value(table.id, "天气", "雨")
+    assert scene.get_attrs(session_id)["天气"] == "雨"
 
-    service.delete_scene_attr(session_id, "时间")
-    assert "时间" in service.get_scene_attrs(session_id)
+    with pytest.raises(PermissionError):
+        manager.runtime_delete_key_value(table.id, "时间")
+    assert "时间" in scene.get_attrs(session_id)
 
-    assert [table.name for table in service.list_context_tables(session_id)] == ["世界旗帜"]
+    assert [
+        table.name for table in StatusContextService(service).list_tables(session_id)
+    ] == ["世界旗帜"]
 
 
 def test_runtime_key_lock_allows_value_update_but_blocks_runtime_delete(tmp_path) -> None:
     gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "runtime_lock_ws")
     service = gateway.status
 
-    template = service.create_template(
+    template = StatusTableAdministrationService(service).create_template(
         workspace_id,
         "当前场景",
         status_kind=models.STATUS_KIND_SCENE,
-        rows=[["位置", "森林"], ["天气", "雨"]],
+        document=_document(("位置", "森林"), ("天气", "雨")),
     )
     service.mount_template(workspace_id, story.id, template.id)
     session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Runtime Lock")
     assert session is not None
 
-    table = service.get_active_scene_table(str(session.id))
+    manager = StatusManager(str(session.id), service)
+    table = SceneStatusService(service).get_active_table(str(session.id))
     assert table is not None
 
     assert table.document.row_for_key("位置").runtime_key_locked is True
     assert table.document.row_for_key("天气").runtime_key_locked is False
-    assert service.runtime_set_key_value(table.id, "位置", "城堡").rows[0] == ("位置", "城堡")
+    assert manager.runtime_set_key_value(table.id, "位置", "城堡")["rows"][0] == ["位置", "城堡"]
     with pytest.raises(PermissionError):
-        service.runtime_delete_key_value(table.id, "位置")
-    assert "位置" in service.get_scene_attrs(str(session.id))
+        manager.runtime_delete_key_value(table.id, "位置")
+    assert "位置" in manager.get_scene_attrs()
 
-    service.runtime_delete_key_value(table.id, "天气")
-    assert "天气" not in service.get_scene_attrs(str(session.id))
+    manager.runtime_delete_key_value(table.id, "天气")
+    assert "天气" not in manager.get_scene_attrs()
 
     service.delete_key_value(table.id, "位置")
-    assert "位置" not in service.get_scene_attrs(str(session.id))
+    assert "位置" not in manager.get_scene_attrs()
 
 
 def test_session_native_table_crud(tmp_path) -> None:
@@ -575,98 +592,89 @@ def test_session_native_table_crud(tmp_path) -> None:
     with pytest.raises(FileNotFoundError):
         service.get_table_by_id(table.id)
 
-
-def test_deferred_update_and_progress_commit_atomically(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "deferred_ws")
+def test_document_and_progress_batch_commits_atomically(tmp_path) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "batch_ws")
     service = gateway.status
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Deferred")
+    session = SessionCatalogService(gateway.sessions).create_session(
+        workspace_id,
+        story.id,
+        title="Batch",
+    )
     assert session is not None
-    document = models.StatusTableDocument.from_rows(rows=[
-        models.StatusTableRow(
-            "长期信任",
-            "低",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
-            deferred_interval_turns=2,
-        )
-    ])
+    document = _document(("长期信任", "低"))
     table = service.create_table(str(session.id), "人物关系", document=document)
     updated = document.with_existing_values([("长期信任", "中")])
 
-    service.commit_deferred_update(
+    result = service.commit_document_batch(
         str(session.id),
-        table.id,
-        updated,
-        processed_keys=["长期信任"],
-        last_processed_turn_id=4,
-        base_document=document,
+        (
+            models.StatusDocumentWrite(
+                table_id=table.id,
+                expected_status_kind=models.STATUS_KIND_NORMAL,
+                document=updated,
+                base_document=document,
+            ),
+        ),
+        (
+            models.StatusProgressWrite(
+                table_id=table.id,
+                field_key="长期信任",
+                last_processed_turn_id=4,
+            ),
+        ),
     )
 
-    assert service.get_table_by_id(table.id).document.rows[0].value == "中"
-    assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 4
+    assert result.tables[0].document == updated
+    assert result.baseline_mismatch_table_ids == ()
+    assert service.list_deferred_progress(str(session.id)) == [
+        models.StatusDeferredProgress(table.id, "长期信任", 4)
+    ]
     assert service.clamp_deferred_progress(str(session.id), 2) == 1
     assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 2
-    assert service.clamp_deferred_progress(str(session.id), 9) == 0
-
-    with pytest.raises(PermissionError, match="not deferred"):
-        service.commit_deferred_update(
-            str(session.id),
-            table.id,
-            models.StatusTableDocument.from_rows(rows=[
-                models.StatusTableRow("长期信任", "高")
-            ]),
-            processed_keys=["长期信任"],
-            last_processed_turn_id=5,
-        )
-    assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 2
 
 
-def test_bootstrap_state_commits_documents_and_all_deferred_progress_atomically(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "bootstrap_ws")
+def test_document_batch_validates_every_write_before_mutating(tmp_path) -> None:
+    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "atomic_batch_ws")
     service = gateway.status
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Bootstrap")
+    session = SessionCatalogService(gateway.sessions).create_session(
+        workspace_id,
+        story.id,
+        title="Atomic Batch",
+    )
     assert session is not None
-    base = models.StatusTableDocument.from_rows(rows=[
-        models.StatusTableRow("生命", "10"),
-        models.StatusTableRow(
-            "长期信任",
-            "低",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
-        ),
-    ])
-    table = service.create_table(str(session.id), "角色状态", document=base)
-    updated = base.with_existing_values([("生命", "8"), ("长期信任", "中")])
-
-    service.commit_bootstrap_state(
+    first = service.create_table(
         str(session.id),
-        [models.StatusBootstrapDocument(
-            table_id=table.id,
-            status_kind=models.STATUS_KIND_NORMAL,
-            document=updated,
-            base_document=base,
-        )],
-        deferred_progress={table.id: ("长期信任",)},
-        boundary_turn_id=12,
+        "角色状态",
+        document=_document(("生命", "10")),
+    )
+    second = service.create_table(
+        str(session.id),
+        "世界状态",
+        document=_document(("警戒", "低")),
     )
 
-    assert service.get_table_by_id(table.id).document == updated
-    assert service.list_deferred_progress(str(session.id)) == [
-        models.StatusDeferredProgress(table.id, "长期信任", 12)
-    ]
-
-    with pytest.raises(PermissionError, match="not deferred"):
-        service.commit_bootstrap_state(
+    with pytest.raises(ValueError, match="kind changed"):
+        service.commit_document_batch(
             str(session.id),
-            [models.StatusBootstrapDocument(
-                table_id=table.id,
-                status_kind=models.STATUS_KIND_NORMAL,
-                document=base,
-                base_document=updated,
-            )],
-            deferred_progress={table.id: ("生命",)},
-            boundary_turn_id=13,
+            (
+                models.StatusDocumentWrite(
+                    table_id=first.id,
+                    expected_status_kind=models.STATUS_KIND_NORMAL,
+                    document=_document(("生命", "8")),
+                    base_document=first.document,
+                ),
+                models.StatusDocumentWrite(
+                    table_id=second.id,
+                    expected_status_kind=models.STATUS_KIND_SCENE,
+                    document=_document(("警戒", "高")),
+                    base_document=second.document,
+                ),
+            ),
         )
-    assert service.get_table_by_id(table.id).document == updated
-    assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 12
+
+    assert service.get_table_by_id(first.id).document == first.document
+    assert service.get_table_by_id(second.id).document == second.document
+
 
 
 def test_scene_not_mounted_is_not_visible_to_session(tmp_path) -> None:
@@ -683,8 +691,9 @@ def test_scene_not_mounted_is_not_visible_to_session(tmp_path) -> None:
     session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="No Scene")
     assert session is not None
 
-    assert service.get_active_scene_table(str(session.id)) is None
-    assert service.get_scene_attrs(str(session.id)) is None
+    scene = SceneStatusService(service)
+    assert scene.get_active_table(str(session.id)) is None
+    assert scene.get_attrs(str(session.id)) is None
 
 
 def test_catalog_status_timing_works_when_catalog_is_accessed_first(tmp_path) -> None:

@@ -25,7 +25,7 @@ from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session import SessionDataConflictError, SessionDataService
 from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryDataService
-from rpg_data.services.status import StatusTableService
+from rpg_data.services.status import StatusDataService
 
 __all__ = [
     "BackupMessageComponent",
@@ -49,7 +49,7 @@ __all__ = [
     "SessionDataService",
     "SessionComposerService",
     "StoryMemoryDataService",
-    "StatusTableService",
+    "StatusDataService",
     "get_data_service_gateway",
     "reset_data_service_gateways",
 ]

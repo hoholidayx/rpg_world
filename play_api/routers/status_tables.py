@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
-from rpg_data import models
+from rpg_core.scene.status import SceneStatusPolicyError
+from rpg_data.model import status as models
 
 router = APIRouter(tags=["play-status-tables"])
 
@@ -96,7 +97,6 @@ class StatusTemplatePayload(StatusDocumentPayload):
     @model_validator(mode="after")
     def _validate_status_kind_policy(self) -> "StatusTemplatePayload":
         self.status_kind = models.validate_status_kind(self.status_kind)
-        _validate_scene_rows(self.status_kind, self.rows)
         return self
 
 
@@ -145,7 +145,6 @@ class SessionStatusTablePayload(StatusDocumentPayload):
     @model_validator(mode="after")
     def _validate_status_kind_policy(self) -> "SessionStatusTablePayload":
         self.status_kind = models.validate_status_kind(self.status_kind)
-        _validate_scene_rows(self.status_kind, self.rows)
         return self
 
 
@@ -312,39 +311,6 @@ def _document_from_patch(
     )
 
 
-def _validate_scene_rows(
-    status_kind: str,
-    rows: list[StatusRowPayload],
-) -> None:
-    if status_kind != models.STATUS_KIND_SCENE:
-        return
-    if any(
-        row.update_frequency != models.STATUS_UPDATE_FREQUENCY_REALTIME
-        for row in rows
-    ):
-        raise ValueError("scene status fields must use realtime updateFrequency")
-
-
-def _validate_document_for_kind(
-    status_kind: object,
-    document: models.StatusTableDocument | None,
-) -> None:
-    if document is None:
-        return
-    kind = models.validate_status_kind(str(status_kind or ""))
-    if (
-        kind == models.STATUS_KIND_SCENE
-        and any(
-            row.update_frequency != models.STATUS_UPDATE_FREQUENCY_REALTIME
-            for row in document.rows
-        )
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="scene status fields must use realtime updateFrequency",
-        )
-
-
 @router.get("/workspaces/{workspace_id}/status-templates", response_model=list[StatusTableResponse])
 async def list_status_templates(workspace_id: str, statusKind: str | None = None) -> list[StatusTableResponse]:
     items = await get_data_manager_backend().list_status_templates(workspace_id, status_kind=statusKind)
@@ -355,15 +321,18 @@ async def list_status_templates(workspace_id: str, statusKind: str | None = None
 
 @router.post("/workspaces/{workspace_id}/status-templates", response_model=StatusTableResponse)
 async def create_status_template(workspace_id: str, payload: StatusTemplatePayload) -> StatusTableResponse:
-    item = await get_data_manager_backend().create_status_template(
-        workspace_id,
-        name=payload.name,
-        status_kind=payload.status_kind,
-        document=payload.to_document(),
-        description=payload.description,
-        sort_order=payload.sort_order,
-        metadata=payload.metadata,
-    )
+    try:
+        item = await get_data_manager_backend().create_status_template(
+            workspace_id,
+            name=payload.name,
+            status_kind=payload.status_kind,
+            document=payload.to_document(),
+            description=payload.description,
+            sort_order=payload.sort_order,
+            metadata=payload.metadata,
+        )
+    except SceneStatusPolicyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     return _table_response(item)
@@ -378,15 +347,17 @@ async def update_status_template(workspace_id: str, template_id: int, payload: S
     if current is None:
         raise HTTPException(status_code=404, detail="status template not found")
     document = payload.to_document(current)
-    _validate_document_for_kind(current.get("status_kind"), document)
-    item = await get_data_manager_backend().update_status_template(
-        workspace_id,
-        template_id,
-        name=payload.name,
-        document=document,
-        description=payload.description,
-        sort_order=payload.sort_order,
-    )
+    try:
+        item = await get_data_manager_backend().update_status_template(
+            workspace_id,
+            template_id,
+            name=payload.name,
+            document=document,
+            description=payload.description,
+            sort_order=payload.sort_order,
+        )
+    except SceneStatusPolicyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="status template not found")
     return _table_response(item)
@@ -441,6 +412,8 @@ async def create_story_status_template(workspace_id: str, story_id: int, payload
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )
+    except SceneStatusPolicyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if item is None:
@@ -494,15 +467,18 @@ async def list_session_status_tables(session_id: str, statusKind: str | None = N
 
 @router.post("/sessions/{session_id}/status-tables", response_model=StatusTableResponse)
 async def create_session_status_table(session_id: str, payload: SessionStatusTablePayload) -> StatusTableResponse:
-    item = await get_data_manager_backend().create_session_status_table(
-        session_id,
-        name=payload.name,
-        status_kind=payload.status_kind,
-        document=payload.to_document(),
-        description=payload.description,
-        sort_order=payload.sort_order,
-        metadata=payload.metadata,
-    )
+    try:
+        item = await get_data_manager_backend().create_session_status_table(
+            session_id,
+            name=payload.name,
+            status_kind=payload.status_kind,
+            document=payload.to_document(),
+            description=payload.description,
+            sort_order=payload.sort_order,
+            metadata=payload.metadata,
+        )
+    except SceneStatusPolicyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="session not found")
     return _table_response(item)
@@ -517,15 +493,17 @@ async def update_session_status_table(session_id: str, table_id: int, payload: S
     if current is None:
         raise HTTPException(status_code=404, detail="status table not found")
     document = payload.to_document(current)
-    _validate_document_for_kind(current.get("status_kind"), document)
-    item = await get_data_manager_backend().update_session_status_table(
-        session_id,
-        table_id,
-        name=payload.name,
-        document=document,
-        description=payload.description,
-        sort_order=payload.sort_order,
-    )
+    try:
+        item = await get_data_manager_backend().update_session_status_table(
+            session_id,
+            table_id,
+            name=payload.name,
+            document=document,
+            description=payload.description,
+            sort_order=payload.sort_order,
+        )
+    except SceneStatusPolicyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="status table not found")
     return _table_response(item)

@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
-from rpg_data import models
+from rpg_data.model import status as models
 from rpg_core.tooling.base import BaseTool
 from rpg_core.status.manager import StatusValueUpdateResult
 

@@ -350,9 +350,9 @@ def _remove_unindexed_dir(
 
 
 def _ensure_session_copies(database: Database) -> int:
-    from rpg_data.services.status import StatusTableService
+    from rpg_data.services.status import StatusDataService
 
-    status_service = StatusTableService(database)
+    status_service = StatusDataService(database)
     initialized_count = 0
     for session in SessionRecord.select():
         session_id = str(session.id)

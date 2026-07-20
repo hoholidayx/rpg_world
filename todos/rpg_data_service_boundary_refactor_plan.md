@@ -8,14 +8,14 @@
 - [x] 已完成整改项：Session 生命周期、角色绑定与开局
 - [x] 已完成整改项：Dream / Persistent Memory / Story Memory
 - [x] 已完成阶段性架构收口：Gateway 注册表、聚合 Data Service、窄 Port、类型归属与静态守卫
-- [ ] **暂停项：状态表与 Scene（P3，本轮不实施）**
-- [ ] 后续整改项：Media 与 TTS
+- [x] 已完成整改项：状态表与 Scene（P3）
+- [ ] **下一整改项：Media 与 TTS（P4）**
 - [ ] 后续整改项：Story Catalog、Composer 与 RP Module 配置
 - [ ] 后续整改项：消息、历史和通用账本收尾
 
 本计划用于把 `rpg_data` 收敛为无框架、无业务决策的数据访问模块。整改后，`rpg_data` 负责数据库 DTO、序列化、复杂查询/read model、CRUD、分页、批量、CAS、数据完整性和数据库级原子持久化；业务规则、状态机、默认策略、跨聚合用例和玩家文案必须由对应领域模块或应用编排层持有。
 
-Plot Schedule、Session P1 与 Dream/P2 已按整改执行顺序完成，本轮目标改为复核这些提交并收紧依赖，不继续启动状态表与 Scene P3。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重或剧情调度优先级。P3 只有在后续明确恢复时才实施，避免为了形式统一继续制造样板层。
+Plot Schedule、Session P1、Dream/P2 与状态表/Scene P3 已按整改执行顺序完成，下一整改项为 Media/TTS P4。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重、剧情调度优先级或后台任务优先级。后续仍以迁出真实业务决策为准，不为了形式统一制造样板层。
 
 ## 1. 统一边界
 
@@ -147,13 +147,14 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 - [x] 增加静态架构测试：禁止 `rpg_data` 反向导入业务模块、Repository/Record 外泄、近期 application service 依赖 Gateway，以及 Gateway lookup allowlist 增长。
 - [x] 明确复杂查询、分页、批量、CAS、数据库原子操作和高效 read model 留在数据层，不以缩短文件或消灭全部 service 为整改目标。
 
-## 5. P3：状态表与 Scene（暂停）
+## 5. P3：状态表与 Scene
 
-- [ ] 将模板复制策略、Session native 表保留/清空策略、名称冲突规则和 deferred 更新推进迁入 `rpg_core/status`。
-- [ ] 将 scene 的专用规则、字段频率许可、runtime key 变化和 LLM 可写范围继续保留在 `rpg_core/scene`、StatusSubAgent 和工具层。
-- [ ] `rpg_data` 只提供 template/mount/session document CRUD、字段策略存储、调用方准备好 document 后的保存以及 deferred progress ledger CRUD。
-- [ ] `list_context_tables` 中角色分组、缺失角色回填和 Context 排除策略拆成数据读取投影与核心 Context policy，避免数据层决定 LLM 能看到什么。
-- [ ] 保持 last-write-wins 及偏离 scratch baseline 时 warning 的现有并发语义。
+- [x] 模板/Story 挂载/Session 表管理策略迁入 `rpg_core.status.StatusTableAdministrationService`；Session 初始化与 reset 继续由既有 `SessionStatusLifecycleService` 决定，数据层只复制明确 mount ID 或原子应用 typed reset plan。
+- [x] Scene 的默认锁定字段、仅 `realtime`、active Scene 选择与运行时 document 规范化归 `rpg_core.scene.SceneStatusService`，并覆盖管理、turn scratch、bootstrap 与 reset 写入路径。
+- [x] deferred/bootstrap 字段资格与运行时 key 删除权限归 `StatusManager`、StatusSubAgent 和工具层；`rpg_data` 只提供 deferred progress ledger 与通用原子 `commit_document_batch`。
+- [x] 角色关联复杂查询保留为 `StatusContextCandidate` 高效 read model，角色名修复、身份冲突排除和 LLM Context 可见性归 `StatusContextService`。
+- [x] Status DTO、document、存储枚举与 read model 迁入 `rpg_data.model.status`，`rpg_data.models` 只兼容重导出；公开持久化入口统一为 `StatusDataService`，Gateway 属性保持 `.status`。
+- [x] 保持 last-write-wins 及 scratch baseline 偏离只 warning 的并发语义；增加静态守卫，禁止数据服务重新暴露 Scene/Context/deferred/bootstrap 业务入口。
 
 ## 6. P4：Media 与 TTS
 

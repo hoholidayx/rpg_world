@@ -1,5 +1,11 @@
-"""RPG Status module — session status adapter backed by rpg_data."""
+"""RPG Status business policy and session-scoped Agent facade."""
 
+from rpg_core.status.administration import StatusTableAdministrationService
+from rpg_core.status.context_service import StatusContextService
 from rpg_core.status.manager import StatusManager
 
-__all__ = ["StatusManager"]
+__all__ = [
+    "StatusContextService",
+    "StatusManager",
+    "StatusTableAdministrationService",
+]

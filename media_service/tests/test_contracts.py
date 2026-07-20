@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from media_service.main import MediaRuntime, app, set_runtime_for_tests
 from media_service.worker import MediaJobWorker
+from rpg_core.scene.status import SceneStatusService
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway
 from rpg_media.brief import DemoVisualBriefPlanner
@@ -73,7 +74,7 @@ def _runtime(tmp_path, *, image_analyzer=None):  # noqa: ANN001, ANN202
             (LocalFileProvider(provider_dir),),
             default_key="local_file",
         ),
-        status=gateway.status,
+        status=SceneStatusService(gateway.status),
         background_matcher=_LibraryMatcher(gateway.media),
         image_analyzer=image_analyzer or _ImageAnalyzer(),
     )

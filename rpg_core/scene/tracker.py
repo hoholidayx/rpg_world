@@ -13,6 +13,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Mapping
 
 from commons.scene_time import SceneTime
+from rpg_core.scene.status import (
+    SCENE_LOCATION_ATTR,
+    SCENE_PRESENT_CHARACTERS_ATTR,
+    SCENE_TIME_ATTR,
+)
 
 if TYPE_CHECKING:
     from rpg_core.status.manager import StatusManager
@@ -21,9 +26,9 @@ if TYPE_CHECKING:
 class SceneTracker:
     """场景状态管理器，所有状态读写都直接委托给 rpg_data。"""
 
-    TIME_ATTR = "时间"
-    LOCATION_ATTR = "位置"
-    PRESENT_CHARACTERS_ATTR = "在场人物"
+    TIME_ATTR = SCENE_TIME_ATTR
+    LOCATION_ATTR = SCENE_LOCATION_ATTR
+    PRESENT_CHARACTERS_ATTR = SCENE_PRESENT_CHARACTERS_ATTR
     TIME_STATE_FIELDS = ("year", "month", "day", "hour", "minute")
     DEFAULT_ATTRS: dict[str, str] = {
         TIME_ATTR: "第 1 年 1 月 1 日 6 时",

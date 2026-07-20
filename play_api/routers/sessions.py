@@ -22,6 +22,7 @@ from play_api.sse_protocol import (
     SSE_RESPONSE_HEADERS,
     agent_event_kind,
 )
+from rpg_core.agent.turn.models import normalize_turn_mode
 from rpg_core.context.usage import ContextPreviewUsagePayload, TurnUsageWirePayload
 from rpg_core.rp_modules.narrative_outcome import (
     NARRATIVE_OUTCOME_DEFINITIONS,
@@ -31,7 +32,7 @@ from rpg_core.session.turn_metadata import (
     has_trustworthy_turn_metadata,
     validate_turn_metadata,
 )
-from rpg_core.agent.turn.models import normalize_turn_mode
+from rpg_core.scene.status import SceneStatusService
 from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(prefix="/sessions", tags=["play-sessions"])
@@ -820,7 +821,8 @@ async def get_session_turn(
 @router.get("/{session_id}/scene", response_model=PlayScene)
 async def get_current_scene(session_id: str) -> PlayScene:
     _, _, agent_session_id = _session_context(await resolve_session_or_404(session_id))
-    attrs = get_data_service_gateway().status.get_scene_attrs(agent_session_id)
+    gateway = get_data_service_gateway()
+    attrs = SceneStatusService(gateway.status).get_attrs(agent_session_id)
     return _scene_from_attrs(attrs)
 
 

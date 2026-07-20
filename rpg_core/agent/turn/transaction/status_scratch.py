@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from rpg_data.models import (
+from rpg_data.model.status import (
     STATUS_KEY_COLUMN,
     STATUS_KIND_NORMAL,
     STATUS_VALUE_COLUMN,
@@ -14,6 +14,7 @@ from rpg_data.models import (
     parse_status_document,
     serialize_status_document,
 )
+from rpg_core.scene.status import SceneStatusService
 from rpg_core.status.manager import StatusValueUpdateResult, collect_value_changes
 
 if TYPE_CHECKING:
@@ -205,10 +206,12 @@ class StatusDocumentScratch:
         return changes
 
     def _stage_document(self, table_id: int, document: StatusTableDocument) -> None:
-        if document == self._base_document(table_id):
+        status_kind = str(self._base_table(table_id).get("status_kind", ""))
+        prepared = SceneStatusService.prepare_document(status_kind, document)
+        if prepared == self._base_document(table_id):
             self._staged_documents.pop(table_id, None)
             return
-        self._staged_documents[table_id] = document
+        self._staged_documents[table_id] = prepared
 
     def _table_with_staged_document(self, table: dict[str, object]) -> dict[str, object]:
         table_id = int(table.get("id", 0))

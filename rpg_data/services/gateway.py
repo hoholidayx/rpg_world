@@ -26,7 +26,7 @@ from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryDataService
-from rpg_data.services.status import StatusTableService
+from rpg_data.services.status import StatusDataService
 from rpg_data.services.tts import TTSDataService
 from rpg_data.settings import resolve_database_path
 
@@ -65,7 +65,7 @@ class DataServiceGateway:
         self._session_composer: SessionComposerService | None = None
         self._backup: BackupService | None = None
         self._story_memory: StoryMemoryDataService | None = None
-        self._status: StatusTableService | None = None
+        self._status: StatusDataService | None = None
         self._tts: TTSDataService | None = None
         self._initialized = False
         logger.debug("data service gateway created db_path=%s", self._database_path)
@@ -240,11 +240,11 @@ class DataServiceGateway:
         return self._story_memory
 
     @property
-    def status(self) -> StatusTableService:
+    def status(self) -> StatusDataService:
         database = self.database
         if self._status is None:
             logger.debug("creating status service db_path=%s", self._database_path)
-            self._status = StatusTableService(database)
+            self._status = StatusDataService(database)
         self._ensure_bound()
         return self._status
 

@@ -1,8 +1,21 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+from dataclasses import replace
 
-from rpg_data.models import STATUS_KIND_NORMAL, STATUS_KIND_SCENE, SessionStatusTable, StatusTableDocument
+import pytest
+
+from rpg_data.model.status import (
+    STATUS_KIND_NORMAL,
+    STATUS_KIND_SCENE,
+    STATUS_UPDATE_FREQUENCY_DEFERRED,
+    SessionStatusTable,
+    StatusContextCandidate,
+    StatusDocumentBatchResult,
+    StatusDocumentSaveResult,
+    StatusTableData,
+    StatusTableDocument,
+    StatusTableRow,
+)
 from rpg_core.status.manager import StatusManager
 
 
@@ -24,7 +37,7 @@ def _table(
         name=name,
         description="",
         document=StatusTableDocument.from_data(
-            SimpleNamespace(headers=("属性", "值"), rows=rows)  # type: ignore[arg-type]
+            StatusTableData(headers=("属性", "值"), rows=rows)
         ),
         sort_order=0,
         metadata_json="{}",
@@ -53,9 +66,13 @@ class FakeStatusService:
             return [self.normal_table]
         return [self.normal_table, self.scene_table]
 
-    def list_context_tables(self, session_id: str):
-        self.calls.append(("list_context_tables", session_id))
-        return [self.normal_table]
+    def list_context_candidates(self, session_id: str):
+        self.calls.append(("list_context_candidates", session_id))
+        return [StatusContextCandidate(table=self.normal_table)]
+
+    def update_table_metadata_for_session(self, session_id, table_id, metadata):
+        self.calls.append(("update_table_metadata_for_session", session_id, table_id, metadata))
+        return self.normal_table
 
     def get_table(self, session_id: str, table_name: str, status_kind: str | None = None):
         self.calls.append(("get_table", session_id, table_name, status_kind))
@@ -72,7 +89,7 @@ class FakeStatusService:
     def save_table(self, table_id: int, document: StatusTableDocument):
         self.calls.append(("save_table", table_id, document))
         table = self.scene_table if table_id == 2 else self.normal_table
-        return SessionStatusTable(
+        saved = SessionStatusTable(
             id=table.id,
             session_id=table.session_id,
             workspace_id=table.workspace_id,
@@ -89,6 +106,7 @@ class FakeStatusService:
             created_at=table.created_at,
             updated_at=table.updated_at,
         )
+        return saved
 
     def save_table_for_session(
         self,
@@ -99,7 +117,7 @@ class FakeStatusService:
     ):
         self.calls.append(("save_table_for_session", session_id, table_id, document, kwargs))
         table = self.scene_table if table_id == 2 else self.normal_table
-        return SessionStatusTable(
+        saved = SessionStatusTable(
             id=table.id,
             session_id=table.session_id,
             workspace_id=table.workspace_id,
@@ -116,6 +134,7 @@ class FakeStatusService:
             created_at=table.created_at,
             updated_at=table.updated_at,
         )
+        return StatusDocumentSaveResult(table=saved, baseline_matched=True)
 
     def set_key_value(self, table_id: int, key: str, value: str, **kwargs):
         self.calls.append(("set_key_value", table_id, key, value, kwargs))
@@ -125,13 +144,12 @@ class FakeStatusService:
         self.calls.append(("delete_key_value", table_id, key, kwargs))
         return self.scene_table
 
-    def get_active_scene_table(self, session_id: str):
-        self.calls.append(("get_active_scene_table", session_id))
-        return self.scene_table
-
-    def get_scene_attrs(self, session_id: str):
-        self.calls.append(("get_scene_attrs", session_id))
-        return {"位置": "森林"}
+    def commit_document_batch(self, session_id, documents, progress=()):
+        documents = tuple(documents)
+        progress = tuple(progress)
+        self.calls.append(("commit_document_batch", session_id, documents, progress))
+        saved = replace(self.normal_table, document=documents[0].document)
+        return StatusDocumentBatchResult(tables=(saved,))
 
 
 def test_status_manager_is_thin_session_adapter() -> None:
@@ -151,32 +169,32 @@ def test_status_manager_is_thin_session_adapter() -> None:
     assert manager.get_scene_attrs() == {"位置": "森林"}
 
 
-def test_status_manager_defaults_to_gateway(monkeypatch) -> None:
-    import rpg_core.status.manager as manager_module
-
+def test_status_manager_requires_explicit_data_service() -> None:
     service = FakeStatusService()
-    monkeypatch.setattr(
-        manager_module,
-        "get_data_service_gateway",
-        lambda: SimpleNamespace(status=service),
-    )
-
-    manager = StatusManager("s_gateway")
-    assert manager.list_context_tables()[0]["id"] == 1
-    assert service.calls == [("list_context_tables", "s_gateway")]
+    with pytest.raises(TypeError):
+        StatusManager("s_gateway")  # type: ignore[call-arg]
+    assert service.calls == []
 
 
-def test_status_manager_delegates_selector_writes() -> None:
+def test_status_manager_applies_scene_policy_before_selector_writes() -> None:
     service = FakeStatusService()
     manager = StatusManager("s_main", service=service)
 
     manager.set_key_value(2, "位置", "城堡")
-    manager.delete_key_value(2, "天气")
+    manager.delete_key_value(2, "位置")
 
-    assert service.calls == [
-        ("set_key_value", 2, "位置", "城堡", {"key_column": "属性", "value_column": "值"}),
-        ("delete_key_value", 2, "天气", {"key_column": "属性"}),
+    assert [call[0] for call in service.calls] == [
+        "get_table_for_session",
+        "save_table_for_session",
+        "get_table_for_session",
+        "save_table_for_session",
     ]
+    saved_document = service.calls[1][3]
+    assert isinstance(saved_document, StatusTableDocument)
+    assert saved_document.row_for_key("位置").runtime_key_locked is True
+    deleted_document = service.calls[3][3]
+    assert isinstance(deleted_document, StatusTableDocument)
+    assert deleted_document.rows == ()
 
 
 def test_status_manager_exposes_document_cow_helpers() -> None:
@@ -188,21 +206,54 @@ def test_status_manager_exposes_document_cow_helpers() -> None:
     table = manager.save_table_document(2, updated)
 
     assert table["rows"] == [["位置", "城堡"]]
-    assert service.calls == [
-        ("get_table_for_session", "s_main", 2),
-        ("get_table_for_session", "s_main", 2),
-        (
-            "save_table_for_session",
-            "s_main",
-            2,
-            updated,
-            {
-                "expected_status_kind": STATUS_KIND_SCENE,
-                "base_document": None,
-                "write_source": "agent_turn",
-            },
-        ),
+    assert [call[0] for call in service.calls] == [
+        "get_table_for_session",
+        "get_table_for_session",
+        "save_table_for_session",
     ]
+    saved_document = service.calls[-1][3]
+    assert isinstance(saved_document, StatusTableDocument)
+    assert saved_document.row_for_key("位置").runtime_key_locked is True
+    assert service.calls[-1][4] == {
+        "expected_status_kind": STATUS_KIND_SCENE,
+        "base_document": None,
+    }
+
+
+def test_status_manager_owns_deferred_field_policy() -> None:
+    service = FakeStatusService()
+    manager = StatusManager("s_main", service=service)
+
+    with pytest.raises(PermissionError, match="not deferred"):
+        manager.commit_deferred_update(
+            1,
+            service.normal_table.document,
+            processed_keys=("封印",),
+            last_processed_turn_id=4,
+        )
+    assert not any(call[0] == "commit_document_batch" for call in service.calls)
+
+    deferred = StatusTableDocument.from_rows(
+        rows=[
+            StatusTableRow(
+                "长期信任",
+                "中",
+                update_frequency=STATUS_UPDATE_FREQUENCY_DEFERRED,
+            )
+        ]
+    )
+    service.normal_table = replace(service.normal_table, document=deferred)
+
+    result = manager.commit_deferred_update(
+        1,
+        deferred,
+        processed_keys=("长期信任",),
+        last_processed_turn_id=4,
+        base_document=deferred,
+    )
+
+    assert result["rows"] == [["长期信任", "中"]]
+    assert service.calls[-1][0] == "commit_document_batch"
 
 
 def test_context_factory_initializes_status_manager_with_session_id(
@@ -215,7 +266,7 @@ def test_context_factory_initializes_status_manager_with_session_id(
     import rpg_core.status as status_module
     from rpg_core.context.factory import build_rpg_context
 
-    seen_session_ids: list[str] = []
+    seen: list[tuple[str, object]] = []
 
     class FakeCharacterManager:
         def __init__(self, session_id: str) -> None:
@@ -232,8 +283,8 @@ def test_context_factory_initializes_status_manager_with_session_id(
             return []
 
     class FakeStatusManager:
-        def __init__(self, session_id: str) -> None:
-            seen_session_ids.append(session_id)
+        def __init__(self, session_id: str, service: object) -> None:
+            seen.append((session_id, service))
 
         def get_active_scene_table(self):
             return None
@@ -247,6 +298,8 @@ def test_context_factory_initializes_status_manager_with_session_id(
 
     context = build_rpg_context(workspace="data/test", session_id="s_factory")
 
-    assert seen_session_ids == ["s_factory"]
+    assert len(seen) == 1
+    assert seen[0][0] == "s_factory"
+    assert seen[0][1] is not None
     assert isinstance(context["status_mgr"], FakeStatusManager)
     assert context["scene_tracker"] is None

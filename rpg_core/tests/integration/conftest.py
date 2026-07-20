@@ -15,6 +15,7 @@ from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.manager import AgentManager
 from rpg_core.session.role import SessionRoleService
 from rpg_core.session.status import SessionStatusLifecycleService
+from rpg_core.status.administration import StatusTableAdministrationService
 from rpg_core.tests.integration.scripted_llm import (
     ScriptedLLMManager,
 )
@@ -261,21 +262,32 @@ def _ensure_integration_session_with_status(gateway, integration_workspace, sess
 def _mount_integration_status(gateway, workspace_id: str, story_id: int) -> None:
     if gateway.status.list_story_mounts(workspace_id, story_id):
         return
-    scene_template = gateway.status.create_template(
+    administration = StatusTableAdministrationService(gateway.status)
+    scene_template = administration.create_template(
         workspace_id,
         "集成当前场景",
         status_kind=models.STATUS_KIND_SCENE,
-        rows=[
-            ["时间", "第 2 年 3 月 4 日 5 时"],
-            ["位置", "集成测试大厅"],
-            ["在场人物", "测试者"],
-        ],
+        document=models.StatusTableDocument.from_data(
+            models.StatusTableData(
+                headers=("属性", "值"),
+                rows=(
+                    ("时间", "第 2 年 3 月 4 日 5 时"),
+                    ("位置", "集成测试大厅"),
+                    ("在场人物", "测试者"),
+                ),
+            )
+        ),
         sort_order=10,
     )
-    normal_template = gateway.status.create_template(
+    normal_template = administration.create_template(
         workspace_id,
         "集成线索",
-        rows=[["线索", "状态表已挂载"]],
+        document=models.StatusTableDocument.from_data(
+            models.StatusTableData(
+                headers=("属性", "值"),
+                rows=(("线索", "状态表已挂载"),),
+            )
+        ),
         sort_order=20,
     )
     gateway.status.mount_template(workspace_id, story_id, scene_template.id, sort_order=10)

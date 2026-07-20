@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from rpg_data.models import (
+from rpg_data.model.status import (
     STATUS_UPDATE_FREQUENCY_DEFERRED,
     STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
     StatusRowRef,

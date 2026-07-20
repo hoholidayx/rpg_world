@@ -5,8 +5,17 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
-from rpg_data import models as data_models
+from rpg_core.scene.status import SceneStatusService
 from rpg_data.model.session import Session
+from rpg_data.model.status import (
+    STATUS_ORIGIN_SESSION_NATIVE,
+    STATUS_ORIGIN_TEMPLATE_COPY,
+    SessionStatusDocumentWrite,
+    SessionStatusResetPlan,
+    SessionStatusResetResult,
+    SessionStatusTable,
+    StoryStatusTable,
+)
 
 
 class SessionStatusDataPort(Protocol):
@@ -15,25 +24,25 @@ class SessionStatusDataPort(Protocol):
     def list_status_tables(
         self,
         session_id: str,
-    ) -> list[data_models.SessionStatusTable]: ...
+    ) -> list[SessionStatusTable]: ...
 
     def list_story_status_mounts(
         self,
         workspace_id: str,
         story_id: int,
-    ) -> list[data_models.StoryStatusTable]: ...
+    ) -> list[StoryStatusTable]: ...
 
     def copy_story_status_mounts(
         self,
         session_id: str,
         mount_ids: Iterable[int],
-    ) -> list[data_models.SessionStatusTable]: ...
+    ) -> list[SessionStatusTable]: ...
 
     def apply_status_reset_plan(
         self,
         session_id: str,
-        plan: data_models.SessionStatusResetPlan,
-    ) -> data_models.SessionStatusResetResult: ...
+        plan: SessionStatusResetPlan,
+    ) -> SessionStatusResetResult: ...
 
 
 class SessionStatusLifecycleService:
@@ -42,7 +51,7 @@ class SessionStatusLifecycleService:
     def __init__(self, data: SessionStatusDataPort) -> None:
         self._data = data
 
-    def initialize(self, session_id: str) -> list[data_models.SessionStatusTable]:
+    def initialize(self, session_id: str) -> list[SessionStatusTable]:
         session = self._require_session(session_id)
         existing = self._data.list_status_tables(session.id)
         if existing:
@@ -56,18 +65,18 @@ class SessionStatusLifecycleService:
             (mount.id for mount in mounts),
         )
 
-    def reset(self, session_id: str) -> data_models.SessionStatusResetResult:
+    def reset(self, session_id: str) -> SessionStatusResetResult:
         session = self._require_session(session_id)
         existing = self._data.list_status_tables(session.id)
         template_tables = tuple(
             table
             for table in existing
-            if table.origin == data_models.STATUS_ORIGIN_TEMPLATE_COPY
+            if table.origin == STATUS_ORIGIN_TEMPLATE_COPY
         )
         native_tables = tuple(
             table
             for table in existing
-            if table.origin == data_models.STATUS_ORIGIN_SESSION_NATIVE
+            if table.origin == STATUS_ORIGIN_SESSION_NATIVE
         )
         known_ids = {table.id for table in template_tables + native_tables}
         unknown = [table for table in existing if table.id not in known_ids]
@@ -94,12 +103,15 @@ class SessionStatusLifecycleService:
                 + ", ".join(conflicts)
             )
 
-        plan = data_models.SessionStatusResetPlan(
+        plan = SessionStatusResetPlan(
             delete_table_ids=tuple(table.id for table in template_tables),
             document_writes=tuple(
-                data_models.SessionStatusDocumentWrite(
+                SessionStatusDocumentWrite(
                     table_id=table.id,
-                    document=table.document.with_cleared_values(),
+                    document=SceneStatusService.prepare_document(
+                        table.status_kind,
+                        table.document.with_cleared_values(),
+                    ),
                 )
                 for table in native_tables
             ),

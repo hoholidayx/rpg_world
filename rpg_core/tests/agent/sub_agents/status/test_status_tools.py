@@ -8,7 +8,12 @@ import pytest
 
 import rpg_core.agent.sub_agents.status.agent as status_module
 from llm_client.types import LLMResponse, LLMUsage
-from rpg_data.models import STATUS_KIND_NORMAL, STATUS_KIND_SCENE, StatusTableDocument, StatusTableRow
+from rpg_data.model.status import (
+    STATUS_KIND_NORMAL,
+    STATUS_KIND_SCENE,
+    StatusTableDocument,
+    StatusTableRow,
+)
 from rpg_core.agent.turn.transaction.status_scratch import ScratchStatusManager, StatusDocumentScratch
 from rpg_core.agent.sub_agents import (
     StatusSubAgent,

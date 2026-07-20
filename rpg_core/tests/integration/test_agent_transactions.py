@@ -8,6 +8,7 @@ from llm_client.types import ProviderChunk
 from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind, TurnCancelStatus
 from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentScratch
 from rpg_core.scene import SceneTracker
+from rpg_core.scene.status import SceneStatusService
 from rpg_core.tests.integration.scripted_llm import response, tool_call
 
 pytestmark = pytest.mark.integration
@@ -242,7 +243,7 @@ async def test_status_target_failure_keeps_successful_scene_and_main_turn_runnin
     assert "部分成功现场" in main_rows[0].content
     assert SceneTracker.RUNTIME_GUIDANCE not in main_rows[0].content
     assert backup_rows[0].content == main_rows[0].content
-    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    scene_attrs = SceneStatusService(integration_data_gateway.status).get_attrs("integration_status")
     assert scene_attrs is not None
     assert scene_attrs["位置"] == "部分成功现场"
     persisted = integration_data_gateway.status.get_table_for_session(
@@ -291,7 +292,7 @@ async def test_main_failure_discards_successful_partial_status_prewrites(
     with pytest.raises(RuntimeError, match="main provider unavailable"):
         await integration_status_agent.send("移动后主流程失败")
 
-    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    scene_attrs = SceneStatusService(integration_data_gateway.status).get_attrs("integration_status")
     assert scene_attrs is not None
     assert scene_attrs["位置"] == "集成测试大厅"
     persisted = integration_data_gateway.status.get_table_for_session(
@@ -575,7 +576,7 @@ async def test_main_agent_syncs_scene_and_normal_status_after_preadjudication(
         "位置",
         "在场人物",
     ]
-    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    scene_attrs = SceneStatusService(integration_data_gateway.status).get_attrs("integration_status")
     assert scene_attrs is not None
     assert scene_attrs["位置"] == "地下裂隙"
     persisted_table = integration_data_gateway.status.get_table_for_session(
@@ -623,7 +624,7 @@ async def test_default_scene_policy_rejects_main_agent_new_key(
         if message.get("role") == "tool"
     ]
     assert any("不能新增字段：天气" in message for message in tool_messages)
-    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    scene_attrs = SceneStatusService(integration_data_gateway.status).get_attrs("integration_status")
     assert scene_attrs is not None
     assert "天气" not in scene_attrs
 
@@ -884,7 +885,7 @@ async def test_stream_syncs_state_before_success_with_cost_narration(
     assert final.committed_turn_id == 1
     assert "回到北境镇" in final.content
     assert "需要我标记" not in final.content
-    scene_attrs = integration_data_gateway.status.get_scene_attrs("integration_status")
+    scene_attrs = SceneStatusService(integration_data_gateway.status).get_attrs("integration_status")
     assert scene_attrs is not None
     assert scene_attrs["位置"] == "北境镇·旅店"
     persisted_table = integration_data_gateway.status.get_table_for_session(

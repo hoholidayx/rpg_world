@@ -20,7 +20,11 @@ from peewee import (
     TextField,
 )
 
-from rpg_data.models import STATUS_KIND_NORMAL, STORY_STATUS_MOUNT_ORIGIN_SYSTEM, TURN_MODE_IC
+from rpg_data.model.status import (
+    STATUS_KIND_NORMAL,
+    STORY_STATUS_MOUNT_ORIGIN_SYSTEM,
+)
+from rpg_data.models import TURN_MODE_IC
 from rpg_data.settings import resolve_database_path
 
 __all__ = [

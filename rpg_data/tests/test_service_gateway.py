@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from rpg_core.scene.status import SceneStatusService
+from rpg_core.status.context_service import StatusContextService
 from rpg_data.bootstrap import (
     delete_unindexed_runtime_item,
     delete_unindexed_runtime_items,
@@ -37,8 +39,8 @@ def test_gateway_initializes_migrations_and_exposes_services(
     backup_message_count = gateway.backup.messages.count("s_forest001")
     templates = gateway.status.list_templates("demo_workspace")
     status_tables = gateway.status.list_tables("s_forest001")
-    context_tables = gateway.status.list_context_tables("s_forest001")
-    scene_table = gateway.status.get_active_scene_table("s_forest001")
+    context_tables = StatusContextService(gateway.status).list_tables("s_forest001")
+    scene_table = SceneStatusService(gateway.status).get_active_table("s_forest001")
 
     assert {workspace.id for workspace in workspaces} == {"demo_workspace"}
     assert [character.name for character in characters] == ["Bob", "Alice"]

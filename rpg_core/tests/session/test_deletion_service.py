@@ -8,6 +8,7 @@ from rpg_core.session.deletion import (
     SessionDeletionService,
     SessionRuntimeCleanupStatus,
 )
+from rpg_core.status.manager import StatusManager
 from rpg_data import models
 from rpg_data.repositories.records import (
     SessionBackupMessageRecord,
@@ -83,8 +84,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         )
     ])
     native = gateway.status.create_table(session.id, "Delete native", document=document)
-    gateway.status.commit_deferred_update(
-        session.id,
+    StatusManager(session.id, gateway.status).commit_deferred_update(
         native.id,
         document,
         processed_keys=["长期进度"],

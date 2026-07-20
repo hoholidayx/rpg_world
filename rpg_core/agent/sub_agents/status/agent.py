@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Callable, Iterator, TypeAlias
 
 from loguru import logger
 
-from rpg_data.models import (
+from rpg_data.model.status import (
     STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY,
     STATUS_ROW_UPDATE_FREQUENCY_KEY,
     STATUS_ROW_UPDATE_RULE_KEY,

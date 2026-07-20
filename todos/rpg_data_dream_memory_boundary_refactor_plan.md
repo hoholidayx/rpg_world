@@ -7,7 +7,7 @@
 - [x] P2 已完成实现与验证；本文件是 [`rpg_data_service_boundary_refactor_plan.md`](./rpg_data_service_boundary_refactor_plan.md) 的已落地模块记录。
 - [x] 前置整改 Plot Schedule 已提交：`ae37bf4`。
 - [x] 前置整改 Session 生命周期、角色绑定与开局已提交：`25b6f30`。
-- [x] 本模块完成时曾把状态表与 Scene 列为下一项；P2 后架构复核已将 P3 改为暂停，不在本轮实施。
+- [x] 本模块完成时曾把状态表与 Scene 列为下一项；P2 当轮曾暂停 P3，后续已恢复并完成，当前顺序以主整改计划为准。
 
 本轮把 Dream Proposal、Persistent Memory 账本和现有 Story Memory 视为一个耦合业务域处理：Dream 的 Shallow 来源直接消费 Story Memory，Apply 又会更新 Story Memory 的 Dream checkpoint，因此不能只迁移其中一半后长期保留双重业务入口。
 
