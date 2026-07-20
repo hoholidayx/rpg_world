@@ -5,19 +5,37 @@ import hashlib
 import pytest
 
 from commons.text_identity import stable_text_identity_key
-from rpg_core.session.deletion import SessionDeletionService
 from rpg_core.session.reset import SessionResetService
 from rpg_data import models
 from rpg_data.services import (
-    DreamActiveMemoryLimitError,
-    DreamEvidenceInvalidError,
-    DreamMemoryService,
-    DreamProposalConflictError,
-    DreamProposalStaleError,
     get_data_service_gateway,
     reset_data_service_gateways,
 )
-from rpg_data.services.dream_source_identity import story_memory_source_identity
+from rp_memory.dream.application import DreamApplicationService
+from rp_memory.dream.errors import (
+    DreamActiveMemoryLimitError,
+    DreamEvidenceInvalidError,
+    DreamProposalConflictError,
+    DreamProposalStaleError,
+)
+from rp_memory.dream.source_identity import story_memory_source_identity
+from rp_memory.dream.proposal import (
+    DreamProposalItemInput,
+    DreamProposalItemPatch,
+)
+from rp_memory.dream.types import (
+    DreamDepth,
+    DreamEvidence,
+    DreamProposalAction,
+    DreamProposalStatus,
+    DreamScope,
+    MAX_ACTIVE_MEMORIES,
+    MAX_DREAM_FACT_TEXT_CHARS,
+    MAX_DREAM_ITEM_EVIDENCE,
+    PersistentMemoryLifecycle,
+)
+from rp_memory.memory_types import EpistemicStatus, MemoryKind
+from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 
 @pytest.fixture(autouse=True)
@@ -28,8 +46,8 @@ def _reset_gateways(tmp_path, monkeypatch):  # noqa: ANN001
     reset_data_service_gateways()
 
 
-def _evidence(message: models.SessionMessage) -> models.DreamEvidenceDraft:
-    return models.DreamEvidenceDraft(
+def _evidence(message: models.SessionMessage) -> DreamEvidence:
+    return DreamEvidence(
         message_id=message.id,
         turn_id=message.turn_id,
         message_version=message.version,
@@ -38,9 +56,9 @@ def _evidence(message: models.SessionMessage) -> models.DreamEvidenceDraft:
 
 
 def _create_ready(
-    dream: DreamMemoryService,
+    dream: DreamApplicationService,
     session_id: str,
-    items: tuple[models.DreamProposalItemDraft, ...],
+    items: tuple[DreamProposalItemInput, ...],
     *,
     source_fingerprint: str = "f" * 64,
     manifests: bool = False,
@@ -48,8 +66,8 @@ def _create_ready(
     snapshot = dream.build_source_snapshot(session_id)
     proposal = dream.create_proposal(
         session_id,
-        depth=models.DREAM_DEPTH_SHALLOW,
-        scope=models.DREAM_SCOPE_INCREMENTAL,
+        depth=DreamDepth.SHALLOW,
+        scope=DreamScope.INCREMENTAL,
         history_fingerprint=snapshot.history_fingerprint,
         source_fingerprint=source_fingerprint,
         next_messages_manifest_json={"message": 1} if manifests else {},
@@ -59,9 +77,20 @@ def _create_ready(
     return dream.set_proposal_ready(proposal.id, items)
 
 
+def _dream(gateway, *, max_active_memories=MAX_ACTIVE_MEMORIES):  # noqa: ANN001, ANN202
+    return DreamApplicationService(
+        gateway.dream_data,
+        max_active_memories=max_active_memories,
+    )
+
+
+def _story_memory(gateway):  # noqa: ANN001, ANN202
+    return StoryMemoryApplicationService(gateway.story_memory_data)
+
+
 def test_snapshot_proposal_apply_and_context_evidence_guard(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream.sqlite3")
-    dream = gateway.dream
+    dream = _dream(gateway)
     snapshot = dream.build_source_snapshot("s_forest001")
     message = snapshot.messages[0]
 
@@ -87,12 +116,12 @@ def test_snapshot_proposal_apply_and_context_evidence_guard(tmp_path) -> None:
     ready = dream.set_proposal_ready(
         proposal.id,
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="a" * 64,
                 text="Alice 确认封印仍然完整。",
-                memory_kind="world_fact",
-                epistemic_status="confirmed",
+                memory_kind=MemoryKind.WORLD_FACT,
+                epistemic_status=EpistemicStatus.CONFIRMED,
                 salience=0.8,
                 evidence=(_evidence(message),),
             ),
@@ -107,7 +136,7 @@ def test_snapshot_proposal_apply_and_context_evidence_guard(tmp_path) -> None:
     patched = dream.update_proposal_items(
         ready.id,
         (
-            models.DreamProposalItemPatch(
+            DreamProposalItemPatch(
                 item_id=ready.items[0].id,
                 text="Alice 确认石林封印仍然完整。",
                 salience=0.9,
@@ -126,7 +155,7 @@ def test_snapshot_proposal_apply_and_context_evidence_guard(tmp_path) -> None:
         source_fingerprint="f" * 64,
     )
 
-    assert result.proposal.status == models.DREAM_PROPOSAL_STATUS_APPLIED
+    assert result.proposal.status == DreamProposalStatus.APPLIED.value
     assert result.active_memory_count == 1
     assert result.ledger_revision == 1
     assert len(result.created_memory_ids) == 1
@@ -147,15 +176,15 @@ def test_snapshot_proposal_apply_and_context_evidence_guard(tmp_path) -> None:
 
 def test_revision_retire_restore_and_supersede_preserve_history(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-lifecycle.sqlite3")
-    dream = gateway.dream
+    dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     evidence = (_evidence(message),)
     first = _create_ready(
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="a" * 64,
                 text="最初事实",
                 evidence=evidence,
@@ -173,13 +202,13 @@ def test_revision_retire_restore_and_supersede_preserve_history(tmp_path) -> Non
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="revise",
+            DreamProposalItemInput(
+                action=DreamProposalAction.REVISE,
                 target_memory_id=memory_id,
                 base_revision_number=1,
                 dedupe_key="a" * 64,
                 text="修订事实",
-                memory_kind="clue",
+                memory_kind=MemoryKind.CLUE,
                 evidence=evidence,
             ),
         ),
@@ -197,8 +226,8 @@ def test_revision_retire_restore_and_supersede_preserve_history(tmp_path) -> Non
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="retire",
+            DreamProposalItemInput(
+                action=DreamProposalAction.RETIRE,
                 target_memory_id=memory_id,
                 base_revision_number=2,
                 dedupe_key="a" * 64,
@@ -212,19 +241,19 @@ def test_revision_retire_restore_and_supersede_preserve_history(tmp_path) -> Non
     )
     assert dream.list_context_memories("s_forest001") == []
     restored = dream.restore_memory("s_forest001", memory_id)
-    assert restored.memory.lifecycle == models.DREAM_LIFECYCLE_ACTIVE
+    assert restored.memory.lifecycle == PersistentMemoryLifecycle.ACTIVE.value
 
     supersede = _create_ready(
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="supersede",
+            DreamProposalItemInput(
+                action=DreamProposalAction.SUPERSEDE,
                 target_memory_id=memory_id,
                 base_revision_number=2,
                 dedupe_key="b" * 64,
                 text="替代事实",
-                memory_kind="event",
+                memory_kind=MemoryKind.EVENT,
                 evidence=evidence,
             ),
         ),
@@ -237,7 +266,7 @@ def test_revision_retire_restore_and_supersede_preserve_history(tmp_path) -> Non
     rows = dream.list_memories("s_forest001")
     old = next(item for item in rows if item.memory.id == memory_id)
     new = next(item for item in rows if item.memory.id != memory_id)
-    assert old.memory.lifecycle == models.DREAM_LIFECYCLE_SUPERSEDED
+    assert old.memory.lifecycle == PersistentMemoryLifecycle.SUPERSEDED.value
     assert old.memory.superseded_by_memory_id == new.memory.id
     assert result.active_memory_count == 1
     assert [item.text for item in dream.list_context_memories("s_forest001")] == [
@@ -247,18 +276,18 @@ def test_revision_retire_restore_and_supersede_preserve_history(tmp_path) -> Non
 
 def test_add_revives_retired_memory_with_new_revision_and_evidence(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-revive.sqlite3")
-    dream = gateway.dream
+    dream = _dream(gateway)
     original_message = dream.build_source_snapshot("s_forest001").messages[0]
     fact_text = "封印的石门只会在月蚀时开启。"
     first = _create_ready(
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="ignored-by-normalization",
                 text=fact_text,
-                memory_kind="world_fact",
+                memory_kind=MemoryKind.WORLD_FACT,
                 evidence=(_evidence(original_message),),
             ),
         ),
@@ -279,8 +308,8 @@ def test_add_revives_retired_memory_with_new_revision_and_evidence(tmp_path) -> 
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="retire",
+            DreamProposalItemInput(
+                action=DreamProposalAction.RETIRE,
                 target_memory_id=memory_id,
                 base_revision_number=1,
                 dedupe_key=dedupe_key,
@@ -307,11 +336,11 @@ def test_add_revives_retired_memory_with_new_revision_and_evidence(tmp_path) -> 
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="also-ignored-by-normalization",
                 text=fact_text,
-                memory_kind="world_fact",
+                memory_kind=MemoryKind.WORLD_FACT,
                 evidence=(_evidence(new_message),),
             ),
         ),
@@ -330,7 +359,7 @@ def test_add_revives_retired_memory_with_new_revision_and_evidence(tmp_path) -> 
     assert len(memories) == 1
     revived = memories[0]
     assert revived.memory.id == memory_id
-    assert revived.memory.lifecycle == models.DREAM_LIFECYCLE_ACTIVE
+    assert revived.memory.lifecycle == PersistentMemoryLifecycle.ACTIVE.value
     assert revived.memory.current_revision_number == 2
     assert [revision.revision_number for revision in revived.revisions] == [1, 2]
     assert revived.revisions[0].evidence[0].message_id == original_message.id
@@ -340,15 +369,15 @@ def test_add_revives_retired_memory_with_new_revision_and_evidence(tmp_path) -> 
 
 def test_revive_counts_against_active_memory_limit(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-revive-limit.sqlite3")
-    dream = DreamMemoryService(gateway.database, max_active_memories=1)
+    dream = _dream(gateway, max_active_memories=1)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     retired_text = "月蚀会开启石门。"
     first = _create_ready(
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="ignored",
                 text=retired_text,
                 evidence=(_evidence(message),),
@@ -364,8 +393,8 @@ def test_revive_counts_against_active_memory_limit(tmp_path) -> None:
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="retire",
+            DreamProposalItemInput(
+                action=DreamProposalAction.RETIRE,
                 target_memory_id=memory_id,
                 base_revision_number=1,
                 dedupe_key=stable_text_identity_key(
@@ -385,8 +414,8 @@ def test_revive_counts_against_active_memory_limit(tmp_path) -> None:
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="ignored",
                 text="守卫持有唯一的铜钥匙。",
                 evidence=(_evidence(message),),
@@ -402,8 +431,8 @@ def test_revive_counts_against_active_memory_limit(tmp_path) -> None:
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="ignored",
                 text=retired_text,
                 evidence=(_evidence(message),),
@@ -422,22 +451,22 @@ def test_revive_counts_against_active_memory_limit(tmp_path) -> None:
         item for item in dream.list_memories("s_forest001")
         if item.memory.id == memory_id
     )
-    assert retired.memory.lifecycle == models.DREAM_LIFECYCLE_RETIRED
+    assert retired.memory.lifecycle == PersistentMemoryLifecycle.RETIRED.value
     assert retired.memory.current_revision_number == 1
     assert dream.get_state("s_forest001").ledger_revision == 3
-    assert dream.get_proposal(revive.id).status == models.DREAM_PROPOSAL_STATUS_READY
+    assert dream.get_proposal(revive.id).status == DreamProposalStatus.READY.value
 
 
 def test_evidence_becomes_invalid_when_message_leaves_in_world_source(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-mode-evidence.sqlite3")
-    dream = gateway.dream
+    dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     proposal = _create_ready(
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="a" * 64,
                 text="Alice 确认石林封印仍然完整。",
                 evidence=(_evidence(message),),
@@ -463,14 +492,14 @@ def test_context_projection_uses_batched_current_revision_queries(
     monkeypatch,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-context-query.sqlite3")
-    dream = gateway.dream
+    dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     proposal = _create_ready(
         dream,
         "s_forest001",
         tuple(
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key=hashlib.sha256(f"fact-{index}".encode()).hexdigest(),
                 text=f"长期事实 {index}",
                 evidence=(_evidence(message),),
@@ -504,14 +533,14 @@ def test_context_projection_uses_batched_current_revision_queries(
 
 def test_ledger_guard_stales_second_ready_proposal(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-stale.sqlite3")
-    dream = gateway.dream
+    dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     first = _create_ready(
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="a" * 64,
                 text="事实 A",
                 evidence=(_evidence(message),),
@@ -522,8 +551,8 @@ def test_ledger_guard_stales_second_ready_proposal(tmp_path) -> None:
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="b" * 64,
                 text="事实 B",
                 evidence=(_evidence(message),),
@@ -543,24 +572,24 @@ def test_ledger_guard_stales_second_ready_proposal(tmp_path) -> None:
             source_fingerprint=second.source_fingerprint,
         )
 
-    assert dream.get_proposal(second.id).status == models.DREAM_PROPOSAL_STATUS_STALE
+    assert dream.get_proposal(second.id).status == DreamProposalStatus.STALE.value
 
 
 def test_active_limit_and_reset_clear_all_dream_rows(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-limit.sqlite3")
     with pytest.raises(ValueError, match="between 1 and 64"):
-        DreamMemoryService(
-            gateway.database,
-            max_active_memories=models.DREAM_MAX_ACTIVE_MEMORIES + 1,
+        DreamApplicationService(
+            gateway.dream_data,
+            max_active_memories=MAX_ACTIVE_MEMORIES + 1,
         )
-    dream = DreamMemoryService(gateway.database, max_active_memories=1)
+    dream = _dream(gateway, max_active_memories=1)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     first = _create_ready(
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="a" * 64,
                 text="事实 A",
                 evidence=(_evidence(message),),
@@ -576,8 +605,8 @@ def test_active_limit_and_reset_clear_all_dream_rows(tmp_path) -> None:
         dream,
         "s_forest001",
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="b" * 64,
                 text="事实 B",
                 evidence=(_evidence(message),),
@@ -595,14 +624,14 @@ def test_active_limit_and_reset_clear_all_dream_rows(tmp_path) -> None:
 
     assert result.dream_memories_cleared == 1
     assert result.dream_proposals_cleared == 2
-    assert gateway.dream.list_memories("s_forest001") == []
-    assert gateway.dream.list_proposals("s_forest001") == []
-    assert gateway.dream.get_state("s_forest001").ledger_revision == 0
+    assert _dream(gateway).list_memories("s_forest001") == []
+    assert _dream(gateway).list_proposals("s_forest001") == []
+    assert _dream(gateway).get_state("s_forest001").ledger_revision == 0
 
 
 def test_proposal_payload_limits_are_enforced_at_data_boundary(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-limits.sqlite3")
-    dream = gateway.dream
+    dream = _dream(gateway)
     message = dream.build_source_snapshot("s_forest001").messages[0]
     snapshot = dream.build_source_snapshot("s_forest001")
     proposal = dream.create_proposal(
@@ -617,30 +646,30 @@ def test_proposal_payload_limits_are_enforced_at_data_boundary(tmp_path) -> None
         dream.set_proposal_ready(
             proposal.id,
             (
-                models.DreamProposalItemDraft(
-                    action="add",
+                DreamProposalItemInput(
+                    action=DreamProposalAction.ADD,
                     dedupe_key="a" * 64,
-                    text="x" * (models.DREAM_MAX_MEMORY_TEXT_CHARS + 1),
+                    text="x" * (MAX_DREAM_FACT_TEXT_CHARS + 1),
                     evidence=(_evidence(message),),
                 ),
             ),
         )
 
     too_many_evidence = tuple(
-        models.DreamEvidenceDraft(
+        DreamEvidence(
             message_id=index,
             turn_id=1,
             message_version=1,
             content_hash="b" * 64,
         )
-        for index in range(1, models.DREAM_MAX_EVIDENCE_PER_ITEM + 2)
+        for index in range(1, MAX_DREAM_ITEM_EVIDENCE + 2)
     )
     with pytest.raises(ValueError, match="at most 64 evidence"):
         dream.set_proposal_ready(
             proposal.id,
             (
-                models.DreamProposalItemDraft(
-                    action="add",
+                DreamProposalItemInput(
+                    action=DreamProposalAction.ADD,
                     dedupe_key="b" * 64,
                     text="bounded",
                     evidence=too_many_evidence,
@@ -651,8 +680,8 @@ def test_proposal_payload_limits_are_enforced_at_data_boundary(tmp_path) -> None
 
 def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-checkpoint.sqlite3")
-    dream = gateway.dream
-    story_memory = gateway.story_memory.add_detail(
+    dream = _dream(gateway)
+    story_memory = _story_memory(gateway).add_detail(
         "s_forest001",
         "封印发出蓝光",
         turn_id=1,
@@ -681,8 +710,8 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
     ready = dream.set_proposal_ready(
         proposal.id,
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="d" * 64,
                 text="封印持续发出蓝光。",
                 reason="长期有效的世界事实",
@@ -696,7 +725,7 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
         source_fingerprint=ready.source_fingerprint,
     )
 
-    assert gateway.story_memory.get(story_memory.id).dream_processed
+    assert _story_memory(gateway).get(story_memory.id).dream_processed
     assert str(story_memory.id) in (
         dream.get_state("s_forest001").story_memories_manifest_json
     )
@@ -726,7 +755,7 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
         proposal_id="not-the-generating-proposal",
     ) == 0
     assert dream.get_proposal(generating.id).status == (
-        models.DREAM_PROPOSAL_STATUS_GENERATING
+        DreamProposalStatus.GENERATING.value
     )
     interrupted = dream.interrupt_generating_proposals(
         "s_forest001",
@@ -734,33 +763,33 @@ def test_apply_advances_story_memory_manifest_but_reject_does_not(tmp_path) -> N
     )
     assert len(interrupted) == 1
     assert interrupted[0].id == generating.id
-    assert interrupted[0].status == models.DREAM_PROPOSAL_STATUS_INTERRUPTED
+    assert interrupted[0].status == DreamProposalStatus.INTERRUPTED.value
     assert interrupted[0].finished_at
     assert dream.get_proposal(generating.id).status == (
-        models.DREAM_PROPOSAL_STATUS_INTERRUPTED
+        DreamProposalStatus.INTERRUPTED.value
     )
 
 
 def test_story_memory_checkpoint_does_not_change_source_fingerprint(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-checkpoint-fingerprint.sqlite3")
-    story_memory = gateway.story_memory.add_detail(
+    story_memory = _story_memory(gateway).add_detail(
         "s_forest001",
         "封印发出蓝光",
         turn_id=1,
     )
-    before = gateway.dream.build_source_snapshot("s_forest001")
+    before = _dream(gateway).build_source_snapshot("s_forest001")
 
-    assert gateway.story_memory.set_dream_processed((story_memory.id,)) == 1
+    assert _story_memory(gateway).set_dream_processed((story_memory.id,)) == 1
 
-    after = gateway.dream.build_source_snapshot("s_forest001")
-    assert gateway.story_memory.get(story_memory.id).dream_processed
+    after = _dream(gateway).build_source_snapshot("s_forest001")
+    assert _story_memory(gateway).get(story_memory.id).dream_processed
     assert after.story_memory_fingerprint == before.story_memory_fingerprint
 
 
 def test_apply_rechecks_story_memory_version_inside_transaction(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "dream-story-stale.sqlite3")
-    dream = gateway.dream
-    story = gateway.story_memory.add_detail(
+    dream = _dream(gateway)
+    story = _story_memory(gateway).add_detail(
         "s_forest001",
         "封印发出蓝光",
         turn_id=1,
@@ -789,15 +818,15 @@ def test_apply_rechecks_story_memory_version_inside_transaction(tmp_path) -> Non
     ready = dream.set_proposal_ready(
         proposal.id,
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="a" * 64,
                 text="封印持续发出蓝光。",
                 evidence=(_evidence(message),),
             ),
         ),
     )
-    updated = gateway.story_memory.add_detail(
+    updated = _story_memory(gateway).add_detail(
         "s_forest001",
         "封印发出蓝光",
         turn_id=2,
@@ -812,54 +841,3 @@ def test_apply_rechecks_story_memory_version_inside_transaction(tmp_path) -> Non
             history_fingerprint=ready.history_fingerprint,
             source_fingerprint=ready.source_fingerprint,
         )
-
-
-def test_session_delete_cascades_dream_ledger_and_audit_rows(tmp_path) -> None:
-    gateway = get_data_service_gateway(tmp_path / "dream-delete.sqlite3")
-    session = gateway.catalog.create_session("demo_workspace", 1, title="Dream delete")
-    message = gateway.messages.append(
-        session.id,
-        models.MESSAGE_ROLE_USER,
-        "需要被删除的历史",
-        turn_id=1,
-        seq_in_turn=1,
-    )
-    proposal = _create_ready(
-        gateway.dream,
-        session.id,
-        (
-            models.DreamProposalItemDraft(
-                action="add",
-                dedupe_key="a" * 64,
-                text="需要被删除的事实",
-                evidence=(_evidence(message),),
-            ),
-        ),
-    )
-    gateway.dream.apply_proposal(
-        proposal.id,
-        history_fingerprint=proposal.history_fingerprint,
-        source_fingerprint=proposal.source_fingerprint,
-    )
-
-    result = SessionDeletionService(gateway).delete(session.id)
-
-    assert result is not None
-    assert gateway.dream.get_proposal(proposal.id) is None
-    for table in (
-        "rpg_session_dream_proposals",
-        "rpg_session_persistent_memories",
-        "rpg_session_persistent_memory_revisions",
-        "rpg_session_persistent_memory_evidence",
-        "rpg_session_dream_states",
-    ):
-        count = gateway.database.execute_sql(
-            f"SELECT COUNT(*) FROM {table}"  # noqa: S608 - fixed test table names
-        ).fetchone()[0]
-        if table in {
-            "rpg_session_persistent_memory_revisions",
-            "rpg_session_persistent_memory_evidence",
-        }:
-            assert count == 0
-        else:
-            assert count == 0

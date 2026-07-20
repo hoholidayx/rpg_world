@@ -20,6 +20,7 @@ from rpg_data.repositories.records import (
     SessionStoryMemoryRecord,
 )
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
+from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 
 @pytest.fixture(autouse=True)
@@ -52,7 +53,11 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         turn_id=1,
         seq_in_turn=1,
     )
-    gateway.story_memory.add_detail(session.id, "memory", turn_id=1)
+    StoryMemoryApplicationService(gateway.story_memory_data).add_detail(
+        session.id,
+        "memory",
+        turn_id=1,
+    )
     gateway.narrative_outcomes.record(
         session_id=session.id,
         turn_id=1,

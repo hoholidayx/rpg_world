@@ -16,7 +16,7 @@ from rpg_data.migrations.runner import run_migrations
 from rpg_data.services.backup import BackupService
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterManagementService, CharacterReadService
-from rpg_data.services.dream_memory import DreamMemoryService
+from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
 from rpg_data.services.message import MessageService
 from rpg_data.services.media import MediaDataService
@@ -27,7 +27,7 @@ from rpg_data.services.session_role import SessionRoleDataService
 from rpg_data.services.session_deletion import SessionDeletionDataService
 from rpg_data.services.session_derivation import SessionDerivationDataService
 from rpg_data.services.session_composer import SessionComposerService
-from rpg_data.services.story_memory import StoryMemoryService
+from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.status import StatusTableService
 from rpg_data.services.tts import TTSDataService
 from rpg_data.settings import resolve_database_path
@@ -53,7 +53,7 @@ class DataServiceGateway:
         self._lorebook: LorebookReadService | None = None
         self._lorebook_management: LorebookManagementService | None = None
         self._messages: MessageService | None = None
-        self._dream: DreamMemoryService | None = None
+        self._dream_data: DreamMemoryDataService | None = None
         self._media: MediaDataService | None = None
         self._narrative_outcomes: NarrativeOutcomeService | None = None
         self._plot_scheduling: PlotSchedulingDataService | None = None
@@ -63,7 +63,7 @@ class DataServiceGateway:
         self._session_derivations: SessionDerivationDataService | None = None
         self._session_composer: SessionComposerService | None = None
         self._backup: BackupService | None = None
-        self._story_memory: StoryMemoryService | None = None
+        self._story_memory_data: StoryMemoryDataService | None = None
         self._status: StatusTableService | None = None
         self._tts: TTSDataService | None = None
         self._initialized = False
@@ -136,13 +136,16 @@ class DataServiceGateway:
         return self._messages
 
     @property
-    def dream(self) -> DreamMemoryService:
+    def dream_data(self) -> DreamMemoryDataService:
         database = self.database
-        if self._dream is None:
-            logger.debug("creating Dream memory service db_path=%s", self._database_path)
-            self._dream = DreamMemoryService(database)
+        if self._dream_data is None:
+            logger.debug(
+                "creating Dream memory data service db_path=%s",
+                self._database_path,
+            )
+            self._dream_data = DreamMemoryDataService(database)
         self._ensure_bound()
-        return self._dream
+        return self._dream_data
 
     @property
     def media(self) -> MediaDataService:
@@ -248,13 +251,16 @@ class DataServiceGateway:
         return self._backup
 
     @property
-    def story_memory(self) -> StoryMemoryService:
+    def story_memory_data(self) -> StoryMemoryDataService:
         database = self.database
-        if self._story_memory is None:
-            logger.debug("creating story memory service db_path=%s", self._database_path)
-            self._story_memory = StoryMemoryService(database)
+        if self._story_memory_data is None:
+            logger.debug(
+                "creating Story Memory data service db_path=%s",
+                self._database_path,
+            )
+            self._story_memory_data = StoryMemoryDataService(database)
         self._ensure_bound()
-        return self._story_memory
+        return self._story_memory_data
 
     @property
     def status(self) -> StatusTableService:
@@ -299,7 +305,7 @@ class DataServiceGateway:
         self._lorebook = None
         self._lorebook_management = None
         self._messages = None
-        self._dream = None
+        self._dream_data = None
         self._media = None
         self._narrative_outcomes = None
         self._plot_scheduling = None
@@ -309,9 +315,15 @@ class DataServiceGateway:
         self._session_derivations = None
         self._session_composer = None
         self._backup = None
-        self._story_memory = None
+        self._story_memory_data = None
         self._status = None
         self._tts = None
+
+    def close_thread_connection(self) -> None:
+        """Close only the current thread's Peewee connection, if one exists."""
+
+        if self._database is not None and not self._database.is_closed():
+            self._database.close()
 
     def _ensure_bound(self) -> None:
         if self._database is None:

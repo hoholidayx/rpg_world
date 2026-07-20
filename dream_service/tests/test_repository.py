@@ -4,8 +4,8 @@ import pytest
 
 from dream_service.repository import RPGDataDreamRepository
 from rpg_data import models
-from rpg_data.services.dream_memory import DreamProposalStaleError
 from rpg_data.services.gateway import get_data_service_gateway, reset_data_service_gateways
+from rp_memory.dream.errors import DreamProposalStaleError
 from rp_memory.dream.source import DreamSourceSelector
 from rp_memory.dream.types import (
     DreamDepth,
@@ -13,8 +13,15 @@ from rp_memory.dream.types import (
     DreamProposalAction,
     DreamProposalItemDraft,
     DreamScope,
+    MAX_ACTIVE_MEMORIES,
 )
+from rp_memory.memory_types import EpistemicStatus, MemoryKind
 from rpg_core.session.role import SessionRoleService
+from rp_memory.story_memory_service import StoryMemoryApplicationService
+
+
+def _story_memory(gateway):  # noqa: ANN001, ANN202
+    return StoryMemoryApplicationService(gateway.story_memory_data)
 
 
 def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
@@ -45,7 +52,7 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
         (first.id, second.id),
         batch_id=0,
     )
-    story_memory = gateway.story_memory.add_details_and_mark_processed(
+    story_memory = _story_memory(gateway).add_details_and_mark_processed(
         session.id,
         ({
             "text": "阿澈得到守卫交付的铜钥匙。",
@@ -102,8 +109,8 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
                 target_memory_id=None,
                 fact=DreamFact(
                     text="守卫把铜钥匙交给阿澈。",
-                    memory_kind="clue",
-                    epistemic_status="confirmed",
+                    memory_kind=MemoryKind.CLUE,
+                    epistemic_status=EpistemicStatus.CONFIRMED,
                     salience=0.8,
                     dedupe_key="guard-key-transfer",
                 ),
@@ -126,10 +133,10 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
     assert applied.status == "applied"
     assert repository.list_proposals(session.id).items[0].status == "applied"
     assert memories.active_count == 1
-    assert memories.active_limit == gateway.dream.max_active_memories
+    assert memories.active_limit == MAX_ACTIVE_MEMORIES
     assert memories.items[0].current_revision.text == "守卫把铜钥匙交给阿澈。"
     assert memories.items[0].evidence[0].message_id == second.id
-    assert gateway.story_memory.get(story_memory.id).dream_processed is True
+    assert _story_memory(gateway).get(story_memory.id).dream_processed is True
 
     gateway.close()
     reset_data_service_gateways()
@@ -195,8 +202,8 @@ def test_apply_rolls_back_and_marks_stale_when_source_changes_during_apply(
                 target_memory_id=None,
                 fact=DreamFact(
                     text="守卫把铜钥匙交给阿澈。",
-                    memory_kind="clue",
-                    epistemic_status="confirmed",
+                    memory_kind=MemoryKind.CLUE,
+                    epistemic_status=EpistemicStatus.CONFIRMED,
                     salience=0.8,
                 ),
                 evidence=(
@@ -338,7 +345,7 @@ def test_repository_preserves_valid_evidence_without_rebinding_replacement(
         turn_id=1,
         seq_in_turn=2,
     )
-    story_memory = gateway.story_memory.add_details_and_mark_processed(
+    story_memory = _story_memory(gateway).add_details_and_mark_processed(
         session.id,
         ({
             "text": "阿澈取得旧钥匙。",
@@ -384,8 +391,8 @@ def test_repository_preserves_valid_evidence_without_rebinding_replacement(
                 target_memory_id=None,
                 fact=DreamFact(
                     text="守卫交出的旧钥匙仍由阿澈持有。",
-                    memory_kind="clue",
-                    epistemic_status="confirmed",
+                    memory_kind=MemoryKind.CLUE,
+                    epistemic_status=EpistemicStatus.CONFIRMED,
                     salience=0.7,
                 ),
                 evidence=(
@@ -399,7 +406,7 @@ def test_repository_preserves_valid_evidence_without_rebinding_replacement(
         ),
     )
 
-    refreshed_story_memory = gateway.story_memory.add_details_and_mark_processed(
+    refreshed_story_memory = _story_memory(gateway).add_details_and_mark_processed(
         session.id,
         ({
             "text": "阿澈取得旧钥匙。",

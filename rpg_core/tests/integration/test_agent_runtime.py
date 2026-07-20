@@ -33,8 +33,22 @@ from rpg_core.tests.integration.scripted_llm import (
     response,
     tool_call,
 )
+from rp_memory.dream.application import DreamApplicationService
+from rp_memory.dream.proposal import DreamProposalItemInput
+from rp_memory.dream.types import DreamDepth, DreamScope
+from rp_memory.dream.types import DreamEvidence, DreamProposalAction
+from rp_memory.memory_types import EpistemicStatus, MemoryKind
+from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 pytestmark = pytest.mark.integration
+
+
+def _story_memory(gateway):  # noqa: ANN001, ANN202
+    return StoryMemoryApplicationService(gateway.story_memory_data)
+
+
+def _dream(gateway):  # noqa: ANN001, ANN202
+    return DreamApplicationService(gateway.dream_data)
 
 
 @pytest.mark.asyncio
@@ -145,7 +159,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         config={},
     )
     assert module_override is not None
-    integration_data_gateway.story_memory.add_detail(
+    _story_memory(integration_data_gateway).add_detail(
         session_id,
         "旧剧情记忆",
         turn_id=2,
@@ -230,7 +244,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         (1, "欢迎 Integration Tester。")
     ]
     assert integration_data_gateway.messages.count(session_id) == 1
-    assert integration_data_gateway.story_memory.list(session_id) == []
+    assert _story_memory(integration_data_gateway).list(session_id) == []
     assert integration_data_gateway.narrative_outcomes.get_for_turn(session_id, 99) is None
     assert integration_data_gateway.media.list_jobs(session_id) == []
     assert integration_data_gateway.media.list_gallery(session_id) == []
@@ -512,7 +526,7 @@ async def test_story_memory_extraction_runs_after_commit_and_marks_message_rows(
     reply = await agent.send("我捡起银色钥匙")
 
     assert reply.text == "config-model response"
-    memories = integration_data_gateway.story_memory.list(session_id)
+    memories = _story_memory(integration_data_gateway).list(session_id)
     assert [item.text for item in memories] == ["测试者在大厅发现了一枚银色钥匙。"]
     assert [item.message_id for item in memories[0].evidence] == [
         row.id for row in integration_data_gateway.messages.list(session_id)
@@ -545,28 +559,28 @@ async def test_default_agent_disables_online_rag_but_keeps_story_and_persistent_
     assert first.committed_turn_id == 1
     assert first.text == "测试大厅的北门由银色机关控制。"
 
-    snapshot = integration_data_gateway.dream.build_source_snapshot(session_id)
+    snapshot = _dream(integration_data_gateway).build_source_snapshot(session_id)
     evidence_message = snapshot.messages[-1]
     source_fingerprint = "f" * 64
-    proposal = integration_data_gateway.dream.create_proposal(
+    proposal = _dream(integration_data_gateway).create_proposal(
         session_id,
-        depth=models.DREAM_DEPTH_SHALLOW,
-        scope=models.DREAM_SCOPE_INCREMENTAL,
+        depth=DreamDepth.SHALLOW,
+        scope=DreamScope.INCREMENTAL,
         history_fingerprint=snapshot.history_fingerprint,
         source_fingerprint=source_fingerprint,
     )
-    ready = integration_data_gateway.dream.set_proposal_ready(
+    ready = _dream(integration_data_gateway).set_proposal_ready(
         proposal.id,
         (
-            models.DreamProposalItemDraft(
-                action="add",
+            DreamProposalItemInput(
+                action=DreamProposalAction.ADD,
                 dedupe_key="a" * 64,
                 text="测试大厅的北门由银色机关控制。",
-                memory_kind="world_fact",
-                epistemic_status="confirmed",
+                memory_kind=MemoryKind.WORLD_FACT,
+                epistemic_status=EpistemicStatus.CONFIRMED,
                 salience=0.9,
                 evidence=(
-                    models.DreamEvidenceDraft(
+                    DreamEvidence(
                         message_id=evidence_message.id,
                         turn_id=evidence_message.turn_id,
                         message_version=evidence_message.version,
@@ -578,12 +592,12 @@ async def test_default_agent_disables_online_rag_but_keeps_story_and_persistent_
             ),
         ),
     )
-    integration_data_gateway.dream.apply_proposal(
+    _dream(integration_data_gateway).apply_proposal(
         ready.id,
         history_fingerprint=snapshot.history_fingerprint,
         source_fingerprint=source_fingerprint,
     )
-    integration_data_gateway.story_memory.add_detail(
+    _story_memory(integration_data_gateway).add_detail(
         session_id,
         "测试者在大厅拾取了一枚银色钥匙。",
         turn_id=1,

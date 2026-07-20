@@ -18,6 +18,7 @@ from rpg_core.session.role import SessionRoleService
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
+from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 
 def _sse_payloads(body: str) -> list[dict[str, object]]:
@@ -820,8 +821,9 @@ def test_session_story_memory_endpoint_pages_filters_and_reports_stats(tmp_path,
     reset_data_service_gateways()
     reset_delete_confirmation_tokens()
     gateway = get_data_service_gateway()
+    story_memory = StoryMemoryApplicationService(gateway.story_memory_data)
     session_id = "s_forest001"
-    gateway.story_memory.clear(session_id)
+    story_memory.clear(session_id)
     gateway.messages.clear(session_id)
 
     first_turn = [
@@ -832,7 +834,7 @@ def test_session_story_memory_endpoint_pages_filters_and_reports_stats(tmp_path,
         gateway.messages.append(session_id, "user", "检查月纹。", turn_id=2, seq_in_turn=1),
         gateway.messages.append(session_id, "assistant", "月纹指向北塔。", turn_id=2, seq_in_turn=2),
     ]
-    first = gateway.story_memory.add_details_and_mark_processed(
+    first = story_memory.add_details_and_mark_processed(
         session_id,
         [{
             "text": "门锁带有月纹。",
@@ -842,7 +844,7 @@ def test_session_story_memory_endpoint_pages_filters_and_reports_stats(tmp_path,
         }],
         message_ids=[row.id for row in first_turn],
     )[0]
-    second = gateway.story_memory.add_detail(
+    second = story_memory.add_detail(
         session_id,
         "月纹指向北塔。",
         turn_id=2,

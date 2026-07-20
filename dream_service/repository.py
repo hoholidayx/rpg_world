@@ -16,11 +16,6 @@ from rpg_core.session.role import (
     SessionRoleService,
 )
 from rpg_data import models
-from rpg_data.services.dream_memory import (
-    DreamEvidenceInvalidError,
-    DreamProposalStaleError,
-)
-from rpg_data.services.dream_source_identity import story_memory_source_identity
 from rpg_data.services.gateway import DataServiceGateway, get_data_service_gateway
 
 from dream_service.contracts import (
@@ -35,6 +30,13 @@ from dream_service.contracts import (
     DreamRevisionView,
 )
 from rp_memory.dream.source import combine_source_fingerprint
+from rp_memory.dream.application import DreamApplicationService
+from rp_memory.dream.ledger import PersistentMemoryProjection
+from rp_memory.dream.proposal import (
+    DreamProposalItemInput,
+    DreamProposalItemPatch,
+)
+from rp_memory.dream.source_identity import story_memory_source_identity
 from rp_memory.dream.types import (
     DreamDerivedSource,
     DreamEvidence,
@@ -47,14 +49,12 @@ from rp_memory.dream.types import (
     DreamSelection,
     DreamSourceKind,
     DreamSourceSnapshot,
+    PersistentMemoryLifecycle,
     dream_fact_identity_key,
 )
+from rp_memory.memory_types import EpistemicStatus, MemoryKind
 
 _FRONT_MATTER = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|\Z)", re.DOTALL)
-
-
-class _SourceChangedDuringApply(RuntimeError):
-    pass
 
 
 class RPGDataDreamRepository(DreamRepository):
@@ -62,9 +62,10 @@ class RPGDataDreamRepository(DreamRepository):
 
     def __init__(self, gateway: DataServiceGateway | None = None) -> None:
         self.gateway = gateway or get_data_service_gateway()
+        self._dream = DreamApplicationService(self.gateway.dream_data)
 
     def build_source_snapshot(self, session_id: str) -> DreamSourceSnapshot:
-        source = self.gateway.dream.build_source_snapshot(session_id)
+        source = self._dream.build_source_snapshot(session_id)
         messages = tuple(_message_source(item) for item in source.messages)
         source_message_by_id = {item.id: item for item in source.messages}
         messages_by_turn: dict[int, tuple[int, ...]] = {}
@@ -73,8 +74,9 @@ class RPGDataDreamRepository(DreamRepository):
         summary_turn_ranges: dict[int, tuple[int, int]] = {}
         for message in messages:
             if (
-                message.role not in {"user", "assistant"}
-                or message.mode not in {"ic", "gm"}
+                message.role
+                not in {models.MESSAGE_ROLE_USER, models.MESSAGE_ROLE_ASSISTANT}
+                or message.mode not in {models.TURN_MODE_IC, models.TURN_MODE_GM}
             ):
                 continue
             messages_by_turn[message.turn_id] = (
@@ -147,7 +149,7 @@ class RPGDataDreamRepository(DreamRepository):
         )
 
     def create_proposal(self, selection: DreamSelection) -> DreamProposalView:
-        proposal = self.gateway.dream.create_proposal(
+        proposal = self._dream.create_proposal(
             selection.snapshot.session_id,
             depth=selection.depth.value,
             scope=selection.scope.value,
@@ -171,7 +173,7 @@ class RPGDataDreamRepository(DreamRepository):
         session_id: str,
         proposal_id: str,
     ) -> DreamProposalView | None:
-        proposal = self.gateway.dream.get_proposal(proposal_id)
+        proposal = self._dream.get_proposal(proposal_id)
         if proposal is None or proposal.session_id != session_id:
             return None
         return _proposal_view(proposal)
@@ -180,7 +182,7 @@ class RPGDataDreamRepository(DreamRepository):
         return DreamProposalListView(
             items=tuple(
                 _proposal_view(proposal)
-                for proposal in self.gateway.dream.list_proposals(session_id)
+                for proposal in self._dream.list_proposals(session_id)
             )
         )
 
@@ -189,14 +191,14 @@ class RPGDataDreamRepository(DreamRepository):
         proposal_id: str,
         items: tuple[DreamProposalItemDraft, ...],
     ) -> DreamProposalView:
-        proposal = self.gateway.dream.get_proposal(proposal_id)
+        proposal = self._dream.get_proposal(proposal_id)
         if proposal is None:
             raise FileNotFoundError(f"Dream proposal not found: {proposal_id}")
         targets = {
             bundle.memory.id: bundle
-            for bundle in self.gateway.dream.list_memories(
+            for bundle in self._dream.list_memories(
                 proposal.session_id,
-                lifecycle=models.DREAM_LIFECYCLE_ACTIVE,
+                lifecycle=PersistentMemoryLifecycle.ACTIVE,
             )
         }
         drafts = tuple(
@@ -204,7 +206,7 @@ class RPGDataDreamRepository(DreamRepository):
             for index, item in enumerate(items)
         )
         return _proposal_view(
-            self.gateway.dream.set_proposal_ready(proposal_id, drafts)
+            self._dream.set_proposal_ready(proposal_id, drafts)
         )
 
     def set_proposal_failed(
@@ -215,7 +217,7 @@ class RPGDataDreamRepository(DreamRepository):
         error_message: str,
     ) -> DreamProposalView:
         return _proposal_view(
-            self.gateway.dream.set_proposal_failed(
+            self._dream.set_proposal_failed(
                 proposal_id,
                 error_code=error_code,
                 error_message=error_message,
@@ -230,7 +232,7 @@ class RPGDataDreamRepository(DreamRepository):
     ) -> tuple[DreamProposalView, ...]:
         return tuple(
             _proposal_view(proposal)
-            for proposal in self.gateway.dream.interrupt_generating_proposals(
+            for proposal in self._dream.interrupt_generating_proposals(
                 session_id,
                 proposal_id=proposal_id,
             )
@@ -244,18 +246,26 @@ class RPGDataDreamRepository(DreamRepository):
     ) -> DreamProposalView:
         self._require_proposal(session_id, proposal_id)
         patches = tuple(
-            models.DreamProposalItemPatch(
+            DreamProposalItemPatch(
                 item_id=item.item_id,
                 selected=item.selected,
                 text=item.text,
-                memory_kind=item.memory_kind,
-                epistemic_status=item.epistemic_status,
+                memory_kind=(
+                    MemoryKind(item.memory_kind)
+                    if item.memory_kind is not None
+                    else None
+                ),
+                epistemic_status=(
+                    EpistemicStatus(item.epistemic_status)
+                    if item.epistemic_status is not None
+                    else None
+                ),
                 salience=item.salience,
             )
             for item in updates
         )
         return _proposal_view(
-            self.gateway.dream.update_proposal_items(proposal_id, patches)
+            self._dream.update_proposal_items(proposal_id, patches)
         )
 
     def reject_proposal(
@@ -264,59 +274,18 @@ class RPGDataDreamRepository(DreamRepository):
         proposal_id: str,
     ) -> DreamProposalView:
         self._require_proposal(session_id, proposal_id)
-        return _proposal_view(self.gateway.dream.reject_proposal(proposal_id))
+        return _proposal_view(self._dream.reject_proposal(proposal_id))
 
     def apply_proposal(
         self,
         session_id: str,
         proposal_id: str,
     ) -> DreamProposalView:
-        deferred_error: DreamProposalStaleError | DreamEvidenceInvalidError | None = None
-        try:
-            with self.gateway.database.atomic("IMMEDIATE"):
-                self._require_proposal(session_id, proposal_id)
-                current = self.build_source_snapshot(session_id)
-                try:
-                    result = self.gateway.dream.apply_proposal(
-                        proposal_id,
-                        history_fingerprint=current.history_fingerprint,
-                        source_fingerprint=current.source_fingerprint,
-                    )
-                except (DreamProposalStaleError, DreamEvidenceInvalidError) as exc:
-                    # rpg_data records the terminal stale state before raising.
-                    # Keep that nested transaction committed by deferring the
-                    # public exception until the outer IMMEDIATE transaction ends.
-                    deferred_error = exc
-                    result = None
-                if deferred_error is None:
-                    confirmed = self.build_source_snapshot(session_id)
-                    if (
-                        confirmed.history_fingerprint != current.history_fingerprint
-                        or confirmed.source_fingerprint != current.source_fingerprint
-                    ):
-                        raise _SourceChangedDuringApply
-        except _SourceChangedDuringApply:
-            # The successful nested Apply was rolled back with the outer
-            # transaction. Re-enter the public data boundary with a deliberately
-            # stale history fingerprint so the proposal itself becomes stale.
-            try:
-                forced_stale_history = (
-                    ("0" if current.history_fingerprint[0] != "0" else "1")
-                    + current.history_fingerprint[1:]
-                )
-                self.gateway.dream.apply_proposal(
-                    proposal_id,
-                    history_fingerprint=forced_stale_history,
-                    source_fingerprint=current.source_fingerprint,
-                )
-            except DreamProposalStaleError:
-                pass
-            raise DreamProposalStaleError(
-                "Dream sources changed during proposal apply"
-            ) from None
-        if deferred_error is not None:
-            raise deferred_error
-        assert result is not None
+        self._require_proposal(session_id, proposal_id)
+        result = self._dream.apply_proposal(
+            proposal_id,
+            source_provider=self,
+        )
         return _proposal_view(result.proposal)
 
     def list_memories(
@@ -325,21 +294,23 @@ class RPGDataDreamRepository(DreamRepository):
         *,
         lifecycle: str | None = None,
     ) -> DreamMemoryListView:
-        if lifecycle is not None and lifecycle not in models.DREAM_LIFECYCLES:
-            raise ValueError(f"Unsupported Dream lifecycle: {lifecycle}")
-        all_bundles = self.gateway.dream.list_memories(session_id)
+        normalized_lifecycle = (
+            PersistentMemoryLifecycle(lifecycle) if lifecycle is not None else None
+        )
+        all_bundles = self._dream.list_memories(session_id)
         bundles = tuple(
             item
             for item in all_bundles
-            if lifecycle is None or item.memory.lifecycle == lifecycle
+            if normalized_lifecycle is None
+            or item.memory.lifecycle == normalized_lifecycle.value
         )
         return DreamMemoryListView(
             items=tuple(_memory_view(item) for item in bundles),
             active_count=sum(
-                item.memory.lifecycle == models.DREAM_LIFECYCLE_ACTIVE
+                item.memory.lifecycle == PersistentMemoryLifecycle.ACTIVE.value
                 for item in all_bundles
             ),
-            active_limit=self.gateway.dream.max_active_memories,
+            active_limit=self._dream.max_active_memories,
         )
 
     def restore_memory(
@@ -348,7 +319,7 @@ class RPGDataDreamRepository(DreamRepository):
         memory_id: str,
     ) -> DreamMemoryView:
         return _memory_view(
-            self.gateway.dream.restore_memory(session_id, memory_id)
+            self._dream.restore_memory(session_id, memory_id)
         )
 
     def close(self) -> None:
@@ -359,7 +330,7 @@ class RPGDataDreamRepository(DreamRepository):
         session_id: str,
         proposal_id: str,
     ) -> models.DreamProposal:
-        proposal = self.gateway.dream.get_proposal(proposal_id)
+        proposal = self._dream.get_proposal(proposal_id)
         if proposal is None or proposal.session_id != session_id:
             raise FileNotFoundError(f"Dream proposal not found: {proposal_id}")
         return proposal
@@ -502,15 +473,15 @@ def _optional_positive_ints(value: object) -> tuple[int, ...] | None:
     return tuple(result)
 
 
-def _ledger_memory(bundle: models.PersistentMemoryBundle) -> DreamLedgerMemory:
+def _ledger_memory(bundle: PersistentMemoryProjection) -> DreamLedgerMemory:
     revision = bundle.current_revision
     return DreamLedgerMemory(
         memory_id=bundle.memory.id,
-        lifecycle=bundle.memory.lifecycle,
+        lifecycle=PersistentMemoryLifecycle(bundle.memory.lifecycle),
         fact=DreamFact(
             text=revision.text,
-            memory_kind=revision.memory_kind,
-            epistemic_status=revision.epistemic_status,
+            memory_kind=MemoryKind(revision.memory_kind),
+            epistemic_status=EpistemicStatus(revision.epistemic_status),
             salience=revision.salience,
             dedupe_key=bundle.memory.dedupe_key,
         ),
@@ -530,8 +501,8 @@ def _data_item_draft(
     item: DreamProposalItemDraft,
     *,
     index: int,
-    targets: Mapping[str, models.PersistentMemoryBundle],
-) -> models.DreamProposalItemDraft:
+    targets: Mapping[str, PersistentMemoryProjection],
+) -> DreamProposalItemInput:
     target = targets.get(item.target_memory_id or "")
     if item.action != DreamProposalAction.ADD and target is None:
         raise FileNotFoundError(
@@ -539,14 +510,20 @@ def _data_item_draft(
         )
     if item.action == DreamProposalAction.RETIRE:
         assert target is not None
-        fact = target.current_revision
+        revision = target.current_revision
         dedupe_key = target.memory.dedupe_key
         text = ""
+        memory_kind = MemoryKind(revision.memory_kind)
+        epistemic_status = EpistemicStatus(revision.epistemic_status)
+        salience = revision.salience
     else:
         if item.fact is None:
             raise ValueError(f"Dream {item.action.value} item is missing a fact")
         fact = item.fact
         text = fact.text
+        memory_kind = fact.memory_kind
+        epistemic_status = fact.epistemic_status
+        salience = fact.salience
         if item.action == DreamProposalAction.REVISE:
             assert target is not None
             dedupe_key = target.memory.dedupe_key
@@ -556,13 +533,13 @@ def _data_item_draft(
                 fact.memory_kind,
                 fact.epistemic_status,
             )
-    return models.DreamProposalItemDraft(
-        action=item.action.value,
+    return DreamProposalItemInput(
+        action=item.action,
         dedupe_key=dedupe_key,
         text=text,
-        memory_kind=fact.memory_kind,
-        epistemic_status=fact.epistemic_status,
-        salience=fact.salience,
+        memory_kind=memory_kind,
+        epistemic_status=epistemic_status,
+        salience=salience,
         target_memory_id=item.target_memory_id,
         base_revision_number=(
             target.memory.current_revision_number if target is not None else None
@@ -571,7 +548,7 @@ def _data_item_draft(
         sort_order=index,
         reason=item.reason,
         evidence=tuple(
-            models.DreamEvidenceDraft(
+            DreamEvidence(
                 message_id=evidence.message_id,
                 turn_id=evidence.turn_id,
                 message_version=evidence.message_version,
@@ -622,7 +599,7 @@ def _proposal_view(proposal: models.DreamProposal) -> DreamProposalView:
     )
 
 
-def _memory_view(bundle: models.PersistentMemoryBundle) -> DreamMemoryView:
+def _memory_view(bundle: PersistentMemoryProjection) -> DreamMemoryView:
     current = bundle.current_revision
     return DreamMemoryView(
         memory_id=bundle.memory.id,

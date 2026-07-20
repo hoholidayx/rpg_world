@@ -33,6 +33,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-20：Dream / Story Memory 业务与数据层拆分。** Dream Proposal 状态机、恢复、两阶段来源确认、Persistent Memory 生命周期和 Context 投影统一归 `rp_memory.dream`，Story Memory 的规范化、exact dedupe、合并、Evidence 与 version 归 `StoryMemoryApplicationService`；`rpg_data` 只保留 typed CRUD/CAS/事务。Apply 继续使用 SQLite `IMMEDIATE`，第二次来源确认失败会回滚账本后独立标记 Proposal stale；SQL、HTTP、通知、SSE、WebUI 与 Context 可观察行为不变。
 - **2026-07-20：Session 业务与数据层拆分。** 角色绑定与 Opening、Story/Session 初始化、`/clear`、Session Derivation 和永久删除的业务规则迁入 `rpg_core.session`；`rpg_data` 只保留角色/Opening 查询、profile/job CRUD、条件删除、显式复制和调用方准备好的状态重置计划。Agent、Play API、Dream 与后台 worker 统一经 Core application service 调用，公开 HTTP/SSE 与数据库结构不变。
 - **2026-07-20：Story 剧情动态调度。** 新增内置 `plot_scheduler` RP Module、Story 级线性剧情大纲与事件池、Session 禁用覆盖和原子调度账本。每个 IC/GM turn 最多选择一个到期大纲节点与一个池事件；强制项到时直接进入动态层，软约束项使用独立 LLM 路由结合完整 fixed layer、状态表和最近 5 个原始 turn 判断适宜性。调度元数据受硬上限保护，Context 门禁在 scratch 前预留最多两条动态指令。Play WebUI 增加“剧情调度”独立入口，集中管理定义、Scene 时间、覆盖与判断历史，不改变主正文 SSE。
 - **2026-07-18：后台终态通知链路。** Dream proposal 与 Session Derivation 在 SQL 终态提交后，通过专用异步 publisher 把 `ready / failed / interrupted` 发送到 Play API 的进程内广播 Hub；Play WebUI 在根 Provider 建立唯一全局 EventSource，并在顶栏独立通知中心展示最近事件。通知只保存在页面内存，可标记已读和清除；不增加 Toast、自动刷新或任务状态回写。
@@ -313,7 +314,8 @@ Telegram 渠道当前支持：
 | `summary/` | 对话摘要压缩 |
 | 顶层 `llm_client/` | 供 Agent、Memory、Dream、TTS 及未来 Media planner 使用的稳定 HTTP/SSE 客户端、DTO 与 Provider facade |
 | 顶层 `llm_service/` | LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析与本地 llama runtime |
-| 顶层 `rp_memory/dream/` | 无框架的 Shallow/Deep 选源、Map/Reduce、Evidence 校验与 proposal 规划领域 |
+| 顶层 `rp_memory/dream/` | 无框架的 Shallow/Deep 选源、Map/Reduce、Proposal 状态机、Apply/恢复与 Persistent Memory 生命周期领域 |
+| 顶层 `rpg_data/` | SQLite schema/migration、typed DTO、CRUD/CAS、分页与无业务语义事务边界 |
 | 顶层 `dream_service/` | 独立 Dream HTTP 进程、DreamClient 与进程内 async 生成任务 |
 | 顶层 `play_events/` | Dream/Derivation 共用的无框架事件 wire contract、内部令牌解析与 loop-owned HTTP publisher |
 | 顶层 `rpg_media/` | 来源快照、VisualBrief、图片 Provider 契约、内容寻址存储与媒体用例 |
@@ -321,7 +323,7 @@ Telegram 渠道当前支持：
 | 顶层 `rpg_tts/` | 正文标准化、确定性分段、缓存指纹与 MP3 内容寻址存储 |
 | 顶层 `tts_service/` | 独立 TTS HTTP 进程、TTSClient 与数据库持久任务 worker |
 
-顶层 `rp_memory/` 是独立记忆系统包：在线部分负责检索、索引、规划、召回和 rerank，`rp_memory.dream` 负责无框架的离线长期记忆归纳；Persistent Memory 的读写真源仍统一位于 `rpg_data` SQL。`rpg_core` 只读取其 Context 投影。顶层 `llm_service/` 是独立 LLM 服务实现，负责 provider 路由、配置解析、OpenAI-compatible provider 与本地 llama.cpp runtime。业务进程只依赖 `llm_client/`，不导入 `llm_service/`。
+顶层 `rp_memory/` 是独立记忆系统包：在线部分负责检索、索引、规划、召回和 rerank，`rp_memory.dream` 负责无框架的离线长期记忆归纳、Proposal/Apply/恢复策略和 Persistent Memory Context 投影，`StoryMemoryApplicationService` 负责 Story Memory 的语义写入。Persistent Memory 与 Story Memory 的持久化真源仍位于 `rpg_data` SQL，但数据层只执行领域层明确给出的 typed CRUD/CAS/事务操作。`rpg_core` 只读取记忆 Context 投影。顶层 `llm_service/` 是独立 LLM 服务实现，负责 provider 路由、配置解析、OpenAI-compatible provider 与本地 llama.cpp runtime。业务进程只依赖 `llm_client/`，不导入 `llm_service/`。
 
 ### Agent 组合式门面与 turn 事务
 
@@ -957,9 +959,9 @@ uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_servic
 
 - `channels/tests/`：ChannelAdapter、CLI、Telegram 渠道和渠道侧会话流程。
 - `rpg_core/tests/`：按源码领域镜像组织；Agent 测试继续按 runtime/mailbox/command/sub_agents/turn/tools 分组，其余 Context、Session、Summary、RP Modules、Scene、Status 与 utils 各自归档。
-- `rp_memory/tests/`：memory 检索、索引、规划、rerank，以及 Dream 选源、分批、Map/Reduce 和 retirement policy。
+- `rp_memory/tests/`：memory 检索、索引、规划、rerank，以及 Story Memory application、Dream 选源/Proposal/Apply/恢复、分批、Map/Reduce 和 retirement policy。
 - `dream_service/tests/`：Dream source adapter、进程内生成生命周期、HTTP/Client 契约与错误隔离。
-- `rpg_data/tests/`：catalog、消息、状态、Dream proposal/ledger/revision/Evidence、原子 Apply 与 `/clear` 数据语义。
+- `rpg_data/tests/`：catalog、消息、状态，以及 Dream/Story Memory proposal/ledger/revision/Evidence 的 CRUD、CAS、约束和事务回滚。
 - `llm_service/tests/`：LLM HTTP/SSE 客户端契约、鉴权、provider 配置、manager 路由与 llama 本地 runtime。
 - `play_api/tests/`：Play API workspace/session/scene/turn/stream、Dream service 代理、characters、lorebook、status-tables 和 ops 等契约。
 - `rpg_media/tests/`：来源指纹、简报、Provider、图片魔数/存储与高层媒体用例。
@@ -974,7 +976,10 @@ Dream 后端与 Play WebUI 的聚焦验证为：
 ```bash
 uv run python -m pytest \
   rp_memory/tests/test_dream.py \
-  rpg_data/tests/test_dream_memory_service.py \
+  rp_memory/tests/test_dream_application.py \
+  rp_memory/tests/test_dream_recovery.py \
+  rp_memory/tests/test_story_memory_application.py \
+  rpg_data/tests/test_dream_memory_data_service.py \
   dream_service/tests \
   play_api/tests/test_dream.py \
   play_api/tests/test_events.py -q

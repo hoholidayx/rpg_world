@@ -11,6 +11,11 @@ from rpg_core.session.role import (
 )
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
+from rp_memory.story_memory_service import StoryMemoryApplicationService
+
+
+def _story_memory(gateway):  # noqa: ANN001, ANN202
+    return StoryMemoryApplicationService(gateway.story_memory_data)
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +61,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         turn_id=2,
         seq_in_turn=1,
     )
-    gateway.story_memory.add_detail(session_id, "发现石碑", turn_id=2)
+    _story_memory(gateway).add_detail(session_id, "发现石碑", turn_id=2)
     gateway.narrative_outcomes.record(
         session_id=session_id,
         turn_id=2,
@@ -140,7 +145,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
         (models.MESSAGE_ROLE_ASSISTANT, result.first_message, 1, 1)
     ]
     assert gateway.narrative_outcomes.list_for_turns(session_id, [2]) == []
-    assert gateway.story_memory.list(session_id) == []
+    assert _story_memory(gateway).list(session_id) == []
     assert gateway.status.list_deferred_progress(session_id) == []
     rebuilt = gateway.status.get_table(session_id, template_name)
     assert rebuilt.document.rows[0].value == "Story 当前模板值"
@@ -185,7 +190,7 @@ def test_reset_rolls_back_all_database_changes_when_status_rebuild_fails(
         tmp_path
     )
     messages_before = gateway.messages.list(session_id)
-    memories_before = gateway.story_memory.list(session_id)
+    memories_before = _story_memory(gateway).list(session_id)
     tables_before = gateway.status.list_tables(session_id)
     backup_count = gateway.backup.messages.count(session_id)
 
@@ -198,7 +203,7 @@ def test_reset_rolls_back_all_database_changes_when_status_rebuild_fails(
         SessionResetService(gateway).reset(session_id)
 
     assert gateway.messages.list(session_id) == messages_before
-    assert gateway.story_memory.list(session_id) == memories_before
+    assert _story_memory(gateway).list(session_id) == memories_before
     assert gateway.status.list_tables(session_id) == tables_before
     assert gateway.narrative_outcomes.get_for_turn(session_id, 2) is not None
     assert gateway.backup.messages.count(session_id) == backup_count

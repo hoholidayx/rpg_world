@@ -29,17 +29,17 @@ from dream_service.schemas import (
 )
 from dream_service.settings import settings
 from rp_memory.dream.engine import DreamEngine
-from rp_memory.dream.errors import DreamAlreadyRunningError
-from rp_memory.dream.model import LLMDreamModel
-from rp_memory.dream.source import DreamSourceSelector
-from rp_memory.dream.types import DreamDepth, DreamScope
-from rpg_data.services.dream_memory import (
+from rp_memory.dream.errors import (
     DreamActiveMemoryLimitError,
+    DreamAlreadyRunningError,
     DreamEvidenceInvalidError,
     DreamProposalConflictError,
     DreamProposalStaleError,
     DreamProposalStateError,
 )
+from rp_memory.dream.model import LLMDreamModel
+from rp_memory.dream.source import DreamSourceSelector
+from rp_memory.dream.types import DreamDepth, DreamScope
 
 logger = logging.getLogger("dream_service.main")
 

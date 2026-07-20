@@ -28,6 +28,7 @@ from rp_memory.dream.types import (
     DreamSourceSnapshot,
     dream_fact_identity_key,
 )
+from rp_memory.memory_types import EpistemicStatus, MemoryKind
 
 
 def _hash(text: str) -> str:
@@ -363,7 +364,12 @@ def test_oversize_turn_uses_explicit_split_fallback_without_dropping_messages() 
 
 def test_dream_fact_and_evidence_bounds_are_enforced() -> None:
     with pytest.raises(ValueError, match="at most 1000"):
-        DreamFact("x" * 1001, "event", "confirmed", 0.5)
+        DreamFact(
+            "x" * 1001,
+            MemoryKind.EVENT,
+            EpistemicStatus.CONFIRMED,
+            0.5,
+        )
     evidence = tuple(
         DreamEvidence(index, index, 1, _hash(str(index)))
         for index in range(1, 66)
@@ -371,7 +377,12 @@ def test_dream_fact_and_evidence_bounds_are_enforced() -> None:
     with pytest.raises(ValueError, match="at most 64"):
         DreamCandidate(
             candidate_id="too-many",
-            fact=DreamFact("fact", "event", "confirmed", 0.5),
+            fact=DreamFact(
+                "fact",
+                MemoryKind.EVENT,
+                EpistemicStatus.CONFIRMED,
+                0.5,
+            ),
             evidence=evidence,
         )
 
@@ -485,7 +496,13 @@ class _DreamModel:
         return (
             DreamCandidate(
                 candidate_id=f"c{batch.index}",
-                fact=DreamFact("持有铜钥匙", "clue", "confirmed", 0.8, "key"),
+                fact=DreamFact(
+                    "持有铜钥匙",
+                    MemoryKind.CLUE,
+                    EpistemicStatus.CONFIRMED,
+                    0.8,
+                    "key",
+                ),
                 evidence=(evidence,),
             ),
         )
@@ -527,7 +544,13 @@ class _RepeatedEvidenceModel(_DreamModel):
         return (
             DreamCandidate(
                 candidate_id=f"candidate-{batch.index}",
-                fact=DreamFact("重复事实", "event", "confirmed", 0.7, "same"),
+                fact=DreamFact(
+                    "重复事实",
+                    MemoryKind.EVENT,
+                    EpistemicStatus.CONFIRMED,
+                    0.7,
+                    "same",
+                ),
                 evidence=evidence,
             ),
         )
@@ -564,8 +587,8 @@ class _DistinctSameProviderKeyModel(_DreamModel):
                 candidate_id=f"distinct-{batch.index}",
                 fact=DreamFact(
                     f"不同事实 {batch.index}",
-                    "event",
-                    "confirmed",
+                    MemoryKind.EVENT,
+                    EpistemicStatus.CONFIRMED,
                     (batch.index + 1) / 10,
                     "provider-shared-key",
                 ),
@@ -735,7 +758,12 @@ async def test_engine_disables_absence_retirement_when_reduce_truncates() -> Non
     message = _message(1, 1, "still-supported fact")
     active_memory = DreamLedgerMemory(
         memory_id="memory-1",
-        fact=DreamFact("still supported", "event", "confirmed", 0.7),
+        fact=DreamFact(
+            "still supported",
+            MemoryKind.EVENT,
+            EpistemicStatus.CONFIRMED,
+            0.7,
+        ),
         evidence=(message.evidence,),
     )
     selection = engine.prepare(
@@ -854,7 +882,13 @@ async def test_deep_incremental_reconciles_invalidated_evidence_without_sources(
     evidence = DreamEvidence(9, 9, 1, _hash("deleted"))
     memory = DreamLedgerMemory(
         memory_id="memory-1",
-        fact=DreamFact("旧事实", "event", "confirmed", 0.5, "old"),
+        fact=DreamFact(
+            "旧事实",
+            MemoryKind.EVENT,
+            EpistemicStatus.CONFIRMED,
+            0.5,
+            "old",
+        ),
         evidence=(evidence,),
     )
     model = _InvalidatedModel()

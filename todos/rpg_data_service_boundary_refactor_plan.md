@@ -4,15 +4,15 @@
 
 - [x] 首个已完成整改项：Plot Schedule
 - [x] 已完成整改项：Session 生命周期、角色绑定与开局
-- [ ] **下一整改项：Dream / Persistent Memory / Story Memory**
-- [ ] 后续整改项：状态表与 Scene
+- [x] 已完成整改项：Dream / Persistent Memory / Story Memory
+- [ ] **下一整改项：状态表与 Scene**
 - [ ] 后续整改项：Media 与 TTS
 - [ ] 后续整改项：Story Catalog、Composer 与 RP Module 配置
 - [ ] 后续整改项：消息、历史和通用账本收尾
 
 本计划用于把 `rpg_data` 收敛为无框架、无业务决策的数据访问模块。整改后，`rpg_data` 只负责数据库 DTO、序列化、查询、CRUD、数据完整性和调用方明确指定的原子持久化；业务规则、状态机、默认策略、跨聚合用例和玩家文案必须由对应领域模块或应用编排层持有。
 
-Plot Schedule 与 Session P1 已按整改执行顺序完成，下一项是 Dream / Persistent Memory / Story Memory。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重或剧情调度优先级。后续业务域继续逐项实施，避免一次同时改动 Dream、Media、TTS 等多条运行链路。
+Plot Schedule、Session P1 与 Dream/P2 已按整改执行顺序完成，下一项是状态表与 Scene。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重或剧情调度优先级。后续业务域继续逐项实施，避免一次同时改动状态、Media、TTS 等多条运行链路。
 
 ## 1. 统一边界
 
@@ -125,11 +125,13 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 
 ## 4. P2：Dream、Persistent Memory 与 Story Memory
 
-- [ ] 将 Dream Proposal 状态机、ADD/REVISE/SUPERSEDE/RETIRE、dedupe identity、Evidence 有效性、active 上限、过期检查和恢复规则迁回 `rp_memory.dream`。
-- [ ] `rpg_data` 只保留 proposal/item/memory/revision/evidence/state ledger 的 typed CRUD、条件更新、事务和只读投影。
-- [ ] 将 Story Memory 的语义合并规则（salience、source range、metadata、Evidence 替换、version 变化条件）迁到 `rp_memory`；数据层只执行明确的 upsert payload。
-- [ ] Dream Apply 仍由领域层完成两次指纹确认，并在一个 SQLite `IMMEDIATE` 事务中调用数据 primitives 原子落库。
-- [ ] 保持 `rpg_data` 不导入 Dream worker、LLM client、NotificationSink 或 WebUI 语义。
+详细落地方案见 [`rpg_data_dream_memory_boundary_refactor_plan.md`](./rpg_data_dream_memory_boundary_refactor_plan.md)。本阶段只做现有 Dream / Persistent Memory / Story Memory 的业务归属拆层，不实施 Story Memory v2 新模型或数据库迁移。
+
+- [x] 将 Dream Proposal 状态机、ADD/REVISE/SUPERSEDE/RETIRE、dedupe identity、Evidence 有效性、active 上限、过期检查和恢复规则迁回 `rp_memory.dream`。
+- [x] `rpg_data` 只保留 proposal/item/memory/revision/evidence/state ledger 的 typed CRUD、条件更新、事务和只读投影。
+- [x] 将 Story Memory 的语义合并规则（salience、source range、metadata、Evidence 替换、version 变化条件）迁到 `rp_memory`；数据层只执行明确的 upsert payload。
+- [x] Dream Apply 仍由领域层完成两次指纹确认，并在一个 SQLite `IMMEDIATE` 事务中调用数据 primitives 原子落库。
+- [x] 保持 `rpg_data` 不导入 Dream worker、LLM client、NotificationSink 或 WebUI 语义。
 
 ## 5. P3：状态表与 Scene
 

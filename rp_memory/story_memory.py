@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
+
+from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 
 class StoryMemoryStore:
@@ -20,8 +21,8 @@ class StoryMemoryStore:
     def get_all(self) -> list[dict[str, object]]:
         """返回所有剧情记忆条目。"""
         return [
-            row.to_context_dict()
-            for row in self._service().list(self._session_id)
+            item.to_context_dict()
+            for item in self._service().get_context_items(self._session_id)
         ]
 
     def add_detail(
@@ -46,14 +47,14 @@ class StoryMemoryStore:
             "evidence_message_ids",
         }
         core = {key: value for key, value in detail.items() if key in allowed}
-        self._service().add_detail(
-            self._session_id,
-            str(detail.pop("text", "") or ""),
-            turn_id=turn_id,
-            dream_processed=dream_processed,
-            metadata_json=json.dumps(detail_metadata or {}, ensure_ascii=False),
+        payload: dict[str, object] = {
             **core,
-        )
+            "text": str(detail.pop("text", "") or ""),
+            "turn_id": turn_id,
+            "dream_processed": dream_processed,
+            "metadata": detail_metadata or {},
+        }
+        self._service().add_candidate(self._session_id, payload)
 
     def add_details_and_mark_processed(
         self,
@@ -86,7 +87,9 @@ class StoryMemoryStore:
         """清空全部剧情记忆（提炼到常驻记忆后调用）。"""
         self._service().clear(self._session_id)
 
-    def _service(self):
+    def _service(self) -> StoryMemoryApplicationService:
         from rpg_data.services import get_data_service_gateway
 
-        return get_data_service_gateway().story_memory
+        return StoryMemoryApplicationService(
+            get_data_service_gateway().story_memory_data
+        )

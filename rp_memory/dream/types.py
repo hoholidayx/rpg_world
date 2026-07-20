@@ -9,6 +9,12 @@ from typing import Mapping
 
 from commons.dream_identity import dream_derived_source_fingerprint
 from commons.text_identity import stable_text_identity_key
+from rp_memory.memory_types import (
+    EPISTEMIC_STATUSES,
+    MEMORY_KINDS,
+    EpistemicStatus,
+    MemoryKind,
+)
 
 
 class DreamDepth(StrEnum):
@@ -35,6 +41,30 @@ class DreamProposalAction(StrEnum):
     RETIRE = "retire"
 
 
+class DreamProposalStatus(StrEnum):
+    GENERATING = "generating"
+    READY = "ready"
+    APPLIED = "applied"
+    REJECTED = "rejected"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
+    STALE = "stale"
+
+
+class PersistentMemoryLifecycle(StrEnum):
+    ACTIVE = "active"
+    RETIRED = "retired"
+    SUPERSEDED = "superseded"
+
+
+class DreamFailureCode(StrEnum):
+    GENERATION_FAILED = "DREAM_GENERATION_FAILED"
+    GENERATION_INTERRUPTED = "DREAM_GENERATION_INTERRUPTED"
+    MODEL_CONTRACT_ERROR = "DREAM_MODEL_CONTRACT_ERROR"
+    PROPOSAL_STALE = "DREAM_PROPOSAL_STALE"
+    EVIDENCE_INVALID = "DREAM_EVIDENCE_INVALID"
+
+
 class DreamRetirementPolicy(StrEnum):
     """How aggressively the final reconciliation may retire ledger entries."""
 
@@ -43,30 +73,17 @@ class DreamRetirementPolicy(StrEnum):
     FULL_RECONCILIATION = "full_reconciliation"
 
 
-MEMORY_KINDS = frozenset(
-    {
-        "character",
-        "event",
-        "relationship",
-        "commitment",
-        "clue",
-        "world_fact",
-        "state_change",
-    }
-)
-EPISTEMIC_STATUSES = frozenset(
-    {"confirmed", "reported", "inferred", "uncertain", "contradicted"}
-)
 MAX_DREAM_FACT_TEXT_CHARS = 1000
 MAX_DREAM_REASON_CHARS = 1000
 MAX_DREAM_ITEM_EVIDENCE = 64
 MAX_DREAM_PROPOSAL_ITEMS = 128
+MAX_ACTIVE_MEMORIES = 64
 
 
 def dream_fact_identity_key(
     text: str,
-    memory_kind: str,
-    epistemic_status: str,
+    memory_kind: str | MemoryKind,
+    epistemic_status: str | EpistemicStatus,
 ) -> str:
     """Return the code-owned identity used for exact facts and new ledger rows."""
 
@@ -94,23 +111,23 @@ class DreamEvidence:
 @dataclass(frozen=True)
 class DreamFact:
     text: str
-    memory_kind: str
-    epistemic_status: str
+    memory_kind: MemoryKind
+    epistemic_status: EpistemicStatus
     salience: float
     dedupe_key: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.memory_kind, MemoryKind):
+            raise TypeError("Dream fact memory_kind must be MemoryKind")
+        if not isinstance(self.epistemic_status, EpistemicStatus):
+            raise TypeError(
+                "Dream fact epistemic_status must be EpistemicStatus"
+            )
         if not self.text.strip():
             raise ValueError("Dream fact text is required")
         if len(self.text) > MAX_DREAM_FACT_TEXT_CHARS:
             raise ValueError(
                 f"Dream fact text may contain at most {MAX_DREAM_FACT_TEXT_CHARS} characters"
-            )
-        if self.memory_kind not in MEMORY_KINDS:
-            raise ValueError(f"invalid Dream memory kind: {self.memory_kind}")
-        if self.epistemic_status not in EPISTEMIC_STATUSES:
-            raise ValueError(
-                f"invalid Dream epistemic status: {self.epistemic_status}"
             )
         if not 0.0 <= float(self.salience) <= 1.0:
             raise ValueError("Dream salience must be between 0 and 1")
@@ -191,11 +208,15 @@ class DreamLedgerMemory:
     memory_id: str
     fact: DreamFact
     evidence: tuple[DreamEvidence, ...]
-    lifecycle: str = "active"
+    lifecycle: PersistentMemoryLifecycle = PersistentMemoryLifecycle.ACTIVE
 
     def __post_init__(self) -> None:
         if not self.memory_id:
             raise ValueError("Dream ledger memory id is required")
+        if not isinstance(self.lifecycle, PersistentMemoryLifecycle):
+            raise TypeError(
+                "Dream ledger memory lifecycle must be PersistentMemoryLifecycle"
+            )
 
 
 @dataclass(frozen=True)

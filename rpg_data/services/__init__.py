@@ -3,15 +3,7 @@
 from rpg_data.services.backup import BackupMessageComponent, BackupService
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterManagementService, CharacterReadService
-from rpg_data.services.dream_memory import (
-    DreamActiveMemoryLimitError,
-    DreamDataError,
-    DreamEvidenceInvalidError,
-    DreamMemoryService,
-    DreamProposalConflictError,
-    DreamProposalStaleError,
-    DreamProposalStateError,
-)
+from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.gateway import (
     DataServiceGateway,
     get_data_service_gateway,
@@ -37,7 +29,7 @@ from rpg_data.services.session_derivation import (
     SessionDerivationDataService,
 )
 from rpg_data.services.session_composer import SessionComposerService
-from rpg_data.services.story_memory import StoryMemoryService
+from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.status import StatusTableService
 
 __all__ = [
@@ -50,13 +42,7 @@ __all__ = [
     "LorebookManagementService",
     "LorebookReadService",
     "MessageService",
-    "DreamActiveMemoryLimitError",
-    "DreamDataError",
-    "DreamEvidenceInvalidError",
-    "DreamMemoryService",
-    "DreamProposalConflictError",
-    "DreamProposalStaleError",
-    "DreamProposalStateError",
+    "DreamMemoryDataService",
     "MediaAssetInUseError",
     "MediaDataService",
     "MediaSourceRangeError",
@@ -69,7 +55,7 @@ __all__ = [
     "SessionDerivationDataConflictError",
     "SessionDerivationDataService",
     "SessionComposerService",
-    "StoryMemoryService",
+    "StoryMemoryDataService",
     "StatusTableService",
     "get_data_service_gateway",
     "reset_data_service_gateways",

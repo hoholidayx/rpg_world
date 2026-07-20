@@ -50,10 +50,10 @@ class SessionResetService:
             plot_decisions_cleared = self._gateway.plot_scheduling.clear_decisions(
                 normalized_session_id
             )
-            story_memories_cleared = self._gateway.story_memory.clear(
+            story_memories_cleared = self._gateway.story_memory_data.clear(
                 normalized_session_id
             )
-            dream_result = self._gateway.dream.clear(normalized_session_id)
+            dream_result = self._gateway.dream_data.clear(normalized_session_id)
             status_result = SessionStatusLifecycleService(self._gateway).reset(
                 normalized_session_id
             )

@@ -14,7 +14,13 @@ from dream_service.notifications import (
 )
 from rp_memory.dream.engine import DreamEngine
 from rp_memory.dream.errors import DreamAlreadyRunningError, DreamError
-from rp_memory.dream.types import DreamDepth, DreamScope
+from rp_memory.dream.recovery import DreamRecoveryAction, decide_orphan_recovery
+from rp_memory.dream.types import (
+    DreamDepth,
+    DreamFailureCode,
+    DreamProposalStatus,
+    DreamScope,
+)
 
 logger = logging.getLogger("dream_service.runtime")
 
@@ -103,7 +109,15 @@ class DreamTaskManager:
                     raise FileNotFoundError(
                         f"Dream proposal not found: {recovery_id}"
                     )
-                if recovery.status != "generating":
+                recovery_decision = decide_orphan_recovery(
+                    status=recovery.status,
+                    depth=recovery.depth,
+                    scope=recovery.scope,
+                )
+                if (
+                    recovery_decision.action
+                    is DreamRecoveryAction.RETURN_EXISTING
+                ):
                     return recovery
 
             existing = self._tasks_by_session.get(session_id)
@@ -112,7 +126,10 @@ class DreamTaskManager:
                     session_id,
                     existing.proposal_id,
                 )
-                if stored is not None and stored.status == "generating":
+                if (
+                    stored is not None
+                    and stored.status == DreamProposalStatus.GENERATING.value
+                ):
                     raise DreamAlreadyRunningError(
                         f"Session already has a generating Dream proposal: {session_id}"
                     )
@@ -139,15 +156,15 @@ class DreamTaskManager:
                     raise FileNotFoundError(
                         f"Dream proposal not found: {recovery.proposal_id}"
                     )
-                if recovered.status == "generating":
+                if recovered.status == DreamProposalStatus.GENERATING.value:
                     raise DreamAlreadyRunningError(
                         "Dream proposal is still generating and could not be "
                         f"recovered: {recovery.proposal_id}"
                     )
-                if recovered.status != "interrupted":
+                if recovered.status != DreamProposalStatus.INTERRUPTED.value:
                     return recovered
-                depth = DreamDepth(recovered.depth)
-                scope = DreamScope(recovered.scope)
+                depth = recovery_decision.depth
+                scope = recovery_decision.scope
                 logger.warning(
                     "recovering orphaned Dream proposal session_id=%s "
                     "proposal_id=%s interrupted=%s",
@@ -231,9 +248,9 @@ class DreamTaskManager:
                 await self._persist_failed(
                     proposal,
                     error_code=(
-                        "DREAM_MODEL_CONTRACT_ERROR"
+                        DreamFailureCode.MODEL_CONTRACT_ERROR.value
                         if isinstance(exc, DreamError)
-                        else "DREAM_GENERATION_FAILED"
+                        else DreamFailureCode.GENERATION_FAILED.value
                     ),
                     error_message=str(exc),
                 )
@@ -270,7 +287,10 @@ class DreamTaskManager:
                     exc_info=True,
                 )
                 continue
-            if stored is None or stored.status != "generating":
+            if (
+                stored is None
+                or stored.status != DreamProposalStatus.GENERATING.value
+            ):
                 return
 
     async def _persist_ready(self, proposal, items) -> None:  # noqa: ANN001
@@ -288,9 +308,13 @@ class DreamTaskManager:
                 lookup = await self._get_proposal_after_persist_error(proposal)
                 stored = lookup.proposal
                 if lookup.succeeded and (
-                    stored is None or stored.status != "generating"
+                    stored is None
+                    or stored.status != DreamProposalStatus.GENERATING.value
                 ):
-                    if stored is not None and stored.status == "ready":
+                    if (
+                        stored is not None
+                        and stored.status == DreamProposalStatus.READY.value
+                    ):
                         await self._publish_terminal(stored)
                         return
                     raise
@@ -321,9 +345,13 @@ class DreamTaskManager:
                 lookup = await self._get_proposal_after_persist_error(proposal)
                 stored = lookup.proposal
                 if lookup.succeeded and (
-                    stored is None or stored.status != "generating"
+                    stored is None
+                    or stored.status != DreamProposalStatus.GENERATING.value
                 ):
-                    if stored is not None and stored.status == "failed":
+                    if (
+                        stored is not None
+                        and stored.status == DreamProposalStatus.FAILED.value
+                    ):
                         await self._publish_terminal(stored)
                     return
                 if attempt < self._state_persist_attempts:

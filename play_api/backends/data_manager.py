@@ -20,6 +20,7 @@ from rpg_data.bootstrap import (
 )
 from rpg_data.services import DataServiceGateway, get_data_service_gateway
 from rpg_data.settings import get_database_path
+from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 
 class DataManagerBackend:
@@ -214,7 +215,9 @@ class DataManagerBackend:
     ) -> dict[str, object] | None:
         if self._ready_session(session_id) is None:
             return None
-        result = self._gateway.story_memory.list_page(
+        result = StoryMemoryApplicationService(
+            self._gateway.story_memory_data
+        ).list_page(
             session_id,
             page=page,
             page_size=page_size,

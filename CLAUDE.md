@@ -183,6 +183,8 @@ TTS service 与 Media service 同级，只持有 `rpg_tts`、`rpg_data`、持久
 
 Dream service 是 Session 级离线记忆提炼边界，只持有 `rp_memory.dream`、`rpg_data` 与 loop-owned `llm_client`。它通过 `dream.shallow` / `dream.deep` biz key 获取远端 Provider facade，不导入 Agent runtime、`MemorySubAgent` 或 `llm_service`。Play API 只用 `DreamClient` 代理手动管理请求；Dream 中断不得影响 Agent Context 构建、聊天或其它服务。v1 不提供入站 Bearer 鉴权，配置层强制监听 localhost/loopback IP；非 loopback host 必须启动失败，不支持非本地暴露。
 
+Dream Proposal 状态机、恢复、Apply、Persistent Memory 生命周期与 Context projection 的唯一业务 owner 是 `rp_memory.dream`；Story Memory 的 normalize、exact dedupe、merge、Evidence、version 和 Context projection 统一归 `rp_memory.story_memory_service`。`rpg_data` 只通过 `dream_data` / `story_memory_data` 提供 frozen DTO、CRUD、CAS、批量读写与无业务语义事务，不得恢复状态迁移、动作分支、active-limit、来源指纹、Evidence 有效性或 Story Memory 合并策略；业务调用方不得直接访问 `gateway.database` 或 Peewee record。
+
 后台终态事件不进入 Agent 正文 SSE。`SessionDerivationWorker` 与 `DreamTaskManager` 只依赖各自的类型化 NotificationSink，在 `ready / failed / interrupted` 成功落库后通知；service composition root 注入映射适配器，再由无框架 `play_events` 的 loop-owned async publisher 调用 Play API。`rpg_data` 不持有 publisher 或 WebUI 语义。通知是 best-effort，失败只记录 warning，GET Proposal/Derivation Job 仍是事实真源。
 
 Play API 独占进程内事件 Hub：`POST /play-api/v1/internal/events` 使用 `RPG_WORLD_PLAY_EVENT_TOKEN` Bearer 鉴权，`GET /play-api/v1/events/stream` 为 WebUI 提供全局 SSE。每订阅者有界队列满时丢最旧事件；不实现 SQL outbox、补发或消费确认。首版只支持 Play API 单进程/单 worker。WebUI 根 `Providers` 只挂一个 EventSource bridge，严格解析并把最近 50 条事件留在 Zustand 内存；独立 `features/notifications` 模块可展示、标记已读和清除这些事件，但不得据此 Toast、跳转、自动刷新 Query、回写任务状态或写 localStorage。
@@ -461,7 +463,7 @@ Dream 只保留可跨 turn 复用的世界内持久事实，不归纳 OOC 内容
 
 Deep 只读取 IC/GM user/assistant 主消息，不读取冷备、system/tool/OOC，也不套用 `summary_processed` Context 过滤；story memory/summary 不参与 Deep 的事实提取，最终非 retire 项必须引用当前主消息 Evidence。Story memory extraction 必须持久化原始 message ID/turn/version/content hash；失效条目被排除，没有任何仍精确匹配的 Evidence 时才跳过该派生源，同一事实被重新抽取时以最新一批精确来源替换旧 manifest。新 summary batch 必须保存 `source_turn_start/end` 与 `source_message_ids`，并与当前仍标记为同一 `summary_batch_id` 的完整消息集合一致；旧文件只允许在当前 turn 范围仍被该 batch 完整覆盖时回填，两种来源都无法验证时跳过。Map 按 turn/字符预算分批，Map、分层 Reduce 和最终 Proposal 共用 `map_concurrency` 并发上限；模型不收敛时使用代码侧有界、高价值且保留类别多样性的选择，不把无界候选一次送入最终 proposal。发生实际候选截断时，Full Deep 必须禁用基于“候选缺席”的退休，避免把未进入最终有界集合但仍受完整历史支持的事实误判为缺失。
 
-每次运行先写 `generating` proposal，再由进程内 async task 生成；同 Session 同时只允许一条 generating，不建持久 worker、不自动重试模型任务。服务启动把遗留 generating 标为 interrupted；ready/failed 状态落库允许有限重试，耗尽后必须尽力把该 proposal 转为 interrupted，且没有本地 task 的新建请求必须先协调同 Session 遗留 generating。WebUI 只手动刷新状态，“检查并重试”必须携带预期 generating proposal ID：真实本地 task 返回冲突，已终态则直接返回旧 proposal，只有该 ID 仍为 SQL orphan 时才按原 depth/scope 创建替代任务。用户可逐项选择、编辑 `text / memory_kind / epistemic_status / salience`；动作目标与 Evidence 不可编辑。Dream HTTP、轮询和 Apply 的同步 SQLite/文件工作统一交给单线程串行 repository worker，repository 必须在该 worker 内创建、使用并关闭，不得阻塞事件循环。Apply 在 SQLite `IMMEDIATE` 外层事务内重新捕获并再次确认 history/source 指纹与 ledger revision，再原子写 revision/evidence、更新生命周期，并只推进本 depth 实际分析的 manifests；Shallow 另标记已分析的 story memory `dream_processed`。任一快照变化都把 proposal 标为 stale 并拒绝写入。
+每次运行先写 `generating` proposal，再由进程内 async task 生成；同 Session 同时只允许一条 generating，不建持久 worker、不自动重试模型任务。服务启动把遗留 generating 标为 interrupted；ready/failed 状态落库允许有限重试，耗尽后必须尽力把该 proposal 转为 interrupted，且没有本地 task 的新建请求必须先协调同 Session 遗留 generating。WebUI 只手动刷新状态，“检查并重试”必须携带预期 generating proposal ID：真实本地 task 返回冲突，已终态则直接返回旧 proposal，只有该 ID 仍为 SQL orphan 时才按原 depth/scope 创建替代任务。用户可逐项选择、编辑 `text / memory_kind / epistemic_status / salience`；动作目标与 Evidence 不可编辑。Dream HTTP、轮询和 Apply 的同步 SQLite/文件工作统一交给单线程串行 repository worker，repository 必须在该 worker 内创建、使用并关闭，不得阻塞事件循环。Apply 只由 `rp_memory.dream.application` 编排：在 SQLite `IMMEDIATE` 事务中写入前完整重捕获 history/source/ledger/Story Memory，执行 typed mutation plan 后、提交前再次重捕获来源。第一次门禁失败只提交 stale；第二次确认失败必须回滚全部 ledger/checkpoint 写入，再用独立条件事务把仍为 ready 的 Proposal 标为 stale。成功时原子写 revision/evidence、生命周期、manifest、Story Memory checkpoint 与 applied 终态。任何快照变化都拒绝 Apply。
 
 Persistent Memory 的 `(session_id, dedupe_key)` 跨 lifecycle 唯一性保持不变。ADD 命中同 key 的 retired 事实时必须复用稳定 Memory ID、追加新的不可变 revision/Evidence 并恢复 active；旧 revisions 继续保留。active 或 superseded key 仍视为冲突。手动 Restore 只恢复当前 revision Evidence 仍有效的 retired 记录，不承担新 Evidence 复活语义。
 
@@ -887,7 +889,10 @@ Dream 后端与 Play WebUI 的聚焦验证：
 ```bash
 uv run python -m pytest \
   rp_memory/tests/test_dream.py \
-  rpg_data/tests/test_dream_memory_service.py \
+  rp_memory/tests/test_dream_application.py \
+  rp_memory/tests/test_dream_recovery.py \
+  rp_memory/tests/test_story_memory_application.py \
+  rpg_data/tests/test_dream_memory_data_service.py \
   dream_service/tests \
   play_api/tests/test_dream.py \
   play_api/tests/test_events.py -q

@@ -28,6 +28,7 @@ from rp_memory.dream.types import (
     MEMORY_KINDS,
     dream_fact_identity_key,
 )
+from rp_memory.memory_types import EpistemicStatus, MemoryKind
 
 DREAM_SHALLOW_BIZ_KEY = "dream.shallow"
 DREAM_DEEP_BIZ_KEY = "dream.deep"
@@ -488,8 +489,10 @@ def _fact_from_wire(raw: Mapping[str, object]) -> DreamFact:
         raise DreamModelContractError("Dream fact salience must be numeric") from exc
     try:
         text = str(raw.get("text") or "").strip()
-        memory_kind = str(raw.get("memoryKind") or "")
-        epistemic_status = str(raw.get("epistemicStatus") or "")
+        memory_kind = MemoryKind(str(raw.get("memoryKind") or ""))
+        epistemic_status = EpistemicStatus(
+            str(raw.get("epistemicStatus") or "")
+        )
         return DreamFact(
             text=text,
             memory_kind=memory_kind,

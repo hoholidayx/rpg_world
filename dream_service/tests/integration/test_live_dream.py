@@ -15,6 +15,7 @@ from rp_memory.dream.engine import DreamEngine
 from rp_memory.dream.model import LLMDreamModel
 from rp_memory.dream.source import DreamSourceSelector
 from rp_memory.dream.types import DreamDepth, DreamScope
+from rp_memory.story_memory_service import StoryMemoryApplicationService
 
 pytestmark = [
     pytest.mark.dream_live,
@@ -74,7 +75,9 @@ async def test_live_deepseek_dream_proposal_is_typed_and_applicable(
             turn_id=1,
             seq_in_turn=2,
         )
-        gateway.story_memory.add_details_and_mark_processed(
+        StoryMemoryApplicationService(
+            gateway.story_memory_data
+        ).add_details_and_mark_processed(
             session.id,
             ({
                 "text": "阿澈承诺守护月光港，并获授守港银徽。",

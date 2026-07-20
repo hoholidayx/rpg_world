@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Protocol
+
+from rp_memory.dream.ledger import PersistentMemoryProjection
 
 
 logger = logging.getLogger(__name__)
@@ -22,11 +25,23 @@ class PersistentMemoryItem:
     salience: float
 
 
+class PersistentMemoryContextReader(Protocol):
+    def list_context_memories(
+        self,
+        session_id: str,
+    ) -> list[PersistentMemoryProjection]: ...
+
+
 class PersistentMemoryStore:
     """Read the current Session ledger through the typed ``rpg_data`` boundary."""
 
-    def __init__(self, session_id: str) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        context_reader: PersistentMemoryContextReader | None = None,
+    ) -> None:
         self._session_id = str(session_id)
+        self._context_reader = context_reader
         self._last_snapshot: tuple[PersistentMemoryItem, ...] = ()
         self._refresh_lock = asyncio.Lock()
 
@@ -50,28 +65,36 @@ class PersistentMemoryStore:
             return memories
 
     def _load_memories(self) -> list[PersistentMemoryItem]:
+        from rp_memory.dream.application import DreamApplicationService
+
+        if self._context_reader is not None:
+            return self._project(self._context_reader)
+
         from rpg_data.services import get_data_service_gateway
 
         gateway = get_data_service_gateway()
-        database = gateway.database
         try:
-            bundles = gateway.dream.list_context_memories(self._session_id)
-            result: list[PersistentMemoryItem] = []
-            for bundle in bundles:
-                fact = bundle.fact
-                result.append(
-                    PersistentMemoryItem(
-                        memory_id=bundle.memory.id,
-                        revision_number=bundle.current_revision.revision_number,
-                        text=fact.text,
-                        memory_kind=fact.memory_kind,
-                        epistemic_status=fact.epistemic_status,
-                        salience=fact.salience,
-                    )
-                )
-            return result
+            return self._project(DreamApplicationService(gateway.dream_data))
         finally:
             # Peewee connections are thread-local. Close the worker's handle;
             # the shared gateway/database object remains initialized.
-            if not database.is_closed():
-                database.close()
+            gateway.close_thread_connection()
+
+    def _project(
+        self,
+        reader: PersistentMemoryContextReader,
+    ) -> list[PersistentMemoryItem]:
+        result: list[PersistentMemoryItem] = []
+        for bundle in reader.list_context_memories(self._session_id):
+            revision = bundle.current_revision
+            result.append(
+                PersistentMemoryItem(
+                    memory_id=bundle.memory.id,
+                    revision_number=revision.revision_number,
+                    text=revision.text,
+                    memory_kind=revision.memory_kind,
+                    epistemic_status=revision.epistemic_status,
+                    salience=revision.salience,
+                )
+            )
+        return result
