@@ -9,6 +9,10 @@ from rpg_data import models
 from rpg_core.agent.manager import AgentManager
 from rpg_core.agent.protocol import StreamEventKind
 from rpg_core.context.models import LayerType, Role
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionRoleService,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -168,8 +172,13 @@ async def test_session_create_and_switch_locator_isolate_history(
         int(current_session.story_id),
     )
     assert sorted(session.id for session in sessions or []) == sorted([created_session_id, "integration_smoke"])
-    bound = integration_data_gateway.session_roles.bind_by_index(created_session_id, 1)
-    assert bound.state.status == models.PLAYER_CHARACTER_STATUS_BOUND
+    role_service = SessionRoleService(integration_data_gateway)
+    option = role_service.list_options(created_session_id)[0]
+    bound = role_service.bind_player_character(
+        created_session_id,
+        option.snapshot.character_id,
+    )
+    assert bound.state.status is PlayerCharacterBindingStatus.BOUND
 
     first_reply = await asyncio.wait_for(
         integration_agent.send("Reply in one short sentence."),

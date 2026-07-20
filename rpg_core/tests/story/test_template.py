@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_data.services.gateway import DataServiceGateway
-from rpg_data.story_template import (
+from rpg_core.session.catalog import SessionCatalogService
+from rpg_core.story.template import (
     StoryTextTemplateError,
     render_story_text_template,
     validate_story_text_template,
 )
+from rpg_data.services.gateway import DataServiceGateway
 
 
 def test_story_text_template_renders_allowlisted_player_name_once() -> None:
@@ -50,7 +51,7 @@ def test_catalog_rejects_unknown_story_variables_without_mutation() -> None:
         assert story is not None
 
         with pytest.raises(StoryTextTemplateError, match="UNKNOWN_ROLE"):
-            gateway.catalog.update_story(
+            SessionCatalogService(gateway).update_story(
                 "demo_workspace",
                 story.id,
                 story_prompt="玩家是 {UNKNOWN_ROLE}",

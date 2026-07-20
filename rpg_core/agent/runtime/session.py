@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import shutil
 import uuid
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from rpg_core.agent.command.role import render_role_bind_prompt, resolve_role_index
 from rpg_core.context.models import Message
+from rpg_core.session.role import SessionRoleService
+from rpg_core.session.reset import SessionResetService
 
 if TYPE_CHECKING:
-    from rpg_data.models import SessionResetResult
+    from rpg_core.session.reset import SessionResetResult
     from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
     from rpg_core.agent.mailbox import AgentMailbox
     from rpg_core.agent.runtime.tools import AgentToolService
@@ -44,8 +46,10 @@ class AgentSessionService:
     def render_role_bind_prompt(self, *, error: str = "") -> str:
         from rpg_data.services import get_data_service_gateway
 
-        return get_data_service_gateway().session_roles.render_role_bind_prompt(
-            self._lifecycle.session_id,
+        role_service = SessionRoleService(get_data_service_gateway())
+        return render_role_bind_prompt(
+            role_service.list_options(self._lifecycle.session_id),
+            role_service.get_state(self._lifecycle.session_id),
             error=error,
         )
 
@@ -64,15 +68,31 @@ class AgentSessionService:
             session_id,
             index,
         )
-        result = get_data_service_gateway().session_roles.bind_by_index(
-            session_id,
+        role_service = SessionRoleService(get_data_service_gateway())
+        option = resolve_role_index(
+            role_service.list_options(session_id),
             int(index),
-            int(opening_index) if opening_index is not None else None,
-            story_opening_id=(
-                int(story_opening_id)
-                if story_opening_id is not None
-                else None
-            ),
+        )
+        selected_opening_id = (
+            int(story_opening_id) if story_opening_id is not None else None
+        )
+        if opening_index is not None and selected_opening_id is not None:
+            raise ValueError(
+                "opening index and story opening id cannot both be provided"
+            )
+        if opening_index is not None:
+            openings = role_service.list_opening_options(
+                session_id,
+                option.snapshot.character_id,
+            )
+            opening_position = int(opening_index)
+            if opening_position < 1 or opening_position > len(openings):
+                raise ValueError(f"无效开局序号: {opening_position}")
+            selected_opening_id = openings[opening_position - 1].opening.id
+        result = role_service.bind_player_character(
+            session_id,
+            option.snapshot.character_id,
+            story_opening_id=selected_opening_id,
         )
         self._lifecycle.session_manager.load()
         self._lifecycle.refresh_sub_agent_bindings()
@@ -86,13 +106,13 @@ class AgentSessionService:
         return result
 
     def player_character_guard_reply(self) -> str:
-        from rpg_data import models
         from rpg_data.services import get_data_service_gateway
+        from rpg_core.session.role import PlayerCharacterBindingStatus
 
         session_id = self._lifecycle.session_id
         if not session_id:
             return ""
-        service = get_data_service_gateway().session_roles
+        service = SessionRoleService(get_data_service_gateway())
         try:
             state = service.get_state(session_id)
         except FileNotFoundError:
@@ -101,14 +121,17 @@ class AgentSessionService:
                 session_id,
             )
             return ""
-        if state.status == models.PLAYER_CHARACTER_STATUS_BOUND:
+        if state.status is PlayerCharacterBindingStatus.BOUND:
             return ""
         logger.info(
             _TAG + " player character guard requires binding: session_id={}, status={}",
             session_id,
             state.status,
         )
-        return service.render_role_bind_prompt(session_id)
+        return render_role_bind_prompt(
+            service.list_options(session_id),
+            state,
+        )
 
     async def reload_history(self) -> None:
         await self._wait_idle()
@@ -214,14 +237,7 @@ class AgentSessionService:
                 runtime_dir.rename(quarantine_dir)
                 runtime_moved = True
 
-            with gateway.transaction():
-                plot_decisions_cleared = gateway.plot_scheduling.clear_decisions(
-                    session_id
-                )
-                result = replace(
-                    gateway.session_reset.reset(session_id),
-                    plot_schedule_decisions_cleared=plot_decisions_cleared,
-                )
+            result = SessionResetService(gateway).reset(session_id)
             database_reset = True
 
             if runtime_moved:

@@ -14,7 +14,13 @@ from agent_service.derivation_notifications import (
 )
 from rpg_core.agent.manager import AgentManager
 from rpg_core.agent.runtime.derivation import SessionDerivationPreparationError
-from rpg_data.services import SessionDerivationDataError
+from rpg_core.session.derivation import (
+    SessionDerivationError,
+    SessionDerivationErrorCode,
+    SessionDerivationService,
+    SessionDerivationStatus,
+)
+from rpg_core.session.deletion import SessionDeletionService
 
 if TYPE_CHECKING:
     from rpg_data.models import SessionDerivationJob
@@ -34,8 +40,12 @@ class SessionDerivationWorker:
         gateway: "DataServiceGateway",
         notification_sink: SessionDerivationNotificationSink | None = None,
         retry_delay_seconds: float = _DEFAULT_RETRY_DELAY_SECONDS,
+        derivation_service: SessionDerivationService | None = None,
+        deletion_service: SessionDeletionService | None = None,
     ) -> None:
         self._gateway = gateway
+        self._derivations = derivation_service or SessionDerivationService(gateway)
+        self._deletion = deletion_service or SessionDeletionService(gateway)
         self._notifications = (
             notification_sink or NullSessionDerivationNotificationSink()
         )
@@ -75,9 +85,9 @@ class SessionDerivationWorker:
     async def interrupt_stale_jobs(self) -> bool:
         """Clean target runtimes before the data layer marks stale jobs final."""
 
-        service = self._gateway.session_derivations
+        service = self._derivations
         try:
-            running = service.list_jobs("running")
+            running = service.list_jobs(SessionDerivationStatus.RUNNING)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -98,7 +108,7 @@ class SessionDerivationWorker:
                     )
                     continue
                 try:
-                    self._gateway.session_deletion.delete_provisioning_target(
+                    self._deletion.delete_provisioning_target(
                         job.id,
                         job.target_session_id,
                     )
@@ -141,7 +151,9 @@ class SessionDerivationWorker:
             self._wake_event.clear()
             while not self._stop_event.is_set():
                 try:
-                    queued = self._gateway.session_derivations.list_jobs("queued")
+                    queued = self._derivations.list_jobs(
+                        SessionDerivationStatus.QUEUED
+                    )
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -158,7 +170,7 @@ class SessionDerivationWorker:
                         break
 
     async def _execute(self, queued_job: "SessionDerivationJob") -> bool:
-        service = self._gateway.session_derivations
+        service = self._derivations
         try:
             job = service.start_job(queued_job.id)
         except asyncio.CancelledError:
@@ -208,7 +220,7 @@ class SessionDerivationWorker:
         job_id: str,
         error: Exception,
     ) -> "SessionDerivationJob | None":
-        service = self._gateway.session_derivations
+        service = self._derivations
         current = service.get_job(job_id)
         if current is None:
             return None
@@ -223,7 +235,7 @@ class SessionDerivationWorker:
                 )
                 return None
             try:
-                self._gateway.session_deletion.delete_provisioning_target(
+                self._deletion.delete_provisioning_target(
                     job_id,
                     current.target_session_id,
                 )
@@ -238,9 +250,9 @@ class SessionDerivationWorker:
             error.code
             if isinstance(
                 error,
-                (SessionDerivationPreparationError, SessionDerivationDataError),
+                (SessionDerivationPreparationError, SessionDerivationError),
             )
-            else "DERIVATION_PREPARATION_FAILED"
+            else SessionDerivationErrorCode.PREPARATION_FAILED.value
         )
         message = str(error) or type(error).__name__
         try:

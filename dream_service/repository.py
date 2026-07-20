@@ -10,6 +10,11 @@ from typing import Mapping
 
 import yaml
 
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionPlayerCharacterState,
+    SessionRoleService,
+)
 from rpg_data import models
 from rpg_data.services.dream_memory import (
     DreamEvidenceInvalidError,
@@ -17,7 +22,6 @@ from rpg_data.services.dream_memory import (
 )
 from rpg_data.services.dream_source_identity import story_memory_source_identity
 from rpg_data.services.gateway import DataServiceGateway, get_data_service_gateway
-from rpg_data.services.session_role import SessionPlayerCharacterState
 
 from dream_service.contracts import (
     DreamEvidenceView,
@@ -108,10 +112,10 @@ class RPGDataDreamRepository(DreamRepository):
             summary_message_ids=summary_message_ids,
             summary_turn_ranges=summary_turn_ranges,
         )
-        player_state = self.gateway.session_roles.get_state(session_id)
+        player_state = SessionRoleService(self.gateway).get_state(session_id)
         player_character_name = (
             player_state.player.name
-            if player_state.status == models.PLAYER_CHARACTER_STATUS_BOUND
+            if player_state.status is PlayerCharacterBindingStatus.BOUND
             and player_state.player is not None
             else ""
         )
@@ -714,9 +718,11 @@ def _optional_positive_int(value: object, *, allow_zero: bool = False) -> int | 
 
 def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 def _player_character_fingerprint(player_state: SessionPlayerCharacterState) -> str:
     if (
-        player_state.status != models.PLAYER_CHARACTER_STATUS_BOUND
+        player_state.status is not PlayerCharacterBindingStatus.BOUND
         or player_state.player is None
     ):
         return ""

@@ -26,6 +26,11 @@ from rpg_core.agent.turn.resolver import (
 from rpg_core.agent.turn.runtime import TurnRuntime
 from rpg_core.context.models import Role
 from rpg_core.session import SessionManager
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    PlayerCharacterOption,
+    SessionPlayerCharacterState,
+)
 
 
 class _Catalog:
@@ -45,14 +50,23 @@ class _SessionRoles:
         self.player = player
 
     def get_state(self, _session_id: str):  # noqa: ANN201
-        return SimpleNamespace(
-            status="bound" if self.player is not None else "invalid",
+        return SessionPlayerCharacterState(
+            status=(
+                PlayerCharacterBindingStatus.BOUND
+                if self.player is not None
+                else PlayerCharacterBindingStatus.INVALID
+            ),
             player=self.player,
         )
 
-    @staticmethod
-    def render_role_bind_prompt(_session_id: str) -> str:
-        return "请选择角色"
+    def list_options(self, _session_id: str) -> list[PlayerCharacterOption]:
+        snapshot = self.player or SimpleNamespace(
+            character_id=1,
+            mount_id=10,
+            story_id=1,
+            name="候选角色",
+        )
+        return [PlayerCharacterOption(snapshot=snapshot, summary="候选角色")]
 
 
 class _Composer:
@@ -77,7 +91,11 @@ def test_turn_snapshot_resolver_freezes_mode_and_style_selection() -> None:
     )
     request = TurnRequest.create("行动", mode="gm", narrative_style_id=7)
 
-    snapshot = TurnSnapshotResolver("s1", gateway=gateway).resolve(request)
+    snapshot = TurnSnapshotResolver(
+        "s1",
+        gateway=gateway,
+        role_service=gateway.session_roles,
+    ).resolve(request)
 
     assert snapshot.request is request
     assert snapshot.mode_prompt == "mode:gm"
@@ -94,7 +112,11 @@ def test_ooc_snapshot_validates_but_suppresses_explicit_style() -> None:
         session_composer=composer,
         session_roles=_SessionRoles(),
     )
-    snapshot = TurnSnapshotResolver("s1", gateway=gateway).resolve(
+    snapshot = TurnSnapshotResolver(
+        "s1",
+        gateway=gateway,
+        role_service=gateway.session_roles,
+    ).resolve(
         TurnRequest.create("解释规则", mode="ooc", narrative_style_id=7)
     )
 
@@ -121,7 +143,11 @@ def test_turn_snapshot_freezes_player_and_rendered_story_prompt() -> None:
         session_roles=roles,
     )
 
-    snapshot = TurnSnapshotResolver("s1", gateway=gateway).resolve(
+    snapshot = TurnSnapshotResolver(
+        "s1",
+        gateway=gateway,
+        role_service=roles,
+    ).resolve(
         TurnRequest.create("行动"),
         require_player_character=True,
     )
@@ -148,8 +174,12 @@ def test_required_turn_snapshot_rejects_missing_player_before_runtime() -> None:
         session_roles=_SessionRoles(),
     )
 
-    with pytest.raises(PlayerCharacterRequiredError, match="请选择角色"):
-        TurnSnapshotResolver("s1", gateway=gateway).resolve(
+    with pytest.raises(PlayerCharacterRequiredError, match="请选择.*角色"):
+        TurnSnapshotResolver(
+            "s1",
+            gateway=gateway,
+            role_service=gateway.session_roles,
+        ).resolve(
             TurnRequest.create("行动"),
             require_player_character=True,
         )
@@ -165,7 +195,11 @@ def test_unbound_inspection_renders_stable_story_prompt_placeholder() -> None:
         session_roles=_SessionRoles(),
     )
 
-    snapshot = TurnSnapshotResolver("s1", gateway=gateway).resolve(
+    snapshot = TurnSnapshotResolver(
+        "s1",
+        gateway=gateway,
+        role_service=gateway.session_roles,
+    ).resolve(
         TurnRequest.create("预览"),
     )
 

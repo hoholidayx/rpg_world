@@ -4,6 +4,14 @@ from pathlib import Path
 
 import pytest
 
+from rpg_core.session.deletion import (
+    SessionDeletionService,
+    SessionRuntimeCleanupStatus,
+)
+from rpg_core.session.derivation import (
+    SessionDerivationError,
+    SessionDerivationService,
+)
 from rpg_data import models
 from rpg_data.repositories.records import (
     SessionBackupMessageRecord,
@@ -12,11 +20,7 @@ from rpg_data.repositories.records import (
     SessionProfileRecord,
     SessionStoryMemoryRecord,
 )
-from rpg_data.services import (
-    SessionDerivationDataError,
-    get_data_service_gateway,
-    reset_data_service_gateways,
-)
+from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +29,14 @@ def _isolate_runtime_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     reset_data_service_gateways()
     yield
     reset_data_service_gateways()
+
+
+def _derivations(gateway):  # noqa: ANN001, ANN202
+    return SessionDerivationService(gateway)
+
+
+def _deletion(gateway):  # noqa: ANN001, ANN202
+    return SessionDeletionService(gateway)
 
 
 def test_derivation_seeds_only_history_and_required_session_configuration(
@@ -97,18 +109,14 @@ def test_derivation_seeds_only_history_and_required_session_configuration(
         .execute()
     )
 
-    job = gateway.session_derivations.create_job(
+    job = _derivations(gateway).create_job(
         source.id,
         3,
         requested_title="铜扣之前",
     )
-    running = gateway.session_derivations.start_job(job.id)
+    running = _derivations(gateway).start_job(job.id)
     assert running.status == models.SESSION_DERIVATION_JOB_STATUS_RUNNING
-    seeded = gateway.session_derivations.seed_target_session(
-        job.id,
-        copy_plot_overrides=True,
-        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-    )
+    seeded = _derivations(gateway).materialize_target(job.id)
     target = seeded.session
 
     assert target.lifecycle == models.SESSION_LIFECYCLE_PROVISIONING
@@ -175,7 +183,7 @@ def test_derivation_seeds_only_history_and_required_session_configuration(
         SessionNarrativeOutcomeRecord.session == target.id
     ).count() == 0
 
-    ready_job = gateway.session_derivations.complete_job(job.id)
+    ready_job = _derivations(gateway).complete_job(job.id)
     ready_target = gateway.catalog.get_session(target.id)
     assert ready_job.status == models.SESSION_DERIVATION_JOB_STATUS_READY
     assert ready_job.stage == "ready"
@@ -191,20 +199,16 @@ def test_derivation_failure_cleans_provisioning_target_and_retains_job(
     tmp_path: Path,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-failure.sqlite3")
-    service = gateway.session_derivations
+    service = _derivations(gateway)
     job = service.create_job("s_forest001", 2)
     service.start_job(job.id)
-    seeded = service.seed_target_session(
-        job.id,
-        copy_plot_overrides=True,
-        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-    )
+    seeded = service.materialize_target(job.id)
     target_id = seeded.session.id
     runtime_dir = gateway.catalog.get_session_runtime_dir(target_id)
     marker = runtime_dir / "cleanup.marker"
     marker.write_text("target", encoding="utf-8")
 
-    deleted = gateway.session_deletion.delete_provisioning_target(job.id, target_id)
+    deleted = _deletion(gateway).delete_provisioning_target(job.id, target_id)
 
     failed = service.fail_job(
         job.id,
@@ -213,7 +217,7 @@ def test_derivation_failure_cleans_provisioning_target_and_retains_job(
     )
 
     assert gateway.catalog.get_session(target_id) is None
-    assert deleted.runtime_cleanup == models.SESSION_RUNTIME_CLEANUP_DELETED
+    assert deleted.runtime_cleanup == SessionRuntimeCleanupStatus.DELETED
     assert not runtime_dir.exists()
     assert failed.target_session_id == target_id
     assert failed.status == models.SESSION_DERIVATION_JOB_STATUS_FAILED
@@ -225,9 +229,9 @@ def test_derivation_failure_cleans_provisioning_target_and_retains_job(
 
 def test_derivation_rejects_missing_or_incomplete_branch_turn(tmp_path: Path) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-invalid.sqlite3")
-    service = gateway.session_derivations
+    service = _derivations(gateway)
 
-    with pytest.raises(SessionDerivationDataError) as missing:
+    with pytest.raises(SessionDerivationError) as missing:
         service.create_job("s_forest001", 99)
     assert missing.value.code == "DERIVATION_TURN_NOT_FOUND"
 
@@ -238,7 +242,7 @@ def test_derivation_rejects_missing_or_incomplete_branch_turn(tmp_path: Path) ->
         turn_id=9,
         seq_in_turn=1,
     )
-    with pytest.raises(SessionDerivationDataError) as incomplete:
+    with pytest.raises(SessionDerivationError) as incomplete:
         service.create_job("s_forest001", 9)
     assert incomplete.value.code == "DERIVATION_TURN_INCOMPLETE"
 
@@ -258,14 +262,10 @@ def test_derivation_accepts_assistant_ended_turn_with_deleted_sequence_gap(
     )
     assert gateway.messages.delete(source_user.id) is True
 
-    service = gateway.session_derivations
+    service = _derivations(gateway)
     job = service.create_job("s_forest001", 2)
     service.start_job(job.id)
-    seeded = service.seed_target_session(
-        job.id,
-        copy_plot_overrides=True,
-        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-    )
+    seeded = service.materialize_target(job.id)
 
     boundary_rows = [
         row for row in gateway.messages.list(seeded.session.id) if row.turn_id == 2
@@ -280,29 +280,31 @@ def test_derivation_seed_rolls_back_target_and_copied_rows_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-rollback.sqlite3")
-    service = gateway.session_derivations
+    service = _derivations(gateway)
     job = service.create_job("s_forest001", 2)
     service.start_job(job.id)
-    original_session_ids = {row.id for row in service._sessions.list()}
-    original_copy = service._copy_messages
+    original_session_ids = {
+        str(row.session_id) for row in SessionProfileRecord.select()
+    }
+    data_service = gateway.session_derivations
+    original_copy = data_service.copy_messages
 
-    def fail_after_partial_copy(messages, target_session_id):  # noqa: ANN001
-        original_copy(messages[:1], target_session_id)
+    def fail_after_partial_copy(target_session_id, messages):  # noqa: ANN001
+        source_messages = tuple(messages)
+        original_copy(target_session_id, source_messages[:1])
         raise RuntimeError("copy interrupted")
 
-    monkeypatch.setattr(service, "_copy_messages", fail_after_partial_copy)
+    monkeypatch.setattr(data_service, "copy_messages", fail_after_partial_copy)
 
     with pytest.raises(RuntimeError, match="copy interrupted"):
-        service.seed_target_session(
-            job.id,
-            copy_plot_overrides=True,
-            plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-        )
+        service.materialize_target(job.id)
 
     persisted_job = service.get_job(job.id)
     assert persisted_job is not None
     assert persisted_job.target_session_id is None
-    assert {row.id for row in service._sessions.list()} == original_session_ids
+    assert {
+        str(row.session_id) for row in SessionProfileRecord.select()
+    } == original_session_ids
     assert SessionMessageRecord.select().where(
         ~SessionMessageRecord.session.in_(original_session_ids)
     ).count() == 0
@@ -310,16 +312,12 @@ def test_derivation_seed_rolls_back_target_and_copied_rows_on_failure(
 
 def test_derivation_interrupts_running_jobs_and_cleans_targets(tmp_path: Path) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-interrupt.sqlite3")
-    service = gateway.session_derivations
+    service = _derivations(gateway)
     job = service.create_job("s_forest001", 1)
     service.start_job(job.id)
-    target_id = service.seed_target_session(
-        job.id,
-        copy_plot_overrides=True,
-        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-    ).session.id
+    target_id = service.materialize_target(job.id).session.id
 
-    gateway.session_deletion.delete_provisioning_target(job.id, target_id)
+    _deletion(gateway).delete_provisioning_target(job.id, target_id)
     interrupted = service.interrupt_job(job.id)
 
     assert interrupted.id == job.id
@@ -329,73 +327,66 @@ def test_derivation_interrupts_running_jobs_and_cleans_targets(tmp_path: Path) -
 
 def test_source_deletion_is_rejected_while_derivation_is_active(tmp_path: Path) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-delete-conflict.sqlite3")
-    job = gateway.session_derivations.create_job("s_forest001", 1)
+    job = _derivations(gateway).create_job("s_forest001", 1)
 
-    with pytest.raises(SessionDerivationDataError) as busy:
-        gateway.session_deletion.delete("s_forest001")
+    with pytest.raises(SessionDerivationError) as busy:
+        _deletion(gateway).delete("s_forest001")
     assert busy.value.code == "DERIVATION_SOURCE_BUSY"
 
-    gateway.session_derivations.fail_job(
+    _derivations(gateway).fail_job(
         job.id,
         error_code="TEST_CANCELLED",
         error_message="test cleanup",
     )
-    assert gateway.session_deletion.delete("s_forest001") is not None
+    assert _deletion(gateway).delete("s_forest001") is not None
 
 
 def test_regular_deletion_rejects_active_target_and_orphan_provisioning(
     tmp_path: Path,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-target-delete.sqlite3")
-    job = gateway.session_derivations.create_job("s_forest001", 1)
-    gateway.session_derivations.start_job(job.id)
-    target_id = gateway.session_derivations.seed_target_session(
-        job.id,
-        copy_plot_overrides=True,
-        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-    ).session.id
+    job = _derivations(gateway).create_job("s_forest001", 1)
+    _derivations(gateway).start_job(job.id)
+    target_id = _derivations(gateway).materialize_target(job.id).session.id
 
-    with pytest.raises(SessionDerivationDataError) as active_target:
-        gateway.session_deletion.delete(target_id)
+    with pytest.raises(SessionDerivationError) as active_target:
+        _deletion(gateway).delete(target_id)
     assert active_target.value.code == "DERIVATION_TARGET_BUSY"
 
-    gateway.session_deletion.delete_provisioning_target(job.id, target_id)
-    gateway.session_derivations.interrupt_job(job.id)
+    _deletion(gateway).delete_provisioning_target(job.id, target_id)
+    _derivations(gateway).interrupt_job(job.id)
 
-    orphan = gateway.session_derivations._sessions.create(
+    orphan = gateway.catalog.create_session(
         "demo_workspace",
         1,
         lifecycle=models.SESSION_LIFECYCLE_PROVISIONING,
     )
-    with pytest.raises(SessionDerivationDataError) as provisioning:
-        gateway.session_deletion.delete(orphan.id)
+    assert orphan is not None
+    with pytest.raises(SessionDerivationError) as provisioning:
+        _deletion(gateway).delete(orphan.id)
     assert provisioning.value.code == "DERIVATION_TARGET_PROVISIONING"
 
 
 def test_privileged_target_deletion_validates_job_ownership(tmp_path: Path) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-target-owner.sqlite3")
-    job = gateway.session_derivations.create_job("s_forest001", 1)
-    gateway.session_derivations.start_job(job.id)
-    target_id = gateway.session_derivations.seed_target_session(
-        job.id,
-        copy_plot_overrides=True,
-        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-    ).session.id
+    job = _derivations(gateway).create_job("s_forest001", 1)
+    _derivations(gateway).start_job(job.id)
+    target_id = _derivations(gateway).materialize_target(job.id).session.id
 
-    with pytest.raises(SessionDerivationDataError) as mismatch:
-        gateway.session_deletion.delete_provisioning_target(job.id, "wrong_target")
+    with pytest.raises(SessionDerivationError) as mismatch:
+        _deletion(gateway).delete_provisioning_target(job.id, "wrong_target")
     assert mismatch.value.code == "DERIVATION_TARGET_OWNERSHIP_MISMATCH"
     assert gateway.catalog.get_session(target_id) is not None
 
 
 def test_job_claim_is_a_single_conditional_transition(tmp_path: Path) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-claim.sqlite3")
-    service = gateway.session_derivations
+    service = _derivations(gateway)
     job = service.create_job("s_forest001", 1)
 
     running = service.start_job(job.id)
     assert running.status == models.SESSION_DERIVATION_JOB_STATUS_RUNNING
-    with pytest.raises(SessionDerivationDataError) as second_claim:
+    with pytest.raises(SessionDerivationError) as second_claim:
         service.start_job(job.id)
     assert second_claim.value.code == "DERIVATION_INVALID_STATE"
 
@@ -404,23 +395,19 @@ def test_conditional_deletes_cannot_remove_published_or_actively_owned_sessions(
     tmp_path: Path,
 ) -> None:
     gateway = get_data_service_gateway(tmp_path / "derive-delete-condition.sqlite3")
-    service = gateway.session_derivations
+    service = _derivations(gateway)
     job = service.create_job("s_forest001", 1)
 
-    assert gateway.session_deletion._sessions.delete_ready_without_active_derivation(
+    assert gateway.session_deletion.delete_ready_without_active_derivation(
         "s_forest001"
     ) is False
     assert gateway.catalog.get_session("s_forest001") is not None
 
     service.start_job(job.id)
-    target_id = service.seed_target_session(
-        job.id,
-        copy_plot_overrides=True,
-        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-    ).session.id
+    target_id = service.materialize_target(job.id).session.id
     service.complete_job(job.id)
 
-    assert gateway.session_deletion._sessions.delete_provisioning_for_derivation(
+    assert gateway.session_deletion.delete_provisioning_for_derivation(
         target_id,
         job.id,
     ) is False

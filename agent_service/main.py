@@ -88,8 +88,16 @@ from rpg_core.agent.runtime.main_llm import (
     MainLLMSelectionService,
 )
 from rpg_core.session import InvalidTurnMetadataError, SessionManager, validate_turn_metadata
+from rpg_core.session.catalog import SessionCatalogService
+from rpg_core.session.derivation import (
+    SessionDerivationError,
+    SessionDerivationErrorCode,
+    SessionDerivationService,
+)
+from rpg_core.session.deletion import SessionDeletionService
+from rpg_core.session.role import PlayerCharacterBindingStatus, SessionRoleService
 from rpg_data import models
-from rpg_data.services import SessionDerivationDataError, get_data_service_gateway
+from rpg_data.services import get_data_service_gateway
 
 
 _derivation_worker: SessionDerivationWorker | None = None
@@ -372,12 +380,13 @@ async def get_session_overview(
         (item for item in gateway.catalog.list_workspaces() if item.id == session.workspace_id),
         None,
     )
-    state = gateway.session_roles.get_state(session_id)
-    options = gateway.session_roles.list_options(session_id)
+    role_service = SessionRoleService(gateway)
+    state = role_service.get_state(session_id)
+    options = role_service.list_options(session_id)
     player = state.player
     player_status: Literal["bound", "invalid"] = (
         "bound"
-        if state.status == models.PLAYER_CHARACTER_STATUS_BOUND
+        if state.status is PlayerCharacterBindingStatus.BOUND
         else "invalid"
     )
     return {
@@ -426,7 +435,7 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayload
         if str(session.workspace_id) != workspace_id or int(session.story_id) != story_id:
             raise HTTPException(status_code=400, detail=f"Session {body.session_id!r} does not belong to workspace/story")
     else:
-        session = gateway.catalog.create_session(
+        session = SessionCatalogService(gateway).create_session(
             workspace_id,
             story_id,
             title=str(body.title or ""),
@@ -497,7 +506,7 @@ async def create_session_derivation(
             status_code=404,
             detail=f"Session {body.session_id!r} not found",
         )
-    service = gateway.session_derivations
+    service = SessionDerivationService(gateway)
     try:
         job = service.create_job(
             body.session_id,
@@ -506,16 +515,20 @@ async def create_session_derivation(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SessionDerivationDataError as exc:
-        status_code = 409 if exc.code == "DERIVATION_SOURCE_NOT_READY" else 422
-        if exc.code == "DERIVATION_SOURCE_BUSY":
+    except SessionDerivationError as exc:
+        status_code = (
+            409
+            if exc.code == SessionDerivationErrorCode.SOURCE_NOT_READY.value
+            else 422
+        )
+        if exc.code == SessionDerivationErrorCode.SOURCE_BUSY.value:
             status_code = 409
         raise _session_derivation_http_error(exc, status_code=status_code) from exc
     worker = _derivation_worker
     if worker is None or not worker.running:
         service.fail_job(
             job.id,
-            error_code="DERIVATION_WORKER_UNAVAILABLE",
+            error_code=SessionDerivationErrorCode.WORKER_UNAVAILABLE.value,
             error_message="Session derivation worker is unavailable",
         )
         raise HTTPException(
@@ -531,7 +544,7 @@ async def create_session_derivation(
     response_model=AgentSessionDerivationJobResponse,
 )
 async def get_session_derivation(job_id: str) -> AgentSessionDerivationJobPayload:
-    job = get_data_service_gateway().session_derivations.get_job(job_id)
+    job = SessionDerivationService(get_data_service_gateway()).get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Derivation job not found: {job_id}")
     return _derivation_job_payload(job)
@@ -547,10 +560,10 @@ async def delete_session(
     normalized_session_id = _require_session_id(session_id)
     gateway = get_data_service_gateway()
     try:
-        session = gateway.session_deletion.validate_regular_deletion(
+        session = SessionDeletionService(gateway).validate_regular_deletion(
             normalized_session_id
         )
-    except SessionDerivationDataError as exc:
+    except SessionDerivationError as exc:
         raise _session_derivation_http_error(exc) from exc
     if session is None:
         raise HTTPException(
@@ -573,7 +586,7 @@ async def delete_session(
         ) from exc
 
     try:
-        result = gateway.session_deletion.delete(normalized_session_id)
+        result = SessionDeletionService(gateway).delete(normalized_session_id)
         if result is None:
             raise HTTPException(
                 status_code=404,
@@ -587,11 +600,11 @@ async def delete_session(
         return {
             "status": "deleted",
             "session_id": normalized_session_id,
-            "runtime_cleanup": result.runtime_cleanup,
+            "runtime_cleanup": result.runtime_cleanup.value,
         }
     except HTTPException:
         raise
-    except SessionDerivationDataError as exc:
+    except SessionDerivationError as exc:
         raise _session_derivation_http_error(exc) from exc
     except Exception as exc:
         logger.exception(
@@ -809,8 +822,8 @@ def _require_ready_catalog_session(session_id: str) -> models.Session:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
     if session.lifecycle != models.SESSION_LIFECYCLE_READY:
-        error = SessionDerivationDataError(
-            "DERIVATION_TARGET_PROVISIONING",
+        error = SessionDerivationError(
+            SessionDerivationErrorCode.TARGET_PROVISIONING,
             f"Session is still provisioning: {session_id}",
         )
         raise _session_derivation_http_error(error)
@@ -819,7 +832,12 @@ def _require_ready_catalog_session(session_id: str) -> models.Session:
 
 def _create_catalog_session(workspace_id: str, story_id: int, *, title: str) -> models.Session:
     workspace_id = _require_workspace(workspace_id)
-    session = get_data_service_gateway().catalog.create_session(workspace_id, story_id, title=title)
+    gateway = get_data_service_gateway()
+    session = SessionCatalogService(gateway).create_session(
+        workspace_id,
+        story_id,
+        title=title,
+    )
     if session is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return session
@@ -875,18 +893,21 @@ async def _bind_agent_player_character(
         )
         raise ValueError(f"role bind command was not handled: {command}")
 
-    state = get_data_service_gateway().session_roles.get_state(session_id)
+    state = SessionRoleService(get_data_service_gateway()).get_state(session_id)
+    bound_character_id = (
+        state.player.character_id if state.player is not None else None
+    )
     if (
-        state.status != models.PLAYER_CHARACTER_STATUS_BOUND
+        state.status is not PlayerCharacterBindingStatus.BOUND
         or state.player is None
-        or int(state.player.character_id) != character_id
+        or bound_character_id != character_id
     ):
         logger.error(
             "[AgentService] player character bind post-check failed: session_id={}, requested_character_id={}, status={}, bound_character_id={}, reply={}",
             session_id,
             character_id,
             state.status,
-            getattr(state.player, "character_id", None),
+            bound_character_id,
             result.reply,
         )
         raise ValueError(result.reply or f"player character binding failed: {character_id}")
@@ -906,7 +927,8 @@ def _role_bind_command_for_character_id(
     *,
     story_opening_id: int | None = None,
 ) -> str:
-    options = get_data_service_gateway().session_roles.list_options(session_id)
+    gateway = get_data_service_gateway()
+    options = SessionRoleService(gateway).list_options(session_id)
     logger.debug(
         "[AgentService] resolving role bind index: session_id={}, character_id={}, option_count={}",
         session_id,
@@ -917,7 +939,7 @@ def _role_bind_command_for_character_id(
         if int(option.snapshot.character_id) == int(player_character_id):
             if story_opening_id is None:
                 return f"/role_bind {index}"
-            story = get_data_service_gateway().catalog.get_session_story(session_id)
+            story = gateway.catalog.get_session_story(session_id)
             if story is None:
                 raise FileNotFoundError(f"Story not found for session: {session_id}")
             for opening in story.openings:
@@ -1008,7 +1030,7 @@ def _turn_metadata_http_error(exc: InvalidTurnMetadataError) -> HTTPException:
 
 
 def _session_derivation_http_error(
-    exc: SessionDerivationDataError,
+    exc: SessionDerivationError,
     *,
     status_code: int = 409,
 ) -> HTTPException:

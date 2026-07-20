@@ -233,7 +233,7 @@ class SessionRepository:
             player_character_snapshot_json=player_character_snapshot_json,
         )
 
-    def bind_initial_player_character(
+    def update_player_character_and_opening(
         self,
         session_id: str,
         *,

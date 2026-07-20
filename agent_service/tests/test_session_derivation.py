@@ -12,8 +12,16 @@ from agent_service import main as service_main
 from agent_service.derivation_notifications import SessionDerivationNotification
 from agent_service.derivation_worker import SessionDerivationWorker
 from rpg_core.agent.runtime.derivation import SessionDerivationPreparationError
+from rpg_core.session.deletion import (
+    SessionDeleteResult,
+    SessionRuntimeCleanupStatus,
+)
+from rpg_core.session.derivation import (
+    SessionDerivationSeedResult,
+    SessionDerivationSourceBusyError,
+    SessionDerivationStatus,
+)
 from rpg_data import models
-from rpg_data.services import SessionDerivationSourceBusyError
 
 
 def _job(
@@ -72,10 +80,14 @@ class FakeDerivationService:
     def get_job(self, job_id: str) -> models.SessionDerivationJob | None:
         return self.jobs.get(job_id)
 
-    def list_jobs(self, *statuses: str) -> list[models.SessionDerivationJob]:
+    def list_jobs(
+        self,
+        *statuses: SessionDerivationStatus,
+    ) -> list[models.SessionDerivationJob]:
         if not statuses:
             return list(self.jobs.values())
-        return [job for job in self.jobs.values() if job.status in statuses]
+        values = {status.value for status in statuses}
+        return [job for job in self.jobs.values() if job.status in values]
 
     def start_job(self, job_id: str) -> models.SessionDerivationJob:
         job = replace(
@@ -143,11 +155,11 @@ class FakeSessionDeletion:
         self,
         job_id: str,
         session_id: str,
-    ) -> models.SessionDeleteResult:
+    ) -> SessionDeleteResult:
         self.deleted.append((job_id, session_id))
-        return models.SessionDeleteResult(
+        return SessionDeleteResult(
             session_id=session_id,
-            runtime_cleanup=models.SESSION_RUNTIME_CLEANUP_DELETED,
+            runtime_cleanup=SessionRuntimeCleanupStatus.DELETED,
         )
 
 
@@ -170,10 +182,10 @@ class FakeSourceAgent:
         self.service = service
         self.materialized: list[str] = []
 
-    async def materialize_derivation(self, job_id: str) -> models.SessionDerivationSeedResult:
+    async def materialize_derivation(self, job_id: str) -> SessionDerivationSeedResult:
         self.materialized.append(job_id)
         job = self.service.set_target(job_id, "target_1")
-        return models.SessionDerivationSeedResult(
+        return SessionDerivationSeedResult(
             job=job,
             session=models.Session(
                 id="target_1",
@@ -231,6 +243,8 @@ async def test_derivation_worker_completes_ready_job(monkeypatch) -> None:
     worker = SessionDerivationWorker(
         gateway=gateway,
         notification_sink=notifications,
+        derivation_service=service,
+        deletion_service=gateway.session_deletion,
     )
     await worker._execute(queued)
 
@@ -263,6 +277,8 @@ async def test_derivation_notification_failure_does_not_change_ready_job(
             session_deletion=FakeSessionDeletion(),
         ),
         notification_sink=FailingNotificationSink(),
+        derivation_service=service,
+        deletion_service=FakeSessionDeletion(),
     )
 
     assert await worker._execute(queued) is True
@@ -292,7 +308,11 @@ async def test_derivation_worker_cleans_target_and_fails_when_prepare_fails(monk
         session_deletion=deletion,
     )
 
-    await SessionDerivationWorker(gateway=gateway)._execute(queued)
+    await SessionDerivationWorker(
+        gateway=gateway,
+        derivation_service=service,
+        deletion_service=deletion,
+    )._execute(queued)
 
     failed = service.get_job(queued.id)
     assert failed is not None
@@ -324,6 +344,8 @@ async def test_derivation_worker_keeps_job_running_when_runtime_close_fails(
     worker = SessionDerivationWorker(
         gateway=gateway,
         notification_sink=notifications,
+        derivation_service=service,
+        deletion_service=deletion,
     )
     try:
         progressed = await worker._execute(queued)
@@ -368,6 +390,8 @@ async def test_derivation_worker_interrupts_stale_running_jobs(monkeypatch) -> N
     worker = SessionDerivationWorker(
         gateway=gateway,
         notification_sink=notifications,
+        derivation_service=service,
+        deletion_service=deletion,
     )
     await worker.start()
     await worker.stop()
@@ -390,8 +414,11 @@ async def test_derivation_worker_recovers_from_list_and_claim_errors(monkeypatch
             self.claim_failures = 1
             self.completed = asyncio.Event()
 
-        def list_jobs(self, *statuses: str) -> list[models.SessionDerivationJob]:
-            if statuses == ("queued",) and self.queued_list_failures:
+        def list_jobs(
+            self,
+            *statuses: SessionDerivationStatus,
+        ) -> list[models.SessionDerivationJob]:
+            if statuses == (SessionDerivationStatus.QUEUED,) and self.queued_list_failures:
                 self.queued_list_failures -= 1
                 raise RuntimeError("temporary list failure")
             return super().list_jobs(*statuses)
@@ -415,12 +442,15 @@ async def test_derivation_worker_recovers_from_list_and_claim_errors(monkeypatch
     FakeWorkerAgentManager.dropped = []
     FakeWorkerAgentManager.drop_error = None
     monkeypatch.setattr(worker_module, "AgentManager", FakeWorkerAgentManager)
+    deletion = FakeSessionDeletion()
     worker = SessionDerivationWorker(
         gateway=SimpleNamespace(
             session_derivations=service,
-            session_deletion=FakeSessionDeletion(),
+            session_deletion=deletion,
         ),
         retry_delay_seconds=0.01,
+        derivation_service=service,
+        deletion_service=deletion,
     )
 
     await worker.start()
@@ -437,14 +467,20 @@ async def test_worker_rescans_queued_jobs_after_stale_recovery(monkeypatch) -> N
     scanned = asyncio.Event()
 
     class Service:
-        def list_jobs(self, *statuses: str) -> list[models.SessionDerivationJob]:
-            assert statuses == ("queued",)
+        def list_jobs(
+            self,
+            *statuses: SessionDerivationStatus,
+        ) -> list[models.SessionDerivationJob]:
+            assert statuses == (SessionDerivationStatus.QUEUED,)
             scanned.set()
             worker._stop_event.set()
             return []
 
+    service = Service()
     worker = SessionDerivationWorker(
-        gateway=SimpleNamespace(session_derivations=Service()),
+        gateway=SimpleNamespace(session_derivations=service),
+        derivation_service=service,
+        deletion_service=FakeSessionDeletion(),
     )
     worker._stale_recovery_pending = True
     worker._wake_event.clear()
@@ -563,6 +599,11 @@ def test_derivation_create_query_and_error_contracts(monkeypatch) -> None:
     monkeypatch.setattr(service_main, "SessionDerivationWorker", FakeLifespanWorker)
     monkeypatch.setattr(service_main, "AgentManager", FakeLifespanAgentManager)
     monkeypatch.setattr(service_main, "get_data_service_gateway", lambda: gateway)
+    monkeypatch.setattr(
+        service_main,
+        "SessionDerivationService",
+        lambda _gateway: service,
+    )
 
     async def no_op(*args: object, **kwargs: object) -> None:
         del args, kwargs

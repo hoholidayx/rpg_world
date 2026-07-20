@@ -6,10 +6,14 @@ from types import SimpleNamespace
 import pytest
 
 import rpg_core.agent.runtime.derivation as derivation_module
-from rpg_data import models as data_models
 from rpg_core.agent.runtime.derivation import (
     AgentDerivationService,
     SessionDerivationPreparationError,
+)
+from rpg_core.session.derivation import SessionDerivationStage
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionPlayerCharacterState,
 )
 from rpg_core.settings import settings
 
@@ -18,27 +22,19 @@ class _DerivationDataService:
     def __init__(self, job: object, order: list[str]) -> None:
         self.job = job
         self.order = order
-        self.seed_calls: list[tuple[str, bool, frozenset[str]]] = []
+        self.materialize_calls: list[str] = []
         self.context_usage: dict[str, object] | None = None
 
     def get_job(self, job_id: str):  # noqa: ANN201
         assert job_id == "job-1"
         return self.job
 
-    def set_stage(self, job_id: str, stage: str) -> None:
+    def set_stage(self, job_id: str, stage: SessionDerivationStage) -> None:
         assert job_id == "job-1"
-        self.order.append(f"stage:{stage}")
+        self.order.append(f"stage:{stage.value}")
 
-    def seed_target_session(
-        self,
-        job_id: str,
-        *,
-        copy_plot_overrides: bool,
-        plot_decision_statuses: frozenset[str],
-    ):  # noqa: ANN201
-        self.seed_calls.append(
-            (job_id, copy_plot_overrides, plot_decision_statuses)
-        )
+    def materialize_target(self, job_id: str):  # noqa: ANN201
+        self.materialize_calls.append(job_id)
         return SimpleNamespace(session=SimpleNamespace(id="target-session"))
 
     def set_context_usage(self, job_id: str, **usage: object) -> None:
@@ -125,18 +121,10 @@ def _build_service(
         branch_turn_id=7,
     )
     data_service = _DerivationDataService(job, order)
-    gateway = SimpleNamespace(
-        session_derivations=data_service,
-        session_roles=SimpleNamespace(
-            get_state=lambda _session_id: SimpleNamespace(
-                status="invalid",
-                player=None,
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        "rpg_data.services.get_data_service_gateway",
-        lambda: gateway,
+    role_service = SimpleNamespace(
+        get_state=lambda _session_id: SessionPlayerCharacterState(
+            status=PlayerCharacterBindingStatus.INVALID,
+        )
     )
 
     class Bootstrap(_StatusBootstrap):
@@ -159,7 +147,12 @@ def _build_service(
     )
     context = _ContextService(order, payload or {})
     return (
-        AgentDerivationService(lifecycle=lifecycle, context_service=context),
+        AgentDerivationService(
+            lifecycle=lifecycle,
+            context_service=context,
+            derivation_service=data_service,
+            role_service=role_service,
+        ),
         data_service,
         order,
     )
@@ -178,11 +171,11 @@ def test_materialize_rejects_job_for_another_source_session(
         service.materialize("job-1")
 
     assert caught.value.code == "DERIVATION_SOURCE_MISMATCH"
-    assert data_service.seed_calls == []
+    assert data_service.materialize_calls == []
     assert order == []
 
 
-def test_materialize_applies_core_plot_derivation_policy(
+def test_materialize_delegates_to_core_derivation_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service, data_service, order = _build_service(monkeypatch)
@@ -191,13 +184,7 @@ def test_materialize_applies_core_plot_derivation_policy(
     result = service.materialize("job-1")
 
     assert result.session.id == "target-session"
-    assert data_service.seed_calls == [
-        (
-            "job-1",
-            True,
-            frozenset((data_models.PLOT_DECISION_TRIGGERED,)),
-        )
-    ]
+    assert data_service.materialize_calls == ["job-1"]
     assert order == ["stage:copying"]
 
 

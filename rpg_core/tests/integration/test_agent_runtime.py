@@ -21,6 +21,11 @@ from llm_client.keys import (
 from llm_client.types import ProviderChunk
 from rpg_core.agent.protocol import StreamEventKind
 from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
+from rpg_core.session.reset import SessionResetService
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionRoleService,
+)
 from rpg_core.tests.integration.scripted_llm import (
     CONFIG_PROVIDER_KEY,
     SESSION_PROVIDER_KEY,
@@ -212,8 +217,9 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     assert vector_db.is_file()
 
     backup_count = integration_data_gateway.backup.messages.count(session_id)
-    state_before = integration_data_gateway.session_roles.get_state(session_id)
-    assert state_before.status == models.PLAYER_CHARACTER_STATUS_BOUND
+    role_service = SessionRoleService(integration_data_gateway)
+    state_before = role_service.get_state(session_id)
+    assert state_before.status is PlayerCharacterBindingStatus.BOUND
 
     result = await agent.execute_command("/clear")
 
@@ -260,7 +266,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     assert json.loads((runtime_dir / "rpg_summaries.json").read_text(encoding="utf-8")) == []
     assert not vector_db.exists()
 
-    state_after = integration_data_gateway.session_roles.get_state(session_id)
+    state_after = role_service.get_state(session_id)
     assert state_after == state_before
     session = integration_data_gateway.catalog.get_session(session_id)
     assert session is not None
@@ -301,10 +307,10 @@ async def test_clear_restores_runtime_and_history_when_database_reset_fails(
     marker.write_text("old runtime", encoding="utf-8")
     rows_before = integration_data_gateway.messages.list(session_id)
 
-    def fail_reset(_session_id: str):  # noqa: ANN202
+    def fail_reset(_service: SessionResetService, _session_id: str):  # noqa: ANN202
         raise RuntimeError("database reset failed")
 
-    monkeypatch.setattr(integration_data_gateway.session_reset, "reset", fail_reset)
+    monkeypatch.setattr(SessionResetService, "reset", fail_reset)
 
     result = await agent.execute_command("/clear")
 

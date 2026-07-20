@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from rpg_core.session.catalog import SessionCatalogService
 from rpg_data.services import get_data_service_gateway
 
 
@@ -58,7 +59,10 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
 
 def test_new_story_mounts_all_current_default_modules(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "new-story-rp-modules.sqlite3")
-    story = gateway.catalog.create_story("demo_workspace", title="New Story")
+    story = SessionCatalogService(gateway).create_story(
+        "demo_workspace",
+        title="New Story",
+    )
     assert story is not None
     mounted = gateway.rp_modules.list_story_modules("demo_workspace", story.id)
     assert mounted is not None

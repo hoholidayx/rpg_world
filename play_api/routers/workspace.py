@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from play_api.backends import get_data_manager_backend
+from rpg_core.story.template import validate_story_text_template
 from rpg_data import models
-from rpg_data.story_template import validate_story_text_template
 
 
 router = APIRouter(prefix="/workspaces", tags=["play-workspaces"])

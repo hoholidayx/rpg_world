@@ -13,6 +13,8 @@ from llm_client.manager import LLMClientManager
 from rpg_core import settings as settings_module
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.manager import AgentManager
+from rpg_core.session.role import SessionRoleService
+from rpg_core.session.status import SessionStatusLifecycleService
 from rpg_core.tests.integration.scripted_llm import (
     ScriptedLLMManager,
 )
@@ -237,9 +239,9 @@ def _create_integration_session(
 
     if with_status:
         _mount_integration_status(gateway, workspace_id, story.id)
-        gateway.status.initialize_session_tables(session_id)
+        SessionStatusLifecycleService(gateway).initialize(session_id)
     if bind_role:
-        gateway.session_roles.bind_by_index(session_id, 1)
+        SessionRoleService(gateway).bind_player_character(session_id, character.id)
     return IntegrationCatalog(workspace_id, story, session, character)
 
 

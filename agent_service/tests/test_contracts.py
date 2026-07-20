@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_service import main as service_main
@@ -28,9 +29,17 @@ from rpg_core.agent.telemetry import CallRecord, TurnStats
 from rpg_core.agent.command import CommandDef, CommandResult
 from rpg_core.agent.turn.runner import AgentReply
 from rpg_core.context.models import Message, Role
+from rpg_core.session.deletion import (
+    SessionDeleteResult,
+    SessionRuntimeCleanupStatus,
+)
+from rpg_core.session.derivation import (
+    SessionDerivationError,
+    SessionDerivationErrorCode,
+)
+from rpg_core.session.role import PlayerCharacterBindingStatus
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data import models
-from rpg_data.services import SessionDerivationDataError
 
 
 class FakeAgent:
@@ -453,7 +462,10 @@ class FakeSessionRoles:
         option = options[index - 1]
         cls.state[session_id] = option.snapshot
         return SimpleNamespace(
-            state=SimpleNamespace(status=models.PLAYER_CHARACTER_STATUS_BOUND, player=option.snapshot),
+            state=SimpleNamespace(
+                status=PlayerCharacterBindingStatus.BOUND,
+                player=option.snapshot,
+            ),
             first_message="Welcome Bob" if index == 1 else "",
             story_opening_id=(
                 story_opening_id
@@ -466,8 +478,14 @@ class FakeSessionRoles:
     def get_state(cls, session_id: str) -> SimpleNamespace:
         player = cls.state.get(session_id)
         if player is None:
-            return SimpleNamespace(status=models.PLAYER_CHARACTER_STATUS_INVALID, player=None)
-        return SimpleNamespace(status=models.PLAYER_CHARACTER_STATUS_BOUND, player=player)
+            return SimpleNamespace(
+                status=PlayerCharacterBindingStatus.INVALID,
+                player=None,
+            )
+        return SimpleNamespace(
+            status=PlayerCharacterBindingStatus.BOUND,
+            player=player,
+        )
 
 
 class InvalidTurnMessages:
@@ -500,20 +518,20 @@ class FakeSessionDeletion:
         if session is None:
             return None
         if session.lifecycle != models.SESSION_LIFECYCLE_READY:
-            raise SessionDerivationDataError(
-                "DERIVATION_TARGET_PROVISIONING",
+            raise SessionDerivationError(
+                SessionDerivationErrorCode.TARGET_PROVISIONING,
                 f"Session is still provisioning: {session_id}",
             )
         return session
 
     @staticmethod
-    def delete(session_id: str) -> models.SessionDeleteResult | None:
+    def delete(session_id: str) -> SessionDeleteResult | None:
         FakeSessionDeletion.validate_regular_deletion(session_id)
         if FakeCatalog.sessions.pop(session_id, None) is None:
             return None
-        return models.SessionDeleteResult(
+        return SessionDeleteResult(
             session_id=session_id,
-            runtime_cleanup=models.SESSION_RUNTIME_CLEANUP_DELETED,
+            runtime_cleanup=SessionRuntimeCleanupStatus.DELETED,
         )
 
 
@@ -538,9 +556,55 @@ class FakeGateway:
     session_derivations = FakeSessionDerivations
 
 
+class FakeSessionCatalogApplication:
+    def __init__(self, _gateway: object) -> None:
+        pass
+
+    def create_session(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        session_id: str | None = None,
+        title: str = "",
+        **_kwargs: object,
+    ) -> models.Session | None:
+        return FakeCatalog.create_session(
+            workspace_id,
+            story_id,
+            session_id=session_id,
+            title=title,
+        )
+
+
+@pytest.fixture(autouse=True)
+def _patch_session_application_services(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        service_main,
+        "SessionCatalogService",
+        FakeSessionCatalogApplication,
+    )
+    monkeypatch.setattr(
+        service_main,
+        "SessionRoleService",
+        lambda _gateway: FakeSessionRoles,
+    )
+    monkeypatch.setattr(
+        service_main,
+        "SessionDeletionService",
+        lambda _gateway: FakeSessionDeletion,
+    )
+    monkeypatch.setattr(
+        service_main,
+        "SessionDerivationService",
+        lambda _gateway: FakeSessionDerivations,
+    )
+
+
 class InvalidHistoryGateway:
     catalog = FakeCatalog
     messages = InvalidTurnMessages
+    session_deletion = FakeSessionDeletion
     session_derivations = FakeSessionDerivations
 
 

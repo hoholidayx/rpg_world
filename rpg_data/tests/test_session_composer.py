@@ -5,9 +5,10 @@ from pathlib import Path
 import pytest
 from peewee import IntegrityError, SqliteDatabase
 
+from rpg_core.session.catalog import SessionCatalogService
 from rpg_data import db
 from rpg_data.migrations.runner import run_migrations
-from rpg_data.services.catalog import CatalogService
+from rpg_data.services.gateway import DataServiceGateway
 from rpg_data.services.session_composer import SessionComposerService
 
 
@@ -24,10 +25,11 @@ def _database(tmp_path: Path) -> SqliteDatabase:
 
 
 def test_session_composer_modes_styles_and_story_defaults(tmp_path: Path) -> None:
-    database = _database(tmp_path)
+    gateway = DataServiceGateway(tmp_path / "composer.sqlite3")
+    gateway.initialize()
     try:
-        service = SessionComposerService(database)
-        catalog = CatalogService(database)
+        service = gateway.session_composer
+        catalog = gateway.catalog
         modes = service.list_modes("demo_workspace")
         assert modes is not None
         assert [(item.mode, item.short_name) for item in modes] == [
@@ -56,7 +58,10 @@ def test_session_composer_modes_styles_and_story_defaults(tmp_path: Path) -> Non
         assert new_style is not None
         assert len(service.list_story_styles("demo_workspace", 1) or []) == 3
 
-        new_story = catalog.create_story("demo_workspace", title="Composer Story")
+        new_story = SessionCatalogService(gateway).create_story(
+            "demo_workspace",
+            title="Composer Story",
+        )
         assert new_story is not None
         new_mounts = service.list_story_styles("demo_workspace", new_story.id) or []
         assert {mount.narrative_style_id for mount in new_mounts} == {
@@ -79,7 +84,7 @@ def test_session_composer_modes_styles_and_story_defaults(tmp_path: Path) -> Non
         assert service.delete_style("demo_workspace", second.narrative_style_id)
         assert not any(mount.is_base for mount in service.list_story_styles("demo_workspace", new_story.id) or [])
     finally:
-        database.close()
+        gateway.close()
 
 
 def test_session_composer_workspace_isolation_and_quick_reply_order(tmp_path: Path) -> None:

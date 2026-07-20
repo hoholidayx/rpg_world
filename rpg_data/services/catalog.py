@@ -10,13 +10,9 @@ from peewee import Database
 
 from rpg_data import models
 from rpg_data.repositories.session_repo import SessionRepository
-from rpg_data.repositories.rp_module_repo import RPModuleRepository
-from rpg_data.repositories.session_composer_repo import SessionComposerRepository
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
-from rpg_data.services.status import StatusTableService
 from rpg_data.settings import resolve_workspace_relative_path, resolve_workspace_root
-from rpg_data.story_template import validate_story_text_template
 
 __all__ = ["CatalogService"]
 
@@ -26,19 +22,11 @@ logger = logging.getLogger("rpg_data.catalog")
 class CatalogService:
     """Expose workspace/story/session metadata without leaking repositories."""
 
-    def __init__(
-        self,
-        database: Database,
-        *,
-        status_service: StatusTableService | None = None,
-    ) -> None:
+    def __init__(self, database: Database) -> None:
         self._database = database
         self._workspaces = WorkspaceRepository(database)
         self._stories = StoryRepository(database)
         self._sessions = SessionRepository(database)
-        self._rp_modules = RPModuleRepository(database)
-        self._session_composer = SessionComposerRepository(database)
-        self._status = status_service
 
     def list_workspaces(self) -> list[models.Workspace]:
         workspaces = [
@@ -106,8 +94,6 @@ class CatalogService:
         story_prompt: str = "",
         openings: Sequence[models.StoryOpeningInput] = (),
     ) -> models.Story | None:
-        validate_story_text_template(story_prompt)
-        normalized_openings = _normalize_story_openings(openings)
         workspace = self._workspaces.get(workspace_id)
         if workspace is None:
             logger.warning("create story rejected missing workspace_id=%s", workspace_id)
@@ -119,10 +105,8 @@ class CatalogService:
                 title,
                 summary=summary,
                 story_prompt=story_prompt,
-                openings=normalized_openings,
+                openings=openings,
             )
-            self._rp_modules.mount_story_defaults(story.id)
-            self._session_composer.mount_all_workspace_styles(workspace_id, story.id)
         logger.info("created story story_id=%s workspace_id=%s", story.id, workspace_id)
         return story
 
@@ -136,13 +120,6 @@ class CatalogService:
         story_prompt: str | None = None,
         openings: Sequence[models.StoryOpeningInput] | None = None,
     ) -> models.Story | None:
-        if story_prompt is not None:
-            validate_story_text_template(story_prompt)
-        normalized_openings = (
-            _normalize_story_openings(openings)
-            if openings is not None
-            else None
-        )
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
             logger.warning("update story rejected missing story workspace_id=%s story_id=%s", workspace_id, story_id)
@@ -154,7 +131,7 @@ class CatalogService:
                 title=title,
                 summary=summary,
                 story_prompt=story_prompt,
-                openings=normalized_openings,
+                openings=openings,
             )
 
     def list_story_openings(
@@ -187,6 +164,8 @@ class CatalogService:
         description: str = "",
         player_character_id: int | None = None,
         player_character_snapshot_json: str = "{}",
+        story_opening_id: int | None = None,
+        lifecycle: str = models.SESSION_LIFECYCLE_READY,
     ) -> models.Session | None:
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
@@ -202,14 +181,9 @@ class CatalogService:
                 description=description,
                 player_character_id=player_character_id,
                 player_character_snapshot_json=player_character_snapshot_json,
+                story_opening_id=story_opening_id,
+                lifecycle=lifecycle,
             )
-            if self._status is not None:
-                tables = self._status.initialize_session_tables(session.id)
-                logger.info(
-                    "initialized session status tables session_id=%s table_count=%s",
-                    session.id,
-                    len(tables),
-                )
         logger.info("created session session_id=%s workspace_id=%s story_id=%s", session.id, workspace_id, story_id)
         return session
 
@@ -237,6 +211,13 @@ class CatalogService:
         if self._sessions.get(session_id) is None:
             return None
         return self._sessions.set_main_llm_provider_key(session_id, provider_key)
+
+    def set_session_lifecycle(
+        self,
+        session_id: str,
+        lifecycle: str,
+    ) -> models.Session | None:
+        return self._sessions.set_lifecycle(str(session_id), str(lifecycle))
 
     def get_session_story(
         self,
@@ -312,40 +293,3 @@ class CatalogService:
 
 def _session_runtime_relative_path(story_id: int, session_id: str) -> str:
     return f"stories/{story_id}/{session_id}"
-
-
-def _normalize_story_openings(
-    openings: Sequence[models.StoryOpeningInput],
-) -> tuple[models.StoryOpeningInput, ...]:
-    if len(openings) > models.MAX_STORY_OPENINGS:
-        raise ValueError(
-            f"story supports at most {models.MAX_STORY_OPENINGS} openings"
-        )
-    normalized: list[models.StoryOpeningInput] = []
-    titles: set[str] = set()
-    ids: set[int] = set()
-    for item in openings:
-        opening_id = item.id
-        if opening_id is not None:
-            if isinstance(opening_id, bool) or int(opening_id) <= 0:
-                raise ValueError("story opening id must be a positive integer")
-            opening_id = int(opening_id)
-            if opening_id in ids:
-                raise ValueError(f"duplicate story opening id: {opening_id}")
-            ids.add(opening_id)
-        title = str(item.title or "").strip()
-        message = str(item.message or "").strip()
-        if not title:
-            raise ValueError("story opening title must not be empty")
-        if not message:
-            raise ValueError("story opening message must not be empty")
-        if title in titles:
-            raise ValueError(f"duplicate story opening title: {title}")
-        titles.add(title)
-        validate_story_text_template(message)
-        normalized.append(models.StoryOpeningInput(
-            id=opening_id,
-            title=title,
-            message=message,
-        ))
-    return tuple(normalized)

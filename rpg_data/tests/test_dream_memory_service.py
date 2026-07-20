@@ -5,6 +5,8 @@ import hashlib
 import pytest
 
 from commons.text_identity import stable_text_identity_key
+from rpg_core.session.deletion import SessionDeletionService
+from rpg_core.session.reset import SessionResetService
 from rpg_data import models
 from rpg_data.services import (
     DreamActiveMemoryLimitError,
@@ -589,7 +591,7 @@ def test_active_limit_and_reset_clear_all_dream_rows(tmp_path) -> None:
             source_fingerprint=second.source_fingerprint,
         )
 
-    result = gateway.session_reset.reset("s_forest001")
+    result = SessionResetService(gateway).reset("s_forest001")
 
     assert result.dream_memories_cleared == 1
     assert result.dream_proposals_cleared == 2
@@ -840,7 +842,7 @@ def test_session_delete_cascades_dream_ledger_and_audit_rows(tmp_path) -> None:
         source_fingerprint=proposal.source_fingerprint,
     )
 
-    result = gateway.session_deletion.delete(session.id)
+    result = SessionDeletionService(gateway).delete(session.id)
 
     assert result is not None
     assert gateway.dream.get_proposal(proposal.id) is None

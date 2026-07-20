@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from rpg_core.session.catalog import SessionCatalogService
+from rpg_core.session.deletion import (
+    SessionDeleteResult,
+    SessionDeletionService,
+    SessionRuntimeCleanupStatus,
+)
 from rpg_data import models
 from rpg_data.repositories.records import (
     SessionBackupMessageRecord,
@@ -26,8 +32,9 @@ def _reset_gateways(tmp_path, monkeypatch):  # noqa: ANN001
 
 def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
     gateway = get_data_service_gateway(tmp_path / "session-delete.sqlite3")
-    session = gateway.catalog.create_session("demo_workspace", 1, title="Delete me")
-    survivor = gateway.catalog.create_session("demo_workspace", 1, title="Keep me")
+    catalog = SessionCatalogService(gateway)
+    session = catalog.create_session("demo_workspace", 1, title="Delete me")
+    survivor = catalog.create_session("demo_workspace", 1, title="Keep me")
     assert session is not None
     assert survivor is not None
 
@@ -89,11 +96,11 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
 def test_delete_removes_catalog_children_and_runtime_directory(tmp_path) -> None:
     gateway, session, survivor, runtime_dir = _prepared_session(tmp_path)
 
-    result = gateway.session_deletion.delete(session.id)
+    result = SessionDeletionService(gateway).delete(session.id)
 
-    assert result == models.SessionDeleteResult(
+    assert result == SessionDeleteResult(
         session_id=session.id,
-        runtime_cleanup=models.SESSION_RUNTIME_CLEANUP_DELETED,
+        runtime_cleanup=SessionRuntimeCleanupStatus.DELETED,
     )
     assert gateway.catalog.get_session(session.id) is None
     assert gateway.catalog.get_session(survivor.id) is not None
@@ -114,10 +121,10 @@ def test_delete_succeeds_when_runtime_directory_is_absent(tmp_path) -> None:
 
     shutil.rmtree(runtime_dir)
 
-    result = gateway.session_deletion.delete(session.id)
+    result = SessionDeletionService(gateway).delete(session.id)
 
     assert result is not None
-    assert result.runtime_cleanup == models.SESSION_RUNTIME_CLEANUP_ABSENT
+    assert result.runtime_cleanup == SessionRuntimeCleanupStatus.ABSENT
     assert gateway.catalog.get_session(session.id) is None
 
 
@@ -135,7 +142,7 @@ def test_delete_restores_runtime_when_database_delete_fails(tmp_path, monkeypatc
     )
 
     with pytest.raises(RuntimeError, match="database delete failed"):
-        gateway.session_deletion.delete(session.id)
+        SessionDeletionService(gateway).delete(session.id)
 
     assert gateway.catalog.get_session(session.id) is not None
     assert marker.read_bytes() == b"delete"
@@ -151,12 +158,12 @@ def test_delete_reports_pending_when_quarantine_cleanup_fails(
     def fail_cleanup(_path) -> None:  # noqa: ANN001
         raise OSError("busy runtime")
 
-    monkeypatch.setattr("rpg_data.services.session_deletion.shutil.rmtree", fail_cleanup)
+    monkeypatch.setattr("rpg_core.session.deletion.shutil.rmtree", fail_cleanup)
 
-    result = gateway.session_deletion.delete(session.id)
+    result = SessionDeletionService(gateway).delete(session.id)
 
     assert result is not None
-    assert result.runtime_cleanup == models.SESSION_RUNTIME_CLEANUP_PENDING
+    assert result.runtime_cleanup == SessionRuntimeCleanupStatus.PENDING
     assert gateway.catalog.get_session(session.id) is None
     assert not runtime_dir.exists()
     assert len(list(runtime_dir.parent.glob(f".{runtime_dir.name}.delete-*"))) == 1
@@ -165,4 +172,4 @@ def test_delete_reports_pending_when_quarantine_cleanup_fails(
 def test_delete_missing_session_returns_none(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "session-delete-missing.sqlite3")
 
-    assert gateway.session_deletion.delete("missing_session") is None
+    assert SessionDeletionService(gateway).delete("missing_session") is None

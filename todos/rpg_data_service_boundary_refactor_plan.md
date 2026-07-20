@@ -2,9 +2,9 @@
 
 ## 0. 状态与目标
 
-- [x] **当前首个整改项：Plot Schedule**
-- [ ] 后续整改项：Session 生命周期、角色绑定与开局
-- [ ] 后续整改项：Dream / Persistent Memory / Story Memory
+- [x] 首个已完成整改项：Plot Schedule
+- [x] 已完成整改项：Session 生命周期、角色绑定与开局
+- [ ] **下一整改项：Dream / Persistent Memory / Story Memory**
 - [ ] 后续整改项：状态表与 Scene
 - [ ] 后续整改项：Media 与 TTS
 - [ ] 后续整改项：Story Catalog、Composer 与 RP Module 配置
@@ -12,7 +12,7 @@
 
 本计划用于把 `rpg_data` 收敛为无框架、无业务决策的数据访问模块。整改后，`rpg_data` 只负责数据库 DTO、序列化、查询、CRUD、数据完整性和调用方明确指定的原子持久化；业务规则、状态机、默认策略、跨聚合用例和玩家文案必须由对应领域模块或应用编排层持有。
 
-Plot Schedule 是当前拆层整改执行顺序中的首个处理项：完成并通过边界验收前，不开始后续业务域的大规模迁移。这里描述的只是整改实施顺序，不代表 Plot Scheduler 的 RP Module 运行时优先级、模块排序、候选仲裁权重或剧情调度优先级。其它业务域先作为已排序的架构债务保留，后续逐项实施，避免一次同时改动 Agent、Dream、Media、TTS 等多条运行链路。
+Plot Schedule 与 Session P1 已按整改执行顺序完成，下一项是 Dream / Persistent Memory / Story Memory。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重或剧情调度优先级。后续业务域继续逐项实施，避免一次同时改动 Dream、Media、TTS 等多条运行链路。
 
 ## 1. 统一边界
 
@@ -109,19 +109,19 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 
 ### 3.1 角色绑定与 Opening
 
-- [ ] 将绑定有效性、首次绑定、后续切换、Opening 默认项/回退、模板渲染和首消息写入策略迁到 `rpg_core` 的 Session role 领域服务。
-- [ ] 将 `/role_bind` 序号解析和中文提示移入 Agent command/渠道展示层。
-- [ ] `rpg_data` 只提供角色挂载查询、Session profile CRUD、Opening CRUD，以及调用方准备好内容后的原子 profile/message 写入。
-- [ ] 保留“角色与 Story/Session 归属”“Opening ID 存在”等数据完整性校验，不在数据层决定是否属于首次绑定。
+- [x] 将绑定有效性、首次绑定、后续切换、Opening 默认项/回退、模板渲染和首消息写入策略迁到 `rpg_core` 的 Session role 领域服务。
+- [x] 将 `/role_bind` 序号解析和中文提示移入 Agent command/渠道展示层。
+- [x] `rpg_data` 只提供角色挂载查询、Session profile CRUD、Opening CRUD，以及调用方准备好内容后的原子 profile/message 写入。
+- [x] 保留“角色与 Story/Session 归属”“Opening ID 存在”等数据完整性校验，不在数据层决定是否属于首次绑定。
 
 ### 3.2 Session 创建、派生、重置和删除
 
-- [ ] Story/Session 创建时自动挂载哪些 RP Module、复制哪些状态模板，改由 Catalog application service 决定；`rpg_data` 只执行创建和批量复制。
-- [ ] 将 derivation job 状态机、完整 turn 判定、继承项目、目标标题、目标生命周期推进迁入 `rpg_core/agent/runtime/derivation.py` 或同业务包。
-- [ ] 将 `/clear` 的清理/保留矩阵、状态模板重建和 Opening 重放迁入 Session reset application service。
-- [ ] 将删除资格、活动任务门禁、runtime 目录隔离/恢复和 pending cleanup 迁入 Agent Session 删除用例。
-- [ ] 数据层保留 job/session 条件更新、级联删除、批量复制、批量清理和通用事务能力。
-- [ ] 迁移必须保持当前 mailbox 隔离、取消顺序、SQL 原子性及 runtime 目录补偿语义。
+- [x] Story/Session 创建时自动挂载哪些 RP Module、复制哪些状态模板，改由 Catalog application service 决定；`rpg_data` 只执行创建和批量复制。
+- [x] 将 derivation job 状态机、完整 turn 判定、继承项目、目标标题、目标生命周期推进迁入 `rpg_core.session.derivation`，Agent runtime 只负责目标运行态准备。
+- [x] 将 `/clear` 的清理/保留矩阵、状态模板重建和 Opening 重放迁入 Session reset application service。
+- [x] 将删除资格、活动任务门禁、runtime 目录隔离/恢复和 pending cleanup 迁入 Agent Session 删除用例。
+- [x] 数据层保留 job/session 条件更新、级联删除、批量复制、批量清理和通用事务能力。
+- [x] 迁移保持 mailbox 隔离、取消顺序、SQL 原子性及 runtime 目录补偿语义。
 
 ## 4. P2：Dream、Persistent Memory 与 Story Memory
 
@@ -155,8 +155,8 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 
 ## 7. P5：Story Catalog、Composer 与 RP Module 配置
 
-- [ ] 将 Story Prompt/Opening 模板白名单、Opening 上限与默认 Opening 规则迁入 Story 领域服务；数据层保留 schema 约束和原始模板 CRUD。
-- [ ] 将新 Story 默认挂载 RP Module、自动挂载叙事风格和新 Session 初始化状态表的行为迁出 `CatalogService`。
+- [x] 将 Story Prompt/Opening 模板白名单、Opening 上限与默认 Opening 规则迁入 Story/Session 领域服务；数据层保留 schema 约束和原始模板 CRUD。
+- [x] 将新 Story 默认挂载 RP Module、自动挂载叙事风格和新 Session 初始化状态表的行为迁出 `CatalogService`。
 - [ ] 将叙事风格的 `story base < session override` 解析迁入 Session Composer 核心逻辑；数据层只管理 style、mount、base 标记和 override 记录。
 - [ ] 将 RP Module 的 `system < story < session` 配置合并、整组字段和有效启用状态解析保持在 `rpg_core/rp_modules`；数据层只管理 catalog/mount/override CRUD。
 - [ ] Character 与 Lorebook management 当前以归属校验和 CRUD 为主，优先保持稳定；只迁出后续发现的 Context 选择、默认挂载或展示策略，不为拆层而重写正常 CRUD。

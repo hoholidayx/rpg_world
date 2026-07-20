@@ -14,6 +14,7 @@ from rp_memory.dream.types import (
     DreamProposalItemDraft,
     DreamScope,
 )
+from rpg_core.session.role import SessionRoleService
 
 
 def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
@@ -57,8 +58,9 @@ def test_repository_snapshot_proposal_apply_boundary(tmp_path) -> None:
         },),
         message_ids=(first.id, second.id),
     )[0]
-    role = gateway.session_roles.list_options(session.id)[0]
-    gateway.session_roles.bind_player_character(
+    role_service = SessionRoleService(gateway)
+    role = role_service.list_options(session.id)[0]
+    role_service.bind_player_character(
         session.id,
         role.snapshot.character_id,
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rpg_data import models
 from rpg_core.agent.command.models import AgentCommandTarget, CommandDef, CommandResult
+from rpg_core.session.catalog import SessionCatalogService
 
 
 async def cmd_clear(agent: AgentCommandTarget, args: list[str]) -> str:
@@ -62,7 +63,7 @@ async def cmd_sessions(agent: AgentCommandTarget, args: list[str]) -> str:
 async def cmd_session_create(agent: AgentCommandTarget, args: list[str]) -> str:
     title = " ".join(args).strip() or "New Session"
     gateway, current_session = _current_catalog_session(agent)
-    created = gateway.catalog.create_session(
+    created = SessionCatalogService(gateway).create_session(
         str(current_session.workspace_id),
         int(current_session.story_id),
         title=title,

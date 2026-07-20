@@ -266,11 +266,14 @@ def _build_sub_agent_context(
 
     player_character = None
     try:
-        from rpg_data import models
+        from rpg_core.session.role import (
+            PlayerCharacterBindingStatus,
+            SessionRoleService,
+        )
         from rpg_data.services import get_data_service_gateway
 
-        state = get_data_service_gateway().session_roles.get_state(session_id)
-        if state.status == models.PLAYER_CHARACTER_STATUS_BOUND:
+        state = SessionRoleService(get_data_service_gateway()).get_state(session_id)
+        if state.status is PlayerCharacterBindingStatus.BOUND:
             player_character = state.player
     except FileNotFoundError:
         logger.debug(

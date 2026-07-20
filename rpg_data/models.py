@@ -78,16 +78,17 @@ __all__ = [
     "SessionRPModuleOverride",
     "Session",
     "SessionDerivationJob",
-    "SessionDerivationSeedResult",
+    "SessionDerivationJobUpdate",
     "SessionCharacter",
+    "SessionCharacterMount",
     "SessionCharacterDetail",
     "SessionLorebookEntry",
     "SessionMessage",
     "SessionPlayerCharacterSnapshot",
     "SessionProfile",
-    "SessionDeleteResult",
-    "SessionResetResult",
     "SessionStatusResetResult",
+    "SessionStatusResetPlan",
+    "SessionStatusDocumentWrite",
     "MemoryFact",
     "MemoryEvidence",
     "SessionStoryMemory",
@@ -246,11 +247,6 @@ __all__ = [
     "NARRATIVE_OUTCOME_SOURCE_CONFIG",
     "NARRATIVE_OUTCOME_SOURCE_SESSION",
     "NARRATIVE_OUTCOME_SOURCE_STORY",
-    "PLAYER_CHARACTER_STATUS_BOUND",
-    "PLAYER_CHARACTER_STATUS_INVALID",
-    "SESSION_RUNTIME_CLEANUP_ABSENT",
-    "SESSION_RUNTIME_CLEANUP_DELETED",
-    "SESSION_RUNTIME_CLEANUP_PENDING",
     "SESSION_LIFECYCLE_PROVISIONING",
     "SESSION_LIFECYCLE_READY",
     "SESSION_DERIVATION_JOB_STATUSES",
@@ -270,11 +266,6 @@ __all__ = [
 
 STATUS_TABLE_KIND = "status_table"
 STATUS_TABLE_MODE_KEY_VALUE = "key_value"
-PLAYER_CHARACTER_STATUS_BOUND = "bound"
-PLAYER_CHARACTER_STATUS_INVALID = "invalid"
-SESSION_RUNTIME_CLEANUP_DELETED = "deleted"
-SESSION_RUNTIME_CLEANUP_ABSENT = "absent"
-SESSION_RUNTIME_CLEANUP_PENDING = "pending"
 SESSION_LIFECYCLE_PROVISIONING = "provisioning"
 SESSION_LIFECYCLE_READY = "ready"
 SESSION_DERIVATION_JOB_STATUS_QUEUED = "queued"
@@ -774,10 +765,20 @@ class SessionDerivationJob:
 
 
 @dataclass(frozen=True)
-class SessionDerivationSeedResult:
-    job: SessionDerivationJob
-    session: Session
-    copied_message_count: int
+class SessionDerivationJobUpdate:
+    """Explicit fields for one derivation-ledger row update."""
+
+    target_session_id: str | None = None
+    status: str | None = None
+    stage: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    context_used_tokens: int | None = None
+    context_limit: int | None = None
+    context_threshold_exceeded: bool | None = None
+    write_context_usage: bool = False
+    mark_started: bool = False
+    mark_finished: bool = False
 
 
 @dataclass(frozen=True)
@@ -796,35 +797,6 @@ class SessionProfile:
 
 
 @dataclass(frozen=True)
-class SessionDeleteResult:
-    """Result of permanently deleting one catalog session."""
-
-    session_id: str
-    runtime_cleanup: str
-
-
-@dataclass(frozen=True)
-class SessionResetResult:
-    """Counts produced by one atomic reset of session-owned runtime data."""
-
-    session_id: str
-    messages_cleared: int = 0
-    narrative_outcomes_cleared: int = 0
-    plot_schedule_decisions_cleared: int = 0
-    story_memories_cleared: int = 0
-    dream_memories_cleared: int = 0
-    dream_proposals_cleared: int = 0
-    template_status_tables_cleared: int = 0
-    template_status_tables_initialized: int = 0
-    session_native_status_tables_reset: int = 0
-    deferred_progress_cleared: int = 0
-    media_jobs_cleared: int = 0
-    media_gallery_items_cleared: int = 0
-    media_backgrounds_cleared: int = 0
-    first_message: str = ""
-
-
-@dataclass(frozen=True)
 class SessionStatusResetResult:
     """Counts produced by resetting one session's status-table runtime."""
 
@@ -833,6 +805,24 @@ class SessionStatusResetResult:
     template_tables_initialized: int = 0
     native_tables_reset: int = 0
     deferred_progress_cleared: int = 0
+
+
+@dataclass(frozen=True)
+class SessionStatusDocumentWrite:
+    """Caller-prepared document replacement for one Session status table."""
+
+    table_id: int
+    document: "StatusTableDocument"
+
+
+@dataclass(frozen=True)
+class SessionStatusResetPlan:
+    """Explicit status-table mutations applied atomically by the data layer."""
+
+    delete_table_ids: tuple[int, ...] = ()
+    document_writes: tuple[SessionStatusDocumentWrite, ...] = ()
+    deferred_progress_table_ids: tuple[int, ...] = ()
+    story_mount_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1241,6 +1231,21 @@ class SessionPlayerCharacterSnapshot:
     avatar_url: str = ""
     role_label: str = ""
     updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SessionCharacterMount:
+    """Typed read projection for one character mounted on a Session's Story."""
+
+    workspace_id: str
+    story_id: int
+    mount_id: int
+    character_id: int
+    name: str
+    personality: str = ""
+    content: str = ""
+    metadata_json: str = "{}"
+    character_updated_at: str = ""
 
 
 @dataclass(frozen=True)

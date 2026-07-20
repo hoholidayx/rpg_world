@@ -13,6 +13,8 @@ from play_api.delete_tokens import reset_delete_confirmation_tokens
 from play_api.routers.sessions import _agent_call, _turns_from_history
 from play_api.sse_protocol import AgentEventKind, PLAY_SSE_SCHEMA_VERSION, PlaySSEType
 from rpg_core.agent.protocol import TurnCancelStatus
+from rpg_core.session.derivation import SessionDerivationService
+from rpg_core.session.role import SessionRoleService
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
@@ -293,7 +295,8 @@ class _FakeAgentClient:
             str(story_opening_id or ""),
         ))
         try:
-            get_data_service_gateway().session_roles.bind_player_character(
+            gateway = get_data_service_gateway()
+            SessionRoleService(gateway).bind_player_character(
                 session_id,
                 player_character_id,
                 story_opening_id=story_opening_id,
@@ -1037,13 +1040,10 @@ def test_provisioning_session_is_hidden_from_play_session_and_status_routes(
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     reset_data_service_gateways()
     gateway = get_data_service_gateway()
-    job = gateway.session_derivations.create_job("s_forest001", 1)
-    gateway.session_derivations.start_job(job.id)
-    target = gateway.session_derivations.seed_target_session(
-        job.id,
-        copy_plot_overrides=True,
-        plot_decision_statuses=frozenset((models.PLOT_DECISION_TRIGGERED,)),
-    ).session
+    derivations = SessionDerivationService(gateway)
+    job = derivations.create_job("s_forest001", 1)
+    derivations.start_job(job.id)
+    target = derivations.materialize_target(job.id).session
     table_id = gateway.status.list_tables(target.id)[0].id
 
     with TestClient(app) as client:

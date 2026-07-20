@@ -23,10 +23,9 @@ from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleService
-from rpg_data.services.session_role import SessionRoleService
-from rpg_data.services.session_deletion import SessionDeletionService
-from rpg_data.services.session_derivation import SessionDerivationService
-from rpg_data.services.session_reset import SessionResetService
+from rpg_data.services.session_role import SessionRoleDataService
+from rpg_data.services.session_deletion import SessionDeletionDataService
+from rpg_data.services.session_derivation import SessionDerivationDataService
 from rpg_data.services.session_composer import SessionComposerService
 from rpg_data.services.story_memory import StoryMemoryService
 from rpg_data.services.status import StatusTableService
@@ -59,10 +58,9 @@ class DataServiceGateway:
         self._narrative_outcomes: NarrativeOutcomeService | None = None
         self._plot_scheduling: PlotSchedulingDataService | None = None
         self._rp_modules: RPModuleService | None = None
-        self._session_roles: SessionRoleService | None = None
-        self._session_deletion: SessionDeletionService | None = None
-        self._session_derivations: SessionDerivationService | None = None
-        self._session_reset: SessionResetService | None = None
+        self._session_roles: SessionRoleDataService | None = None
+        self._session_deletion: SessionDeletionDataService | None = None
+        self._session_derivations: SessionDerivationDataService | None = None
         self._session_composer: SessionComposerService | None = None
         self._backup: BackupService | None = None
         self._story_memory: StoryMemoryService | None = None
@@ -88,7 +86,7 @@ class DataServiceGateway:
         database = self.database
         if self._catalog is None:
             logger.debug("creating catalog service db_path=%s", self._database_path)
-            self._catalog = CatalogService(database, status_service=self.status)
+            self._catalog = CatalogService(database)
         self._ensure_bound()
         return self._catalog
 
@@ -199,60 +197,35 @@ class DataServiceGateway:
         return self._rp_modules
 
     @property
-    def session_roles(self) -> SessionRoleService:
+    def session_roles(self) -> SessionRoleDataService:
         database = self.database
         if self._session_roles is None:
             logger.debug("creating session role service db_path=%s", self._database_path)
-            self._session_roles = SessionRoleService(database)
+            self._session_roles = SessionRoleDataService(database)
         self._ensure_bound()
         return self._session_roles
 
     @property
-    def session_reset(self) -> SessionResetService:
-        database = self.database
-        if self._session_reset is None:
-            logger.debug("creating session reset service db_path=%s", self._database_path)
-            self._session_reset = SessionResetService(
-                database,
-                messages=self.messages,
-                narrative_outcomes=self.narrative_outcomes,
-                session_roles=self.session_roles,
-                story_memory=self.story_memory,
-                dream=self.dream,
-                status=self.status,
-                media=self.media,
-            )
-        self._ensure_bound()
-        return self._session_reset
-
-    @property
-    def session_deletion(self) -> SessionDeletionService:
+    def session_deletion(self) -> SessionDeletionDataService:
         database = self.database
         if self._session_deletion is None:
             logger.debug(
                 "creating session deletion service db_path=%s",
                 self._database_path,
             )
-            self._session_deletion = SessionDeletionService(
-                database,
-                catalog=self.catalog,
-            )
+            self._session_deletion = SessionDeletionDataService(database)
         self._ensure_bound()
         return self._session_deletion
 
     @property
-    def session_derivations(self) -> SessionDerivationService:
+    def session_derivations(self) -> SessionDerivationDataService:
         database = self.database
         if self._session_derivations is None:
             logger.debug(
                 "creating session derivation service db_path=%s",
                 self._database_path,
             )
-            self._session_derivations = SessionDerivationService(
-                database,
-                status=self.status,
-                plot_scheduling=self.plot_scheduling,
-            )
+            self._session_derivations = SessionDerivationDataService(database)
         self._ensure_bound()
         return self._session_derivations
 
@@ -334,7 +307,6 @@ class DataServiceGateway:
         self._session_roles = None
         self._session_deletion = None
         self._session_derivations = None
-        self._session_reset = None
         self._session_composer = None
         self._backup = None
         self._story_memory = None

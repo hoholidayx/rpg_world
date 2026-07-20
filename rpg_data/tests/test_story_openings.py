@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from rpg_core.session.catalog import SessionCatalogService
 from rpg_data import models
 from rpg_data.services.gateway import DataServiceGateway
 
@@ -18,14 +19,15 @@ def test_catalog_manages_zero_to_three_ordered_story_openings() -> None:
     gateway = DataServiceGateway(":memory:")
     try:
         gateway.initialize()
-        empty = gateway.catalog.create_story(
+        catalog = SessionCatalogService(gateway)
+        empty = catalog.create_story(
             "demo_workspace",
             title="无开局故事",
         )
         assert empty is not None
         assert empty.openings == ()
 
-        story = gateway.catalog.create_story(
+        story = catalog.create_story(
             "demo_workspace",
             title="多开局故事",
             openings=(
@@ -42,7 +44,7 @@ def test_catalog_manages_zero_to_three_ordered_story_openings() -> None:
         ]
 
         first_id, second_id, third_id = (item.id for item in story.openings)
-        updated = gateway.catalog.update_story(
+        updated = catalog.update_story(
             "demo_workspace",
             story.id,
             openings=(
@@ -59,13 +61,13 @@ def test_catalog_manages_zero_to_three_ordered_story_openings() -> None:
         ]
 
         with pytest.raises(ValueError, match="at most 3"):
-            gateway.catalog.update_story(
+            catalog.update_story(
                 "demo_workspace",
                 story.id,
                 openings=tuple(_opening(f"开局 {index}", str(index)) for index in range(4)),
             )
         with pytest.raises(ValueError, match="duplicate story opening title"):
-            gateway.catalog.update_story(
+            catalog.update_story(
                 "demo_workspace",
                 story.id,
                 openings=(_opening("重复", "一"), _opening("重复", "二")),
@@ -78,13 +80,14 @@ def test_story_opening_update_rejects_foreign_id_without_partial_changes() -> No
     gateway = DataServiceGateway(":memory:")
     try:
         gateway.initialize()
-        first = gateway.catalog.create_story(
+        catalog = SessionCatalogService(gateway)
+        first = catalog.create_story(
             "demo_workspace",
             title="开局归属甲",
             summary="原摘要",
             openings=(_opening("甲", "甲正文"),),
         )
-        second = gateway.catalog.create_story(
+        second = catalog.create_story(
             "demo_workspace",
             title="开局归属乙",
             openings=(_opening("乙", "乙正文"),),
@@ -92,7 +95,7 @@ def test_story_opening_update_rejects_foreign_id_without_partial_changes() -> No
         assert first is not None and second is not None
 
         with pytest.raises(ValueError, match="does not belong"):
-            gateway.catalog.update_story(
+            catalog.update_story(
                 "demo_workspace",
                 first.id,
                 summary="不应提交",

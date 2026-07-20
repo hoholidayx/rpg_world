@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from peewee import Database, IntegrityError, SQL
+from peewee import Database, SQL
 
 from rpg_data import models
 from rpg_data.repositories.records import SessionDerivationJobRecord, bind_database
@@ -22,17 +22,12 @@ class SessionDerivationRepository:
         *,
         requested_title: str = "",
     ) -> models.SessionDerivationJob:
-        try:
-            row = SessionDerivationJobRecord.create(
-                id=f"sd_{uuid.uuid4().hex}",
-                source_session=source_session_id,
-                branch_turn_id=int(branch_turn_id),
-                requested_title=str(requested_title),
-            )
-        except IntegrityError as exc:
-            raise ValueError(
-                f"An active derivation already exists for session: {source_session_id}"
-            ) from exc
+        row = SessionDerivationJobRecord.create(
+            id=f"sd_{uuid.uuid4().hex}",
+            source_session=source_session_id,
+            branch_turn_id=int(branch_turn_id),
+            requested_title=str(requested_title),
+        )
         return _to_job(row)
 
     def get(self, job_id: str) -> models.SessionDerivationJob | None:
@@ -78,85 +73,63 @@ class SessionDerivationRepository:
             .exists()
         )
 
-    def claim_queued(self, job_id: str) -> models.SessionDerivationJob | None:
-        """Atomically move one queued job to running.
-
-        The status predicate is part of the UPDATE so multiple service
-        processes cannot both claim the same persisted job after reading the
-        same queued snapshot.
-        """
-
-        updated = (
-            SessionDerivationJobRecord.update(
-                status=models.SESSION_DERIVATION_JOB_STATUS_RUNNING,
-                stage="snapshotting",
-                started_at=SQL("COALESCE(started_at, CURRENT_TIMESTAMP)"),
-                version=SessionDerivationJobRecord.version + 1,
-                updated_at=SQL("CURRENT_TIMESTAMP"),
-            )
-            .where(
-                (SessionDerivationJobRecord.id == str(job_id))
-                & (
-                    SessionDerivationJobRecord.status
-                    == models.SESSION_DERIVATION_JOB_STATUS_QUEUED
-                )
-            )
-            .execute()
-        )
-        return self.get(job_id) if updated else None
+    def update_if_status(
+        self,
+        job_id: str,
+        expected_status: str,
+        update: models.SessionDerivationJobUpdate,
+    ) -> models.SessionDerivationJob | None:
+        return self._update(job_id, update, expected_status=expected_status)
 
     def update(
         self,
         job_id: str,
+        update: models.SessionDerivationJobUpdate,
+    ) -> models.SessionDerivationJob | None:
+        return self._update(job_id, update, expected_status=None)
+
+    def _update(
+        self,
+        job_id: str,
+        update: models.SessionDerivationJobUpdate,
         *,
-        target_session_id: str | None | object = ...,
-        status: str | None = None,
-        stage: str | None = None,
-        error_code: str | None = None,
-        error_message: str | None = None,
-        context_used_tokens: int | None | object = ...,
-        context_limit: int | None | object = ...,
-        context_threshold_exceeded: bool | None = None,
-        started: bool = False,
-        finished: bool = False,
+        expected_status: str | None,
     ) -> models.SessionDerivationJob | None:
         values: dict[object, object] = {
             SessionDerivationJobRecord.version: SessionDerivationJobRecord.version + 1,
             SessionDerivationJobRecord.updated_at: SQL("CURRENT_TIMESTAMP"),
         }
-        if target_session_id is not ...:
-            values[SessionDerivationJobRecord.target_session_id] = target_session_id
-        if status is not None:
-            if status not in models.SESSION_DERIVATION_JOB_STATUSES:
-                raise ValueError(f"Unsupported derivation status: {status}")
-            values[SessionDerivationJobRecord.status] = status
-        if stage is not None:
-            if stage not in models.SESSION_DERIVATION_STAGES:
-                raise ValueError(f"Unsupported derivation stage: {stage}")
-            values[SessionDerivationJobRecord.stage] = stage
-        if error_code is not None:
-            values[SessionDerivationJobRecord.error_code] = str(error_code)
-        if error_message is not None:
-            values[SessionDerivationJobRecord.error_message] = str(error_message)
-        if context_used_tokens is not ...:
-            values[SessionDerivationJobRecord.context_used_tokens] = context_used_tokens
-        if context_limit is not ...:
-            values[SessionDerivationJobRecord.context_limit] = context_limit
-        if context_threshold_exceeded is not None:
+        if update.target_session_id is not None:
+            values[SessionDerivationJobRecord.target_session_id] = update.target_session_id
+        if update.status is not None:
+            if update.status not in models.SESSION_DERIVATION_JOB_STATUSES:
+                raise ValueError(f"Unsupported derivation status: {update.status}")
+            values[SessionDerivationJobRecord.status] = update.status
+        if update.stage is not None:
+            if update.stage not in models.SESSION_DERIVATION_STAGES:
+                raise ValueError(f"Unsupported derivation stage: {update.stage}")
+            values[SessionDerivationJobRecord.stage] = update.stage
+        if update.error_code is not None:
+            values[SessionDerivationJobRecord.error_code] = str(update.error_code)
+        if update.error_message is not None:
+            values[SessionDerivationJobRecord.error_message] = str(update.error_message)
+        if update.write_context_usage:
+            values[SessionDerivationJobRecord.context_used_tokens] = update.context_used_tokens
+            values[SessionDerivationJobRecord.context_limit] = update.context_limit
+        if update.context_threshold_exceeded is not None:
             values[SessionDerivationJobRecord.context_threshold_exceeded] = bool(
-                context_threshold_exceeded
+                update.context_threshold_exceeded
             )
-        if started:
+        if update.mark_started:
             values[SessionDerivationJobRecord.started_at] = SQL(
                 "COALESCE(started_at, CURRENT_TIMESTAMP)"
             )
-        if finished:
+        if update.mark_finished:
             values[SessionDerivationJobRecord.finished_at] = SQL("CURRENT_TIMESTAMP")
-        updated = (
-            SessionDerivationJobRecord.update(values)
-            .where(SessionDerivationJobRecord.id == str(job_id))
-            .execute()
-        )
+        predicate = SessionDerivationJobRecord.id == str(job_id)
+        if expected_status is not None:
+            predicate &= SessionDerivationJobRecord.status == str(expected_status)
+        updated = SessionDerivationJobRecord.update(values).where(predicate).execute()
         return self.get(job_id) if updated else None
 
 

@@ -6,6 +6,10 @@ import pytest
 
 from play_api.backends import data_manager as data_manager_module
 from play_api.backends.data_manager import DataManagerBackend
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionPlayerCharacterState,
+)
 from rpg_data import models
 
 
@@ -234,6 +238,24 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
         return gateway
 
     monkeypatch.setattr(data_manager_module, "get_data_service_gateway", fake_get_gateway)
+    monkeypatch.setattr(
+        data_manager_module,
+        "SessionCatalogService",
+        lambda fake_gateway: fake_gateway.catalog,
+    )
+
+    class FakeRoleService:
+        @staticmethod
+        def get_state(_session_id: str) -> SessionPlayerCharacterState:
+            return SessionPlayerCharacterState(
+                status=PlayerCharacterBindingStatus.INVALID,
+            )
+
+    monkeypatch.setattr(
+        data_manager_module,
+        "SessionRoleService",
+        lambda _fake_gateway: FakeRoleService(),
+    )
 
     db_path = tmp_path / "play.sqlite3"
     backend = DataManagerBackend(db_path)

@@ -6,6 +6,11 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionRoleService,
+)
+from rpg_core.session.catalog import SessionCatalogService
 from rpg_core.summary.reader import SummaryDocument, SummaryReader
 from rpg_data import models
 from rpg_data.bootstrap import (
@@ -60,7 +65,7 @@ class DataManagerBackend:
         story_prompt: str = "",
         openings: Sequence[models.StoryOpeningInput] = (),
     ) -> dict[str, object] | None:
-        story = self._gateway.catalog.create_story(
+        story = SessionCatalogService(self._gateway).create_story(
             workspace,
             title=title,
             summary=summary,
@@ -81,7 +86,7 @@ class DataManagerBackend:
         story_prompt: str | None = None,
         openings: Sequence[models.StoryOpeningInput] | None = None,
     ) -> dict[str, object] | None:
-        story = self._gateway.catalog.update_story(
+        story = SessionCatalogService(self._gateway).update_story(
             workspace,
             story_id,
             title=title,
@@ -101,15 +106,13 @@ class DataManagerBackend:
         session = self._ready_session(session_id)
         if session is None:
             return None
-        options = self._gateway.session_roles.list_opening_options(
+        role_service = SessionRoleService(self._gateway)
+        options = role_service.list_opening_options(
             session_id,
             player_character_id,
         )
         return {
-            "can_select_opening": (
-                session.player_character_id is None
-                and self._gateway.messages.count(session_id) == 0
-            ),
+            "can_select_opening": role_service.can_select_opening(session_id),
             "items": [
                 {
                     "id": option.opening.id,
@@ -139,7 +142,7 @@ class DataManagerBackend:
         title: str = "",
         description: str = "",
     ) -> dict[str, object] | None:
-        session = self._gateway.catalog.create_session(
+        session = SessionCatalogService(self._gateway).create_session(
             workspace,
             story_id,
             title=title,
@@ -891,14 +894,14 @@ def _session_summary(session: models.Session, gateway: DataServiceGateway | None
 
 
 def _player_character_state(session: models.Session, gateway: DataServiceGateway | None) -> dict[str, object]:
-    if gateway is None or not hasattr(gateway, "session_roles"):
-        return {"status": models.PLAYER_CHARACTER_STATUS_INVALID, "player": None}
-    try:
-        state = gateway.session_roles.get_state(str(session.id))
-    except Exception:
-        return {"status": models.PLAYER_CHARACTER_STATUS_INVALID, "player": None}
+    if gateway is None:
+        return {
+            "status": PlayerCharacterBindingStatus.INVALID.value,
+            "player": None,
+        }
+    state = SessionRoleService(gateway).get_state(str(session.id))
     return {
-        "status": state.status,
+        "status": state.status.value,
         "player": _player_character_summary(state.player) if state.player is not None else None,
     }
 

@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from rpg_data.models import SessionResetResult
-    from rpg_data.services import SessionPlayerCharacterBindResult
     from rpg_core.rp_modules.models import ModuleCommand
     from rpg_core.session import SessionManager
+    from rpg_core.session.role import SessionPlayerCharacterBindResult
+    from rpg_core.session.reset import SessionResetResult
 
 
 class AgentCommandTarget(Protocol):

@@ -38,7 +38,7 @@ from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 
 if TYPE_CHECKING:
-    from rpg_data.models import SessionResetResult
+    from rpg_core.session.reset import SessionResetResult
     from rpg_core.agent.command.models import CommandDef
     from rpg_core.agent.turn.runner import ToolCallRecord
     from rpg_core.context.inspector import LayerInfo

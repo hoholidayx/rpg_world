@@ -33,6 +33,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-20：Session 业务与数据层拆分。** 角色绑定与 Opening、Story/Session 初始化、`/clear`、Session Derivation 和永久删除的业务规则迁入 `rpg_core.session`；`rpg_data` 只保留角色/Opening 查询、profile/job CRUD、条件删除、显式复制和调用方准备好的状态重置计划。Agent、Play API、Dream 与后台 worker 统一经 Core application service 调用，公开 HTTP/SSE 与数据库结构不变。
 - **2026-07-20：Story 剧情动态调度。** 新增内置 `plot_scheduler` RP Module、Story 级线性剧情大纲与事件池、Session 禁用覆盖和原子调度账本。每个 IC/GM turn 最多选择一个到期大纲节点与一个池事件；强制项到时直接进入动态层，软约束项使用独立 LLM 路由结合完整 fixed layer、状态表和最近 5 个原始 turn 判断适宜性。调度元数据受硬上限保护，Context 门禁在 scratch 前预留最多两条动态指令。Play WebUI 增加“剧情调度”独立入口，集中管理定义、Scene 时间、覆盖与判断历史，不改变主正文 SSE。
 - **2026-07-18：后台终态通知链路。** Dream proposal 与 Session Derivation 在 SQL 终态提交后，通过专用异步 publisher 把 `ready / failed / interrupted` 发送到 Play API 的进程内广播 Hub；Play WebUI 在根 Provider 建立唯一全局 EventSource，并在顶栏独立通知中心展示最近事件。通知只保存在页面内存，可标记已读和清除；不增加 Toast、自动刷新或任务状态回写。
 - **2026-07-17：Dream 长期记忆系统。** 新增独立 `dream_service` 与 Session 级类型化 Persistent Memory 账本。Play WebUI 可手动执行 Shallow/Deep × Incremental/Full 四种 Dream，逐项检查和编辑 proposal 后原子应用；主 Agent 只读取 Evidence 仍有效的 active revisions，不再读取 `persistent_memory.json`。
@@ -198,6 +199,8 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - CLI / Telegram 启动时也先通过 Agent service 的 `ensure_session(workspace_id, story_id, session_id, title)` 解析会话；`session_id` 为空时创建系统生成 ID 的 session，非空时只校验并加载既有 session。
 - `rpg_session_profiles` 保存会话标题、描述、`player_character_id`、`player_character_snapshot_json` 和稳定的 `story_opening_id`；`rpg_sessions.id` 保持稳定，用作 URL 和 Agent session id。
 
+Session 业务 owner 是 `rpg_core.session`：`SessionCatalogService` 负责 Story/Session 创建时的默认挂载与状态副本初始化，`SessionRoleService` 负责绑定和 Opening，`SessionResetService`、`SessionDerivationService`、`SessionDeletionService` 分别负责重置、派生和永久删除。`rpg_data` 只提供 typed CRUD、只读投影、条件更新、显式复制及事务边界，不决定首次绑定、默认 Opening、生命周期推进、清理矩阵或 runtime 补偿。
+
 玩家扮演角色绑定是 session 级能力：
 
 - 状态只暴露 `bound | invalid`。缺失绑定、角色不存在、未挂载到当前 story、snapshot 损坏或 snapshot mount/story 不匹配，都统一视为 `invalid`。
@@ -225,7 +228,7 @@ SessionRoom 的首次进入流程分为读取候选与最终提交两步：
 
 - `GET /play-api/v1/sessions/{session_id}/opening-options?playerCharacterId={character_id}` 只按候选角色渲染预览，不写角色、Opening 或历史。
 - Story 有 0 条或 1 条 Opening 时直接使用缺省项；有 2–3 条时才显示第二步选择面板，未改动选择时默认第一条。
-- `PATCH /play-api/v1/sessions/{session_id}/player-character` 最终一次提交角色与可选 Opening：`{"playerCharacterId": 1, "storyOpeningId": 12}`。数据层会再次校验稳定 ID 仍属于当前 Story，再原子写入绑定和首条消息。
+- `PATCH /play-api/v1/sessions/{session_id}/player-character` 最终一次提交角色与可选 Opening：`{"playerCharacterId": 1, "storyOpeningId": 12}`。Session role application service 会再次校验稳定 ID 仍属于当前 Story，再在一个事务中写入 profile、main history 与 backup history。
 - CLI、Telegram 和未传 `storyOpeningId` 的调用方使用第一条 Opening。该流程不改变 turn SSE、历史分页或消息正文协议。
 
 Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_id` 反查 workspace/story，并只把全局 `session_id` 传给 Agent 服务运行态；Agent service 的 `/chat/history`、`/chat/commands`、`/chat/send`、`/chat/stream`、`/chat/stop` 不再接收 workspace。当前会话内接口集中在 `/play-api/v1/sessions/{session_id}/...`，例如 `history`、`history-page`、`scene`、`commands`、`turn`、`stream`、`stop`、`opening-options`、`player-character`。workspace、characters、lorebook、status-tables、ops 等管理接口也在 Play API 下；旧的 `chat.py`、`scene.py`、`commands.py` router 只保留占位，不再挂载为主接口。

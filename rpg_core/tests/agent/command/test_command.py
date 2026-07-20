@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import rpg_core.agent.command.handlers as command_module
 from rpg_core.agent.command import CommandDispatcher, format_command_help
 from rpg_core.rp_modules.registry import RPModuleRegistry
+from rpg_core.session.reset import SessionResetResult
 from rpg_core.settings import RPModuleSettings
 from rpg_data import models
 
@@ -37,7 +38,7 @@ class TestCommandDispatcher:
 
     @pytest.mark.asyncio
     async def test_clear_command_awaits_complete_session_reset(self):
-        fake_agent = SimpleNamespace(reset_session=AsyncMock(return_value=models.SessionResetResult(
+        fake_agent = SimpleNamespace(reset_session=AsyncMock(return_value=SessionResetResult(
             session_id="s1",
             first_message="新的开场白",
         )))

@@ -9,15 +9,6 @@ UNBOUND_PLAYER_ROLE_NAME = "尚未绑定玩家角色"
 
 SUPPORTED_STORY_TEXT_VARIABLES = frozenset({USER_PLAY_ROLE_NAME})
 
-__all__ = [
-    "SUPPORTED_STORY_TEXT_VARIABLES",
-    "StoryTextTemplateError",
-    "UNBOUND_PLAYER_ROLE_NAME",
-    "USER_PLAY_ROLE_NAME",
-    "render_story_text_template",
-    "validate_story_text_template",
-]
-
 
 class StoryTextTemplateError(ValueError):
     """Raised when Story text contains an unsupported template variable."""
@@ -93,3 +84,13 @@ def _is_template_identifier(value: str) -> bool:
         or "A" <= character <= "Z"
         for character in value
     )
+
+
+__all__ = [
+    "SUPPORTED_STORY_TEXT_VARIABLES",
+    "StoryTextTemplateError",
+    "UNBOUND_PLAYER_ROLE_NAME",
+    "USER_PLAY_ROLE_NAME",
+    "render_story_text_template",
+    "validate_story_text_template",
+]

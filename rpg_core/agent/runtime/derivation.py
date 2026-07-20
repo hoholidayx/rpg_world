@@ -3,17 +3,51 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from rpg_core.agent.sub_agents.status.bootstrap import StatusBootstrapCoordinator
 from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
-from rpg_core.rp_modules.plot_scheduler.ledger import PLOT_DERIVATION_COPY_POLICY
+from rpg_core.session.derivation import (
+    SessionDerivationSeedResult,
+    SessionDerivationService,
+    SessionDerivationStage,
+)
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    SessionPlayerCharacterState,
+    SessionRoleService,
+)
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
-    from rpg_data.models import SessionDerivationSeedResult
     from rpg_core.agent.runtime.context import AgentContextService
     from rpg_core.agent.runtime.lifecycle import AgentRuntimeLifecycle
+    from rpg_data.models import SessionDerivationJob
+
+
+class DerivationRuntimeApplication(Protocol):
+    def get_job(self, job_id: str) -> "SessionDerivationJob | None": ...
+
+    def set_stage(
+        self,
+        job_id: str,
+        stage: SessionDerivationStage,
+    ) -> "SessionDerivationJob": ...
+
+    def materialize_target(self, job_id: str) -> SessionDerivationSeedResult: ...
+
+    def set_context_usage(
+        self,
+        job_id: str,
+        *,
+        used_tokens: int,
+        context_limit: int,
+        threshold_exceeded: bool,
+    ) -> "SessionDerivationJob": ...
+
+
+class SessionRoleReader(Protocol):
+    def get_state(self, session_id: str) -> SessionPlayerCharacterState: ...
 
 
 class SessionDerivationPreparationError(RuntimeError):
@@ -39,16 +73,18 @@ class AgentDerivationService:
         *,
         lifecycle: "AgentRuntimeLifecycle",
         context_service: "AgentContextService",
+        derivation_service: DerivationRuntimeApplication | None = None,
+        role_service: SessionRoleReader | None = None,
     ) -> None:
         self._lifecycle = lifecycle
         self._context_service = context_service
+        self._derivation_service = derivation_service
+        self._role_service = role_service
 
     def materialize(self, job_id: str) -> "SessionDerivationSeedResult":
         """Create a target at this source mailbox's serialized boundary."""
 
-        from rpg_data.services import get_data_service_gateway
-
-        service = get_data_service_gateway().session_derivations
+        service = self._get_derivation_service()
         job = service.get_job(job_id)
         if job is None:
             raise FileNotFoundError(f"Derivation job not found: {job_id}")
@@ -57,13 +93,8 @@ class AgentDerivationService:
                 "DERIVATION_SOURCE_MISMATCH",
                 "Derivation job does not belong to the source Agent mailbox",
             )
-        service.set_stage(job_id, "copying")
-        copy_policy = PLOT_DERIVATION_COPY_POLICY
-        return service.seed_target_session(
-            job_id,
-            copy_plot_overrides=copy_policy.copy_overrides,
-            plot_decision_statuses=copy_policy.decision_statuses,
-        )
+        service.set_stage(job_id, SessionDerivationStage.COPYING)
+        return service.materialize_target(job_id)
 
     async def prepare_target(
         self,
@@ -71,10 +102,7 @@ class AgentDerivationService:
     ) -> SessionDerivationPreparationResult:
         """Rebuild derived state/memory/summary before publishing the target."""
 
-        from rpg_data.services import get_data_service_gateway
-
-        gateway = get_data_service_gateway()
-        service = gateway.session_derivations
+        service = self._get_derivation_service()
         job = service.get_job(job_id)
         if job is None:
             raise FileNotFoundError(f"Derivation job not found: {job_id}")
@@ -91,7 +119,7 @@ class AgentDerivationService:
                 "DERIVATION_STATUS_UNAVAILABLE",
                 "Status bootstrap collaborators are unavailable",
             )
-        service.set_stage(job_id, "rebuilding_status")
+        service.set_stage(job_id, SessionDerivationStage.REBUILDING_STATUS)
         bootstrap = await StatusBootstrapCoordinator(status_sub_agent).run(
             history=self._lifecycle.session_manager.history,
             boundary_turn_id=job.branch_turn_id,
@@ -111,7 +139,7 @@ class AgentDerivationService:
                 "DERIVATION_STORY_MEMORY_UNAVAILABLE",
                 "Story Memory extraction is unavailable",
             )
-        service.set_stage(job_id, "extracting_story_memory")
+        service.set_stage(job_id, SessionDerivationStage.EXTRACTING_STORY_MEMORY)
         extraction = await memory_sub_agent.extract_pending_story_memory(
             self._lifecycle.session_manager,
             strict=True,
@@ -128,7 +156,7 @@ class AgentDerivationService:
                 "DERIVATION_SUMMARY_UNAVAILABLE",
                 "Summary compressor is unavailable",
             )
-        service.set_stage(job_id, "summarizing")
+        service.set_stage(job_id, SessionDerivationStage.SUMMARIZING)
         compression = await compressor.maybe_compress(
             self._lifecycle.session_manager,
             strict=True,
@@ -139,7 +167,7 @@ class AgentDerivationService:
                 compression.error_message or "Summary generation failed",
             )
 
-        service.set_stage(job_id, "evaluating_context")
+        service.set_stage(job_id, SessionDerivationStage.EVALUATING_CONTEXT)
         usage = self._context_usage(await self._context_service.inspect_payload())
         if usage.used_tokens is not None and usage.context_limit is not None:
             service.set_context_usage(
@@ -148,18 +176,13 @@ class AgentDerivationService:
                 context_limit=usage.context_limit,
                 threshold_exceeded=usage.context_threshold_exceeded,
             )
-        service.set_stage(job_id, "finalizing")
+        service.set_stage(job_id, SessionDerivationStage.FINALIZING)
         return usage
 
     def _player_character_snapshot(self) -> TurnPlayerCharacterSnapshot | None:
-        from rpg_data import models as data_models
-        from rpg_data.services import get_data_service_gateway
-
-        state = get_data_service_gateway().session_roles.get_state(
-            self._lifecycle.session_id
-        )
+        state = self._get_role_service().get_state(self._lifecycle.session_id)
         if (
-            state.status != data_models.PLAYER_CHARACTER_STATUS_BOUND
+            state.status is not PlayerCharacterBindingStatus.BOUND
             or state.player is None
         ):
             return None
@@ -170,6 +193,22 @@ class AgentDerivationService:
             story_id=int(player.story_id),
             name=str(player.name),
         )
+
+    def _get_derivation_service(self) -> DerivationRuntimeApplication:
+        if self._derivation_service is None:
+            from rpg_data.services import get_data_service_gateway
+
+            self._derivation_service = SessionDerivationService(
+                get_data_service_gateway()
+            )
+        return self._derivation_service
+
+    def _get_role_service(self) -> SessionRoleReader:
+        if self._role_service is None:
+            from rpg_data.services import get_data_service_gateway
+
+            self._role_service = SessionRoleService(get_data_service_gateway())
+        return self._role_service
 
     @staticmethod
     def _context_usage(payload: dict[str, object]) -> SessionDerivationPreparationResult:

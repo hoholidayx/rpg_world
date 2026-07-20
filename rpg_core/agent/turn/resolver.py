@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from rpg_core.agent.turn.models import (
     TurnExecutionPolicy,
@@ -10,14 +10,26 @@ from rpg_core.agent.turn.models import (
     TurnPlayerCharacterSnapshot,
     TurnRequest,
 )
-from rpg_data import models as data_models
-from rpg_data.story_template import (
+from rpg_core.agent.command.role import render_role_bind_prompt
+from rpg_core.session.role import (
+    PlayerCharacterBindingStatus,
+    PlayerCharacterOption,
+    SessionPlayerCharacterState,
+    SessionRoleService,
+)
+from rpg_core.story.template import (
     UNBOUND_PLAYER_ROLE_NAME,
     render_story_text_template,
 )
 
 if TYPE_CHECKING:
     from rpg_data.services import DataServiceGateway
+
+
+class SessionRoleSnapshotReader(Protocol):
+    def get_state(self, session_id: str) -> SessionPlayerCharacterState: ...
+
+    def list_options(self, session_id: str) -> list[PlayerCharacterOption]: ...
 
 
 class TurnSnapshotResolver:
@@ -28,9 +40,11 @@ class TurnSnapshotResolver:
         session_id: str,
         *,
         gateway: "DataServiceGateway | None" = None,
+        role_service: SessionRoleSnapshotReader | None = None,
     ) -> None:
         self._session_id = str(session_id)
         self._gateway = gateway
+        self._role_service = role_service
 
     def resolve(
         self,
@@ -100,9 +114,9 @@ class TurnSnapshotResolver:
         self,
         gateway: "DataServiceGateway",
     ) -> TurnPlayerCharacterSnapshot | None:
-        state = gateway.session_roles.get_state(self._session_id)
+        state = self._get_role_service(gateway).get_state(self._session_id)
         if (
-            state.status != data_models.PLAYER_CHARACTER_STATUS_BOUND
+            state.status is not PlayerCharacterBindingStatus.BOUND
             or state.player is None
         ):
             return None
@@ -131,7 +145,19 @@ class TurnSnapshotResolver:
         )
 
     def _role_bind_prompt(self, gateway: "DataServiceGateway") -> str:
-        return gateway.session_roles.render_role_bind_prompt(self._session_id)
+        service = self._get_role_service(gateway)
+        return render_role_bind_prompt(
+            service.list_options(self._session_id),
+            service.get_state(self._session_id),
+        )
+
+    def _get_role_service(
+        self,
+        gateway: "DataServiceGateway",
+    ) -> SessionRoleSnapshotReader:
+        if self._role_service is None:
+            self._role_service = SessionRoleService(gateway)
+        return self._role_service
 
     def _get_gateway(self) -> "DataServiceGateway":
         if self._gateway is None:
