@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from rpg_data.models import SessionCharacter, SessionCharacterDetail
 from rpg_core.character import CharacterManager
 
@@ -93,26 +95,9 @@ def test_character_manager_delegates_to_service_without_path_or_cache() -> None:
     assert [character["name"] for character in manager.list_characters()] == ["Alice", "Bob"]
 
 
-def test_character_manager_defaults_to_gateway_service(monkeypatch) -> None:
-    import rpg_core.character as manager_module
-
-    service = FakeCharacterService([_character("Gateway")])
-    calls = 0
-
-    class FakeGateway:
-        character = service
-
-    def fake_get_gateway():
-        nonlocal calls
-        calls += 1
-        return FakeGateway()
-
-    monkeypatch.setattr(manager_module, "get_data_service_gateway", fake_get_gateway)
-
-    manager = CharacterManager("s_gateway")
-
-    assert calls == 1
-    assert manager.list_enabled_characters()[0]["name"] == "Gateway"
+def test_character_manager_requires_explicit_read_service() -> None:
+    with pytest.raises(TypeError):
+        CharacterManager("s_without_service")  # type: ignore[call-arg]
 
 
 def test_character_manager_detail_queries() -> None:
@@ -161,14 +146,16 @@ def test_context_factory_initializes_character_manager_with_session_id(
     seen_session_ids: list[str] = []
 
     class FakeCharacterManager:
-        def __init__(self, session_id: str) -> None:
+        def __init__(self, session_id: str, service: object) -> None:
+            assert service is not None
             seen_session_ids.append(session_id)
 
         def list_enabled_characters(self):
             return []
 
     class FakeLorebookManager:
-        def __init__(self, session_id: str) -> None:
+        def __init__(self, session_id: str, service: object) -> None:
+            assert service is not None
             self.session_id = session_id
 
         def list_enabled_entries(self):

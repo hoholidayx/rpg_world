@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from rpg_data.services import get_data_service_gateway
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from rpg_data.models import SessionCharacter, SessionCharacterDetail
-    from rpg_data.services.character import CharacterReadService
+
+
+class CharacterReadPort(Protocol):
+    """Session-scoped character reads needed by the Core adapter."""
+
+    def list_characters(self, session_id: str) -> list["SessionCharacter"]: ...
+
+    def get_character(
+        self,
+        session_id: str,
+        name: str,
+    ) -> "SessionCharacter | None": ...
 
 
 class CharacterManager:
@@ -17,10 +26,10 @@ class CharacterManager:
     def __init__(
         self,
         session_id: str,
-        service: "CharacterReadService | None" = None,
+        service: CharacterReadPort,
     ) -> None:
         self.session_id = session_id
-        self._service = service or get_data_service_gateway().character
+        self._service = service
 
     def list_characters(self) -> list[dict[str, object]]:
         """Return all character cards mounted to this session's story."""

@@ -134,9 +134,9 @@ MESSAGE_AND_LEDGER_BUSINESS_FILES = (
     "rpg_core/rp_modules/plot_scheduler/management.py",
 )
 
-# Gateway lookup is valid at process/composition boundaries. Remaining legacy
-# consumers stay explicit in a fixed allowlist so the service-locator surface
-# cannot expand during unrelated changes.
+# Gateway lookup is valid only at process/composition boundaries. Keep the
+# complete surface explicit so a data service locator cannot enter business
+# objects during unrelated changes.
 GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "agent_service/main.py",
     "dream_service/repository.py",
@@ -147,14 +147,13 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "play_api/routers/sessions.py",
     "rp_memory/run.py",
     "rpg_core/agent/agent.py",
-    "rpg_core/agent/command/handlers.py",
-    "rpg_core/agent/runtime/main_llm.py",
-    "rpg_core/agent/runtime/tools.py",
-    "rpg_core/character.py",
     "rpg_core/context/factory.py",
-    "rpg_core/context/fixed_layer/contributors/story_prompt.py",
-    "rpg_core/lorebook.py",
     "tts_service/main.py",
+})
+
+CORE_GATEWAY_LOOKUP_ALLOWLIST = frozenset({
+    "rpg_core/agent/agent.py",
+    "rpg_core/context/factory.py",
 })
 
 # A few pre-boundary services still receive the whole Gateway even though they
@@ -163,7 +162,6 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
 WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
     "media_service/main.py",
     "play_api/backends/data_manager.py",
-    "rpg_core/agent/runtime/main_llm.py",
     "tts_service/main.py",
 })
 
@@ -267,11 +265,22 @@ def test_gateway_lookup_surface_does_not_grow() -> None:
     actual = {
         path.relative_to(ROOT).as_posix()
         for path in _production_python_files()
-        if path.relative_to(ROOT).as_posix() != "rpg_data/services/gateway.py"
-        and "get_data_service_gateway(" in path.read_text(encoding="utf-8")
+        if not path.is_relative_to(ROOT / "rpg_data")
+        and _uses_gateway_lookup(path)
     }
 
     assert actual - GATEWAY_LOOKUP_ALLOWLIST == set()
+
+
+def test_rpg_core_gateway_lookup_is_limited_to_composition_roots() -> None:
+    actual = {
+        path.relative_to(ROOT).as_posix()
+        for path in _production_python_files()
+        if path.is_relative_to(ROOT / "rpg_core")
+        and _uses_gateway_lookup(path)
+    }
+
+    assert actual - CORE_GATEWAY_LOOKUP_ALLOWLIST == set()
 
 
 def test_whole_gateway_reference_surface_does_not_grow() -> None:
@@ -451,3 +460,25 @@ def _imports(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module)
     return imported
+
+
+def _uses_gateway_lookup(path: Path) -> bool:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in {
+            "rpg_data.services",
+            "rpg_data.services.gateway",
+        }:
+            if any(
+                alias.name == "get_data_service_gateway"
+                for alias in node.names
+            ):
+                return True
+        if isinstance(node, ast.Name) and node.id == "get_data_service_gateway":
+            return True
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "get_data_service_gateway"
+        ):
+            return True
+    return False

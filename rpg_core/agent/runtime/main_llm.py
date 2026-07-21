@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
 from loguru import logger
 
@@ -11,10 +11,33 @@ from llm_client.keys import AGENT_MAIN_BIZ_KEY
 from llm_client.manager import LLMClientManager
 from llm_client.types import LLMProviderOption
 from rpg_data import models
-from rpg_data.services import DataServiceGateway, get_data_service_gateway
+from rpg_data.model.session import Session
 
 MainLLMSelectionSource = Literal["config", "story", "session"]
 MainLLMOverrideSource = Literal["story", "session"]
+
+
+class MainLLMSelectionDataPort(Protocol):
+    """Catalog operations required by main-model selection policy."""
+
+    def get_story(self, workspace_id: str, story_id: int) -> models.Story | None: ...
+
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def get_session_story(self, session_id: str) -> models.Story | None: ...
+
+    def set_story_main_llm_provider_key(
+        self,
+        workspace_id: str,
+        story_id: int,
+        provider_key: str | None,
+    ) -> models.Story | None: ...
+
+    def set_session_main_llm_provider_key(
+        self,
+        session_id: str,
+        provider_key: str | None,
+    ) -> Session | None: ...
 
 
 class InvalidMainLLMProviderKey(ValueError):
@@ -47,8 +70,8 @@ class MainLLMSelection:
 class MainLLMSelectionService:
     """Resolve and persist the main Agent's provider selection."""
 
-    def __init__(self, gateway: DataServiceGateway | None = None) -> None:
-        self._gateway = gateway or get_data_service_gateway()
+    def __init__(self, data: MainLLMSelectionDataPort) -> None:
+        self._data = data
 
     async def get_provider_catalog(self) -> MainLLMProviderCatalog:
         remote = await LLMClientManager.get().get_catalog(AGENT_MAIN_BIZ_KEY)
@@ -62,16 +85,16 @@ class MainLLMSelectionService:
         workspace_id: str,
         story_id: int,
     ) -> MainLLMSelection | None:
-        story = self._gateway.catalog.get_story(workspace_id, story_id)
+        story = self._data.get_story(workspace_id, story_id)
         if story is None:
             return None
         return await self._resolve(story=story, session=None)
 
     async def resolve_session(self, session_id: str) -> MainLLMSelection | None:
-        session = self._gateway.catalog.get_session(session_id)
+        session = self._data.get_session(session_id)
         if session is None:
             return None
-        story = self._gateway.catalog.get_session_story(session_id)
+        story = self._data.get_session_story(session_id)
         if story is None:
             return None
         return await self._resolve(story=story, session=session)
@@ -82,11 +105,11 @@ class MainLLMSelectionService:
         story_id: int,
         provider_key: str | None,
     ) -> MainLLMSelection | None:
-        story = self._gateway.catalog.get_story(workspace_id, story_id)
+        story = self._data.get_story(workspace_id, story_id)
         if story is None:
             return None
         normalized = await self._validate_provider_key(provider_key)
-        updated = self._gateway.catalog.set_story_main_llm_provider_key(
+        updated = self._data.set_story_main_llm_provider_key(
             workspace_id,
             story_id,
             normalized,
@@ -100,17 +123,17 @@ class MainLLMSelectionService:
         session_id: str,
         provider_key: str | None,
     ) -> MainLLMSelection | None:
-        session = self._gateway.catalog.get_session(session_id)
+        session = self._data.get_session(session_id)
         if session is None:
             return None
         normalized = await self._validate_provider_key(provider_key)
-        updated = self._gateway.catalog.set_session_main_llm_provider_key(
+        updated = self._data.set_session_main_llm_provider_key(
             session_id,
             normalized,
         )
         if updated is None:
             return None
-        story = self._gateway.catalog.get_session_story(session_id)
+        story = self._data.get_session_story(session_id)
         if story is None:
             return None
         return await self._resolve(story=story, session=updated)
@@ -136,7 +159,7 @@ class MainLLMSelectionService:
         self,
         *,
         story: models.Story,
-        session: models.Session | None,
+        session: Session | None,
     ) -> MainLLMSelection:
         catalog = await self.get_provider_catalog()
         options = {option.provider_key: option for option in catalog.options}

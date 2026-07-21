@@ -56,7 +56,7 @@ def main_llm_context(tmp_path, monkeypatch):
         classmethod(lambda cls: FakeManager()),
     )
 
-    service = MainLLMSelectionService(gateway)
+    service = MainLLMSelectionService(gateway.catalog)
     yield SimpleNamespace(
         gateway=gateway,
         service=service,

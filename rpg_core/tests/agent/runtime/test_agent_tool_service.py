@@ -64,7 +64,6 @@ def _execution(mode: TurnMode) -> TurnExecutionSnapshot:
 
 def test_tool_service_removes_hidden_rp_tool_from_registry_and_schema(
     tmp_path,
-    monkeypatch,
 ) -> None:
     scene = _Scene()
     resources = AgentContextResources(
@@ -75,16 +74,11 @@ def test_tool_service_removes_hidden_rp_tool_from_registry_and_schema(
         scene_tracker=scene,
         memory_manager=None,
     )
-    gateway = SimpleNamespace(
-        catalog=SimpleNamespace(get_session_runtime_dir=lambda _sid: tmp_path)
-    )
-    monkeypatch.setattr(
-        "rpg_data.services.get_data_service_gateway",
-        lambda: gateway,
-    )
+    data = SimpleNamespace(resolve_session_runtime_dir=lambda _sid: tmp_path)
     service = AgentToolService(
         session_id=lambda: "s1",
         resources=lambda: resources,
+        data=data,
         extra_tools=[_Tool("custom_read")],
     )
     service.refresh_base_registry()
@@ -106,7 +100,7 @@ def test_tool_service_removes_hidden_rp_tool_from_registry_and_schema(
     assert "rp_visible" in names
 
 
-def test_ooc_tool_policy_hides_state_rp_and_write_tools(tmp_path, monkeypatch) -> None:
+def test_ooc_tool_policy_hides_state_rp_and_write_tools(tmp_path) -> None:
     scene = _Scene()
     resources = AgentContextResources(
         builder=SimpleNamespace(),
@@ -116,16 +110,11 @@ def test_ooc_tool_policy_hides_state_rp_and_write_tools(tmp_path, monkeypatch) -
         scene_tracker=scene,
         memory_manager=None,
     )
-    gateway = SimpleNamespace(
-        catalog=SimpleNamespace(get_session_runtime_dir=lambda _sid: tmp_path)
-    )
-    monkeypatch.setattr(
-        "rpg_data.services.get_data_service_gateway",
-        lambda: gateway,
-    )
+    data = SimpleNamespace(resolve_session_runtime_dir=lambda _sid: tmp_path)
     service = AgentToolService(
         session_id=lambda: "s1",
         resources=lambda: resources,
+        data=data,
         extra_tools=[_Tool("custom_read")],
     )
     service.refresh_base_registry()
@@ -143,6 +132,50 @@ def test_ooc_tool_policy_hides_state_rp_and_write_tools(tmp_path, monkeypatch) -
     assert "rp_story_outcome" not in names
     assert "rp_visible" not in names
     assert "custom_read" in names
+
+
+async def test_tool_service_refreshes_sandbox_for_current_session(tmp_path) -> None:
+    session_id = "first"
+    roots = {
+        "first": tmp_path / "first",
+        "second": tmp_path / "second",
+    }
+    data = SimpleNamespace(
+        resolve_session_runtime_dir=lambda current: roots[current]
+    )
+    resources = AgentContextResources(
+        builder=SimpleNamespace(),
+        character_manager=None,
+        lorebook_manager=None,
+        status_manager=None,
+        scene_tracker=None,
+        memory_manager=None,
+    )
+    service = AgentToolService(
+        session_id=lambda: session_id,
+        resources=lambda: resources,
+        data=data,
+    )
+
+    service.refresh_base_registry()
+    first_registry = service.base_registry
+    assert first_registry is not None
+    await first_registry.execute(
+        "write_file",
+        '{"path":"sandbox.txt","content":"first"}',
+    )
+
+    session_id = "second"
+    service.refresh_base_registry()
+    second_registry = service.base_registry
+    assert second_registry is not None
+    await second_registry.execute(
+        "write_file",
+        '{"path":"sandbox.txt","content":"second"}',
+    )
+
+    assert (roots["first"] / "sandbox.txt").read_text(encoding="utf-8") == "first"
+    assert (roots["second"] / "sandbox.txt").read_text(encoding="utf-8") == "second"
 
 
 def test_state_tool_set_reports_exact_runtime_capabilities() -> None:

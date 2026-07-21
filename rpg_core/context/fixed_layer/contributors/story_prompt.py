@@ -29,7 +29,7 @@ class StoryPromptFixedLayerContributor(FixedLayerContributor):
         self,
         session_id: str,
         *,
-        catalog: _StoryPromptCatalog | None = None,
+        catalog: _StoryPromptCatalog,
         content: str | None = None,
     ) -> None:
         self._session_id = session_id
@@ -38,7 +38,7 @@ class StoryPromptFixedLayerContributor(FixedLayerContributor):
 
     def get_fixed_contribution(self) -> FixedLayerContribution:
         if self._content is None:
-            story = self._get_catalog().get_session_story(self._session_id)
+            story = self._catalog.get_session_story(self._session_id)
             content = str(story.story_prompt or "").strip() if story is not None else ""
         else:
             content = str(self._content).strip()
@@ -55,10 +55,3 @@ class StoryPromptFixedLayerContributor(FixedLayerContributor):
                 item_count=1,
             )
         ])
-
-    def _get_catalog(self) -> _StoryPromptCatalog:
-        if self._catalog is not None:
-            return self._catalog
-        from rpg_data.services import get_data_service_gateway
-
-        return get_data_service_gateway().catalog

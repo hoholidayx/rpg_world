@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from rpg_core.context.fixed_layer import (
     FIXED_LAYER_CHARACTER_SECTION_ID,
     FIXED_LAYER_CORE_SECTION_ID,
@@ -121,6 +123,26 @@ def test_story_prompt_contributor_skips_blank_or_missing_story():
 
     assert blank.sections == []
     assert missing.sections == []
+
+
+def test_story_prompt_contributor_prefers_explicit_turn_snapshot() -> None:
+    class UnexpectedCatalogRead:
+        @staticmethod
+        def get_session_story(_session_id: str):  # noqa: ANN205
+            raise AssertionError("frozen turn prompt must not reread the Story")
+
+    contribution = StoryPromptFixedLayerContributor(
+        "s1",
+        catalog=UnexpectedCatalogRead(),
+        content="  本轮已经渲染的 Prompt。  ",
+    ).get_fixed_contribution()
+
+    assert contribution.sections[0].content == "本轮已经渲染的 Prompt。"
+
+
+def test_story_prompt_contributor_requires_explicit_catalog_reader() -> None:
+    with pytest.raises(TypeError):
+        StoryPromptFixedLayerContributor("s1")  # type: ignore[call-arg]
 
 
 def test_player_character_section_and_card_labels_are_session_local() -> None:

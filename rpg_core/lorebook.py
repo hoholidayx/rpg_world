@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from rpg_data.services import get_data_service_gateway
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from rpg_data.models import SessionLorebookEntry
-    from rpg_data.services.lorebook import LorebookReadService
+
+
+class LorebookReadPort(Protocol):
+    """Session-scoped lorebook reads needed by the Core adapter."""
+
+    def list_entries(self, session_id: str) -> list["SessionLorebookEntry"]: ...
+
+    def list_enabled_entries(
+        self,
+        session_id: str,
+    ) -> list["SessionLorebookEntry"]: ...
+
+    def get_entry(
+        self,
+        session_id: str,
+        name: str,
+    ) -> "SessionLorebookEntry | None": ...
 
 
 class LorebookManager:
@@ -17,10 +31,10 @@ class LorebookManager:
     def __init__(
         self,
         session_id: str,
-        service: "LorebookReadService | None" = None,
+        service: LorebookReadPort,
     ) -> None:
         self.session_id = session_id
-        self._service = service or get_data_service_gateway().lorebook
+        self._service = service
 
     # ------------------------------------------------------------------
     # Queries

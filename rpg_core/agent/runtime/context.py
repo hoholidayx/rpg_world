@@ -491,6 +491,7 @@ class AgentContextService:
             CoreRPContractContributor(self._world_name),
             StoryPromptFixedLayerContributor(
                 self._session_id(),
+                catalog=self._turn_snapshot_data,
                 content=(
                     turn_execution.rendered_story_prompt
                     if turn_execution is not None

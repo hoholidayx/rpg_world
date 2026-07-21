@@ -269,14 +269,16 @@ def test_context_factory_initializes_status_manager_with_session_id(
     seen: list[tuple[str, object]] = []
 
     class FakeCharacterManager:
-        def __init__(self, session_id: str) -> None:
+        def __init__(self, session_id: str, service: object) -> None:
+            assert service is not None
             self.session_id = session_id
 
         def list_enabled_characters(self):
             return []
 
     class FakeLorebookManager:
-        def __init__(self, session_id: str) -> None:
+        def __init__(self, session_id: str, service: object) -> None:
+            assert service is not None
             self.session_id = session_id
 
         def list_enabled_entries(self):

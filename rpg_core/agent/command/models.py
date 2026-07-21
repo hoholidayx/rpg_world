@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from rpg_data.model.session import Session
     from rpg_core.rp_modules.models import ModuleCommand
     from rpg_core.session import SessionManager
     from rpg_core.session.role import SessionPlayerCharacterBindResult
@@ -36,6 +37,9 @@ class AgentCommandTarget(Protocol):
         *,
         story_opening_id: int | None = None,
     ): ...
+    def list_story_sessions(self) -> list[Session]: ...
+    def create_story_session(self, title: str) -> Session | None: ...
+    def can_switch_session(self, session_id: str) -> bool: ...
 
 
 @dataclass

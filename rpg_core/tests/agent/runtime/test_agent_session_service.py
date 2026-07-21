@@ -53,6 +53,7 @@ def test_history_truncate_clamps_deferred_progress() -> None:
         lifecycle=lifecycle,
         tool_service=object(),
         data=_UnusedSessionData(),
+        catalog_creator=object(),
         role_service=object(),
         reset_service=object(),
     )
@@ -138,6 +139,7 @@ async def test_agent_reset_clears_plot_ledger_and_preserves_overrides(
         lifecycle=_ResetLifecycle(),
         tool_service=object(),
         data=gateway.sessions,
+        catalog_creator=object(),
         role_service=SessionRoleService(gateway.sessions),
         reset_service=SessionResetService(gateway.sessions),
     )
@@ -151,3 +153,83 @@ async def test_agent_reset_clears_plot_ledger_and_preserves_overrides(
         assert calls == ["release", "reload", "load"]
     finally:
         reset_data_service_gateways()
+
+
+def test_session_catalog_commands_stay_within_current_story() -> None:
+    current = models.Session("current", "workspace", 7)
+    ready = models.Session("ready", "workspace", 7)
+    provisioning = models.Session(
+        "provisioning",
+        "workspace",
+        7,
+        lifecycle=models.SESSION_LIFECYCLE_PROVISIONING,
+    )
+    other_story = models.Session("other_story", "workspace", 8)
+    sessions = {
+        row.id: row
+        for row in (current, ready, provisioning, other_story)
+    }
+    list_calls: list[tuple[str, int]] = []
+    create_calls: list[tuple[str, int, str]] = []
+
+    class _CatalogData(_UnusedSessionData):
+        @staticmethod
+        def get_session(session_id: str):  # noqa: ANN205
+            return sessions.get(session_id)
+
+        @staticmethod
+        def list_sessions(workspace_id: str, story_id: int):  # noqa: ANN205
+            list_calls.append((workspace_id, story_id))
+            return [current, ready]
+
+    class _CatalogCreator:
+        @staticmethod
+        def create_session(
+            workspace_id: str,
+            story_id: int,
+            *,
+            title: str,
+        ) -> models.Session:
+            create_calls.append((workspace_id, story_id, title))
+            return models.Session("created", workspace_id, story_id, title=title)
+
+    service = AgentSessionService(
+        lifecycle=SimpleNamespace(session_id="current"),
+        tool_service=object(),
+        data=_CatalogData(),
+        catalog_creator=_CatalogCreator(),
+        role_service=object(),
+        reset_service=object(),
+    )
+
+    assert service.list_story_sessions() == [current, ready]
+    created = service.create_story_session("New Session")
+    assert created is not None and created.id == "created"
+    assert service.can_switch_session("ready") is True
+    assert service.can_switch_session("provisioning") is False
+    assert service.can_switch_session("other_story") is False
+    assert service.can_switch_session("missing") is False
+    assert list_calls == [("workspace", 7)]
+    assert create_calls == [("workspace", 7, "New Session")]
+
+
+def test_session_catalog_commands_require_current_catalog_session() -> None:
+    class _MissingCatalogData(_UnusedSessionData):
+        @staticmethod
+        def get_session(_session_id: str):  # noqa: ANN205
+            return None
+
+    service = AgentSessionService(
+        lifecycle=SimpleNamespace(session_id="missing"),
+        tool_service=object(),
+        data=_MissingCatalogData(),
+        catalog_creator=object(),
+        role_service=object(),
+        reset_service=object(),
+    )
+
+    with pytest.raises(
+        FileNotFoundError,
+        match="Session not found in rpg_data: missing",
+    ):
+        service.list_story_sessions()

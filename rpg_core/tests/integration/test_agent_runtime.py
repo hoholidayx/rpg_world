@@ -162,7 +162,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         completed_media.asset.id,
         source_mode=models.MEDIA_BACKGROUND_SOURCE_MANUAL,
     )
-    selection = MainLLMSelectionService(integration_data_gateway)
+    selection = MainLLMSelectionService(integration_data_gateway.catalog)
     selected = await selection.set_session_provider_key(session_id, SESSION_PROVIDER_KEY)
     assert selected is not None
     module_override = integration_data_gateway.rp_modules.upsert_session_override(
@@ -384,7 +384,7 @@ async def test_main_llm_runtime_priority_context_window_and_subagent_route_indep
     session = integration_data_gateway.catalog.get_session(session_id)
     story = integration_data_gateway.catalog.get_session_story(session_id)
     assert session is not None and story is not None
-    selection = MainLLMSelectionService(integration_data_gateway)
+    selection = MainLLMSelectionService(integration_data_gateway.catalog)
 
     default_reply = await agent.send("config")
     story_selected = await selection.set_story_provider_key(
@@ -469,7 +469,7 @@ async def test_provider_switch_during_active_stream_only_applies_to_next_turn(
 
     task = asyncio.create_task(consume())
     await asyncio.wait_for(started.wait(), timeout=2)
-    selection = MainLLMSelectionService(integration_data_gateway)
+    selection = MainLLMSelectionService(integration_data_gateway.catalog)
     updated = await selection.set_session_provider_key("integration_smoke", SESSION_PROVIDER_KEY)
     assert updated is not None
     release.set()

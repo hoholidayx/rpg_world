@@ -6,7 +6,6 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-import rpg_core.agent.command.handlers as command_module
 from rpg_core.agent.command import CommandDispatcher, format_command_help
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.rp_modules.application import RPModuleApplicationService
@@ -262,7 +261,7 @@ class TestCommandDispatcher:
             raise AssertionError("expected ValueError")
 
     @pytest.mark.asyncio
-    async def test_sessions_command_marks_current_session(self, monkeypatch):
+    async def test_sessions_command_marks_current_session(self):
         fake_agent = SimpleNamespace(
             reset_session=AsyncMock(),
             reload_rpg_context=AsyncMock(),
@@ -270,23 +269,13 @@ class TestCommandDispatcher:
             session_id="s2",
             reindex_memory=lambda: False,
             list_commands=lambda: [],
+            list_story_sessions=lambda: [
+                models.Session("s1", "data/test", 1),
+                models.Session("s2", "data/test", 1),
+            ],
         )
         dispatcher = CommandDispatcher(agent=fake_agent)
         dispatcher.register_default_builtins()
-
-        fake_gateway = SimpleNamespace(
-            catalog=SimpleNamespace(
-                list_sessions=lambda workspace, story_id: [
-                    models.Session("s1", workspace, story_id),
-                    models.Session("s2", workspace, story_id),
-                ],
-            ),
-        )
-        monkeypatch.setattr(
-            command_module,
-            "_current_catalog_session",
-            lambda agent: (fake_gateway, models.Session("s2", "data/test", 1)),
-        )
 
         result = await dispatcher.dispatch("/sessions")
 
@@ -295,26 +284,10 @@ class TestCommandDispatcher:
         assert "- s2 （当前）" in result.reply
 
     @pytest.mark.asyncio
-    async def test_session_switch_hides_provisioning_target(self, monkeypatch):
+    async def test_session_switch_hides_provisioning_target(self):
         fake_agent = SimpleNamespace(
             session_id="s1",
-        )
-        target = models.Session(
-            "target",
-            "workspace",
-            1,
-            lifecycle=models.SESSION_LIFECYCLE_PROVISIONING,
-        )
-        fake_gateway = SimpleNamespace(
-            catalog=SimpleNamespace(get_session=lambda session_id: target),
-        )
-        monkeypatch.setattr(
-            command_module,
-            "_current_catalog_session",
-            lambda agent: (
-                fake_gateway,
-                models.Session("s1", "workspace", 1),
-            ),
+            can_switch_session=lambda _session_id: False,
         )
         dispatcher = CommandDispatcher(agent=fake_agent)
         dispatcher.register_default_builtins()
@@ -328,20 +301,10 @@ class TestCommandDispatcher:
     @pytest.mark.asyncio
     async def test_session_switch_returns_locator_without_mutating_source_agent(
         self,
-        monkeypatch,
     ):
-        fake_agent = SimpleNamespace(session_id="s1")
-        target = models.Session("target", "workspace", 1)
-        fake_gateway = SimpleNamespace(
-            catalog=SimpleNamespace(get_session=lambda session_id: target),
-        )
-        monkeypatch.setattr(
-            command_module,
-            "_current_catalog_session",
-            lambda agent: (
-                fake_gateway,
-                models.Session("s1", "workspace", 1),
-            ),
+        fake_agent = SimpleNamespace(
+            session_id="s1",
+            can_switch_session=lambda session_id: session_id == "target",
         )
         dispatcher = CommandDispatcher(agent=fake_agent)
         dispatcher.register_default_builtins()

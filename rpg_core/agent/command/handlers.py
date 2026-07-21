@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from rpg_data import models
 from rpg_core.agent.command.models import AgentCommandTarget, CommandDef, CommandResult
-from rpg_core.session.catalog import SessionCatalogService
 
 
 async def cmd_clear(agent: AgentCommandTarget, args: list[str]) -> str:
@@ -46,11 +44,7 @@ async def cmd_context(agent: AgentCommandTarget, args: list[str]) -> str:
 
 
 async def cmd_sessions(agent: AgentCommandTarget, args: list[str]) -> str:
-    gateway, current_session = _current_catalog_session(agent)
-    sessions = gateway.catalog.list_sessions(
-        str(current_session.workspace_id),
-        int(current_session.story_id),
-    ) or []
+    sessions = agent.list_story_sessions()
     current = agent.session_id
     lines = [f"会话列表 ({len(sessions)}):", f"当前会话: {current}"]
     for session in sessions:
@@ -62,12 +56,7 @@ async def cmd_sessions(agent: AgentCommandTarget, args: list[str]) -> str:
 
 async def cmd_session_create(agent: AgentCommandTarget, args: list[str]) -> str:
     title = " ".join(args).strip() or "New Session"
-    gateway, current_session = _current_catalog_session(agent)
-    created = SessionCatalogService(gateway.sessions).create_session(
-        str(current_session.workspace_id),
-        int(current_session.story_id),
-        title=title,
-    )
+    created = agent.create_story_session(title)
     if created is None:
         return "[错误] 无法在当前故事下创建会话"
     return f"[会话已创建: {created.id}]"
@@ -86,14 +75,7 @@ async def cmd_session_switch(
         SessionManager.validate_session_id(sid)
     except ValueError as exc:
         return f"[错误] {exc}"
-    gateway, current_session = _current_catalog_session(agent)
-    target = gateway.catalog.get_session(sid)
-    if (
-        target is None
-        or target.lifecycle != models.SESSION_LIFECYCLE_READY
-        or str(target.workspace_id) != str(current_session.workspace_id)
-        or int(target.story_id) != int(current_session.story_id)
-    ):
+    if not agent.can_switch_session(sid):
         return f"[会话不存在: {sid}]"
     return CommandResult(
         reply=f"[已切换到会话: {sid}]",
@@ -161,13 +143,3 @@ def format_command_help(commands: list[CommandDef]) -> str:
     for command in commands:
         lines.append(f"- {command.name}: {command.description}")
     return "\n".join(lines)
-
-
-def _current_catalog_session(agent: AgentCommandTarget):
-    from rpg_data.services import get_data_service_gateway
-
-    gateway = get_data_service_gateway()
-    current_session = gateway.catalog.get_session(agent.session_id)
-    if current_session is None:
-        raise FileNotFoundError(f"Session not found in rpg_data: {agent.session_id}")
-    return gateway, current_session

@@ -18,7 +18,7 @@
 
 - `rpg_data` 负责数据如何可靠、高效、原子地存取，不应被窄化为简单 CRUD：数据库连接/migration、Peewee record、typed DTO、复杂关联查询、分页/排序、高效 read model、批量写入、CAS/条件更新、数据库级原子操作、序列化、归属与完整性校验都应留在数据层；业务层不得拼装 SQL 语义或制造 N+1/事务竞争。
 - `rpg_data` 不得决定产品行为：不做默认选择、调度/抽样、优先级合并、冷却/重试、状态机下一步、生命周期策略、派生/重置/删除保留矩阵、Prompt/模板渲染、玩家文案或跨聚合业务编排。
-- `DataServiceGateway` 是合法的数据库生命周期与 Data Service 注册表；composition root 可从中取得具体 service，但业务 service 必须依赖窄 Protocol/Data Service，不得持有整个 Gateway 作为 service locator。现有非组装层 Gateway lookup 与整 Gateway 注入分别由架构测试显式 allowlist，禁止新增。
+- `DataServiceGateway` 是合法的数据库生命周期与 Data Service 注册表；composition root 可从中取得具体 service，但业务 service 必须依赖窄 Protocol/Data Service，不得持有整个 Gateway 作为 service locator。`rpg_core` 仅 `agent/agent.py` 与 `context/factory.py` 可以取得 Gateway，并必须立即把具体 service 逐项注入；进程边界的现有 lookup 与整 Gateway 引用由架构测试显式 allowlist，禁止新增。
 - `rpg_data` 的公开类型化持久化边界统一使用 Service 语义；Session、Message、Plot、Narrative Outcome、Dream/Memory、Status、Media 与 TTS 等新的大业务聚合入口命名为 `*DataService`，Repository/Peewee 实现只在 `rpg_data` 内部使用。既有简单 Character/Lorebook CRUD 可保留清晰的 `*ReadService` / `*ManagementService`，不为后缀或形式统一机械增加 application/facade/adapter 样板层。
 - 业务归属固定：Plot Scheduler 与 Narrative Outcome 在 `rpg_core/rp_modules`，Session/角色/Opening/状态/Scene 在 `rpg_core`，Dream/Story Memory/Persistent Memory 在 `rp_memory`，媒体与语音分别在 `rpg_media`、`rpg_tts`；service composition root 只负责依赖组装和进程适配。
 - 需要跨多次数据操作保持原子性时，由 `rpg_data` 提供无业务语义的 transaction/unit-of-work 或调用方指定的 bulk primitive，业务层决定事务内做什么。业务层不得直接使用 Repository/Peewee record，跨层结果使用 typed contract；Session、Memory、Status、Media、TTS 与 Narrative Outcome 存储契约优先从 `rpg_data.model.*` 引用，`rpg_data.models` 仅保留兼容重导出。

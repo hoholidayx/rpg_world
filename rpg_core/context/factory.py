@@ -97,14 +97,14 @@ def build_rpg_context(
     try:
         from rpg_core.character import CharacterManager
 
-        character_mgr = CharacterManager(session_id)
+        character_mgr = CharacterManager(session_id, gateway.character)
     except Exception as exc:
         logger.debug("[RPG World] CharacterManager init skipped: {}", exc)
 
     try:
         from rpg_core.lorebook import LorebookManager
 
-        lorebook_mgr = LorebookManager(session_id)
+        lorebook_mgr = LorebookManager(session_id, gateway.lorebook)
     except Exception as exc:
         logger.debug("[RPG World] LorebookManager init skipped: {}", exc)
 

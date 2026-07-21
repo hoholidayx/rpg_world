@@ -41,7 +41,7 @@ Repository / Peewee Record（仅 rpg_data 内部）
 
 ### Composition Root
 
-进程入口、`RPGGameAgent` 等明确的组装边界负责：
+进程入口、`RPGGameAgent`、`rpg_core.context.factory` 等明确的组装边界负责：
 
 - 获取 `DataServiceGateway`；
 - 从注册表取得具体 Data Service；
@@ -49,6 +49,9 @@ Repository / Peewee Record（仅 rpg_data 内部）
 - 绑定进程级生命周期、worker、HTTP adapter 和通知 adapter。
 
 Composition Root 可以看见 Gateway，但不得把 Gateway 继续向业务对象传递。
+在 `rpg_core` 内，合法 Gateway 获取点固定为 `agent/agent.py` 与
+`context/factory.py`；其它 Core 文件只能接收具体 Data Service 或自身声明的窄
+Protocol。独立进程入口及其组装 adapter 的例外必须由架构守卫显式列出。
 
 ### `DataServiceGateway`
 
@@ -59,7 +62,7 @@ Gateway 是合法的数据库生命周期管理器和 Service 注册表，负责
 - 确保当前线程连接已绑定；
 - 统一关闭连接并清空已注册实例。
 
-Gateway 不是业务 service locator。领域/application service 不得保存 Gateway，也不得在方法内部调用全局 getter。现存非组装层 lookup 或整 Gateway 注入只能保留在架构测试的显式 allowlist 中；allowlist 是待收口边界，不是新增先例。
+Gateway 不是业务 service locator。领域/application service、Manager、command handler、contributor 和 runtime helper 不得保存 Gateway，也不得在方法内部调用全局 getter。进程组装边界的现有 lookup 或整 Gateway 引用只能保留在架构测试的显式 allowlist 中；allowlist 是受控边界，不是新增先例。
 
 ### Domain / Application Service
 
@@ -159,6 +162,13 @@ derivation_service = SessionDerivationService(gateway.sessions)
 
 禁止在 `SessionDerivationService` 内保存 Gateway，或在业务方法中临时调用 `get_data_service_gateway()`。
 
+Agent 侧同样遵循这条规则：`RPGGameAgent` 将 `gateway.catalog` 注入 Main LLM
+选择服务，将 `gateway.sessions` 注入工具与 Session 用例；Context factory 将
+`gateway.character` / `gateway.lorebook` 注入对应 Manager。斜杠命令只调用
+Agent facade，Story Prompt contributor 复用 turn snapshot reader，不自行回查
+Gateway。若一个协作者只需要解析 Session 运行目录，就只声明该方法，而不是接收
+完整 Session Data Service 类型或 Gateway。
+
 ## 事务与并发语义
 
 事务所有权分为两部分：
@@ -207,6 +217,7 @@ derivation_service = SessionDerivationService(gateway.sessions)
 - 已整改 application service 不依赖 Gateway；
 - Status application service 不直接依赖具体 `StatusDataService`，只声明自身所需的窄 Data Port；
 - Gateway getter 使用面不超出显式 allowlist；
+- `rpg_core` 的 Gateway getter 只出现在 `agent/agent.py` 与 `context/factory.py`；
 - 整 Gateway 类型引用与构造注入不超出独立的显式 allowlist；
 - 新聚合持久化入口采用 `*DataService` 命名；
 - `rpg_data.models` 的兼容重导出与 canonical 类型保持同一身份。

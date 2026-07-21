@@ -49,6 +49,30 @@ def test_session_role_data_service_reads_mounts_and_persists_explicit_profile(
     assert updated.story_opening_id == openings[0].id
 
 
+def test_session_data_service_lists_only_ready_sessions_for_story(
+    gateway: DataServiceGateway,
+) -> None:
+    ready = gateway.sessions.create_session(
+        "demo_workspace",
+        1,
+        title="ready through session data",
+    )
+    provisioning = gateway.sessions.create_session(
+        "demo_workspace",
+        1,
+        title="hidden provisioning",
+        lifecycle=models.SESSION_LIFECYCLE_PROVISIONING,
+    )
+    assert ready is not None and provisioning is not None
+
+    sessions = gateway.sessions.list_sessions("demo_workspace", 1)
+
+    assert sessions is not None
+    assert ready.id in {session.id for session in sessions}
+    assert provisioning.id not in {session.id for session in sessions}
+    assert gateway.sessions.list_sessions("missing", 1) is None
+
+
 def test_session_role_data_transaction_rolls_back_explicit_update(
     gateway: DataServiceGateway,
 ) -> None:

@@ -88,6 +88,13 @@ class SessionDataService:
     def get_story(self, workspace_id: str, story_id: int) -> models.Story | None:
         return self._catalog.get_story(str(workspace_id), int(story_id))
 
+    def list_sessions(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> list[models.Session] | None:
+        return self._catalog.list_sessions(str(workspace_id), int(story_id))
+
     def create_story(
         self,
         workspace_id: str,

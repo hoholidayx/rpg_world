@@ -13,6 +13,7 @@ from rpg_core.agent.command.role import render_role_bind_prompt, resolve_role_in
 from rpg_core.context.models import Message
 from rpg_core.session.role import SessionRoleService
 from rpg_core.session.reset import SessionResetService
+from rpg_data.model.session import SESSION_LIFECYCLE_READY, Session
 
 if TYPE_CHECKING:
     from rpg_data.model.session import SessionMessage
@@ -29,6 +30,24 @@ class AgentSessionDataPort(Protocol):
 
     def list_messages(self, session_id: str) -> list["SessionMessage"]: ...
 
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def list_sessions(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> list[Session] | None: ...
+
+
+class SessionCatalogCreator(Protocol):
+    def create_session(
+        self,
+        workspace_id: str,
+        story_id: int,
+        *,
+        title: str,
+    ) -> Session | None: ...
+
 
 class AgentSessionService:
     """Own role guards and every mutable session-history operation."""
@@ -39,12 +58,14 @@ class AgentSessionService:
         lifecycle: "AgentRuntimeLifecycle",
         tool_service: "AgentToolService",
         data: AgentSessionDataPort,
+        catalog_creator: SessionCatalogCreator,
         role_service: SessionRoleService,
         reset_service: SessionResetService,
     ) -> None:
         self._lifecycle = lifecycle
         self._tool_service = tool_service
         self._data = data
+        self._catalog_creator = catalog_creator
         self._role_service = role_service
         self._reset_service = reset_service
         self._mailbox: AgentMailbox | None = None
@@ -55,6 +76,31 @@ class AgentSessionService:
     @property
     def history(self) -> list[Message]:
         return self._lifecycle.session_manager.history
+
+    def list_story_sessions(self) -> list[Session]:
+        current = self._require_catalog_session()
+        return self._data.list_sessions(
+            str(current.workspace_id),
+            int(current.story_id),
+        ) or []
+
+    def create_story_session(self, title: str) -> Session | None:
+        current = self._require_catalog_session()
+        return self._catalog_creator.create_session(
+            str(current.workspace_id),
+            int(current.story_id),
+            title=str(title),
+        )
+
+    def can_switch_session(self, session_id: str) -> bool:
+        current = self._require_catalog_session()
+        target = self._data.get_session(str(session_id))
+        return bool(
+            target is not None
+            and target.lifecycle == SESSION_LIFECYCLE_READY
+            and str(target.workspace_id) == str(current.workspace_id)
+            and int(target.story_id) == int(current.story_id)
+        )
 
     def render_role_bind_prompt(self, *, error: str = "") -> str:
         return render_role_bind_prompt(
@@ -315,6 +361,15 @@ class AgentSessionService:
 
     def _history_rows(self) -> list["SessionMessage"]:
         return self._data.list_messages(self._lifecycle.session_id)
+
+    def _require_catalog_session(self) -> Session:
+        session_id = self._lifecycle.session_id
+        session = self._data.get_session(session_id)
+        if session is None:
+            raise FileNotFoundError(
+                f"Session not found in rpg_data: {session_id}"
+            )
+        return session
 
     def _clamp_deferred_progress(self, max_turn_id: int | None = None) -> None:
         if not self._lifecycle.initialized:

@@ -979,7 +979,7 @@ def _main_llm_option_payload(option) -> AgentMainLLMProviderOptionPayload:  # no
 
 
 def _main_llm_selection_service() -> MainLLMSelectionService:
-    return MainLLMSelectionService(get_data_service_gateway())
+    return MainLLMSelectionService(get_data_service_gateway().catalog)
 
 
 def _main_llm_catalog_payload(

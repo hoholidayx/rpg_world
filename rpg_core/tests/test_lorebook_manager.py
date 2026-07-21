@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from rpg_data.models import SessionLorebookEntry
 from rpg_core.lorebook import LorebookManager
 
@@ -69,26 +71,9 @@ def test_lorebook_manager_delegates_to_service_without_path_or_cache() -> None:
     assert [entry["name"] for entry in manager.list_enabled_entries()] == ["First", "Second"]
 
 
-def test_lorebook_manager_defaults_to_gateway_service(monkeypatch) -> None:
-    import rpg_core.lorebook as manager_module
-
-    service = FakeLorebookService([_entry("Gateway")])
-    calls = 0
-
-    class FakeGateway:
-        lorebook = service
-
-    def fake_get_gateway():
-        nonlocal calls
-        calls += 1
-        return FakeGateway()
-
-    monkeypatch.setattr(manager_module, "get_data_service_gateway", fake_get_gateway)
-
-    manager = LorebookManager("s_gateway")
-
-    assert calls == 1
-    assert manager.list_enabled_entries()[0]["name"] == "Gateway"
+def test_lorebook_manager_requires_explicit_read_service() -> None:
+    with pytest.raises(TypeError):
+        LorebookManager("s_without_service")  # type: ignore[call-arg]
 
 
 def test_lorebook_manager_lists_all_entries_and_gets_by_name() -> None:
@@ -126,14 +111,16 @@ def test_context_factory_initializes_lorebook_manager_with_session_id(
     seen_session_ids: list[str] = []
 
     class FakeLorebookManager:
-        def __init__(self, session_id: str) -> None:
+        def __init__(self, session_id: str, service: object) -> None:
+            assert service is not None
             seen_session_ids.append(session_id)
 
         def list_enabled_entries(self):
             return []
 
     class FakeCharacterManager:
-        def __init__(self, session_id: str) -> None:
+        def __init__(self, session_id: str, service: object) -> None:
+            assert service is not None
             self.session_id = session_id
 
         def list_enabled_characters(self):

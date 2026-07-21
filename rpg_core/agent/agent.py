@@ -40,14 +40,16 @@ from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
 from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
 from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.rp_modules.registry import RPModuleRegistry
-from rpg_core.session.derivation import SessionDerivationService
+from rpg_core.session.catalog import SessionCatalogService
 from rpg_core.session.composer import SessionComposerApplicationService
+from rpg_core.session.derivation import SessionDerivationService
 from rpg_core.session.reset import SessionResetService
 from rpg_core.session.role import SessionRoleService
 from rpg_core.settings import settings
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 
 if TYPE_CHECKING:
+    from rpg_data.model.session import Session
     from rpg_core.session.reset import SessionResetResult
     from rpg_core.agent.command.models import CommandDef
     from rpg_core.agent.turn.runner import ToolCallRecord
@@ -86,7 +88,8 @@ class RPGGameAgent:
         self._command_dispatcher = CommandDispatcher(agent=self)
         self._model_runtime = MainModelRuntime(
             selection_service=(
-                main_llm_selection_service or MainLLMSelectionService()
+                main_llm_selection_service
+                or MainLLMSelectionService(gateway.catalog)
             ),
             initial_model=None,
         )
@@ -114,12 +117,14 @@ class RPGGameAgent:
         self._tool_service = AgentToolService(
             session_id=lambda: self._lifecycle.session_id,
             resources=lambda: self._lifecycle.resources,
+            data=session_data,
             extra_tools=tools,
         )
         self._session_service = AgentSessionService(
             lifecycle=self._lifecycle,
             tool_service=self._tool_service,
             data=session_data,
+            catalog_creator=SessionCatalogService(session_data),
             role_service=role_service,
             reset_service=reset_service,
         )
@@ -300,6 +305,15 @@ class RPGGameAgent:
             opening_index,
             story_opening_id=story_opening_id,
         )
+
+    def list_story_sessions(self) -> list["Session"]:
+        return self._session_service.list_story_sessions()
+
+    def create_story_session(self, title: str) -> "Session | None":
+        return self._session_service.create_story_session(title)
+
+    def can_switch_session(self, session_id: str) -> bool:
+        return self._session_service.can_switch_session(session_id)
 
     @property
     def history(self) -> list["Message"]:
