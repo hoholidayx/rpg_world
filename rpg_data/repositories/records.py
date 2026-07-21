@@ -1135,6 +1135,7 @@ class StoryPlotEventRecord(BaseRecord):
     suitability_hint = TextField(default="")
     dispatch_mode = TextField(default="soft")
     scheduled_time_json = TextField(null=True)
+    deadline_time_json = TextField(null=True)
     position = IntegerField(default=0)
     enabled = BooleanField(default=True)
     allow_repeat = BooleanField(default=False)

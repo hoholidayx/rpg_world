@@ -406,7 +406,60 @@ def test_run_migrations_is_idempotent() -> None:
             ("0017", "0017_story_memory_evidence.sql"),
             ("0018", "0018_story_openings.sql"),
             ("0019", "0019_plot_scheduling.sql"),
+            ("0020", "0020_plot_event_deadline.sql"),
         ]
+    finally:
+        conn.close()
+
+
+def test_plot_event_deadline_migration_preserves_existing_events(monkeypatch) -> None:
+    conn = db.connect(":memory:")
+    migrations = migration_runner._iter_migration_files()
+    deadline_index = next(
+        index
+        for index, migration in enumerate(migrations)
+        if migration.name == "0020_plot_event_deadline.sql"
+    )
+    try:
+        monkeypatch.setattr(
+            migration_runner,
+            "_iter_migration_files",
+            lambda: migrations[:deadline_index],
+        )
+        migration_runner.run_migrations(conn)
+        conn.execute(
+            """
+            INSERT INTO rpg_story_plot_event_pools (story_id, name)
+            VALUES (1, 'legacy pool')
+            """
+        )
+        pool_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO rpg_story_plot_events (story_id, pool_id, title, directive)
+            VALUES (1, ?, 'legacy event', 'legacy directive')
+            """,
+            (pool_id,),
+        )
+        event_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+
+        monkeypatch.setattr(
+            migration_runner,
+            "_iter_migration_files",
+            lambda: migrations,
+        )
+        migration_runner.run_migrations(conn)
+
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(rpg_story_plot_events)")
+        }
+        assert "deadline_time_json" in columns
+        assert conn.execute(
+            "SELECT deadline_time_json FROM rpg_story_plot_events WHERE id = ?",
+            (event_id,),
+        ).fetchone()["deadline_time_json"] is None
     finally:
         conn.close()
 

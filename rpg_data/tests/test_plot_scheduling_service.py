@@ -32,6 +32,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             suitability_hint="",
             dispatch_mode=models.PLOT_DISPATCH_SOFT,
             scheduled_time=None,
+            deadline_time=SceneTime(1, 1, 2, 9),
             position=4,
             enabled=True,
             allow_repeat=False,
@@ -46,6 +47,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             suitability_hint="",
             dispatch_mode=models.PLOT_DISPATCH_FORCED,
             scheduled_time=SceneTime(1, 1, 1, 8),
+            deadline_time=SceneTime(1, 1, 1, 10),
             position=9,
             enabled=True,
             allow_repeat=True,
@@ -85,6 +87,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
             suitability_hint="角色仍在城内",
             dispatch_mode=models.PLOT_DISPATCH_SOFT,
             scheduled_time=SceneTime(1, 1, 1, 7),
+            deadline_time=SceneTime(1, 1, 1, 12),
             position=2,
             enabled=True,
             allow_repeat=False,
@@ -108,6 +111,7 @@ def test_plot_data_service_exposes_explicit_crud_and_ownership_checks() -> None:
 
         assert updated_pool is not None and updated_pool.name == "日常事件池"
         assert updated_event is not None and updated_event.position == 2
+        assert updated_event.deadline_time == SceneTime(1, 1, 1, 12)
         assert updated_outline is not None and updated_outline.name == "主线 A"
         assert updated_node is not None and updated_node.event_id == second.id
         assert service.get_pool(999, pool.id) is None
@@ -168,6 +172,7 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
                 suitability_hint="",
                 dispatch_mode=models.PLOT_DISPATCH_SOFT,
                 scheduled_time=None,
+                deadline_time=None,
                 position=0,
                 enabled=True,
                 allow_repeat=True,
@@ -198,6 +203,7 @@ def test_plot_data_constraints_and_transaction_rollback() -> None:
                 suitability_hint="",
                 dispatch_mode=models.PLOT_DISPATCH_SOFT,
                 scheduled_time=None,
+                deadline_time=None,
                 position=0,
                 enabled=True,
                 allow_repeat=False,
@@ -247,6 +253,7 @@ def test_plot_data_ledger_pagination_and_caller_selected_copy() -> None:
             suitability_hint="",
             dispatch_mode=models.PLOT_DISPATCH_SOFT,
             scheduled_time=None,
+            deadline_time=None,
             position=0,
             enabled=True,
             allow_repeat=False,

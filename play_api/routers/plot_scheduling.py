@@ -91,6 +91,7 @@ class PlotEventInput(BaseModel):
     suitability_hint: str = Field(default="", alias="suitabilityHint")
     dispatch_mode: str = Field(default=models.PLOT_DISPATCH_SOFT, alias="dispatchMode")
     scheduled_time: SceneTimePayload | None = Field(default=None, alias="scheduledTime")
+    deadline_time: SceneTimePayload | None = Field(default=None, alias="deadlineTime")
     position: int | None = Field(default=None, ge=0)
     enabled: bool = True
     allow_repeat: bool = Field(default=False, alias="allowRepeat")
@@ -111,6 +112,7 @@ class PlotEventPatch(BaseModel):
     suitability_hint: str | None = Field(default=None, alias="suitabilityHint")
     dispatch_mode: str | None = Field(default=None, alias="dispatchMode")
     scheduled_time: SceneTimePayload | None = Field(default=None, alias="scheduledTime")
+    deadline_time: SceneTimePayload | None = Field(default=None, alias="deadlineTime")
     position: int | None = Field(default=None, ge=0)
     enabled: bool | None = None
     allow_repeat: bool | None = Field(default=None, alias="allowRepeat")
@@ -133,6 +135,7 @@ class PlotEventResponse(BaseModel):
     suitability_hint: str = Field(alias="suitabilityHint")
     dispatch_mode: str = Field(alias="dispatchMode")
     scheduled_time: SceneTimePayload | None = Field(alias="scheduledTime")
+    deadline_time: SceneTimePayload | None = Field(alias="deadlineTime")
     position: int
     enabled: bool
     allow_repeat: bool = Field(alias="allowRepeat")
@@ -320,6 +323,7 @@ def _event_response(value: models.StoryPlotEvent) -> PlotEventResponse:
         suitabilityHint=value.suitability_hint,
         dispatchMode=value.dispatch_mode,
         scheduledTime=_time_response(value.scheduled_time),
+        deadlineTime=_time_response(value.deadline_time),
         position=value.position,
         enabled=value.enabled,
         allowRepeat=value.allow_repeat,
@@ -423,6 +427,16 @@ def _event_time_patch(
     return payload.scheduled_time.to_scene_time()
 
 
+def _event_deadline_time_patch(
+    payload: PlotEventPatch,
+) -> SceneTime | None | PlotPatchUnset:
+    if "deadline_time" not in payload.model_fields_set:
+        return PLOT_PATCH_UNSET
+    if payload.deadline_time is None:
+        return None
+    return payload.deadline_time.to_scene_time()
+
+
 def _node_time_patch(payload: PlotNodePatch) -> SceneTime | PlotPatchUnset:
     value = _required_patch_value(
         payload,
@@ -489,6 +503,7 @@ def _event_update_command(
             payload.dispatch_mode,
         ),
         scheduled_time=_event_time_patch(payload),
+        deadline_time=_event_deadline_time_patch(payload),
         position=_required_patch_value(payload, "position", payload.position),
         enabled=_required_patch_value(payload, "enabled", payload.enabled),
         allow_repeat=_required_patch_value(
@@ -647,6 +662,11 @@ async def create_plot_event(
                 scheduled_time=(
                     payload.scheduled_time.to_scene_time()
                     if payload.scheduled_time is not None
+                    else None
+                ),
+                deadline_time=(
+                    payload.deadline_time.to_scene_time()
+                    if payload.deadline_time is not None
                     else None
                 ),
                 position=payload.position,

@@ -91,6 +91,7 @@ async def test_agent_reset_clears_plot_ledger_and_preserves_overrides(
         suitability_hint="",
         dispatch_mode=models.PLOT_DISPATCH_FORCED,
         scheduled_time=None,
+        deadline_time=None,
         position=0,
         enabled=True,
         allow_repeat=False,

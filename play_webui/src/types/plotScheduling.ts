@@ -42,6 +42,7 @@ export type PlotEvent = {
   suitabilityHint: string
   dispatchMode: PlotDispatchMode
   scheduledTime: SceneTimeValue | null
+  deadlineTime: SceneTimeValue | null
   position: number
   enabled: boolean
   allowRepeat: boolean
@@ -136,6 +137,7 @@ export type PlotEventInput = {
   suitabilityHint: string
   dispatchMode: PlotDispatchMode
   scheduledTime: SceneTimeValue | null
+  deadlineTime: SceneTimeValue | null
   enabled: boolean
   allowRepeat: boolean
   repeatCooldownMinutes: number

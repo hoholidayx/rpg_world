@@ -51,7 +51,11 @@ class _Judge:
         return self.result
 
 
-def _plan(dispatch_mode: str = models.PLOT_DISPATCH_SOFT) -> TurnExecutionPlan:
+def _plan(
+    dispatch_mode: str = models.PLOT_DISPATCH_SOFT,
+    *,
+    deadline_time: SceneTime | None = None,
+) -> TurnExecutionPlan:
     event = models.StoryPlotEvent(
         id=10,
         story_id=1,
@@ -59,6 +63,7 @@ def _plan(dispatch_mode: str = models.PLOT_DISPATCH_SOFT) -> TurnExecutionPlan:
         title="雨夜来信",
         directive="让信使送来一封信。",
         dispatch_mode=dispatch_mode,
+        deadline_time=deadline_time,
     )
     snapshot = PlotScheduleSnapshot(
         session_id="s1",
@@ -111,7 +116,7 @@ async def test_soft_plot_candidate_stages_trigger_and_dynamic_injection() -> Non
     scratch = _scratch()
 
     await hook.run(
-        plan=_plan(),
+        plan=_plan(deadline_time=SceneTime(1, 1, 1, 12)),
         turn_scratch=scratch,
         turn_stats=TurnStats(),
         rp_module_runtime=None,
@@ -120,6 +125,13 @@ async def test_soft_plot_candidate_stages_trigger_and_dynamic_injection() -> Non
     assert judge.calls == 1
     assert len(context.calls) == 1
     assert scratch.plot_schedule_decisions[0].decision_status == "triggered"
+    assert scratch.plot_schedule_decisions[0].event_snapshot["deadlineTime"] == {
+        "year": 1,
+        "month": 1,
+        "day": 1,
+        "hour": 12,
+        "minute": 0,
+    }
     assert scratch.plot_schedule_injections[0].directive == "让信使送来一封信。"
 
 
@@ -164,3 +176,27 @@ async def test_forced_plot_candidate_never_calls_judge() -> None:
     assert judge.calls == 0
     assert scratch.plot_schedule_decisions[0].decision_status == "triggered"
     assert len(scratch.plot_schedule_injections) == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_plot_candidate_never_calls_judge_or_stages_a_decision() -> None:
+    context = _Context()
+    judge = _Judge(AssertionError("expired event must not reach the judge"))
+    hook = PlotSchedulingPreflightHook(
+        context_service=context,
+        session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
+        judge=judge,
+    )
+    scratch = _scratch()
+
+    await hook.run(
+        plan=_plan(deadline_time=SceneTime(1, 1, 1, 10)),
+        turn_scratch=scratch,
+        turn_stats=TurnStats(),
+        rp_module_runtime=None,
+    )
+
+    assert judge.calls == 0
+    assert context.calls == []
+    assert scratch.plot_schedule_injections == []
+    assert scratch.plot_schedule_decisions == []

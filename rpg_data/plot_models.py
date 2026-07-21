@@ -55,6 +55,7 @@ class StoryPlotEvent:
     suitability_hint: str = ""
     dispatch_mode: str = PLOT_DISPATCH_SOFT
     scheduled_time: SceneTime | None = None
+    deadline_time: SceneTime | None = None
     position: int = 0
     enabled: bool = True
     allow_repeat: bool = False

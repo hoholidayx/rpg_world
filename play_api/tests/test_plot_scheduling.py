@@ -46,6 +46,13 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
                 "directive": "让信使送来一封被雨打湿的信。",
                 "dispatchMode": "soft",
                 "scheduledTime": None,
+                "deadlineTime": {
+                    "year": 1,
+                    "month": 1,
+                    "day": 1,
+                    "hour": 9,
+                    "minute": 0,
+                },
                 "allowRepeat": False,
                 "repeatCooldownMinutes": 0,
             },
@@ -67,18 +74,40 @@ def test_plot_scheduling_story_crud_and_session_runtime_contract(
         )
         assert scheduled_event.status_code == 200
         assert scheduled_event.json()["scheduledTime"]["minute"] == 30
+        assert scheduled_event.json()["deadlineTime"]["hour"] == 9
+        invalid_deadline = client.patch(
+            f"{story_path}/events/{event_id}",
+            json={
+                "deadlineTime": {
+                    "year": 1,
+                    "month": 1,
+                    "day": 1,
+                    "hour": 8,
+                    "minute": 30,
+                }
+            },
+        )
+        assert invalid_deadline.status_code == 422
         renamed_event = client.patch(
             f"{story_path}/events/{event_id}",
             json={"title": "雨夜加急来信"},
         )
         assert renamed_event.status_code == 200
         assert renamed_event.json()["scheduledTime"]["minute"] == 30
+        assert renamed_event.json()["deadlineTime"]["hour"] == 9
         cleared_schedule = client.patch(
             f"{story_path}/events/{event_id}",
             json={"scheduledTime": None},
         )
         assert cleared_schedule.status_code == 200
         assert cleared_schedule.json()["scheduledTime"] is None
+        assert cleared_schedule.json()["deadlineTime"]["hour"] == 9
+        cleared_deadline = client.patch(
+            f"{story_path}/events/{event_id}",
+            json={"deadlineTime": None},
+        )
+        assert cleared_deadline.status_code == 200
+        assert cleared_deadline.json()["deadlineTime"] is None
         invalid_null_title = client.patch(
             f"{story_path}/events/{event_id}",
             json={"title": None},

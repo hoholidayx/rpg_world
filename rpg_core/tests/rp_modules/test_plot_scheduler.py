@@ -11,6 +11,7 @@ def _event(
     *,
     position: int = 0,
     scheduled_time: SceneTime | None = None,
+    deadline_time: SceneTime | None = None,
     repeat: bool = False,
     cooldown: int = 0,
 ) -> models.StoryPlotEvent:
@@ -22,6 +23,7 @@ def _event(
         directive=f"执行事件 {event_id}",
         position=position,
         scheduled_time=scheduled_time,
+        deadline_time=deadline_time,
         allow_repeat=repeat,
         repeat_cooldown_minutes=cooldown,
     )
@@ -204,3 +206,207 @@ def test_non_repeat_event_keeps_pool_lane_trigger_after_moving_pools() -> None:
     )
 
     assert selected == ()
+
+
+def test_pool_event_window_includes_start_and_excludes_deadline_across_month() -> None:
+    start = SceneTime(1, 1, 31, 23, 30)
+    deadline = SceneTime(1, 2, 1, 0)
+    event = _event(1, 10, scheduled_time=start, deadline_time=deadline)
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(models.StoryPlotEventPool(10, 1, "窗口池"),),
+            events=(event,),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(),
+    )
+    selector = PlotScheduleSelector()
+
+    selected = selector.select(
+        snapshot,
+        scene_time=start,
+        current_turn_id=2,
+        completed_ic_gm_turn_ids=(1,),
+    )
+    assert [item.event.id for item in selected] == [event.id]
+    assert selector.select(
+        snapshot,
+        scene_time=deadline,
+        current_turn_id=2,
+        completed_ic_gm_turn_ids=(1,),
+    ) == ()
+
+
+def test_deadline_without_start_expires_an_immediately_eligible_event() -> None:
+    deadline = SceneTime(1, 1, 1, 10)
+    event = _event(1, 10, deadline_time=deadline)
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(models.StoryPlotEventPool(10, 1, "窗口池"),),
+            events=(event,),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(),
+    )
+    selector = PlotScheduleSelector()
+
+    assert [item.event.id for item in selector.select(
+        snapshot,
+        scene_time=SceneTime(1, 1, 1, 9, 59),
+        current_turn_id=2,
+        completed_ic_gm_turn_ids=(1,),
+    )] == [event.id]
+    assert selector.select(
+        snapshot,
+        scene_time=deadline,
+        current_turn_id=2,
+        completed_ic_gm_turn_ids=(1,),
+    ) == ()
+
+
+def test_sequential_pool_skips_expired_head_but_keeps_future_head_blocking() -> None:
+    expired = _event(1, 10, position=0, deadline_time=SceneTime(1, 1, 1, 10))
+    following = _event(2, 10, position=1)
+    selector = PlotScheduleSelector()
+    expired_snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(models.StoryPlotEventPool(10, 1, "顺序池", selection_mode="sequential"),),
+            events=(expired, following),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(),
+    )
+
+    selected = selector.select(
+        expired_snapshot,
+        scene_time=SceneTime(1, 1, 1, 10),
+        current_turn_id=2,
+        completed_ic_gm_turn_ids=(1,),
+    )
+    assert [item.event.id for item in selected] == [following.id]
+
+    future = _event(3, 10, position=0, scheduled_time=SceneTime(1, 1, 1, 11))
+    future_snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(models.StoryPlotEventPool(10, 1, "顺序池", selection_mode="sequential"),),
+            events=(future, following),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(),
+    )
+    assert selector.select(
+        future_snapshot,
+        scene_time=SceneTime(1, 1, 1, 10),
+        current_turn_id=2,
+        completed_ic_gm_turn_ids=(1,),
+    ) == ()
+
+
+def test_outline_skips_expired_shared_event_and_continues_next_node() -> None:
+    deadline = SceneTime(1, 1, 1, 10)
+    expired = _event(1, 10, deadline_time=deadline)
+    following = _event(2, 10)
+    first_outline = models.StoryPlotOutline(
+        20,
+        1,
+        "主线 A",
+        nodes=(
+            models.StoryPlotOutlineNode(
+                50, 1, 20, expired.id, SceneTime(1, 1, 1, 8), position=0
+            ),
+            models.StoryPlotOutlineNode(
+                51, 1, 20, following.id, SceneTime(1, 1, 1, 9), position=1
+            ),
+        ),
+    )
+    second_outline = models.StoryPlotOutline(
+        21,
+        1,
+        "主线 B",
+        nodes=(
+            models.StoryPlotOutlineNode(
+                52, 1, 21, expired.id, SceneTime(1, 1, 1, 8)
+            ),
+        ),
+    )
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(models.StoryPlotEventPool(10, 1, "禁用池", enabled=False),),
+            events=(expired, following),
+            outlines=(first_outline, second_outline),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(),
+    )
+
+    selected = PlotScheduleSelector().select(
+        snapshot,
+        scene_time=deadline,
+        current_turn_id=2,
+        completed_ic_gm_turn_ids=(1,),
+    )
+
+    assert len(selected) == 1
+    assert selected[0].source_kind == models.PLOT_SOURCE_OUTLINE
+    assert selected[0].source_id == 51
+    assert selected[0].event.id == following.id
+
+
+def test_repeatable_event_stops_participating_at_deadline() -> None:
+    deadline = SceneTime(1, 1, 1, 10)
+    event = _event(
+        1,
+        10,
+        repeat=True,
+        cooldown=1,
+        deadline_time=deadline,
+    )
+    triggered = _decision(
+        1,
+        1,
+        models.PLOT_SOURCE_POOL,
+        event.id,
+        event.id,
+        10,
+        models.PLOT_DECISION_TRIGGERED,
+        scene_time=SceneTime(1, 1, 1, 9),
+    )
+    snapshot = PlotScheduleSnapshot(
+        session_id="s1",
+        story_id=1,
+        enabled=True,
+        story=models.StoryPlotSchedule(
+            story_id=1,
+            pools=(models.StoryPlotEventPool(10, 1, "重复池"),),
+            events=(event,),
+        ),
+        overrides=models.SessionPlotOverrides("s1"),
+        decisions=(triggered,),
+    )
+
+    assert PlotScheduleSelector().select(
+        snapshot,
+        scene_time=deadline,
+        current_turn_id=3,
+        completed_ic_gm_turn_ids=(1, 2),
+    ) == ()

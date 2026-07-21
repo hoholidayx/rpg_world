@@ -42,6 +42,7 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
             )
         )
         scheduled_time = SceneTime(1, 1, 1, 8)
+        deadline_time = SceneTime(1, 1, 1, 10)
         first = service.create_event(
             CreatePlotEventCommand(
                 workspace_id="demo_workspace",
@@ -50,6 +51,7 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
                 title="来信",
                 directive="送来一封信。",
                 scheduled_time=scheduled_time,
+                deadline_time=deadline_time,
             )
         )
         second = service.create_event(
@@ -113,6 +115,7 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
             )
         )
         assert unchanged_time.scheduled_time == scheduled_time
+        assert unchanged_time.deadline_time == deadline_time
         cleared_time = service.update_event(
             UpdatePlotEventCommand(
                 workspace_id="demo_workspace",
@@ -122,6 +125,29 @@ def test_management_owns_default_position_move_reorder_and_repeat_rules() -> Non
             )
         )
         assert cleared_time.scheduled_time is None
+        assert cleared_time.deadline_time == deadline_time
+        cleared_deadline = service.update_event(
+            UpdatePlotEventCommand(
+                workspace_id="demo_workspace",
+                story_id=1,
+                event_id=first.id,
+                deadline_time=None,
+            )
+        )
+        assert cleared_deadline.deadline_time is None
+
+        with pytest.raises(ValueError, match="deadline_time must be later"):
+            service.create_event(
+                CreatePlotEventCommand(
+                    workspace_id="demo_workspace",
+                    story_id=1,
+                    pool_id=first_pool.id,
+                    title="非法截止时间",
+                    directive="不会保存。",
+                    scheduled_time=scheduled_time,
+                    deadline_time=scheduled_time,
+                )
+            )
 
         with pytest.raises(ValueError, match="must be positive"):
             service.create_event(

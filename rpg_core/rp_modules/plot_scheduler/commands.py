@@ -52,6 +52,7 @@ class CreatePlotEventCommand:
     suitability_hint: str = ""
     dispatch_mode: str = data_models.PLOT_DISPATCH_SOFT
     scheduled_time: SceneTime | None = None
+    deadline_time: SceneTime | None = None
     position: int | None = None
     enabled: bool = True
     allow_repeat: bool = False
@@ -70,6 +71,7 @@ class UpdatePlotEventCommand:
     suitability_hint: str | PlotPatchUnset = PLOT_PATCH_UNSET
     dispatch_mode: str | PlotPatchUnset = PLOT_PATCH_UNSET
     scheduled_time: SceneTime | None | PlotPatchUnset = PLOT_PATCH_UNSET
+    deadline_time: SceneTime | None | PlotPatchUnset = PLOT_PATCH_UNSET
     position: int | PlotPatchUnset = PLOT_PATCH_UNSET
     enabled: bool | PlotPatchUnset = PLOT_PATCH_UNSET
     allow_repeat: bool | PlotPatchUnset = PLOT_PATCH_UNSET

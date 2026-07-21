@@ -109,6 +109,7 @@ class PlotScheduleManagementDataPort(Protocol):
         suitability_hint: str,
         dispatch_mode: str,
         scheduled_time: SceneTime | None,
+        deadline_time: SceneTime | None,
         position: int,
         enabled: bool,
         allow_repeat: bool,
@@ -126,6 +127,7 @@ class PlotScheduleManagementDataPort(Protocol):
         suitability_hint: str,
         dispatch_mode: str,
         scheduled_time: SceneTime | None,
+        deadline_time: SceneTime | None,
         position: int,
         enabled: bool,
         allow_repeat: bool,
@@ -330,6 +332,10 @@ class PlotScheduleManagementService:
                 command.allow_repeat,
                 command.repeat_cooldown_minutes,
             )
+            scheduled_time, deadline_time = _event_time_window(
+                command.scheduled_time,
+                command.deadline_time,
+            )
             return self._data.create_event(
                 story_id=command.story_id,
                 pool_id=pool.id,
@@ -338,7 +344,8 @@ class PlotScheduleManagementService:
                 directive=_required_text(command.directive, "event directive"),
                 suitability_hint=_text(command.suitability_hint),
                 dispatch_mode=_dispatch_mode(command.dispatch_mode),
-                scheduled_time=_optional_scene_time(command.scheduled_time),
+                scheduled_time=scheduled_time,
+                deadline_time=deadline_time,
                 position=position,
                 enabled=_boolean(command.enabled, "enabled"),
                 allow_repeat=allow_repeat,
@@ -375,6 +382,10 @@ class PlotScheduleManagementService:
                 )
             else:
                 position = current.position
+            scheduled_time, deadline_time = _event_time_window(
+                _resolve_patch(command.scheduled_time, current.scheduled_time),
+                _resolve_patch(command.deadline_time, current.deadline_time),
+            )
             updated = self._data.update_event(
                 current.id,
                 pool_id=pool_id,
@@ -398,9 +409,8 @@ class PlotScheduleManagementService:
                 dispatch_mode=_dispatch_mode(
                     _resolve_patch(command.dispatch_mode, current.dispatch_mode)
                 ),
-                scheduled_time=_optional_scene_time(
-                    _resolve_patch(command.scheduled_time, current.scheduled_time)
-                ),
+                scheduled_time=scheduled_time,
+                deadline_time=deadline_time,
                 position=position,
                 enabled=_boolean(
                     _resolve_patch(command.enabled, current.enabled),
@@ -796,6 +806,25 @@ def _optional_scene_time(value: SceneTime | None) -> SceneTime | None:
     if value is None:
         return None
     return _scene_time(value)
+
+
+def _event_time_window(
+    scheduled_time: SceneTime | None,
+    deadline_time: SceneTime | None,
+) -> tuple[SceneTime | None, SceneTime | None]:
+    scheduled = _optional_scene_time(scheduled_time)
+    deadline = _optional_deadline_time(deadline_time)
+    if scheduled is not None and deadline is not None and deadline <= scheduled:
+        raise ValueError("deadline_time must be later than scheduled_time")
+    return scheduled, deadline
+
+
+def _optional_deadline_time(value: SceneTime | None) -> SceneTime | None:
+    if value is None:
+        return None
+    if not isinstance(value, SceneTime):
+        raise ValueError("deadline_time must be a SceneTime")
+    return value
 
 
 def _scene_time(value: SceneTime) -> SceneTime:

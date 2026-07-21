@@ -96,6 +96,13 @@ function isValidSceneTime(value: SceneTimeValue) {
     && Number.isInteger(value.minute) && value.minute >= 0 && value.minute <= 59
 }
 
+function compareSceneTime(left: SceneTimeValue, right: SceneTimeValue) {
+  for (const key of ['year', 'month', 'day', 'hour', 'minute'] as const) {
+    if (left[key] !== right[key]) return left[key] - right[key]
+  }
+  return 0
+}
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
@@ -186,6 +193,8 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
   const [dispatchMode, setDispatchMode] = useState(eventItem?.dispatchMode ?? nodeItem?.dispatchMode ?? PLOT_DISPATCH_MODE.SOFT)
   const [hasTime, setHasTime] = useState(Boolean(eventItem?.scheduledTime) || target.kind === 'node')
   const [scheduledTime, setScheduledTime] = useState(eventItem?.scheduledTime ?? nodeItem?.scheduledTime ?? DEFAULT_TIME)
+  const [hasDeadline, setHasDeadline] = useState(Boolean(eventItem?.deadlineTime))
+  const [deadlineTime, setDeadlineTime] = useState(eventItem?.deadlineTime ?? DEFAULT_TIME)
   const [allowRepeat, setAllowRepeat] = useState(eventItem?.allowRepeat ?? false)
   const [cooldown, setCooldown] = useState(eventItem?.repeatCooldownMinutes || 60)
   const [eventId, setEventId] = useState(nodeItem?.eventId ?? schedule.events[0]?.id ?? 0)
@@ -205,6 +214,7 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
       onSave({ kind: 'event', input: {
         poolId, title, directive, description, suitabilityHint, dispatchMode,
         scheduledTime: hasTime ? scheduledTime : null, enabled, allowRepeat,
+        deadlineTime: hasDeadline ? deadlineTime : null,
         repeatCooldownMinutes: allowRepeat ? cooldown : 0,
       } })
     } else if (target.kind === 'outline') {
@@ -221,6 +231,8 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
         && title.trim().length > 0
         && directive.trim().length > 0
         && (!hasTime || isValidSceneTime(scheduledTime))
+        && (!hasDeadline || isValidSceneTime(deadlineTime))
+        && (!hasTime || !hasDeadline || compareSceneTime(scheduledTime, deadlineTime) < 0)
         && (!allowRepeat || (Number.isInteger(cooldown) && cooldown > 0))
       : eventId > 0 && isValidSceneTime(scheduledTime)
 
@@ -261,6 +273,11 @@ function DefinitionDialog({ target, schedule, busy, errorMessage, onClose, onSav
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <Toggle checked={hasTime} label="设置首次可调度时间" onChange={setHasTime} />
                 {hasTime ? <div className="mt-4"><SceneTimeEditor value={scheduledTime} onChange={setScheduledTime} /></div> : <p className="mt-2 text-sm font-semibold text-slate-500">未设置时，事件在会话开始后立即进入候选。</p>}
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <Toggle checked={hasDeadline} label="设置截止时间" onChange={setHasDeadline} />
+                {hasDeadline ? <div className="mt-4"><SceneTimeEditor value={deadlineTime} onChange={setDeadlineTime} /></div> : <p className="mt-2 text-sm font-semibold text-slate-500">未设置时，事件不会因 Scene 时间自动过期。</p>}
+                {hasTime && hasDeadline && compareSceneTime(scheduledTime, deadlineTime) >= 0 ? <p className="mt-2 text-sm font-bold text-rose-600">截止时间必须晚于首次可调度时间。</p> : null}
               </div>
               <div className="grid gap-4 rounded-2xl border border-slate-200 p-4 sm:grid-cols-[1fr_220px]">
                 <div><Toggle checked={allowRepeat} label="允许重复发生" onChange={setAllowRepeat} /><p className="mt-2 text-sm font-semibold text-slate-500">重复状态与大纲节点独立，冷却按世界内 Scene 时间计算。</p></div>
@@ -326,7 +343,7 @@ function PoolsView({ schedule, busy, onEdit, onDelete, onMove }: {
             <div className="divide-y divide-slate-100">
               {!events.length ? <div className="px-6 py-10 text-center text-sm font-semibold text-slate-400">此池暂无事件</div> : events.map((event, index) => (
                 <article key={event.id} className="grid gap-4 px-6 py-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
-                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-500">{index + 1}</span><h4 className="text-lg font-black text-slate-900">{event.title}</h4><Tag tone={event.dispatchMode === 'forced' ? 'rose' : 'emerald'}>{event.dispatchMode === 'forced' ? '强制' : '软约束'}</Tag>{event.allowRepeat ? <Tag tone="amber">可重复 · {event.repeatCooldownMinutes} 分钟</Tag> : null}{!event.enabled ? <Tag tone="rose">已停用</Tag> : null}</div><p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-slate-600">{event.directive}</p><p className="mt-2 flex items-center gap-2 text-xs font-bold text-slate-400"><Clock3 size={14} />{event.scheduledTime ? `首次：${formatSceneTime(event.scheduledTime)}` : '无起始时间 · 立即候选'}</p></div>
+                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-500">{index + 1}</span><h4 className="text-lg font-black text-slate-900">{event.title}</h4><Tag tone={event.dispatchMode === 'forced' ? 'rose' : 'emerald'}>{event.dispatchMode === 'forced' ? '强制' : '软约束'}</Tag>{event.allowRepeat ? <Tag tone="amber">可重复 · {event.repeatCooldownMinutes} 分钟</Tag> : null}{!event.enabled ? <Tag tone="rose">已停用</Tag> : null}</div><p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-slate-600">{event.directive}</p><p className="mt-2 flex items-center gap-2 text-xs font-bold text-slate-400"><Clock3 size={14} />{event.scheduledTime ? `首次：${formatSceneTime(event.scheduledTime)}` : '无起始时间 · 立即候选'}{event.deadlineTime ? ` · 截止：${formatSceneTime(event.deadlineTime)}` : ''}</p></div>
                   <div className="flex flex-wrap gap-2"><button type="button" disabled={index === 0 || busy} onClick={() => onMove(pool, event, -1)} className={quietButton} aria-label="上移"><ArrowUp size={15} /></button><button type="button" disabled={index === events.length - 1 || busy} onClick={() => onMove(pool, event, 1)} className={quietButton} aria-label="下移"><ArrowDown size={15} /></button><button type="button" onClick={() => onEdit({ kind: 'event', poolId: pool.id, item: event })} className={quietButton}><Pencil size={15} />编辑</button><button type="button" disabled={busy} onClick={() => onDelete('event', event.id)} className={quietButton}><Trash2 size={15} /></button></div>
                 </article>
               ))}

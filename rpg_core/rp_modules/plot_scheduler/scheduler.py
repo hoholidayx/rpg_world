@@ -88,6 +88,10 @@ class PlotScheduleSelector:
                     if node.enabled
                     and node.id not in disabled
                     and node.id not in triggered_node_ids
+                    and not self._event_expired(
+                        event_by_id.get(node.event_id),
+                        scene_time,
+                    )
                 ),
                 None,
             )
@@ -204,6 +208,8 @@ class PlotScheduleSelector:
             for event in events:
                 if event.id in triggered_by_event:
                     continue
+                if self._event_expired(event, scene_time):
+                    continue
                 return event if self._pool_event_eligible(
                     snapshot,
                     event=event,
@@ -217,15 +223,15 @@ class PlotScheduleSelector:
             repeatable = [event for event in events if event.allow_repeat]
             if not repeatable:
                 return None
-            last_triggered = max(
-                (
-                    decision
-                    for event_id, decisions in triggered_by_event.items()
-                    if event_id in current_event_ids
-                    for decision in decisions
-                ),
-                key=lambda item: (item.turn_id, item.id),
+            triggered = tuple(
+                decision
+                for event_id, decisions in triggered_by_event.items()
+                if event_id in current_event_ids
+                for decision in decisions
             )
+            if not triggered:
+                return None
+            last_triggered = max(triggered, key=lambda item: (item.turn_id, item.id))
             last_index = next(
                 (
                     index
@@ -234,16 +240,20 @@ class PlotScheduleSelector:
                 ),
                 -1,
             )
-            target = repeatable[(last_index + 1) % len(repeatable)]
-            return target if self._pool_event_eligible(
-                snapshot,
-                event=target,
-                scene_time=scene_time,
-                current_turn_id=current_turn_id,
-                completed_turn_ids=completed_turn_ids,
-                triggered=tuple(triggered_by_event.get(target.id, ())),
-                excluded_event_ids=excluded_event_ids,
-            ) else None
+            for offset in range(1, len(repeatable) + 1):
+                target = repeatable[(last_index + offset) % len(repeatable)]
+                if self._event_expired(target, scene_time):
+                    continue
+                return target if self._pool_event_eligible(
+                    snapshot,
+                    event=target,
+                    scene_time=scene_time,
+                    current_turn_id=current_turn_id,
+                    completed_turn_ids=completed_turn_ids,
+                    triggered=tuple(triggered_by_event.get(target.id, ())),
+                    excluded_event_ids=excluded_event_ids,
+                ) else None
+            return None
 
         eligible = [
             event
@@ -276,6 +286,8 @@ class PlotScheduleSelector:
         triggered: tuple[data_models.SessionPlotScheduleDecision, ...],
         excluded_event_ids: frozenset[int],
     ) -> bool:
+        if self._event_expired(event, scene_time):
+            return False
         if event.id in excluded_event_ids:
             return False
         if not self._retry_ready(
@@ -294,6 +306,17 @@ class PlotScheduleSelector:
         return (
             scene_time.ordinal_minutes - latest.scene_time_ordinal
             >= event.repeat_cooldown_minutes
+        )
+
+    @staticmethod
+    def _event_expired(
+        event: data_models.StoryPlotEvent | None,
+        scene_time: SceneTime,
+    ) -> bool:
+        return (
+            event is not None
+            and event.deadline_time is not None
+            and scene_time >= event.deadline_time
         )
 
     @staticmethod

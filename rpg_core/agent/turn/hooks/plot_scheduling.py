@@ -211,6 +211,11 @@ class PlotSchedulingPreflightHook:
                 if candidate.scheduled_time is not None
                 else None
             ),
+            "deadlineTime": (
+                candidate.event.deadline_time.to_dict()
+                if candidate.event.deadline_time is not None
+                else None
+            ),
             "dispatchMode": candidate.dispatch_mode,
             "eventVersion": candidate.event.version,
         }
