@@ -36,6 +36,8 @@ from rpg_core.agent.turn.runner import AgentReply, run_chat_loop, run_chat_loop_
 from rpg_core.agent.turn.service import AgentTurnService
 from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshotResolver
+from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
+from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
 from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.session.derivation import SessionDerivationService
@@ -94,6 +96,7 @@ class RPGGameAgent:
             history_enabled=history_enabled,
             command_dispatcher=self._command_dispatcher,
             role_reader=role_service,
+            session_data=session_data,
             rp_module_service=rp_module_service,
         )
         self._context_service = AgentContextService(
@@ -152,6 +155,13 @@ class RPGGameAgent:
                 model_runtime=self._model_runtime,
                 status_preflight=status_preflight,
                 plot_scheduling_preflight=plot_scheduling_preflight,
+                transaction_data=session_data,
+                narrative_outcome_ledger=NarrativeOutcomeLedgerService(
+                    gateway.narrative_outcomes
+                ),
+                plot_schedule_ledger=PlotScheduleLedgerService(
+                    gateway.plot_scheduling
+                ),
             ),
             preparation=preparation,
             post_commit_hooks=PostCommitHooks(

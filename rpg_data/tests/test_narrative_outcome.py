@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from peewee import IntegrityError
 
 from rpg_data import models
+from rpg_data.errors import DataIntegrityError
 from rpg_data.services import get_data_service_gateway
 
 
@@ -53,7 +53,7 @@ def test_outcome_record_typed_round_trip_and_unique_turn(tmp_path) -> None:
     gateway = get_data_service_gateway(tmp_path / "narrative-records.sqlite3")
     service = gateway.narrative_outcomes
 
-    created = service.record(
+    created = service.append(models.NarrativeOutcomeCreate(
         session_id="s_forest001",
         turn_id=99,
         outcome_code="success_with_cost",
@@ -62,7 +62,7 @@ def test_outcome_record_typed_round_trip_and_unique_turn(tmp_path) -> None:
         sample_value=58,
         effective_weights=SESSION_WEIGHTS,
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_SESSION,
-    )
+    ))
 
     loaded = service.get_for_turn("s_forest001", 99)
     assert loaded == created
@@ -70,8 +70,8 @@ def test_outcome_record_typed_round_trip_and_unique_turn(tmp_path) -> None:
     assert loaded.effective_weights == SESSION_WEIGHTS
     assert service.list_for_turns("s_forest001", [98, 99, 100]) == [created]
 
-    with pytest.raises(IntegrityError):
-        service.record(
+    with pytest.raises(DataIntegrityError):
+        service.append(models.NarrativeOutcomeCreate(
             session_id="s_forest001",
             turn_id=99,
             outcome_code="success",
@@ -80,7 +80,7 @@ def test_outcome_record_typed_round_trip_and_unique_turn(tmp_path) -> None:
             sample_value=10,
             effective_weights=DEFAULT_WEIGHTS,
             effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
-        )
+        ))
 
     assert service.delete_from_turn("s_forest001", 99) == 1
     assert service.get_for_turn("s_forest001", 99) is None

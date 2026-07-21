@@ -645,7 +645,7 @@ Narrative Outcome 是当前剧情分支随机机制：
 - 结果固定为 `critical_success / success / success_with_cost / setback / critical_failure` 五档，系统默认比例 `5/25/40/25/5`。`reason` 是不可缩小的整体目标边界；`success_with_cost` 必须完整达成目标，代价不得抵消成功。重大失败不得自动死亡、硬停局或永久剥夺玩家角色主权。
 - 每 turn 最多一条裁定；重复调用复用 scratch 结果。有效权重在 turn 开始前形成模块快照，优先级 `config < story < session`；各层可以不覆盖 `weights`，但一旦提供就必须是总和严格等于 100 的完整五项原子组。
 - `StatusSubAgent` 负责可选预裁定：需要 outcome 的同批状态预写全部延后，结果以 `outcomeCode / label / narrativeGuidance / reason / actor?` 在主 Agent 首次调用前进入 `RP_MODULES` runtime section。漏判或预裁定失败时主 Agent 保留明确写出 `rp_story_outcome` 的 fixed contract 与补判工具；已预裁定时不注入该 fixed section，outcome 工具也从主 Agent schema 和可执行 registry 同时移除。工具自身的幂等只用于预裁定边界内的重复保护。
-- 裁定与消息、状态表在同一个短 `database.atomic()` 中提交。取消、provider 错误或 commit 失败不落库；truncate、clear、用户消息编辑和相关历史删除同步清理裁定，retry/edit 重新抽取。
+- 裁定与消息、Plot decision、状态表在同一个短 SQLite transaction 中提交；transaction port 与 Outcome/Plot ledger adapter 由 Agent composition root 显式注入。`NarrativeOutcomeLedgerService` 校验 code/sample/权重来源并映射唯一 turn 冲突，`NarrativeOutcomeDataService` 只持久化调用方准备的 typed row。取消、provider 错误或 commit 失败不落库；truncate、clear、用户消息编辑和相关历史删除同步清理裁定，retry/edit 重新抽取。
 - retry/edit/truncate 不回滚已经提交的状态表；状态分支回滚留作独立能力，不增加 `status_turn_journal` 或其它状态 journal。
 - 持久化表是 `rpg_session_narrative_outcomes`，内部保存 sample 和有效权重快照；LLM、Play API outcome 与 WebUI 卡片不得展示 sample、区间或百分比。
 - 配置统一走 `/rp-modules/catalog`、Story `/rp-modules/{module_name}` 和 Session `/rp-modules/{module_name}` 通用接口。PlayTurn 的 nullable `outcome` 用于刷新/分页恢复；流式卡按 turn 去重且不受 `showTools` 控制。
@@ -771,7 +771,7 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 - `rpg_summaries.json` / `summaries/` — 对话摘要文件
 - `memory_vectors.db*` — memory SQLite / WAL / SHM 索引文件
 
-会话层以 `SessionManager` 作为稳定公开门面：`session/history.py` 负责有序消息、turn 分配和主表/冷备持久化，`session/progress.py` 负责 summary/story-memory 的消息级处理进度，`session/grouping.py` 提供纯 turn 分组与候选选择，`session/models.py` 保存快照和共享运行态。持久化消息必须有正数 `turn_id` 和 `seq_in_turn`：主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一，冷备份表保持 append-only 但同样要求正数 turn metadata。非法 turn metadata 在写入或加载边界失败，不再为 summary、剧情记忆或 history pagination 做 legacy 降级分组。summary 和故事记忆续提进度按主消息表行标记持久化，进程重启后从 rpg_data 继续。历史删除、清空、编辑回滚和 turn truncate 只直接修改主历史，不清理摘要文件、不重置其它消息标记，也不自动重新归纳；主 Agent Context 下次构建时只按剩余行各自的 `summary_processed` 值重新投影。
+会话层以 `SessionManager` 作为稳定公开门面：`session/history.py` 负责有序消息、turn 分配、主表/冷备共同写入，以及历史修改对 Outcome/Plot ledger 的联动；`session/progress.py` 负责 summary/story-memory 候选分组、保留窗口和消息级处理进度；`session/grouping.py` 提供纯 turn 算法，`session/models.py` 保存快照和共享运行态。它们只依赖自身声明的窄 Data Port，由 Agent composition root 注入 `SessionDataService`，不再回查 Gateway。`MessageDataService` 仅保留 CRUD、turn window/分页、processed flag 聚合和调用方指定的批量标记，不决定 Context 投影、候选范围或编辑重置。持久化消息必须有正数 `turn_id` 和 `seq_in_turn`：主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一，冷备份表保持 append-only 但同样要求正数 turn metadata。非法 turn metadata 在写入或加载边界失败，不再为 summary、剧情记忆或 history pagination 做 legacy 降级分组。summary 和故事记忆续提进度按主消息表行标记持久化，进程重启后从 rpg_data 继续。历史删除、清空、编辑回滚和 turn truncate 只直接修改主历史，不清理摘要文件、不重置其它消息标记，也不自动重新归纳；主 Agent Context 下次构建时只按剩余行各自的 `summary_processed` 值重新投影。
 
 Agent runtime 会话消息、剧情记忆和 Dream Persistent Memory 账本均由 `rpg_data` 管理；只有摘要和在线 memory 索引文件集中在
 `CatalogService.get_session_runtime_dir(session_id)` 返回的 `{workspace_root}/stories/{story_id}/{session_id}/` 下。旧 `persistent_memory.json` 不再读取或创建，升级时也不会自动删除已有遗留文件。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Protocol
 
 from loguru import logger
 
@@ -17,8 +18,9 @@ from rpg_core.session.grouping import (
     split_into_turn_batches as build_turn_batches,
 )
 from rpg_core.session.history import SessionHistory
+from rpg_core.session.history import SessionHistoryDataPort
 from rpg_core.session.models import ContextHistorySnapshot, SessionRuntimeState
-from rpg_core.session.progress import SessionProgress
+from rpg_core.session.progress import SessionProgress, SessionProgressDataPort
 from rpg_core.session.turn_metadata import (
     InvalidTurnMetadataError,
     validate_turn_metadata as validate_message_turn_metadata,
@@ -32,6 +34,14 @@ _DEFAULT_SESSION_ID = "default"
 DEFAULT_SESSION_ID = _DEFAULT_SESSION_ID
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 _SESSION_ID_MAX_LENGTH = 64
+
+
+class SessionManagerDataPort(
+    SessionHistoryDataPort,
+    SessionProgressDataPort,
+    Protocol,
+):
+    """Combined narrow persistence contract used by the Session façade."""
 
 
 class SessionManager:
@@ -60,23 +70,25 @@ class SessionManager:
         session_id: str = None,  # type: ignore[assignment]
         workspace: str = "",
         history_enabled: bool = True,
+        data: SessionManagerDataPort | None = None,
     ) -> None:
         self._session_id = session_id if session_id is not None else _DEFAULT_SESSION_ID
         self._workspace = workspace
         self._history_enabled = history_enabled
+        self._data = data
         state = SessionRuntimeState()
         self._progress = SessionProgress(
             state,
             session_id=lambda: self._session_id,
             history_enabled=lambda: self._history_enabled,
-            require_gateway=lambda: self._require_data_session(),
+            require_data=self._require_data,
         )
         self._history_service = SessionHistory(
             state,
             self._progress,
             session_id=lambda: self._session_id,
             history_enabled=lambda: self._history_enabled,
-            require_gateway=lambda: self._require_data_session(),
+            require_data=self._require_data,
         )
 
     # ── Public API — history ───────────────────────────────────────────
@@ -201,7 +213,7 @@ class SessionManager:
         if not self._history_enabled:
             return {}
 
-        session = self._require_data_session().catalog.get_session(self._session_id)
+        session = self._require_data().get_session(self._session_id)
         if session is None:
             return {}
         return {
@@ -275,12 +287,13 @@ class SessionManager:
     ) -> None:
         self._history_service.replace(history, persist=persist)
 
-    def _require_data_session(self):
-        from rpg_data.services import get_data_service_gateway
-
-        gateway = get_data_service_gateway()
-        if gateway.catalog.get_session(self._session_id) is None:
+    def _require_data(self) -> SessionManagerDataPort:
+        if self._data is None:
+            raise RuntimeError(
+                "persistent SessionManager requires an injected data service"
+            )
+        if self._data.get_session(self._session_id) is None:
             raise FileNotFoundError(
                 f"Session not found in rpg_data: {self._session_id}"
             )
-        return gateway
+        return self._data

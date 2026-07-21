@@ -39,27 +39,42 @@ def test_validate_session_id():
         SessionManager.validate_session_id("bad-id")
 
 
-def test_load_requires_rpg_data_session(rpg_data_gateway):  # noqa: ARG001
-    mgr = SessionManager(session_id="missing_session", history_enabled=True)
+def test_load_requires_rpg_data_session(rpg_data_gateway):
+    mgr = SessionManager(
+        session_id="missing_session",
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
 
     with pytest.raises(FileNotFoundError):
         mgr.load()
 
 
-def test_load_rejects_invalid_persisted_turn_metadata(monkeypatch):
-    class FakeMessages:
+def test_persistent_session_requires_injected_data_service() -> None:
+    mgr = SessionManager(session_id="missing_session", history_enabled=True)
+
+    with pytest.raises(RuntimeError, match="requires an injected data service"):
+        mgr.load()
+
+
+def test_load_rejects_invalid_persisted_turn_metadata():
+    class FakeData:
         @staticmethod
-        def list(_session_id: str):
+        def get_session(_session_id: str):
+            return object()
+
+        @staticmethod
+        def list_messages(_session_id: str):
             return [
                 _HistoryRow(role="user", content="u1", turn_id=1, seq_in_turn=1, uid=1),
                 _HistoryRow(role="assistant", content="bad", turn_id=1, seq_in_turn=0, uid=2),
             ]
 
-    class FakeGateway:
-        messages = FakeMessages()
-
-    mgr = SessionManager(session_id="s_bad_history", history_enabled=True)
-    monkeypatch.setattr(mgr, "_require_data_session", lambda: FakeGateway())
+    mgr = SessionManager(
+        session_id="s_bad_history",
+        history_enabled=True,
+        data=FakeData(),  # type: ignore[arg-type]
+    )
 
     with pytest.raises(InvalidTurnMetadataError, match=r"history\[1\]"):
         mgr.load()
@@ -73,7 +88,12 @@ def test_append_persists_messages_backup_and_unique_uids(
     workspace,
 ):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
 
     turn_id = mgr.begin_turn()
@@ -92,7 +112,12 @@ def test_append_persists_messages_backup_and_unique_uids(
     assert [row.seq_in_turn for row in main_rows] == [1, 2]
     assert mgr.count_new_turns_since_story() == 1
 
-    reloaded = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    reloaded = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     reloaded.load()
     assert [message.uid for message in reloaded.history] == [row.id for row in main_rows]
     assert reloaded.begin_turn() == turn_id + 1
@@ -104,7 +129,12 @@ def test_context_history_filters_processed_rows_without_changing_full_history(
     workspace,
 ):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
 
     turn_id = mgr.begin_turn()
@@ -125,9 +155,18 @@ def test_context_history_filters_processed_rows_without_changing_full_history(
     assert projected.filtered_message_count == 1
 
 
-def test_story_memory_progress_uses_message_flags(make_data_session, workspace):
+def test_story_memory_progress_uses_message_flags(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
 
     t1 = mgr.begin_turn()
@@ -180,9 +219,18 @@ def test_message_from_dict_ignores_legacy_hid_key():
     assert msg.to_dict() == {"role": "user", "content": "hello"}
 
 
-def test_story_memory_progress_survives_restart(make_data_session, workspace):
+def test_story_memory_progress_survives_restart(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
 
     t1 = mgr.begin_turn()
@@ -195,7 +243,12 @@ def test_story_memory_progress_survives_restart(make_data_session, workspace):
     mgr.end_turn(t2)
     mgr.mark_story_messages_processed(mgr.turn_messages(t1))
 
-    reloaded = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    reloaded = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     reloaded.load()
 
     assert [m.content for m in reloaded.story_messages_since_last_extraction()] == ["u2", "a2"]
@@ -205,9 +258,18 @@ def test_story_memory_progress_survives_restart(make_data_session, workspace):
     assert reloaded.story_messages_since_last_extraction() == []
 
 
-def test_rebuild_turn_state_after_history_compaction(make_data_session, workspace):
+def test_rebuild_turn_state_after_history_compaction(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
 
     t1 = mgr.begin_turn()
@@ -237,7 +299,12 @@ def test_clear_and_truncate_update_main_history_only(
     workspace,
 ):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
     t1 = mgr.begin_turn()
     mgr.append(Role.USER, "u1", turn_id=t1)
@@ -268,7 +335,12 @@ def test_history_mutations_reload_and_reset_processing_flags(
     workspace,
 ):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
 
     t1 = mgr.begin_turn()
@@ -305,13 +377,86 @@ def test_history_mutations_reload_and_reset_processing_flags(
     assert mgr.story_messages_since_last_extraction() == []
 
 
+def test_summary_candidates_keep_window_uses_full_persisted_history(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
+    make_data_session("s1")
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
+    mgr.load()
+    for turn_id in range(1, 5):
+        mgr.append(Role.USER, f"u{turn_id}", turn_id=turn_id, seq_in_turn=1)
+        mgr.append(
+            Role.ASSISTANT,
+            f"a{turn_id}",
+            turn_id=turn_id,
+            seq_in_turn=2,
+        )
+
+    mgr.mark_summary_messages_processed(mgr.history, batch_id=1)
+    edited_old = mgr.update_message_content(mgr.history[0].uid, "u1 edited")
+
+    assert [
+        [message.content for message in group]
+        for group in mgr.summary_turn_groups_for_compression(2)
+    ] == [["u1 edited"]]
+
+    mgr.mark_summary_messages_processed([edited_old], batch_id=2)
+    recent_user = next(message for message in mgr.history if message.content == "u4")
+    mgr.update_message_content(recent_user.uid, "u4 edited")
+
+    assert mgr.summary_turn_groups_for_compression(2) == []
+
+
+def test_replace_history_preserves_processing_flags_by_message_identity(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
+    make_data_session("s1")
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
+    mgr.load()
+    turn_id = mgr.begin_turn()
+    mgr.append(Role.USER, "u1", turn_id=turn_id)
+    mgr.append(Role.ASSISTANT, "a1", turn_id=turn_id)
+    mgr.end_turn(turn_id)
+    first, second = mgr.history
+    mgr.mark_summary_messages_processed([first], batch_id=3)
+    mgr.mark_story_messages_processed([second])
+
+    mgr.replace_history(mgr.history, persist=True)
+
+    first_row, second_row = rpg_data_gateway.messages.list("s1")
+    assert first_row.summary_processed
+    assert first_row.summary_batch_id == 3
+    assert not first_row.story_memory_processed
+    assert not second_row.summary_processed
+    assert second_row.story_memory_processed
+
+
 def test_assistant_edit_removes_plot_schedule_decision(
     make_data_session,
     rpg_data_gateway,
     workspace,
 ):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
     turn_id = mgr.begin_turn()
     mgr.append(Role.USER, "u1", turn_id=turn_id)
@@ -340,14 +485,28 @@ def test_assistant_edit_removes_plot_schedule_decision(
     assert rpg_data_gateway.plot_scheduling.list_session_decisions("s1") == []
 
 
-def test_reload_history_keeps_session_identity(make_data_session, workspace):
+def test_reload_history_keeps_session_identity(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
     make_data_session("s1")
     make_data_session("s2")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
     mgr.append(Role.USER, "hello")
 
-    other = SessionManager(session_id="s2", workspace=workspace, history_enabled=True)
+    other = SessionManager(
+        session_id="s2",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     other.load()
     other.append(Role.USER, "world")
 
@@ -357,9 +516,18 @@ def test_reload_history_keeps_session_identity(make_data_session, workspace):
     assert "story_memory_last_turn_id" not in mgr.meta
 
 
-def test_history_snapshot_is_read_only(make_data_session, workspace):
+def test_history_snapshot_is_read_only(
+    make_data_session,
+    rpg_data_gateway,
+    workspace,
+):
     make_data_session("s1")
-    mgr = SessionManager(session_id="s1", workspace=workspace, history_enabled=True)
+    mgr = SessionManager(
+        session_id="s1",
+        workspace=workspace,
+        history_enabled=True,
+        data=rpg_data_gateway.sessions,
+    )
     mgr.load()
     mgr.append(Role.USER, "hello")
 

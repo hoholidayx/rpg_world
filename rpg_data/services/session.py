@@ -18,6 +18,7 @@ from rpg_data.model.status import (
     StoryStatusTable,
 )
 from rpg_data.model.rp_modules import SessionRPModuleOverride
+from rpg_data.services._message_store import MessageInput
 from rpg_data.repositories._utils import (
     serialize_rp_module_config,
     to_story_opening,
@@ -39,8 +40,8 @@ from rpg_data.services.backup import BackupService
 from rpg_data.services.catalog import CatalogService
 from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.media import MediaDataService
-from rpg_data.services.message import MessageService
-from rpg_data.services.narrative_outcome import NarrativeOutcomeService
+from rpg_data.services.message import MessageDataService
+from rpg_data.services.narrative_outcome import NarrativeOutcomeDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session_composer import SessionComposerDataService
@@ -66,9 +67,9 @@ class SessionDataService:
         self._sessions = SessionRepository(database)
         self._derivations = SessionDerivationRepository(database)
         self._catalog = CatalogService(database)
-        self._messages = MessageService(database)
+        self._messages = MessageDataService(database)
         self._backup = BackupService(database)
-        self._outcomes = NarrativeOutcomeService(database)
+        self._outcomes = NarrativeOutcomeDataService(database)
         self._plot = PlotSchedulingDataService(database)
         self._rp_modules = RPModuleDataService(database)
         self._composer = SessionComposerDataService(database)
@@ -258,6 +259,46 @@ class SessionDataService:
     def list_messages(self, session_id: str) -> list[models.SessionMessage]:
         return self._messages.list(str(session_id))
 
+    def list_messages_filtered(
+        self,
+        session_id: str,
+        *,
+        excluded_roles: Collection[str] = (),
+        summary_processed: bool | None = None,
+        story_memory_processed: bool | None = None,
+    ) -> list[models.SessionMessage]:
+        return self._messages.list_filtered(
+            str(session_id),
+            excluded_roles=excluded_roles,
+            summary_processed=summary_processed,
+            story_memory_processed=story_memory_processed,
+        )
+
+    def count_message_turns_filtered(
+        self,
+        session_id: str,
+        *,
+        excluded_roles: Collection[str] = (),
+        summary_processed: bool | None = None,
+        story_memory_processed: bool | None = None,
+    ) -> int:
+        return self._messages.count_distinct_turns(
+            str(session_id),
+            excluded_roles=excluded_roles,
+            summary_processed=summary_processed,
+            story_memory_processed=story_memory_processed,
+        )
+
+    def latest_message_turn_id(self, session_id: str) -> int:
+        return self._messages.latest_turn_id(str(session_id))
+
+    def get_message_for_session(
+        self,
+        session_id: str,
+        message_id: int,
+    ) -> models.SessionMessage | None:
+        return self._messages.get_for_session(str(session_id), int(message_id))
+
     def append_message(
         self,
         session_id: str,
@@ -299,6 +340,114 @@ class SessionDataService:
             seq_in_turn=seq_in_turn,
             metadata_json=metadata_json,
         )
+
+    def update_message_content(
+        self,
+        message_id: int,
+        content: str,
+    ) -> models.SessionMessage | None:
+        return self._messages.update(int(message_id), content=str(content))
+
+    def delete_message_for_session(self, session_id: str, message_id: int) -> bool:
+        return self._messages.delete_for_session(str(session_id), int(message_id))
+
+    def replace_messages(
+        self,
+        session_id: str,
+        messages: Iterable[MessageInput],
+    ) -> list[models.SessionMessage]:
+        return self._messages.replace(str(session_id), messages)
+
+    def truncate_messages_before_id(self, session_id: str, boundary_id: int) -> int:
+        return self._messages.truncate_before_id(
+            str(session_id),
+            int(boundary_id),
+        )
+
+    def truncate_messages_from_turn(self, session_id: str, turn_id: int) -> int:
+        return self._messages.truncate_from_turn(str(session_id), int(turn_id))
+
+    def mark_summary_messages_processed(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+        *,
+        batch_id: int | None,
+    ) -> int:
+        return self._messages.mark_summary_processed(
+            str(session_id),
+            message_ids,
+            batch_id=batch_id,
+        )
+
+    def mark_summary_message_batches_processed(
+        self,
+        session_id: str,
+        batches: Iterable[tuple[Iterable[int], int]],
+    ) -> int:
+        return self._messages.mark_summary_batches_processed(str(session_id), batches)
+
+    def mark_story_memory_messages_processed(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+    ) -> int:
+        return self._messages.mark_story_memory_processed(
+            str(session_id),
+            message_ids,
+        )
+
+    def reset_message_processing(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+    ) -> int:
+        return self._messages.reset_processing_for_messages(
+            str(session_id),
+            message_ids,
+        )
+
+    def delete_narrative_outcomes_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._outcomes.delete_for_turn(str(session_id), int(turn_id))
+
+    def delete_narrative_outcomes_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._outcomes.delete_from_turn(str(session_id), int(turn_id))
+
+    def retain_narrative_outcome_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        return self._outcomes.retain_turns(str(session_id), turn_ids)
+
+    def delete_plot_decisions_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._plot.delete_decisions_for_turn(str(session_id), int(turn_id))
+
+    def delete_plot_decisions_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int:
+        return self._plot.delete_decisions_from_turn(str(session_id), int(turn_id))
+
+    def retain_plot_decision_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int:
+        return self._plot.retain_decision_turns(str(session_id), turn_ids)
 
     def update_player_character(
         self,

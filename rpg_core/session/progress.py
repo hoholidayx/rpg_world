@@ -2,20 +2,59 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Collection, Iterable
+from typing import Protocol
 
 from loguru import logger
 
 from rpg_core.context.models import Message
 from rpg_core.session.grouping import iter_turn_groups, uses_fallback_grouping
 from rpg_core.session.models import SessionRuntimeState
-
-if TYPE_CHECKING:
-    from rpg_data.services import DataServiceGateway
+from rpg_core.session.turn_metadata import validate_turn_metadata
+from rpg_data.model.session import MESSAGE_ROLE_SYSTEM, SessionMessage
 
 
 _TAG = "[SessionManager]"
+
+
+class SessionProgressDataPort(Protocol):
+    def list_messages_filtered(
+        self,
+        session_id: str,
+        *,
+        excluded_roles: Collection[str] = (),
+        summary_processed: bool | None = None,
+        story_memory_processed: bool | None = None,
+    ) -> list[SessionMessage]: ...
+
+    def count_message_turns_filtered(
+        self,
+        session_id: str,
+        *,
+        excluded_roles: Collection[str] = (),
+        summary_processed: bool | None = None,
+        story_memory_processed: bool | None = None,
+    ) -> int: ...
+
+    def mark_summary_messages_processed(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+        *,
+        batch_id: int | None,
+    ) -> int: ...
+
+    def mark_summary_message_batches_processed(
+        self,
+        session_id: str,
+        batches: Iterable[tuple[Iterable[int], int]],
+    ) -> int: ...
+
+    def mark_story_memory_messages_processed(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+    ) -> int: ...
 
 
 class SessionProgress:
@@ -27,12 +66,12 @@ class SessionProgress:
         *,
         session_id: Callable[[], str],
         history_enabled: Callable[[], bool],
-        require_gateway: Callable[[], DataServiceGateway],
+        require_data: Callable[[], SessionProgressDataPort],
     ) -> None:
         self._state = state
         self._session_id = session_id
         self._history_enabled = history_enabled
-        self._require_gateway = require_gateway
+        self._require_data = require_data
 
     def summary_turn_groups_for_compression(
         self,
@@ -40,13 +79,27 @@ class SessionProgress:
     ) -> list[list[Message]]:
         """Return unprocessed message groups eligible for summary compression."""
         if self._history_enabled():
-            groups = self._require_gateway().messages.list_summary_candidate_turn_groups(
+            rows = self._require_data().list_messages_filtered(
                 self._session_id(),
-                keep_recent_turns=keep_recent_turns,
+                excluded_roles=(MESSAGE_ROLE_SYSTEM,),
             )
+            if not any(not row.summary_processed for row in rows):
+                return []
+            groups = _persisted_turn_groups(
+                rows,
+                session_id=self._session_id(),
+                purpose="summary",
+            )
+            keep = max(0, int(keep_recent_turns))
+            eligible = groups if keep <= 0 else groups[:-keep]
             return [
-                [Message.from_dict(row.to_message_dict()) for row in group]
-                for group in groups
+                [
+                    Message.from_dict(row.to_message_dict())
+                    for row in group
+                    if not row.summary_processed
+                ]
+                for group in eligible
+                if any(not row.summary_processed for row in group)
             ]
 
         conversation = [
@@ -83,8 +136,14 @@ class SessionProgress:
     def summary_unprocessed_turn_groups(self) -> list[list[Message]]:
         """Return all unprocessed summary groups without mode/keep policy."""
         if self._history_enabled():
-            groups = self._require_gateway().messages.list_summary_unprocessed_turn_groups(
-                self._session_id()
+            groups = _persisted_turn_groups(
+                self._require_data().list_messages_filtered(
+                    self._session_id(),
+                    excluded_roles=(MESSAGE_ROLE_SYSTEM,),
+                    summary_processed=False,
+                ),
+                session_id=self._session_id(),
+                purpose="summary",
             )
             return [
                 [Message.from_dict(row.to_message_dict()) for row in group]
@@ -111,7 +170,7 @@ class SessionProgress:
         if not messages:
             return
         if self._history_enabled():
-            self._require_gateway().messages.mark_summary_processed(
+            self._require_data().mark_summary_messages_processed(
                 self._session_id(),
                 self._message_ids(messages),
                 batch_id=batch_id,
@@ -129,7 +188,7 @@ class SessionProgress:
         if not batches:
             return
         if self._history_enabled():
-            self._require_gateway().messages.mark_summary_batches_processed(
+            self._require_data().mark_summary_message_batches_processed(
                 self._session_id(),
                 [
                     (self._message_ids(messages), batch_id)
@@ -145,8 +204,14 @@ class SessionProgress:
     def story_turn_groups_since_last_extraction(self) -> list[list[Message]]:
         """Return logical turn groups not yet processed for story memory."""
         if self._history_enabled():
-            groups = self._require_gateway().messages.list_story_memory_unprocessed_turn_groups(
-                self._session_id()
+            groups = _persisted_turn_groups(
+                self._require_data().list_messages_filtered(
+                    self._session_id(),
+                    excluded_roles=(MESSAGE_ROLE_SYSTEM,),
+                    story_memory_processed=False,
+                ),
+                session_id=self._session_id(),
+                purpose="story_memory",
             )
             return [
                 [Message.from_dict(row.to_message_dict()) for row in group]
@@ -175,7 +240,7 @@ class SessionProgress:
         if not messages:
             return
         if self._history_enabled():
-            self._require_gateway().messages.mark_story_memory_processed(
+            self._require_data().mark_story_memory_messages_processed(
                 self._session_id(),
                 self._message_ids(messages),
             )
@@ -187,8 +252,10 @@ class SessionProgress:
     def count_new_turns_since_story(self) -> int:
         """Count conversation turns not yet processed for story memory."""
         if self._history_enabled():
-            return self._require_gateway().messages.count_story_memory_unprocessed_turns(
-                self._session_id()
+            return self._require_data().count_message_turns_filtered(
+                self._session_id(),
+                excluded_roles=(MESSAGE_ROLE_SYSTEM,),
+                story_memory_processed=False,
             )
         return len(self.story_turn_groups_since_last_extraction())
 
@@ -240,3 +307,32 @@ class SessionProgress:
     @staticmethod
     def _in_memory_message_key(message: Message) -> int:
         return id(message)
+
+
+def _persisted_turn_groups(
+    rows: list[SessionMessage],
+    *,
+    session_id: str,
+    purpose: str,
+) -> list[list[SessionMessage]]:
+    if not rows:
+        return []
+    validate_turn_metadata(rows, label=f"{purpose}: session_id={session_id}")
+    groups: list[list[SessionMessage]] = []
+    current_turn_id = rows[0].turn_id
+    current: list[SessionMessage] = []
+    for row in rows:
+        if row.turn_id != current_turn_id:
+            groups.append(current)
+            current = []
+            current_turn_id = row.turn_id
+        current.append(row)
+    if current:
+        groups.append(current)
+    return groups
+
+
+__all__ = [
+    "SessionProgress",
+    "SessionProgressDataPort",
+]

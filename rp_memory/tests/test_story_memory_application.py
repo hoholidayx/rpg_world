@@ -8,7 +8,7 @@ from peewee import SqliteDatabase
 from commons.errors import InvalidTurnMetadataError
 from rpg_data import db, models
 from rpg_data.migrations.runner import run_migrations
-from rpg_data.services.message import MessageService
+from rpg_data.services.message import MessageDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rp_memory.story_memory_service import StoryMemoryApplicationService
 
@@ -193,7 +193,7 @@ def test_story_memory_service_lists_filtered_pages_and_session_stats(
 def test_story_memory_batch_and_progress_commit_atomically(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
-        messages = MessageService(database)
+        messages = MessageDataService(database)
         story_memory = _story_memory(database)
         session_id = _create_test_session(database, "s_story_atomic")
         rows = [
@@ -258,7 +258,7 @@ def test_story_memory_batch_and_progress_commit_atomically(tmp_path: Path) -> No
 def test_story_memory_evidence_preserves_large_backlog(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
-        messages = MessageService(database)
+        messages = MessageDataService(database)
         story_memory = _story_memory(database)
         session_id = _create_test_session(database, "s_story_large_backlog")
         rows = []
@@ -308,7 +308,7 @@ def test_story_memory_exact_upsert_replaces_evidence_instead_of_union(
 ) -> None:
     database = _migrated_database(tmp_path)
     try:
-        messages = MessageService(database)
+        messages = MessageDataService(database)
         story_memory = _story_memory(database)
         session_id = _create_test_session(database, "s_story_evidence_replace")
         first_source = messages.append(
@@ -357,7 +357,7 @@ def test_story_memory_fact_evidence_and_progress_roll_back_together(
 ) -> None:
     database = _migrated_database(tmp_path)
     try:
-        messages = MessageService(database)
+        messages = MessageDataService(database)
         story_memory = _story_memory(database)
         session_id = _create_test_session(database, "s_story_atomic_rollback")
         batch_source = messages.append(

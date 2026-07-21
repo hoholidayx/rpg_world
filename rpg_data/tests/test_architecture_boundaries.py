@@ -14,6 +14,11 @@ from rpg_data.model.composer import (
 )
 from rpg_data.model.memory import DreamProposal, PersistentMemoryBundle
 from rpg_data.model.media import MediaJob, MediaLibraryAssetBundle
+from rpg_data.model.narrative_outcome import (
+    NarrativeOutcomeCreate,
+    NarrativeOutcomeRecord,
+    NarrativeOutcomeWeights,
+)
 from rpg_data.model.rp_modules import (
     RPModuleCatalogEntry,
     SessionRPModuleOverride,
@@ -29,6 +34,8 @@ from rpg_data.model.status import (
 from rpg_data.model.tts import TTSJob, TTSMessageSource
 from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.media import MediaDataService
+from rpg_data.services.message import MessageDataService
+from rpg_data.services.narrative_outcome import NarrativeOutcomeDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session_composer import SessionComposerDataService
@@ -76,7 +83,11 @@ RECENT_APPLICATION_SERVICE_FILES = (
     "rpg_core/session/reset.py",
     "rpg_core/session/role.py",
     "rpg_core/session/status.py",
+    "rpg_core/session/history.py",
+    "rpg_core/session/manager.py",
+    "rpg_core/session/progress.py",
     "rpg_core/rp_modules/application.py",
+    "rpg_core/rp_modules/narrative_outcome/ledger.py",
     "rpg_core/rp_modules/plot_scheduler/management.py",
     "rpg_core/rp_modules/plot_scheduler/ledger.py",
     "rpg_core/rp_modules/plot_scheduler/snapshot.py",
@@ -88,6 +99,7 @@ RECENT_APPLICATION_SERVICE_FILES = (
     "rpg_core/status/context_service.py",
     "rpg_core/status/administration.py",
     "rpg_core/status/manager.py",
+    "rpg_core/agent/turn/transaction/commit_plan.py",
     "rpg_media/service.py",
     "rpg_tts/service.py",
 )
@@ -112,10 +124,19 @@ STATUS_APPLICATION_SERVICE_FILES = (
     "rpg_core/status/manager.py",
 )
 
-# Gateway lookup is valid at process/composition boundaries. These legacy
-# consumers remain explicit until their owning P3/P5/P6 work is scheduled;
-# keeping them in a fixed allowlist prevents the service-locator surface from
-# expanding during unrelated changes.
+MESSAGE_AND_LEDGER_BUSINESS_FILES = (
+    "rpg_core/session/history.py",
+    "rpg_core/session/manager.py",
+    "rpg_core/session/progress.py",
+    "rpg_core/agent/turn/transaction/commit_plan.py",
+    "rpg_core/rp_modules/narrative_outcome/ledger.py",
+    "rpg_core/rp_modules/plot_scheduler/ledger.py",
+    "rpg_core/rp_modules/plot_scheduler/management.py",
+)
+
+# Gateway lookup is valid at process/composition boundaries. Remaining legacy
+# consumers stay explicit in a fixed allowlist so the service-locator surface
+# cannot expand during unrelated changes.
 GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "agent_service/main.py",
     "dream_service/repository.py",
@@ -133,7 +154,6 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "rpg_core/context/factory.py",
     "rpg_core/context/fixed_layer/contributors/story_prompt.py",
     "rpg_core/lorebook.py",
-    "rpg_core/session/manager.py",
     "tts_service/main.py",
 })
 
@@ -144,9 +164,6 @@ WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
     "media_service/main.py",
     "play_api/backends/data_manager.py",
     "rpg_core/agent/runtime/main_llm.py",
-    "rpg_core/agent/turn/transaction/commit_plan.py",
-    "rpg_core/session/history.py",
-    "rpg_core/session/progress.py",
     "tts_service/main.py",
 })
 
@@ -196,6 +213,23 @@ def test_status_application_services_use_narrow_data_ports() -> None:
         relative_path
         for relative_path in STATUS_APPLICATION_SERVICE_FILES
         if "rpg_data.services.status" in _imports(ROOT / relative_path)
+    ]
+
+    assert violations == []
+
+
+def test_message_history_and_ledgers_use_narrow_data_ports() -> None:
+    forbidden = {
+        "rpg_data.services.gateway",
+        "rpg_data.services.message",
+        "rpg_data.services.narrative_outcome",
+        "rpg_data.services.plot_scheduling",
+        "rpg_data.services.session",
+    }
+    violations = [
+        relative_path
+        for relative_path in MESSAGE_AND_LEDGER_BUSINESS_FILES
+        if _imports(ROOT / relative_path) & forbidden
     ]
 
     assert violations == []
@@ -262,6 +296,8 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         TTSDataService,
         SessionComposerDataService,
         RPModuleDataService,
+        MessageDataService,
+        NarrativeOutcomeDataService,
     )
 
     assert all(service_type.__name__.endswith("DataService") for service_type in service_types)
@@ -288,6 +324,9 @@ def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.StoryRPModule is StoryRPModule
     assert models.SessionRPModuleOverride is SessionRPModuleOverride
     assert models.SessionRPModuleSelectionRows is SessionRPModuleSelectionRows
+    assert models.NarrativeOutcomeCreate is NarrativeOutcomeCreate
+    assert models.NarrativeOutcomeRecord is NarrativeOutcomeRecord
+    assert models.NarrativeOutcomeWeights is NarrativeOutcomeWeights
 
 
 def test_composer_application_service_uses_narrow_data_port() -> None:
@@ -364,6 +403,32 @@ def test_status_data_service_does_not_expose_business_policy_entrypoints() -> No
     }
 
     assert forbidden.isdisjoint(vars(StatusDataService))
+
+
+def test_message_data_service_does_not_expose_history_or_candidate_policy() -> None:
+    forbidden = {
+        "count_story_memory_unprocessed_turns",
+        "count_summary_candidate_turns",
+        "list_for_agent_context",
+        "list_story_memory_unprocessed_turn_groups",
+        "list_summary_candidate_turn_groups",
+        "list_summary_unprocessed_turn_groups",
+    }
+
+    assert forbidden.isdisjoint(vars(MessageDataService))
+    assert {"count_distinct_turns", "list_filtered"}.issubset(
+        vars(MessageDataService)
+    )
+
+
+def test_narrative_outcome_data_service_does_not_expose_rp_policy() -> None:
+    assert "record" not in vars(NarrativeOutcomeDataService)
+    source = (ROOT / "rpg_data/services/narrative_outcome.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "NarrativeOutcomeSampler" not in source
+    assert "NARRATIVE_OUTCOME_DEFINITION_BY_CODE" not in source
 
 
 def _production_python_files():

@@ -15,6 +15,10 @@ from rpg_data.model.composer import (
     StoryQuickReply,
     WorkspaceTurnMode,
 )
+from rpg_data.model.narrative_outcome import (
+    NarrativeOutcomeRecord,
+    NarrativeOutcomeWeights,
+)
 from rpg_data.model.rp_modules import (
     RPModuleCatalogEntry,
     SessionRPModuleOverride,
@@ -404,11 +408,11 @@ def to_session_media_background(
 
 def to_narrative_outcome(
     row: records.SessionNarrativeOutcomeRecord,
-) -> models.NarrativeOutcomeRecord:
+) -> NarrativeOutcomeRecord:
     weights = _parse_narrative_outcome_weights(row.effective_weights_json)
     if weights is None:
         raise ValueError("narrative outcome record is missing effective weights")
-    return models.NarrativeOutcomeRecord(
+    return NarrativeOutcomeRecord(
         id=int(row.id),
         session_id=str(row.session_id),
         turn_id=int(row.turn_id),
@@ -468,7 +472,7 @@ def to_session_rp_module_override(
 
 
 def serialize_narrative_outcome_weights(
-    weights: models.NarrativeOutcomeWeights | None,
+    weights: NarrativeOutcomeWeights | None,
 ) -> str | None:
     if weights is None:
         return None
@@ -491,7 +495,7 @@ def parse_rp_module_config(raw: object) -> JsonObject:
 
 def _parse_narrative_outcome_weights(
     raw: object,
-) -> models.NarrativeOutcomeWeights | None:
+) -> NarrativeOutcomeWeights | None:
     if raw is None or str(raw).strip() == "":
         return None
     try:
@@ -500,7 +504,7 @@ def _parse_narrative_outcome_weights(
         raise ValueError("invalid narrative outcome weights JSON") from exc
     if not isinstance(payload, dict):
         raise ValueError("narrative outcome weights JSON must be an object")
-    return models.NarrativeOutcomeWeights.from_mapping(payload)
+    return NarrativeOutcomeWeights.from_mapping(payload)
 
 
 def to_memory_evidence(

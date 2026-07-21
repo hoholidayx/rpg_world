@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from typing import TypeVar
+from typing import ContextManager, Protocol, TypeVar
 
 from commons.scene_time import SceneTime
 from rpg_core.rp_modules.plot_scheduler.commands import (
@@ -20,10 +20,7 @@ from rpg_core.rp_modules.plot_scheduler.commands import (
     UpdatePlotPoolCommand,
 )
 from rpg_data import models as data_models
-from rpg_data.services.plot_scheduling import (
-    PlotScheduleDataIntegrityError,
-    PlotSchedulingDataService,
-)
+from rpg_data.errors import DataIntegrityError
 
 _ValueT = TypeVar("_ValueT")
 
@@ -36,10 +33,193 @@ class PlotScheduleConflictError(RuntimeError):
     """Persisted Plot data changed or rejected an otherwise valid command."""
 
 
+class PlotScheduleManagementDataPort(Protocol):
+    def transaction(self) -> ContextManager[None]: ...
+
+    def get_story_schedule(
+        self,
+        workspace_id: str,
+        story_id: int,
+    ) -> data_models.StoryPlotSchedule | None: ...
+
+    def get_pool(
+        self,
+        story_id: int,
+        pool_id: int,
+    ) -> data_models.StoryPlotEventPool | None: ...
+
+    def list_events(
+        self,
+        story_id: int,
+        *,
+        pool_id: int | None = None,
+    ) -> list[data_models.StoryPlotEvent]: ...
+
+    def get_event(
+        self,
+        story_id: int,
+        event_id: int,
+    ) -> data_models.StoryPlotEvent | None: ...
+
+    def get_outline(
+        self,
+        story_id: int,
+        outline_id: int,
+    ) -> data_models.StoryPlotOutline | None: ...
+
+    def get_node(
+        self,
+        story_id: int,
+        outline_id: int,
+        node_id: int,
+    ) -> data_models.StoryPlotOutlineNode | None: ...
+
+    def create_pool(
+        self,
+        *,
+        story_id: int,
+        name: str,
+        description: str,
+        selection_mode: str,
+        priority: int,
+        enabled: bool,
+    ) -> data_models.StoryPlotEventPool: ...
+
+    def update_pool(
+        self,
+        pool_id: int,
+        *,
+        name: str,
+        description: str,
+        selection_mode: str,
+        priority: int,
+        enabled: bool,
+    ) -> data_models.StoryPlotEventPool | None: ...
+
+    def delete_pool(self, pool_id: int) -> int: ...
+
+    def create_event(
+        self,
+        *,
+        story_id: int,
+        pool_id: int,
+        title: str,
+        description: str,
+        directive: str,
+        suitability_hint: str,
+        dispatch_mode: str,
+        scheduled_time: SceneTime | None,
+        position: int,
+        enabled: bool,
+        allow_repeat: bool,
+        repeat_cooldown_minutes: int,
+    ) -> data_models.StoryPlotEvent: ...
+
+    def update_event(
+        self,
+        event_id: int,
+        *,
+        pool_id: int,
+        title: str,
+        description: str,
+        directive: str,
+        suitability_hint: str,
+        dispatch_mode: str,
+        scheduled_time: SceneTime | None,
+        position: int,
+        enabled: bool,
+        allow_repeat: bool,
+        repeat_cooldown_minutes: int,
+    ) -> data_models.StoryPlotEvent | None: ...
+
+    def set_event_positions(self, event_ids: Sequence[int]) -> None: ...
+
+    def delete_event(self, event_id: int) -> int: ...
+
+    def create_outline(
+        self,
+        *,
+        story_id: int,
+        name: str,
+        description: str,
+        priority: int,
+        enabled: bool,
+    ) -> data_models.StoryPlotOutline: ...
+
+    def update_outline(
+        self,
+        outline_id: int,
+        *,
+        name: str,
+        description: str,
+        priority: int,
+        enabled: bool,
+    ) -> data_models.StoryPlotOutline | None: ...
+
+    def delete_outline(self, outline_id: int) -> int: ...
+
+    def create_node(
+        self,
+        *,
+        story_id: int,
+        outline_id: int,
+        event_id: int,
+        scheduled_time: SceneTime,
+        dispatch_mode: str,
+        position: int,
+        enabled: bool,
+    ) -> data_models.StoryPlotOutlineNode: ...
+
+    def update_node(
+        self,
+        node_id: int,
+        *,
+        event_id: int,
+        scheduled_time: SceneTime,
+        dispatch_mode: str,
+        position: int,
+        enabled: bool,
+    ) -> data_models.StoryPlotOutlineNode | None: ...
+
+    def set_node_positions(self, node_ids: Sequence[int]) -> None: ...
+
+    def delete_node(self, node_id: int) -> int: ...
+
+    def get_session_schedule(
+        self,
+        session_id: str,
+    ) -> tuple[
+        data_models.StoryPlotSchedule,
+        data_models.SessionPlotOverrides,
+    ]: ...
+
+    def list_session_decisions(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        before_id: int | None = None,
+    ) -> list[data_models.SessionPlotScheduleDecision]: ...
+
+    def set_session_event_disabled(
+        self,
+        session_id: str,
+        event_id: int,
+        disabled: bool,
+    ) -> data_models.SessionPlotOverrides: ...
+
+    def set_session_node_disabled(
+        self,
+        session_id: str,
+        node_id: int,
+        disabled: bool,
+    ) -> data_models.SessionPlotOverrides: ...
+
+
 class PlotScheduleManagementService:
     """Apply Plot definition rules around the persistence-only data facade."""
 
-    def __init__(self, data: PlotSchedulingDataService) -> None:
+    def __init__(self, data: PlotScheduleManagementDataPort) -> None:
         self._data = data
 
     def get_story_schedule(
@@ -125,7 +305,7 @@ class PlotScheduleManagementService:
                 raise PlotDefinitionInUseError("event pool must be empty before deletion")
             try:
                 self._data.delete_pool(pool.id)
-            except PlotScheduleDataIntegrityError as exc:
+            except DataIntegrityError as exc:
                 raise PlotDefinitionInUseError(
                     "event pool must be empty before deletion"
                 ) from exc
@@ -256,7 +436,7 @@ class PlotScheduleManagementService:
             event = self._require_event(workspace_id, story_id, event_id)
             try:
                 self._data.delete_event(event.id)
-            except PlotScheduleDataIntegrityError as exc:
+            except DataIntegrityError as exc:
                 raise PlotDefinitionInUseError(
                     "event is referenced by an outline node and cannot be deleted"
                 ) from exc
@@ -456,7 +636,7 @@ class PlotScheduleManagementService:
         try:
             with self._data.transaction():
                 yield
-        except PlotScheduleDataIntegrityError as exc:
+        except DataIntegrityError as exc:
             raise PlotScheduleConflictError(
                 "plot schedule command conflicts with persisted data"
             ) from exc
@@ -644,5 +824,6 @@ def _next_position(
 __all__ = [
     "PlotDefinitionInUseError",
     "PlotScheduleConflictError",
+    "PlotScheduleManagementDataPort",
     "PlotScheduleManagementService",
 ]

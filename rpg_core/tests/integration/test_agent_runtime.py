@@ -177,7 +177,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         "旧剧情记忆",
         turn_id=2,
     )
-    integration_data_gateway.narrative_outcomes.record(
+    integration_data_gateway.narrative_outcomes.append(models.NarrativeOutcomeCreate(
         session_id=session_id,
         turn_id=99,
         outcome_code="success",
@@ -186,7 +186,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         sample_value=20,
         effective_weights=models.NarrativeOutcomeWeights(),
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
-    )
+    ))
 
     template_copy = next(
         table
@@ -246,7 +246,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     assert vector_db.is_file()
 
     backup_count = integration_data_gateway.backup.messages.count(session_id)
-    role_service = SessionRoleService(integration_data_gateway)
+    role_service = SessionRoleService(integration_data_gateway.sessions)
     state_before = role_service.get_state(session_id)
     assert state_before.status is PlayerCharacterBindingStatus.BOUND
 

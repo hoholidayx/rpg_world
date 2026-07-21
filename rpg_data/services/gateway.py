@@ -18,9 +18,9 @@ from rpg_data.services.catalog import CatalogService
 from rpg_data.services.character import CharacterManagementService, CharacterReadService
 from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
-from rpg_data.services.message import MessageService
+from rpg_data.services.message import MessageDataService
 from rpg_data.services.media import MediaDataService
-from rpg_data.services.narrative_outcome import NarrativeOutcomeService
+from rpg_data.services.narrative_outcome import NarrativeOutcomeDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session import SessionDataService
@@ -55,10 +55,10 @@ class DataServiceGateway:
         self._character_management: CharacterManagementService | None = None
         self._lorebook: LorebookReadService | None = None
         self._lorebook_management: LorebookManagementService | None = None
-        self._messages: MessageService | None = None
+        self._messages: MessageDataService | None = None
         self._dream_memory: DreamMemoryDataService | None = None
         self._media: MediaDataService | None = None
-        self._narrative_outcomes: NarrativeOutcomeService | None = None
+        self._narrative_outcomes: NarrativeOutcomeDataService | None = None
         self._plot_scheduling: PlotSchedulingDataService | None = None
         self._rp_modules: RPModuleDataService | None = None
         self._sessions: SessionDataService | None = None
@@ -128,11 +128,11 @@ class DataServiceGateway:
         return self._lorebook_management
 
     @property
-    def messages(self) -> MessageService:
+    def messages(self) -> MessageDataService:
         database = self.database
         if self._messages is None:
             logger.debug("creating message service db_path=%s", self._database_path)
-            self._messages = MessageService(database)
+            self._messages = MessageDataService(database)
         self._ensure_bound()
         return self._messages
 
@@ -167,11 +167,11 @@ class DataServiceGateway:
         return self._tts
 
     @property
-    def narrative_outcomes(self) -> NarrativeOutcomeService:
+    def narrative_outcomes(self) -> NarrativeOutcomeDataService:
         database = self.database
         if self._narrative_outcomes is None:
             logger.debug("creating narrative outcome service db_path=%s", self._database_path)
-            self._narrative_outcomes = NarrativeOutcomeService(database)
+            self._narrative_outcomes = NarrativeOutcomeDataService(database)
         self._ensure_bound()
         return self._narrative_outcomes
 

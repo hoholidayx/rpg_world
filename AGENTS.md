@@ -19,9 +19,9 @@
 - `rpg_data` 负责数据如何可靠、高效、原子地存取，不应被窄化为简单 CRUD：数据库连接/migration、Peewee record、typed DTO、复杂关联查询、分页/排序、高效 read model、批量写入、CAS/条件更新、数据库级原子操作、序列化、归属与完整性校验都应留在数据层；业务层不得拼装 SQL 语义或制造 N+1/事务竞争。
 - `rpg_data` 不得决定产品行为：不做默认选择、调度/抽样、优先级合并、冷却/重试、状态机下一步、生命周期策略、派生/重置/删除保留矩阵、Prompt/模板渲染、玩家文案或跨聚合业务编排。
 - `DataServiceGateway` 是合法的数据库生命周期与 Data Service 注册表；composition root 可从中取得具体 service，但业务 service 必须依赖窄 Protocol/Data Service，不得持有整个 Gateway 作为 service locator。现有非组装层 Gateway lookup 与整 Gateway 注入分别由架构测试显式 allowlist，禁止新增。
-- `rpg_data` 的公开类型化持久化边界统一使用 Service 语义；Session、Plot、Dream/Memory、Status、Media 与 TTS 等新的大业务聚合入口命名为 `*DataService`，Repository/Peewee 实现只在 `rpg_data` 内部使用。既有简单 Character/Lorebook CRUD 可保留清晰的 `*ReadService` / `*ManagementService`，不为后缀或形式统一机械增加 application/facade/adapter 样板层。
+- `rpg_data` 的公开类型化持久化边界统一使用 Service 语义；Session、Message、Plot、Narrative Outcome、Dream/Memory、Status、Media 与 TTS 等新的大业务聚合入口命名为 `*DataService`，Repository/Peewee 实现只在 `rpg_data` 内部使用。既有简单 Character/Lorebook CRUD 可保留清晰的 `*ReadService` / `*ManagementService`，不为后缀或形式统一机械增加 application/facade/adapter 样板层。
 - 业务归属固定：Plot Scheduler 与 Narrative Outcome 在 `rpg_core/rp_modules`，Session/角色/Opening/状态/Scene 在 `rpg_core`，Dream/Story Memory/Persistent Memory 在 `rp_memory`，媒体与语音分别在 `rpg_media`、`rpg_tts`；service composition root 只负责依赖组装和进程适配。
-- 需要跨多次数据操作保持原子性时，由 `rpg_data` 提供无业务语义的 transaction/unit-of-work 或调用方指定的 bulk primitive，业务层决定事务内做什么。业务层不得直接使用 Repository/Peewee record，跨层结果使用 typed contract；Session、Memory、Status、Media 与 TTS 存储契约优先从 `rpg_data.model.*` 引用，`rpg_data.models` 仅保留兼容重导出。
+- 需要跨多次数据操作保持原子性时，由 `rpg_data` 提供无业务语义的 transaction/unit-of-work 或调用方指定的 bulk primitive，业务层决定事务内做什么。业务层不得直接使用 Repository/Peewee record，跨层结果使用 typed contract；Session、Memory、Status、Media、TTS 与 Narrative Outcome 存储契约优先从 `rpg_data.model.*` 引用，`rpg_data.models` 仅保留兼容重导出。
 - 数据层错误只表达 not found、integrity、conflict、conditional update failed 等数据事实；领域错误码、HTTP 状态和玩家提示由上层映射。`rpg_data` 不得导入业务模块、事件 publisher、WebUI 或渠道语义。
 - 完整范式与 Review 清单见 [docs/rpg-data-architecture.md](docs/rpg-data-architecture.md)。新代码不得扩大现有越界；后续整改只以迁出真实业务决策、收紧依赖或修复事务/查询问题为目标，不按文件长度或层次数量机械拆分。
 
@@ -40,7 +40,7 @@
 ## RP Module、Scene 与状态表
 
 - RP Modules 是仓库内置 RP 玩法模块，不是通用 Skill 或第三方代码加载系统。Story 挂载定义能力上限，Session 只能在已挂载模块内稀疏覆盖；配置按 `system < story < session` 合并。新 Story 自动挂载当时 catalog 中的默认模块，后续新增模块不回填既有 Story。Agent 在门禁前解析不可变 `RPModuleSelectionSnapshot`，不得把动态选择写回共享 Registry。
-- Narrative Outcome 只向 LLM 暴露 `rp_story_outcome(reason, actor?)`；每 turn 最多一个五级结果且重复调用幂等复用。不得向 LLM 暴露 Dice 表达式、DC、权重或随机数；Dice 仅保留手动 `/roll`、`/check_dc` 与解析调试。权重五项均为 `0..100` 且总和严格为 100，`success_with_cost` 必须完整达成原目标。
+- Narrative Outcome 只向 LLM 暴露 `rp_story_outcome(reason, actor?)`；每 turn 最多一个五级结果且重复调用幂等复用。不得向 LLM 暴露 Dice 表达式、DC、权重或随机数；Dice 仅保留手动 `/roll`、`/check_dc` 与解析调试。权重五项均为 `0..100` 且总和严格为 100，`success_with_cost` 必须完整达成原目标。Outcome code/sample/来源一致性由 `NarrativeOutcomeLedgerService` 校验，`NarrativeOutcomeDataService` 只追加调用方准备的 typed ledger row。
 - Plot Scheduler 是 Story 级 RP Module。每个 IC/GM turn 最多选择一个到期大纲节点和一个池事件，同一事件不得由两个 lane 同轮注入，OOC 不调度；Scene 时间统一由 `SceneTime` 严格解析。强制候选到时直接注入，软候选通过 `agent.plot_scheduler` 读取完整 fixed layer、scene/状态表、最近 N 个完整 IC/GM turn 和当前输入判断适宜性。
 - Plot 的 `deferred | error` 不阻断主 turn，并按完整 IC/GM turn 间隔重试；注入只进入 RP Module 动态层，不写 SSE/历史正文。大纲节点不重复，池事件按稳定 `event_id` 承载触发/延期/冷却身份，移动池不得重置语义；`container_id` 仅为当时来源快照。`/clear` 清决策账本但保留 Session 覆盖，派生只复制分支点前 `triggered` 与覆盖。
 - Plot WebUI 使用独立 `/plot-scheduling` 页面，不向 SessionRoom 增加 HUD、轮询或前端 LLM 判断。决策历史按自增 `id DESC` + `beforeId` 分页，公开页最大 200，内部可多取一条判断 `hasMore`。
@@ -58,7 +58,7 @@
 - 玩家角色必须进入本轮不可变 snapshot；fixed layer `[player_character]` 是身份唯一真源，角色 metadata 不得承载 PLAYER/NPC 身份。切换只影响后续 turn，并刷新共享 Context 资源，不改写历史、摘要或记忆。
 - `/clear` 保留 Session 身份/profile、append-only 冷备、角色/Opening、标题、模型和 RP Module 覆盖；清除主历史、Outcome/Plot ledger、Story/Persistent Memory、Dream、Session runtime、deferred progress 和 Session 媒体引用，重建模板状态表并清空 native 表值。有效绑定按稳定 Opening ID 重放 turn 1，缺失时回退当前第一条。
 - 删除 Session 与 `/clear` 严格区分：Agent service 先隔离 Session、取消 turn、释放资源，再删除 catalog/级联数据、冷备与 runtime；数据库失败恢复隔离目录，提交后目录清理失败返回 `pending`。Play API 只转发删除，WebUI 两个入口都必须确认。
-- 持久消息必须有正数 `turn_id`、`seq_in_turn`，主表唯一 `(session_id, turn_id, seq_in_turn)`，冷备 append-only。Summary/Story Memory 进度只使用消息行 `summary_processed` / `story_memory_processed`，不恢复 last-turn 游标；主 Agent Context 仅过滤 `summary_processed=true`，其它历史 API 和 SubAgent 仍读取完整未删除历史。
+- 持久消息必须有正数 `turn_id`、`seq_in_turn`，主表唯一 `(session_id, turn_id, seq_in_turn)`，冷备 append-only。Summary/Story Memory 进度只使用消息行 `summary_processed` / `story_memory_processed`，不恢复 last-turn 游标；主 Agent Context 仅过滤 `summary_processed=true`，其它历史 API 和 SubAgent 仍读取完整未删除历史。候选分组、保留窗口、编辑重置及 Outcome/Plot 清理矩阵归 `SessionHistory` / `SessionProgress`，`MessageDataService` 不固化这些策略。
 - `text_output_format` 是默认 fixed layer 约束，不进入 RP Module；带 `<rp-narration>` / `<rp-character>` 标签的全文是 assistant `content` 真源，原样进入 SSE、历史和数据库，不写解析后的 message metadata。
 
 ## Memory 与 Dream

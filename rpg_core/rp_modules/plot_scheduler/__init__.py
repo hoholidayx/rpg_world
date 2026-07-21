@@ -16,12 +16,14 @@ from rpg_core.rp_modules.plot_scheduler.ledger import (
     PLOT_DERIVATION_COPY_POLICY,
     PlotScheduleDerivationCopyPolicy,
     PlotScheduleLedgerConflictError,
+    PlotScheduleLedgerDataPort,
     PlotScheduleLedgerService,
     validate_plot_decision_batch,
 )
 from rpg_core.rp_modules.plot_scheduler.management import (
     PlotDefinitionInUseError,
     PlotScheduleConflictError,
+    PlotScheduleManagementDataPort,
     PlotScheduleManagementService,
 )
 from rpg_core.rp_modules.plot_scheduler.models import (
@@ -48,7 +50,9 @@ __all__ = [
     "PlotScheduleDerivationCopyPolicy",
     "PlotScheduleInjection",
     "PlotScheduleLedgerConflictError",
+    "PlotScheduleLedgerDataPort",
     "PlotScheduleLedgerService",
+    "PlotScheduleManagementDataPort",
     "PlotScheduleManagementService",
     "PlotScheduleSnapshot",
     "PlotSuitabilityDecision",

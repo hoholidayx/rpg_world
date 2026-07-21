@@ -11,11 +11,11 @@
 - [x] 已完成整改项：状态表与 Scene（P3）
 - [x] 已完成整改项：Media 与 TTS（P4）
 - [x] 已完成整改项：Story Catalog、Composer 与 RP Module 配置（P5）
-- [ ] **下一整改项：消息、历史和通用账本收尾（P6）**
+- [x] 已完成整改项：消息、历史和通用账本收尾（P6）
 
 本计划用于把 `rpg_data` 收敛为无框架、无业务决策的数据访问模块。整改后，`rpg_data` 负责数据库 DTO、序列化、复杂查询/read model、CRUD、分页、批量、CAS、数据完整性和数据库级原子持久化；业务规则、状态机、默认策略、跨聚合用例和玩家文案必须由对应领域模块或应用编排层持有。
 
-Plot Schedule、Session P1、Dream/P2、状态表/Scene P3、Media/TTS P4 与 Story Catalog/Composer/RP Module P5 已按整改执行顺序完成，下一整改项为消息、历史和通用账本收尾 P6。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重、剧情调度优先级或后台任务优先级。后续仍以迁出真实业务决策为准，不为了形式统一制造样板层。
+Plot Schedule、Session P1、Dream/P2、状态表/Scene P3、Media/TTS P4、Story Catalog/Composer/RP Module P5 与消息/历史/账本 P6 已按整改执行顺序完成。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重、剧情调度优先级或后台任务优先级。后续仍以迁出真实业务决策为准，不为了形式统一制造样板层。
 
 ## 1. 统一边界
 
@@ -180,11 +180,11 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 
 ## 8. P6：消息、历史与通用账本收尾
 
-- [ ] 审查 Message/Backup/Story Memory/Narrative Outcome service，区分数据查询分组与 summary、memory、retry、truncate 的业务选择。
-- [ ] Message service 保留按 turn/page/processed flag 的查询和批量标记；由 Summary、Memory、Session history 业务层决定候选范围和处理时机。
-- [ ] Narrative Outcome ledger 只校验持久字段和唯一 turn，Outcome code、sample、权重来源等规则由 RP Module policy 验证。
-- [ ] 清理 `rpg_data` 中面向 HTTP/玩家的错误码和文本，统一由调用方做领域错误与 transport 映射。
-- [ ] 为 `rpg_data` 增加依赖边界静态测试，并在 code review checklist 中加入“数据层不得决定业务动作”检查项。
+- [x] 审查 Message/Backup/Story Memory/Narrative Outcome service，区分数据查询分组与 summary、memory、retry、truncate 的业务选择。
+- [x] `MessageDataService` 保留 turn window、分页、processed flag 聚合和批量标记；Summary、Memory 与 `SessionHistory` / `SessionProgress` 决定候选范围、Context 投影、编辑重置和账本联动时机。
+- [x] `NarrativeOutcomeDataService` 只追加调用方准备的 typed row、查询和删除；Outcome code、sample、权重来源及 sample/code 一致性由 `NarrativeOutcomeLedgerService` 验证，唯一 turn 冲突映射为领域 ledger conflict。
+- [x] 数据错误只表达 integrity 等持久化事实；Outcome/Plot 领域冲突和 transport 映射由调用方完成，不在 `rpg_data` 增加 HTTP/玩家语义。
+- [x] 架构守卫覆盖 Message/Outcome Data Service 命名、canonical DTO、候选策略入口移除，以及 Session/turn/Plot/Outcome 业务服务的 Gateway/具体 Data Service 依赖禁令。
 
 ## 9. 每个业务域的实施模板
 

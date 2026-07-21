@@ -172,7 +172,7 @@ async def test_session_create_and_switch_locator_isolate_history(
         int(current_session.story_id),
     )
     assert sorted(session.id for session in sessions or []) == sorted([created_session_id, "integration_smoke"])
-    role_service = SessionRoleService(integration_data_gateway)
+    role_service = SessionRoleService(integration_data_gateway.sessions)
     option = role_service.list_options(created_session_id)[0]
     bound = role_service.bind_player_character(
         created_session_id,

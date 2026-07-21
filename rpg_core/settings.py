@@ -28,7 +28,7 @@ from rpg_core.rp_modules.constants import (
     RP_MODULE_PLOT_SCHEDULER_NAME,
 )
 from rpg_core.utils.path_utils import PACKAGE_ROOT as _PACKAGE_ROOT
-from rpg_data.models import NarrativeOutcomeWeights
+from rpg_data.model.narrative_outcome import NarrativeOutcomeWeights
 
 # Location of rpg_core process/business settings.
 _SETTINGS_PATH = Path(__file__).resolve().parent / "settings.yaml"

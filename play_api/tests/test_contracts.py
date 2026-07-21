@@ -503,7 +503,7 @@ def test_rp_module_config_inheritance_validation_and_history_page(
         ).status_code == 404
 
         gateway = get_data_service_gateway()
-        gateway.narrative_outcomes.record(
+        gateway.narrative_outcomes.append(models.NarrativeOutcomeCreate(
             session_id="s_forest001",
             turn_id=1,
             outcome_code="success_with_cost",
@@ -512,7 +512,7 @@ def test_rp_module_config_inheritance_validation_and_history_page(
             sample_value=50,
             effective_weights=models.NarrativeOutcomeWeights(),
             effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
-        )
+        ))
 
         history_page = client.get(
             "/play-api/v1/sessions/s_forest001/history-page?limit=50"

@@ -28,7 +28,12 @@ from rpg_core.settings import (
     PlotSchedulerModuleSettings,
     RPModuleSettings,
 )
-from rpg_data import models as data_models
+from rpg_data.model.narrative_outcome import (
+    NARRATIVE_OUTCOME_SOURCE_CONFIG,
+    NARRATIVE_OUTCOME_SOURCE_SESSION,
+    NARRATIVE_OUTCOME_SOURCE_STORY,
+    NarrativeOutcomeWeights,
+)
 from rpg_data.model.rp_modules import SessionRPModuleOverride, StoryRPModule
 
 
@@ -164,13 +169,13 @@ class RPModuleRegistry:
                 override.config if override is not None else {},
             )
             effective_config = dict(system_config)
-            sources = {key: data_models.NARRATIVE_OUTCOME_SOURCE_CONFIG for key in system_config}
+            sources = {key: NARRATIVE_OUTCOME_SOURCE_CONFIG for key in system_config}
             for key, value in story_config.items():
                 effective_config[key] = value
-                sources[key] = data_models.NARRATIVE_OUTCOME_SOURCE_STORY
+                sources[key] = NARRATIVE_OUTCOME_SOURCE_STORY
             for key, value in session_config.items():
                 effective_config[key] = value
-                sources[key] = data_models.NARRATIVE_OUTCOME_SOURCE_SESSION
+                sources[key] = NARRATIVE_OUTCOME_SOURCE_SESSION
             story_mounted = mount is not None
             story_enabled = bool(mount.enabled) if mount is not None else False
             session_enabled = override.enabled if override is not None else None
@@ -224,7 +229,7 @@ class RPModuleRegistry:
             value = raw["weights"]
             if not isinstance(value, Mapping):
                 raise ValueError("weights must be an object")
-            normalized["weights"] = data_models.NarrativeOutcomeWeights.from_mapping(
+            normalized["weights"] = NarrativeOutcomeWeights.from_mapping(
                 value
             ).to_dict()
         return normalized
@@ -272,7 +277,7 @@ class RPModuleRegistry:
         session_id: str,
         selected: RPModuleSelection,
     ) -> NarrativeOutcomeModule:
-        weights = data_models.NarrativeOutcomeWeights.from_mapping(
+        weights = NarrativeOutcomeWeights.from_mapping(
             _mapping(selected.effective_config["weights"], "weights")
         )
         return NarrativeOutcomeModule(
@@ -289,7 +294,7 @@ class RPModuleRegistry:
                 effective_weights=weights,
                 effective_source=selected.config_sources.get(
                     "weights",
-                    data_models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
+                    NARRATIVE_OUTCOME_SOURCE_CONFIG,
                 ),
             ),
         )

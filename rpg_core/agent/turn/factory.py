@@ -18,6 +18,9 @@ if TYPE_CHECKING:
         PlotSchedulingPreflightHook,
     )
     from rpg_core.agent.turn.models import TurnExecutionPlan
+    from rpg_core.agent.turn.transaction.commit_plan import TurnCommitTransactionPort
+    from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
+    from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
 
 
 class TurnRuntimeFactory:
@@ -31,12 +34,18 @@ class TurnRuntimeFactory:
         model_runtime: "MainModelRuntime",
         status_preflight: "StatusPreflightHook",
         plot_scheduling_preflight: "PlotSchedulingPreflightHook | None" = None,
+        transaction_data: "TurnCommitTransactionPort | None" = None,
+        narrative_outcome_ledger: "NarrativeOutcomeLedgerService | None" = None,
+        plot_schedule_ledger: "PlotScheduleLedgerService | None" = None,
     ) -> None:
         self._lifecycle = lifecycle
         self._context_service = context_service
         self._model_runtime = model_runtime
         self._status_preflight = status_preflight
         self._plot_scheduling_preflight = plot_scheduling_preflight
+        self._transaction_data = transaction_data
+        self._narrative_outcome_ledger = narrative_outcome_ledger
+        self._plot_schedule_ledger = plot_schedule_ledger
 
     async def create(self, plan: "TurnExecutionPlan") -> TurnRuntime:
         self._context_service.enforce_window_threshold(
@@ -56,6 +65,9 @@ class TurnRuntimeFactory:
             session=self._lifecycle.session_manager,
             status_mgr=resources.status_manager,
             scene_tracker=resources.scene_tracker,
+            transaction_data=self._transaction_data,
+            narrative_outcome_ledger=self._narrative_outcome_ledger,
+            plot_schedule_ledger=self._plot_schedule_ledger,
         )
         scratch = transaction.begin(stats, mode=plan.request.mode)
         runtime = TurnRuntime(

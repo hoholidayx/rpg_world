@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterable, Mapping
+from typing import ContextManager, Protocol
 
 from loguru import logger
 
@@ -12,12 +12,116 @@ from rpg_core.session.grouping import latest_turn_id
 from rpg_core.session.models import ContextHistorySnapshot, SessionRuntimeState
 from rpg_core.session.progress import SessionProgress
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError, validate_turn_metadata
-
-if TYPE_CHECKING:
-    from rpg_data.services import DataServiceGateway
+from rpg_data.model.session import Session, SessionMessage
 
 
 _TAG = "[SessionManager]"
+
+
+class SessionHistoryDataPort(Protocol):
+    def transaction(self) -> ContextManager[None]: ...
+
+    def get_session(self, session_id: str) -> Session | None: ...
+
+    def list_messages(self, session_id: str) -> list[SessionMessage]: ...
+
+    def latest_message_turn_id(self, session_id: str) -> int: ...
+
+    def get_message_for_session(
+        self,
+        session_id: str,
+        message_id: int,
+    ) -> SessionMessage | None: ...
+
+    def append_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        *,
+        mode: str,
+        turn_id: int,
+        seq_in_turn: int,
+        metadata_json: str,
+    ) -> SessionMessage: ...
+
+    def append_backup_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        *,
+        mode: str,
+        turn_id: int,
+        seq_in_turn: int,
+        metadata_json: str,
+    ) -> SessionMessage: ...
+
+    def update_message_content(
+        self,
+        message_id: int,
+        content: str,
+    ) -> SessionMessage | None: ...
+
+    def delete_message_for_session(self, session_id: str, message_id: int) -> bool: ...
+
+    def clear_messages(self, session_id: str) -> int: ...
+
+    def replace_messages(
+        self,
+        session_id: str,
+        messages: Iterable[SessionMessage | Mapping[str, object]],
+    ) -> list[SessionMessage]: ...
+
+    def truncate_messages_before_id(self, session_id: str, boundary_id: int) -> int: ...
+
+    def truncate_messages_from_turn(self, session_id: str, turn_id: int) -> int: ...
+
+    def reset_message_processing(
+        self,
+        session_id: str,
+        message_ids: Iterable[int],
+    ) -> int: ...
+
+    def clear_narrative_outcomes(self, session_id: str) -> int: ...
+
+    def delete_narrative_outcomes_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int: ...
+
+    def delete_narrative_outcomes_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int: ...
+
+    def retain_narrative_outcome_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int: ...
+
+    def clear_plot_decisions(self, session_id: str) -> int: ...
+
+    def delete_plot_decisions_for_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int: ...
+
+    def delete_plot_decisions_from_turn(
+        self,
+        session_id: str,
+        turn_id: int,
+    ) -> int: ...
+
+    def retain_plot_decision_turns(
+        self,
+        session_id: str,
+        turn_ids: Iterable[int],
+    ) -> int: ...
 
 
 class SessionHistory:
@@ -30,13 +134,13 @@ class SessionHistory:
         *,
         session_id: Callable[[], str],
         history_enabled: Callable[[], bool],
-        require_gateway: Callable[[], DataServiceGateway],
+        require_data: Callable[[], SessionHistoryDataPort],
     ) -> None:
         self._state = state
         self._progress = progress
         self._session_id = session_id
         self._history_enabled = history_enabled
-        self._require_gateway = require_gateway
+        self._require_data = require_data
 
     @property
     def messages(self) -> list[Message]:
@@ -54,7 +158,7 @@ class SessionHistory:
             )
             return
 
-        rows = self._require_gateway().messages.list(self._session_id())
+        rows = self._require_data().list_messages(self._session_id())
         try:
             validate_turn_metadata(rows, label="history")
         except InvalidTurnMetadataError as exc:
@@ -80,22 +184,21 @@ class SessionHistory:
     def context_history(self) -> ContextHistorySnapshot:
         """Return the history visible to the main Agent context."""
         if self._history_enabled():
-            projection = self._require_gateway().messages.list_for_agent_context(
-                self._session_id()
-            )
+            rows = self._require_data().list_messages(self._session_id())
+            projected = tuple(row for row in rows if not row.summary_processed)
             messages = tuple(
                 Message.from_dict(row.to_message_dict())
-                for row in projection.messages
+                for row in projected
             )
             logger.debug(
                 _TAG + " context history projected: session_id={}, kept={}, filtered={}",
                 self._session_id(),
                 len(messages),
-                projection.filtered_message_count,
+                len(rows) - len(projected),
             )
             return ContextHistorySnapshot(
                 messages=messages,
-                filtered_message_count=projection.filtered_message_count,
+                filtered_message_count=len(rows) - len(projected),
             )
 
         messages = tuple(
@@ -114,7 +217,7 @@ class SessionHistory:
         if self._history_enabled():
             latest = max(
                 latest,
-                self._require_gateway().messages.latest_turn_id(self._session_id()),
+                self._require_data().latest_message_turn_id(self._session_id()),
             )
         if self._state.active_turn_id is not None:
             latest = max(latest, self._state.active_turn_id)
@@ -163,23 +266,25 @@ class SessionHistory:
 
         uid = 0
         if self._history_enabled():
-            gateway = self._require_gateway()
-            with gateway.database.atomic():
-                row = gateway.messages.append(
+            data = self._require_data()
+            with data.transaction():
+                row = data.append_message(
                     self._session_id(),
                     role_value,
                     text,
                     mode=pending.mode,
                     turn_id=turn_id,
                     seq_in_turn=seq_in_turn,
+                    metadata_json="{}",
                 )
-                gateway.backup.messages.append(
+                data.append_backup_message(
                     self._session_id(),
                     role_value,
                     text,
                     mode=pending.mode,
                     turn_id=turn_id,
                     seq_in_turn=seq_in_turn,
+                    metadata_json="{}",
                 )
             uid = row.id
 
@@ -198,11 +303,11 @@ class SessionHistory:
     def clear(self) -> None:
         """Clear in-memory history and the mutable rpg_data message table."""
         if self._history_enabled():
-            gateway = self._require_gateway()
-            with gateway.database.atomic():
-                gateway.messages.clear(self._session_id())
-                gateway.narrative_outcomes.clear(self._session_id())
-                gateway.plot_scheduling.clear_decisions(self._session_id())
+            data = self._require_data()
+            with data.transaction():
+                data.clear_messages(self._session_id())
+                data.clear_narrative_outcomes(self._session_id())
+                data.clear_plot_decisions(self._session_id())
         self.replace([], persist=False)
         logger.debug(_TAG + " cleared history for session '{}'", self._session_id())
 
@@ -214,11 +319,11 @@ class SessionHistory:
 
         if keep_from_index >= before:
             if self._history_enabled():
-                gateway = self._require_gateway()
-                with gateway.database.atomic():
-                    gateway.messages.clear(self._session_id())
-                    gateway.narrative_outcomes.clear(self._session_id())
-                    gateway.plot_scheduling.clear_decisions(self._session_id())
+                data = self._require_data()
+                with data.transaction():
+                    data.clear_messages(self._session_id())
+                    data.clear_narrative_outcomes(self._session_id())
+                    data.clear_plot_decisions(self._session_id())
             self._state.messages = []
             self._rebuild_turn_state()
             return before
@@ -232,15 +337,15 @@ class SessionHistory:
             }
             boundary_uid = self._state.messages[keep_from_index].uid
             if boundary_uid > 0:
-                gateway = self._require_gateway()
-                with gateway.database.atomic():
-                    gateway.messages.truncate_before_id(self._session_id(), boundary_uid)
+                data = self._require_data()
+                with data.transaction():
+                    data.truncate_messages_before_id(self._session_id(), boundary_uid)
                     for turn_id in removed_turn_ids:
-                        gateway.narrative_outcomes.delete_for_turn(
+                        data.delete_narrative_outcomes_for_turn(
                             self._session_id(),
                             turn_id,
                         )
-                        gateway.plot_scheduling.delete_decisions_for_turn(
+                        data.delete_plot_decisions_for_turn(
                             self._session_id(),
                             turn_id,
                         )
@@ -268,7 +373,7 @@ class SessionHistory:
         if not self._history_enabled():
             return None
 
-        row = self._require_gateway().messages.get_for_session(
+        row = self._require_data().get_message_for_session(
             self._session_id(),
             target_id,
         )
@@ -301,17 +406,17 @@ class SessionHistory:
 
         before = len(self._state.messages)
         if self._history_enabled():
-            gateway = self._require_gateway()
-            with gateway.database.atomic():
-                removed = gateway.messages.truncate_from_turn(
+            data = self._require_data()
+            with data.transaction():
+                removed = data.truncate_messages_from_turn(
                     self._session_id(),
                     boundary_turn,
                 )
-                gateway.narrative_outcomes.delete_from_turn(
+                data.delete_narrative_outcomes_from_turn(
                     self._session_id(),
                     boundary_turn,
                 )
-                gateway.plot_scheduling.delete_decisions_from_turn(
+                data.delete_plot_decisions_from_turn(
                     self._session_id(),
                     boundary_turn,
                 )
@@ -349,20 +454,21 @@ class SessionHistory:
                     return updated
             raise FileNotFoundError(f"session message not found: {message_id}")
 
-        gateway = self._require_gateway()
-        with gateway.database.atomic():
-            current = gateway.messages.get_for_session(self._session_id(), target_id)
+        data = self._require_data()
+        with data.transaction():
+            current = data.get_message_for_session(self._session_id(), target_id)
             if current is None:
                 raise FileNotFoundError(f"session message not found: {message_id}")
-            updated_row = gateway.messages.update(target_id, content=str(content))
+            updated_row = data.update_message_content(target_id, str(content))
             if updated_row is None:
                 raise FileNotFoundError(f"session message not found: {message_id}")
+            data.reset_message_processing(self._session_id(), (target_id,))
             if current.role == "user":
-                gateway.narrative_outcomes.delete_for_turn(
+                data.delete_narrative_outcomes_for_turn(
                     self._session_id(),
                     current.turn_id,
                 )
-            gateway.plot_scheduling.delete_decisions_for_turn(
+            data.delete_plot_decisions_for_turn(
                 self._session_id(),
                 current.turn_id,
             )
@@ -381,18 +487,18 @@ class SessionHistory:
                     return deleted
             raise FileNotFoundError(f"session message not found: {message_id}")
 
-        gateway = self._require_gateway()
-        with gateway.database.atomic():
-            current = gateway.messages.get_for_session(self._session_id(), target_id)
+        data = self._require_data()
+        with data.transaction():
+            current = data.get_message_for_session(self._session_id(), target_id)
             if current is None:
                 raise FileNotFoundError(f"session message not found: {message_id}")
-            if not gateway.messages.delete_for_session(self._session_id(), target_id):
+            if not data.delete_message_for_session(self._session_id(), target_id):
                 raise FileNotFoundError(f"session message not found: {message_id}")
-            gateway.narrative_outcomes.delete_for_turn(
+            data.delete_narrative_outcomes_for_turn(
                 self._session_id(),
                 current.turn_id,
             )
-            gateway.plot_scheduling.delete_decisions_for_turn(
+            data.delete_plot_decisions_for_turn(
                 self._session_id(),
                 current.turn_id,
             )
@@ -407,17 +513,24 @@ class SessionHistory:
 
         if persist and self._history_enabled():
             self.validate_loaded_turn_metadata(label="history")
-            gateway = self._require_gateway()
-            with gateway.database.atomic():
-                rows = gateway.messages.replace(
-                    self._session_id(),
-                    (message.to_persistence_dict() for message in self._state.messages),
+            data = self._require_data()
+            with data.transaction():
+                current_by_id = {
+                    row.id: row for row in data.list_messages(self._session_id())
+                }
+                payloads = tuple(
+                    _message_replace_payload(message, current_by_id)
+                    for message in self._state.messages
                 )
-                gateway.narrative_outcomes.retain_turns(
+                rows = data.replace_messages(
+                    self._session_id(),
+                    payloads,
+                )
+                data.retain_narrative_outcome_turns(
                     self._session_id(),
                     (message.turn_id for message in self._state.messages),
                 )
-                gateway.plot_scheduling.retain_decision_turns(
+                data.retain_plot_decision_turns(
                     self._session_id(),
                     (message.turn_id for message in self._state.messages),
                 )
@@ -461,3 +574,24 @@ class SessionHistory:
             for turn_id, sequence in seq_by_turn.items()
         }
         self._state.active_turn_id = None
+
+
+def _message_replace_payload(
+    message: Message,
+    current_by_id: Mapping[int, SessionMessage],
+) -> Mapping[str, object]:
+    payload = message.to_persistence_dict()
+    current = current_by_id.get(message.uid)
+    if current is None:
+        return payload
+    payload.update(
+        summary_processed=current.summary_processed,
+        summary_batch_id=current.summary_batch_id,
+        summary_processed_at=current.summary_processed_at,
+        story_memory_processed=current.story_memory_processed,
+        story_memory_processed_at=current.story_memory_processed_at,
+    )
+    return payload
+
+
+__all__ = ["SessionHistory", "SessionHistoryDataPort"]

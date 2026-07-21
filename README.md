@@ -477,6 +477,8 @@ Play WebUI 左侧“剧情调度”页面提供三类大面板：大纲时间线
 
 Outcome 判定与状态更新由代码拆成独立阶段：预裁定成功后停止 Route 并将结果注入主 Agent；无需裁定时才执行状态目标路由与隔离更新。Outcome 的失败补判语义不受快速状态 best-effort 策略影响。完整正常链路和失败路径见 [StatusSubAgent 固定编排](docs/agent-turn-orchestration.md#statussubagent-固定编排)。
 
+持久化边界由 `NarrativeOutcomeLedgerService` 与 `NarrativeOutcomeDataService` 分工：前者在 `rpg_core` 校验 code、sample、权重来源及其一致性，并把唯一 turn 数据冲突映射为领域冲突；后者只追加调用方准备的 typed row、查询和删除。Agent composition root 将同一数据库下的 transaction port、Outcome ledger 与 Plot ledger 注入 turn runtime，消息、两类 ledger 和状态表仍在一个短事务中共同提交。
+
 适合触发剧情裁定的情况：
 
 - 玩家明确把结果交给运气，例如“我想碰碰运气，看能不能找到其它线索”。
@@ -949,7 +951,7 @@ Telegram/CLI 通过 `channels/settings.yaml` 中各自的 `workspace_id + story_
 
 ### 会话历史字段
 
-会话消息写入 `rpg_session_messages`，冷备份写入 `rpg_session_backup_messages`。`SessionManager` 保持公开门面，内部由 `session/history.py` 管消息与持久化、`progress.py` 管 summary/story-memory 行标记、`grouping.py` 管 turn 算法。数据库自增 `id` 映射为 `Message.uid`；`turn_id` 和 `seq_in_turn` 由会话层管理，持久化路径必须写入正数。主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一；冷备份表保持追加语义，不做唯一约束。
+会话消息写入 `rpg_session_messages`，冷备份写入 `rpg_session_backup_messages`。`SessionManager` 保持公开门面，内部由 `session/history.py` 管有序消息、主表/冷备共同写入和历史修改的 Outcome/Plot ledger 联动，`progress.py` 管 summary/story-memory 候选与行标记，`grouping.py` 管纯 turn 算法；这些业务对象只接收窄 Data Port。`MessageDataService` 只负责 CRUD、turn window/分页、processed flag 聚合和调用方指定的批量标记，不决定 Context 投影、候选窗口或编辑重置。数据库自增 `id` 映射为 `Message.uid`；`turn_id` 和 `seq_in_turn` 由会话层管理，持久化路径必须写入正数。主消息表约束同一 session 内 `(turn_id, seq_in_turn)` 唯一；冷备份表保持追加语义，不做唯一约束。
 
 summary 和剧情记忆提取进度标记在 `rpg_session_messages` 对应消息行上；剧情记忆条目写入 `rpg_session_story_memories`，且必须关联正数 `turn_id`。summary 的 `keep_recent_rounds` 和批次切分仍按显式 turn/round 分组；异常 turn metadata 在写入或加载边界失败，不再恢复 user-anchor / pair 降级分组。
 

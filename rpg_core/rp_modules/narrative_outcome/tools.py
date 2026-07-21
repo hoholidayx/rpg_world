@@ -11,7 +11,7 @@ from rpg_core.rp_modules.narrative_outcome.models import (
     NarrativeOutcomeSelection,
     StagedNarrativeOutcome,
 )
-from rpg_data.models import NarrativeOutcomeWeights
+from rpg_data.model.narrative_outcome import NarrativeOutcomeWeights
 
 
 NARRATIVE_OUTCOME_TOOL_NAME = "rp_story_outcome"

@@ -78,9 +78,18 @@ def test_execute_story_memory_marks_messages_processed(tmp_path):
     assert remaining_turns == 0
 
 
-async def _run_story_progress_restart(workspace: str, make_data_session) -> tuple[list[str], int]:
+async def _run_story_progress_restart(
+    workspace: str,
+    make_data_session,
+    session_data,
+) -> tuple[list[str], int]:
     make_data_session("s2")
-    session = SessionManager(session_id="s2", workspace=workspace, history_enabled=True)
+    session = SessionManager(
+        session_id="s2",
+        workspace=workspace,
+        history_enabled=True,
+        data=session_data,
+    )
     session.load()
     t1 = session.begin_turn()
     session.append(Role.USER, "u1", turn_id=t1)
@@ -92,7 +101,12 @@ async def _run_story_progress_restart(workspace: str, make_data_session) -> tupl
     session.end_turn(t2)
     session.mark_story_messages_processed(session.turn_messages(t1))
 
-    reloaded = SessionManager(session_id="s2", workspace=workspace, history_enabled=True)
+    reloaded = SessionManager(
+        session_id="s2",
+        workspace=workspace,
+        history_enabled=True,
+        data=session_data,
+    )
     reloaded.load()
     new_msgs = reloaded.story_messages_since_last_extraction()
     assert [m.content for m in new_msgs] == ["u2", "a2"]
@@ -100,8 +114,12 @@ async def _run_story_progress_restart(workspace: str, make_data_session) -> tupl
     return [m.content for m in reloaded.story_messages_since_last_extraction()], reloaded.count_new_turns_since_story()
 
 
-def test_story_progress_restart(tmp_path, make_data_session):
-    remaining, remaining_turns = asyncio.run(_run_story_progress_restart(str(tmp_path), make_data_session))
+def test_story_progress_restart(tmp_path, make_data_session, rpg_data_gateway):
+    remaining, remaining_turns = asyncio.run(_run_story_progress_restart(
+        str(tmp_path),
+        make_data_session,
+        rpg_data_gateway.sessions,
+    ))
 
     assert remaining == []
     assert remaining_turns == 0

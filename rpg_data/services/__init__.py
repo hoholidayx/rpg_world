@@ -10,9 +10,9 @@ from rpg_data.services.gateway import (
     reset_data_service_gateways,
 )
 from rpg_data.services.lorebook import LorebookManagementService, LorebookReadService
-from rpg_data.services.message import MessageService
+from rpg_data.services.message import MessageDataService
 from rpg_data.services.media import MediaDataService
-from rpg_data.services.narrative_outcome import NarrativeOutcomeService
+from rpg_data.services.narrative_outcome import NarrativeOutcomeDataService
 from rpg_data.services.plot_scheduling import (
     PlotScheduleDataIntegrityError,
     PlotSchedulingDataService,
@@ -32,10 +32,10 @@ __all__ = [
     "DataServiceGateway",
     "LorebookManagementService",
     "LorebookReadService",
-    "MessageService",
+    "MessageDataService",
     "DreamMemoryDataService",
     "MediaDataService",
-    "NarrativeOutcomeService",
+    "NarrativeOutcomeDataService",
     "PlotScheduleDataIntegrityError",
     "PlotSchedulingDataService",
     "RPModuleDataService",

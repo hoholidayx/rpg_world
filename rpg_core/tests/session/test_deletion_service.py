@@ -59,7 +59,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         "memory",
         turn_id=1,
     )
-    gateway.narrative_outcomes.record(
+    gateway.narrative_outcomes.append(models.NarrativeOutcomeCreate(
         session_id=session.id,
         turn_id=1,
         outcome_code="success",
@@ -68,7 +68,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         sample_value=20,
         effective_weights=models.NarrativeOutcomeWeights(),
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
-    )
+    ))
     gateway.rp_modules.upsert_session_override(
         session.id,
         "narrative_outcome",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from typing import TypeAlias
 
 from peewee import Database, IntegrityError, SQL, fn
@@ -111,6 +111,72 @@ class BaseSessionMessageStore:
         if limit is not None:
             query = query.limit(limit)
         return [to_session_message(row) for row in query]
+
+    def list_filtered(
+        self,
+        session_id: str,
+        *,
+        excluded_roles: Collection[str] = (),
+        summary_processed: bool | None = None,
+        story_memory_processed: bool | None = None,
+    ) -> list[models.SessionMessage]:
+        """Return ordered rows after caller-specified storage-field filters."""
+        if not _supports_processing_fields(self._record_model) and (
+            summary_processed is not None or story_memory_processed is not None
+        ):
+            raise ValueError("processing filters require the mutable message table")
+        query = self._record_model.select().where(
+            self._record_model.session == session_id
+        )
+        roles = tuple(sorted({str(role) for role in excluded_roles}))
+        if roles:
+            query = query.where(~(self._record_model.role.in_(roles)))
+        if summary_processed is not None:
+            query = query.where(
+                self._record_model.summary_processed == bool(summary_processed)
+            )
+        if story_memory_processed is not None:
+            query = query.where(
+                self._record_model.story_memory_processed
+                == bool(story_memory_processed)
+            )
+        query = query.order_by(
+            self._record_model.turn_id,
+            self._record_model.seq_in_turn,
+            self._record_model.id,
+        )
+        return [to_session_message(row) for row in query]
+
+    def count_distinct_turns(
+        self,
+        session_id: str,
+        *,
+        excluded_roles: Collection[str] = (),
+        summary_processed: bool | None = None,
+        story_memory_processed: bool | None = None,
+    ) -> int:
+        """Count turn IDs after caller-specified storage-field filters."""
+        if not _supports_processing_fields(self._record_model) and (
+            summary_processed is not None or story_memory_processed is not None
+        ):
+            raise ValueError("processing filters require the mutable message table")
+        query = self._record_model.select(self._record_model.turn_id).where(
+            (self._record_model.session == session_id)
+            & (self._record_model.turn_id > 0)
+        )
+        roles = tuple(sorted({str(role) for role in excluded_roles}))
+        if roles:
+            query = query.where(~(self._record_model.role.in_(roles)))
+        if summary_processed is not None:
+            query = query.where(
+                self._record_model.summary_processed == bool(summary_processed)
+            )
+        if story_memory_processed is not None:
+            query = query.where(
+                self._record_model.story_memory_processed
+                == bool(story_memory_processed)
+            )
+        return int(query.distinct().count())
 
     def list_turn_window(
         self,

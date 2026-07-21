@@ -23,6 +23,9 @@ if TYPE_CHECKING:
     from rpg_core.context.models import Message
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager
+    from rpg_core.agent.turn.transaction.commit_plan import TurnCommitTransactionPort
+    from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
+    from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
 
 _TAG = "[AgentTurnTransaction]"
 
@@ -36,10 +39,16 @@ class AgentTurnTransaction:
         session: "SessionManager",
         status_mgr: "StatusManager | None",
         scene_tracker: SceneTracker | None,
+        transaction_data: "TurnCommitTransactionPort | None" = None,
+        narrative_outcome_ledger: "NarrativeOutcomeLedgerService | None" = None,
+        plot_schedule_ledger: "PlotScheduleLedgerService | None" = None,
     ) -> None:
         self._session = session
         self._status_mgr = status_mgr
         self._real_scene_tracker = scene_tracker
+        self._transaction_data = transaction_data
+        self._narrative_outcome_ledger = narrative_outcome_ledger
+        self._plot_schedule_ledger = plot_schedule_ledger
         self._turn_id: int | None = None
         self._scratch: TurnScratch | None = None
         self._committed = False
@@ -96,6 +105,9 @@ class AgentTurnTransaction:
             status_mgr=self._status_mgr,
             message_scratch=self.scratch.message_scratch,
             status_scratch=self.scratch.status_scratch,
+            transaction_data=self._transaction_data,
+            narrative_outcome_ledger=self._narrative_outcome_ledger,
+            plot_schedule_ledger=self._plot_schedule_ledger,
             narrative_outcome=self.scratch.narrative_outcome,
             plot_schedule_decisions=tuple(self.scratch.plot_schedule_decisions),
         )

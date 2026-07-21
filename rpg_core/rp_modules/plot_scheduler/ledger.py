@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import Protocol
 
 from commons.scene_time import SceneTime
 from rpg_data import models as data_models
-from rpg_data.services.plot_scheduling import (
-    PlotScheduleDataIntegrityError,
-    PlotSchedulingDataService,
-)
+from rpg_data.errors import DataIntegrityError
 
 PLOT_DECISIONS_PER_TURN_MAX = len(data_models.PLOT_SOURCE_KINDS)
 
@@ -31,10 +29,19 @@ class PlotScheduleLedgerConflictError(RuntimeError):
     """A validated decision batch conflicts with the persisted ledger."""
 
 
+class PlotScheduleLedgerDataPort(Protocol):
+    def append_decisions(
+        self,
+        session_id: str,
+        turn_id: int,
+        decisions: Iterable[data_models.StagedPlotScheduleDecision],
+    ) -> list[data_models.SessionPlotScheduleDecision]: ...
+
+
 class PlotScheduleLedgerService:
     """Validate turn-local decisions before appending them to the SQL ledger."""
 
-    def __init__(self, data: PlotSchedulingDataService) -> None:
+    def __init__(self, data: PlotScheduleLedgerDataPort) -> None:
         self._data = data
 
     def record(
@@ -46,7 +53,7 @@ class PlotScheduleLedgerService:
         staged = validate_plot_decision_batch(turn_id, decisions)
         try:
             return self._data.append_decisions(session_id, turn_id, staged)
-        except PlotScheduleDataIntegrityError as exc:
+        except DataIntegrityError as exc:
             raise PlotScheduleLedgerConflictError(
                 "plot schedule decision batch conflicts with the persisted ledger"
             ) from exc
@@ -100,6 +107,7 @@ __all__ = [
     "PLOT_DERIVATION_COPY_POLICY",
     "PlotScheduleDerivationCopyPolicy",
     "PlotScheduleLedgerConflictError",
+    "PlotScheduleLedgerDataPort",
     "PlotScheduleLedgerService",
     "validate_plot_decision_batch",
 ]

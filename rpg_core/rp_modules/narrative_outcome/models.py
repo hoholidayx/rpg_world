@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rpg_data.models import NarrativeOutcomeWeights
+from rpg_data.model.narrative_outcome import NarrativeOutcomeWeights
 
 
 @dataclass(frozen=True)

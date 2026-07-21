@@ -3,23 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import ContextManager, Protocol, TYPE_CHECKING
 
 from loguru import logger
 
 from rpg_core.agent.turn.transaction.message_scratch import MessageScratch
 from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentChange, StatusDocumentScratch
+from rpg_core.rp_modules.narrative_outcome.ledger import NarrativeOutcomeLedgerService
 from rpg_core.rp_modules.plot_scheduler.ledger import PlotScheduleLedgerService
 from rpg_core.session import InvalidTurnMetadataError
 
 if TYPE_CHECKING:
     from rpg_data.models import StagedPlotScheduleDecision
-    from rpg_data.services.gateway import DataServiceGateway
     from rpg_core.rp_modules.narrative_outcome.models import StagedNarrativeOutcome
     from rpg_core.session import SessionManager
     from rpg_core.status.manager import StatusManager
 
 _TAG = "[AgentTurnTransaction]"
+
+
+class TurnCommitTransactionPort(Protocol):
+    def transaction(self) -> ContextManager[None]: ...
 
 
 @dataclass
@@ -30,6 +34,9 @@ class TurnCommitPlan:
     status_mgr: "StatusManager | None"
     message_scratch: MessageScratch
     status_scratch: StatusDocumentScratch
+    transaction_data: TurnCommitTransactionPort | None = None
+    narrative_outcome_ledger: NarrativeOutcomeLedgerService | None = None
+    plot_schedule_ledger: PlotScheduleLedgerService | None = None
     narrative_outcome: "StagedNarrativeOutcome | None" = None
     plot_schedule_decisions: tuple["StagedPlotScheduleDecision", ...] = ()
 
@@ -37,11 +44,12 @@ class TurnCommitPlan:
         snapshot = self.session.history
         try:
             if self.session.history_enabled:
-                gateway = self.session._require_data_session()
-                with gateway.database.atomic():
+                if self.transaction_data is None:
+                    raise RuntimeError("persistent turn commit requires transaction data")
+                with self.transaction_data.transaction():
                     self._append_messages()
-                    self._commit_narrative_outcome(gateway)
-                    self._commit_plot_schedule(gateway)
+                    self._commit_narrative_outcome()
+                    self._commit_plot_schedule()
                     changes = self.status_scratch.commit(self.status_mgr)
             else:
                 # Non-persistent sessions are test/in-memory mode. They restore
@@ -72,25 +80,24 @@ class TurnCommitPlan:
                 seq_in_turn=message.seq_in_turn,
             )
 
-    def _commit_narrative_outcome(self, gateway: "DataServiceGateway") -> None:
+    def _commit_narrative_outcome(self) -> None:
         staged = self.narrative_outcome
         if staged is None:
             return
-        gateway.narrative_outcomes.record(
-            session_id=self.session.session_id,
-            turn_id=self.message_scratch.turn_id,
-            outcome_code=staged.outcome_code,
-            reason=staged.reason,
-            actor=staged.actor,
-            sample_value=staged.sample_value,
-            effective_weights=staged.effective_weights,
-            effective_source=staged.effective_source,
+        if self.narrative_outcome_ledger is None:
+            raise RuntimeError("Narrative Outcome ledger is not configured")
+        self.narrative_outcome_ledger.record(
+            self.session.session_id,
+            self.message_scratch.turn_id,
+            staged,
         )
 
-    def _commit_plot_schedule(self, gateway: "DataServiceGateway") -> None:
+    def _commit_plot_schedule(self) -> None:
         if not self.plot_schedule_decisions:
             return
-        PlotScheduleLedgerService(gateway.plot_scheduling).record(
+        if self.plot_schedule_ledger is None:
+            raise RuntimeError("Plot Schedule ledger is not configured")
+        self.plot_schedule_ledger.record(
             self.session.session_id,
             self.message_scratch.turn_id,
             self.plot_schedule_decisions,
@@ -105,3 +112,6 @@ class TurnCommitPlan:
             }
             for message in self.message_scratch.staged_messages
         ]
+
+
+__all__ = ["TurnCommitPlan", "TurnCommitTransactionPort"]

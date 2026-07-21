@@ -261,8 +261,10 @@ class DataManagerBackend:
                 "totalFacts": stats.total_facts,
                 "dreamProcessedFacts": stats.dream_processed_facts,
                 "pendingDreamFacts": stats.pending_dream_facts,
-                "unprocessedSourceTurns": self._gateway.messages.count_story_memory_unprocessed_turns(
-                    session_id
+                "unprocessedSourceTurns": self._gateway.messages.count_distinct_turns(
+                    session_id,
+                    excluded_roles=(models.MESSAGE_ROLE_SYSTEM,),
+                    story_memory_processed=False,
                 ),
                 "latestUpdatedAt": stats.latest_updated_at or None,
             },

@@ -9,6 +9,7 @@ from peewee import Database, IntegrityError
 
 from commons.scene_time import SceneTime
 from rpg_data import models
+from rpg_data.errors import DataIntegrityError
 from rpg_data.repositories.plot_scheduling_repo import PlotSchedulingRepository
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_repo import StoryRepository
@@ -19,7 +20,7 @@ __all__ = [
 ]
 
 
-class PlotScheduleDataIntegrityError(RuntimeError):
+class PlotScheduleDataIntegrityError(DataIntegrityError):
     """A Plot Scheduler write was rejected by persisted data constraints."""
 
 

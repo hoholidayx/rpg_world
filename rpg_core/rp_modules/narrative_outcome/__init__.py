@@ -7,6 +7,11 @@ from rpg_core.rp_modules.narrative_outcome.models import (
     StagedNarrativeOutcome,
 )
 from rpg_core.rp_modules.narrative_outcome.module import NarrativeOutcomeModule
+from rpg_core.rp_modules.narrative_outcome.ledger import (
+    NarrativeOutcomeLedgerConflictError,
+    NarrativeOutcomeLedgerDataPort,
+    NarrativeOutcomeLedgerService,
+)
 from rpg_core.rp_modules.narrative_outcome.tools import (
     NARRATIVE_OUTCOME_TOOL_NAME,
     NarrativeOutcomeSampler,
@@ -17,6 +22,9 @@ __all__ = [
     "NARRATIVE_OUTCOME_TOOL_NAME",
     "NARRATIVE_OUTCOME_DEFINITIONS",
     "NarrativeOutcomeDefinition",
+    "NarrativeOutcomeLedgerConflictError",
+    "NarrativeOutcomeLedgerDataPort",
+    "NarrativeOutcomeLedgerService",
     "NarrativeOutcomeModule",
     "NarrativeOutcomeSelection",
     "NarrativeOutcomeSampler",

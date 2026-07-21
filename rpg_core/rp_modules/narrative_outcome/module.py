@@ -25,7 +25,7 @@ from rpg_core.rp_modules.narrative_outcome.tools import (
 )
 from rpg_core.rp_modules.narrative_outcome.models import NarrativeOutcomeSelection
 from rpg_core.settings import NarrativeOutcomeModuleSettings
-from rpg_data import models as data_models
+from rpg_data.model.narrative_outcome import NARRATIVE_OUTCOME_SOURCE_CONFIG
 
 if TYPE_CHECKING:
     from rpg_core.agent.turn.transaction import TurnScratch
@@ -92,7 +92,7 @@ class NarrativeOutcomeModule(RPModule):
         self._sampler = NarrativeOutcomeSampler(rng)
         self._selection = selection or NarrativeOutcomeSelection(
             effective_weights=self.settings.default_weights,
-            effective_source=data_models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
+            effective_source=NARRATIVE_OUTCOME_SOURCE_CONFIG,
         )
         self._active_scratch: TurnScratch | None = None
         self._tool = NarrativeOutcomeTool(self)

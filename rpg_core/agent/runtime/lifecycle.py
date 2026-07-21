@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.runtime.tools import AgentToolService
     from rpg_core.rp_modules.application import RPModuleApplicationService
     from rpg_core.rp_modules.registry import RPModuleRegistry
+    from rpg_core.session.manager import SessionManagerDataPort
 
 ContextResourceFactory = Callable[..., AgentContextResources]
 
@@ -55,6 +56,7 @@ class AgentRuntimeLifecycle:
         history_enabled: bool,
         command_dispatcher: "CommandDispatcher",
         role_reader: SessionRoleContextReader,
+        session_data: "SessionManagerDataPort | None" = None,
         rp_module_service: "RPModuleApplicationService | None" = None,
         resource_factory: ContextResourceFactory = build_agent_context_resources,
     ) -> None:
@@ -66,6 +68,7 @@ class AgentRuntimeLifecycle:
         self._session_manager = SessionManager(
             session_id=session_id,
             history_enabled=history_enabled,
+            data=session_data,
         )
         self._resources = self._build_resources(session_id)
         self._rp_module_service = rp_module_service

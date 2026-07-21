@@ -16,6 +16,7 @@ from rp_memory.dream.types import (
     MAX_ACTIVE_MEMORIES,
 )
 from rp_memory.memory_types import EpistemicStatus, MemoryKind
+from rpg_core.session.manager import SessionManager
 from rpg_core.session.role import SessionRoleService
 from rp_memory.story_memory_service import StoryMemoryApplicationService
 
@@ -322,7 +323,14 @@ def test_repository_rejects_legacy_summary_after_partial_batch_edit(tmp_path) ->
         encoding="utf-8",
     )
 
-    edited = gateway.messages.update(original_user.id, content="阿澈抵达新港。")
+    history = SessionManager(
+        session_id=session.id,
+        history_enabled=True,
+        data=gateway.sessions,
+    )
+    history.load()
+    history.update_message_content(original_user.id, "阿澈抵达新港。")
+    edited = gateway.messages.get(original_user.id)
     assert edited is not None
     assert edited.summary_batch_id is None
     assert gateway.messages.get(original_assistant.id).summary_batch_id == 0

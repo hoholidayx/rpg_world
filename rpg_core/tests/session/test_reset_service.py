@@ -63,7 +63,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         seq_in_turn=1,
     )
     _story_memory(gateway).add_detail(session_id, "发现石碑", turn_id=2)
-    gateway.narrative_outcomes.record(
+    gateway.narrative_outcomes.append(models.NarrativeOutcomeCreate(
         session_id=session_id,
         turn_id=2,
         outcome_code="success",
@@ -72,7 +72,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         sample_value=20,
         effective_weights=models.NarrativeOutcomeWeights(),
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
-    )
+    ))
 
     template_copy = next(
         table
