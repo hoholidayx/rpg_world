@@ -24,7 +24,7 @@ from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session import SessionDataService
-from rpg_data.services.session_composer import SessionComposerService
+from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.status import StatusDataService
 from rpg_data.services.tts import TTSDataService
@@ -62,7 +62,7 @@ class DataServiceGateway:
         self._plot_scheduling: PlotSchedulingDataService | None = None
         self._rp_modules: RPModuleService | None = None
         self._sessions: SessionDataService | None = None
-        self._session_composer: SessionComposerService | None = None
+        self._session_composer: SessionComposerDataService | None = None
         self._backup: BackupService | None = None
         self._story_memory: StoryMemoryDataService | None = None
         self._status: StatusDataService | None = None
@@ -210,11 +210,11 @@ class DataServiceGateway:
         return self._sessions
 
     @property
-    def session_composer(self) -> SessionComposerService:
+    def session_composer(self) -> SessionComposerDataService:
         database = self.database
         if self._session_composer is None:
             logger.debug("creating session composer service db_path=%s", self._database_path)
-            self._session_composer = SessionComposerService(database)
+            self._session_composer = SessionComposerDataService(database)
         self._ensure_bound()
         return self._session_composer
 

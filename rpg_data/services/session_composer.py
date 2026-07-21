@@ -1,19 +1,31 @@
-"""Domain services for Session Composer configuration."""
+"""Typed persistence boundary for Session Composer data."""
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 
 from peewee import Database
 
 from rpg_data import models
+from rpg_data.model.composer import (
+    NarrativeStyle,
+    StoryNarrativeStyle,
+    StoryQuickReply,
+    WorkspaceTurnMode,
+    WorkspaceTurnModeSeed,
+)
+from rpg_data.model.session import Session
 from rpg_data.repositories.session_composer_repo import SessionComposerRepository
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 
-__all__ = ["SessionComposerService"]
+__all__ = ["SessionComposerDataService"]
 
 
-class SessionComposerService:
+class SessionComposerDataService:
+    """Store Composer rows without choosing defaults or effective presentation."""
+
     def __init__(self, database: Database) -> None:
         self._database = database
         self._repo = SessionComposerRepository(database)
@@ -21,18 +33,36 @@ class SessionComposerService:
         self._stories = StoryRepository(database)
         self._sessions = SessionRepository(database)
 
-    def list_modes(self, workspace_id: str) -> list[models.WorkspaceTurnMode] | None:
-        if self._workspaces.get(workspace_id) is None:
+    def workspace_exists(self, workspace_id: str) -> bool:
+        return self._workspaces.get(str(workspace_id)) is not None
+
+    def get_session(self, session_id: str) -> Session | None:
+        return self._sessions.get(str(session_id))
+
+    def list_modes(self, workspace_id: str) -> list[WorkspaceTurnMode] | None:
+        if not self.workspace_exists(workspace_id):
+            return None
+        return self._repo.list_workspace_modes(str(workspace_id))
+
+    def ensure_modes(
+        self,
+        workspace_id: str,
+        seeds: Iterable[WorkspaceTurnModeSeed],
+    ) -> list[WorkspaceTurnMode] | None:
+        if not self.workspace_exists(workspace_id):
             return None
         with self._database.atomic():
-            return self._repo.ensure_workspace_modes(workspace_id)
+            return self._repo.ensure_workspace_modes(str(workspace_id), seeds)
 
-    def get_mode(self, workspace_id: str, mode: str) -> models.WorkspaceTurnMode | None:
+    def get_mode(
+        self,
+        workspace_id: str,
+        mode: str,
+    ) -> WorkspaceTurnMode | None:
         items = self.list_modes(workspace_id)
         if items is None:
             return None
-        normalized = normalize_turn_mode(mode)
-        return next((item for item in items if item.mode == normalized), None)
+        return next((item for item in items if item.mode == str(mode)), None)
 
     def update_mode(
         self,
@@ -41,25 +71,21 @@ class SessionComposerService:
         *,
         short_name: str,
         prompt: str,
-    ) -> models.WorkspaceTurnMode | None:
-        if self.list_modes(workspace_id) is None:
+    ) -> WorkspaceTurnMode | None:
+        if not self.workspace_exists(workspace_id):
             return None
-        normalized = normalize_turn_mode(mode)
-        name = str(short_name or "").strip()
-        if not name:
-            raise ValueError("short_name must not be empty")
         with self._database.atomic():
             return self._repo.update_workspace_mode(
-                workspace_id,
-                normalized,
-                short_name=name,
-                prompt=str(prompt or ""),
+                str(workspace_id),
+                str(mode),
+                short_name=str(short_name),
+                prompt=str(prompt),
             )
 
-    def list_styles(self, workspace_id: str) -> list[models.NarrativeStyle] | None:
-        if self._workspaces.get(workspace_id) is None:
+    def list_styles(self, workspace_id: str) -> list[NarrativeStyle] | None:
+        if not self.workspace_exists(workspace_id):
             return None
-        return self._repo.list_styles(workspace_id)
+        return self._repo.list_styles(str(workspace_id))
 
     def create_style(
         self,
@@ -68,15 +94,14 @@ class SessionComposerService:
         name: str,
         prompt: str,
         sort_order: int = 0,
-    ) -> models.NarrativeStyle | None:
-        if self._workspaces.get(workspace_id) is None:
+    ) -> NarrativeStyle | None:
+        if not self.workspace_exists(workspace_id):
             return None
-        normalized_name = _required_text(name, "name")
         with self._database.atomic():
             return self._repo.create_style(
-                workspace_id,
-                name=normalized_name,
-                prompt=str(prompt or ""),
+                str(workspace_id),
+                name=str(name),
+                prompt=str(prompt),
                 sort_order=int(sort_order),
             )
 
@@ -88,49 +113,53 @@ class SessionComposerService:
         name: str | None = None,
         prompt: str | None = None,
         sort_order: int | None = None,
-    ) -> models.NarrativeStyle | None:
-        current = self._repo.get_style(style_id)
-        if current is None or current.workspace_id != workspace_id:
+    ) -> NarrativeStyle | None:
+        current = self._repo.get_style(int(style_id))
+        if current is None or current.workspace_id != str(workspace_id):
             return None
         with self._database.atomic():
             return self._repo.update_style(
-                style_id,
-                name=_required_text(name, "name") if name is not None else None,
+                int(style_id),
+                name=str(name) if name is not None else None,
                 prompt=str(prompt) if prompt is not None else None,
                 sort_order=sort_order,
             )
 
     def delete_style(self, workspace_id: str, style_id: int) -> bool | None:
-        current = self._repo.get_style(style_id)
+        current = self._repo.get_style(int(style_id))
         if current is None:
             return False
-        if current.workspace_id != workspace_id:
+        if current.workspace_id != str(workspace_id):
             return None
         with self._database.atomic():
-            return self._repo.delete_style(style_id)
+            return self._repo.delete_style(int(style_id))
 
     def list_story_styles(
         self,
         workspace_id: str,
         story_id: int,
-    ) -> list[models.StoryNarrativeStyle] | None:
+    ) -> list[StoryNarrativeStyle] | None:
         if self._story(workspace_id, story_id) is None:
             return None
-        return self._repo.list_story_styles(story_id)
+        return self._repo.list_story_styles(int(story_id))
 
     def mount_story_style(
         self,
         workspace_id: str,
         story_id: int,
         style_id: int,
-    ) -> models.StoryNarrativeStyle | None:
+    ) -> StoryNarrativeStyle | None:
         if self._story(workspace_id, story_id) is None:
             return None
-        style = self._repo.get_style(style_id)
-        if style is None or style.workspace_id != workspace_id:
+        style = self._repo.get_style(int(style_id))
+        if style is None or style.workspace_id != str(workspace_id):
             raise FileNotFoundError(f"narrative style not found in workspace: {style_id}")
         with self._database.atomic():
-            items = self._repo.mount_story_styles(workspace_id, story_id, [style_id])
+            items = self._repo.mount_story_styles(
+                str(workspace_id),
+                int(story_id),
+                [int(style_id)],
+            )
         return next(item for item in items if item.narrative_style_id == int(style_id))
 
     def unmount_story_style(
@@ -142,37 +171,18 @@ class SessionComposerService:
         if self._story(workspace_id, story_id) is None:
             return None
         with self._database.atomic():
-            return self._repo.unmount_story_style(story_id, mount_id)
+            return self._repo.unmount_story_style(int(story_id), int(mount_id))
 
     def set_story_base_style(
         self,
         workspace_id: str,
         story_id: int,
         mount_id: int | None,
-    ) -> models.StoryNarrativeStyle | None:
+    ) -> StoryNarrativeStyle | None:
         if self._story(workspace_id, story_id) is None:
             raise FileNotFoundError("story not found in workspace")
         with self._database.atomic():
-            return self._repo.set_story_base_style(story_id, mount_id)
-
-    def resolve_session_style(
-        self,
-        session_id: str,
-        override_style_id: int | None,
-    ) -> models.StoryNarrativeStyle | None:
-        session = self._sessions.get(session_id)
-        if session is None:
-            raise FileNotFoundError(f"session not found: {session_id}")
-        items = self._repo.list_story_styles(int(session.story_id))
-        if override_style_id is None:
-            return next((item for item in items if item.is_base), None)
-        selected = next(
-            (item for item in items if item.narrative_style_id == int(override_style_id)),
-            None,
-        )
-        if selected is None:
-            raise ValueError("narrative style is not mounted on the session story")
-        return selected
+            return self._repo.set_story_base_style(int(story_id), mount_id)
 
     def list_quick_replies(
         self,
@@ -180,10 +190,13 @@ class SessionComposerService:
         story_id: int,
         *,
         enabled_only: bool = False,
-    ) -> list[models.StoryQuickReply] | None:
+    ) -> list[StoryQuickReply] | None:
         if self._story(workspace_id, story_id) is None:
             return None
-        return self._repo.list_quick_replies(story_id, enabled_only=enabled_only)
+        return self._repo.list_quick_replies(
+            int(story_id),
+            enabled_only=bool(enabled_only),
+        )
 
     def create_quick_reply(
         self,
@@ -194,17 +207,17 @@ class SessionComposerService:
         message: str,
         sort_order: int = 0,
         enabled: bool = True,
-    ) -> models.StoryQuickReply | None:
+    ) -> StoryQuickReply | None:
         if self._story(workspace_id, story_id) is None:
             return None
         with self._database.atomic():
             return self._repo.create_quick_reply(
-                workspace_id,
-                story_id,
-                title=_required_text(title, "title"),
-                message=_required_text(message, "message"),
-                sort_order=sort_order,
-                enabled=enabled,
+                str(workspace_id),
+                int(story_id),
+                title=str(title),
+                message=str(message),
+                sort_order=int(sort_order),
+                enabled=bool(enabled),
             )
 
     def update_quick_reply(
@@ -217,15 +230,19 @@ class SessionComposerService:
         message: str | None = None,
         sort_order: int | None = None,
         enabled: bool | None = None,
-    ) -> models.StoryQuickReply | None:
-        current = self._repo.get_quick_reply(reply_id)
-        if current is None or current.workspace_id != workspace_id or current.story_id != int(story_id):
+    ) -> StoryQuickReply | None:
+        current = self._repo.get_quick_reply(int(reply_id))
+        if (
+            current is None
+            or current.workspace_id != str(workspace_id)
+            or current.story_id != int(story_id)
+        ):
             return None
         with self._database.atomic():
             return self._repo.update_quick_reply(
-                reply_id,
-                title=_required_text(title, "title") if title is not None else None,
-                message=_required_text(message, "message") if message is not None else None,
+                int(reply_id),
+                title=str(title) if title is not None else None,
+                message=str(message) if message is not None else None,
                 sort_order=sort_order,
                 enabled=enabled,
             )
@@ -236,33 +253,19 @@ class SessionComposerService:
         story_id: int,
         reply_id: int,
     ) -> bool | None:
-        current = self._repo.get_quick_reply(reply_id)
+        current = self._repo.get_quick_reply(int(reply_id))
         if current is None:
             return False
-        if current.workspace_id != workspace_id or current.story_id != int(story_id):
+        if (
+            current.workspace_id != str(workspace_id)
+            or current.story_id != int(story_id)
+        ):
             return None
         with self._database.atomic():
-            return self._repo.delete_quick_reply(reply_id)
-
-    def mount_all_workspace_styles(self, workspace_id: str, story_id: int) -> None:
-        self._repo.mount_all_workspace_styles(workspace_id, story_id)
+            return self._repo.delete_quick_reply(int(reply_id))
 
     def _story(self, workspace_id: str, story_id: int) -> models.Story | None:
         story = self._stories.get(int(story_id))
-        if story is None or story.workspace_id != workspace_id:
+        if story is None or story.workspace_id != str(workspace_id):
             return None
         return story
-
-
-def normalize_turn_mode(value: object) -> str:
-    normalized = str(value or "").strip().lower() or models.TURN_MODE_IC
-    if normalized not in models.TURN_MODES:
-        raise ValueError(f"invalid turn mode: {normalized}")
-    return normalized
-
-
-def _required_text(value: object, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise ValueError(f"{field_name} must not be empty")
-    return text

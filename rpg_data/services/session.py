@@ -41,7 +41,7 @@ from rpg_data.services.message import MessageService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
 from rpg_data.services.rp_modules import RPModuleService
-from rpg_data.services.session_composer import SessionComposerService
+from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.status import StatusDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 
@@ -69,7 +69,7 @@ class SessionDataService:
         self._outcomes = NarrativeOutcomeService(database)
         self._plot = PlotSchedulingDataService(database)
         self._rp_modules = RPModuleService(database)
-        self._composer = SessionComposerService(database)
+        self._composer = SessionComposerDataService(database)
         self._story_memory = StoryMemoryDataService(database)
         self._dream_memory = DreamMemoryDataService(database)
         self._status = StatusDataService(database)
@@ -151,23 +151,6 @@ class SessionDataService:
 
     def get_session_story(self, session_id: str) -> models.Story | None:
         return self._catalog.get_session_story(str(session_id))
-
-    def get_turn_mode(
-        self,
-        workspace_id: str,
-        mode: str,
-    ) -> models.WorkspaceTurnMode | None:
-        return self._composer.get_mode(str(workspace_id), str(mode))
-
-    def resolve_session_style(
-        self,
-        session_id: str,
-        override_style_id: int | None,
-    ) -> models.StoryNarrativeStyle | None:
-        return self._composer.resolve_session_style(
-            str(session_id),
-            override_style_id,
-        )
 
     def set_session_main_llm_provider_key(
         self,

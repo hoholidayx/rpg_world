@@ -22,6 +22,7 @@ from rpg_core.story.template import (
 )
 
 from rpg_data import models as data_models
+from rpg_data.model.composer import StoryNarrativeStyle, WorkspaceTurnMode
 from rpg_data.model.session import Session
 
 
@@ -30,17 +31,19 @@ class TurnSnapshotDataPort(Protocol):
 
     def get_session_story(self, session_id: str) -> data_models.Story | None: ...
 
-    def get_turn_mode(
+
+class SessionComposerSnapshotReader(Protocol):
+    def get_mode(
         self,
         workspace_id: str,
         mode: str,
-    ) -> data_models.WorkspaceTurnMode | None: ...
+    ) -> WorkspaceTurnMode | None: ...
 
     def resolve_session_style(
         self,
         session_id: str,
-        override_style_id: int | None,
-    ) -> data_models.StoryNarrativeStyle | None: ...
+        request_override_style_id: int | None,
+    ) -> StoryNarrativeStyle | None: ...
 
 
 class SessionRoleSnapshotReader(Protocol):
@@ -57,10 +60,12 @@ class TurnSnapshotResolver:
         session_id: str,
         *,
         data: TurnSnapshotDataPort,
+        composer: SessionComposerSnapshotReader,
         role_service: SessionRoleSnapshotReader,
     ) -> None:
         self._session_id = str(session_id)
         self._data = data
+        self._composer = composer
         self._role_service = role_service
 
     def resolve(
@@ -95,7 +100,7 @@ class TurnSnapshotResolver:
             player_character,
         )
 
-        mode_config = self._data.get_turn_mode(
+        mode_config = self._composer.get_mode(
             session.workspace_id,
             request.mode.value,
         )
@@ -105,7 +110,7 @@ class TurnSnapshotResolver:
         if policy.apply_narrative_style or request.narrative_style_id is not None:
             # Explicit overrides remain validated in OOC mode even though the
             # OOC execution policy suppresses their prompt.
-            style = self._data.resolve_session_style(
+            style = self._composer.resolve_session_style(
                 self._session_id,
                 request.narrative_style_id,
             )

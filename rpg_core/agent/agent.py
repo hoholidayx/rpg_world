@@ -37,6 +37,7 @@ from rpg_core.agent.turn.service import AgentTurnService
 from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshotResolver
 from rpg_core.session.derivation import SessionDerivationService
+from rpg_core.session.composer import SessionComposerApplicationService
 from rpg_core.session.reset import SessionResetService
 from rpg_core.session.role import SessionRoleService
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
@@ -67,6 +68,9 @@ class RPGGameAgent:
         token_counter = token_counter or TiktokenTokenCounter()
         gateway = get_data_service_gateway()
         session_data = gateway.sessions
+        session_composer = SessionComposerApplicationService(
+            gateway.session_composer
+        )
         role_service = SessionRoleService(session_data)
         reset_service = SessionResetService(session_data)
         derivation_service = SessionDerivationService(session_data)
@@ -93,6 +97,7 @@ class RPGGameAgent:
             main_llm_selection=self._model_runtime.resolve,
             token_counter=token_counter,
             turn_snapshot_data=session_data,
+            session_composer=session_composer,
             role_snapshot_reader=role_service,
         )
         self._tool_service = AgentToolService(

@@ -12,6 +12,7 @@ from commons.errors import MainContextWindowThresholdExceededError
 from rpg_core.agent.runtime.resources import AgentContextResources
 from rpg_core.agent.turn import TurnExecutionSnapshot, TurnMode, TurnRequest
 from rpg_core.agent.turn.resolver import (
+    SessionComposerSnapshotReader,
     SessionRoleSnapshotReader,
     TurnSnapshotDataPort,
     TurnSnapshotResolver,
@@ -64,6 +65,7 @@ class AgentContextService:
         main_llm_selection: Callable[[str], Awaitable["MainLLMSelection"]],
         token_counter: "TokenCounter",
         turn_snapshot_data: TurnSnapshotDataPort,
+        session_composer: SessionComposerSnapshotReader,
         role_snapshot_reader: SessionRoleSnapshotReader,
     ) -> None:
         self._world_name = world_name
@@ -74,6 +76,7 @@ class AgentContextService:
         self._main_llm_selection = main_llm_selection
         self._token_counter = token_counter
         self._turn_snapshot_data = turn_snapshot_data
+        self._session_composer = session_composer
         self._role_snapshot_reader = role_snapshot_reader
 
     def resolve_turn_execution(
@@ -85,6 +88,7 @@ class AgentContextService:
         return TurnSnapshotResolver(
             self._session_id(),
             data=self._turn_snapshot_data,
+            composer=self._session_composer,
             role_service=self._role_snapshot_reader,
         ).resolve(
             request,

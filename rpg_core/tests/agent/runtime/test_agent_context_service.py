@@ -102,15 +102,17 @@ class _TurnSnapshotData:
     def get_session_story(_session_id: str):  # noqa: ANN201
         return None
 
-    @staticmethod
-    def get_turn_mode(_workspace_id: str, _mode: str):  # noqa: ANN201
-        return None
 
+class _SessionComposer:
     @staticmethod
     def resolve_session_style(
         _session_id: str,
         _override_style_id: int | None,
     ):  # noqa: ANN201
+        return None
+
+    @staticmethod
+    def get_mode(_workspace_id: str, _mode: str):  # noqa: ANN201
         return None
 
 
@@ -152,6 +154,7 @@ def _service(builder: _Builder, *, session=None, scene=None, characters=None):  
         ),
         token_counter=_Counter(),
         turn_snapshot_data=_TurnSnapshotData(),
+        session_composer=_SessionComposer(),
         role_snapshot_reader=_RoleReader(),
     )
 

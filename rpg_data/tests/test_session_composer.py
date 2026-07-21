@@ -6,10 +6,11 @@ import pytest
 from peewee import IntegrityError, SqliteDatabase
 
 from rpg_core.session.catalog import SessionCatalogService
+from rpg_core.session.composer import SessionComposerApplicationService
 from rpg_data import db
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.services.gateway import DataServiceGateway
-from rpg_data.services.session_composer import SessionComposerService
+from rpg_data.services.session_composer import SessionComposerDataService
 
 
 def _database(tmp_path: Path) -> SqliteDatabase:
@@ -28,7 +29,7 @@ def test_session_composer_modes_styles_and_story_defaults(tmp_path: Path) -> Non
     gateway = DataServiceGateway(tmp_path / "composer.sqlite3")
     gateway.initialize()
     try:
-        service = gateway.session_composer
+        service = SessionComposerApplicationService(gateway.session_composer)
         catalog = gateway.catalog
         modes = service.list_modes("demo_workspace")
         assert modes is not None
@@ -90,7 +91,9 @@ def test_session_composer_modes_styles_and_story_defaults(tmp_path: Path) -> Non
 def test_session_composer_workspace_isolation_and_quick_reply_order(tmp_path: Path) -> None:
     database = _database(tmp_path)
     try:
-        service = SessionComposerService(database)
+        service = SessionComposerApplicationService(
+            SessionComposerDataService(database)
+        )
         with database.atomic():
             database.execute_sql(
                 "INSERT INTO rpg_workspaces (id, name, root_path) VALUES ('other', 'Other', 'other')"

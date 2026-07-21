@@ -6,7 +6,13 @@ from collections.abc import Iterable
 
 from peewee import Database, SQL
 
-from rpg_data import models
+from rpg_data.model.composer import (
+    NarrativeStyle,
+    StoryNarrativeStyle,
+    StoryQuickReply,
+    WorkspaceTurnMode,
+    WorkspaceTurnModeSeed,
+)
 from rpg_data.repositories._utils import (
     to_narrative_style,
     to_story_narrative_style,
@@ -22,47 +28,29 @@ from rpg_data.repositories.records import (
 )
 
 
-DEFAULT_TURN_MODES: tuple[tuple[str, str, str, int], ...] = (
-    (
-        models.TURN_MODE_IC,
-        "角色内",
-        "将本轮输入视为玩家角色在故事内的行动或发言，保持沉浸式叙事并自然推进当前场景。",
-        10,
-    ),
-    (
-        models.TURN_MODE_OOC,
-        "场外",
-        "将本轮输入视为场外讨论：直接、清晰地回应，不推进剧情，不产生剧情裁定或状态变化。",
-        20,
-    ),
-    (
-        models.TURN_MODE_GM,
-        "主持",
-        "将本轮输入视为主持人或导演指令，在遵守既有事实的前提下执行指令，并同步已经确定的剧情状态变化。",
-        30,
-    ),
-)
-
-
 class SessionComposerRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
         bind_database(database)
 
-    def ensure_workspace_modes(self, workspace_id: str) -> list[models.WorkspaceTurnMode]:
-        for mode, short_name, prompt, sort_order in DEFAULT_TURN_MODES:
+    def ensure_workspace_modes(
+        self,
+        workspace_id: str,
+        seeds: Iterable[WorkspaceTurnModeSeed],
+    ) -> list[WorkspaceTurnMode]:
+        for seed in seeds:
             WorkspaceTurnModeRecord.get_or_create(
                 workspace=workspace_id,
-                mode=mode,
+                mode=seed.mode,
                 defaults={
-                    "short_name": short_name,
-                    "prompt": prompt,
-                    "sort_order": sort_order,
+                    "short_name": seed.short_name,
+                    "prompt": seed.prompt,
+                    "sort_order": seed.sort_order,
                 },
             )
         return self.list_workspace_modes(workspace_id)
 
-    def list_workspace_modes(self, workspace_id: str) -> list[models.WorkspaceTurnMode]:
+    def list_workspace_modes(self, workspace_id: str) -> list[WorkspaceTurnMode]:
         rows = (
             WorkspaceTurnModeRecord.select()
             .where(WorkspaceTurnModeRecord.workspace == workspace_id)
@@ -77,7 +65,7 @@ class SessionComposerRepository:
         *,
         short_name: str,
         prompt: str,
-    ) -> models.WorkspaceTurnMode | None:
+    ) -> WorkspaceTurnMode | None:
         updated = (
             WorkspaceTurnModeRecord.update(
                 short_name=short_name,
@@ -99,7 +87,7 @@ class SessionComposerRepository:
         )
         return to_workspace_turn_mode(row)
 
-    def list_styles(self, workspace_id: str) -> list[models.NarrativeStyle]:
+    def list_styles(self, workspace_id: str) -> list[NarrativeStyle]:
         rows = (
             NarrativeStyleRecord.select()
             .where(NarrativeStyleRecord.workspace == workspace_id)
@@ -107,7 +95,7 @@ class SessionComposerRepository:
         )
         return [to_narrative_style(row) for row in rows]
 
-    def get_style(self, style_id: int) -> models.NarrativeStyle | None:
+    def get_style(self, style_id: int) -> NarrativeStyle | None:
         row = NarrativeStyleRecord.get_or_none(NarrativeStyleRecord.id == int(style_id))
         return to_narrative_style(row) if row is not None else None
 
@@ -118,7 +106,7 @@ class SessionComposerRepository:
         name: str,
         prompt: str,
         sort_order: int,
-    ) -> models.NarrativeStyle:
+    ) -> NarrativeStyle:
         row = NarrativeStyleRecord.create(
             workspace=workspace_id,
             name=name,
@@ -134,7 +122,7 @@ class SessionComposerRepository:
         name: str | None = None,
         prompt: str | None = None,
         sort_order: int | None = None,
-    ) -> models.NarrativeStyle | None:
+    ) -> NarrativeStyle | None:
         fields: dict[str, object] = {}
         if name is not None:
             fields["name"] = name
@@ -165,7 +153,7 @@ class SessionComposerRepository:
         workspace_id: str,
         story_id: int,
         style_ids: Iterable[int],
-    ) -> list[models.StoryNarrativeStyle]:
+    ) -> list[StoryNarrativeStyle]:
         requested = {int(value) for value in style_ids}
         styles = {
             style.id: style
@@ -181,18 +169,7 @@ class SessionComposerRepository:
             )
         return self.list_story_styles(story_id)
 
-    def mount_all_workspace_styles(
-        self,
-        workspace_id: str,
-        story_id: int,
-    ) -> list[models.StoryNarrativeStyle]:
-        return self.mount_story_styles(
-            workspace_id,
-            story_id,
-            (style.id for style in self.list_styles(workspace_id)),
-        )
-
-    def list_story_styles(self, story_id: int) -> list[models.StoryNarrativeStyle]:
+    def list_story_styles(self, story_id: int) -> list[StoryNarrativeStyle]:
         rows = (
             StoryNarrativeStyleRecord.select(
                 StoryNarrativeStyleRecord,
@@ -211,7 +188,7 @@ class SessionComposerRepository:
         self,
         story_id: int,
         style_id: int,
-    ) -> models.StoryNarrativeStyle | None:
+    ) -> StoryNarrativeStyle | None:
         row = StoryNarrativeStyleRecord.get_or_none(
             (StoryNarrativeStyleRecord.story == int(story_id))
             & (StoryNarrativeStyleRecord.narrative_style == int(style_id))
@@ -232,7 +209,7 @@ class SessionComposerRepository:
         self,
         story_id: int,
         mount_id: int | None,
-    ) -> models.StoryNarrativeStyle | None:
+    ) -> StoryNarrativeStyle | None:
         with self._database.atomic():
             (
                 StoryNarrativeStyleRecord.update(
@@ -270,7 +247,7 @@ class SessionComposerRepository:
         story_id: int,
         *,
         enabled_only: bool = False,
-    ) -> list[models.StoryQuickReply]:
+    ) -> list[StoryQuickReply]:
         query = StoryQuickReplyRecord.select().where(
             StoryQuickReplyRecord.story == int(story_id)
         )
@@ -279,7 +256,7 @@ class SessionComposerRepository:
         query = query.order_by(StoryQuickReplyRecord.sort_order, StoryQuickReplyRecord.id)
         return [to_story_quick_reply(row) for row in query]
 
-    def get_quick_reply(self, reply_id: int) -> models.StoryQuickReply | None:
+    def get_quick_reply(self, reply_id: int) -> StoryQuickReply | None:
         row = StoryQuickReplyRecord.get_or_none(StoryQuickReplyRecord.id == int(reply_id))
         return to_story_quick_reply(row) if row is not None else None
 
@@ -292,7 +269,7 @@ class SessionComposerRepository:
         message: str,
         sort_order: int,
         enabled: bool,
-    ) -> models.StoryQuickReply:
+    ) -> StoryQuickReply:
         row = StoryQuickReplyRecord.create(
             workspace=workspace_id,
             story=story_id,
@@ -311,7 +288,7 @@ class SessionComposerRepository:
         message: str | None = None,
         sort_order: int | None = None,
         enabled: bool | None = None,
-    ) -> models.StoryQuickReply | None:
+    ) -> StoryQuickReply | None:
         fields: dict[str, object] = {}
         if title is not None:
             fields["title"] = title

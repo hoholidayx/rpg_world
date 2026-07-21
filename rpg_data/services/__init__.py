@@ -19,7 +19,7 @@ from rpg_data.services.plot_scheduling import (
 )
 from rpg_data.services.rp_modules import RPModuleService
 from rpg_data.services.session import SessionDataConflictError, SessionDataService
-from rpg_data.services.session_composer import SessionComposerService
+from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.status import StatusDataService
 
@@ -41,7 +41,7 @@ __all__ = [
     "RPModuleService",
     "SessionDataConflictError",
     "SessionDataService",
-    "SessionComposerService",
+    "SessionComposerDataService",
     "StoryMemoryDataService",
     "StatusDataService",
     "get_data_service_gateway",

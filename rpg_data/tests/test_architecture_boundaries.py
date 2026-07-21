@@ -6,6 +6,12 @@ import ast
 from pathlib import Path
 
 from rpg_data import models
+from rpg_data.model.composer import (
+    NarrativeStyle,
+    StoryNarrativeStyle,
+    StoryQuickReply,
+    WorkspaceTurnMode,
+)
 from rpg_data.model.memory import DreamProposal, PersistentMemoryBundle
 from rpg_data.model.media import MediaJob, MediaLibraryAssetBundle
 from rpg_data.model.session import Session, SessionDerivationJob, SessionMessage
@@ -18,6 +24,7 @@ from rpg_data.model.tts import TTSJob, TTSMessageSource
 from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.media import MediaDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
+from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
 from rpg_data.services.status import StatusDataService
@@ -56,6 +63,7 @@ FORBIDDEN_DATA_DEPENDENCIES = (
 
 RECENT_APPLICATION_SERVICE_FILES = (
     "rpg_core/session/catalog.py",
+    "rpg_core/session/composer.py",
     "rpg_core/session/deletion.py",
     "rpg_core/session/derivation.py",
     "rpg_core/session/reset.py",
@@ -107,7 +115,7 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "play_api/backends/data_manager.py",
     "play_api/routers/plot_scheduling.py",
     "play_api/routers/rp_modules.py",
-    "play_api/routers/session_composer.py",
+    "play_api/composition.py",
     "play_api/routers/sessions.py",
     "rp_memory/run.py",
     "rpg_core/agent/agent.py",
@@ -246,6 +254,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         StatusDataService,
         MediaDataService,
         TTSDataService,
+        SessionComposerDataService,
     )
 
     assert all(service_type.__name__.endswith("DataService") for service_type in service_types)
@@ -264,6 +273,27 @@ def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.MediaLibraryAssetBundle is MediaLibraryAssetBundle
     assert models.TTSJob is TTSJob
     assert models.TTSMessageSource is TTSMessageSource
+    assert models.WorkspaceTurnMode is WorkspaceTurnMode
+    assert models.NarrativeStyle is NarrativeStyle
+    assert models.StoryNarrativeStyle is StoryNarrativeStyle
+    assert models.StoryQuickReply is StoryQuickReply
+
+
+def test_composer_application_service_uses_narrow_data_port() -> None:
+    imports = _imports(ROOT / "rpg_core/session/composer.py")
+
+    assert "rpg_data.services.gateway" not in imports
+    assert "rpg_data.services.session_composer" not in imports
+
+
+def test_composer_data_services_do_not_expose_business_resolution() -> None:
+    assert "resolve_session_style" not in vars(SessionComposerDataService)
+    assert "get_turn_mode" not in vars(SessionDataService)
+    assert "resolve_session_style" not in vars(SessionDataService)
+    repository_source = (
+        ROOT / "rpg_data/repositories/session_composer_repo.py"
+    ).read_text(encoding="utf-8")
+    assert "DEFAULT_TURN_MODES" not in repository_source
 
 
 def test_media_data_service_does_not_expose_business_policy_entrypoints() -> None:

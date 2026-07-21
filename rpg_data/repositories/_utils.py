@@ -8,6 +8,12 @@ from typing import Mapping, TypeVar
 from peewee import SQL, DoesNotExist, Model
 
 from rpg_data import models
+from rpg_data.model.composer import (
+    NarrativeStyle,
+    StoryNarrativeStyle,
+    StoryQuickReply,
+    WorkspaceTurnMode,
+)
 from rpg_data.repositories import records
 
 ModelT = TypeVar("ModelT", bound=Model)
@@ -45,8 +51,8 @@ def to_workspace(row: records.WorkspaceRecord) -> models.Workspace:
     )
 
 
-def to_workspace_turn_mode(row: records.WorkspaceTurnModeRecord) -> models.WorkspaceTurnMode:
-    return models.WorkspaceTurnMode(
+def to_workspace_turn_mode(row: records.WorkspaceTurnModeRecord) -> WorkspaceTurnMode:
+    return WorkspaceTurnMode(
         workspace_id=str(row.workspace_id),
         mode=str(row.mode),
         short_name=str(row.short_name),
@@ -58,8 +64,8 @@ def to_workspace_turn_mode(row: records.WorkspaceTurnModeRecord) -> models.Works
     )
 
 
-def to_narrative_style(row: records.NarrativeStyleRecord) -> models.NarrativeStyle:
-    return models.NarrativeStyle(
+def to_narrative_style(row: records.NarrativeStyleRecord) -> NarrativeStyle:
+    return NarrativeStyle(
         id=int(row.id),
         workspace_id=str(row.workspace_id),
         name=str(row.name),
@@ -73,9 +79,9 @@ def to_narrative_style(row: records.NarrativeStyleRecord) -> models.NarrativeSty
 
 def to_story_narrative_style(
     row: records.StoryNarrativeStyleRecord,
-) -> models.StoryNarrativeStyle:
+) -> StoryNarrativeStyle:
     style = row.narrative_style
-    return models.StoryNarrativeStyle(
+    return StoryNarrativeStyle(
         id=int(row.id),
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
@@ -90,8 +96,8 @@ def to_story_narrative_style(
     )
 
 
-def to_story_quick_reply(row: records.StoryQuickReplyRecord) -> models.StoryQuickReply:
-    return models.StoryQuickReply(
+def to_story_quick_reply(row: records.StoryQuickReplyRecord) -> StoryQuickReply:
+    return StoryQuickReply(
         id=int(row.id),
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),

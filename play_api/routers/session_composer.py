@@ -8,10 +8,16 @@ from fastapi import APIRouter, HTTPException, Response
 from peewee import IntegrityError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from play_api.composition import session_composer_service
 from play_api.routers._locator import resolve_session_or_404
 from rpg_core.agent.turn.models import normalize_turn_mode
-from rpg_data import models
-from rpg_data.services import get_data_service_gateway
+from rpg_core.session.composer import SessionComposerApplicationService
+from rpg_data.model.composer import (
+    NarrativeStyle,
+    StoryNarrativeStyle,
+    StoryQuickReply,
+    WorkspaceTurnMode,
+)
 
 router = APIRouter(tags=["play-session-composer"])
 
@@ -173,7 +179,7 @@ class PlaySessionComposer(BaseModel):
     quick_replies: list[PlayQuickReply] = Field(alias="quickReplies")
 
 
-def _mode_response(item: models.WorkspaceTurnMode) -> PlayTurnMode:
+def _mode_response(item: WorkspaceTurnMode) -> PlayTurnMode:
     return PlayTurnMode(
         mode=normalize_turn_mode(item.mode).value,
         shortName=item.short_name,
@@ -183,7 +189,7 @@ def _mode_response(item: models.WorkspaceTurnMode) -> PlayTurnMode:
     )
 
 
-def _style_response(item: models.NarrativeStyle) -> PlayNarrativeStyle:
+def _style_response(item: NarrativeStyle) -> PlayNarrativeStyle:
     return PlayNarrativeStyle(
         id=item.id,
         workspaceId=item.workspace_id,
@@ -196,7 +202,7 @@ def _style_response(item: models.NarrativeStyle) -> PlayNarrativeStyle:
     )
 
 
-def _story_style_response(item: models.StoryNarrativeStyle) -> PlayStoryNarrativeStyle:
+def _story_style_response(item: StoryNarrativeStyle) -> PlayStoryNarrativeStyle:
     return PlayStoryNarrativeStyle(
         mountId=item.id,
         narrativeStyleId=item.narrative_style_id,
@@ -208,7 +214,7 @@ def _story_style_response(item: models.StoryNarrativeStyle) -> PlayStoryNarrativ
     )
 
 
-def _quick_reply_response(item: models.StoryQuickReply) -> PlayQuickReply:
+def _quick_reply_response(item: StoryQuickReply) -> PlayQuickReply:
     return PlayQuickReply(
         id=item.id,
         title=item.title,
@@ -221,8 +227,8 @@ def _quick_reply_response(item: models.StoryQuickReply) -> PlayQuickReply:
     )
 
 
-def _composer_service():
-    return get_data_service_gateway().session_composer
+def _composer_service() -> SessionComposerApplicationService:
+    return session_composer_service()
 
 
 def _conflict(exc: IntegrityError) -> HTTPException:
@@ -478,26 +484,17 @@ async def delete_quick_reply(
 async def get_session_composer(session_id: str) -> PlaySessionComposer:
     session_payload = await resolve_session_or_404(session_id)
     agent_session_id = str(session_payload["id"])
-    session = get_data_service_gateway().catalog.get_session(agent_session_id)
-    if session is None:
+    snapshot = _composer_service().get_snapshot(agent_session_id)
+    if snapshot is None:
         raise HTTPException(status_code=404, detail="session not found")
-    service = _composer_service()
-    modes = service.list_modes(session.workspace_id) or []
-    styles = service.list_story_styles(session.workspace_id, session.story_id) or []
-    quick_replies = service.list_quick_replies(
-        session.workspace_id,
-        session.story_id,
-        enabled_only=True,
-    ) or []
-    base_style = next((item for item in styles if item.is_base), None)
     return PlaySessionComposer(
-        sessionId=session.id,
-        workspaceId=session.workspace_id,
-        storyId=session.story_id,
-        modes=[_mode_response(item) for item in modes],
-        narrativeStyles=[_story_style_response(item) for item in styles],
-        baseNarrativeStyleId=(
-            base_style.narrative_style_id if base_style is not None else None
-        ),
-        quickReplies=[_quick_reply_response(item) for item in quick_replies],
+        sessionId=snapshot.session_id,
+        workspaceId=snapshot.workspace_id,
+        storyId=snapshot.story_id,
+        modes=[_mode_response(item) for item in snapshot.modes],
+        narrativeStyles=[
+            _story_style_response(item) for item in snapshot.narrative_styles
+        ],
+        baseNarrativeStyleId=snapshot.base_narrative_style_id,
+        quickReplies=[_quick_reply_response(item) for item in snapshot.quick_replies],
     )
