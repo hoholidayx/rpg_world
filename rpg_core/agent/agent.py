@@ -36,10 +36,13 @@ from rpg_core.agent.turn.runner import AgentReply, run_chat_loop, run_chat_loop_
 from rpg_core.agent.turn.service import AgentTurnService
 from rpg_core.agent.runtime.main_llm import MainLLMSelectionService
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshotResolver
+from rpg_core.rp_modules.application import RPModuleApplicationService
+from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.session.derivation import SessionDerivationService
 from rpg_core.session.composer import SessionComposerApplicationService
 from rpg_core.session.reset import SessionResetService
 from rpg_core.session.role import SessionRoleService
+from rpg_core.settings import settings
 from rpg_core.utils.tokenizer import TiktokenTokenCounter, TokenCounter
 
 if TYPE_CHECKING:
@@ -71,6 +74,10 @@ class RPGGameAgent:
         session_composer = SessionComposerApplicationService(
             gateway.session_composer
         )
+        rp_module_service = RPModuleApplicationService(
+            RPModuleRegistry(settings=settings.rp_module_settings),
+            gateway.rp_modules,
+        )
         role_service = SessionRoleService(session_data)
         reset_service = SessionResetService(session_data)
         derivation_service = SessionDerivationService(session_data)
@@ -87,13 +94,14 @@ class RPGGameAgent:
             history_enabled=history_enabled,
             command_dispatcher=self._command_dispatcher,
             role_reader=role_service,
+            rp_module_service=rp_module_service,
         )
         self._context_service = AgentContextService(
             world_name=world_name,
             session_id=lambda: self._lifecycle.session_id,
             session_manager=self._lifecycle.session_manager,
             resources=lambda: self._lifecycle.resources,
-            rp_module_registry=lambda: self._lifecycle.rp_module_registry,
+            rp_module_service=lambda: self._lifecycle.rp_module_service,
             main_llm_selection=self._model_runtime.resolve,
             token_counter=token_counter,
             turn_snapshot_data=session_data,

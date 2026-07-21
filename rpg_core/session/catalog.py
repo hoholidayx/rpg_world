@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ContextManager, Mapping, Protocol
 
+from commons.types import JsonValue
 from rpg_core.story.template import validate_story_text_template
 from rpg_core.session.status import (
     SessionStatusDataPort,
@@ -69,7 +70,7 @@ class SessionCatalogDataPort(SessionStatusDataPort, Protocol):
         module_name: str,
         *,
         enabled: bool,
-        config: Mapping[str, object],
+        config: Mapping[str, JsonValue],
     ) -> data_models.StoryRPModule | None: ...
 
     def list_narrative_styles(

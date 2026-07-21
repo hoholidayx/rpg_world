@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import rpg_core.agent.command.handlers as command_module
 from rpg_core.agent.command import CommandDispatcher, format_command_help
 from rpg_core.rp_modules.registry import RPModuleRegistry
+from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.session.reset import SessionResetResult
 from rpg_core.settings import RPModuleSettings
 from rpg_data import models
@@ -358,11 +359,11 @@ class TestCommandDispatcher:
         dispatcher = CommandDispatcher(agent=SimpleNamespace())
         dispatcher.register_default_builtins()
         gateway = get_data_service_gateway(tmp_path / "command-rp-modules.sqlite3")
-        registry = RPModuleRegistry(
-            settings=RPModuleSettings(),
-            gateway_provider=lambda: gateway,
+        service = RPModuleApplicationService(
+            RPModuleRegistry(settings=RPModuleSettings()),
+            gateway.rp_modules,
         )
-        for command in registry.get_commands("s_forest001"):
+        for command in service.get_commands("s_forest001"):
             dispatcher.register_builtin(
                 command.name,
                 command.description,

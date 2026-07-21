@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from rpg_core.agent.command.dispatcher import CommandDispatcher
     from rpg_core.agent.mailbox import AgentMailbox
     from rpg_core.agent.runtime.tools import AgentToolService
+    from rpg_core.rp_modules.application import RPModuleApplicationService
     from rpg_core.rp_modules.registry import RPModuleRegistry
 
 ContextResourceFactory = Callable[..., AgentContextResources]
@@ -54,6 +55,7 @@ class AgentRuntimeLifecycle:
         history_enabled: bool,
         command_dispatcher: "CommandDispatcher",
         role_reader: SessionRoleContextReader,
+        rp_module_service: "RPModuleApplicationService | None" = None,
         resource_factory: ContextResourceFactory = build_agent_context_resources,
     ) -> None:
         self._session_id = session_id
@@ -66,7 +68,7 @@ class AgentRuntimeLifecycle:
             history_enabled=history_enabled,
         )
         self._resources = self._build_resources(session_id)
-        self._rp_module_registry: RPModuleRegistry | None = None
+        self._rp_module_service = rp_module_service
         self._status_sub_agent: StatusSubAgent | None = None
         self._memory_sub_agent: MemorySubAgent | None = None
         self._compressor: SummaryCompressor | None = None
@@ -87,7 +89,12 @@ class AgentRuntimeLifecycle:
 
     @property
     def rp_module_registry(self) -> "RPModuleRegistry | None":
-        return self._rp_module_registry
+        service = self._rp_module_service
+        return service.registry if service is not None else None
+
+    @property
+    def rp_module_service(self) -> "RPModuleApplicationService | None":
+        return self._rp_module_service
 
     @property
     def status_sub_agent(self) -> StatusSubAgent | None:
@@ -121,7 +128,6 @@ class AgentRuntimeLifecycle:
             if self._initialized:
                 return
 
-            self._setup_rp_module_registry()
             self._session_manager.load()
             if self._resources.memory_manager is not None:
                 await self._resources.memory_manager.initialize()
@@ -181,15 +187,6 @@ class AgentRuntimeLifecycle:
                 memory_sub_agent=self._memory_sub_agent,
             )
         self._refresh_sub_agent_bindings()
-        if self._rp_module_registry is not None:
-            self._setup_rp_module_registry()
-
-    def _setup_rp_module_registry(self) -> None:
-        from rpg_core.rp_modules.registry import RPModuleRegistry
-
-        self._rp_module_registry = RPModuleRegistry(
-            settings=getattr(settings, "rp_module_settings", None),
-        )
 
     def _create_sub_agents(self) -> None:
         status_cfg = settings.status_sub_agent_config
@@ -245,8 +242,8 @@ class AgentRuntimeLifecycle:
     def _configure_commands(self) -> None:
         self._command_dispatcher.register_default_builtins()
         self._command_dispatcher.replace_command_providers([
-            lambda: self._rp_module_registry.get_commands(self._session_id)
-            if self._rp_module_registry is not None
+            lambda: self._rp_module_service.get_commands(self._session_id)
+            if self._rp_module_service is not None
             else []
         ])
         sub_agents = []

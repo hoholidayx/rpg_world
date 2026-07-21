@@ -84,7 +84,7 @@ def test_derivation_seeds_only_history_and_required_session_configuration(
         "main_provider_test",
     )
     assert source is not None
-    override = gateway.rp_modules.set_session_override(
+    override = gateway.rp_modules.upsert_session_override(
         source.id,
         "dice",
         enabled=False,

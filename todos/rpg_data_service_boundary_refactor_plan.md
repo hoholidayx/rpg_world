@@ -10,12 +10,12 @@
 - [x] 已完成阶段性架构收口：Gateway 注册表、聚合 Data Service、窄 Port、类型归属与静态守卫
 - [x] 已完成整改项：状态表与 Scene（P3）
 - [x] 已完成整改项：Media 与 TTS（P4）
-- [ ] **下一整改项：Story Catalog、Composer 与 RP Module 配置（P5）**
-- [ ] 后续整改项：消息、历史和通用账本收尾
+- [x] 已完成整改项：Story Catalog、Composer 与 RP Module 配置（P5）
+- [ ] **下一整改项：消息、历史和通用账本收尾（P6）**
 
 本计划用于把 `rpg_data` 收敛为无框架、无业务决策的数据访问模块。整改后，`rpg_data` 负责数据库 DTO、序列化、复杂查询/read model、CRUD、分页、批量、CAS、数据完整性和数据库级原子持久化；业务规则、状态机、默认策略、跨聚合用例和玩家文案必须由对应领域模块或应用编排层持有。
 
-Plot Schedule、Session P1、Dream/P2、状态表/Scene P3 与 Media/TTS P4 已按整改执行顺序完成，下一整改项为 Story Catalog、Composer 与 RP Module 配置 P5。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重、剧情调度优先级或后台任务优先级。后续仍以迁出真实业务决策为准，不为了形式统一制造样板层。
+Plot Schedule、Session P1、Dream/P2、状态表/Scene P3、Media/TTS P4 与 Story Catalog/Composer/RP Module P5 已按整改执行顺序完成，下一整改项为消息、历史和通用账本收尾 P6。这里描述的始终只是架构债务的实施顺序，不代表任何 RP Module 运行时优先级、模块排序、候选仲裁权重、剧情调度优先级或后台任务优先级。后续仍以迁出真实业务决策为准，不为了形式统一制造样板层。
 
 ## 1. 统一边界
 
@@ -174,9 +174,9 @@ Plot Repository 原先的 triggered-only 专用复制方法也固化了“派生
 
 - [x] 将 Story Prompt/Opening 模板白名单、Opening 上限与默认 Opening 规则迁入 Story/Session 领域服务；数据层保留 schema 约束和原始模板 CRUD。
 - [x] 将新 Story 默认挂载 RP Module、自动挂载叙事风格和新 Session 初始化状态表的行为迁出 `CatalogService`。
-- [ ] 将叙事风格的 `story base < session override` 解析迁入 Session Composer 核心逻辑；数据层只管理 style、mount、base 标记和 override 记录。
-- [ ] 将 RP Module 的 `system < story < session` 配置合并、整组字段和有效启用状态解析保持在 `rpg_core/rp_modules`；数据层只管理 catalog/mount/override CRUD。
-- [ ] Character 与 Lorebook management 当前以归属校验和 CRUD 为主，优先保持稳定；只迁出后续发现的 Context 选择、默认挂载或展示策略，不为拆层而重写正常 CRUD。
+- [x] 将叙事风格的 `Story base < 本次请求 override` 解析迁入 Session Composer 核心逻辑；当前没有持久化 Session style override，数据层只管理 style、mount、base 标记和 quick reply/mode 数据。
+- [x] 将 RP Module 的 `system < story < session` 配置合并、整组字段和有效启用状态解析保持在 `rpg_core/rp_modules`；数据层只管理 catalog/mount/override CRUD 与聚合 read model。
+- [x] 复核 Character 与 Lorebook management：当前以归属校验和 CRUD 为主，保持稳定；只在后续发现真实 Context 选择、默认挂载或展示策略越界时整改，不为拆层而重写正常 CRUD。
 
 ## 8. P6：消息、历史与通用账本收尾
 

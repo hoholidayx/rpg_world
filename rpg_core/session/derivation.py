@@ -19,6 +19,7 @@ from rpg_data.model.session import (
     SessionDerivationJobUpdate,
     SessionMessage,
 )
+from rpg_data.model.rp_modules import SessionRPModuleOverride
 from rpg_data.services.session import SessionDataConflictError
 
 
@@ -73,13 +74,13 @@ class SessionDerivationDataPort(SessionCatalogDataPort, Protocol):
     def copy_rp_module_overrides(
         self,
         target_session_id: str,
-        overrides: Iterable[data_models.SessionRPModuleOverride],
+        overrides: Iterable[SessionRPModuleOverride],
     ) -> int: ...
 
     def list_session_rp_module_overrides(
         self,
         session_id: str,
-    ) -> list[data_models.SessionRPModuleOverride] | None: ...
+    ) -> list[SessionRPModuleOverride] | None: ...
 
     def copy_plot_overrides(
         self,

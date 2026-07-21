@@ -9,6 +9,7 @@ from typing import Mapping
 
 from peewee import Database, IntegrityError
 
+from commons.types import JsonValue
 from rpg_data import models
 from rpg_data.model.status import (
     SessionStatusResetPlan,
@@ -16,6 +17,7 @@ from rpg_data.model.status import (
     SessionStatusTable,
     StoryStatusTable,
 )
+from rpg_data.model.rp_modules import SessionRPModuleOverride
 from rpg_data.repositories._utils import (
     serialize_rp_module_config,
     to_story_opening,
@@ -40,7 +42,7 @@ from rpg_data.services.media import MediaDataService
 from rpg_data.services.message import MessageService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
-from rpg_data.services.rp_modules import RPModuleService
+from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.status import StatusDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
@@ -68,7 +70,7 @@ class SessionDataService:
         self._backup = BackupService(database)
         self._outcomes = NarrativeOutcomeService(database)
         self._plot = PlotSchedulingDataService(database)
-        self._rp_modules = RPModuleService(database)
+        self._rp_modules = RPModuleDataService(database)
         self._composer = SessionComposerDataService(database)
         self._story_memory = StoryMemoryDataService(database)
         self._dream_memory = DreamMemoryDataService(database)
@@ -182,9 +184,9 @@ class SessionDataService:
         module_name: str,
         *,
         enabled: bool,
-        config: Mapping[str, object],
+        config: Mapping[str, JsonValue],
     ) -> models.StoryRPModule | None:
-        return self._rp_modules.set_story_module(
+        return self._rp_modules.upsert_story_module(
             str(workspace_id),
             int(story_id),
             module_name,
@@ -494,7 +496,7 @@ class SessionDataService:
     @staticmethod
     def copy_rp_module_overrides(
         target_session_id: str,
-        overrides: Iterable[models.SessionRPModuleOverride],
+        overrides: Iterable[SessionRPModuleOverride],
     ) -> int:
         copied = 0
         for override in overrides:
@@ -510,7 +512,7 @@ class SessionDataService:
     def list_session_rp_module_overrides(
         self,
         session_id: str,
-    ) -> list[models.SessionRPModuleOverride] | None:
+    ) -> list[SessionRPModuleOverride] | None:
         return self._rp_modules.list_session_overrides(str(session_id))
 
     def copy_plot_overrides(

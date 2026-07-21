@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Mapping
 
 from rpg_data.plot_models import (
@@ -129,6 +129,12 @@ from rpg_data.model.media import (
     SessionMediaBackgroundState,
     SessionMediaGalleryItem,
     SessionMediaResetResult,
+)
+from rpg_data.model.rp_modules import (
+    RPModuleCatalogEntry,
+    SessionRPModuleOverride,
+    SessionRPModuleSelectionRows,
+    StoryRPModule,
 )
 from rpg_data.model.session import (
     MESSAGE_ROLES,
@@ -330,6 +336,7 @@ __all__ = [
     "NarrativeStyle",
     "StoryNarrativeStyle",
     "StoryQuickReply",
+    "SessionRPModuleSelectionRows",
     "WorkspaceTurnMode",
     "WorkspaceTurnModeSeed",
     "StoryCharacter",
@@ -578,42 +585,6 @@ class Workspace:
     description: str = ""
     enabled: bool = True
     metadata_json: str = "{}"
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class RPModuleCatalogEntry:
-    module_name: str
-    display_name: str
-    description: str = ""
-    sort_order: int = 0
-    config_version: int = 1
-    default_story_enabled: bool = True
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class StoryRPModule:
-    id: int
-    story_id: int
-    module_name: str
-    enabled: bool = True
-    config: Mapping[str, object] = field(default_factory=dict)
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class SessionRPModuleOverride:
-    id: int
-    session_id: str
-    module_name: str
-    enabled: bool | None = None
-    config: Mapping[str, object] = field(default_factory=dict)
     version: int = 1
     created_at: str = ""
     updated_at: str = ""

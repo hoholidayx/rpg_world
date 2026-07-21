@@ -14,6 +14,12 @@ from rpg_data.model.composer import (
 )
 from rpg_data.model.memory import DreamProposal, PersistentMemoryBundle
 from rpg_data.model.media import MediaJob, MediaLibraryAssetBundle
+from rpg_data.model.rp_modules import (
+    RPModuleCatalogEntry,
+    SessionRPModuleOverride,
+    SessionRPModuleSelectionRows,
+    StoryRPModule,
+)
 from rpg_data.model.session import Session, SessionDerivationJob, SessionMessage
 from rpg_data.model.status import (
     SessionStatusTable,
@@ -24,6 +30,7 @@ from rpg_data.model.tts import TTSJob, TTSMessageSource
 from rpg_data.services.dream_memory import DreamMemoryDataService
 from rpg_data.services.media import MediaDataService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
+from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
@@ -69,6 +76,7 @@ RECENT_APPLICATION_SERVICE_FILES = (
     "rpg_core/session/reset.py",
     "rpg_core/session/role.py",
     "rpg_core/session/status.py",
+    "rpg_core/rp_modules/application.py",
     "rpg_core/rp_modules/plot_scheduler/management.py",
     "rpg_core/rp_modules/plot_scheduler/ledger.py",
     "rpg_core/rp_modules/plot_scheduler/snapshot.py",
@@ -114,7 +122,6 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "media_service/main.py",
     "play_api/backends/data_manager.py",
     "play_api/routers/plot_scheduling.py",
-    "play_api/routers/rp_modules.py",
     "play_api/composition.py",
     "play_api/routers/sessions.py",
     "rp_memory/run.py",
@@ -126,7 +133,6 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "rpg_core/context/factory.py",
     "rpg_core/context/fixed_layer/contributors/story_prompt.py",
     "rpg_core/lorebook.py",
-    "rpg_core/rp_modules/registry.py",
     "rpg_core/session/manager.py",
     "tts_service/main.py",
 })
@@ -255,6 +261,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         MediaDataService,
         TTSDataService,
         SessionComposerDataService,
+        RPModuleDataService,
     )
 
     assert all(service_type.__name__.endswith("DataService") for service_type in service_types)
@@ -277,6 +284,10 @@ def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.NarrativeStyle is NarrativeStyle
     assert models.StoryNarrativeStyle is StoryNarrativeStyle
     assert models.StoryQuickReply is StoryQuickReply
+    assert models.RPModuleCatalogEntry is RPModuleCatalogEntry
+    assert models.StoryRPModule is StoryRPModule
+    assert models.SessionRPModuleOverride is SessionRPModuleOverride
+    assert models.SessionRPModuleSelectionRows is SessionRPModuleSelectionRows
 
 
 def test_composer_application_service_uses_narrow_data_port() -> None:
@@ -294,6 +305,28 @@ def test_composer_data_services_do_not_expose_business_resolution() -> None:
         ROOT / "rpg_data/repositories/session_composer_repo.py"
     ).read_text(encoding="utf-8")
     assert "DEFAULT_TURN_MODES" not in repository_source
+
+
+def test_rp_module_application_and_registry_do_not_use_gateway() -> None:
+    for relative_path in (
+        "rpg_core/rp_modules/application.py",
+        "rpg_core/rp_modules/registry.py",
+    ):
+        imports = _imports(ROOT / relative_path)
+        assert "rpg_data.services" not in imports
+        assert "rpg_data.services.gateway" not in imports
+
+
+def test_rp_module_data_service_does_not_expose_effective_policy() -> None:
+    forbidden = {
+        "clear_session_override",
+        "mount_story_defaults",
+        "resolve_snapshot",
+        "set_session_override",
+        "set_story_module",
+    }
+
+    assert forbidden.isdisjoint(vars(RPModuleDataService))
 
 
 def test_media_data_service_does_not_expose_business_policy_entrypoints() -> None:

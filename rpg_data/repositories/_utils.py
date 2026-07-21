@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import json
-from typing import Mapping, TypeVar
+from typing import Mapping, TypeVar, cast
 
 from peewee import SQL, DoesNotExist, Model
 
+from commons.types import JsonObject, JsonValue
 from rpg_data import models
 from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
     StoryQuickReply,
     WorkspaceTurnMode,
+)
+from rpg_data.model.rp_modules import (
+    RPModuleCatalogEntry,
+    SessionRPModuleOverride,
+    StoryRPModule,
 )
 from rpg_data.repositories import records
 
@@ -420,8 +426,8 @@ def to_narrative_outcome(
 
 def to_rp_module_catalog(
     row: records.RPModuleCatalogRecord,
-) -> models.RPModuleCatalogEntry:
-    return models.RPModuleCatalogEntry(
+) -> RPModuleCatalogEntry:
+    return RPModuleCatalogEntry(
         module_name=str(row.module_name),
         display_name=str(row.display_name),
         description=str(row.description or ""),
@@ -433,8 +439,8 @@ def to_rp_module_catalog(
     )
 
 
-def to_story_rp_module(row: records.StoryRPModuleRecord) -> models.StoryRPModule:
-    return models.StoryRPModule(
+def to_story_rp_module(row: records.StoryRPModuleRecord) -> StoryRPModule:
+    return StoryRPModule(
         id=int(row.id),
         story_id=int(row.story_id),
         module_name=str(row.module_name_id),
@@ -448,8 +454,8 @@ def to_story_rp_module(row: records.StoryRPModuleRecord) -> models.StoryRPModule
 
 def to_session_rp_module_override(
     row: records.SessionRPModuleOverrideRecord,
-) -> models.SessionRPModuleOverride:
-    return models.SessionRPModuleOverride(
+) -> SessionRPModuleOverride:
+    return SessionRPModuleOverride(
         id=int(row.id),
         session_id=str(row.session_id),
         module_name=str(row.module_name_id),
@@ -469,18 +475,18 @@ def serialize_narrative_outcome_weights(
     return json.dumps(weights.to_dict(), ensure_ascii=False, separators=(",", ":"))
 
 
-def serialize_rp_module_config(config: Mapping[str, object]) -> str:
+def serialize_rp_module_config(config: Mapping[str, JsonValue]) -> str:
     return json.dumps(dict(config), ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
-def parse_rp_module_config(raw: object) -> dict[str, object]:
+def parse_rp_module_config(raw: object) -> JsonObject:
     try:
         payload = json.loads(str(raw or "{}"))
     except json.JSONDecodeError as exc:
         raise ValueError("invalid RP module config JSON") from exc
     if not isinstance(payload, dict):
         raise ValueError("RP module config JSON must be an object")
-    return payload
+    return cast(JsonObject, payload)
 
 
 def _parse_narrative_outcome_weights(

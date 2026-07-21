@@ -22,7 +22,7 @@ from rpg_data.services.message import MessageService
 from rpg_data.services.media import MediaDataService
 from rpg_data.services.narrative_outcome import NarrativeOutcomeService
 from rpg_data.services.plot_scheduling import PlotSchedulingDataService
-from rpg_data.services.rp_modules import RPModuleService
+from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
@@ -60,7 +60,7 @@ class DataServiceGateway:
         self._media: MediaDataService | None = None
         self._narrative_outcomes: NarrativeOutcomeService | None = None
         self._plot_scheduling: PlotSchedulingDataService | None = None
-        self._rp_modules: RPModuleService | None = None
+        self._rp_modules: RPModuleDataService | None = None
         self._sessions: SessionDataService | None = None
         self._session_composer: SessionComposerDataService | None = None
         self._backup: BackupService | None = None
@@ -192,11 +192,11 @@ class DataServiceGateway:
             yield
 
     @property
-    def rp_modules(self) -> RPModuleService:
+    def rp_modules(self) -> RPModuleDataService:
         database = self.database
         if self._rp_modules is None:
             logger.debug("creating RP module service db_path=%s", self._database_path)
-            self._rp_modules = RPModuleService(database)
+            self._rp_modules = RPModuleDataService(database)
         self._ensure_bound()
         return self._rp_modules
 

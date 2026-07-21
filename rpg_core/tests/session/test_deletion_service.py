@@ -69,7 +69,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         effective_weights=models.NarrativeOutcomeWeights(),
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
     )
-    gateway.rp_modules.set_session_override(
+    gateway.rp_modules.upsert_session_override(
         session.id,
         "narrative_outcome",
         enabled=False,

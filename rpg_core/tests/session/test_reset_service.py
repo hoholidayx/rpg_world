@@ -40,7 +40,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
     role_result = SessionRoleService(gateway.sessions).bind_player_character(session_id, 1)
     assert role_result.state.player is not None
     gateway.catalog.set_session_main_llm_provider_key(session_id, "session_chat")
-    override = gateway.rp_modules.set_session_override(
+    override = gateway.rp_modules.upsert_session_override(
         session_id,
         "narrative_outcome",
         enabled=False,

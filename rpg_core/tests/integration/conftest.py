@@ -236,7 +236,15 @@ def _create_integration_session(
             workspace_id=workspace_id,
             story_id=story.id,
         )
-        gateway.rp_modules.mount_story_defaults(story.id)
+        for module in gateway.rp_modules.list_catalog():
+            if module.default_story_enabled:
+                gateway.rp_modules.upsert_story_module(
+                    workspace_id,
+                    story.id,
+                    module.module_name,
+                    enabled=True,
+                    config={},
+                )
 
     if with_status:
         _mount_integration_status(gateway, workspace_id, story.id)

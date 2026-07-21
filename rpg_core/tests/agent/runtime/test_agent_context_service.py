@@ -148,7 +148,7 @@ def _service(builder: _Builder, *, session=None, scene=None, characters=None):  
         session_id=lambda: "s1",
         session_manager=session,
         resources=lambda: resources,
-        rp_module_registry=lambda: None,
+        rp_module_service=lambda: None,
         main_llm_selection=lambda _sid: SimpleNamespace(
             effective=SimpleNamespace(context_window=100)
         ),

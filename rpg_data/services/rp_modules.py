@@ -1,4 +1,4 @@
-"""Story RP Module mounts and Session override persistence."""
+"""Typed persistence boundary for Story and Session RP Module data."""
 
 from __future__ import annotations
 
@@ -6,39 +6,42 @@ from typing import Mapping
 
 from peewee import Database
 
-from rpg_data import models
+from commons.types import JsonValue
+from rpg_data.model.rp_modules import (
+    RPModuleCatalogEntry,
+    SessionRPModuleOverride,
+    SessionRPModuleSelectionRows,
+    StoryRPModule,
+)
 from rpg_data.repositories.rp_module_repo import RPModuleRepository
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_repo import StoryRepository
 
-__all__ = ["RPModuleService"]
+__all__ = ["RPModuleDataService"]
 
 
-class RPModuleService:
+class RPModuleDataService:
+    """Persist caller-selected mounts and overrides without resolving policy."""
+
     def __init__(self, database: Database) -> None:
         self._database = database
         self._modules = RPModuleRepository(database)
         self._stories = StoryRepository(database)
         self._sessions = SessionRepository(database)
 
-    def list_catalog(self) -> list[models.RPModuleCatalogEntry]:
+    def list_catalog(self) -> list[RPModuleCatalogEntry]:
         return self._modules.list_catalog()
 
-    def get_catalog(self, module_name: str) -> models.RPModuleCatalogEntry | None:
-        return self._modules.get_catalog(_module_name(module_name))
-
-    def mount_story_defaults(self, story_id: int) -> list[models.StoryRPModule]:
-        if self._stories.get(int(story_id)) is None:
-            raise FileNotFoundError(f"story not found: {story_id}")
-        return self._modules.mount_story_defaults(int(story_id))
+    def get_catalog(self, module_name: str) -> RPModuleCatalogEntry | None:
+        return self._modules.get_catalog(str(module_name))
 
     def list_story_modules(
         self,
         workspace_id: str,
         story_id: int,
-    ) -> list[models.StoryRPModule] | None:
+    ) -> list[StoryRPModule] | None:
         story = self._stories.get(int(story_id))
-        if story is None or story.workspace_id != workspace_id:
+        if story is None or story.workspace_id != str(workspace_id):
             return None
         return self._modules.list_story(int(story_id))
 
@@ -47,86 +50,92 @@ class RPModuleService:
         workspace_id: str,
         story_id: int,
         module_name: str,
-    ) -> models.StoryRPModule | None:
+    ) -> StoryRPModule | None:
         story = self._stories.get(int(story_id))
-        if story is None or story.workspace_id != workspace_id:
+        if story is None or story.workspace_id != str(workspace_id):
             return None
-        return self._modules.get_story(int(story_id), _module_name(module_name))
+        return self._modules.get_story(int(story_id), str(module_name))
 
-    def set_story_module(
+    def upsert_story_module(
         self,
         workspace_id: str,
         story_id: int,
         module_name: str,
         *,
         enabled: bool,
-        config: Mapping[str, object],
-    ) -> models.StoryRPModule | None:
-        name = _module_name(module_name)
+        config: Mapping[str, JsonValue],
+    ) -> StoryRPModule | None:
         story = self._stories.get(int(story_id))
-        if story is None or story.workspace_id != workspace_id:
+        if story is None or story.workspace_id != str(workspace_id):
             return None
-        if self._modules.get_catalog(name) is None:
-            raise KeyError(f"unknown RP module: {name}")
+        if self._modules.get_catalog(str(module_name)) is None:
+            raise KeyError(f"unknown RP module: {module_name}")
         with self._database.atomic():
             return self._modules.upsert_story(
                 int(story_id),
-                name,
+                str(module_name),
                 enabled=bool(enabled),
                 config=config,
             )
 
+    def get_session_selection(
+        self,
+        session_id: str,
+    ) -> SessionRPModuleSelectionRows | None:
+        session = self._sessions.get(str(session_id))
+        if session is None:
+            return None
+        return SessionRPModuleSelectionRows(
+            session=session,
+            story_modules=tuple(self._modules.list_story(int(session.story_id))),
+            session_overrides=tuple(self._modules.list_session(str(session_id))),
+        )
+
     def list_session_overrides(
         self,
         session_id: str,
-    ) -> list[models.SessionRPModuleOverride] | None:
-        if self._sessions.get(session_id) is None:
+    ) -> list[SessionRPModuleOverride] | None:
+        if self._sessions.get(str(session_id)) is None:
             return None
-        return self._modules.list_session(session_id)
+        return self._modules.list_session(str(session_id))
 
     def get_session_override(
         self,
         session_id: str,
         module_name: str,
-    ) -> models.SessionRPModuleOverride | None:
-        if self._sessions.get(session_id) is None:
+    ) -> SessionRPModuleOverride | None:
+        if self._sessions.get(str(session_id)) is None:
             return None
-        return self._modules.get_session(session_id, _module_name(module_name))
+        return self._modules.get_session(str(session_id), str(module_name))
 
-    def set_session_override(
+    def upsert_session_override(
         self,
         session_id: str,
         module_name: str,
         *,
         enabled: bool | None,
-        config: Mapping[str, object],
-    ) -> models.SessionRPModuleOverride | None:
-        name = _module_name(module_name)
-        session = self._sessions.get(session_id)
-        if session is None:
+        config: Mapping[str, JsonValue],
+    ) -> SessionRPModuleOverride | None:
+        if self._sessions.get(str(session_id)) is None:
             return None
-        if self._modules.get_story(int(session.story_id), name) is None:
-            raise KeyError(f"RP module is not mounted on Story: {name}")
+        if self._modules.get_catalog(str(module_name)) is None:
+            raise KeyError(f"unknown RP module: {module_name}")
         with self._database.atomic():
-            if enabled is None and not config:
-                self._modules.delete_session(session_id, name)
-                return None
             return self._modules.upsert_session(
-                session_id,
-                name,
+                str(session_id),
+                str(module_name),
                 enabled=enabled,
                 config=config,
             )
 
-    def clear_session_override(self, session_id: str, module_name: str) -> bool | None:
-        if self._sessions.get(session_id) is None:
+    def delete_session_override(
+        self,
+        session_id: str,
+        module_name: str,
+    ) -> bool | None:
+        if self._sessions.get(str(session_id)) is None:
             return None
         with self._database.atomic():
-            return bool(self._modules.delete_session(session_id, _module_name(module_name)))
-
-
-def _module_name(value: str) -> str:
-    name = str(value or "").strip().lower()
-    if not name:
-        raise ValueError("module_name must not be empty")
-    return name
+            return bool(
+                self._modules.delete_session(str(session_id), str(module_name))
+            )

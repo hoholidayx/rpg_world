@@ -66,9 +66,9 @@ class TurnRuntimeFactory:
             provider=provider,
         )
         try:
-            registry = self._lifecycle.rp_module_registry
-            if registry is not None:
-                runtime.rp_module_runtime = registry.create_runtime(plan.rp_modules)
+            rp_modules = self._lifecycle.rp_module_service
+            if rp_modules is not None:
+                runtime.rp_module_runtime = rp_modules.create_runtime(plan.rp_modules)
                 runtime.rp_module_runtime.bind_turn(scratch)
             if plan.execution.policy.run_status_preflight:
                 runtime.preflight_result = await self._status_preflight.run(

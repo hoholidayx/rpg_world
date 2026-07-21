@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
+from commons.types import JsonObject, JsonValue
 from rpg_core.context import RPModuleRuntimeSection
 
 ModuleCommandHandler = Callable[[object, list[str]], Awaitable[str]]
@@ -73,11 +74,11 @@ class RPModuleDefinition:
     description: str
     sort_order: int
     configurable_fields: tuple[str, ...]
-    config_validator: Callable[[Mapping[str, object]], dict[str, object]] = field(
+    config_validator: Callable[[Mapping[str, JsonValue]], JsonObject] = field(
         repr=False,
         compare=False,
     )
-    system_config_resolver: Callable[[object], tuple[bool, dict[str, object]]] = field(
+    system_config_resolver: Callable[[object], tuple[bool, JsonObject]] = field(
         repr=False,
         compare=False,
     )

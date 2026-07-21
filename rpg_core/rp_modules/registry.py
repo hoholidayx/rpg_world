@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
+from commons.types import JsonObject, JsonValue
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
@@ -28,6 +29,7 @@ from rpg_core.settings import (
     RPModuleSettings,
 )
 from rpg_data import models as data_models
+from rpg_data.model.rp_modules import SessionRPModuleOverride, StoryRPModule
 
 
 class RPModuleRegistry:
@@ -38,11 +40,9 @@ class RPModuleRegistry:
         *,
         settings: RPModuleSettings | None = None,
         rng_factory: Callable[[], random.Random] | None = None,
-        gateway_provider: Callable[[], object] | None = None,
     ) -> None:
         self.settings = settings or RPModuleSettings()
         self._rng_factory = rng_factory or random.Random
-        self._gateway_provider = gateway_provider
         self._definitions = (
             RPModuleDefinition(
                 name=RP_MODULE_NARRATIVE_OUTCOME_NAME,
@@ -83,64 +83,11 @@ class RPModuleRegistry:
         name = str(module_name or "").strip().lower()
         return next((item for item in self._definitions if item.name == name), None)
 
-    def resolve_snapshot(self, session_id: str | None = None) -> RPModuleSelectionSnapshot:
-        from rpg_data.services import get_data_service_gateway
-
-        resolved_session_id = session_id
-        if not resolved_session_id:
-            raise ValueError("session_id is required to resolve RP Modules")
-        gateway = (
-            self._gateway_provider()
-            if self._gateway_provider is not None
-            else get_data_service_gateway()
-        )
-        session = gateway.catalog.get_session(resolved_session_id)
-        if session is None:
-            raise FileNotFoundError(f"session not found: {resolved_session_id}")
-        mounts = gateway.rp_modules.list_story_modules(
-            session.workspace_id,
-            int(session.story_id),
-        )
-        overrides = gateway.rp_modules.list_session_overrides(resolved_session_id)
-        if mounts is None or overrides is None:
-            raise FileNotFoundError(f"RP Module selection context not found: {resolved_session_id}")
-        return self._build_snapshot(
-            session_id=resolved_session_id,
-            story_id=int(session.story_id),
-            mounts=mounts,
-            overrides=overrides,
-        )
-
-    def resolve_story_snapshot(
-        self,
-        workspace_id: str,
-        story_id: int,
-    ) -> RPModuleSelectionSnapshot | None:
-        from rpg_data.services import get_data_service_gateway
-
-        gateway = (
-            self._gateway_provider()
-            if self._gateway_provider is not None
-            else get_data_service_gateway()
-        )
-        mounts = gateway.rp_modules.list_story_modules(
-            workspace_id,
-            int(story_id),
-        )
-        if mounts is None:
-            return None
-        return self._build_snapshot(
-            session_id="",
-            story_id=int(story_id),
-            mounts=mounts,
-            overrides=[],
-        )
-
     def validate_config_patch(
         self,
         module_name: str,
-        config: Mapping[str, object],
-    ) -> dict[str, object]:
+        config: Mapping[str, JsonValue],
+    ) -> JsonObject:
         definition = self.definition(module_name)
         if definition is None:
             raise KeyError(f"unknown RP module: {module_name}")
@@ -164,9 +111,10 @@ class RPModuleRegistry:
             modules.append(definition.module_factory(snapshot.session_id, selected))
         return RPModuleTurnRuntime(snapshot, modules)
 
-    def get_commands(self, session_id: str | None = None) -> list[ModuleCommand]:
-        snapshot = self.resolve_snapshot(session_id)
-
+    def commands_for_snapshot(
+        self,
+        snapshot: RPModuleSelectionSnapshot,
+    ) -> list[ModuleCommand]:
         async def list_modules(_agent, _args: list[str]) -> str:
             return self._format_modules(snapshot)
 
@@ -192,13 +140,13 @@ class RPModuleRegistry:
             commands.extend(module.get_commands())
         return commands
 
-    def _build_snapshot(
+    def build_snapshot(
         self,
         *,
         session_id: str,
         story_id: int,
-        mounts: list[data_models.StoryRPModule],
-        overrides: list[data_models.SessionRPModuleOverride],
+        mounts: Sequence[StoryRPModule],
+        overrides: Sequence[SessionRPModuleOverride],
     ) -> RPModuleSelectionSnapshot:
         mount_by_name = {mount.module_name: mount for mount in mounts}
         override_by_name = {override.module_name: override for override in overrides}
@@ -258,15 +206,15 @@ class RPModuleRegistry:
             modules=tuple(sorted(selected, key=lambda item: (item.sort_order, item.name))),
         )
 
-    def _system_module_config(self, module_name: str) -> tuple[bool, dict[str, object]]:
+    def _system_module_config(self, module_name: str) -> tuple[bool, JsonObject]:
         definition = self.definition(module_name)
         if definition is None:
             raise KeyError(f"unknown RP module: {module_name}")
         return definition.system_config_resolver(self.settings)
 
     @staticmethod
-    def _validate_narrative_config(raw: Mapping[str, object]) -> dict[str, object]:
-        normalized: dict[str, object] = {}
+    def _validate_narrative_config(raw: Mapping[str, JsonValue]) -> JsonObject:
+        normalized: JsonObject = {}
         if "auto_adjudication_enabled" in raw:
             value = raw["auto_adjudication_enabled"]
             if not isinstance(value, bool):
@@ -282,7 +230,7 @@ class RPModuleRegistry:
         return normalized
 
     @staticmethod
-    def _validate_dice_config(raw: Mapping[str, object]) -> dict[str, object]:
+    def _validate_dice_config(raw: Mapping[str, JsonValue]) -> JsonObject:
         if "default_dc" not in raw:
             return {}
         value = raw["default_dc"]
@@ -291,13 +239,13 @@ class RPModuleRegistry:
         return {"default_dc": value}
 
     @staticmethod
-    def _validate_plot_scheduler_config(raw: Mapping[str, object]) -> dict[str, object]:
+    def _validate_plot_scheduler_config(raw: Mapping[str, JsonValue]) -> JsonObject:
         if raw:
             raise ValueError("plot_scheduler does not expose Story/Session config fields")
         return {}
 
     @staticmethod
-    def _narrative_system_config(settings: object) -> tuple[bool, dict[str, object]]:
+    def _narrative_system_config(settings: object) -> tuple[bool, JsonObject]:
         current = settings.narrative_outcome
         return current.enabled, {
             "auto_adjudication_enabled": current.auto_adjudication_enabled,
@@ -305,14 +253,14 @@ class RPModuleRegistry:
         }
 
     @staticmethod
-    def _dice_system_config(settings: object) -> tuple[bool, dict[str, object]]:
+    def _dice_system_config(settings: object) -> tuple[bool, JsonObject]:
         current = settings.dice
         return current.enabled, {"default_dc": current.default_dc}
 
     @staticmethod
     def _plot_scheduler_system_config(
         settings: object,
-    ) -> tuple[bool, dict[str, object]]:
+    ) -> tuple[bool, JsonObject]:
         current = settings.plot_scheduler
         return current.enabled, {
             "judge_history_turns": current.judge_history_turns,

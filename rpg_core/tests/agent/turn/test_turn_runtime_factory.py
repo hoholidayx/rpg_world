@@ -44,7 +44,7 @@ def _lifecycle(session: SessionManager):  # noqa: ANN201
         session_id="s1",
         session_manager=session,
         resources=resources,
-        rp_module_registry=None,
+        rp_module_service=None,
     )
 
 

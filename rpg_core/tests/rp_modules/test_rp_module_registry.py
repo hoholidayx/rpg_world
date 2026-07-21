@@ -5,11 +5,13 @@ import random
 import pytest
 
 import rpg_core.rp_modules.registry as registry_module
+from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
+    RP_MODULE_PLOT_SCHEDULER_NAME,
 )
 from rpg_core.rp_modules.models import ModuleContextRequest
 from rpg_core.tooling.base import BaseTool
@@ -27,10 +29,10 @@ def _runtime(tmp_path, settings: RPModuleSettings | None = None):
     registry = RPModuleRegistry(
         settings=settings or RPModuleSettings(),
         rng_factory=lambda: random.Random(0),
-        gateway_provider=lambda: gateway,
     )
-    snapshot = registry.resolve_snapshot("s_forest001")
-    return registry, snapshot, registry.create_runtime(snapshot)
+    service = RPModuleApplicationService(registry, gateway.rp_modules)
+    snapshot = service.resolve_snapshot("s_forest001")
+    return service, snapshot, service.create_runtime(snapshot)
 
 
 def test_registry_loads_default_modules(tmp_path):
@@ -232,8 +234,9 @@ def test_registry_rejects_duplicate_public_tool_names(monkeypatch, tmp_path):
 
     monkeypatch.setattr(registry_module, "DiceModule", DuplicateDiceModule)
     gateway = get_data_service_gateway(tmp_path / "duplicate-tools.sqlite3")
-    registry = RPModuleRegistry(gateway_provider=lambda: gateway)
-    snapshot = registry.resolve_snapshot("s_forest001")
+    registry = RPModuleRegistry()
+    service = RPModuleApplicationService(registry, gateway.rp_modules)
+    snapshot = service.resolve_snapshot("s_forest001")
 
     with pytest.raises(ValueError, match="Duplicate RP module tool name"):
         registry.create_runtime(snapshot)
@@ -241,7 +244,8 @@ def test_registry_rejects_duplicate_public_tool_names(monkeypatch, tmp_path):
 
 def test_snapshot_merges_story_and_session_config_with_story_capability_ceiling(tmp_path):
     gateway = get_data_service_gateway(tmp_path / "rp-module-selection.sqlite3")
-    registry = RPModuleRegistry(gateway_provider=lambda: gateway)
+    registry = RPModuleRegistry()
+    service = RPModuleApplicationService(registry, gateway.rp_modules)
     weights = {
         "critical_success": 10,
         "success": 30,
@@ -249,21 +253,21 @@ def test_snapshot_merges_story_and_session_config_with_story_capability_ceiling(
         "setback": 25,
         "critical_failure": 5,
     }
-    gateway.rp_modules.set_story_module(
+    gateway.rp_modules.upsert_story_module(
         "demo_workspace",
         1,
         RP_MODULE_NARRATIVE_OUTCOME_NAME,
         enabled=True,
         config={"auto_adjudication_enabled": False, "weights": weights},
     )
-    gateway.rp_modules.set_session_override(
+    gateway.rp_modules.upsert_session_override(
         "s_forest001",
         RP_MODULE_NARRATIVE_OUTCOME_NAME,
         enabled=True,
         config={"auto_adjudication_enabled": True},
     )
 
-    first = registry.resolve_snapshot("s_forest001")
+    first = service.resolve_snapshot("s_forest001")
     selected = first.get(RP_MODULE_NARRATIVE_OUTCOME_NAME)
     assert selected is not None
     assert selected.effective_enabled is True
@@ -276,14 +280,14 @@ def test_snapshot_merges_story_and_session_config_with_story_capability_ceiling(
     with pytest.raises(TypeError):
         selected.effective_config["weights"]["success"] = 1
 
-    gateway.rp_modules.set_story_module(
+    gateway.rp_modules.upsert_story_module(
         "demo_workspace",
         1,
         RP_MODULE_NARRATIVE_OUTCOME_NAME,
         enabled=False,
         config={"auto_adjudication_enabled": False, "weights": weights},
     )
-    second = registry.resolve_snapshot("s_forest001")
+    second = service.resolve_snapshot("s_forest001")
     assert second.get(RP_MODULE_NARRATIVE_OUTCOME_NAME).effective_enabled is False
     assert first.get(RP_MODULE_NARRATIVE_OUTCOME_NAME).effective_enabled is True
     disabled_runtime = registry.create_runtime(second)
@@ -296,15 +300,57 @@ def test_snapshot_merges_story_and_session_config_with_story_capability_ceiling(
 
 def test_dice_commands_follow_latest_story_mount_state(tmp_path):
     gateway = get_data_service_gateway(tmp_path / "rp-module-commands.sqlite3")
-    registry = RPModuleRegistry(gateway_provider=lambda: gateway)
-    assert "/roll" in [item.name for item in registry.get_commands("s_forest001")]
+    registry = RPModuleRegistry()
+    service = RPModuleApplicationService(registry, gateway.rp_modules)
+    assert "/roll" in [item.name for item in service.get_commands("s_forest001")]
 
-    gateway.rp_modules.set_story_module(
+    gateway.rp_modules.upsert_story_module(
         "demo_workspace",
         1,
         RP_MODULE_DICE_NAME,
         enabled=False,
         config={},
     )
-    names = [item.name for item in registry.get_commands("s_forest001")]
+    names = [item.name for item in service.get_commands("s_forest001")]
     assert names == ["/rp_modules", "/rp_module"]
+
+
+def test_application_service_owns_empty_override_and_story_capability_ceiling(
+    tmp_path,
+):
+    gateway = get_data_service_gateway(tmp_path / "rp-module-application.sqlite3")
+    service = RPModuleApplicationService(RPModuleRegistry(), gateway.rp_modules)
+
+    overridden = service.patch_session_override(
+        "s_forest001",
+        RP_MODULE_NARRATIVE_OUTCOME_NAME,
+        enabled=False,
+        replace_enabled=True,
+        config={},
+    )
+    assert (
+        overridden.get(RP_MODULE_NARRATIVE_OUTCOME_NAME).effective_enabled
+        is False
+    )
+
+    inherited = service.patch_session_override(
+        "s_forest001",
+        RP_MODULE_NARRATIVE_OUTCOME_NAME,
+        enabled=None,
+        replace_enabled=True,
+        config={},
+    )
+    assert inherited.get(RP_MODULE_NARRATIVE_OUTCOME_NAME).session_config == {}
+    assert gateway.rp_modules.get_session_override(
+        "s_forest001",
+        RP_MODULE_NARRATIVE_OUTCOME_NAME,
+    ) is None
+
+    with pytest.raises(ValueError, match="not mounted on Story"):
+        service.patch_session_override(
+            "s_forest001",
+            RP_MODULE_PLOT_SCHEDULER_NAME,
+            enabled=True,
+            replace_enabled=True,
+            config={},
+        )

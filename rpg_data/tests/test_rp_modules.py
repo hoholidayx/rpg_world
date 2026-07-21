@@ -20,7 +20,7 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
         "dice",
     }
 
-    story = service.set_story_module(
+    story = service.upsert_story_module(
         "demo_workspace",
         1,
         "narrative_outcome",
@@ -30,7 +30,7 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
     assert story is not None
     assert story.config == {"auto_adjudication_enabled": False}
 
-    override = service.set_session_override(
+    override = service.upsert_session_override(
         "s_forest001",
         "narrative_outcome",
         enabled=False,
@@ -39,21 +39,23 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
     assert override is not None
     assert override.enabled is False
     assert override.config == {"weights": {"critical_success": 10}}
-    assert service.set_session_override(
+    empty_override = service.upsert_session_override(
         "s_forest001",
         "narrative_outcome",
         enabled=None,
         config={},
-    ) is None
-    assert service.get_session_override("s_forest001", "narrative_outcome") is None
+    )
+    assert empty_override is not None
+    assert empty_override.enabled is None
+    assert empty_override.config == {}
 
-    service.set_session_override(
+    service.upsert_session_override(
         "s_forest001",
         "narrative_outcome",
         enabled=False,
         config={},
     )
-    assert service.clear_session_override("s_forest001", "narrative_outcome") is True
+    assert service.delete_session_override("s_forest001", "narrative_outcome") is True
     assert service.get_session_override("s_forest001", "narrative_outcome") is None
 
 

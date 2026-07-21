@@ -6,7 +6,12 @@ from typing import Mapping
 
 from peewee import Database, SQL
 
-from rpg_data import models
+from commons.types import JsonValue
+from rpg_data.model.rp_modules import (
+    RPModuleCatalogEntry,
+    SessionRPModuleOverride,
+    StoryRPModule,
+)
 from rpg_data.repositories._utils import (
     serialize_rp_module_config,
     to_rp_module_catalog,
@@ -26,34 +31,20 @@ class RPModuleRepository:
         self._database = database
         bind_database(database)
 
-    def list_catalog(self) -> list[models.RPModuleCatalogEntry]:
+    def list_catalog(self) -> list[RPModuleCatalogEntry]:
         rows = RPModuleCatalogRecord.select().order_by(
             RPModuleCatalogRecord.sort_order,
             RPModuleCatalogRecord.module_name,
         )
         return [to_rp_module_catalog(row) for row in rows]
 
-    def get_catalog(self, module_name: str) -> models.RPModuleCatalogEntry | None:
+    def get_catalog(self, module_name: str) -> RPModuleCatalogEntry | None:
         row = RPModuleCatalogRecord.get_or_none(
             RPModuleCatalogRecord.module_name == module_name
         )
         return to_rp_module_catalog(row) if row is not None else None
 
-    def mount_story_defaults(self, story_id: int) -> list[models.StoryRPModule]:
-        defaults = (
-            RPModuleCatalogRecord.select()
-            .where(RPModuleCatalogRecord.default_story_enabled == True)  # noqa: E712
-            .order_by(RPModuleCatalogRecord.sort_order, RPModuleCatalogRecord.module_name)
-        )
-        for entry in defaults:
-            StoryRPModuleRecord.get_or_create(
-                story=story_id,
-                module_name=entry.module_name,
-                defaults={"enabled": True, "config_json": "{}"},
-            )
-        return self.list_story(story_id)
-
-    def list_story(self, story_id: int) -> list[models.StoryRPModule]:
+    def list_story(self, story_id: int) -> list[StoryRPModule]:
         rows = (
             StoryRPModuleRecord.select(StoryRPModuleRecord, RPModuleCatalogRecord)
             .join(RPModuleCatalogRecord)
@@ -62,7 +53,7 @@ class RPModuleRepository:
         )
         return [to_story_rp_module(row) for row in rows]
 
-    def get_story(self, story_id: int, module_name: str) -> models.StoryRPModule | None:
+    def get_story(self, story_id: int, module_name: str) -> StoryRPModule | None:
         row = StoryRPModuleRecord.get_or_none(
             (StoryRPModuleRecord.story == story_id)
             & (StoryRPModuleRecord.module_name == module_name)
@@ -75,8 +66,8 @@ class RPModuleRepository:
         module_name: str,
         *,
         enabled: bool,
-        config: Mapping[str, object],
-    ) -> models.StoryRPModule:
+        config: Mapping[str, JsonValue],
+    ) -> StoryRPModule:
         row, created = StoryRPModuleRecord.get_or_create(
             story=story_id,
             module_name=module_name,
@@ -99,7 +90,7 @@ class RPModuleRepository:
             row = StoryRPModuleRecord.get_by_id(row.id)
         return to_story_rp_module(row)
 
-    def list_session(self, session_id: str) -> list[models.SessionRPModuleOverride]:
+    def list_session(self, session_id: str) -> list[SessionRPModuleOverride]:
         rows = (
             SessionRPModuleOverrideRecord.select(
                 SessionRPModuleOverrideRecord,
@@ -118,7 +109,7 @@ class RPModuleRepository:
         self,
         session_id: str,
         module_name: str,
-    ) -> models.SessionRPModuleOverride | None:
+    ) -> SessionRPModuleOverride | None:
         row = SessionRPModuleOverrideRecord.get_or_none(
             (SessionRPModuleOverrideRecord.session == session_id)
             & (SessionRPModuleOverrideRecord.module_name == module_name)
@@ -131,8 +122,8 @@ class RPModuleRepository:
         module_name: str,
         *,
         enabled: bool | None,
-        config: Mapping[str, object],
-    ) -> models.SessionRPModuleOverride:
+        config: Mapping[str, JsonValue],
+    ) -> SessionRPModuleOverride:
         serialized = serialize_rp_module_config(config)
         row, created = SessionRPModuleOverrideRecord.get_or_create(
             session=session_id,

@@ -165,7 +165,7 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     selection = MainLLMSelectionService(integration_data_gateway)
     selected = await selection.set_session_provider_key(session_id, SESSION_PROVIDER_KEY)
     assert selected is not None
-    module_override = integration_data_gateway.rp_modules.set_session_override(
+    module_override = integration_data_gateway.rp_modules.upsert_session_override(
         session_id,
         "narrative_outcome",
         enabled=False,

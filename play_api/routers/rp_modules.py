@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from commons.types import JsonObject, JsonValue
+from play_api.composition import rp_module_service
 from play_api.routers._locator import resolve_session_or_404
 from rpg_core.rp_modules.constants import RP_MODULE_NARRATIVE_OUTCOME_NAME
-from rpg_core.rp_modules.registry import RPModuleRegistry
+from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.rp_modules.models import RPModuleSelection, RPModuleSelectionSnapshot
 from rpg_core.rp_modules.narrative_outcome import NARRATIVE_OUTCOME_DEFINITIONS
-from rpg_core.settings import settings
-from rpg_data.services import get_data_service_gateway
 
 router = APIRouter(tags=["play-rp-modules"])
 
@@ -51,10 +51,10 @@ class PlayRPModuleConfig(BaseModel):
     story_enabled: bool = Field(alias="storyEnabled")
     session_enabled_override: bool | None = Field(alias="sessionEnabledOverride")
     effective_enabled: bool = Field(alias="effectiveEnabled")
-    system_config: dict[str, Any] = Field(alias="systemConfig")
-    story_config: dict[str, Any] = Field(alias="storyConfig")
-    session_config: dict[str, Any] = Field(alias="sessionConfig")
-    effective_config: dict[str, Any] = Field(alias="effectiveConfig")
+    system_config: JsonObject = Field(alias="systemConfig")
+    story_config: JsonObject = Field(alias="storyConfig")
+    session_config: JsonObject = Field(alias="sessionConfig")
+    effective_config: JsonObject = Field(alias="effectiveConfig")
     config_sources: dict[str, str] = Field(alias="configSources")
     outcome_definitions: list[dict[str, str]] | None = Field(
         default=None,
@@ -70,18 +70,18 @@ class PlayStoryRPModulePatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool | None = None
-    config: dict[str, Any] | None = None
+    config: JsonObject | None = None
 
 
 class PlaySessionRPModulePatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool | None = None
-    config: dict[str, Any] | None = None
+    config: JsonObject | None = None
 
 
-def _registry() -> RPModuleRegistry:
-    return RPModuleRegistry(settings=settings.rp_module_settings)
+def _service() -> RPModuleApplicationService:
+    return rp_module_service()
 
 
 def _selection_response(
@@ -112,12 +112,14 @@ def _selection_response(
     )
 
 
-def _json_config(value: Any) -> Any:
-    if isinstance(value, dict) or hasattr(value, "items"):
+def _json_config(value: object) -> JsonValue:
+    if isinstance(value, Mapping):
         return {str(key): _json_config(item) for key, item in value.items()}
     if isinstance(value, tuple | list):
         return [_json_config(item) for item in value]
-    return value
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    raise TypeError(f"RP module config contains a non-JSON value: {type(value).__name__}")
 
 
 def _list_response(snapshot: RPModuleSelectionSnapshot) -> PlayRPModuleList:
@@ -128,9 +130,9 @@ def _list_response(snapshot: RPModuleSelectionSnapshot) -> PlayRPModuleList:
 
 @router.get("/rp-modules/catalog", response_model=PlayRPModuleCatalog)
 async def get_rp_module_catalog() -> PlayRPModuleCatalog:
-    registry = _registry()
-    definitions = {item.name: item for item in registry.definitions()}
-    rows = get_data_service_gateway().rp_modules.list_catalog()
+    service = _service()
+    definitions = {item.name: item for item in service.definitions()}
+    rows = service.list_catalog()
     return PlayRPModuleCatalog(modules=[
         PlayRPModuleCatalogItem(
             moduleName=row.module_name,
@@ -156,7 +158,7 @@ async def get_rp_module_catalog() -> PlayRPModuleCatalog:
     response_model=PlayRPModuleList,
 )
 async def get_story_rp_modules(workspace_id: str, story_id: int) -> PlayRPModuleList:
-    snapshot = _registry().resolve_story_snapshot(workspace_id, story_id)
+    snapshot = _service().resolve_story_snapshot(workspace_id, story_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="story not found in workspace")
     return _list_response(snapshot)
@@ -172,35 +174,22 @@ async def patch_story_rp_module(
     module_name: str,
     payload: PlayStoryRPModulePatch,
 ) -> PlayRPModuleConfig:
-    registry = _registry()
-    if registry.definition(module_name) is None:
+    service = _service()
+    definition = service.definition(module_name)
+    if definition is None:
         raise HTTPException(status_code=404, detail="RP module not found")
-    service = get_data_service_gateway().rp_modules
-    current = service.get_story_module(workspace_id, story_id, module_name)
-    if current is None:
-        if service.list_story_modules(workspace_id, story_id) is None:
-            raise HTTPException(status_code=404, detail="story not found in workspace")
-        current_enabled = True
-        current_config: dict[str, object] = {}
-    else:
-        current_enabled = current.enabled
-        current_config = dict(current.config)
+    name = definition.name
     try:
-        config = registry.validate_config_patch(
-            module_name,
-            payload.config if payload.config is not None else current_config,
-        )
-        service.set_story_module(
+        snapshot = service.patch_story_module(
             workspace_id,
             story_id,
-            module_name,
-            enabled=current_enabled if payload.enabled is None else payload.enabled,
-            config=config,
+            name,
+            enabled=payload.enabled,
+            config=payload.config,
         )
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    snapshot = registry.resolve_story_snapshot(workspace_id, story_id)
-    selected = snapshot.get(module_name) if snapshot is not None else None
+    selected = snapshot.get(name) if snapshot is not None else None
     if snapshot is None or selected is None:
         raise HTTPException(status_code=404, detail="RP module not found")
     return _selection_response(snapshot, selected)
@@ -212,7 +201,7 @@ async def patch_story_rp_module(
 )
 async def get_session_rp_modules(session_id: str) -> PlayRPModuleList:
     await resolve_session_or_404(session_id)
-    return _list_response(_registry().resolve_snapshot(session_id))
+    return _list_response(_service().resolve_snapshot(session_id))
 
 
 @router.patch(
@@ -225,30 +214,22 @@ async def patch_session_rp_module(
     payload: PlaySessionRPModulePatch,
 ) -> PlayRPModuleConfig:
     await resolve_session_or_404(session_id)
-    registry = _registry()
-    if registry.definition(module_name) is None:
+    service = _service()
+    definition = service.definition(module_name)
+    if definition is None:
         raise HTTPException(status_code=404, detail="RP module not found")
-    service = get_data_service_gateway().rp_modules
-    current = service.get_session_override(session_id, module_name)
-    current_config = dict(current.config) if current is not None else {}
-    enabled = current.enabled if current is not None else None
-    if "enabled" in payload.model_fields_set:
-        enabled = payload.enabled
+    name = definition.name
     try:
-        config = registry.validate_config_patch(
-            module_name,
-            payload.config if payload.config is not None else current_config,
-        )
-        service.set_session_override(
+        snapshot = service.patch_session_override(
             session_id,
-            module_name,
-            enabled=enabled,
-            config=config,
+            name,
+            enabled=payload.enabled,
+            replace_enabled="enabled" in payload.model_fields_set,
+            config=payload.config,
         )
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    snapshot = registry.resolve_snapshot(session_id)
-    selected = snapshot.get(module_name)
+    selected = snapshot.get(name)
     if selected is None:
         raise HTTPException(status_code=404, detail="RP module not found")
     return _selection_response(snapshot, selected)
@@ -263,14 +244,16 @@ async def delete_session_rp_module_override(
     module_name: str,
 ) -> PlayRPModuleConfig:
     await resolve_session_or_404(session_id)
-    if _registry().definition(module_name) is None:
+    service = _service()
+    definition = service.definition(module_name)
+    if definition is None:
         raise HTTPException(status_code=404, detail="RP module not found")
-    get_data_service_gateway().rp_modules.clear_session_override(
+    name = definition.name
+    snapshot = service.clear_session_override(
         session_id,
-        module_name,
+        name,
     )
-    snapshot = _registry().resolve_snapshot(session_id)
-    selected = snapshot.get(module_name)
+    selected = snapshot.get(name)
     if selected is None:
         raise HTTPException(status_code=404, detail="RP module not found")
     return _selection_response(snapshot, selected)

@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from rpg_core.context.models import PersistentMemoryFact, RPGContext
     from rpg_core.agent.runtime.main_llm import MainLLMSelection
     from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
-    from rpg_core.rp_modules.registry import RPModuleRegistry
+    from rpg_core.rp_modules.application import RPModuleApplicationService
     from rpg_core.rp_modules.runtime import RPModuleTurnRuntime
     from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshot
     from rpg_core.scene import SceneTracker
@@ -61,7 +61,7 @@ class AgentContextService:
         session_id: Callable[[], str],
         session_manager: "SessionManager",
         resources: Callable[[], AgentContextResources],
-        rp_module_registry: Callable[[], "RPModuleRegistry | None"],
+        rp_module_service: Callable[[], "RPModuleApplicationService | None"],
         main_llm_selection: Callable[[str], Awaitable["MainLLMSelection"]],
         token_counter: "TokenCounter",
         turn_snapshot_data: TurnSnapshotDataPort,
@@ -72,7 +72,7 @@ class AgentContextService:
         self._session_id = session_id
         self._session_manager = session_manager
         self._resources = resources
-        self._rp_module_registry = rp_module_registry
+        self._rp_module_service = rp_module_service
         self._main_llm_selection = main_llm_selection
         self._token_counter = token_counter
         self._turn_snapshot_data = turn_snapshot_data
@@ -96,9 +96,9 @@ class AgentContextService:
         )
 
     def resolve_rp_module_snapshot(self) -> "RPModuleSelectionSnapshot":
-        registry = self._rp_module_registry()
-        if registry is not None:
-            return registry.resolve_snapshot(self._session_id())
+        service = self._rp_module_service()
+        if service is not None:
+            return service.resolve_snapshot(self._session_id())
 
         from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
 
@@ -274,8 +274,8 @@ class AgentContextService:
                 ),
             )
 
-        registry = self._rp_module_registry()
-        if registry is None:
+        service = self._rp_module_service()
+        if service is None:
             return self.build_main_context(
                 current_user_message=current_user_message,
                 status_manager=resources.status_manager,
@@ -285,7 +285,7 @@ class AgentContextService:
                 persistent_memory_snapshot=persistent_memory_snapshot,
             )
 
-        runtime = registry.create_runtime(
+        runtime = service.create_runtime(
             rp_module_snapshot or self.resolve_rp_module_snapshot()
         )
         try:
