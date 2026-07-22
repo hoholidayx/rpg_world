@@ -48,6 +48,10 @@ data/benchmarks/
 /data/import/
 /data/imports/
 
+# Local yq Story Pack import tooling and operator handoff
+/rpg_import/
+/docs/yq_story_pack_import_handoff.md
+
 # Logs and temp files
 *.log
 logs/
