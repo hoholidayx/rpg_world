@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from peewee import Database
+from peewee import Database, IntegrityError
 
+from commons.types import JsonValue
 from rpg_data import models
+from rpg_data.errors import DataIntegrityError
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
@@ -37,6 +40,62 @@ class CatalogService:
         workspaces.sort(key=lambda workspace: (workspace.name, workspace.id))
         logger.debug("listed workspaces count=%s ids=%s", len(workspaces), [workspace.id for workspace in workspaces])
         return workspaces
+
+    def get_workspace(self, workspace_id: str) -> models.Workspace | None:
+        """Return one workspace without creating its runtime directory."""
+
+        return self._workspaces.get(str(workspace_id))
+
+    def create_workspace(
+        self,
+        workspace_id: str,
+        *,
+        name: str,
+        root_path: str,
+        description: str = "",
+        enabled: bool = True,
+        metadata: Mapping[str, JsonValue] | None = None,
+    ) -> models.Workspace:
+        """Create a catalog workspace as one data fact.
+
+        Runtime bootstrap materializes indexed directories on a later Gateway
+        initialization; this method deliberately does not create directories
+        or seed Stories.
+        """
+
+        normalized_id = str(workspace_id or "").strip()
+        if not normalized_id:
+            raise ValueError("workspace_id must not be empty")
+        normalized_name = str(name or "").strip()
+        if not normalized_name:
+            raise ValueError("workspace name must not be empty")
+        normalized_root = str(root_path or "").strip()
+        if not normalized_root:
+            raise ValueError("workspace root_path must not be empty")
+        try:
+            serialized_metadata = json.dumps(
+                dict(metadata or {}),
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("workspace metadata must be JSON-serializable") from exc
+        try:
+            with self._database.atomic():
+                return self._workspaces.create(
+                    normalized_id,
+                    normalized_name,
+                    normalized_root,
+                    description=str(description or ""),
+                    enabled=bool(enabled),
+                    metadata_json=serialized_metadata,
+                )
+        except IntegrityError as exc:
+            raise DataIntegrityError(
+                "Workspace write violated persisted constraints"
+            ) from exc
 
     def list_sessions(
         self,
