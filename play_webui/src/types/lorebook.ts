@@ -1,8 +1,7 @@
-export type { StorySummary } from './story'
-
 export type LorebookEntry = {
   id: number
   workspaceId: string
+  storyId: number
   name: string
   content: string
   description: string
@@ -11,8 +10,7 @@ export type LorebookEntry = {
   version: number
   createdAt?: string | null
   updatedAt?: string | null
-  mountId?: number | null
-  storyId?: number | null
+  sortOrder: number
 }
 
 export type LorebookEntryInput = {
@@ -20,5 +18,6 @@ export type LorebookEntryInput = {
   content: string
   description: string
   tags: string[]
+  sortOrder?: number
   metadata: Record<string, unknown>
 }

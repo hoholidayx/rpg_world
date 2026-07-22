@@ -949,7 +949,7 @@ def _role_bind_command_for_character_id(
                     # a concurrent Story reorder cannot select another item.
                     return f"/role_bind {index} opening_id={int(story_opening_id)}"
             raise ValueError(
-                f"story opening is not mounted to this session story: {story_opening_id}"
+                f"story opening does not belong to this session story: {story_opening_id}"
             )
     logger.warning(
         "[AgentService] role bind index not found: session_id={}, character_id={}, option_count={}",
@@ -957,7 +957,10 @@ def _role_bind_command_for_character_id(
         player_character_id,
         len(options),
     )
-    raise ValueError(f"player character is not mounted to this session story: {int(player_character_id)}")
+    raise ValueError(
+        "player character does not belong to this session story: "
+        f"{int(player_character_id)}"
+    )
 
 
 def _session_payload(session: models.Session) -> AgentSessionPayloadDict:

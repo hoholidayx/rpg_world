@@ -6,7 +6,7 @@ export const STATUS_KIND = {
 export type StatusKind = (typeof STATUS_KIND)[keyof typeof STATUS_KIND]
 
 export const STATUS_ORIGIN = {
-  TEMPLATE_COPY: 'template_copy',
+  STORY_COPY: 'story_copy',
   SESSION_NATIVE: 'session_native',
 } as const
 
@@ -20,13 +20,6 @@ export const STATUS_UPDATE_FREQUENCY = {
 } as const
 
 export type StatusUpdateFrequency = (typeof STATUS_UPDATE_FREQUENCY)[keyof typeof STATUS_UPDATE_FREQUENCY]
-
-export const STORY_STATUS_MOUNT_ORIGIN = {
-  SYSTEM: 'system_mount',
-  STORY_TEMPLATE: 'story_template',
-} as const
-
-export type StoryStatusMountOrigin = (typeof STORY_STATUS_MOUNT_ORIGIN)[keyof typeof STORY_STATUS_MOUNT_ORIGIN]
 
 export type StatusRow = {
   key: string
@@ -54,30 +47,15 @@ export type StatusTable = {
   workspaceId?: string | null
   sessionId?: string | null
   storyId?: number | null
-  sourceTableId?: number | null
+  storyCharacterId?: number | null
+  sourceStoryStatusTableId?: number | null
   origin?: StatusOrigin | null
-}
-
-export type StoryStatusMount = {
-  id: number
-  workspaceId: string
-  storyId: number
-  statusTableId: number
-  characterMountId: number | null
-  mountOrigin: StoryStatusMountOrigin
-  tableName: string
-  statusKind: StatusKind
-  description: string
-  sortOrder: number
-  metadata: Record<string, unknown>
-  version: number
-  createdAt?: string | null
-  updatedAt?: string | null
 }
 
 export type StatusTableInput = {
   name: string
   statusKind: StatusKind
+  storyCharacterId?: number | null
   description?: string
   keyColumn?: string
   valueColumn?: string
@@ -88,18 +66,12 @@ export type StatusTableInput = {
 
 export type StatusTablePatch = {
   name?: string
+  statusKind?: StatusKind
+  storyCharacterId?: number | null
   description?: string
   keyColumn?: string
   valueColumn?: string
   rows?: StatusRow[]
   metadata?: Record<string, unknown>
   sortOrder?: number
-}
-
-export type StoryStatusTemplateInput = StatusTableInput & {
-  characterMountId?: number | null
-}
-
-export type StoryStatusMountPatch = {
-  characterMountId: number | null
 }

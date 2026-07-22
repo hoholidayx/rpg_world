@@ -13,15 +13,14 @@ def _table(
     character_name: str | None = None,
     character_id: int | None = None,
 ) -> dict[str, object]:
-    mount = None
+    source = None
     if character_name is not None or character_id is not None:
-        mount = {
-            "mountId": 20 + table_id,
-            "characterMountId": 30 + table_id,
+        source = {
+            "storyStatusTableId": 20 + table_id,
             "characterId": character_id,
             "characterName": character_name,
         }
-    metadata = {"storyStatusMount": mount} if mount is not None else {}
+    metadata = {"storyStatusSource": source} if source is not None else {}
     return {
         "id": table_id,
         "name": name,
@@ -29,8 +28,8 @@ def _table(
         "headers": ["属性", "值"],
         "rows": [["生命", "10"]],
         "metadata_json": json.dumps(metadata, ensure_ascii=False),
-        "origin": "template_copy",
-        "source_table_id": 100 + table_id,
+        "origin": "story_copy",
+        "source_story_status_table_id": 100 + table_id,
     }
 
 
@@ -58,8 +57,8 @@ def test_status_context_separates_regular_and_character_tables() -> None:
     assert "#### 装备状态" in rendered
     assert "只在 Alice 受伤或恢复时更新。" in rendered
     assert "仅在剧情事实明确影响现有键时更新" in rendered
-    assert "template_copy" not in rendered
-    assert "source_table_id" not in rendered
+    assert "story_copy" not in rendered
+    assert "source_story_status_table_id" not in rendered
     assert "characterId" not in rendered
 
 

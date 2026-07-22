@@ -8,9 +8,6 @@ from rpg_data import db
 from rpg_data import models
 from rpg_data.migrations.runner import run_migrations
 from rpg_data.repositories.records import StoryRecord
-from rpg_data.repositories.character_detail_repo import CharacterDetailRepository
-from rpg_data.repositories.character_repo import CharacterRepository
-from rpg_data.repositories.lorebook_repo import LorebookEntryRepository
 from rpg_data.repositories.session_repo import SessionRepository
 from rpg_data.repositories.story_character_repo import StoryCharacterRepository
 from rpg_data.repositories.story_lorebook_repo import StoryLorebookEntryRepository
@@ -240,59 +237,50 @@ def test_story_and_session_repositories_set_and_clear_main_llm_provider_key(
         database.close()
 
 
-def test_character_lorebook_and_mount_repositories(tmp_path: Path) -> None:
+def test_story_owned_character_and_lorebook_repositories(tmp_path: Path) -> None:
     database = _migrated_database(tmp_path)
     try:
         rpg_stories = StoryRepository(database)
-        rpg_characters = CharacterRepository(database)
-        rpg_character_details = CharacterDetailRepository(database)
-        rpg_lorebook_entries = LorebookEntryRepository(database)
         rpg_story_characters = StoryCharacterRepository(database)
         rpg_story_lorebook_entries = StoryLorebookEntryRepository(database)
         rpg_workspaces = WorkspaceRepository(database)
 
         with database.atomic():
-            rpg_workspaces.create("repo_mounts", "Repo Mounts", "data/repo_mounts")
-            story = rpg_stories.create("repo_mounts", "北境森林")
-            character = rpg_characters.create(
-                "repo_mounts",
+            rpg_workspaces.create("repo_story", "Repo Story", "data/repo_story")
+            story = rpg_stories.create("repo_story", "北境森林")
+            other_story = rpg_stories.create("repo_story", "学院")
+            character = rpg_story_characters.create(
+                "repo_story",
+                story.id,
                 "Alice",
                 personality="curious",
                 content="A young wizard.",
             )
-            detail = rpg_character_details.create(
+            detail = rpg_story_characters.create_detail(
                 character.id,
                 "外貌",
                 content="银白色长发。",
                 tags_json='["外观"]',
             )
-            lorebook = rpg_lorebook_entries.create(
-                "repo_mounts",
+            lorebook = rpg_story_lorebook_entries.create(
+                "repo_story",
+                story.id,
                 "World History",
                 content="Forged from ashes.",
                 tags_json='["history"]',
                 metadata_json='{"ui":{"displayVersion":"v1.0.0"}}',
             )
-            character_mount = rpg_story_characters.create(
-                "repo_mounts",
-                story.id,
-                character.id,
-            )
-            lorebook_mount = rpg_story_lorebook_entries.create(
-                "repo_mounts",
-                story.id,
-                lorebook.id,
+            other_character = rpg_story_characters.create(
+                "repo_story", other_story.id, "Alice", content="Independent copy"
             )
 
-        assert isinstance(character, models.Character)
+        assert isinstance(character, models.StoryCharacter)
         assert isinstance(detail, models.CharacterDetail)
-        assert isinstance(lorebook, models.LorebookEntry)
-        assert isinstance(character_mount, models.StoryCharacter)
-        assert isinstance(lorebook_mount, models.StoryLorebookEntry)
-        assert rpg_characters.get(character.id).name == "Alice"
-        assert rpg_character_details.list(character.id)[0].id == detail.id
-        assert rpg_lorebook_entries.get(lorebook.id).name == "World History"
-        updated_lorebook = rpg_lorebook_entries.update(
+        assert isinstance(lorebook, models.StoryLorebookEntry)
+        assert rpg_story_characters.get(character.id).name == "Alice"
+        assert rpg_story_characters.list_details(character.id)[0].id == detail.id
+        assert rpg_story_lorebook_entries.get(lorebook.id).name == "World History"
+        updated_lorebook = rpg_story_lorebook_entries.update(
             lorebook.id,
             name="World History Revised",
             tags_json='["history","revised"]',
@@ -301,27 +289,17 @@ def test_character_lorebook_and_mount_repositories(tmp_path: Path) -> None:
         assert updated_lorebook.name == "World History Revised"
         assert updated_lorebook.tags_json == '["history","revised"]'
         assert updated_lorebook.version == lorebook.version + 1
-        assert rpg_story_characters.list(story_id=story.id)[0].id == character_mount.id
+        assert rpg_story_characters.list(story_id=story.id)[0].id == character.id
         assert (
             rpg_story_lorebook_entries.list(story_id=story.id)[0].id
-            == lorebook_mount.id
+            == lorebook.id
         )
-        duplicate_lorebook_mount = rpg_story_lorebook_entries.mount(
-            "repo_mounts",
-            story.id,
-            lorebook.id,
-        )
-        assert duplicate_lorebook_mount.id == lorebook_mount.id
-        touched_character_mount = rpg_story_characters.update_timestamp(character_mount.id)
-        touched_lorebook_mount = rpg_story_lorebook_entries.update_timestamp(lorebook_mount.id)
-
-        assert touched_character_mount.id == character_mount.id
-        assert touched_lorebook_mount.id == lorebook_mount.id
-        assert rpg_story_lorebook_entries.delete(lorebook_mount.id) is True
-        assert rpg_story_lorebook_entries.get(lorebook_mount.id) is None
-        assert rpg_story_lorebook_entries.delete(lorebook_mount.id) is False
-        assert rpg_lorebook_entries.delete(lorebook.id) is True
-        assert rpg_lorebook_entries.get(lorebook.id) is None
-        assert rpg_lorebook_entries.delete(lorebook.id) is False
+        assert rpg_story_characters.list(story_id=other_story.id) == [other_character]
+        assert rpg_story_lorebook_entries.delete(lorebook.id) is True
+        assert rpg_story_lorebook_entries.get(lorebook.id) is None
+        assert rpg_story_lorebook_entries.delete(lorebook.id) is False
+        assert rpg_story_characters.delete(character.id) is True
+        assert rpg_story_characters.get(character.id) is None
+        assert rpg_story_characters.list_details(character.id) == []
     finally:
         database.close()

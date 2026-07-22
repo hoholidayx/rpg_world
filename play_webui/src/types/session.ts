@@ -70,7 +70,6 @@ export type SessionDerivationJob = {
 
 export type SessionPlayerCharacter = {
   characterId: number
-  mountId: number
   storyId: number
   name: string
   avatarUrl: string

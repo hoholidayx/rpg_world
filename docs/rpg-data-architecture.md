@@ -8,6 +8,8 @@
 
 “数据层”不等于简单 CRUD。复杂关联查询、分页、批量写入、CAS、数据库级原子操作和高效 read model 应留在 `rpg_data`，避免业务层拼装 SQL 语义、制造 N+1 查询或破坏并发正确性。与此同时，数据层不得决定产品行为、状态机下一步或跨聚合业务流程。
 
+当前 catalog 保持 `workspace → story → session`，但 Character、Lorebook 与 Status 内容资产直接归属 Story，不存在 Workspace 资产库或 Story mount。Session Status 是从 Story 定义复制出的独立 `story_copy` 或 Session 自建的 `session_native`；来源删除只把副本的 `source_story_status_table_id` 置空，不级联删除副本。该模型通过三张压缩 migration 硬切，旧 migration ledger、文件名或 checksum 均不兼容，不能在数据层偷偷增加升级或导入兼容路径。
+
 ## 依赖方向
 
 ```text
@@ -112,7 +114,7 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 - `PlotSchedulingDataService`：Plot 定义、Session 覆盖、决策账本和分页 read model；
 - `DreamMemoryDataService`：Dream/Persistent Memory 账本、CAS、批量与 `IMMEDIATE` 事务；
 - `StoryMemoryDataService`：Story Memory/Evidence 的查询、分页与类型化写入。
-- `StatusDataService`：模板、Story 挂载、Session document、角色关联 read model、deferred progress 与调用方指定的原子 document batch。
+- `StatusDataService`：Story 直属定义、Session document、来源与角色关联 read model、deferred progress，以及调用方指定的复制/reset/原子 document batch。
 - `MediaDataService`：Job/Blob/Asset/Gallery/Background/Evaluation 的 typed CRUD、引用 read model、CAS claim、去重和调用方准备的原子 completion。
 - `TTSDataService`：Message source read model、Job/Cache/Blob/Part CRUD、条件 claim/transition、引用查询和调用方准备的原子 completion。
 - `SessionComposerDataService`：workspace mode、narrative style、Story mount/base 与 quick reply 的 typed CRUD、排序和调用方指定的批量 mode seed。
@@ -120,7 +122,7 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 - `MessageDataService`：主历史 CRUD、turn window/分页、processed flag 聚合与调用方指定的批量标记；不决定 Context 投影或 Summary/Story Memory 候选。
 - `NarrativeOutcomeDataService`：调用方准备好的 Outcome ledger row 追加、按 turn 查询和删除；不判断 Outcome code、sample、权重来源或剧情语义。
 
-Status 的产品策略由 Core 持有：`StatusTableAdministrationService` 决定模板/挂载/Session 表管理规则，`SceneStatusService` 决定 Scene 字段约束与 active Scene，`StatusContextService` 决定角色名修复和 Context 可见性，`StatusManager` 决定 Agent 运行时/deferred/bootstrap 写入资格。上述服务只接收窄 Data Port；`StatusDataService` 不重新暴露这些业务入口。
+Status 的产品策略由 Core 持有：`StatusTableAdministrationService` 决定 Story 定义与 Session 表管理规则，`SessionStatusLifecycleService` 决定何时按当前 Story 定义复制或 reset，`SceneStatusService` 决定 Scene 字段约束与 active Scene，`StatusContextService` 决定角色名修复和 Context 可见性，`StatusManager` 决定 Agent 运行时/deferred/bootstrap 写入资格。上述服务只接收窄 Data Port；`StatusDataService` 不重新暴露这些业务入口。
 
 Media 的来源范围、VisualBrief 来源确认、图库 metadata、删除门禁、背景选择/评估和 worker 恢复策略由 `MediaApplicationService` 持有。`media_service` worker 只调用该业务入口，不直接操作 `MediaDataService`。
 

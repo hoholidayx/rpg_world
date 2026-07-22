@@ -1,4 +1,4 @@
-import { STATUS_UPDATE_FREQUENCY, type StatusRow, type StatusTable } from '@/types/statusTables'
+import { STATUS_UPDATE_FREQUENCY, type StatusRow } from '@/types/statusTables'
 import { DEFAULT_KEY_COLUMN, DEFAULT_VALUE_COLUMN } from './constants'
 
 export type TableDraft = {
@@ -71,19 +71,4 @@ export function validateRows(rows: StatusRow[]) {
   }
 
   return { error: null, rows: normalized }
-}
-
-export function uniqueStatusTableName(baseName: string, tables: StatusTable[]) {
-  const names = new Set(tables.map((table) => table.name))
-  if (!names.has(baseName)) return baseName
-
-  const firstCopy = `${baseName} 副本`
-  if (!names.has(firstCopy)) return firstCopy
-
-  for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${firstCopy} ${index}`
-    if (!names.has(candidate)) return candidate
-  }
-
-  return `${firstCopy} ${Date.now()}`
 }

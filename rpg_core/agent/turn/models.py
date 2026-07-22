@@ -81,7 +81,6 @@ class TurnPlayerCharacterSnapshot:
     """Session player identity frozen before Context gates and LLM work."""
 
     character_id: int
-    mount_id: int
     story_id: int
     name: str
 

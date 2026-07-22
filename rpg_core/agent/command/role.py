@@ -16,7 +16,7 @@ def render_role_bind_prompt(
     error: str = "",
 ) -> str:
     if not options:
-        return "当前故事还没有可扮演角色。请先在角色库创建角色，并挂载到当前故事。"
+        return "当前故事还没有可扮演角色。请先在角色库为当前 Story 创建角色。"
 
     lines: list[str] = []
     if error.strip():

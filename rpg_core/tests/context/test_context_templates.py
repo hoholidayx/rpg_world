@@ -99,14 +99,13 @@ def test_sub_agent_context_reuses_fixed_layer_knowledge_sections():
 def test_sub_agent_context_marks_current_player_for_memory_and_status_prompts() -> None:
     player = SimpleNamespace(
         character_id=2,
-        mount_id=20,
         story_id=1,
         name="Alice",
     )
     rendered = SubAgentContext(
         characters=[
-            {"id": 1, "mount_id": 10, "name": "Bob"},
-            {"id": 2, "mount_id": 20, "name": "Alice"},
+            {"id": 1, "name": "Bob"},
+            {"id": 2, "name": "Alice"},
         ],
         player_character=player,
     ).render()

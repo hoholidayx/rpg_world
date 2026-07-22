@@ -57,7 +57,6 @@ class PlayPlayerCharacterSnapshot(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     character_id: int = Field(alias="characterId")
-    mount_id: int = Field(alias="mountId")
     story_id: int = Field(alias="storyId")
     name: str
     avatar_url: str = Field(default="", alias="avatarUrl")

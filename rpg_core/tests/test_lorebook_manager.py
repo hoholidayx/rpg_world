@@ -31,12 +31,10 @@ def _entry(
     name: str,
     *,
     entry_id: int = 1,
-    mount_id: int = 10,
     sort_order: int = 0,
 ) -> SessionLorebookEntry:
     return SessionLorebookEntry(
         id=entry_id,
-        mount_id=mount_id,
         workspace_id="workspace",
         story_id=2,
         name=name,
@@ -55,7 +53,6 @@ def test_lorebook_manager_delegates_to_service_without_path_or_cache() -> None:
     assert manager.list_enabled_entries() == [
         {
             "id": 1,
-            "mount_id": 10,
             "workspace_id": "workspace",
             "story_id": 2,
             "name": "First",
@@ -67,7 +64,7 @@ def test_lorebook_manager_delegates_to_service_without_path_or_cache() -> None:
     ]
     assert service.calls == [("list_enabled_entries", "s_main")]
 
-    service.entries.append(_entry("Second", entry_id=2, mount_id=11, sort_order=30))
+    service.entries.append(_entry("Second", entry_id=2, sort_order=30))
     assert [entry["name"] for entry in manager.list_enabled_entries()] == ["First", "Second"]
 
 
@@ -79,7 +76,7 @@ def test_lorebook_manager_requires_explicit_read_service() -> None:
 def test_lorebook_manager_lists_all_entries_and_gets_by_name() -> None:
     service = FakeLorebookService([
         _entry("First"),
-        _entry("Second", entry_id=2, mount_id=11),
+        _entry("Second", entry_id=2),
     ])
     manager = LorebookManager("s_main", service=service)
 

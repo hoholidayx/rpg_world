@@ -14,7 +14,7 @@ from rpg_data.model.session import (
     MESSAGE_ROLE_ASSISTANT,
     TURN_MODE_IC,
     Session,
-    SessionCharacterMount,
+    SessionCharacterOption,
     SessionMessage,
     SessionPlayerCharacterSnapshot,
 )
@@ -31,10 +31,10 @@ class SessionRoleDataPort(Protocol):
 
     def get_session(self, session_id: str) -> Session | None: ...
 
-    def list_character_mounts(
+    def list_character_options(
         self,
         session_id: str,
-    ) -> list[SessionCharacterMount]: ...
+    ) -> list[SessionCharacterOption]: ...
 
     def list_story_openings(
         self,
@@ -160,12 +160,10 @@ class SessionRoleService:
             None,
         )
         if (
-            current is None
-            or snapshot.mount_id != current.mount_id
-            or snapshot.story_id != current.story_id
+            current is None or snapshot.story_id != current.story_id
         ):
             logger.warning(
-                "player character binding no longer matches Story mount "
+                "player character binding no longer matches Story ownership "
                 "session_id=%s character_id=%s",
                 session_id,
                 session.player_character_id,
@@ -179,10 +177,10 @@ class SessionRoleService:
     def list_options(self, session_id: str) -> list[PlayerCharacterOption]:
         return [
             PlayerCharacterOption(
-                snapshot=_snapshot_from_mount(mount),
-                summary=_character_summary(mount),
+                snapshot=_snapshot_from_option(option),
+                summary=_character_summary(option),
             )
-            for mount in self._data.list_character_mounts(str(session_id))
+            for option in self._data.list_character_options(str(session_id))
         ]
 
     def list_opening_options(
@@ -329,7 +327,7 @@ class SessionRoleService:
         )
         if option is None:
             raise ValueError(
-                "player character is not mounted to this session story: "
+                "player character does not belong to this session story: "
                 f"{target_id}"
             )
         return option
@@ -360,7 +358,7 @@ class SessionRoleService:
             )
             return openings[0] if openings else None
         raise ValueError(
-            "story opening is not mounted to this session story: "
+            "story opening does not belong to this session Story: "
             f"{selected_id}"
         )
 
@@ -406,7 +404,6 @@ def encode_player_character_snapshot(
 ) -> str:
     payload: dict[str, str | int] = {
         "characterId": snapshot.character_id,
-        "mountId": snapshot.mount_id,
         "storyId": snapshot.story_id,
         "name": snapshot.name,
         "avatarUrl": snapshot.avatar_url,
@@ -424,21 +421,18 @@ def decode_player_character_snapshot(
     payload = _json_object(raw)
     try:
         character_id = int(payload.get("characterId") or 0)
-        mount_id = int(payload.get("mountId") or 0)
         story_id = int(payload.get("storyId") or 0)
     except (TypeError, ValueError):
         return None
     name = _string_value(payload.get("name")).strip()
     if (
         character_id != int(expected_character_id)
-        or mount_id <= 0
         or story_id <= 0
         or not name
     ):
         return None
     return SessionPlayerCharacterSnapshot(
         character_id=character_id,
-        mount_id=mount_id,
         story_id=story_id,
         name=name,
         avatar_url=_string_value(payload.get("avatarUrl")),
@@ -447,31 +441,30 @@ def decode_player_character_snapshot(
     )
 
 
-def _snapshot_from_mount(
-    mount: SessionCharacterMount,
+def _snapshot_from_option(
+    option: SessionCharacterOption,
 ) -> SessionPlayerCharacterSnapshot:
-    metadata = _json_object(mount.metadata_json)
+    metadata = _json_object(option.metadata_json)
     raw_ui = metadata.get("ui")
     ui = raw_ui if isinstance(raw_ui, dict) else {}
     return SessionPlayerCharacterSnapshot(
-        character_id=mount.character_id,
-        mount_id=mount.mount_id,
-        story_id=mount.story_id,
-        name=mount.name,
+        character_id=option.character_id,
+        story_id=option.story_id,
+        name=option.name,
         avatar_url=_string_value(ui.get("avatarUrl")),
         role_label=_string_value(ui.get("roleLabel")),
-        updated_at=mount.character_updated_at,
+        updated_at=option.character_updated_at,
     )
 
 
-def _character_summary(mount: SessionCharacterMount) -> str:
-    personality = mount.personality.strip()
+def _character_summary(option: SessionCharacterOption) -> str:
+    personality = option.personality.strip()
     if personality:
         return " ".join(personality.split())[:96]
-    content = mount.content.strip()
+    content = option.content.strip()
     if content:
         return " ".join(content.split())[:96]
-    return "已挂载到当前故事。"
+    return "属于当前故事。"
 
 
 def _render_opening(

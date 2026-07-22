@@ -51,9 +51,6 @@ function isCurrentPlayer(
   playerCharacter?: SessionPlayerCharacter | null,
 ) {
   if (!playerCharacter) return false
-  if (character.mountId && playerCharacter.mountId) {
-    return character.mountId === playerCharacter.mountId
-  }
   return character.id === playerCharacter.characterId
 }
 
@@ -96,7 +93,7 @@ function CharactersView({
     (scene?.presentCharacters ?? []).map((name) => name.trim().toLocaleLowerCase()),
   )
   if (loading) return <EmptyState>正在加载故事角色…</EmptyState>
-  if (!characters.length) return <EmptyState>当前故事还没有已挂载角色。</EmptyState>
+  if (!characters.length) return <EmptyState>当前故事还没有角色。</EmptyState>
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">

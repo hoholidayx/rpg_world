@@ -21,17 +21,17 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
-import { listStoryCharacters, unmountCharacter } from '@/lib/api/characters'
-import { listStoryLorebookEntries, unmountLorebookEntry } from '@/lib/api/lorebook'
+import { listCharacters } from '@/lib/api/characters'
+import { listLorebookEntries } from '@/lib/api/lorebook'
 import { getMainLLMOptions, getStoryMainLLM, setStoryMainLLM } from '@/lib/api/mainLLM'
 import { listSessions } from '@/lib/api/sessions'
 import { createStory, listStories, updateStory } from '@/lib/api/stories'
-import { listStoryStatusMounts, unmountStatusTemplate } from '@/lib/api/statusTables'
+import { listStoryStatusTables } from '@/lib/api/statusTables'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import type { LorebookEntry } from '@/types/lorebook'
 import type { SessionSummary } from '@/types/session'
-import { STATUS_KIND, type StoryStatusMount } from '@/types/statusTables'
+import { STATUS_KIND, type StatusTable } from '@/types/statusTables'
 import type { StoryInput, StoryOpeningInput, StorySummary } from '@/types/story'
 import { StoryRPModulesPanel } from './StoryRPModulesPanel'
 import { StoryComposerPanel } from './StoryComposerPanel'
@@ -381,17 +381,17 @@ function StoryEditContent({
 
   const charactersQuery = useQuery({
     queryKey: ['play-story-characters', currentWorkspace, storyId],
-    queryFn: () => listStoryCharacters(currentWorkspace ?? '', storyId ?? 0),
+    queryFn: () => listCharacters(currentWorkspace ?? '', storyId ?? 0),
     enabled: Boolean(currentWorkspace && story && !isCreate && storyId !== undefined),
   })
   const lorebookQuery = useQuery({
     queryKey: ['play-story-lorebook', currentWorkspace, storyId],
-    queryFn: () => listStoryLorebookEntries(currentWorkspace ?? '', storyId ?? 0),
+    queryFn: () => listLorebookEntries(currentWorkspace ?? '', storyId ?? 0),
     enabled: Boolean(currentWorkspace && story && !isCreate && storyId !== undefined),
   })
-  const statusMountsQuery = useQuery({
-    queryKey: ['play-story-status-mounts', currentWorkspace, storyId],
-    queryFn: () => listStoryStatusMounts(currentWorkspace ?? '', storyId ?? 0),
+  const statusTablesQuery = useQuery({
+    queryKey: ['play-story-status-tables', currentWorkspace, storyId],
+    queryFn: () => listStoryStatusTables(currentWorkspace ?? '', storyId ?? 0),
     enabled: Boolean(currentWorkspace && story && !isCreate && storyId !== undefined),
   })
   const sessionsQuery = useQuery({
@@ -412,9 +412,9 @@ function StoryEditContent({
 
   const characters = charactersQuery.data ?? []
   const lorebookEntries = lorebookQuery.data ?? []
-  const statusMounts = statusMountsQuery.data ?? []
+  const statusTables = statusTablesQuery.data ?? []
   const sessions = useMemo(() => sortSessions(sessionsQuery.data ?? []), [sessionsQuery.data])
-  const sceneMountCount = statusMounts.filter((mount) => mount.statusKind === STATUS_KIND.SCENE).length
+  const sceneTableCount = statusTables.filter((table) => table.statusKind === STATUS_KIND.SCENE).length
   const dirty = isCreate
     ? Boolean(draft.title.trim() || draft.summary || draft.openings.length || draft.storyPrompt)
     : isDirty(story, draft)
@@ -482,15 +482,6 @@ function StoryEditContent({
     setDraftSavedAt(new Date().toISOString())
   }, [draft, draftReady, draftStorageKey, dirty])
 
-  function invalidateStoryEditData() {
-    queryClient.invalidateQueries({ queryKey: ['play-stories', currentWorkspace] })
-    if (storyId === undefined) return
-    queryClient.invalidateQueries({ queryKey: ['play-story-characters', currentWorkspace, storyId] })
-    queryClient.invalidateQueries({ queryKey: ['play-story-lorebook', currentWorkspace, storyId] })
-    queryClient.invalidateQueries({ queryKey: ['play-story-status-mounts', currentWorkspace, storyId] })
-    queryClient.invalidateQueries({ queryKey: ['play-story-library-aggregate', currentWorkspace, storyId] })
-  }
-
   const saveMutation = useMutation({
     mutationFn: () => {
       if (!currentWorkspace) throw new Error('workspace missing')
@@ -523,30 +514,6 @@ function StoryEditContent({
       queryClient.invalidateQueries({ queryKey: ['play-story-library-aggregate', currentWorkspace, storyId] })
     },
     onError: (reason) => setError(reason instanceof Error ? reason.message : isCreate ? '新建故事失败' : '保存故事失败'),
-  })
-
-  const unmountCharacterMutation = useMutation({
-    mutationFn: (mountId: number) => {
-      if (!currentWorkspace) throw new Error('workspace missing')
-      return unmountCharacter(currentWorkspace, storyId ?? 0, mountId)
-    },
-    onSuccess: invalidateStoryEditData,
-  })
-
-  const unmountLorebookMutation = useMutation({
-    mutationFn: (mountId: number) => {
-      if (!currentWorkspace) throw new Error('workspace missing')
-      return unmountLorebookEntry(currentWorkspace, storyId ?? 0, mountId)
-    },
-    onSuccess: invalidateStoryEditData,
-  })
-
-  const unmountStatusMutation = useMutation({
-    mutationFn: (mountId: number) => {
-      if (!currentWorkspace) throw new Error('workspace missing')
-      return unmountStatusTemplate(currentWorkspace, storyId ?? 0, mountId)
-    },
-    onSuccess: invalidateStoryEditData,
   })
 
   function discardChanges() {
@@ -888,13 +855,21 @@ function StoryEditContent({
               </Panel>
 
               <Panel
-                title="挂载资产"
-                description="角色、世界书和状态表都是 workspace 资产；只有挂载到 story 后才会被 session 感知。"
-                action={(
-                  <Link href="/characters" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-teal-300 hover:text-teal-700">
-                    管理挂载
-                  </Link>
-                )}
+                title="Story 资产"
+                description="角色、世界书和状态表直接归属当前 Story；此处只做概览，分别进入管理页编辑。"
+                action={story ? (
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Link href={`/characters?storyId=${story.id}`} className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 transition hover:border-teal-300 hover:text-teal-700">
+                      角色
+                    </Link>
+                    <Link href={`/worldbook?storyId=${story.id}`} className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:text-violet-700">
+                      世界书
+                    </Link>
+                    <Link href={`/status-tables?storyId=${story.id}`} className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 transition hover:border-amber-300 hover:text-amber-700">
+                      状态表
+                    </Link>
+                  </div>
+                ) : undefined}
               >
                 <div className="grid gap-4 lg:grid-cols-2">
                   <section>
@@ -903,20 +878,18 @@ function StoryEditContent({
                       <span>rpg_story_characters</span>
                     </div>
                     <div className="grid gap-2">
-                      {isCreate ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">保存故事后可挂载角色</p> : null}
-                      {!isCreate && charactersQuery.isLoading ? <AssetRow name="加载中" meta="正在读取角色挂载" chip="角色" tone="teal" /> : null}
+                      {isCreate ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">保存 Story 后可创建角色</p> : null}
+                      {!isCreate && charactersQuery.isLoading ? <AssetRow name="加载中" meta="正在读取 Story 角色" chip="角色" tone="teal" /> : null}
                       {characters.map((character: CharacterCard) => (
                         <AssetRow
-                          key={character.mountId ?? character.id}
+                          key={character.id}
                           name={character.name}
                           meta={character.personality || character.content || `character #${character.id}`}
                           chip="角色"
                           tone="teal"
-                          pending={unmountCharacterMutation.isPending && unmountCharacterMutation.variables === character.mountId}
-                          onRemove={character.mountId ? () => unmountCharacterMutation.mutate(character.mountId as number) : undefined}
                         />
                       ))}
-                      {!isCreate && !charactersQuery.isLoading && !characters.length ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">暂无角色挂载</p> : null}
+                      {!isCreate && !charactersQuery.isLoading && !characters.length ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">当前 Story 暂无角色</p> : null}
                     </div>
                   </section>
 
@@ -926,43 +899,39 @@ function StoryEditContent({
                       <span>rpg_story_lorebook_entries</span>
                     </div>
                     <div className="grid gap-2">
-                      {isCreate ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">保存故事后可挂载世界书</p> : null}
-                      {!isCreate && lorebookQuery.isLoading ? <AssetRow name="加载中" meta="正在读取世界书挂载" chip="世界书" tone="violet" /> : null}
+                      {isCreate ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">保存 Story 后可创建世界书条目</p> : null}
+                      {!isCreate && lorebookQuery.isLoading ? <AssetRow name="加载中" meta="正在读取 Story 世界书" chip="世界书" tone="violet" /> : null}
                       {lorebookEntries.map((entry: LorebookEntry) => (
                         <AssetRow
-                          key={entry.mountId ?? entry.id}
+                          key={entry.id}
                           name={entry.name}
                           meta={entry.description || entry.content || `entry #${entry.id}`}
                           chip="世界书"
                           tone="violet"
-                          pending={unmountLorebookMutation.isPending && unmountLorebookMutation.variables === entry.mountId}
-                          onRemove={entry.mountId ? () => unmountLorebookMutation.mutate(entry.mountId as number) : undefined}
                         />
                       ))}
-                      {!isCreate && !lorebookQuery.isLoading && !lorebookEntries.length ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">暂无世界书挂载</p> : null}
+                      {!isCreate && !lorebookQuery.isLoading && !lorebookEntries.length ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">当前 Story 暂无世界书条目</p> : null}
                     </div>
                   </section>
 
                   <section className="lg:col-span-2">
                     <div className="mb-2 flex items-center justify-between gap-3 text-xs font-black uppercase text-slate-500">
-                      <span>状态表模板</span>
+                      <span>状态表定义</span>
                       <span>rpg_story_status_tables</span>
                     </div>
                     <div className="grid gap-2">
-                      {isCreate ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">保存故事后可挂载状态表模板</p> : null}
-                      {!isCreate && statusMountsQuery.isLoading ? <AssetRow name="加载中" meta="正在读取状态表挂载" chip="状态表" tone="amber" /> : null}
-                      {statusMounts.map((mount: StoryStatusMount) => (
+                      {isCreate ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">保存 Story 后可创建状态表</p> : null}
+                      {!isCreate && statusTablesQuery.isLoading ? <AssetRow name="加载中" meta="正在读取 Story 状态表" chip="状态表" tone="amber" /> : null}
+                      {statusTables.map((table: StatusTable) => (
                         <AssetRow
-                          key={mount.id}
-                          name={mount.tableName}
-                          meta={`status_kind ${mount.statusKind} · 创建 session 时复制 document_json`}
-                          chip={mount.statusKind}
-                          tone={mount.statusKind === STATUS_KIND.SCENE ? 'teal' : 'amber'}
-                          pending={unmountStatusMutation.isPending && unmountStatusMutation.variables === mount.id}
-                          onRemove={() => unmountStatusMutation.mutate(mount.id)}
+                          key={table.id}
+                          name={table.name}
+                          meta={`status_kind ${table.statusKind} · 创建 Session 时复制 document_json`}
+                          chip={table.statusKind}
+                          tone={table.statusKind === STATUS_KIND.SCENE ? 'teal' : 'amber'}
                         />
                       ))}
-                      {!isCreate && !statusMountsQuery.isLoading && !statusMounts.length ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">暂无状态表模板挂载</p> : null}
+                      {!isCreate && !statusTablesQuery.isLoading && !statusTables.length ? <p className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm font-semibold text-slate-400">当前 Story 暂无状态表</p> : null}
                     </div>
                   </section>
                 </div>
@@ -975,10 +944,10 @@ function StoryEditContent({
                   <StatCard value={sessions.length} label="sessions" />
                   <StatCard value={characters.length} label="characters" />
                   <StatCard value={lorebookEntries.length} label="lorebook" />
-                  <StatCard value={statusMounts.length} label="status tables" />
+                  <StatCard value={statusTables.length} label="status tables" />
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {sceneMountCount ? <Chip tone="teal">scene 已挂载</Chip> : <Chip tone="amber">scene 未挂载</Chip>}
+                  {sceneTableCount ? <Chip tone="teal">scene 已定义</Chip> : <Chip tone="amber">scene 未定义</Chip>}
                   <Chip tone="violet">story_prompt stored</Chip>
                   <Chip tone="amber">{sessions.length} active sessions</Chip>
                 </div>

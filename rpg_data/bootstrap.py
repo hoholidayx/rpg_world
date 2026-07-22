@@ -359,13 +359,13 @@ def _ensure_session_copies(database: Database) -> int:
         if SessionStatusTableRecord.select().where(SessionStatusTableRecord.session == session_id).exists():
             continue
         try:
-            mounts = status_service.list_story_mounts(
+            story_tables = status_service.list_story_tables(
                 str(session.workspace_id),
                 int(session.story_id),
             )
-            tables = status_service.copy_story_mounts_to_session(
+            tables = status_service.copy_story_status_tables_to_session(
                 session_id,
-                (mount.id for mount in mounts),
+                (table.id for table in story_tables),
             )
             initialized_count += 1
             logger.info("session status tables materialized session_id=%s table_count=%s", session_id, len(tables))

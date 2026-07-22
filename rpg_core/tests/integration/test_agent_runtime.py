@@ -188,25 +188,27 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
     ))
 
-    template_copy = next(
+    story_copy = next(
         table
         for table in integration_data_gateway.status.list_tables(session_id)
-        if table.source_table_id is not None
+        if table.source_story_status_table_id is not None
     )
-    old_session_document = template_copy.document.with_existing_values([
-        (template_copy.document.rows[0].key, "旧会话值")
+    old_session_document = story_copy.document.with_existing_values([
+        (story_copy.document.rows[0].key, "旧会话值")
     ])
-    integration_data_gateway.status.save_table(template_copy.id, old_session_document)
-    source_template = integration_data_gateway.status.get_template(
-        int(template_copy.source_table_id)
+    integration_data_gateway.status.save_table(story_copy.id, old_session_document)
+    source_story_table = integration_data_gateway.status.get_story_table(
+        int(story_copy.source_story_status_table_id)
     )
-    assert source_template is not None
-    current_template_document = source_template.document.with_existing_values([
-        (source_template.document.rows[0].key, "当前 Story 模板值")
+    assert source_story_table is not None
+    current_story_document = source_story_table.document.with_existing_values([
+        (source_story_table.document.rows[0].key, "当前 Story 状态值")
     ])
-    integration_data_gateway.status.update_template(
-        source_template.id,
-        document=current_template_document,
+    integration_data_gateway.status.update_story_table(
+        source_story_table.workspace_id,
+        source_story_table.story_id,
+        source_story_table.id,
+        document=current_story_document,
     )
     deferred_document = models.StatusTableDocument.from_rows(rows=[
         models.StatusTableRow(
@@ -279,8 +281,8 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     )
     assert integration_data_gateway.backup.messages.count(session_id) == backup_count + 1
     assert integration_data_gateway.status.list_deferred_progress(session_id) == []
-    rebuilt = integration_data_gateway.status.get_table(session_id, template_copy.name)
-    assert rebuilt.document.rows[0].value == "当前 Story 模板值"
+    rebuilt = integration_data_gateway.status.get_table(session_id, story_copy.name)
+    assert rebuilt.document.rows[0].value == "当前 Story 状态值"
     native_after = integration_data_gateway.status.get_table_by_id(native_table.id)
     assert native_after.id == native_table.id
     assert native_after.origin == models.STATUS_ORIGIN_SESSION_NATIVE

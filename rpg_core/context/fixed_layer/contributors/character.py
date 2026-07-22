@@ -33,7 +33,7 @@ def render_character_section_body(characters: list[JsonObject]) -> str:
 
 
 def build_character_section(characters: list[JsonObject]) -> FixedLayerSection | None:
-    """Build the character-card fixed-layer section from mounted characters."""
+    """Build the character-card fixed-layer section from Story-owned characters."""
     content = render_character_section_body(characters)
     if not content.strip():
         return None

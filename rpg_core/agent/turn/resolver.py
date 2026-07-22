@@ -140,7 +140,6 @@ class TurnSnapshotResolver:
         player = state.player
         return TurnPlayerCharacterSnapshot(
             character_id=int(player.character_id),
-            mount_id=int(player.mount_id),
             story_id=int(player.story_id),
             name=str(player.name),
         )

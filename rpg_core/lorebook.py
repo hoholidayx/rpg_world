@@ -1,4 +1,4 @@
-"""Thin core adapter for lorebook entries mounted to a session's story."""
+"""Thin core adapter for lorebook entries owned by a Session's Story."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class LorebookReadPort(Protocol):
 
 
 class LorebookManager:
-    """Read lorebook entries mounted to one session's story."""
+    """Read lorebook entries owned by one Session's Story."""
 
     def __init__(
         self,
@@ -41,7 +41,7 @@ class LorebookManager:
     # ------------------------------------------------------------------
 
     def list_entries(self) -> list[dict[str, object]]:
-        """Return all lorebook entries mounted to this session's story."""
+        """Return all lorebook entries owned by this Session's Story."""
 
         return [
             _entry_to_dict(entry)
@@ -49,7 +49,7 @@ class LorebookManager:
         ]
 
     def list_enabled_entries(self) -> list[dict[str, object]]:
-        """Compatibility alias for mounted lorebook entries."""
+        """Compatibility alias for Story-owned lorebook entries."""
 
         return [
             _entry_to_dict(entry)
@@ -57,7 +57,7 @@ class LorebookManager:
         ]
 
     def get_entry(self, name: str) -> dict[str, object]:
-        """Return a mounted lorebook entry by name."""
+        """Return a Story-owned lorebook entry by name."""
 
         entry = self._service.get_entry(self.session_id, name)
         if entry is None:
@@ -68,7 +68,6 @@ class LorebookManager:
 def _entry_to_dict(entry: "SessionLorebookEntry") -> dict[str, object]:
     return {
         "id": entry.id,
-        "mount_id": entry.mount_id,
         "workspace_id": entry.workspace_id,
         "story_id": entry.story_id,
         "name": entry.name,

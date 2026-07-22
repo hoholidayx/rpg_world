@@ -74,23 +74,27 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         effective_source=models.NARRATIVE_OUTCOME_SOURCE_CONFIG,
     ))
 
-    template_copy = next(
+    story_copy = next(
         table
         for table in gateway.status.list_tables(session_id)
-        if table.source_table_id is not None
+        if table.source_story_status_table_id is not None
     )
-    changed_document = template_copy.document.with_existing_values([
-        (template_copy.document.rows[0].key, "会话中的旧值")
+    changed_document = story_copy.document.with_existing_values([
+        (story_copy.document.rows[0].key, "会话中的旧值")
     ])
-    gateway.status.save_table(template_copy.id, changed_document)
-    source_template = gateway.status.get_template(int(template_copy.source_table_id))
-    assert source_template is not None
-    current_template_document = source_template.document.with_existing_values([
-        (source_template.document.rows[0].key, "Story 当前模板值")
+    gateway.status.save_table(story_copy.id, changed_document)
+    source_story_table = gateway.status.get_story_table(
+        int(story_copy.source_story_status_table_id)
+    )
+    assert source_story_table is not None
+    current_story_document = source_story_table.document.with_existing_values([
+        (source_story_table.document.rows[0].key, "Story 当前状态值")
     ])
-    gateway.status.update_template(
-        source_template.id,
-        document=current_template_document,
+    gateway.status.update_story_table(
+        source_story_table.workspace_id,
+        source_story_table.story_id,
+        source_story_table.id,
+        document=current_story_document,
     )
 
     deferred_document = models.StatusTableDocument.from_rows(rows=[
@@ -118,7 +122,7 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         gateway,
         session_id,
         role_result.state.player,
-        template_copy.name,
+        story_copy.name,
         native_table,
     )
 
@@ -135,8 +139,8 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     assert result.messages_cleared >= 2
     assert result.narrative_outcomes_cleared == 1
     assert result.story_memories_cleared == 1
-    assert result.template_status_tables_cleared >= 1
-    assert result.template_status_tables_initialized >= 1
+    assert result.story_status_tables_cleared >= 1
+    assert result.story_status_tables_initialized >= 1
     assert result.session_native_status_tables_reset == 1
     assert result.deferred_progress_cleared == 1
     assert result.first_message
@@ -148,7 +152,7 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     assert _story_memory(gateway).list(session_id) == []
     assert gateway.status.list_deferred_progress(session_id) == []
     rebuilt = gateway.status.get_table(session_id, template_name)
-    assert rebuilt.document.rows[0].value == "Story 当前模板值"
+    assert rebuilt.document.rows[0].value == "Story 当前状态值"
     native_after = gateway.status.get_table_by_id(native_before.id)
     assert native_after.id == native_before.id
     assert native_after.name == native_before.name
@@ -209,16 +213,18 @@ def test_reset_rolls_back_all_database_changes_when_status_rebuild_fails(
     assert gateway.backup.messages.count(session_id) == backup_count
 
 
-def test_reset_fails_atomically_when_native_table_name_conflicts_with_story_template(
+def test_reset_fails_atomically_when_native_table_name_conflicts_with_story_table(
     tmp_path,
 ) -> None:
     gateway, session_id, _bound_player, template_name, native_table = _prepared_session(
         tmp_path
     )
-    template_copy = gateway.status.get_table(session_id, template_name)
-    assert template_copy.source_table_id is not None
-    gateway.status.update_template(
-        int(template_copy.source_table_id),
+    story_copy = gateway.status.get_table(session_id, template_name)
+    assert story_copy.source_story_status_table_id is not None
+    gateway.status.update_story_table(
+        story_copy.workspace_id,
+        story_copy.story_id,
+        int(story_copy.source_story_status_table_id),
         name=native_table.name,
     )
     messages_before = gateway.messages.list(session_id)

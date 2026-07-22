@@ -18,33 +18,32 @@ def gateway() -> DataServiceGateway:
         service_gateway.close()
 
 
-def test_session_role_data_service_reads_mounts_and_persists_explicit_profile(
+def test_session_role_data_service_reads_story_characters_and_persists_profile(
     gateway: DataServiceGateway,
 ) -> None:
     session = gateway.catalog.create_session("demo_workspace", 1, title="role data")
     assert session is not None
-    mounts = gateway.sessions.list_character_mounts(session.id)
+    characters = gateway.sessions.list_character_options(session.id)
     openings = gateway.sessions.list_story_openings(session.id)
-    assert mounts and openings
-    mount = mounts[0]
+    assert characters and openings
+    character = characters[0]
     snapshot_json = json.dumps(
         {
-            "characterId": mount.character_id,
-            "mountId": mount.mount_id,
-            "storyId": mount.story_id,
-            "name": mount.name,
+            "characterId": character.character_id,
+            "storyId": character.story_id,
+            "name": character.name,
         }
     )
 
     updated = gateway.sessions.update_player_character_and_opening(
         session.id,
-        player_character_id=mount.character_id,
+        player_character_id=character.character_id,
         player_character_snapshot_json=snapshot_json,
         story_opening_id=openings[0].id,
     )
 
     assert updated is not None
-    assert updated.player_character_id == mount.character_id
+    assert updated.player_character_id == character.character_id
     assert updated.player_character_snapshot_json == snapshot_json
     assert updated.story_opening_id == openings[0].id
 
@@ -78,13 +77,13 @@ def test_session_role_data_transaction_rolls_back_explicit_update(
 ) -> None:
     session = gateway.catalog.create_session("demo_workspace", 1, title="rollback")
     assert session is not None
-    mount = gateway.sessions.list_character_mounts(session.id)[0]
+    character = gateway.sessions.list_character_options(session.id)[0]
 
     with pytest.raises(RuntimeError, match="rollback"):
         with gateway.sessions.transaction():
             gateway.sessions.update_player_character(
                 session.id,
-                player_character_id=mount.character_id,
+                player_character_id=character.character_id,
                 player_character_snapshot_json='{"prepared":true}',
             )
             raise RuntimeError("rollback")
@@ -174,10 +173,12 @@ def test_status_data_service_applies_exact_reset_plan(
 ) -> None:
     session = gateway.catalog.create_session("demo_workspace", 1, title="status data")
     assert session is not None
-    mounts = gateway.status.list_story_mounts(session.workspace_id, session.story_id)
-    copied = gateway.status.copy_story_mounts_to_session(
+    story_tables = gateway.status.list_story_tables(
+        session.workspace_id, session.story_id
+    )
+    copied = gateway.status.copy_story_status_tables_to_session(
         session.id,
-        (mount.id for mount in mounts),
+        (table.id for table in story_tables),
     )
     native = gateway.status.create_table(
         session.id,
@@ -186,27 +187,27 @@ def test_status_data_service_applies_exact_reset_plan(
             rows=[models.StatusTableRow("key", "value")]
         ),
     )
-    template_ids = tuple(
+    story_copy_ids = tuple(
         table.id
         for table in copied
-        if table.origin == models.STATUS_ORIGIN_TEMPLATE_COPY
+        if table.origin == models.STATUS_ORIGIN_STORY_COPY
     )
 
     result = gateway.status.apply_session_reset_plan(
         session.id,
         models.SessionStatusResetPlan(
-            delete_table_ids=template_ids,
+            delete_table_ids=story_copy_ids,
             document_writes=(
                 models.SessionStatusDocumentWrite(
                     table_id=native.id,
                     document=native.document.with_cleared_values(),
                 ),
             ),
-            story_mount_ids=tuple(mount.id for mount in mounts),
+            story_status_table_ids=tuple(table.id for table in story_tables),
         ),
     )
 
-    assert result.template_tables_cleared == len(template_ids)
-    assert result.template_tables_initialized == len(mounts)
+    assert result.story_tables_cleared == len(story_copy_ids)
+    assert result.story_tables_initialized == len(story_tables)
     assert result.native_tables_reset == 1
     assert gateway.status.get_table_by_id(native.id).document.rows[0].value == ""

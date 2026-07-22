@@ -37,7 +37,8 @@ def test_gateway_initializes_migrations_and_exposes_services(
     backup_messages = gateway.backup.messages.list("s_forest001")
     message_count = gateway.messages.count("s_forest001")
     backup_message_count = gateway.backup.messages.count("s_forest001")
-    templates = gateway.status.list_templates("demo_workspace")
+    forest_definitions = gateway.status.list_story_tables("demo_workspace", 1)
+    academy_definitions = gateway.status.list_story_tables("demo_workspace", 2)
     status_tables = gateway.status.list_tables("s_forest001")
     context_tables = StatusContextService(gateway.status).list_tables("s_forest001")
     scene_table = SceneStatusService(gateway.status).get_active_table("s_forest001")
@@ -51,9 +52,12 @@ def test_gateway_initializes_migrations_and_exposes_services(
     assert [message.turn_id for message in messages[:4]] == [1, 1, 2, 2]
     assert [message.seq_in_turn for message in messages[:4]] == [1, 2, 1, 2]
     assert [message.content for message in backup_messages[:2]] == [message.content for message in messages[:2]]
-    assert [(item.name, item.status_kind) for item in templates] == [
+    assert [(item.name, item.status_kind) for item in forest_definitions] == [
         ("世界线索", "normal"),
         ("北境森林当前场景", "scene"),
+    ]
+    assert [(item.name, item.status_kind) for item in academy_definitions] == [
+        ("世界线索", "normal"),
         ("奥术学院当前场景", "scene"),
     ]
     assert [table.name for table in status_tables] == ["世界线索", "北境森林当前场景"]

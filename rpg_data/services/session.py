@@ -24,7 +24,6 @@ from rpg_data.repositories._utils import (
     to_story_opening,
 )
 from rpg_data.repositories.records import (
-    CharacterRecord,
     SessionBackupMessageRecord,
     SessionMessageRecord,
     SessionRPModuleOverrideRecord,
@@ -222,14 +221,13 @@ class SessionDataService:
 
     # Player role and Opening primitives --------------------------------
 
-    def list_character_mounts(
+    def list_character_options(
         self,
         session_id: str,
-    ) -> list[models.SessionCharacterMount]:
+    ) -> list[models.SessionCharacterOption]:
         session = self._require_session(session_id)
         rows = (
-            StoryCharacterRecord.select(StoryCharacterRecord, CharacterRecord)
-            .join(CharacterRecord)
+            StoryCharacterRecord.select()
             .where(
                 (StoryCharacterRecord.workspace == session.workspace_id)
                 & (StoryCharacterRecord.story == session.story_id)
@@ -237,16 +235,15 @@ class SessionDataService:
             .order_by(StoryCharacterRecord.sort_order, StoryCharacterRecord.id)
         )
         return [
-            models.SessionCharacterMount(
+            models.SessionCharacterOption(
                 workspace_id=str(row.workspace_id),
                 story_id=int(row.story_id),
-                mount_id=int(row.id),
-                character_id=int(row.character_id),
-                name=str(row.character.name),
-                personality=str(row.character.personality or ""),
-                content=str(row.character.content or ""),
-                metadata_json=str(row.character.metadata_json or "{}"),
-                character_updated_at=str(row.character.updated_at),
+                character_id=int(row.id),
+                name=str(row.name),
+                personality=str(row.personality or ""),
+                content=str(row.content or ""),
+                metadata_json=str(row.metadata_json or "{}"),
+                character_updated_at=str(row.updated_at),
             )
             for row in rows
         ]
@@ -504,21 +501,21 @@ class SessionDataService:
     ) -> list[SessionStatusTable]:
         return self._status.list_tables(str(session_id))
 
-    def list_story_status_mounts(
+    def list_story_status_tables(
         self,
         workspace_id: str,
         story_id: int,
     ) -> list[StoryStatusTable]:
-        return self._status.list_story_mounts(str(workspace_id), int(story_id))
+        return self._status.list_story_tables(str(workspace_id), int(story_id))
 
-    def copy_story_status_mounts(
+    def copy_story_status_tables(
         self,
         session_id: str,
-        mount_ids: Iterable[int],
+        story_status_table_ids: Iterable[int],
     ) -> list[SessionStatusTable]:
-        return self._status.copy_story_mounts_to_session(
+        return self._status.copy_story_status_tables_to_session(
             str(session_id),
-            mount_ids,
+            story_status_table_ids,
         )
 
     def apply_status_reset_plan(

@@ -8,9 +8,9 @@ from rpg_data.model.status import (
     SessionStatusTable,
     StatusCharacterIdentity,
     StatusContextCandidate,
-    StatusStoryMountIdentity,
+    StatusStoryTableIdentity,
     StatusTableDocument,
-    StoryStatusMountSnapshot,
+    StoryStatusSourceSnapshot,
     parse_session_status_metadata,
     serialize_session_status_metadata,
 )
@@ -22,8 +22,8 @@ def _table(metadata: SessionStatusMetadata) -> SessionStatusTable:
         session_id="session",
         workspace_id="workspace",
         story_id=1,
-        source_table_id=11,
-        origin="template_copy",
+        source_story_status_table_id=11,
+        origin="story_copy",
         name="角色状态",
         document=StatusTableDocument.from_rows(),
         metadata_json=serialize_session_status_metadata(metadata),
@@ -54,14 +54,13 @@ class _Data:
 
 
 def test_context_service_repairs_missing_character_name() -> None:
-    metadata = SessionStatusMetadata().with_story_mount(
-        StoryStatusMountSnapshot(
-            mount_id=21,
-            character_mount_id=31,
+    metadata = SessionStatusMetadata().with_story_source(
+        StoryStatusSourceSnapshot(
+            story_status_table_id=11,
             character_id=41,
         )
     )
-    identity = StatusCharacterIdentity(31, 41, "Alice")
+    identity = StatusCharacterIdentity(41, "Alice")
     data = _Data(
         StatusContextCandidate(
             table=_table(metadata),
@@ -71,29 +70,27 @@ def test_context_service_repairs_missing_character_name() -> None:
 
     result = StatusContextService(data).list_tables("session")
 
-    repaired = parse_session_status_metadata(result[0].metadata_json).story_mount
+    repaired = parse_session_status_metadata(result[0].metadata_json).story_source
     assert repaired is not None
     assert repaired.character_name == "Alice"
-    assert repaired.character_mount_id == 31
+    assert repaired.character_id == 41
     assert len(data.updates) == 1
 
 
 def test_context_service_excludes_identity_mismatch() -> None:
-    metadata = SessionStatusMetadata().with_story_mount(
-        StoryStatusMountSnapshot(
-            mount_id=21,
-            character_mount_id=31,
+    metadata = SessionStatusMetadata().with_story_source(
+        StoryStatusSourceSnapshot(
+            story_status_table_id=11,
             character_id=41,
         )
     )
     data = _Data(
         StatusContextCandidate(
             table=_table(metadata),
-            referenced_character=StatusCharacterIdentity(31, 99, "Bob"),
-            current_story_mount=StatusStoryMountIdentity(
-                mount_id=21,
-                mount_origin="system_mount",
-                character=StatusCharacterIdentity(31, 99, "Bob"),
+            referenced_character=StatusCharacterIdentity(99, "Bob"),
+            current_story_table=StatusStoryTableIdentity(
+                story_status_table_id=11,
+                character=StatusCharacterIdentity(99, "Bob"),
             ),
         )
     )

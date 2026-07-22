@@ -16,13 +16,8 @@ class StatusKind(StrEnum):
 
 
 class StatusOrigin(StrEnum):
-    TEMPLATE_COPY = "template_copy"
+    STORY_COPY = "story_copy"
     SESSION_NATIVE = "session_native"
-
-
-class StoryStatusMountOrigin(StrEnum):
-    SYSTEM = "system_mount"
-    STORY_TEMPLATE = "story_template"
 
 
 class StatusUpdateFrequency(StrEnum):
@@ -36,10 +31,8 @@ STATUS_TABLE_KIND = "status_table"
 STATUS_TABLE_MODE_KEY_VALUE = "key_value"
 STATUS_KIND_SCENE = StatusKind.SCENE
 STATUS_KIND_NORMAL = StatusKind.NORMAL
-STATUS_ORIGIN_TEMPLATE_COPY = StatusOrigin.TEMPLATE_COPY
+STATUS_ORIGIN_STORY_COPY = StatusOrigin.STORY_COPY
 STATUS_ORIGIN_SESSION_NATIVE = StatusOrigin.SESSION_NATIVE
-STORY_STATUS_MOUNT_ORIGIN_SYSTEM = StoryStatusMountOrigin.SYSTEM
-STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE = StoryStatusMountOrigin.STORY_TEMPLATE
 STATUS_KEY_COLUMN = "属性"
 STATUS_VALUE_COLUMN = "值"
 STATUS_UPDATE_FREQUENCY_REALTIME = StatusUpdateFrequency.REALTIME
@@ -50,7 +43,7 @@ STATUS_UPDATE_FREQUENCIES = frozenset(StatusUpdateFrequency)
 STATUS_ROW_UPDATE_FREQUENCY_KEY = "updateFrequency"
 STATUS_ROW_UPDATE_RULE_KEY = "updateRule"
 STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY = "deferredIntervalTurns"
-STATUS_METADATA_STORY_MOUNT_KEY = "storyStatusMount"
+STATUS_METADATA_STORY_SOURCE_KEY = "storyStatusSource"
 
 
 @dataclass(frozen=True)
@@ -58,8 +51,8 @@ class SessionStatusResetResult:
     """Counts produced by resetting one session's status-table runtime."""
 
     session_id: str
-    template_tables_cleared: int = 0
-    template_tables_initialized: int = 0
+    story_tables_cleared: int = 0
+    story_tables_initialized: int = 0
     native_tables_reset: int = 0
     deferred_progress_cleared: int = 0
 
@@ -79,7 +72,7 @@ class SessionStatusResetPlan:
     delete_table_ids: tuple[int, ...] = ()
     document_writes: tuple[SessionStatusDocumentWrite, ...] = ()
     deferred_progress_table_ids: tuple[int, ...] = ()
-    story_mount_ids: tuple[int, ...] = ()
+    story_status_table_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -128,17 +121,15 @@ class StatusDocumentBatchResult:
 class StatusCharacterIdentity:
     """Character identity projected for a status-table association read."""
 
-    character_mount_id: int
     character_id: int
     character_name: str
 
 
 @dataclass(frozen=True)
-class StatusStoryMountIdentity:
-    """Current Story mount association for a copied status table."""
+class StatusStoryTableIdentity:
+    """Current Story definition associated with a copied status table."""
 
-    mount_id: int
-    mount_origin: StoryStatusMountOrigin
+    story_status_table_id: int
     character: StatusCharacterIdentity | None = None
 
 
@@ -148,32 +139,27 @@ class StatusContextCandidate:
 
     table: "SessionStatusTable"
     referenced_character: StatusCharacterIdentity | None = None
-    current_story_mount: StatusStoryMountIdentity | None = None
+    current_story_table: StatusStoryTableIdentity | None = None
 
 
 @dataclass(frozen=True)
-class StoryStatusMountSnapshot:
-    """Denormalized mount snapshot stored in Session table metadata."""
+class StoryStatusSourceSnapshot:
+    """Denormalized Story source stored in Session table metadata."""
 
-    mount_id: int | None = None
-    mount_origin: StoryStatusMountOrigin = STORY_STATUS_MOUNT_ORIGIN_SYSTEM
-    character_mount_id: int | None = None
+    story_status_table_id: int | None = None
     character_id: int | None = None
     character_name: str | None = None
 
     @property
     def has_character_binding(self) -> bool:
         return (
-            self.character_mount_id is not None
-            or self.character_id is not None
+            self.character_id is not None
             or bool((self.character_name or "").strip())
         )
 
     def to_json_dict(self) -> JsonObject:
         return {
-            "mountId": self.mount_id,
-            "mountOrigin": self.mount_origin,
-            "characterMountId": self.character_mount_id,
+            "storyStatusTableId": self.story_status_table_id,
             "characterId": self.character_id,
             "characterName": self.character_name,
         }
@@ -184,15 +170,15 @@ class SessionStatusMetadata:
     """Typed access to known metadata while preserving extension fields."""
 
     values: Mapping[str, JsonValue] = field(default_factory=dict)
-    story_mount: StoryStatusMountSnapshot | None = None
+    story_source: StoryStatusSourceSnapshot | None = None
 
-    def with_story_mount(
+    def with_story_source(
         self,
-        story_mount: StoryStatusMountSnapshot,
+        story_source: StoryStatusSourceSnapshot,
     ) -> "SessionStatusMetadata":
         values = dict(self.values)
-        values[STATUS_METADATA_STORY_MOUNT_KEY] = story_mount.to_json_dict()
-        return replace(self, values=values, story_mount=story_mount)
+        values[STATUS_METADATA_STORY_SOURCE_KEY] = story_source.to_json_dict()
+        return replace(self, values=values, story_source=story_source)
 
 
 def parse_session_status_metadata(raw: str) -> SessionStatusMetadata:
@@ -201,26 +187,17 @@ def parse_session_status_metadata(raw: str) -> SessionStatusMetadata:
     except (TypeError, json.JSONDecodeError):
         loaded = {}
     values = _json_object(loaded)
-    raw_mount = values.get(STATUS_METADATA_STORY_MOUNT_KEY)
-    if not isinstance(raw_mount, dict):
+    raw_source = values.get(STATUS_METADATA_STORY_SOURCE_KEY)
+    if not isinstance(raw_source, dict):
         return SessionStatusMetadata(values=values)
-    raw_origin = raw_mount.get("mountOrigin")
-    try:
-        mount_origin = validate_story_status_mount_origin(
-            str(raw_origin or STORY_STATUS_MOUNT_ORIGIN_SYSTEM)
-        )
-    except ValueError:
-        mount_origin = STORY_STATUS_MOUNT_ORIGIN_SYSTEM
     return SessionStatusMetadata(
         values=values,
-        story_mount=StoryStatusMountSnapshot(
-            mount_id=_optional_positive_int(raw_mount.get("mountId")),
-            mount_origin=mount_origin,
-            character_mount_id=_optional_positive_int(
-                raw_mount.get("characterMountId")
+        story_source=StoryStatusSourceSnapshot(
+            story_status_table_id=_optional_positive_int(
+                raw_source.get("storyStatusTableId")
             ),
-            character_id=_optional_positive_int(raw_mount.get("characterId")),
-            character_name=_optional_text(raw_mount.get("characterName")),
+            character_id=_optional_positive_int(raw_source.get("characterId")),
+            character_name=_optional_text(raw_source.get("characterName")),
         ),
     )
 
@@ -808,18 +785,6 @@ def validate_status_update_policy(
     return parsed_frequency
 
 
-def validate_story_status_mount_origin(
-    value: str | StoryStatusMountOrigin,
-) -> StoryStatusMountOrigin:
-    origin = str(value or STORY_STATUS_MOUNT_ORIGIN_SYSTEM)
-    try:
-        return StoryStatusMountOrigin(origin)
-    except ValueError as exc:
-        raise ValueError(
-            f"Unsupported story status mount origin: {origin}"
-        ) from exc
-
-
 def validate_status_origin(value: str | StatusOrigin) -> StatusOrigin:
     origin = str(value)
     try:
@@ -829,9 +794,11 @@ def validate_status_origin(value: str | StatusOrigin) -> StatusOrigin:
 
 
 @dataclass(frozen=True)
-class StatusTableTemplate:
+class StoryStatusTable:
     id: int
     workspace_id: str
+    story_id: int
+    story_character_id: int | None
     name: str
     status_kind: StatusKind = STATUS_KIND_NORMAL
     description: str = ""
@@ -862,38 +829,12 @@ class StatusTableTemplate:
 
 
 @dataclass(frozen=True)
-class StoryStatusTable:
-    id: int
-    workspace_id: str
-    story_id: int
-    status_table_id: int
-    story_character_mount_id: int | None
-    table_name: str
-    mount_origin: StoryStatusMountOrigin = STORY_STATUS_MOUNT_ORIGIN_SYSTEM
-    status_kind: StatusKind = STATUS_KIND_NORMAL
-    description: str = ""
-    sort_order: int = 0
-    metadata_json: str = "{}"
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "mount_origin",
-            validate_story_status_mount_origin(self.mount_origin),
-        )
-        object.__setattr__(self, "status_kind", validate_status_kind(self.status_kind))
-
-
-@dataclass(frozen=True)
 class SessionStatusTable:
     id: int
     session_id: str
     workspace_id: str
     story_id: int
-    source_table_id: int | None
+    source_story_status_table_id: int | None
     origin: StatusOrigin
     name: str
     status_kind: StatusKind = STATUS_KIND_NORMAL
@@ -926,7 +867,7 @@ class SessionStatusTable:
 
 
 def _status_table_as_dict(
-    table: StatusTableTemplate | SessionStatusTable,
+    table: StoryStatusTable | SessionStatusTable,
 ) -> dict[str, object]:
     data = asdict(table)
     data["document"] = table.document.to_json_dict()
@@ -939,7 +880,6 @@ __all__ = [
     name
     for name in globals()
     if name.startswith("STATUS_")
-    or name.startswith("STORY_STATUS_")
     or name.startswith("SessionStatus")
     or name.startswith("Status")
     or name.startswith("StoryStatus")
@@ -951,6 +891,5 @@ __all__ = [
         "validate_status_kind",
         "validate_status_origin",
         "validate_status_update_policy",
-        "validate_story_status_mount_origin",
     }
 ]

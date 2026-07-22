@@ -20,17 +20,12 @@ from peewee import (
     TextField,
 )
 
-from rpg_data.model.status import (
-    STATUS_KIND_NORMAL,
-    STORY_STATUS_MOUNT_ORIGIN_SYSTEM,
-)
+from rpg_data.model.status import STATUS_KIND_NORMAL
 from rpg_data.models import TURN_MODE_IC
 from rpg_data.settings import resolve_database_path
 
 __all__ = [
-    "CharacterDetailRecord",
-    "CharacterRecord",
-    "LorebookEntryRecord",
+    "StoryCharacterDetailRecord",
     "MediaAssetRecord",
     "MediaBlobRecord",
     "MediaJobRecord",
@@ -79,7 +74,6 @@ __all__ = [
     "TTSJobRecord",
     "StoryRecord",
     "StoryRPModuleRecord",
-    "StatusTableTemplateRecord",
     "WorkspaceRecord",
     "WorkspaceTurnModeRecord",
     "bind_database",
@@ -169,7 +163,6 @@ class StoryRecord(BaseRecord):
     summary = TextField(default="")
     # Story-level fixed system prompt; planned to be integrated into fix layer later.
     story_prompt = TextField(default="")
-    first_message = TextField(default="")
     main_llm_provider_key = TextField(null=True)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
@@ -1274,67 +1267,6 @@ class SessionPlotScheduleDecisionRecord(BaseRecord):
         indexes = ((('session', 'turn_id', 'source_kind'), True),)
 
 
-class CharacterRecord(BaseRecord):
-    id = AutoField()
-    workspace = ForeignKeyField(
-        WorkspaceRecord,
-        backref="characters",
-        column_name="workspace_id",
-        on_delete="CASCADE",
-    )
-    name = TextField()
-    personality = TextField(default="")
-    content = TextField(default="")
-    metadata_json = TextField(default="{}")
-    version = IntegerField(default=1)
-    created_at = TextField()
-    updated_at = TextField()
-
-    class Meta:
-        table_name = "rpg_characters"
-
-
-class CharacterDetailRecord(BaseRecord):
-    id = AutoField()
-    character = ForeignKeyField(
-        CharacterRecord,
-        backref="details",
-        column_name="character_id",
-        on_delete="CASCADE",
-    )
-    name = TextField()
-    content = TextField(default="")
-    tags_json = TextField(default="[]")
-    sort_order = IntegerField(default=0)
-    version = IntegerField(default=1)
-    created_at = TextField()
-    updated_at = TextField()
-
-    class Meta:
-        table_name = "rpg_character_details"
-
-
-class LorebookEntryRecord(BaseRecord):
-    id = AutoField()
-    workspace = ForeignKeyField(
-        WorkspaceRecord,
-        backref="lorebook_entries",
-        column_name="workspace_id",
-        on_delete="CASCADE",
-    )
-    name = TextField()
-    content = TextField(default="")
-    description = TextField(default="")
-    tags_json = TextField(default="[]")
-    metadata_json = TextField(default="{}")
-    version = IntegerField(default=1)
-    created_at = TextField()
-    updated_at = TextField()
-
-    class Meta:
-        table_name = "rpg_lorebook_entries"
-
-
 class StoryCharacterRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
@@ -1345,16 +1277,13 @@ class StoryCharacterRecord(BaseRecord):
     )
     story = ForeignKeyField(
         StoryRecord,
-        backref="character_mounts",
+        backref="characters",
         column_name="story_id",
         on_delete="CASCADE",
     )
-    character = ForeignKeyField(
-        CharacterRecord,
-        backref="story_mounts",
-        column_name="character_id",
-        on_delete="CASCADE",
-    )
+    name = TextField()
+    personality = TextField(default="")
+    content = TextField(default="")
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
@@ -1363,6 +1292,28 @@ class StoryCharacterRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_story_characters"
+        indexes = ((('story', 'name'), True),)
+
+
+class StoryCharacterDetailRecord(BaseRecord):
+    id = AutoField()
+    story_character = ForeignKeyField(
+        StoryCharacterRecord,
+        backref="details",
+        column_name="story_character_id",
+        on_delete="CASCADE",
+    )
+    name = TextField()
+    content = TextField(default="")
+    tags_json = TextField(default="[]")
+    sort_order = IntegerField(default=0)
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_character_details"
+        indexes = ((('story_character', 'name'), True),)
 
 
 class StoryLorebookEntryRecord(BaseRecord):
@@ -1375,16 +1326,14 @@ class StoryLorebookEntryRecord(BaseRecord):
     )
     story = ForeignKeyField(
         StoryRecord,
-        backref="lorebook_mounts",
+        backref="lorebook_entries",
         column_name="story_id",
         on_delete="CASCADE",
     )
-    lorebook_entry = ForeignKeyField(
-        LorebookEntryRecord,
-        backref="story_mounts",
-        column_name="lorebook_entry_id",
-        on_delete="CASCADE",
-    )
+    name = TextField()
+    content = TextField(default="")
+    description = TextField(default="")
+    tags_json = TextField(default="[]")
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
@@ -1393,28 +1342,7 @@ class StoryLorebookEntryRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_story_lorebook_entries"
-
-
-class StatusTableTemplateRecord(BaseRecord):
-    id = AutoField()
-    workspace = ForeignKeyField(
-        WorkspaceRecord,
-        backref="status_table_templates",
-        column_name="workspace_id",
-        on_delete="CASCADE",
-    )
-    name = TextField()
-    status_kind = TextField(default=STATUS_KIND_NORMAL)
-    description = TextField(default="")
-    document_json = TextField()
-    sort_order = IntegerField(default=0)
-    metadata_json = TextField(default="{}")
-    version = IntegerField(default=1)
-    created_at = TextField()
-    updated_at = TextField()
-
-    class Meta:
-        table_name = "rpg_status_table_templates"
+        indexes = ((('story', 'name'), True),)
 
 
 class StoryStatusTableRecord(BaseRecord):
@@ -1427,24 +1355,21 @@ class StoryStatusTableRecord(BaseRecord):
     )
     story = ForeignKeyField(
         StoryRecord,
-        backref="status_table_mounts",
+        backref="status_tables",
         column_name="story_id",
-        on_delete="CASCADE",
-    )
-    status_table = ForeignKeyField(
-        StatusTableTemplateRecord,
-        backref="story_mounts",
-        column_name="status_table_id",
         on_delete="CASCADE",
     )
     story_character = ForeignKeyField(
         StoryCharacterRecord,
-        backref="status_table_mounts",
-        column_name="story_character_mount_id",
+        backref="status_tables",
+        column_name="story_character_id",
         on_delete="SET NULL",
         null=True,
     )
-    mount_origin = TextField(default=STORY_STATUS_MOUNT_ORIGIN_SYSTEM)
+    name = TextField()
+    status_kind = TextField(default=STATUS_KIND_NORMAL)
+    description = TextField(default="")
+    document_json = TextField()
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
@@ -1453,6 +1378,7 @@ class StoryStatusTableRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_story_status_tables"
+        indexes = ((('story', 'name'), True),)
 
 
 class SessionStatusTableRecord(BaseRecord):
@@ -1475,7 +1401,13 @@ class SessionStatusTableRecord(BaseRecord):
         column_name="story_id",
         on_delete="CASCADE",
     )
-    source_table_id = IntegerField(null=True)
+    source_story_status_table = ForeignKeyField(
+        StoryStatusTableRecord,
+        backref="session_copies",
+        column_name="source_story_status_table_id",
+        on_delete="SET NULL",
+        null=True,
+    )
     origin = TextField()
     name = TextField()
     status_kind = TextField(default=STATUS_KIND_NORMAL)
@@ -1553,12 +1485,9 @@ RECORD_MODELS = (
     SessionMediaBackgroundRecord,
     SessionMediaBackgroundStateRecord,
     MediaBackgroundEvaluationRecord,
-    CharacterRecord,
-    CharacterDetailRecord,
-    LorebookEntryRecord,
     StoryCharacterRecord,
+    StoryCharacterDetailRecord,
     StoryLorebookEntryRecord,
-    StatusTableTemplateRecord,
     StoryStatusTableRecord,
     SessionStatusTableRecord,
     SessionStatusDeferredProgressRecord,

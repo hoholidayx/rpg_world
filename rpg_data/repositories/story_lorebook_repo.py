@@ -1,13 +1,12 @@
-"""Repository for story-to-lorebook-entry mounts."""
+"""Peewee persistence for Story-owned lorebook entries."""
 
 from __future__ import annotations
 
-from peewee import Database
-from peewee import IntegrityError
+from peewee import Database, SQL
 
 from rpg_data import models
+from rpg_data.repositories._utils import get_or_none, to_story_lorebook_entry
 from rpg_data.repositories.records import StoryLorebookEntryRecord, bind_database
-from rpg_data.repositories._utils import get_or_none, to_story_lorebook_entry, update_timestamp
 
 
 class StoryLorebookEntryRepository:
@@ -18,18 +17,28 @@ class StoryLorebookEntryRepository:
         self,
         workspace_id: str,
         story_id: int,
-        lorebook_entry_id: int,
+        name: str,
         *,
+        content: str = "",
+        description: str = "",
+        tags_json: str = "[]",
         sort_order: int = 0,
         metadata_json: str = "{}",
     ) -> models.StoryLorebookEntry:
-        return to_story_lorebook_entry(StoryLorebookEntryRecord.create(
+        row = StoryLorebookEntryRecord.create(
             workspace=workspace_id,
             story=story_id,
-            lorebook_entry=lorebook_entry_id,
+            name=name,
+            content=content,
+            description=description,
+            tags_json=tags_json,
             sort_order=sort_order,
             metadata_json=metadata_json,
-        ))
+        )
+        stored = get_or_none(StoryLorebookEntryRecord, int(row.id))
+        if stored is None:
+            raise RuntimeError(f"created Story lorebook entry disappeared: {row.id}")
+        return to_story_lorebook_entry(stored)
 
     def list(
         self,
@@ -51,58 +60,49 @@ class StoryLorebookEntryRepository:
             )
         ]
 
-    def get(self, mount_id: int) -> models.StoryLorebookEntry | None:
-        row = get_or_none(StoryLorebookEntryRecord, mount_id)
+    def get(self, entry_id: int) -> models.StoryLorebookEntry | None:
+        row = get_or_none(StoryLorebookEntryRecord, entry_id)
         return to_story_lorebook_entry(row) if row is not None else None
 
-    def get_for_story_entry(
+    def update(
         self,
-        story_id: int,
-        lorebook_entry_id: int,
-    ) -> models.StoryLorebookEntry | None:
-        row = (
-            StoryLorebookEntryRecord
-            .select()
-            .where(
-                (StoryLorebookEntryRecord.story == story_id)
-                & (StoryLorebookEntryRecord.lorebook_entry == lorebook_entry_id)
-            )
-            .first()
-        )
-        return to_story_lorebook_entry(row) if row is not None else None
-
-    def mount(
-        self,
-        workspace_id: str,
-        story_id: int,
-        lorebook_entry_id: int,
+        entry_id: int,
         *,
-        metadata_json: str = "{}",
-    ) -> models.StoryLorebookEntry:
-        existing = self.get_for_story_entry(story_id, lorebook_entry_id)
-        if existing is not None:
-            return existing
-        try:
-            return self.create(
-                workspace_id,
-                story_id,
-                lorebook_entry_id,
-                metadata_json=metadata_json,
-            )
-        except IntegrityError:
-            existing = self.get_for_story_entry(story_id, lorebook_entry_id)
-            if existing is not None:
-                return existing
-            raise
+        name: str | None = None,
+        content: str | None = None,
+        description: str | None = None,
+        tags_json: str | None = None,
+        sort_order: int | None = None,
+        metadata_json: str | None = None,
+    ) -> models.StoryLorebookEntry | None:
+        fields: dict[object, object] = {
+            StoryLorebookEntryRecord.updated_at: SQL("CURRENT_TIMESTAMP"),
+            StoryLorebookEntryRecord.version: StoryLorebookEntryRecord.version + 1,
+        }
+        if name is not None:
+            fields[StoryLorebookEntryRecord.name] = name
+        if content is not None:
+            fields[StoryLorebookEntryRecord.content] = content
+        if description is not None:
+            fields[StoryLorebookEntryRecord.description] = description
+        if tags_json is not None:
+            fields[StoryLorebookEntryRecord.tags_json] = tags_json
+        if sort_order is not None:
+            fields[StoryLorebookEntryRecord.sort_order] = sort_order
+        if metadata_json is not None:
+            fields[StoryLorebookEntryRecord.metadata_json] = metadata_json
+        updated = (
+            StoryLorebookEntryRecord
+            .update(fields)
+            .where(StoryLorebookEntryRecord.id == entry_id)
+            .execute()
+        )
+        return self.get(entry_id) if updated else None
 
-    def delete(self, mount_id: int) -> bool:
+    def delete(self, entry_id: int) -> bool:
         return bool(
             StoryLorebookEntryRecord
             .delete()
-            .where(StoryLorebookEntryRecord.id == mount_id)
+            .where(StoryLorebookEntryRecord.id == entry_id)
             .execute()
         )
-
-    def update_timestamp(self, mount_id: int) -> models.StoryLorebookEntry | None:
-        row = update_timestamp(StoryLorebookEntryRecord, mount_id)
-        return to_story_lorebook_entry(row) if row is not None else None

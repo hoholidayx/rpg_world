@@ -22,10 +22,10 @@ function positiveInt(value: unknown) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
 }
 
-function storyStatusMount(table: StatusTable) {
-  const mount = table.metadata.storyStatusMount
-  return mount && typeof mount === 'object' && !Array.isArray(mount)
-    ? mount as Record<string, unknown>
+function storyStatusSource(table: StatusTable) {
+  const source = table.metadata.storyStatusSource
+  return source && typeof source === 'object' && !Array.isArray(source)
+    ? source as Record<string, unknown>
     : null
 }
 
@@ -33,22 +33,18 @@ export function resolveStatusBinding(
   table: StatusTable,
   characters: CharacterCard[],
 ): ResolvedStatusBinding {
-  const mount = storyStatusMount(table)
-  if (!mount) return { kind: 'global' }
+  const source = storyStatusSource(table)
+  if (!source) return { kind: 'global' }
 
-  const mountId = positiveInt(mount.characterMountId)
-  const characterId = positiveInt(mount.characterId)
-  const characterName = typeof mount.characterName === 'string'
-    ? mount.characterName.trim()
+  const characterId = positiveInt(source.characterId)
+  const characterName = typeof source.characterName === 'string'
+    ? source.characterName.trim()
     : ''
-  const explicit = mountId !== null || characterId !== null || Boolean(characterName)
+  const explicit = characterId !== null || Boolean(characterName)
   if (!explicit) return { kind: 'global' }
 
   const character = (
-    (mountId !== null
-      ? characters.find((item) => item.mountId === mountId)
-      : undefined)
-    ?? (characterId !== null
+    (characterId !== null
       ? characters.find((item) => item.id === characterId)
       : undefined)
     ?? (characterName

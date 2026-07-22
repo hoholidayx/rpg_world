@@ -1085,7 +1085,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     stories = client.get("/play-api/v1/workspaces/demo_workspace/stories")
     assert stories.status_code == 200
     assert stories.json()[0]["title"] == "北境森林 Demo"
-    assert stories.json()[0]["storyPrompt"] == "用于验证 workspace、story、session、角色卡与 lorebook 挂载关系的演示故事。"
+    assert stories.json()[0]["storyPrompt"] == "用于验证 Story 直属角色卡、世界书、状态表与 Session 运行时副本的演示故事。"
     assert "北境森林的霜雾" in stories.json()[0]["openings"][0]["message"]
     assert "description" not in stories.json()[0]
     assert client.get("/play-api/v1/workspaces/missing/stories").status_code == 404
@@ -1271,46 +1271,59 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert ("truncate-turn", demo_session_id, "2") in fake_agent.calls
     assert ("delete-message", demo_session_id, "1") in fake_agent.calls
 
-    characters = client.get("/play-api/v1/workspaces/demo_workspace/characters")
+    character_base = "/play-api/v1/workspaces/demo_workspace/stories/1/characters"
+    characters = client.get(character_base)
     assert characters.status_code == 200
     assert {character["name"] for character in characters.json()} >= {"Bob", "Alice"}
     assert characters.json()[0]["workspaceId"] == "demo_workspace"
     assert isinstance(characters.json()[0]["details"], list)
     assert isinstance(characters.json()[0]["metadata"], dict)
-    assert client.get("/play-api/v1/workspaces/missing/characters").status_code == 404
+    assert "mountId" not in characters.json()[0]
+    assert client.get(
+        "/play-api/v1/workspaces/missing/stories/1/characters"
+    ).status_code == 404
+    assert client.get(
+        "/play-api/v1/workspaces/demo_workspace/characters"
+    ).status_code == 404
 
     new_character = client.post(
-        "/play-api/v1/workspaces/demo_workspace/characters",
+        character_base,
         json={
             "name": "守夜人伊凡",
             "personality": "谨慎，疲惫但可靠",
             "content": "灯塔旧守夜人，知道潮汐与失火名单。",
+            "sortOrder": 37,
             "metadata": {"ui": {"displayVersion": "v1.0.0", "roleLabel": "NPC"}},
         },
     )
     assert new_character.status_code == 200
     assert new_character.json()["name"] == "守夜人伊凡"
     assert new_character.json()["personality"] == "谨慎，疲惫但可靠"
+    assert new_character.json()["sortOrder"] == 37
     assert new_character.json()["metadata"]["ui"]["roleLabel"] == "NPC"
     assert client.post(
-        "/play-api/v1/workspaces/demo_workspace/characters",
+        character_base,
+        json={"name": "守夜人伊凡"},
+    ).status_code == 409
+    assert client.post(
+        character_base,
         json={"name": ""},
     ).status_code == 422
 
     patched_character = client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}",
+        f"{character_base}/{new_character.json()['id']}",
         json={"personality": "谨慎，口风很紧", "metadata": {"ui": {"displayVersion": "v1.0.1"}}},
     )
     assert patched_character.status_code == 200
     assert patched_character.json()["personality"] == "谨慎，口风很紧"
     assert patched_character.json()["version"] == 2
     assert client.patch(
-        f"/play-api/v1/workspaces/missing/characters/{new_character.json()['id']}",
+        f"/play-api/v1/workspaces/missing/stories/1/characters/{new_character.json()['id']}",
         json={"name": "Nope"},
     ).status_code == 404
 
     new_detail = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details",
+        f"{character_base}/{new_character.json()['id']}/details",
         json={
             "name": "禁忌话题",
             "content": "拒绝谈论灯塔失火当夜。",
@@ -1322,9 +1335,13 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert new_detail.json()["name"] == "禁忌话题"
     assert new_detail.json()["tags"] == ["秘密", "话题"]
     assert new_detail.json()["sortOrder"] == 10
+    assert client.post(
+        f"{character_base}/{new_character.json()['id']}/details",
+        json={"name": "禁忌话题"},
+    ).status_code == 409
 
     patched_detail = client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details/{new_detail.json()['id']}",
+        f"{character_base}/{new_character.json()['id']}/details/{new_detail.json()['id']}",
         json={"content": "只在午夜后透露线索。", "tags": ["秘密"], "sortOrder": 20},
     )
     assert patched_detail.status_code == 200
@@ -1333,13 +1350,17 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert patched_detail.json()["sortOrder"] == 20
     assert patched_detail.json()["version"] == 2
     assert client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details/99999",
+        f"{character_base}/{new_character.json()['id']}/details/{new_detail.json()['id']}",
+        json={"name": ""},
+    ).status_code == 422
+    assert client.patch(
+        f"{character_base}/{new_character.json()['id']}/details/99999",
         json={"name": "Nope"},
     ).status_code == 404
 
     story_characters = client.get("/play-api/v1/workspaces/demo_workspace/stories/1/characters")
     assert story_characters.status_code == 200
-    assert story_characters.json()[0]["mountId"] is not None
+    assert "mountId" not in story_characters.json()[0]
     assert client.get("/play-api/v1/workspaces/demo_workspace/stories/999/characters").status_code == 404
     bob = next(character for character in story_characters.json() if character["name"] == "Bob")
     opening_options = client.get(
@@ -1371,84 +1392,94 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     )
     assert invalid_bind.status_code == 422
 
-    mounted_character = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/characters/{new_character.json()['id']}/mount"
+    same_name_other_story = client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories/2/characters",
+        json={"name": "守夜人伊凡"},
     )
-    assert mounted_character.status_code == 200
-    assert mounted_character.json()["name"] == "守夜人伊凡"
-    assert mounted_character.json()["storyId"] == 1
-    duplicate_character_mount = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/characters/{new_character.json()['id']}/mount"
-    )
-    assert duplicate_character_mount.status_code == 200
-    assert duplicate_character_mount.json()["mountId"] == mounted_character.json()["mountId"]
-
-    removed_character_mount = client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/character-mounts/{mounted_character.json()['mountId']}"
-    )
-    assert removed_character_mount.status_code == 204
-    assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/character-mounts/{mounted_character.json()['mountId']}"
+    assert same_name_other_story.status_code == 200
+    assert same_name_other_story.json()["storyId"] == 2
+    assert same_name_other_story.json()["id"] != new_character.json()["id"]
+    assert client.post(
+        f"{character_base}/{new_character.json()['id']}/mount"
     ).status_code == 404
 
     delete_character_target = client.post(
-        "/play-api/v1/workspaces/demo_workspace/characters",
+        character_base,
         json={"name": "待删除角色", "content": "临时角色"},
     )
     assert delete_character_target.status_code == 200
     delete_character_detail = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{delete_character_target.json()['id']}/details",
+        f"{character_base}/{delete_character_target.json()['id']}/details",
         json={"name": "临时细节", "content": "tmp"},
     )
     assert delete_character_detail.status_code == 200
-    delete_character_mount = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/characters/{delete_character_target.json()['id']}/mount"
+    gateway = get_data_service_gateway()
+    SessionRoleService(gateway.sessions).bind_player_character(
+        created.json()["id"],
+        delete_character_target.json()["id"],
     )
-    assert delete_character_mount.status_code == 200
     deleted_character = client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{delete_character_target.json()['id']}"
+        f"{character_base}/{delete_character_target.json()['id']}"
     )
     assert deleted_character.status_code == 204
+    invalidated_session = client.get(
+        f"/play-api/v1/sessions/{created.json()['id']}"
+    )
+    assert invalidated_session.status_code == 200
+    assert invalidated_session.json()["playerCharacterStatus"] == "invalid"
     assert client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{delete_character_target.json()['id']}",
+        f"{character_base}/{delete_character_target.json()['id']}",
         json={"name": "Gone"},
     ).status_code == 404
     assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details/{new_detail.json()['id']}"
+        f"{character_base}/{new_character.json()['id']}/details/{new_detail.json()['id']}"
     ).status_code == 204
     assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/characters/{new_character.json()['id']}/details/{new_detail.json()['id']}"
+        f"{character_base}/{new_character.json()['id']}/details/{new_detail.json()['id']}"
     ).status_code == 404
 
-    lorebooks = client.get("/play-api/v1/workspaces/demo_workspace/lorebook-entries")
+    lorebook_base = "/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries"
+    lorebooks = client.get(lorebook_base)
     assert lorebooks.status_code == 200
     assert {entry["name"] for entry in lorebooks.json()} >= {"炎心之木", "圆形封印祭坛"}
     assert lorebooks.json()[0]["workspaceId"] == "demo_workspace"
     assert isinstance(lorebooks.json()[0]["tags"], list)
     assert isinstance(lorebooks.json()[0]["metadata"], dict)
-    assert client.get("/play-api/v1/workspaces/missing/lorebook-entries").status_code == 404
+    assert "mountId" not in lorebooks.json()[0]
+    assert client.get(
+        "/play-api/v1/workspaces/missing/stories/1/lorebook-entries"
+    ).status_code == 404
+    assert client.get(
+        "/play-api/v1/workspaces/demo_workspace/lorebook-entries"
+    ).status_code == 404
 
     new_entry = client.post(
-        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        lorebook_base,
         json={
             "name": "潮汐信号",
             "content": "海岸线上古老的信号系统。",
             "description": "用于测试世界书管理接口。",
             "tags": ["规则", "组织"],
+            "sortOrder": 45,
             "metadata": {"ui": {"displayVersion": "v1.0.0"}},
         },
     )
     assert new_entry.status_code == 200
     assert new_entry.json()["name"] == "潮汐信号"
     assert new_entry.json()["tags"] == ["规则", "组织"]
+    assert new_entry.json()["sortOrder"] == 45
     assert new_entry.json()["metadata"]["ui"]["displayVersion"] == "v1.0.0"
     assert client.post(
-        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        lorebook_base,
+        json={"name": "潮汐信号"},
+    ).status_code == 409
+    assert client.post(
+        lorebook_base,
         json={"name": ""},
     ).status_code == 422
 
     patched = client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{new_entry.json()['id']}",
+        f"{lorebook_base}/{new_entry.json()['id']}",
         json={"description": "更新后的短描述", "tags": ["地点"]},
     )
     assert patched.status_code == 200
@@ -1456,37 +1487,32 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert patched.json()["tags"] == ["地点"]
     assert patched.json()["version"] == 2
     assert client.patch(
-        f"/play-api/v1/workspaces/missing/lorebook-entries/{new_entry.json()['id']}",
+        f"{lorebook_base}/{new_entry.json()['id']}",
+        json={"name": ""},
+    ).status_code == 422
+    assert client.patch(
+        f"/play-api/v1/workspaces/missing/stories/1/lorebook-entries/{new_entry.json()['id']}",
         json={"name": "Nope"},
     ).status_code == 404
 
     story_lorebooks = client.get("/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries")
     assert story_lorebooks.status_code == 200
-    assert story_lorebooks.json()[0]["mountId"] is not None
+    assert "mountId" not in story_lorebooks.json()[0]
     assert client.get("/play-api/v1/workspaces/demo_workspace/stories/999/lorebook-entries").status_code == 404
 
-    mounted = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries/{new_entry.json()['id']}/mount"
+    same_name_other_story = client.post(
+        "/play-api/v1/workspaces/demo_workspace/stories/2/lorebook-entries",
+        json={"name": "潮汐信号"},
     )
-    assert mounted.status_code == 200
-    assert mounted.json()["name"] == "潮汐信号"
-    assert mounted.json()["storyId"] == 1
-    duplicate_mount = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries/{new_entry.json()['id']}/mount"
-    )
-    assert duplicate_mount.status_code == 200
-    assert duplicate_mount.json()["mountId"] == mounted.json()["mountId"]
-
-    removed = client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-mounts/{mounted.json()['mountId']}"
-    )
-    assert removed.status_code == 204
-    assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-mounts/{mounted.json()['mountId']}"
+    assert same_name_other_story.status_code == 200
+    assert same_name_other_story.json()["storyId"] == 2
+    assert same_name_other_story.json()["id"] != new_entry.json()["id"]
+    assert client.post(
+        f"{lorebook_base}/{new_entry.json()['id']}/mount"
     ).status_code == 404
 
     delete_target = client.post(
-        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        lorebook_base,
         json={
             "name": "待删除条目",
             "content": "临时内容",
@@ -1494,30 +1520,35 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         },
     )
     assert delete_target.status_code == 200
-    delete_mount = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries/{delete_target.json()['id']}/mount"
-    )
-    assert delete_mount.status_code == 200
     deleted_entry = client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{delete_target.json()['id']}"
+        f"{lorebook_base}/{delete_target.json()['id']}"
     )
     assert deleted_entry.status_code == 204
     assert client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/lorebook-entries/{delete_target.json()['id']}",
+        f"{lorebook_base}/{delete_target.json()['id']}",
         json={"name": "Gone"},
     ).status_code == 404
 
-    status_templates = client.get("/play-api/v1/workspaces/demo_workspace/status-templates")
-    assert status_templates.status_code == 200
-    assert {item["statusKind"] for item in status_templates.json()} == {"scene", "normal"}
-    mounted_scene_template = next(item for item in status_templates.json() if item["statusKind"] == "scene")
-    assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/status-templates/{mounted_scene_template['id']}"
-    ).status_code == 409
-    assert client.get("/play-api/v1/workspaces/missing/status-templates").status_code == 404
+    status_base = "/play-api/v1/workspaces/demo_workspace/stories/1/status-tables"
+    story_status_tables = client.get(status_base)
+    assert story_status_tables.status_code == 200
+    assert {item["statusKind"] for item in story_status_tables.json()} == {"scene", "normal"}
+    assert all("mountOrigin" not in item for item in story_status_tables.json())
+    assert client.get(
+        "/play-api/v1/workspaces/missing/stories/1/status-tables"
+    ).status_code == 404
+    assert client.get(
+        "/play-api/v1/workspaces/demo_workspace/status-templates"
+    ).status_code == 404
+    assert client.get(
+        "/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts"
+    ).status_code == 404
+    scene_story_table = next(
+        item for item in story_status_tables.json() if item["statusKind"] == "scene"
+    )
 
-    new_status_template = client.post(
-        "/play-api/v1/workspaces/demo_workspace/status-templates",
+    new_story_status = client.post(
+        status_base,
         json={
             "name": "测试状态表",
             "statusKind": "normal",
@@ -1541,16 +1572,17 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
             "metadata": {"ui": {"compact": True}},
         },
     )
-    assert new_status_template.status_code == 200
-    assert new_status_template.json()["name"] == "测试状态表"
-    assert new_status_template.json()["rows"][0]["key"] == "钟声"
-    assert new_status_template.json()["rows"][0]["updateFrequency"] == "event_driven"
-    assert new_status_template.json()["rows"][0]["updateRule"] == "钟楼被明确敲响时更新"
-    assert new_status_template.json()["rows"][1]["updateFrequency"] == "deferred"
-    assert new_status_template.json()["rows"][1]["deferredIntervalTurns"] == 6
-    assert new_status_template.json()["metadata"]["ui"]["compact"] is True
+    assert new_story_status.status_code == 200
+    assert new_story_status.json()["name"] == "测试状态表"
+    assert new_story_status.json()["storyId"] == 1
+    assert new_story_status.json()["rows"][0]["key"] == "钟声"
+    assert new_story_status.json()["rows"][0]["updateFrequency"] == "event_driven"
+    assert new_story_status.json()["rows"][0]["updateRule"] == "钟楼被明确敲响时更新"
+    assert new_story_status.json()["rows"][1]["updateFrequency"] == "deferred"
+    assert new_story_status.json()["rows"][1]["deferredIntervalTurns"] == 6
+    assert new_story_status.json()["metadata"]["ui"]["compact"] is True
     assert client.post(
-        "/play-api/v1/workspaces/demo_workspace/status-templates",
+        status_base,
         json={
             "name": "无规则事件表",
             "rows": [{
@@ -1561,7 +1593,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         },
     ).status_code == 422
     assert client.post(
-        "/play-api/v1/workspaces/demo_workspace/status-templates",
+        status_base,
         json={
             "name": "非法慢场景",
             "statusKind": "scene",
@@ -1573,7 +1605,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         },
     ).status_code == 422
     assert client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/status-templates/{mounted_scene_template['id']}",
+        f"{status_base}/{scene_story_table['id']}",
         json={
             "rows": [{
                 "key": "位置",
@@ -1584,61 +1616,76 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         },
     ).status_code == 422
 
-    patched_status_template = client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/status-templates/{new_status_template.json()['id']}",
+    patched_story_status = client.patch(
+        f"{status_base}/{new_story_status.json()['id']}",
         json={
             "description": "更新后的状态表",
             "rows": [{"key": "钟声", "value": "响起", "runtimeKeyLocked": True}],
         },
     )
-    assert patched_status_template.status_code == 200
-    assert patched_status_template.json()["description"] == "更新后的状态表"
-    assert patched_status_template.json()["rows"][0]["runtimeKeyLocked"] is True
-    assert client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/status-templates/{new_status_template.json()['id']}",
+    assert patched_story_status.status_code == 200
+    assert patched_story_status.json()["description"] == "更新后的状态表"
+    assert patched_story_status.json()["rows"][0]["runtimeKeyLocked"] is True
+    converted_story_status = client.patch(
+        f"{status_base}/{new_story_status.json()['id']}",
         json={"statusKind": "scene"},
-    ).status_code == 422
-
-    status_mounts = client.get("/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts")
-    assert status_mounts.status_code == 200
-    assert {item["statusKind"] for item in status_mounts.json()} == {"scene", "normal"}
-    assert {item["mountOrigin"] for item in status_mounts.json()} == {"system_mount"}
-    assert all("characterMountId" in item for item in status_mounts.json())
-    new_status_mount = client.post(
-        "/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts",
-        json={"templateId": new_status_template.json()["id"], "characterMountId": bob["mountId"], "sortOrder": 30},
     )
-    assert new_status_mount.status_code == 200
-    assert new_status_mount.json()["tableName"] == "测试状态表"
-    assert new_status_mount.json()["mountOrigin"] == "system_mount"
-    assert new_status_mount.json()["characterMountId"] == bob["mountId"]
-    patched_status_mount = client.patch(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts/{new_status_mount.json()['id']}",
-        json={"characterMountId": None},
-    )
-    assert patched_status_mount.status_code == 200
-    assert patched_status_mount.json()["characterMountId"] is None
-    assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts/{new_status_mount.json()['id']}"
-    ).status_code == 204
+    assert converted_story_status.status_code == 200
+    assert converted_story_status.json()["statusKind"] == "scene"
 
-    story_status_template = client.post(
-        "/play-api/v1/workspaces/demo_workspace/stories/1/status-templates",
+    character_story_status = client.post(
+        status_base,
         json={
             "name": "角色私有状态",
             "statusKind": "normal",
             "rows": [{"key": "姿态", "value": "观察"}],
-            "characterMountId": bob["mountId"],
+            "storyCharacterId": bob["id"],
         },
     )
-    assert story_status_template.status_code == 200
-    assert story_status_template.json()["mountOrigin"] == "story_template"
-    assert story_status_template.json()["characterMountId"] == bob["mountId"]
+    assert character_story_status.status_code == 200
+    assert character_story_status.json()["storyCharacterId"] == bob["id"]
+
+    source_for_copy = client.post(
+        status_base,
+        json={
+            "name": "删除源后保留副本",
+            "rows": [{"key": "标记", "value": "保留"}],
+        },
+    )
+    assert source_for_copy.status_code == 200
+    copy_session = client.post(
+        "/play-api/v1/sessions",
+        json={
+            "workspaceId": "demo_workspace",
+            "storyId": 1,
+            "title": "状态源删除测试",
+        },
+    )
+    assert copy_session.status_code == 200
+    copied_tables = client.get(
+        f"/play-api/v1/sessions/{copy_session.json()['id']}/status-tables"
+    )
+    copied_source = next(
+        item
+        for item in copied_tables.json()
+        if item["name"] == "删除源后保留副本"
+    )
+    assert copied_source["sourceStoryStatusTableId"] == source_for_copy.json()["id"]
     assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/status-mounts/{story_status_template.json()['id']}"
-    ).status_code == 409
+        f"{status_base}/{source_for_copy.json()['id']}"
+    ).status_code == 204
+    retained_tables = client.get(
+        f"/play-api/v1/sessions/{copy_session.json()['id']}/status-tables"
+    )
+    retained_copy = next(
+        item
+        for item in retained_tables.json()
+        if item["name"] == "删除源后保留副本"
+    )
+    assert retained_copy["origin"] == "story_copy"
+    assert retained_copy["sourceStoryStatusTableId"] is None
     assert client.delete(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/status-templates/{story_status_template.json()['id']}"
+        f"{status_base}/{character_story_status.json()['id']}"
     ).status_code == 204
 
     session_status_tables = client.get(f"/play-api/v1/sessions/{demo_session_id}/status-tables")
@@ -1740,47 +1787,26 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     stale_token = client.post("/play-api/v1/ops/unindexed-runtime/delete-token", json={"items": batch_items})
     assert stale_token.status_code == 404
 
-    ops_mount_entry = client.post(
-        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
-        json={"name": "运维挂载删除", "content": "ops"},
-    )
-    assert ops_mount_entry.status_code == 200
-    ops_mount = client.post(
-        f"/play-api/v1/workspaces/demo_workspace/stories/1/lorebook-entries/{ops_mount_entry.json()['id']}/mount"
-    )
-    assert ops_mount.status_code == 200
-    assert client.delete(
-        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-mounts/{ops_mount.json()['mountId']}"
-    ).status_code == 409
-    ops_mount_token = client.post(
-        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-mounts/{ops_mount.json()['mountId']}/delete-token"
-    )
-    assert ops_mount_token.status_code == 200
-    assert client.delete(
-        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-mounts/{ops_mount.json()['mountId']}",
-        headers={"X-Delete-Confirm-Token": ops_mount_token.json()["token"]},
-    ).status_code == 204
-    assert client.delete(
-        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-mounts/{ops_mount.json()['mountId']}",
-        headers={"X-Delete-Confirm-Token": ops_mount_token.json()["token"]},
-    ).status_code == 409
-
     ops_entry = client.post(
-        "/play-api/v1/workspaces/demo_workspace/lorebook-entries",
+        lorebook_base,
         json={"name": "运维条目删除", "content": "ops"},
     )
     assert ops_entry.status_code == 200
     assert client.delete(
-        f"/play-api/v1/ops/workspaces/demo_workspace/lorebook-entries/{ops_entry.json()['id']}"
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-entries/{ops_entry.json()['id']}"
     ).status_code == 409
     ops_entry_token = client.post(
-        f"/play-api/v1/ops/workspaces/demo_workspace/lorebook-entries/{ops_entry.json()['id']}/delete-token"
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-entries/{ops_entry.json()['id']}/delete-token"
     )
     assert ops_entry_token.status_code == 200
     assert client.delete(
-        f"/play-api/v1/ops/workspaces/demo_workspace/lorebook-entries/{ops_entry.json()['id']}",
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-entries/{ops_entry.json()['id']}",
         headers={"X-Delete-Confirm-Token": ops_entry_token.json()["token"]},
     ).status_code == 204
+    assert client.delete(
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-entries/{ops_entry.json()['id']}",
+        headers={"X-Delete-Confirm-Token": ops_entry_token.json()["token"]},
+    ).status_code == 409
     assert client.post(
-        f"/play-api/v1/ops/workspaces/demo_workspace/lorebook-entries/{ops_entry.json()['id']}/delete-token"
+        f"/play-api/v1/ops/workspaces/demo_workspace/stories/1/lorebook-entries/{ops_entry.json()['id']}/delete-token"
     ).status_code == 404

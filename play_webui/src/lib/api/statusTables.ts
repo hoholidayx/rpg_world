@@ -1,103 +1,34 @@
-import type {
-  StatusKind,
-  StatusTable,
-  StatusTableInput,
-  StatusTablePatch,
-  StoryStatusMount,
-  StoryStatusMountPatch,
-  StoryStatusTemplateInput,
-} from '@/types/statusTables'
+import type { StatusKind, StatusTable, StatusTableInput, StatusTablePatch } from '@/types/statusTables'
 import { getPlayApiBaseUrl } from '@/lib/config/env'
 import { playApiFetch } from './client'
 import { readApiError } from './errors'
 
-export function listStatusTemplates(workspace: string, statusKind?: StatusKind) {
-  const query = statusKind ? `?statusKind=${encodeURIComponent(statusKind)}` : ''
-  return playApiFetch<StatusTable[]>(`/workspaces/${encodeURIComponent(workspace)}/status-templates${query}`)
+function storyStatusPath(workspace: string, storyId: number) {
+  return `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-tables`
 }
 
-export function createStatusTemplate(workspace: string, input: StatusTableInput) {
-  return playApiFetch<StatusTable>(`/workspaces/${encodeURIComponent(workspace)}/status-templates`, {
+export function listStoryStatusTables(workspace: string, storyId: number, statusKind?: StatusKind) {
+  const query = statusKind ? `?statusKind=${encodeURIComponent(statusKind)}` : ''
+  return playApiFetch<StatusTable[]>(`${storyStatusPath(workspace, storyId)}${query}`)
+}
+
+export function createStoryStatusTable(workspace: string, storyId: number, input: StatusTableInput) {
+  return playApiFetch<StatusTable>(storyStatusPath(workspace, storyId), {
     method: 'POST',
     body: JSON.stringify(input),
   })
 }
 
-export function updateStatusTemplate(workspace: string, templateId: number, input: StatusTablePatch) {
-  return playApiFetch<StatusTable>(
-    `/workspaces/${encodeURIComponent(workspace)}/status-templates/${encodeURIComponent(templateId)}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    },
-  )
+export function updateStoryStatusTable(workspace: string, storyId: number, tableId: number, input: StatusTablePatch) {
+  return playApiFetch<StatusTable>(`${storyStatusPath(workspace, storyId)}/${encodeURIComponent(tableId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
 }
 
-export async function deleteStatusTemplate(workspace: string, templateId: number) {
+export async function deleteStoryStatusTable(workspace: string, storyId: number, tableId: number) {
   const response = await fetch(
-    `${getPlayApiBaseUrl()}/workspaces/${encodeURIComponent(workspace)}/status-templates/${encodeURIComponent(templateId)}`,
-    { method: 'DELETE' },
-  )
-  if (!response.ok) throw new Error(await readApiError(response))
-}
-
-export function listStoryStatusMounts(workspace: string, storyId: number) {
-  return playApiFetch<StoryStatusMount[]>(
-    `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-mounts`,
-  )
-}
-
-export function mountStatusTemplate(
-  workspace: string,
-  storyId: number,
-  templateId: number,
-  sortOrder = 0,
-  characterMountId?: number | null,
-) {
-  return playApiFetch<StoryStatusMount>(
-    `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-mounts`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        templateId,
-        sortOrder,
-        ...(characterMountId === undefined ? {} : { characterMountId }),
-      }),
-    },
-  )
-}
-
-export function createStoryStatusTemplate(workspace: string, storyId: number, input: StoryStatusTemplateInput) {
-  return playApiFetch<StoryStatusMount>(
-    `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-templates`,
-    {
-      method: 'POST',
-      body: JSON.stringify(input),
-    },
-  )
-}
-
-export function updateStoryStatusMount(workspace: string, storyId: number, mountId: number, input: StoryStatusMountPatch) {
-  return playApiFetch<StoryStatusMount>(
-    `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-mounts/${encodeURIComponent(mountId)}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    },
-  )
-}
-
-export async function unmountStatusTemplate(workspace: string, storyId: number, mountId: number) {
-  const response = await fetch(
-    `${getPlayApiBaseUrl()}/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-mounts/${encodeURIComponent(mountId)}`,
-    { method: 'DELETE' },
-  )
-  if (!response.ok) throw new Error(await readApiError(response))
-}
-
-export async function deleteStoryStatusTemplate(workspace: string, storyId: number, mountId: number) {
-  const response = await fetch(
-    `${getPlayApiBaseUrl()}/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/status-templates/${encodeURIComponent(mountId)}`,
+    `${getPlayApiBaseUrl()}${storyStatusPath(workspace, storyId)}/${encodeURIComponent(tableId)}`,
     { method: 'DELETE' },
   )
   if (!response.ok) throw new Error(await readApiError(response))
@@ -118,10 +49,7 @@ export function createSessionStatusTable(sessionId: string, input: StatusTableIn
 export function updateSessionStatusTable(sessionId: string, tableId: number, input: StatusTablePatch) {
   return playApiFetch<StatusTable>(
     `/sessions/${encodeURIComponent(sessionId)}/status-tables/${encodeURIComponent(tableId)}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    },
+    { method: 'PATCH', body: JSON.stringify(input) },
   )
 }
 

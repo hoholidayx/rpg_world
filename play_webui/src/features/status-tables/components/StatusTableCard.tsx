@@ -6,13 +6,11 @@ import { Chip } from './FormBits'
 export function StatusTableCard({
   table,
   active,
-  mounted,
   extraChips,
   onClick,
 }: {
   table: StatusTable
   active: boolean
-  mounted?: boolean
   extraChips?: ReactNode
   onClick: () => void
 }) {
@@ -35,8 +33,7 @@ export function StatusTableCard({
         {table.description || (table.statusKind === STATUS_KIND.SCENE ? '场景状态表。' : '普通状态表进入结构化上下文。')}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
-        {typeof mounted === 'boolean' ? <Chip tone={mounted ? 'green' : 'gray'}>{mounted ? '已挂载' : '未挂载'}</Chip> : null}
-        {table.origin ? <Chip tone={table.origin === STATUS_ORIGIN.TEMPLATE_COPY ? 'amber' : 'green'}>{originLabel(table.origin)}</Chip> : null}
+        {table.origin ? <Chip tone={table.origin === STATUS_ORIGIN.STORY_COPY ? 'amber' : 'green'}>{originLabel(table.origin)}</Chip> : null}
         {extraChips}
         <Chip tone="gray">{table.rows.length} key</Chip>
       </div>

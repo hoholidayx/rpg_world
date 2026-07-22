@@ -148,13 +148,12 @@ def test_story_prompt_contributor_requires_explicit_catalog_reader() -> None:
 def test_player_character_section_and_card_labels_are_session_local() -> None:
     player = SimpleNamespace(
         character_id=2,
-        mount_id=20,
         story_id=1,
         name="Alice",
     )
     characters = [
-        {"id": 1, "mount_id": 10, "name": "Bob"},
-        {"id": 2, "mount_id": 20, "name": "Alice"},
+        {"id": 1, "name": "Bob"},
+        {"id": 2, "name": "Alice"},
     ]
 
     fixed_layer = FixedLayerAssembler(

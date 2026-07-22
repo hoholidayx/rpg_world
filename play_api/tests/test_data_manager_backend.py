@@ -116,63 +116,68 @@ class FakeGateway:
 
 
 class FakeLorebookManagement:
-    def list_entries(self, workspace: str):
+    def list_entries(self, workspace: str, story_id: int):
         if workspace != "workspace":
             return None
-        return [models.LorebookEntry(1, workspace, "Entry")]
+        return [models.StoryLorebookEntry(1, workspace, story_id, "Entry")]
 
-    def create_entry(self, workspace: str, **kwargs):
-        return models.LorebookEntry(
+    def create_entry(self, workspace: str, story_id: int, **kwargs):
+        return models.StoryLorebookEntry(
             2,
             workspace,
+            story_id,
             str(kwargs["name"]),
             content=str(kwargs.get("content") or ""),
             description=str(kwargs.get("description") or ""),
         )
 
-    def update_entry(self, workspace: str, entry_id: int, **kwargs):
-        return models.LorebookEntry(entry_id, workspace, str(kwargs["name"]), version=2)
+    def update_entry(self, workspace: str, story_id: int, entry_id: int, **kwargs):
+        return models.StoryLorebookEntry(
+            entry_id,
+            workspace,
+            story_id,
+            str(kwargs["name"]),
+            version=2,
+        )
 
-    def delete_entry(self, workspace: str, entry_id: int):
-        return workspace == "workspace" and entry_id == 1
-
-    def list_story_entries(self, workspace: str, story_id: int):
-        return [_lorebook_detail(workspace, story_id)]
-
-    def mount_entry(self, workspace: str, story_id: int, entry_id: int):
-        return _lorebook_detail(workspace, story_id, entry_id=entry_id)
-
-    def unmount_entry(self, workspace: str, story_id: int, mount_id: int):
-        return workspace == "workspace" and story_id == 1 and mount_id == 10
+    def delete_entry(self, workspace: str, story_id: int, entry_id: int):
+        return workspace == "workspace" and story_id == 1 and entry_id == 1
 
 
 class FakeCharacterManagement:
-    def list_characters(self, workspace: str):
+    def list_characters(self, workspace: str, story_id: int):
         if workspace != "workspace":
             return None
-        return [models.Character(1, workspace, "Character")]
+        return [models.StoryCharacter(1, workspace, story_id, "Character")]
 
-    def create_character(self, workspace: str, **kwargs):
-        return models.Character(
+    def create_character(self, workspace: str, story_id: int, **kwargs):
+        return models.StoryCharacter(
             2,
             workspace,
+            story_id,
             str(kwargs["name"]),
             personality=str(kwargs.get("personality") or ""),
             content=str(kwargs.get("content") or ""),
         )
 
-    def update_character(self, workspace: str, character_id: int, **kwargs):
-        return models.Character(character_id, workspace, str(kwargs["name"]), version=2)
+    def update_character(self, workspace: str, story_id: int, character_id: int, **kwargs):
+        return models.StoryCharacter(
+            character_id,
+            workspace,
+            story_id,
+            str(kwargs["name"]),
+            version=2,
+        )
 
-    def delete_character(self, workspace: str, character_id: int):
-        return workspace == "workspace" and character_id == 1
+    def delete_character(self, workspace: str, story_id: int, character_id: int):
+        return workspace == "workspace" and story_id == 1 and character_id == 1
 
-    def list_details(self, workspace: str, character_id: int):
+    def list_details(self, workspace: str, story_id: int, character_id: int):
         if workspace != "workspace":
             return None
         return [models.CharacterDetail(11, character_id, "Detail", tags_json='["tag"]')]
 
-    def create_detail(self, workspace: str, character_id: int, **kwargs):
+    def create_detail(self, workspace: str, story_id: int, character_id: int, **kwargs):
         return models.CharacterDetail(
             12,
             character_id,
@@ -182,7 +187,7 @@ class FakeCharacterManagement:
             sort_order=int(kwargs.get("sort_order") or 0),
         )
 
-    def update_detail(self, workspace: str, character_id: int, detail_id: int, **kwargs):
+    def update_detail(self, workspace: str, story_id: int, character_id: int, detail_id: int, **kwargs):
         return models.CharacterDetail(
             detail_id,
             character_id,
@@ -191,43 +196,13 @@ class FakeCharacterManagement:
             version=2,
         )
 
-    def delete_detail(self, workspace: str, character_id: int, detail_id: int):
-        return workspace == "workspace" and character_id == 1 and detail_id == 11
-
-    def list_story_characters(self, workspace: str, story_id: int):
-        return [_character_mount_detail(workspace, story_id)]
-
-    def mount_character(self, workspace: str, story_id: int, character_id: int):
-        return _character_mount_detail(workspace, story_id, character_id=character_id)
-
-    def unmount_character(self, workspace: str, story_id: int, mount_id: int):
-        return workspace == "workspace" and story_id == 1 and mount_id == 20
-
-
-def _character_mount_detail(
-    workspace: str,
-    story_id: int,
-    *,
-    character_id: int = 1,
-    mount_id: int = 20,
-) -> models.StoryCharacterDetail:
-    return models.StoryCharacterDetail(
-        mount=models.StoryCharacter(mount_id, workspace, story_id, character_id),
-        character=models.Character(character_id, workspace, "Character"),
-    )
-
-
-def _lorebook_detail(
-    workspace: str,
-    story_id: int,
-    *,
-    entry_id: int = 1,
-    mount_id: int = 10,
-) -> models.StoryLorebookEntryDetail:
-    return models.StoryLorebookEntryDetail(
-        mount=models.StoryLorebookEntry(mount_id, workspace, story_id, entry_id),
-        entry=models.LorebookEntry(entry_id, workspace, "Entry"),
-    )
+    def delete_detail(self, workspace: str, story_id: int, character_id: int, detail_id: int):
+        return (
+            workspace == "workspace"
+            and story_id == 1
+            and character_id == 1
+            and detail_id == 11
+        )
 
 
 @pytest.mark.asyncio
@@ -292,30 +267,22 @@ async def test_data_manager_backend_uses_gateway(monkeypatch, tmp_path: Path) ->
         name="hidden",
     ) is None
     assert await backend.delete_session_status_table("provisioning", 1) is None
-    assert (await backend.list_characters("workspace"))[0]["name"] == "Character"
-    assert (await backend.list_characters("workspace"))[0]["details"][0]["tags"] == ["tag"]
-    assert (await backend.create_character("workspace", name="New"))["name"] == "New"
-    assert (await backend.get_character("workspace", 1))["name"] == "Character"
-    assert await backend.get_character("missing", 1) is None
-    assert (await backend.update_character("workspace", 1, name="Updated"))["name"] == "Updated"
-    assert await backend.delete_character("workspace", 1) is True
-    assert (await backend.create_character_detail("workspace", 1, name="New Detail"))["name"] == "New Detail"
-    assert (await backend.update_character_detail("workspace", 1, 11, name="Updated Detail"))["version"] == 2
-    assert await backend.delete_character_detail("workspace", 1, 11) is True
-    assert (await backend.list_story_characters("workspace", 1))[0]["mount_id"] == 20
-    assert (await backend.mount_character("workspace", 1, 1))["mount_id"] == 20
-    assert await backend.unmount_character("workspace", 1, 20) is True
-    assert (await backend.list_lorebook_entries("workspace"))[0]["name"] == "Entry"
-    assert (await backend.create_lorebook_entry("workspace", name="New"))["name"] == "New"
-    assert (await backend.get_lorebook_entry("workspace", 1))["name"] == "Entry"
-    assert await backend.get_lorebook_entry("missing", 1) is None
-    assert (await backend.update_lorebook_entry("workspace", 1, name="Updated"))["name"] == "Updated"
-    assert await backend.delete_lorebook_entry("workspace", 1) is True
-    assert (await backend.list_story_lorebook_entries("workspace", 1))[0]["mount_id"] == 10
-    assert (await backend.mount_lorebook_entry("workspace", 1, 1))["mount_id"] == 10
-    assert (await backend.get_lorebook_mount("workspace", 1, 10))["mount_id"] == 10
-    assert await backend.get_lorebook_mount("workspace", 1, 999) is None
-    assert await backend.unmount_lorebook_entry("workspace", 1, 10) is True
+    assert (await backend.list_characters("workspace", 1))[0]["name"] == "Character"
+    assert (await backend.list_characters("workspace", 1))[0]["details"][0]["tags"] == ["tag"]
+    assert (await backend.create_character("workspace", 1, name="New"))["name"] == "New"
+    assert (await backend.get_character("workspace", 1, 1))["name"] == "Character"
+    assert await backend.get_character("missing", 1, 1) is None
+    assert (await backend.update_character("workspace", 1, 1, name="Updated"))["name"] == "Updated"
+    assert await backend.delete_character("workspace", 1, 1) is True
+    assert (await backend.create_character_detail("workspace", 1, 1, name="New Detail"))["name"] == "New Detail"
+    assert (await backend.update_character_detail("workspace", 1, 1, 11, name="Updated Detail"))["version"] == 2
+    assert await backend.delete_character_detail("workspace", 1, 1, 11) is True
+    assert (await backend.list_lorebook_entries("workspace", 1))[0]["name"] == "Entry"
+    assert (await backend.create_lorebook_entry("workspace", 1, name="New"))["name"] == "New"
+    assert (await backend.get_lorebook_entry("workspace", 1, 1))["name"] == "Entry"
+    assert await backend.get_lorebook_entry("missing", 1, 1) is None
+    assert (await backend.update_lorebook_entry("workspace", 1, 1, name="Updated"))["name"] == "Updated"
+    assert await backend.delete_lorebook_entry("workspace", 1, 1) is True
 
     backend.close()
 

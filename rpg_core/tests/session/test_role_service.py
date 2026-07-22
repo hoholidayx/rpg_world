@@ -74,12 +74,12 @@ def test_session_role_lists_rendered_openings_and_selects_one_atomically() -> No
             ),
         )
         assert story is not None
-        bob_mount = gateway.character_management.mount_character(
+        bob = gateway.character_management.create_character(
             "demo_workspace",
             story.id,
-            1,
+            name="Bob",
         )
-        assert bob_mount is not None
+        assert bob is not None
         session = _catalog(gateway).create_session(
             "demo_workspace",
             story.id,
@@ -87,7 +87,7 @@ def test_session_role_lists_rendered_openings_and_selects_one_atomically() -> No
         )
         assert session is not None
 
-        options = _roles(gateway).list_opening_options(session.id, 1)
+        options = _roles(gateway).list_opening_options(session.id, bob.id)
         assert [item.opening.title for item in options] == ["第一幕", "第二幕", "第三幕"]
         assert [item.rendered_message for item in options] == [
             "Bob 在门外。",
@@ -99,7 +99,7 @@ def test_session_role_lists_rendered_openings_and_selects_one_atomically() -> No
 
         selected = _roles(gateway).bind_player_character(
             session.id,
-            1,
+            bob.id,
             story_opening_id=story.openings[1].id,
         )
 
@@ -107,7 +107,7 @@ def test_session_role_lists_rendered_openings_and_selects_one_atomically() -> No
         assert selected.story_opening_id == story.openings[1].id
         assert selected.first_message == "Bob 在雨中。"
         assert stored is not None
-        assert stored.player_character_id == 1
+        assert stored.player_character_id == bob.id
         assert stored.story_opening_id == story.openings[1].id
         assert gateway.messages.list(session.id)[0].content == "Bob 在雨中。"
         assert gateway.backup.messages.list(session.id)[0].content == "Bob 在雨中。"
@@ -139,18 +139,19 @@ def test_session_role_defaults_first_opening_and_supports_story_without_opening(
             title="空开局角色测试",
         )
         assert empty_story is not None
-        assert gateway.character_management.mount_character(
+        bob = gateway.character_management.create_character(
             "demo_workspace",
             empty_story.id,
-            1,
-        ) is not None
+            name="Bob",
+        )
+        assert bob is not None
         empty_session = _catalog(gateway).create_session(
             "demo_workspace",
             empty_story.id,
             title="空开局",
         )
         assert empty_session is not None
-        empty_result = _roles(gateway).bind_player_character(empty_session.id, 1)
+        empty_result = _roles(gateway).bind_player_character(empty_session.id, bob.id)
         assert empty_result.story_opening_id is None
         assert empty_result.first_message == ""
         assert gateway.messages.count(empty_session.id) == 0
@@ -364,7 +365,7 @@ def test_invalid_story_opening_does_not_partially_bind() -> None:
         gateway.close()
 
 
-def test_session_role_invalid_when_character_unmounted() -> None:
+def test_session_role_invalid_when_character_deleted() -> None:
     gateway = DataServiceGateway(":memory:")
     try:
         gateway.initialize()
@@ -375,10 +376,10 @@ def test_session_role_invalid_when_character_unmounted() -> None:
         bob = next(option for option in options if option.snapshot.name == "Bob")
         _roles(gateway).bind_player_character(session.id, bob.snapshot.character_id)
 
-        deleted = gateway.character_management.unmount_character(
+        deleted = gateway.character_management.delete_character(
             "demo_workspace",
             1,
-            bob.snapshot.mount_id,
+            bob.snapshot.character_id,
         )
         assert deleted is True
 
@@ -412,7 +413,7 @@ def test_session_role_invalid_when_snapshot_is_corrupted() -> None:
         gateway.close()
 
 
-def test_session_role_invalid_when_snapshot_mount_is_stale() -> None:
+def test_session_role_invalid_when_snapshot_character_id_is_stale() -> None:
     gateway = DataServiceGateway(":memory:")
     try:
         gateway.initialize()
@@ -429,7 +430,11 @@ def test_session_role_invalid_when_snapshot_mount_is_stale() -> None:
             SET player_character_snapshot_json = REPLACE(player_character_snapshot_json, ?, ?)
             WHERE session_id = ?
             """,
-            (f'"mountId":{bob.snapshot.mount_id}', f'"mountId":{bob.snapshot.mount_id + 999}', session.id),
+            (
+                f'"characterId":{bob.snapshot.character_id}',
+                f'"characterId":{bob.snapshot.character_id + 999}',
+                session.id,
+            ),
         )
 
         state = _roles(gateway).get_state(session.id)

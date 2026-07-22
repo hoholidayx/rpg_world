@@ -29,7 +29,7 @@ def render_lorebook_section_body(lorebook_entries: list[JsonObject]) -> str:
 
 
 def build_lorebook_section(lorebook_entries: list[JsonObject]) -> FixedLayerSection | None:
-    """Build the lorebook fixed-layer section from mounted entries."""
+    """Build the lorebook fixed-layer section from Story-owned entries."""
     content = render_lorebook_section_body(lorebook_entries)
     if not content.strip():
         return None

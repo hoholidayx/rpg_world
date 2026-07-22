@@ -182,8 +182,8 @@ class _Characters:
     @staticmethod
     def list_enabled_characters() -> list[dict[str, object]]:
         return [
-            {"id": 1, "mount_id": 10, "name": "Bob"},
-            {"id": 2, "mount_id": 20, "name": "Alice"},
+            {"id": 1, "name": "Bob"},
+            {"id": 2, "name": "Alice"},
         ]
 
 
@@ -234,7 +234,6 @@ def test_context_fixed_layer_uses_frozen_player_and_story_prompt() -> None:
     execution = _execution(
         player_character=TurnPlayerCharacterSnapshot(
             character_id=2,
-            mount_id=20,
             story_id=1,
             name="Alice",
         ),

@@ -19,8 +19,8 @@ def _table(table_id: int, name: str, *, sort_order: int) -> SessionStatusTable:
         session_id="session",
         workspace_id="workspace",
         story_id=1,
-        source_table_id=table_id + 10,
-        origin="template_copy",
+        source_story_status_table_id=table_id + 10,
+        origin="story_copy",
         name=name,
         status_kind=STATUS_KIND_SCENE,
         document=StatusTableDocument.from_rows(

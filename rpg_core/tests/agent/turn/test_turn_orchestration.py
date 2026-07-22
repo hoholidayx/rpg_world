@@ -62,7 +62,6 @@ class _SessionRoles:
     def list_options(self, _session_id: str) -> list[PlayerCharacterOption]:
         snapshot = self.player or SimpleNamespace(
             character_id=1,
-            mount_id=10,
             story_id=1,
             name="候选角色",
         )
@@ -136,7 +135,6 @@ def test_ooc_snapshot_validates_but_suppresses_explicit_style() -> None:
 def test_turn_snapshot_freezes_player_and_rendered_story_prompt() -> None:
     player = SimpleNamespace(
         character_id=2,
-        mount_id=20,
         story_id=1,
         name="Alice",
     )
@@ -160,14 +158,12 @@ def test_turn_snapshot_freezes_player_and_rendered_story_prompt() -> None:
     )
     roles.player = SimpleNamespace(
         character_id=1,
-        mount_id=10,
         story_id=1,
         name="Bob",
     )
 
     assert snapshot.player_character == TurnPlayerCharacterSnapshot(
         character_id=2,
-        mount_id=20,
         story_id=1,
         name="Alice",
     )

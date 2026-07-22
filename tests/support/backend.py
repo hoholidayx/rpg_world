@@ -18,7 +18,7 @@ class IntegrationCatalog:
     workspace_id: str
     story: models.Story
     session: models.Session
-    character: models.Character
+    character: models.StoryCharacter
 
 
 async def shutdown_agent(agent: RPGGameAgent) -> None:
@@ -36,7 +36,6 @@ def create_integration_session(
 ) -> IntegrationCatalog:
     """Seed one catalog session through a single shared test-support boundary."""
 
-    from rpg_data.repositories.character_repo import CharacterRepository
     from rpg_data.repositories.session_repo import SessionRepository
     from rpg_data.repositories.story_repo import StoryRepository
     from rpg_data.repositories.story_character_repo import StoryCharacterRepository
@@ -44,7 +43,6 @@ def create_integration_session(
 
     workspace_id = "integration_workspace"
     database = gateway.database
-    characters = CharacterRepository(database)
     story_characters = StoryCharacterRepository(database)
     workspaces = WorkspaceRepository(database)
     stories = StoryRepository(database)
@@ -109,7 +107,6 @@ def create_integration_session(
                 title=session_id,
             )
         character = _ensure_test_role(
-            characters=characters,
             story_characters=story_characters,
             workspace_id=workspace_id,
             story_id=story.id,
@@ -125,7 +122,7 @@ def create_integration_session(
                 )
 
     if with_status:
-        _mount_integration_status(gateway, workspace_id, story.id)
+        _ensure_integration_status(gateway, workspace_id, story.id)
         SessionStatusLifecycleService(gateway.sessions).initialize(session_id)
     if bind_role:
         SessionRoleService(gateway.sessions).bind_player_character(
@@ -143,16 +140,17 @@ def ensure_integration_session(
     create_integration_session(gateway, integration_workspace, session_id)
 
 
-def _mount_integration_status(
+def _ensure_integration_status(
     gateway: DataServiceGateway,
     workspace_id: str,
     story_id: int,
 ) -> None:
-    if gateway.status.list_story_mounts(workspace_id, story_id):
+    if gateway.status.list_story_tables(workspace_id, story_id):
         return
     administration = StatusTableAdministrationService(gateway.status)
-    scene_template = administration.create_template(
+    administration.create_story_table(
         workspace_id,
+        story_id,
         "集成当前场景",
         status_kind=models.STATUS_KIND_SCENE,
         document=models.StatusTableDocument.from_data(
@@ -167,8 +165,9 @@ def _mount_integration_status(
         ),
         sort_order=10,
     )
-    normal_template = administration.create_template(
+    administration.create_story_table(
         workspace_id,
+        story_id,
         "集成线索",
         document=models.StatusTableDocument.from_data(
             models.StatusTableData(
@@ -178,23 +177,8 @@ def _mount_integration_status(
         ),
         sort_order=20,
     )
-    gateway.status.mount_template(
-        workspace_id,
-        story_id,
-        scene_template.id,
-        sort_order=10,
-    )
-    gateway.status.mount_template(
-        workspace_id,
-        story_id,
-        normal_template.id,
-        sort_order=20,
-    )
-
-
 def _ensure_test_role(
     *,
-    characters,
     story_characters,
     workspace_id: str,
     story_id: int,
@@ -202,17 +186,20 @@ def _ensure_test_role(
     character = next(
         (
             candidate
-            for candidate in characters.list(workspace_id)
+            for candidate in story_characters.list(
+                workspace_id=workspace_id,
+                story_id=story_id,
+            )
             if candidate.name == "Integration Tester"
         ),
         None,
     )
     if character is None:
-        character = characters.create(
+        character = story_characters.create(
             workspace_id,
+            story_id,
             "Integration Tester",
             personality="A concise test role used by integration tests.",
             content="You are the player-controlled role for integration tests.",
         )
-    story_characters.mount(workspace_id, story_id, character.id)
     return character

@@ -45,8 +45,8 @@ class SessionResetResult:
     story_memories_cleared: int = 0
     dream_memories_cleared: int = 0
     dream_proposals_cleared: int = 0
-    template_status_tables_cleared: int = 0
-    template_status_tables_initialized: int = 0
+    story_status_tables_cleared: int = 0
+    story_status_tables_initialized: int = 0
     session_native_status_tables_reset: int = 0
     deferred_progress_cleared: int = 0
     media_jobs_cleared: int = 0
@@ -96,9 +96,9 @@ class SessionResetService:
             story_memories_cleared=story_memories_cleared,
             dream_memories_cleared=dream_result.memories_cleared,
             dream_proposals_cleared=dream_result.proposals_cleared,
-            template_status_tables_cleared=status_result.template_tables_cleared,
-            template_status_tables_initialized=(
-                status_result.template_tables_initialized
+            story_status_tables_cleared=status_result.story_tables_cleared,
+            story_status_tables_initialized=(
+                status_result.story_tables_initialized
             ),
             session_native_status_tables_reset=status_result.native_tables_reset,
             deferred_progress_cleared=status_result.deferred_progress_cleared,

@@ -544,43 +544,16 @@ def to_session_story_memory(
     )
 
 
-def to_character(row: records.CharacterRecord) -> models.Character:
-    return models.Character(
-        id=int(row.id),
-        workspace_id=str(row.workspace_id),
-        name=str(row.name),
-        personality=str(row.personality or ""),
-        content=str(row.content or ""),
-        metadata_json=str(row.metadata_json or "{}"),
-        version=int(row.version),
-        created_at=str(row.created_at),
-        updated_at=str(row.updated_at),
-    )
-
-
-def to_character_detail(row: records.CharacterDetailRecord) -> models.CharacterDetail:
+def to_character_detail(
+    row: records.StoryCharacterDetailRecord,
+) -> models.CharacterDetail:
     return models.CharacterDetail(
         id=int(row.id),
-        character_id=int(row.character_id),
+        story_character_id=int(row.story_character_id),
         name=str(row.name),
         content=str(row.content or ""),
         tags_json=str(row.tags_json or "[]"),
         sort_order=int(row.sort_order),
-        version=int(row.version),
-        created_at=str(row.created_at),
-        updated_at=str(row.updated_at),
-    )
-
-
-def to_lorebook_entry(row: records.LorebookEntryRecord) -> models.LorebookEntry:
-    return models.LorebookEntry(
-        id=int(row.id),
-        workspace_id=str(row.workspace_id),
-        name=str(row.name),
-        content=str(row.content or ""),
-        description=str(row.description or ""),
-        tags_json=str(row.tags_json or "[]"),
-        metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),
@@ -592,7 +565,9 @@ def to_story_character(row: records.StoryCharacterRecord) -> models.StoryCharact
         id=int(row.id),
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
-        character_id=int(row.character_id),
+        name=str(row.name),
+        personality=str(row.personality or ""),
+        content=str(row.content or ""),
         sort_order=int(row.sort_order),
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),
@@ -606,7 +581,10 @@ def to_story_lorebook_entry(row: records.StoryLorebookEntryRecord) -> models.Sto
         id=int(row.id),
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
-        lorebook_entry_id=int(row.lorebook_entry_id),
+        name=str(row.name),
+        content=str(row.content or ""),
+        description=str(row.description or ""),
+        tags_json=str(row.tags_json or "[]"),
         sort_order=int(row.sort_order),
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),

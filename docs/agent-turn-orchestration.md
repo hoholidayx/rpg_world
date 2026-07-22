@@ -253,7 +253,7 @@ select_status_targets({
 4. 代码忽略未知/重复表 ID、未知 key 和频率不匹配的 key。
 5. `event_keys` 还必须对应 `event_driven` 字段且具有非空 `updateRule`。
 
-这里的 ID 是 `rpg_session_status_tables` 的运行时表 ID，不是 workspace template ID 或 story mount ID。模板来源和通用挂载范围不向 LLM 暴露。
+这里的 ID 是 `rpg_session_status_tables` 的运行时表 ID，不是 Story 定义 ID 或 `source_story_status_table_id`。Story 来源关系不向 LLM 暴露。
 
 ### 阶段 C：隔离更新
 

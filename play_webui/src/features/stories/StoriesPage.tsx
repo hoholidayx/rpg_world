@@ -17,16 +17,16 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { AppShell, useAppShell } from '@/features/layout/AppShell'
-import { listStoryCharacters } from '@/lib/api/characters'
-import { listStoryLorebookEntries } from '@/lib/api/lorebook'
+import { listCharacters } from '@/lib/api/characters'
+import { listLorebookEntries } from '@/lib/api/lorebook'
 import { createSession, listSessions } from '@/lib/api/sessions'
 import { listStories } from '@/lib/api/stories'
-import { listStoryStatusMounts } from '@/lib/api/statusTables'
+import { listStoryStatusTables } from '@/lib/api/statusTables'
 import { cn } from '@/lib/utils/cn'
 import type { CharacterCard } from '@/types/characters'
 import type { LorebookEntry } from '@/types/lorebook'
 import type { SessionSummary } from '@/types/session'
-import { STATUS_KIND, type StoryStatusMount } from '@/types/statusTables'
+import { STATUS_KIND, type StatusTable } from '@/types/statusTables'
 import { STORY_COMPUTED_STATUS, type StoryComputedStatus, type StoryLibraryItem, type StorySummary } from '@/types/story'
 
 type StoryFilter = 'all' | StoryComputedStatus
@@ -36,7 +36,7 @@ type StoryAggregate = {
   storyId: number
   characters: CharacterCard[]
   lorebookEntries: LorebookEntry[]
-  statusMounts: StoryStatusMount[]
+  statusTables: StatusTable[]
   sessions: SessionSummary[]
   error: string | null
 }
@@ -87,7 +87,7 @@ function emptyAggregate(storyId: number): StoryAggregate {
     storyId,
     characters: [],
     lorebookEntries: [],
-    statusMounts: [],
+    statusTables: [],
     sessions: [],
     error: null,
   }
@@ -98,13 +98,13 @@ function isFulfilled<T>(result: PromiseSettledResult<T>): result is PromiseFulfi
 }
 
 async function loadStoryAggregate(workspace: string, storyId: number): Promise<StoryAggregate> {
-  const [characters, lorebookEntries, statusMounts, sessions] = await Promise.allSettled([
-    listStoryCharacters(workspace, storyId),
-    listStoryLorebookEntries(workspace, storyId),
-    listStoryStatusMounts(workspace, storyId),
+  const [characters, lorebookEntries, statusTables, sessions] = await Promise.allSettled([
+    listCharacters(workspace, storyId),
+    listLorebookEntries(workspace, storyId),
+    listStoryStatusTables(workspace, storyId),
     listSessions(workspace, storyId),
   ])
-  const errors = [characters, lorebookEntries, statusMounts, sessions]
+  const errors = [characters, lorebookEntries, statusTables, sessions]
     .filter((result) => result.status === 'rejected')
     .map((result) => result.reason instanceof Error ? result.reason.message : '加载失败')
 
@@ -112,7 +112,7 @@ async function loadStoryAggregate(workspace: string, storyId: number): Promise<S
     storyId,
     characters: isFulfilled(characters) ? characters.value : [],
     lorebookEntries: isFulfilled(lorebookEntries) ? lorebookEntries.value : [],
-    statusMounts: isFulfilled(statusMounts) ? statusMounts.value : [],
+    statusTables: isFulfilled(statusTables) ? statusTables.value : [],
     sessions: isFulfilled(sessions) ? sessions.value : [],
     error: errors.length ? errors.join(' / ') : null,
   }
@@ -124,7 +124,7 @@ function buildSearchText(
 ) {
   const characterText = aggregate.characters.map((character) => `${character.name} ${character.personality} ${character.content}`).join(' ')
   const lorebookText = aggregate.lorebookEntries.map((entry) => `${entry.name} ${entry.description} ${entry.content} ${entry.tags.join(' ')}`).join(' ')
-  const statusText = aggregate.statusMounts.map((mount) => `${mount.tableName} ${mount.description} ${mount.statusKind}`).join(' ')
+  const statusText = aggregate.statusTables.map((table) => `${table.name} ${table.description} ${table.statusKind}`).join(' ')
   const sessionText = aggregate.sessions.map((session) => `${session.title ?? ''} ${session.description ?? ''}`).join(' ')
   const openingText = story.openings.map((opening) => `${opening.title} ${opening.message}`).join(' ')
   return `${story.title} ${story.summary ?? ''} ${story.storyPrompt} ${openingText} ${characterText} ${lorebookText} ${statusText} ${sessionText}`.toLowerCase()
@@ -143,13 +143,13 @@ function toLibraryItem(story: StorySummary, aggregate: StoryAggregate): StoryLib
     ...sortedSessions.map((session) => Math.max(getTimestamp(session.updatedAt), getTimestamp(session.createdAt))),
   )
   const computedStatus: StoryComputedStatus = sortedSessions.length ? STORY_COMPUTED_STATUS.LIVE : STORY_COMPUTED_STATUS.DRAFT
-  const sceneStatusCount = aggregate.statusMounts.filter((mount) => mount.statusKind === STATUS_KIND.SCENE).length
+  const sceneStatusCount = aggregate.statusTables.filter((table) => table.statusKind === STATUS_KIND.SCENE).length
 
   return {
     ...story,
     characterCount: aggregate.characters.length,
     lorebookCount: aggregate.lorebookEntries.length,
-    statusTableCount: aggregate.statusMounts.length,
+    statusTableCount: aggregate.statusTables.length,
     sceneStatusCount,
     sessions: sortedSessions,
     latestSession: latest,
@@ -222,7 +222,7 @@ function StoryCard({
         </div>
         <p className="mt-2 line-clamp-2 min-h-11 text-sm leading-6 text-slate-500">{item.summary || '暂无故事摘要'}</p>
 
-        <div className="mt-4 grid grid-cols-4 gap-2" aria-label="挂载资产">
+        <div className="mt-4 grid grid-cols-4 gap-2" aria-label="Story 资产">
           {[
             ['角色', item.characterCount],
             ['世界书', item.lorebookCount],
@@ -333,7 +333,7 @@ function StoriesContent() {
   )
 
   // 落地备注：当前后端没有 story aggregate/search 接口；这里先按效果图说明做前端本地过滤。
-  // 搜索语料来自 story 主数据 + 前端额外拉取的 mounts/sessions，未来可替换为服务端聚合搜索。
+  // 搜索语料来自 Story 主数据、直属资产和 Sessions，未来可替换为服务端聚合搜索。
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase()
     return libraryItems
@@ -395,7 +395,7 @@ function StoriesContent() {
           </p>
           <h1 className="text-3xl font-black text-slate-950">故事库</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            管理 story 主数据、开场模板、角色与世界书挂载，并从这里按全局 session_id 进入游玩会话。
+            管理 Story 主数据、开场模板和直属内容资产，并从这里按全局 session_id 进入游玩会话。
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -455,9 +455,9 @@ function StoriesContent() {
 
       <section className="mb-6 grid gap-3 md:grid-cols-2 2xl:grid-cols-4" aria-label="故事库概览">
         <MetricCard label="故事" value={libraryItems.length} note={`${liveCount} 个进行中，${draftCount} 个未开始`} icon={BookOpen} />
-        <MetricCard label="挂载角色" value={totalCharacters} note="来自 story 角色挂载表" icon={UsersRound} />
-        <MetricCard label="世界书条目" value={totalLorebook} note="跨 story 可复用挂载" icon={Globe2} />
-        <MetricCard label="状态表模板" value={totalStatus} note={`scene 模板 ${totalSceneStatus} 张`} icon={TableProperties} />
+        <MetricCard label="Story 角色" value={totalCharacters} note="由各 Story 直接拥有" icon={UsersRound} />
+        <MetricCard label="世界书条目" value={totalLorebook} note="由各 Story 独立维护" icon={Globe2} />
+        <MetricCard label="状态表定义" value={totalStatus} note={`scene 定义 ${totalSceneStatus} 张`} icon={TableProperties} />
       </section>
 
       {!currentWorkspace ? (
@@ -491,7 +491,7 @@ function StoriesContent() {
           {aggregatesLoading ? (
             <p className="mb-3 flex items-center gap-2 text-xs font-bold text-slate-400">
               <Loader2 size={14} className="animate-spin" />
-              正在补齐挂载资源和最近会话
+              正在补齐 Story 资产和最近会话
             </p>
           ) : null}
           {filteredItems.length ? (

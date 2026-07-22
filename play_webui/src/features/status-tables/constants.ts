@@ -1,15 +1,12 @@
 import {
   STATUS_KIND,
   STATUS_ORIGIN,
-  STORY_STATUS_MOUNT_ORIGIN,
   type StatusKind,
   type StatusOrigin,
-  type StoryStatusMountOrigin,
 } from '@/types/statusTables'
 
 export const STATUS_TABLE_VIEW = {
-  SYSTEM: 'templates',
-  STORY: 'storyTemplates',
+  STORY: 'story',
   RUNTIME: 'runtime',
 } as const
 
@@ -17,8 +14,6 @@ export type StatusTableView = (typeof STATUS_TABLE_VIEW)[keyof typeof STATUS_TAB
 
 export const DEFAULT_KEY_COLUMN = '属性'
 export const DEFAULT_VALUE_COLUMN = '值'
-export const DEFAULT_TEMPLATE_METADATA = { ui: {} } as const
-export const STATUS_DESCRIPTION_PLACEHOLDER = '例如：追踪角色生命与法力；仅在受伤、治疗、施法或恢复时更新。'
 
 export const STATUS_TABLE_NAMES: Record<StatusKind, string> = {
   [STATUS_KIND.SCENE]: '未命名场景',
@@ -36,13 +31,8 @@ export const STATUS_KIND_HINTS: Record<StatusKind, string> = {
 }
 
 export const STATUS_ORIGIN_LABELS: Record<StatusOrigin, string> = {
-  [STATUS_ORIGIN.TEMPLATE_COPY]: '模板副本',
+  [STATUS_ORIGIN.STORY_COPY]: 'Story 副本',
   [STATUS_ORIGIN.SESSION_NATIVE]: '会话新建',
-}
-
-export const STORY_STATUS_MOUNT_ORIGIN_LABELS: Record<StoryStatusMountOrigin, string> = {
-  [STORY_STATUS_MOUNT_ORIGIN.SYSTEM]: '系统挂载',
-  [STORY_STATUS_MOUNT_ORIGIN.STORY_TEMPLATE]: '故事模板',
 }
 
 export function defaultStatusTableName(kind: StatusKind) {
@@ -59,8 +49,4 @@ export function statusKindHint(kind: StatusKind) {
 
 export function originLabel(origin?: StatusOrigin | null) {
   return origin ? STATUS_ORIGIN_LABELS[origin] ?? '未知来源' : '未知来源'
-}
-
-export function storyMountOriginLabel(origin: StoryStatusMountOrigin) {
-  return STORY_STATUS_MOUNT_ORIGIN_LABELS[origin]
 }

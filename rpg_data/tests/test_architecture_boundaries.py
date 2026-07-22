@@ -29,7 +29,7 @@ from rpg_data.model.session import Session, SessionDerivationJob, SessionMessage
 from rpg_data.model.status import (
     SessionStatusTable,
     StatusTableDocument,
-    StatusTableTemplate,
+    StoryStatusTable,
 )
 from rpg_data.model.tts import TTSJob, TTSMessageSource
 from rpg_data.services.dream_memory import DreamMemoryDataService
@@ -323,7 +323,7 @@ def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.PersistentMemoryBundle is PersistentMemoryBundle
     assert models.SessionStatusTable is SessionStatusTable
     assert models.StatusTableDocument is StatusTableDocument
-    assert models.StatusTableTemplate is StatusTableTemplate
+    assert models.StoryStatusTable is StoryStatusTable
     assert models.MediaJob is MediaJob
     assert models.MediaLibraryAssetBundle is MediaLibraryAssetBundle
     assert models.TTSJob is TTSJob

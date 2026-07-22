@@ -164,7 +164,7 @@ from rpg_data.model.session import (
     TURN_MODE_OOC,
     TURN_MODES,
     Session,
-    SessionCharacterMount,
+    SessionCharacterOption,
     SessionDerivationJob,
     SessionDerivationJobUpdate,
     SessionMessage,
@@ -175,9 +175,9 @@ from rpg_data.model.status import (
     STATUS_KEY_COLUMN,
     STATUS_KIND_NORMAL,
     STATUS_KIND_SCENE,
-    STATUS_METADATA_STORY_MOUNT_KEY,
+    STATUS_METADATA_STORY_SOURCE_KEY,
     STATUS_ORIGIN_SESSION_NATIVE,
-    STATUS_ORIGIN_TEMPLATE_COPY,
+    STATUS_ORIGIN_STORY_COPY,
     STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY,
     STATUS_ROW_UPDATE_FREQUENCY_KEY,
     STATUS_ROW_UPDATE_RULE_KEY,
@@ -189,8 +189,6 @@ from rpg_data.model.status import (
     STATUS_UPDATE_FREQUENCY_MANUAL,
     STATUS_UPDATE_FREQUENCY_REALTIME,
     STATUS_VALUE_COLUMN,
-    STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE,
-    STORY_STATUS_MOUNT_ORIGIN_SYSTEM,
     SessionStatusDocumentWrite,
     SessionStatusMetadata,
     SessionStatusResetPlan,
@@ -206,14 +204,12 @@ from rpg_data.model.status import (
     StatusOrigin,
     StatusProgressWrite,
     StatusRowRef,
-    StatusStoryMountIdentity,
+    StatusStoryTableIdentity,
     StatusTableData,
     StatusTableDocument,
     StatusTableRow,
-    StatusTableTemplate,
     StatusUpdateFrequency,
-    StoryStatusMountOrigin,
-    StoryStatusMountSnapshot,
+    StoryStatusSourceSnapshot,
     StoryStatusTable,
     parse_session_status_metadata,
     parse_status_document,
@@ -222,7 +218,6 @@ from rpg_data.model.status import (
     validate_status_kind,
     validate_status_origin,
     validate_status_update_policy,
-    validate_story_status_mount_origin,
 )
 from rpg_data.model.tts import (
     TTS_JOB_ACTIVE_STATUSES,
@@ -244,9 +239,7 @@ from rpg_data.model.tts import (
 )
 
 __all__ = [
-    "Character",
     "CharacterDetail",
-    "LorebookEntry",
     "MediaAsset",
     "MediaAssetDeleteResult",
     "MediaBlob",
@@ -306,7 +299,7 @@ __all__ = [
     "SessionDerivationJob",
     "SessionDerivationJobUpdate",
     "SessionCharacter",
-    "SessionCharacterMount",
+    "SessionCharacterOption",
     "SessionCharacterDetail",
     "SessionLorebookEntry",
     "SessionMessage",
@@ -350,7 +343,6 @@ __all__ = [
     "WorkspaceTurnModeSeed",
     "StoryCharacter",
     "StoryLorebookEntry",
-    "StoryLorebookEntryDetail",
     "StoryStatusTable",
     "StatusRowRef",
     "StatusTableData",
@@ -363,13 +355,11 @@ __all__ = [
     "StatusKind",
     "StatusOrigin",
     "StatusProgressWrite",
-    "StatusStoryMountIdentity",
+    "StatusStoryTableIdentity",
     "StatusTableDocument",
     "StatusTableRow",
-    "StatusTableTemplate",
     "StatusUpdateFrequency",
-    "StoryStatusMountOrigin",
-    "StoryStatusMountSnapshot",
+    "StoryStatusSourceSnapshot",
     "STATUS_KIND_NORMAL",
     "PLOT_DECISION_DEFERRED",
     "PLOT_DECISION_ERROR",
@@ -386,12 +376,10 @@ __all__ = [
     "PLOT_SOURCE_OUTLINE",
     "PLOT_SOURCE_POOL",
     "STATUS_KIND_SCENE",
-    "STATUS_METADATA_STORY_MOUNT_KEY",
+    "STATUS_METADATA_STORY_SOURCE_KEY",
     "STATUS_ORIGIN_SESSION_NATIVE",
-    "STATUS_ORIGIN_TEMPLATE_COPY",
+    "STATUS_ORIGIN_STORY_COPY",
     "STATUS_KEY_COLUMN",
-    "STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE",
-    "STORY_STATUS_MOUNT_ORIGIN_SYSTEM",
     "STATUS_TABLE_KIND",
     "STATUS_TABLE_MODE_KEY_VALUE",
     "STATUS_VALUE_COLUMN",
@@ -474,7 +462,6 @@ __all__ = [
     "parse_session_status_metadata",
     "serialize_session_status_metadata",
     "serialize_status_document",
-    "validate_story_status_mount_origin",
     "validate_status_kind",
     "validate_status_origin",
     "validate_status_update_policy",
@@ -533,22 +520,9 @@ class Story:
 
 
 @dataclass(frozen=True)
-class Character:
-    id: int
-    workspace_id: str
-    name: str
-    personality: str = ""
-    content: str = ""
-    metadata_json: str = "{}"
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
 class CharacterDetail:
     id: int
-    character_id: int
+    story_character_id: int
     name: str
     content: str = ""
     tags_json: str = "[]"
@@ -559,23 +533,8 @@ class CharacterDetail:
 
 
 @dataclass(frozen=True)
-class LorebookEntry:
-    id: int
-    workspace_id: str
-    name: str
-    content: str = ""
-    description: str = ""
-    tags_json: str = "[]"
-    metadata_json: str = "{}"
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-
-@dataclass(frozen=True)
 class SessionLorebookEntry:
     id: int
-    mount_id: int
     workspace_id: str
     story_id: int
     name: str
@@ -588,7 +547,7 @@ class SessionLorebookEntry:
 @dataclass(frozen=True)
 class SessionCharacterDetail:
     id: int
-    character_id: int
+    story_character_id: int
     name: str
     content: str = ""
     tags: tuple[str, ...] = ()
@@ -598,7 +557,6 @@ class SessionCharacterDetail:
 @dataclass(frozen=True)
 class SessionCharacter:
     id: int
-    mount_id: int
     workspace_id: str
     story_id: int
     name: str
@@ -613,18 +571,14 @@ class StoryCharacter:
     id: int
     workspace_id: str
     story_id: int
-    character_id: int
+    name: str
+    personality: str = ""
+    content: str = ""
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class StoryCharacterDetail:
-    mount: StoryCharacter
-    character: Character
 
 
 @dataclass(frozen=True)
@@ -632,15 +586,12 @@ class StoryLorebookEntry:
     id: int
     workspace_id: str
     story_id: int
-    lorebook_entry_id: int
+    name: str
+    content: str = ""
+    description: str = ""
+    tags_json: str = "[]"
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
-
-
-@dataclass(frozen=True)
-class StoryLorebookEntryDetail:
-    mount: StoryLorebookEntry
-    entry: LorebookEntry

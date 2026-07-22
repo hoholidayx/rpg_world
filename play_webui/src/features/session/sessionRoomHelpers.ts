@@ -23,7 +23,7 @@ export function characterSummary(character: CharacterCard) {
   const personality = character.personality?.trim()
   if (personality) return personality
   const content = character.content?.replace(/\s+/g, ' ').trim()
-  return content ? content.slice(0, 72) : '已挂载到当前故事。'
+  return content ? content.slice(0, 72) : '属于当前 Story。'
 }
 
 export function formatDateTime(value?: string | null) {

@@ -192,7 +192,7 @@ function PlayerCharacterDialog({
             <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
               <h3 className="text-lg font-black text-slate-950 dark:text-slate-100">当前故事还没有可扮演角色</h3>
               <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-300">
-                请先到角色库创建角色，并将角色挂载到当前故事。绑定完成前本会话不能发送消息。
+                请先到角色库为当前 Story 创建角色。绑定完成前本会话不能发送消息。
               </p>
             </section>
           )}

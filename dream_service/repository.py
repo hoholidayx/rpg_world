@@ -739,7 +739,6 @@ def _player_character_fingerprint(player_state: SessionPlayerCharacterState) -> 
     payload = json.dumps(
         {
             "characterId": player.character_id,
-            "mountId": player.mount_id,
             "storyId": player.story_id,
             "name": player.name,
             "updatedAt": player.updated_at,

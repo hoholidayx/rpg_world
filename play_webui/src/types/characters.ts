@@ -1,10 +1,6 @@
-import type { StorySummary } from './lorebook'
-
-export type { StorySummary }
-
 export type CharacterDetail = {
   id: number
-  characterId: number
+  storyCharacterId: number
   name: string
   content: string
   tags: string[]
@@ -17,6 +13,7 @@ export type CharacterDetail = {
 export type CharacterCard = {
   id: number
   workspaceId: string
+  storyId: number
   name: string
   personality: string
   content: string
@@ -25,14 +22,14 @@ export type CharacterCard = {
   version: number
   createdAt?: string | null
   updatedAt?: string | null
-  mountId?: number | null
-  storyId?: number | null
+  sortOrder: number
 }
 
 export type CharacterInput = {
   name: string
   personality: string
   content: string
+  sortOrder?: number
   metadata: Record<string, unknown>
 }
 

@@ -1,3 +1,5 @@
+-- Demo data for the clean Story-owned schema.
+
 INSERT OR IGNORE INTO rpg_workspaces (
     id,
     name,
@@ -18,34 +20,43 @@ INSERT OR IGNORE INTO rpg_stories (
     title,
     summary,
     story_prompt,
-    first_message,
     metadata_json
 )
-VALUES (
-    'demo_workspace',
-    '北境森林 Demo',
-    'Bob 与 Alice 在北境森林追查幽蓝封印。',
-    '用于验证 workspace、story、session、角色卡与 lorebook 挂载关系的演示故事。',
-    '北境森林的霜雾刚漫过石林入口，幽蓝封印在远处一明一暗。你——{USER_PLAY_ROLE_NAME}——听见祭坛方向再次传来潮声。',
-    '{"kind":"demo","order":1}'
-);
+VALUES
+    (
+        'demo_workspace',
+        '北境森林 Demo',
+        'Bob 与 Alice 在北境森林追查幽蓝封印。',
+        '用于验证 Story 直属角色卡、世界书、状态表与 Session 运行时副本的演示故事。',
+        '{"kind":"demo","order":1}'
+    ),
+    (
+        'demo_workspace',
+        '奥术学院 Demo',
+        'Alice 返回学院调查炎心之木的旧档案。',
+        '用于验证不同 Story 各自拥有独立角色卡、世界书与状态表。',
+        '{"kind":"demo","order":2}'
+    );
 
-INSERT OR IGNORE INTO rpg_stories (
+INSERT OR IGNORE INTO rpg_story_openings (
     workspace_id,
+    story_id,
     title,
-    summary,
-    story_prompt,
-    first_message,
-    metadata_json
+    message,
+    sort_order
 )
-VALUES (
-    'demo_workspace',
-    '奥术学院 Demo',
-    'Alice 返回学院调查炎心之木的旧档案。',
-    '用于验证同一角色卡和 lorebook entry 可挂载到多个 story。',
-    '旧档案馆的铜铃在午后轻响，管理员莫兰把一叠封蜡破损的登记簿推到桌边，看向你：“{USER_PLAY_ROLE_NAME}，如果你真要查炎心之木，就从这一本开始。”',
-    '{"kind":"demo","order":2}'
-);
+SELECT
+    workspace_id,
+    id,
+    '默认开局',
+    CASE title
+        WHEN '北境森林 Demo' THEN '北境森林的霜雾刚漫过石林入口，幽蓝封印在远处一明一暗。你——{USER_PLAY_ROLE_NAME}——听见祭坛方向再次传来潮声。'
+        ELSE '旧档案馆的铜铃在午后轻响，管理员莫兰把一叠封蜡破损的登记簿推到桌边，看向你：“{USER_PLAY_ROLE_NAME}，如果你真要查炎心之木，就从这一本开始。”'
+    END,
+    0
+FROM rpg_stories
+WHERE workspace_id = 'demo_workspace'
+  AND title IN ('北境森林 Demo', '奥术学院 Demo');
 
 INSERT OR IGNORE INTO rpg_sessions (
     id,
@@ -53,55 +64,61 @@ INSERT OR IGNORE INTO rpg_sessions (
     story_id,
     state_json
 )
-VALUES (
-    's_forest001',
-    'demo_workspace',
+VALUES
     (
-        SELECT id
-        FROM rpg_stories
-        WHERE workspace_id = 'demo_workspace' AND title = '北境森林 Demo'
+        's_forest001',
+        'demo_workspace',
+        (
+            SELECT id FROM rpg_stories
+            WHERE workspace_id = 'demo_workspace' AND title = '北境森林 Demo'
+        ),
+        '{"scene":"北境森林·石林·圆形封印祭坛","time":"第 1 年 1 月 1 日 8 时 30 分"}'
     ),
-    '{"scene":"北境森林·石林·圆形封印祭坛","time":"第 1 年 1 月 1 日 8 时 30 分"}'
-);
+    (
+        's_academy01',
+        'demo_workspace',
+        (
+            SELECT id FROM rpg_stories
+            WHERE workspace_id = 'demo_workspace' AND title = '奥术学院 Demo'
+        ),
+        '{"scene":"奥术学院·旧档案馆","time":"第 1 年 1 月 3 日 14 时"}'
+    );
 
 INSERT OR IGNORE INTO rpg_session_profiles (
     session_id,
     title,
+    story_opening_id,
     metadata_json
 )
-VALUES (
-    's_forest001',
-    '北境森林主线',
-    '{"kind":"demo"}'
-);
-
-INSERT OR IGNORE INTO rpg_sessions (
-    id,
-    workspace_id,
-    story_id,
-    state_json
-)
-VALUES (
-    's_academy01',
-    'demo_workspace',
+VALUES
     (
-        SELECT id
-        FROM rpg_stories
-        WHERE workspace_id = 'demo_workspace' AND title = '奥术学院 Demo'
+        's_forest001',
+        '北境森林主线',
+        (
+            SELECT openings.id
+            FROM rpg_story_openings AS openings
+            JOIN rpg_stories AS stories ON stories.id = openings.story_id
+            WHERE stories.workspace_id = 'demo_workspace'
+              AND stories.title = '北境森林 Demo'
+            ORDER BY openings.sort_order, openings.id
+            LIMIT 1
+        ),
+        '{"kind":"demo"}'
     ),
-    '{"scene":"奥术学院·旧档案馆","time":"第 1 年 1 月 3 日 14 时"}'
-);
-
-INSERT OR IGNORE INTO rpg_session_profiles (
-    session_id,
-    title,
-    metadata_json
-)
-VALUES (
-    's_academy01',
-    '奥术学院档案',
-    '{"kind":"demo"}'
-);
+    (
+        's_academy01',
+        '奥术学院档案',
+        (
+            SELECT openings.id
+            FROM rpg_story_openings AS openings
+            JOIN rpg_stories AS stories ON stories.id = openings.story_id
+            WHERE stories.workspace_id = 'demo_workspace'
+              AND stories.title = '奥术学院 Demo'
+            ORDER BY openings.sort_order, openings.id
+            LIMIT 1
+        ),
+        '{"kind":"demo"}'
+    );
 
 INSERT INTO rpg_session_messages (
     session_id,
@@ -182,194 +199,149 @@ WHERE demo_messages.session_id IN ('s_forest001', 's_academy01')
         AND existing.seq_in_turn = demo_messages.seq_in_turn
   );
 
-INSERT OR IGNORE INTO rpg_characters (
-    workspace_id,
-    name,
-    personality,
-    content,
-    metadata_json
-)
-VALUES (
-    'demo_workspace',
-    'Bob',
-    'bold',
-    'A brave knight who favors direct charges and two-handed swords.',
-    '{"kind":"demo"}'
-);
-
-INSERT OR IGNORE INTO rpg_characters (
-    workspace_id,
-    name,
-    personality,
-    content,
-    metadata_json
-)
-VALUES (
-    'demo_workspace',
-    'Alice',
-    'curious',
-    'A young wizard from the Arcanum Academy with a talent for elemental magic.',
-    '{"kind":"demo"}'
-);
-
-INSERT OR IGNORE INTO rpg_character_details (
-    character_id,
-    name,
-    content,
-    tags_json,
-    sort_order
-)
-VALUES (
-    (
-        SELECT id
-        FROM rpg_characters
-        WHERE workspace_id = 'demo_workspace' AND name = 'Bob'
-    ),
-    '战斗风格',
-    '擅长双手重剑，战斗时喜欢正面冲锋。',
-    '["战斗"]',
-    10
-);
-
-INSERT OR IGNORE INTO rpg_character_details (
-    character_id,
-    name,
-    content,
-    tags_json,
-    sort_order
-)
-VALUES (
-    (
-        SELECT id
-        FROM rpg_characters
-        WHERE workspace_id = 'demo_workspace' AND name = 'Alice'
-    ),
-    '外貌',
-    '银白色长发，紫罗兰色瞳孔，战斗时穿轻便法师袍。',
-    '["外观"]',
-    10
-);
-
-INSERT OR IGNORE INTO rpg_lorebook_entries (
-    workspace_id,
-    name,
-    content,
-    description,
-    tags_json,
-    metadata_json
-)
-VALUES (
-    'demo_workspace',
-    '炎心之木',
-    '北境森林传说中的世界之树，树干中流淌着永不熄灭的火焰。',
-    '与火焰符文和最初的燃烧有关的核心传说。',
-    '["history","magic"]',
-    '{"kind":"demo"}'
-);
-
-INSERT OR IGNORE INTO rpg_lorebook_entries (
-    workspace_id,
-    name,
-    content,
-    description,
-    tags_json,
-    metadata_json
-)
-VALUES (
-    'demo_workspace',
-    '圆形封印祭坛',
-    '北境森林石林深处的青石板空地，中央金属圆盘微微渗出幽蓝光芒。',
-    '用于演示场景与世界设定词条。',
-    '["scene","seal"]',
-    '{"kind":"demo"}'
-);
-
 INSERT OR IGNORE INTO rpg_story_characters (
     workspace_id,
     story_id,
-    character_id,
+    name,
+    personality,
+    content,
     sort_order,
     metadata_json
 )
 SELECT
-    'demo_workspace',
-    rpg_stories.id,
-    rpg_characters.id,
-    CASE rpg_characters.name WHEN 'Bob' THEN 10 ELSE 20 END,
+    stories.workspace_id,
+    stories.id,
+    characters.name,
+    characters.personality,
+    characters.content,
+    characters.sort_order,
     '{"kind":"demo"}'
-FROM rpg_stories
-JOIN rpg_characters ON rpg_characters.workspace_id = rpg_stories.workspace_id
-WHERE rpg_stories.workspace_id = 'demo_workspace'
-  AND rpg_stories.title IN ('北境森林 Demo', '奥术学院 Demo')
-  AND rpg_characters.name IN ('Bob', 'Alice');
+FROM rpg_stories AS stories
+CROSS JOIN (
+    SELECT
+        'Bob' AS name,
+        'bold' AS personality,
+        'A brave knight who favors direct charges and two-handed swords.' AS content,
+        10 AS sort_order
+    UNION ALL
+    SELECT
+        'Alice',
+        'curious',
+        'A young wizard from the Arcanum Academy with a talent for elemental magic.',
+        20
+) AS characters
+WHERE stories.workspace_id = 'demo_workspace'
+  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo');
+
+INSERT OR IGNORE INTO rpg_story_character_details (
+    story_character_id,
+    name,
+    content,
+    tags_json,
+    sort_order
+)
+SELECT
+    characters.id,
+    CASE characters.name WHEN 'Bob' THEN '战斗风格' ELSE '外貌' END,
+    CASE characters.name
+        WHEN 'Bob' THEN '擅长双手重剑，战斗时喜欢正面冲锋。'
+        ELSE '银白色长发，紫罗兰色瞳孔，战斗时穿轻便法师袍。'
+    END,
+    CASE characters.name WHEN 'Bob' THEN '["战斗"]' ELSE '["外观"]' END,
+    10
+FROM rpg_story_characters AS characters
+JOIN rpg_stories AS stories ON stories.id = characters.story_id
+WHERE stories.workspace_id = 'demo_workspace'
+  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo')
+  AND characters.name IN ('Bob', 'Alice');
 
 UPDATE rpg_session_profiles
 SET
     player_character_id = (
-        SELECT rpg_characters.id
-        FROM rpg_characters
-        WHERE rpg_characters.workspace_id = 'demo_workspace'
-          AND rpg_characters.name = 'Bob'
+        SELECT characters.id
+        FROM rpg_story_characters AS characters
+        JOIN rpg_stories AS stories ON stories.id = characters.story_id
+        WHERE stories.workspace_id = 'demo_workspace'
+          AND stories.title = '北境森林 Demo'
+          AND characters.name = 'Bob'
     ),
     player_character_snapshot_json = (
         SELECT
-            '{"characterId":' || rpg_characters.id
-            || ',"mountId":' || rpg_story_characters.id
-            || ',"storyId":' || rpg_stories.id
-            || ',"name":"Bob","avatarUrl":"","roleLabel":"","updatedAt":"' || rpg_characters.updated_at || '"}'
-        FROM rpg_story_characters
-        JOIN rpg_characters ON rpg_characters.id = rpg_story_characters.character_id
-        JOIN rpg_stories ON rpg_stories.id = rpg_story_characters.story_id
-        WHERE rpg_story_characters.workspace_id = 'demo_workspace'
-          AND rpg_stories.title = '北境森林 Demo'
-          AND rpg_characters.name = 'Bob'
+            '{"characterId":' || characters.id
+            || ',"storyId":' || stories.id
+            || ',"name":"Bob","avatarUrl":"","roleLabel":"","updatedAt":"' || characters.updated_at || '"}'
+        FROM rpg_story_characters AS characters
+        JOIN rpg_stories AS stories ON stories.id = characters.story_id
+        WHERE stories.workspace_id = 'demo_workspace'
+          AND stories.title = '北境森林 Demo'
+          AND characters.name = 'Bob'
     )
 WHERE session_id = 's_forest001';
 
 UPDATE rpg_session_profiles
 SET
     player_character_id = (
-        SELECT rpg_characters.id
-        FROM rpg_characters
-        WHERE rpg_characters.workspace_id = 'demo_workspace'
-          AND rpg_characters.name = 'Alice'
+        SELECT characters.id
+        FROM rpg_story_characters AS characters
+        JOIN rpg_stories AS stories ON stories.id = characters.story_id
+        WHERE stories.workspace_id = 'demo_workspace'
+          AND stories.title = '奥术学院 Demo'
+          AND characters.name = 'Alice'
     ),
     player_character_snapshot_json = (
         SELECT
-            '{"characterId":' || rpg_characters.id
-            || ',"mountId":' || rpg_story_characters.id
-            || ',"storyId":' || rpg_stories.id
-            || ',"name":"Alice","avatarUrl":"","roleLabel":"","updatedAt":"' || rpg_characters.updated_at || '"}'
-        FROM rpg_story_characters
-        JOIN rpg_characters ON rpg_characters.id = rpg_story_characters.character_id
-        JOIN rpg_stories ON rpg_stories.id = rpg_story_characters.story_id
-        WHERE rpg_story_characters.workspace_id = 'demo_workspace'
-          AND rpg_stories.title = '奥术学院 Demo'
-          AND rpg_characters.name = 'Alice'
+            '{"characterId":' || characters.id
+            || ',"storyId":' || stories.id
+            || ',"name":"Alice","avatarUrl":"","roleLabel":"","updatedAt":"' || characters.updated_at || '"}'
+        FROM rpg_story_characters AS characters
+        JOIN rpg_stories AS stories ON stories.id = characters.story_id
+        WHERE stories.workspace_id = 'demo_workspace'
+          AND stories.title = '奥术学院 Demo'
+          AND characters.name = 'Alice'
     )
 WHERE session_id = 's_academy01';
 
 INSERT OR IGNORE INTO rpg_story_lorebook_entries (
     workspace_id,
     story_id,
-    lorebook_entry_id,
+    name,
+    content,
+    description,
+    tags_json,
     sort_order,
     metadata_json
 )
 SELECT
-    'demo_workspace',
-    rpg_stories.id,
-    rpg_lorebook_entries.id,
-    CASE rpg_lorebook_entries.name WHEN '炎心之木' THEN 10 ELSE 20 END,
+    stories.workspace_id,
+    stories.id,
+    entries.name,
+    entries.content,
+    entries.description,
+    entries.tags_json,
+    entries.sort_order,
     '{"kind":"demo"}'
-FROM rpg_stories
-JOIN rpg_lorebook_entries ON rpg_lorebook_entries.workspace_id = rpg_stories.workspace_id
-WHERE rpg_stories.workspace_id = 'demo_workspace'
-  AND rpg_stories.title IN ('北境森林 Demo', '奥术学院 Demo')
-  AND rpg_lorebook_entries.name IN ('炎心之木', '圆形封印祭坛');
+FROM rpg_stories AS stories
+CROSS JOIN (
+    SELECT
+        '炎心之木' AS name,
+        '北境森林传说中的世界之树，树干中流淌着永不熄灭的火焰。' AS content,
+        '与火焰符文和最初的燃烧有关的核心传说。' AS description,
+        '["history","magic"]' AS tags_json,
+        10 AS sort_order
+    UNION ALL
+    SELECT
+        '圆形封印祭坛',
+        '北境森林石林深处的青石板空地，中央金属圆盘微微渗出幽蓝光芒。',
+        '用于演示场景与世界设定词条。',
+        '["scene","seal"]',
+        20
+) AS entries
+WHERE stories.workspace_id = 'demo_workspace'
+  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo');
 
-INSERT OR IGNORE INTO rpg_status_table_templates (
+INSERT OR IGNORE INTO rpg_story_status_tables (
     workspace_id,
+    story_id,
     name,
     status_kind,
     description,
@@ -377,18 +349,31 @@ INSERT OR IGNORE INTO rpg_status_table_templates (
     sort_order,
     metadata_json
 )
-VALUES (
-    'demo_workspace',
-    '北境森林当前场景',
+SELECT
+    stories.workspace_id,
+    stories.id,
+    CASE stories.title
+        WHEN '北境森林 Demo' THEN '北境森林当前场景'
+        ELSE '奥术学院当前场景'
+    END,
     'scene',
-    '北境森林演示故事的当前场景。',
-    '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 1 日 8 时 30 分","runtimeKeyLocked":true,"metadata":{}},{"key":"位置","value":"北境森林·石林·圆形封印祭坛","runtimeKeyLocked":true,"metadata":{}},{"key":"在场人物","value":"Bob, Alice","runtimeKeyLocked":true,"metadata":{}}],"metadata":{"ui":{}}}',
+    CASE stories.title
+        WHEN '北境森林 Demo' THEN '北境森林演示故事的当前场景。'
+        ELSE '奥术学院演示故事的当前场景。'
+    END,
+    CASE stories.title
+        WHEN '北境森林 Demo' THEN '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 1 日 8 时 30 分","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"位置","value":"北境森林·石林·圆形封印祭坛","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"在场人物","value":"Bob, Alice","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null}],"metadata":{"ui":{}}}'
+        ELSE '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 3 日 14 时","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"位置","value":"奥术学院·旧档案馆","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"在场人物","value":"Alice","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null}],"metadata":{"ui":{}}}'
+    END,
     0,
     '{"kind":"demo"}'
-);
+FROM rpg_stories AS stories
+WHERE stories.workspace_id = 'demo_workspace'
+  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo');
 
-INSERT OR IGNORE INTO rpg_status_table_templates (
+INSERT OR IGNORE INTO rpg_story_status_tables (
     workspace_id,
+    story_id,
     name,
     status_kind,
     description,
@@ -396,97 +381,103 @@ INSERT OR IGNORE INTO rpg_status_table_templates (
     sort_order,
     metadata_json
 )
-VALUES (
-    'demo_workspace',
-    '奥术学院当前场景',
-    'scene',
-    '奥术学院演示故事的当前场景。',
-    '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 3 日 14 时","runtimeKeyLocked":true,"metadata":{}},{"key":"位置","value":"奥术学院·旧档案馆","runtimeKeyLocked":true,"metadata":{}},{"key":"在场人物","value":"Alice","runtimeKeyLocked":true,"metadata":{}}],"metadata":{"ui":{}}}',
-    0,
-    '{"kind":"demo"}'
-);
-
-INSERT OR IGNORE INTO rpg_status_table_templates (
-    workspace_id,
-    name,
-    status_kind,
-    description,
-    document_json,
-    sort_order,
-    metadata_json
-)
-VALUES (
-    'demo_workspace',
+SELECT
+    stories.workspace_id,
+    stories.id,
     '世界线索',
     'normal',
     '演示普通状态表如何进入上下文。',
-    '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"项目","valueColumn":"状态","rows":[{"key":"幽蓝封印","value":"异常波动","runtimeKeyLocked":false,"metadata":{"备注":"圆形封印祭坛附近出现微弱蓝光。"}},{"key":"炎心之木","value":"待调查","runtimeKeyLocked":false,"metadata":{"备注":"相关记载散落在北境与学院档案中。"}}],"metadata":{"ui":{}}}',
+    '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"项目","valueColumn":"状态","rows":[{"key":"幽蓝封印","value":"异常波动","runtimeKeyLocked":false,"metadata":{"备注":"圆形封印祭坛附近出现微弱蓝光。"},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"炎心之木","value":"待调查","runtimeKeyLocked":false,"metadata":{"备注":"相关记载散落在北境与学院档案中。"},"updateFrequency":"event_driven","updateRule":"获得与炎心之木相关的新线索时更新","deferredIntervalTurns":null}],"metadata":{"ui":{}}}',
     10,
     '{"kind":"demo"}'
-);
+FROM rpg_stories AS stories
+WHERE stories.workspace_id = 'demo_workspace'
+  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo');
 
-INSERT OR IGNORE INTO rpg_story_status_tables (
+INSERT OR IGNORE INTO rpg_session_status_tables (
+    session_id,
     workspace_id,
     story_id,
-    status_table_id,
-    mount_origin,
+    source_story_status_table_id,
+    origin,
+    name,
+    status_kind,
+    description,
+    document_json,
     sort_order,
     metadata_json
 )
 SELECT
-    'demo_workspace',
-    rpg_stories.id,
-    rpg_status_table_templates.id,
-    'system_mount',
+    sessions.id,
+    sessions.workspace_id,
+    sessions.story_id,
+    tables.id,
+    'story_copy',
+    tables.name,
+    tables.status_kind,
+    tables.description,
+    tables.document_json,
+    tables.sort_order,
+    '{"kind":"demo","storyStatusSource":{"storyStatusTableId":' || tables.id
+        || ',"characterId":null,"characterName":null}}'
+FROM rpg_sessions AS sessions
+JOIN rpg_story_status_tables AS tables ON tables.story_id = sessions.story_id
+WHERE sessions.id IN ('s_forest001', 's_academy01');
+
+INSERT OR IGNORE INTO rpg_workspace_turn_modes (
+    workspace_id,
+    mode,
+    short_name,
+    prompt,
+    sort_order
+)
+VALUES
+    ('demo_workspace', 'ic', '角色内', '将本轮输入视为玩家角色在故事内的行动或发言，保持沉浸式叙事并自然推进当前场景。', 10),
+    ('demo_workspace', 'ooc', '场外', '将本轮输入视为场外讨论：直接、清晰地回应，不推进剧情，不产生剧情裁定或状态变化。', 20),
+    ('demo_workspace', 'gm', '主持', '将本轮输入视为主持人或导演指令，在遵守既有事实的前提下执行指令，并同步已经确定的剧情状态变化。', 30);
+
+INSERT OR IGNORE INTO rpg_narrative_styles (
+    workspace_id,
+    name,
+    prompt,
+    sort_order
+)
+VALUES
+    ('demo_workspace', '细腻描写', '请用细腻描写推进这一幕。', 10),
+    ('demo_workspace', '快速推进', '请快速推进到下一个关键选择。', 20),
+    ('demo_workspace', '多给选项', '请在回应末尾给出多个可选择的行动方向。', 30);
+
+INSERT OR IGNORE INTO rpg_story_narrative_styles (
+    workspace_id,
+    story_id,
+    narrative_style_id,
+    is_base,
+    sort_order
+)
+SELECT
+    stories.workspace_id,
+    stories.id,
+    styles.id,
     0,
-    '{"kind":"demo"}'
-FROM rpg_stories
-JOIN rpg_status_table_templates
-  ON rpg_status_table_templates.workspace_id = rpg_stories.workspace_id
-WHERE rpg_stories.workspace_id = 'demo_workspace'
-  AND rpg_stories.title = '北境森林 Demo'
-  AND rpg_status_table_templates.name = '北境森林当前场景';
+    styles.sort_order
+FROM rpg_stories AS stories
+JOIN rpg_narrative_styles AS styles ON styles.workspace_id = stories.workspace_id
+WHERE stories.workspace_id = 'demo_workspace'
+  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo');
 
-INSERT OR IGNORE INTO rpg_story_status_tables (
-    workspace_id,
+INSERT OR IGNORE INTO rpg_story_rp_modules (
     story_id,
-    status_table_id,
-    mount_origin,
-    sort_order,
-    metadata_json
+    module_name,
+    enabled,
+    config_json
 )
 SELECT
-    'demo_workspace',
-    rpg_stories.id,
-    rpg_status_table_templates.id,
-    'system_mount',
-    0,
-    '{"kind":"demo"}'
-FROM rpg_stories
-JOIN rpg_status_table_templates
-  ON rpg_status_table_templates.workspace_id = rpg_stories.workspace_id
-WHERE rpg_stories.workspace_id = 'demo_workspace'
-  AND rpg_stories.title = '奥术学院 Demo'
-  AND rpg_status_table_templates.name = '奥术学院当前场景';
-
-INSERT OR IGNORE INTO rpg_story_status_tables (
-    workspace_id,
-    story_id,
-    status_table_id,
-    mount_origin,
-    sort_order,
-    metadata_json
-)
-SELECT
-    'demo_workspace',
-    rpg_stories.id,
-    rpg_status_table_templates.id,
-    'system_mount',
-    10,
-    '{"kind":"demo"}'
-FROM rpg_stories
-JOIN rpg_status_table_templates
-  ON rpg_status_table_templates.workspace_id = rpg_stories.workspace_id
-WHERE rpg_stories.workspace_id = 'demo_workspace'
-  AND rpg_stories.title IN ('北境森林 Demo', '奥术学院 Demo')
-  AND rpg_status_table_templates.name = '世界线索';
+    stories.id,
+    modules.module_name,
+    1,
+    '{}'
+FROM rpg_stories AS stories
+CROSS JOIN rpg_rp_module_catalog AS modules
+WHERE stories.workspace_id = 'demo_workspace'
+  AND stories.title IN ('北境森林 Demo', '奥术学院 Demo')
+  AND modules.module_name IN ('dice', 'narrative_outcome');

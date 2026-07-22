@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import Protocol
 
 from rpg_data.model.status import (
-    STATUS_ORIGIN_TEMPLATE_COPY,
+    STATUS_ORIGIN_STORY_COPY,
     SessionStatusMetadata,
     SessionStatusTable,
     StatusContextCandidate,
@@ -50,60 +50,59 @@ class StatusContextService:
         candidate: StatusContextCandidate,
     ) -> SessionStatusTable | None:
         table = candidate.table
-        if table.origin is not STATUS_ORIGIN_TEMPLATE_COPY:
+        if table.origin is not STATUS_ORIGIN_STORY_COPY:
             return table
         metadata = parse_session_status_metadata(table.metadata_json)
-        mount = metadata.story_mount
-        if mount is None or not mount.has_character_binding:
+        source = metadata.story_source
+        if source is None or not source.has_character_binding:
             return table
-        if (mount.character_name or "").strip():
+        if (source.character_name or "").strip():
             return table
 
         identity = candidate.referenced_character
         if (
             identity is None
-            and mount.character_id is not None
-            and candidate.current_story_mount is not None
-            and mount.mount_id == candidate.current_story_mount.mount_id
+            and source.character_id is not None
+            and candidate.current_story_table is not None
+            and source.story_status_table_id
+            == candidate.current_story_table.story_status_table_id
         ):
-            identity = candidate.current_story_mount.character
+            identity = candidate.current_story_table.character
 
         if (
             identity is None
             or not identity.character_name.strip()
             or (
-                mount.character_id is not None
-                and identity.character_id != mount.character_id
+                source.character_id is not None
+                and identity.character_id != source.character_id
             )
         ):
             logger.warning(
                 "excluded character-bound status table from context because "
                 "character name is unresolved session_id=%s table_id=%s "
-                "character_mount_id=%s character_id=%s",
+                "character_id=%s",
                 table.session_id,
                 table.id,
-                mount.character_mount_id,
-                mount.character_id,
+                source.character_id,
             )
             return None
 
-        repaired_mount = replace(
-            mount,
-            character_mount_id=identity.character_mount_id,
+        repaired_source = replace(
+            source,
             character_id=identity.character_id,
             character_name=identity.character_name,
         )
         repaired = self._data.update_table_metadata_for_session(
             table.session_id,
             table.id,
-            metadata.with_story_mount(repaired_mount),
+            metadata.with_story_source(repaired_source),
         )
         logger.warning(
             "backfilled missing status table character name session_id=%s "
-            "table_id=%s character_mount_id=%s character_name=%s",
+            "table_id=%s character_id=%s character_name=%s",
             table.session_id,
             table.id,
-            identity.character_mount_id,
+            identity.character_id,
             identity.character_name,
         )
         return repaired

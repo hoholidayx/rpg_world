@@ -9,7 +9,7 @@ from rpg_core.scene.status import SceneStatusService
 from rpg_data.model.session import Session
 from rpg_data.model.status import (
     STATUS_ORIGIN_SESSION_NATIVE,
-    STATUS_ORIGIN_TEMPLATE_COPY,
+    STATUS_ORIGIN_STORY_COPY,
     SessionStatusDocumentWrite,
     SessionStatusResetPlan,
     SessionStatusResetResult,
@@ -26,16 +26,16 @@ class SessionStatusDataPort(Protocol):
         session_id: str,
     ) -> list[SessionStatusTable]: ...
 
-    def list_story_status_mounts(
+    def list_story_status_tables(
         self,
         workspace_id: str,
         story_id: int,
     ) -> list[StoryStatusTable]: ...
 
-    def copy_story_status_mounts(
+    def copy_story_status_tables(
         self,
         session_id: str,
-        mount_ids: Iterable[int],
+        story_status_table_ids: Iterable[int],
     ) -> list[SessionStatusTable]: ...
 
     def apply_status_reset_plan(
@@ -56,29 +56,29 @@ class SessionStatusLifecycleService:
         existing = self._data.list_status_tables(session.id)
         if existing:
             return existing
-        mounts = self._data.list_story_status_mounts(
+        story_tables = self._data.list_story_status_tables(
             session.workspace_id,
             session.story_id,
         )
-        return self._data.copy_story_status_mounts(
+        return self._data.copy_story_status_tables(
             session.id,
-            (mount.id for mount in mounts),
+            (table.id for table in story_tables),
         )
 
     def reset(self, session_id: str) -> SessionStatusResetResult:
         session = self._require_session(session_id)
         existing = self._data.list_status_tables(session.id)
-        template_tables = tuple(
+        story_copies = tuple(
             table
             for table in existing
-            if table.origin == STATUS_ORIGIN_TEMPLATE_COPY
+            if table.origin == STATUS_ORIGIN_STORY_COPY
         )
         native_tables = tuple(
             table
             for table in existing
             if table.origin == STATUS_ORIGIN_SESSION_NATIVE
         )
-        known_ids = {table.id for table in template_tables + native_tables}
+        known_ids = {table.id for table in story_copies + native_tables}
         unknown = [table for table in existing if table.id not in known_ids]
         if unknown:
             raise ValueError(
@@ -88,23 +88,23 @@ class SessionStatusLifecycleService:
                 )
             )
 
-        mounts = self._data.list_story_status_mounts(
+        story_tables = self._data.list_story_status_tables(
             session.workspace_id,
             session.story_id,
         )
-        mounted_names = {mount.table_name for mount in mounts}
+        story_table_names = {table.name for table in story_tables}
         conflicts = sorted(
-            table.name for table in native_tables if table.name in mounted_names
+            table.name for table in native_tables if table.name in story_table_names
         )
         if conflicts:
             raise ValueError(
                 "Session-native status table names conflict with current Story "
-                "templates: "
+                "tables: "
                 + ", ".join(conflicts)
             )
 
         plan = SessionStatusResetPlan(
-            delete_table_ids=tuple(table.id for table in template_tables),
+            delete_table_ids=tuple(table.id for table in story_copies),
             document_writes=tuple(
                 SessionStatusDocumentWrite(
                     table_id=table.id,
@@ -116,7 +116,7 @@ class SessionStatusLifecycleService:
                 for table in native_tables
             ),
             deferred_progress_table_ids=tuple(table.id for table in existing),
-            story_mount_ids=tuple(mount.id for mount in mounts),
+            story_status_table_ids=tuple(table.id for table in story_tables),
         )
         return self._data.apply_status_reset_plan(session.id, plan)
 

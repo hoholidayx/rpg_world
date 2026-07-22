@@ -279,14 +279,25 @@ class DataManagerBackend:
     async def delete_unindexed_runtime_items(self, items: list[dict[str, str]]) -> bool | None:
         return delete_unindexed_runtime_items(self._gateway.database, items)
 
-    async def list_characters(self, workspace: str) -> list[dict[str, object]] | None:
-        characters = self._gateway.character_management.list_characters(workspace)
+    async def list_characters(
+        self,
+        workspace: str,
+        story_id: int,
+    ) -> list[dict[str, object]] | None:
+        characters = self._gateway.character_management.list_characters(
+            workspace,
+            story_id,
+        )
         if characters is None:
             return None
         return [
             _character_summary(
                 character,
-                self._gateway.character_management.list_details(workspace, int(character.id)) or [],
+                self._gateway.character_management.list_details(
+                    workspace,
+                    story_id,
+                    int(character.id),
+                ) or [],
             )
             for character in characters
         ]
@@ -294,77 +305,107 @@ class DataManagerBackend:
     async def create_character(
         self,
         workspace: str,
+        story_id: int,
         *,
         name: str,
         personality: str = "",
         content: str = "",
+        sort_order: int = 0,
         metadata: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
         character = self._gateway.character_management.create_character(
             workspace,
+            story_id,
             name=name,
             personality=personality,
             content=content,
+            sort_order=sort_order,
             metadata=metadata,
         )
         if character is None:
             return None
         return _character_summary(
             character,
-            self._gateway.character_management.list_details(workspace, int(character.id)) or [],
+            self._gateway.character_management.list_details(
+                workspace,
+                story_id,
+                int(character.id),
+            ) or [],
         )
 
     async def get_character(
         self,
         workspace: str,
+        story_id: int,
         character_id: int,
     ) -> dict[str, object] | None:
-        characters = self._gateway.character_management.list_characters(workspace)
+        characters = self._gateway.character_management.list_characters(
+            workspace,
+            story_id,
+        )
         if characters is None:
             return None
         for character in characters:
             if int(character.id) == int(character_id):
                 return _character_summary(
                     character,
-                    self._gateway.character_management.list_details(workspace, int(character.id)) or [],
+                    self._gateway.character_management.list_details(
+                        workspace,
+                        story_id,
+                        int(character.id),
+                    ) or [],
                 )
         return None
 
     async def update_character(
         self,
         workspace: str,
+        story_id: int,
         character_id: int,
         *,
         name: str | None = None,
         personality: str | None = None,
         content: str | None = None,
+        sort_order: int | None = None,
         metadata: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
         character = self._gateway.character_management.update_character(
             workspace,
+            story_id,
             character_id,
             name=name,
             personality=personality,
             content=content,
+            sort_order=sort_order,
             metadata=metadata,
         )
         if character is None:
             return None
         return _character_summary(
             character,
-            self._gateway.character_management.list_details(workspace, int(character.id)) or [],
+            self._gateway.character_management.list_details(
+                workspace,
+                story_id,
+                int(character.id),
+            ) or [],
         )
 
     async def delete_character(
         self,
         workspace: str,
+        story_id: int,
         character_id: int,
     ) -> bool:
-        return self._gateway.character_management.delete_character(workspace, character_id)
+        return self._gateway.character_management.delete_character(
+            workspace,
+            story_id,
+            character_id,
+        )
 
     async def create_character_detail(
         self,
         workspace: str,
+        story_id: int,
         character_id: int,
         *,
         name: str,
@@ -374,6 +415,7 @@ class DataManagerBackend:
     ) -> dict[str, object] | None:
         detail = self._gateway.character_management.create_detail(
             workspace,
+            story_id,
             character_id,
             name=name,
             content=content,
@@ -387,6 +429,7 @@ class DataManagerBackend:
     async def update_character_detail(
         self,
         workspace: str,
+        story_id: int,
         character_id: int,
         detail_id: int,
         *,
@@ -397,6 +440,7 @@ class DataManagerBackend:
     ) -> dict[str, object] | None:
         detail = self._gateway.character_management.update_detail(
             workspace,
+            story_id,
             character_id,
             detail_id,
             name=name,
@@ -411,51 +455,23 @@ class DataManagerBackend:
     async def delete_character_detail(
         self,
         workspace: str,
+        story_id: int,
         character_id: int,
         detail_id: int,
     ) -> bool:
-        return self._gateway.character_management.delete_detail(workspace, character_id, detail_id)
+        return self._gateway.character_management.delete_detail(
+            workspace,
+            story_id,
+            character_id,
+            detail_id,
+        )
 
-    async def list_story_characters(
+    async def list_lorebook_entries(
         self,
         workspace: str,
         story_id: int,
     ) -> list[dict[str, object]] | None:
-        characters = self._gateway.character_management.list_story_characters(workspace, story_id)
-        if characters is None:
-            return None
-        return [
-            _mounted_character_summary(
-                item,
-                self._gateway.character_management.list_details(workspace, int(item.character.id)) or [],
-            )
-            for item in characters
-        ]
-
-    async def mount_character(
-        self,
-        workspace: str,
-        story_id: int,
-        character_id: int,
-    ) -> dict[str, object] | None:
-        character = self._gateway.character_management.mount_character(workspace, story_id, character_id)
-        if character is None:
-            return None
-        return _mounted_character_summary(
-            character,
-            self._gateway.character_management.list_details(workspace, int(character.character.id)) or [],
-        )
-
-    async def unmount_character(
-        self,
-        workspace: str,
-        story_id: int,
-        mount_id: int,
-    ) -> bool | None:
-        return self._gateway.character_management.unmount_character(workspace, story_id, mount_id)
-
-    async def list_lorebook_entries(self, workspace: str) -> list[dict[str, object]] | None:
-        entries = self._gateway.lorebook_management.list_entries(workspace)
+        entries = self._gateway.lorebook_management.list_entries(workspace, story_id)
         if entries is None:
             return None
         return [_lorebook_entry_summary(entry) for entry in entries]
@@ -463,19 +479,23 @@ class DataManagerBackend:
     async def create_lorebook_entry(
         self,
         workspace: str,
+        story_id: int,
         *,
         name: str,
         content: str = "",
         description: str = "",
         tags: list[str] | None = None,
+        sort_order: int = 0,
         metadata: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
         entry = self._gateway.lorebook_management.create_entry(
             workspace,
+            story_id,
             name=name,
             content=content,
             description=description,
             tags=tags or [],
+            sort_order=sort_order,
             metadata=metadata,
         )
         if entry is None:
@@ -485,9 +505,10 @@ class DataManagerBackend:
     async def get_lorebook_entry(
         self,
         workspace: str,
+        story_id: int,
         entry_id: int,
     ) -> dict[str, object] | None:
-        entries = self._gateway.lorebook_management.list_entries(workspace)
+        entries = self._gateway.lorebook_management.list_entries(workspace, story_id)
         if entries is None:
             return None
         for entry in entries:
@@ -498,21 +519,25 @@ class DataManagerBackend:
     async def update_lorebook_entry(
         self,
         workspace: str,
+        story_id: int,
         entry_id: int,
         *,
         name: str | None = None,
         content: str | None = None,
         description: str | None = None,
         tags: list[str] | None = None,
+        sort_order: int | None = None,
         metadata: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
         entry = self._gateway.lorebook_management.update_entry(
             workspace,
+            story_id,
             entry_id,
             name=name,
             content=content,
             description=description,
             tags=tags,
+            sort_order=sort_order,
             metadata=metadata,
         )
         if entry is None:
@@ -522,158 +547,34 @@ class DataManagerBackend:
     async def delete_lorebook_entry(
         self,
         workspace: str,
+        story_id: int,
         entry_id: int,
     ) -> bool:
-        return self._gateway.lorebook_management.delete_entry(workspace, entry_id)
-
-    async def list_story_lorebook_entries(
-        self,
-        workspace: str,
-        story_id: int,
-    ) -> list[dict[str, object]] | None:
-        entries = self._gateway.lorebook_management.list_story_entries(workspace, story_id)
-        if entries is None:
-            return None
-        return [_mounted_lorebook_entry_summary(entry) for entry in entries]
-
-    async def mount_lorebook_entry(
-        self,
-        workspace: str,
-        story_id: int,
-        entry_id: int,
-    ) -> dict[str, object] | None:
-        entry = self._gateway.lorebook_management.mount_entry(workspace, story_id, entry_id)
-        if entry is None:
-            return None
-        return _mounted_lorebook_entry_summary(entry)
-
-    async def get_lorebook_mount(
-        self,
-        workspace: str,
-        story_id: int,
-        mount_id: int,
-    ) -> dict[str, object] | None:
-        entries = self._gateway.lorebook_management.list_story_entries(workspace, story_id)
-        if entries is None:
-            return None
-        for entry in entries:
-            if int(entry.mount.id) == int(mount_id):
-                return _mounted_lorebook_entry_summary(entry)
-        return None
-
-    async def unmount_lorebook_entry(
-        self,
-        workspace: str,
-        story_id: int,
-        mount_id: int,
-    ) -> bool | None:
-        return self._gateway.lorebook_management.unmount_entry(workspace, story_id, mount_id)
-
-    async def list_status_templates(
-        self,
-        workspace: str,
-        status_kind: str | None = None,
-    ) -> list[dict[str, object]] | None:
-        if not _workspace_exists(self._gateway, workspace):
-            return None
-        return [
-            _status_template_summary(template)
-            for template in self._status_administration.list_templates(
-                workspace,
-                status_kind=status_kind,
-            )
-        ]
-
-    async def create_status_template(
-        self,
-        workspace: str,
-        *,
-        name: str,
-        status_kind: str,
-        document: status_models.StatusTableDocument,
-        description: str = "",
-        sort_order: int = 0,
-        metadata: dict[str, object] | None = None,
-    ) -> dict[str, object] | None:
-        if not _workspace_exists(self._gateway, workspace):
-            return None
-        template = self._status_administration.create_template(
+        return self._gateway.lorebook_management.delete_entry(
             workspace,
-            name,
-            status_kind=status_kind,
-            document=document,
-            description=description,
-            sort_order=sort_order,
-            metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+            story_id,
+            entry_id,
         )
-        return _status_template_summary(template)
 
-    async def update_status_template(
+    async def list_story_status_tables(
         self,
         workspace: str,
-        template_id: int,
-        *,
-        name: str | None = None,
+        story_id: int,
         status_kind: str | None = None,
-        document: status_models.StatusTableDocument | None = None,
-        description: str | None = None,
-        sort_order: int | None = None,
-    ) -> dict[str, object] | None:
-        try:
-            updated = self._status_administration.update_template(
-                workspace,
-                template_id,
-                name=name,
-                status_kind=status_kind,
-                document=document,
-                description=description,
-                sort_order=sort_order,
-            )
-        except FileNotFoundError:
-            return None
-        return _status_template_summary(updated)
-
-    async def delete_status_template(self, workspace: str, template_id: int) -> bool | None:
-        try:
-            self._status_administration.delete_template(workspace, template_id)
-        except FileNotFoundError:
-            return None
-        return True
-
-    async def list_story_status_mounts(self, workspace: str, story_id: int) -> list[dict[str, object]] | None:
+    ) -> list[dict[str, object]] | None:
         stories = self._gateway.catalog.list_stories(workspace)
         if stories is None or not any(int(story.id) == int(story_id) for story in stories):
             return None
         return [
-            _status_mount_summary(mount)
-            for mount in self._status_administration.list_story_mounts(
+            _story_status_table_summary(table)
+            for table in self._status_administration.list_story_tables(
                 workspace,
                 story_id,
+                status_kind=status_kind,
             )
         ]
 
-    async def mount_status_template(
-        self,
-        workspace: str,
-        story_id: int,
-        template_id: int,
-        *,
-        character_mount_id: int | None = None,
-        sort_order: int = 0,
-    ) -> dict[str, object] | None:
-        try:
-            mount = self._status_administration.mount_template(
-                workspace,
-                story_id,
-                template_id,
-                character_mount_id=character_mount_id,
-                sort_order=sort_order,
-            )
-        except FileNotFoundError:
-            return None
-        return _status_mount_summary(mount)
-
-    async def create_story_status_template(
+    async def create_story_status_table(
         self,
         workspace: str,
         story_id: int,
@@ -681,63 +582,69 @@ class DataManagerBackend:
         name: str,
         status_kind: str,
         document: status_models.StatusTableDocument,
-        character_mount_id: int | None = None,
+        story_character_id: int | None = None,
         description: str = "",
         sort_order: int = 0,
         metadata: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
         try:
-            mount = self._status_administration.create_story_template(
+            table = self._status_administration.create_story_table(
                 workspace,
                 story_id,
                 name,
                 status_kind=status_kind,
                 document=document,
-                character_mount_id=character_mount_id,
+                story_character_id=story_character_id,
                 description=description,
                 sort_order=sort_order,
                 metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
             )
         except FileNotFoundError:
             return None
-        return _status_mount_summary(mount)
+        return _story_status_table_summary(table)
 
-    async def update_story_status_mount(
+    async def update_story_status_table(
         self,
         workspace: str,
         story_id: int,
-        mount_id: int,
+        story_status_table_id: int,
         *,
-        character_mount_id: int | None,
+        name: str | None = None,
+        status_kind: str | None = None,
+        document: status_models.StatusTableDocument | None = None,
+        story_character_id: int | None = None,
+        update_story_character: bool = False,
+        description: str | None = None,
+        sort_order: int | None = None,
     ) -> dict[str, object] | None:
         try:
-            mount = self._status_administration.update_story_mount_character(
+            table = self._status_administration.update_story_table(
                 workspace,
                 story_id,
-                mount_id,
-                character_mount_id=character_mount_id,
+                story_status_table_id,
+                name=name,
+                status_kind=status_kind,
+                document=document,
+                story_character_id=story_character_id,
+                update_story_character=update_story_character,
+                description=description,
+                sort_order=sort_order,
             )
         except FileNotFoundError:
             return None
-        return _status_mount_summary(mount)
+        return _story_status_table_summary(table)
 
-    async def unmount_status_template(self, workspace: str, story_id: int, mount_id: int) -> bool | None:
+    async def delete_story_status_table(
+        self,
+        workspace: str,
+        story_id: int,
+        story_status_table_id: int,
+    ) -> bool | None:
         try:
-            self._status_administration.unmount_template(
+            self._status_administration.delete_story_table(
                 workspace,
                 story_id,
-                mount_id,
-            )
-        except FileNotFoundError:
-            return None
-        return True
-
-    async def delete_story_status_template(self, workspace: str, story_id: int, mount_id: int) -> bool | None:
-        try:
-            self._status_administration.delete_story_template(
-                workspace,
-                story_id,
-                mount_id,
+                story_status_table_id,
             )
         except FileNotFoundError:
             return None
@@ -929,7 +836,6 @@ def _player_character_state(session: models.Session, gateway: DataServiceGateway
 def _player_character_summary(snapshot: models.SessionPlayerCharacterSnapshot) -> dict[str, object]:
     return {
         "character_id": int(snapshot.character_id),
-        "mount_id": int(snapshot.mount_id),
         "story_id": int(snapshot.story_id),
         "name": str(snapshot.name),
         "avatar_url": str(snapshot.avatar_url or ""),
@@ -939,15 +845,17 @@ def _player_character_summary(snapshot: models.SessionPlayerCharacterSnapshot) -
 
 
 def _character_summary(
-    character: models.Character,
+    character: models.StoryCharacter,
     details: list[models.CharacterDetail],
 ) -> dict[str, object]:
     return {
         "id": int(character.id),
         "workspace_id": str(character.workspace_id),
+        "story_id": int(character.story_id),
         "name": str(character.name),
         "personality": str(character.personality or ""),
         "content": str(character.content or ""),
+        "sort_order": int(character.sort_order),
         "metadata": _parse_metadata(character.metadata_json),
         "details": [_character_detail_summary(detail) for detail in details],
         "version": int(character.version),
@@ -959,7 +867,7 @@ def _character_summary(
 def _character_detail_summary(detail: models.CharacterDetail) -> dict[str, object]:
     return {
         "id": int(detail.id),
-        "character_id": int(detail.character_id),
+        "story_character_id": int(detail.story_character_id),
         "name": str(detail.name),
         "content": str(detail.content or ""),
         "tags": list(_parse_tags(detail.tags_json)),
@@ -970,44 +878,23 @@ def _character_detail_summary(detail: models.CharacterDetail) -> dict[str, objec
     }
 
 
-def _mounted_character_summary(
-    detail: models.StoryCharacterDetail,
-    details: list[models.CharacterDetail],
+def _lorebook_entry_summary(
+    entry: models.StoryLorebookEntry,
 ) -> dict[str, object]:
-    result = _character_summary(detail.character, details)
-    result.update(
-        {
-            "mount_id": int(detail.mount.id),
-            "story_id": int(detail.mount.story_id),
-        }
-    )
-    return result
-
-
-def _lorebook_entry_summary(entry: models.LorebookEntry) -> dict[str, object]:
     return {
         "id": int(entry.id),
         "workspace_id": str(entry.workspace_id),
+        "story_id": int(entry.story_id),
         "name": str(entry.name),
         "content": str(entry.content or ""),
         "description": str(entry.description or ""),
         "tags": list(_parse_tags(entry.tags_json)),
+        "sort_order": int(entry.sort_order),
         "metadata": _parse_metadata(entry.metadata_json),
         "version": int(entry.version),
         "created_at": str(entry.created_at),
         "updated_at": str(entry.updated_at),
     }
-
-
-def _mounted_lorebook_entry_summary(detail: models.StoryLorebookEntryDetail) -> dict[str, object]:
-    result = _lorebook_entry_summary(detail.entry)
-    result.update(
-        {
-            "mount_id": int(detail.mount.id),
-            "story_id": int(detail.mount.story_id),
-        }
-    )
-    return result
 
 
 def _status_document_summary(
@@ -1032,44 +919,25 @@ def _status_document_summary(
     }
 
 
-def _status_template_summary(
-    template: status_models.StatusTableTemplate,
+def _story_status_table_summary(
+    table: status_models.StoryStatusTable,
 ) -> dict[str, object]:
     result = {
-        "id": int(template.id),
-        "workspace_id": str(template.workspace_id),
-        "name": str(template.name),
-        "status_kind": str(template.status_kind),
-        "description": str(template.description or ""),
-        "sort_order": int(template.sort_order),
-        "metadata": _parse_metadata(template.metadata_json),
-        "version": int(template.version),
-        "created_at": str(template.created_at),
-        "updated_at": str(template.updated_at),
+        "id": int(table.id),
+        "workspace_id": str(table.workspace_id),
+        "story_id": int(table.story_id),
+        "story_character_id": table.story_character_id,
+        "name": str(table.name),
+        "status_kind": str(table.status_kind),
+        "description": str(table.description or ""),
+        "sort_order": int(table.sort_order),
+        "metadata": _parse_metadata(table.metadata_json),
+        "version": int(table.version),
+        "created_at": str(table.created_at),
+        "updated_at": str(table.updated_at),
     }
-    result.update(_status_document_summary(template.document))
+    result.update(_status_document_summary(table.document))
     return result
-
-
-def _status_mount_summary(
-    mount: status_models.StoryStatusTable,
-) -> dict[str, object]:
-    return {
-        "id": int(mount.id),
-        "workspace_id": str(mount.workspace_id),
-        "story_id": int(mount.story_id),
-        "status_table_id": int(mount.status_table_id),
-        "character_mount_id": mount.story_character_mount_id,
-        "mount_origin": str(mount.mount_origin),
-        "table_name": str(mount.table_name),
-        "status_kind": str(mount.status_kind),
-        "description": str(mount.description or ""),
-        "sort_order": int(mount.sort_order),
-        "metadata": _parse_metadata(mount.metadata_json),
-        "version": int(mount.version),
-        "created_at": str(mount.created_at),
-        "updated_at": str(mount.updated_at),
-    }
 
 
 def _session_status_table_summary(
@@ -1080,7 +948,7 @@ def _session_status_table_summary(
         "session_id": str(table.session_id),
         "workspace_id": str(table.workspace_id),
         "story_id": int(table.story_id),
-        "source_table_id": table.source_table_id,
+        "source_story_status_table_id": table.source_story_status_table_id,
         "origin": str(table.origin),
         "name": str(table.name),
         "status_kind": str(table.status_kind),

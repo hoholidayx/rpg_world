@@ -31,7 +31,7 @@ def _detail(
 ) -> SessionCharacterDetail:
     return SessionCharacterDetail(
         id=detail_id,
-        character_id=100,
+        story_character_id=100,
         name=name,
         content=f"{name} detail",
         tags=("tag",),
@@ -43,13 +43,11 @@ def _character(
     name: str,
     *,
     character_id: int = 1,
-    mount_id: int = 10,
     details: tuple[SessionCharacterDetail, ...] = (),
     sort_order: int = 0,
 ) -> SessionCharacter:
     return SessionCharacter(
         id=character_id,
-        mount_id=mount_id,
         workspace_id="workspace",
         story_id=2,
         name=name,
@@ -70,7 +68,6 @@ def test_character_manager_delegates_to_service_without_path_or_cache() -> None:
     assert manager.list_enabled_characters() == [
         {
             "id": 1,
-            "mount_id": 10,
             "workspace_id": "workspace",
             "story_id": 2,
             "name": "Alice",
@@ -79,7 +76,7 @@ def test_character_manager_delegates_to_service_without_path_or_cache() -> None:
             "details": [
                 {
                     "id": 1,
-                    "character_id": 100,
+                    "story_character_id": 100,
                     "name": "外貌",
                     "content": "外貌 detail",
                     "tags": ["tag"],
@@ -91,7 +88,7 @@ def test_character_manager_delegates_to_service_without_path_or_cache() -> None:
     ]
     assert service.calls == [("list_characters", "s_main")]
 
-    service.characters.append(_character("Bob", character_id=2, mount_id=11, sort_order=20))
+    service.characters.append(_character("Bob", character_id=2, sort_order=20))
     assert [character["name"] for character in manager.list_characters()] == ["Alice", "Bob"]
 
 

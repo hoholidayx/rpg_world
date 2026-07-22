@@ -16,15 +16,15 @@ Play WebUI 是面向玩家沉浸式聊天、游玩和数据维护的唯一 Web �
 - Session 背景使用模糊 cover 铺底，并叠加完整居中的 contain 前景图与 dark scrim；Gallery 预览同样完整居中，不裁切图片。图片不进入消息正文、metadata、turn/SSE 或 localStorage。Media service 故障只在图像工作室显示，不阻塞聊天历史、composer 或 Agent SSE。
 - context 占用达到 `session.contextUsage.inputBlockThresholdRatio` 时，普通发送、retry 和 edit 被阻止，前导空白后以 `/` 开头的命令仍可执行；界面只引导用户手动 `/compact` 或切换更大窗口模型，不自动压缩或清空草稿。
 - context 圆环左侧可切换 session 级主 Agent LLM；Story 详情编辑页配置 story 默认。选项只来自后台白名单，优先级为系统默认、故事默认、会话覆盖，生成中切换从下一 turn 生效。
-- 角色库：workspace 角色卡、详情、metadata、头像和 story 挂载。
-- 世界设定：workspace lorebook 条目、metadata、缩略图和 story 挂载。
-- 状态表：模板、story 挂载、session 运行表、`scene` / `normal` 状态类型。
+- 角色库：当前 Story 直属角色卡、详情、metadata 和头像。
+- 世界设定：当前 Story 直属 lorebook 条目、metadata 和缩略图。
+- 状态表：Story 直属定义、Session 运行副本、`scene` / `normal` 状态类型和 Story 角色绑定。
 - 设置页：运行目录扫描、未索引目录清理和 Play API 相关维护入口。
 - 前端只访问 `/play-api/v1`，不直接读取或写入 `data/`。
 - 流式错误展示使用 `errorCode` + `message`，其中 `message` 是后端底层错误文本，不把 HTTP status 当成业务错误码。
 
 会话页 URL 只携带全局短 `sessionId`；workspace/story 由 Play API 通过 catalog session 反查。
-角色库、世界设定和状态表都是 workspace 资产，只有挂载到 story 后才进入对应 session 的上下文或初始化流程。
+角色库、世界设定和状态表都由 Story 直接拥有，不再提供 Workspace 资产库或挂载交互。Character/Lorebook 按当前 Session 的 Story 实时读取；状态表在 Session 创建或 `/clear` 时从 Story 定义复制，已有副本不随源定义修改。
 状态表正文以后端 SQLite `document_json` 为真源，前端通过 `StatusTableDocument` 形态的 API payload 编辑 rows/key/value，不维护 CSV 文件路径。
 
 玩家扮演角色绑定不在 SessionCenter 或进入 SessionRoom 前处理。WebUI 调用

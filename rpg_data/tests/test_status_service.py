@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from rpg_core.session.catalog import SessionCatalogService
 from rpg_core.scene.status import SceneStatusService
-from rpg_core.status.context_service import StatusContextService
+from rpg_core.session.catalog import SessionCatalogService
+from rpg_core.session.status import SessionStatusLifecycleService
 from rpg_core.status.administration import StatusTableAdministrationService
+from rpg_core.status.context_service import StatusContextService
 from rpg_core.status.manager import StatusManager
 from rpg_data import models
-from rpg_data.model.status import StatusRowRef
-from rpg_data.repositories.records import CharacterRecord, SessionStatusTableRecord, StatusTableTemplateRecord
+from rpg_data.repositories.records import StoryCharacterRecord, StoryStatusTableRecord
 from rpg_data.repositories.story_repo import StoryRepository
 from rpg_data.repositories.workspace_repo import WorkspaceRepository
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
@@ -37,7 +37,10 @@ def _workspace(tmp_path, name: str = "status_ws"):
     return gateway, name, workspace_root, story
 
 
-def _document(*rows: tuple[str, str], locked: set[str] | None = None) -> models.StatusTableDocument:
+def _document(
+    *rows: tuple[str, str],
+    locked: set[str] | None = None,
+) -> models.StatusTableDocument:
     locked = locked or set()
     return models.StatusTableDocument.from_rows(
         rows=[
@@ -48,667 +51,313 @@ def _document(*rows: tuple[str, str], locked: set[str] | None = None) -> models.
     )
 
 
-def test_template_crud_uses_sql_document_source(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, _story = _workspace(tmp_path)
+def test_story_status_crud_uses_sql_document_source(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path)
     service = gateway.status
-
-    template = service.create_template(
+    table = service.create_story_table(
         workspace_id,
+        story.id,
         "装备",
         document=_document(("手部", "长剑")),
         description="角色装备",
         sort_order=20,
     )
+    assert table.story_id == story.id
+    assert table.status_kind == models.STATUS_KIND_NORMAL
+    assert table.rows == (("手部", "长剑"),)
 
-    assert template.status_kind == models.STATUS_KIND_NORMAL
-    assert template.headers == ("属性", "值")
-    assert template.rows == (("手部", "长剑"),)
+    replacement = _document(("手部", "法杖"))
+    StoryStatusTableRecord.update(
+        document_json=models.serialize_status_document(replacement)
+    ).where(StoryStatusTableRecord.id == table.id).execute()
+    assert service.get_story_table(table.id).rows == (("手部", "法杖"),)
 
-    StatusTableTemplateRecord.update(
-        document_json=models.serialize_status_document(_document(("手部", "短剑")))
-    ).where(StatusTableTemplateRecord.id == template.id).execute()
-
-    reread = service.get_template(template.id)
-    assert reread is not None
-    assert reread.rows == (("手部", "短剑"),)
-
-    renamed = service.update_template(template.id, name="背包", rows=[["金币", "7"]])
-
+    renamed = service.update_story_table(
+        workspace_id,
+        story.id,
+        table.id,
+        name="背包",
+        document=_document(("金币", "7")),
+    )
     assert renamed.name == "背包"
     assert renamed.rows == (("金币", "7"),)
-
-    service.delete_template(template.id)
-    assert service.get_template(template.id) is None
-
-
-def test_template_create_does_not_materialize_status_file_dirs(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
-    gateway = get_data_service_gateway(tmp_path / "relative.sqlite3")
-    WorkspaceRepository(gateway.database).create(
-        "relative_ws",
-        "Relative Workspace",
-        "relative_workspace",
-    )
-    StoryRepository(gateway.database).create("relative_ws", "北境森林")
-
-    service = gateway.status
-    service.create_template(
-        "relative_ws",
-        "旗帜",
-        rows=[["封印", "完整"]],
-    )
-
-    assert not (tmp_path / "relative_workspace" / "template_status").exists()
-
-
-def test_story_mount_controls_session_copy_visibility(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, forest_story = _workspace(tmp_path, "mount_ws")
-    academy_story = StoryRepository(gateway.database).create(workspace_id, "学院旧梦")
-    service = gateway.status
-
-    template = service.create_template(
-        workspace_id,
-        "旗帜",
-        rows=[["封印", "完整"]],
-    )
-    service.mount_template(workspace_id, forest_story.id, template.id)
-
-    forest_session = SessionCatalogService(gateway.sessions).create_session(workspace_id, forest_story.id, title="Forest")
-    academy_session = SessionCatalogService(gateway.sessions).create_session(workspace_id, academy_story.id, title="Academy")
-
-    assert forest_session is not None
-    assert academy_session is not None
-    assert [table.name for table in service.list_tables(str(forest_session.id))] == ["旗帜"]
-    assert service.list_tables(str(academy_session.id)) == []
-
-    session_table = service.get_table(str(forest_session.id), "旗帜")
-    assert session_table.origin == models.STATUS_ORIGIN_TEMPLATE_COPY
-    assert session_table.source_table_id == template.id
-    assert session_table.workspace_id == workspace_id
-    assert session_table.story_id == forest_story.id
-
-
-def test_story_status_mount_character_binding_and_session_metadata(tmp_path, caplog) -> None:
-    gateway, workspace_id, _workspace_root, forest_story = _workspace(tmp_path, "role_mount_ws")
-    academy_story = StoryRepository(gateway.database).create(workspace_id, "学院旧梦")
-    status = gateway.status
-    characters = gateway.character_management
-
-    alice = characters.create_character(workspace_id, name="Alice")
-    bob = characters.create_character(workspace_id, name="Bob")
-    outsider = characters.create_character(workspace_id, name="Outsider")
-    assert alice is not None and bob is not None and outsider is not None
-    alice_mount = characters.mount_character(workspace_id, forest_story.id, alice.id)
-    bob_mount = characters.mount_character(workspace_id, forest_story.id, bob.id)
-    outsider_mount = characters.mount_character(workspace_id, academy_story.id, outsider.id)
-    assert alice_mount is not None and bob_mount is not None and outsider_mount is not None
-
-    first_template = status.create_template(workspace_id, "Alice 状态", rows=[["心情", "平静"]])
-    second_template = status.create_template(workspace_id, "Alice 装备", rows=[["手部", "长剑"]])
-    first_mount = status.mount_template(
-        workspace_id,
-        forest_story.id,
-        first_template.id,
-        character_mount_id=alice_mount.mount.id,
-    )
-    second_mount = status.mount_template(
-        workspace_id,
-        forest_story.id,
-        second_template.id,
-        character_mount_id=alice_mount.mount.id,
-    )
-
-    assert first_mount.story_character_mount_id == alice_mount.mount.id
-    assert second_mount.story_character_mount_id == alice_mount.mount.id
-
-    rebound = status.update_story_mount_character(
-        workspace_id,
-        forest_story.id,
-        first_mount.id,
-        character_mount_id=bob_mount.mount.id,
-    )
-    assert rebound.story_character_mount_id == bob_mount.mount.id
-
-    unbound = status.update_story_mount_character(
-        workspace_id,
-        forest_story.id,
-        first_mount.id,
-        character_mount_id=None,
-    )
-    assert unbound.story_character_mount_id is None
-
-    with pytest.raises(FileNotFoundError):
-        status.update_story_mount_character(
-            workspace_id,
-            forest_story.id,
-            first_mount.id,
-            character_mount_id=outsider_mount.mount.id,
-        )
-
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, forest_story.id, title="Role Metadata")
-    assert session is not None
-    copied = status.get_table(str(session.id), "Alice 装备")
-    metadata = json.loads(copied.metadata_json)
-    assert metadata["storyStatusMount"] == {
-        "mountId": second_mount.id,
-        "mountOrigin": models.STORY_STATUS_MOUNT_ORIGIN_SYSTEM,
-        "characterMountId": alice_mount.mount.id,
-        "characterId": alice.id,
-        "characterName": "Alice",
-    }
-
-    del metadata["storyStatusMount"]["characterName"]
-    SessionStatusTableRecord.update(
-        metadata_json=json.dumps(metadata, ensure_ascii=False)
-    ).where(SessionStatusTableRecord.id == copied.id).execute()
-
-    with caplog.at_level("WARNING", logger="rpg_core.status.context_service"):
-        context_table = next(
-            table
-            for table in StatusContextService(status).list_tables(str(session.id))
-            if table.id == copied.id
-        )
-
-    repaired_metadata = json.loads(context_table.metadata_json)
-    assert repaired_metadata["storyStatusMount"]["characterName"] == "Alice"
-    assert "backfilled missing status table character name" in caplog.text
-    persisted = status.get_table_by_id(copied.id)
-    assert json.loads(persisted.metadata_json)["storyStatusMount"]["characterName"] == "Alice"
-
-    fallback_metadata = json.loads(persisted.metadata_json)
-    fallback_metadata["storyStatusMount"]["characterName"] = None
-    fallback_metadata["storyStatusMount"]["characterMountId"] = None
-    SessionStatusTableRecord.update(
-        metadata_json=json.dumps(fallback_metadata, ensure_ascii=False)
-    ).where(SessionStatusTableRecord.id == copied.id).execute()
-    caplog.clear()
-
-    with caplog.at_level("WARNING", logger="rpg_core.status.context_service"):
-        fallback_context_table = next(
-            table
-            for table in StatusContextService(status).list_tables(str(session.id))
-            if table.id == copied.id
-        )
-
-    fallback_repaired = json.loads(fallback_context_table.metadata_json)["storyStatusMount"]
-    assert fallback_repaired["characterMountId"] == alice_mount.mount.id
-    assert fallback_repaired["characterName"] == "Alice"
-    assert "backfilled missing status table character name" in caplog.text
-
-    fallback_repaired["characterName"] = None
-    fallback_repaired["characterMountId"] = None
-    SessionStatusTableRecord.update(
-        metadata_json=json.dumps({"storyStatusMount": fallback_repaired}, ensure_ascii=False)
-    ).where(SessionStatusTableRecord.id == copied.id).execute()
-    status.update_story_mount_character(
-        workspace_id,
-        forest_story.id,
-        second_mount.id,
-        character_mount_id=bob_mount.mount.id,
-    )
-    caplog.clear()
-
-    with caplog.at_level("WARNING", logger="rpg_core.status.context_service"):
-        context_tables = StatusContextService(status).list_tables(str(session.id))
-
-    assert copied.id not in {table.id for table in context_tables}
-    assert "excluded character-bound status table from context" in caplog.text
-
-
-def test_unresolved_character_bound_table_is_excluded_from_context(tmp_path, caplog) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "unresolved_role_status_ws")
-    status = gateway.status
-    characters = gateway.character_management
-    character = characters.create_character(workspace_id, name="Alice")
-    assert character is not None
-    character_mount = characters.mount_character(workspace_id, story.id, character.id)
-    assert character_mount is not None
-    template = status.create_template(workspace_id, "Alice 状态", rows=[["生命", "10"]])
-    status.mount_template(
-        workspace_id,
-        story.id,
-        template.id,
-        character_mount_id=character_mount.mount.id,
-    )
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Unresolved Role")
-    assert session is not None
-    copied = status.get_table(str(session.id), "Alice 状态")
-    metadata = json.loads(copied.metadata_json)
-    metadata["storyStatusMount"]["characterName"] = None
-    metadata["storyStatusMount"]["characterMountId"] = 999999
-    metadata["storyStatusMount"]["mountId"] = 999999
-    SessionStatusTableRecord.update(
-        metadata_json=json.dumps(metadata, ensure_ascii=False)
-    ).where(SessionStatusTableRecord.id == copied.id).execute()
-
-    with caplog.at_level("WARNING", logger="rpg_core.status.context_service"):
-        context_tables = StatusContextService(status).list_tables(str(session.id))
-
-    assert copied.id not in {table.id for table in context_tables}
-    assert "excluded character-bound status table from context" in caplog.text
-
-
-def test_status_character_binding_requires_non_empty_character_name(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "empty_role_name_ws")
-    status = gateway.status
-    characters = gateway.character_management
-    character = characters.create_character(workspace_id, name="Alice")
-    assert character is not None
-    character_mount = characters.mount_character(workspace_id, story.id, character.id)
-    assert character_mount is not None
-    template = status.create_template(workspace_id, "角色状态", rows=[["生命", "10"]])
-
-    CharacterRecord.update(name="").where(CharacterRecord.id == character.id).execute()
-    with pytest.raises(ValueError, match="non-empty character name"):
-        status.mount_template(
+    with pytest.raises(ValueError, match="already exists"):
+        service.create_story_table(
             workspace_id,
             story.id,
-            template.id,
-            character_mount_id=character_mount.mount.id,
+            "背包",
+            document=_document(),
         )
+    service.delete_story_table(workspace_id, story.id, table.id)
+    assert service.get_story_table(table.id) is None
 
 
-def test_session_creation_rejects_bound_character_that_lost_name(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "lost_role_name_ws")
-    status = gateway.status
-    characters = gateway.character_management
-    character = characters.create_character(workspace_id, name="Alice")
-    assert character is not None
-    character_mount = characters.mount_character(workspace_id, story.id, character.id)
-    assert character_mount is not None
-    template = status.create_template(workspace_id, "角色状态", rows=[["生命", "10"]])
-    status.mount_template(
+def test_story_status_crud_does_not_materialize_legacy_status_dirs(tmp_path) -> None:
+    gateway, workspace_id, workspace_root, story = _workspace(tmp_path, "no_status_dirs")
+    gateway.status.create_story_table(
         workspace_id,
         story.id,
-        template.id,
-        character_mount_id=character_mount.mount.id,
-    )
-
-    CharacterRecord.update(name="").where(CharacterRecord.id == character.id).execute()
-    with pytest.raises(ValueError, match="non-empty character name"):
-        SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Should Roll Back")
-    assert all(session.title != "Should Roll Back" for session in gateway.catalog.list_sessions(workspace_id, story.id))
-
-
-def test_story_owned_status_template_can_be_deleted_by_mount(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "story_owned_ws")
-    characters = gateway.character_management
-    status = gateway.status
-
-    character = characters.create_character(workspace_id, name="Keeper")
-    assert character is not None
-    character_mount = characters.mount_character(workspace_id, story.id, character.id)
-    assert character_mount is not None
-
-    administration = StatusTableAdministrationService(status)
-    owned_mount = administration.create_story_template(
-        workspace_id,
-        story.id,
-        "Keeper 状态",
-        character_mount_id=character_mount.mount.id,
-        document=_document(("姿态", "警戒")),
-    )
-    assert owned_mount.mount_origin == models.STORY_STATUS_MOUNT_ORIGIN_STORY_TEMPLATE
-    assert owned_mount.story_character_mount_id == character_mount.mount.id
-    assert status.get_template(owned_mount.status_table_id) is not None
-
-    administration.delete_story_template(workspace_id, story.id, owned_mount.id)
-    assert status.get_template(owned_mount.status_table_id) is None
-
-    system_template = status.create_template(workspace_id, "系统模板", rows=[["旗帜", "亮起"]])
-    system_mount = status.mount_template(workspace_id, story.id, system_template.id)
-    with pytest.raises(ValueError):
-        administration.delete_story_template(workspace_id, story.id, system_mount.id)
-    assert status.get_template(system_template.id) is not None
-
-
-def test_session_copy_is_independent_from_template_and_other_sessions(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "copy_ws")
-    service = gateway.status
-
-    template = service.create_template(
-        workspace_id,
-        "旗帜",
-        rows=[["封印", "完整"]],
-    )
-    service.mount_template(workspace_id, story.id, template.id)
-
-    first = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="First")
-    assert first is not None
-
-    service.update_template(template.id, rows=[["封印", "破裂"]])
-    second = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Second")
-    assert second is not None
-
-    first_table = service.get_table(str(first.id), "旗帜")
-    second_table = service.get_table(str(second.id), "旗帜")
-    assert first_table.rows == (("封印", "完整"),)
-    assert second_table.rows == (("封印", "破裂"),)
-
-    service.save_table(first_table.id, _document(("封印", "已修复")))
-
-    assert service.get_table_by_id(first_table.id).rows == (("封印", "已修复"),)
-    assert service.get_table_by_id(second_table.id).rows == (("封印", "破裂"),)
-
-
-def test_session_scoped_save_warns_and_keeps_last_write(tmp_path, caplog) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "scoped_save_ws")
-    service = gateway.status
-    template = service.create_template(workspace_id, "旗帜", rows=[["封印", "完整"]])
-    service.mount_template(workspace_id, story.id, template.id)
-    first = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="First")
-    second = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Second")
-    assert first is not None and second is not None
-
-    table = service.get_table(str(first.id), "旗帜")
-    base_document = table.document
-    service.save_table(table.id, _document(("封印", "破裂")))
-
-    with caplog.at_level("WARNING", logger="rpg_data.status"):
-        saved = service.save_table_for_session(
-            str(first.id),
-            table.id,
-            _document(("封印", "已修复")),
-            expected_status_kind=models.STATUS_KIND_NORMAL,
-            base_document=base_document,
-        )
-
-    assert saved.table.rows == (("封印", "已修复"),)
-    assert saved.baseline_matched is False
-    assert "last-write-wins" in caplog.text
-
-    with pytest.raises(FileNotFoundError, match="unavailable"):
-        service.get_table_for_session(str(second.id), table.id)
-    with pytest.raises(FileNotFoundError, match="unavailable"):
-        service.save_table_for_session(
-            str(second.id),
-            table.id,
-            _document(("封印", "越权")),
-            expected_status_kind=models.STATUS_KIND_NORMAL,
-        )
-    with pytest.raises(ValueError, match="kind changed"):
-        service.save_table_for_session(
-            str(first.id),
-            table.id,
-            _document(("封印", "错误类型")),
-            expected_status_kind=models.STATUS_KIND_SCENE,
-        )
-
-
-def test_table_id_selector_writes_are_visible_from_document(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "selector_ws")
-    service = gateway.status
-
-    template = service.create_template(
-        workspace_id,
-        "旗帜",
-        headers=["名称", "值"],
-        rows=[["封印", "完整"]],
-    )
-    service.mount_template(workspace_id, story.id, template.id)
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Selector")
-    assert session is not None
-
-    table = service.get_table(str(session.id), "旗帜")
-    service.set_cell(table.id, StatusRowRef.match("名称", "封印"), "值", "破裂")
-    service.append_row(table.id, ["钟声", "响起", "ignored"])
-    service.replace_row(table.id, StatusRowRef.match("名称", "钟声"), ["钟声", "静默"])
-    updated = service.delete_row(table.id, StatusRowRef.match("名称", "封印"))
-
-    assert updated.document.key_column == "名称"
-    assert updated.document.value_column == "值"
-    assert updated.rows == (("钟声", "静默"),)
-    assert updated.document.rows[0].runtime_key_locked is False
-
-    updated = service.set_key_value(table.id, "钟声", "彻底静默")
-    assert updated.rows == (("钟声", "彻底静默"),)
-    updated = service.delete_key_value(table.id, "钟声")
-    assert updated.rows == ()
-
-
-def test_key_value_write_updates_appends_and_rejects_duplicates(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "key_ws")
-    service = gateway.status
-
-    template = service.create_template(
-        workspace_id,
-        "普通状态",
-        rows=[["位置", "森林"]],
-    )
-    service.mount_template(workspace_id, story.id, template.id)
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Key")
-    assert session is not None
-
-    table = service.get_table(str(session.id), "普通状态")
-    assert service.set_key_value(table.id, "位置", "城堡").rows == (("位置", "城堡"),)
-    assert service.set_key_value(table.id, "天气", "雨").rows == (("位置", "城堡"), ("天气", "雨"))
-    assert service.delete_key_value(table.id, "位置").rows == (("天气", "雨"),)
-
-    with pytest.raises(ValueError):
-        service.append_row(table.id, ["天气", "雾"])
-
-
-def test_scene_is_story_mounted_and_active_scene_uses_first_sorted_table(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "scene_ws")
-    service = gateway.status
-
-    administration = StatusTableAdministrationService(service)
-    later_scene = administration.create_template(
-        workspace_id,
-        "备用场景",
-        status_kind=models.STATUS_KIND_SCENE,
-        document=_document(("位置", "营地")),
-    )
-    active_scene = administration.create_template(
-        workspace_id,
-        "当前场景",
-        status_kind=models.STATUS_KIND_SCENE,
-        document=_document(
-            ("时间", "第 1 年 1 月 1 日 6 时"),
-            ("位置", "森林"),
-        ),
-    )
-    normal = service.create_template(
-        workspace_id,
-        "世界旗帜",
-        rows=[["封印", "完整"]],
-    )
-    service.mount_template(workspace_id, story.id, later_scene.id, sort_order=20)
-    service.mount_template(workspace_id, story.id, active_scene.id, sort_order=10)
-    service.mount_template(workspace_id, story.id, normal.id, sort_order=30)
-
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Scene")
-    assert session is not None
-    session_id = str(session.id)
-
-    scene = SceneStatusService(service)
-    assert scene.get_active_table(session_id).name == "当前场景"
-    assert scene.get_attrs(session_id) == {
-        "时间": "第 1 年 1 月 1 日 6 时",
-        "位置": "森林",
-    }
-
-    manager = StatusManager(session_id, service)
-    table = scene.get_active_table(session_id)
-    assert table is not None
-    manager.runtime_set_key_value(table.id, "天气", "雨")
-    assert scene.get_attrs(session_id)["天气"] == "雨"
-
-    with pytest.raises(PermissionError):
-        manager.runtime_delete_key_value(table.id, "时间")
-    assert "时间" in scene.get_attrs(session_id)
-
-    assert [
-        table.name for table in StatusContextService(service).list_tables(session_id)
-    ] == ["世界旗帜"]
-
-
-def test_runtime_key_lock_allows_value_update_but_blocks_runtime_delete(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "runtime_lock_ws")
-    service = gateway.status
-
-    template = StatusTableAdministrationService(service).create_template(
-        workspace_id,
-        "当前场景",
-        status_kind=models.STATUS_KIND_SCENE,
-        document=_document(("位置", "森林"), ("天气", "雨")),
-    )
-    service.mount_template(workspace_id, story.id, template.id)
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Runtime Lock")
-    assert session is not None
-
-    manager = StatusManager(str(session.id), service)
-    table = SceneStatusService(service).get_active_table(str(session.id))
-    assert table is not None
-
-    assert table.document.row_for_key("位置").runtime_key_locked is True
-    assert table.document.row_for_key("天气").runtime_key_locked is False
-    assert manager.runtime_set_key_value(table.id, "位置", "城堡")["rows"][0] == ["位置", "城堡"]
-    with pytest.raises(PermissionError):
-        manager.runtime_delete_key_value(table.id, "位置")
-    assert "位置" in manager.get_scene_attrs()
-
-    manager.runtime_delete_key_value(table.id, "天气")
-    assert "天气" not in manager.get_scene_attrs()
-
-    service.delete_key_value(table.id, "位置")
-    assert "位置" not in manager.get_scene_attrs()
-
-
-def test_session_native_table_crud(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "native_ws")
-    service = gateway.status
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Native")
-    assert session is not None
-
-    table = service.create_table(str(session.id), "临时状态", rows=[["钟声", "响起"]])
-    assert table.origin == models.STATUS_ORIGIN_SESSION_NATIVE
-    assert table.source_table_id is None
-    assert service.get_table_by_id(table.id).rows == (("钟声", "响起"),)
-
-    renamed = service.rename_table(table.id, "运行时状态")
-    assert renamed.name == "运行时状态"
-    service.delete_table(table.id)
-    with pytest.raises(FileNotFoundError):
-        service.get_table_by_id(table.id)
-
-def test_document_and_progress_batch_commits_atomically(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "batch_ws")
-    service = gateway.status
-    session = SessionCatalogService(gateway.sessions).create_session(
-        workspace_id,
-        story.id,
-        title="Batch",
-    )
-    assert session is not None
-    document = _document(("长期信任", "低"))
-    table = service.create_table(str(session.id), "人物关系", document=document)
-    updated = document.with_existing_values([("长期信任", "中")])
-
-    result = service.commit_document_batch(
-        str(session.id),
-        (
-            models.StatusDocumentWrite(
-                table_id=table.id,
-                expected_status_kind=models.STATUS_KIND_NORMAL,
-                document=updated,
-                base_document=document,
-            ),
-        ),
-        (
-            models.StatusProgressWrite(
-                table_id=table.id,
-                field_key="长期信任",
-                last_processed_turn_id=4,
-            ),
-        ),
-    )
-
-    assert result.tables[0].document == updated
-    assert result.baseline_mismatch_table_ids == ()
-    assert service.list_deferred_progress(str(session.id)) == [
-        models.StatusDeferredProgress(table.id, "长期信任", 4)
-    ]
-    assert service.clamp_deferred_progress(str(session.id), 2) == 1
-    assert service.list_deferred_progress(str(session.id))[0].last_processed_turn_id == 2
-
-
-def test_document_batch_validates_every_write_before_mutating(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "atomic_batch_ws")
-    service = gateway.status
-    session = SessionCatalogService(gateway.sessions).create_session(
-        workspace_id,
-        story.id,
-        title="Atomic Batch",
-    )
-    assert session is not None
-    first = service.create_table(
-        str(session.id),
-        "角色状态",
+        "状态",
         document=_document(("生命", "10")),
     )
-    second = service.create_table(
-        str(session.id),
-        "世界状态",
-        document=_document(("警戒", "低")),
-    )
+    assert not (workspace_root / "template_status").exists()
+    assert not (workspace_root / "status").exists()
 
-    with pytest.raises(ValueError, match="kind changed"):
-        service.commit_document_batch(
-            str(session.id),
-            (
-                models.StatusDocumentWrite(
-                    table_id=first.id,
-                    expected_status_kind=models.STATUS_KIND_NORMAL,
-                    document=_document(("生命", "8")),
-                    base_document=first.document,
-                ),
-                models.StatusDocumentWrite(
-                    table_id=second.id,
-                    expected_status_kind=models.STATUS_KIND_SCENE,
-                    document=_document(("警戒", "高")),
-                    base_document=second.document,
-                ),
-            ),
+
+def test_session_copies_exact_story_status_table_set(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path, "copy_set")
+    other_story = StoryRepository(gateway.database).create(workspace_id, "学院")
+    first = gateway.status.create_story_table(
+        workspace_id, story.id, "第一张", document=_document(("A", "1"))
+    )
+    second = gateway.status.create_story_table(
+        workspace_id, story.id, "第二张", document=_document(("B", "2"))
+    )
+    outsider = gateway.status.create_story_table(
+        workspace_id, other_story.id, "外部", document=_document(("C", "3"))
+    )
+    session = gateway.sessions.create_session(
+        workspace_id, story.id, session_id="s_exact_status"
+    )
+    assert session is not None
+
+    copied = gateway.status.copy_story_status_tables_to_session(
+        session.id, (second.id,)
+    )
+    assert len(copied) == 1
+    assert copied[0].name == "第二张"
+    assert copied[0].origin == models.STATUS_ORIGIN_STORY_COPY
+    assert copied[0].source_story_status_table_id == second.id
+    assert gateway.status.get_story_table(first.id) is not None
+    with pytest.raises(FileNotFoundError, match="Story status tables not found"):
+        gateway.status.copy_story_status_tables_to_session(
+            session.id, (outsider.id,)
         )
 
-    assert service.get_table_by_id(first.id).document == first.document
-    assert service.get_table_by_id(second.id).document == second.document
 
-
-
-def test_scene_not_mounted_is_not_visible_to_session(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "no_scene_ws")
-    service = gateway.status
-
-    service.create_template(
+def test_character_binding_is_snapshotted_by_stable_story_character_id(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path, "character_status")
+    alice = gateway.character_management.create_character(
+        workspace_id, story.id, name="Alice"
+    )
+    bob = gateway.character_management.create_character(
+        workspace_id, story.id, name="Bob"
+    )
+    assert alice is not None and bob is not None
+    table = gateway.status.create_story_table(
         workspace_id,
+        story.id,
+        "Alice 状态",
+        story_character_id=alice.id,
+        document=_document(("心情", "平静")),
+    )
+    session = SessionCatalogService(gateway.sessions).create_session(
+        workspace_id, story.id, session_id="s_character_status"
+    )
+    assert session is not None
+    copied = gateway.status.list_tables(session.id)[0]
+    metadata = models.parse_session_status_metadata(copied.metadata_json)
+    assert metadata.story_source is not None
+    assert metadata.story_source.story_status_table_id == table.id
+    assert metadata.story_source.character_id == alice.id
+    assert metadata.story_source.character_name == "Alice"
+
+    rebound = gateway.status.update_story_table(
+        workspace_id,
+        story.id,
+        table.id,
+        story_character_id=bob.id,
+        update_story_character=True,
+    )
+    assert rebound.story_character_id == bob.id
+    unchanged = models.parse_session_status_metadata(
+        gateway.status.get_table_by_id(copied.id).metadata_json
+    )
+    assert unchanged.story_source is not None
+    assert unchanged.story_source.character_id == alice.id
+    assert unchanged.story_source.character_name == "Alice"
+
+    assert gateway.character_management.delete_character(
+        workspace_id, story.id, bob.id
+    ) is True
+    assert gateway.status.get_story_table(table.id).story_character_id is None
+    assert StatusContextService(gateway.status).list_tables(session.id)[0].id == copied.id
+
+
+def test_copy_rejects_character_with_blank_name(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path, "blank_character")
+    character = gateway.character_management.create_character(
+        workspace_id, story.id, name="Alice"
+    )
+    assert character is not None
+    table = gateway.status.create_story_table(
+        workspace_id,
+        story.id,
+        "角色状态",
+        story_character_id=character.id,
+        document=_document(("生命", "10")),
+    )
+    StoryCharacterRecord.update(name="").where(
+        StoryCharacterRecord.id == character.id
+    ).execute()
+    session = gateway.sessions.create_session(
+        workspace_id, story.id, session_id="s_blank_character"
+    )
+    assert session is not None
+    with pytest.raises(ValueError, match="non-empty name"):
+        gateway.status.copy_story_status_tables_to_session(session.id, (table.id,))
+
+
+def test_session_copy_is_independent_and_survives_source_delete(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path, "copy_independent")
+    source = gateway.status.create_story_table(
+        workspace_id,
+        story.id,
+        "封印",
+        document=_document(("状态", "完整")),
+    )
+    session = SessionCatalogService(gateway.sessions).create_session(
+        workspace_id, story.id, session_id="s_copy_independent"
+    )
+    assert session is not None
+    copied = gateway.status.list_tables(session.id)[0]
+    gateway.status.update_story_table(
+        workspace_id,
+        story.id,
+        source.id,
+        document=_document(("状态", "破裂")),
+    )
+    assert gateway.status.get_table_by_id(copied.id).rows == (("状态", "完整"),)
+
+    gateway.status.delete_story_table(workspace_id, story.id, source.id)
+    orphan_copy = gateway.status.get_table_by_id(copied.id)
+    assert orphan_copy.source_story_status_table_id is None
+    assert orphan_copy.rows == (("状态", "完整"),)
+
+
+def test_session_status_reset_rebuilds_story_copies_and_clears_native_values(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path, "status_reset")
+    source = gateway.status.create_story_table(
+        workspace_id,
+        story.id,
+        "剧情状态",
+        document=_document(("封印", "完整")),
+    )
+    session = SessionCatalogService(gateway.sessions).create_session(
+        workspace_id, story.id, session_id="s_status_reset"
+    )
+    assert session is not None
+    native = gateway.status.create_table(
+        session.id,
+        "临时记录",
+        document=_document(("备注", "保留结构")),
+    )
+    original_native_id = native.id
+    gateway.status.update_story_table(
+        workspace_id,
+        story.id,
+        source.id,
+        document=_document(("封印", "破裂")),
+    )
+
+    result = SessionStatusLifecycleService(gateway.sessions).reset(session.id)
+    assert result.story_tables_cleared == 1
+    assert result.story_tables_initialized == 1
+    assert result.native_tables_reset == 1
+    tables = gateway.status.list_tables(session.id)
+    rebuilt = next(table for table in tables if table.origin == models.STATUS_ORIGIN_STORY_COPY)
+    reset_native = next(table for table in tables if table.origin == models.STATUS_ORIGIN_SESSION_NATIVE)
+    assert rebuilt.rows == (("封印", "破裂"),)
+    assert reset_native.id == original_native_id
+    assert reset_native.rows == (("备注", ""),)
+
+
+def test_scene_policy_and_status_manager_use_session_runtime_tables(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path, "scene_status")
+    administration = StatusTableAdministrationService(gateway.status)
+    administration.create_story_table(
+        workspace_id,
+        story.id,
+        "后备场景",
+        status_kind=models.STATUS_KIND_SCENE,
+        document=_document(("时间", "第 1 年 1 月 2 日"), ("位置", "学院")),
+        sort_order=20,
+    )
+    administration.create_story_table(
+        workspace_id,
+        story.id,
         "当前场景",
         status_kind=models.STATUS_KIND_SCENE,
-        rows=[["位置", "森林"]],
+        document=_document(("时间", "第 1 年 1 月 1 日"), ("位置", "森林")),
+        sort_order=10,
     )
-
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="No Scene")
-    assert session is not None
-
-    scene = SceneStatusService(service)
-    assert scene.get_active_table(str(session.id)) is None
-    assert scene.get_attrs(str(session.id)) is None
-
-
-def test_catalog_status_timing_works_when_catalog_is_accessed_first(tmp_path) -> None:
-    gateway, workspace_id, _workspace_root, story = _workspace(tmp_path, "timing_ws")
-    catalog = gateway.catalog
-    service = gateway.status
-
-    template = service.create_template(
+    administration.create_story_table(
         workspace_id,
-        "旗帜",
-        rows=[["封印", "完整"]],
+        story.id,
+        "角色状态",
+        document=_document(("生命", "10")),
+        sort_order=30,
     )
-    service.mount_template(workspace_id, story.id, template.id)
-
-    session = SessionCatalogService(gateway.sessions).create_session(workspace_id, story.id, title="Timing")
-
+    session = SessionCatalogService(gateway.sessions).create_session(
+        workspace_id, story.id, session_id="s_scene_status"
+    )
     assert session is not None
-    assert service.get_table(str(session.id), "旗帜").rows == (("封印", "完整"),)
+    scene = SceneStatusService(gateway.status).get_active_table(session.id)
+    assert scene is not None
+    assert scene.name == "当前场景"
+    assert all(row.runtime_key_locked for row in scene.document.rows)
+    assert SceneStatusService(gateway.status).get_attrs(session.id)["位置"] == "森林"
+
+    manager = StatusManager(session.id, gateway.status)
+    assert manager.list_tables(models.STATUS_KIND_NORMAL) == ["角色状态"]
+    normal_table = gateway.status.get_table(session.id, "角色状态")
+    result = manager.runtime_set_existing_values(normal_table.id, [("生命", "8")])
+    assert result.changed is True
+    assert gateway.status.get_table(session.id, "角色状态").document.rows[0].value == "8"
+
+
+def test_status_reset_plan_is_atomic_on_invalid_story_table(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path, "atomic_reset")
+    session = gateway.sessions.create_session(
+        workspace_id, story.id, session_id="s_atomic_reset"
+    )
+    assert session is not None
+    native = gateway.status.create_table(
+        session.id, "原生", document=_document(("值", "before"))
+    )
+    with pytest.raises(FileNotFoundError, match="Story status tables not found"):
+        gateway.status.apply_session_reset_plan(
+            session.id,
+            models.SessionStatusResetPlan(
+                document_writes=(
+                    models.SessionStatusDocumentWrite(
+                        table_id=native.id,
+                        document=_document(("值", "after")),
+                    ),
+                ),
+                story_status_table_ids=(999999,),
+            ),
+        )
+    assert gateway.status.get_table_by_id(native.id).rows == (("值", "before"),)
+
+
+def test_session_copy_metadata_uses_story_source_not_mount_fields(tmp_path) -> None:
+    gateway, workspace_id, _root, story = _workspace(tmp_path, "metadata_shape")
+    table = gateway.status.create_story_table(
+        workspace_id, story.id, "全局", document=_document(("天气", "晴"))
+    )
+    session = gateway.sessions.create_session(
+        workspace_id, story.id, session_id="s_metadata_shape"
+    )
+    assert session is not None
+    copy = gateway.status.copy_story_status_tables_to_session(
+        session.id, (table.id,)
+    )[0]
+    raw = json.loads(copy.metadata_json)
+    assert raw["storyStatusSource"] == {
+        "storyStatusTableId": table.id,
+        "characterId": None,
+        "characterName": None,
+    }
+    assert "storyStatusMount" not in raw
+    assert "mountId" not in copy.metadata_json

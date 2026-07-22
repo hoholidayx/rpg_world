@@ -118,7 +118,7 @@ def build_rpg_context(
     except Exception as exc:
         logger.debug("[RPG World] StatusManager init skipped: {}", exc)
 
-    # ── SceneTracker (only when story-mounted scene table exists) ──────
+    # ── SceneTracker (only when the Story owns a scene table) ──────────
     scene_tracker: SceneTracker | None = None
     if status_mgr is not None:
         try:

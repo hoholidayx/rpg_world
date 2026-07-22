@@ -128,7 +128,6 @@ class SessionProfile:
 @dataclass(frozen=True)
 class SessionPlayerCharacterSnapshot:
     character_id: int
-    mount_id: int
     story_id: int
     name: str
     avatar_url: str = ""
@@ -137,12 +136,11 @@ class SessionPlayerCharacterSnapshot:
 
 
 @dataclass(frozen=True)
-class SessionCharacterMount:
-    """Typed read projection for one character mounted on a Session's Story."""
+class SessionCharacterOption:
+    """Typed read projection for one character owned by a Session's Story."""
 
     workspace_id: str
     story_id: int
-    mount_id: int
     character_id: int
     name: str
     personality: str = ""
@@ -207,7 +205,7 @@ __all__ = [
     "SESSION_LIFECYCLE_PROVISIONING",
     "SESSION_LIFECYCLE_READY",
     "Session",
-    "SessionCharacterMount",
+    "SessionCharacterOption",
     "SessionDerivationJob",
     "SessionDerivationJobUpdate",
     "SessionMessage",

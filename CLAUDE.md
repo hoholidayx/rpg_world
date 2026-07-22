@@ -149,9 +149,9 @@ rpg_world/
 │       ├── dream.py              #   Session Dream proposal / memory 代理
 │       ├── media.py              #   Session 媒体代理与图片流式转发
 │       ├── tts.py                #   Session TTS 任务与 Range 音频代理
-│       ├── characters.py         #   角色库 + story 挂载 APIs
-│       ├── lorebook.py           #   世界书 + story 挂载 APIs
-│       ├── status_tables.py      #   状态表模板、story 挂载、session 表 APIs
+│       ├── characters.py         #   Story 直属角色卡 APIs
+│       ├── lorebook.py           #   Story 直属世界书 APIs
+│       ├── status_tables.py      #   Story 定义、Session 运行表 APIs
 │       ├── ops.py                #   运维清理和删除确认 APIs
 │       ├── chat.py               #   legacy placeholder；不要恢复为主入口
 │       ├── commands.py           #   legacy placeholder；不要恢复为主入口
@@ -320,25 +320,25 @@ await agent.initialize()
 
 ### Play catalog 与 session 定位
 
-`rpg_data` 的数据关系是：workspace 下有多个 story，story 下有多个 session；角色卡和世界书条目属于 workspace，并通过 `rpg_story_characters`、`rpg_story_lorebook_entries` 挂载到 story。同一个角色卡或世界书条目可以挂载到多个 story，挂载表只禁止同一 story 内重复挂载。
+`rpg_data` 的 catalog 关系仍是 workspace 下有多个 story、story 下有多个 session。Character、Lorebook 与 Status 内容资产由 Story 直接拥有，不存在 Workspace 资产库或 Story mount；同名资源可以分别存在于不同 Story，但所有 CRUD 都必须同时校验 `workspace_id + story_id`，资源不能跨 Story 复用。
 
-Story 主数据字段中，`summary` 是短摘要，`story_prompt` 是 Story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。会话开局真源是 `rpg_story_openings` 中按顺序保存的 0–3 条稳定 Opening（标题＋正文）；旧 `rpg_stories.first_message` 物理列只供 `0018_story_openings.sql` 迁移读取，不得用于新生产路径。Opening 正文与 Story Prompt 当前只支持白名单变量 `{USER_PLAY_ROLE_NAME}`；数据库和 API 返回原始模板，选中 Opening 在首次绑定且历史为空时渲染后持久化，Story Prompt 在 turn snapshot 中按 session 角色渲染。未知单花括号变量在保存边界失败，不执行 Jinja、表达式或递归替换。第一条 Opening 是默认项；CLI/Telegram 与未指定 Opening 的调用方使用它。
+Story 主数据字段中，`summary` 是短摘要，`story_prompt` 是 Story 专属固定系统提示词，会通过 fixed layer 参与上下文渲染。会话开局真源是 `rpg_story_openings` 中按顺序保存的 0–3 条稳定 Opening（标题＋正文），Story 表不再保存旧 `first_message` 列。Opening 正文与 Story Prompt 当前只支持白名单变量 `{USER_PLAY_ROLE_NAME}`；数据库和 API 返回原始模板，选中 Opening 在首次绑定且历史为空时渲染后持久化，Story Prompt 在 turn snapshot 中按 session 角色渲染。未知单花括号变量在保存边界失败，不执行 Jinja、表达式或递归替换。第一条 Opening 是默认项；CLI/Telegram 与未指定 Opening 的调用方使用它。
 
-状态表的 SQLite `document_json` 仍是模板表和会话表正文真源，SQL 同时保存模板、Story 挂载、Session 副本、来源关系、排序和 `status_kind`。`status_kind` 只允许 `scene | normal`；状态表必须挂载到 Story 后才能绑定该 Story 的可选角色挂载。新 Session 的复制策略由 `rpg_core.session.SessionCatalogService` / `SessionStatusLifecycleService` 决定，`rpg_data.StatusDataService` 只复制调用方明确给出的 mount ID，或原子应用调用方准备好的 typed reset plan。模板后续修改不影响既有 Session 副本。`rpg_data` bootstrap 仅为既有缺失副本执行兼容性 materialize，不承载新的 Session 创建策略，也不硬编码 demo 数据。Bootstrap 默认保留 SQL 未索引目录，只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才允许清理并记录结果。
+状态表的 SQLite `document_json` 是 Story 定义和 Session 运行表的正文真源。`rpg_story_status_tables` 直接归属 Story，可选绑定同一 Story 的一个 Character；`rpg_session_status_tables` 只包含 `story_copy | session_native`，Story 副本通过可空的 `source_story_status_table_id` 记录来源。`status_kind` 只允许 `scene | normal`。新 Session 的复制策略由 `rpg_core.session.SessionCatalogService` / `SessionStatusLifecycleService` 决定，`rpg_data.StatusDataService` 只复制调用方明确给出的 Story 状态表 ID，或原子应用调用方准备好的 typed reset plan。Story 定义后续修改或删除不覆盖既有 Session 副本；删除来源时副本保留且来源 ID 由外键置空。`rpg_data` bootstrap 仅为缺失运行表的 Session 执行 materialize，不承载新的 Session 创建策略，也不硬编码 demo 数据。Bootstrap 默认保留 SQL 未索引目录，只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才允许清理并记录结果。
 
 Session 生命周期业务统一归 `rpg_core.session`：角色有效性、首次绑定、Opening 默认/回退和渲染归 `SessionRoleService`；Story/Session 默认挂载归 `SessionCatalogService`；`/clear`、Derivation 状态机/继承、永久删除资格与 runtime 目录补偿分别归 reset、derivation、deletion application service。`rpg_data.sessions` 聚合角色/Opening read model、Session/profile/job 持久化、调用方指定的复制/删除、复杂查询与原子事务，但不得恢复玩家文案、默认选择、状态机推进或清理矩阵。
 
-`当前场景` 是 `status_kind="scene"` 的特殊状态表，展示名可以自定义，但仍必须挂载到 story 才会被 session 感知。多张 scene 表存在时，v1 消费排序第一张 active scene。LLM 结构写权限由 `agent.scene.allow_runtime_key_changes` 控制且默认关闭：现有字段继续完整注入并允许更新 value，但不能新增、删除或重命名 key；只有显式开启后才恢复非锁定 key 的运行时增删能力。该开关只收紧 Agent 工具，不改变 Play API / `rpg_data` 的手工管理 CRUD。
+`当前场景` 是 Story 直接拥有的 `status_kind="scene"` 特殊状态表，展示名可以自定义；Session 创建时与其它 Story 状态表一起复制。多张 scene 表存在时，v1 消费排序第一张 active scene。LLM 结构写权限由 `agent.scene.allow_runtime_key_changes` 控制且默认关闭：现有字段继续完整注入并允许更新 value，但不能新增、删除或重命名 key；只有显式开启后才恢复非锁定 key 的运行时增删能力。该开关只收紧 Agent 工具，不改变 Play API / `rpg_data` 的手工管理 CRUD。
 
 `rpg_sessions.id` 是跨 workspace/story 全局唯一的稳定定位 ID，兼容 `rpg_core` 当前 `^[A-Za-z0-9_]+$` 校验。所有创建入口都由 `rpg_data` 生成 session ID，用户只允许指定 title；`rpg_session_profiles` 保存 title、description、玩家扮演角色 ID 和角色快照。Play API 是 catalog session 到 Agent 服务的边界层：会话内接口只收 `session_id`，内部解析出 workspace/story；Agent 服务运行态只接收全局 `session_id`。CLI / Telegram 启动时也先 ensure session：配置了 `session_id` 只校验并加载既有 session，未配置则创建系统生成 ID 的默认 session。
 
 会话永久删除由 Agent service 统一协调。删除期间 `AgentManager` 阻止同 ID runtime 重建，取消活动和排队 turn、丢弃未提交 scratch，并关闭 mailbox、watcher 与向量 SQLite；随后删除 `rpg_sessions` 及其所有外键级联数据（包含冷备、状态表、裁定、记忆和配置覆盖），最后清理整个 runtime 目录。runtime 先重命名隔离，数据库失败时恢复；数据库提交后目录删除失败返回 `runtime_cleanup=pending`，隔离目录由未索引数据清理能力继续发现。Play API 只通过 AgentClient 转发删除，不直接操作 AgentManager。
 
-玩家扮演角色是 session 级运行语义。绑定状态对外只暴露 `bound | invalid`：缺失绑定、角色不存在、未挂载到当前 story、snapshot 损坏或 snapshot 的 mount/story 与当前挂载不一致，都统一视为 `invalid`。WebUI 不在进入 SessionRoom 前拦截，而是在 SessionRoom 内打开不可取消的角色选择弹窗；没有可选角色时显示阻塞空态。CLI / Telegram / Agent API 允许创建空 session，但普通消息在绑定前只返回固定编号角色列表，不调用 LLM、不写 user history。
+玩家扮演角色是 session 级运行语义。绑定状态对外只暴露 `bound | invalid`：缺失绑定、角色不存在于当前 Story、snapshot 损坏或 snapshot 的角色/Story 身份与当前归属不一致，都统一视为 `invalid`。WebUI 不在进入 SessionRoom 前拦截，而是在 SessionRoom 内打开不可取消的角色选择弹窗；没有可选角色时显示阻塞空态。CLI / Telegram / Agent API 允许创建空 session，但普通消息在绑定前只返回固定编号角色列表，不调用 LLM、不写 user history。
 
 绑定和切换必须统一经 Agent 命令链路：`/role_bind <角色序号> [开局序号]`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 只负责把角色 ID 与可选稳定 Opening ID 转发到 Agent service，由 Agent service 映射角色序号并通过内部稳定 ID 参数执行命令；不要在 Play API 或 DataManager 中直接写 `rpg_session_profiles`。空 SessionRoom 使用“角色 → 开局”两步向导，只有 2–3 条 Opening 才显示第二步，最终一次提交角色与 Opening；0/1 条直接使用缺省项。首次成功绑定且 main history 为空时，`SessionRoleService` 追加选中 Opening 的渲染正文到 main history 和 backup history；普通历史删除/截断或后续切换不重复追加。`/clear` 沿用 Session 保存的稳定 Opening ID 并读取 Story 最新正文，已删除则回退第一条。Agent 的 send/send_stream 在命令分发之后、进入 LLM 前强校验玩家角色，只有 `bound` 才进入正常生成。
 
-玩家角色必须在 Context 门禁前进入不可变 turn snapshot，并由主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是玩家身份唯一真源：角色卡按当前 session 投影为 `PLAYER_CHARACTER` 或 `NPC`，Story Prompt、开场消息、历史、摘要、记忆或旧 metadata 与其冲突时均以绑定快照为准。玩家/NPC 标记不得写回 workspace 角色 metadata；角色切换后刷新 MemorySubAgent 等缓存上下文，但不重写已有历史。
+玩家角色必须在 Context 门禁前进入不可变 turn snapshot，并由主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是玩家身份唯一真源：角色卡按当前 session 投影为 `PLAYER_CHARACTER` 或 `NPC`，Story Prompt、开场消息、历史、摘要、记忆或旧 metadata 与其冲突时均以绑定快照为准。玩家/NPC 标记不得写回 Story 角色 metadata；角色切换后刷新 MemorySubAgent 等缓存上下文，但不重写已有历史。
 
 ### ChannelAdapter 基类（`channels/base.py`）
 
@@ -592,8 +592,8 @@ Summary Layer 只把“本次投影过滤过至少一条消息”作为尝试加
 `当前场景` 是 `status_kind="scene"` 的特殊状态表，不走普通 `STATUS_TABLES` 层。`SceneTracker.get_context()`
 会将它作为 user prefix 注入最终用户消息：一方面提高模型对当前时空、地点、场景属性的注意力，
 另一方面让场景状态随 user message 进入历史，便于后续摘要和记忆按时间顺序归纳。
-`rpg_data` 状态表 service 用 `status_kind="scene"` 表达这一类特殊状态，且仍由 story
-挂载关系决定 session 是否可见；未挂载 scene 时，Agent 不注入 `[scene]`，也不注册 scene 工具。
+`rpg_data` 状态表 service 用 `status_kind="scene"` 表达这一类特殊状态。Session 只消费创建或
+reset 时从当前 Story 复制的 scene，以及显式创建的 Session 原生 scene；没有 scene 运行表时，Agent 不注入 `[scene]`，也不注册 scene 工具。
 当 Plot Scheduler 启用时，`SceneTracker` 每 turn 必须从 scratch 状态表重新解析“时间”，且只接受
 `第 Y 年 M 月 D 日 H 时 [M 分]`。缺失、空值或非法格式使调度安全跳过，不得回退到默认时间或系统时钟；
 虚拟时间 ordinal 固定按 12 月 × 31 日换算世界内分钟。
@@ -605,9 +605,10 @@ Summary Layer 只把“本次投影过滤过至少一条消息”作为尝试加
 普通 `STATUS_TABLES` 层只展示 session 运行时表 ID、表名、作为“用途与更新规则”的
 `description`、完整 KV、更新频率和事件规则，不展示模板来源或通用作用范围。绑定角色的普通表进入独立的
 “角色状态表”段落并按 `characterName` 分组；当前角色绑定不触发额外工具或业务行为。
-角色绑定入库必须校验角色 name 非空；旧 session 缺 name 时优先通过 `characterMountId`
-反查，必要时由状态表 `mountId` 回退到 `story_character_mount_id`，成功后回填。仍无法解析
-的表记录 warning 并从 LLM 上下文排除，不得合并到“未知角色”分组。
+角色绑定入库必须校验角色 name 非空。Story 副本 metadata 缺角色名时，优先按复制时保存的
+`characterId` 读取当前 Story Character；来源定义仍存在时也可从 `source_story_status_table_id`
+对应的角色关联修复，成功后回填副本 metadata。仍无法解析的表记录 warning 并从 LLM 上下文排除，
+不得合并到“未知角色”分组。
 
 上下文基于 Jinja2 模板（`rpg_core/jinja/`），通过 `RPGContext.to_message_objects()`
 展平为 OpenAI-compatible 消息列表。不要在 builder 或 dataclass 中提前拼接最终 prompt，
@@ -658,7 +659,7 @@ Narrative Outcome 是当前剧情分支随机机制：
 - 持久化表是 `rpg_session_narrative_outcomes`，内部保存 sample 和有效权重快照；LLM、Play API outcome 与 WebUI 卡片不得展示 sample、区间或百分比。
 - 配置统一走 `/rp-modules/catalog`、Story `/rp-modules/{module_name}` 和 Session `/rp-modules/{module_name}` 通用接口。PlayTurn 的 nullable `outcome` 用于刷新/分页恢复；流式卡按 turn 去重且不受 `showTools` 控制。
 - canonical 系统配置位于 `rp_modules.modules.narrative_outcome`；`dice.allow_auto_checks` 已移除且旧 key 必须启动失败。
-- 开发期 `0005` 已重写为 `0005_rp_modules.sql`，不兼容执行过旧 `0005_narrative_outcome.sql` 的数据库；此类本地数据应直接重建。
+- 当前数据库是明确不兼容旧 ledger 的硬切 schema：`rpg_data/migrations/` 只保留 `0001_initial.sql`、`0002_demo.sql`、`0003_pagination_demo.sql`。版本、文件名或 checksum 与这三张不完全一致时启动必须 fail-fast，旧数据库直接重建。旧 Story Pack 的数据库 import/check composition root 同样 fail-fast；只有离线包校验可继续使用，新的 Story-owned 导入方案另行实现。
 
 Plot Scheduler 是 Story 级剧情动态调度模块：
 
@@ -668,7 +669,7 @@ Plot Scheduler 是 Story 级剧情动态调度模块：
 - 门禁在 scratch 创建前按当前 Story 最长两条 directive、事件/容器名称与有界判断元数据保守预留。调度实际发生在 Status preflight 之后、Memory recall 之前；因此读取本轮最新 scratch 状态，并让主 Agent 在记忆召回完成后看到已触发指令。
 - 大纲节点不重复；池事件可配置基于世界内分钟的重复冷却。池 lane identity 固定为 `event_id`，事件移到其它池后仍沿用已触发、延期和冷却状态；`container_id` 只表示当时所属池。大纲 lane 与池 lane 独立，但同一事件不得在同 turn 重复注入。
 - Session 只保存池事件/大纲节点禁用覆盖与决策账本。`deferred | error` 不中断主 turn，并跳过配置数量的完整 IC/GM turn 后重试。决策与消息、Narrative Outcome、scene/status 在同一短事务提交；`/clear` 清账本但保留覆盖，Session 派生只复制分支点前 triggered 和覆盖。
-- Play WebUI 只在 `/plot-scheduling` 独立页管理定义、覆盖和运行态；运行态不轮询、不调用 Judge。决策历史按 `id DESC` + `beforeId` 分页，不能改为 `turn_id` 游标，否则同 turn 的 outline/pool 两条记录可能漏页。迁移只把模块加入 catalog，不追溯挂载旧 Story。
+- Play WebUI 只在 `/plot-scheduling` 独立页管理定义、覆盖和运行态；运行态不轮询、不调用 Judge。决策历史按 `id DESC` + `beforeId` 分页，不能改为 `turn_id` 游标，否则同 turn 的 outline/pool 两条记录可能漏页。内置 catalog 包含 Plot Scheduler；默认模块只在 Story 创建时挂载，不追溯修改既有 Story。
 
 Dice 只保留低层随机与调试能力：
 
@@ -747,9 +748,9 @@ Play API 使用 `play_api/settings.yaml` 中的 `api_prefix`，默认 `/play-api
 | workspace | `play_api/routers/workspace.py` | 工作区列表 |
 | sessions | `play_api/routers/sessions.py` | 会话列表、创建、读取、永久删除，以及 `history/history-page/scene/commands/turn/stream/stop` 子资源 |
 | main-llm | `play_api/routers/main_llm.py` | 主 Agent 安全模型目录、story 默认和 session 覆盖 |
-| characters | `play_api/routers/characters.py` | workspace 角色库、角色详情、story 挂载 |
-| lorebook | `play_api/routers/lorebook.py` | workspace 世界书条目、story 挂载 |
-| status-tables | `play_api/routers/status_tables.py` | 状态表模板、story 挂载、session 运行表 |
+| characters | `play_api/routers/characters.py` | Story 直属角色卡与角色详情 CRUD |
+| lorebook | `play_api/routers/lorebook.py` | Story 直属世界书条目 CRUD |
+| status-tables | `play_api/routers/status_tables.py` | Story 直属状态表定义与 Session 运行表 CRUD |
 | dream | `play_api/routers/dream.py` | Session Dream proposal 的创建/读取/编辑/Apply/Reject，以及 Persistent Memory 列表与恢复代理 |
 | events | `play_api/routers/events.py` | 内部终态事件接收与 WebUI 全局 SSE；不查询或修改业务任务 |
 | media | `play_api/routers/media.py` | Session 图片任务、Gallery、背景与 workspace 媒体库代理 |
@@ -800,13 +801,14 @@ Story memory 已由 `rpg_session_story_memories` 持久化，Persistent Memory �
 
 其它 SQL 真源同样不走文件 Manager 模式：`rpg_core.character.CharacterManager`、
 `rpg_core.lorebook.LorebookManager` 和 `rpg_core.status.StatusManager` 只保存
-`session_id` 与数据访问引用，通过 `rpg_data` service 实时读取当前 session 绑定 story 的挂载数据，
-不读取旧 JSON/目录结构，也不注册 `FileWatcher`。是否进入上下文由 story 挂载关系决定。
+`session_id` 与数据访问引用，通过 `rpg_data` service 实时读取当前 Session 所属 Story 的直属资源，
+不读取旧 JSON/目录结构，也不注册 `FileWatcher`。Character/Lorebook 是否进入上下文由 Story 归属决定；
+Status 使用 Session 创建或 reset 时形成的独立运行副本。
 
 `rpg_data.services.status.StatusDataService` 是状态表的公开类型化持久化入口：SQL row 内的
-`document_json` 是正文真源；service 不通过目录扫描发现状态表。它负责模板、Story 挂载、Session
+`document_json` 是正文真源；service 不通过目录扫描发现状态表。它负责 Story 定义、Session
 document、角色关联 read model、deferred progress、last-write-wins 诊断与调用方指定的原子 document
-batch，不决定 Scene、Context 或运行时写入策略。`StatusTableAdministrationService` 负责模板/挂载/Session 表管理规则，
+batch，不决定 Scene、Context 或运行时写入策略。`StatusTableAdministrationService` 负责 Story/Session 表管理规则，
 `SceneStatusService` 负责 Scene 字段约束与 active Scene，`StatusContextService` 负责角色名修复和 Context
 可见性，`StatusManager` 负责 Agent 运行时、deferred 与 bootstrap 写入资格。composition root 从
 `get_data_service_gateway().status` 取得 Data Service 后显式注入，不新增 per-service 全局 getter，也不让
@@ -815,7 +817,7 @@ batch，不决定 Scene、Context 或运行时写入策略。`StatusTableAdminis
 key/value 为准，不依赖 UI 列标题。
 每个 `StatusTableRow` 可配置 `updateFrequency`、`updateRule`、`deferredIntervalTurns`；
 `event_driven` 必须提供非空 `updateRule`，只有 `deferred` 可设置正整数间隔，旧 document 缺字段时按
-`realtime` 读取。deferred 进度保存在 `rpg_session_status_deferred_progress`；历史 truncate 只收缩进度边界、不回滚已经提交的状态值。`/clear` 删除全部进度与旧 `template_copy` 并按当前 Story 挂载重建；`session_native` 表保留 ID 和完整结构，但所有 value 置空。同名原生表与当前模板冲突时 reset 原子失败。
+`realtime` 读取。deferred 进度保存在 `rpg_session_status_deferred_progress`；历史 truncate 只收缩进度边界、不回滚已经提交的状态值。`/clear` 删除全部进度与既有 `story_copy`，再按当前 Story 定义重建；`session_native` 表保留 ID 和完整结构，但所有 value 置空。同名原生表与当前 Story 定义冲突时 reset 原子失败。
 gateway/bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session
 状态表副本，不负责发现或创建业务索引。默认不清理不在 SQL 索引中的 workspace/story/session 目录；
 开启开关是 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true`。
@@ -837,7 +839,7 @@ gateway/bootstrap 只 materialize workspace/story/session 运行目录并初始�
 - Play WebUI 使用 Next.js App Router + React + TypeScript。
 - Play WebUI 只访问 Play API，不直接访问 `data/`。
 - Web 管理能力也沉淀在 Play WebUI 内，不跳转旧 Dashboard。
-- 状态表管理页保持 `系统模板`、`故事状态模板`、`故事运行时` 三个视图：系统模板维护工作区级模板和系统挂载，故事状态模板维护当前 story 已挂载模板、故事内创建模板和角色绑定，故事运行时只维护当前 session 副本。
+- 状态表管理页只保留 `Story 定义` 与 `Session 运行时` 两个视图：前者维护当前 Story 直属定义与角色绑定，后者维护指定 Session 的 Story 副本和 Session 原生表。删除 Story 定义不删除既有 Session 副本。
 - 中文路径在前端 API 层用 `encodeURIComponent()` 编码。
 - `session_id` 输入必须与后端一致，只允许字母、数字、下划线，不允许连字符。
 - Play WebUI 通用配置入口是 `play_webui/play_webui.config.json`；SessionRoom 历史分页读取 `session.historyPagination`，正文门禁读取 `session.contextUsage.inputBlockThresholdRatio`。
@@ -850,8 +852,8 @@ gateway/bootstrap 只 materialize workspace/story/session 运行目录并初始�
 
 ### 数据格式
 
-- **Character/Lorebook**: SQLite（`rpg_data` workspace/story/session catalog + story 挂载表）
-- **Status**: SQLite document 真源。SQL 保存 template/story mount/session copy/origin/source/status_kind/sort_order 与封装后的 `document_json`；对外通过 `StatusTableDocument` / `StatusTableRow` dataclass 访问
+- **Character/Lorebook**: SQLite Story 直属资源；所有读取和写入同时校验 workspace/story 归属
+- **Status**: SQLite document 真源。SQL 保存 Story 定义、Session copy/origin/source/status_kind/sort_order 与封装后的 `document_json`；对外通过 `StatusTableDocument` / `StatusTableRow` dataclass 访问
 - **会话历史**: SQLite `rpg_session_messages` 主表 + `rpg_session_backup_messages` 冷备份表
 - **摘要**: `summaries/` batch + overall 文件；已归纳消息在 `rpg_session_messages` 标记
 - **剧情记忆**: SQLite `rpg_session_story_memories`；已提取消息在 `rpg_session_messages` 标记

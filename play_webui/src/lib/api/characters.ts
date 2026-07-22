@@ -1,87 +1,61 @@
-import type { CharacterCard, CharacterDetail, CharacterDetailInput, CharacterInput, StorySummary } from '@/types/characters'
+import type { CharacterCard, CharacterDetail, CharacterDetailInput, CharacterInput } from '@/types/characters'
 import { getPlayApiBaseUrl } from '@/lib/config/env'
 import { playApiFetch } from './client'
 import { readApiError } from './errors'
 
-export function listStories(workspace: string) {
-  return playApiFetch<StorySummary[]>(`/workspaces/${encodeURIComponent(workspace)}/stories`)
+function storyCharactersPath(workspace: string, storyId: number) {
+  return `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/characters`
 }
 
-export function listCharacters(workspace: string) {
-  return playApiFetch<CharacterCard[]>(`/workspaces/${encodeURIComponent(workspace)}/characters`)
+export function listCharacters(workspace: string, storyId: number) {
+  return playApiFetch<CharacterCard[]>(storyCharactersPath(workspace, storyId))
 }
 
-export function createCharacter(workspace: string, input: CharacterInput) {
-  return playApiFetch<CharacterCard>(`/workspaces/${encodeURIComponent(workspace)}/characters`, {
+export function createCharacter(workspace: string, storyId: number, input: CharacterInput) {
+  return playApiFetch<CharacterCard>(storyCharactersPath(workspace, storyId), {
     method: 'POST',
     body: JSON.stringify(input),
   })
 }
 
-export function updateCharacter(workspace: string, characterId: number, input: Partial<CharacterInput>) {
-  return playApiFetch<CharacterCard>(`/workspaces/${encodeURIComponent(workspace)}/characters/${encodeURIComponent(characterId)}`, {
+export function updateCharacter(workspace: string, storyId: number, characterId: number, input: Partial<CharacterInput>) {
+  return playApiFetch<CharacterCard>(`${storyCharactersPath(workspace, storyId)}/${encodeURIComponent(characterId)}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
   })
 }
 
-export async function deleteCharacter(workspace: string, characterId: number) {
+export async function deleteCharacter(workspace: string, storyId: number, characterId: number) {
   const response = await fetch(
-    `${getPlayApiBaseUrl()}/workspaces/${encodeURIComponent(workspace)}/characters/${encodeURIComponent(characterId)}`,
+    `${getPlayApiBaseUrl()}${storyCharactersPath(workspace, storyId)}/${encodeURIComponent(characterId)}`,
     { method: 'DELETE' },
   )
   if (!response.ok) throw new Error(await readApiError(response))
 }
 
-export function createCharacterDetail(workspace: string, characterId: number, input: CharacterDetailInput) {
+export function createCharacterDetail(workspace: string, storyId: number, characterId: number, input: CharacterDetailInput) {
   return playApiFetch<CharacterDetail>(
-    `/workspaces/${encodeURIComponent(workspace)}/characters/${encodeURIComponent(characterId)}/details`,
-    {
-      method: 'POST',
-      body: JSON.stringify(input),
-    },
+    `${storyCharactersPath(workspace, storyId)}/${encodeURIComponent(characterId)}/details`,
+    { method: 'POST', body: JSON.stringify(input) },
   )
 }
 
 export function updateCharacterDetail(
   workspace: string,
+  storyId: number,
   characterId: number,
   detailId: number,
   input: Partial<CharacterDetailInput>,
 ) {
   return playApiFetch<CharacterDetail>(
-    `/workspaces/${encodeURIComponent(workspace)}/characters/${encodeURIComponent(characterId)}/details/${encodeURIComponent(detailId)}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    },
+    `${storyCharactersPath(workspace, storyId)}/${encodeURIComponent(characterId)}/details/${encodeURIComponent(detailId)}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
   )
 }
 
-export async function deleteCharacterDetail(workspace: string, characterId: number, detailId: number) {
+export async function deleteCharacterDetail(workspace: string, storyId: number, characterId: number, detailId: number) {
   const response = await fetch(
-    `${getPlayApiBaseUrl()}/workspaces/${encodeURIComponent(workspace)}/characters/${encodeURIComponent(characterId)}/details/${encodeURIComponent(detailId)}`,
-    { method: 'DELETE' },
-  )
-  if (!response.ok) throw new Error(await readApiError(response))
-}
-
-export function listStoryCharacters(workspace: string, storyId: number) {
-  return playApiFetch<CharacterCard[]>(
-    `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/characters`,
-  )
-}
-
-export function mountCharacter(workspace: string, storyId: number, characterId: number) {
-  return playApiFetch<CharacterCard>(
-    `/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/characters/${encodeURIComponent(characterId)}/mount`,
-    { method: 'POST' },
-  )
-}
-
-export async function unmountCharacter(workspace: string, storyId: number, mountId: number) {
-  const response = await fetch(
-    `${getPlayApiBaseUrl()}/workspaces/${encodeURIComponent(workspace)}/stories/${encodeURIComponent(storyId)}/character-mounts/${encodeURIComponent(mountId)}`,
+    `${getPlayApiBaseUrl()}${storyCharactersPath(workspace, storyId)}/${encodeURIComponent(characterId)}/details/${encodeURIComponent(detailId)}`,
     { method: 'DELETE' },
   )
   if (!response.ok) throw new Error(await readApiError(response))

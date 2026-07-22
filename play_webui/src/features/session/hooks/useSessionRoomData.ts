@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { listStoryCharacters } from '@/lib/api/characters'
+import { listCharacters } from '@/lib/api/characters'
 import { getContextPreview } from '@/lib/api/contextPreview'
 import { getCurrentScene } from '@/lib/api/scene'
 import { getSession } from '@/lib/api/sessions'
@@ -87,7 +87,7 @@ export function useSessionRoomData({
   const charactersQuery = useQuery({
     queryKey: ['play-story-characters', session?.workspace, session?.storyId],
     enabled: Boolean(session?.workspace && session?.storyId),
-    queryFn: () => listStoryCharacters(session?.workspace ?? '', session?.storyId ?? 0),
+    queryFn: () => listCharacters(session?.workspace ?? '', session?.storyId ?? 0),
   })
 
   const characters = charactersQuery.data ?? []

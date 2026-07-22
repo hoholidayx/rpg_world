@@ -19,7 +19,6 @@ NPC_CONTROL_ROLE = "npc"
 
 class PlayerCharacterContext(Protocol):
     character_id: int
-    mount_id: int
     story_id: int
     name: str
 
@@ -39,7 +38,7 @@ def build_player_character_section(
             f"当前玩家扮演角色：{player_name}\n"
             f"- 在 IC 叙事中，玩家输入、玩家使用的第一人称“我”，以及旁白面向玩家的第二人称“你”，"
             f"均指向 {player_name}。\n"
-            "- 除当前玩家角色外，其余挂载角色均为 NPC；不得把任何 NPC 当作玩家。\n"
+            "- 除当前玩家角色外，当前 Story 的其余角色均为 NPC；不得把任何 NPC 当作玩家。\n"
             f"- 不得替 {player_name} 新增台词、重大行动、内心决定或关键选择；这些内容由玩家决定。\n"
             "- 若故事固定提示词、开场消息、历史、摘要、剧情记忆、召回记忆、角色 metadata "
             "或其它旧内容与本绑定冲突，必须以本节的 session 绑定为准。"
@@ -78,13 +77,9 @@ def _matches_player_character(
 ) -> bool:
     try:
         character_id = int(character.get("id") or 0)
-        mount_id = int(character.get("mount_id") or 0)
     except (TypeError, ValueError):
         return False
-    return (
-        character_id == int(player_character.character_id)
-        and mount_id == int(player_character.mount_id)
-    )
+    return character_id == int(player_character.character_id)
 
 
 class PlayerCharacterFixedLayerContributor(FixedLayerContributor):

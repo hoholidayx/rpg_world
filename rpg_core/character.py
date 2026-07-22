@@ -1,4 +1,4 @@
-"""Thin core adapter for character cards mounted to a session's story."""
+"""Thin core adapter for character cards owned by a Session's Story."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class CharacterReadPort(Protocol):
 
 
 class CharacterManager:
-    """Read character cards mounted to one session's story."""
+    """Read character cards owned by one Session's Story."""
 
     def __init__(
         self,
@@ -32,7 +32,7 @@ class CharacterManager:
         self._service = service
 
     def list_characters(self) -> list[dict[str, object]]:
-        """Return all character cards mounted to this session's story."""
+        """Return all character cards owned by this Session's Story."""
 
         return [
             _character_to_dict(character)
@@ -40,12 +40,12 @@ class CharacterManager:
         ]
 
     def list_enabled_characters(self) -> list[dict[str, object]]:
-        """Compatibility alias for mounted character cards."""
+        """Compatibility alias for Story-owned character cards."""
 
         return self.list_characters()
 
     def get_character(self, name: str) -> dict[str, object]:
-        """Return a mounted character card by name."""
+        """Return a Story-owned character card by name."""
 
         character = self._service.get_character(self.session_id, name)
         if character is None:
@@ -53,7 +53,7 @@ class CharacterManager:
         return _character_to_dict(character)
 
     def list_details(self, character_name: str) -> list[dict[str, object]]:
-        """Return all details for a mounted character."""
+        """Return all details for a Story-owned character."""
 
         character = self.get_character(character_name)
         return list(character.get("details", []))
@@ -67,7 +67,7 @@ class CharacterManager:
         raise FileNotFoundError(f"Detail not found: {detail_name}")
 
     def list_detail_names(self, character_name: str) -> list[str]:
-        """Return all detail names for a mounted character."""
+        """Return all detail names for a Story-owned character."""
 
         return [
             str(detail["name"])
@@ -89,7 +89,7 @@ class CharacterManager:
         ]
 
     def get_all_details(self, character_name: str) -> list[dict[str, object]]:
-        """Return all details for a mounted character."""
+        """Return all details for a Story-owned character."""
 
         return self.list_details(character_name)
 
@@ -97,7 +97,6 @@ class CharacterManager:
 def _character_to_dict(character: "SessionCharacter") -> dict[str, object]:
     return {
         "id": character.id,
-        "mount_id": character.mount_id,
         "workspace_id": character.workspace_id,
         "story_id": character.story_id,
         "name": character.name,
@@ -114,7 +113,7 @@ def _character_to_dict(character: "SessionCharacter") -> dict[str, object]:
 def _detail_to_dict(detail: "SessionCharacterDetail") -> dict[str, object]:
     return {
         "id": detail.id,
-        "character_id": detail.character_id,
+        "story_character_id": detail.story_character_id,
         "name": detail.name,
         "content": detail.content,
         "tags": list(detail.tags),

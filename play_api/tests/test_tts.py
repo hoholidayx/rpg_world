@@ -54,6 +54,7 @@ class _FakeTTSClient:
 
 
 def test_play_api_tts_proxy_contract(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
     monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
     reset_data_service_gateways()
     tts_client._client = _FakeTTSClient()  # type: ignore[assignment]

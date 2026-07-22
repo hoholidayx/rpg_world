@@ -49,12 +49,12 @@ class UnindexedRuntimeDeleteRequest(BaseModel):
     items: list[UnindexedRuntimeItem] = Field(default_factory=list)
 
 
-def _entry_delete_purpose(workspace_id: str, entry_id: int) -> str:
-    return f"ops:lorebook_entry:{workspace_id}:{entry_id}"
-
-
-def _mount_delete_purpose(workspace_id: str, story_id: int, mount_id: int) -> str:
-    return f"ops:lorebook_mount:{workspace_id}:{story_id}:{mount_id}"
+def _entry_delete_purpose(
+    workspace_id: str,
+    story_id: int,
+    entry_id: int,
+) -> str:
+    return f"ops:lorebook_entry:{workspace_id}:{story_id}:{entry_id}"
 
 
 def _unindexed_delete_purpose(items: list[UnindexedRuntimeItem]) -> str:
@@ -157,60 +157,46 @@ async def delete_unindexed_runtime(
 
 
 @router.post(
-    "/workspaces/{workspace_id}/lorebook-entries/{entry_id}/delete-token",
+    "/workspaces/{workspace_id}/stories/{story_id}/lorebook-entries/{entry_id}/delete-token",
     response_model=PlayDeleteConfirmationToken,
 )
 async def create_lorebook_entry_delete_token(
     workspace_id: str,
+    story_id: int,
     entry_id: int,
 ) -> PlayDeleteConfirmationToken:
-    entry = await get_data_manager_backend().get_lorebook_entry(workspace_id, entry_id)
+    entry = await get_data_manager_backend().get_lorebook_entry(
+        workspace_id,
+        story_id,
+        entry_id,
+    )
     if entry is None:
         raise HTTPException(status_code=404, detail="lorebook entry not found")
-    issued = issue_delete_confirmation_token(_entry_delete_purpose(workspace_id, entry_id))
+    issued = issue_delete_confirmation_token(
+        _entry_delete_purpose(workspace_id, story_id, entry_id)
+    )
     return PlayDeleteConfirmationToken(token=issued.token, expires_in_seconds=issued.expires_in_seconds)
 
 
-@router.delete("/workspaces/{workspace_id}/lorebook-entries/{entry_id}", status_code=204)
+@router.delete(
+    "/workspaces/{workspace_id}/stories/{story_id}/lorebook-entries/{entry_id}",
+    status_code=204,
+)
 async def delete_lorebook_entry(
     workspace_id: str,
+    story_id: int,
     entry_id: int,
     x_delete_confirm_token: str | None = Header(default=None, alias=DELETE_CONFIRMATION_HEADER),
     confirm_token: str | None = Query(default=None),
 ) -> None:
-    _require_delete_token(x_delete_confirm_token or confirm_token, _entry_delete_purpose(workspace_id, entry_id))
-    deleted = await get_data_manager_backend().delete_lorebook_entry(workspace_id, entry_id)
+    _require_delete_token(
+        x_delete_confirm_token or confirm_token,
+        _entry_delete_purpose(workspace_id, story_id, entry_id),
+    )
+    deleted = await get_data_manager_backend().delete_lorebook_entry(
+        workspace_id,
+        story_id,
+        entry_id,
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="lorebook entry not found")
-
-
-@router.post(
-    "/workspaces/{workspace_id}/stories/{story_id}/lorebook-mounts/{mount_id}/delete-token",
-    response_model=PlayDeleteConfirmationToken,
-)
-async def create_lorebook_mount_delete_token(
-    workspace_id: str,
-    story_id: int,
-    mount_id: int,
-) -> PlayDeleteConfirmationToken:
-    exists = await get_data_manager_backend().get_lorebook_mount(workspace_id, story_id, mount_id)
-    if exists is None:
-        raise HTTPException(status_code=404, detail="story or lorebook mount not found")
-    issued = issue_delete_confirmation_token(_mount_delete_purpose(workspace_id, story_id, mount_id))
-    return PlayDeleteConfirmationToken(token=issued.token, expires_in_seconds=issued.expires_in_seconds)
-
-
-@router.delete("/workspaces/{workspace_id}/stories/{story_id}/lorebook-mounts/{mount_id}", status_code=204)
-async def unmount_lorebook_entry(
-    workspace_id: str,
-    story_id: int,
-    mount_id: int,
-    x_delete_confirm_token: str | None = Header(default=None, alias=DELETE_CONFIRMATION_HEADER),
-    confirm_token: str | None = Query(default=None),
-) -> None:
-    _require_delete_token(x_delete_confirm_token or confirm_token, _mount_delete_purpose(workspace_id, story_id, mount_id))
-    deleted = await get_data_manager_backend().unmount_lorebook_entry(workspace_id, story_id, mount_id)
-    if deleted is None:
-        raise HTTPException(status_code=404, detail="story not found in workspace")
-    if not deleted:
-        raise HTTPException(status_code=404, detail="lorebook mount not found")
