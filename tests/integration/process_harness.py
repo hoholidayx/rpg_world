@@ -6,9 +6,8 @@ import json
 import multiprocessing
 import os
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from llm_client.types import DocumentScoreProvider, LLMProvider
@@ -71,7 +70,7 @@ def _serve(kind: str, config: dict[str, Any], sender) -> None:  # noqa: ANN001
         app, prefix = _build_app(kind, config)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("127.0.0.1", 0))
+        sock.bind(("127.0.0.1", int(config.get("port", 0))))
         sock.listen(128)
         port = int(sock.getsockname()[1])
         sender.send({"port": port, "prefix": prefix})
@@ -105,6 +104,8 @@ def _serve(kind: str, config: dict[str, Any], sender) -> None:  # noqa: ANN001
 def _configure_environment(config: dict[str, Any]) -> None:
     os.environ["RPG_WORLD_PROFILE"] = "test"
     os.environ["RPG_WORLD_LLM_SERVICE_TOKEN"] = _TOKEN
+    os.environ["RPG_WORLD_PLAY_EVENT_TOKEN"] = _TOKEN
+    os.environ.setdefault("OPENAI_API_KEY", "test")
     if config.get("db_path"):
         os.environ["RPG_WORLD_DB_PATH"] = str(config["db_path"])
     if config.get("workspace_root"):
@@ -116,8 +117,12 @@ def _build_app(kind: str, config: dict[str, Any]):  # noqa: ANN202
         return _build_llm_app(), "/llm/v1"
     if kind == "agent":
         return _build_agent_app(config), "/agent/v1"
+    if kind == "dream":
+        return _build_dream_app(config), "/dream/v1"
     if kind == "media":
         return _build_media_app(config), "/media/v1"
+    if kind == "tts":
+        return _build_tts_app(config), "/tts/v1"
     if kind == "play":
         return _build_play_app(config), "/play-api/v1"
     raise ValueError(f"Unknown service kind: {kind}")
@@ -134,22 +139,72 @@ def _build_llm_app():  # noqa: ANN202
 
 def _build_agent_app(config: dict[str, Any]):  # noqa: ANN202
     from agent_service import main as service_main
+    from agent_service.settings import AgentServiceSettings
+    from rpg_core.utils.watcher import get_watcher
 
-    service_main.process_settings = SimpleNamespace(
-        service=service_main.process_settings.service,
-        llm_client=SimpleNamespace(
-            base_url=str(config["llm_url"]),
-            token=_TOKEN,
-            request_timeout_ms=5_000,
-            stream_timeout_ms=10_000,
-        ),
+    configured_llm = replace(
+        service_main.process_settings.llm_client,
+        base_url=str(config["llm_url"]),
+        request_timeout_ms=5_000,
+        stream_timeout_ms=10_000,
     )
+    configured_events = replace(
+        service_main.process_settings.play_events,
+        enabled=True,
+        endpoint_url=str(config["play_event_url"]),
+        timeout_ms=5_000,
+    )
+
+    class HarnessAgentSettings(AgentServiceSettings):
+        @property
+        def llm_client(self):  # noqa: ANN201
+            return configured_llm
+
+        @property
+        def play_events(self):  # noqa: ANN201
+            return configured_events
+
+    service_main.process_settings = HarnessAgentSettings()
+    watcher = get_watcher()
+    watcher.start = lambda: None  # type: ignore[method-assign]
+    watcher.stop = lambda: None  # type: ignore[method-assign]
+    return service_main.app
+
+
+def _build_dream_app(config: dict[str, Any]):  # noqa: ANN202
+    from dream_service import main as service_main
+    from dream_service.settings import DreamServiceSettings
+
+    configured_llm = replace(
+        service_main.settings.llm_client,
+        base_url=str(config["llm_url"]),
+        request_timeout_ms=5_000,
+        stream_timeout_ms=10_000,
+    )
+    configured_events = replace(
+        service_main.settings.play_events,
+        enabled=True,
+        endpoint_url=str(config["play_event_url"]),
+        timeout_ms=5_000,
+    )
+
+    class HarnessDreamSettings(DreamServiceSettings):
+        @property
+        def llm_client(self):  # noqa: ANN201
+            return configured_llm
+
+        @property
+        def play_events(self):  # noqa: ANN201
+            return configured_events
+
+    service_main.settings = HarnessDreamSettings("test")
     return service_main.app
 
 
 def _build_media_app(config: dict[str, Any]):  # noqa: ANN202
     from media_service import main as service_main
     from media_service.main import MediaRuntime
+    from media_service.settings import MediaServiceSettings
     from media_service.worker import MediaJobWorker
     from rpg_data.services import get_data_service_gateway
     from rpg_core.scene.status import SceneStatusService
@@ -158,17 +213,19 @@ def _build_media_app(config: dict[str, Any]):  # noqa: ANN202
     from rpg_media.providers.catalog import MediaProviderCatalog
     from rpg_media.providers.local_file import LocalFileProvider
 
-    service_main.process_settings = SimpleNamespace(
-        service=service_main.process_settings.service,
-        worker=SimpleNamespace(concurrency=1),
-        background_worker=SimpleNamespace(concurrency=1),
-        llm_client=SimpleNamespace(
-            base_url=str(config["llm_url"]),
-            token=_TOKEN,
-            request_timeout_ms=5_000,
-            stream_timeout_ms=10_000,
-        ),
+    configured_llm = replace(
+        service_main.process_settings.llm_client,
+        base_url=str(config["llm_url"]),
+        request_timeout_ms=5_000,
+        stream_timeout_ms=10_000,
     )
+
+    class HarnessMediaSettings(MediaServiceSettings):
+        @property
+        def llm_client(self):  # noqa: ANN201
+            return configured_llm
+
+    service_main.process_settings = HarnessMediaSettings("test")
     gateway = get_data_service_gateway()
     media_service = MediaApplicationService(
         data=gateway.media,
@@ -189,11 +246,33 @@ def _build_media_app(config: dict[str, Any]):  # noqa: ANN202
     return service_main.app
 
 
+def _build_tts_app(config: dict[str, Any]):  # noqa: ANN202
+    from tts_service import main as service_main
+    from tts_service.settings import TTSServiceSettings
+
+    configured_llm = replace(
+        service_main.settings.llm_client,
+        base_url=str(config["llm_url"]),
+        request_timeout_ms=5_000,
+        stream_timeout_ms=10_000,
+    )
+
+    class HarnessTTSSettings(TTSServiceSettings):
+        @property
+        def llm_client(self):  # noqa: ANN201
+            return configured_llm
+
+    service_main.settings = HarnessTTSSettings("test")
+    return service_main.app
+
+
 def _build_play_app(config: dict[str, Any]):  # noqa: ANN202
     from agent_service.client import AgentClient
+    from dream_service.client import DreamClient
     from media_service.client import MediaClient
-    from play_api import agent_client, media_client
+    from play_api import agent_client, dream_client, media_client, tts_client
     from play_api import main as service_main
+    from tts_service.client import TTSClient
 
     agent_client._client = AgentClient(
         base_url=str(config["agent_url"]),
@@ -202,6 +281,14 @@ def _build_play_app(config: dict[str, Any]):  # noqa: ANN202
     )
     media_client._client = MediaClient(
         base_url=str(config["media_url"]),
+        request_timeout_ms=5_000,
+    )
+    dream_client._client = DreamClient(
+        base_url=str(config["dream_url"]),
+        request_timeout_ms=10_000,
+    )
+    tts_client._client = TTSClient(
+        base_url=str(config["tts_url"]),
         request_timeout_ms=5_000,
     )
     return service_main.app
@@ -220,10 +307,61 @@ class _DeterministicProvider(LLMProvider):
         )
         from llm_client.types import LLMResponse, LLMUsage
 
-        del messages
         content = ""
         tool_calls = None
-        if self.biz_key == AGENT_MAIN_BIZ_KEY:
+        tool_name = ""
+        if tools:
+            tool_name = str(tools[0].get("function", {}).get("name", ""))
+        if tool_name == "submit_dream_candidates":
+            payload = json.loads(str(messages[-1].get("content") or "{}"))
+            evidence_ids = [
+                int(message_id)
+                for source in payload.get("sources", [])
+                for message_id in source.get("allowedEvidenceMessageIds", [])
+            ]
+            arguments = {
+                "candidates": (
+                    [
+                        {
+                            "candidateId": "integration-dream-candidate",
+                            "text": "测试者确认银色天文仪位于月光大厅。",
+                            "memoryKind": "world_fact",
+                            "epistemicStatus": "confirmed",
+                            "salience": 0.85,
+                            "dedupeKey": "integration-dream-fact",
+                            "evidenceMessageIds": [evidence_ids[-1]],
+                        }
+                    ]
+                    if evidence_ids
+                    else []
+                )
+            }
+            tool_calls = [_tool_call(tool_name, arguments)]
+        elif tool_name == "submit_dream_proposal":
+            payload = json.loads(str(messages[-1].get("content") or "{}"))
+            candidates = payload.get("candidates", [])
+            candidate = candidates[0] if candidates else None
+            arguments = {
+                "items": (
+                    [
+                        {
+                            "action": "add",
+                            "targetMemoryId": None,
+                            "text": candidate["text"],
+                            "memoryKind": candidate["memoryKind"],
+                            "epistemicStatus": candidate["epistemicStatus"],
+                            "salience": candidate["salience"],
+                            "dedupeKey": candidate["dedupeKey"],
+                            "evidenceMessageIds": candidate["evidenceMessageIds"],
+                            "reason": "真实 HTTP Dream 集成候选。",
+                        }
+                    ]
+                    if candidate is not None
+                    else []
+                )
+            }
+            tool_calls = [_tool_call(tool_name, arguments)]
+        elif self.biz_key == AGENT_MAIN_BIZ_KEY:
             content = "<rp-narration>真实 HTTP 集成回复。</rp-narration>"
         elif self.biz_key == MEDIA_VISUAL_BRIEF_BIZ_KEY:
             content = json.dumps(
@@ -270,7 +408,7 @@ class _DeterministicProvider(LLMProvider):
         return LLMResponse(
             content=content,
             tool_calls=tool_calls,
-            finish_reason="stop",
+            finish_reason="tool_calls" if tool_calls else "stop",
             usage=LLMUsage(prompt_tokens=5, completion_tokens=3, total_tokens=8),
             model=f"integration-{self.biz_key}",
         )
@@ -316,6 +454,35 @@ class _DeterministicScoreProvider(_DeterministicProvider, DocumentScoreProvider)
         ]
 
 
+def _tool_call(name: str, arguments: dict[str, object]) -> dict[str, object]:
+    return {
+        "id": f"integration-{name}",
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": json.dumps(arguments, ensure_ascii=False),
+        },
+    }
+
+
+class _DeterministicSpeechProvider:
+    def __init__(self) -> None:
+        from llm_service.openai_speech import SpeechProfile
+
+        self.profile = SpeechProfile(
+            provider_key="integration-speech",
+            model="integration-tts",
+            voice="alloy",
+            response_format="mp3",
+            speed=1.0,
+            cache_revision="integration-v1",
+            config_fingerprint="d" * 64,
+        )
+
+    async def synthesize(self, text: str) -> bytes:
+        return b"ID3" + text.encode("utf-8")
+
+
 class _DeterministicLLMManager:
     def __init__(self) -> None:
         self._providers: dict[str, object] = {}
@@ -331,6 +498,23 @@ class _DeterministicLLMManager:
                 else _DeterministicProvider(biz_key)
             )
         return self._providers[biz_key]
+
+    def get_speech_provider(
+        self,
+        biz_key: str,
+        *,
+        provider_key: str | None = None,
+    ) -> _DeterministicSpeechProvider:
+        del provider_key
+        if biz_key != "tts.reply":
+            raise ValueError(f"unsupported integration speech key: {biz_key}")
+        provider = self._providers.get(biz_key)
+        if provider is None:
+            provider = _DeterministicSpeechProvider()
+            self._providers[biz_key] = provider
+        if not isinstance(provider, _DeterministicSpeechProvider):
+            raise TypeError("integration speech provider cache is inconsistent")
+        return provider
 
 
 __all__ = ["ServiceProcess", "start_service", "_TOKEN"]

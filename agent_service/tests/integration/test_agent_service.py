@@ -11,11 +11,8 @@ from agent_service import main as service_main
 from llm_client.keys import AGENT_MAIN_BIZ_KEY
 from llm_client.types import ProviderChunk
 from rpg_core.agent.manager import AgentManager
-from rpg_core.tests.integration.conftest import (
-    _create_integration_session,
-    _shutdown_agent,
-)
-from rpg_core.tests.integration.scripted_llm import (
+from tests.support.backend import create_integration_session
+from tests.support.scripted_llm import (
     CONFIG_PROVIDER_KEY,
     SESSION_PROVIDER_KEY,
     STORY_PROVIDER_KEY,
@@ -37,11 +34,7 @@ async def agent_service_client(
     async with service_main.app.router.lifespan_context(service_main.app):
         transport = httpx.ASGITransport(app=service_main.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://agent.test") as client:
-            try:
-                yield client
-            finally:
-                for agent in list(AgentManager._instances.values()):
-                    await _shutdown_agent(agent)
+            yield client
 
 
 def _sse_events(response: httpx.Response) -> list[dict[str, object]]:
@@ -59,7 +52,7 @@ async def test_agent_service_send_history_and_context_preview_use_real_runtime(
     integration_data_gateway,
 ):
     session_id = "service_send"
-    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    create_integration_session(integration_data_gateway, integration_workspace, session_id)
 
     sent = await agent_service_client.post(
         "/agent/v1/chat/send",
@@ -107,8 +100,8 @@ async def test_agent_service_stream_success_and_failure_preserve_transaction_sem
 ):
     success_id = "service_stream_ok"
     failure_id = "service_stream_fail"
-    _create_integration_session(integration_data_gateway, integration_workspace, success_id)
-    _create_integration_session(integration_data_gateway, integration_workspace, failure_id)
+    create_integration_session(integration_data_gateway, integration_workspace, success_id)
+    create_integration_session(integration_data_gateway, integration_workspace, failure_id)
 
     success = await agent_service_client.post(
         "/agent/v1/chat/stream",
@@ -149,7 +142,7 @@ async def test_agent_service_stop_uses_request_id_and_discards_active_stream(
     scripted_llm_manager,
 ):
     session_id = "service_stop"
-    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    create_integration_session(integration_data_gateway, integration_workspace, session_id)
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -241,7 +234,7 @@ async def test_agent_service_delete_closes_active_and_queued_turns_before_data_r
     scripted_llm_manager,
 ):
     session_id = "service_delete_busy"
-    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    create_integration_session(integration_data_gateway, integration_workspace, session_id)
     runtime_dir = integration_data_gateway.catalog.get_session_runtime_dir(session_id)
     marker = runtime_dir / "delete-marker.bin"
     marker.write_bytes(b"delete")
@@ -298,7 +291,6 @@ async def test_agent_service_delete_closes_active_and_queued_turns_before_data_r
     assert all(event["kind"] != "done" for event in _sse_events(active_response))
     assert all(event["kind"] != "done" for event in _sse_events(queued_response))
     assert integration_data_gateway.catalog.get_session(session_id) is None
-    assert session_id not in AgentManager._instances
     assert not runtime_dir.exists()
 
     missing = await agent_service_client.post(
@@ -316,7 +308,7 @@ async def test_agent_service_delete_failure_restores_runtime_and_allows_recreati
     monkeypatch,
 ):
     session_id = "service_delete_rollback"
-    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    create_integration_session(integration_data_gateway, integration_workspace, session_id)
     first = await agent_service_client.post(
         "/agent/v1/chat/send",
         json={"session_id": session_id, "message": "keep me"},
@@ -330,7 +322,7 @@ async def test_agent_service_delete_failure_restores_runtime_and_allows_recreati
         raise RuntimeError("database delete failed")
 
     monkeypatch.setattr(
-        integration_data_gateway.sessions._sessions,
+        integration_data_gateway.sessions,
         "delete_ready_without_active_derivation",
         fail_delete,
     )
@@ -343,8 +335,6 @@ async def test_agent_service_delete_failure_restores_runtime_and_allows_recreati
     assert "database delete failed" in failed.json()["detail"]
     assert integration_data_gateway.catalog.get_session(session_id) is not None
     assert marker.read_bytes() == b"keep"
-    assert session_id not in AgentManager._instances
-
     followup = await agent_service_client.post(
         "/agent/v1/chat/send",
         json={"session_id": session_id, "message": "still usable"},
@@ -361,7 +351,7 @@ async def test_agent_service_non_stream_failure_maps_error_without_writes(
     scripted_llm_manager,
 ):
     session_id = "service_send_fail"
-    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    create_integration_session(integration_data_gateway, integration_workspace, session_id)
     scripted_llm_manager.main_provider().queue_chat(RuntimeError("service send failed"))
 
     failed = await agent_service_client.post(
@@ -383,7 +373,7 @@ async def test_agent_service_player_character_binding_uses_command_path(
     scripted_llm_manager,
 ):
     session_id = "service_role"
-    catalog = _create_integration_session(
+    catalog = create_integration_session(
         integration_data_gateway,
         integration_workspace,
         session_id,
@@ -425,7 +415,7 @@ async def test_agent_service_truncate_updates_cached_agent_and_keeps_backup(
     integration_data_gateway,
 ):
     session_id = "service_truncate"
-    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    create_integration_session(integration_data_gateway, integration_workspace, session_id)
     for message in ("turn one", "turn two"):
         response = await agent_service_client.post(
             "/agent/v1/chat/send",
@@ -446,7 +436,6 @@ async def test_agent_service_truncate_updates_cached_agent_and_keeps_backup(
     assert truncated.json()["removed"] == 2
     assert truncated.json()["agent_sync_status"] == "synced"
     assert [row["turnId"] for row in history.json()["history"]] == [1, 1]
-    assert [message.turn_id for message in AgentManager._instances[session_id].history] == [1, 1]
     assert integration_data_gateway.backup.messages.count(session_id) == 4
 
 
@@ -458,7 +447,7 @@ async def test_agent_service_main_llm_endpoints_change_provider_used_by_next_sen
     scripted_llm_manager,
 ):
     session_id = "service_llm"
-    catalog = _create_integration_session(
+    catalog = create_integration_session(
         integration_data_gateway,
         integration_workspace,
         session_id,

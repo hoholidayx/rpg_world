@@ -19,22 +19,25 @@
 | LLM Service | `llm_service/tests` | 真实 HTTP catalog/chat/stream/embed/rerank | health 免鉴权、业务鉴权、typed codec、远端不可用映射与 degraded health |
 | Media 生成 | `rpg_media/tests`、`media_service/tests` | Play → Media → worker → 文件 | 来源指纹、VisualBrief、持久 job、Gallery、魔数存储、内容流式转发 |
 | Media 背景与删除 | `media_service/tests` | 真实 Play/Media HTTP | 背景引用阻止 Asset 删除；媒体故障返回 503 且不影响聊天 |
-| 服务生命周期 | 各 service lifespan 契约 | 四个独立子进程 | 随机端口、共享临时 SQLite、连接池 loop 归属、优雅关闭和无残留 |
+| Dream | `rpg_memory/tests`、`dream_service/tests` | Play → Dream → LLM → SQL | proposal 生成、终态读取、Apply 与 Persistent Memory 投影 |
+| TTS | `rpg_tts/tests`、`tts_service/tests` | Play → TTS → LLM speech → MP3 | assistant 来源资格、持久 job、音频落盘与二进制代理 |
+| 后台终态事件 | `play_api/tests/test_events.py`、Agent/Dream 通知契约 | Agent/Dream → Play Event Hub → SSE | 鉴权、Dream/Derivation 终态类型与无持久补发语义 |
+| 服务生命周期 | 各 service lifespan 契约 | 六个独立子进程 | 随机端口、共享临时 SQLite、连接池 loop 归属、优雅关闭和无残留 |
 
 ## Commands
 
 ```bash
 # 全后端单元与契约基线
-uv run python -m pytest channels/tests rpg_core/tests rpg_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests -q
+uv run python -m pytest channels/tests rpg_core/tests rpg_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests rpg_tts/tests tts_service/tests dream_service/tests -q
 
-# 真实 SQLite + RPGGameAgent + Agent Service ASGI
-INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q
+# 真实 SQLite + RPGGameAgent + Agent Service ASGI；确定性用例也是默认基线的一部分
+uv run python -m pytest rpg_core/tests/integration agent_service/tests/integration -q
 
-# 独立 LLM / Agent / Media / Play 进程与真实 HTTP/SSE
+# 独立 LLM / Agent / Dream / Media / TTS / Play 进程与真实 HTTP/SSE
 SERVICE_INTEGRATION_TEST=1 uv run python -m pytest tests/integration -m service_integration -q
 
 # 真实模型只做显式人工验证，不进入 PR 门禁
-LIVE_LLM_TEST=1 INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration/test_live_llm.py -q
+LIVE_LLM_TEST=1 uv run python -m pytest rpg_core/tests/integration/test_live_llm.py -q
 ```
 
 新增或调整跨模块核心行为时，应先更新本矩阵，再选择最低且足以覆盖真实边界的测试层。不要用 service integration 重复纯 schema、校验分支或 Provider 内部算法测试。

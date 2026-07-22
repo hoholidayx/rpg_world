@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,9 +11,9 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from rpg_core.tests.integration.conftest import _create_integration_session
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
 from tests.integration.process_harness import ServiceProcess, _TOKEN, start_service
+from tests.support.backend import create_integration_session
 
 
 pytestmark = [
@@ -28,18 +29,31 @@ pytestmark = [
 class BackendStack:
     llm: ServiceProcess
     agent: ServiceProcess
+    dream: ServiceProcess
     media: ServiceProcess
+    tts: ServiceProcess
     play: ServiceProcess
     db_path: Path
     workspace_root: Path
 
     def stop(self) -> None:
-        for service in (self.play, self.media, self.agent, self.llm):
+        for service in (
+            self.tts,
+            self.media,
+            self.dream,
+            self.agent,
+            self.play,
+            self.llm,
+        ):
             service.stop()
 
 
 @pytest_asyncio.fixture
-async def backend_stack(tmp_path: Path, monkeypatch) -> BackendStack:
+async def backend_stack(
+    tmp_path: Path,
+    monkeypatch,
+    unused_tcp_port_factory,
+) -> BackendStack:
     db_path = tmp_path / "backend-stack.sqlite3"
     workspace_root = tmp_path / "workspace"
     provider_dir = tmp_path / "provider"
@@ -58,48 +72,89 @@ async def backend_stack(tmp_path: Path, monkeypatch) -> BackendStack:
         "service_stack_delete",
         "service_stack_failure",
     ):
-        _create_integration_session(
+        create_integration_session(
             gateway,
             workspace_root,
             session_id,
         )
     reset_data_service_gateways()
 
+    ports = {
+        kind: unused_tcp_port_factory()
+        for kind in ("llm", "agent", "dream", "media", "tts", "play")
+    }
+    urls = {
+        "llm": f"http://127.0.0.1:{ports['llm']}/llm/v1",
+        "agent": f"http://127.0.0.1:{ports['agent']}/agent/v1",
+        "dream": f"http://127.0.0.1:{ports['dream']}/dream/v1",
+        "media": f"http://127.0.0.1:{ports['media']}/media/v1",
+        "tts": f"http://127.0.0.1:{ports['tts']}/tts/v1",
+        "play": f"http://127.0.0.1:{ports['play']}/play-api/v1",
+    }
+    play_event_url = f"{urls['play']}/internal/events"
+
     started: list[ServiceProcess] = []
     try:
-        llm = start_service("llm")
+        llm = start_service("llm", port=ports["llm"])
         started.append(llm)
         await _wait_ready(llm)
-        agent = start_service(
-            "agent",
+        play = start_service(
+            "play",
+            port=ports["play"],
             db_path=db_path,
             workspace_root=workspace_root,
-            llm_url=llm.base_url,
+            agent_url=urls["agent"],
+            dream_url=urls["dream"],
+            media_url=urls["media"],
+            tts_url=urls["tts"],
+        )
+        started.append(play)
+        await _wait_ready(play, path="/sessions/service_stack_main")
+        agent = start_service(
+            "agent",
+            port=ports["agent"],
+            db_path=db_path,
+            workspace_root=workspace_root,
+            llm_url=urls["llm"],
+            play_event_url=play_event_url,
         )
         started.append(agent)
         await _wait_ready(agent)
-        media = start_service(
-            "media",
+        dream = start_service(
+            "dream",
+            port=ports["dream"],
             db_path=db_path,
             workspace_root=workspace_root,
-            llm_url=llm.base_url,
+            llm_url=urls["llm"],
+            play_event_url=play_event_url,
+        )
+        started.append(dream)
+        await _wait_ready(dream)
+        media = start_service(
+            "media",
+            port=ports["media"],
+            db_path=db_path,
+            workspace_root=workspace_root,
+            llm_url=urls["llm"],
             provider_dir=provider_dir,
         )
         started.append(media)
         await _wait_ready(media)
-        play = start_service(
-            "play",
+        tts = start_service(
+            "tts",
+            port=ports["tts"],
             db_path=db_path,
             workspace_root=workspace_root,
-            agent_url=agent.base_url,
-            media_url=media.base_url,
+            llm_url=urls["llm"],
         )
-        started.append(play)
-        await _wait_ready(play, path="/sessions/service_stack_main")
+        started.append(tts)
+        await _wait_ready(tts)
         stack = BackendStack(
             llm=llm,
             agent=agent,
+            dream=dream,
             media=media,
+            tts=tts,
             play=play,
             db_path=db_path,
             workspace_root=workspace_root,
@@ -136,8 +191,31 @@ def _data_payloads(text: str) -> list[dict[str, object]]:
     ]
 
 
+async def _next_play_event(lines: AsyncIterator[str]) -> dict[str, object]:
+    async for line in lines:
+        if line.startswith("data: "):
+            return json.loads(line.removeprefix("data: "))
+    raise RuntimeError("Play event stream ended before a data event")
+
+
+async def _wait_for_terminal_payload(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    active_statuses: set[str],
+) -> dict[str, object]:
+    for _ in range(200):
+        response = await client.get(url)
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["status"] not in active_statuses:
+            return payload
+        await asyncio.sleep(0.03)
+    raise AssertionError(f"backend job did not reach a terminal state: {url}")
+
+
 @pytest.mark.asyncio
-async def test_backend_services_cover_chat_media_deletion_and_failure_isolation(
+async def test_backend_services_cover_chat_dream_media_tts_events_and_failure_isolation(
     backend_stack: BackendStack,
 ) -> None:
     auth = {"Authorization": f"Bearer {_TOKEN}"}
@@ -205,6 +283,112 @@ async def test_backend_services_cover_chat_media_deletion_and_failure_isolation(
         assert stream_events[-1]["payload"]["committedTurnId"] == 2
         assert len(history.json()) == 2
         assert [turn_payload["turnId"] for turn_payload in history.json()] == [1, 2]
+
+        async with httpx.AsyncClient(timeout=None) as event_client:
+            async with event_client.stream(
+                "GET",
+                f"{backend_stack.play.base_url}/events/stream",
+            ) as event_stream:
+                assert event_stream.status_code == 200
+                event_lines = event_stream.aiter_lines()
+
+                dream = await client.post(
+                    f"{backend_stack.play.base_url}/sessions/service_stack_main/dream/proposals",
+                    json={"depth": "deep", "scope": "full"},
+                )
+                assert dream.status_code == 202
+                proposal_id = dream.json()["proposalId"]
+                proposal = await _wait_for_terminal_payload(
+                    client,
+                    (
+                        f"{backend_stack.play.base_url}/sessions/service_stack_main/"
+                        f"dream/proposals/{proposal_id}"
+                    ),
+                    active_statuses={"generating"},
+                )
+                dream_event = await asyncio.wait_for(
+                    _next_play_event(event_lines),
+                    timeout=10,
+                )
+
+                assert proposal["status"] == "ready"
+                assert len(proposal["items"]) == 1
+                assert dream_event["eventType"] == "dream.proposal.terminal"
+                assert dream_event["sessionId"] == "service_stack_main"
+                assert dream_event["payload"]["proposalId"] == proposal_id
+                assert dream_event["payload"]["status"] == "ready"
+
+                applied = await client.post(
+                    (
+                        f"{backend_stack.play.base_url}/sessions/service_stack_main/"
+                        f"dream/proposals/{proposal_id}/apply"
+                    )
+                )
+                memories = await client.get(
+                    f"{backend_stack.play.base_url}/sessions/service_stack_main/dream/memories"
+                )
+                assert applied.status_code == 200
+                assert applied.json()["status"] == "applied"
+                assert memories.status_code == 200
+                assert memories.json()["activeCount"] == 1
+
+                derivation = await client.post(
+                    f"{backend_stack.play.base_url}/sessions/service_stack_main/derivations",
+                    json={"turnId": 1, "title": "HTTP 集成派生"},
+                )
+                assert derivation.status_code == 202
+                derivation_job_id = derivation.json()["jobId"]
+                derivation_event = await asyncio.wait_for(
+                    _next_play_event(event_lines),
+                    timeout=10,
+                )
+                derivation_job = await _wait_for_terminal_payload(
+                    client,
+                    (
+                        f"{backend_stack.play.base_url}/session-derivations/"
+                        f"{derivation_job_id}"
+                    ),
+                    active_statuses={"queued", "running"},
+                )
+
+                assert derivation_event["eventType"] == "session.derivation.terminal"
+                assert derivation_event["sessionId"] == "service_stack_main"
+                assert derivation_event["payload"]["jobId"] == derivation_job_id
+                assert derivation_event["payload"]["status"] == derivation_job["status"]
+
+        assistant_message_id = next(
+            message["messageId"]
+            for turn_payload in reversed(history.json())
+            for message in reversed(turn_payload["messages"])
+            if message["role"] == "assistant"
+        )
+        tts_job = await client.post(
+            (
+                f"{backend_stack.play.base_url}/sessions/service_stack_main/tts/"
+                f"messages/{assistant_message_id}/jobs"
+            )
+        )
+        assert tts_job.status_code == 200
+        tts_job_id = tts_job.json()["jobId"]
+        tts_payload = await _wait_for_terminal_payload(
+            client,
+            (
+                f"{backend_stack.play.base_url}/sessions/service_stack_main/tts/"
+                f"jobs/{tts_job_id}"
+            ),
+            active_statuses={"queued", "running"},
+        )
+        assert tts_payload["status"] == "succeeded"
+        assert tts_payload["partCount"] >= 1
+        audio = await client.get(
+            (
+                f"{backend_stack.play.base_url}/sessions/service_stack_main/tts/"
+                f"jobs/{tts_job_id}/parts/0/audio"
+            )
+        )
+        assert audio.status_code == 200
+        assert audio.headers["content-type"].startswith("audio/mpeg")
+        assert audio.content.startswith(b"ID3")
 
         providers = await client.get(
             f"{backend_stack.play.base_url}/sessions/service_stack_main/media/providers"
@@ -307,6 +491,36 @@ async def test_backend_services_cover_chat_media_deletion_and_failure_isolation(
             == "MEDIA_SERVICE_UNAVAILABLE"
         )
         assert chat_survives.status_code == 200
+
+        backend_stack.dream.stop()
+        dream_unavailable = await client.get(
+            f"{backend_stack.play.base_url}/sessions/service_stack_failure/dream/proposals"
+        )
+        chat_survives_dream = await client.post(
+            f"{backend_stack.play.base_url}/sessions/service_stack_failure/turn",
+            json={"text": "dream outage must not block chat"},
+        )
+        assert dream_unavailable.status_code == 503
+        assert (
+            dream_unavailable.json()["detail"]["errorCode"]
+            == "DREAM_SERVICE_UNAVAILABLE"
+        )
+        assert chat_survives_dream.status_code == 200
+
+        backend_stack.tts.stop()
+        tts_unavailable = await client.get(
+            (
+                f"{backend_stack.play.base_url}/sessions/service_stack_main/tts/"
+                f"jobs/{tts_job_id}"
+            )
+        )
+        chat_survives_tts = await client.post(
+            f"{backend_stack.play.base_url}/sessions/service_stack_failure/turn",
+            json={"text": "tts outage must not block chat"},
+        )
+        assert tts_unavailable.status_code == 503
+        assert tts_unavailable.json()["detail"]["errorCode"] == "TTS_SERVICE_ERROR"
+        assert chat_survives_tts.status_code == 200
 
         backend_stack.llm.stop()
         llm_unavailable = await client.post(

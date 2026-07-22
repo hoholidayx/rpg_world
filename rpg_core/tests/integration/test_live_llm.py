@@ -8,9 +8,9 @@ import pytest_asyncio
 from llm_client.manager import LLMClientManager
 from rpg_core.agent.agent import RPGGameAgent
 from rpg_core.agent.protocol import StreamEventKind
-from rpg_core.tests.integration.conftest import (
-    _create_integration_session,
-    _shutdown_agent,
+from tests.support.backend import (
+    create_integration_session,
+    shutdown_agent,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.live_llm]
@@ -28,13 +28,13 @@ async def live_agent(
     except Exception:
         pytest.skip("standalone LLM service is not available")
     session_id = f"live_{request.node.name[-24:]}".replace("-", "_")
-    _create_integration_session(integration_data_gateway, integration_workspace, session_id)
+    create_integration_session(integration_data_gateway, integration_workspace, session_id)
     agent = RPGGameAgent(session_id=session_id)
     await agent.initialize()
     try:
         yield agent
     finally:
-        await _shutdown_agent(agent)
+        await shutdown_agent(agent)
         await LLMClientManager.areset()
 
 

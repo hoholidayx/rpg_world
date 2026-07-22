@@ -1,4 +1,4 @@
-"""Deterministic LLM providers used by backend integration tests."""
+"""Deterministic LLM providers shared by backend integration tests."""
 
 from __future__ import annotations
 

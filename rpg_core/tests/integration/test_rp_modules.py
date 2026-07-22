@@ -19,7 +19,7 @@ from rpg_core.rp_modules.constants import (
     RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
 )
-from rpg_core.tests.integration.conftest import _ensure_integration_session
+from tests.support.backend import ensure_integration_session
 from rpg_core.utils.watcher import get_watcher
 
 pytestmark = pytest.mark.integration
@@ -72,7 +72,7 @@ async def test_rp_modules_and_dice_commands_work_without_real_llm(
     )
 
     session_id = "integration_rp_modules"
-    _ensure_integration_session(integration_data_gateway, integration_workspace, session_id)
+    ensure_integration_session(integration_data_gateway, integration_workspace, session_id)
     agent = RPGGameAgent(session_id=session_id)
     await agent.initialize()
 

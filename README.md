@@ -1025,7 +1025,7 @@ uv run python -m pytest \
   rpg_core/tests/agent/turn/test_turn_runtime_factory.py \
   rpg_core/tests/agent/turn/test_turn_orchestration.py -q
 uv run python -m pytest agent_service/tests -q
-INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q
+uv run python -m pytest rpg_core/tests/integration agent_service/tests/integration -q
 SERVICE_INTEGRATION_TEST=1 uv run python -m pytest tests/integration -m service_integration -q
 ```
 

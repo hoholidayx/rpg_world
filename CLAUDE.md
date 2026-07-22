@@ -898,7 +898,7 @@ uv run python -m pytest \
   rpg_core/tests/agent/turn/test_turn_orchestration.py \
   rpg_core/tests/agent/turn/test_turn_transaction.py -q
 uv run python -m pytest agent_service/tests -q
-INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q
+uv run python -m pytest rpg_core/tests/integration agent_service/tests/integration -q
 SERVICE_INTEGRATION_TEST=1 uv run python -m pytest tests/integration -m service_integration -q
 ```
 
@@ -933,7 +933,7 @@ RPG_WORLD_PROFILE=test DREAM_LIVE_TEST=1 \
 测试只连接已经运行的 LLM Service，不会代为启动或切换远端进程的 profile。未设置
 `DREAM_LIVE_TEST=1` 时 `dream_live` 测试必须跳过；显式开启后 Provider 或结构化契约错误必须使测试失败。
 
-跨服务覆盖矩阵见 `docs/backend-integration-matrix.md`。`service_integration` 会以随机 loopback 端口启动独立 LLM、Agent、Media、Play API 测试进程，真实经过 HTTP/SSE、lifespan、SQLite 和媒体文件落盘，但最终模型与图片 Provider 仍为 deterministic fake，不需要 API key 或公网。
+跨服务覆盖矩阵见 `docs/backend-integration-matrix.md`。确定性 Core/Agent Service integration 默认进入 Python 基线；只有真实 Provider 用例继续显式 opt-in。`service_integration` 会以随机 loopback 端口启动独立 LLM、Agent、Dream、Media、TTS、Play API 测试进程，真实经过 HTTP/SSE、lifespan、SQLite、后台终态事件和媒体/音频文件落盘，但最终模型、语音与图片 Provider 仍为 deterministic fake，不需要 API key 或公网。
 
 ## 当前实现优先级
 

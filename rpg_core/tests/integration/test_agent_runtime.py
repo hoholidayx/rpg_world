@@ -27,7 +27,7 @@ from rpg_core.session.role import (
     SessionRoleService,
 )
 from rpg_core.status.manager import StatusManager
-from rpg_core.tests.integration.scripted_llm import (
+from tests.support.scripted_llm import (
     CONFIG_PROVIDER_KEY,
     SESSION_PROVIDER_KEY,
     STORY_PROVIDER_KEY,

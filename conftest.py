@@ -5,6 +5,13 @@ from __future__ import annotations
 import os
 
 
+# Pytest is a dedicated test process. Select the test profile before any
+# production module-level settings singletons are imported during collection.
+os.environ["RPG_WORLD_PROFILE"] = "test"
+
+pytest_plugins = ("tests.support.integration_fixtures",)
+
+
 _PROXY_ENV_VARS = (
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -21,5 +28,9 @@ def pytest_configure() -> None:
         return
     for name in _PROXY_ENV_VARS:
         os.environ.pop(name, None)
-    if os.environ.get("INTEGRATION_TEST") != "1":
+    live_provider_enabled = any(
+        os.environ.get(name) == "1"
+        for name in ("LIVE_LLM_TEST", "DREAM_LIVE_TEST")
+    )
+    if not live_provider_enabled:
         os.environ.setdefault("OPENAI_API_KEY", "test")

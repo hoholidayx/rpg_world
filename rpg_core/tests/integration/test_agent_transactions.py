@@ -9,7 +9,7 @@ from rpg_core.agent.protocol import AgentStreamEvent, StreamEventKind, TurnCance
 from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentScratch
 from rpg_core.scene import SceneTracker
 from rpg_core.scene.status import SceneStatusService
-from rpg_core.tests.integration.scripted_llm import response, tool_call
+from tests.support.scripted_llm import response, tool_call
 
 pytestmark = pytest.mark.integration
 
