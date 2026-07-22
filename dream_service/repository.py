@@ -39,15 +39,15 @@ from dream_service.contracts import (
     DreamRepository,
     DreamRevisionView,
 )
-from rp_memory.dream.source import combine_source_fingerprint
-from rp_memory.dream.application import DreamApplicationService
-from rp_memory.dream.ledger import PersistentMemoryProjection
-from rp_memory.dream.proposal import (
+from rpg_memory.dream.source import combine_source_fingerprint
+from rpg_memory.dream.application import DreamApplicationService
+from rpg_memory.persistent.ledger import PersistentMemoryProjection
+from rpg_memory.dream.proposal import (
     DreamProposalItemInput,
     DreamProposalItemPatch,
 )
-from rp_memory.dream.source_identity import story_memory_source_identity
-from rp_memory.dream.types import (
+from rpg_memory.dream.source_identity import story_memory_source_identity
+from rpg_memory.dream.types import (
     DreamDerivedSource,
     DreamEvidence,
     DreamFact,
@@ -62,7 +62,7 @@ from rp_memory.dream.types import (
     PersistentMemoryLifecycle,
     dream_fact_identity_key,
 )
-from rp_memory.memory_types import EpistemicStatus, MemoryKind
+from rpg_memory.types import EpistemicStatus, MemoryKind
 
 _FRONT_MATTER = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|\Z)", re.DOTALL)
 

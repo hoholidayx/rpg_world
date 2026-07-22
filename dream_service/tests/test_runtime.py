@@ -8,8 +8,8 @@ import pytest
 from dream_service.contracts import DreamProposalView
 from dream_service.notifications import DreamTerminalNotification
 from dream_service.runtime import DreamTaskManager
-from rp_memory.dream.errors import DreamAlreadyRunningError
-from rp_memory.dream.types import (
+from rpg_memory.dream.errors import DreamAlreadyRunningError
+from rpg_memory.dream.types import (
     DreamDepth,
     DreamGenerationResult,
     DreamScope,

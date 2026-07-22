@@ -12,10 +12,10 @@ from dream_service.notifications import (
     DreamTerminalNotificationSink,
     NullDreamTerminalNotificationSink,
 )
-from rp_memory.dream.engine import DreamEngine
-from rp_memory.dream.errors import DreamAlreadyRunningError, DreamError
-from rp_memory.dream.recovery import DreamRecoveryAction, decide_orphan_recovery
-from rp_memory.dream.types import (
+from rpg_memory.dream.engine import DreamEngine
+from rpg_memory.dream.errors import DreamAlreadyRunningError, DreamError
+from rpg_memory.dream.recovery import DreamRecoveryAction, decide_orphan_recovery
+from rpg_memory.dream.types import (
     DreamDepth,
     DreamFailureCode,
     DreamProposalStatus,

@@ -184,7 +184,7 @@ class MemoryRecallHook:
         if manager is None:
             return
         try:
-            from rp_memory.recall_query import RecallQueryContext
+            from rpg_memory.recall.query import RecallQueryContext
 
             scene = scene_tracker.get_recall_context() if scene_tracker is not None else {}
             await manager.recall(

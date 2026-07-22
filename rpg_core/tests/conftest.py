@@ -10,8 +10,8 @@ from types import SimpleNamespace
 import pytest
 
 from rpg_core.context.models import Message, Role
-from rp_memory.candidate import MemoryCandidate
-from rp_memory.planning.plan import QueryPlan
+from memory_retrieval.candidate import MemoryCandidate
+from memory_retrieval.planning.plan import QueryPlan
 from rpg_core.session.manager import SessionManager
 from llm_client.manager import LLMClientManager
 

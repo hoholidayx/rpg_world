@@ -63,10 +63,11 @@ PRODUCTION_ROOTS = (
     ROOT / "llm_client",
     ROOT / "llm_service",
     ROOT / "media_service",
+    ROOT / "memory_retrieval",
     ROOT / "play_api",
-    ROOT / "rp_memory",
     ROOT / "rpg_core",
     ROOT / "rpg_data",
+    ROOT / "rpg_memory",
     ROOT / "rpg_media",
     ROOT / "rpg_tts",
     ROOT / "tts_service",
@@ -128,6 +129,10 @@ def test_removed_compatibility_modules_do_not_exist() -> None:
     ]
 
     assert present == []
+
+
+def test_removed_rp_memory_package_does_not_exist() -> None:
+    assert not (ROOT / "rp_memory").exists()
 
 
 def test_production_has_no_import_only_facade_modules() -> None:

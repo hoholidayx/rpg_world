@@ -1,0 +1,96 @@
+"""Read-only projection for the main Agent Persistent Memory layer."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Protocol
+
+from rpg_memory.persistent.ledger import PersistentMemoryProjection
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PersistentMemoryItem:
+    """One evidence-valid active memory projected for the main Context."""
+
+    memory_id: str
+    revision_number: int
+    text: str
+    memory_kind: str
+    epistemic_status: str
+    salience: float
+
+
+class PersistentMemoryContextReader(Protocol):
+    def list_context_memories(
+        self,
+        session_id: str,
+    ) -> list[PersistentMemoryProjection]: ...
+
+
+class PersistentMemoryStore:
+    """Read the current Session ledger through the typed ``rpg_data`` boundary."""
+
+    def __init__(
+        self,
+        session_id: str,
+        context_reader: PersistentMemoryContextReader,
+        close_worker_connection: Callable[[], None] | None = None,
+    ) -> None:
+        self._session_id = str(session_id)
+        self._context_reader = context_reader
+        self._close_worker_connection = close_worker_connection
+        self._last_snapshot: tuple[PersistentMemoryItem, ...] = ()
+        self._refresh_lock = asyncio.Lock()
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    async def load_snapshot(self) -> tuple[PersistentMemoryItem, ...]:
+        """Load one immutable projection off-loop, retaining a stale fallback."""
+
+        async with self._refresh_lock:
+            try:
+                memories = tuple(await asyncio.to_thread(self._load_memories))
+            except Exception:
+                logger.warning(
+                    "persistent memory projection refresh failed; using stale snapshot",
+                    exc_info=True,
+                )
+                return self._last_snapshot
+            self._last_snapshot = memories
+            return memories
+
+    def _load_memories(self) -> list[PersistentMemoryItem]:
+        try:
+            return self._project(self._context_reader)
+        finally:
+            if self._close_worker_connection is not None:
+                # Peewee connections are thread-local. Close only the worker's
+                # handle; the shared gateway/database remains initialized.
+                self._close_worker_connection()
+
+    def _project(
+        self,
+        reader: PersistentMemoryContextReader,
+    ) -> list[PersistentMemoryItem]:
+        result: list[PersistentMemoryItem] = []
+        for bundle in reader.list_context_memories(self._session_id):
+            revision = bundle.current_revision
+            result.append(
+                PersistentMemoryItem(
+                    memory_id=bundle.memory.id,
+                    revision_number=revision.revision_number,
+                    text=revision.text,
+                    memory_kind=revision.memory_kind,
+                    epistemic_status=revision.epistemic_status,
+                    salience=revision.salience,
+                )
+            )
+        return result

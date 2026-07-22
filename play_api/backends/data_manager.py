@@ -22,7 +22,7 @@ from rpg_data.bootstrap import (
 )
 from rpg_data.services import DataServiceGateway, get_data_service_gateway
 from rpg_data.settings import get_database_path
-from rp_memory.story_memory_service import StoryMemoryApplicationService
+from rpg_memory.story.application import StoryMemoryApplicationService
 
 
 class DataManagerBackend:

@@ -25,7 +25,7 @@
 
 ```bash
 # 全后端单元与契约基线
-uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests -q
+uv run python -m pytest channels/tests rpg_core/tests rpg_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests -q
 
 # 真实 SQLite + RPGGameAgent + Agent Service ASGI
 INTEGRATION_TEST=1 uv run python -m pytest rpg_core/tests/integration -q

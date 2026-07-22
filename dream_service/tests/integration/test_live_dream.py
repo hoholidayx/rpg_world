@@ -11,11 +11,11 @@ from llm_client.auth import resolve_llm_service_token
 from llm_client.manager import LLMClientManager
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway, reset_data_service_gateways
-from rp_memory.dream.engine import DreamEngine
-from rp_memory.dream.model import LLMDreamModel
-from rp_memory.dream.source import DreamSourceSelector
-from rp_memory.dream.types import DreamDepth, DreamScope
-from rp_memory.story_memory_service import StoryMemoryApplicationService
+from rpg_memory.dream.engine import DreamEngine
+from rpg_memory.dream.model import LLMDreamModel
+from rpg_memory.dream.source import DreamSourceSelector
+from rpg_memory.dream.types import DreamDepth, DreamScope
+from rpg_memory.story.application import StoryMemoryApplicationService
 
 pytestmark = [
     pytest.mark.dream_live,

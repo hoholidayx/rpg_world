@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from rpg_core.lorebook import LorebookManager
     from rpg_core.scene import SceneTracker
     from rpg_core.status.manager import StatusManager
-    from rp_memory.memory_manager import MemoryManager
+    from rpg_memory.recall.manager import MemoryRecallManager
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +27,7 @@ class AgentContextResources:
     lorebook_manager: "LorebookManager | None"
     status_manager: "StatusManager | None"
     scene_tracker: "SceneTracker | None"
-    memory_manager: "MemoryManager | None"
+    memory_manager: "MemoryRecallManager | None"
 
     async def close(self) -> None:
         """Release every session-scoped file watcher and storage handle."""
@@ -52,7 +52,7 @@ class AgentContextResources:
             lorebook_manager=cast("LorebookManager | None", result.get("lorebook_mgr")),
             status_manager=cast("StatusManager | None", result.get("status_mgr")),
             scene_tracker=cast("SceneTracker | None", result.get("scene_tracker")),
-            memory_manager=cast("MemoryManager | None", result.get("memory_manager")),
+            memory_manager=cast("MemoryRecallManager | None", result.get("memory_manager")),
         )
 
 

@@ -27,7 +27,7 @@ def _configure_logging() -> None:
     log_cfg = channels_settings.logging
     configure_process_logging("cli", log_cfg)
     logging.getLogger("rpg_core.watcher").setLevel(_logging_level(log_cfg.watcher_log_level))
-    logging.getLogger("rp_memory.vector_index_manager").setLevel(_logging_level(log_cfg.vector_index_log_level))
+    logging.getLogger("memory_retrieval.vector_index_manager").setLevel(_logging_level(log_cfg.vector_index_log_level))
 
 
 async def main() -> int:

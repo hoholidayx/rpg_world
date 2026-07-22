@@ -1,1 +1,0 @@
-"""Memory retrieval subpackage."""

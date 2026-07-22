@@ -12,7 +12,7 @@ from rpg_core.session.role import (
 from rpg_core.status.manager import StatusManager
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
-from rp_memory.story_memory_service import StoryMemoryApplicationService
+from rpg_memory.story.application import StoryMemoryApplicationService
 
 
 def _story_memory(gateway):  # noqa: ANN001, ANN202

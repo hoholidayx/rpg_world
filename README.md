@@ -34,11 +34,12 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-22：通用检索与 RPG Memory 拆包。** 业务无关的 chunk、FTS/vector、QueryPlan、Hybrid、rerank、索引协调和存储迁入 `memory_retrieval`；RP 查询上下文、候选 policy、在线召回编排、Story/Persistent Memory、Dream 与 benchmark 归 `rpg_memory`。依赖固定为 `rpg_memory → memory_retrieval`，旧 `rp_memory` 包删除，不保留兼容转发；算法权重、配置键、索引/数据库格式和服务协议不变。
 - **2026-07-20：Status / Scene 业务与数据层拆分。** 状态模板/挂载/Session 表管理、Scene 字段规则与 active Scene、角色名修复与 Context 可见性、运行时/deferred/bootstrap 写入资格统一归 `rpg_core`；`StatusDataService` 只保留 typed CRUD、关联 read model、deferred progress、last-write-wins 诊断和原子 document batch。Status 存储契约迁入 `rpg_data.model.status`，Gateway 属性和 HTTP/SSE/数据库结构保持不变。
 - **2026-07-21：Media 业务与数据层拆分。** 来源 turn/VisualBrief、图库 metadata、删除门禁、背景评估和 worker 恢复策略统一归 `MediaApplicationService`；`MediaDataService` 只保留 typed CRUD/read model、CAS、引用查询、去重和显式 completion。Media 存储契约迁入 `rpg_data.model.media`，HTTP 与数据库结构保持不变。
 - **2026-07-21：TTS 业务与数据层拆分。** 已提交 assistant message 资格、正文清洗/分段、fingerprint、cache 命中与失效、retry 资格和 worker interrupted 策略统一归 `TTSApplicationService`；`TTSDataService` 只保留 typed 查询/read model、Job/Cache/Blob/Part CRUD、条件 claim/transition、引用查询和原子 completion。TTS 存储契约迁入 `rpg_data.model.tts`，HTTP、数据库结构、文件目录和 Play API 协议保持不变。
 - **2026-07-20：`rpg_data` 依赖边界收口。** `DataServiceGateway` 保留为数据库生命周期与 Data Service 注册表，Session、Plot、Dream/Memory 的业务服务改为显式依赖窄 Protocol；`sessions` 作为大业务聚合 Data Service 取代角色、派生、删除三个薄入口。Session/Memory 存储类型拆入 `rpg_data.model.*`，旧 `rpg_data.models` 兼容重导出，并增加静态守卫防止 Repository/Peewee record 外泄、业务 service 持有 Gateway 或 Gateway lookup 面继续增长。复杂查询、分页、批量、CAS、数据库原子操作和高效 read model 仍归数据层。
-- **2026-07-20：Dream / Story Memory 业务与数据层拆分。** Dream Proposal 状态机、恢复、两阶段来源确认、Persistent Memory 生命周期和 Context 投影统一归 `rp_memory.dream`，Story Memory 的规范化、exact dedupe、合并、Evidence 与 version 归 `StoryMemoryApplicationService`；`rpg_data` 保留 typed 查询/read model、CRUD/CAS、批量与事务。Apply 继续使用 SQLite `IMMEDIATE`，第二次来源确认失败会回滚账本后独立标记 Proposal stale；SQL、HTTP、通知、SSE、WebUI 与 Context 可观察行为不变。
+- **2026-07-20：Dream / Story Memory 业务与数据层拆分。** Dream Proposal 状态机、恢复、两阶段来源确认、Persistent Memory 生命周期和 Context 投影统一归 `rpg_memory.dream`，Story Memory 的规范化、exact dedupe、合并、Evidence 与 version 归 `StoryMemoryApplicationService`；`rpg_data` 保留 typed 查询/read model、CRUD/CAS、批量与事务。Apply 继续使用 SQLite `IMMEDIATE`，第二次来源确认失败会回滚账本后独立标记 Proposal stale；SQL、HTTP、通知、SSE、WebUI 与 Context 可观察行为不变。
 - **2026-07-20：Session 业务与数据层拆分。** 角色绑定与 Opening、Story/Session 初始化、`/clear`、Session Derivation 和永久删除的业务规则迁入 `rpg_core.session`；`rpg_data` 只保留角色/Opening 查询、profile/job CRUD、条件删除、显式复制和调用方准备好的状态重置计划。Agent、Play API、Dream 与后台 worker 统一经 Core application service 调用，公开 HTTP/SSE 与数据库结构不变。
 - **2026-07-20：Story 剧情动态调度。** 新增内置 `plot_scheduler` RP Module、Story 级线性剧情大纲与事件池、Session 禁用覆盖和原子调度账本。每个 IC/GM turn 最多选择一个到期大纲节点与一个池事件；强制项到时直接进入动态层，软约束项使用独立 LLM 路由结合完整 fixed layer、状态表和最近 5 个原始 turn 判断适宜性。调度元数据受硬上限保护，Context 门禁在 scratch 前预留最多两条动态指令。Play WebUI 增加“剧情调度”独立入口，集中管理定义、Scene 时间、覆盖与判断历史，不改变主正文 SSE。
 - **2026-07-18：后台终态通知链路。** Dream proposal 与 Session Derivation 在 SQL 终态提交后，通过专用异步 publisher 把 `ready / failed / interrupted` 发送到 Play API 的进程内广播 Hub；Play WebUI 在根 Provider 建立唯一全局 EventSource，并在顶栏独立通知中心展示最近事件。通知只保存在页面内存，可标记已读和清除；不增加 Toast、自动刷新或任务状态回写。
@@ -102,8 +103,8 @@ Agent `8010`、Media `8011`、LLM `8012`、TTS `8013`、Dream `8014`。
 ### 进程隔离架构
 
 RPG World 采用独立 Agent、LLM、Dream、Media 与 TTS 服务拓扑。只有 `run_agent.py` 进程持有
-`AgentManager` 和 `RPGGameAgent`；Agent 使用 `rp_memory` 做召回与 Context 投影，Dream Service 使用
-`rp_memory.dream` 做离线提炼。只有 `run_llm.py` 进程读取
+`AgentManager` 和 `RPGGameAgent`；Agent 使用 `rpg_memory` 做 RP 召回与 Context 投影，并把底层检索委托给 `memory_retrieval`，Dream Service 使用
+`rpg_memory.dream` 做离线提炼。只有 `run_llm.py` 进程读取
 `llm.yaml`、Provider 密钥并持有 OpenAI/llama Provider 和本地 llama runtime。
 Agent/Memory、Dream 与 TTS Service 通过 `llm_client` 调用 LLM 服务；Play API 的聊天、Dream、媒体和语音链路分别通过
 `AgentClient`、`DreamClient`、`MediaClient`、`TTSClient` 访问独立服务，CLI 与 Telegram 通过 `AgentClient` 调用 Agent 服务。
@@ -111,7 +112,7 @@ Agent/Memory、Dream 与 TTS Service 通过 `llm_client` 调用 LLM 服务；Pla
 ```
 run_llm            -> llm_service.main:app   -> Provider + local llama runtime
 run_agent          -> agent_service.main:app
-run_dream          -> dream_service.main:app -> rp_memory.dream + rpg_data + llm_client
+run_dream          -> dream_service.main:app -> rpg_memory.dream + rpg_data + llm_client
 run_media          -> media_service.main:app -> rpg_media + rpg_data
 run_tts            -> tts_service.main:app   -> rpg_tts + rpg_data + llm_client
 run_play_api       -> play_api.main:app      -> AgentClient + DreamClient + MediaClient + TTSClient
@@ -146,7 +147,7 @@ Agent event loop
 ├── session B mailbox ── await LLM / Memory
 └── loop-owned LLMClientManager + AsyncClient
 
-MemoryManager（每个 session 一个）
+MemoryRecallManager（每个 session 一个）
 ├── async lock：recall / index / reindex / close 串行
 ├── watchdog callback thread：只投递 source ID
 └── loop consumer：await embedding；file/hash/chunk/SQLite 使用 to_thread
@@ -324,7 +325,9 @@ Telegram 渠道当前支持：
 | `summary/` | 对话摘要压缩 |
 | 顶层 `llm_client/` | 供 Agent、Memory、Dream、TTS 及未来 Media planner 使用的稳定 HTTP/SSE 客户端、DTO 与 Provider facade |
 | 顶层 `llm_service/` | LLMProvider 抽象、OpenAI/llama provider、LLMManager、llm.yaml 解析与本地 llama runtime |
-| 顶层 `rp_memory/dream/` | 无框架的 Shallow/Deep 选源、Map/Reduce、Proposal 状态机、Apply/恢复与 Persistent Memory 生命周期领域 |
+| 顶层 `memory_retrieval/` | 业务无关的 chunk、FTS/vector、QueryPlan、Hybrid、rerank、索引协调与存储 |
+| 顶层 `rpg_memory/` | RP Recall policy/编排、Story/Persistent Memory、Dream 和固定 benchmark |
+| `rpg_memory/dream/` | 无框架的 Shallow/Deep 选源、Map/Reduce、Proposal 状态机、Apply/恢复与 Persistent Memory 生命周期领域 |
 | 顶层 `rpg_data/` | SQLite schema/migration、按业务聚合的 Data Service、typed 存储契约、复杂查询/read model、CRUD/CAS、批量、分页与数据库原子边界 |
 | 顶层 `dream_service/` | 独立 Dream HTTP 进程、DreamClient 与进程内 async 生成任务 |
 | 顶层 `play_events/` | Dream/Derivation 共用的无框架事件 wire contract、内部令牌解析与 loop-owned HTTP publisher |
@@ -333,7 +336,7 @@ Telegram 渠道当前支持：
 | 顶层 `rpg_tts/` | 正文标准化、确定性分段、缓存指纹与 MP3 内容寻址存储 |
 | 顶层 `tts_service/` | 独立 TTS HTTP 进程、TTSClient 与数据库持久任务 worker |
 
-顶层 `rp_memory/` 是独立记忆系统包：在线部分负责检索、索引、规划、召回和 rerank，`rp_memory.dream` 负责无框架的离线长期记忆归纳、Proposal/Apply/恢复策略和 Persistent Memory Context 投影，`StoryMemoryApplicationService` 负责 Story Memory 的语义写入。Persistent Memory 与 Story Memory 的持久化真源仍位于 `rpg_data` SQL；`dream_memory` / `story_memory` Data Service 负责类型化查询、分页、CAS、批量和数据库事务，只接受领域层已经决定的动作。`rpg_core` 只读取记忆 Context 投影。顶层 `llm_service/` 是独立 LLM 服务实现，负责 provider 路由、配置解析、OpenAI-compatible provider 与本地 llama.cpp runtime。业务进程只依赖 `llm_client/`，不导入 `llm_service/`。
+顶层 `memory_retrieval/` 是可复用的业务无关检索基础包，不知道 RP、Story、Dream、Context 或 `rpg_data`；顶层 `rpg_memory/` 是 RPG Memory bounded context，通过注入 `RetrievalQuery`、`RPRecallCandidatePolicy` 和 Provider facade 组合通用检索。依赖方向只能是 `rpg_memory → memory_retrieval`。`rpg_memory.dream` 负责离线长期记忆归纳、Proposal/Apply/恢复策略和 Persistent Memory Context 投影，`StoryMemoryApplicationService` 负责 Story Memory 的语义写入。Persistent Memory 与 Story Memory 的持久化真源仍位于 `rpg_data` SQL；`dream_memory` / `story_memory` Data Service 负责类型化查询、分页、CAS、批量和数据库事务，只接受领域层已经决定的动作。`rpg_core` 只读取记忆 Context 投影。顶层 `llm_service/` 是独立 LLM 服务实现，业务进程只依赖 `llm_client/`，不导入 `llm_service/`。
 
 ### Agent 组合式门面与 turn 事务
 
@@ -562,16 +565,25 @@ SSE 业务错误码通过独立 `errorCode` 字段传递，`message` 保持底�
 
 ## 记忆系统
 
-`rp_memory/` 是一个独立的记忆子系统，不再把离线归纳、向量、keyword FTS、原始 markdown 扫描和 query 规划混在一个类里。当前结构按职责拆分为五个职责层：
+记忆实现分成两个顶层包：`memory_retrieval` 只提供业务无关的检索能力，`rpg_memory` 只承载 RPG 记忆语义与应用编排。旧 `rp_memory` 已删除，不提供兼容转发模块。
 
 ```text
-rp_memory/
-├── dream/       Shallow/Deep source selection、Map/Reduce 与 proposal 规划
-├── planning/    QueryPlan 生成与 query rewrite
-├── retrieval/   SqlVec / keyword / raw markdown recall
+memory_retrieval/
+├── planning/    RetrievalQuery、QueryPlan 与通用 planner
+├── retrieval/   SqlVec / keyword / raw markdown / Hybrid
 ├── rerank/      基于 LLMProvider 的可选最终重排
-└── storage/     SQLite repository、vector index、text index
+├── storage/     SQLite repository、vector index、text index
+└── vector_index_manager.py  watcher 可注入的异步索引协调
+
+rpg_memory/
+├── recall/      RP query adapter、candidate policy 与 MemoryRecallManager
+├── story/       Story Memory store/application
+├── persistent/  Persistent Memory ledger/context projection
+├── dream/       Shallow/Deep、Map/Reduce、Proposal/Apply/恢复
+└── benchmark/   LocoMo、RP Gold 与可选 LongMemEval 固定流程
 ```
+
+`memory_retrieval` 不导入 `rpg_memory`、`rpg_core` 或 `rpg_data`。`overall.md` 排除、RP 记忆粒度评分、最近 IC/GM turn/玩家/场景查询扩展，以及传闻/尝试/承诺的 pointwise rerank prompt 都留在 `rpg_memory.recall`，通过窄 query/policy/prompt 接口注入通用 planner、retriever 和 reranker。
 
 ### Dream 长期记忆
 
@@ -620,7 +632,7 @@ DreamTaskManager / SessionDerivationWorker
 
 ```text
 进程启动 / session 初始化
-  -> MemoryManager.create() / initialize()
+  -> MemoryRecallManager.create() / initialize()
      - 只建立本地 text index、keyword、raw-md 和 watcher coordinator
      - 不访问 LLM Service
 首次 recall / reindex
@@ -628,7 +640,7 @@ DreamTaskManager / SessionDerivationWorker
      - 远程能力失败时保留 keyword / raw-md / rule-based fallback
      - 未就绪能力在后续调用中重试
 用户 query
-  -> MemoryManager session operation lock
+  -> MemoryRecallManager session operation lock
   -> QueryPlanner
      - 可通过 `llm_service/llm.yaml` 选择 OpenAI-compatible 或 llama provider
      - 配置缺失或加载失败时降级到 rule-based planner
@@ -641,23 +653,24 @@ DreamTaskManager / SessionDerivationWorker
   -> RecallItem 列表
 ```
 
-### 子包职责
+### 通用检索子包职责
 
-#### `planning/`
+#### `memory_retrieval/planning/`
 
 负责把用户 query 变成结构化 `QueryPlan`。
 
 - `RuleBasedQueryPlanner`：无模型兜底，负责归一化、term extraction、jieba 切词
-- `LlamaQueryPlanner` / `OpenAIQueryPlanner`：可选的 LLM query planner，通过 `await LLMClientManager.get().get_provider(...)` 获取远端 provider facade
+- `LlamaQueryPlanner`：通用的可选 LLM query planner，依赖调用方注入的 `LLMProvider`
 - `FallbackQueryPlanner`：运行时异常兜底，保证 recall 不被 planner 中断
+- `rpg_memory.recall.planner.OpenAIQueryPlanner`：把 RP 的最近 turn、玩家身份与 Scene 上下文适配为通用 `RetrievalQuery`，Provider 仍由 `MemoryRecallManager` 经 `llm_client` 解析
 
-#### `retrieval/`
+#### `memory_retrieval/retrieval/`
 
 负责实际召回，不负责 query 解析。
 
 - `SqlVecRetriever`：纯向量召回
 - `KeywordRetriever`：基于 `TextIndex.keyword_search()` 的关键词召回，query 来源权重为 normalized 1.0、planner 0.85、compact 0.70
-- `HybridRetriever`：组装 sqlvec + keyword + raw md 的融合召回，统一执行 exact / fuzzy、expanded、recency、granularity 和 hybrid scoring
+- `HybridRetriever`：组装 sqlvec + keyword + raw md 的融合召回，统一执行 exact / fuzzy、expanded、recency 和 hybrid scoring；候选资格与 granularity 分值由调用方注入的 policy 提供
 - `RawMarkdownGrepSearch`：直接扫描 markdown 文件，保留 query planner 的 `raw_md_terms`、`expanded_queries` 和扩展查询分词；会解析 markdown front matter 中的简单标量字段用于 granularity
 - `RawMarkdownRetriever`：只走 raw md 的 retriever 适配器
 
@@ -667,14 +680,14 @@ DreamTaskManager / SessionDerivationWorker
 - `always`：raw md 每次运行，作为主召回一路参与 merge、hybrid scoring 和 rerank。
 - `fallback_only`：主召回只运行 sqlvec + keyword；当主候选不足或 sqlvec / keyword / store 阶段失败时才运行 raw md 补候选。`raw_md_min_results > 0` 时使用该显式阈值；否则阈值为当前召回池目标，有 reranker 时是 `rerank_candidate_k`，无 reranker 时是 `top_k`。
 
-#### `rerank/`
+#### `memory_retrieval/rerank/`
 
 负责可选的最终重排，不参与召回和 query 解析。
 
 - `MemoryReranker`：统一重排接口
 - `PointwiseMemoryReranker`：基于 `LLMProvider` 的 pointwise rerank 实现，可使用 OpenAI-compatible 或 llama provider
 
-#### `storage/`
+#### `memory_retrieval/storage/`
 
 负责持久化和底层索引。
 
@@ -686,7 +699,7 @@ DreamTaskManager / SessionDerivationWorker
 ### 召回 `meta` 字段说明
 
 最终返回的 `meta` 不是单一数据库字段，而是由原始 `candidate.metadata`、各路检索分数，
-以及 rerank 调试信息合并而成。`HybridRetriever` 和 `MemoryManager.hybrid_search()` 会在
+以及 rerank 调试信息合并而成。`HybridRetriever` 和 `MemoryRecallManager.hybrid_search()` 会在
 最终输出前补齐这些字段。
 
 | 字段 | 来源 | 作用 |
@@ -782,8 +795,9 @@ DreamTaskManager / SessionDerivationWorker
 
 ### 设计原则
 
-- `MemoryManager` 负责组装，不负责检索细节
-- `MemoryManager.create()` / `initialize()` 只初始化本地能力，不产生 LLM HTTP I/O；远程能力在首次 `recall()` / `reindex()` 懒加载
+- `MemoryRecallManager` 负责组装，不负责检索细节
+- `memory_retrieval` 保持业务无关；RP eligibility 与 granularity 只能通过 `RPRecallCandidatePolicy` 注入
+- `MemoryRecallManager.create()` / `initialize()` 只初始化本地能力，不产生 LLM HTTP I/O；远程能力在首次 `recall()` / `reindex()` 懒加载
 - 同一 session 的 recall、index、reindex 和 close 由单一 async lock 串行；不同 session 之间可并行
 - watchdog 回调只使用 `call_soon_threadsafe` 向所属 loop 入队，不在 watcher 线程运行 embedding、索引或 SQLite
 - 文件读取、hash、chunk 和 SQLite 操作通过 `asyncio.to_thread()` 移出 Agent 事件循环
@@ -964,14 +978,14 @@ Agent Context 与历史展示分离：Play/Agent 的 `history` / `history-page` 
 默认测试全部 mock LLM 调用，无需 API key：
 
 ```bash
-uv run python -m pytest channels/tests rpg_core/tests rp_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests rpg_tts/tests tts_service/tests dream_service/tests -q
+uv run python -m pytest channels/tests rpg_core/tests rpg_memory/tests llm_service/tests play_api/tests agent_service/tests rpg_data/tests rpg_media/tests media_service/tests rpg_tts/tests tts_service/tests dream_service/tests -q
 ```
 
 当前测试会 mock LLM、Telegram SDK 和网络调用。若本地缺少 `pytest-asyncio`，`rpg_core/tests/agent/command/test_command.py` 中的 async 测试会提示需要安装异步 pytest 插件。覆盖范围包括：
 
 - `channels/tests/`：ChannelAdapter、CLI、Telegram 渠道和渠道侧会话流程。
 - `rpg_core/tests/`：按源码领域镜像组织；Agent 测试继续按 runtime/mailbox/command/sub_agents/turn/tools 分组，其余 Context、Session、Summary、RP Modules、Scene、Status 与 utils 各自归档。
-- `rp_memory/tests/`：memory 检索、索引、规划、rerank，以及 Story Memory application、Dream 选源/Proposal/Apply/恢复、分批、Map/Reduce 和 retirement policy。
+- `rpg_memory/tests/`：`memory_retrieval` 的检索/索引/规划/rerank 合约，以及 RP Recall、Story/Persistent Memory、Dream 选源/Proposal/Apply/恢复、分批、Map/Reduce 和 retirement policy。
 - `dream_service/tests/`：Dream source adapter、进程内生成生命周期、HTTP/Client 契约与错误隔离。
 - `rpg_data/tests/`：catalog、消息、状态，以及 Dream/Story Memory proposal/ledger/revision/Evidence 的 CRUD、CAS、约束和事务回滚。
 - `llm_service/tests/`：LLM HTTP/SSE 客户端契约、鉴权、provider 配置、manager 路由与 llama 本地 runtime。
@@ -987,10 +1001,10 @@ Dream 后端与 Play WebUI 的聚焦验证为：
 
 ```bash
 uv run python -m pytest \
-  rp_memory/tests/test_dream.py \
-  rp_memory/tests/test_dream_application.py \
-  rp_memory/tests/test_dream_recovery.py \
-  rp_memory/tests/test_story_memory_application.py \
+  rpg_memory/tests/test_dream.py \
+  rpg_memory/tests/test_dream_application.py \
+  rpg_memory/tests/test_dream_recovery.py \
+  rpg_memory/tests/test_story_memory_application.py \
   rpg_data/tests/test_dream_memory_data_service.py \
   dream_service/tests \
   play_api/tests/test_dream.py \
@@ -1038,7 +1052,7 @@ RPG_WORLD_PROFILE=test DREAM_LIVE_TEST=1 \
 ## 当前实现优先级
 
 1. **P0：Play WebUI 主体验与 Play API 契约**。优先保障 session 房间、SSE/turn、Session 图像、workspace、characters、lorebook、status-tables、ops 等 Web 主链路。
-2. **P1：核心数据、上下文与记忆链路**。确保角色卡、世界书、状态表、summary、story memory 和 rp_memory 在全局 `session_id` 语义下稳定可用。
+2. **P1：核心数据、上下文与记忆链路**。确保角色卡、世界书、状态表、summary、story memory 和 rpg_memory 在全局 `session_id` 语义下稳定可用。
 3. **P2：Telegram/CLI 轻量入口稳定性**。保持真实 Telegram 长轮询、会话菜单、stream/non-stream、异常回复、命令菜单和运行配置可靠。
 4. **P3：玩法模块与沉浸式细节**。骰子、战斗、物品等新增体验型能力优先沉淀到 Play WebUI，并通过受控工具和状态读写接入核心。
 

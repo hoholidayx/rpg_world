@@ -10,7 +10,7 @@ from dream_service.contracts import (
     DreamProposalListView,
     DreamProposalView,
 )
-from rp_memory.dream.types import (
+from rpg_memory.dream.types import (
     MAX_DREAM_FACT_TEXT_CHARS,
     MAX_DREAM_ITEM_EVIDENCE,
     MAX_DREAM_PROPOSAL_ITEMS,

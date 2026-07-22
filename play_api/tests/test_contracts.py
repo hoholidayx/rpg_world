@@ -18,7 +18,7 @@ from rpg_core.session.role import SessionRoleService
 from rpg_core.session.turn_metadata import InvalidTurnMetadataError
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
-from rp_memory.story_memory_service import StoryMemoryApplicationService
+from rpg_memory.story.application import StoryMemoryApplicationService
 
 
 def _sse_payloads(body: str) -> list[dict[str, object]]:

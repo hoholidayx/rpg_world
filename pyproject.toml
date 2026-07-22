@@ -82,7 +82,8 @@ include = [
     "rpg_core*",
     "rpg_data*",
     "rpg_media*",
-    "rp_memory*",
+    "memory_retrieval*",
+    "rpg_memory*",
     "llm_service*",
     "llm_client*",
 ]
@@ -93,7 +94,7 @@ exclude = [
 ]
 
 [tool.setuptools.package-data]
-rp_memory = ["benchmark/*.json", "benchmark/*.md"]
+rpg_memory = ["benchmark/*.json", "benchmark/*.md"]
 rpg_core = ["jinja/**/*.jinja"]
 rpg_data = ["migrations/*.sql"]
 rpg_media = ["settings.yaml"]

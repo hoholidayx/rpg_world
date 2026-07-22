@@ -21,7 +21,7 @@ from rpg_data.repositories.records import (
     SessionStoryMemoryRecord,
 )
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
-from rp_memory.story_memory_service import StoryMemoryApplicationService
+from rpg_memory.story.application import StoryMemoryApplicationService
 
 
 @pytest.fixture(autouse=True)

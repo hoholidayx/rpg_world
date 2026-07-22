@@ -5,7 +5,7 @@ import pytest
 
 from dream_service.contracts import DreamProposalListView, DreamProposalView
 from dream_service.main import DreamRuntime, app, lifespan, set_runtime_for_tests
-from rp_memory.dream.errors import DreamAlreadyRunningError
+from rpg_memory.dream.errors import DreamAlreadyRunningError
 
 
 def _proposal(proposal_id: str, *, status: str = "generating") -> DreamProposalView:

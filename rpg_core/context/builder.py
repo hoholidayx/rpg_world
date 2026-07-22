@@ -27,9 +27,9 @@ from rpg_core.session.grouping import slice_recent_turns
 from rpg_core.status.context import prepare_status_context_tables
 
 if TYPE_CHECKING:
-    from rp_memory.persist_memory import PersistentMemoryStore
-    from rp_memory.recalled_memory import RecalledMemoryStore
-    from rp_memory.story_memory import StoryMemoryStore
+    from rpg_memory.persistent.store import PersistentMemoryStore
+    from rpg_memory.recall.store import RecalledMemoryStore
+    from rpg_memory.story.store import StoryMemoryStore
     from rpg_core.scene.tracker import SceneTracker
     from rpg_core.status.manager import StatusManager
     from rpg_core.summary.batch_store import BatchSummaryStore

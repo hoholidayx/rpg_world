@@ -63,7 +63,7 @@ from rpg_core.settings import settings
 if TYPE_CHECKING:
     from rpg_core.agent.command.models import AgentCommandTarget
     from llm_client.types import LLMProvider
-    from rp_memory.story_memory import StoryMemoryStore
+    from rpg_memory.story.store import StoryMemoryStore
     from rpg_core.summary.store import SummaryStore
     from rpg_core.session.manager import SessionManager
 

@@ -10,14 +10,14 @@ def test_context_factory_uses_catalog_session_runtime_dir(
     session_root = rpg_data_gateway.catalog.get_session_runtime_dir("s_runtime")
     captured: dict[str, object] = {}
 
-    from rp_memory.memory_manager import MemoryManager
+    from rpg_memory.recall.manager import MemoryRecallManager
     from rpg_core.context.factory import build_rpg_context
 
     def fake_create(**kwargs):
         captured.update(kwargs)
         return None
 
-    monkeypatch.setattr(MemoryManager, "create", fake_create)
+    monkeypatch.setattr(MemoryRecallManager, "create", fake_create)
 
     context = build_rpg_context(workspace="ignored_workspace_id", session_id="s_runtime")
     builder = context["builder"]
@@ -27,3 +27,4 @@ def test_context_factory_uses_catalog_session_runtime_dir(
     assert builder._persist_memory.session_id == "s_runtime"
     assert captured["session_dir"] == str(session_root)
     assert captured["get_vector_db_path"] == str(session_root / "memory_vectors.db")
+    assert captured["watcher"] is not None

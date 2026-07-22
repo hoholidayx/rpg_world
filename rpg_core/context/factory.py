@@ -33,11 +33,11 @@ def build_rpg_context(
     from rpg_core.settings import settings as rpg_settings
     from rpg_core.context.builder import RPGContextBuilder
     from rpg_core.context.config import RPGContextConfig
-    from rp_memory.persist_memory import PersistentMemoryStore
-    from rp_memory.dream.application import DreamApplicationService
-    from rp_memory.recalled_memory import RecalledMemoryStore
-    from rp_memory.story_memory import StoryMemoryStore
-    from rp_memory.story_memory_service import StoryMemoryApplicationService
+    from rpg_memory.persistent.store import PersistentMemoryStore
+    from rpg_memory.dream.application import DreamApplicationService
+    from rpg_memory.recall.store import RecalledMemoryStore
+    from rpg_memory.story.store import StoryMemoryStore
+    from rpg_memory.story.application import StoryMemoryApplicationService
     from rpg_core.summary.batch_store import BatchSummaryStore
     from rpg_core.summary.store import SummaryStore
     from rpg_data.services import get_data_service_gateway
@@ -74,20 +74,22 @@ def build_rpg_context(
         )
     )
 
-    # ── MemoryManager（封装向量记忆检索） ─────────────────────────
+    # ── MemoryRecallManager（封装向量记忆检索） ─────────────────────────
     memory_manager: object | None = None
 
     try:
-        from rp_memory.memory_manager import MemoryManager
+        from rpg_memory.recall.manager import MemoryRecallManager
+        from rpg_core.utils.watcher import get_watcher
 
-        memory_manager = MemoryManager.create(
+        memory_manager = MemoryRecallManager.create(
             recalled_store=recalled_store,  # type: ignore[arg-type]
             session_dir=str(session_root),
             get_vector_db_path=str(session_root / "memory_vectors.db"),
             mem_cfg=rpg_settings.memory_settings,
+            watcher=get_watcher(),
         )
     except Exception as exc:
-        logger.warning("[RPG World] MemoryManager creation failed: {}", exc)
+        logger.warning("[RPG World] MemoryRecallManager creation failed: {}", exc)
 
     # ── Cross-session Managers ────────────────────────────────────────
     character_mgr: CharacterManager | None = None

@@ -5,9 +5,9 @@ import pytest
 from dream_service.repository import RPGDataDreamRepository
 from rpg_data import models
 from rpg_data.services.gateway import get_data_service_gateway, reset_data_service_gateways
-from rp_memory.dream.errors import DreamProposalStaleError
-from rp_memory.dream.source import DreamSourceSelector
-from rp_memory.dream.types import (
+from rpg_memory.dream.errors import DreamProposalStaleError
+from rpg_memory.dream.source import DreamSourceSelector
+from rpg_memory.dream.types import (
     DreamDepth,
     DreamFact,
     DreamProposalAction,
@@ -15,10 +15,10 @@ from rp_memory.dream.types import (
     DreamScope,
     MAX_ACTIVE_MEMORIES,
 )
-from rp_memory.memory_types import EpistemicStatus, MemoryKind
+from rpg_memory.types import EpistemicStatus, MemoryKind
 from rpg_core.session.manager import SessionManager
 from rpg_core.session.role import SessionRoleService
-from rp_memory.story_memory_service import StoryMemoryApplicationService
+from rpg_memory.story.application import StoryMemoryApplicationService
 
 
 def _story_memory(gateway):  # noqa: ANN001, ANN202

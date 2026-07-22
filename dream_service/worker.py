@@ -16,7 +16,7 @@ from dream_service.contracts import (
     DreamProposalView,
     DreamRepository,
 )
-from rp_memory.dream.types import (
+from rpg_memory.dream.types import (
     DreamProposalItemDraft,
     DreamSelection,
     DreamSourceSnapshot,

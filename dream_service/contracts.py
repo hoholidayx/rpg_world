@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from rp_memory.dream.types import (
+from rpg_memory.dream.types import (
     DreamProposalItemDraft,
     DreamSelection,
     DreamSourceSnapshot,

@@ -43,7 +43,8 @@ def test_business_processes_only_use_public_llm_client_contract() -> None:
     violations: list[str] = []
     for path in _python_files(
         "rpg_core",
-        "rp_memory",
+        "memory_retrieval",
+        "rpg_memory",
         "agent_service",
         "play_api",
         "channels",
@@ -61,6 +62,8 @@ def test_business_processes_only_use_public_llm_client_contract() -> None:
 def test_llm_service_does_not_import_business_runtimes() -> None:
     forbidden = (
         "from rpg_core",
+        "from memory_retrieval",
+        "from rpg_memory",
         "from rp_memory",
         "from rpg_media",
         "from rpg_data",
@@ -73,6 +76,47 @@ def test_llm_service_does_not_import_business_runtimes() -> None:
         for marker in forbidden:
             if marker in text:
                 violations.append(f"{path.relative_to(ROOT)}: {marker}")
+    assert violations == []
+
+
+def test_memory_retrieval_does_not_import_rpg_business_packages() -> None:
+    forbidden = (
+        "from rpg_core",
+        "import rpg_core",
+        "from rpg_data",
+        "import rpg_data",
+        "from rpg_memory",
+        "import rpg_memory",
+        "from rp_memory",
+        "import rp_memory",
+    )
+    violations: list[str] = []
+    for path in _python_files("memory_retrieval"):
+        text = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            if marker in text:
+                violations.append(f"{path.relative_to(ROOT)}: {marker}")
+
+    assert violations == []
+
+
+def test_production_code_does_not_import_removed_rp_memory_package() -> None:
+    violations: list[str] = []
+    for path in _python_files(
+        "agent_service",
+        "channels",
+        "dream_service",
+        "memory_retrieval",
+        "play_api",
+        "rpg_core",
+        "rpg_data",
+        "rpg_memory",
+    ):
+        text = path.read_text(encoding="utf-8")
+        for marker in ("from rp_memory", "import rp_memory"):
+            if marker in text:
+                violations.append(f"{path.relative_to(ROOT)}: {marker}")
+
     assert violations == []
 
 

@@ -124,7 +124,7 @@ base:
 
   # ── 核心/记忆侧日志配置 ───────────────────────────────────────────
   logging:
-    # 核心工具和 rp_memory 手动 CLI 的日志级别。当前阶段默认 DEBUG。
+    # 核心工具、rpg_memory 调试 CLI 和 memory_retrieval 的日志级别。当前阶段默认 DEBUG。
     log_level: DEBUG
 
 # 固定 profile 名称；覆盖文件无需在这里声明 file。

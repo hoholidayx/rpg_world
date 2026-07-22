@@ -34,12 +34,12 @@ from rpg_core.tests.integration.scripted_llm import (
     response,
     tool_call,
 )
-from rp_memory.dream.application import DreamApplicationService
-from rp_memory.dream.proposal import DreamProposalItemInput
-from rp_memory.dream.types import DreamDepth, DreamScope
-from rp_memory.dream.types import DreamEvidence, DreamProposalAction
-from rp_memory.memory_types import EpistemicStatus, MemoryKind
-from rp_memory.story_memory_service import StoryMemoryApplicationService
+from rpg_memory.dream.application import DreamApplicationService
+from rpg_memory.dream.proposal import DreamProposalItemInput
+from rpg_memory.dream.types import DreamDepth, DreamScope
+from rpg_memory.dream.types import DreamEvidence, DreamProposalAction
+from rpg_memory.types import EpistemicStatus, MemoryKind
+from rpg_memory.story.application import StoryMemoryApplicationService
 
 pytestmark = pytest.mark.integration
 

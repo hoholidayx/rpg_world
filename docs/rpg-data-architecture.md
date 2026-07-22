@@ -32,7 +32,7 @@ Repository / Peewee Record（仅 rpg_data 内部）
 
 必须保持以下单向关系：
 
-- `rpg_data` 不导入 `rpg_core`、`rp_memory`、`rpg_media`、`rpg_tts`、接入层、事件发布器或 UI 模块。
+- `rpg_data` 不导入 `rpg_core`、`rpg_memory`、`memory_retrieval`、`rpg_media`、`rpg_tts`、接入层、事件发布器或 UI 模块。
 - 业务代码可以依赖 `rpg_data.model.*` 的存储契约，以及自己定义的窄 Data Port。
 - 业务代码不得导入 `rpg_data.repositories`、Peewee Record 或数据库查询对象。
 - Repository 不作为跨模块 API；数据库实现变化必须被 Data Service 边界吸收。
