@@ -26,6 +26,7 @@ from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
+from rpg_data.services.story_pack import StoryPackDataService
 from rpg_data.services.status import StatusDataService
 from rpg_data.services.tts import TTSDataService
 from rpg_data.settings import resolve_database_path
@@ -65,6 +66,7 @@ class DataServiceGateway:
         self._session_composer: SessionComposerDataService | None = None
         self._backup: BackupService | None = None
         self._story_memory: StoryMemoryDataService | None = None
+        self._story_packs: StoryPackDataService | None = None
         self._status: StatusDataService | None = None
         self._tts: TTSDataService | None = None
         self._initialized = False
@@ -248,6 +250,18 @@ class DataServiceGateway:
         self._ensure_bound()
         return self._status
 
+    @property
+    def story_packs(self) -> StoryPackDataService:
+        database = self.database
+        if self._story_packs is None:
+            logger.debug(
+                "creating Story Pack data service db_path=%s",
+                self._database_path,
+            )
+            self._story_packs = StoryPackDataService(database)
+        self._ensure_bound()
+        return self._story_packs
+
     def initialize(self) -> None:
         if self._initialized:
             self._ensure_bound()
@@ -291,6 +305,7 @@ class DataServiceGateway:
         self._session_composer = None
         self._backup = None
         self._story_memory = None
+        self._story_packs = None
         self._status = None
         self._tts = None
 

@@ -75,6 +75,7 @@ class StoryRepository:
         summary: str | None = None,
         story_prompt: str | None = None,
         openings: Sequence[models.StoryOpeningInput] | None = None,
+        metadata_json: str | None = None,
     ) -> models.Story | None:
         with self._database.atomic():
             fields: dict[str, object] = {}
@@ -84,6 +85,8 @@ class StoryRepository:
                 fields["summary"] = summary
             if story_prompt is not None:
                 fields["story_prompt"] = story_prompt
+            if metadata_json is not None:
+                fields["metadata_json"] = metadata_json
             if not fields and openings is None:
                 row = get_or_none(StoryRecord, story_id)
                 return self._to_story(row) if row is not None else None

@@ -229,6 +229,75 @@ CREATE INDEX idx_rpg_session_backup_messages_session_id_id ON rpg_session_backup
 
 CREATE INDEX idx_rpg_session_backup_messages_turn ON rpg_session_backup_messages(session_id, turn_id, seq_in_turn, id);
 
+CREATE TABLE rpg_story_pack_bindings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL,
+    story_id INTEGER NOT NULL,
+    resource_kind TEXT NOT NULL CHECK (length(trim(resource_kind)) > 0),
+    source_id TEXT NOT NULL CHECK (length(trim(source_id)) > 0),
+    resource_id TEXT NOT NULL CHECK (length(trim(resource_id)) > 0),
+    source_digest TEXT NOT NULL CHECK (
+        length(source_digest) = 64
+        AND source_digest NOT GLOB '*[^0-9a-f]*'
+    ),
+    resource_version INTEGER NOT NULL CHECK (resource_version > 0),
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (story_id, workspace_id)
+        REFERENCES rpg_stories(id, workspace_id) ON DELETE CASCADE,
+    UNIQUE (story_id, resource_kind, source_id),
+    UNIQUE (story_id, resource_kind, resource_id)
+);
+
+CREATE INDEX idx_rpg_story_pack_bindings_story
+ON rpg_story_pack_bindings(story_id, resource_kind, source_id);
+
+CREATE TABLE rpg_story_pack_operations (
+    id TEXT PRIMARY KEY,
+    operation_kind TEXT NOT NULL CHECK (length(trim(operation_kind)) > 0),
+    status TEXT NOT NULL DEFAULT 'previewed'
+        CHECK (
+            status IN (
+                'previewed',
+                'applying',
+                'applied',
+                'applied_with_local_sync_pending',
+                'failed'
+            )
+        ),
+    project_id TEXT NOT NULL CHECK (length(trim(project_id)) > 0),
+    pack_id TEXT NOT NULL CHECK (length(trim(pack_id)) > 0),
+    pack_digest TEXT NOT NULL CHECK (
+        length(pack_digest) = 64
+        AND pack_digest NOT GLOB '*[^0-9a-f]*'
+    ),
+    workspace_id TEXT NOT NULL CHECK (length(trim(workspace_id)) > 0),
+    story_stable_id TEXT NOT NULL CHECK (length(trim(story_stable_id)) > 0),
+    story_id INTEGER,
+    pack_json TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    result_json TEXT NOT NULL DEFAULT '{}',
+    error_code TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    applied_at TEXT,
+    FOREIGN KEY (story_id) REFERENCES rpg_stories(id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_rpg_story_pack_operations_pack
+ON rpg_story_pack_operations(
+    workspace_id,
+    story_stable_id,
+    pack_digest,
+    status,
+    created_at
+);
+
 CREATE TABLE rpg_rp_module_catalog (
     module_name TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,

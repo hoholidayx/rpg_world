@@ -152,6 +152,7 @@ class CatalogService:
         summary: str = "",
         story_prompt: str = "",
         openings: Sequence[models.StoryOpeningInput] = (),
+        metadata_json: str = "{}",
     ) -> models.Story | None:
         workspace = self._workspaces.get(workspace_id)
         if workspace is None:
@@ -165,6 +166,7 @@ class CatalogService:
                 summary=summary,
                 story_prompt=story_prompt,
                 openings=openings,
+                metadata_json=metadata_json,
             )
         logger.info("created story story_id=%s workspace_id=%s", story.id, workspace_id)
         return story
@@ -178,6 +180,7 @@ class CatalogService:
         summary: str | None = None,
         story_prompt: str | None = None,
         openings: Sequence[models.StoryOpeningInput] | None = None,
+        metadata_json: str | None = None,
     ) -> models.Story | None:
         story = self._stories.get(story_id)
         if story is None or story.workspace_id != workspace_id:
@@ -191,6 +194,7 @@ class CatalogService:
                 summary=summary,
                 story_prompt=story_prompt,
                 openings=openings,
+                metadata_json=metadata_json,
             )
 
     def list_story_openings(

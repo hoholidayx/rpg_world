@@ -102,6 +102,7 @@ class SessionDataService:
         summary: str = "",
         story_prompt: str = "",
         openings: Sequence[models.StoryOpeningInput] = (),
+        metadata_json: str = "{}",
     ) -> models.Story | None:
         return self._catalog.create_story(
             str(workspace_id),
@@ -109,6 +110,7 @@ class SessionDataService:
             summary=summary,
             story_prompt=story_prompt,
             openings=openings,
+            metadata_json=metadata_json,
         )
 
     def update_story(
@@ -120,6 +122,7 @@ class SessionDataService:
         summary: str | None = None,
         story_prompt: str | None = None,
         openings: Sequence[models.StoryOpeningInput] | None = None,
+        metadata_json: str | None = None,
     ) -> models.Story | None:
         return self._catalog.update_story(
             str(workspace_id),
@@ -128,6 +131,7 @@ class SessionDataService:
             summary=summary,
             story_prompt=story_prompt,
             openings=openings,
+            metadata_json=metadata_json,
         )
 
     def create_session(

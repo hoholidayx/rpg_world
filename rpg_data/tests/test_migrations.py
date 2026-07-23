@@ -39,6 +39,8 @@ def test_run_migrations_creates_consolidated_final_schema() -> None:
             "rpg_story_character_details",
             "rpg_story_lorebook_entries",
             "rpg_story_status_tables",
+            "rpg_story_pack_bindings",
+            "rpg_story_pack_operations",
             "rpg_session_status_tables",
             "rpg_session_status_deferred_progress",
             "rpg_rp_module_catalog",
@@ -101,6 +103,21 @@ def test_run_migrations_creates_consolidated_final_schema() -> None:
             "mount_origin",
         }.isdisjoint(_columns(conn, "rpg_session_status_tables"))
         assert "deadline_time_json" in _columns(conn, "rpg_story_plot_events")
+        assert {
+            "resource_kind",
+            "source_id",
+            "resource_id",
+            "source_digest",
+            "resource_version",
+        }.issubset(_columns(conn, "rpg_story_pack_bindings"))
+        assert {
+            "operation_kind",
+            "status",
+            "pack_digest",
+            "pack_json",
+            "plan_json",
+            "result_json",
+        }.issubset(_columns(conn, "rpg_story_pack_operations"))
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         conn.close()

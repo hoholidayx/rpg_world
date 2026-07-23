@@ -60,6 +60,8 @@ __all__ = [
     "SessionStatusDeferredProgressRecord",
     "StoryCharacterRecord",
     "StoryLorebookEntryRecord",
+    "StoryPackBindingRecord",
+    "StoryPackOperationRecord",
     "StoryNarrativeStyleRecord",
     "StoryOpeningRecord",
     "StoryPlotEventPoolRecord",
@@ -1439,6 +1441,68 @@ class SessionStatusDeferredProgressRecord(BaseRecord):
         primary_key = CompositeKey("session_status_table", "field_key")
 
 
+class StoryPackBindingRecord(BaseRecord):
+    id = AutoField()
+    workspace = ForeignKeyField(
+        WorkspaceRecord,
+        backref="story_pack_bindings",
+        column_name="workspace_id",
+        on_delete="CASCADE",
+    )
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="story_pack_bindings",
+        column_name="story_id",
+        on_delete="CASCADE",
+    )
+    resource_kind = TextField()
+    source_id = TextField()
+    resource_id = TextField()
+    source_digest = CharField()
+    resource_version = IntegerField()
+    metadata_json = TextField(default="{}")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+
+    class Meta:
+        table_name = "rpg_story_pack_bindings"
+        indexes = (
+            (("story", "resource_kind", "source_id"), True),
+            (("story", "resource_kind", "resource_id"), True),
+        )
+
+
+class StoryPackOperationRecord(BaseRecord):
+    id = CharField(primary_key=True)
+    operation_kind = TextField()
+    status = TextField(default="previewed")
+    project_id = TextField()
+    pack_id = TextField()
+    pack_digest = CharField()
+    workspace_id = TextField()
+    story_stable_id = TextField()
+    story = ForeignKeyField(
+        StoryRecord,
+        backref="story_pack_operations",
+        column_name="story_id",
+        null=True,
+        on_delete="SET NULL",
+    )
+    pack_json = TextField()
+    plan_json = TextField()
+    result_json = TextField(default="{}")
+    error_code = TextField(default="")
+    error_message = TextField(default="")
+    version = IntegerField(default=1)
+    created_at = TextField()
+    updated_at = TextField()
+    applied_at = TextField(null=True)
+
+    class Meta:
+        table_name = "rpg_story_pack_operations"
+
+
 RECORD_MODELS = (
     WorkspaceRecord,
     WorkspaceTurnModeRecord,
@@ -1491,4 +1555,6 @@ RECORD_MODELS = (
     StoryStatusTableRecord,
     SessionStatusTableRecord,
     SessionStatusDeferredProgressRecord,
+    StoryPackBindingRecord,
+    StoryPackOperationRecord,
 )

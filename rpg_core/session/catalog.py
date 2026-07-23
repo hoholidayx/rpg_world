@@ -26,6 +26,7 @@ class SessionCatalogDataPort(SessionStatusDataPort, Protocol):
         summary: str,
         story_prompt: str,
         openings: Sequence[data_models.StoryOpeningInput],
+        metadata_json: str,
     ) -> data_models.Story | None: ...
 
     def update_story(
@@ -37,6 +38,7 @@ class SessionCatalogDataPort(SessionStatusDataPort, Protocol):
         summary: str | None,
         story_prompt: str | None,
         openings: Sequence[data_models.StoryOpeningInput] | None,
+        metadata_json: str | None,
     ) -> data_models.Story | None: ...
 
     def get_story(
@@ -100,6 +102,7 @@ class SessionCatalogService:
         summary: str = "",
         story_prompt: str = "",
         openings: Sequence[data_models.StoryOpeningInput] = (),
+        metadata_json: str = "{}",
     ) -> data_models.Story | None:
         normalized_openings = normalize_story_openings(openings)
         validate_story_text_template(story_prompt)
@@ -110,6 +113,7 @@ class SessionCatalogService:
                 summary=summary,
                 story_prompt=story_prompt,
                 openings=normalized_openings,
+                metadata_json=metadata_json,
             )
             if story is None:
                 return None
@@ -150,6 +154,7 @@ class SessionCatalogService:
         summary: str | None = None,
         story_prompt: str | None = None,
         openings: Sequence[data_models.StoryOpeningInput] | None = None,
+        metadata_json: str | None = None,
     ) -> data_models.Story | None:
         if story_prompt is not None:
             validate_story_text_template(story_prompt)
@@ -165,6 +170,7 @@ class SessionCatalogService:
             summary=summary,
             story_prompt=story_prompt,
             openings=normalized_openings,
+            metadata_json=metadata_json,
         )
 
     def create_session(

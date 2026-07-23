@@ -41,6 +41,7 @@ from rpg_data.services.rp_modules import RPModuleDataService
 from rpg_data.services.session_composer import SessionComposerDataService
 from rpg_data.services.session import SessionDataService
 from rpg_data.services.story_memory import StoryMemoryDataService
+from rpg_data.services.story_pack import StoryPackDataService
 from rpg_data.services.status import StatusDataService
 from rpg_data.services.tts import TTSDataService
 
@@ -58,6 +59,7 @@ PRODUCTION_ROOTS = (
     "rpg_data",
     "rpg_media",
     "rpg_memory",
+    "rpg_mcp",
     "rpg_tts",
     "tts_service",
 )
@@ -151,6 +153,7 @@ GATEWAY_LOOKUP_ALLOWLIST = frozenset({
     "channels/cli/memory_recall.py",
     "rpg_core/agent/agent.py",
     "rpg_core/context/factory.py",
+    "rpg_mcp/composition.py",
     "tts_service/main.py",
 })
 
@@ -165,6 +168,7 @@ CORE_GATEWAY_LOOKUP_ALLOWLIST = frozenset({
 WHOLE_GATEWAY_REFERENCE_ALLOWLIST = frozenset({
     "media_service/main.py",
     "play_api/backends/data_manager.py",
+    "rpg_mcp/composition.py",
     "tts_service/main.py",
 })
 
@@ -303,6 +307,7 @@ def test_recent_public_persistence_boundaries_use_data_service_naming() -> None:
         PlotSchedulingDataService,
         DreamMemoryDataService,
         StoryMemoryDataService,
+        StoryPackDataService,
         StatusDataService,
         MediaDataService,
         TTSDataService,

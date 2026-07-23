@@ -146,6 +146,7 @@ class StatusDataService:
         rows: Iterable[Iterable[str]] | None = None,
         description: str | None = None,
         sort_order: int | None = None,
+        metadata_json: str | None = None,
     ) -> models.StoryStatusTable:
         row = self._get_story_table_row(story_status_table_id)
         if str(row.workspace_id) != workspace_id or int(row.story_id) != story_id:
@@ -176,6 +177,8 @@ class StatusDataService:
             row.description = description
         if sort_order is not None:
             row.sort_order = sort_order
+        if metadata_json is not None:
+            row.metadata_json = str(metadata_json)
         row.updated_at = SQL("CURRENT_TIMESTAMP")
         try:
             row.save()
