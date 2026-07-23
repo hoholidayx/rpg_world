@@ -110,6 +110,101 @@ const PHASE_LABELS = {
   runtime_synced: "已同步",
 };
 
+const REVISION_CHANGE_COLLECTIONS = [
+  {
+    key: "openings",
+    viewId: "openings",
+    getValues: (document) => document.resources?.openings,
+    getIdentity: (item, index) => item.stableId || item.title || index,
+  },
+  {
+    key: "characters",
+    viewId: "characters",
+    getValues: (document) => document.resources?.characters,
+    getIdentity: (item, index) => item.stableId || item.name || index,
+  },
+  {
+    key: "lorebook",
+    viewId: "lorebook",
+    getValues: (document) => document.resources?.lorebook,
+    getIdentity: (item, index) => item.stableId || item.name || index,
+  },
+  {
+    key: "statusTables",
+    viewId: "status-tables",
+    getValues: (document) => document.resources?.statusTables,
+    getIdentity: (item, index) => item.stableId || item.name || index,
+  },
+  {
+    key: "plotOutlines",
+    viewId: "plot-schedule",
+    getValues: (document) => document.resources?.plotSchedule?.outlines,
+    getIdentity: (item, index) => item.stableId || item.name || index,
+  },
+  {
+    key: "plotPools",
+    viewId: "plot-schedule",
+    getValues: (document) => document.resources?.plotSchedule?.pools,
+    getIdentity: (item, index) => item.stableId || item.name || index,
+  },
+  {
+    key: "plotEvents",
+    viewId: "plot-schedule",
+    getValues: (document) => document.resources?.plotSchedule?.events,
+    getIdentity: (item, index) => item.stableId || item.title || index,
+  },
+  {
+    key: "plotNodes",
+    viewId: "plot-schedule",
+    getValues: (document) => safeArray(
+      document.resources?.plotSchedule?.outlines,
+    ).flatMap((outline) => safeArray(outline.nodes)),
+    getIdentity: (item, index) => item.stableId || item.eventRef || index,
+  },
+  {
+    key: "rpModules",
+    viewId: "rp-modules",
+    getValues: (document) => document.resources?.rpModules,
+    getIdentity: (item, index) => item.moduleName || index,
+  },
+  {
+    key: "narrativeStyles",
+    viewId: "narrative-styles",
+    getValues: (document) => document.resources?.narrativeStyles,
+    getIdentity: (item, index) => item.stableId || item.name || index,
+  },
+  {
+    key: "quickReplies",
+    viewId: "quick-replies",
+    getValues: (document) => document.resources?.quickReplies,
+    getIdentity: (item, index) => item.stableId || item.title || index,
+  },
+  {
+    key: "visualCatalog",
+    viewId: "visual-catalog",
+    getValues: (document) => document.resources?.visualCatalog,
+    getIdentity: (item, index) => item.stableId || item.title || index,
+  },
+  {
+    key: "decisions",
+    viewId: "decisions",
+    getValues: (document) => document.decisions,
+    getIdentity: (item, index) => item.id || index,
+  },
+  {
+    key: "openQuestions",
+    viewId: "decisions",
+    getValues: (document) => document.openQuestions,
+    getIdentity: (item, index) => item.id || index,
+  },
+  {
+    key: "sources",
+    viewId: "sources",
+    getValues: (document) => document.sources,
+    getIdentity: (item, index) => item.id || item.title || index,
+  },
+];
+
 const state = {
   manifest: null,
   history: { revisions: [], checkpoints: [] },
@@ -127,6 +222,8 @@ const state = {
   eventSource: null,
   pollTimer: null,
   toastTimer: null,
+  selectionToken: 0,
+  revisionChanges: createEmptyRevisionChanges(),
 };
 
 const elements = {};
@@ -350,10 +447,17 @@ async function selectRevision(
   if (!revisionId) {
     throw new Error("没有可读取的 revision。");
   }
+  const selectionToken = ++state.selectionToken;
+  state.revisionChanges = createEmptyRevisionChanges();
   setContentLoading();
   const revision = await api(`/api/revisions/${encodeURIComponent(revisionId)}`);
+  const revisionChanges = await loadRevisionChanges(revision);
+  if (selectionToken !== state.selectionToken) {
+    return;
+  }
   state.selectedRevision = revision;
   state.selectedRevisionId = revision.revisionId;
+  state.revisionChanges = revisionChanges;
   if (followHead || revision.revisionId === state.headRevisionId) {
     state.pendingHeadId = null;
   } else if (state.headRevisionId !== revision.revisionId) {
@@ -514,16 +618,20 @@ function renderNavigation() {
   const document = state.selectedRevision?.document || {};
   elements.sectionNavigation.innerHTML = VIEW_DEFINITIONS.map((item, index) => {
     const count = getViewCount(item, document);
+    const hasRevisionChange = hasViewRevisionChange(item.id);
     return `
       <button
-        class="nav-button ${item.id === state.activeView ? "is-active" : ""}"
+        class="nav-button ${item.id === state.activeView ? "is-active" : ""} ${hasRevisionChange ? "is-changed" : ""}"
         type="button"
         data-view="${escapeHtml(item.id)}"
         aria-current="${item.id === state.activeView ? "page" : "false"}"
       >
         <span class="nav-index">${String(index + 1).padStart(2, "0")}</span>
         <span class="nav-label">${escapeHtml(item.label)}</span>
-        ${count === null ? "" : `<span class="section-count">${count}</span>`}
+        <span class="nav-tail">
+          ${hasRevisionChange ? '<span class="nav-change-marker" aria-label="与上一版本相比有变化">更新</span>' : ""}
+          ${count === null ? "" : `<span class="section-count">${count}</span>`}
+        </span>
       </button>
     `;
   }).join("");
@@ -659,10 +767,207 @@ function renderActiveView() {
     default:
       result = renderOverview(document);
   }
-  elements.contentStage.innerHTML = result.html;
+  elements.contentStage.innerHTML = `${renderRevisionChangeSummary(
+    definition.id,
+  )}${result.html}`;
   state.rawValue = result.raw;
   state.rawPath = result.path;
   elements.rawButton.disabled = result.raw === undefined;
+}
+
+function createEmptyRevisionChanges() {
+  return {
+    revisionId: null,
+    previousRevisionId: null,
+    hasPrevious: false,
+    changedViews: new Set(),
+    changedSections: new Set(),
+    itemChanges: new Map(),
+    removedCounts: new Map(),
+  };
+}
+
+async function loadRevisionChanges(revision) {
+  const changes = createEmptyRevisionChanges();
+  changes.revisionId = revision.revisionId || null;
+  const previousRevisionId = revision.parentRevision;
+  if (!previousRevisionId) {
+    return changes;
+  }
+  try {
+    const previous = await api(
+      `/api/revisions/${encodeURIComponent(previousRevisionId)}`,
+    );
+    return compareRevisionDocuments(
+      previous.document,
+      revision.document,
+      previousRevisionId,
+      revision.revisionId,
+    );
+  } catch {
+    return changes;
+  }
+}
+
+function compareRevisionDocuments(
+  previousDocument,
+  currentDocument,
+  previousRevisionId,
+  revisionId,
+) {
+  const changes = createEmptyRevisionChanges();
+  changes.revisionId = revisionId || null;
+  changes.previousRevisionId = previousRevisionId || null;
+  changes.hasPrevious = true;
+
+  if (!sameRevisionValue(previousDocument, currentDocument)) {
+    changes.changedViews.add("overview");
+  }
+  for (const [key, viewId] of [
+    ["project", "overview"],
+    ["target", "overview"],
+    ["story", "story"],
+    ["notes", "sources"],
+  ]) {
+    if (!sameRevisionValue(previousDocument?.[key], currentDocument?.[key])) {
+      changes.changedSections.add(key);
+      changes.changedViews.add(viewId);
+      if (key === "story") {
+        changes.changedViews.add("overview");
+      }
+    }
+  }
+
+  REVISION_CHANGE_COLLECTIONS.forEach((definition) => {
+    compareRevisionCollection(
+      changes,
+      definition,
+      definition.getValues(previousDocument || {}),
+      definition.getValues(currentDocument || {}),
+    );
+  });
+  return changes;
+}
+
+function compareRevisionCollection(
+  changes,
+  definition,
+  previousValues,
+  currentValues,
+) {
+  const previous = safeArray(previousValues);
+  const current = safeArray(currentValues);
+  const previousById = new Map(
+    previous.map((item, index) => [
+      String(definition.getIdentity(item, index)),
+      { item, index },
+    ]),
+  );
+  const currentIds = new Set();
+  const itemChanges = new Map();
+
+  current.forEach((item, index) => {
+    const identity = String(definition.getIdentity(item, index));
+    currentIds.add(identity);
+    const previousEntry = previousById.get(identity);
+    if (previousEntry === undefined) {
+      itemChanges.set(identity, "added");
+    } else if (
+      previousEntry.index !== index
+      || !sameRevisionValue(previousEntry.item, item)
+    ) {
+      itemChanges.set(identity, "updated");
+    }
+  });
+
+  const removedCount = previous.filter((item, index) => (
+    !currentIds.has(String(definition.getIdentity(item, index)))
+  )).length;
+  if (
+    itemChanges.size === 0
+    && removedCount === 0
+    && sameRevisionValue(previous, current)
+  ) {
+    return;
+  }
+
+  changes.changedViews.add(definition.viewId);
+  changes.changedViews.add("overview");
+  changes.changedSections.add(definition.key);
+  changes.itemChanges.set(definition.key, itemChanges);
+  if (removedCount > 0) {
+    changes.removedCounts.set(definition.key, removedCount);
+  }
+}
+
+function sameRevisionValue(left, right) {
+  return canonicalRevisionValue(left) === canonicalRevisionValue(right);
+}
+
+function canonicalRevisionValue(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalRevisionValue(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => (
+      `${JSON.stringify(key)}:${canonicalRevisionValue(value[key])}`
+    )).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function hasViewRevisionChange(viewId) {
+  return state.revisionChanges.hasPrevious
+    && state.revisionChanges.changedViews.has(viewId);
+}
+
+function revisionChangeClass(key, identity = null) {
+  if (identity === null) {
+    return state.revisionChanges.changedSections.has(key)
+      ? " is-revision-changed"
+      : "";
+  }
+  return state.revisionChanges.itemChanges.get(key)?.has(String(identity))
+    ? " is-revision-changed"
+    : "";
+}
+
+function revisionChangeClassForSections(...keys) {
+  return keys.some((key) => state.revisionChanges.changedSections.has(key))
+    ? " is-revision-changed"
+    : "";
+}
+
+function renderRevisionChangeSummary(viewId) {
+  if (!hasViewRevisionChange(viewId)) {
+    return "";
+  }
+  const change = state.revisionChanges;
+  const removed = totalRemovedForView(viewId);
+  const copy = removed > 0
+    ? `本板块含有新增、修改或删除内容；带亮边的卡片是当前仍可查看的新增或修改项，另有 ${removed} 项已移除。`
+    : "带亮边的内容块为相对上一 revision 新增或修改的内容。";
+  return `
+    <aside class="revision-change-banner" aria-label="当前页面的 revision 变化">
+      <div>
+        <span>REVISION DELTA</span>
+        <strong>与 ${escapeHtml(change.previousRevisionId)} 相比，此板块有更新</strong>
+        <p>${escapeHtml(copy)}</p>
+      </div>
+      <span class="revision-delta-id">${escapeHtml(change.previousRevisionId)} → ${escapeHtml(change.revisionId)}</span>
+    </aside>
+  `;
+}
+
+function totalRemovedForView(viewId) {
+  return REVISION_CHANGE_COLLECTIONS
+    .filter((definition) => definition.viewId === viewId)
+    .reduce(
+      (total, definition) => (
+        total + (state.revisionChanges.removedCounts.get(definition.key) || 0)
+      ),
+      0,
+    );
 }
 
 function renderOverview(document) {
@@ -696,7 +1001,7 @@ function renderOverview(document) {
     raw: document,
     html: `
       <div class="section-stack">
-        <article class="story-hero">
+        <article class="story-hero${revisionChangeClassForSections("project", "story")}">
           <p class="section-kicker">${escapeHtml(
             PHASE_LABELS[project.phase] || project.phase || "STORY DESIGN",
           )}</p>
@@ -714,14 +1019,51 @@ function renderOverview(document) {
         </article>
 
         <div class="metric-grid">
-          ${metricCard("设计资源", totalResources + plotCount, "当前 revision 中的结构化资源")}
-          ${metricCard("角色", safeArray(resources.characters).length, "Story 直接拥有")}
-          ${metricCard("剧情节点", plotCount, "大纲、事件池与事件")}
-          ${metricCard("开放问题", openQuestions.length, "仍需要确认的设计选择")}
+          ${metricCard(
+            "设计资源",
+            totalResources + plotCount,
+            "当前 revision 中的结构化资源",
+            revisionChangeClassForSections(
+              "openings",
+              "characters",
+              "lorebook",
+              "statusTables",
+              "plotOutlines",
+              "plotPools",
+              "plotEvents",
+              "rpModules",
+              "narrativeStyles",
+              "quickReplies",
+              "visualCatalog",
+            ),
+          )}
+          ${metricCard(
+            "角色",
+            safeArray(resources.characters).length,
+            "Story 直接拥有",
+            revisionChangeClass("characters"),
+          )}
+          ${metricCard(
+            "剧情节点",
+            plotCount,
+            "大纲、事件池与事件",
+            revisionChangeClassForSections(
+              "plotOutlines",
+              "plotPools",
+              "plotEvents",
+              "plotNodes",
+            ),
+          )}
+          ${metricCard(
+            "开放问题",
+            openQuestions.length,
+            "仍需要确认的设计选择",
+            revisionChangeClass("openQuestions"),
+          )}
         </div>
 
         <div class="two-column">
-          <article class="content-card">
+          <article class="content-card${revisionChangeClass("story")}">
             <p class="card-eyebrow">STORY SUMMARY</p>
             <h3>故事摘要</h3>
             <p class="prose-block">${
@@ -730,7 +1072,7 @@ function renderOverview(document) {
                 : '<span class="muted">尚未形成故事摘要。</span>'
             }</p>
           </article>
-          <article class="content-card">
+          <article class="content-card${revisionChangeClass("target")}">
             <p class="card-eyebrow">RUNTIME TARGET</p>
             <h3>运行时目标</h3>
             <div class="detail-list">
@@ -742,7 +1084,7 @@ function renderOverview(document) {
         </div>
 
         <div class="two-column">
-          <article class="content-card">
+          <article class="content-card${revisionChangeClass("decisions")}">
             <p class="card-eyebrow">RECENT DECISIONS</p>
             <h3>最近决策</h3>
             ${
@@ -759,7 +1101,7 @@ function renderOverview(document) {
                 : emptyInline("还没有确认过设计决策。")
             }
           </article>
-          <article class="content-card">
+          <article class="content-card${revisionChangeClass("notes")}">
             <p class="card-eyebrow">NOTES</p>
             <h3>项目笔记</h3>
             ${
@@ -784,7 +1126,7 @@ function renderStory(document) {
     raw: story,
     html: `
       <div class="section-stack">
-        <article class="story-hero">
+        <article class="story-hero${revisionChangeClass("story")}">
           <p class="section-kicker">${escapeHtml(story.stableId || "story")}</p>
           <h3>${escapeHtml(story.title || "未命名故事")}</h3>
           <p class="story-logline">${
@@ -798,12 +1140,19 @@ function renderStory(document) {
           </div>
         </article>
         <div class="two-column">
-          ${proseCard("SUMMARY", "故事摘要", story.summary, "尚未形成故事摘要。")}
+          ${proseCard(
+            "SUMMARY",
+            "故事摘要",
+            story.summary,
+            "尚未形成故事摘要。",
+            revisionChangeClass("story"),
+          )}
           ${proseCard(
             "BOUNDARIES",
             "叙事边界",
             boundaries.join("\n"),
             "尚未设置叙事边界。",
+            revisionChangeClass("story"),
           )}
         </div>
         ${proseCard(
@@ -811,10 +1160,16 @@ function renderStory(document) {
           "Story Prompt",
           story.storyPrompt,
           "尚未定义固定故事提示词。",
+          revisionChangeClass("story"),
         )}
         ${
           hasKeys(story.metadata)
-            ? genericCard("METADATA", "扩展元数据", story.metadata)
+            ? genericCard(
+              "METADATA",
+              "扩展元数据",
+              story.metadata,
+              revisionChangeClass("story"),
+            )
             : ""
         }
       </div>
@@ -838,7 +1193,10 @@ function renderOpenings(value) {
     html: `
       <div class="resource-grid">
         ${openings.map((opening, index) => `
-          <article class="resource-card">
+          <article class="resource-card${revisionChangeClass(
+            "openings",
+            opening.stableId || opening.title || index,
+          )}">
             <div class="card-heading">
               <div>
                 <p class="card-eyebrow">OPENING ${String(index + 1).padStart(2, "0")}</p>
@@ -873,8 +1231,11 @@ function renderCharacters(value) {
     raw: characters,
     html: `
       <div class="resource-grid">
-        ${characters.map((character) => `
-          <article class="resource-card">
+        ${characters.map((character, index) => `
+          <article class="resource-card${revisionChangeClass(
+            "characters",
+            character.stableId || character.name || index,
+          )}">
             <div class="card-heading">
               <div>
                 <p class="card-eyebrow">${escapeHtml(character.stableId || "CHARACTER")}</p>
@@ -941,8 +1302,11 @@ function renderLorebook(value) {
     raw: entries,
     html: `
       <div class="resource-grid">
-        ${entries.map((entry) => `
-          <article class="resource-card">
+        ${entries.map((entry, index) => `
+          <article class="resource-card${revisionChangeClass(
+            "lorebook",
+            entry.stableId || entry.name || index,
+          )}">
             <div class="card-heading">
               <div>
                 <p class="card-eyebrow">${escapeHtml(entry.stableId || "LORE")}</p>
@@ -989,8 +1353,11 @@ function renderStatusTables(value) {
     raw: tables,
     html: `
       <div class="section-stack">
-        ${tables.map((table) => `
-          <article class="resource-card">
+        ${tables.map((table, index) => `
+          <article class="resource-card${revisionChangeClass(
+            "statusTables",
+            table.stableId || table.name || index,
+          )}">
             <div class="card-heading">
               <div>
                 <p class="card-eyebrow">${escapeHtml(table.stableId || "STATUS TABLE")}</p>
@@ -1081,8 +1448,11 @@ function renderPlotSchedule(value) {
             "达到时间直接注入",
           )}
         </div>
-        ${outlines.map((outline) => `
-          <article class="plot-lane">
+        ${outlines.map((outline, index) => `
+          <article class="plot-lane${revisionChangeClass(
+            "plotOutlines",
+            outline.stableId || outline.name || index,
+          )}">
             <div class="plot-lane-header">
               <div>
                 <p class="card-eyebrow">${escapeHtml(outline.stableId || "OUTLINE")}</p>
@@ -1095,8 +1465,11 @@ function renderPlotSchedule(value) {
           </article>
         `).join("")}
         <div class="resource-grid">
-          ${pools.map((pool) => `
-            <article class="resource-card">
+          ${pools.map((pool, index) => `
+            <article class="resource-card${revisionChangeClass(
+              "plotPools",
+              pool.stableId || pool.name || index,
+            )}">
               <div class="card-heading">
                 <div>
                   <p class="card-eyebrow">${escapeHtml(pool.stableId || "POOL")}</p>
@@ -1114,7 +1487,7 @@ function renderPlotSchedule(value) {
           `).join("")}
         </div>
         <div class="resource-grid">
-          ${events.map((event) => renderPlotEvent(event)).join("")}
+          ${events.map((event, index) => renderPlotEvent(event, index)).join("")}
         </div>
       </div>
     `,
@@ -1131,7 +1504,10 @@ function renderOutlineNodes(value, eventById) {
       ${nodes.map((node, index) => {
         const event = eventById.get(node.eventRef);
         return `
-          <li class="plot-node">
+          <li class="plot-node${revisionChangeClass(
+            "plotNodes",
+            node.stableId || node.eventRef || index,
+          )}">
             <span class="node-index">${String(index + 1).padStart(2, "0")}</span>
             <div>
               <strong>${escapeHtml(event?.title || node.eventRef || "未绑定事件")}</strong>
@@ -1145,9 +1521,12 @@ function renderOutlineNodes(value, eventById) {
   `;
 }
 
-function renderPlotEvent(event) {
+function renderPlotEvent(event, index) {
   return `
-    <article class="resource-card">
+    <article class="resource-card${revisionChangeClass(
+      "plotEvents",
+      event.stableId || event.title || index,
+    )}">
       <div class="card-heading">
         <div>
           <p class="card-eyebrow">${escapeHtml(event.stableId || "EVENT")}</p>
@@ -1194,8 +1573,11 @@ function renderRPModules(value) {
     raw: modules,
     html: `
       <div class="resource-grid">
-        ${modules.map((module) => `
-          <article class="resource-card">
+        ${modules.map((module, index) => `
+          <article class="resource-card${revisionChangeClass(
+            "rpModules",
+            module.moduleName || index,
+          )}">
             <div class="card-heading">
               <div>
                 <p class="card-eyebrow">RP MODULE</p>
@@ -1226,8 +1608,11 @@ function renderNarrativeStyles(value) {
     raw: styles,
     html: `
       <div class="resource-grid">
-        ${styles.map((style) => `
-          <article class="resource-card">
+        ${styles.map((style, index) => `
+          <article class="resource-card${revisionChangeClass(
+            "narrativeStyles",
+            style.stableId || style.name || index,
+          )}">
             <div class="card-heading">
               <div>
                 <p class="card-eyebrow">${escapeHtml(style.stableId || "STYLE")}</p>
@@ -1259,8 +1644,11 @@ function renderQuickReplies(value) {
     raw: replies,
     html: `
       <div class="resource-grid">
-        ${replies.map((reply) => `
-          <article class="resource-card">
+        ${replies.map((reply, index) => `
+          <article class="resource-card${revisionChangeClass(
+            "quickReplies",
+            reply.stableId || reply.title || index,
+          )}">
             <div class="card-heading">
               <div>
                 <p class="card-eyebrow">${escapeHtml(reply.stableId || "QUICK REPLY")}</p>
@@ -1292,8 +1680,11 @@ function renderVisualCatalog(value) {
     raw: visuals,
     html: `
       <div class="resource-grid">
-        ${visuals.map((visual) => `
-          <article class="resource-card">
+        ${visuals.map((visual, index) => `
+          <article class="resource-card${revisionChangeClass(
+            "visualCatalog",
+            visual.stableId || visual.title || index,
+          )}">
             <div class="card-heading">
               <div>
                 <p class="card-eyebrow">${escapeHtml(visual.stableId || "VISUAL")}</p>
@@ -1326,7 +1717,9 @@ function renderVisualCatalog(value) {
 }
 
 function renderDecisions(decisionValue, questionValue) {
-  const decisions = safeArray(decisionValue).slice().reverse();
+  const decisions = safeArray(decisionValue)
+    .map((decision, index) => ({ decision, index }))
+    .reverse();
   const questions = safeArray(questionValue);
   return {
     path: "/decisions",
@@ -1334,18 +1727,41 @@ function renderDecisions(decisionValue, questionValue) {
     html: `
       <div class="section-stack">
         <div class="metric-grid">
-          ${metricCard("已确认", decisions.filter((item) => item.status === "confirmed").length, "confirmed decisions")}
-          ${metricCard("暂定", decisions.filter((item) => item.status === "tentative").length, "tentative decisions")}
-          ${metricCard("开放问题", questions.filter((item) => item.status === "open").length, "waiting for decision")}
-          ${metricCard("已解决", questions.filter((item) => item.status === "resolved").length, "resolved questions")}
+          ${metricCard(
+            "已确认",
+            decisions.filter(({ decision }) => decision.status === "confirmed").length,
+            "confirmed decisions",
+            revisionChangeClass("decisions"),
+          )}
+          ${metricCard(
+            "暂定",
+            decisions.filter(({ decision }) => decision.status === "tentative").length,
+            "tentative decisions",
+            revisionChangeClass("decisions"),
+          )}
+          ${metricCard(
+            "开放问题",
+            questions.filter((item) => item.status === "open").length,
+            "waiting for decision",
+            revisionChangeClass("openQuestions"),
+          )}
+          ${metricCard(
+            "已解决",
+            questions.filter((item) => item.status === "resolved").length,
+            "resolved questions",
+            revisionChangeClass("openQuestions"),
+          )}
         </div>
         <div class="two-column">
           <div class="section-stack">
             <p class="section-kicker">DECISIONS</p>
             ${
               decisions.length
-                ? decisions.map((decision) => `
-                    <article class="decision-card">
+                ? decisions.map(({ decision, index }) => `
+                    <article class="decision-card${revisionChangeClass(
+                      "decisions",
+                      decision.id || index,
+                    )}">
                       <div class="card-heading">
                         <div>
                           <p class="card-eyebrow">${escapeHtml(decision.id || "DECISION")}</p>
@@ -1369,8 +1785,11 @@ function renderDecisions(decisionValue, questionValue) {
             <p class="section-kicker">OPEN QUESTIONS</p>
             ${
               questions.length
-                ? questions.map((question) => `
-                    <article class="question-card">
+                ? questions.map((question, index) => `
+                    <article class="question-card${revisionChangeClass(
+                      "openQuestions",
+                      question.id || index,
+                    )}">
                       <div class="card-heading">
                         <div>
                           <p class="card-eyebrow">${escapeHtml(question.id || "QUESTION")}</p>
@@ -1417,7 +1836,7 @@ function renderSources(sourceValue, noteValue) {
       <div class="section-stack">
         ${
           notes.length
-            ? `<article class="content-card">
+            ? `<article class="content-card${revisionChangeClass("notes")}">
                 <p class="card-eyebrow">PROJECT NOTES</p>
                 <h3>项目笔记</h3>
                 <div class="detail-list">
@@ -1427,8 +1846,11 @@ function renderSources(sourceValue, noteValue) {
             : ""
         }
         <div class="resource-grid">
-          ${sources.map((source) => `
-            <article class="resource-card">
+          ${sources.map((source, index) => `
+            <article class="resource-card${revisionChangeClass(
+              "sources",
+              source.id || source.title || index,
+            )}">
               <div class="card-heading">
                 <div>
                   <p class="card-eyebrow">${escapeHtml(source.id || "SOURCE")}</p>
@@ -1925,7 +2347,7 @@ function emptyResult(path, raw, title, description) {
     path,
     raw,
     html: `
-      <div class="empty-state">
+      <div class="empty-state${hasViewRevisionChange(state.activeView) ? " is-revision-changed" : ""}">
         <div>
           <strong>${escapeHtml(title)}</strong>
           <p>${escapeHtml(description)}</p>
@@ -1939,9 +2361,9 @@ function emptyInline(message) {
   return `<div class="empty-inline">${escapeHtml(message)}</div>`;
 }
 
-function metricCard(label, value, note) {
+function metricCard(label, value, note, className = "") {
   return `
-    <article class="metric-card">
+    <article class="metric-card${className}">
       <span class="metric-label">${escapeHtml(label)}</span>
       <strong class="metric-value">${escapeHtml(value)}</strong>
       <span class="metric-note">${escapeHtml(note)}</span>
@@ -1949,9 +2371,9 @@ function metricCard(label, value, note) {
   `;
 }
 
-function proseCard(eyebrow, title, value, fallback) {
+function proseCard(eyebrow, title, value, fallback, className = "") {
   return `
-    <article class="content-card">
+    <article class="content-card${className}">
       <p class="card-eyebrow">${escapeHtml(eyebrow)}</p>
       <h3>${escapeHtml(title)}</h3>
       <p class="prose-block">${
@@ -1963,9 +2385,9 @@ function proseCard(eyebrow, title, value, fallback) {
   `;
 }
 
-function genericCard(eyebrow, title, value) {
+function genericCard(eyebrow, title, value, className = "") {
   return `
-    <article class="content-card">
+    <article class="content-card${className}">
       <p class="card-eyebrow">${escapeHtml(eyebrow)}</p>
       <h3>${escapeHtml(title)}</h3>
       <div class="generic-tree">${renderGenericTree(value)}</div>
