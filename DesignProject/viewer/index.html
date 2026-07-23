@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta
+      name="description"
+      content="Story DesignProject 的只读叙事编辑台与 revision 浏览器。"
+    >
+    <title>Story Design Viewer</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#mainContent">跳到故事内容</a>
+
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <button
+            class="icon-button mobile-only"
+            id="sectionToggle"
+            type="button"
+            aria-controls="sectionSidebar"
+            aria-expanded="false"
+            aria-label="打开内容目录"
+          >目</button>
+          <div class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="brand-copy">
+            <p>STORY DESIGN / LIVE ARCHIVE</p>
+            <h1 id="projectTitle">正在读取设计项目…</h1>
+          </div>
+        </div>
+
+        <div class="head-status">
+          <span class="phase-badge" id="projectPhase">载入中</span>
+          <span class="revision-badge" id="selectedRevision">—</span>
+          <span class="live-indicator" id="liveIndicator">
+            <span class="live-dot" aria-hidden="true"></span>
+            <span id="liveLabel">连接中</span>
+          </span>
+        </div>
+
+        <div class="head-actions">
+          <button class="quiet-button" id="refreshButton" type="button">
+            刷新
+          </button>
+          <button
+            class="icon-button mobile-only"
+            id="historyToggle"
+            type="button"
+            aria-controls="historyRail"
+            aria-expanded="false"
+            aria-label="打开版本历史"
+          >史</button>
+        </div>
+      </header>
+
+      <aside class="section-sidebar" id="sectionSidebar">
+        <div class="sidebar-heading">
+          <span>CONTENTS</span>
+          <strong>设计目录</strong>
+        </div>
+        <nav id="sectionNavigation" aria-label="故事设计目录"></nav>
+        <div class="sidebar-footnote">
+          <span class="readonly-mark" aria-hidden="true">R</span>
+          <p>
+            只读投影<br>
+            所有修订仍由 MCP 创建
+          </p>
+        </div>
+      </aside>
+
+      <main class="main-content" id="mainContent" tabindex="-1">
+        <header class="view-header">
+          <div>
+            <p class="view-eyebrow" id="viewEyebrow">PROJECT OVERVIEW</p>
+            <h2 id="viewTitle">项目总览</h2>
+            <p class="view-description" id="viewDescription">
+              正在整理当前 revision。
+            </p>
+          </div>
+          <div class="view-actions">
+            <button class="quiet-button" id="compareButton" type="button">
+              版本对比
+            </button>
+            <button class="quiet-button" id="rawButton" type="button">
+              原始 JSON
+            </button>
+          </div>
+        </header>
+
+        <div class="update-banner" id="updateBanner" hidden>
+          <div>
+            <span>NEW REVISION</span>
+            <strong id="updateBannerText">发现新的故事版本</strong>
+          </div>
+          <button class="primary-button" id="followLatestButton" type="button">
+            查看最新版
+          </button>
+        </div>
+
+        <section class="content-stage" id="contentStage" aria-live="polite">
+          <div class="loading-state">
+            <div class="loading-orbit" aria-hidden="true"></div>
+            <p>正在展开故事档案…</p>
+          </div>
+        </section>
+      </main>
+
+      <aside class="history-rail" id="historyRail">
+        <div class="history-heading">
+          <div>
+            <span>REVISION STREAM</span>
+            <strong>版本历史</strong>
+          </div>
+          <span class="history-count" id="historyCount">0</span>
+        </div>
+        <div class="history-list" id="historyList"></div>
+        <div class="history-footer" id="historyFooter">
+          <span>HEAD DIGEST</span>
+          <code id="headDigest">—</code>
+        </div>
+      </aside>
+    </div>
+
+    <button
+      class="panel-backdrop"
+      id="panelBackdrop"
+      type="button"
+      aria-label="关闭侧边面板"
+      hidden
+    ></button>
+
+    <dialog class="viewer-dialog raw-dialog" id="rawDialog">
+      <header>
+        <div>
+          <span>RAW DOCUMENT</span>
+          <h2 id="rawDialogTitle">原始 JSON</h2>
+        </div>
+        <button
+          class="icon-button dialog-close"
+          type="button"
+          data-close-dialog="rawDialog"
+          aria-label="关闭"
+        >×</button>
+      </header>
+      <div class="dialog-toolbar">
+        <code id="rawDialogPath">/</code>
+        <button class="quiet-button" id="copyRawButton" type="button">
+          复制 JSON
+        </button>
+      </div>
+      <pre id="rawJsonContent" tabindex="0"></pre>
+    </dialog>
+
+    <dialog class="viewer-dialog compare-dialog" id="compareDialog">
+      <header>
+        <div>
+          <span>REVISION COMPARE</span>
+          <h2>版本对比</h2>
+        </div>
+        <button
+          class="icon-button dialog-close"
+          type="button"
+          data-close-dialog="compareDialog"
+          aria-label="关闭"
+        >×</button>
+      </header>
+      <div class="compare-controls">
+        <label>
+          <span>起始版本</span>
+          <select id="compareFrom"></select>
+        </label>
+        <span class="compare-arrow" aria-hidden="true">→</span>
+        <label>
+          <span>目标版本</span>
+          <select id="compareTo"></select>
+        </label>
+        <button class="primary-button" id="runCompareButton" type="button">
+          对比
+        </button>
+      </div>
+      <div class="compare-result" id="compareResult">
+        <div class="empty-inline">选择两个 revision 查看变化。</div>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+      <strong id="toastTitle">提示</strong>
+      <span id="toastMessage"></span>
+    </div>
+
+    <noscript>
+      <div class="noscript-message">
+        Story Design Viewer 需要启用 JavaScript 才能格式化 revision。
+      </div>
+    </noscript>
+  </body>
+</html>
