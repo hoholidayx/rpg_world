@@ -1,0 +1,48 @@
+{
+  "decisions": [],
+  "notes": [
+    "这是一个可移动的空白 Story DesignProject。先从故事想法和目标体验开始。"
+  ],
+  "openQuestions": [],
+  "project": {
+    "language": "zh-CN",
+    "name": "未命名故事设计",
+    "phase": "idea",
+    "projectId": "story-design-template"
+  },
+  "resources": {
+    "characters": [],
+    "lorebook": [],
+    "narrativeStyles": [],
+    "openings": [],
+    "plotSchedule": {
+      "events": [],
+      "outlines": [],
+      "pools": []
+    },
+    "quickReplies": [],
+    "rpModules": [],
+    "statusTables": [],
+    "visualCatalog": []
+  },
+  "schemaVersion": "story-design/1.0",
+  "sources": [],
+  "story": {
+    "boundaries": [],
+    "logline": "",
+    "metadata": {},
+    "stableId": "story",
+    "storyPrompt": "",
+    "summary": "",
+    "themes": [],
+    "timeSetting": "",
+    "title": ""
+  },
+  "target": {
+    "allowCreateWorkspace": false,
+    "storyId": null,
+    "workspaceId": "",
+    "workspaceName": "",
+    "workspaceRoot": ""
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "contractDigest": "6055274119d642a9c5148cae87c89d1efb7dfabcd986b8459f8304a15df50b41",
+  "contractVersion": "1.0",
+  "createdAt": "2026-07-23T00:00:00Z",
+  "currentRevision": "r000001",
+  "headDigest": "2e4ebe9277e0515aace8e797c5ac525d59775e96e3b996ddd09129e1d9d5bc9e",
+  "name": "未命名故事设计",
+  "paths": {
+    "checkpoints": "design/checkpoints",
+    "current": "design/current.json",
+    "integration": "integrations/rpg-world.json",
+    "reports": "reports",
+    "revisions": "design/revisions",
+    "snapshots": "artifacts/snapshots",
+    "sources": "design/sources",
+    "storyPacks": "artifacts/story-packs"
+  },
+  "projectId": "story-design-template",
+  "schemaVersion": "story-design-project/1.0",
+  "updatedAt": "2026-07-23T00:00:00Z"
+}

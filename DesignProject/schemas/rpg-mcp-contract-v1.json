@@ -1,0 +1,251 @@
+{
+  "command": "rpg-world-mcp",
+  "confirmation": {
+    "applyUsesOpaqueOperationId": true,
+    "booleanConfirmationArgumentsForbidden": true,
+    "previewAndApplyAreSeparateTools": true
+  },
+  "contractVersion": "1.0",
+  "defaultTransport": "stdio",
+  "inspectorTransport": {
+    "loopbackOnly": true,
+    "type": "streamable-http"
+  },
+  "modes": {
+    "all": {
+      "importsRpgRuntime": true,
+      "includes": [
+        "design",
+        "runtime"
+      ],
+      "tools": [
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_compare_runtime"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "story_design_preview_runtime_sync"
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "story_design_apply_runtime_sync"
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "story_design_reconcile_from_runtime"
+        }
+      ]
+    },
+    "design": {
+      "importsRpgRuntime": false,
+      "tools": [
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_get_project"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_get_resume_context"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_get_section"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "story_design_patch"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "story_design_create_checkpoint"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_list_history"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_diff_revisions"
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "story_design_restore_revision"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_validate"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "story_design_build_pack"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_doctor"
+        }
+      ]
+    },
+    "runtime": {
+      "importsRpgRuntime": true,
+      "tools": [
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "rpg_list_workspaces"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "rpg_list_stories"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "rpg_search_story_resources"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "rpg_get_story_resource"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "rpg_validate_story_pack"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "rpg_preview_story_pack"
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "rpg_apply_story_pack"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "rpg_preview_changes"
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "rpg_apply_changes"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "rpg_export_story_snapshot"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "rpg_get_operation_result"
+        }
+      ]
+    }
+  },
+  "runtimePolicy": {
+    "createsSessions": false,
+    "deleteMissing": false,
+    "mergeOnly": true,
+    "oneStoryPerPack": true,
+    "visualCatalogIsArchiveOnly": true
+  },
+  "schemaVersion": "rpg-mcp-contract/1.0"
+}

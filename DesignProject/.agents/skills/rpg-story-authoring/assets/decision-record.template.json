@@ -1,0 +1,8 @@
+{
+  "id": "decision-topic",
+  "topic": "待决策主题",
+  "decision": "用户确认的结论",
+  "rationale": "保留该结论所需的最短理由",
+  "status": "confirmed",
+  "decidedAt": "2026-01-01T00:00:00Z"
+}

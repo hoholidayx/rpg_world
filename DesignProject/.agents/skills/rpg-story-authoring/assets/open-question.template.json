@@ -1,0 +1,10 @@
+{
+  "id": "question-topic",
+  "question": "需要用户决策的问题",
+  "options": [
+    "选项 A 及关键取舍",
+    "选项 B 及关键取舍"
+  ],
+  "context": "理解该问题所需的最短上下文",
+  "status": "open"
+}

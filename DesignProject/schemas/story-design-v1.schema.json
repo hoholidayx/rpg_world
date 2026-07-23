@@ -1,0 +1,1077 @@
+{
+  "$defs": {
+    "CharacterDetailSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "sortOrder": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sortorder",
+          "type": "integer"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stableId",
+        "name"
+      ],
+      "title": "CharacterDetailSpec",
+      "type": "object"
+    },
+    "CharacterSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        },
+        "details": {
+          "items": {
+            "$ref": "#/$defs/CharacterDetailSpec"
+          },
+          "title": "Details",
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "personality": {
+          "default": "",
+          "title": "Personality",
+          "type": "string"
+        },
+        "sortOrder": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sortorder",
+          "type": "integer"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        },
+        "visual": {
+          "additionalProperties": true,
+          "title": "Visual",
+          "type": "object"
+        }
+      },
+      "required": [
+        "stableId",
+        "name"
+      ],
+      "title": "CharacterSpec",
+      "type": "object"
+    },
+    "DecisionRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "decidedAt": {
+          "title": "Decidedat",
+          "type": "string"
+        },
+        "decision": {
+          "title": "Decision",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "status": {
+          "default": "confirmed",
+          "enum": [
+            "confirmed",
+            "tentative",
+            "superseded"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "topic",
+        "decision"
+      ],
+      "title": "DecisionRecord",
+      "type": "object"
+    },
+    "LorebookSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "sortOrder": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sortorder",
+          "type": "integer"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "visual": {
+          "additionalProperties": true,
+          "title": "Visual",
+          "type": "object"
+        }
+      },
+      "required": [
+        "stableId",
+        "name"
+      ],
+      "title": "LorebookSpec",
+      "type": "object"
+    },
+    "NarrativeStyleSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "isBase": {
+          "default": false,
+          "title": "Isbase",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "prompt": {
+          "default": "",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "sortOrder": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sortorder",
+          "type": "integer"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stableId",
+        "name"
+      ],
+      "title": "NarrativeStyleSpec",
+      "type": "object"
+    },
+    "OpenQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "default": "",
+          "title": "Context",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "status": {
+          "default": "open",
+          "enum": [
+            "open",
+            "resolved",
+            "deferred"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "question"
+      ],
+      "title": "OpenQuestion",
+      "type": "object"
+    },
+    "OpeningSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "sortOrder": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sortorder",
+          "type": "integer"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stableId",
+        "title",
+        "message"
+      ],
+      "title": "OpeningSpec",
+      "type": "object"
+    },
+    "PlotEventSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "allowRepeat": {
+          "default": false,
+          "title": "Allowrepeat",
+          "type": "boolean"
+        },
+        "deadlineTime": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deadlinetime"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "directive": {
+          "title": "Directive",
+          "type": "string"
+        },
+        "dispatchMode": {
+          "default": "soft",
+          "enum": [
+            "forced",
+            "soft"
+          ],
+          "title": "Dispatchmode",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "poolRef": {
+          "title": "Poolref",
+          "type": "string"
+        },
+        "position": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Position",
+          "type": "integer"
+        },
+        "repeatCooldownMinutes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Repeatcooldownminutes",
+          "type": "integer"
+        },
+        "scheduledTime": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scheduledtime"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        },
+        "suitabilityHint": {
+          "default": "",
+          "title": "Suitabilityhint",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stableId",
+        "poolRef",
+        "title",
+        "directive"
+      ],
+      "title": "PlotEventSpec",
+      "type": "object"
+    },
+    "PlotNodeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatchMode": {
+          "default": "soft",
+          "enum": [
+            "forced",
+            "soft"
+          ],
+          "title": "Dispatchmode",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "eventRef": {
+          "title": "Eventref",
+          "type": "string"
+        },
+        "position": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Position",
+          "type": "integer"
+        },
+        "scheduledTime": {
+          "title": "Scheduledtime",
+          "type": "string"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stableId",
+        "eventRef",
+        "scheduledTime"
+      ],
+      "title": "PlotNodeSpec",
+      "type": "object"
+    },
+    "PlotOutlineSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/PlotNodeSpec"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "priority": {
+          "default": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stableId",
+        "name"
+      ],
+      "title": "PlotOutlineSpec",
+      "type": "object"
+    },
+    "PlotPoolSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "priority": {
+          "default": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "selectionMode": {
+          "default": "random",
+          "enum": [
+            "random",
+            "sequential"
+          ],
+          "title": "Selectionmode",
+          "type": "string"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stableId",
+        "name"
+      ],
+      "title": "PlotPoolSpec",
+      "type": "object"
+    },
+    "PlotScheduleSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/PlotEventSpec"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "outlines": {
+          "items": {
+            "$ref": "#/$defs/PlotOutlineSpec"
+          },
+          "title": "Outlines",
+          "type": "array"
+        },
+        "pools": {
+          "items": {
+            "$ref": "#/$defs/PlotPoolSpec"
+          },
+          "title": "Pools",
+          "type": "array"
+        }
+      },
+      "title": "PlotScheduleSpec",
+      "type": "object"
+    },
+    "ProjectIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "default": "zh-CN",
+          "title": "Language",
+          "type": "string"
+        },
+        "name": {
+          "default": "未命名故事设计",
+          "title": "Name",
+          "type": "string"
+        },
+        "phase": {
+          "default": "idea",
+          "enum": [
+            "idea",
+            "architecture",
+            "resource_design",
+            "package_ready",
+            "runtime_synced"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "projectId": {
+          "default": "story-design",
+          "title": "Projectid",
+          "type": "string"
+        }
+      },
+      "title": "ProjectIdentity",
+      "type": "object"
+    },
+    "QuickReplySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "sortOrder": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sortorder",
+          "type": "integer"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stableId",
+        "title",
+        "message"
+      ],
+      "title": "QuickReplySpec",
+      "type": "object"
+    },
+    "RPModuleSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "moduleName": {
+          "title": "Modulename",
+          "type": "string"
+        }
+      },
+      "required": [
+        "moduleName"
+      ],
+      "title": "RPModuleSpec",
+      "type": "object"
+    },
+    "RuntimeTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "allowCreateWorkspace": {
+          "default": false,
+          "title": "Allowcreateworkspace",
+          "type": "boolean"
+        },
+        "storyId": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Storyid"
+        },
+        "workspaceId": {
+          "default": "",
+          "title": "Workspaceid",
+          "type": "string"
+        },
+        "workspaceName": {
+          "default": "",
+          "title": "Workspacename",
+          "type": "string"
+        },
+        "workspaceRoot": {
+          "default": "",
+          "title": "Workspaceroot",
+          "type": "string"
+        }
+      },
+      "title": "RuntimeTarget",
+      "type": "object"
+    },
+    "SourceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "locator": {
+          "default": "",
+          "title": "Locator",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "sourceType": {
+          "default": "",
+          "title": "Sourcetype",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "SourceRecord",
+      "type": "object"
+    },
+    "StatusRowSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "deferredIntervalTurns": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deferredintervalturns"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "runtimeKeyLocked": {
+          "default": false,
+          "title": "Runtimekeylocked",
+          "type": "boolean"
+        },
+        "updateFrequency": {
+          "default": "realtime",
+          "enum": [
+            "realtime",
+            "event_driven",
+            "deferred",
+            "manual"
+          ],
+          "title": "Updatefrequency",
+          "type": "string"
+        },
+        "updateRule": {
+          "default": "",
+          "title": "Updaterule",
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "StatusRowSpec",
+      "type": "object"
+    },
+    "StatusTableSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "characterRef": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Characterref"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/StatusRowSpec"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "sortOrder": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sortorder",
+          "type": "integer"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        },
+        "statusKind": {
+          "default": "normal",
+          "enum": [
+            "scene",
+            "normal"
+          ],
+          "title": "Statuskind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stableId",
+        "name"
+      ],
+      "title": "StatusTableSpec",
+      "type": "object"
+    },
+    "StoryCore": {
+      "additionalProperties": false,
+      "properties": {
+        "boundaries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Boundaries",
+          "type": "array"
+        },
+        "logline": {
+          "default": "",
+          "title": "Logline",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "stableId": {
+          "default": "story",
+          "title": "Stableid",
+          "type": "string"
+        },
+        "storyPrompt": {
+          "default": "",
+          "title": "Storyprompt",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "themes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Themes",
+          "type": "array"
+        },
+        "timeSetting": {
+          "default": "",
+          "title": "Timesetting",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "title": "StoryCore",
+      "type": "object"
+    },
+    "StoryResources": {
+      "additionalProperties": false,
+      "properties": {
+        "characters": {
+          "items": {
+            "$ref": "#/$defs/CharacterSpec"
+          },
+          "title": "Characters",
+          "type": "array"
+        },
+        "lorebook": {
+          "items": {
+            "$ref": "#/$defs/LorebookSpec"
+          },
+          "title": "Lorebook",
+          "type": "array"
+        },
+        "narrativeStyles": {
+          "items": {
+            "$ref": "#/$defs/NarrativeStyleSpec"
+          },
+          "title": "Narrativestyles",
+          "type": "array"
+        },
+        "openings": {
+          "items": {
+            "$ref": "#/$defs/OpeningSpec"
+          },
+          "maxItems": 3,
+          "title": "Openings",
+          "type": "array"
+        },
+        "plotSchedule": {
+          "$ref": "#/$defs/PlotScheduleSpec"
+        },
+        "quickReplies": {
+          "items": {
+            "$ref": "#/$defs/QuickReplySpec"
+          },
+          "title": "Quickreplies",
+          "type": "array"
+        },
+        "rpModules": {
+          "items": {
+            "$ref": "#/$defs/RPModuleSpec"
+          },
+          "title": "Rpmodules",
+          "type": "array"
+        },
+        "statusTables": {
+          "items": {
+            "$ref": "#/$defs/StatusTableSpec"
+          },
+          "title": "Statustables",
+          "type": "array"
+        },
+        "visualCatalog": {
+          "items": {
+            "$ref": "#/$defs/VisualSpec"
+          },
+          "title": "Visualcatalog",
+          "type": "array"
+        }
+      },
+      "title": "StoryResources",
+      "type": "object"
+    },
+    "VisualSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "assetType": {
+          "enum": [
+            "character_portrait",
+            "character_sprite",
+            "scene",
+            "location",
+            "object",
+            "map",
+            "costume",
+            "other"
+          ],
+          "title": "Assettype",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "negativePrompt": {
+          "default": "",
+          "title": "Negativeprompt",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "stableId": {
+          "title": "Stableid",
+          "type": "string"
+        },
+        "subjectRefs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Subjectrefs",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "visualAnchors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Visualanchors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stableId",
+        "assetType",
+        "title",
+        "prompt"
+      ],
+      "title": "VisualSpec",
+      "type": "object"
+    }
+  },
+  "$id": "story-design-v1.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "decisions": {
+      "items": {
+        "$ref": "#/$defs/DecisionRecord"
+      },
+      "title": "Decisions",
+      "type": "array"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "openQuestions": {
+      "items": {
+        "$ref": "#/$defs/OpenQuestion"
+      },
+      "title": "Openquestions",
+      "type": "array"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectIdentity"
+    },
+    "resources": {
+      "$ref": "#/$defs/StoryResources"
+    },
+    "schemaVersion": {
+      "const": "story-design/1.0",
+      "default": "story-design/1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceRecord"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "story": {
+      "$ref": "#/$defs/StoryCore"
+    },
+    "target": {
+      "$ref": "#/$defs/RuntimeTarget"
+    }
+  },
+  "title": "Portable Story Design v1",
+  "type": "object"
+}

@@ -1,0 +1,12 @@
+interface:
+  display_name: "RPG Story Authoring"
+  short_description: "Design, inspect, and package an RPG Story"
+  default_prompt: "Use $rpg-story-authoring to resume this Story design, inspect its live revisions, and save confirmed decisions."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "rpg-world-mcp"
+      description: "Portable Story revision store and RPG World synchronization service"
+      transport: "stdio"
+policy:
+  allow_implicit_invocation: true
