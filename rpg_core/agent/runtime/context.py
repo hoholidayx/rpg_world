@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -27,10 +28,12 @@ from rpg_core.context.fixed_layer.contributors import (
     StoryPromptFixedLayerContributor,
     TextOutputFormatFixedLayerContributor,
     TurnExecutionFixedLayerContributor,
+    player_character_portrayal_details,
 )
 from rpg_core.context.inspector import ContextInspector
 from rpg_core.context.models import FixedLayerData, LayerType, Message, Role, RPGContext
 from rpg_core.context.renderer import ContextRenderer
+from rpg_core.rp_modules.models import PlayerPortrayalDetail
 from rpg_core.status.context import render_status_tables_context
 from rpg_core.context.usage import estimate_rendered_context_usage
 from rpg_core.settings import settings
@@ -85,7 +88,7 @@ class AgentContextService:
         *,
         require_player_character: bool = False,
     ) -> TurnExecutionSnapshot:
-        return TurnSnapshotResolver(
+        execution = TurnSnapshotResolver(
             self._session_id(),
             data=self._turn_snapshot_data,
             composer=self._session_composer,
@@ -93,6 +96,27 @@ class AgentContextService:
         ).resolve(
             request,
             require_player_character=require_player_character,
+        )
+        resources = self._resources()
+        manager = resources.character_manager
+        if execution.player_character is None or manager is None:
+            return execution
+        characters = list(manager.list_enabled_characters())
+        details = player_character_portrayal_details(
+            characters,
+            execution.player_character,
+        )
+
+        return replace(
+            execution,
+            player_portrayal_details=tuple(
+                PlayerPortrayalDetail(
+                    name=str(detail.get("name") or "").strip(),
+                    content=str(detail.get("content") or "").strip(),
+                )
+                for detail in details
+                if str(detail.get("name") or "").strip()
+            ),
         )
 
     def resolve_rp_module_snapshot(self) -> "RPModuleSelectionSnapshot":
@@ -177,12 +201,15 @@ class AgentContextService:
                 )
             )
 
-        messages.extend(self._recent_raw_ic_gm_messages(history_turns))
+        messages.extend(self._recent_raw_world_messages(history_turns))
         messages.append(Message(Role.USER, str(current_user_input or "")))
         return messages
 
-    def _recent_raw_ic_gm_messages(self, turn_count: int) -> list[Message]:
-        from rpg_core.agent.turn.models import TurnMode
+    def _recent_raw_world_messages(self, turn_count: int) -> list[Message]:
+        from rpg_core.session.modes import (
+            DEFAULT_TURN_MODE,
+            WORLD_ADVANCING_MODES,
+        )
 
         groups: list[list[Message]] = []
         for group in self._session_manager.iter_turn_groups(
@@ -194,10 +221,12 @@ class AgentContextService:
                 if not item.is_system() and not item.is_tool()
             ]
             modes = {
-                str(item.mode or TurnMode.IC.value).lower()
+                str(item.mode or DEFAULT_TURN_MODE.value).lower()
                 for item in conversation
             }
-            if modes and modes.issubset({TurnMode.IC.value, TurnMode.GM.value}):
+            if modes and modes.issubset(
+                {mode.value for mode in WORLD_ADVANCING_MODES}
+            ):
                 # Keep the entire persisted turn, including any tool messages.
                 groups.append(list(group))
         selected = groups[-max(1, int(turn_count)):]
@@ -270,7 +299,7 @@ class AgentContextService:
                 mode=(
                     turn_execution.request.mode.value
                     if turn_execution is not None
-                    else TurnMode.IC.value
+                    else TurnMode.NEUTRAL.value
                 ),
             )
 
@@ -459,15 +488,21 @@ class AgentContextService:
         narrative_style_id: int | None,
     ) -> ContextInspector:
         persistent_memory_snapshot = await self.load_persistent_memory_snapshot()
+        rp_module_snapshot = self.resolve_rp_module_snapshot()
+        from rpg_core.rp_modules.message_mode import ensure_message_mode_available
+
+        requested_mode = TurnRequest.create(
+            user_input,
+            mode=mode,
+            narrative_style_id=narrative_style_id,
+        )
+        ensure_message_mode_available(rp_module_snapshot, requested_mode.mode)
         execution = self.resolve_turn_execution(
-            TurnRequest.create(
-                user_input,
-                mode=mode,
-                narrative_style_id=narrative_style_id,
-            )
+            requested_mode
         )
         context = self.build_for_inspection(
             user_input,
+            rp_module_snapshot=rp_module_snapshot,
             turn_execution=execution,
             persistent_memory_snapshot=persistent_memory_snapshot,
         )
@@ -519,15 +554,12 @@ class AgentContextService:
         ]
         if turn_execution is not None:
             contributors.append(TurnExecutionFixedLayerContributor(turn_execution))
-        if turn_execution is None or turn_execution.request.mode is not TurnMode.OOC:
-            contributors.append(TextOutputFormatFixedLayerContributor())
+        contributors.append(TextOutputFormatFixedLayerContributor())
         assembler = FixedLayerAssembler(
             world_name=self._world_name,
             contributors=contributors,
         )
-        if rp_fixed_sections and (
-            turn_execution is None or turn_execution.policy.expose_rp_modules
-        ):
+        if rp_fixed_sections:
             assembler = assembler.with_contributor(
                 StaticFixedLayerContributor(rp_fixed_sections)
             )
@@ -542,9 +574,7 @@ class AgentContextService:
         turn_execution: TurnExecutionSnapshot | None,
     ) -> list:
         sections = []
-        if rp_module_runtime is not None and (
-            turn_execution is None or turn_execution.policy.expose_rp_modules
-        ):
+        if rp_module_runtime is not None:
             from rpg_core.rp_modules.models import ModuleContextRequest
 
             sections = rp_module_runtime.get_runtime_sections(
@@ -552,8 +582,39 @@ class AgentContextService:
                     session_id=self._session_id(),
                     user_input=user_input,
                     include_staged_turn=include_staged_turn,
+                    message_mode=(
+                        turn_execution.request.mode.value
+                        if turn_execution is not None
+                        else TurnMode.NEUTRAL.value
+                    ),
+                    player_character_name=(
+                        turn_execution.player_character.name
+                        if (
+                            turn_execution is not None
+                            and turn_execution.player_character is not None
+                        )
+                        else ""
+                    ),
+                    player_portrayal_details=(
+                        turn_execution.player_portrayal_details
+                        if turn_execution is not None
+                        else ()
+                    ),
                 )
             )
+            if (
+                turn_execution is not None
+                and not turn_execution.policy.expose_rp_modules
+            ):
+                from rpg_core.rp_modules.constants import (
+                    RP_MODULE_MESSAGE_MODE_SOURCE,
+                )
+
+                sections = [
+                    section
+                    for section in sections
+                    if section.source == RP_MODULE_MESSAGE_MODE_SOURCE
+                ]
         if settings.verbose_logging:
             logger.debug(
                 _TAG + " RP runtime sections prepared: session_id={} include_staged_turn={} count={}",

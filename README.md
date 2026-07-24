@@ -34,6 +34,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-24：角色卡与消息模式硬切。** 角色一级叙事字段统一为 `name + description`，性格、说话方式、行为倾向和心理改为带内置 kind 与 `scope:npc_portrayal` 的二级详情；玩家角色 Fixed Layer 排除这些演绎详情，仅在 GM 当前 turn 托管时动态注入。消息模式统一为 `neutral | ic | ooc | gm`，默认 neutral；Workspace mode 配置删除，提示词内置到无配置 `message_mode` RP Module，并在 Hot History 后动态注入以保持 Fixed Layer 前缀稳定。Story Design、Story Pack、DesignProject 与 MCP 契约同步硬切 2.0，v1 直接拒绝且无转换器。
 - **2026-07-24：状态字段 Schema v2 硬切。** Story 与 Session 状态 document 统一为 `schemaVersion=2`，每行只保留 `key / value / runtimeKeyLocked / updateRule / metadata`。字段频率、延迟周期、人工只读和逐字段进度账本全部删除；所有已有字段的 value 由 Agent 在当前 turn 即时判断更新，`updateRule` 只提供额外语义指导，`runtimeKeyLocked` 只保护 key 结构。Play API/WebUI、DesignProject schema/viewer 与 `rpg_mcp` 同步切换，旧 document 和旧行字段直接拒绝。
 - **2026-07-22：Story 直属内容资产与数据库硬切。** Character、Lorebook、Status 从 Workspace 资产库与 Story mount 模型切换为 Story 直接拥有；Session 状态表只复制当前 Story 定义，来源为 `story_copy`。Play API/WebUI 删除旧资产库、挂载和系统模板入口。数据库不兼容升级，migration 压缩为 `0001_initial.sql`、`0002_demo.sql`、`0003_pagination_demo.sql`，旧 ledger 会明确拒绝启动；旧 Story Pack 导入方案不在本轮兼容。
 - **2026-07-22：通用检索与 RPG Memory 拆包。** 业务无关的 chunk、FTS/vector、QueryPlan、Hybrid、rerank、索引协调和存储迁入 `memory_retrieval`；RP 查询上下文、候选 policy、在线召回编排、Story/Persistent Memory、Dream 与 benchmark 归 `rpg_memory`。依赖固定为 `rpg_memory → memory_retrieval`，旧 `rp_memory` 包删除，不保留兼容转发；算法权重、配置键、索引/数据库格式和服务协议不变。
@@ -43,7 +44,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 - **2026-07-20：`rpg_data` 依赖边界收口。** `DataServiceGateway` 保留为数据库生命周期与 Data Service 注册表，Session、Plot、Dream/Memory 的业务服务改为显式依赖窄 Protocol；`sessions` 作为大业务聚合 Data Service 取代角色、派生、删除三个薄入口。Session/Memory 存储类型拆入 `rpg_data.model.*`，旧 `rpg_data.models` 兼容重导出，并增加静态守卫防止 Repository/Peewee record 外泄、业务 service 持有 Gateway 或 Gateway lookup 面继续增长。复杂查询、分页、批量、CAS、数据库原子操作和高效 read model 仍归数据层。
 - **2026-07-20：Dream / Story Memory 业务与数据层拆分。** Dream Proposal 状态机、恢复、两阶段来源确认、Persistent Memory 生命周期和 Context 投影统一归 `rpg_memory.dream`，Story Memory 的规范化、exact dedupe、合并、Evidence 与 version 归 `StoryMemoryApplicationService`；`rpg_data` 保留 typed 查询/read model、CRUD/CAS、批量与事务。Apply 继续使用 SQLite `IMMEDIATE`，第二次来源确认失败会回滚账本后独立标记 Proposal stale；SQL、HTTP、通知、SSE、WebUI 与 Context 可观察行为不变。
 - **2026-07-20：Session 业务与数据层拆分。** 角色绑定与 Opening、Story/Session 初始化、`/clear`、Session Derivation 和永久删除的业务规则迁入 `rpg_core.session`；`rpg_data` 只保留角色/Opening 查询、profile/job CRUD、条件删除、显式复制和调用方准备好的状态重置计划。Agent、Play API、Dream 与后台 worker 统一经 Core application service 调用，公开 HTTP/SSE 与数据库结构不变。
-- **2026-07-20：Story 剧情动态调度。** 新增内置 `plot_scheduler` RP Module、Story 级线性剧情大纲与事件池、Session 禁用覆盖和原子调度账本。每个 IC/GM turn 最多选择一个到期大纲节点与一个池事件；强制项到时直接进入动态层，软约束项使用独立 LLM 路由结合完整 fixed layer、状态表和最近 5 个原始 turn 判断适宜性。调度元数据受硬上限保护，Context 门禁在 scratch 前预留最多两条动态指令。Play WebUI 增加“剧情调度”独立入口，集中管理定义、Scene 时间、覆盖与判断历史，不改变主正文 SSE。
+- **2026-07-20：Story 剧情动态调度。** 新增内置 `plot_scheduler` RP Module、Story 级线性剧情大纲与事件池、Session 禁用覆盖和原子调度账本。每个可推进世界 turn 最多选择一个到期大纲节点与一个池事件；强制项到时直接进入动态层，软约束项使用独立 LLM 路由结合完整 fixed layer、状态表和最近 5 个原始 turn 判断适宜性。调度元数据受硬上限保护，Context 门禁在 scratch 前预留最多两条动态指令。Play WebUI 增加“剧情调度”独立入口，集中管理定义、Scene 时间、覆盖与判断历史，不改变主正文 SSE。
 - **2026-07-18：后台终态通知链路。** Dream proposal 与 Session Derivation 在 SQL 终态提交后，通过专用异步 publisher 把 `ready / failed / interrupted` 发送到 Play API 的进程内广播 Hub；Play WebUI 在根 Provider 建立唯一全局 EventSource，并在顶栏独立通知中心展示最近事件。通知只保存在页面内存，可标记已读和清除；不增加 Toast、自动刷新或任务状态回写。
 - **2026-07-17：Dream 长期记忆系统。** 新增独立 `dream_service` 与 Session 级类型化 Persistent Memory 账本。Play WebUI 可手动执行 Shallow/Deep × Incremental/Full 四种 Dream，逐项检查和编辑 proposal 后原子应用；主 Agent 只读取 Evidence 仍有效的 active revisions，不再读取 `persistent_memory.json`。
 - **2026-07-15：LLM Service 完全独立进程化。** 新增 `run_llm.py`、受 Bearer 保护的 `/llm/v1` 业务 HTTP/SSE 边界和独立 `llm_client` 契约包。只有 LLM Service 读取 `llm.yaml`、Provider 密钥并持有 OpenAI/llama runtime；Agent 与 Memory 只通过远端客户端调用，旧 llama 子进程协议已删除。
@@ -202,7 +203,7 @@ Play WebUI 使用 `rpg_data` 作为故事 catalog。数据模型是：
 - 1 个 workspace 下可以有多个 story。
 - 1 个 story 下可以有多个 session。
 - Story 主数据中，`summary` 是短摘要，`story_prompt` 是 Story 专属固定系统提示词；会话开局由 `rpg_story_openings` 保存 0–3 条带标题、稳定 ID 和顺序的 Opening。Opening 正文与 Story Prompt 当前只支持 `{USER_PLAY_ROLE_NAME}` 白名单变量，数据库与 API 始终返回原始模板；未知变量在保存时返回校验错误，不执行 Jinja、表达式或递归替换。第一条 Opening 是非 Web 渠道和未显式选择时的默认项。
-- Character 与 Lorebook 由 Story 直接拥有，不存在 Workspace 级资产库或 Story mount；不同 Story 可以各自保存同名资源，CRUD 始终校验 `workspace_id + story_id`。
+- Character 与 Lorebook 由 Story 直接拥有，不存在 Workspace 级资产库或 Story mount；不同 Story 可以各自保存同名资源，CRUD 始终校验 `workspace_id + story_id`。角色一级叙事字段只有 `name + description`；description 只写身份、经历和客观事实，性格、说话方式、行为倾向与心理使用二级内置 kind 标签，且演绎详情自动附带 `scope:npc_portrayal`。
 - Status 定义同样由 Story 直接拥有，可通过 nullable `story_character_id` 绑定同 Story 的一个角色；一个角色可以关联多张状态表。
 - Play 侧公开 `session_id` 是全局唯一短 ID，创建入口由 `rpg_data` 生成，当前生成格式为 `s_` + 10 位小写字母/数字；创建 session 时绑定 `workspace_id + story_id`，之后会话内接口只传 `session_id`。
 - CLI / Telegram 启动时也先通过 Agent service 的 `ensure_session(workspace_id, story_id, session_id, title)` 解析会话；`session_id` 为空时创建系统生成 ID 的 session，非空时只校验并加载既有 session。
@@ -217,7 +218,7 @@ Session 业务 owner 是 `rpg_core.session`：`SessionCatalogService` 负责 Sto
 - CLI / Telegram / Agent API 允许建立空 session；绑定前普通消息只返回固定编号角色列表，不调用 LLM、不写 user history。
 - 绑定与切换统一走 Agent 命令 `/role_bind <角色序号> [开局序号]`。WebUI 的 `PATCH /play-api/v1/sessions/{session_id}/player-character` 会转发到 Agent service，由 Agent service 将角色 ID 映射为当前 Story 直属角色序号，并以稳定 Opening ID 执行同一命令；不要在 Play API/DataManager 中直接写绑定。
 - 首次成功绑定且 main history 为空时，`SessionRoleService` 会按刚绑定的角色渲染选中 Opening，再将同一条 assistant 开场消息写入 main 和 backup history；角色与 `story_opening_id` 在一次事务中提交。普通历史删除或后续切换角色时不会重复追加。`/clear` 完整重置沿用 Session 保存的稳定 Opening ID 并读取 Story 最新正文；选项已删除时回退当前第一条，无 Opening 时不写开场。
-- 玩家身份在 Context 门禁前固化进 `TurnExecutionSnapshot`，由门禁、主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是身份唯一真源；角色卡只在 Context 投影时标注为 `PLAYER_CHARACTER` 或 `NPC`，不依赖角色 metadata。当前绑定覆盖冲突的旧历史、摘要和记忆，但不会自动改写这些既有数据。
+- 玩家身份在 Context 门禁前固化进 `TurnExecutionSnapshot`，由门禁、主 Agent、StatusSubAgent 与 Context Preview 共用。fixed layer 的 `[player_character]` 标签块是身份唯一真源；角色卡只在 Context 投影时标注为 `PLAYER_CHARACTER` 或 `NPC`，不依赖角色 metadata。玩家卡从 Fixed Layer 排除 `scope:npc_portrayal` 详情，NPC 卡保留；只有当前 GM turn 托管时才在后置动态层注入玩家演绎详情。当前绑定覆盖冲突的旧历史、摘要和记忆，但不会自动改写这些既有数据。
 
 Story 的创建与更新请求使用完整、有序的 `openings` 数组；新建 Opening 可省略 `id`，编辑已有 Opening 时应原样带回稳定 ID：
 
@@ -394,9 +395,9 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 - `ContextInspector` 只服务 `/context`、日志和调试输出，不进入主业务数据模型。
 - `context/usage.py` 封装最终渲染 messages 的共享 token 估算和 provider usage 归一化。`context-preview` 只返回下一轮主 Context 估算并驱动圆环/正文门禁；准确 usage 只来自正常 `/turn` 返回或 `/stream` 的 `turn_completed.payload.usage`，仅用于回复气泡和详情复盘，当前不落库。
 - 主 Agent LLM 选择使用 `config default < story override < session override`：Story 详情编辑页立即保存故事默认，SessionRoom context 圆环左侧设置会话覆盖；生成中切换只影响下一 turn，不触发自动压缩。
-- `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。`narrative_outcome` 负责主 Agent 的剧情分支随机裁定；`plot_scheduler` 按 Scene 时间选择大纲节点与事件池事件；`dice` 只保留表达式解析和手动调试命令；`text_output_format` 仍由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
+- `rpg_core/rp_modules/` 是 RP 业务模块体系，不做通用 skill 体系。`message_mode` 提供代码内置的 `neutral | ic | ooc | gm` 本轮语义；`narrative_outcome` 负责主 Agent 的剧情分支随机裁定；`plot_scheduler` 按 Scene 时间选择大纲节点与事件池事件；`dice` 只保留表达式解析和手动调试命令；`text_output_format` 仍由 fixed layer contributor 约束 assistant 正文使用 RP XML 标签。
 - 内置模块登记在 `rpg_rp_module_catalog`。Story 挂载是 Session 的能力上限，新 Story 默认挂载当前全部内置模块；Session 可覆盖模块启用状态和稀疏配置，但不能重新启用 Story 已停用的模块。每次 preview/turn 都解析独立不可变快照，生成中的配置修改只影响下一 turn。
-- `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。Narrative Outcome 平时依靠 fixed contract 判断隐式变数；检测到明确随机意图时加入本轮强制裁定指令。若 StatusSubAgent 已预裁定，本轮不再注入 Narrative Outcome fixed section，只在动态层注入最终结果和明确的状态工具边界。
+- `RP_MODULES` 是模块动态运行态层，位置在 `STATUS_TABLES` 后、`USER_MESSAGE` 前。非 neutral 的 `message_mode` 指令和 GM 托管详情在这里按 turn 注入；Narrative Outcome 平时依靠 fixed contract 判断隐式变数，检测到明确随机意图时加入本轮强制裁定指令。若 StatusSubAgent 已预裁定，本轮不再注入 Narrative Outcome fixed section，只在动态层注入最终结果和明确的状态工具边界。
 
 结构化 Context 与实际 provider messages 共用以下顺序：
 
@@ -410,7 +411,7 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 
 “只能有一条且必须首位 system”不是跨模型/provider 的通用约束，而是具体 API 或 chat template 的兼容能力。局域网原生 llama.cpp/Qwen 部署应使用 `--jinja` 与 `--chat-template` / `--chat-template-file` 在服务端正确渲染多段、交错 system，不应改变本项目的全局 Context 语义。
 
-prefix cache 以 provider 最终序列化/tokenized 请求的共同前缀为准，不以结构化层、消息边界或整条 system message 的应用层 hash 为独立缓存单元。动态 system 位于 Hot History 后，变化不会截断更早的稳定指令和历史前缀；rolling history 自身发生滑窗时仍会改变共同前缀。整条 system/context hash 不同仍可能命中更早的部分 token，实际缓存效果只看 provider usage 返回的 hit/miss token。开启 `verbose_logging` 后，`TurnPreparation` 会在最终主 Agent messages 和 tool schemas 完成后、首次主 LLM 调用前输出一次不含正文的 `contextHash` / `systemHash` / `toolsHash`、逐消息 `index/role/hash/chars`、role 计数和工具名；后续工具 round 不重复输出这条初始指纹。
+prefix cache 以 provider 最终序列化/tokenized 请求的共同前缀为准，不以结构化层、消息边界或整条 system message 的应用层 hash 为独立缓存单元。动态 system 位于 Hot History 后，变化不会截断更早的稳定指令和历史前缀；四种 message mode 共用字节相同的 Fixed Layer，模式指令与 GM 托管详情只改变后置 `RP_MODULES`。rolling history 自身发生滑窗时仍会改变共同前缀。整条 system/context hash 不同仍可能命中更早的部分 token，实际缓存效果只看 provider usage 返回的 hit/miss token。开启 `verbose_logging` 后，`TurnPreparation` 会在最终主 Agent messages 和 tool schemas 完成后、首次主 LLM 调用前输出一次不含正文的 `contextHash` / `systemHash` / `toolsHash`、逐消息 `index/role/hash/chars`、role 计数和工具名；后续工具 round 不重复输出这条初始指纹。
 
 `当前场景` 在数据层是 Story 直属 `status_kind="scene"` 定义复制出的 Session SQL document，在主 Context 中则是高优先级 `[scene]` user prefix，不进入普通 `STATUS_TABLES`。Status Route 只在本轮涉及且存在可用 scene 工具时选择它；scene 只走专用工具，不存在回复后更新路径。默认关闭结构编辑时，已有字段都保持可见且可改 value，`scene_attr` 只接受现有 key，`scene_time` 只在已有 `时间` key 时出现，`scene_del_attr` 不注册；空 scene 完全不暴露写工具。完整差异见 [scene 的特殊语义](docs/agent-turn-orchestration.md#scene-的特殊语义)。
 
@@ -422,7 +423,8 @@ RP Modules 采用上下文分层策略：
 
 - 稳定、低频变化的规则只放进 fixed layer，例如主 Agent 仍需裁定时 Narrative Outcome 的“何时裁定、调用哪个工具、不得替玩家做选择”；预裁定成功的 turn 不再重复注入这组规则。
 - 文本输出格式是默认启用的 fixed layer 约束；RP 正文使用 `<rp-narration>` 和 `<rp-character name="...">` 标签区分旁白与角色发言。
-- 高频或临时模块状态才进入 `RP_MODULES` 动态层；Narrative Outcome 为明确随机意图加入本轮强制指令，并把 StatusSubAgent 已暂存的裁定结果注入主 Agent 首次调用。
+- `message_mode` 是无配置的可选模块，mode/prompt 不持久化到 Workspace。neutral 始终可用且无额外提示；模块有效时 WebUI 才展示 IC/OOC/GM，模块无效却请求这些模式时在 LLM/history 前返回 `message_mode_unavailable`。OOC 不写世界事实，neutral/IC/GM 可推进世界。
+- 高频或临时模块状态才进入 `RP_MODULES` 动态层；`message_mode` 注入非 neutral 指令，Narrative Outcome 为明确随机意图加入本轮强制指令，并把 StatusSubAgent 已暂存的裁定结果注入主 Agent 首次调用。
 - 未预裁定时，主 LLM 的 RP schema 只暴露高层 `rp_story_outcome(reason, actor?)`；已预裁定时，该工具同时从主 Agent schema 和可执行 registry 移除。两种情况都不暴露表达式、DC、随机数、权重或低层 Dice 工具。
 - `/rp_modules`、`/rp_module` 始终由 `CommandDispatcher` 在 LLM 前拦截；`/roll`、`/check_dc` 只在当前 Story/Session 的 Dice 模块有效启用时动态出现。所有命令都不进入对话历史。
 
@@ -439,7 +441,7 @@ RP Modules 采用上下文分层策略：
 
 Scene 时间统一使用 `第 Y 年 M 月 D 日 H 时 [M 分]`，与当前 `status_kind="scene"` 状态表的“时间”字段严格对应。内部采用固定 12 月 × 31 日虚拟历法换算世界内分钟；缺失或格式错误时，本轮调度记录 warning 并安全跳过，不使用系统时钟或默认时间。
 
-普通 IC/GM turn 的固定顺序是：
+普通可推进世界 turn（neutral/IC/GM）的固定顺序是：
 
 ```text
 Context gate
@@ -452,7 +454,7 @@ Context gate
   → post-commit hooks
 ```
 
-强制候选达到时间后直接暂存为 `triggered` 并进入本轮 `RP_MODULES / 本轮剧情调度`。软候选使用独立 `agent.plot_scheduler` LLM 业务路由判断当前是否适合开始；输入包含完整 fixed layer（Story Prompt、世界书、角色卡等）、当前 Scene、全部普通状态表、最近默认 5 个完整原始 IC/GM turn 和当前玩家输入，不读取 Summary、Story Memory、Persistent Memory 或 Recall 投影。Judge 理由有硬长度上限；主 Context 门禁按当前定义中最长两条 directive、事件/容器名称和有界元数据保守预留。适合时注入，不适合记录 `deferred`，Provider/结构化响应失败记录 `error`；后二者都不会中断主 turn，并至少跳过一个完整已提交 IC/GM turn 后才重试。同轮若大纲已接受，池事件判断会同时看到该指令并检查兼容性。
+强制候选达到时间后直接暂存为 `triggered` 并进入本轮 `RP_MODULES / 本轮剧情调度`。软候选使用独立 `agent.plot_scheduler` LLM 业务路由判断当前是否适合开始；输入包含完整 fixed layer（Story Prompt、世界书、角色卡等）、当前 Scene、全部普通状态表、最近默认 5 个完整原始可推进世界 turn 和当前玩家输入，不读取 Summary、Story Memory、Persistent Memory 或 Recall 投影。Judge 理由有硬长度上限；主 Context 门禁按当前定义中最长两条 directive、事件/容器名称和有界元数据保守预留。适合时注入，不适合记录 `deferred`，Provider/结构化响应失败记录 `error`；后二者都不会中断主 turn，并至少跳过一个完整已提交可推进世界 turn 后才重试。同轮若大纲已接受，池事件判断会同时看到该指令并检查兼容性。
 
 每个 turn 最多原子记录一条 `outline` 和一条 `pool` 决策。主 runner 取消、Provider 失败、流缺失 DONE 或 commit 失败时，判断与注入随 scratch 一起丢弃；主历史编辑、删除、截断和重试会同步删除对应决策。`/clear` 清空判断/触发账本但保留 Session 禁用覆盖；Session 派生复制分支点以前的 `triggered` 记录和全部禁用覆盖，不复制 `deferred / error`。
 
@@ -584,7 +586,7 @@ rpg_memory/
 └── benchmark/   LocoMo、RP Gold 与可选 LongMemEval 固定流程
 ```
 
-`memory_retrieval` 不导入 `rpg_memory`、`rpg_core` 或 `rpg_data`。`overall.md` 排除、RP 记忆粒度评分、最近 IC/GM turn/玩家/场景查询扩展，以及传闻/尝试/承诺的 pointwise rerank prompt 都留在 `rpg_memory.recall`，通过窄 query/policy/prompt 接口注入通用 planner、retriever 和 reranker。
+`memory_retrieval` 不导入 `rpg_memory`、`rpg_core` 或 `rpg_data`。`overall.md` 排除、RP 记忆粒度评分、最近可推进世界 turn/玩家/场景查询扩展，以及传闻/尝试/承诺的 pointwise rerank prompt 都留在 `rpg_memory.recall`，通过窄 query/policy/prompt 接口注入通用 planner、retriever 和 reranker。
 
 ### Dream 长期记忆
 
@@ -597,7 +599,7 @@ Dream 是手动、Session 级的离线归纳链路。Persistent Memory 的真源
 系统不会自动删除它，也不会把它迁移为 SQL 事实。
 
 - **Shallow**：从仍能精确匹配当前主消息 ID/version/hash 的 story memory，以及来源消息仍完整属于原 batch 的 summary 提炼；派生材料只用于增量整理，不能因局部缺失全局退休旧事实。
-- **Deep**：以当前主消息表的 IC/GM user/assistant 历史为事实真源；Full 可全局校准，Incremental 只处理新增、修改、删除及 Evidence 受影响的记忆。
+- **Deep**：以当前主消息表的 neutral/IC/GM user/assistant 历史为事实真源；Full 可全局校准，Incremental 只处理新增、修改、删除及 Evidence 受影响的记忆。
 - **Incremental / Full**：与 Shallow/Deep 独立组合，形成四种手动运行方式。
 - Map、分层 Reduce 和最终 Proposal 共用 `map_concurrency` 并发上限；若 Reduce 不收敛而触发代码侧候选截断，Full Deep 会禁用基于“候选缺席”的退休，只保留显式证据驱动的修订或替换。
 - 每次运行先持久化 proposal。WebUI 可逐项选择并编辑文本、类型、认知状态和显著度；Apply 在串行 repository worker 中取得 SQLite `IMMEDIATE` 写锁，事务内重新捕获并再次确认 history/source/ledger 快照后原子提交。

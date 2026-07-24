@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 from peewee import Database
 
 from rpg_data import models
@@ -11,8 +9,6 @@ from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
     StoryQuickReply,
-    WorkspaceTurnMode,
-    WorkspaceTurnModeSeed,
 )
 from rpg_data.model.session import Session
 from rpg_data.repositories.session_composer_repo import SessionComposerRepository
@@ -38,49 +34,6 @@ class SessionComposerDataService:
 
     def get_session(self, session_id: str) -> Session | None:
         return self._sessions.get(str(session_id))
-
-    def list_modes(self, workspace_id: str) -> list[WorkspaceTurnMode] | None:
-        if not self.workspace_exists(workspace_id):
-            return None
-        return self._repo.list_workspace_modes(str(workspace_id))
-
-    def ensure_modes(
-        self,
-        workspace_id: str,
-        seeds: Iterable[WorkspaceTurnModeSeed],
-    ) -> list[WorkspaceTurnMode] | None:
-        if not self.workspace_exists(workspace_id):
-            return None
-        with self._database.atomic():
-            return self._repo.ensure_workspace_modes(str(workspace_id), seeds)
-
-    def get_mode(
-        self,
-        workspace_id: str,
-        mode: str,
-    ) -> WorkspaceTurnMode | None:
-        items = self.list_modes(workspace_id)
-        if items is None:
-            return None
-        return next((item for item in items if item.mode == str(mode)), None)
-
-    def update_mode(
-        self,
-        workspace_id: str,
-        mode: str,
-        *,
-        short_name: str,
-        prompt: str,
-    ) -> WorkspaceTurnMode | None:
-        if not self.workspace_exists(workspace_id):
-            return None
-        with self._database.atomic():
-            return self._repo.update_workspace_mode(
-                str(workspace_id),
-                str(mode),
-                short_name=str(short_name),
-                prompt=str(prompt),
-            )
 
     def list_styles(self, workspace_id: str) -> list[NarrativeStyle] | None:
         if not self.workspace_exists(workspace_id):

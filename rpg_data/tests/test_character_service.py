@@ -49,12 +49,15 @@ def test_character_read_service_lists_only_session_story_characters(tmp_path: Pa
                 "main_ws",
                 main_story.id,
                 "First",
-                personality="calm",
-                content="First content",
+                description="First description",
                 sort_order=10,
             )
-            characters.create("main_ws", side_story.id, "First", content="Side copy")
-            characters.create("other_ws", other_story.id, "First", content="Other copy")
+            characters.create(
+                "main_ws", side_story.id, "First", description="Side copy"
+            )
+            characters.create(
+                "other_ws", other_story.id, "First", description="Other copy"
+            )
             characters.create_detail(first.id, "A", tags_json='["alpha"]', sort_order=20)
             characters.create_detail(first.id, "B", tags_json="{bad json", sort_order=10)
 
@@ -67,9 +70,15 @@ def test_character_read_service_lists_only_session_story_characters(tmp_path: Pa
         assert [detail.name for detail in main[0].details] == ["B", "A"]
         assert main[0].details[0].tags == ()
         assert main[0].details[1].tags == ("alpha",)
-        assert service.get_character(main_session.id, "First").content == "First content"
-        assert service.get_character(side_session.id, "First").content == "Side copy"
-        assert service.get_character(other_session.id, "First").content == "Other copy"
+        assert (
+            service.get_character(main_session.id, "First").description
+            == "First description"
+        )
+        assert service.get_character(side_session.id, "First").description == "Side copy"
+        assert (
+            service.get_character(other_session.id, "First").description
+            == "Other copy"
+        )
         assert service.list_characters("missing") == []
     finally:
         database.close()
@@ -91,8 +100,7 @@ def test_character_management_service_manages_story_cards_and_details(tmp_path: 
             "main_ws",
             story.id,
             name="Harbor Watcher",
-            personality="patient",
-            content="Keeps the old lighthouse.",
+            description="Keeps the old lighthouse.",
             sort_order=20,
             metadata={"ui": {"roleLabel": "NPC"}},
         )
@@ -143,7 +151,7 @@ def test_character_management_service_manages_story_cards_and_details(tmp_path: 
             story.id,
             created.id,
             name="Harbor Watcher Revised",
-            personality="watchful",
+            description="Watchful keeper of the old lighthouse.",
         )
         assert updated is not None
         assert updated.name == "Harbor Watcher Revised"

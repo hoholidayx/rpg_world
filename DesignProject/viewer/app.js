@@ -1251,13 +1251,8 @@ function renderCharacters(value) {
                 : ""
             }
             ${
-              character.personality
-                ? `<h4>性格</h4><p class="card-copy">${escapeHtml(character.personality)}</p>`
-                : ""
-            }
-            ${
-              character.content
-                ? `<h4>角色内容</h4><p class="card-copy">${escapeHtml(character.content)}</p>`
+              character.description
+                ? `<h4>角色描述</h4><p class="card-copy">${escapeHtml(character.description)}</p>`
                 : ""
             }
             ${renderCharacterDetails(character.details)}
@@ -2079,7 +2074,7 @@ function renderStoryPacks() {
           <p class="card-eyebrow">PACK ARCHIVE</p>
           <strong>${state.packs.length} 个不可变产物</strong>
         </div>
-        <span class="muted">Story Pack v1 · merge-only</span>
+        <span class="muted">Story Pack v2 · merge-only</span>
       </div>
       <div class="pack-list">
         ${state.packs.map((pack) => `

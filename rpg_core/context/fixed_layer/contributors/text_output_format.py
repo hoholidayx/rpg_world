@@ -35,9 +35,11 @@ class TextOutputFormatFixedLayerContributor(FixedLayerContributor):
                     "- RP 正文必须由 XML 风格标签块组成，标签必须闭合，不得嵌套，不得放入代码块。\n"
                     f"- 旁白、环境、行动后果、GM 描写使用 {narration_open}...{narration_close}。\n"
                     f"- NPC 或非玩家角色的台词、短动作使用 {character_open}...{character_close}；"
-                    "name 必须填写可识别角色名。\n"
+                    "name 必须填写可识别角色名。当前 turn 的后置 Message Mode RP Module "
+                    "若明确声明 GM 托管，也可用同一标签输出玩家角色。\n"
                     f"- 无法确认说话者、群体行动或非台词叙述时，使用 {narration_open}...{narration_close}。\n"
-                    "- 标签外不要输出 RP 正文；不要替玩家角色说话、行动或描写内心。\n"
+                    "- 标签外不要输出 RP 正文；玩家角色控制权遵循 [player_character] "
+                    "与当前 turn 的后置 Message Mode RP Module。\n"
                     "- 命令回复、角色绑定错误、纯 OOC 或调试类非叙事回复允许不使用标签。"
                 ),
             )

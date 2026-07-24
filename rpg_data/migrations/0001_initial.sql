@@ -74,8 +74,8 @@ CREATE TABLE rpg_session_messages (
     story_memory_processed_at TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, mode TEXT NOT NULL DEFAULT 'ic'
-CHECK (mode IN ('ic', 'ooc', 'gm')),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, mode TEXT NOT NULL DEFAULT 'neutral'
+CHECK (mode IN ('neutral', 'ic', 'ooc', 'gm')),
     FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE
 );
 
@@ -91,8 +91,8 @@ CREATE TABLE rpg_session_backup_messages (
     metadata_json TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, mode TEXT NOT NULL DEFAULT 'ic'
-CHECK (mode IN ('ic', 'ooc', 'gm')),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, mode TEXT NOT NULL DEFAULT 'neutral'
+CHECK (mode IN ('neutral', 'ic', 'ooc', 'gm')),
     FOREIGN KEY (session_id) REFERENCES rpg_sessions(id) ON DELETE CASCADE
 );
 
@@ -101,8 +101,7 @@ CREATE TABLE rpg_story_characters (
     workspace_id TEXT NOT NULL,
     story_id INTEGER NOT NULL,
     name TEXT NOT NULL,
-    personality TEXT NOT NULL DEFAULT '',
-    content TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     metadata_json TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
@@ -370,19 +369,6 @@ CREATE TABLE rpg_session_narrative_outcomes (
 
 CREATE INDEX idx_rpg_session_narrative_outcomes_session_turn
 ON rpg_session_narrative_outcomes(session_id, turn_id);
-
-CREATE TABLE rpg_workspace_turn_modes (
-    workspace_id TEXT NOT NULL,
-    mode TEXT NOT NULL CHECK (mode IN ('ic', 'ooc', 'gm')),
-    short_name TEXT NOT NULL,
-    prompt TEXT NOT NULL DEFAULT '',
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    version INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (workspace_id, mode),
-    FOREIGN KEY (workspace_id) REFERENCES rpg_workspaces(id) ON DELETE CASCADE
-);
 
 CREATE TABLE rpg_narrative_styles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1138,6 +1124,14 @@ INSERT INTO rpg_rp_module_catalog (
     config_version,
     default_story_enabled
 ) VALUES
+    (
+        'message_mode',
+        '消息模式',
+        '提供 Neutral、IC、OOC 与 GM 的本轮语义及 GM 玩家角色托管。',
+        5,
+        1,
+        1
+    ),
     (
         'narrative_outcome',
         '剧情结果裁定',

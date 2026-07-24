@@ -17,11 +17,30 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-CONTRACT_VERSION = "1.0"
-STORY_DESIGN_SCHEMA_VERSION = "story-design/1.0"
-STORY_PACK_SCHEMA_VERSION = "rpg-story-pack/1.0"
-PROJECT_SCHEMA_VERSION = "story-design-project/1.0"
+CONTRACT_VERSION = "2.0"
+STORY_DESIGN_SCHEMA_VERSION = "story-design/2.0"
+STORY_PACK_SCHEMA_VERSION = "rpg-story-pack/2.0"
+PROJECT_SCHEMA_VERSION = "story-design-project/2.0"
 STORY_RUNTIME_METADATA_KEY = "_rpgStoryDesign"
+
+CHARACTER_DETAIL_TAG_NPC_PORTRAYAL = "scope:npc_portrayal"
+OBJECTIVE_CHARACTER_DETAIL_TAGS = frozenset({
+    "kind:appearance",
+    "kind:background",
+    "kind:relationship",
+    "kind:ability",
+})
+PORTRAYAL_CHARACTER_DETAIL_TAGS = frozenset({
+    "kind:personality",
+    "kind:speech",
+    "kind:behavior",
+    "kind:psychology",
+})
+RESERVED_CHARACTER_DETAIL_TAGS = frozenset({
+    *OBJECTIVE_CHARACTER_DETAIL_TAGS,
+    *PORTRAYAL_CHARACTER_DETAIL_TAGS,
+    CHARACTER_DETAIL_TAG_NPC_PORTRAYAL,
+})
 
 RESOURCE_SECTIONS = (
     "story",
@@ -249,12 +268,40 @@ class CharacterDetailSpec(ContractModel):
     def _stable_id(cls, value: str) -> str:
         return validate_stable_id(value)
 
+    @field_validator("tags")
+    @classmethod
+    def _tags(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            tag = str(raw or "").strip()
+            if not tag or tag in seen:
+                continue
+            if (
+                (tag.startswith("kind:") or tag.startswith("scope:"))
+                and tag not in RESERVED_CHARACTER_DETAIL_TAGS
+            ):
+                raise ValueError(
+                    f"unsupported reserved character detail tag: {tag}"
+                )
+            normalized.append(tag)
+            seen.add(tag)
+        if PORTRAYAL_CHARACTER_DETAIL_TAGS.intersection(seen):
+            if CHARACTER_DETAIL_TAG_NPC_PORTRAYAL not in seen:
+                normalized.append(CHARACTER_DETAIL_TAG_NPC_PORTRAYAL)
+        return normalized
+
 
 class CharacterSpec(ContractModel):
     stable_id: str
     name: str
-    personality: str = ""
-    content: str = ""
+    description: str = Field(
+        default="",
+        description=(
+            "角色身份、经历与客观事实。不得写性格、说话方式、行为倾向或"
+            "心理活动；这些演绎设定必须放入带内置 kind 标签的 details。"
+        ),
+    )
     aliases: list[str] = Field(default_factory=list)
     details: list[CharacterDetailSpec] = Field(default_factory=list)
     visual: dict[str, Any] = Field(default_factory=dict)
@@ -386,6 +433,12 @@ class RPModuleSpec(ContractModel):
     @classmethod
     def _module_name(cls, value: str) -> str:
         return validate_stable_id(value, "moduleName").lower()
+
+    @model_validator(mode="after")
+    def _module_contract(self) -> "RPModuleSpec":
+        if self.module_name == "message_mode" and self.config:
+            raise ValueError("message_mode config must be empty")
+        return self
 
 
 class PlotPoolSpec(ContractModel):
@@ -943,8 +996,12 @@ def _scene_ordinal(value: str) -> int:
 
 
 __all__ = [
+    "CHARACTER_DETAIL_TAG_NPC_PORTRAYAL",
     "CONTRACT_VERSION",
+    "OBJECTIVE_CHARACTER_DETAIL_TAGS",
+    "PORTRAYAL_CHARACTER_DETAIL_TAGS",
     "PROJECT_SCHEMA_VERSION",
+    "RESERVED_CHARACTER_DETAIL_TAGS",
     "RESOURCE_SECTIONS",
     "STORY_DESIGN_SCHEMA_VERSION",
     "STORY_PACK_SCHEMA_VERSION",

@@ -203,8 +203,7 @@ INSERT OR IGNORE INTO rpg_story_characters (
     workspace_id,
     story_id,
     name,
-    personality,
-    content,
+    description,
     sort_order,
     metadata_json
 )
@@ -212,22 +211,19 @@ SELECT
     stories.workspace_id,
     stories.id,
     characters.name,
-    characters.personality,
-    characters.content,
+    characters.description,
     characters.sort_order,
     '{"kind":"demo"}'
 FROM rpg_stories AS stories
 CROSS JOIN (
     SELECT
         'Bob' AS name,
-        'bold' AS personality,
-        'A brave knight who favors direct charges and two-handed swords.' AS content,
+        'A knight trained in two-handed swords who serves the northern watch.' AS description,
         10 AS sort_order
     UNION ALL
     SELECT
         'Alice',
-        'curious',
-        'A young wizard from the Arcanum Academy with a talent for elemental magic.',
+        'A young wizard from the Arcanum Academy with formal training in elemental magic.',
         20
 ) AS characters
 WHERE stories.workspace_id = 'demo_workspace'
@@ -247,7 +243,10 @@ SELECT
         WHEN 'Bob' THEN '擅长双手重剑，战斗时喜欢正面冲锋。'
         ELSE '银白色长发，紫罗兰色瞳孔，战斗时穿轻便法师袍。'
     END,
-    CASE characters.name WHEN 'Bob' THEN '["战斗"]' ELSE '["外观"]' END,
+    CASE characters.name
+        WHEN 'Bob' THEN '["kind:behavior","scope:npc_portrayal"]'
+        ELSE '["kind:appearance"]'
+    END,
     10
 FROM rpg_story_characters AS characters
 JOIN rpg_stories AS stories ON stories.id = characters.story_id
@@ -424,18 +423,6 @@ FROM rpg_sessions AS sessions
 JOIN rpg_story_status_tables AS tables ON tables.story_id = sessions.story_id
 WHERE sessions.id IN ('s_forest001', 's_academy01');
 
-INSERT OR IGNORE INTO rpg_workspace_turn_modes (
-    workspace_id,
-    mode,
-    short_name,
-    prompt,
-    sort_order
-)
-VALUES
-    ('demo_workspace', 'ic', '角色内', '将本轮输入视为玩家角色在故事内的行动或发言，保持沉浸式叙事并自然推进当前场景。', 10),
-    ('demo_workspace', 'ooc', '场外', '将本轮输入视为场外讨论：直接、清晰地回应，不推进剧情，不产生剧情裁定或状态变化。', 20),
-    ('demo_workspace', 'gm', '主持', '将本轮输入视为主持人或导演指令，在遵守既有事实的前提下执行指令，并同步已经确定的剧情状态变化。', 30);
-
 INSERT OR IGNORE INTO rpg_narrative_styles (
     workspace_id,
     name,
@@ -480,4 +467,4 @@ FROM rpg_stories AS stories
 CROSS JOIN rpg_rp_module_catalog AS modules
 WHERE stories.workspace_id = 'demo_workspace'
   AND stories.title IN ('北境森林 Demo', '奥术学院 Demo')
-  AND modules.module_name IN ('dice', 'narrative_outcome');
+  AND modules.module_name IN ('message_mode', 'dice', 'narrative_outcome');

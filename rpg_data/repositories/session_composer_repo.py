@@ -1,8 +1,6 @@
-"""Persistence for turn modes, narrative styles, and story quick replies."""
+"""Persistence for narrative styles and Story quick replies."""
 
 from __future__ import annotations
-
-from collections.abc import Iterable
 
 from peewee import Database, SQL
 
@@ -10,20 +8,16 @@ from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
     StoryQuickReply,
-    WorkspaceTurnMode,
-    WorkspaceTurnModeSeed,
 )
 from rpg_data.repositories._utils import (
     to_narrative_style,
     to_story_narrative_style,
     to_story_quick_reply,
-    to_workspace_turn_mode,
 )
 from rpg_data.repositories.records import (
     NarrativeStyleRecord,
     StoryNarrativeStyleRecord,
     StoryQuickReplyRecord,
-    WorkspaceTurnModeRecord,
     bind_database,
 )
 
@@ -32,60 +26,6 @@ class SessionComposerRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
         bind_database(database)
-
-    def ensure_workspace_modes(
-        self,
-        workspace_id: str,
-        seeds: Iterable[WorkspaceTurnModeSeed],
-    ) -> list[WorkspaceTurnMode]:
-        for seed in seeds:
-            WorkspaceTurnModeRecord.get_or_create(
-                workspace=workspace_id,
-                mode=seed.mode,
-                defaults={
-                    "short_name": seed.short_name,
-                    "prompt": seed.prompt,
-                    "sort_order": seed.sort_order,
-                },
-            )
-        return self.list_workspace_modes(workspace_id)
-
-    def list_workspace_modes(self, workspace_id: str) -> list[WorkspaceTurnMode]:
-        rows = (
-            WorkspaceTurnModeRecord.select()
-            .where(WorkspaceTurnModeRecord.workspace == workspace_id)
-            .order_by(WorkspaceTurnModeRecord.sort_order, WorkspaceTurnModeRecord.mode)
-        )
-        return [to_workspace_turn_mode(row) for row in rows]
-
-    def update_workspace_mode(
-        self,
-        workspace_id: str,
-        mode: str,
-        *,
-        short_name: str,
-        prompt: str,
-    ) -> WorkspaceTurnMode | None:
-        updated = (
-            WorkspaceTurnModeRecord.update(
-                short_name=short_name,
-                prompt=prompt,
-                version=WorkspaceTurnModeRecord.version + 1,
-                updated_at=SQL("CURRENT_TIMESTAMP"),
-            )
-            .where(
-                (WorkspaceTurnModeRecord.workspace == workspace_id)
-                & (WorkspaceTurnModeRecord.mode == mode)
-            )
-            .execute()
-        )
-        if not updated:
-            return None
-        row = WorkspaceTurnModeRecord.get(
-            (WorkspaceTurnModeRecord.workspace == workspace_id)
-            & (WorkspaceTurnModeRecord.mode == mode)
-        )
-        return to_workspace_turn_mode(row)
 
     def list_styles(self, workspace_id: str) -> list[NarrativeStyle]:
         rows = (

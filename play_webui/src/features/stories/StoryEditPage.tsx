@@ -884,7 +884,7 @@ function StoryEditContent({
                         <AssetRow
                           key={character.id}
                           name={character.name}
-                          meta={character.personality || character.content || `character #${character.id}`}
+                          meta={character.description || `character #${character.id}`}
                           chip="角色"
                           tone="teal"
                         />

@@ -27,8 +27,16 @@ the entire turn.
 - Runtime changes require a preview followed by a separate apply tool call
   after explicit user confirmation. Never represent confirmation as a boolean
   argument.
-- Do not infer deletion from omission. Story Pack v1 is merge-only and never
+- Do not infer deletion from omission. Story Pack v2 is merge-only and never
   deletes missing runtime resources.
+- Character prose at the top level is limited to `name + description`.
+  `description` contains objective identity/history only; personality, speech,
+  behavior, and psychology belong in tagged details and automatically carry
+  `scope:npc_portrayal`.
+- `message_mode` is a code-owned, empty-config RP Module with
+  `neutral | ic | ooc | gm`; do not model Workspace mode or prompt resources.
+- Story Design, Story Pack, DesignProject, and MCP contracts are 2.0 hard cuts.
+  Reject v1 inputs; do not create a converter.
 
 ## Portability rules
 

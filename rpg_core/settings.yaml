@@ -48,7 +48,7 @@ base:
     # 状态子 Agent 开关。
     status_sub_agent:
       enabled: true
-      # 普通 preflight 与派生初始化读取的最近完整 IC/GM turn 数。
+      # 普通 preflight 与派生初始化读取的最近完整可推进世界 turn 数。
       history_rounds: 5
 
   # ── RP Modules 玩法机制配置 ─────────────────────────────────────
@@ -66,9 +66,9 @@ base:
           critical_failure: 5
       plot_scheduler:
         enabled: true
-        # 软约束适宜性判断读取的最近完整 IC/GM turn 数。
+        # 软约束适宜性判断读取的最近完整可推进世界 turn 数。
         judge_history_turns: 5
-        # 软判断延期后至少跳过多少个已提交 IC/GM turn。
+        # 软判断延期后至少跳过多少个已提交可推进世界 turn。
         soft_retry_intervening_turns: 1
       dice:
         enabled: true

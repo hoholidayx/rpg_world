@@ -19,6 +19,7 @@ from rpg_core.context.fixed_layer.contributors.player_character import (
     PlayerCharacterFixedLayerContributor,
     annotate_player_character_cards,
     build_player_character_section,
+    player_character_portrayal_details,
 )
 from rpg_core.context.fixed_layer.contributors.story_prompt import (
     STORY_PROMPT_SECTION_ID,
@@ -64,6 +65,7 @@ __all__ = [
     "PlayerCharacterFixedLayerContributor",
     "annotate_player_character_cards",
     "build_player_character_section",
+    "player_character_portrayal_details",
     "render_character_section_body",
     "render_lorebook_section_body",
 ]

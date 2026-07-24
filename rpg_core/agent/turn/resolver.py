@@ -22,7 +22,7 @@ from rpg_core.story.template import (
 )
 
 from rpg_data import models as data_models
-from rpg_data.model.composer import StoryNarrativeStyle, WorkspaceTurnMode
+from rpg_data.model.composer import StoryNarrativeStyle
 from rpg_data.model.session import Session
 
 
@@ -33,12 +33,6 @@ class TurnSnapshotDataPort(Protocol):
 
 
 class SessionComposerSnapshotReader(Protocol):
-    def get_mode(
-        self,
-        workspace_id: str,
-        mode: str,
-    ) -> WorkspaceTurnMode | None: ...
-
     def resolve_session_style(
         self,
         session_id: str,
@@ -86,7 +80,6 @@ class TurnSnapshotResolver:
             # Production Agent service resolves a catalog session first.
             return TurnExecutionSnapshot(
                 request=request,
-                mode_prompt="",
                 narrative_style_id=None,
                 narrative_style_name="",
                 narrative_style_prompt="",
@@ -100,29 +93,18 @@ class TurnSnapshotResolver:
             player_character,
         )
 
-        mode_config = self._composer.get_mode(
-            session.workspace_id,
-            request.mode.value,
+        # Keep the Fixed Layer byte-stable across mode changes. The late OOC
+        # message-mode directive suppresses narrative behavior for that turn.
+        style = self._composer.resolve_session_style(
+            self._session_id,
+            request.narrative_style_id,
         )
-        mode_prompt = mode_config.prompt if mode_config is not None else ""
-
-        style = None
-        if policy.apply_narrative_style or request.narrative_style_id is not None:
-            # Explicit overrides remain validated in OOC mode even though the
-            # OOC execution policy suppresses their prompt.
-            style = self._composer.resolve_session_style(
-                self._session_id,
-                request.narrative_style_id,
-            )
 
         return TurnExecutionSnapshot(
             request=request,
-            mode_prompt=mode_prompt,
             narrative_style_id=(style.narrative_style_id if style is not None else None),
             narrative_style_name=(style.name if style is not None else ""),
-            narrative_style_prompt=(
-                style.prompt if style is not None and policy.apply_narrative_style else ""
-            ),
+            narrative_style_prompt=(style.prompt if style is not None else ""),
             policy=policy,
             player_character=player_character,
             rendered_story_prompt=rendered_story_prompt,

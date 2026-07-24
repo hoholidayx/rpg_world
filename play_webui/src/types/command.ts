@@ -1,4 +1,4 @@
-export type InputMode = 'ic' | 'ooc' | 'gm'
+export type InputMode = 'neutral' | 'ic' | 'ooc' | 'gm'
 
 export type CommandMode = InputMode | 'slash'
 

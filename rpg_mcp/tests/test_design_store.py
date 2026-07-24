@@ -13,7 +13,7 @@ from rpg_mcp.design_store import DesignConflictError, DesignProjectStore
 
 def _document() -> StoryDesignDocument:
     return StoryDesignDocument.model_validate({
-        "schemaVersion": "story-design/1.0",
+        "schemaVersion": "story-design/2.0",
         "project": {
             "projectId": "portable-test",
             "name": "Portable Test",
@@ -409,7 +409,7 @@ def test_design_rejects_non_portable_source_locator(locator: str) -> None:
 def test_checked_in_design_schema_accepts_current_project() -> None:
     root = __import__("pathlib").Path("DesignProject")
     schema = json.loads(
-        (root / "schemas/story-design-v1.schema.json").read_text(
+        (root / "schemas/story-design-v2.schema.json").read_text(
             encoding="utf-8"
         )
     )

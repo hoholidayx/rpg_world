@@ -68,11 +68,11 @@ class Message:
         seq_in_turn: int = 0,
         tool_call_id: str = "",
         tool_calls: list[JsonObject] | None = None,
-        mode: str = "ic",
+        mode: str = "neutral",
     ) -> None:
         self._role = Role(role) if isinstance(role, str) else role
         self._content = content
-        self._mode = str(mode or "ic").strip().lower() or "ic"
+        self._mode = str(mode or "neutral").strip().lower() or "neutral"
         self._uid = int(uid)
         self._turn_id = int(turn_id)
         self._seq_in_turn = int(seq_in_turn)
@@ -162,7 +162,7 @@ class Message:
         return cls(
             role=str(data[MsgKey.ROLE]),
             content=str(data.get(MsgKey.CONTENT) or ""),
-            mode=str(data.get(MsgKey.MODE, "ic") or "ic"),
+            mode=str(data.get(MsgKey.MODE, "neutral") or "neutral"),
             uid=int(data.get(MsgKey.UID, 0) or 0),
             turn_id=int(data.get(MsgKey.TURN_ID, 0) or 0),
             seq_in_turn=int(data.get(MsgKey.SEQ_IN_TURN, 0) or 0),

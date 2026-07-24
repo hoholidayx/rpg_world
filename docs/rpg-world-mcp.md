@@ -43,7 +43,13 @@ It stores only relative paths and never imports an RPG package. Complete chat
 history is intentionally not persisted; confirmed decisions, open questions,
 source summaries, and Story resources are.
 
-## Story Pack v1
+The contract is a hard cut at 2.0:
+`story-design-project/2.0`, `story-design/2.0`,
+`rpg-story-pack/2.0`, and `rpg-mcp-contract/2.0`. Design storage, generated
+schemas, portable validation, preview, and runtime apply all reject v1 inputs.
+There is no compatibility model or converter.
+
+## Story Pack v2
 
 One pack contains one Story. Sections are:
 
@@ -56,6 +62,33 @@ The policy is always merge-only with `deleteMissing=false`. Character,
 lorebook, and status resources are Story-owned. Narrative styles are
 workspace-owned and Story-bound. Visual specifications are archived in the
 pack/operation but do not create media data.
+
+The only top-level Character prose fields are `name` and `description`;
+`personality` and `content` have been removed. `description` contains identity,
+history, and objective facts, not personality, speech, behavior, or psychology
+that could constrain a player. Optional Character details use the built-in
+objective tags:
+
+```text
+kind:appearance, kind:background, kind:relationship, kind:ability
+```
+
+Portrayal details use:
+
+```text
+kind:personality, kind:speech, kind:behavior, kind:psychology
+```
+
+Every portrayal detail automatically carries `scope:npc_portrayal`. Runtime
+keeps those details on NPC cards, removes them from the bound player
+Character's Fixed Layer card, and injects them for that Character only in a GM
+turn's late `message_mode` section.
+
+`message_mode` is a code-owned RP Module with empty configuration. Its
+canonical modes are `neutral | ic | ooc | gm`, with `neutral` as the default.
+Mode prompts and labels are not Workspace/Composer resources and do not appear
+in Story Pack configuration. A pack may only mount/enable the module with
+`config={}`.
 
 A status-only pack may refer to a Character omitted from that pack only when
 the target Story already has the same-project stable Character binding.

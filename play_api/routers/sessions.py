@@ -187,7 +187,7 @@ class PlayChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     text: str
-    mode: Literal["ic", "ooc", "gm"] = "ic"
+    mode: Literal["neutral", "ic", "ooc", "gm"] = "neutral"
     narrative_style_id: int | None = Field(default=None, alias="narrativeStyleId", gt=0)
     request_id: str | None = Field(default=None, alias="requestId")
 
@@ -221,7 +221,7 @@ class PlayHistoryMessage(BaseModel):
     seq_in_turn: int = Field(alias="seqInTurn")
     role: Literal["user", "assistant", "tool", "system"]
     content: str
-    mode: Literal["ic", "ooc", "gm"] = "ic"
+    mode: Literal["neutral", "ic", "ooc", "gm"] = "neutral"
     metadata: dict[str, object] = Field(default_factory=dict)
     created_at: str | None = Field(default=None, alias="createdAt")
 
@@ -545,7 +545,7 @@ def _history_payload_from_row(row: object) -> dict[str, object]:
         "seqInTurn": int(getattr(row, "seq_in_turn", 0) or 0),
         "role": str(getattr(row, "role", "") or "assistant"),
         "content": str(getattr(row, "content", "") or ""),
-        "mode": str(getattr(row, "mode", "") or "ic"),
+        "mode": str(getattr(row, "mode", "") or "neutral"),
         "metadata": metadata,
     }
     created_at = str(getattr(row, "created_at", "") or "")

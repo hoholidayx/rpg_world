@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from types import MappingProxyType
+
 import pytest
 
+from rpg_core.rp_modules.constants import RP_MODULE_MESSAGE_MODE_NAME
+from rpg_core.rp_modules.models import (
+    RPModuleSelection,
+    RPModuleSelectionSnapshot,
+)
 from rpg_core.session.composer import SessionComposerApplicationService
 from rpg_data.model.composer import (
     StoryNarrativeStyle,
     StoryQuickReply,
-    WorkspaceTurnMode,
-    WorkspaceTurnModeSeed,
 )
 from rpg_data.model.session import Session
 
@@ -15,7 +20,6 @@ from rpg_data.model.session import Session
 class _ComposerData:
     def __init__(self) -> None:
         self.session = Session(id="s1", workspace_id="ws", story_id=7)
-        self.modes: dict[str, WorkspaceTurnMode] = {}
         self.styles = [
             StoryNarrativeStyle(
                 id=10,
@@ -53,26 +57,6 @@ class _ComposerData:
     def get_session(self, session_id: str) -> Session | None:
         return self.session if session_id == self.session.id else None
 
-    def ensure_modes(
-        self,
-        workspace_id: str,
-        seeds: tuple[WorkspaceTurnModeSeed, ...],
-    ) -> list[WorkspaceTurnMode] | None:
-        if workspace_id != "ws":
-            return None
-        for seed in seeds:
-            self.modes.setdefault(
-                seed.mode,
-                WorkspaceTurnMode(
-                    workspace_id=workspace_id,
-                    mode=seed.mode,
-                    short_name=seed.short_name,
-                    prompt=seed.prompt,
-                    sort_order=seed.sort_order,
-                ),
-            )
-        return sorted(self.modes.values(), key=lambda item: item.sort_order)
-
     def list_story_styles(
         self,
         workspace_id: str,
@@ -96,27 +80,66 @@ class _ComposerData:
         return list(self.quick_replies)
 
 
-def test_composer_owns_default_modes_without_overwriting_workspace_edits() -> None:
-    data = _ComposerData()
-    data.modes["ooc"] = WorkspaceTurnMode(
-        workspace_id="ws",
-        mode="ooc",
-        short_name="幕后",
-        prompt="自定义场外规则",
-        sort_order=20,
+class _RPModules:
+    def __init__(self, *, message_mode_enabled: bool) -> None:
+        self._message_mode_enabled = message_mode_enabled
+
+    def resolve_snapshot(self, session_id: str) -> RPModuleSelectionSnapshot:
+        return RPModuleSelectionSnapshot(
+            session_id=session_id,
+            story_id=7,
+            global_enabled=True,
+            modules=(
+                RPModuleSelection(
+                    name=RP_MODULE_MESSAGE_MODE_NAME,
+                    display_name="消息模式",
+                    description="",
+                    sort_order=5,
+                    system_enabled=True,
+                    story_mounted=True,
+                    story_enabled=True,
+                    session_enabled_override=None,
+                    effective_enabled=self._message_mode_enabled,
+                    system_config=MappingProxyType({}),
+                    story_config=MappingProxyType({}),
+                    session_config=MappingProxyType({}),
+                    effective_config=MappingProxyType({}),
+                    config_sources=MappingProxyType({}),
+                ),
+            ),
+        )
+
+
+def test_composer_exposes_builtin_modes_only_when_message_mode_is_enabled() -> None:
+    enabled = SessionComposerApplicationService(
+        _ComposerData(),
+        _RPModules(message_mode_enabled=True),
     )
-    service = SessionComposerApplicationService(data)
+    disabled = SessionComposerApplicationService(
+        _ComposerData(),
+        _RPModules(message_mode_enabled=False),
+    )
 
-    modes = service.list_modes("ws")
+    enabled_snapshot = enabled.get_snapshot("s1")
+    disabled_snapshot = disabled.get_snapshot("s1")
 
-    assert modes is not None
-    assert [item.mode for item in modes] == ["ic", "ooc", "gm"]
-    assert service.get_mode("ws", " OOC ").prompt == "自定义场外规则"
+    assert enabled_snapshot is not None
+    assert [item.mode.value for item in enabled_snapshot.modes] == [
+        "neutral",
+        "ic",
+        "ooc",
+        "gm",
+    ]
+    assert disabled_snapshot is not None
+    assert disabled_snapshot.modes == ()
 
 
 def test_composer_resolves_request_override_and_session_projection() -> None:
     data = _ComposerData()
-    service = SessionComposerApplicationService(data)
+    service = SessionComposerApplicationService(
+        data,
+        _RPModules(message_mode_enabled=True),
+    )
 
     assert service.resolve_session_style("s1", None).narrative_style_id == 100
     assert service.resolve_session_style("s1", 101).id == 11

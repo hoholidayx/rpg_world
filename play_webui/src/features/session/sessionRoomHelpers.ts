@@ -20,10 +20,8 @@ export function getCharacterAvatarUrl(character?: CharacterCard | null) {
 }
 
 export function characterSummary(character: CharacterCard) {
-  const personality = character.personality?.trim()
-  if (personality) return personality
-  const content = character.content?.replace(/\s+/g, ' ').trim()
-  return content ? content.slice(0, 72) : '属于当前 Story。'
+  const description = character.description?.replace(/\s+/g, ' ').trim()
+  return description ? description.slice(0, 72) : '属于当前 Story。'
 }
 
 export function formatDateTime(value?: string | null) {

@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from rpg_data import models as data_models
-from rpg_core.agent.turn.models import TurnMode
+from rpg_core.session.modes import (
+    DEFAULT_TURN_MODE,
+    WORLD_ADVANCING_MODES,
+    is_world_advancing_mode,
+)
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleInjection
 from rpg_core.rp_modules.plot_scheduler.judge import (
     PlotScheduleJudge,
@@ -55,7 +59,7 @@ class PlotSchedulingPreflightHook:
         if (
             not snapshot.enabled
             or not plan.execution.policy.expose_rp_modules
-            or plan.request.mode is TurnMode.OOC
+            or not is_world_advancing_mode(plan.request.mode)
         ):
             return
         scene_tracker = turn_scratch.scene_tracker
@@ -79,7 +83,7 @@ class PlotSchedulingPreflightHook:
             snapshot,
             scene_time=scene_time,
             current_turn_id=turn_scratch.turn_id,
-            completed_ic_gm_turn_ids=self._completed_ic_gm_turn_ids(
+            completed_world_turn_ids=self._completed_world_turn_ids(
                 turn_scratch.base_history
             ),
         )
@@ -233,7 +237,7 @@ class PlotSchedulingPreflightHook:
             error_message=error_message,
         )
 
-    def _completed_ic_gm_turn_ids(self, messages) -> tuple[int, ...]:
+    def _completed_world_turn_ids(self, messages) -> tuple[int, ...]:
         groups = self._session_manager.iter_turn_groups(
             [
                 message
@@ -243,8 +247,13 @@ class PlotSchedulingPreflightHook:
         )
         completed: list[int] = []
         for group in groups:
-            modes = {str(message.mode or TurnMode.IC.value).lower() for message in group}
-            if not modes or not modes.issubset({TurnMode.IC.value, TurnMode.GM.value}):
+            modes = {
+                str(message.mode or DEFAULT_TURN_MODE.value).lower()
+                for message in group
+            }
+            if not modes or not modes.issubset(
+                {mode.value for mode in WORLD_ADVANCING_MODES}
+            ):
                 continue
             turn_id = next((message.turn_id for message in group if message.turn_id > 0), 0)
             if turn_id > 0:

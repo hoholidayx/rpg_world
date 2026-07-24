@@ -31,7 +31,7 @@ class RecallQueryContext:
             "## 当前场景\n"
             f"时间：{self.scene_time or '（未知）'}\n"
             f"地点：{self.scene_location or '（未知）'}\n\n"
-            "## 最近两个 IC/GM Turn\n"
+            "## 最近两个可推进世界的 Turn\n"
             f"{recent}"
         )
 

@@ -1,4 +1,4 @@
-"""Generate neutral checked-in schemas and the initial portable revision."""
+"""Generate neutral v2 schemas and initialize a new portable revision."""
 
 from __future__ import annotations
 
@@ -69,25 +69,46 @@ def _tool_contract(
 
 
 def generate(root: Path) -> None:
+    manifest_path = root / "design-project.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError("design-project.json must contain one object")
+        if manifest.get("schemaVersion") != PROJECT_SCHEMA_VERSION:
+            raise ValueError(
+                "unsupported DesignProject schemaVersion: "
+                f"{manifest.get('schemaVersion')!r}; v1 projects must be "
+                "re-created as v2 because no converter is provided"
+            )
+    contract = generate_schema_assets(root)
+    _initialize_revision(
+        root,
+        contract_digest=_digest(contract),
+    )
+
+
+def generate_schema_assets(root: Path) -> dict[str, Any]:
+    """Write v2 schema artifacts without mutating DesignProject state."""
+
     schemas = root / "schemas"
     schemas.mkdir(parents=True, exist_ok=True)
     design_schema = StoryDesignDocument.model_json_schema(
         by_alias=True,
         mode="validation",
     )
-    design_schema["$id"] = "story-design-v1.schema.json"
-    design_schema["title"] = "Portable Story Design v1"
+    design_schema["$id"] = "story-design-v2.schema.json"
+    design_schema["title"] = "Portable Story Design v2"
     pack_schema = StoryPack.model_json_schema(
         by_alias=True,
         mode="validation",
     )
-    pack_schema["$id"] = "story-pack-v1.schema.json"
-    pack_schema["title"] = "RPG World Story Pack v1"
-    _write_json(schemas / "story-design-v1.schema.json", design_schema)
-    _write_json(schemas / "story-pack-v1.schema.json", pack_schema)
+    pack_schema["$id"] = "story-pack-v2.schema.json"
+    pack_schema["title"] = "RPG World Story Pack v2"
+    _write_json(schemas / "story-design-v2.schema.json", design_schema)
+    _write_json(schemas / "story-pack-v2.schema.json", pack_schema)
 
     contract = {
-        "schemaVersion": "rpg-mcp-contract/1.0",
+        "schemaVersion": "rpg-mcp-contract/2.0",
         "contractVersion": CONTRACT_VERSION,
         "command": "rpg-world-mcp",
         "defaultTransport": "stdio",
@@ -128,13 +149,33 @@ def generate(root: Path) -> None:
             "visualCatalogIsArchiveOnly": True,
             "createsSessions": False,
         },
+        "characterCards": {
+            "topLevelFields": ["name", "description"],
+            "objectiveDetailTags": [
+                "kind:appearance",
+                "kind:background",
+                "kind:relationship",
+                "kind:ability",
+            ],
+            "portrayalDetailTags": [
+                "kind:personality",
+                "kind:speech",
+                "kind:behavior",
+                "kind:psychology",
+            ],
+            "portrayalScopeTag": "scope:npc_portrayal",
+        },
+        "messageMode": {
+            "moduleName": "message_mode",
+            "modes": ["neutral", "ic", "ooc", "gm"],
+            "defaultMode": "neutral",
+            "promptsAreCodeOwned": True,
+            "workspaceConfiguration": False,
+        },
     }
-    contract_path = schemas / "rpg-mcp-contract-v1.json"
+    contract_path = schemas / "rpg-mcp-contract-v2.json"
     _write_json(contract_path, contract)
-    _initialize_revision(
-        root,
-        contract_digest=_digest(contract),
-    )
+    return contract
 
 
 def _initialize_revision(root: Path, *, contract_digest: str) -> None:
@@ -143,6 +184,12 @@ def _initialize_revision(root: Path, *, contract_digest: str) -> None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(manifest, dict):
             raise ValueError("design-project.json must contain one object")
+        if manifest.get("schemaVersion") != PROJECT_SCHEMA_VERSION:
+            raise ValueError(
+                "unsupported DesignProject schemaVersion: "
+                f"{manifest.get('schemaVersion')!r}; v1 projects must be "
+                "re-created as v2 because no converter is provided"
+            )
         manifest["contractVersion"] = CONTRACT_VERSION
         manifest["contractDigest"] = contract_digest
         _write_json(manifest_path, manifest)

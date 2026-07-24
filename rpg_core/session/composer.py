@@ -3,60 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TYPE_CHECKING
 
-from rpg_core.session.modes import TurnMode, normalize_turn_mode
+from rpg_core.rp_modules.constants import RP_MODULE_MESSAGE_MODE_NAME
+from rpg_core.rp_modules.message_mode import MESSAGE_MODE_OPTIONS, MessageModeOption
 from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
     StoryQuickReply,
-    WorkspaceTurnMode,
-    WorkspaceTurnModeSeed,
 )
 from rpg_data.model.session import Session
 
-
-DEFAULT_TURN_MODES: tuple[WorkspaceTurnModeSeed, ...] = (
-    WorkspaceTurnModeSeed(
-        mode=TurnMode.IC.value,
-        short_name="角色内",
-        prompt="将本轮输入视为玩家角色在故事内的行动或发言，保持沉浸式叙事并自然推进当前场景。",
-        sort_order=10,
-    ),
-    WorkspaceTurnModeSeed(
-        mode=TurnMode.OOC.value,
-        short_name="场外",
-        prompt="将本轮输入视为场外讨论：直接、清晰地回应，不推进剧情，不产生剧情裁定或状态变化。",
-        sort_order=20,
-    ),
-    WorkspaceTurnModeSeed(
-        mode=TurnMode.GM.value,
-        short_name="主持",
-        prompt="将本轮输入视为主持人或导演指令，在遵守既有事实的前提下执行指令，并同步已经确定的剧情状态变化。",
-        sort_order=30,
-    ),
-)
+if TYPE_CHECKING:
+    from rpg_core.rp_modules.models import RPModuleSelectionSnapshot
 
 
 class SessionComposerDataPort(Protocol):
     def get_session(self, session_id: str) -> Session | None: ...
-
-    def list_modes(self, workspace_id: str) -> list[WorkspaceTurnMode] | None: ...
-
-    def ensure_modes(
-        self,
-        workspace_id: str,
-        seeds: tuple[WorkspaceTurnModeSeed, ...],
-    ) -> list[WorkspaceTurnMode] | None: ...
-
-    def update_mode(
-        self,
-        workspace_id: str,
-        mode: str,
-        *,
-        short_name: str,
-        prompt: str,
-    ) -> WorkspaceTurnMode | None: ...
 
     def list_styles(self, workspace_id: str) -> list[NarrativeStyle] | None: ...
 
@@ -147,12 +110,16 @@ class SessionComposerDataPort(Protocol):
     ) -> bool | None: ...
 
 
+class SessionRPModuleSnapshotReader(Protocol):
+    def resolve_snapshot(self, session_id: str) -> "RPModuleSelectionSnapshot": ...
+
+
 @dataclass(frozen=True)
 class SessionComposerSnapshot:
     session_id: str
     workspace_id: str
     story_id: int
-    modes: tuple[WorkspaceTurnMode, ...]
+    modes: tuple[MessageModeOption, ...]
     narrative_styles: tuple[StoryNarrativeStyle, ...]
     base_narrative_style_id: int | None
     quick_replies: tuple[StoryQuickReply, ...]
@@ -161,41 +128,13 @@ class SessionComposerSnapshot:
 class SessionComposerApplicationService:
     """Own Composer defaults, validation, and effective request selection."""
 
-    def __init__(self, data: SessionComposerDataPort) -> None:
+    def __init__(
+        self,
+        data: SessionComposerDataPort,
+        rp_modules: SessionRPModuleSnapshotReader | None = None,
+    ) -> None:
         self._data = data
-
-    def list_modes(self, workspace_id: str) -> list[WorkspaceTurnMode] | None:
-        return self._data.ensure_modes(str(workspace_id), DEFAULT_TURN_MODES)
-
-    def get_mode(
-        self,
-        workspace_id: str,
-        mode: TurnMode | str,
-    ) -> WorkspaceTurnMode | None:
-        normalized = normalize_turn_mode(mode).value
-        items = self.list_modes(workspace_id)
-        if items is None:
-            return None
-        return next((item for item in items if item.mode == normalized), None)
-
-    def update_mode(
-        self,
-        workspace_id: str,
-        mode: TurnMode | str,
-        *,
-        short_name: str,
-        prompt: str,
-    ) -> WorkspaceTurnMode | None:
-        normalized = normalize_turn_mode(mode).value
-        name = _required_text(short_name, "short_name")
-        if self.list_modes(workspace_id) is None:
-            return None
-        return self._data.update_mode(
-            str(workspace_id),
-            normalized,
-            short_name=name,
-            prompt=str(prompt or ""),
-        )
+        self._rp_modules = rp_modules
 
     def list_styles(self, workspace_id: str) -> list[NarrativeStyle] | None:
         return self._data.list_styles(str(workspace_id))
@@ -377,7 +316,12 @@ class SessionComposerApplicationService:
         session = self._data.get_session(str(session_id))
         if session is None:
             return None
-        modes = self.list_modes(session.workspace_id) or []
+        modes: tuple[MessageModeOption, ...] = ()
+        if self._rp_modules is not None:
+            rp_snapshot = self._rp_modules.resolve_snapshot(session.id)
+            message_mode = rp_snapshot.get(RP_MODULE_MESSAGE_MODE_NAME)
+            if message_mode is not None and message_mode.effective_enabled:
+                modes = MESSAGE_MODE_OPTIONS
         styles = self.list_story_styles(session.workspace_id, session.story_id) or []
         quick_replies = self.list_quick_replies(
             session.workspace_id,
@@ -389,7 +333,7 @@ class SessionComposerApplicationService:
             session_id=session.id,
             workspace_id=session.workspace_id,
             story_id=session.story_id,
-            modes=tuple(modes),
+            modes=modes,
             narrative_styles=tuple(styles),
             base_narrative_style_id=(
                 base_style.narrative_style_id if base_style is not None else None
@@ -406,8 +350,8 @@ def _required_text(value: object, field_name: str) -> str:
 
 
 __all__ = [
-    "DEFAULT_TURN_MODES",
     "SessionComposerApplicationService",
     "SessionComposerDataPort",
+    "SessionRPModuleSnapshotReader",
     "SessionComposerSnapshot",
 ]

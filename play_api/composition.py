@@ -11,7 +11,10 @@ from rpg_data.services import get_data_service_gateway
 
 def session_composer_service() -> SessionComposerApplicationService:
     gateway = get_data_service_gateway()
-    return SessionComposerApplicationService(gateway.session_composer)
+    return SessionComposerApplicationService(
+        gateway.session_composer,
+        rp_module_service(),
+    )
 
 
 def rp_module_service() -> RPModuleApplicationService:

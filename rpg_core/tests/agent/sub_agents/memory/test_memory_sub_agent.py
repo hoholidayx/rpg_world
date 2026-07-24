@@ -189,7 +189,7 @@ async def test_pending_story_memory_is_turn_batched_and_keeps_successful_prefix(
 
 
 @pytest.mark.asyncio
-async def test_pending_story_memory_marks_ooc_and_batches_all_ic_gm() -> None:
+async def test_pending_story_memory_marks_ooc_and_batches_all_world_modes() -> None:
     session = SessionManager(history_enabled=False)
     session.replace_history([
         Message(Role.USER, "ooc", mode="ooc", turn_id=1, seq_in_turn=1),
@@ -198,6 +198,14 @@ async def test_pending_story_memory_marks_ooc_and_batches_all_ic_gm() -> None:
         Message(Role.ASSISTANT, "ic answer", mode="ic", turn_id=2, seq_in_turn=2),
         Message(Role.USER, "gm", mode="gm", turn_id=3, seq_in_turn=1),
         Message(Role.ASSISTANT, "gm answer", mode="gm", turn_id=3, seq_in_turn=2),
+        Message(Role.USER, "neutral", mode="neutral", turn_id=4, seq_in_turn=1),
+        Message(
+            Role.ASSISTANT,
+            "neutral answer",
+            mode="neutral",
+            turn_id=4,
+            seq_in_turn=2,
+        ),
     ], persist=False)
     sub_agent = MemorySubAgent(
         story_store=DummyStoryStore(),
@@ -214,9 +222,9 @@ async def test_pending_story_memory_marks_ooc_and_batches_all_ic_gm() -> None:
     result = await sub_agent.extract_pending_story_memory(session, batch_turns=1)
 
     assert result.status is StoryMemoryExtractionStatus.SUCCEEDED
-    assert result.pending_turns == 2
-    assert result.completed_batches == 2
-    assert calls == [[2], [3]]
+    assert result.pending_turns == 3
+    assert result.completed_batches == 3
+    assert calls == [[2], [3], [4]]
     assert session.count_new_turns_since_story() == 0
 
 
@@ -395,8 +403,11 @@ async def test_story_memory_requires_and_persists_per_fact_evidence_ids() -> Non
     assert added == 1
     assert store.persisted_details[0]["evidence_message_ids"] == [12]
     assert store.persist_kwargs["message_ids"] == [11, 12]
-    assert "[message_id=11; turn_id=2; mode=ic; role=User]" in captured_prompt
-    assert "[message_id=12; turn_id=2; mode=ic; role=Assistant]" in captured_prompt
+    assert "[message_id=11; turn_id=2; mode=neutral; role=User]" in captured_prompt
+    assert (
+        "[message_id=12; turn_id=2; mode=neutral; role=Assistant]"
+        in captured_prompt
+    )
     item_schema = STORY_DETAIL_SCHEMA["function"]["parameters"]["properties"][
         "story_details"
     ]["items"]

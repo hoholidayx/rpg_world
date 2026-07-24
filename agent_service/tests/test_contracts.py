@@ -12,9 +12,12 @@ from commons.errors import (
     LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
+    MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+    MESSAGE_MODE_UNAVAILABLE_STATUS_CODE,
     TURN_METADATA_INVALID_ERROR_CODE,
     TURN_METADATA_INVALID_STATUS_CODE,
     MainContextWindowThresholdExceededError,
+    MessageModeUnavailableError,
 )
 from llm_client.client import LLMServiceClientError
 from llm_client.types import LLMBizCatalog, LLMProviderOption, LLMUsage
@@ -291,6 +294,31 @@ class ContextThresholdAgentManager(FakeAgentManager):
     def get_or_create(cls, session_id: str):
         if session_id not in cls.instances:
             cls.instances[session_id] = ContextThresholdAgent(session_id)
+        return cls.instances[session_id]
+
+
+class MessageModeUnavailableAgent(FakeAgent):
+    async def send(self, message: str, **_kwargs) -> AgentReply:
+        del message
+        raise MessageModeUnavailableError("gm")
+
+    async def send_stream(self, message: str, **_kwargs):
+        del message
+        if False:
+            yield AgentStreamEvent(kind=StreamEventKind.TEXT, content="")
+        raise MessageModeUnavailableError("gm")
+
+    async def get_context_payload(self, **_kwargs) -> dict[str, object]:
+        raise MessageModeUnavailableError("ic")
+
+
+class MessageModeUnavailableAgentManager(FakeAgentManager):
+    instances: dict[str, FakeAgent] = {}
+
+    @classmethod
+    def get_or_create(cls, session_id: str):
+        if session_id not in cls.instances:
+            cls.instances[session_id] = MessageModeUnavailableAgent(session_id)
         return cls.instances[session_id]
 
 
@@ -1138,6 +1166,51 @@ def test_agent_service_send_and_stream_map_context_threshold_error(monkeypatch) 
     assert f'"status_code": {MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE}' in body
     assert '"content": "主 Agent Context 当前占用' in body
     assert MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE not in send.json()["detail"]
+
+
+def test_agent_service_maps_unavailable_message_mode_for_send_preview_and_stream(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        service_main,
+        "AgentManager",
+        MessageModeUnavailableAgentManager,
+    )
+    monkeypatch.setattr(service_main, "SessionManager", FakeSessionManager)
+    monkeypatch.setattr(
+        service_main,
+        "get_data_service_gateway",
+        lambda: FakeGateway,
+    )
+    FakeCatalog.reset()
+    MessageModeUnavailableAgentManager.reset()
+
+    with TestClient(service_main.app) as client:
+        send = client.post(
+            "/agent/v1/chat/send",
+            json={"session_id": "s1", "message": "go", "mode": "gm"},
+        )
+        preview = client.get(
+            "/agent/v1/chat/context-preview",
+            params={"session_id": "s1", "mode": "ic"},
+        )
+        with client.stream(
+            "POST",
+            "/agent/v1/chat/stream",
+            json={"session_id": "s1", "message": "go", "mode": "gm"},
+        ) as stream:
+            body = "".join(stream.iter_text())
+
+    assert send.status_code == MESSAGE_MODE_UNAVAILABLE_STATUS_CODE
+    assert send.json()["detail"]["error_code"] == (
+        MESSAGE_MODE_UNAVAILABLE_ERROR_CODE
+    )
+    assert preview.status_code == MESSAGE_MODE_UNAVAILABLE_STATUS_CODE
+    assert preview.json()["detail"]["error_code"] == (
+        MESSAGE_MODE_UNAVAILABLE_ERROR_CODE
+    )
+    assert f'"error_code": "{MESSAGE_MODE_UNAVAILABLE_ERROR_CODE}"' in body
+    assert f'"status_code": {MESSAGE_MODE_UNAVAILABLE_STATUS_CODE}' in body
 
 
 def test_agent_service_send_and_stream_map_llm_dependency_error(monkeypatch) -> None:

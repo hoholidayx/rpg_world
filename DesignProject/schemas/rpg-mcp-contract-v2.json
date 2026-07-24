@@ -1,15 +1,46 @@
 {
+  "characterCards": {
+    "objectiveDetailTags": [
+      "kind:appearance",
+      "kind:background",
+      "kind:relationship",
+      "kind:ability"
+    ],
+    "portrayalDetailTags": [
+      "kind:personality",
+      "kind:speech",
+      "kind:behavior",
+      "kind:psychology"
+    ],
+    "portrayalScopeTag": "scope:npc_portrayal",
+    "topLevelFields": [
+      "name",
+      "description"
+    ]
+  },
   "command": "rpg-world-mcp",
   "confirmation": {
     "applyUsesOpaqueOperationId": true,
     "booleanConfirmationArgumentsForbidden": true,
     "previewAndApplyAreSeparateTools": true
   },
-  "contractVersion": "1.0",
+  "contractVersion": "2.0",
   "defaultTransport": "stdio",
   "inspectorTransport": {
     "loopbackOnly": true,
     "type": "streamable-http"
+  },
+  "messageMode": {
+    "defaultMode": "neutral",
+    "modes": [
+      "neutral",
+      "ic",
+      "ooc",
+      "gm"
+    ],
+    "moduleName": "message_mode",
+    "promptsAreCodeOwned": true,
+    "workspaceConfiguration": false
   },
   "modes": {
     "all": {
@@ -247,5 +278,5 @@
     "oneStoryPerPack": true,
     "visualCatalogIsArchiveOnly": true
   },
-  "schemaVersion": "rpg-mcp-contract/1.0"
+  "schemaVersion": "rpg-mcp-contract/2.0"
 }

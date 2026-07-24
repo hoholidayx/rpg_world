@@ -99,8 +99,7 @@ class CharacterManagementService:
         story_id: int,
         *,
         name: str,
-        personality: str = "",
-        content: str = "",
+        description: str = "",
         sort_order: int = 0,
         metadata: dict[str, object] | None = None,
     ) -> models.StoryCharacter | None:
@@ -110,8 +109,7 @@ class CharacterManagementService:
             workspace_id,
             story_id,
             _required_character_name(name),
-            personality=personality,
-            content=content,
+            description=description,
             sort_order=sort_order,
             metadata_json=_dump_metadata(metadata),
         )
@@ -130,8 +128,7 @@ class CharacterManagementService:
         character_id: int,
         *,
         name: str | None = None,
-        personality: str | None = None,
-        content: str | None = None,
+        description: str | None = None,
         sort_order: int | None = None,
         metadata: dict[str, object] | None = None,
     ) -> models.StoryCharacter | None:
@@ -141,8 +138,7 @@ class CharacterManagementService:
         return self._characters.update(
             character_id,
             name=_required_character_name(name) if name is not None else None,
-            personality=personality,
-            content=content,
+            description=description,
             sort_order=sort_order,
             metadata_json=_dump_metadata(metadata) if metadata is not None else None,
         )
@@ -307,8 +303,7 @@ def _to_session_character(
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
         name=str(row.name),
-        personality=str(row.personality or ""),
-        content=str(row.content or ""),
+        description=str(row.description or ""),
         details=details,
         sort_order=int(row.sort_order),
     )

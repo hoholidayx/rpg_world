@@ -14,6 +14,12 @@ ModuleCommandHandler = Callable[[object, list[str]], Awaitable[str]]
 
 
 @dataclass(frozen=True)
+class PlayerPortrayalDetail:
+    name: str
+    content: str
+
+
+@dataclass(frozen=True)
 class ModuleContextRequest:
     """Inputs used by modules that expose dynamic runtime sections."""
 
@@ -21,6 +27,9 @@ class ModuleContextRequest:
     user_input: str = ""
     include_staged_turn: bool = False
     """Whether runtime sections may expose scratch data from the active turn."""
+    message_mode: str = "neutral"
+    player_character_name: str = ""
+    player_portrayal_details: tuple[PlayerPortrayalDetail, ...] = ()
 
 
 @dataclass(frozen=True)

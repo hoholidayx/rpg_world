@@ -10,7 +10,6 @@ from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
     StoryQuickReply,
-    WorkspaceTurnMode,
 )
 from rpg_data.model.memory import DreamProposal, PersistentMemoryBundle
 from rpg_data.model.media import MediaJob, MediaLibraryAssetBundle
@@ -333,7 +332,6 @@ def test_legacy_models_module_reexports_canonical_aggregate_types() -> None:
     assert models.MediaLibraryAssetBundle is MediaLibraryAssetBundle
     assert models.TTSJob is TTSJob
     assert models.TTSMessageSource is TTSMessageSource
-    assert models.WorkspaceTurnMode is WorkspaceTurnMode
     assert models.NarrativeStyle is NarrativeStyle
     assert models.StoryNarrativeStyle is StoryNarrativeStyle
     assert models.StoryQuickReply is StoryQuickReply

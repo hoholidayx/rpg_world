@@ -20,7 +20,6 @@ def _plan(mode: TurnMode = TurnMode.IC) -> TurnExecutionPlan:
     return TurnExecutionPlan(
         execution=TurnExecutionSnapshot(
             request=request,
-            mode_prompt="",
             narrative_style_id=None,
             narrative_style_name="",
             narrative_style_prompt="",

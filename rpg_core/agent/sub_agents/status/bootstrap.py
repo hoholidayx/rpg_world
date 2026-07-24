@@ -10,7 +10,7 @@ from rpg_core.agent.turn.transaction.status_scratch import (
     ScratchStatusManager,
     StatusDocumentScratch,
 )
-from rpg_core.agent.turn.models import TurnMode
+from rpg_core.session.modes import DEFAULT_TURN_MODE, WORLD_ADVANCING_MODES
 from rpg_core.scene import SceneTracker
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
@@ -29,7 +29,7 @@ def select_status_bootstrap_history(
     boundary_turn_id: int,
     history_rounds: int | None = None,
 ) -> list["Message"]:
-    """Select the latest complete IC/GM turns at or before a branch boundary."""
+    """Select complete world-advancing turns at or before a branch boundary."""
     if boundary_turn_id <= 0:
         raise ValueError("boundary_turn_id must be positive")
     rounds = settings.status_history_rounds if history_rounds is None else int(history_rounds)
@@ -53,8 +53,13 @@ def select_status_bootstrap_history(
             for message in group
             if not message.is_system() and not message.is_tool()
         ]
-        modes = {str(message.mode or TurnMode.IC.value).strip().lower() for message in conversation}
-        if not modes or not modes.issubset({TurnMode.IC.value, TurnMode.GM.value}):
+        modes = {
+            str(message.mode or DEFAULT_TURN_MODE.value).strip().lower()
+            for message in conversation
+        }
+        if not modes or not modes.issubset(
+            {mode.value for mode in WORLD_ADVANCING_MODES}
+        ):
             continue
         if not any(message.is_user() for message in conversation):
             continue

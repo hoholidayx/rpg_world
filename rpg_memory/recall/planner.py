@@ -80,7 +80,7 @@ class OpenAIQueryPlanner(BaseQueryPlanner):
 
 def _build_rp_context_prompt(context: RetrievalQuery) -> str:
     return (
-        "你是 RPG 长期记忆检索查询规划器。根据当前输入、最近两个 IC/GM turn、"
+        "你是 RPG 长期记忆检索查询规划器。根据当前输入、最近两个可推进世界的 turn、"
         "玩家身份和当前场景，解决代词、角色别名与相对时间引用。\n"
         "只输出 JSON 对象，不要输出解释。\n"
         "字段：keyword_queries、expanded_queries、raw_md_terms、query_type。\n"

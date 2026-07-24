@@ -7,13 +7,13 @@ from agent_service.schemas import AgentMessageRequest
 
 
 @pytest.mark.parametrize("value", [None, "", "   "])
-def test_agent_message_mode_empty_values_normalize_to_ic(value: object) -> None:
+def test_agent_message_mode_empty_values_normalize_to_neutral(value: object) -> None:
     request = AgentMessageRequest.model_validate({
         "session_id": "s1",
         "message": "hello",
         "mode": value,
     })
-    assert request.mode == "ic"
+    assert request.mode == "neutral"
 
 
 def test_agent_message_mode_normalizes_case_and_rejects_invalid() -> None:
@@ -22,7 +22,7 @@ def test_agent_message_mode_normalizes_case_and_rejects_invalid() -> None:
         "message": "hello",
         "mode": " GM ",
     }).mode == "gm"
-    assert AgentMessageRequest(session_id="s1", message="hello").mode == "ic"
+    assert AgentMessageRequest(session_id="s1", message="hello").mode == "neutral"
     with pytest.raises(ValidationError, match="invalid turn mode"):
         AgentMessageRequest.model_validate({
             "session_id": "s1",

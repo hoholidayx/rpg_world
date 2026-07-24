@@ -23,13 +23,13 @@ class PlotScheduleSelector:
         *,
         scene_time: SceneTime,
         current_turn_id: int,
-        completed_ic_gm_turn_ids: Iterable[int],
+        completed_world_turn_ids: Iterable[int],
     ) -> tuple[PlotScheduleCandidate, ...]:
         if not snapshot.enabled:
             return ()
         completed_turn_ids = frozenset(
             int(turn_id)
-            for turn_id in completed_ic_gm_turn_ids
+            for turn_id in completed_world_turn_ids
             if 0 < int(turn_id) < int(current_turn_id)
         )
         event_by_id = {event.id: event for event in snapshot.story.events}

@@ -7,7 +7,7 @@ Usage::
 
     ctx = SubAgentContext(
         lorebook_entries=[{"name": "世界设定", "content": "..."}],
-        characters=[{"name": "Alice", "content": "..."}],
+        characters=[{"name": "Alice", "description": "..."}],
     )
     system_text = ctx.render()
 """
@@ -44,7 +44,7 @@ class SubAgentContext:
     lorebook_entries:
         世界书条目列表，每项含 ``name``、``content``，可选 ``description``、``tags``。
     characters:
-        角色卡列表，每项含 ``name``、``content``，可选 ``personality``、``details``。
+        角色卡列表，每项含 ``name``、``description``，可选 ``details``。
     """
 
     def __init__(

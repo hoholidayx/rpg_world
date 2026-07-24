@@ -84,7 +84,7 @@ def test_selector_can_emit_one_due_outline_and_one_pool_event() -> None:
         snapshot,
         scene_time=SceneTime(1, 1, 1, 10),
         current_turn_id=2,
-        completed_ic_gm_turn_ids=(1,),
+        completed_world_turn_ids=(1,),
     )
 
     assert [item.source_kind for item in selected] == ["outline", "pool"]
@@ -118,13 +118,13 @@ def test_sequential_pool_retries_deferred_head_only_after_intervening_turn() -> 
         snapshot,
         scene_time=SceneTime(1, 1, 1, 10),
         current_turn_id=4,
-        completed_ic_gm_turn_ids=(1, 2, 3),
+        completed_world_turn_ids=(1, 2, 3),
     ) == ()
     retried = selector.select(
         snapshot,
         scene_time=SceneTime(1, 1, 1, 10),
         current_turn_id=5,
-        completed_ic_gm_turn_ids=(1, 2, 3, 4),
+        completed_world_turn_ids=(1, 2, 3, 4),
     )
     assert len(retried) == 1
     assert retried[0].event.id == first.id
@@ -156,20 +156,20 @@ def test_repeat_event_uses_scene_time_cooldown_and_random_is_stable() -> None:
         snapshot,
         scene_time=SceneTime(1, 1, 1, 10, 30),
         current_turn_id=4,
-        completed_ic_gm_turn_ids=(1, 2, 3),
+        completed_world_turn_ids=(1, 2, 3),
     )
     assert before[0].event.id == second.id
     after_a = selector.select(
         snapshot,
         scene_time=SceneTime(1, 1, 1, 11),
         current_turn_id=5,
-        completed_ic_gm_turn_ids=(1, 2, 3, 4),
+        completed_world_turn_ids=(1, 2, 3, 4),
     )
     after_b = selector.select(
         snapshot,
         scene_time=SceneTime(1, 1, 1, 11),
         current_turn_id=5,
-        completed_ic_gm_turn_ids=(1, 2, 3, 4),
+        completed_world_turn_ids=(1, 2, 3, 4),
     )
     assert after_a == after_b
 
@@ -202,7 +202,7 @@ def test_non_repeat_event_keeps_pool_lane_trigger_after_moving_pools() -> None:
         snapshot,
         scene_time=SceneTime(1, 1, 1, 10),
         current_turn_id=4,
-        completed_ic_gm_turn_ids=(1, 2, 3),
+        completed_world_turn_ids=(1, 2, 3),
     )
 
     assert selected == ()
@@ -230,14 +230,14 @@ def test_pool_event_window_includes_start_and_excludes_deadline_across_month() -
         snapshot,
         scene_time=start,
         current_turn_id=2,
-        completed_ic_gm_turn_ids=(1,),
+        completed_world_turn_ids=(1,),
     )
     assert [item.event.id for item in selected] == [event.id]
     assert selector.select(
         snapshot,
         scene_time=deadline,
         current_turn_id=2,
-        completed_ic_gm_turn_ids=(1,),
+        completed_world_turn_ids=(1,),
     ) == ()
 
 
@@ -262,13 +262,13 @@ def test_deadline_without_start_expires_an_immediately_eligible_event() -> None:
         snapshot,
         scene_time=SceneTime(1, 1, 1, 9, 59),
         current_turn_id=2,
-        completed_ic_gm_turn_ids=(1,),
+        completed_world_turn_ids=(1,),
     )] == [event.id]
     assert selector.select(
         snapshot,
         scene_time=deadline,
         current_turn_id=2,
-        completed_ic_gm_turn_ids=(1,),
+        completed_world_turn_ids=(1,),
     ) == ()
 
 
@@ -293,7 +293,7 @@ def test_sequential_pool_skips_expired_head_but_keeps_future_head_blocking() -> 
         expired_snapshot,
         scene_time=SceneTime(1, 1, 1, 10),
         current_turn_id=2,
-        completed_ic_gm_turn_ids=(1,),
+        completed_world_turn_ids=(1,),
     )
     assert [item.event.id for item in selected] == [following.id]
 
@@ -314,7 +314,7 @@ def test_sequential_pool_skips_expired_head_but_keeps_future_head_blocking() -> 
         future_snapshot,
         scene_time=SceneTime(1, 1, 1, 10),
         current_turn_id=2,
-        completed_ic_gm_turn_ids=(1,),
+        completed_world_turn_ids=(1,),
     ) == ()
 
 
@@ -363,7 +363,7 @@ def test_outline_skips_expired_shared_event_and_continues_next_node() -> None:
         snapshot,
         scene_time=deadline,
         current_turn_id=2,
-        completed_ic_gm_turn_ids=(1,),
+        completed_world_turn_ids=(1,),
     )
 
     assert len(selected) == 1
@@ -408,5 +408,5 @@ def test_repeatable_event_stops_participating_at_deadline() -> None:
         snapshot,
         scene_time=deadline,
         current_turn_id=3,
-        completed_ic_gm_turn_ids=(1, 2),
+        completed_world_turn_ids=(1, 2),
     ) == ()

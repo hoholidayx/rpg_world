@@ -72,10 +72,6 @@ class _Composer:
     def __init__(self) -> None:
         self.style_calls: list[tuple[str, int | None]] = []
 
-    @staticmethod
-    def get_mode(_workspace_id: str, mode: str):  # noqa: ANN201
-        return SimpleNamespace(prompt=f"mode:{mode}")
-
     def resolve_session_style(self, session_id: str, style_id: int | None):  # noqa: ANN201
         self.style_calls.append((session_id, style_id))
         return SimpleNamespace(narrative_style_id=7, name="简洁", prompt="style:brief")
@@ -106,14 +102,13 @@ def test_turn_snapshot_resolver_freezes_mode_and_style_selection() -> None:
     ).resolve(request)
 
     assert snapshot.request is request
-    assert snapshot.mode_prompt == "mode:gm"
     assert snapshot.narrative_style_id == 7
     assert snapshot.narrative_style_prompt == "style:brief"
     assert snapshot.policy == TurnExecutionPolicy.for_mode(TurnMode.GM)
     assert composer.style_calls == [("s1", 7)]
 
 
-def test_ooc_snapshot_validates_but_suppresses_explicit_style() -> None:
+def test_ooc_snapshot_keeps_explicit_style_for_mode_stable_fixed_layer() -> None:
     composer = _Composer()
     roles = _SessionRoles()
     data = _SnapshotData(_Catalog(SimpleNamespace(workspace_id="ws")))
@@ -127,7 +122,7 @@ def test_ooc_snapshot_validates_but_suppresses_explicit_style() -> None:
     )
 
     assert snapshot.narrative_style_id == 7
-    assert snapshot.narrative_style_prompt == ""
+    assert snapshot.narrative_style_prompt == "style:brief"
     assert snapshot.policy.run_status_preflight is False
     assert composer.style_calls == [("s1", 7)]
 
@@ -231,7 +226,6 @@ class _PlanResolver:
         return TurnExecutionPlan(
             execution=TurnExecutionSnapshot(
                 request=request,
-                mode_prompt="",
                 narrative_style_id=None,
                 narrative_style_name="",
                 narrative_style_prompt="",

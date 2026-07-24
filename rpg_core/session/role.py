@@ -458,12 +458,9 @@ def _snapshot_from_option(
 
 
 def _character_summary(option: SessionCharacterOption) -> str:
-    personality = option.personality.strip()
-    if personality:
-        return " ".join(personality.split())[:96]
-    content = option.content.strip()
-    if content:
-        return " ".join(content.split())[:96]
+    description = option.description.strip()
+    if description:
+        return " ".join(description.split())[:96]
     return "属于当前故事。"
 
 

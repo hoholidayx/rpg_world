@@ -68,7 +68,7 @@ def test_all_mode_registers_complete_contract(tmp_path) -> None:
         assert apply.annotations.readOnlyHint is False
         contract = json.loads(
             __import__("pathlib").Path(
-                "DesignProject/schemas/rpg-mcp-contract-v1.json"
+                "DesignProject/schemas/rpg-mcp-contract-v2.json"
             ).read_text(encoding="utf-8")
         )
         contract_names = {

@@ -1,4 +1,4 @@
-"""RPG World runtime preview/apply adapter for neutral Story Pack v1."""
+"""RPG World runtime preview/apply adapter for neutral Story Pack v2."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ from rpg_data.model.story_pack import (
     StoryPackOperation,
 )
 from rpg_mcp.contracts import (
+    STORY_DESIGN_SCHEMA_VERSION,
     STORY_PACK_SCHEMA_VERSION,
     STORY_RUNTIME_METADATA_KEY,
     StoryPack,
@@ -661,7 +662,7 @@ class RuntimeApplication:
             "warnings": sorted(set(warnings)),
             "counts": counts,
             "limitations": [
-                "Story Pack v1 is merge-only and does not delete omitted resources.",
+                "Story Pack v2 is merge-only and does not delete omitted resources.",
                 "Visual specifications are archived and do not create media.",
                 "No Session, message, Media Job, TTS Job, or binary is created.",
             ],
@@ -1096,8 +1097,6 @@ class RuntimeApplication:
                     "storyPackContractVersion": pack.contract_version,
                 },
             )
-        self._services.composer.list_modes(workspace_id)
-
         story_action = action_map[
             (RESOURCE_STORY, pack.story_stable_id)
         ]["action"]
@@ -1387,8 +1386,7 @@ class RuntimeApplication:
                         story.workspace_id,
                         int(story.id),
                         name=spec.name,
-                        personality=spec.personality,
-                        content=spec.content,
+                        description=spec.description,
                         sort_order=spec.sort_order,
                         metadata=metadata,
                     ),
@@ -1401,8 +1399,7 @@ class RuntimeApplication:
                         int(story.id),
                         int(current.id),
                         name=spec.name,
-                        personality=spec.personality,
-                        content=spec.content,
+                        description=spec.description,
                         sort_order=spec.sort_order,
                         metadata=metadata,
                     ),
@@ -2119,8 +2116,7 @@ class RuntimeApplication:
             characters.append({
                 "stableId": source_id,
                 "name": item.name,
-                "personality": item.personality,
-                "content": item.content,
+                "description": item.description,
                 "aliases": metadata.get("aliases", []),
                 "details": [
                     {
@@ -2252,7 +2248,7 @@ class RuntimeApplication:
         if not isinstance(archived_story_design, dict):
             archived_story_design = {}
         document = {
-            "schemaVersion": "story-design/1.0",
+            "schemaVersion": STORY_DESIGN_SCHEMA_VERSION,
             "project": {
                 "projectId": project_id,
                 "name": story.title,
@@ -2863,7 +2859,7 @@ def _object_name(kind: str, value: Any) -> str:
 
 def _object_summary(kind: str, value: Any) -> str:
     if kind == RESOURCE_CHARACTER:
-        return str(value.personality)
+        return str(value.description)
     if kind == RESOURCE_LOREBOOK:
         return str(value.description)
     if kind == RESOURCE_STATUS_TABLE:

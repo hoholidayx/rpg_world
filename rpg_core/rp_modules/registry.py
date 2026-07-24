@@ -8,10 +8,12 @@ from collections.abc import Callable, Mapping, Sequence
 from commons.types import JsonObject, JsonValue
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
+    RP_MODULE_MESSAGE_MODE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
     RP_MODULE_PLOT_SCHEDULER_NAME,
 )
 from rpg_core.rp_modules.dice import DiceModule
+from rpg_core.rp_modules.message_mode import MessageModeModule
 from rpg_core.rp_modules.models import (
     ModuleCommand,
     RPModuleDefinition,
@@ -49,6 +51,16 @@ class RPModuleRegistry:
         self.settings = settings or RPModuleSettings()
         self._rng_factory = rng_factory or random.Random
         self._definitions = (
+            RPModuleDefinition(
+                name=RP_MODULE_MESSAGE_MODE_NAME,
+                display_name="消息模式",
+                description="提供 Neutral、IC、OOC 与 GM 的本轮语义及 GM 玩家角色托管。",
+                sort_order=5,
+                configurable_fields=(),
+                config_validator=self._validate_message_mode_config,
+                system_config_resolver=self._message_mode_system_config,
+                module_factory=self._create_message_mode_module,
+            ),
             RPModuleDefinition(
                 name=RP_MODULE_NARRATIVE_OUTCOME_NAME,
                 display_name="剧情结果裁定",
@@ -218,6 +230,12 @@ class RPModuleRegistry:
         return definition.system_config_resolver(self.settings)
 
     @staticmethod
+    def _validate_message_mode_config(raw: Mapping[str, JsonValue]) -> JsonObject:
+        if raw:
+            raise ValueError("message_mode does not expose Story/Session config fields")
+        return {}
+
+    @staticmethod
     def _validate_narrative_config(raw: Mapping[str, JsonValue]) -> JsonObject:
         normalized: JsonObject = {}
         if "auto_adjudication_enabled" in raw:
@@ -248,6 +266,12 @@ class RPModuleRegistry:
         if raw:
             raise ValueError("plot_scheduler does not expose Story/Session config fields")
         return {}
+
+    @staticmethod
+    def _message_mode_system_config(
+        _settings: object,
+    ) -> tuple[bool, JsonObject]:
+        return True, {}
 
     @staticmethod
     def _narrative_system_config(settings: object) -> tuple[bool, JsonObject]:
@@ -298,6 +322,13 @@ class RPModuleRegistry:
                 ),
             ),
         )
+
+    @staticmethod
+    def _create_message_mode_module(
+        _session_id: str,
+        _selected: RPModuleSelection,
+    ) -> MessageModeModule:
+        return MessageModeModule()
 
     def _create_dice_module(
         self,

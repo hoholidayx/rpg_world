@@ -83,7 +83,7 @@ class AgentBackend:
         narrative_style_id: int | None = None,
     ) -> ContextPreviewPayload:
         del workspace, story_id
-        if (mode is None or mode == "ic") and narrative_style_id is None:
+        if (mode is None or mode == "neutral") and narrative_style_id is None:
             return await agent_client.get_agent_client().get_context_preview(session_id)
         return await agent_client.get_agent_client().get_context_preview(
             session_id,
@@ -101,7 +101,7 @@ class AgentBackend:
         narrative_style_id: int | None = None,
     ) -> dict[str, object]:
         del workspace, story_id
-        if mode == "ic" and narrative_style_id is None:
+        if mode == "neutral" and narrative_style_id is None:
             return await agent_client.get_agent_client().send(session_id, text)
         return await agent_client.get_agent_client().send(
             session_id,
@@ -197,7 +197,7 @@ class AgentBackend:
                 text,
                 request_id=request_id,
             )
-            if mode == "ic" and narrative_style_id is None
+            if mode == "neutral" and narrative_style_id is None
             else agent_client.get_agent_client().stream(
                 session_id,
                 text,

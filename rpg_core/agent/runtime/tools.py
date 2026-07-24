@@ -98,7 +98,7 @@ class AgentToolService:
         policy = (
             turn_execution.policy
             if turn_execution is not None
-            else TurnExecutionPolicy.for_mode(TurnMode.IC)
+            else TurnExecutionPolicy.for_mode(TurnMode.NEUTRAL)
         )
         if self._base_registry is not None:
             for tool in self._base_registry:

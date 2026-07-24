@@ -345,7 +345,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const logger = useMemo(() => createSessionRoomLogger(sessionId), [sessionId])
-  const [inputMode, setInputMode] = useState<SessionInputMode>('ic')
+  const [inputMode, setInputMode] = useState<SessionInputMode>('neutral')
   const [narrativeStyleId, setNarrativeStyleId] = useState<NarrativeStyleId>(null)
   const [composerText, setComposerText] = useState('')
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
@@ -366,7 +366,7 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     setComposerText('')
-    setInputMode('ic')
+    setInputMode('neutral')
     setNarrativeStyleId(null)
     setWorkspacePanel(null)
     logger.info('session room entered', { status: 'session_changed' })
@@ -433,6 +433,15 @@ export function SessionRoom({ sessionId }: { sessionId: string }) {
       setNarrativeStyleId(null)
     }
   }, [composerConfig, narrativeStyleId])
+  useEffect(() => {
+    if (
+      composerConfig
+      && inputMode !== 'neutral'
+      && !composerConfig.modes.some((item) => item.mode === inputMode)
+    ) {
+      setInputMode('neutral')
+    }
+  }, [composerConfig, inputMode])
   const roleSelectionBlocked = (
     !data.session
     || data.playerCharacterInvalid

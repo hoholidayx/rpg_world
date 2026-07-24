@@ -65,9 +65,12 @@ from commons.errors import (
     LLM_SERVICE_UNAVAILABLE_STATUS_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
+    MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+    MESSAGE_MODE_UNAVAILABLE_STATUS_CODE,
     TURN_METADATA_INVALID_ERROR_CODE,
     TURN_METADATA_INVALID_STATUS_CODE,
     MainContextWindowThresholdExceededError,
+    MessageModeUnavailableError,
     format_turn_metadata_error_message,
 )
 from commons.types import JsonObject, JsonValue
@@ -237,6 +240,8 @@ async def get_context_preview(
                 mode=mode,
                 narrative_style_id=narrative_style_id,
             )
+    except MessageModeUnavailableError as exc:
+        raise _message_mode_unavailable_http_error(exc) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -451,7 +456,7 @@ async def ensure_session(body: AgentSessionEnsureRequest) -> AgentSessionPayload
 async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
     agent = _get_agent(body.session_id)
     try:
-        if body.mode == "ic" and body.narrative_style_id is None:
+        if body.mode == "neutral" and body.narrative_style_id is None:
             reply = await agent.send(body.message)
         else:
             reply = await agent.send(
@@ -459,6 +464,8 @@ async def chat_send(body: AgentMessageRequest) -> AgentReplyPayload:
                 mode=body.mode,
                 narrative_style_id=body.narrative_style_id,
             )
+    except MessageModeUnavailableError as exc:
+        raise _message_mode_unavailable_http_error(exc) from exc
     except MainContextWindowThresholdExceededError as exc:
         raise _main_context_threshold_http_error(exc) from exc
     except InvalidTurnMetadataError as exc:
@@ -762,7 +769,7 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
         try:
             stream_events = (
                 agent.send_stream(body.message, request_id=body.request_id)
-                if body.mode == "ic" and body.narrative_style_id is None
+                if body.mode == "neutral" and body.narrative_style_id is None
                 else agent.send_stream(
                     body.message,
                     request_id=body.request_id,
@@ -772,6 +779,9 @@ async def chat_stream(body: AgentMessageRequest) -> StreamingResponse:
             )
             async for event in stream_events:
                 yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+        except MessageModeUnavailableError as exc:
+            event = _message_mode_unavailable_stream_error(exc)
+            yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except MainContextWindowThresholdExceededError as exc:
             event = _main_context_threshold_stream_error(exc)
             yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
@@ -1062,6 +1072,29 @@ def _main_context_threshold_http_error(
     )
 
 
+def _message_mode_unavailable_http_error(
+    exc: MessageModeUnavailableError,
+) -> HTTPException:
+    return HTTPException(
+        status_code=MESSAGE_MODE_UNAVAILABLE_STATUS_CODE,
+        detail={
+            "error_code": MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+            "message": str(exc),
+        },
+    )
+
+
+def _message_mode_unavailable_stream_error(
+    exc: MessageModeUnavailableError,
+) -> AgentStreamEvent:
+    return AgentStreamEvent(
+        kind=StreamEventKind.ERROR,
+        content=str(exc),
+        error_code=MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+        status_code=MESSAGE_MODE_UNAVAILABLE_STATUS_CODE,
+    )
+
+
 def _main_context_threshold_stream_error(
     exc: MainContextWindowThresholdExceededError,
 ) -> AgentStreamEvent:
@@ -1151,7 +1184,7 @@ def _message_payload(row: models.SessionMessage) -> JsonObject:
         "seqInTurn": int(row.seq_in_turn),
         "role": str(row.role),
         "content": str(row.content or ""),
-        "mode": str(row.mode or models.TURN_MODE_IC),
+        "mode": str(row.mode or models.TURN_MODE_NEUTRAL),
         "metadata": _metadata_from_json(row.metadata_json),
     }
     if row.created_at:

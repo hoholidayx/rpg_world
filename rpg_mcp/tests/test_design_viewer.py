@@ -95,7 +95,7 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
         assert status == 200
         assert "default-src 'self'" in headers["content-security-policy"]
         project = json.loads(body)
-        assert project["viewerVersion"] == "story-design-viewer/1.0"
+        assert project["viewerVersion"] == "story-design-viewer/2.0"
         assert project["live"]["currentRevision"] == "r000001"
 
         status, headers, body = _request(port, "GET", "/")
@@ -117,7 +117,7 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
             "/api/schemas/story-design",
         )
         assert status == 200
-        assert json.loads(body)["$id"] == "story-design-v1.schema.json"
+        assert json.loads(body)["$id"] == "story-design-v2.schema.json"
 
         status, headers, body = _request(port, "POST", "/api/project")
         assert status == 405
@@ -193,7 +193,7 @@ def test_manifest_switch_is_the_revision_visibility_boundary(tmp_path) -> None:
     document["story"]["title"] = "雨中的白鸢咖啡馆"
     digest = module._json_digest(document)
     revision_two = {
-        "schemaVersion": "story-design-project/1.0",
+        "schemaVersion": "story-design-project/2.0",
         "revisionId": "r000002",
         "revisionNumber": 2,
         "parentRevision": "r000001",

@@ -21,7 +21,7 @@ from peewee import (
 )
 
 from rpg_data.model.status import STATUS_KIND_NORMAL
-from rpg_data.models import TURN_MODE_IC
+from rpg_data.models import TURN_MODE_NEUTRAL
 from rpg_data.settings import resolve_database_path
 
 __all__ = [
@@ -76,7 +76,6 @@ __all__ = [
     "StoryRecord",
     "StoryRPModuleRecord",
     "WorkspaceRecord",
-    "WorkspaceTurnModeRecord",
     "bind_database",
     "make_database",
 ]
@@ -130,26 +129,6 @@ class WorkspaceRecord(BaseRecord):
 
     class Meta:
         table_name = "rpg_workspaces"
-
-
-class WorkspaceTurnModeRecord(BaseRecord):
-    workspace = ForeignKeyField(
-        WorkspaceRecord,
-        backref="turn_modes",
-        column_name="workspace_id",
-        on_delete="CASCADE",
-    )
-    mode = TextField()
-    short_name = TextField()
-    prompt = TextField(default="")
-    sort_order = IntegerField(default=0)
-    version = IntegerField(default=1)
-    created_at = TextField()
-    updated_at = TextField()
-
-    class Meta:
-        table_name = "rpg_workspace_turn_modes"
-        primary_key = CompositeKey("workspace", "mode")
 
 
 class StoryRecord(BaseRecord):
@@ -368,7 +347,7 @@ class SessionMessageRecord(BaseRecord):
     )
     role = TextField()
     content = TextField(default="")
-    mode = TextField(default=TURN_MODE_IC)
+    mode = TextField(default=TURN_MODE_NEUTRAL)
     turn_id = IntegerField(constraints=[Check("turn_id > 0")])
     seq_in_turn = IntegerField(constraints=[Check("seq_in_turn > 0")])
     tool_call_id = TextField(default="")
@@ -397,7 +376,7 @@ class SessionBackupMessageRecord(BaseRecord):
     )
     role = TextField()
     content = TextField(default="")
-    mode = TextField(default=TURN_MODE_IC)
+    mode = TextField(default=TURN_MODE_NEUTRAL)
     turn_id = IntegerField(constraints=[Check("turn_id > 0")])
     seq_in_turn = IntegerField(constraints=[Check("seq_in_turn > 0")])
     tool_call_id = TextField(default="")
@@ -1283,8 +1262,7 @@ class StoryCharacterRecord(BaseRecord):
         on_delete="CASCADE",
     )
     name = TextField()
-    personality = TextField(default="")
-    content = TextField(default="")
+    description = TextField(default="")
     sort_order = IntegerField(default=0)
     metadata_json = TextField(default="{}")
     version = IntegerField(default=1)
@@ -1488,7 +1466,6 @@ class StoryPackOperationRecord(BaseRecord):
 
 RECORD_MODELS = (
     WorkspaceRecord,
-    WorkspaceTurnModeRecord,
     StoryRecord,
     StoryOpeningRecord,
     NarrativeStyleRecord,

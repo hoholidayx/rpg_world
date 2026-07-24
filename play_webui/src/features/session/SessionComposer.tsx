@@ -12,16 +12,10 @@ import { CommandPaletteDialog } from '@/components/input/CommandPaletteDialog'
 import { cn } from '@/lib/utils/cn'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
 import type { MainLLMProviderCatalog, MainLLMSelection } from '@/types/mainLLM'
-import type { StoryQuickReply, WorkspaceTurnMode } from '@/types/sessionComposer'
+import type { MessageModeOption, StoryQuickReply } from '@/types/sessionComposer'
 import { SessionContextUsageIndicator } from './SessionContextUsageIndicator'
 import { isSlashCommandInput } from './contextWindowGate'
 import type { NarrativeStyle, NarrativeStyleId, SessionInputMode } from './sessionRoomTypes'
-
-const fallbackInputModes: Array<{ id: SessionInputMode; label: string }> = [
-  { id: 'ic', label: 'IC·角色内' },
-  { id: 'ooc', label: 'OOC·场外' },
-  { id: 'gm', label: 'GM·主持' },
-]
 
 const QUICK_REPLY_LONG_PRESS_MS = 400
 
@@ -239,7 +233,7 @@ export function SessionComposer({
   mode: SessionInputMode
   narrativeStyleId: NarrativeStyleId
   narrativeStyles: NarrativeStyle[]
-  turnModes: WorkspaceTurnMode[]
+  turnModes: MessageModeOption[]
   quickReplies: StoryQuickReply[]
   sending: boolean
   stopping?: boolean
@@ -294,13 +288,10 @@ export function SessionComposer({
   const actionStopping = stopping
   const actionSending = sending || stopping
   const canLongPress = !sending && !stopping && !actionDisabled && quickReplies.length > 0
-  const modeOptions: Array<SelectOption<SessionInputMode>> = fallbackInputModes.map((fallback) => {
-    const configured = turnModes.find((item) => item.mode === fallback.id)
-    return {
-      id: fallback.id,
-      label: configured ? `${fallback.id.toUpperCase()}·${configured.shortName}` : fallback.label,
-    }
-  })
+  const modeOptions: Array<SelectOption<SessionInputMode>> = turnModes.map((configured) => ({
+    id: configured.mode,
+    label: `${configured.mode.toUpperCase()}·${configured.shortName}`,
+  }))
   const narrativeOptions: Array<SelectOption<NarrativeStyleId>> = narrativeStyles.map((style) => ({
     id: style.id,
     label: style.label,
@@ -433,14 +424,16 @@ export function SessionComposer({
     <section className="border-t border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6">
       <div className="mx-auto max-w-6xl overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2 dark:border-slate-800">
-          <PopupSingleSelect
-            label="模式"
-            value={mode}
-            options={modeOptions}
-            onChange={onModeChange}
-            side="bottom"
-            align="left"
-          />
+          {modeOptions.length > 0 ? (
+            <PopupSingleSelect
+              label="模式"
+              value={mode}
+              options={modeOptions}
+              onChange={onModeChange}
+              side="bottom"
+              align="left"
+            />
+          ) : <span />}
           <CommandPaletteDialog
             sessionId={sessionId}
             disabled={disabled}
@@ -546,7 +539,7 @@ export function SessionComposer({
             options={narrativeOptions}
             onChange={onNarrativeStyleChange}
             disabled={mode === 'ooc'}
-            statusMessage={mode === 'ooc' ? 'OOC 场外模式不应用叙事风格；切回 IC/GM 后恢复当前选择。' : null}
+            statusMessage={mode === 'ooc' ? 'OOC 以场外讨论指令为准；当前叙事风格选择会保留，切换模式后继续使用。' : null}
             side="top"
             align="left"
           />

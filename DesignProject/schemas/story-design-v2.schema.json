@@ -47,9 +47,10 @@
           "title": "Aliases",
           "type": "array"
         },
-        "content": {
+        "description": {
           "default": "",
-          "title": "Content",
+          "description": "角色身份、经历与客观事实。不得写性格、说话方式、行为倾向或心理活动；这些演绎设定必须放入带内置 kind 标签的 details。",
+          "title": "Description",
           "type": "string"
         },
         "details": {
@@ -66,11 +67,6 @@
         },
         "name": {
           "title": "Name",
-          "type": "string"
-        },
-        "personality": {
-          "default": "",
-          "title": "Personality",
           "type": "string"
         },
         "sortOrder": {
@@ -998,7 +994,7 @@
       "type": "object"
     }
   },
-  "$id": "story-design-v1.schema.json",
+  "$id": "story-design-v2.schema.json",
   "additionalProperties": false,
   "properties": {
     "decisions": {
@@ -1029,8 +1025,8 @@
       "$ref": "#/$defs/StoryResources"
     },
     "schemaVersion": {
-      "const": "story-design/1.0",
-      "default": "story-design/1.0",
+      "const": "story-design/2.0",
+      "default": "story-design/2.0",
       "title": "Schemaversion",
       "type": "string"
     },
@@ -1048,6 +1044,6 @@
       "$ref": "#/$defs/RuntimeTarget"
     }
   },
-  "title": "Portable Story Design v1",
+  "title": "Portable Story Design v2",
   "type": "object"
 }

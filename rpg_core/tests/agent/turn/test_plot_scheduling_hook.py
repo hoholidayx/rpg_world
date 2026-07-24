@@ -19,6 +19,7 @@ from rpg_core.rp_modules.plot_scheduler import (
     PlotScheduleSnapshot,
     PlotSuitabilityDecision,
 )
+from rpg_core.session.modes import TurnMode
 
 
 class _Scene:
@@ -55,6 +56,7 @@ def _plan(
     dispatch_mode: str = models.PLOT_DISPATCH_SOFT,
     *,
     deadline_time: SceneTime | None = None,
+    mode: TurnMode = TurnMode.NEUTRAL,
 ) -> TurnExecutionPlan:
     event = models.StoryPlotEvent(
         id=10,
@@ -77,11 +79,10 @@ def _plan(
         overrides=models.SessionPlotOverrides("s1"),
         decisions=(),
     )
-    request = TurnRequest.create("我推开门")
+    request = TurnRequest.create("我推开门", mode=mode)
     return TurnExecutionPlan(
         execution=TurnExecutionSnapshot(
             request=request,
-            mode_prompt="",
             narrative_style_id=None,
             narrative_style_name="",
             narrative_style_prompt="",
@@ -176,6 +177,30 @@ async def test_forced_plot_candidate_never_calls_judge() -> None:
     assert judge.calls == 0
     assert scratch.plot_schedule_decisions[0].decision_status == "triggered"
     assert len(scratch.plot_schedule_injections) == 1
+
+
+@pytest.mark.asyncio
+async def test_ooc_turn_never_calls_judge_or_stages_a_decision() -> None:
+    context = _Context()
+    judge = _Judge(AssertionError("OOC must not reach the plot judge"))
+    hook = PlotSchedulingPreflightHook(
+        context_service=context,
+        session_manager=SimpleNamespace(iter_turn_groups=lambda messages: []),
+        judge=judge,
+    )
+    scratch = _scratch()
+
+    await hook.run(
+        plan=_plan(models.PLOT_DISPATCH_FORCED, mode=TurnMode.OOC),
+        turn_scratch=scratch,
+        turn_stats=TurnStats(),
+        rp_module_runtime=None,
+    )
+
+    assert judge.calls == 0
+    assert context.calls == []
+    assert scratch.plot_schedule_injections == []
+    assert scratch.plot_schedule_decisions == []
 
 
 @pytest.mark.asyncio

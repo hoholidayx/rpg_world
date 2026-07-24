@@ -19,15 +19,15 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import parse_qs, unquote, urlparse
 
 
-VIEWER_VERSION = "story-design-viewer/1.0"
+VIEWER_VERSION = "story-design-viewer/2.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 MAX_JSON_BYTES = 32 * 1024 * 1024
 REVISION_RE = re.compile(r"^r[0-9]{6}$")
 PACK_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.json$")
 SCHEMA_FILES = {
-    "story-design": "story-design-v1.schema.json",
-    "story-pack": "story-pack-v1.schema.json",
+    "story-design": "story-design-v2.schema.json",
+    "story-pack": "story-pack-v2.schema.json",
 }
 STATIC_FILES = {
     "/": "index.html",
@@ -102,7 +102,7 @@ class ProjectReader:
 
     def manifest(self) -> dict[str, Any]:
         manifest = _read_json(self.manifest_path)
-        if manifest.get("schemaVersion") != "story-design-project/1.0":
+        if manifest.get("schemaVersion") != "story-design-project/2.0":
             raise ViewerValidationError(
                 "unsupported or missing DesignProject schemaVersion"
             )

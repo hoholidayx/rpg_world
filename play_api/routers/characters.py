@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
+from rpg_core.character_tags import normalize_character_detail_tags
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/stories/{story_id}/characters",
@@ -23,8 +24,7 @@ class PlayCharacterPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    personality: str = ""
-    content: str = ""
+    description: str = ""
     sort_order: int = Field(default=0, alias="sortOrder")
     metadata: JsonObject = Field(default_factory=dict)
 
@@ -41,8 +41,7 @@ class PlayCharacterPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
-    personality: str | None = None
-    content: str | None = None
+    description: str | None = None
     sort_order: int | None = Field(default=None, alias="sortOrder")
     metadata: JsonObject | None = None
 
@@ -73,6 +72,11 @@ class PlayCharacterDetailPayload(BaseModel):
             raise ValueError("name must not be empty")
         return value
 
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, value: list[str]) -> list[str]:
+        return list(normalize_character_detail_tags(value))
+
 
 class PlayCharacterDetailPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -91,6 +95,15 @@ class PlayCharacterDetailPatch(BaseModel):
         if not value:
             raise ValueError("name must not be empty")
         return value
+
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, value: list[str] | None) -> list[str] | None:
+        return (
+            list(normalize_character_detail_tags(value))
+            if value is not None
+            else None
+        )
 
 
 class PlayCharacterDetail(BaseModel):
@@ -114,8 +127,7 @@ class PlayCharacter(BaseModel):
     workspace_id: str = Field(alias="workspaceId")
     story_id: int = Field(alias="storyId")
     name: str
-    personality: str
-    content: str
+    description: str
     sort_order: int = Field(alias="sortOrder")
     metadata: JsonObject = Field(default_factory=dict)
     details: list[PlayCharacterDetail] = Field(default_factory=list)
@@ -145,8 +157,7 @@ def _character_response(item: dict[str, object]) -> PlayCharacter:
         workspace_id=str(item["workspace_id"]),
         story_id=int(item["story_id"]),
         name=str(item["name"]),
-        personality=str(item.get("personality") or ""),
-        content=str(item.get("content") or ""),
+        description=str(item.get("description") or ""),
         sort_order=int(item.get("sort_order") or 0),
         metadata=dict(item.get("metadata") or {}),
         details=[
@@ -182,8 +193,7 @@ async def create_character(
             workspace_id,
             story_id,
             name=payload.name,
-            personality=payload.personality,
-            content=payload.content,
+            description=payload.description,
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )
@@ -207,8 +217,7 @@ async def update_character(
             story_id,
             character_id,
             name=payload.name,
-            personality=payload.personality,
-            content=payload.content,
+            description=payload.description,
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )

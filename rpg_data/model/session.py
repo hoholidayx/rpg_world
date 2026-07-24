@@ -45,10 +45,21 @@ MESSAGE_ROLES = frozenset({
     MESSAGE_ROLE_TOOL,
 })
 
+TURN_MODE_NEUTRAL = "neutral"
 TURN_MODE_IC = "ic"
 TURN_MODE_OOC = "ooc"
 TURN_MODE_GM = "gm"
-TURN_MODES = frozenset({TURN_MODE_IC, TURN_MODE_OOC, TURN_MODE_GM})
+TURN_MODES = frozenset({
+    TURN_MODE_NEUTRAL,
+    TURN_MODE_IC,
+    TURN_MODE_OOC,
+    TURN_MODE_GM,
+})
+WORLD_ADVANCING_TURN_MODES = frozenset({
+    TURN_MODE_NEUTRAL,
+    TURN_MODE_IC,
+    TURN_MODE_GM,
+})
 
 
 @dataclass(frozen=True)
@@ -143,8 +154,7 @@ class SessionCharacterOption:
     story_id: int
     character_id: int
     name: str
-    personality: str = ""
-    content: str = ""
+    description: str = ""
     metadata_json: str = "{}"
     character_updated_at: str = ""
 
@@ -155,7 +165,7 @@ class SessionMessage:
     session_id: str
     role: str
     content: str = ""
-    mode: str = TURN_MODE_IC
+    mode: str = TURN_MODE_NEUTRAL
     turn_id: int = 0
     seq_in_turn: int = 0
     tool_call_id: str = ""
@@ -174,7 +184,7 @@ class SessionMessage:
         data: dict[str, object] = {
             "role": self.role,
             "content": self.content,
-            "mode": self.mode or TURN_MODE_IC,
+            "mode": self.mode or TURN_MODE_NEUTRAL,
         }
         if self.id:
             data["uid"] = self.id
@@ -213,6 +223,8 @@ __all__ = [
     "SessionProfile",
     "TURN_MODE_GM",
     "TURN_MODE_IC",
+    "TURN_MODE_NEUTRAL",
     "TURN_MODE_OOC",
     "TURN_MODES",
+    "WORLD_ADVANCING_TURN_MODES",
 ]

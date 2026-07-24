@@ -21,6 +21,7 @@ from rpg_core.context import FixedLayerSection
 from rpg_core.context.models import (
     FixedLayerData,
     HotHistoryLayer,
+    LayerType,
     Message,
     RPModulesLayer,
     Role,
@@ -111,10 +112,6 @@ class _SessionComposer:
     ):  # noqa: ANN201
         return None
 
-    @staticmethod
-    def get_mode(_workspace_id: str, _mode: str):  # noqa: ANN201
-        return None
-
 
 class _RoleReader:
     @staticmethod
@@ -164,14 +161,15 @@ def _execution(
     *,
     player_character: TurnPlayerCharacterSnapshot | None = None,
     rendered_story_prompt: str = "",
+    narrative_style_name: str = "",
+    narrative_style_prompt: str = "",
 ) -> TurnExecutionSnapshot:
     request = TurnRequest.create("preview", mode=mode)
     return TurnExecutionSnapshot(
         request=request,
-        mode_prompt="",
         narrative_style_id=None,
-        narrative_style_name="",
-        narrative_style_prompt="",
+        narrative_style_name=narrative_style_name,
+        narrative_style_prompt=narrative_style_prompt,
         policy=TurnExecutionPolicy.for_mode(mode),
         player_character=player_character,
         rendered_story_prompt=rendered_story_prompt,
@@ -252,6 +250,31 @@ def test_context_fixed_layer_uses_frozen_player_and_story_prompt() -> None:
     assert fixed_layer.characters[1]["control_role"] == "player_character"
 
 
+def test_fixed_layer_bytes_are_identical_across_all_message_modes() -> None:
+    service = _service(_Builder(), characters=_Characters())
+    rendered: list[str | None] = []
+
+    for mode in TurnMode:
+        fixed_layer = service._assemble_fixed_layer(
+            turn_execution=_execution(
+                mode,
+                player_character=TurnPlayerCharacterSnapshot(
+                    character_id=2,
+                    story_id=1,
+                    name="Alice",
+                ),
+                rendered_story_prompt="Story prompt",
+                narrative_style_name="克制",
+                narrative_style_prompt="保持克制的叙事风格。",
+            )
+        )
+        rendered.append(
+            RPGContext(fixed_layer=fixed_layer).render_layer(LayerType.FIXED)
+        )
+
+    assert len(set(rendered)) == 1
+
+
 def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -> None:
     builder = _Builder()
     service = _service(builder)
@@ -310,7 +333,7 @@ def test_context_gate_excludes_new_input_and_rejects_at_threshold(monkeypatch) -
         )
 
 
-def test_plot_judge_context_uses_fixed_state_and_latest_complete_ic_gm_turns() -> None:
+def test_plot_judge_context_uses_fixed_state_and_latest_complete_world_turns() -> None:
     session = SessionManager(history_enabled=False)
     session.replace_history(
         [
@@ -320,6 +343,20 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_ic_gm_turns() -
             Message(Role.ASSISTANT, "ooc reply", mode="ooc", turn_id=2, seq_in_turn=2),
             Message(Role.USER, "gm user", mode="gm", turn_id=3, seq_in_turn=1),
             Message(Role.ASSISTANT, "gm reply", mode="gm", turn_id=3, seq_in_turn=2),
+            Message(
+                Role.USER,
+                "neutral user",
+                mode="neutral",
+                turn_id=4,
+                seq_in_turn=1,
+            ),
+            Message(
+                Role.ASSISTANT,
+                "neutral reply",
+                mode="neutral",
+                turn_id=4,
+                seq_in_turn=2,
+            ),
         ],
         persist=False,
     )
@@ -347,7 +384,17 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_ic_gm_turns() -
                 "status_kind": "normal",
                 "description": "测试",
                 "headers": ["属性", "值"],
-                "rows": [["生命", "8"]],
+                "document": {
+                    "rows": [
+                        {
+                            "key": "生命",
+                            "value": "8",
+                            "runtimeKeyLocked": False,
+                            "updateRule": "",
+                            "metadata": {},
+                        }
+                    ]
+                },
             }
         ]
     )
@@ -356,7 +403,7 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_ic_gm_turns() -
     messages = service.build_plot_judge_messages(
         judge_prompt="judge marker",
         current_user_input="current marker",
-        history_turns=1,
+        history_turns=2,
         status_manager=status,
         scene_tracker=scene,
         rp_module_runtime=runtime,
@@ -368,7 +415,13 @@ def test_plot_judge_context_uses_fixed_state_and_latest_complete_ic_gm_turns() -
     assert contents[1] == "judge marker"
     assert "位置: 大厅" in contents[2]
     assert "生命" in contents[2]
-    assert contents[-3:] == ["gm user", "gm reply", "current marker"]
+    assert contents[-5:] == [
+        "gm user",
+        "gm reply",
+        "neutral user",
+        "neutral reply",
+        "current marker",
+    ]
     assert all("ooc" not in content and "ic user" not in content for content in contents)
     service._assemble_fixed_layer.assert_called_once_with(
         ["rp fixed marker"],

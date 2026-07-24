@@ -28,7 +28,7 @@ class AgentRequestBase(_BaseSchema):
 class AgentMessageRequest(AgentRequestBase):
     message: str
     request_id: str | None = None
-    mode: Literal["ic", "ooc", "gm"] = "ic"
+    mode: Literal["neutral", "ic", "ooc", "gm"] = "neutral"
     narrative_style_id: int | None = Field(default=None, gt=0)
 
     @field_validator("mode", mode="before")

@@ -29,8 +29,7 @@ class StoryCharacterRepository:
         story_id: int,
         name: str,
         *,
-        personality: str = "",
-        content: str = "",
+        description: str = "",
         sort_order: int = 0,
         metadata_json: str = "{}",
     ) -> models.StoryCharacter:
@@ -38,8 +37,7 @@ class StoryCharacterRepository:
             workspace=workspace_id,
             story=story_id,
             name=name,
-            personality=personality,
-            content=content,
+            description=description,
             sort_order=sort_order,
             metadata_json=metadata_json,
         )
@@ -77,8 +75,7 @@ class StoryCharacterRepository:
         character_id: int,
         *,
         name: str | None = None,
-        personality: str | None = None,
-        content: str | None = None,
+        description: str | None = None,
         sort_order: int | None = None,
         metadata_json: str | None = None,
     ) -> models.StoryCharacter | None:
@@ -88,10 +85,8 @@ class StoryCharacterRepository:
         }
         if name is not None:
             fields[StoryCharacterRecord.name] = name
-        if personality is not None:
-            fields[StoryCharacterRecord.personality] = personality
-        if content is not None:
-            fields[StoryCharacterRecord.content] = content
+        if description is not None:
+            fields[StoryCharacterRecord.description] = description
         if sort_order is not None:
             fields[StoryCharacterRecord.sort_order] = sort_order
         if metadata_json is not None:

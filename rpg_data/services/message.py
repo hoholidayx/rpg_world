@@ -26,7 +26,7 @@ class MessageDataService:
         role: str,
         content: str = "",
         *,
-        mode: str = models.TURN_MODE_IC,
+        mode: str = models.TURN_MODE_NEUTRAL,
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
         tool_call_id: str = "",

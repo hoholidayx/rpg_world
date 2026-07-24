@@ -15,8 +15,7 @@ export type CharacterCard = {
   workspaceId: string
   storyId: number
   name: string
-  personality: string
-  content: string
+  description: string
   metadata: Record<string, unknown>
   details: CharacterDetail[]
   version: number
@@ -27,8 +26,7 @@ export type CharacterCard = {
 
 export type CharacterInput = {
   name: string
-  personality: string
-  content: string
+  description: string
   sortOrder?: number
   metadata: Record<string, unknown>
 }

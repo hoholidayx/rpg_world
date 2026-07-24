@@ -35,15 +35,14 @@ def test_character_template_renders_body_content():
         "modules/character_card.jinja",
         characters=[{
             "name": "Alice",
-            "personality": "curious",
-            "content": "A young wizard.",
+            "description": "A young wizard.",
             "details": [{"name": "外貌", "content": "银白色长发。"}],
         }],
     )
 
     assert rendered.startswith("### Alice")
     assert "### Alice" in rendered
-    assert "个性: curious" in rendered
+    assert "A young wizard." in rendered
     assert "- 外貌: 银白色长发。" in rendered
     assert "[character_card]" not in rendered
 
@@ -57,8 +56,7 @@ def test_fixed_layer_sections_wrap_rendered_knowledge_sections():
     }])
     character_section = build_character_section([{
         "name": "Alice",
-        "personality": "curious",
-        "content": "A young wizard.",
+        "description": "A young wizard.",
         "details": [{"name": "外貌", "content": "银白色长发。"}],
     }])
     assert lorebook_section is not None
@@ -84,8 +82,7 @@ def test_sub_agent_context_reuses_fixed_layer_knowledge_sections():
         }],
         characters=[{
             "name": "Alice",
-            "personality": "curious",
-            "content": "A young wizard.",
+            "description": "A young wizard.",
             "details": [{"name": "外貌", "content": "银白色长发。"}],
         }],
     ).render()

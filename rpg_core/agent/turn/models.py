@@ -11,6 +11,7 @@ from rpg_core.session.modes import (
     normalize_turn_mode,
 )
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshot
+from rpg_core.rp_modules.models import PlayerPortrayalDetail
 
 if TYPE_CHECKING:
     from rpg_core.agent.telemetry import TurnStats
@@ -57,7 +58,6 @@ class TurnExecutionPolicy:
     run_status_preflight: bool
     expose_state_tools: bool
     expose_rp_modules: bool
-    apply_narrative_style: bool
 
     @classmethod
     def for_mode(cls, mode: TurnMode) -> "TurnExecutionPolicy":
@@ -66,13 +66,11 @@ class TurnExecutionPolicy:
                 run_status_preflight=False,
                 expose_state_tools=False,
                 expose_rp_modules=False,
-                apply_narrative_style=False,
             )
         return cls(
             run_status_preflight=True,
             expose_state_tools=True,
             expose_rp_modules=True,
-            apply_narrative_style=True,
         )
 
 
@@ -90,12 +88,12 @@ class TurnExecutionSnapshot:
     """Resolved mode, style, player identity, and Story prompt for one turn."""
 
     request: TurnRequest
-    mode_prompt: str
     narrative_style_id: int | None
     narrative_style_name: str
     narrative_style_prompt: str
     policy: TurnExecutionPolicy
     player_character: TurnPlayerCharacterSnapshot | None = None
+    player_portrayal_details: tuple[PlayerPortrayalDetail, ...] = ()
     rendered_story_prompt: str = ""
 
 

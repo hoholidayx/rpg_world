@@ -244,8 +244,7 @@ class SessionDataService:
                 story_id=int(row.story_id),
                 character_id=int(row.id),
                 name=str(row.name),
-                personality=str(row.personality or ""),
-                content=str(row.content or ""),
+                description=str(row.description or ""),
                 metadata_json=str(row.metadata_json or "{}"),
                 character_updated_at=str(row.updated_at),
             )

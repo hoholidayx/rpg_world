@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rpg_core.agent.turn.models import TurnExecutionPlan, TurnRequest
+from rpg_core.rp_modules.message_mode import ensure_message_mode_available
 from rpg_core.rp_modules.plot_scheduler import PlotScheduleSnapshotResolver
 
 if TYPE_CHECKING:
@@ -30,11 +31,12 @@ class TurnPlanResolver:
         self._plot_schedule_resolver = plot_schedule_resolver
 
     async def resolve(self, request: TurnRequest) -> TurnExecutionPlan:
+        rp_modules = self._context_service.resolve_rp_module_snapshot()
+        ensure_message_mode_available(rp_modules, request.mode)
         execution = self._context_service.resolve_turn_execution(
             request,
             require_player_character=True,
         )
-        rp_modules = self._context_service.resolve_rp_module_snapshot()
         return TurnExecutionPlan(
             execution=execution,
             main_llm=await self._model_runtime.resolve(self._lifecycle.session_id),

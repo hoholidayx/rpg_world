@@ -199,7 +199,8 @@ def _ensure_test_role(
             workspace_id,
             story_id,
             "Integration Tester",
-            personality="A concise test role used by integration tests.",
-            content="You are the player-controlled role for integration tests.",
+            description=(
+                "You are the player-controlled role used by integration tests."
+            ),
         )
     return character

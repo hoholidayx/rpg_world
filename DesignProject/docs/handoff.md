@@ -90,9 +90,16 @@ manifest 之间退出，下次启动 MCP 会在锁内完成同一笔提交；独
 
 ## 导入与确认
 
-Story Pack v1 每包只包含一个 Story，支持按 section 拆包，采用 merge-only
+Story Pack v2 每包只包含一个 Story，支持按 section 拆包，采用 merge-only
 且不会因遗漏而删除运行时资源。角色、世界书和状态表都直接归 Story 所有；
 视觉规格只归档，不创建媒体任务或图片。
+
+角色一级叙事字段只有 `name + description`；description 只写身份、经历和客观
+事实，性格、说话方式、行为倾向与心理必须放入二级详情。演绎详情使用内置
+`kind:personality | kind:speech | kind:behavior | kind:psychology`，并自动携带
+`scope:npc_portrayal`。`message_mode` 是配置为空、提示词由运行时代码内置的
+RP Module，模式固定为 `neutral | ic | ooc | gm`，不再设计 Workspace mode。
+Design/Pack/Project/MCP 契约均硬切 2.0，v1 输入直接拒绝且无转换器。
 
 同一 revision、section 与 runtime target 重复构建会复用完全相同的不可变
 Story Pack；不同 target 会生成不同 pack ID。Story 的时间背景、logline、

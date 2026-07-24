@@ -117,7 +117,7 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 - `StatusDataService`：Story 直属定义、Session document、来源与角色关联 read model，以及调用方指定的复制/reset/原子 document batch。
 - `MediaDataService`：Job/Blob/Asset/Gallery/Background/Evaluation 的 typed CRUD、引用 read model、CAS claim、去重和调用方准备的原子 completion。
 - `TTSDataService`：Message source read model、Job/Cache/Blob/Part CRUD、条件 claim/transition、引用查询和调用方准备的原子 completion。
-- `SessionComposerDataService`：workspace mode、narrative style、Story mount/base 与 quick reply 的 typed CRUD、排序和调用方指定的批量 mode seed。
+- `SessionComposerDataService`：Workspace narrative style、Story style mount/base 与 quick reply 的 typed CRUD 和排序。
 - `RPModuleDataService`：内置 catalog、Story mount、Session override 的 typed CRUD，以及解析单个 Session snapshot 所需的聚合 read model。
 - `MessageDataService`：主历史 CRUD、turn window/分页、processed flag 聚合与调用方指定的批量标记；不决定 Context 投影或 Summary/Story Memory 候选。
 - `NarrativeOutcomeDataService`：调用方准备好的 Outcome ledger row 追加、按 turn 查询和删除；不判断 Outcome code、sample、权重来源或剧情语义。
@@ -130,7 +130,7 @@ Media 的来源范围、VisualBrief 来源确认、图库 metadata、删除门�
 
 TTS 的 assistant 消息资格、正文规范化/分段、fingerprint、cache 命中、retry/失效和 worker 中断策略由 `TTSApplicationService` 持有。`tts_service` worker 只调用该业务入口，不直接操作 `TTSDataService`。
 
-Session Composer 的默认 Turn Mode、管理字段校验、`Story base < 本次请求 narrative style override` 解析和 enabled quick reply 投影由 `SessionComposerApplicationService` 持有。当前没有持久化的 Session narrative style override；`narrativeStyleId` 仍是 Preview/Turn 的请求级选择。`SessionComposerDataService` 不解析有效风格，也不在 Repository 固化产品默认 Prompt。
+Session Composer 的 narrative style 管理字段校验、`Story base < 本次请求 narrative style override` 解析和 enabled quick reply 投影由 `SessionComposerApplicationService` 持有。当前没有持久化的 Session narrative style override；`narrativeStyleId` 仍是 Preview/Turn 的请求级选择。消息模式不属于 Composer/Workspace 数据：`message_mode` 是 Core 中提示词内置、配置为空的可选 RP Module，Composer application 只根据当前模块 snapshot 投影可选的 `neutral | ic | ooc | gm`，不持久化 mode 或 prompt。`SessionComposerDataService` 不解析有效风格，也不在 Repository 固化产品默认 Prompt。
 
 RP Module 的内置定义、config schema、snapshot builder 和 runtime factory 由纯内存 `RPModuleRegistry` 持有；`RPModuleApplicationService` 组合 Registry 与窄 Data Port，唯一负责 `system < story < session` 合并、有效 enabled、Story capability ceiling、patch 校验和空 Session override 清理。Registry 不访问 Gateway，`RPModuleDataService` 不选择默认挂载、不合并配置，也不根据 payload 内容决定 upsert 或 delete。
 
@@ -228,7 +228,7 @@ Gateway。若一个协作者只需要解析 Session 运行目录，就只声明�
 - Status 数据入口不重新暴露 Scene、Context、即时更新策略或 bootstrap 业务方法。
 - Media application service、source/background helper 与 worker 不依赖 Gateway 或具体 `MediaDataService`，Media 数据入口不重新暴露背景状态机或 worker 恢复策略。
 - TTS application service 与 worker 不依赖 Gateway 或具体 `TTSDataService`，TTS 数据入口不重新暴露消息资格、cache/retry 或 worker 恢复策略。
-- Composer application service 不依赖 Gateway 或具体 Data Service，Composer 数据入口不暴露默认 mode 或有效 narrative style 解析。
+- Composer application service 不依赖 Gateway 或具体 Data Service，Composer 数据入口不暴露 message mode/prompt 或有效 narrative style 解析。
 - RP Module Registry/Application Service 不依赖 Gateway，RP Module 数据入口不暴露默认挂载、三层合并、有效 enabled 或空 override 清理策略。
 - Session history/progress、turn commit、Plot management/ledger 与 Outcome ledger 不依赖 Gateway 或具体 Data Service，只使用各自声明的窄 Port。
 - Message 数据入口不暴露 Context 投影、Summary/Story Memory 候选或计数策略；Outcome 数据入口不暴露 RP policy `record`。

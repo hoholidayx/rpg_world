@@ -24,7 +24,7 @@ MCP_INSTRUCTIONS = (
     "Persist confirmed decisions through expected-head CAS. Never apply RPG "
     "runtime changes without first showing the separate preview to the user "
     "and receiving explicit confirmation; apply tools intentionally accept an "
-    "opaque operation id instead of a confirmation boolean. Story Pack v1 is "
+    "opaque operation id instead of a confirmation boolean. Story Pack v2 is "
     "merge-only, one-Story-per-pack, and never deletes omitted resources. "
     "Character, lorebook, and status resources are Story-owned. Visual specs "
     "are archived only and never create media jobs."
@@ -349,7 +349,7 @@ def _register_runtime_tools(
         name="rpg_validate_story_pack",
         title="Validate Story Pack",
         description=(
-            "Validate Story Pack v1 without creating a preview or changing "
+            "Validate Story Pack v2 without creating a preview or changing "
             "runtime business data."
         ),
         annotations=_annotations(read_only=True),

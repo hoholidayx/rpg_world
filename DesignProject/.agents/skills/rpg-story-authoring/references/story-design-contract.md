@@ -37,7 +37,7 @@ Story, not merely within their parent Character or outline.
 - `notes`: concise working notes.
 
 The MCP service validates the exact JSON Schema in
-`schemas/story-design-v1.schema.json`.
+`schemas/story-design-v2.schema.json`.
 Do not use `_rpgStoryDesign` in Story metadata; the runtime adapter reserves
 that key to round-trip design-only Story fields through runtime metadata.
 Copy local source material under `design/sources/` and store only a safe
@@ -56,6 +56,22 @@ paths, `file:` URLs, and parent-directory traversal are rejected.
 - `plotSchedule`: pools, events, outlines, and nodes.
 - `visualCatalog`: independent, image-generation-ready briefs; archived by
   the Story Pack but not materialized as media jobs.
+
+Character top-level data is only `name + description`; `description` contains
+identity, history, and objective facts, never personality, speech, behavior,
+or psychology that would constrain a player. Put those optional portrayal
+settings in Character details. Built-in objective tags are
+`kind:appearance | kind:background | kind:relationship | kind:ability`;
+portrayal tags are
+`kind:personality | kind:speech | kind:behavior | kind:psychology`.
+Every portrayal tag automatically carries the locked
+`scope:npc_portrayal` tag. Runtime omits those details from a bound player's
+Fixed Layer and injects them only when the Character is an NPC or a GM turn
+temporarily delegates the player Character.
+
+Message modes are the code-owned `message_mode` RP Module. Its modes are
+`neutral | ic | ooc | gm`, its config is empty, and `neutral` is the default.
+Mode labels and prompts are not Workspace resources.
 
 ## Status rules
 
@@ -99,7 +115,7 @@ reused: portraits, sprites, locations, scenes, objects, maps, or costumes.
 Keep immutable identity anchors separate from variable costume, pose, light,
 and composition details in the resource metadata.
 
-Story Pack v1 archives these briefs. It does not create image binaries, media
+Story Pack v2 archives these briefs. It does not create image binaries, media
 assets, jobs, messages, or message metadata.
 
 ## Story Pack sections
@@ -111,5 +127,6 @@ story, openings, characters, lorebook, statusTables, composer,
 rpModules, plotSchedule, visualCatalog
 ```
 
-The schema is `schemas/story-pack-v1.schema.json`. Import policy is always
-`mode=merge` and `deleteMissing=false` in v1.
+The schema is `schemas/story-pack-v2.schema.json`. Import policy is always
+`mode=merge` and `deleteMissing=false` in v2. Story Design, Story Pack, and
+DesignProject v1 inputs are rejected; there is no v1 converter.

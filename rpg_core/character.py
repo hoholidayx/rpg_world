@@ -100,8 +100,7 @@ def _character_to_dict(character: "SessionCharacter") -> dict[str, object]:
         "workspace_id": character.workspace_id,
         "story_id": character.story_id,
         "name": character.name,
-        "personality": character.personality,
-        "content": character.content,
+        "description": character.description,
         "details": [
             _detail_to_dict(detail)
             for detail in character.details

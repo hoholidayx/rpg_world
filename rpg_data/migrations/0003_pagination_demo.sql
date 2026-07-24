@@ -75,8 +75,7 @@ INSERT OR IGNORE INTO rpg_story_characters (
     workspace_id,
     story_id,
     name,
-    personality,
-    content,
+    description,
     sort_order,
     metadata_json
 )
@@ -84,7 +83,6 @@ SELECT
     workspace_id,
     id,
     'Bob',
-    'bold',
     'Pagination-demo player character owned only by this Story.',
     10,
     '{"kind":"pagination_demo"}'

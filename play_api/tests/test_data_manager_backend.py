@@ -156,8 +156,7 @@ class FakeCharacterManagement:
             workspace,
             story_id,
             str(kwargs["name"]),
-            personality=str(kwargs.get("personality") or ""),
-            content=str(kwargs.get("content") or ""),
+            description=str(kwargs.get("description") or ""),
         )
 
     def update_character(self, workspace: str, story_id: int, character_id: int, **kwargs):

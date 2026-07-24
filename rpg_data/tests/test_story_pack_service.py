@@ -44,7 +44,7 @@ def test_story_pack_binding_and_operation_cas(tmp_path) -> None:
             workspace_id="pack_world",
             story_stable_id="story-main",
             story_id=story.id,
-            pack={"schemaVersion": "rpg-story-pack/1.0"},
+            pack={"schemaVersion": "rpg-story-pack/2.0"},
             plan={"conflicts": []},
         )
         assert operation.status == "previewed"

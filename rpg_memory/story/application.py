@@ -14,8 +14,7 @@ from rpg_data.model import memory as models
 from rpg_data.model.session import (
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_USER,
-    TURN_MODE_GM,
-    TURN_MODE_IC,
+    WORLD_ADVANCING_TURN_MODES,
     SessionMessage,
 )
 from rpg_data.transaction import DataTransactionMode
@@ -25,7 +24,7 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _EVIDENCE_ROLES = frozenset(
     {MESSAGE_ROLE_USER, MESSAGE_ROLE_ASSISTANT}
 )
-_EVIDENCE_MODES = frozenset({TURN_MODE_IC, TURN_MODE_GM})
+_EVIDENCE_MODES = WORLD_ADVANCING_TURN_MODES
 
 
 class StoryMemoryDataPort(Protocol):
@@ -359,7 +358,8 @@ class StoryMemoryApplicationService:
             for item in rows
         ):
             raise ValueError(
-                "story-memory Evidence must reference IC/GM user or assistant messages"
+                "story-memory Evidence must reference neutral/IC/GM user or "
+                "assistant messages"
             )
         return rows
 

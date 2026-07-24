@@ -89,7 +89,13 @@ def _snapshot(**changes) -> DreamSourceSnapshot:  # noqa: ANN003, ANN202
             _message(1, 1, "阿澈抵达港口"),
             _message(2, 2, "守卫交出铜钥匙", role="assistant"),
             _message(3, 3, "玩家讨论模型", mode="ooc"),
-            _message(4, 4, "石门在月光下开启", role="assistant"),
+            _message(
+                4,
+                4,
+                "石门在月光下开启",
+                role="assistant",
+                mode="neutral",
+            ),
         ),
         "story_memories": (
             _derived("10", DreamSourceKind.STORY_MEMORY, "得到铜钥匙", 2, 2, (2,)),
@@ -175,7 +181,7 @@ def test_deep_incremental_detects_change_neighbors_deletion_and_excludes_ooc() -
             message.turn_id,
         )
         for message in messages
-        if message.mode in {"ic", "gm"}
+        if message.mode in {"neutral", "ic", "gm"}
     }
     manifest["99"] = DreamManifestEntry("99", "old", 4, 4)
     selection = DreamSourceSelector().select(
@@ -226,7 +232,7 @@ def test_deep_incremental_uses_nearest_current_turns_around_deleted_gap() -> Non
     ]
 
 
-def test_deep_full_uses_complete_current_ic_history() -> None:
+def test_deep_full_uses_complete_current_world_history() -> None:
     selection = DreamSourceSelector().select(
         _snapshot(),
         depth=DreamDepth.DEEP,

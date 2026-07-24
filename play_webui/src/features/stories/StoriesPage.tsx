@@ -122,7 +122,7 @@ function buildSearchText(
   story: StorySummary,
   aggregate: StoryAggregate,
 ) {
-  const characterText = aggregate.characters.map((character) => `${character.name} ${character.personality} ${character.content}`).join(' ')
+  const characterText = aggregate.characters.map((character) => `${character.name} ${character.description}`).join(' ')
   const lorebookText = aggregate.lorebookEntries.map((entry) => `${entry.name} ${entry.description} ${entry.content} ${entry.tags.join(' ')}`).join(' ')
   const statusText = aggregate.statusTables.map((table) => `${table.name} ${table.description} ${table.statusKind}`).join(' ')
   const sessionText = aggregate.sessions.map((session) => `${session.title ?? ''} ${session.description ?? ''}`).join(' ')

@@ -58,6 +58,7 @@ from rpg_core.context.fingerprint import (
 )
 from rpg_core.context.models import Message, Role
 from rpg_core.session.manager import SessionManager
+from rpg_core.session.modes import is_world_advancing_mode
 from rpg_core.settings import settings
 
 if TYPE_CHECKING:
@@ -404,7 +405,7 @@ class MemorySubAgent(BaseSubAgent):
         batch_turns: int | None = None,
         max_batch_chars: int | None = None,
     ) -> StoryMemoryExtractionResult:
-        """Extract every pending IC/GM turn in bounded, turn-aligned batches.
+        """Extract pending neutral/IC/GM turns in bounded, turn-aligned batches.
 
         Each successful batch persists its memories and source-message progress
         atomically through ``StoryMemoryStore``. A later failure therefore
@@ -940,7 +941,7 @@ class MemorySubAgent(BaseSubAgent):
             message
             for message in conv
             if message.role in (Role.USER, Role.ASSISTANT)
-            and message.mode in ("ic", "gm")
+            and is_world_advancing_mode(message.mode)
         ]
         source_message_ids = {
             int(message.uid) for message in source_messages if message.uid > 0
@@ -949,7 +950,7 @@ class MemorySubAgent(BaseSubAgent):
             evidence_ids = set(detail["evidence_message_ids"])
             if not evidence_ids.issubset(source_message_ids):
                 raise MemoryPipelineError(
-                    "story memory Evidence must reference messages in the current IC/GM batch"
+                    "story memory Evidence must reference messages in the current world-advancing batch"
                 )
         turn_ids = [
             int(message.turn_id)

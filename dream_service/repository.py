@@ -20,8 +20,7 @@ from rpg_data.model import memory as models
 from rpg_data.model.session import (
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_USER,
-    TURN_MODE_GM,
-    TURN_MODE_IC,
+    WORLD_ADVANCING_TURN_MODES,
     SessionMessage,
 )
 from rpg_data.services.dream_memory import DreamMemoryDataService
@@ -108,7 +107,7 @@ class RPGDataDreamRepository(DreamRepository):
             if (
                 message.role
                 not in {MESSAGE_ROLE_USER, MESSAGE_ROLE_ASSISTANT}
-                or message.mode not in {TURN_MODE_IC, TURN_MODE_GM}
+                or message.mode not in WORLD_ADVANCING_TURN_MODES
             ):
                 continue
             messages_by_turn[message.turn_id] = (

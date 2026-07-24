@@ -435,7 +435,7 @@ class DesignProjectStore:
             )
         expected_contract_digest = manifest.get("contractDigest")
         if expected_contract_digest:
-            contract_path = self.root / "schemas" / "rpg-mcp-contract-v1.json"
+            contract_path = self.root / "schemas" / "rpg-mcp-contract-v2.json"
             try:
                 contract_digest = digest_json(_read_json(contract_path))
                 if contract_digest != expected_contract_digest:
@@ -525,7 +525,7 @@ class DesignProjectStore:
         integration_relative = "integrations/rpg-world.json"
         report_relative = f"reports/runtime-operation-{operation_id}.json"
         integration = {
-            "schemaVersion": "rpg-world-integration/1.0",
+            "schemaVersion": "rpg-world-integration/2.0",
             "projectId": operation["projectId"],
             "lastOperationId": operation_id,
             "lastStatus": operation["status"],
@@ -631,7 +631,7 @@ class DesignProjectStore:
             "updatedAt": now,
         }
         transaction = {
-            "schemaVersion": "story-design-transaction/1.0",
+            "schemaVersion": "story-design-transaction/2.0",
             "baseManifest": manifest,
             "targetManifest": updated_manifest,
             "revision": revision,
@@ -708,7 +708,7 @@ class DesignProjectStore:
         if not self.transaction_path.is_file():
             return
         transaction = _read_json(self.transaction_path)
-        if transaction.get("schemaVersion") != "story-design-transaction/1.0":
+        if transaction.get("schemaVersion") != "story-design-transaction/2.0":
             raise DesignStoreError("unsupported design transaction journal")
         base_manifest = transaction.get("baseManifest")
         target_manifest = transaction.get("targetManifest")

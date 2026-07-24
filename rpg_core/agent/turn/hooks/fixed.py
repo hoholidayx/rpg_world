@@ -187,7 +187,7 @@ class MemoryRecallHook:
             await manager.recall(
                 RecallQueryContext(
                     current_input=user_input,
-                    recent_turns=self._recent_ic_gm_turns(),
+                    recent_turns=self._recent_world_turns(),
                     player_character=player_character.name if player_character is not None else "",
                     scene_time=str(scene.get("time", "")),
                     scene_location=str(scene.get("location", "")),
@@ -196,8 +196,11 @@ class MemoryRecallHook:
         except Exception as exc:
             logger.opt(exception=exc).warning(_TAG + " memory recall failed")
 
-    def _recent_ic_gm_turns(self) -> tuple[str, ...]:
-        from rpg_core.agent.turn.models import TurnMode
+    def _recent_world_turns(self) -> tuple[str, ...]:
+        from rpg_core.session.modes import (
+            DEFAULT_TURN_MODE,
+            WORLD_ADVANCING_MODES,
+        )
 
         messages = [
             message
@@ -206,8 +209,13 @@ class MemoryRecallHook:
         ]
         groups = []
         for group in self._session_manager.iter_turn_groups(messages):
-            modes = {str(message.mode or TurnMode.IC.value).lower() for message in group}
-            if modes and modes.issubset({TurnMode.IC.value, TurnMode.GM.value}):
+            modes = {
+                str(message.mode or DEFAULT_TURN_MODE.value).lower()
+                for message in group
+            }
+            if modes and modes.issubset(
+                {mode.value for mode in WORLD_ADVANCING_MODES}
+            ):
                 groups.append(group)
         rendered: list[str] = []
         for index, group in enumerate(groups[-2:], start=1):

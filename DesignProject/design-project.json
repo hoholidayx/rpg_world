@@ -1,9 +1,9 @@
 {
-  "contractDigest": "6055274119d642a9c5148cae87c89d1efb7dfabcd986b8459f8304a15df50b41",
-  "contractVersion": "1.0",
-  "createdAt": "2026-07-23T00:00:00Z",
+  "contractDigest": "e2a7c7f5651040dfbedcb4cce199d32c9ede69473b2df55e7f73b8de81d1aa33",
+  "contractVersion": "2.0",
+  "createdAt": "2026-07-24T08:15:58Z",
   "currentRevision": "r000001",
-  "headDigest": "2e4ebe9277e0515aace8e797c5ac525d59775e96e3b996ddd09129e1d9d5bc9e",
+  "headDigest": "88e6edb0afb3ff861964b06157c1b9b481034276c2963b31a685918407424de9",
   "name": "未命名故事设计",
   "paths": {
     "checkpoints": "design/checkpoints",
@@ -16,6 +16,6 @@
     "storyPacks": "artifacts/story-packs"
   },
   "projectId": "story-design-template",
-  "schemaVersion": "story-design-project/1.0",
-  "updatedAt": "2026-07-23T00:00:00Z"
+  "schemaVersion": "story-design-project/2.0",
+  "updatedAt": "2026-07-24T08:15:58Z"
 }

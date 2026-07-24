@@ -8,6 +8,7 @@ import rpg_core.rp_modules.registry as registry_module
 from rpg_core.rp_modules.application import RPModuleApplicationService
 from rpg_core.rp_modules.constants import (
     RP_MODULE_DICE_NAME,
+    RP_MODULE_MESSAGE_MODE_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_NAME,
     RP_MODULE_NARRATIVE_OUTCOME_SECTION_ID,
     RP_MODULE_NARRATIVE_OUTCOME_TURN_SECTION_ID,
@@ -40,6 +41,7 @@ def test_registry_loads_default_modules(tmp_path):
 
     assert [module.name for module in runtime.enabled_modules()] == [
         RP_MODULE_DICE_NAME,
+        RP_MODULE_MESSAGE_MODE_NAME,
         RP_MODULE_NARRATIVE_OUTCOME_NAME,
     ]
     assert [section.id for section in runtime.get_fixed_sections()] == [
@@ -78,6 +80,7 @@ def test_registry_keeps_narrative_module_and_framework_commands_when_dice_disabl
     )
 
     assert [module.name for module in runtime.enabled_modules()] == [
+        RP_MODULE_MESSAGE_MODE_NAME,
         RP_MODULE_NARRATIVE_OUTCOME_NAME
     ]
     assert [section.id for section in runtime.get_fixed_sections()] == [

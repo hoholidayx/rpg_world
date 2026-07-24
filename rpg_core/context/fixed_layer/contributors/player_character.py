@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from commons.types import JsonObject
+from rpg_core.character_tags import split_player_character_details
 from rpg_core.context.fixed_layer.models import (
     FixedLayerContribution,
     FixedLayerContributor,
@@ -36,10 +37,12 @@ def build_player_character_section(
         title="当前玩家扮演角色（权威绑定）",
         content=(
             f"当前玩家扮演角色：{player_name}\n"
-            f"- 在 IC 叙事中，玩家输入、玩家使用的第一人称“我”，以及旁白面向玩家的第二人称“你”，"
+            f"- 在 neutral/IC 叙事中，玩家输入、玩家使用的第一人称“我”，以及旁白面向玩家的第二人称“你”，"
             f"均指向 {player_name}。\n"
             "- 除当前玩家角色外，当前 Story 的其余角色均为 NPC；不得把任何 NPC 当作玩家。\n"
-            f"- 不得替 {player_name} 新增台词、重大行动、内心决定或关键选择；这些内容由玩家决定。\n"
+            f"- 默认由玩家控制 {player_name}；不得替其新增台词、主动行动、心理活动或关键选择。\n"
+            "- 只有当前 turn 在后置 [message_mode] RP Module 中明确声明 GM 托管时，"
+            "才允许在该 turn 内代演玩家角色。\n"
             "- 若故事固定提示词、开场消息、历史、摘要、剧情记忆、召回记忆、角色 metadata "
             "或其它旧内容与本绑定冲突，必须以本节的 session 绑定为准。"
         ),
@@ -67,8 +70,31 @@ def annotate_player_character_cards(
         item["control_role"] = (
             PLAYER_CHARACTER_CONTROL_ROLE if is_player else NPC_CONTROL_ROLE
         )
+        if is_player:
+            raw_details = item.get("details")
+            details = raw_details if isinstance(raw_details, list) else []
+            reference, _portrayal = split_player_character_details(details)
+            item["details"] = reference
         annotated.append(item)
     return annotated
+
+
+def player_character_portrayal_details(
+    characters: list[JsonObject],
+    player_character: PlayerCharacterContext | None,
+) -> tuple[JsonObject, ...]:
+    """Capture details withheld from the bound player's Fixed Layer card."""
+
+    if player_character is None:
+        return ()
+    for character in characters:
+        if not _matches_player_character(character, player_character):
+            continue
+        raw_details = character.get("details")
+        details = raw_details if isinstance(raw_details, list) else []
+        _reference, portrayal = split_player_character_details(details)
+        return tuple(portrayal)
+    return ()
 
 
 def _matches_player_character(

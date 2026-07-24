@@ -69,10 +69,17 @@ Add a character:
     "value": {
       "stableId": "character-lin",
       "name": "林澈",
-      "personality": "克制、观察力强，对自己的记忆保持怀疑。",
-      "content": "玩家可选主角。",
+      "description": "一名曾主动删除关键证词的失忆调查员。",
       "aliases": [],
-      "details": [],
+      "details": [
+        {
+          "stableId": "character-lin-personality",
+          "name": "NPC 演绎性格",
+          "content": "克制、观察力强，对自己的记忆保持怀疑。",
+          "tags": ["kind:personality", "scope:npc_portrayal"],
+          "sortOrder": 10
+        }
+      ],
       "visual": {
         "identityAnchors": ["黑色短发", "旧银色录音笔"]
       },
@@ -95,7 +102,8 @@ Create a named checkpoint after:
 - openings, status tables, and plot scheduling are internally consistent;
 - a Story Pack validates and is ready for runtime preview.
 
-Good names are `architecture-v1`, `resources-v1`, and `import-ready-v1`.
+Good names are `architecture-ready`, `resources-ready`, and
+`runtime-preview-ready`; avoid contract-version suffixes in milestone names.
 
 ## Story Pack workflow
 
@@ -109,4 +117,4 @@ The default section list creates a complete pack. Useful small packages:
 - `["composer"]`
 
 A small pack does not delete resources from omitted sections. A full pack also
-uses merge-only semantics in v1.
+uses merge-only semantics in v2.

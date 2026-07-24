@@ -41,12 +41,21 @@ def check(root: Path) -> dict[str, Any]:
         manifest = load(manifest_path)
     except Exception as exc:
         return {"healthy": False, "errors": [str(exc)], "warnings": []}
+    if manifest.get("schemaVersion") != "story-design-project/2.0":
+        errors.append(
+            "unsupported DesignProject schemaVersion; v1 projects must be "
+            "re-created as v2 because no converter is provided"
+        )
+    if manifest.get("contractVersion") != "2.0":
+        errors.append("unsupported DesignProject contractVersion")
     for key, raw in manifest.get("paths", {}).items():
         value = Path(str(raw))
         if value.is_absolute() or ".." in value.parts:
             errors.append(f"non-portable path {key}: {raw}")
     try:
         current = load(root / str(manifest["paths"]["current"]))
+        if current.get("schemaVersion") != "story-design/2.0":
+            errors.append("unsupported current Story Design schemaVersion")
         if current.get("project", {}).get("projectId") != manifest.get(
             "projectId"
         ):
@@ -66,7 +75,9 @@ def check(root: Path) -> dict[str, Any]:
     except Exception as exc:
         errors.append(str(exc))
     try:
-        contract = load(root / "schemas/rpg-mcp-contract-v1.json")
+        contract = load(root / "schemas/rpg-mcp-contract-v2.json")
+        if contract.get("schemaVersion") != "rpg-mcp-contract/2.0":
+            errors.append("unsupported MCP contract schemaVersion")
         if digest(contract) != manifest.get("contractDigest"):
             errors.append("MCP contract digest differs from manifest")
     except Exception as exc:

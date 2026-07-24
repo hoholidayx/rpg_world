@@ -46,7 +46,7 @@ README 只保留架构概览；涉及阶段顺序、状态写入边界或失败�
 | `AgentMailbox` | session 内 FIFO、stream task 与 `requestId` 取消 |
 | `AgentTurnService` | 命令/角色 bypass，适配 `AgentReply` 和 SSE |
 | `TurnPreprocessor` | 在快照、门禁和事务之前处理斜杠命令与玩家角色 guard |
-| `TurnPlanResolver` | 固化 mode/style、玩家角色、Story Prompt、主模型、RP Module 与 Plot Schedule 快照 |
+| `TurnPlanResolver` | 先解析 RP Module 并执行 message-mode 门禁，再固化 mode/style、玩家角色、Story Prompt、主模型与 Plot Schedule 快照 |
 | `TurnRuntimeFactory` | Context 门禁、provider 解析、transaction/scratch、RP runtime、Status 与 Plot preflight |
 | `StatusPreflightHook` | 为 `StatusSubAgent` 绑定本 turn 的 scratch 工具和逐目标 checkpoint 回调 |
 | `PlotSchedulingPreflightHook` | 在状态更新后按 Scene 时间选择大纲/池候选；强制项直接暂存，软约束项隔离调用判断 LLM |
@@ -73,10 +73,11 @@ AgentTurnService / TurnPreprocessor
        │
        ▼
 TurnPlanResolver
-  ├─ TurnExecutionSnapshot
-  │    mode / mode prompt / style / player character / rendered Story Prompt / policy
-  ├─ MainLLMSelection
   ├─ RPModuleSelectionSnapshot
+  ├─ 非 neutral mode 不可用 ───────► message_mode_unavailable，不建 scratch、不调用 LLM、不写历史
+  ├─ TurnExecutionSnapshot
+  │    mode / style / player character / rendered Story Prompt / policy
+  ├─ MainLLMSelection
   └─ PlotScheduleSnapshot
        │
        ▼
@@ -99,7 +100,7 @@ TurnRuntimeFactory
        │       Update：scene 一次 + 每张普通表各一次；本 turn 即时更新，目标失败仅恢复该目标并继续
        │
        ▼
-  PlotSchedulingPreflightHook（仅 IC/GM 且模块有效时）
+  PlotSchedulingPreflightHook（仅 neutral/IC/GM 且模块有效时）
   ├─ Scene 时间无效 ─► warning 并跳过
   ├─ 每轮最多一个到期大纲节点 + 一个池事件
   ├─ forced ─► 直接暂存 triggered + 动态层注入
@@ -147,17 +148,22 @@ Story、Session 或模型配置在生成中的修改只影响下一 turn，不�
 
 ### mode policy
 
-| mode | Status preflight | scene/status 工具 | RP Modules | 叙事风格 prompt |
-|---|---:|---:|---:|---:|
-| `ic` | 开启 | 开启 | 开启 | 开启 |
-| `gm` | 开启 | 开启 | 开启 | 开启 |
-| `ooc` | 关闭 | 关闭 | 关闭 | 关闭 |
+| mode | Status preflight | scene/status 工具 | 世界事实 RP Modules | `message_mode` 动态指令 | 叙事风格 Fixed section |
+|---|---:|---:|---:|---:|---:|
+| `neutral` | 开启 | 开启 | 开启 | 无 | 保留 |
+| `ic` | 开启 | 开启 | 开启 | IC | 保留 |
+| `gm` | 开启 | 开启 | 开启 | GM + 本 turn 托管 | 保留 |
+| `ooc` | 关闭 | 关闭 | 关闭 | OOC | 保留但由 OOC 指令覆盖 |
 
-`ooc` 仍是普通正文 turn，会进入主 Context 门禁、事务、主 runner 和 commit；它只是通过 `TurnExecutionPolicy` 关闭 RP/状态相关能力。显式传入的 style ID 仍会被校验，但 style prompt 不注入 OOC Context。
+`neutral` 是空值、null 和未传 mode 的默认语义，不额外引导表达方式，但仍可推进世界、运行 Plot/状态并进入 Story Memory 与 Dream 事实链路。`ic` 把玩家输入视为玩家已经明确表达的台词、行动或意图，但不允许补写玩家未声明的内容。`gm` 允许当前 turn 托管玩家角色，且只在此动态 section 中附带该玩家角色被 Fixed Layer 排除的 `scope:npc_portrayal` 详情。
+
+`ooc` 仍是普通正文 turn，会进入主 Context 门禁、事务、主 runner 和 commit；它只是通过 `TurnExecutionPolicy` 关闭世界事实 RP Modules、状态写入和后置事实提取。显式传入的 style ID 仍会被校验。为保持四种 mode 的 Fixed Layer 字节稳定，叙事风格 section 不再因 OOC 被移除，而是由 Hot History 后的 OOC 动态指令要求直接讨论、不使用 RP 正文标签。
 
 该 policy 不移除 scene 和普通状态表的只读 Context 投影，因此 OOC 主 Agent 仍可理解当前世界状态，但不能通过 scene/status 工具写回；基础工具中的 `WriteFileTool` 也会隐藏，其它只读基础工具可继续存在。
 
 斜杠命令不属于上述普通正文 mode pipeline，始终在门禁和事务之前分流。
+
+`message_mode` 是提示词内置、配置必须为空的可选 RP Module。Story 挂载与 Session 覆盖只控制模块是否有效；Workspace 不再保存 mode 或提示词。模块无效时 `neutral` 始终可用，IC/OOC/GM 在 `TurnPlanResolver` 最前方失败，并由 Agent/Play API 映射为 HTTP 409 `message_mode_unavailable`；WebUI 隐藏模式选择器并回退 `neutral`。
 
 ## Context 门禁与事务创建
 
@@ -397,7 +403,7 @@ Fixed Layer
 → 当前 User Message（含 scene prefix）
 ```
 
-实际 provider wire messages 与上述结构化顺序一致：Fixed、Persistent Memory、Summary 分别作为 system message，Hot History 的 user/assistant/tool/system role 全部原位保留，之后 Story Memory、`STATUS_TABLES`、Recalled Memory、`RP_MODULES` 分别作为 system message，最后发送当前 User Message。Story Memory 作为低频累积信息放在 Summary 后、状态表前；当前状态表位于每轮召回之前。这样动态层变化不会截断更早的固定指令与 Hot History 前缀；历史窗口滑动时共同前缀仍可能缩短。Recall 块同时声明冲突时以当前 scene、普通状态表、玩家角色绑定和更新事实为准，不能仅凭历史召回回滚状态。
+实际 provider wire messages 与上述结构化顺序一致：Fixed、Persistent Memory、Summary 分别作为 system message，Hot History 的 user/assistant/tool/system role 全部原位保留，之后 Story Memory、`STATUS_TABLES`、Recalled Memory、`RP_MODULES` 分别作为 system message，最后发送当前 User Message。Story Memory 作为低频累积信息放在 Summary 后、状态表前；当前状态表位于每轮召回之前。`message_mode` 的非 neutral 指令和 GM 托管详情也只出现在这个后置 `RP_MODULES` message 中，因此频繁切换 mode 不会改变 Fixed Layer 或截断更早的稳定前缀；历史窗口滑动时共同前缀仍可能缩短。Recall 块同时声明冲突时以当前 scene、普通状态表、玩家角色绑定和更新事实为准，不能仅凭历史召回回滚状态。
 
 “只能有一条且必须首位 system”不是跨 provider 的行业准则，而是具体 API 或 chat template 的兼容能力。本项目不再为某个模型全局合并 system。局域网原生 llama.cpp/Qwen 部署可以使用 `--jinja` 和 `--chat-template` / `--chat-template-file` 配置服务端模板；模板上线前必须用包含“Hot History 后再次出现 system”的请求验证角色顺序和生成结果。若某个部署不支持，应在该 provider/chat-template 边界修复，不得改变 canonical Context。
 

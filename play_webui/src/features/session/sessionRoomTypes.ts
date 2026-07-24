@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react'
+import type { InputMode } from '@/types/command'
 import type { ContextUsageSnapshot } from '@/types/contextUsage'
 import { HISTORY_MESSAGE_ROLE } from '@/types/session'
 import type { NarrativeOutcome } from '@/types/narrativeOutcome'
 
-export type SessionInputMode = 'ic' | 'ooc' | 'gm'
+export type SessionInputMode = InputMode
 
 export type NarrativeStyleId = number | null
 

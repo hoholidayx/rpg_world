@@ -64,8 +64,6 @@ from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
     StoryQuickReply,
-    WorkspaceTurnMode,
-    WorkspaceTurnModeSeed,
 )
 from rpg_data.model.media import (
     MEDIA_ASSET_ORIGINS,
@@ -161,8 +159,10 @@ from rpg_data.model.session import (
     SESSION_LIFECYCLE_READY,
     TURN_MODE_GM,
     TURN_MODE_IC,
+    TURN_MODE_NEUTRAL,
     TURN_MODE_OOC,
     TURN_MODES,
+    WORLD_ADVANCING_TURN_MODES,
     Session,
     SessionCharacterOption,
     SessionDerivationJob,
@@ -329,8 +329,6 @@ __all__ = [
     "StoryNarrativeStyle",
     "StoryQuickReply",
     "SessionRPModuleSelectionRows",
-    "WorkspaceTurnMode",
-    "WorkspaceTurnModeSeed",
     "StoryCharacter",
     "StoryLorebookEntry",
     "StoryStatusTable",
@@ -423,8 +421,10 @@ __all__ = [
     "TTS_JOB_STATUS_INTERRUPTED",
     "TURN_MODE_GM",
     "TURN_MODE_IC",
+    "TURN_MODE_NEUTRAL",
     "TURN_MODE_OOC",
     "TURN_MODES",
+    "WORLD_ADVANCING_TURN_MODES",
     "NARRATIVE_OUTCOME_CODES",
     "NARRATIVE_OUTCOME_SOURCE_CONFIG",
     "NARRATIVE_OUTCOME_SOURCE_SESSION",
@@ -540,8 +540,7 @@ class SessionCharacter:
     workspace_id: str
     story_id: int
     name: str
-    personality: str = ""
-    content: str = ""
+    description: str = ""
     details: tuple[SessionCharacterDetail, ...] = ()
     sort_order: int = 0
 
@@ -552,8 +551,7 @@ class StoryCharacter:
     workspace_id: str
     story_id: int
     name: str
-    personality: str = ""
-    content: str = ""
+    description: str = ""
     sort_order: int = 0
     metadata_json: str = "{}"
     version: int = 1

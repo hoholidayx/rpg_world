@@ -70,8 +70,7 @@ def test_fixed_layer_assembler_merges_core_knowledge_and_module_sections():
     }]
     characters = [{
         "name": "Alice",
-        "personality": "curious",
-        "content": "A young wizard.",
+        "description": "A young wizard.",
         "details": [{"name": "外貌", "content": "银白色长发。"}],
     }]
     module_section = FixedLayerSection(
@@ -152,8 +151,33 @@ def test_player_character_section_and_card_labels_are_session_local() -> None:
         name="Alice",
     )
     characters = [
-        {"id": 1, "name": "Bob"},
-        {"id": 2, "name": "Alice"},
+        {
+            "id": 1,
+            "name": "Bob",
+            "details": [
+                {
+                    "name": "NPC 性格",
+                    "content": "外向",
+                    "tags": ["kind:personality", "scope:npc_portrayal"],
+                }
+            ],
+        },
+        {
+            "id": 2,
+            "name": "Alice",
+            "details": [
+                {
+                    "name": "外貌",
+                    "content": "银白短发",
+                    "tags": ["kind:appearance"],
+                },
+                {
+                    "name": "玩家性格",
+                    "content": "谨慎",
+                    "tags": ["kind:personality", "scope:npc_portrayal"],
+                },
+            ],
+        },
     ]
 
     fixed_layer = FixedLayerAssembler(
@@ -176,8 +200,14 @@ def test_player_character_section_and_card_labels_are_session_local() -> None:
     assert "必须以本节的 session 绑定为准" in player_section.content
     assert "Bob [NPC｜非玩家角色]" in character_section.content
     assert "Alice [PLAYER_CHARACTER｜玩家当前扮演]" in character_section.content
+    assert "NPC 性格: 外向" in character_section.content
+    assert "外貌: 银白短发" in character_section.content
+    assert "玩家性格" not in character_section.content
     assert fixed_layer.characters[0]["control_role"] == "npc"
     assert fixed_layer.characters[1]["is_player_character"] is True
+    assert [detail["name"] for detail in fixed_layer.characters[1]["details"]] == [
+        "外貌"
+    ]
 
 
 def test_fixed_layer_assembler_keeps_domain_structure_when_contributor_disabled():

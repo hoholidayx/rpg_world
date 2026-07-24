@@ -33,7 +33,7 @@ class BaseSessionMessageStore:
         role: str,
         content: str = "",
         *,
-        mode: str = models.TURN_MODE_IC,
+        mode: str = models.TURN_MODE_NEUTRAL,
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
         tool_call_id: str = "",
@@ -619,7 +619,7 @@ def _validate_role(role: str) -> str:
 
 
 def _validate_mode(mode: str | None) -> str:
-    normalized = str(mode or "").strip().lower() or models.TURN_MODE_IC
+    normalized = str(mode or "").strip().lower() or models.TURN_MODE_NEUTRAL
     if normalized not in models.TURN_MODES:
         raise ValueError(f"invalid session message mode: {normalized}")
     return normalized
@@ -692,7 +692,9 @@ def _coerce_message_input(values: MessageInput) -> dict[str, object]:
     return {
         "role": str(values["role"]),
         "content": str(values.get("content", "") or ""),
-        "mode": _validate_mode(str(values.get("mode", models.TURN_MODE_IC) or "")),
+        "mode": _validate_mode(
+            str(values.get("mode", models.TURN_MODE_NEUTRAL) or "")
+        ),
         "turn_id": _required_positive_int(values.get("turn_id", values.get("turnId")), "turn_id"),
         "seq_in_turn": _required_positive_int(
             values.get("seq_in_turn", values.get("seqInTurn")),

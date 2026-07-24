@@ -13,8 +13,8 @@ from rpg_mcp.runtime import StoryPackRuntimeError
 
 def _pack() -> dict:
     return {
-        "schemaVersion": "rpg-story-pack/1.0",
-        "contractVersion": "1.0",
+        "schemaVersion": "rpg-story-pack/2.0",
+        "contractVersion": "2.0",
         "packId": "test-project-r000002-full",
         "projectId": "test-project",
         "storyStableId": "story-main",
@@ -63,16 +63,25 @@ def _pack() -> dict:
                 {
                     "stableId": "character-player",
                     "name": "林澈",
-                    "personality": "谨慎而敏锐。",
-                    "content": "玩家候选角色。",
+                    "description": "玩家候选角色，曾经是调查记者。",
                     "aliases": [],
                     "details": [
                         {
                             "stableId": "character-player-background",
                             "name": "背景",
                             "content": "曾经是调查记者。",
-                            "tags": ["背景"],
+                            "tags": ["kind:background"],
                             "sortOrder": 10,
+                        },
+                        {
+                            "stableId": "character-player-personality",
+                            "name": "性格",
+                            "content": "谨慎而敏锐。",
+                            "tags": [
+                                "kind:personality",
+                                "scope:npc_portrayal",
+                            ],
+                            "sortOrder": 20,
                         }
                     ],
                     "visual": {"identityAnchors": ["黑色短发", "银色录音笔"]},
@@ -239,7 +248,7 @@ def test_checked_in_story_pack_schema_accepts_runtime_fixture() -> None:
     from pathlib import Path
 
     schema = json.loads(
-        Path("DesignProject/schemas/story-pack-v1.schema.json").read_text(
+        Path("DesignProject/schemas/story-pack-v2.schema.json").read_text(
             encoding="utf-8"
         )
     )
@@ -387,7 +396,9 @@ def test_story_pack_update_and_runtime_drift_conflict(tmp_path) -> None:
         changed["packId"] = "test-project-r000003-characters"
         changed["sourceRevision"] = "r000003"
         changed["sourceDigest"] = "b" * 64
-        changed["resources"]["characters"][0]["personality"] = "果断而敏锐。"
+        changed["resources"]["characters"][0]["description"] = (
+            "玩家候选角色，曾经是调查记者，也更擅长快速决断。"
+        )
         update_preview = composition.application.preview_story_pack(changed)
         character_change = next(
             item
@@ -405,13 +416,15 @@ def test_story_pack_update_and_runtime_drift_conflict(tmp_path) -> None:
             "test_world",
             story_id,
             character.id,
-            personality="运行时人工修改。",
+            description="运行时人工修改。",
         )
         conflicted = deepcopy(changed)
         conflicted["packId"] = "test-project-r000004-characters"
         conflicted["sourceRevision"] = "r000004"
         conflicted["sourceDigest"] = "c" * 64
-        conflicted["resources"]["characters"][0]["personality"] = "沉着冷静。"
+        conflicted["resources"]["characters"][0]["description"] = (
+            "玩家候选角色，沉着冷静。"
+        )
         conflict_preview = composition.application.preview_story_pack(
             conflicted
         )
@@ -441,7 +454,9 @@ def test_narrative_style_mount_drift_is_preserved(tmp_path) -> None:
         changed["packId"] = "test-project-r000003-character-update"
         changed["sourceRevision"] = "r000003"
         changed["sourceDigest"] = "b" * 64
-        changed["resources"]["characters"][0]["personality"] = "更加果断。"
+        changed["resources"]["characters"][0]["description"] = (
+            "玩家候选角色，拥有新的公开经历。"
+        )
         preview = composition.application.preview_story_pack(changed)
         style_change = next(
             item

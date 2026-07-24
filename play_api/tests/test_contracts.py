@@ -427,6 +427,7 @@ def test_rp_module_config_inheritance_validation_and_history_page(
         catalog = client.get("/play-api/v1/rp-modules/catalog")
         assert catalog.status_code == 200
         assert [item["moduleName"] for item in catalog.json()["modules"]] == [
+            "message_mode",
             "narrative_outcome",
             "plot_scheduler",
             "dice",
@@ -436,7 +437,11 @@ def test_rp_module_config_inheritance_validation_and_history_page(
             "/play-api/v1/workspaces/demo_workspace/stories/1/rp-modules"
         )
         assert story_default.status_code == 200
-        story_outcome = story_default.json()["modules"][0]
+        story_outcome = next(
+            item
+            for item in story_default.json()["modules"]
+            if item["moduleName"] == "narrative_outcome"
+        )
         assert story_outcome["configSources"]["weights"] == "config"
         assert story_outcome["effectiveConfig"]["weights"] == {
             "critical_success": 5,
@@ -465,7 +470,11 @@ def test_rp_module_config_inheritance_validation_and_history_page(
             "/play-api/v1/sessions/s_forest001/rp-modules"
         )
         assert inherited.status_code == 200
-        inherited_outcome = inherited.json()["modules"][0]
+        inherited_outcome = next(
+            item
+            for item in inherited.json()["modules"]
+            if item["moduleName"] == "narrative_outcome"
+        )
         assert inherited_outcome["sessionConfig"] == {}
         assert inherited_outcome["effectiveConfig"]["weights"] == story_weights
         assert inherited_outcome["configSources"]["weights"] == "story"
@@ -931,7 +940,7 @@ def test_stream_endpoint_uses_play_sse_envelope(tmp_path, monkeypatch) -> None:
     assert {event["sessionId"] for event in events} == {"s_forest001"}
     assert len({event["turnId"] for event in events}) == 1
     assert str(events[0]["turnId"]).startswith("turn_s_forest001_")
-    assert events[0]["payload"] == {"mode": "ic"}
+    assert events[0]["payload"] == {"mode": "neutral"}
     assert events[1]["payload"] == {"text": "你推开门"}
     assert events[2]["payload"] == {"toolName": "roll", "toolArguments": "1d20"}
     assert events[3]["payload"] == {"toolName": "roll", "resultPreview": "18"}
@@ -1290,15 +1299,14 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
         character_base,
         json={
             "name": "守夜人伊凡",
-            "personality": "谨慎，疲惫但可靠",
-            "content": "灯塔旧守夜人，知道潮汐与失火名单。",
+            "description": "灯塔旧守夜人，知道潮汐与失火名单。",
             "sortOrder": 37,
             "metadata": {"ui": {"displayVersion": "v1.0.0", "roleLabel": "NPC"}},
         },
     )
     assert new_character.status_code == 200
     assert new_character.json()["name"] == "守夜人伊凡"
-    assert new_character.json()["personality"] == "谨慎，疲惫但可靠"
+    assert new_character.json()["description"] == "灯塔旧守夜人，知道潮汐与失火名单。"
     assert new_character.json()["sortOrder"] == 37
     assert new_character.json()["metadata"]["ui"]["roleLabel"] == "NPC"
     assert client.post(
@@ -1312,10 +1320,13 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
 
     patched_character = client.patch(
         f"{character_base}/{new_character.json()['id']}",
-        json={"personality": "谨慎，口风很紧", "metadata": {"ui": {"displayVersion": "v1.0.1"}}},
+        json={
+            "description": "谨慎而且口风很紧的守夜人。",
+            "metadata": {"ui": {"displayVersion": "v1.0.1"}},
+        },
     )
     assert patched_character.status_code == 200
-    assert patched_character.json()["personality"] == "谨慎，口风很紧"
+    assert patched_character.json()["description"] == "谨慎而且口风很紧的守夜人。"
     assert patched_character.json()["version"] == 2
     assert client.patch(
         f"/play-api/v1/workspaces/missing/stories/1/characters/{new_character.json()['id']}",
@@ -1405,7 +1416,7 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
 
     delete_character_target = client.post(
         character_base,
-        json={"name": "待删除角色", "content": "临时角色"},
+        json={"name": "待删除角色", "description": "临时角色"},
     )
     assert delete_character_target.status_code == 200
     delete_character_detail = client.post(

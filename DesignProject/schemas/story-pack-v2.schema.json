@@ -47,9 +47,10 @@
           "title": "Aliases",
           "type": "array"
         },
-        "content": {
+        "description": {
           "default": "",
-          "title": "Content",
+          "description": "角色身份、经历与客观事实。不得写性格、说话方式、行为倾向或心理活动；这些演绎设定必须放入带内置 kind 标签的 details。",
+          "title": "Description",
           "type": "string"
         },
         "details": {
@@ -66,11 +67,6 @@
         },
         "name": {
           "title": "Name",
-          "type": "string"
-        },
-        "personality": {
-          "default": "",
-          "title": "Personality",
           "type": "string"
         },
         "sortOrder": {
@@ -865,15 +861,15 @@
       "type": "object"
     }
   },
-  "$id": "story-pack-v1.schema.json",
+  "$id": "story-pack-v2.schema.json",
   "additionalProperties": false,
   "properties": {
     "applyPolicy": {
       "$ref": "#/$defs/StoryPackApplyPolicy"
     },
     "contractVersion": {
-      "const": "1.0",
-      "default": "1.0",
+      "const": "2.0",
+      "default": "2.0",
       "title": "Contractversion",
       "type": "string"
     },
@@ -911,8 +907,8 @@
       "$ref": "#/$defs/StoryResources"
     },
     "schemaVersion": {
-      "const": "rpg-story-pack/1.0",
-      "default": "rpg-story-pack/1.0",
+      "const": "rpg-story-pack/2.0",
+      "default": "rpg-story-pack/2.0",
       "title": "Schemaversion",
       "type": "string"
     },
@@ -947,6 +943,6 @@
     "includedSections",
     "story"
   ],
-  "title": "RPG World Story Pack v1",
+  "title": "RPG World Story Pack v2",
   "type": "object"
 }

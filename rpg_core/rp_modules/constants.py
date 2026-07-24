@@ -4,6 +4,12 @@ from __future__ import annotations
 
 RP_MODULE_SOURCE_PREFIX = "rp_module"
 
+RP_MODULE_MESSAGE_MODE_NAME = "message_mode"
+RP_MODULE_MESSAGE_MODE_TURN_SECTION_ID = "rp_module_message_mode_turn_directive"
+RP_MODULE_MESSAGE_MODE_SOURCE = (
+    f"{RP_MODULE_SOURCE_PREFIX}:{RP_MODULE_MESSAGE_MODE_NAME}"
+)
+
 RP_MODULE_DICE_NAME = "dice"
 RP_MODULE_DICE_SECTION_ID = "rp_module_dice"
 RP_MODULE_DICE_TURN_SECTION_ID = "rp_module_dice_turn_directive"

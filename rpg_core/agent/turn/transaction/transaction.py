@@ -63,7 +63,7 @@ class AgentTurnTransaction:
         self,
         turn_stats: "TurnStats",
         *,
-        mode: TurnMode | str = TurnMode.IC,
+        mode: TurnMode | str = TurnMode.NEUTRAL,
     ) -> TurnScratch:
         turn_id: int | None = None
         try:

@@ -9,6 +9,7 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
     service = gateway.rp_modules
 
     assert [item.module_name for item in service.list_catalog()] == [
+        "message_mode",
         "narrative_outcome",
         "plot_scheduler",
         "dice",
@@ -16,6 +17,7 @@ def test_catalog_default_mount_and_session_override_round_trip(tmp_path) -> None
     story_modules = service.list_story_modules("demo_workspace", 1)
     assert story_modules is not None
     assert {item.module_name for item in story_modules} == {
+        "message_mode",
         "narrative_outcome",
         "dice",
     }
@@ -69,6 +71,7 @@ def test_new_story_mounts_all_current_default_modules(tmp_path) -> None:
     mounted = gateway.rp_modules.list_story_modules("demo_workspace", story.id)
     assert mounted is not None
     assert {item.module_name for item in mounted} == {
+        "message_mode",
         "narrative_outcome",
         "plot_scheduler",
         "dice",

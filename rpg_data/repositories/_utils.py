@@ -13,7 +13,6 @@ from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
     StoryQuickReply,
-    WorkspaceTurnMode,
 )
 from rpg_data.model.narrative_outcome import (
     NarrativeOutcomeRecord,
@@ -55,19 +54,6 @@ def to_workspace(row: records.WorkspaceRecord) -> models.Workspace:
         description=str(row.description or ""),
         enabled=bool(row.enabled),
         metadata_json=str(row.metadata_json or "{}"),
-        version=int(row.version),
-        created_at=str(row.created_at),
-        updated_at=str(row.updated_at),
-    )
-
-
-def to_workspace_turn_mode(row: records.WorkspaceTurnModeRecord) -> WorkspaceTurnMode:
-    return WorkspaceTurnMode(
-        workspace_id=str(row.workspace_id),
-        mode=str(row.mode),
-        short_name=str(row.short_name),
-        prompt=str(row.prompt or ""),
-        sort_order=int(row.sort_order),
         version=int(row.version),
         created_at=str(row.created_at),
         updated_at=str(row.updated_at),
@@ -226,7 +212,10 @@ def to_session_message(
         session_id=str(row.session_id),
         role=str(row.role),
         content=str(row.content or ""),
-        mode=str(getattr(row, "mode", models.TURN_MODE_IC) or models.TURN_MODE_IC),
+        mode=str(
+            getattr(row, "mode", models.TURN_MODE_NEUTRAL)
+            or models.TURN_MODE_NEUTRAL
+        ),
         turn_id=int(row.turn_id),
         seq_in_turn=int(row.seq_in_turn),
         tool_call_id=str(row.tool_call_id or ""),
@@ -566,8 +555,7 @@ def to_story_character(row: records.StoryCharacterRecord) -> models.StoryCharact
         workspace_id=str(row.workspace_id),
         story_id=int(row.story_id),
         name=str(row.name),
-        personality=str(row.personality or ""),
-        content=str(row.content or ""),
+        description=str(row.description or ""),
         sort_order=int(row.sort_order),
         metadata_json=str(row.metadata_json or "{}"),
         version=int(row.version),

@@ -8,12 +8,28 @@ from enum import StrEnum
 class TurnMode(StrEnum):
     """Supported semantic modes for a normal text turn."""
 
+    NEUTRAL = "neutral"
     IC = "ic"
     OOC = "ooc"
     GM = "gm"
 
 
-DEFAULT_TURN_MODE = TurnMode.IC
+DEFAULT_TURN_MODE = TurnMode.NEUTRAL
+ALL_MESSAGE_MODES = frozenset(TurnMode)
+WORLD_ADVANCING_MODES = frozenset({
+    TurnMode.NEUTRAL,
+    TurnMode.IC,
+    TurnMode.GM,
+})
+
+
+def is_world_advancing_mode(value: object) -> bool:
+    """Return whether one persisted/requested mode may advance story facts."""
+
+    try:
+        return normalize_turn_mode(value) in WORLD_ADVANCING_MODES
+    except ValueError:
+        return False
 
 
 def normalize_turn_mode(value: object) -> TurnMode:

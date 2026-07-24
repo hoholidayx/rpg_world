@@ -79,8 +79,7 @@ def test_run_migrations_creates_consolidated_final_schema() -> None:
             "workspace_id",
             "story_id",
             "name",
-            "personality",
-            "content",
+            "description",
             "sort_order",
         }.issubset(_columns(conn, "rpg_story_characters"))
         assert "character_id" not in _columns(conn, "rpg_story_characters")
@@ -274,10 +273,15 @@ def test_demo_data_uses_story_owned_resources_and_complete_defaults() -> None:
             row["module_name"]
             for row in conn.execute("SELECT module_name FROM rpg_rp_module_catalog")
         }
-        assert catalog == {"narrative_outcome", "plot_scheduler", "dice"}
+        assert catalog == {
+            "message_mode",
+            "narrative_outcome",
+            "plot_scheduler",
+            "dice",
+        }
         expected_modules_by_story = {
-            1: {"dice", "narrative_outcome"},
-            2: {"dice", "narrative_outcome"},
+            1: {"message_mode", "dice", "narrative_outcome"},
+            2: {"message_mode", "dice", "narrative_outcome"},
             3: catalog,
         }
         for story_id, expected_modules in expected_modules_by_story.items():

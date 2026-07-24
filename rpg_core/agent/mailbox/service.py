@@ -11,9 +11,12 @@ from loguru import logger
 from commons.errors import (
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE,
     MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE,
+    MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+    MESSAGE_MODE_UNAVAILABLE_STATUS_CODE,
     TURN_METADATA_INVALID_ERROR_CODE,
     TURN_METADATA_INVALID_STATUS_CODE,
     MainContextWindowThresholdExceededError,
+    MessageModeUnavailableError,
     format_turn_metadata_error_message,
 )
 from rpg_core.agent.mailbox.models import (
@@ -446,6 +449,13 @@ class AgentMailbox:
 
     @staticmethod
     def stream_error_event(error: BaseException) -> AgentStreamEvent:
+        if isinstance(error, MessageModeUnavailableError):
+            return AgentStreamEvent(
+                kind=StreamEventKind.ERROR,
+                content=str(error),
+                error_code=MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+                status_code=MESSAGE_MODE_UNAVAILABLE_STATUS_CODE,
+            )
         if isinstance(error, MainContextWindowThresholdExceededError):
             return AgentStreamEvent(
                 kind=StreamEventKind.ERROR,

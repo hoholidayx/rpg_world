@@ -174,7 +174,7 @@ class SessionManager:
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
         *,
-        mode: str = "ic",
+        mode: str = "neutral",
     ) -> None:
         self._history_service.append(
             role,

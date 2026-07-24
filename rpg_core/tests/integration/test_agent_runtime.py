@@ -9,7 +9,10 @@ from dataclasses import replace
 
 import pytest
 
-from commons.errors import MainContextWindowThresholdExceededError
+from commons.errors import (
+    MainContextWindowThresholdExceededError,
+    MessageModeUnavailableError,
+)
 from llm_client.keys import (
     AGENT_MAIN_BIZ_KEY,
     AGENT_MEMORY_SUB_AGENT_BIZ_KEY,
@@ -777,8 +780,8 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
     }
     assert ooc_reply.committed_turn_id == 1
     assert len(scripted_llm_manager.status.calls) == status_calls_before
-    assert "COMPOSER_STYLE_PROMPT" not in ooc_content
-    assert "硬性边界：本轮是场外讨论" in ooc_content
+    assert "COMPOSER_STYLE_PROMPT" in ooc_content
+    assert "本轮是 OOC（场外讨论）" in ooc_content
     assert not ({"rp_story_outcome", "status_table_set_values", "write_file"} & ooc_tool_names)
     assert not any(name.startswith("scene_") for name in ooc_tool_names)
 
@@ -802,6 +805,104 @@ async def test_turn_mode_style_snapshot_and_ooc_policy_are_end_to_end(
     assert [row.mode for row in rows] == ["ooc", "ooc", "gm", "gm"]
     assert all(row.summary_processed and row.summary_batch_id is None for row in rows[:2])
     assert all(row.story_memory_processed for row in rows[:2])
+
+
+@pytest.mark.asyncio
+async def test_ooc_recall_reads_world_context_without_reusing_ooc_history(
+    integration_agent_factory,
+    integration_data_gateway,
+    integration_settings,
+    scripted_llm_manager,
+    monkeypatch,
+) -> None:
+    session_id = "integration_ooc_recall"
+    online_memory_settings = replace(
+        integration_settings.memory_settings,
+        enabled=True,
+        query_planner_enabled=False,
+        rerank_enabled=False,
+    )
+    monkeypatch.setattr(
+        type(integration_settings),
+        "memory_settings",
+        property(lambda self: online_memory_settings),
+    )
+    captured_queries = []
+
+    async def capture_recall(_manager, context) -> None:  # noqa: ANN001
+        captured_queries.append(context)
+
+    from rpg_memory.recall.manager import MemoryRecallManager
+
+    monkeypatch.setattr(MemoryRecallManager, "recall", capture_recall)
+    agent = await integration_agent_factory(session_id, with_status=True)
+    status_calls_before = len(scripted_llm_manager.status.calls)
+
+    world_reply = await agent.send("我走进钟楼。", mode="neutral")
+    first_ooc_reply = await agent.send("第一次场外讨论规则。", mode="ooc")
+    second_ooc_reply = await agent.send("第二次场外确认规则。", mode="ooc")
+
+    assert [
+        world_reply.committed_turn_id,
+        first_ooc_reply.committed_turn_id,
+        second_ooc_reply.committed_turn_id,
+    ] == [1, 2, 3]
+    assert len(captured_queries) == 3
+    assert captured_queries[-1].current_input == "第二次场外确认规则。"
+    assert any("我走进钟楼" in turn for turn in captured_queries[-1].recent_turns)
+    assert all(
+        "第一次场外讨论规则" not in turn
+        for turn in captured_queries[-1].recent_turns
+    )
+    assert len(scripted_llm_manager.status.calls) == status_calls_before + 2
+    rows = integration_data_gateway.messages.list(session_id)
+    assert [row.mode for row in rows] == [
+        "neutral",
+        "neutral",
+        "ooc",
+        "ooc",
+        "ooc",
+        "ooc",
+    ]
+    assert all(row.summary_processed for row in rows[2:])
+    assert all(row.story_memory_processed for row in rows[2:])
+
+
+@pytest.mark.asyncio
+async def test_disabled_message_mode_rejects_guided_turn_before_llm_or_history(
+    integration_agent_factory,
+    integration_data_gateway,
+    scripted_llm_manager,
+) -> None:
+    session_id = "integration_message_mode_disabled"
+    agent = await integration_agent_factory(session_id)
+    override = integration_data_gateway.rp_modules.upsert_session_override(
+        session_id,
+        "message_mode",
+        enabled=False,
+        config={},
+    )
+    assert override is not None
+    main_calls_before = len(scripted_llm_manager.main_provider().calls)
+
+    with pytest.raises(MessageModeUnavailableError):
+        await agent.get_context_payload(mode="ic")
+    with pytest.raises(MessageModeUnavailableError):
+        await agent.send("讨论规则", mode="ooc")
+    with pytest.raises(MessageModeUnavailableError):
+        await agent.send("代我推进", mode="gm")
+
+    assert len(scripted_llm_manager.main_provider().calls) == main_calls_before
+    assert integration_data_gateway.messages.list(session_id) == []
+
+    reply = await agent.send("继续观察")
+
+    assert reply.committed_turn_id == 1
+    assert len(scripted_llm_manager.main_provider().calls) == main_calls_before + 1
+    assert [row.mode for row in integration_data_gateway.messages.list(session_id)] == [
+        "neutral",
+        "neutral",
+    ]
 
 
 @pytest.mark.asyncio

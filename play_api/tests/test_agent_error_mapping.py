@@ -3,7 +3,10 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from agent_service.client import AgentClientError, AgentServiceUnavailable
-from commons.errors import LLM_SERVICE_UNAVAILABLE_ERROR_CODE
+from commons.errors import (
+    LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+    MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+)
 from play_api import agent_client
 from play_api.main import app
 from play_api.sse_protocol import PLAY_SSE_SCHEMA_VERSION, PlaySSEType
@@ -64,6 +67,26 @@ class _LLMUnavailableStreamClient:
             "LLM service connection failed",
             status_code=503,
             error_code=LLM_SERVICE_UNAVAILABLE_ERROR_CODE,
+        )
+
+
+class _MessageModeUnavailableClient:
+    async def send(self, session_id: str, text: str, **_kwargs):
+        del session_id, text
+        raise AgentClientError(
+            "message mode unavailable",
+            status_code=409,
+            error_code=MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+        )
+
+    async def stream(self, session_id: str, text: str, **_kwargs):
+        del session_id, text
+        if False:
+            yield None
+        raise AgentClientError(
+            "message mode unavailable",
+            status_code=409,
+            error_code=MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
         )
 
 
@@ -185,3 +208,32 @@ def test_stream_preserves_llm_dependency_error_code(tmp_path, monkeypatch) -> No
     assert f'"errorCode": "{LLM_SERVICE_UNAVAILABLE_ERROR_CODE}"' in body
     assert '"statusCode": 503' in body
     assert '"message": "LLM service connection failed"' in body
+
+
+def test_turn_and_stream_preserve_message_mode_unavailable_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("RPG_WORLD_DB_PATH", str(tmp_path / "rpg_world.sqlite3"))
+    monkeypatch.setenv("RPG_WORLD_WORKSPACE_ROOT_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_client, "_client", _MessageModeUnavailableClient())
+
+    with TestClient(app) as client:
+        turn = client.post(
+            "/play-api/v1/sessions/s_forest001/turn",
+            json={"text": "host this", "mode": "gm"},
+        )
+        with client.stream(
+            "POST",
+            "/play-api/v1/sessions/s_forest001/stream",
+            json={"text": "host this", "mode": "gm"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+    assert turn.status_code == 409
+    assert turn.json()["detail"] == {
+        "errorCode": MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+        "message": "message mode unavailable",
+    }
+    assert f'"errorCode": "{MESSAGE_MODE_UNAVAILABLE_ERROR_CODE}"' in body
+    assert '"statusCode": 409' in body

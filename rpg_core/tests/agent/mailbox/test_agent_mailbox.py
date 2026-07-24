@@ -4,7 +4,11 @@ import asyncio
 
 import pytest
 
-from commons.errors import TURN_METADATA_INVALID_ERROR_CODE
+from commons.errors import (
+    MESSAGE_MODE_UNAVAILABLE_ERROR_CODE,
+    TURN_METADATA_INVALID_ERROR_CODE,
+    MessageModeUnavailableError,
+)
 from rpg_core.agent.protocol import StreamEventKind, TurnCancelStatus
 from rpg_core.agent.turn.runner import AgentReply
 from rpg_core.agent.mailbox import AgentMailbox, AgentMailboxClosedError
@@ -86,6 +90,23 @@ async def test_mailbox_maps_turn_metadata_error_without_prefixing_content() -> N
         assert events[0].kind is StreamEventKind.ERROR
         assert events[0].error_code == TURN_METADATA_INVALID_ERROR_CODE
         assert TURN_METADATA_INVALID_ERROR_CODE not in events[0].content
+    finally:
+        await mailbox.close()
+
+
+@pytest.mark.asyncio
+async def test_mailbox_maps_message_mode_unavailable_error() -> None:
+    turns = _Turns()
+    turns.stream_error = MessageModeUnavailableError("gm")
+    mailbox = _mailbox(turns)
+    try:
+        events = await _collect(
+            mailbox,
+            TurnRequest.create("host this", mode="gm"),
+        )
+        assert events[0].kind is StreamEventKind.ERROR
+        assert events[0].error_code == MESSAGE_MODE_UNAVAILABLE_ERROR_CODE
+        assert events[0].status_code == 409
     finally:
         await mailbox.close()
 

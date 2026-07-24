@@ -51,8 +51,7 @@ def _character(
         workspace_id="workspace",
         story_id=2,
         name=name,
-        personality=f"{name} personality",
-        content=f"{name} content",
+        description=f"{name} description",
         details=details,
         sort_order=sort_order,
     )
@@ -71,8 +70,7 @@ def test_character_manager_delegates_to_service_without_path_or_cache() -> None:
             "workspace_id": "workspace",
             "story_id": 2,
             "name": "Alice",
-            "personality": "Alice personality",
-            "content": "Alice content",
+            "description": "Alice description",
             "details": [
                 {
                     "id": 1,

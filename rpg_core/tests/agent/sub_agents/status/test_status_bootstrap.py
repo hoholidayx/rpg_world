@@ -86,14 +86,16 @@ def _history() -> list[Message]:
     ]
 
 
-def test_select_status_bootstrap_history_uses_complete_ic_gm_turns_only() -> None:
+def test_select_status_bootstrap_history_uses_complete_world_turns_only() -> None:
     selected = select_status_bootstrap_history(
         _history(),
         boundary_turn_id=4,
-        history_rounds=1,
+        history_rounds=2,
     )
 
     assert [(message.turn_id, message.content) for message in selected] == [
+        (1, "旧行动"),
+        (1, "旧结果"),
         (3, "受伤"),
         (3, "生命降为八"),
     ]

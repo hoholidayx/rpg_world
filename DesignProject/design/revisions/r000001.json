@@ -1,5 +1,5 @@
 {
-  "createdAt": "2026-07-23T00:00:00Z",
+  "createdAt": "2026-07-24T08:15:58Z",
   "document": {
     "decisions": [],
     "notes": [
@@ -27,7 +27,7 @@
       "statusTables": [],
       "visualCatalog": []
     },
-    "schemaVersion": "story-design/1.0",
+    "schemaVersion": "story-design/2.0",
     "sources": [],
     "story": {
       "boundaries": [],
@@ -48,11 +48,11 @@
       "workspaceRoot": ""
     }
   },
-  "documentDigest": "2e4ebe9277e0515aace8e797c5ac525d59775e96e3b996ddd09129e1d9d5bc9e",
+  "documentDigest": "88e6edb0afb3ff861964b06157c1b9b481034276c2963b31a685918407424de9",
   "parentDigest": null,
   "parentRevision": null,
   "reason": "Initialize portable Story design project",
   "revisionId": "r000001",
   "revisionNumber": 1,
-  "schemaVersion": "story-design-project/1.0"
+  "schemaVersion": "story-design-project/2.0"
 }

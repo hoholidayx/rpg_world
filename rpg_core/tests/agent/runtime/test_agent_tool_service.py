@@ -54,7 +54,6 @@ def _execution(mode: TurnMode) -> TurnExecutionSnapshot:
     request = TurnRequest.create("test", mode=mode)
     return TurnExecutionSnapshot(
         request=request,
-        mode_prompt="",
         narrative_style_id=None,
         narrative_style_name="",
         narrative_style_prompt="",

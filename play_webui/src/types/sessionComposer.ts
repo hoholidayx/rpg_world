@@ -1,11 +1,9 @@
 import type { InputMode } from './command'
 
-export type WorkspaceTurnMode = {
+export type MessageModeOption = {
   mode: InputMode
   shortName: string
-  prompt: string
   sortOrder: number
-  version: number
 }
 
 export type NarrativeStyle = {
@@ -44,7 +42,7 @@ export type SessionComposerConfig = {
   sessionId: string
   workspaceId: string
   storyId: number
-  modes: WorkspaceTurnMode[]
+  modes: MessageModeOption[]
   narrativeStyles: StoryNarrativeStyle[]
   baseNarrativeStyleId: number | null
   quickReplies: StoryQuickReply[]

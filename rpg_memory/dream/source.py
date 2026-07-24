@@ -25,7 +25,7 @@ from rpg_memory.dream.types import (
 )
 
 _ALLOWED_ROLES = frozenset({"user", "assistant"})
-_ALLOWED_MODES = frozenset({"ic", "gm"})
+_ALLOWED_MODES = frozenset({"neutral", "ic", "gm"})
 
 
 class DreamSourceSelector:

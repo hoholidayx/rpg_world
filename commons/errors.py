@@ -13,6 +13,9 @@ MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_ERROR_CODE = (
 )
 MAIN_CONTEXT_WINDOW_THRESHOLD_EXCEEDED_STATUS_CODE = 409
 
+MESSAGE_MODE_UNAVAILABLE_ERROR_CODE = "message_mode_unavailable"
+MESSAGE_MODE_UNAVAILABLE_STATUS_CODE = 409
+
 
 class InvalidTurnMetadataError(ValueError):
     """Raised when explicit ``turn_id`` / ``seq_in_turn`` metadata is invalid."""
@@ -37,6 +40,17 @@ class MainContextWindowThresholdExceededError(RuntimeError):
             f"{self.used_tokens}/{self.context_limit} tokens（{self.usage_ratio:.1%}），"
             f"已达到 {self.threshold_ratio:.0%} 输入阈值；普通正文已拒绝。"
             "请先执行 /compact 手动压缩，或切换到更大上下文窗口的 LLM。"
+        )
+
+
+class MessageModeUnavailableError(RuntimeError):
+    """Raised before turn allocation when a disabled module receives a mode."""
+
+    def __init__(self, mode: str) -> None:
+        self.mode = str(mode or "").strip().lower()
+        super().__init__(
+            f"消息模式 {self.mode!r} 当前不可用；请启用 Story/Session 的 "
+            "message_mode RP Module，或使用 neutral。"
         )
 
 

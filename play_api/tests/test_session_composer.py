@@ -11,9 +11,12 @@ from rpg_data.services import reset_data_service_gateways
 
 def test_play_chat_request_normalizes_optional_mode() -> None:
     for value in (None, "", "   "):
-        assert PlayChatRequest.model_validate({"text": "hello", "mode": value}).mode == "ic"
+        assert (
+            PlayChatRequest.model_validate({"text": "hello", "mode": value}).mode
+            == "neutral"
+        )
     assert PlayChatRequest.model_validate({"text": "hello", "mode": " OOC "}).mode == "ooc"
-    assert PlayChatRequest.model_validate({"text": "hello"}).mode == "ic"
+    assert PlayChatRequest.model_validate({"text": "hello"}).mode == "neutral"
     with pytest.raises(ValidationError, match="invalid turn mode"):
         PlayChatRequest.model_validate({"text": "hello", "mode": "chat"})
 
@@ -24,19 +27,10 @@ def test_play_session_composer_management_contract(tmp_path, monkeypatch) -> Non
     reset_data_service_gateways()
     client = TestClient(app)
 
-    modes = client.get("/play-api/v1/workspaces/demo_workspace/turn-modes")
-    assert modes.status_code == 200
-    assert [item["mode"] for item in modes.json()] == ["ic", "ooc", "gm"]
-    updated_mode = client.patch(
-        "/play-api/v1/workspaces/demo_workspace/turn-modes/ooc",
-        json={"shortName": "幕后", "prompt": "只讨论设定"},
+    assert (
+        client.get("/play-api/v1/workspaces/demo_workspace/turn-modes").status_code
+        == 404
     )
-    assert updated_mode.status_code == 200
-    assert updated_mode.json()["shortName"] == "幕后"
-    assert client.patch(
-        "/play-api/v1/workspaces/demo_workspace/turn-modes/chat",
-        json={"shortName": "聊天", "prompt": ""},
-    ).status_code == 422
 
     created_style = client.post(
         "/play-api/v1/workspaces/demo_workspace/narrative-styles",
@@ -74,7 +68,13 @@ def test_play_session_composer_management_contract(tmp_path, monkeypatch) -> Non
     composer = client.get("/play-api/v1/sessions/s_forest001/composer")
     assert composer.status_code == 200
     assert composer.json()["baseNarrativeStyleId"] == style_id
-    assert composer.json()["modes"][1]["shortName"] == "幕后"
+    assert [item["mode"] for item in composer.json()["modes"]] == [
+        "neutral",
+        "ic",
+        "ooc",
+        "gm",
+    ]
+    assert composer.json()["modes"][2]["shortName"] == "场外"
     assert [item["title"] for item in composer.json()["quickReplies"]] == ["观察"]
 
     deleted = client.delete(

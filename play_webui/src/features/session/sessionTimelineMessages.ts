@@ -23,11 +23,11 @@ export type UserTimelineMessage = SessionTimelineMessage & { role: typeof SESSIO
 
 export function makePlayerSpeaker(
   character: SessionPlayerCharacter | null,
-  mode: SessionTimelineMessage['mode'] = 'ic',
+  mode: SessionTimelineMessage['mode'] = 'neutral',
 ): SessionSpeaker {
   return {
     name: character?.name ?? '你',
-    label: (mode ?? 'ic').toUpperCase(),
+    label: (mode ?? 'neutral').toUpperCase(),
     avatarUrl: character?.avatarUrl ?? '',
     fallback: firstLetter(character?.name ?? '你'),
     tone: 'player',
@@ -127,7 +127,7 @@ function makeHistorySpeaker(
   const role = timelineRole(message.role)
 
   if (role === HISTORY_MESSAGE_ROLE.USER) {
-    return makePlayerSpeaker(playerCharacter, message.mode ?? 'ic')
+    return makePlayerSpeaker(playerCharacter, message.mode ?? 'neutral')
   }
 
   if (role === HISTORY_MESSAGE_ROLE.ASSISTANT) {
@@ -166,7 +166,7 @@ export function mapHistoryToMessages({
         timelineGroupOrder: 0,
         seqInTurn: message.seqInTurn || messageIndex + 1,
         role,
-        mode: message.mode ?? 'ic',
+        mode: message.mode ?? 'neutral',
         content,
         metadata: message.metadata,
         createdAt: message.createdAt,

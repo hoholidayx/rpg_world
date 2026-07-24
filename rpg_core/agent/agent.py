@@ -74,12 +74,13 @@ class RPGGameAgent:
         token_counter = token_counter or TiktokenTokenCounter()
         gateway = get_data_service_gateway()
         session_data = gateway.sessions
-        session_composer = SessionComposerApplicationService(
-            gateway.session_composer
-        )
         rp_module_service = RPModuleApplicationService(
             RPModuleRegistry(settings=settings.rp_module_settings),
             gateway.rp_modules,
+        )
+        session_composer = SessionComposerApplicationService(
+            gateway.session_composer,
+            rp_module_service,
         )
         role_service = SessionRoleService(session_data)
         reset_service = SessionResetService(session_data)

@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from peewee import IntegrityError, SqliteDatabase
 
+from rpg_core.rp_modules.application import RPModuleApplicationService
+from rpg_core.rp_modules.registry import RPModuleRegistry
 from rpg_core.session.catalog import SessionCatalogService
 from rpg_core.session.composer import SessionComposerApplicationService
 from rpg_data import db
@@ -29,24 +31,23 @@ def test_session_composer_modes_styles_and_story_defaults(tmp_path: Path) -> Non
     gateway = DataServiceGateway(tmp_path / "composer.sqlite3")
     gateway.initialize()
     try:
-        service = SessionComposerApplicationService(gateway.session_composer)
+        rp_modules = RPModuleApplicationService(
+            RPModuleRegistry(),
+            gateway.rp_modules,
+        )
+        service = SessionComposerApplicationService(
+            gateway.session_composer,
+            rp_modules,
+        )
         catalog = gateway.catalog
-        modes = service.list_modes("demo_workspace")
-        assert modes is not None
-        assert [(item.mode, item.short_name) for item in modes] == [
+        demo_snapshot = service.get_snapshot("s_forest001")
+        assert demo_snapshot is not None
+        assert [(item.mode.value, item.short_name) for item in demo_snapshot.modes] == [
+            ("neutral", "默认"),
             ("ic", "角色内"),
             ("ooc", "场外"),
             ("gm", "主持"),
         ]
-        updated = service.update_mode(
-            "demo_workspace",
-            " OOC ",
-            short_name="幕后",
-            prompt="只讨论设定",
-        )
-        assert updated is not None and updated.short_name == "幕后"
-        with pytest.raises(ValueError, match="invalid turn mode"):
-            service.update_mode("demo_workspace", "chat", short_name="聊天", prompt="")
 
         existing = service.list_story_styles("demo_workspace", 1)
         assert existing is not None and len(existing) == 3

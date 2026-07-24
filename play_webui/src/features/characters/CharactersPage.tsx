@@ -25,8 +25,7 @@ import type {
 
 type CharacterDraft = {
   name: string
-  personality: string
-  content: string
+  description: string
   sortOrder: number
   metadataText: string
 }
@@ -34,14 +33,14 @@ type CharacterDraft = {
 type DetailDraft = {
   name: string
   content: string
-  tagsText: string
+  tags: string[]
+  customTagsText: string
   sortOrder: number
 }
 
 const EMPTY_CHARACTER: CharacterDraft = {
   name: '',
-  personality: '',
-  content: '',
+  description: '',
   sortOrder: 0,
   metadataText: '{\n  "ui": {}\n}',
 }
@@ -49,16 +48,38 @@ const EMPTY_CHARACTER: CharacterDraft = {
 const EMPTY_DETAIL: DetailDraft = {
   name: '',
   content: '',
-  tagsText: '',
+  tags: [],
+  customTagsText: '',
   sortOrder: 0,
 }
+
+const NPC_PORTRAYAL_TAG = 'scope:npc_portrayal'
+const OBJECTIVE_DETAIL_TAGS = [
+  ['kind:appearance', '外观'],
+  ['kind:background', '背景'],
+  ['kind:relationship', '关系'],
+  ['kind:ability', '能力'],
+] as const
+const PORTRAYAL_DETAIL_TAGS = [
+  ['kind:personality', '性格'],
+  ['kind:speech', '说话方式'],
+  ['kind:behavior', '行为模式'],
+  ['kind:psychology', '心理倾向'],
+] as const
+const BUILTIN_DETAIL_TAGS: ReadonlySet<string> = new Set<string>([
+  ...OBJECTIVE_DETAIL_TAGS.map(([tag]) => tag),
+  ...PORTRAYAL_DETAIL_TAGS.map(([tag]) => tag),
+  NPC_PORTRAYAL_TAG,
+])
+const PORTRAYAL_DETAIL_TAG_SET: ReadonlySet<string> = new Set<string>(
+  PORTRAYAL_DETAIL_TAGS.map(([tag]) => tag),
+)
 
 function characterDraft(character: CharacterCard | null): CharacterDraft {
   if (!character) return EMPTY_CHARACTER
   return {
     name: character.name,
-    personality: character.personality,
-    content: character.content,
+    description: character.description,
     sortOrder: character.sortOrder,
     metadataText: JSON.stringify(character.metadata ?? {}, null, 2),
   }
@@ -66,10 +87,12 @@ function characterDraft(character: CharacterCard | null): CharacterDraft {
 
 function detailDraft(detail: CharacterDetail | null): DetailDraft {
   if (!detail) return EMPTY_DETAIL
+  const tags = normalizeDetailTags(detail.tags)
   return {
     name: detail.name,
     content: detail.content,
-    tagsText: detail.tags.join(', '),
+    tags: tags.filter((tag) => BUILTIN_DETAIL_TAGS.has(tag)),
+    customTagsText: tags.filter((tag) => !BUILTIN_DETAIL_TAGS.has(tag)).join(', '),
     sortOrder: detail.sortOrder,
   }
 }
@@ -86,6 +109,16 @@ function parseTags(value: string) {
   return Array.from(new Set(
     value.split(/[,，、\n]+/).map((item) => item.trim().replace(/^#/, '')).filter(Boolean),
   ))
+}
+
+function normalizeDetailTags(tags: Iterable<string>) {
+  const normalized = Array.from(new Set(
+    Array.from(tags, (tag) => tag.trim()).filter(Boolean),
+  ))
+  if (normalized.some((tag) => PORTRAYAL_DETAIL_TAG_SET.has(tag))) {
+    if (!normalized.includes(NPC_PORTRAYAL_TAG)) normalized.push(NPC_PORTRAYAL_TAG)
+  }
+  return normalized
 }
 
 function formatDate(value?: string | null) {
@@ -155,7 +188,7 @@ function CharactersContent() {
     const needle = search.trim().toLocaleLowerCase()
     if (!needle) return characters
     return characters.filter((character) => (
-      `${character.name} ${character.personality} ${character.content} ${character.details.map((detail) => `${detail.name} ${detail.tags.join(' ')}`).join(' ')}`
+      `${character.name} ${character.description} ${character.details.map((detail) => `${detail.name} ${detail.tags.join(' ')}`).join(' ')}`
         .toLocaleLowerCase()
         .includes(needle)
     ))
@@ -172,8 +205,7 @@ function CharactersContent() {
       if (!currentWorkspace || !storyId) throw new Error('请先选择 Story')
       const input: CharacterInput = {
         name: nextAvailableName('未命名角色', characters.map((item) => item.name)),
-        personality: '',
-        content: '',
+        description: '',
         sortOrder: characters.length ? Math.max(...characters.map((item) => item.sortOrder)) + 10 : 0,
         metadata: { ui: {} },
       }
@@ -192,8 +224,7 @@ function CharactersContent() {
       if (!draft.name.trim()) throw new Error('角色名不能为空')
       return updateCharacter(currentWorkspace, storyId, selected.id, {
         name: draft.name.trim(),
-        personality: draft.personality,
-        content: draft.content,
+        description: draft.description,
         sortOrder: draft.sortOrder,
         metadata: parseMetadata(draft.metadataText),
       })
@@ -225,7 +256,10 @@ function CharactersContent() {
       const input: CharacterDetailInput = {
         name: detailForm.name.trim(),
         content: detailForm.content,
-        tags: parseTags(detailForm.tagsText),
+        tags: normalizeDetailTags([
+          ...detailForm.tags,
+          ...parseTags(detailForm.customTagsText),
+        ]),
         sortOrder: detailForm.sortOrder,
       }
       return editingDetailId
@@ -258,6 +292,13 @@ function CharactersContent() {
     setEditingDetailId(detail?.id ?? null)
     setDetailForm(detailDraft(detail))
     setDetailOpen(true)
+  }
+
+  function toggleDetailTag(tag: string) {
+    const next = detailForm.tags.includes(tag)
+      ? detailForm.tags.filter((item) => item !== tag)
+      : [...detailForm.tags, tag]
+    setDetailForm({ ...detailForm, tags: normalizeDetailTags(next) })
   }
 
   return (
@@ -314,7 +355,7 @@ function CharactersContent() {
                   <strong className="truncate text-sm text-slate-950">{character.name}</strong>
                   <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500">#{character.id}</span>
                 </div>
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{character.personality || character.content || '暂无设定'}</p>
+                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{character.description || '暂无设定'}</p>
                 <p className="mt-2 text-[11px] font-semibold text-slate-400">{character.details.length} 条细节 · {formatDate(character.updatedAt)}</p>
               </button>
             ))}
@@ -334,11 +375,12 @@ function CharactersContent() {
           </div>
           <div className="mt-6 grid gap-5">
             <label className="grid gap-2 text-sm font-bold text-slate-700">角色名<input disabled={!selected} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-violet-300 disabled:bg-slate-50" /></label>
-            <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_140px]">
-              <label className="grid gap-2 text-sm font-bold text-slate-700">人格摘要<textarea disabled={!selected} value={draft.personality} onChange={(event) => setDraft({ ...draft, personality: event.target.value })} className="min-h-24 rounded-lg border border-slate-200 px-3 py-3 leading-6 outline-none focus:border-violet-300 disabled:bg-slate-50" /></label>
-              <label className="grid content-start gap-2 text-sm font-bold text-slate-700">排序<input disabled={!selected} type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value) || 0 })} className="h-11 rounded-lg border border-slate-200 px-3 outline-none disabled:bg-slate-50" /></label>
-            </div>
-            <label className="grid gap-2 text-sm font-bold text-slate-700">完整角色卡<textarea disabled={!selected} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} className="min-h-64 rounded-lg border border-slate-200 px-3 py-3 font-mono text-sm leading-7 outline-none focus:border-violet-300 disabled:bg-slate-50" /></label>
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              角色描述
+              <textarea disabled={!selected} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className="min-h-64 rounded-lg border border-slate-200 px-3 py-3 text-sm leading-7 outline-none focus:border-violet-300 disabled:bg-slate-50" />
+              <span className="text-xs font-medium leading-5 text-amber-700">这里只写身份、经历与客观事实；不要写性格、说话方式、行为倾向或心理活动。演绎设定请放到下方带内置标签的角色细节中。</span>
+            </label>
+            <label className="grid max-w-40 content-start gap-2 text-sm font-bold text-slate-700">排序<input disabled={!selected} type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value) || 0 })} className="h-11 rounded-lg border border-slate-200 px-3 outline-none disabled:bg-slate-50" /></label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">Metadata JSON<textarea disabled={!selected} value={draft.metadataText} onChange={(event) => setDraft({ ...draft, metadataText: event.target.value })} className="min-h-36 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-xs leading-6 outline-none focus:border-violet-300" /></label>
           </div>
         </section>
@@ -368,8 +410,31 @@ function CharactersContent() {
           <div className="grid gap-4 px-6 py-5">
             <label className="grid gap-2 text-sm font-bold">名称<input value={detailForm.name} onChange={(event) => setDetailForm({ ...detailForm, name: event.target.value })} className="h-11 rounded-lg border border-slate-200 px-3" /></label>
             <label className="grid gap-2 text-sm font-bold">正文<textarea value={detailForm.content} onChange={(event) => setDetailForm({ ...detailForm, content: event.target.value })} className="min-h-40 rounded-lg border border-slate-200 px-3 py-3 leading-7" /></label>
+            <div className="grid gap-3">
+              <span className="text-sm font-bold">客观设定标签</span>
+              <div className="flex flex-wrap gap-2">
+                {OBJECTIVE_DETAIL_TAGS.map(([tag, label]) => (
+                  <button key={tag} type="button" onClick={() => toggleDetailTag(tag)} className={`rounded-full border px-3 py-1.5 text-xs font-bold ${detailForm.tags.includes(tag) ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500'}`}>{label}</button>
+                ))}
+              </div>
+              <span className="mt-2 text-sm font-bold">NPC 演绎标签</span>
+              <div className="flex flex-wrap gap-2">
+                {PORTRAYAL_DETAIL_TAGS.map(([tag, label]) => (
+                  <button key={tag} type="button" onClick={() => toggleDetailTag(tag)} className={`rounded-full border px-3 py-1.5 text-xs font-bold ${detailForm.tags.includes(tag) ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-slate-200 text-slate-500'}`}>{label}</button>
+                ))}
+                <button
+                  type="button"
+                  disabled={detailForm.tags.some((tag) => PORTRAYAL_DETAIL_TAG_SET.has(tag))}
+                  onClick={() => toggleDetailTag(NPC_PORTRAYAL_TAG)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-bold ${detailForm.tags.includes(NPC_PORTRAYAL_TAG) ? 'border-amber-600 bg-amber-100 text-amber-900' : 'border-slate-200 text-slate-500'} disabled:cursor-not-allowed`}
+                >
+                  NPC 演绎作用域{detailForm.tags.some((tag) => PORTRAYAL_DETAIL_TAG_SET.has(tag)) ? '（自动锁定）' : ''}
+                </button>
+              </div>
+              <p className="text-xs leading-5 text-slate-500">NPC 演绎设定会从玩家角色的 Fixed Layer 中排除，只在该角色作为 NPC，或当前 turn 使用 GM 托管时动态注入。</p>
+            </div>
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_140px]">
-              <label className="grid gap-2 text-sm font-bold">标签<input value={detailForm.tagsText} onChange={(event) => setDetailForm({ ...detailForm, tagsText: event.target.value })} placeholder="关系, 外观, 秘密" className="h-11 rounded-lg border border-slate-200 px-3" /></label>
+              <label className="grid gap-2 text-sm font-bold">自定义标签<input value={detailForm.customTagsText} onChange={(event) => setDetailForm({ ...detailForm, customTagsText: event.target.value })} placeholder="秘密, 阵营" className="h-11 rounded-lg border border-slate-200 px-3" /></label>
               <label className="grid gap-2 text-sm font-bold">排序<input type="number" value={detailForm.sortOrder} onChange={(event) => setDetailForm({ ...detailForm, sortOrder: Number(event.target.value) || 0 })} className="h-11 rounded-lg border border-slate-200 px-3" /></label>
             </div>
           </div>

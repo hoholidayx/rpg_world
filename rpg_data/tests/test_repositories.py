@@ -253,8 +253,7 @@ def test_story_owned_character_and_lorebook_repositories(tmp_path: Path) -> None
                 "repo_story",
                 story.id,
                 "Alice",
-                personality="curious",
-                content="A young wizard.",
+                description="A young wizard.",
             )
             detail = rpg_story_characters.create_detail(
                 character.id,
@@ -271,7 +270,10 @@ def test_story_owned_character_and_lorebook_repositories(tmp_path: Path) -> None
                 metadata_json='{"ui":{"displayVersion":"v1.0.0"}}',
             )
             other_character = rpg_story_characters.create(
-                "repo_story", other_story.id, "Alice", content="Independent copy"
+                "repo_story",
+                other_story.id,
+                "Alice",
+                description="Independent copy",
             )
 
         assert isinstance(character, models.StoryCharacter)

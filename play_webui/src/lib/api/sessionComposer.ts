@@ -5,9 +5,7 @@ import type {
   SessionComposerConfig,
   StoryNarrativeStyle,
   StoryQuickReply,
-  WorkspaceTurnMode,
 } from '@/types/sessionComposer'
-import type { InputMode } from '@/types/command'
 import { playApiFetch, playApiFetchNoContent } from './client'
 
 function workspacePath(workspaceId: string) {
@@ -20,21 +18,6 @@ function storyPath(workspaceId: string, storyId: number) {
 
 export function getSessionComposer(sessionId: string) {
   return playApiFetch<SessionComposerConfig>(`/sessions/${encodeURIComponent(sessionId)}/composer`)
-}
-
-export function listWorkspaceTurnModes(workspaceId: string) {
-  return playApiFetch<WorkspaceTurnMode[]>(`${workspacePath(workspaceId)}/turn-modes`)
-}
-
-export function updateWorkspaceTurnMode(
-  workspaceId: string,
-  mode: InputMode,
-  input: { shortName: string; prompt: string },
-) {
-  return playApiFetch<WorkspaceTurnMode>(`${workspacePath(workspaceId)}/turn-modes/${mode}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  })
 }
 
 export function listNarrativeStyles(workspaceId: string) {

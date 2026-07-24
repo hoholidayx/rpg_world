@@ -6,13 +6,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rpg_core.context.models import Message
-from rpg_core.session.modes import TurnMode
+from rpg_core.session.modes import (
+    DEFAULT_TURN_MODE,
+    TurnMode,
+    WORLD_ADVANCING_MODES,
+)
 
 if TYPE_CHECKING:
     from rpg_core.session.manager import SessionManager
 
 
-_ALLOWED_MEMORY_MODES = frozenset({TurnMode.IC.value, TurnMode.GM.value})
+_ALLOWED_MEMORY_MODES = frozenset(mode.value for mode in WORLD_ADVANCING_MODES)
 
 
 @dataclass(frozen=True)
@@ -104,7 +108,7 @@ def select_summary_turn_groups(
     keep_recent_turns: int,
     mark_excluded: bool = True,
 ) -> list[list[Message]]:
-    """Return eligible IC/GM groups, optionally advancing excluded OOC rows."""
+    """Return world-advancing groups, optionally advancing excluded OOC rows."""
 
     included, excluded = _partition_mode_groups(session.summary_unprocessed_turn_groups())
     if excluded and mark_excluded:
@@ -133,7 +137,7 @@ def select_summary_turn_groups(
 def select_story_memory_turn_groups(
     session: SessionManager,
 ) -> list[list[Message]]:
-    """Mark OOC story-memory rows and return IC/GM extraction groups."""
+    """Mark OOC story-memory rows and return world-advancing extraction groups."""
 
     included, excluded = _partition_mode_groups(
         session.story_turn_groups_since_last_extraction()
@@ -151,7 +155,10 @@ def _partition_mode_groups(
     included: list[list[Message]] = []
     excluded: list[list[Message]] = []
     for group in groups:
-        modes = {str(message.mode or TurnMode.IC.value).strip().lower() for message in group}
+        modes = {
+            str(message.mode or DEFAULT_TURN_MODE.value).strip().lower()
+            for message in group
+        }
         if TurnMode.OOC.value in modes:
             excluded.append(group)
         elif modes and modes.issubset(_ALLOWED_MEMORY_MODES):

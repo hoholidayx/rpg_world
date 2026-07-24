@@ -243,7 +243,7 @@ class SessionHistory:
         turn_id: int | None = None,
         seq_in_turn: int | None = None,
         *,
-        mode: str = "ic",
+        mode: str = "neutral",
     ) -> None:
         """Append a message to in-memory history and, when enabled, rpg_data."""
         role_value = Role(role).value

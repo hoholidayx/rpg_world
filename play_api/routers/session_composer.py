@@ -10,13 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from play_api.composition import session_composer_service
 from play_api.routers._locator import resolve_session_or_404
-from rpg_core.agent.turn.models import normalize_turn_mode
+from rpg_core.rp_modules.message_mode import MessageModeOption
 from rpg_core.session.composer import SessionComposerApplicationService
 from rpg_data.model.composer import (
     NarrativeStyle,
     StoryNarrativeStyle,
     StoryQuickReply,
-    WorkspaceTurnMode,
 )
 
 router = APIRouter(tags=["play-session-composer"])
@@ -25,26 +24,9 @@ router = APIRouter(tags=["play-session-composer"])
 class PlayTurnMode(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    mode: Literal["ic", "ooc", "gm"]
+    mode: Literal["neutral", "ic", "ooc", "gm"]
     short_name: str = Field(alias="shortName")
-    prompt: str
     sort_order: int = Field(alias="sortOrder")
-    version: int
-
-
-class PlayTurnModePatch(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
-
-    short_name: str = Field(alias="shortName")
-    prompt: str
-
-    @field_validator("short_name")
-    @classmethod
-    def _short_name_required(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("shortName must not be empty")
-        return value
 
 
 class PlayNarrativeStyle(BaseModel):
@@ -179,13 +161,11 @@ class PlaySessionComposer(BaseModel):
     quick_replies: list[PlayQuickReply] = Field(alias="quickReplies")
 
 
-def _mode_response(item: WorkspaceTurnMode) -> PlayTurnMode:
+def _mode_response(item: MessageModeOption) -> PlayTurnMode:
     return PlayTurnMode(
-        mode=normalize_turn_mode(item.mode).value,
+        mode=item.mode.value,
         shortName=item.short_name,
-        prompt=item.prompt,
         sortOrder=item.sort_order,
-        version=item.version,
     )
 
 
@@ -233,37 +213,6 @@ def _composer_service() -> SessionComposerApplicationService:
 
 def _conflict(exc: IntegrityError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
-
-
-@router.get("/workspaces/{workspace_id}/turn-modes", response_model=list[PlayTurnMode])
-async def list_turn_modes(workspace_id: str) -> list[PlayTurnMode]:
-    items = _composer_service().list_modes(workspace_id)
-    if items is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return [_mode_response(item) for item in items]
-
-
-@router.patch(
-    "/workspaces/{workspace_id}/turn-modes/{mode}",
-    response_model=PlayTurnMode,
-)
-async def update_turn_mode(
-    workspace_id: str,
-    mode: str,
-    body: PlayTurnModePatch,
-) -> PlayTurnMode:
-    try:
-        item = _composer_service().update_mode(
-            workspace_id,
-            mode,
-            short_name=body.short_name,
-            prompt=body.prompt,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if item is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return _mode_response(item)
 
 
 @router.get(
