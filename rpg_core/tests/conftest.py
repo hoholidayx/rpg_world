@@ -199,6 +199,19 @@ class FakeStatusManager:
                 attrs[str(row[0])] = str(row[1])
         return attrs
 
+    def get_scene_update_rules(self):
+        if self.scene_table is None:
+            return None
+        document = self.scene_table.get("document")
+        rows = document.get("rows", []) if isinstance(document, dict) else []
+        return {
+            str(row.get("key", "")): str(row.get("updateRule", ""))
+            for row in rows
+            if isinstance(row, dict)
+            and str(row.get("key", ""))
+            and str(row.get("updateRule", ""))
+        }
+
     def set_key_value(self, table_id: int, key: str, value: str):
         self.calls.append(("set", table_id, key, value))
         if self.scene_table is None:

@@ -1,4 +1,4 @@
-"""Status routing, update, deferred, and bootstrap SubAgent workflow."""
+"""Status routing, immediate update, and bootstrap SubAgent workflow."""
 
 from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
 from rpg_core.agent.sub_agents.status.bootstrap import (
@@ -6,7 +6,6 @@ from rpg_core.agent.sub_agents.status.bootstrap import (
     select_status_bootstrap_history,
 )
 from rpg_core.agent.sub_agents.status.models import (
-    DeferredStatusResult,
     OutcomeDecision,
     StatusBootstrapResult,
     StatusRouteResult,
@@ -19,7 +18,6 @@ from rpg_core.agent.sub_agents.status.models import (
 )
 
 __all__ = [
-    "DeferredStatusResult",
     "OutcomeDecision",
     "StatusBootstrapCoordinator",
     "StatusBootstrapResult",

@@ -92,7 +92,7 @@
 - `play_webui/src/types/statusTables.ts`
   - 状态表是通用 `rows[].key/value`，value 为字符串。
   - 支持 `scene | normal`。
-  - 字段更新频率支持 `realtime | event_driven | deferred | manual`。
+  - 所有字段 value 均在当前 turn 即时判断更新；`updateRule` 只提供额外语义指导，`runtimeKeyLocked` 只保护 key 结构。
 - `play_webui/src/features/session/SessionStatusRail.tsx`
   - 已支持多张 scene 表和 normal 表。
   - 已支持角色绑定状态表、玩家角色标识、在场角色和 normal 表 pin。
@@ -290,7 +290,7 @@ ImmersiveSessionPage
 - `history-page` 只表示服务端 turn 历史分页，不得与沉浸对白的前端视觉分页混用。
 - 会话内 API 只使用全局短 `session_id`。
 - 玩家角色选择和切换统一走 Agent `/role_bind` 命令链路。
-- scene 仍是 story 挂载的专用实时状态，不进入普通 normal 表展示逻辑。
+- scene 仍是 Story 直属的专用状态，不进入普通 normal 表展示逻辑；字段使用统一即时更新契约。
 - Context 圆环只使用下一轮 `context-preview`。
 - stop 必须使用 requestId 的既有 Play API → Agent service 链路。
 - 主模型选择继续遵循 config default < story override < session override。

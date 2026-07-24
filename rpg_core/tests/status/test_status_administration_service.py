@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from rpg_core.scene.status import SceneStatusPolicyError
 from rpg_core.status.administration import StatusTableAdministrationService
 from rpg_data.model.status import (
     STATUS_KIND_SCENE,
-    STATUS_UPDATE_FREQUENCY_MANUAL,
     StatusTableDocument,
     StatusTableRow,
     StoryStatusTable,
@@ -69,7 +67,7 @@ def test_administration_prepares_scene_document_before_persistence() -> None:
     assert data.document.row_for_key("天气").runtime_key_locked is False
 
 
-def test_administration_validates_existing_document_when_kind_changes() -> None:
+def test_administration_preserves_rules_when_kind_changes_to_scene() -> None:
     data = _Data()
     data.table = StoryStatusTable(
         id=5,
@@ -82,19 +80,21 @@ def test_administration_validates_existing_document_when_kind_changes() -> None:
                 StatusTableRow(
                     "备注",
                     "人工维护",
-                    update_frequency=STATUS_UPDATE_FREQUENCY_MANUAL,
+                    update_rule="仅在备注事实明确变化时更新",
                 )
             ]
         ),
     )
 
-    with pytest.raises(SceneStatusPolicyError, match="realtime"):
-        StatusTableAdministrationService(data).update_story_table(
-            "workspace",
-            1,
-            5,
-            status_kind=STATUS_KIND_SCENE,
-        )
+    StatusTableAdministrationService(data).update_story_table(
+        "workspace",
+        1,
+        5,
+        status_kind=STATUS_KIND_SCENE,
+    )
+
+    assert data.document is not None
+    assert data.document.rows[0].update_rule == "仅在备注事实明确变化时更新"
 
 
 def test_administration_scopes_story_table_deletion() -> None:

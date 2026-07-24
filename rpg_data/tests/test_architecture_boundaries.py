@@ -409,7 +409,6 @@ def test_tts_data_service_does_not_expose_business_policy_entrypoints() -> None:
 def test_status_data_service_does_not_expose_business_policy_entrypoints() -> None:
     forbidden = {
         "commit_bootstrap_state",
-        "commit_deferred_update",
         "create_story_template",
         "delete_story_template_mount",
         "get_active_scene_table",

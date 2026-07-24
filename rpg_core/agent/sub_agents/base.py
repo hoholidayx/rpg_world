@@ -8,8 +8,8 @@
 - ``ToolProvider`` 接口 + 工具提供者管理（注册、去重、刷新）
 - ``_build_system_context()`` 渲染完整系统上下文
 
-所有子 Agent **必须**定义自己的 ``system_prompt`` 属性（类似 Java 抽象方法），
-单场景子 Agent 返回主提示词，多管线子 Agent 返回空串由各管线自行提供。
+单提示词子 Agent 可覆盖 ``system_prompt`` 属性；多管线子 Agent 返回空串，
+由各管线在调用时显式提供提示词。
 
 子 Agent 的 ``system_prompt`` 通过 ``bind_context()`` 注入到 ``SubAgentContext``，
 调用 ``_build_system_context()`` 或 ``context.render()`` 可获得完整输出：
@@ -83,10 +83,8 @@ class BaseSubAgent:
     def system_prompt(self) -> str:
         """子 Agent 自身系统提示。
 
-        子类必须覆盖此属性（类似 Java 抽象方法）。
-
-        - 单场景子 Agent（如 ``StatusSubAgent``）返回主提示词。
-        - 多管线子 Agent（如 ``MemorySubAgent``）返回空串，各管线自行提供。
+        单提示词子 Agent 可覆盖此属性；Status/Memory 等多管线子 Agent 保持空串，
+        各管线自行提供专属提示词。
         """
         return ""
 

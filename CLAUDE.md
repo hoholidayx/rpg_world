@@ -450,14 +450,13 @@ TurnRequest                            调用方原始、不可变输入
 
 - turn 开始后，user message、assistant reply 和 scene/status document 变更先写入 scratch。
 - 创建 turn scratch 前先解析不可变 RP Module 快照，Narrative Outcome 权重随该快照固定；turn 开始后 `rp_story_outcome` 与 scratch 版 scene/status 工具一起绑定给 `StatusSubAgent`。代码固定编排为 Outcome 独立判定 → 状态表/字段路由 → scene 与每张命中表分别更新；Outcome 已暂存或判定失败时不进入状态路由与预写。
-- 状态路由只能选择具有实际可用工具的 scene，以及普通表中的 `realtime` / 已明确命中 `updateRule` 的 `event_driven` 字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID、key allowlist 和频率。隔离 Update 使用稳定 system contract，明确只能调用本请求实际提供的工具；user 内容按 `Recent Conversation → User Action → Selected State Target` 排列，每次仍只下发当前目标 schema。默认结构权限关闭时只允许更新已有 value。快速更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
+- 状态路由只能选择具有实际可用工具的 scene，以及普通表中的已有字段；每个更新调用只获得对应 scene 或单张表的被选字段，并由工具层再次校验 table ID 与 key allowlist。空 `updateRule` 使用通用“事实已明确且值实际变化”条件，非空规则作为额外语义指导，不产生独立调度或数据库写入门禁。隔离 Update 使用稳定 system contract，明确只能调用本请求实际提供的工具；user 内容按 `Recent Conversation → User Action → Selected State Target` 排列，每次仍只下发当前目标 schema。默认结构权限关闭时只允许更新已有 value。即时更新按 scene/单张普通表目标各自创建内存 checkpoint；provider、工具或范围校验失败只恢复当前目标，保留此前成功目标并继续后续目标和主 Agent。checkpoint 创建或恢复失败才终止并 discard 整个 turn；不新增持久化 journal 或可靠重试队列。
 - 主 Agent context builder 读取按 `summary_processed` 投影后的历史、当前 scratch user message、scratch 后的状态，以及主调用前已暂存的 Narrative Outcome runtime section。预裁定成功后不再注入 Narrative Outcome fixed section，只用简短无序条目要求执行最终结果并明确列出本轮可用的 scene/status 工具，同时从主 Agent schema 和可执行 registry 移除 outcome 工具；漏判或预裁定失败时才保留原 fixed contract 和补判工具。主 Agent 每次 outcome 后都检查 scene/status，但只有实际、持久、确定的值变化才写，允许零状态工具。有变化时工具调用轮不得夹带 RP 正文，最终正文不得新增尚未同步的可追踪确定事实；状态同步无需询问玩家。
-- 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。字段更新频率固定为 `realtime | event_driven | deferred | manual`，旧字段默认 `realtime`，scene 永远只能是 `realtime`；`deferred` 由回复交付后的慢状态归纳维护，`manual` 不允许 LLM 写入。
+- 普通表统一使用 `status_table_set_values`，只能按当前 session 运行时表 ID 批量修改已有 key 的 value；no-op 不进入 scratch，普通表即使没有 scene 也可独立触发状态预更新。状态 document 固定为 `schemaVersion=2`，行结构只允许 `key / value / runtimeKeyLocked / updateRule / metadata`；所有字段的 value 都可由 LLM 在当前 turn 即时更新，不存在频率、周期、人工只读或替代写权限字段。`runtimeKeyLocked` 只保护 key 结构。
 - LLM 完整成功后再提交 main history、backup history 和状态表；stream 模式 commit 成功后才发 DONE。
 - WebUI 停止生成通过 `requestId` 走 Play API `/sessions/{session_id}/stop` 到 Agent service `/chat/stop`；取消成功的 stream turn 丢弃 scratch，不发 DONE，不提交消息、状态或 usage。
 - 持久化 session 的 commit 使用 `rpg_data` database atomic；`history_enabled=False` 仅作为测试/内存模式，不承诺补偿回滚已写入的外部 status manager。
 - summary compression 和 story memory extraction 是 commit 后副作用，失败只记录 warning，不回滚已提交 turn。
-- 已提交 turn 的回复/SSE 完成先交付调用方，再由同一 session mailbox 执行到期的 deferred 字段归纳；归纳不延迟本轮回复展示，但在下一队列项前完成。默认间隔来自 `agent.status_sub_agent.deferred.default_interval_turns`，字段可用 `deferredIntervalTurns` 覆盖；值与逐字段进度原子提交，失败不推进进度。
 - session 状态表并发暂采用 last-write-wins，不使用 `version`/CAS；提交发现 document 已偏离 scratch 基线时在 data 层记录 warning 后继续覆盖。
 
 ## 关键设计
@@ -591,7 +590,8 @@ Summary Layer 只把“本次投影过滤过至少一条消息”作为尝试加
 
 `当前场景` 是 `status_kind="scene"` 的特殊状态表，不走普通 `STATUS_TABLES` 层。`SceneTracker.get_context()`
 会将它作为 user prefix 注入最终用户消息：一方面提高模型对当前时空、地点、场景属性的注意力，
-另一方面让场景状态随 user message 进入历史，便于后续摘要和记忆按时间顺序归纳。
+另一方面让纯场景数据 snapshot 随 user message 进入历史，便于后续摘要和记忆按时间顺序归纳；
+`updateRule` 等运行时指导不写入该 snapshot。
 `rpg_data` 状态表 service 用 `status_kind="scene"` 表达这一类特殊状态。Session 只消费创建或
 reset 时从当前 Story 复制的 scene，以及显式创建的 Session 原生 scene；没有 scene 运行表时，Agent 不注入 `[scene]`，也不注册 scene 工具。
 当 Plot Scheduler 启用时，`SceneTracker` 每 turn 必须从 scratch 状态表重新解析“时间”，且只接受
@@ -600,10 +600,12 @@ reset 时从当前 Story 复制的 scene，以及显式创建的 Session 原生 
 默认配置 `agent.scene.allow_runtime_key_changes=false` 时，非空 scene 只注册已有 value 更新能力：
 `scene_attr` 的 key schema 枚举当前已有字段，`scene_time` 仅在 `时间` 字段已存在时注册，
 `scene_del_attr` 不注册；空 scene 没有任何 scene 工具，Route 也不能选择 scene。工具执行层会再次校验，
-因此旧 schema 或手工构造的工具实例也不能越权创建/删除 key。显式开启该配置后才恢复原有结构编辑能力。
+因此旧 schema 或手工构造的工具实例也不能越权创建/删除 key。显式开启该配置后才恢复原有结构编辑能力；
+`runtimeKeyLocked` 只保护 key 不被删除或重命名，不限制 value 更新。Scene 的非空 `updateRule` 仅由
+`SceneTracker.get_context()` 注入本轮运行时 Context，持久化 user history 使用的 snapshot 不包含这些规则。
 
 普通 `STATUS_TABLES` 层只展示 session 运行时表 ID、表名、作为“用途与更新规则”的
-`description`、完整 KV、更新频率和事件规则，不展示模板来源或通用作用范围。绑定角色的普通表进入独立的
+`description`、完整 KV 和逐字段 `updateRule`，不展示模板来源或通用作用范围。绑定角色的普通表进入独立的
 “角色状态表”段落并按 `characterName` 分组；当前角色绑定不触发额外工具或业务行为。
 角色绑定入库必须校验角色 name 非空。Story 副本 metadata 缺角色名时，优先按复制时保存的
 `characterId` 读取当前 Story Character；来源定义仍存在时也可从 `source_story_status_table_id`
@@ -688,7 +690,7 @@ agent.send(user_input)
   → TurnRuntimeFactory 创建 AgentTurnTransaction / TurnScratch / RPModuleTurnRuntime
   → StatusPreflightHook 调用 StatusSubAgent.run_preflight() 执行固定编排
     → Outcome 阶段：需要裁定时只暂存 outcome，并停止后续状态阶段
-    → Route 阶段：只选择相关 scene、表 ID 及 realtime/event_driven key
+    → Route 阶段：只选择相关 scene、表 ID 及已有 key
     → Update 阶段：scene 与每张命中表分别调用；目标失败只恢复该目标，其他确定性变化保留在 scratch
   → PlotSchedulingPreflightHook：按 scratch SceneTime 选择 outline/pool 候选；forced 直接暂存，soft 隔离调用 Judge
   → SceneTracker.get_context() → [scene] 嵌入 user message
@@ -702,7 +704,6 @@ agent.send(user_input)
   → TurnRuntime.commit() 短事务写入主/backup 消息、Narrative Outcome、Plot decisions 与状态表
   → 同步适配为 AgentReply；流式仅在 commit 成功后发送带 usage/turn_id 的 DONE
   → PostCommitHooks：story memory extraction / summary compression 逐项隔离
-  → 回复已交付后，mailbox 在下一项前执行到期 deferred 字段归纳
 ```
 
 ### 子 Agent 系统（`agent/sub_agents/`）
@@ -711,7 +712,7 @@ agent.send(user_input)
 
 | 子 Agent | 职责 | 执行时机 |
 |---|---|---|
-| **StatusSubAgent** | 独立 Outcome 预判、状态目标路由、按 scene/单表预更新，以及 committed history 的 deferred 慢状态归纳 | 主 LLM 前执行快速阶段；回复交付后执行到期慢阶段 |
+| **StatusSubAgent** | 独立 Outcome 预判、状态目标路由，以及按 scene/单表进行当前 turn 的即时预更新 | 主 LLM 前执行 |
 | **MemorySubAgent** | 记忆总结/召回/剧情持久化 | `process()` 由 CommandDispatcher 或自动触发 |
 
 支持独立 LLM provider 配置，通过 `llm_service/llm.yaml` 的 `agent.status_sub_agent` / `agent.memory_sub_agent` biz key 选择 `shared`、`openai` 或 `llama`，通过 `SubAgentContext` 获取世界书、当前玩家角色强约束和带 PLAYER/NPC 标注的角色卡上下文。StatusSubAgent 使用本轮不可变角色快照；MemorySubAgent 在角色绑定或切换后刷新共享上下文。
@@ -807,17 +808,20 @@ Status 使用 Session 创建或 reset 时形成的独立运行副本。
 
 `rpg_data.services.status.StatusDataService` 是状态表的公开类型化持久化入口：SQL row 内的
 `document_json` 是正文真源；service 不通过目录扫描发现状态表。它负责 Story 定义、Session
-document、角色关联 read model、deferred progress、last-write-wins 诊断与调用方指定的原子 document
+document、角色关联 read model、last-write-wins 诊断与调用方指定的原子 document
 batch，不决定 Scene、Context 或运行时写入策略。`StatusTableAdministrationService` 负责 Story/Session 表管理规则，
 `SceneStatusService` 负责 Scene 字段约束与 active Scene，`StatusContextService` 负责角色名修复和 Context
-可见性，`StatusManager` 负责 Agent 运行时、deferred 与 bootstrap 写入资格。composition root 从
+可见性，`StatusManager` 负责 Agent 当前 turn 即时更新与 bootstrap 写入资格。composition root 从
 `get_data_service_gateway().status` 取得 Data Service 后显式注入，不新增 per-service 全局 getter，也不让
 业务服务持有整个 Gateway。通用存储写操作仍支持 header 名称、行匹配和 key/value selector；LLM 的
 普通表工具只能更新已有 key 的 value，不能增删改 key。key/value 写入以 `StatusTableDocument` 的逻辑
 key/value 为准，不依赖 UI 列标题。
-每个 `StatusTableRow` 可配置 `updateFrequency`、`updateRule`、`deferredIntervalTurns`；
-`event_driven` 必须提供非空 `updateRule`，只有 `deferred` 可设置正整数间隔，旧 document 缺字段时按
-`realtime` 读取。deferred 进度保存在 `rpg_session_status_deferred_progress`；历史 truncate 只收缩进度边界、不回滚已经提交的状态值。`/clear` 删除全部进度与既有 `story_copy`，再按当前 Story 定义重建；`session_native` 表保留 ID 和完整结构，但所有 value 置空。同名原生表与当前 Story 定义冲突时 reset 原子失败。
+状态 document 固定为 `schemaVersion=2`；每个 `StatusTableRow` 只允许 `key`、`value`、
+`runtimeKeyLocked`、`updateRule` 和 `metadata`。旧版本、旧频率/周期字段与其它未知属性直接拒绝。
+所有字段 value 都可由 Agent 在当前 turn 即时更新；空 `updateRule` 使用通用事实变化条件，非空规则
+只是额外语义指导。`runtimeKeyLocked` 只保护 key 结构。`/clear` 删除既有 `story_copy` 并按当前 Story
+定义重建；`session_native` 表保留 ID 和完整结构，但所有 value 置空。同名原生表与当前 Story 定义
+冲突时 reset 原子失败。
 gateway/bootstrap 只 materialize workspace/story/session 运行目录并初始化缺失的 session
 状态表副本，不负责发现或创建业务索引。默认不清理不在 SQL 索引中的 workspace/story/session 目录；
 开启开关是 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true`。

@@ -162,7 +162,7 @@ async def test_status_scratch_and_messages_commit_together_with_real_sqlite(
             model="status-model",
             tool_calls=[tool_call(
                 "select_status_targets",
-                f'{{"scene":false,"tables":[{{"table_id":{table_id},"realtime_keys":["线索"],"event_keys":[],"reason":"明确更新线索"}}]}}',
+                f'{{"scene":false,"tables":[{{"table_id":{table_id},"keys":["线索"],"reason":"明确更新线索"}}]}}',
             )],
         )
     )
@@ -211,7 +211,7 @@ async def test_status_target_failure_keeps_successful_scene_and_main_turn_runnin
             tool_calls=[tool_call(
                 "select_status_targets",
                 f'{{"scene":true,"tables":[{{"table_id":{table_id},'
-                '"realtime_keys":["线索"],"event_keys":[],'
+                '"keys":["线索"],'
                 '"reason":"确定更新线索"}]}',
             )],
         ),
@@ -271,7 +271,7 @@ async def test_main_failure_discards_successful_partial_status_prewrites(
             tool_calls=[tool_call(
                 "select_status_targets",
                 f'{{"scene":true,"tables":[{{"table_id":{table_id},'
-                '"realtime_keys":["线索"],"event_keys":[],'
+                '"keys":["线索"],'
                 '"reason":"确定更新线索"}]}',
             )],
         ),
@@ -321,7 +321,7 @@ async def test_status_commit_failure_rolls_back_messages_backup_and_document(
             model="status-model",
             tool_calls=[tool_call(
                 "select_status_targets",
-                f'{{"scene":false,"tables":[{{"table_id":{table_id},"realtime_keys":["线索"],"event_keys":[],"reason":"明确更新线索"}}]}}',
+                f'{{"scene":false,"tables":[{{"table_id":{table_id},"keys":["线索"],"reason":"明确更新线索"}}]}}',
             )],
         )
     )

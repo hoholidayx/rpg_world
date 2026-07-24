@@ -1,6 +1,6 @@
 # Agent Turn 与状态更新编排
 
-本文是当前 Agent 普通正文 turn 的完整编排说明，覆盖命令与角色门禁、不可变快照、Context 门禁、Narrative Outcome、快速状态路由、主 Agent、事务提交、commit 后副作用和 deferred 慢状态归纳。
+本文是当前 Agent 普通正文 turn 的完整编排说明，覆盖命令与角色门禁、不可变快照、Context 门禁、Narrative Outcome、状态路由、当前 turn 即时更新、主 Agent、事务提交和 commit 后副作用。
 
 README 只保留架构概览；涉及阶段顺序、状态写入边界或失败语义时，以本文和对应代码为准。
 
@@ -12,11 +12,10 @@ README 只保留架构概览；涉及阶段顺序、状态写入边界或失败�
 - [Turn 对象与模式策略](#turn-对象与模式策略)
 - [Context 门禁与事务创建](#context-门禁与事务创建)
 - [StatusSubAgent 固定编排](#statussubagent-固定编排)
-- [状态字段更新频率](#状态字段更新频率)
+- [状态字段契约与即时更新](#状态字段契约与即时更新)
 - [scene 的特殊语义](#scene-的特殊语义)
 - [主 Agent Context 与工具](#主-agent-context-与工具)
 - [提交、回复与后置任务](#提交回复与后置任务)
-- [deferred 慢状态归纳](#deferred-慢状态归纳)
 - [失败与回退矩阵](#失败与回退矩阵)
 - [LLM 调用数量](#llm-调用数量)
 - [历史编辑与回滚边界](#历史编辑与回滚边界)
@@ -31,20 +30,20 @@ README 只保留架构概览；涉及阶段顺序、状态写入边界或失败�
 
 1. 同一 session 的工作由 `AgentMailbox` 串行处理。
 2. 调用方输入、不可变选择和事务期资源分别由 `TurnRequest`、`TurnExecutionPlan`、`TurnRuntime` 表达。
-3. Narrative Outcome 与状态更新是两个独立阶段；需要裁定时，本轮快速状态路由立即停止。
+3. Narrative Outcome 与状态更新是两个独立阶段；需要裁定时，本轮状态路由立即停止。
 4. 状态路由只决定目标，不直接写值；scene 和每张普通表分别进入独立更新调用。
-5. 每次状态更新调用只获得一个目标及其字段 allowlist，代码在工具执行边界再次校验；每个目标各自使用 checkpoint，失败只恢复当前目标并继续快速链路。
+5. 每次状态更新调用只获得一个目标及其字段 allowlist，代码在工具执行边界再次校验；每个目标各自使用 checkpoint，失败只恢复当前目标并继续后续即时更新。
 6. user/assistant message、Narrative Outcome、scene 和普通状态表的 turn 内写入都先进入 `TurnScratch`。
 7. 只有主 LLM 完整成功后才执行短 commit；取消、provider 错误、流缺少 DONE 或 commit 失败都不得留下半个 turn。
-8. `realtime` / `event_driven` 属于快速状态，`deferred` 属于回复后的慢归纳，`manual` 禁止 LLM 写入。
-9. deferred 在回复交付后运行，但同一 session 的下一 mailbox 项必须等待它完成。
+8. 状态 document 固定为 schema v2；所有已有字段的 value 均可由 LLM 在当前 turn 即时更新，不存在字段频率、周期、人工只读或回复后慢更新。
+9. `updateRule` 只提供字段级语义指导，`runtimeKeyLocked` 只保护 key 结构；两者都不限制已有 value 更新。
 10. `send()` 与 `send_stream()` 共用相同业务 pipeline，只在回复协议和事件时序上不同。
 
 ## 组件职责
 
 | 组件 | 职责 |
 |---|---|
-| `AgentMailbox` | session 内 FIFO、stream task、`requestId` 取消、回复后触发 deferred |
+| `AgentMailbox` | session 内 FIFO、stream task 与 `requestId` 取消 |
 | `AgentTurnService` | 命令/角色 bypass，适配 `AgentReply` 和 SSE |
 | `TurnPreprocessor` | 在快照、门禁和事务之前处理斜杠命令与玩家角色 guard |
 | `TurnPlanResolver` | 固化 mode/style、玩家角色、Story Prompt、主模型、RP Module 与 Plot Schedule 快照 |
@@ -55,7 +54,6 @@ README 只保留架构概览；涉及阶段顺序、状态写入边界或失败�
 | `TurnOrchestrator` | 同步/流式共享的 runner、commit、discard 和 post-commit 模板 |
 | `AgentTurnTransaction` | message、Narrative Outcome、Plot decision、scene/status COW scratch 与短 commit |
 | `PostCommitHooks` | story memory extraction 与 summary compression，逐项隔离失败 |
-| `DeferredStatusCoordinator` | 调用同一个 `StatusSubAgent` 归纳到期的 deferred 字段 |
 
 `RPGGameAgent` 只负责组装这些组件并委托公开 API，不承载上述阶段实现。
 
@@ -95,10 +93,10 @@ TurnRuntimeFactory
        │    └─ NOT_REQUIRED
        │          │
        │          ▼
-       │       Route：选择 scene / normal table / realtime key / event key
+       │       Route：选择 scene / normal table / existing key
        │          │
        │          ▼
-       │       Update：scene 一次 + 每张普通表各一次；目标失败仅恢复该目标并继续
+       │       Update：scene 一次 + 每张普通表各一次；本 turn 即时更新，目标失败仅恢复该目标并继续
        │
        ▼
   PlotSchedulingPreflightHook（仅 IC/GM 且模块有效时）
@@ -109,7 +107,7 @@ TurnRuntimeFactory
        │
        ▼
 TurnPreparation
-  ├─ 将“scene prefix + 原始 input”暂存为本 turn user message
+  ├─ 将“scene 数据快照 prefix + 原始 input”暂存为本 turn user message；运行时规则不入历史
   ├─ MemoryRecallHook（失败只 warning）
   ├─ 用 scratch 后的 scene/status/outcome/plot injection 构建主 Context
   └─ 构建 turn-local 工具 registry 与主 Agent schema
@@ -128,9 +126,6 @@ AgentTurnTransaction.commit()
        │
        ▼
 回复适配 + PostCommitHooks
-       │
-       ▼
-AgentMailbox：回复交付后执行 deferred reconciliation
        │
        ▼
 处理同 session 下一 QueueItem
@@ -219,9 +214,9 @@ rp_story_outcome(reason, actor?)
 
 | 结果 | 含义 | 后续行为 |
 |---|---|---|
-| `STAGED` | 已成功暂存一条 Narrative Outcome | 立即停止 Route 和快速状态预写 |
+| `STAGED` | 已成功暂存一条 Narrative Outcome | 立即停止 Route 和状态预写 |
 | `NOT_REQUIRED` | 模型未调用 outcome 工具，或本轮没有 outcome schema | 允许进入 Route |
-| `FALLBACK` | 返回了非法工具、工具执行失败或判定无法可靠完成 | 停止快速链路，主 Agent 保留补判能力 |
+| `FALLBACK` | 返回了非法工具、工具执行失败或判定无法可靠完成 | 停止状态预写链路，主 Agent 保留补判能力 |
 
 同一 turn 最多暂存一条结果。若模型返回多个纯 outcome 调用，只执行第一个，其余作为重复调用诊断；底层工具本身也会幂等复用 scratch 中的第一条结果。若一次响应混入任何非 outcome 工具，则不执行混合批次并进入 `FALLBACK`。
 
@@ -236,8 +231,7 @@ select_status_targets({
   scene: boolean,
   tables: [{
     table_id: integer,
-    realtime_keys: string[],
-    event_keys: string[],
+    keys: string[],
     reason: string
   }]
 })
@@ -248,10 +242,10 @@ select_status_targets({
 普通表的定位方式如下：
 
 1. 代码从 `StatusManager.list_context_tables()` 取得当前 session 可见的 normal 表。
-2. Route catalog 为每张表提供运行时 `table_id`、name、description，以及每个字段的 key、value、frequency 和 `event_rule`。
+2. Route catalog 为每张表提供运行时 `table_id`、name、description，以及每个字段的 key、value 和 `update_rule`。
 3. LLM 只能返回 catalog 中的运行时 `table_id` 和现有字段 key。
-4. 代码忽略未知/重复表 ID、未知 key 和频率不匹配的 key。
-5. `event_keys` 还必须对应 `event_driven` 字段且具有非空 `updateRule`。
+4. 代码忽略未知/重复表 ID 和未知/重复 key。
+5. 空 `updateRule` 使用通用“事实已明确且值实际变化”条件；非空规则是选择和更新该字段时必须额外考虑的语义条件。
 
 这里的 ID 是 `rpg_session_status_tables` 的运行时表 ID，不是 Story 定义 ID 或 `source_story_status_table_id`。Story 来源关系不向 LLM 暴露。
 
@@ -286,11 +280,11 @@ Recent Conversation
 
 1. 当前阶段只能调用为该 batch 注册的工具名。
 2. StatusSubAgent active scope 校验 `table_id` 和本次 Route 产生的 key allowlist。
-3. `StatusWritePolicy` 再读取真实 document，校验表可访问、key 存在且频率只属于 `realtime` / `event_driven`。
+3. `StatusWritePolicy` 再读取真实 document，校验表可访问且 key 存在。
 4. scratch manager 再拒绝 scene 等非 normal 表。
 5. 值未变化时返回 no-op，不产生 staged document。
 
-每个快速 Update 目标在 provider 调用前各自创建内存 checkpoint。目标内任一 provider 异常、非法工具、工具执行失败或范围校验失败，都会恢复该目标开始前的 scratch；该目标内已恢复的记录只保留诊断意义，此前成功目标不受影响，代码继续执行后续 scene/普通表目标和主 Agent。`StatusSubAgentResult.failed` 仅表示至少一个快速目标失败，`updated` 表示最终仍有修改保留在 scratch，二者可以同时为 `true`。
+每个即时 Update 目标在 provider 调用前各自创建内存 checkpoint。目标内任一 provider 异常、非法工具、工具执行失败或范围校验失败，都会恢复该目标开始前的 scratch；该目标内已恢复的记录只保留诊断意义，此前成功目标不受影响，代码继续执行后续 scene/普通表目标和主 Agent。`StatusSubAgentResult.failed` 仅表示至少一个目标失败，`updated` 表示最终仍有修改保留在 scratch，二者可以同时为 `true`。
 
 目标级 best-effort 不提供可靠重试：主 Agent 仍获得同一个 scratch 上的 scene/status 工具，可以机会性补写失败目标；如果没有补写，也只提交成功目标。checkpoint 创建或恢复失败意味着无法确认 scratch 一致性，异常必须上抛并 discard 整个 turn。取消信号同样向外传播，不作为可恢复目标失败吞掉。不新增持久化 journal、失败待办或重试队列。
 
@@ -301,7 +295,7 @@ Provider 缓存匹配的是实际序列化并 tokenized 后的请求共同前缀
 | 调用链路 | Provider message 顺序 | 缓存族边界 |
 |---|---|---|
 | Main Agent | Fixed / Persistent / Summary → Hot History 原始 messages → Story / Status / Recall / RP Modules → Current User | 同一主模型与工具集合；rolling history 和动态层决定后续公共前缀 |
-| StatusSubAgent | 一条阶段 system contract → 一条动态 user（history/action/target） | Outcome、Route、scene Update、各单表 Update、Deferred 分开 |
+| StatusSubAgent | 一条阶段 system contract → 一条动态 user（history/action/target） | Outcome、Route、scene Update 与各单表 Update 分开 |
 | MemorySubAgent | 一条 pipeline system contract → 一条动态 user | Recall、Story、Summary、Batch Summary、Overall Summary 分开 |
 
 StatusSubAgent 与 MemorySubAgent 本身没有使用主 Context 的 system 合并逻辑；它们保持稳定 system 在前、动态 user 在后的两消息结构。主 Context 是否合并不会直接改变 SubAgent 请求，低命中更常由不同阶段 schema、动态 user 内容、服务端缓存策略或共享缓存容量造成。
@@ -325,30 +319,29 @@ Status preflight 的结果决定主 Agent 能看到什么：
 - `NONE`：没有预裁定；若 Narrative Outcome 模块允许，主 Agent 仍可调用 `rp_story_outcome` 补判。
 - `FALLBACK`：预判不可靠，主 Agent 保留同一 outcome 工具完成补判。
 
-scene/status 工具仍绑定到同一个 turn scratch。主 Agent 可以补做预路由遗漏或快速目标失败后的确定状态同步，但普通表工具仍拒绝 `deferred` / `manual` 和非现有 key，默认 scene 工具同样拒绝非现有 key；该补写是机会性的，不承诺本轮或下一轮一定修复。
+scene/status 工具仍绑定到同一个 turn scratch。主 Agent 可以补做预路由遗漏或目标失败后的确定状态同步；普通表工具允许修改任意已有 normal key 的 value，默认 scene 工具同样只接受已有 key。该补写是机会性的，不承诺一定修复预处理失败。
 
 模型协议要求：只有发生真实、持久、确定的追踪值变化时才写状态；有变化时先在不含 RP 正文的工具调用轮完成同步，最终正文不得新增尚未同步的可追踪确定事实。确认没有变化时允许零状态工具，也不得询问玩家是否需要标记状态。
 
-## 状态字段更新频率
+## 状态字段契约与即时更新
 
-状态字段只允许以下四种频率：
+Story 定义和 Session 运行表共用严格的 `schemaVersion=2` document。每行只允许：
 
-| 频率 | 语义 | 快速 Route | 主 Agent 状态工具 | deferred |
-|---|---|---:|---:|---:|
-| `realtime` | 本 turn 已确定且应立即反映的状态 | 可选 | 可写 | 不参与 |
-| `event_driven` | 仅在本 turn 明确命中自然语言 `updateRule` 时更新 | 命中规则后可选 | 回退时可写，仍受工具频率校验 | 不参与 |
-| `deferred` | 多个 committed turn 后才适合归纳的慢状态 | 禁止 | 禁止 | 到期后可写 |
-| `manual` | 只由管理端人工维护 | 禁止 | 禁止 | 禁止 |
+| 字段 | 语义 |
+|---|---|
+| `key` | 稳定字段名；普通状态工具只能定位已有 key |
+| `value` | 当前值；所有 scene/normal 字段都可由 LLM 在当前 turn 即时更新 |
+| `runtimeKeyLocked` | 只保护 key 不被运行时删除或重命名，不限制 value 更新 |
+| `updateRule` | 字段级额外语义指导，保存时 trim；空字符串使用通用事实变化条件 |
+| `metadata` | 普通扩展数据，不承载隐藏更新类型或写权限 |
 
-补充规则：
+旧 schema、字段频率、延迟周期和其它未知行属性直接拒绝，不做兼容解析。`updateRule` 不是事件总线、调度器或数据库条件：
 
-- 旧 document 缺少 `updateFrequency` 时按 `realtime` 读取。
-- `event_driven` 必须有非空 `updateRule`；它不是事件总线，而是 Route 每 turn 对规则是否命中的语义判断。
-- 只有 normal 表可以使用 `deferred`。
-- `deferredIntervalTurns` 只对 deferred 字段有效；未配置时使用 `agent.status_sub_agent.deferred.default_interval_turns`。
-- 频率是字段级策略，不是整张表统一的刷新周期。
-
-这形成“快表/慢表”能力，但不强制整张表只能快或慢。同一 normal 表可以同时包含 realtime、event-driven、deferred 和 manual 字段，例如生命值实时更新、任务节点事件更新、人物关系延迟归纳、备注人工维护。
+- Router 依据本轮已确认事实判断字段是否相关；
+- 隔离更新器只获得 Router 选中的 key，并把非空规则作为额外更新条件；
+- 主 Agent fallback 可修改任意已有 normal key，但仍须遵循同一规则与“值实际变化”约束；
+- 空规则不等于无约束，仍只允许同步真实、持久、已经确定的变化；
+- 没有回复后归纳、周期任务、逐字段进度或后台更新。
 
 ## scene 的特殊语义
 
@@ -356,14 +349,14 @@ scene 在数据层和 Agent 编排层承担不同职责：
 
 | 层级 | scene 行为 |
 |---|---|
-| 数据层 | 仍是 `status_kind="scene"` 的 SQLite document，必须挂载到 story；多张时使用排序第一张 active scene |
-| 字段策略 | 所有字段固定为 `realtime`，保存边界拒绝 `event_driven` / `deferred` / `manual` |
+| 数据层 | 仍是 Story 直接拥有的 `status_kind="scene"` SQLite document；Session 使用其副本，多张时取排序第一张 active scene |
+| 字段契约 | 与 normal 表相同的 schema v2；所有 value 可即时更新，非空 `updateRule` 只提供本轮指导 |
 | 主 Context | 不进入普通 `STATUS_TABLES`，而作为高优先级 `[scene]` user prefix 与当前输入合并 |
 | Outcome / Route | 可读取 scene；Route 用独立 `scene: boolean` 决定本轮是否涉及它 |
 | Update | 命中后单独调用，只暴露 scene Context 和 scene 专用工具 |
 | LLM key 权限 | `agent.scene.allow_runtime_key_changes=false` 时只能修改已有 value；开启后才允许增删非锁定 key |
 | 普通表工具 | 永远不使用 `status_table_set_values` |
-| 慢归纳 | 永远不进入 deferred |
+| 回复后任务 | 不存在 Scene 状态归纳或逐字段进度 |
 
 因此需要区分两件事：
 
@@ -379,7 +372,7 @@ scene 工具注册和执行权限如下：
 | 默认关闭，空 scene | 不注册任何 scene 工具，Route 强制 `scene=false` |
 | `allow_runtime_key_changes=true` | 注册 `scene_time` / `scene_attr` / `scene_del_attr`，保留 `MAX_ATTRS=8` 与非锁定 key 删除规则 |
 
-默认关闭时，`runtimeKeyLocked` 不限制已有 value 更新；它只继续参与显式开启结构编辑后的删除保护。该配置只影响 LLM 工具暴露和执行，Play API / Data 层的手工 CRUD 不变。
+默认关闭时，`runtimeKeyLocked` 不限制已有 value 更新；它只继续参与显式开启结构编辑后的删除保护。该配置只影响 LLM 工具暴露和执行，Play API / Data 层的手工 CRUD 不变。Scene 的非空 `updateRule` 由 `SceneTracker.get_context()` 追加为本轮运行时指导；写入历史的 `get_snapshot_context()` 只包含 Scene 数据，避免把规则复制进每条 user message。
 
 普通表才通过 `tables[]` 选择具体运行时表 ID 和字段 key；scene 走专用布尔目标和专用工具，不参与普通表 catalog。
 
@@ -412,7 +405,7 @@ Fixed Layer
 
 主 Agent 历史与 StatusSubAgent 历史不同：主 Context 只投影 `summary_processed=false` 的消息；Play/Agent history API 和 StatusSubAgent 独立链路仍可读取完整未删除历史。
 
-普通 `STATUS_TABLES` 展示运行时表 ID、表名、description、完整 KV 和字段更新策略。角色绑定表按 `characterName` 分组，但绑定只帮助模型理解归属，不改变普通工具的 ID/key 校验方式。
+普通 `STATUS_TABLES` 展示运行时表 ID、表名、description、完整 KV 和逐字段 `updateRule`。角色绑定表按 `characterName` 分组，但绑定只帮助模型理解归属，不改变普通工具的 ID/key 校验方式。
 
 如果 StatusSubAgent 已暂存 Outcome，`RP_MODULES` 会在主 Agent 第一次调用前给出该结果和状态同步边界。主 runner 可以进行多轮工具调用；最终 assistant `content` 是回复、SSE、历史和数据库的唯一正文真源。
 
@@ -435,42 +428,14 @@ Fixed Layer
 
 | 路径 | commit 后顺序 |
 |---|---|
-| `send()` | commit → `PostCommitHooks` → 返回 `AgentReply` / mailbox `set_result` → deferred |
-| `send_stream()` | commit → 发最终 SSE DONE 和 end → `PostCommitHooks` → turn task 返回 → deferred |
+| `send()` | commit → `PostCommitHooks` → 返回 `AgentReply` / mailbox `set_result` |
+| `send_stream()` | commit → 发最终 SSE DONE 和 end → `PostCommitHooks` → turn task 返回 |
 
 流式中 runner 产生的 DONE 会先被暂存；只有 commit 成功后，最终 DONE 才携带 usage、stats 和 `committed_turn_id` 发给调用方。runner 发出 ERROR、stream 结束但没有 DONE、commit 失败或主动取消时都不发送成功 DONE。
 
 同步结果可以携带类型化的 `status_sub_agent_records` 诊断。流式路径会在主 runner 前把实际执行的 preflight tool call/result 转成 SSE 事件；重复 outcome、跳过项和已回滚项属于诊断记录，不重复发成工具事件。
 
 `PostCommitHooks` 当前依次执行 story memory extraction 和 summary compression。两项分别捕获异常，只记录 warning，不回滚已提交 turn。
-
-## deferred 慢状态归纳
-
-deferred 复用同一个 `StatusSubAgent`，但不是快速 Route 的延续。它只根据已提交历史工作，并使用专用结构化工具 `set_deferred_values`。
-
-### 到期计算
-
-对每个 normal 表的每个 deferred 字段：
-
-1. 读取 `(runtime table ID, field key)` 对应的 `last_processed_turn_id`。
-2. 只选择 marker 之后的 committed turn groups。
-3. 使用字段 `deferredIntervalTurns`，未配置则使用全局默认周期。
-4. 累积达到周期后，取最早一批符合周期的 turn，并计算本批 boundary turn ID。
-5. 同一 table、同一 boundary 的到期字段合并成一次 LLM batch。
-
-当前到期计算不按 `ic` / `gm` / `ooc` mode 过滤；只要消息已经成功 commit，其 turn group 就会参与累计。斜杠命令和角色 guard 不写历史，因此不计入。
-
-每个 batch 只向模型提供：
-
-- 本批允许的字段 key、当前 value 和周期；
-- 从 marker 到本批 boundary 的 committed messages；
-- `set_deferred_values` schema。
-
-模型可以不调用工具，表示值无需改变。无论是否改变值，只要 batch 成功，document 与所有本批字段的进度会在同一数据库事务中提交；batch 失败则既不写值，也不推进进度。不同 batch 相互隔离，一个失败不阻止其它 batch。
-
-### 用户体验与串行一致性
-
-deferred 在同步 reply 或流式 DONE 已交付后才由 mailbox 触发，因此不延迟本轮正文展示。它不是脱离 session 的后台任务：mailbox 会等待归纳完成，再处理同一 session 的下一命令或 turn，确保下一轮读取到一致的慢状态。
 
 ## 失败与回退矩阵
 
@@ -479,17 +444,16 @@ deferred 在同步 reply 或流式 DONE 已交付后才由 mailbox 触发，因�
 | 命令或玩家角色 guard | 直接 bypass；角色 invalid 返回固定绑定提示 | 不创建事务 |
 | Context 窗口门禁 | 拒绝正文，提示先压缩 | 不创建事务 |
 | Outcome 返回非法/执行失败 | 标记 `FALLBACK`，停止 Route，主 Agent 补判 | 保留 scratch，主 turn 继续 |
-| Route 失败 | 停止快速 Update，主 Agent 继续处理 | 保留 scratch，主 turn 继续 |
-| 单个快速 Update provider/工具/范围失败 | 仅恢复当前目标，继续后续目标和主 Agent | 保留其他成功目标的 scratch，主 turn 继续 |
-| 快速目标 checkpoint 创建/恢复失败 | 异常终止 | discard scratch |
+| Route 失败 | 停止即时 Update，主 Agent 继续处理 | 保留 scratch，主 turn 继续 |
+| 单个即时 Update provider/工具/范围失败 | 仅恢复当前目标，继续后续目标和主 Agent | 保留其他成功目标的 scratch，主 turn 继续 |
+| 即时目标 checkpoint 创建/恢复失败 | 异常终止 | discard scratch |
 | Memory recall 失败 | warning-and-continue | 主 turn 继续 |
 | 主 provider / runner 失败 | 异常终止 | discard scratch |
 | stream ERROR 或缺少 DONE | 发送错误/end | discard scratch |
 | commit 失败 | 恢复内存 history并报错；持久化 atomic 回滚 | commit 不成立，discard scratch |
 | story memory / summary 失败 | warning，互不影响 | 已提交 turn 保留 |
-| deferred 单批失败 | warning，不推进该批进度 | 已提交 turn 保留 |
 
-Status preflight 的单目标可恢复失败不会自动终止后续快速目标或主 turn；只有未处理异常、取消或 checkpoint 无法创建/恢复时才升级为事务失败。即使快速阶段已有部分成功目标，后续主 provider、stream 或 commit 失败仍会 discard 整个 turn scratch。
+Status preflight 的单目标可恢复失败不会自动终止后续即时目标或主 turn；只有未处理异常、取消或 checkpoint 无法创建/恢复时才升级为事务失败。即使即时阶段已有部分成功目标，后续主 provider、stream 或 commit 失败仍会 discard 整个 turn scratch。
 
 ## LLM 调用数量
 
@@ -505,7 +469,6 @@ Status preflight 的单目标可恢复失败不会自动终止后续快速目标
 | Outcome 不需要、Route 无目标 | Outcome 1 次 + Route 1 次 + 主 Agent 1 次 |
 | Outcome 不需要、命中 N 个状态目标 | Outcome 1 次 + Route 1 次 + N 次隔离 Update + 主 Agent 1 次 |
 | 没有 Outcome 工具但有状态能力 | Route 1 次 + N 次隔离 Update + 主 Agent 1 次 |
-| deferred 到期 | 回复后每个 `(table, boundary)` batch 额外 1 次 |
 
 这里的一个状态目标是 scene 或一张 normal 表；同一表选中多个 key 仍只产生一次 Update 调用。
 包含 Outcome 的行假设本轮实际提供了 outcome schema；模块未提供时直接从 Route 开始计算。
@@ -515,8 +478,6 @@ Status preflight 的单目标可恢复失败不会自动终止后续快速目标
 - `retry/edit` 若针对最后一个持久化 turn，会先 truncate 该 turn，再以相同 turn ID 重新生成；非最后一轮则追加新 turn。
 - truncate 会删除对应消息和 Narrative Outcome，重新生成时重新裁定。
 - 已提交的 scene/status 值不会随消息 truncate、edit、retry 或 clear 自动回滚。
-- deferred progress 会收缩到剩余历史的最大 turn ID；clear 时收缩到 0。
-- 收缩 progress 只影响未来归纳范围，不反向恢复已经写入的 deferred 值。
 - 主动停止 stream 只 discard 当前未提交 scratch，不补偿回滚此前已完成的 turn。
 
 状态分支回滚需要独立的状态版本/日志能力；当前实现没有持久化 `status_turn_journal`。
@@ -524,7 +485,7 @@ Status preflight 的单目标可恢复失败不会自动终止后续快速目标
 ## 模型选择与当前非目标
 
 - 主 Agent 模型按 `config default < story override < session override` 解析，并固化进本 turn plan。
-- StatusSubAgent 的 Outcome、Route、隔离 Update 和 deferred 当前复用 `agent.status_sub_agent` 的 provider 配置与逻辑。
+- StatusSubAgent 的 Outcome、Route 和隔离 Update 当前复用 `agent.status_sub_agent` 的 provider 配置与逻辑。
 - 当前没有按阶段、成本或 provider 健康度动态降级的编排；如需使用低成本或本地模型，应通过现有 biz provider 配置切换整个 StatusSubAgent 链路。
 - 当前没有额外轻量预处理 LLM、归纳式 StatusSubAgent 历史窗口，也没有把 Outcome 延迟到多个 turn 后批量判断。
 - rolling history 可能降低严格前缀 cache 命中率；隔离 Update 通过稳定 system contract 和 `Recent Conversation → User Action → Selected State Target` 扩大同一 Route 内的公共前缀，不增加动态 provider 路由复杂度。
@@ -534,7 +495,7 @@ Status preflight 的单目标可恢复失败不会自动终止后续快速目标
 | 能力 | 文件 |
 |---|---|
 | facade / composition root | `rpg_core/agent/agent.py` |
-| mailbox 与 deferred 时序 | `rpg_core/agent/mailbox/service.py` |
+| mailbox 与取消时序 | `rpg_core/agent/mailbox/service.py` |
 | turn 请求、快照与 policy | `rpg_core/agent/turn/models.py` |
 | plan 解析 | `rpg_core/agent/turn/planning.py` |
 | Context 门禁与 runtime 创建 | `rpg_core/agent/turn/factory.py` |
@@ -547,5 +508,4 @@ Status preflight 的单目标可恢复失败不会自动终止后续快速目标
 | StatusSubAgent 类型化结果 | `rpg_core/agent/sub_agents/status/models.py` |
 | 主工具装配与 schema 过滤 | `rpg_core/agent/runtime/tools.py` |
 | 普通状态表工具与写策略 | `rpg_core/status/tools.py` |
-| deferred 协调器 | `rpg_core/agent/runtime/deferred_status.py` |
 | Narrative Outcome runtime | `rpg_core/rp_modules/narrative_outcome/` |

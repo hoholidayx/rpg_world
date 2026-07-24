@@ -11,16 +11,13 @@ from rpg_data.model.status import (
     STATUS_KEY_COLUMN,
     STATUS_KIND_NORMAL,
     STATUS_KIND_SCENE,
-    STATUS_UPDATE_FREQUENCY_DEFERRED,
     STATUS_VALUE_COLUMN,
     SessionStatusMetadata,
     SessionStatusTable,
     StatusContextCandidate,
-    StatusDeferredProgress,
     StatusDocumentBatchResult,
     StatusDocumentSaveResult,
     StatusDocumentWrite,
-    StatusProgressWrite,
     StatusRowRef,
     StatusTableDocument,
 )
@@ -73,22 +70,10 @@ class StatusRuntimeDataPort(Protocol):
         base_document: StatusTableDocument | None = None,
     ) -> StatusDocumentSaveResult: ...
 
-    def list_deferred_progress(
-        self,
-        session_id: str,
-    ) -> list[StatusDeferredProgress]: ...
-
-    def clamp_deferred_progress(
-        self,
-        session_id: str,
-        max_turn_id: int,
-    ) -> int: ...
-
     def commit_document_batch(
         self,
         session_id: str,
         document_writes: Iterable[StatusDocumentWrite],
-        progress_writes: Iterable[StatusProgressWrite] = (),
     ) -> StatusDocumentBatchResult: ...
 
 
@@ -172,64 +157,10 @@ class StatusManager:
             base_document=base_document,
         )
 
-    def list_deferred_progress(self) -> list[StatusDeferredProgress]:
-        return self._service.list_deferred_progress(self.session_id)
-
-    def clamp_deferred_progress(self, max_turn_id: int) -> int:
-        return self._service.clamp_deferred_progress(
-            self.session_id,
-            max_turn_id,
-        )
-
-    def commit_deferred_update(
-        self,
-        table_id: int,
-        document: StatusTableDocument,
-        *,
-        processed_keys: Iterable[str],
-        last_processed_turn_id: int,
-        base_document: StatusTableDocument | None = None,
-    ) -> dict[str, object]:
-        if last_processed_turn_id <= 0:
-            raise ValueError("last_processed_turn_id must be positive")
-        keys = tuple(dict.fromkeys(str(key) for key in processed_keys if str(key)))
-        if not keys:
-            raise ValueError("processed_keys must not be empty")
-        table = self._service.get_table_for_session(self.session_id, table_id)
-        if table.status_kind is not STATUS_KIND_NORMAL:
-            raise PermissionError("Deferred updates only support normal status tables")
-        validated = document.validated()
-        _require_deferred_keys(validated, keys)
-        result = self._service.commit_document_batch(
-            self.session_id,
-            (
-                StatusDocumentWrite(
-                    table_id=table_id,
-                    expected_status_kind=STATUS_KIND_NORMAL,
-                    document=validated,
-                    base_document=base_document,
-                ),
-            ),
-            tuple(
-                StatusProgressWrite(
-                    table_id=table_id,
-                    field_key=key,
-                    last_processed_turn_id=last_processed_turn_id,
-                )
-                for key in keys
-            ),
-        )
-        return _table_to_dict(result.tables[0])
-
     def commit_bootstrap_state(
         self,
         changes: Iterable["StatusDocumentChange"],
-        *,
-        deferred_progress: dict[int, tuple[str, ...]],
-        boundary_turn_id: int,
     ) -> list[dict[str, object]]:
-        if boundary_turn_id <= 0:
-            raise ValueError("boundary_turn_id must be positive")
         staged = tuple(changes)
         if len({change.table_id for change in staged}) != len(staged):
             raise ValueError("bootstrap documents contain duplicate table IDs")
@@ -249,28 +180,9 @@ class StatusManager:
             )
             for change in staged
         )
-        progress_writes: list[StatusProgressWrite] = []
-        for table_id, raw_keys in deferred_progress.items():
-            keys = tuple(dict.fromkeys(str(key) for key in raw_keys if str(key)))
-            table = self._service.get_table_for_session(self.session_id, table_id)
-            if table.status_kind is not STATUS_KIND_NORMAL:
-                raise PermissionError(
-                    "Deferred bootstrap progress only supports normal status tables"
-                )
-            document = documents_by_table.get(table_id, table.document)
-            _require_deferred_keys(document, keys)
-            progress_writes.extend(
-                StatusProgressWrite(
-                    table_id=table_id,
-                    field_key=key,
-                    last_processed_turn_id=boundary_turn_id,
-                )
-                for key in keys
-            )
         result = self._service.commit_document_batch(
             self.session_id,
             document_writes,
-            progress_writes,
         )
         return [_table_to_dict(table) for table in result.tables]
 
@@ -433,6 +345,9 @@ class StatusManager:
     def get_scene_attrs(self) -> dict[str, str] | None:
         return self._scene.get_attrs(self.session_id)
 
+    def get_scene_update_rules(self) -> dict[str, str] | None:
+        return self._scene.get_update_rules(self.session_id)
+
     def _require_table(self, table_id: int) -> SessionStatusTable:
         return self._service.get_table_for_session(self.session_id, table_id)
 
@@ -460,18 +375,6 @@ class StatusManager:
 
 def _table_to_dict(table: SessionStatusTable) -> dict[str, object]:
     return table.to_dict()
-
-
-def _require_deferred_keys(
-    document: StatusTableDocument,
-    keys: Iterable[str],
-) -> None:
-    for key in keys:
-        field = document.row_for_key(key)
-        if field is None:
-            raise KeyError(f"Status table key not found: {key}")
-        if field.update_frequency is not STATUS_UPDATE_FREQUENCY_DEFERRED:
-            raise PermissionError(f"Status field is not deferred: {key}")
 
 
 def collect_value_changes(

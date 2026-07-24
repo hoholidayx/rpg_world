@@ -114,7 +114,7 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 - `PlotSchedulingDataService`：Plot 定义、Session 覆盖、决策账本和分页 read model；
 - `DreamMemoryDataService`：Dream/Persistent Memory 账本、CAS、批量与 `IMMEDIATE` 事务；
 - `StoryMemoryDataService`：Story Memory/Evidence 的查询、分页与类型化写入。
-- `StatusDataService`：Story 直属定义、Session document、来源与角色关联 read model、deferred progress，以及调用方指定的复制/reset/原子 document batch。
+- `StatusDataService`：Story 直属定义、Session document、来源与角色关联 read model，以及调用方指定的复制/reset/原子 document batch。
 - `MediaDataService`：Job/Blob/Asset/Gallery/Background/Evaluation 的 typed CRUD、引用 read model、CAS claim、去重和调用方准备的原子 completion。
 - `TTSDataService`：Message source read model、Job/Cache/Blob/Part CRUD、条件 claim/transition、引用查询和调用方准备的原子 completion。
 - `SessionComposerDataService`：workspace mode、narrative style、Story mount/base 与 quick reply 的 typed CRUD、排序和调用方指定的批量 mode seed。
@@ -122,7 +122,9 @@ Repository 是 `rpg_data` 内部的 Peewee 实现细节，负责查询表达式�
 - `MessageDataService`：主历史 CRUD、turn window/分页、processed flag 聚合与调用方指定的批量标记；不决定 Context 投影或 Summary/Story Memory 候选。
 - `NarrativeOutcomeDataService`：调用方准备好的 Outcome ledger row 追加、按 turn 查询和删除；不判断 Outcome code、sample、权重来源或剧情语义。
 
-Status 的产品策略由 Core 持有：`StatusTableAdministrationService` 决定 Story 定义与 Session 表管理规则，`SessionStatusLifecycleService` 决定何时按当前 Story 定义复制或 reset，`SceneStatusService` 决定 Scene 字段约束与 active Scene，`StatusContextService` 决定角色名修复和 Context 可见性，`StatusManager` 决定 Agent 运行时/deferred/bootstrap 写入资格。上述服务只接收窄 Data Port；`StatusDataService` 不重新暴露这些业务入口。
+Status 的产品策略由 Core 持有：`StatusTableAdministrationService` 决定 Story 定义与 Session 表管理规则，`SessionStatusLifecycleService` 决定何时按当前 Story 定义复制或 reset，`SceneStatusService` 决定 Scene 字段约束与 active Scene，`StatusContextService` 决定角色名修复和 Context 可见性，`StatusManager` 决定 Agent 当前 turn 的即时写入与 bootstrap 资格。上述服务只接收窄 Data Port；`StatusDataService` 不重新暴露这些业务入口。
+
+Status 持久化 document 固定为 `schemaVersion=2`，行结构只允许 `key / value / runtimeKeyLocked / updateRule / metadata`。数据层负责严格解析、序列化、批量原子 document 写入和 last-write-wins 基线诊断，但不解释 `updateRule`、不把 `runtimeKeyLocked` 扩张为 value 写权限，也不维护逐字段调度或进度账本；旧 schema 与旧行字段直接作为数据格式错误拒绝。
 
 Media 的来源范围、VisualBrief 来源确认、图库 metadata、删除门禁、背景选择/评估和 worker 恢复策略由 `MediaApplicationService` 持有。`media_service` worker 只调用该业务入口，不直接操作 `MediaDataService`。
 
@@ -223,7 +225,7 @@ Gateway。若一个协作者只需要解析 Session 运行目录，就只声明�
 - 整 Gateway 类型引用与构造注入不超出独立的显式 allowlist；
 - 新聚合持久化入口采用 `*DataService` 命名；
 - `rpg_data.models` 的兼容重导出与 canonical 类型保持同一身份。
-- Status 数据入口不重新暴露 Scene、Context、deferred 或 bootstrap 业务方法。
+- Status 数据入口不重新暴露 Scene、Context、即时更新策略或 bootstrap 业务方法。
 - Media application service、source/background helper 与 worker 不依赖 Gateway 或具体 `MediaDataService`，Media 数据入口不重新暴露背景状态机或 worker 恢复策略。
 - TTS application service 与 worker 不依赖 Gateway 或具体 `TTSDataService`，TTS 数据入口不重新暴露消息资格、cache/retry 或 worker 恢复策略。
 - Composer application service 不依赖 Gateway 或具体 Data Service，Composer 数据入口不暴露默认 mode 或有效 narrative style 解析。

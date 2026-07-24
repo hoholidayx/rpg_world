@@ -12,23 +12,12 @@ export const STATUS_ORIGIN = {
 
 export type StatusOrigin = (typeof STATUS_ORIGIN)[keyof typeof STATUS_ORIGIN]
 
-export const STATUS_UPDATE_FREQUENCY = {
-  REALTIME: 'realtime',
-  EVENT_DRIVEN: 'event_driven',
-  DEFERRED: 'deferred',
-  MANUAL: 'manual',
-} as const
-
-export type StatusUpdateFrequency = (typeof STATUS_UPDATE_FREQUENCY)[keyof typeof STATUS_UPDATE_FREQUENCY]
-
 export type StatusRow = {
   key: string
   value: string
   runtimeKeyLocked: boolean
-  metadata: Record<string, unknown>
-  updateFrequency: StatusUpdateFrequency
   updateRule: string
-  deferredIntervalTurns: number | null
+  metadata: Record<string, unknown>
 }
 
 export type StatusTable = {

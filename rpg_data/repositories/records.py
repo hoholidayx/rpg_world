@@ -57,7 +57,6 @@ __all__ = [
     "SessionStoryMemoryEvidenceRecord",
     "SessionStoryMemoryRecord",
     "SessionStatusTableRecord",
-    "SessionStatusDeferredProgressRecord",
     "StoryCharacterRecord",
     "StoryLorebookEntryRecord",
     "StoryPackBindingRecord",
@@ -1425,22 +1424,6 @@ class SessionStatusTableRecord(BaseRecord):
         table_name = "rpg_session_status_tables"
 
 
-class SessionStatusDeferredProgressRecord(BaseRecord):
-    session_status_table = ForeignKeyField(
-        SessionStatusTableRecord,
-        backref="deferred_progress",
-        column_name="session_status_table_id",
-        on_delete="CASCADE",
-    )
-    field_key = TextField()
-    last_processed_turn_id = IntegerField(default=0)
-    updated_at = TextField()
-
-    class Meta:
-        table_name = "rpg_session_status_deferred_progress"
-        primary_key = CompositeKey("session_status_table", "field_key")
-
-
 class StoryPackBindingRecord(BaseRecord):
     id = AutoField()
     workspace = ForeignKeyField(
@@ -1554,7 +1537,6 @@ RECORD_MODELS = (
     StoryLorebookEntryRecord,
     StoryStatusTableRecord,
     SessionStatusTableRecord,
-    SessionStatusDeferredProgressRecord,
     StoryPackBindingRecord,
     StoryPackOperationRecord,
 )

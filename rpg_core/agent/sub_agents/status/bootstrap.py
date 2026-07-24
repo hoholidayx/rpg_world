@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rpg_data.model import status as models
 from rpg_core.agent.telemetry import TurnStats
 from rpg_core.agent.sub_agents.status.models import StatusBootstrapResult
 from rpg_core.agent.turn.transaction.status_scratch import (
@@ -15,7 +14,7 @@ from rpg_core.agent.turn.models import TurnMode
 from rpg_core.scene import SceneTracker
 from rpg_core.session.manager import SessionManager
 from rpg_core.settings import settings
-from rpg_core.status.tools import StatusTableSetValuesTool, StatusWritePolicy
+from rpg_core.status.tools import StatusTableSetValuesTool
 
 if TYPE_CHECKING:
     from rpg_core.agent.sub_agents.status.agent import StatusSubAgent
@@ -95,16 +94,7 @@ class StatusBootstrapCoordinator:
         tools = []
         if scratch_scene is not None:
             tools.extend(scratch_scene.get_tools())
-        tools.append(StatusTableSetValuesTool(
-            scratch_manager,
-            write_policy=StatusWritePolicy(
-                allowed_frequencies=frozenset({
-                    models.STATUS_UPDATE_FREQUENCY_REALTIME,
-                    models.STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
-                    models.STATUS_UPDATE_FREQUENCY_DEFERRED,
-                })
-            ),
-        ))
+        tools.append(StatusTableSetValuesTool(scratch_manager))
 
         def create_checkpoint() -> object:
             return (
@@ -123,7 +113,6 @@ class StatusBootstrapCoordinator:
             mutation_probe=lambda: scratch.change_token,
             create_checkpoint=create_checkpoint,
             restore_checkpoint=restore_checkpoint,
-            outcome_preflight_enabled=False,
         ):
             context_tables = scratch_manager.list_context_tables()
             result = await self._status_sub_agent.bootstrap_state(
@@ -138,11 +127,7 @@ class StatusBootstrapCoordinator:
             )
         if result.failed:
             return result
-        status_manager.commit_bootstrap_state(
-            scratch.staged_changes,
-            deferred_progress=result.deferred_progress,
-            boundary_turn_id=boundary_turn_id,
-        )
+        status_manager.commit_bootstrap_state(scratch.staged_changes)
         return result
 
     @staticmethod

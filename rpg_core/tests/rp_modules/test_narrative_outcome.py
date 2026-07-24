@@ -113,7 +113,7 @@ class _NormalStatusCapabilities:
         return [{
             "id": 1,
             "document": {
-                "rows": [{"key": "生命", "value": "10", "updateFrequency": "realtime"}],
+                "rows": [{"key": "生命", "value": "10", "updateRule": ""}],
             },
         }]
 

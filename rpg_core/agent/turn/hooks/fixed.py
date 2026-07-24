@@ -85,9 +85,6 @@ class StatusPreflightHook:
             mutation_probe=lambda: turn_scratch.status_scratch.change_token,
             create_checkpoint=create_checkpoint,
             restore_checkpoint=restore_checkpoint,
-            outcome_preflight_enabled=any(
-                tool.name == NARRATIVE_OUTCOME_TOOL_NAME for tool in tools
-            ),
         ):
             context_tables = (
                 turn_scratch.status_manager.list_context_tables()
@@ -295,7 +292,6 @@ class TurnDiagnostics:
         *,
         turn_scratch: "TurnScratch",
         preflight_outcome: StatusSubAgentPreflightOutcome,
-        state_prewrites_skipped: int,
         main_tool_names: list[str],
     ) -> None:
         effective = preflight_outcome
@@ -314,10 +310,9 @@ class TurnDiagnostics:
         )
         logger.info(
             _TAG
-            + " preflightOutcome={} statePrewritesSkipped={} "
-            "mainStateCorrections={} outcomeRepeatRequestedByMain={}",
+            + " preflightOutcome={} mainStateCorrections={} "
+            "outcomeRepeatRequestedByMain={}",
             effective.value,
-            int(state_prewrites_skipped),
             int(main_state_corrections),
             outcome_repeat_requested_by_main,
         )

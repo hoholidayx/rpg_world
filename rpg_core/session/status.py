@@ -115,7 +115,6 @@ class SessionStatusLifecycleService:
                 )
                 for table in native_tables
             ),
-            deferred_progress_table_ids=tuple(table.id for table in existing),
             story_status_table_ids=tuple(table.id for table in story_tables),
         )
         return self._data.apply_status_reset_plan(session.id, plan)

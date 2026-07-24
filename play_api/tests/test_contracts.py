@@ -1559,14 +1559,11 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
                     "key": "钟声",
                     "value": "未响",
                     "runtimeKeyLocked": False,
-                    "updateFrequency": "event_driven",
                     "updateRule": "钟楼被明确敲响时更新",
                 },
                 {
                     "key": "长期警戒",
                     "value": "低",
-                    "updateFrequency": "deferred",
-                    "deferredIntervalTurns": 6,
                 },
             ],
             "metadata": {"ui": {"compact": True}},
@@ -1576,45 +1573,44 @@ def test_play_api_contracts(tmp_path, monkeypatch) -> None:
     assert new_story_status.json()["name"] == "测试状态表"
     assert new_story_status.json()["storyId"] == 1
     assert new_story_status.json()["rows"][0]["key"] == "钟声"
-    assert new_story_status.json()["rows"][0]["updateFrequency"] == "event_driven"
     assert new_story_status.json()["rows"][0]["updateRule"] == "钟楼被明确敲响时更新"
-    assert new_story_status.json()["rows"][1]["updateFrequency"] == "deferred"
-    assert new_story_status.json()["rows"][1]["deferredIntervalTurns"] == 6
+    assert "updateFrequency" not in new_story_status.json()["rows"][0]
+    assert "deferredIntervalTurns" not in new_story_status.json()["rows"][1]
     assert new_story_status.json()["metadata"]["ui"]["compact"] is True
     assert client.post(
         status_base,
         json={
-            "name": "无规则事件表",
+            "name": "旧频率字段",
             "rows": [{
                 "key": "事件",
                 "value": "未发生",
-                "updateFrequency": "event_driven",
+                "updateFrequency": "realtime",
             }],
         },
     ).status_code == 422
     assert client.post(
         status_base,
         json={
-            "name": "非法慢场景",
-            "statusKind": "scene",
+            "name": "隐藏写权限字段",
             "rows": [{
                 "key": "位置",
                 "value": "林地",
-                "updateFrequency": "deferred",
+                "llmWritable": False,
             }],
         },
     ).status_code == 422
-    assert client.patch(
+    scene_rule_patch = client.patch(
         f"{status_base}/{scene_story_table['id']}",
         json={
             "rows": [{
                 "key": "位置",
                 "value": "林地",
-                "updateFrequency": "event_driven",
                 "updateRule": "角色抵达林地时更新",
             }],
         },
-    ).status_code == 422
+    )
+    assert scene_rule_patch.status_code == 200
+    assert scene_rule_patch.json()["rows"][0]["updateRule"] == "角色抵达林地时更新"
 
     patched_story_status = client.patch(
         f"{status_base}/{new_story_status.json()['id']}",

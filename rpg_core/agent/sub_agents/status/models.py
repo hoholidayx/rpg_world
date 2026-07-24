@@ -28,18 +28,8 @@ class StatusSubAgentStage(StrEnum):
     """Fixed execution stage that produced a tool diagnostic."""
 
     OUTCOME = "outcome"
-    REALTIME = "realtime"
-    EVENT_DRIVEN = "event_driven"
+    IMMEDIATE = "immediate"
     BOOTSTRAP = "bootstrap"
-
-
-@dataclass(frozen=True)
-class DeferredStatusResult:
-    """Typed summary of one post-reply deferred reconciliation pass."""
-
-    batches: int = 0
-    fields: int = 0
-    changed: int = 0
 
 
 @dataclass
@@ -51,14 +41,12 @@ class StatusBootstrapResult:
     processed_turns: int = 0
     records: list[StatusSubAgentToolRecord] = field(default_factory=list)
     call_stats: list[CallRecord] = field(default_factory=list)
-    deferred_progress: dict[int, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class StatusRouteTarget:
     table_id: int
-    realtime_keys: tuple[str, ...] = ()
-    event_keys: tuple[str, ...] = ()
+    keys: tuple[str, ...] = ()
     reason: str = ""
 
 
@@ -77,7 +65,6 @@ class StatusSubAgentRecordStatus(StrEnum):
     NO_OP = "no_op"
     ERROR = "error"
     OUTCOME_STAGED = "outcome_staged"
-    SKIPPED_DUE_TO_OUTCOME = "skipped_due_to_outcome"
     SKIPPED_DUPLICATE_OUTCOME = "skipped_duplicate_outcome"
     ROLLED_BACK_DUE_TO_FAILURE = "rolled_back_due_to_failure"
 
@@ -85,7 +72,6 @@ class StatusSubAgentRecordStatus(StrEnum):
     def emits_tool_event(self) -> bool:
         """Whether this record represents a tool execution visible in SSE."""
         return self not in {
-            StatusSubAgentRecordStatus.SKIPPED_DUE_TO_OUTCOME,
             StatusSubAgentRecordStatus.SKIPPED_DUPLICATE_OUTCOME,
             StatusSubAgentRecordStatus.ROLLED_BACK_DUE_TO_FAILURE,
         }
@@ -98,12 +84,6 @@ class StatusSubAgentRecordStatus(StrEnum):
 class StatusSubAgentRecordText:
     """Canonical diagnostics for calls intentionally not executed or retained."""
 
-    STATE_PREWRITE_SKIPPED = (
-        "Skipped: rp_story_outcome was requested in the same preflight batch"
-    )
-    NON_OUTCOME_TOOL_SKIPPED = (
-        "Skipped: only rp_story_outcome may execute in an outcome preflight batch"
-    )
     DUPLICATE_OUTCOME_SKIPPED = (
         "Skipped: duplicate outcome call in the same preflight batch"
     )
@@ -122,29 +102,7 @@ class StatusSubAgentToolRecord:
     success: bool
     changed: bool
     status: StatusSubAgentRecordStatus
-    stage: StatusSubAgentStage = StatusSubAgentStage.REALTIME
-
-    @classmethod
-    def skipped_due_to_outcome(
-        cls,
-        *,
-        tool_name: str,
-        arguments: str,
-        state_prewrite: bool,
-    ) -> "StatusSubAgentToolRecord":
-        return cls(
-            tool_name=tool_name,
-            arguments=arguments,
-            result=(
-                StatusSubAgentRecordText.STATE_PREWRITE_SKIPPED
-                if state_prewrite
-                else StatusSubAgentRecordText.NON_OUTCOME_TOOL_SKIPPED
-            ),
-            success=False,
-            changed=False,
-            status=StatusSubAgentRecordStatus.SKIPPED_DUE_TO_OUTCOME,
-            stage=StatusSubAgentStage.OUTCOME,
-        )
+    stage: StatusSubAgentStage = StatusSubAgentStage.IMMEDIATE
 
     @classmethod
     def skipped_duplicate_outcome(
@@ -189,7 +147,7 @@ class StatusSubAgentToolRecord:
 class StatusSubAgentResult:
     """StatusSubAgent result with typed tool-call diagnostics.
 
-    ``failed`` and ``updated`` may both be true when one fast-update target was
+    ``failed`` and ``updated`` may both be true when one immediate-update target was
     restored while another target still has changes staged in turn scratch.
     """
 
@@ -198,7 +156,6 @@ class StatusSubAgentResult:
     call_stats: list[CallRecord] = field(default_factory=list)
     outcome_requested: bool = False
     outcome_staged: bool = False
-    state_prewrites_skipped: int = 0
     failed: bool = False
     outcome_decision: OutcomeDecision = OutcomeDecision.NOT_REQUIRED
     route: StatusRouteResult | None = None

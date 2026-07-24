@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -42,7 +43,6 @@ def test_run_migrations_creates_consolidated_final_schema() -> None:
             "rpg_story_pack_bindings",
             "rpg_story_pack_operations",
             "rpg_session_status_tables",
-            "rpg_session_status_deferred_progress",
             "rpg_rp_module_catalog",
             "rpg_story_rp_modules",
             "rpg_session_rp_module_overrides",
@@ -69,6 +69,7 @@ def test_run_migrations_creates_consolidated_final_schema() -> None:
             "rpg_lorebook_entries",
             "rpg_status_table_templates",
         }.isdisjoint(tables)
+        assert "rpg_session_status_deferred_progress" not in tables
 
         assert "first_message" not in _columns(conn, "rpg_stories")
         assert {"story_prompt", "main_llm_provider_key"}.issubset(
@@ -254,6 +255,20 @@ def test_demo_data_uses_story_owned_resources_and_complete_defaults() -> None:
             "SELECT COUNT(*) AS count FROM rpg_session_status_tables "
             "WHERE workspace_id = 'demo_workspace'"
         ).fetchone()["count"] == 4
+        status_documents = [
+            json.loads(str(row["document_json"]))
+            for row in conn.execute(
+                "SELECT document_json FROM rpg_story_status_tables"
+            )
+        ]
+        assert status_documents
+        assert all(document["schemaVersion"] == 2 for document in status_documents)
+        assert all(
+            "updateFrequency" not in row
+            and "deferredIntervalTurns" not in row
+            for document in status_documents
+            for row in document["rows"]
+        )
 
         catalog = {
             row["module_name"]

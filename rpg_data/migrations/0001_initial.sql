@@ -440,18 +440,6 @@ CREATE TABLE rpg_story_quick_replies (
 CREATE INDEX idx_rpg_story_quick_replies_story
 ON rpg_story_quick_replies(story_id, enabled, sort_order, id);
 
-CREATE TABLE rpg_session_status_deferred_progress (
-    session_status_table_id INTEGER NOT NULL,
-    field_key TEXT NOT NULL,
-    last_processed_turn_id INTEGER NOT NULL DEFAULT 0 CHECK (last_processed_turn_id >= 0),
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (session_status_table_id, field_key),
-    FOREIGN KEY (session_status_table_id) REFERENCES rpg_session_status_tables(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_status_deferred_progress_table
-ON rpg_session_status_deferred_progress(session_status_table_id);
-
 CREATE TABLE rpg_media_blobs (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,

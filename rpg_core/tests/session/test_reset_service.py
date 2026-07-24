@@ -9,7 +9,6 @@ from rpg_core.session.role import (
     PlayerCharacterBindingStatus,
     SessionRoleService,
 )
-from rpg_core.status.manager import StatusManager
 from rpg_data import models
 from rpg_data.services import get_data_service_gateway, reset_data_service_gateways
 from rpg_memory.story.application import StoryMemoryApplicationService
@@ -97,25 +96,18 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         document=current_story_document,
     )
 
-    deferred_document = models.StatusTableDocument.from_rows(rows=[
+    native_document = models.StatusTableDocument.from_rows(rows=[
         models.StatusTableRow(
             "长期进度",
-            "旧值",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
-            deferred_interval_turns=2,
+            "已推进",
+            update_rule="长期进度事实明确变化时更新",
+            metadata={"format": "text"},
         )
     ])
     native_table = gateway.status.create_table(
         session_id,
         "会话原生表",
-        document=deferred_document,
-    )
-    StatusManager(session_id, gateway.status).commit_deferred_update(
-        native_table.id,
-        deferred_document.with_existing_values([("长期进度", "已推进")]),
-        processed_keys=["长期进度"],
-        last_processed_turn_id=2,
-        base_document=deferred_document,
+        document=native_document,
     )
     native_table = gateway.status.get_table_by_id(native_table.id)
     return (
@@ -142,7 +134,6 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     assert result.story_status_tables_cleared >= 1
     assert result.story_status_tables_initialized >= 1
     assert result.session_native_status_tables_reset == 1
-    assert result.deferred_progress_cleared == 1
     assert result.first_message
     messages = gateway.messages.list(session_id)
     assert [(row.role, row.content, row.turn_id, row.seq_in_turn) for row in messages] == [
@@ -150,7 +141,6 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     ]
     assert gateway.narrative_outcomes.list_for_turns(session_id, [2]) == []
     assert _story_memory(gateway).list(session_id) == []
-    assert gateway.status.list_deferred_progress(session_id) == []
     rebuilt = gateway.status.get_table(session_id, template_name)
     assert rebuilt.document.rows[0].value == "Story 当前状态值"
     native_after = gateway.status.get_table_by_id(native_before.id)
@@ -167,10 +157,10 @@ def test_reset_clears_runtime_rows_and_rebuilds_current_story_status(tmp_path) -
     assert native_after.document.rows[0].key == "长期进度"
     assert native_after.document.rows[0].value == ""
     assert (
-        native_after.document.rows[0].update_frequency
-        == models.STATUS_UPDATE_FREQUENCY_DEFERRED
+        native_after.document.rows[0].update_rule
+        == "长期进度事实明确变化时更新"
     )
-    assert native_after.document.rows[0].deferred_interval_turns == 2
+    assert native_after.document.rows[0].metadata == {"format": "text"}
 
     assert gateway.backup.messages.count(session_id) == backup_count + 1
     state = SessionRoleService(gateway.sessions).get_state(session_id)
@@ -299,7 +289,6 @@ def test_reset_rolls_back_when_story_opening_cannot_render(tmp_path) -> None:
     )
     messages_before = gateway.messages.list(session_id)
     tables_before = gateway.status.list_tables(session_id)
-    progress_before = gateway.status.list_deferred_progress(session_id)
     backup_count = gateway.backup.messages.count(session_id)
 
     with pytest.raises(ValueError):
@@ -307,5 +296,4 @@ def test_reset_rolls_back_when_story_opening_cannot_render(tmp_path) -> None:
 
     assert gateway.messages.list(session_id) == messages_before
     assert gateway.status.list_tables(session_id) == tables_before
-    assert gateway.status.list_deferred_progress(session_id) == progress_before
     assert gateway.backup.messages.count(session_id) == backup_count

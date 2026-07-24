@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import pytest
-
-from rpg_core.scene.status import SceneStatusPolicyError, SceneStatusService
+from rpg_core.scene.status import SceneStatusService
 from rpg_data.model.status import (
     STATUS_KIND_NORMAL,
     STATUS_KIND_SCENE,
-    STATUS_UPDATE_FREQUENCY_MANUAL,
     SessionStatusTable,
     StatusTableDocument,
     StatusTableRow,
@@ -72,16 +69,17 @@ def test_scene_document_policy_locks_core_fields() -> None:
     assert SceneStatusService.prepare_document(STATUS_KIND_NORMAL, document) is document
 
 
-def test_scene_document_policy_rejects_non_realtime_fields() -> None:
+def test_scene_document_policy_preserves_update_rules() -> None:
     document = StatusTableDocument.from_rows(
         rows=[
             StatusTableRow(
                 "天气",
                 "晴",
-                update_frequency=STATUS_UPDATE_FREQUENCY_MANUAL,
+                update_rule="天气被明确改变时更新",
             )
         ]
     )
 
-    with pytest.raises(SceneStatusPolicyError, match="realtime"):
-        SceneStatusService.prepare_document(STATUS_KIND_SCENE, document)
+    prepared = SceneStatusService.prepare_document(STATUS_KIND_SCENE, document)
+
+    assert prepared.rows[0].update_rule == "天气被明确改变时更新"

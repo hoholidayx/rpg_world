@@ -21,12 +21,11 @@ def _document() -> models.StatusTableDocument:
         models.StatusTableRow(
             "长期信任",
             "低",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
+            update_rule="长期信任事实明确变化时更新",
         ),
         models.StatusTableRow(
             "人工备注",
             "保留",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_MANUAL,
         ),
     ])
 
@@ -68,16 +67,9 @@ class _StatusManager:
     def commit_bootstrap_state(
         self,
         changes,
-        *,
-        deferred_progress,
-        boundary_turn_id,
     ) -> None:  # noqa: ANN001
         changes = list(changes)
-        self.commits.append({
-            "changes": changes,
-            "deferred_progress": deferred_progress,
-            "boundary_turn_id": boundary_turn_id,
-        })
+        self.commits.append({"changes": changes})
         for change in changes:
             self.document = change.document
 
@@ -133,7 +125,7 @@ def test_select_status_bootstrap_history_requires_explicit_contiguous_closed_tur
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_updates_non_manual_fields_and_commits_once() -> None:
+async def test_bootstrap_updates_all_fields_and_commits_once() -> None:
     manager = _StatusManager()
 
     class Provider:
@@ -144,7 +136,8 @@ async def test_bootstrap_updates_non_manual_fields_and_commits_once() -> None:
             prompt = str(messages[-1]["content"])
             assert "生命降为八" in prompt
             assert "题外回复" not in prompt
-            assert "人工备注" not in prompt
+            assert "人工备注" in prompt
+            assert "长期信任事实明确变化时更新" in prompt
             return {
                 "tool_calls": [{
                     "function": {
@@ -154,6 +147,7 @@ async def test_bootstrap_updates_non_manual_fields_and_commits_once() -> None:
                             "updates": [
                                 {"key": "生命", "value": "8"},
                                 {"key": "长期信任", "value": "中"},
+                                {"key": "人工备注", "value": "已核实"},
                             ],
                         }),
                     }
@@ -179,10 +173,8 @@ async def test_bootstrap_updates_non_manual_fields_and_commits_once() -> None:
     assert result.processed_turns == 2
     assert manager.document.row_for_key("生命").value == "8"  # type: ignore[union-attr]
     assert manager.document.row_for_key("长期信任").value == "中"  # type: ignore[union-attr]
-    assert manager.document.row_for_key("人工备注").value == "保留"  # type: ignore[union-attr]
+    assert manager.document.row_for_key("人工备注").value == "已核实"  # type: ignore[union-attr]
     assert len(manager.commits) == 1
-    assert manager.commits[0]["deferred_progress"] == {1: ("长期信任",)}
-    assert manager.commits[0]["boundary_turn_id"] == 4
 
 
 @pytest.mark.asyncio
@@ -222,7 +214,7 @@ async def test_bootstrap_prompt_keeps_long_message_tail() -> None:
 
 
 @pytest.mark.asyncio
-async def test_disabled_bootstrap_without_complete_history_skips_and_marks_progress() -> None:
+async def test_disabled_bootstrap_without_complete_history_skips_cleanly() -> None:
     manager = _StatusManager()
 
     class Provider:
@@ -249,7 +241,6 @@ async def test_disabled_bootstrap_without_complete_history_skips_and_marks_progr
     assert result.failed is False
     assert result.processed_turns == 0
     assert manager.commits[0]["changes"] == []
-    assert manager.commits[0]["deferred_progress"] == {1: ("长期信任",)}
 
 
 @pytest.mark.asyncio
@@ -279,20 +270,13 @@ async def test_disabled_bootstrap_with_complete_history_and_normal_target_fails(
 
     assert result.failed is True
     assert result.processed_turns == 2
-    assert result.deferred_progress == {1: ("长期信任",)}
     assert manager.commits == []
 
 
 @pytest.mark.asyncio
 async def test_disabled_bootstrap_with_no_writable_target_skips() -> None:
     manager = _StatusManager()
-    manager.document = models.StatusTableDocument.from_rows(rows=[
-        models.StatusTableRow(
-            "人工备注",
-            "保留",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_MANUAL,
-        ),
-    ])
+    manager.document = models.StatusTableDocument.from_rows(rows=[])
     sub_agent = StatusSubAgent(
         provider_biz_key="agent.status_sub_agent",
         enabled=False,
@@ -310,7 +294,6 @@ async def test_disabled_bootstrap_with_no_writable_target_skips() -> None:
     assert result.processed_turns == 2
     assert len(manager.commits) == 1
     assert manager.commits[0]["changes"] == []
-    assert manager.commits[0]["deferred_progress"] == {}
 
 
 class _SceneStatusManager:
@@ -348,6 +331,13 @@ class _SceneStatusManager:
     def get_scene_attrs(self) -> dict[str, str]:
         return dict(self.documents[2].data_rows)
 
+    def get_scene_update_rules(self) -> dict[str, str]:
+        return {
+            row.key: row.update_rule
+            for row in self.documents[2].rows
+            if row.update_rule
+        }
+
     def get_table_by_id(self, table_id: int) -> dict[str, object]:
         return self._table(table_id)
 
@@ -357,11 +347,7 @@ class _SceneStatusManager:
     def commit_bootstrap_state(
         self,
         changes,
-        *,
-        deferred_progress,
-        boundary_turn_id,
     ) -> None:  # noqa: ANN001
-        del deferred_progress, boundary_turn_id
         for change in changes:
             self.committed_table_ids.append(change.table_id)
             self.documents[change.table_id] = change.document

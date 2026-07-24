@@ -293,35 +293,13 @@ class StatusRowSpec(ContractModel):
     key: str
     value: str = ""
     runtime_key_locked: bool = False
-    update_frequency: Literal[
-        "realtime",
-        "event_driven",
-        "deferred",
-        "manual",
-    ] = "realtime"
     update_rule: str = ""
-    deferred_interval_turns: int | None = Field(default=None, gt=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def _update_policy(self) -> "StatusRowSpec":
-        if self.update_frequency == "event_driven" and not self.update_rule.strip():
-            raise ValueError("event_driven status rows require updateRule")
-        if self.update_frequency != "event_driven" and self.update_rule.strip():
-            raise ValueError("updateRule is only valid for event_driven rows")
-        if (
-            self.update_frequency == "deferred"
-            and self.deferred_interval_turns is None
-        ):
-            raise ValueError("deferred status rows require deferredIntervalTurns")
-        if (
-            self.update_frequency != "deferred"
-            and self.deferred_interval_turns is not None
-        ):
-            raise ValueError(
-                "deferredIntervalTurns is only valid for deferred rows"
-            )
-        return self
+    @field_validator("update_rule")
+    @classmethod
+    def _update_rule(cls, value: str) -> str:
+        return value.strip()
 
 
 class StatusTableSpec(ContractModel):
@@ -365,12 +343,6 @@ class StatusTableSpec(ContractModel):
                 )
             time_row = next(row for row in self.rows if row.key == "时间")
             validate_scene_time(time_row.value)
-            if any(
-                row.update_frequency != "realtime" for row in self.rows
-            ):
-                raise ValueError(
-                    "scene status rows must use realtime updateFrequency"
-                )
         return self
 
 

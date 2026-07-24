@@ -244,15 +244,11 @@ class TurnOrchestrator:
         runtime: "TurnRuntime",
         main_tool_names: list[str],
     ) -> None:
-        result = runtime.preflight_result
         self._diagnostics.log_preflight(
             turn_scratch=runtime.scratch,
             preflight_outcome=(
                 runtime.preflight_outcome
                 or StatusSubAgentPreflightOutcome.NONE
-            ),
-            state_prewrites_skipped=(
-                result.state_prewrites_skipped if result is not None else 0
             ),
             main_tool_names=main_tool_names,
         )

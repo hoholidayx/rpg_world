@@ -34,9 +34,10 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 
 ## 近期架构变更记录
 
+- **2026-07-24：状态字段 Schema v2 硬切。** Story 与 Session 状态 document 统一为 `schemaVersion=2`，每行只保留 `key / value / runtimeKeyLocked / updateRule / metadata`。字段频率、延迟周期、人工只读和逐字段进度账本全部删除；所有已有字段的 value 由 Agent 在当前 turn 即时判断更新，`updateRule` 只提供额外语义指导，`runtimeKeyLocked` 只保护 key 结构。Play API/WebUI、DesignProject schema/viewer 与 `rpg_mcp` 同步切换，旧 document 和旧行字段直接拒绝。
 - **2026-07-22：Story 直属内容资产与数据库硬切。** Character、Lorebook、Status 从 Workspace 资产库与 Story mount 模型切换为 Story 直接拥有；Session 状态表只复制当前 Story 定义，来源为 `story_copy`。Play API/WebUI 删除旧资产库、挂载和系统模板入口。数据库不兼容升级，migration 压缩为 `0001_initial.sql`、`0002_demo.sql`、`0003_pagination_demo.sql`，旧 ledger 会明确拒绝启动；旧 Story Pack 导入方案不在本轮兼容。
 - **2026-07-22：通用检索与 RPG Memory 拆包。** 业务无关的 chunk、FTS/vector、QueryPlan、Hybrid、rerank、索引协调和存储迁入 `memory_retrieval`；RP 查询上下文、候选 policy、在线召回编排、Story/Persistent Memory、Dream 与 benchmark 归 `rpg_memory`。依赖固定为 `rpg_memory → memory_retrieval`，旧 `rp_memory` 包删除，不保留兼容转发；算法权重、配置键、索引/数据库格式和服务协议不变。
-- **2026-07-20：Status / Scene 业务与数据层拆分。** 状态模板/挂载/Session 表管理、Scene 字段规则与 active Scene、角色名修复与 Context 可见性、运行时/deferred/bootstrap 写入资格统一归 `rpg_core`；`StatusDataService` 只保留 typed CRUD、关联 read model、deferred progress、last-write-wins 诊断和原子 document batch。Status 存储契约迁入 `rpg_data.model.status`，Gateway 属性和 HTTP/SSE/数据库结构保持不变。
+- **2026-07-20：Status / Scene 业务与数据层拆分。** 状态模板/挂载/Session 表管理、Scene 字段规则与 active Scene、角色名修复与 Context 可见性、运行时/bootstrap 写入资格统一归 `rpg_core`；`StatusDataService` 只保留 typed CRUD、关联 read model、last-write-wins 诊断和原子 document batch。Status 存储契约迁入 `rpg_data.model.status`。
 - **2026-07-21：Media 业务与数据层拆分。** 来源 turn/VisualBrief、图库 metadata、删除门禁、背景评估和 worker 恢复策略统一归 `MediaApplicationService`；`MediaDataService` 只保留 typed CRUD/read model、CAS、引用查询、去重和显式 completion。Media 存储契约迁入 `rpg_data.model.media`，HTTP 与数据库结构保持不变。
 - **2026-07-21：TTS 业务与数据层拆分。** 已提交 assistant message 资格、正文清洗/分段、fingerprint、cache 命中与失效、retry 资格和 worker interrupted 策略统一归 `TTSApplicationService`；`TTSDataService` 只保留 typed 查询/read model、Job/Cache/Blob/Part CRUD、条件 claim/transition、引用查询和原子 completion。TTS 存储契约迁入 `rpg_data.model.tts`，HTTP、数据库结构、文件目录和 Play API 协议保持不变。
 - **2026-07-20：`rpg_data` 依赖边界收口。** `DataServiceGateway` 保留为数据库生命周期与 Data Service 注册表，Session、Plot、Dream/Memory 的业务服务改为显式依赖窄 Protocol；`sessions` 作为大业务聚合 Data Service 取代角色、派生、删除三个薄入口。Session/Memory 存储类型拆入 `rpg_data.model.*`，旧 `rpg_data.models` 兼容重导出，并增加静态守卫防止 Repository/Peewee record 外泄、业务 service 持有 Gateway 或 Gateway lookup 面继续增长。复杂查询、分页、批量、CAS、数据库原子操作和高效 read model 仍归数据层。
@@ -48,7 +49,7 @@ RPG World 的长期产品目标是成为一个 **AI RPG World / 沉浸式 RP 平
 - **2026-07-15：LLM Service 完全独立进程化。** 新增 `run_llm.py`、受 Bearer 保护的 `/llm/v1` 业务 HTTP/SSE 边界和独立 `llm_client` 契约包。只有 LLM Service 读取 `llm.yaml`、Provider 密钥并持有 OpenAI/llama runtime；Agent 与 Memory 只通过远端客户端调用，旧 llama 子进程协议已删除。
 - **2026-07-15：Agent / Memory / LLM 统一异步线程模型。** `llm_client` 改为 loop-owned 纯异步客户端，Agent 与 Memory 直接 await catalog、provider、embedding 和 recall；Memory 使用 session 级 async coordinator，watchdog 线程只入队。llama 的队列等待与运行期统一受 `request_timeout_ms` 控制，并在 completion、stream、rerank 安全边界协作取消。
 - **2026-07-15：RPG Media v1。** 新增与 `rpg_core` 同级的无框架 `rpg_media`，以及独立 `media_service` 持久任务进程。SessionRoom 支持从 1–20 个连续 turn 生成可编辑 `VisualBrief`、异步生图、Gallery 与会话背景；图片按工作区内容寻址存储，媒体故障不影响聊天主链路。
-- **2026-07-13：Agent Turn 与状态更新固定编排。** Narrative Outcome 与状态更新拆分为独立阶段；状态更新先 Route，再按 scene 和单张普通表隔离执行。快速状态目标采用 best-effort：单个目标失败只回退该目标，其他成功目标保留且主流程继续；整个 turn 仍只在主 runner 成功后统一提交。字段频率统一为 `realtime | event_driven | deferred | manual`，其中 deferred 在回复交付后、同 session 下一 mailbox 项前归纳。scene 继续以 `status_kind="scene"` 作为数据真源，但在主 Context 和更新工具上走专用路径。完整设计、时序和失败语义见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。
+- **2026-07-13：Agent Turn 与状态更新固定编排。** Narrative Outcome 与状态更新拆分为独立阶段；状态更新先 Route，再按 scene 和单张普通表隔离执行。状态目标采用 best-effort：单个目标失败只回退该目标，其他成功目标保留且主流程继续；整个 turn 仍只在主 runner 成功后统一提交。scene 继续以 `status_kind="scene"` 作为数据真源，但在主 Context 和更新工具上走专用路径。字段契约现已由 2026-07-24 的 Schema v2 硬切取代。完整设计、时序和失败语义见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。
 
 ## 快速起步
 
@@ -245,19 +246,19 @@ Play API 是 catalog session 到 Agent 服务的边界层：它通过 `session_i
 
 状态表采用 SQLite document 真源；`rpg_data` 负责可靠存取，`rpg_core` 负责产品策略：
 
-- canonical 存储契约位于 `rpg_data.model.status`，`rpg_data.models` 只保留兼容重导出。`StatusDataService` 负责 Story 定义、Session document、角色/来源关联 read model、deferred progress 和原子批量写入；`StatusTableAdministrationService`、`SceneStatusService`、`StatusContextService` 与 `StatusManager` 分别承接管理后台用例、Scene、Context 和 Agent 运行时策略。
+- canonical 存储契约位于 `rpg_data.model.status`，`rpg_data.models` 只保留兼容重导出。`StatusDataService` 负责 Story 定义、Session document、角色/来源关联 read model 和原子批量写入；`StatusTableAdministrationService`、`SceneStatusService`、`StatusContextService` 与 `StatusManager` 分别承接管理后台用例、Scene、Context 和 Agent 运行时策略。
 - Story 定义表和 Session 运行表都在 SQL 行内保存封装后的 `document_json`，对外通过 `StoryStatusTable`、`SessionStatusTable`、`StatusTableDocument` / `StatusTableRow` 等 typed contract 暴露，不把原始 JSON 字符串作为正文数据返回。
 - SQLite 同时记录 Story 归属、Session 副本、nullable 来源关系、排序、`metadata_json` 和 `status_kind`；`status_kind` 当前只允许 `scene | normal`。
-- 每个 `StatusTableRow` 可声明 `updateFrequency`、`updateRule` 和 `deferredIntervalTurns`。频率只允许 `realtime | event_driven | deferred | manual`；旧 document 缺少频率时按 `realtime` 读取，`event_driven` 必须填写非空规则，只有 `deferred` 可以配置正整数归纳周期。
-- 字段频率对应实时、规则命中、延迟归纳和人工维护四种写入策略；Route、字段 allowlist、scene 特例和 deferred 时序统一见 [Agent Turn 完整编排](docs/agent-turn-orchestration.md#状态字段更新频率)。
+- 状态 document 固定为 `schemaVersion=2`，每个 `StatusTableRow` 只包含 `key`、`value`、`runtimeKeyLocked`、`updateRule` 与 `metadata`。旧 schema、旧频率/周期字段及其它未知属性直接拒绝，不做兼容转换。
+- 所有已有字段的 value 均可由 Agent 在当前 turn 即时更新。空 `updateRule` 使用通用“事实已明确且值实际变化”条件；非空规则作为 Route、隔离更新器和主 Agent 的额外语义条件，不产生定时调度或数据库级写入门禁。`runtimeKeyLocked` 只限制 key 删除/重命名，不限制 value 更新。完整编排见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md#状态字段契约与即时更新)。
 - Story 状态表通过 nullable `story_character_id` 绑定一个同 Story 角色；一名角色可绑定多张表。角色删除后定义上的绑定 FK 置空，不删除状态表。
 - 创建 Session 时会把当前 Story 定义复制到 `rpg_session_status_tables`，`origin="story_copy"`，并通过 `source_story_status_table_id` 关联来源。metadata 的 `storyStatusSource` 保存来源表、角色 ID 和 `characterName` 快照；角色名只用于在 LLM Context 中分组角色状态表。
 - Story 定义后续修改不影响已有 Session 副本；Story 定义删除后副本保留、来源 FK 置空。Context 发现角色名快照缺失时可通过角色 ID 和仍存在的 Story 来源关系回填；无法解析则 warning 并从 LLM Context 排除。
-- 运行时直接新建的会话表写入 `rpg_session_status_tables`，`origin="session_native"`。deferred 进度以运行时表 ID + 字段 key 保存最后处理 turn；document 值与进度在同一数据库事务中提交，归纳失败不推进进度，truncate 只收缩进度边界且不回滚已经提交的状态值。
-- `/clear` 删除全部 deferred 进度与旧 `story_copy`，按当前 Story 定义重建；`session_native` 表保留 ID、结构、metadata 和字段策略，仅将所有 value 置空。同名原生表与当前 Story 定义冲突时整个 reset 回滚。
+- 运行时直接新建的会话表写入 `rpg_session_status_tables`，`origin="session_native"`；状态系统不再维护逐字段进度或回复后的慢更新任务。
+- `/clear` 删除旧 `story_copy` 并按当前 Story 定义重建；`session_native` 表保留 ID、结构、metadata 和 `updateRule`，仅将所有 value 置空。同名原生表与当前 Story 定义冲突时整个 reset 回滚。
 - `DataServiceGateway` 初始化时只 materialize workspace/story/session 运行目录并初始化缺失的 session 状态表副本；service 不扫描目录补业务索引，也不维护状态表 type 表、workspace-relative 状态表文件路径或 CSV 内容源。
 - Bootstrap 默认不删除不在 SQL 索引里的 workspace/story/session 目录。只有显式设置 `RPG_WORLD_BOOTSTRAP_DELETE_ORPHAN_DIRS=true` 才会执行启动清理；日志会输出每个删除项和汇总计数。
-- `当前场景` 是 Story 直属 `status_kind="scene"` 定义复制出的特殊 Session 表；多张 scene 表存在时消费排序第一张。scene document 的所有字段固定为 `realtime`，Core 的管理、turn scratch、bootstrap 与 reset 写入边界都会拒绝 `event_driven` / `deferred` / `manual`。LLM 默认只能修改已有 key 的 value；`agent.scene.allow_runtime_key_changes=true` 才允许通过 scene 工具增删非锁定 key，管理端手工 CRUD 不受影响。
+- `当前场景` 是 Story 直属 `status_kind="scene"` 定义复制出的特殊 Session 表；多张 scene 表存在时消费排序第一张。它使用同一 v2 行契约，非空 `updateRule` 只作为本轮运行时 Context 指导，不写入历史 scene 快照。LLM 默认只能修改已有 key 的 value；`agent.scene.allow_runtime_key_changes=true` 才允许通过 scene 工具增删非锁定 key，`runtimeKeyLocked` 只在结构编辑时保护 key，管理端手工 CRUD 不受影响。
 - `rpg_data` 通过 `rpg_workspaces.root_path` 定位 workspace 根目录，workspace/story/session 运行目录使用 workspace-relative 路径时统一由 `rpg_data.settings` 解析并阻止路径逃逸。
 
 Play WebUI 的状态表页只保留 `Story 定义` 与 `Session 运行时` 两类视图：前者管理当前 Story 直属定义和可选角色绑定，后者管理选定 Session 的复制表与原生表。角色卡和世界书页面同样先选择 Story，再直接编辑该 Story 的资源，不再提供 Workspace 资产库或挂载操作。
@@ -364,7 +365,7 @@ Mailbox → 命令/角色 guard → 不可变 TurnExecutionPlan
 → Status preflight（Outcome → Route → scene/逐表 Update）
 → stage user + memory recall + 主 Context/工具
 → 主 runner → commit → 输出适配 / PostCommitHooks
-→ 回复后的 deferred 归纳 → 同 session 下一 mailbox 项
+→ 同 session 下一 mailbox 项
 ```
 
 这些 hook 是固定的类型化阶段，不是事件总线，不提供动态优先级、运行时重排或第三方注册。
@@ -377,7 +378,7 @@ Mailbox → 命令/角色 guard → 不可变 TurnExecutionPlan
 
 turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool service 与固定 hooks；生产代码通过公开接口协作，不访问 Agent、builder 或 SubAgent 私有状态。
 
-`AgentTurnTransaction` 是“内存 scratch + 短 commit 点”，不是跨 LLM 调用的长数据库事务。user/assistant message、Narrative Outcome、Plot Scheduler 判断、scene/status 都先暂存；快速状态阶段按 scene/单表目标独立 checkpoint，目标失败只恢复该目标并继续后续目标及主 runner。主 runner 完整成功后才统一提交仍保留的 scratch，流式 DONE 只在 commit 成功后发送；主 turn 取消或失败仍丢弃全部 scratch。story-memory、summary 和 deferred 属于 commit 后任务，不回滚已提交 turn。
+`AgentTurnTransaction` 是“内存 scratch + 短 commit 点”，不是跨 LLM 调用的长数据库事务。user/assistant message、Narrative Outcome、Plot Scheduler 判断、scene/status 都先暂存；即时状态阶段按 scene/单表目标独立 checkpoint，目标失败只恢复该目标并继续后续目标及主 runner。主 runner 完整成功后才统一提交仍保留的 scratch，流式 DONE 只在 commit 成功后发送；主 turn 取消或失败仍丢弃全部 scratch。story-memory 与 summary 属于 commit 后任务，不回滚已提交 turn。
 
 完整阶段顺序、mode 差异、Outcome/Route/Update 隔离、scene 规则、字段 allowlist、同步/流式时序、失败隔离和 LLM 调用数量见 [Agent Turn 与状态更新编排](docs/agent-turn-orchestration.md)。该文档是编排细节的单一说明入口。
 
@@ -411,7 +412,7 @@ turn 子系统只依赖显式的 plan resolver、runtime factory、Context/Tool 
 
 prefix cache 以 provider 最终序列化/tokenized 请求的共同前缀为准，不以结构化层、消息边界或整条 system message 的应用层 hash 为独立缓存单元。动态 system 位于 Hot History 后，变化不会截断更早的稳定指令和历史前缀；rolling history 自身发生滑窗时仍会改变共同前缀。整条 system/context hash 不同仍可能命中更早的部分 token，实际缓存效果只看 provider usage 返回的 hit/miss token。开启 `verbose_logging` 后，`TurnPreparation` 会在最终主 Agent messages 和 tool schemas 完成后、首次主 LLM 调用前输出一次不含正文的 `contextHash` / `systemHash` / `toolsHash`、逐消息 `index/role/hash/chars`、role 计数和工具名；后续工具 round 不重复输出这条初始指纹。
 
-`当前场景` 在数据层是 Story 直属 `status_kind="scene"` 定义复制出的 Session SQL document，在主 Context 中则是高优先级 `[scene]` user prefix，不进入普通 `STATUS_TABLES`。Status Route 只在本轮涉及且存在可用 scene 工具时选择它；scene 不走普通表工具或 deferred。默认关闭结构编辑时，已有字段都保持可见且可改 value，`scene_attr` 只接受现有 key，`scene_time` 只在已有 `时间` key 时出现，`scene_del_attr` 不注册；空 scene 完全不暴露写工具。完整差异见 [scene 的特殊语义](docs/agent-turn-orchestration.md#scene-的特殊语义)。
+`当前场景` 在数据层是 Story 直属 `status_kind="scene"` 定义复制出的 Session SQL document，在主 Context 中则是高优先级 `[scene]` user prefix，不进入普通 `STATUS_TABLES`。Status Route 只在本轮涉及且存在可用 scene 工具时选择它；scene 只走专用工具，不存在回复后更新路径。默认关闭结构编辑时，已有字段都保持可见且可改 value，`scene_attr` 只接受现有 key，`scene_time` 只在已有 `时间` key 时出现，`scene_del_attr` 不注册；空 scene 完全不暴露写工具。完整差异见 [scene 的特殊语义](docs/agent-turn-orchestration.md#scene-的特殊语义)。
 
 StatusSubAgent 的 Outcome、Route、scene Update 和单表 Update 是不同缓存族。隔离 Update 使用稳定 system contract，并按 `Recent Conversation → User Action → Selected State Target` 排列 user 内容；每次仍只下发当前目标 schema。MemorySubAgent 的 Recall、Story、Summary、Batch Summary 和 Overall Summary 同样各自保持一条稳定 system + 一条动态 user，并使用独立 source。`verbose_logging` 会按 source 使用与主 Agent 相同的无正文指纹口径，并记录 SubAgent provider usage 的 cache hit/miss/rate。完整说明见 [缓存前缀与观测](docs/agent-turn-orchestration.md#缓存前缀与观测)。
 
@@ -478,7 +479,7 @@ Play WebUI 左侧“剧情调度”页面提供三类大面板：大纲时间线
 | `setback` | 失败但推进 | 25% | 未达成 reason 的整体目标，但提供新信息、替代路径或下一步行动 |
 | `critical_failure` | 重大失败 | 5% | 未达成 reason 的整体目标并引入严重后果，但不自动死亡、硬停局或永久剥夺玩家角色主权 |
 
-Outcome 判定与状态更新由代码拆成独立阶段：预裁定成功后停止 Route 并将结果注入主 Agent；无需裁定时才执行状态目标路由与隔离更新。Outcome 的失败补判语义不受快速状态 best-effort 策略影响。完整正常链路和失败路径见 [StatusSubAgent 固定编排](docs/agent-turn-orchestration.md#statussubagent-固定编排)。
+Outcome 判定与状态更新由代码拆成独立阶段：预裁定成功后停止 Route 并将结果注入主 Agent；无需裁定时才执行状态目标路由与隔离即时更新。Outcome 的失败补判语义不受单目标 best-effort 策略影响。完整正常链路和失败路径见 [StatusSubAgent 固定编排](docs/agent-turn-orchestration.md#statussubagent-固定编排)。
 
 持久化边界由 `NarrativeOutcomeLedgerService` 与 `NarrativeOutcomeDataService` 分工：前者在 `rpg_core` 校验 code、sample、权重来源及其一致性，并把唯一 turn 数据冲突映射为领域冲突；后者只追加调用方准备的 typed row、查询和删除。Agent composition root 将同一数据库下的 transaction port、Outcome ledger 与 Plot ledger 注入 turn runtime，消息、两类 ledger 和状态表仍在一个短事务中共同提交。
 
@@ -504,7 +505,7 @@ Outcome 判定与状态更新由代码拆成独立阶段：预裁定成功后停
 | `我很犹豫，但还是没有决定是否原谅他` | 不替玩家作出内心选择 |
 | `这轮不要掷骰，直接继续叙事` | 尊重明确否定，不注入本轮强制裁定指令 |
 
-每个自动剧情 turn 最多产生一条裁定；同一 turn 重复工具调用复用第一次结果。权重在 turn 开始时形成快照，生成中修改只影响下一 turn。裁定与 user/assistant message、快速状态表在同一个短数据库事务中提交；取消、provider 失败或 commit 失败都不留记录。
+每个自动剧情 turn 最多产生一条裁定；同一 turn 重复工具调用复用第一次结果。权重在 turn 开始时形成快照，生成中修改只影响下一 turn。裁定与 user/assistant message、即时状态变更在同一个短数据库事务中提交；取消、provider 失败或 commit 失败都不留记录。
 
 模块配置优先级是 `系统配置 < Story 稀疏覆盖 < Session 稀疏覆盖`；普通字段逐字段合并，Narrative Outcome 的五档 `weights` 是不可拆分整组，五项必须是 `0..100` 整数且总和严格等于 `100`。Story 编辑页管理模块挂载开关与配置，Session 设置菜单可覆盖或清除后继续继承 Story。通用接口为：
 
@@ -863,8 +864,6 @@ base:
       allow_runtime_key_changes: false
     status_sub_agent:
       enabled: true
-      deferred:
-        default_interval_turns: 5
   memory:
     top_k: 2
     keyword_tokenizer: jieba
@@ -1059,7 +1058,7 @@ RPG_WORLD_PROFILE=test DREAM_LIVE_TEST=1 \
 ## 相关文档
 
 - [`docs/rpg-data-architecture.md`](docs/rpg-data-architecture.md) — `rpg_data`、Data Service、Gateway、Repository、事务与类型所有权的正式规范
-- [`docs/agent-turn-orchestration.md`](docs/agent-turn-orchestration.md) — Agent turn、Outcome、状态路由、事务和 deferred 完整编排
+- [`docs/agent-turn-orchestration.md`](docs/agent-turn-orchestration.md) — Agent turn、Outcome、状态即时路由与事务完整编排
 - `CLAUDE.md` — 完整架构文档和技术细节
 - `rpg_core/settings.yaml` — 核心业务、数据路径、memory 参数
 - `agent_service/settings.yaml` — Agent 服务监听与 AgentClient 默认值

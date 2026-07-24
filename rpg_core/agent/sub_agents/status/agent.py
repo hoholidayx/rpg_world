@@ -7,14 +7,8 @@
 用精简上下文（历史 + 状态描述 + 用户输入）预处理状态表变更，
 避免主 LLM chat loop 的场景工具 round-trip 开销。
 
-Usage::
-
-    agent = StatusSubAgent(
-        provider_biz_key="agent.status_sub_agent",
-    )
-    agent.register_scene_tools(scene_tracker)
-    agent.bind_context(sub_agent_context)
-    result = await agent.update(history, scene_ctx, user_input)
+The production entrypoint is :meth:`StatusSubAgent.run_preflight`, which runs
+the fixed Outcome → Route → isolated target-update pipeline.
 """
 
 from __future__ import annotations
@@ -28,19 +22,12 @@ from typing import TYPE_CHECKING, Callable, Iterator, TypeAlias
 from loguru import logger
 
 from rpg_data.model.status import (
-    STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY,
-    STATUS_ROW_UPDATE_FREQUENCY_KEY,
     STATUS_ROW_UPDATE_RULE_KEY,
-    STATUS_UPDATE_FREQUENCY_DEFERRED,
-    STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
-    STATUS_UPDATE_FREQUENCY_MANUAL,
-    STATUS_UPDATE_FREQUENCY_REALTIME,
 )
 from llm_client.types import LLMResponse, LLMUsage
 from rpg_core.agent.telemetry import CallRecord, TurnStats
 from rpg_core.agent.sub_agents.base import BaseSubAgent
 from rpg_core.agent.sub_agents.status.models import (
-    DeferredStatusResult,
     OutcomeDecision,
     StatusBootstrapResult,
     StatusRouteResult,
@@ -56,18 +43,14 @@ from rpg_core.agent.sub_agents.status.parsing import (
     tool_result_succeeded as _tool_result_succeeded,
 )
 from rpg_core.agent.sub_agents.status.prompts import (
-    DEFERRED_STATUS_SCHEMA,
-    DEFERRED_STATUS_TOOL_NAME,
-    NARRATIVE_OUTCOME_SYSTEM_PROMPT,
     OUTCOME_ONLY_SYSTEM_PROMPT,
     ROUTED_STATE_UPDATE_SYSTEM_PROMPT,
     STATUS_ROUTER_SCHEMA,
     STATUS_ROUTER_TOOL_NAME,
-    build_state_system_prompt as _build_state_system_prompt,
 )
 from rpg_core.tooling.base import BaseTool
 from rpg_core.tooling.registry import ToolRegistry
-from rpg_core.agent.tools.state import STATE_TOOL_NAMES, StateToolSet
+from rpg_core.agent.tools.state import StateToolSet
 from rpg_core.context.models import Message, Role
 from rpg_core.context.fingerprint import (
     build_request_fingerprint,
@@ -83,8 +66,6 @@ if TYPE_CHECKING:
 
     from rpg_core.agent.sub_agents.context import SubAgentContext
     from rpg_core.agent.turn.models import TurnPlayerCharacterSnapshot
-    from rpg_core.status.manager import StatusManager
-
 # ── constants ──────────────────────────────────────────────────────────
 
 _TAG = "[StatusSubAgent]"
@@ -140,7 +121,6 @@ class StatusSubAgent(BaseSubAgent):
         self._mutation_probe: Callable[[], object] | None = None
         self._mutation_checkpoint: Callable[[], object] | None = None
         self._mutation_restore: Callable[[object], None] | None = None
-        self._outcome_preflight_enabled = False
         self._active_status_allowed_keys: dict[int, frozenset[str]] | None = None
         self._active_scene_allowed = True
 
@@ -177,7 +157,6 @@ class StatusSubAgent(BaseSubAgent):
         mutation_probe: Callable[[], object] | None,
         create_checkpoint: Callable[[], object] | None,
         restore_checkpoint: Callable[[object], None] | None,
-        outcome_preflight_enabled: bool | None = None,
     ) -> Iterator[None]:
         """Temporarily bind tools and rollback callbacks for one turn."""
         previous_registry = self._tool_registry
@@ -186,17 +165,11 @@ class StatusSubAgent(BaseSubAgent):
         previous_probe = self._mutation_probe
         previous_checkpoint = self._mutation_checkpoint
         previous_restore = self._mutation_restore
-        previous_outcome_preflight_enabled = self._outcome_preflight_enabled
         try:
             self.clear_tools()
             self.register_tools(tools)
             self.set_mutation_probe(mutation_probe)
             self.set_mutation_boundary(create_checkpoint, restore_checkpoint)
-            self._outcome_preflight_enabled = (
-                any(tool.name == NARRATIVE_OUTCOME_TOOL_NAME for tool in tools)
-                if outcome_preflight_enabled is None
-                else bool(outcome_preflight_enabled)
-            )
             yield
         finally:
             self._tool_registry = previous_registry
@@ -204,7 +177,6 @@ class StatusSubAgent(BaseSubAgent):
             self._state_tool_set = previous_state_tool_set
             self.set_mutation_probe(previous_probe)
             self.set_mutation_boundary(previous_checkpoint, previous_restore)
-            self._outcome_preflight_enabled = previous_outcome_preflight_enabled
 
     # ── Context 绑定（覆盖基类） ─────────────────────────────────────
 
@@ -215,14 +187,6 @@ class StatusSubAgent(BaseSubAgent):
         super().bind_context(context)
 
     # ── 核心方法 ─────────────────────────────────────────────────────
-
-    @property
-    def system_prompt(self) -> str:
-        """返回状态表预更新子 Agent 的系统提示。"""
-        base_prompt = _build_state_system_prompt(self._state_tool_set)
-        if self._outcome_preflight_enabled:
-            return base_prompt + NARRATIVE_OUTCOME_SYSTEM_PROMPT
-        return base_prompt
 
     @staticmethod
     def _log_verbose(message: str, *args: object) -> None:
@@ -382,7 +346,6 @@ class StatusSubAgent(BaseSubAgent):
             result.failed = True
             return result
 
-        deferred_progress: dict[int, tuple[str, ...]] = {}
         batches: list[_RoutedStatusUpdateBatch] = []
         scene_tool_names = frozenset(
             name for name in self._state_tool_set.names if name in SCENE_TOOL_NAMES
@@ -400,22 +363,13 @@ class StatusSubAgent(BaseSubAgent):
             document = table.get("document")
             rows = document.get("rows", []) if isinstance(document, dict) else []
             allowed: list[str] = []
-            deferred: list[str] = []
             for row in rows if isinstance(rows, list) else []:
                 if not isinstance(row, dict):
                     continue
                 key = str(row.get("key") or "")
-                frequency = str(
-                    row.get(STATUS_ROW_UPDATE_FREQUENCY_KEY)
-                    or STATUS_UPDATE_FREQUENCY_REALTIME
-                )
-                if not key or frequency == STATUS_UPDATE_FREQUENCY_MANUAL:
+                if not key:
                     continue
                 allowed.append(key)
-                if frequency == STATUS_UPDATE_FREQUENCY_DEFERRED:
-                    deferred.append(key)
-            if deferred and table_id > 0:
-                deferred_progress[table_id] = tuple(deferred)
             if table_id <= 0 or not allowed:
                 continue
             allowed_keys = frozenset(allowed)
@@ -425,7 +379,6 @@ class StatusSubAgent(BaseSubAgent):
                 schema_names=frozenset({STATUS_TABLE_SET_VALUES_TOOL_NAME}),
                 allowed_status_keys={table_id: allowed_keys},
             ))
-        result.deferred_progress = deferred_progress
         writable_batches = [
             batch
             for batch in batches
@@ -445,13 +398,19 @@ class StatusSubAgent(BaseSubAgent):
             return result
 
         self._busy = True
-        checkpoint = (
-            self._mutation_checkpoint()
-            if self._mutation_checkpoint is not None
-            else None
-        )
-        recent = self._format_history_window(history, rounds)
+        checkpoint: object | None = None
         try:
+            try:
+                checkpoint = (
+                    self._mutation_checkpoint()
+                    if self._mutation_checkpoint is not None
+                    else None
+                )
+            except Exception as exc:
+                raise _StatusPrewriteRollbackError(
+                    "failed to create status bootstrap checkpoint"
+                ) from exc
+            recent = self._format_history_window(history, rounds)
             for batch in writable_batches:
                 self._active_scene_allowed = batch.is_scene
                 self._active_status_allowed_keys = batch.allowed_status_keys
@@ -504,6 +463,8 @@ class StatusSubAgent(BaseSubAgent):
                         )
             result.updated = any(record.changed for record in result.records)
             return result
+        except _StatusPrewriteRollbackError:
+            raise
         except Exception as exc:
             result.failed = True
             try:
@@ -527,257 +488,6 @@ class StatusSubAgent(BaseSubAgent):
             self._active_status_allowed_keys = None
             self._active_scene_allowed = True
             self._busy = False
-
-    async def reconcile_deferred(
-        self,
-        *,
-        session_manager: SessionManager,
-        status_manager: "StatusManager",
-    ) -> DeferredStatusResult:
-        """Reconcile due deferred fields from committed history only."""
-        if self._busy:
-            logger.debug(
-                _TAG + " deferred reconciliation skipped: reason=reentrancy_guard"
-            )
-            return DeferredStatusResult()
-        if not self._enabled:
-            self._log_verbose(
-                "deferred reconciliation skipped: reason=disabled"
-            )
-            return DeferredStatusResult()
-
-        history = session_manager.history
-        groups = SessionManager.iter_turn_groups(history)
-        if not groups:
-            self._log_verbose(
-                "deferred reconciliation skipped: reason=no_committed_turns"
-            )
-            return DeferredStatusResult()
-        latest_turn_id = SessionManager.latest_turn_id(history)
-        status_manager.clamp_deferred_progress(latest_turn_id)
-        progress = {
-            (item.session_status_table_id, item.field_key):
-                item.last_processed_turn_id
-            for item in status_manager.list_deferred_progress()
-        }
-        default_interval = settings.status_deferred_default_interval_turns
-        batches: list[tuple[int, int, tuple[str, ...], list[Message]]] = []
-        for table in status_manager.list_context_tables():
-            table_id = int(table.get("id", 0))
-            document = table.get("document")
-            rows = document.get("rows", []) if isinstance(document, dict) else []
-            due_by_boundary: dict[int, list[str]] = {}
-            history_by_boundary: dict[int, list[Message]] = {}
-            for row in rows if isinstance(rows, list) else []:
-                if not isinstance(row, dict):
-                    continue
-                if str(
-                    row.get(STATUS_ROW_UPDATE_FREQUENCY_KEY)
-                    or STATUS_UPDATE_FREQUENCY_REALTIME
-                ) != STATUS_UPDATE_FREQUENCY_DEFERRED:
-                    continue
-                key = str(row.get("key") or "")
-                if not key:
-                    continue
-                interval = row.get(STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY)
-                interval = (
-                    int(interval)
-                    if isinstance(interval, int) and not isinstance(interval, bool)
-                    else default_interval
-                )
-                marker = progress.get((table_id, key), 0)
-                eligible = [
-                    group
-                    for group in groups
-                    if max((message.turn_id for message in group), default=0) > marker
-                ]
-                if len(eligible) < interval:
-                    continue
-                selected_groups = eligible[:interval]
-                boundary = max(
-                    message.turn_id
-                    for group in selected_groups
-                    for message in group
-                )
-                due_by_boundary.setdefault(boundary, []).append(key)
-                history_by_boundary[boundary] = [
-                    message
-                    for group in selected_groups
-                    for message in group
-                ]
-            for boundary, keys in due_by_boundary.items():
-                batches.append((
-                    table_id,
-                    boundary,
-                    tuple(keys),
-                    history_by_boundary[boundary],
-                ))
-
-        if not batches:
-            self._log_verbose(
-                "deferred reconciliation skipped: reason=no_due_fields "
-                "latest_turn_id={}",
-                latest_turn_id,
-            )
-            return DeferredStatusResult()
-
-        self._busy = True
-        batch_count = field_count = changed_count = 0
-        self._log_verbose(
-            "deferred reconciliation started: latest_turn_id={} batches={}",
-            latest_turn_id,
-            [
-                {
-                    "table_id": table_id,
-                    "boundary": boundary,
-                    "keys": list(allowed_keys),
-                }
-                for table_id, boundary, allowed_keys, _history in batches
-            ],
-        )
-        try:
-            for table_id, boundary, allowed_keys, batch_history in batches:
-                self._log_verbose(
-                    "deferred batch started: table_id={} boundary={} keys={} "
-                    "history_messages={}",
-                    table_id,
-                    boundary,
-                    list(allowed_keys),
-                    len(batch_history),
-                )
-                try:
-                    changed = await self._reconcile_deferred_batch(
-                        table_id=table_id,
-                        boundary=boundary,
-                        allowed_keys=allowed_keys,
-                        batch_history=batch_history,
-                        default_interval=default_interval,
-                        status_manager=status_manager,
-                    )
-                except Exception as exc:
-                    logger.opt(exception=exc).warning(
-                        _TAG
-                        + " deferred batch failed: table_id={}, boundary={}, keys={}",
-                        table_id,
-                        boundary,
-                        allowed_keys,
-                    )
-                    continue
-                batch_count += 1
-                field_count += len(allowed_keys)
-                changed_count += changed
-                self._log_verbose(
-                    "deferred batch completed: table_id={} boundary={} keys={} "
-                    "changed_fields={}",
-                    table_id,
-                    boundary,
-                    list(allowed_keys),
-                    changed,
-                )
-        finally:
-            self._busy = False
-        deferred_result = DeferredStatusResult(
-            batches=batch_count,
-            fields=field_count,
-            changed=changed_count,
-        )
-        self._log_verbose(
-            "deferred reconciliation completed: batches={} fields={} changed={}",
-            deferred_result.batches,
-            deferred_result.fields,
-            deferred_result.changed,
-        )
-        return deferred_result
-
-    async def _reconcile_deferred_batch(
-        self,
-        *,
-        table_id: int,
-        boundary: int,
-        allowed_keys: tuple[str, ...],
-        batch_history: list[Message],
-        default_interval: int,
-        status_manager: "StatusManager",
-    ) -> int:
-        base_document = status_manager.get_table_document_by_id(table_id)
-        selected_rows = [
-            {
-                "key": row.key,
-                "value": row.value,
-                "interval_turns": row.deferred_interval_turns or default_interval,
-            }
-            for row in base_document.rows
-            if row.key in allowed_keys
-        ]
-        recent = self._format_history_window(
-            batch_history,
-            max(len(SessionManager.iter_turn_groups(batch_history)), 1),
-        )
-        messages = [
-            Message(
-                role=Role.SYSTEM,
-                content=self._build_system_context(
-                    "你是 RPG 慢状态归纳器。只根据已提交历史归纳允许的 deferred 字段。"
-                    "只有长期、明确且持久的变化才更新；不确定或无变化时不调用工具。"
-                ),
-            ).to_dict(),
-            Message(
-                role=Role.USER,
-                content=(
-                    f"## Allowed Deferred Fields\n"
-                    f"{json.dumps(selected_rows, ensure_ascii=False)}\n\n"
-                    f"## Committed Turns\n{recent}"
-                ),
-            ).to_dict(),
-        ]
-        llm_result, _call_record = await self._chat_with_stats(
-            messages,
-            [DEFERRED_STATUS_SCHEMA],
-            source="status_deferred",
-        )
-        calls = [
-            _normalize_tool_call(call)
-            for call in self._tool_calls(llm_result)
-        ]
-        updates: list[tuple[str, str]] = []
-        if calls:
-            if len(calls) != 1 or calls[0][0] != DEFERRED_STATUS_TOOL_NAME:
-                raise ValueError("deferred status returned an invalid tool call")
-            payload = json.loads(calls[0][1])
-            if not isinstance(payload, dict):
-                raise ValueError("deferred status arguments must be an object")
-            raw_updates = payload.get("updates", [])
-            if not isinstance(raw_updates, list):
-                raise ValueError("deferred updates must be an array")
-            seen: set[str] = set()
-            for item in raw_updates:
-                if not isinstance(item, dict):
-                    raise ValueError("deferred update must be an object")
-                key = str(item.get("key") or "")
-                value = item.get("value")
-                if key not in allowed_keys or key in seen or not isinstance(value, str):
-                    raise PermissionError(
-                        "deferred update is outside the allowed field scope"
-                    )
-                seen.add(key)
-                updates.append((key, value))
-        updated_document = (
-            base_document.with_existing_values(updates)
-            if updates
-            else base_document
-        )
-        status_manager.commit_deferred_update(
-            table_id,
-            updated_document,
-            processed_keys=allowed_keys,
-            last_processed_turn_id=boundary,
-            base_document=base_document,
-        )
-        return sum(
-            row is not None and row.value != value
-            for key, value in updates
-            if (row := base_document.row_for_key(key)) is not None
-        )
 
     async def _decide_outcome(
         self,
@@ -919,8 +629,8 @@ class StatusSubAgent(BaseSubAgent):
                 role=Role.SYSTEM,
                 content=self._build_system_context(
                     "你是状态更新路由器。只选择本轮确实涉及的状态目标，不修改状态。"
-                    "realtime 字段在相关时选择；event_driven 只有显式规则已被确认事件命中时选择；"
-                    "deferred/manual 永远不要选择。",
+                    "字段的值只在事实明确且实际变化时选择；若字段带 update_rule，"
+                    "还必须确认该额外规则已经满足。",
                     player_character=player_character,
                 ),
             ).to_dict(),
@@ -978,22 +688,14 @@ class StatusSubAgent(BaseSubAgent):
                 if table_id <= 0 or table_id in seen_tables or table_id not in policy_index:
                     continue
                 seen_tables.add(table_id)
-                policies = policy_index[table_id]
-                realtime = self._validated_route_keys(
-                    raw_target.get("realtime_keys"),
-                    policies,
-                    frequency=STATUS_UPDATE_FREQUENCY_REALTIME,
+                keys = self._validated_route_keys(
+                    raw_target.get("keys"),
+                    policy_index[table_id],
                 )
-                event = self._validated_route_keys(
-                    raw_target.get("event_keys"),
-                    policies,
-                    frequency=STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
-                )
-                if realtime or event:
+                if keys:
                     route.targets.append(StatusRouteTarget(
                         table_id=table_id,
-                        realtime_keys=realtime,
-                        event_keys=event,
+                        keys=keys,
                         reason=str(raw_target.get("reason") or "")[:500],
                     ))
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -1005,8 +707,7 @@ class StatusSubAgent(BaseSubAgent):
             [
                 {
                     "table_id": target.table_id,
-                    "realtime_keys": list(target.realtime_keys),
-                    "event_keys": list(target.event_keys),
+                    "keys": list(target.keys),
                     "reason": target.reason,
                 }
                 for target in route.targets
@@ -1051,7 +752,7 @@ class StatusSubAgent(BaseSubAgent):
                     target.table_id,
                 )
                 continue
-            allowed = frozenset((*target.realtime_keys, *target.event_keys))
+            allowed = frozenset(target.keys)
             if not allowed:
                 self._log_verbose(
                     "update target skipped: source=status_update:table:{} "
@@ -1096,11 +797,16 @@ class StatusSubAgent(BaseSubAgent):
                     else None
                 ),
             )
-            checkpoint = (
-                self._mutation_checkpoint()
-                if self._mutation_checkpoint is not None
-                else None
-            )
+            try:
+                checkpoint = (
+                    self._mutation_checkpoint()
+                    if self._mutation_checkpoint is not None
+                    else None
+                )
+            except Exception as exc:
+                raise _StatusPrewriteRollbackError(
+                    "failed to create status update target checkpoint"
+                ) from exc
             record_start = len(result.records)
             try:
                 messages = [
@@ -1145,7 +851,7 @@ class StatusSubAgent(BaseSubAgent):
                             success=False,
                             changed=False,
                             status=StatusSubAgentRecordStatus.ERROR,
-                            stage=StatusSubAgentStage.REALTIME,
+                            stage=StatusSubAgentStage.IMMEDIATE,
                         ))
                         batch_failed = True
                         break
@@ -1154,12 +860,7 @@ class StatusSubAgent(BaseSubAgent):
                         args,
                         track_mutation=True,
                     )
-                    record.stage = (
-                        StatusSubAgentStage.EVENT_DRIVEN
-                        if name == STATUS_TABLE_SET_VALUES_TOOL_NAME
-                        and self._arguments_touch_event_key(args, route)
-                        else StatusSubAgentStage.REALTIME
-                    )
+                    record.stage = StatusSubAgentStage.IMMEDIATE
                     result.records.append(record)
                     if not record.success:
                         batch_failed = True
@@ -1257,196 +958,6 @@ class StatusSubAgent(BaseSubAgent):
             ) from exc
         for record in records:
             record.mark_rolled_back()
-
-    async def update(
-        self,
-        history: list[Message],
-        state_context: str,
-        user_input: str,
-        max_history_rounds: int | None = None,
-        turn_stats: TurnStats | None = None,
-        player_character: "TurnPlayerCharacterSnapshot | None" = None,
-    ) -> StatusSubAgentResult:
-        """根据用户输入预更新状态表。
-
-        Parameters
-        ----------
-        history:
-            完整对话历史（内部按 *max_history_rounds* 窗口化）。
-        state_context:
-            当前状态描述（如 ``[scene]`` 标签块）。
-        user_input:
-            用户原始输入（最新一条）。
-        max_history_rounds:
-            传递给 LLM 的最大用户轮次数。
-        turn_stats:
-            可选的外部聚合器——传入后 LLM 调用数据也会归入其中。
-
-        Returns
-        -------
-        ``StatusSubAgentResult``，包含是否更新以及工具调用记录。
-        """
-        if max_history_rounds is None:
-            max_history_rounds = settings.status_history_rounds
-        if self._busy:
-            logger.debug(_TAG + " legacy update skipped: reason=reentrancy_guard")
-            return StatusSubAgentResult()
-
-        if not self._enabled:
-            self._log_verbose("legacy update skipped: reason=disabled")
-            return StatusSubAgentResult()
-        if not self._schemas:
-            self._log_verbose("legacy update skipped: reason=no_tools")
-            return StatusSubAgentResult()
-
-        self._busy = True
-        result = StatusSubAgentResult()
-        try:
-            if settings.verbose_logging:
-                logger.info(
-                    _TAG + " analyzing {!r} (history={} msgs, schemes={})",
-                    user_input,
-                    len(history),
-                    [s["function"]["name"] for s in self._schemas],
-                )
-
-            messages = self._build_messages(
-                history,
-                state_context,
-                user_input,
-                max_history_rounds,
-                player_character=player_character,
-            )
-
-            llm_result, call_record = await self._chat_with_stats(
-                messages,
-                self._schemas,
-                source="status_sub_agent",
-            )
-            self._append_call_record(result.call_stats, turn_stats, call_record)
-
-            tool_calls = self._tool_calls(llm_result)
-            if not tool_calls:
-                if settings.verbose_logging:
-                    logger.info(_TAG + " no state changes needed")
-                return result
-
-            if settings.verbose_logging:
-                logger.info(
-                    _TAG + " LLM returned {} tool call(s)",
-                    len(tool_calls),
-                )
-
-            normalized_calls = [_normalize_tool_call(tc) for tc in tool_calls]
-            result.outcome_requested = any(
-                name == NARRATIVE_OUTCOME_TOOL_NAME
-                for name, _args in normalized_calls
-            )
-
-            # The decision is batch-wide, not order-dependent. Once an outcome
-            # is requested, no state mutation from the same response may enter
-            # scratch, including deterministic-looking parts of a mixed action.
-            if result.outcome_requested:
-                outcome_executed = False
-                for name, args in normalized_calls:
-                    if name in STATE_TOOL_NAMES:
-                        result.state_prewrites_skipped += 1
-                        skipped = StatusSubAgentToolRecord.skipped_due_to_outcome(
-                            tool_name=name,
-                            arguments=args,
-                            state_prewrite=True,
-                        )
-                        result.records.append(skipped)
-                        continue
-                    if name != NARRATIVE_OUTCOME_TOOL_NAME:
-                        skipped = StatusSubAgentToolRecord.skipped_due_to_outcome(
-                            tool_name=name,
-                            arguments=args,
-                            state_prewrite=False,
-                        )
-                        result.records.append(skipped)
-                        continue
-                    if outcome_executed:
-                        duplicate = StatusSubAgentToolRecord.skipped_duplicate_outcome(
-                            tool_name=name,
-                            arguments=args,
-                        )
-                        result.records.append(duplicate)
-                        continue
-
-                    outcome_executed = True
-                    record = await self._execute_tool_call(
-                        name,
-                        args,
-                        track_mutation=False,
-                        success_status=StatusSubAgentRecordStatus.OUTCOME_STAGED,
-                    )
-                    record.stage = StatusSubAgentStage.OUTCOME
-                    result.records.append(record)
-                    result.outcome_staged = record.success
-                    result.failed = not result.outcome_staged
-
-                if result.outcome_staged:
-                    logger.info(
-                        _TAG + " staged narrative outcome; skipped {} state prewrite(s)",
-                        result.state_prewrites_skipped,
-                    )
-                else:
-                    logger.warning(
-                        _TAG + " outcome preflight failed; main Agent will decide via fallback"
-                    )
-                return result
-
-            checkpoint = (
-                self._mutation_checkpoint()
-                if self._mutation_checkpoint is not None
-                else None
-            )
-            for name, args in normalized_calls:
-                record = await self._execute_tool_call(
-                    name,
-                    args,
-                    track_mutation=True,
-                )
-                result.records.append(record)
-                result.updated = result.updated or record.changed
-                result.failed = result.failed or not record.success
-
-            if result.failed:
-                self._restore_failed_update_target(checkpoint, result.records)
-                result.updated = any(record.changed for record in result.records)
-                logger.warning(
-                    _TAG + " state update target failed and was restored"
-                )
-
-            if result.updated:
-                logger.info(
-                    _TAG + " updated state via {} tool call(s): {}",
-                    len(result.records),
-                    [record.tool_name for record in result.records if record.changed],
-                )
-            else:
-                logger.info(_TAG + " state tool calls produced no staged changes")
-            return result
-
-        except _StatusPrewriteRollbackError:
-            raise
-        except Exception as exc:
-            result.failed = True
-            logger.warning(_TAG + " update failed: {}", exc)
-            return result
-        finally:
-            self._log_verbose(
-                "legacy update completed: outcome_requested={} outcome_staged={} "
-                "records={} changed_records={} updated={} failed={}",
-                result.outcome_requested,
-                result.outcome_staged,
-                len(result.records),
-                sum(record.changed for record in result.records),
-                result.updated,
-                result.failed,
-            )
-            self._busy = False
 
     async def _execute_tool_call(
         self,
@@ -1683,9 +1194,9 @@ class StatusSubAgent(BaseSubAgent):
     @staticmethod
     def _status_catalog(
         context_tables: list[dict[str, object]],
-    ) -> tuple[list[dict[str, object]], dict[int, dict[str, tuple[str, str]]]]:
+    ) -> tuple[list[dict[str, object]], dict[int, frozenset[str]]]:
         catalog: list[dict[str, object]] = []
-        index: dict[int, dict[str, tuple[str, str]]] = {}
+        index: dict[int, frozenset[str]] = {}
         for table in context_tables:
             table_id = int(table.get("id", 0))
             document = table.get("document")
@@ -1695,26 +1206,21 @@ class StatusSubAgent(BaseSubAgent):
             if not isinstance(raw_rows, list):
                 continue
             fields: list[dict[str, object]] = []
-            policies: dict[str, tuple[str, str]] = {}
+            keys: set[str] = set()
             for raw_row in raw_rows:
                 if not isinstance(raw_row, dict):
                     continue
                 key = str(raw_row.get("key") or "")
                 if not key:
                     continue
-                frequency = str(
-                    raw_row.get(STATUS_ROW_UPDATE_FREQUENCY_KEY)
-                    or STATUS_UPDATE_FREQUENCY_REALTIME
-                )
                 rule = str(raw_row.get(STATUS_ROW_UPDATE_RULE_KEY) or "")
-                policies[key] = (frequency, rule)
+                keys.add(key)
                 fields.append({
                     "key": key,
                     "value": str(raw_row.get("value") or ""),
-                    "frequency": frequency,
-                    "event_rule": rule,
+                    "update_rule": rule,
                 })
-            index[table_id] = policies
+            index[table_id] = frozenset(keys)
             catalog.append({
                 "table_id": table_id,
                 "name": str(table.get("name") or ""),
@@ -1726,9 +1232,7 @@ class StatusSubAgent(BaseSubAgent):
     @staticmethod
     def _validated_route_keys(
         raw_keys: object,
-        policies: dict[str, tuple[str, str]],
-        *,
-        frequency: str,
+        existing_keys: frozenset[str],
     ) -> tuple[str, ...]:
         if not isinstance(raw_keys, list):
             return ()
@@ -1736,13 +1240,7 @@ class StatusSubAgent(BaseSubAgent):
         seen: set[str] = set()
         for raw_key in raw_keys:
             key = str(raw_key or "")
-            policy = policies.get(key)
-            if not key or key in seen or policy is None or policy[0] != frequency:
-                continue
-            if (
-                frequency == STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN
-                and not policy[1].strip()
-            ):
+            if not key or key in seen or key not in existing_keys:
                 continue
             seen.add(key)
             result.append(key)
@@ -1795,28 +1293,6 @@ class StatusSubAgent(BaseSubAgent):
         if not keys or not keys.issubset(allowed):
             raise PermissionError("status update is outside the routed update scope")
 
-    @staticmethod
-    def _arguments_touch_event_key(
-        args: str,
-        route: StatusRouteResult,
-    ) -> bool:
-        event_keys = {
-            (target.table_id, key)
-            for target in route.targets
-            for key in target.event_keys
-        }
-        try:
-            payload = json.loads(args)
-            table_id = int(payload.get("table_id", 0))
-            updates = payload.get("updates", [])
-        except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
-            return False
-        return any(
-            isinstance(item, dict)
-            and (table_id, str(item.get("key", ""))) in event_keys
-            for item in updates
-        )
-
     def clear_tools(self) -> None:
         """清空已注册的工具集（重新注册前调用避免重复）。"""
         self._tool_registry = ToolRegistry()
@@ -1824,48 +1300,6 @@ class StatusSubAgent(BaseSubAgent):
         self._state_tool_set = StateToolSet()
 
     # ── internal helpers ──────────────────────────────────────────────
-
-    def _build_messages(
-        self,
-        history: list[Message],
-        state_context: str,
-        user_input: str,
-        max_rounds: int,
-        *,
-        player_character: "TurnPlayerCharacterSnapshot | None" = None,
-    ) -> list[dict]:
-        """组装子 Agent 消息：系统上下文（含世界书/角色卡） + 历史窗口 + 场景 + 用户输入。"""
-        total_turns = SessionManager.count_turns(history)
-        recent = self._format_history_window(history, max_rounds)
-        if settings.verbose_logging:
-            kept = min(total_turns, max_rounds)
-            logger.info(
-                _TAG + " history window: {}/{} turns (max_rounds={})",
-                kept, total_turns, max_rounds,
-            )
-        system_content = self._build_system_context(
-            self.system_prompt,
-            player_character=player_character,
-        )
-        outcome_instruction = (
-            "先判断是否存在外部实质变数；需要裁定时只调用 "
-            "rp_story_outcome，且不要同时调用状态工具。"
-            if NARRATIVE_OUTCOME_TOOL_NAME in self._tool_registry
-            else "本轮未提供剧情裁定工具；不要虚构随机结果。"
-        )
-        return [
-            Message(role=Role.SYSTEM, content=system_content).to_dict(),
-            Message(
-                role=Role.USER,
-                content=(
-                    f"## Current State\n\n{state_context}\n\n"
-                    f"## Recent Conversation\n\n{recent}\n\n"
-                    f"## User action\n{user_input}\n\n"
-                    f"{outcome_instruction}只有不需要裁定时，才预更新已经确定且实际改变的"
-                    f"追踪状态；没有变化就不调用工具。"
-                ),
-            ).to_dict(),
-        ]
 
     @staticmethod
     def _format_history_window(

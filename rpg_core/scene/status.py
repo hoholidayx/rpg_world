@@ -6,7 +6,6 @@ from typing import Protocol
 
 from rpg_data.model.status import (
     STATUS_KIND_SCENE,
-    STATUS_UPDATE_FREQUENCY_REALTIME,
     SessionStatusTable,
     StatusKind,
     StatusTableDocument,
@@ -32,10 +31,6 @@ class SceneStatusDataPort(Protocol):
     ) -> list[SessionStatusTable]: ...
 
 
-class SceneStatusPolicyError(ValueError):
-    """A Scene document violates runtime-facing Scene policy."""
-
-
 class SceneStatusService:
     """Own Scene document rules and active Scene interpretation."""
 
@@ -53,6 +48,10 @@ class SceneStatusService:
         table = self.get_active_table(session_id)
         return None if table is None else document_attrs(table.document)
 
+    def get_update_rules(self, session_id: str) -> dict[str, str] | None:
+        table = self.get_active_table(session_id)
+        return None if table is None else document_update_rules(table.document)
+
     @staticmethod
     def prepare_document(
         status_kind: str | StatusKind,
@@ -69,19 +68,10 @@ class SceneStatusService:
                     row.runtime_key_locked or row.key in SCENE_DEFAULT_LOCKED_KEYS
                 ),
                 metadata=dict(row.metadata),
-                update_frequency=row.update_frequency,
                 update_rule=row.update_rule,
-                deferred_interval_turns=row.deferred_interval_turns,
             )
             for row in document.rows
         )
-        if any(
-            row.update_frequency is not STATUS_UPDATE_FREQUENCY_REALTIME
-            for row in rows
-        ):
-            raise SceneStatusPolicyError(
-                "scene status fields must use realtime updateFrequency"
-            )
         return StatusTableDocument(
             schema_version=document.schema_version,
             kind=document.kind,
@@ -97,13 +87,21 @@ def document_attrs(document: StatusTableDocument) -> dict[str, str]:
     return {row.key: row.value for row in document.rows}
 
 
+def document_update_rules(document: StatusTableDocument) -> dict[str, str]:
+    return {
+        row.key: row.update_rule
+        for row in document.rows
+        if row.update_rule
+    }
+
+
 __all__ = [
     "SCENE_DEFAULT_LOCKED_KEYS",
     "SCENE_LOCATION_ATTR",
     "SCENE_PRESENT_CHARACTERS_ATTR",
     "SCENE_TIME_ATTR",
     "SceneStatusDataPort",
-    "SceneStatusPolicyError",
     "SceneStatusService",
     "document_attrs",
+    "document_update_rules",
 ]

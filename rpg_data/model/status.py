@@ -20,30 +20,33 @@ class StatusOrigin(StrEnum):
     SESSION_NATIVE = "session_native"
 
 
-class StatusUpdateFrequency(StrEnum):
-    REALTIME = "realtime"
-    EVENT_DRIVEN = "event_driven"
-    DEFERRED = "deferred"
-    MANUAL = "manual"
-
-
 STATUS_TABLE_KIND = "status_table"
 STATUS_TABLE_MODE_KEY_VALUE = "key_value"
+STATUS_TABLE_SCHEMA_VERSION = 2
 STATUS_KIND_SCENE = StatusKind.SCENE
 STATUS_KIND_NORMAL = StatusKind.NORMAL
 STATUS_ORIGIN_STORY_COPY = StatusOrigin.STORY_COPY
 STATUS_ORIGIN_SESSION_NATIVE = StatusOrigin.SESSION_NATIVE
 STATUS_KEY_COLUMN = "属性"
 STATUS_VALUE_COLUMN = "值"
-STATUS_UPDATE_FREQUENCY_REALTIME = StatusUpdateFrequency.REALTIME
-STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN = StatusUpdateFrequency.EVENT_DRIVEN
-STATUS_UPDATE_FREQUENCY_DEFERRED = StatusUpdateFrequency.DEFERRED
-STATUS_UPDATE_FREQUENCY_MANUAL = StatusUpdateFrequency.MANUAL
-STATUS_UPDATE_FREQUENCIES = frozenset(StatusUpdateFrequency)
-STATUS_ROW_UPDATE_FREQUENCY_KEY = "updateFrequency"
 STATUS_ROW_UPDATE_RULE_KEY = "updateRule"
-STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY = "deferredIntervalTurns"
 STATUS_METADATA_STORY_SOURCE_KEY = "storyStatusSource"
+_STATUS_DOCUMENT_KEYS = frozenset({
+    "schemaVersion",
+    "kind",
+    "mode",
+    "keyColumn",
+    "valueColumn",
+    "rows",
+    "metadata",
+})
+_STATUS_ROW_KEYS = frozenset({
+    "key",
+    "value",
+    "runtimeKeyLocked",
+    STATUS_ROW_UPDATE_RULE_KEY,
+    "metadata",
+})
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,6 @@ class SessionStatusResetResult:
     story_tables_cleared: int = 0
     story_tables_initialized: int = 0
     native_tables_reset: int = 0
-    deferred_progress_cleared: int = 0
 
 
 @dataclass(frozen=True)
@@ -71,7 +73,6 @@ class SessionStatusResetPlan:
 
     delete_table_ids: tuple[int, ...] = ()
     document_writes: tuple[SessionStatusDocumentWrite, ...] = ()
-    deferred_progress_table_ids: tuple[int, ...] = ()
     story_status_table_ids: tuple[int, ...] = ()
 
 
@@ -90,15 +91,6 @@ class StatusDocumentWrite:
             "expected_status_kind",
             validate_status_kind(self.expected_status_kind),
         )
-
-
-@dataclass(frozen=True)
-class StatusProgressWrite:
-    """One caller-prepared deferred-progress ledger value."""
-
-    table_id: int
-    field_key: str
-    last_processed_turn_id: int
 
 
 @dataclass(frozen=True)
@@ -402,44 +394,24 @@ class StatusTableRow:
     value: str
     runtime_key_locked: bool = False
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
-    update_frequency: StatusUpdateFrequency = STATUS_UPDATE_FREQUENCY_REALTIME
     update_rule: str = ""
-    deferred_interval_turns: int | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "update_frequency",
-            validate_status_update_policy(
-                self.update_frequency,
-                update_rule=self.update_rule,
-                deferred_interval_turns=self.deferred_interval_turns,
-            ),
-        )
-        object.__setattr__(self, "update_rule", self.update_rule.strip())
+        object.__setattr__(self, "update_rule", str(self.update_rule or "").strip())
 
     def to_json_dict(self) -> JsonObject:
         return {
             "key": self.key,
             "value": self.value,
             "runtimeKeyLocked": self.runtime_key_locked,
-            "metadata": dict(self.metadata),
-            STATUS_ROW_UPDATE_FREQUENCY_KEY: self.update_frequency,
             STATUS_ROW_UPDATE_RULE_KEY: self.update_rule,
-            STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY: self.deferred_interval_turns,
+            "metadata": dict(self.metadata),
         }
 
 
 @dataclass(frozen=True)
-class StatusDeferredProgress:
-    session_status_table_id: int
-    field_key: str
-    last_processed_turn_id: int = 0
-
-
-@dataclass(frozen=True)
 class StatusTableDocument:
-    schema_version: int = 1
+    schema_version: int = STATUS_TABLE_SCHEMA_VERSION
     kind: str = STATUS_TABLE_KIND
     mode: str = STATUS_TABLE_MODE_KEY_VALUE
     key_column: str = STATUS_KEY_COLUMN
@@ -516,20 +488,10 @@ class StatusTableDocument:
                     if row and row[0] in rows_by_key
                     else {}
                 ),
-                update_frequency=(
-                    rows_by_key[row[0]].update_frequency
-                    if row and row[0] in rows_by_key
-                    else STATUS_UPDATE_FREQUENCY_REALTIME
-                ),
                 update_rule=(
                     rows_by_key[row[0]].update_rule
                     if row and row[0] in rows_by_key
                     else ""
-                ),
-                deferred_interval_turns=(
-                    rows_by_key[row[0]].deferred_interval_turns
-                    if row and row[0] in rows_by_key
-                    else None
                 ),
             )
             for row in data.rows
@@ -557,9 +519,7 @@ class StatusTableDocument:
                     str(value),
                     row.runtime_key_locked,
                     dict(row.metadata),
-                    row.update_frequency,
                     row.update_rule,
-                    row.deferred_interval_turns,
                 ))
                 matched = True
             else:
@@ -607,9 +567,7 @@ class StatusTableDocument:
                     values_by_key.get(row.key, row.value),
                     row.runtime_key_locked,
                     dict(row.metadata),
-                    row.update_frequency,
                     row.update_rule,
-                    row.deferred_interval_turns,
                 )
                 for row in self.rows
             ),
@@ -631,9 +589,7 @@ class StatusTableDocument:
                     "",
                     row.runtime_key_locked,
                     dict(row.metadata),
-                    row.update_frequency,
                     row.update_rule,
-                    row.deferred_interval_turns,
                 )
                 for row in self.rows
             ),
@@ -662,6 +618,11 @@ class StatusTableDocument:
         return None
 
     def validated(self) -> "StatusTableDocument":
+        if self.schema_version != STATUS_TABLE_SCHEMA_VERSION:
+            raise ValueError(
+                "Unsupported status table schemaVersion: "
+                f"{self.schema_version}; expected {STATUS_TABLE_SCHEMA_VERSION}"
+            )
         if self.kind != STATUS_TABLE_KIND:
             raise ValueError(f"Unsupported status table kind: {self.kind}")
         if self.mode != STATUS_TABLE_MODE_KEY_VALUE:
@@ -673,11 +634,6 @@ class StatusTableDocument:
             if row.key in seen:
                 raise ValueError(f"Status table key is duplicated: {row.key}")
             seen.add(row.key)
-            validate_status_update_policy(
-                row.update_frequency,
-                update_rule=row.update_rule,
-                deferred_interval_turns=row.deferred_interval_turns,
-            )
         return self
 
     def to_json_dict(self) -> JsonObject:
@@ -699,46 +655,82 @@ def parse_status_document(raw: str) -> StatusTableDocument:
         raise ValueError("Status table document JSON is invalid") from exc
     if not isinstance(data, dict):
         raise ValueError("Status table document must be an object")
+    unknown_document_keys = set(data).difference(_STATUS_DOCUMENT_KEYS)
+    if unknown_document_keys:
+        raise ValueError(
+            "Status table document contains unsupported fields: "
+            + ", ".join(sorted(str(key) for key in unknown_document_keys))
+        )
+    schema_version = data.get("schemaVersion")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != STATUS_TABLE_SCHEMA_VERSION
+    ):
+        raise ValueError(
+            "Unsupported status table schemaVersion: "
+            f"{schema_version}; expected {STATUS_TABLE_SCHEMA_VERSION}"
+        )
     raw_rows = data.get("rows", [])
     if not isinstance(raw_rows, list):
-        raw_rows = []
+        raise ValueError("Status table rows must be an array")
     rows: list[StatusTableRow] = []
     for item in raw_rows:
         if not isinstance(item, dict):
-            continue
+            raise ValueError("Status table row must be an object")
+        unknown_row_keys = set(item).difference(_STATUS_ROW_KEYS)
+        if unknown_row_keys:
+            raise ValueError(
+                "Status table row contains unsupported fields: "
+                + ", ".join(sorted(str(key) for key in unknown_row_keys))
+            )
+        raw_key = item.get("key")
+        if not isinstance(raw_key, str):
+            raise ValueError("Status table row key must be a string")
+        raw_value = item.get("value", "")
+        if not isinstance(raw_value, str):
+            raise ValueError("Status table row value must be a string")
+        raw_runtime_key_locked = item.get("runtimeKeyLocked", False)
+        if not isinstance(raw_runtime_key_locked, bool):
+            raise ValueError(
+                "Status table row runtimeKeyLocked must be a boolean"
+            )
+        raw_update_rule = item.get(STATUS_ROW_UPDATE_RULE_KEY, "")
+        if not isinstance(raw_update_rule, str):
+            raise ValueError("Status table row updateRule must be a string")
         raw_metadata = item.get("metadata", {})
+        if not isinstance(raw_metadata, dict):
+            raise ValueError("Status table row metadata must be an object")
         rows.append(StatusTableRow(
-            key=str(item.get("key", "")),
-            value=str(item.get("value", "")),
-            runtime_key_locked=bool(item.get("runtimeKeyLocked", False)),
-            metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
-            update_frequency=str(
-                item.get(STATUS_ROW_UPDATE_FREQUENCY_KEY)
-                or STATUS_UPDATE_FREQUENCY_REALTIME
-            ),
-            update_rule=str(item.get(STATUS_ROW_UPDATE_RULE_KEY) or ""),
-            deferred_interval_turns=_parse_deferred_interval_turns(
-                item.get(STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY)
-            ),
+            key=raw_key,
+            value=raw_value,
+            runtime_key_locked=raw_runtime_key_locked,
+            update_rule=raw_update_rule,
+            metadata=raw_metadata,
         ))
     raw_metadata = data.get("metadata", {})
+    if not isinstance(raw_metadata, dict):
+        raise ValueError("Status table metadata must be an object")
+    document_strings = {
+        "kind": data.get("kind", STATUS_TABLE_KIND),
+        "mode": data.get("mode", STATUS_TABLE_MODE_KEY_VALUE),
+        "keyColumn": data.get("keyColumn", STATUS_KEY_COLUMN),
+        "valueColumn": data.get("valueColumn", STATUS_VALUE_COLUMN),
+    }
+    for field_name, field_value in document_strings.items():
+        if not isinstance(field_value, str):
+            raise ValueError(
+                f"Status table document {field_name} must be a string"
+            )
     return StatusTableDocument(
-        schema_version=int(data.get("schemaVersion") or 1),
-        kind=str(data.get("kind") or STATUS_TABLE_KIND),
-        mode=str(data.get("mode") or STATUS_TABLE_MODE_KEY_VALUE),
-        key_column=str(data.get("keyColumn") or STATUS_KEY_COLUMN),
-        value_column=str(data.get("valueColumn") or STATUS_VALUE_COLUMN),
+        schema_version=schema_version,
+        kind=document_strings["kind"],
+        mode=document_strings["mode"],
+        key_column=document_strings["keyColumn"],
+        value_column=document_strings["valueColumn"],
         rows=tuple(rows),
-        metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
+        metadata=raw_metadata,
     ).validated()
-
-
-def _parse_deferred_interval_turns(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("deferredIntervalTurns must be a positive integer")
-    return value
 
 
 def serialize_status_document(document: StatusTableDocument) -> str:
@@ -751,38 +743,6 @@ def validate_status_kind(value: str | StatusKind) -> StatusKind:
         return StatusKind(kind)
     except ValueError as exc:
         raise ValueError(f"Unsupported status kind: {kind}") from exc
-
-
-def validate_status_update_policy(
-    frequency: str | StatusUpdateFrequency,
-    *,
-    update_rule: str = "",
-    deferred_interval_turns: int | None = None,
-) -> StatusUpdateFrequency:
-    normalized = str(frequency or STATUS_UPDATE_FREQUENCY_REALTIME).strip().lower()
-    try:
-        parsed_frequency = StatusUpdateFrequency(normalized)
-    except ValueError as exc:
-        raise ValueError(
-            f"Unsupported status update frequency: {normalized}"
-        ) from exc
-    rule = str(update_rule or "").strip()
-    if normalized == STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN and not rule:
-        raise ValueError("event_driven status fields require updateRule")
-    if normalized != STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN and rule:
-        raise ValueError("updateRule is only supported for event_driven status fields")
-    if deferred_interval_turns is not None:
-        if (
-            isinstance(deferred_interval_turns, bool)
-            or not isinstance(deferred_interval_turns, int)
-            or deferred_interval_turns <= 0
-        ):
-            raise ValueError("deferredIntervalTurns must be a positive integer")
-        if normalized != STATUS_UPDATE_FREQUENCY_DEFERRED:
-            raise ValueError(
-                "deferredIntervalTurns is only supported for deferred status fields"
-            )
-    return parsed_frequency
 
 
 def validate_status_origin(value: str | StatusOrigin) -> StatusOrigin:
@@ -890,6 +850,5 @@ __all__ = [
         "serialize_status_document",
         "validate_status_kind",
         "validate_status_origin",
-        "validate_status_update_policy",
     }
 ]

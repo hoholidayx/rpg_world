@@ -35,6 +35,14 @@ def _attrs_from_document(document: StatusTableDocument) -> dict[str, str]:
     return {row.key: row.value for row in document.rows}
 
 
+def _update_rules_from_document(document: StatusTableDocument) -> dict[str, str]:
+    return {
+        row.key: row.update_rule
+        for row in document.rows
+        if row.update_rule
+    }
+
+
 def _table_dict_with_document(table: dict[str, object], document: StatusTableDocument) -> dict[str, object]:
     updated = dict(table)
     updated["document"] = document.to_json_dict()
@@ -128,6 +136,13 @@ class StatusDocumentScratch:
         if self._active_scene_id is None:
             return None
         return _attrs_from_document(self._current_document(self._active_scene_id))
+
+    def get_scene_update_rules(self) -> dict[str, str] | None:
+        if self._active_scene_id is None:
+            return None
+        return _update_rules_from_document(
+            self._current_document(self._active_scene_id)
+        )
 
     def get_table_by_id(self, table_id: int) -> dict[str, object]:
         table_id = int(table_id)
@@ -286,6 +301,9 @@ class ScratchStatusManager:
 
     def get_scene_attrs(self) -> dict[str, str] | None:
         return self._scratch.get_scene_attrs()
+
+    def get_scene_update_rules(self) -> dict[str, str] | None:
+        return self._scratch.get_scene_update_rules()
 
     def runtime_set_key_value(
         self,

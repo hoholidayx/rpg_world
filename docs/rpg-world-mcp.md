@@ -61,6 +61,13 @@ A status-only pack may refer to a Character omitted from that pack only when
 the target Story already has the same-project stable Character binding.
 Preview reports missing, stale, or foreign bindings as conflicts.
 
+Status rows use the same hard-cut contract as RPG World runtime schema v2:
+`key`, `value`, `runtimeKeyLocked`, `updateRule`, and `metadata`. All values
+are eligible for current-turn Agent updates. `updateRule` is semantic guidance
+only, while `runtimeKeyLocked` protects key structure only. Legacy frequency,
+interval, or replacement write-permission fields are rejected by the generated
+schemas, portable validator, preview, apply, compare, and reconcile paths.
+
 The importer never creates Sessions, messages, media jobs, TTS jobs, or
 binaries.
 

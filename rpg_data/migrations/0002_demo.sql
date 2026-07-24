@@ -362,8 +362,8 @@ SELECT
         ELSE '奥术学院演示故事的当前场景。'
     END,
     CASE stories.title
-        WHEN '北境森林 Demo' THEN '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 1 日 8 时 30 分","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"位置","value":"北境森林·石林·圆形封印祭坛","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"在场人物","value":"Bob, Alice","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null}],"metadata":{"ui":{}}}'
-        ELSE '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 3 日 14 时","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"位置","value":"奥术学院·旧档案馆","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"在场人物","value":"Alice","runtimeKeyLocked":true,"metadata":{},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null}],"metadata":{"ui":{}}}'
+        WHEN '北境森林 Demo' THEN '{"schemaVersion":2,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 1 日 8 时 30 分","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"位置","value":"北境森林·石林·圆形封印祭坛","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"在场人物","value":"Bob, Alice","runtimeKeyLocked":true,"updateRule":"","metadata":{}}],"metadata":{"ui":{}}}'
+        ELSE '{"schemaVersion":2,"kind":"status_table","mode":"key_value","keyColumn":"属性","valueColumn":"值","rows":[{"key":"时间","value":"第 1 年 1 月 3 日 14 时","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"位置","value":"奥术学院·旧档案馆","runtimeKeyLocked":true,"updateRule":"","metadata":{}},{"key":"在场人物","value":"Alice","runtimeKeyLocked":true,"updateRule":"","metadata":{}}],"metadata":{"ui":{}}}'
     END,
     0,
     '{"kind":"demo"}'
@@ -387,7 +387,7 @@ SELECT
     '世界线索',
     'normal',
     '演示普通状态表如何进入上下文。',
-    '{"schemaVersion":1,"kind":"status_table","mode":"key_value","keyColumn":"项目","valueColumn":"状态","rows":[{"key":"幽蓝封印","value":"异常波动","runtimeKeyLocked":false,"metadata":{"备注":"圆形封印祭坛附近出现微弱蓝光。"},"updateFrequency":"realtime","updateRule":"","deferredIntervalTurns":null},{"key":"炎心之木","value":"待调查","runtimeKeyLocked":false,"metadata":{"备注":"相关记载散落在北境与学院档案中。"},"updateFrequency":"event_driven","updateRule":"获得与炎心之木相关的新线索时更新","deferredIntervalTurns":null}],"metadata":{"ui":{}}}',
+    '{"schemaVersion":2,"kind":"status_table","mode":"key_value","keyColumn":"项目","valueColumn":"状态","rows":[{"key":"幽蓝封印","value":"异常波动","runtimeKeyLocked":false,"updateRule":"","metadata":{"备注":"圆形封印祭坛附近出现微弱蓝光。"}},{"key":"炎心之木","value":"待调查","runtimeKeyLocked":false,"updateRule":"获得与炎心之木相关的新线索时更新","metadata":{"备注":"相关记载散落在北境与学院档案中。"}}],"metadata":{"ui":{}}}',
     10,
     '{"kind":"demo"}'
 FROM rpg_stories AS stories

@@ -7,15 +7,14 @@ import pytest
 from rpg_data.model.status import (
     STATUS_KIND_NORMAL,
     STATUS_KIND_SCENE,
-    STATUS_UPDATE_FREQUENCY_DEFERRED,
     SessionStatusTable,
     StatusContextCandidate,
     StatusDocumentBatchResult,
     StatusDocumentSaveResult,
     StatusTableData,
     StatusTableDocument,
-    StatusTableRow,
 )
+from rpg_core.agent.turn.transaction.status_scratch import StatusDocumentChange
 from rpg_core.status.manager import StatusManager
 
 
@@ -144,10 +143,9 @@ class FakeStatusService:
         self.calls.append(("delete_key_value", table_id, key, kwargs))
         return self.scene_table
 
-    def commit_document_batch(self, session_id, documents, progress=()):
+    def commit_document_batch(self, session_id, documents):
         documents = tuple(documents)
-        progress = tuple(progress)
-        self.calls.append(("commit_document_batch", session_id, documents, progress))
+        self.calls.append(("commit_document_batch", session_id, documents))
         saved = replace(self.normal_table, document=documents[0].document)
         return StatusDocumentBatchResult(tables=(saved,))
 
@@ -220,40 +218,26 @@ def test_status_manager_exposes_document_cow_helpers() -> None:
     }
 
 
-def test_status_manager_owns_deferred_field_policy() -> None:
+def test_status_manager_commits_bootstrap_documents_without_progress_ledger() -> None:
     service = FakeStatusService()
     manager = StatusManager("s_main", service=service)
+    current = service.normal_table.document
+    updated = current.with_existing_values([("封印", "破裂")])
 
-    with pytest.raises(PermissionError, match="not deferred"):
-        manager.commit_deferred_update(
-            1,
-            service.normal_table.document,
-            processed_keys=("封印",),
-            last_processed_turn_id=4,
+    result = manager.commit_bootstrap_state(
+        (
+            StatusDocumentChange(
+                table_id=service.normal_table.id,
+                status_kind=STATUS_KIND_NORMAL,
+                base_document=current,
+                document=updated,
+            ),
         )
-    assert not any(call[0] == "commit_document_batch" for call in service.calls)
-
-    deferred = StatusTableDocument.from_rows(
-        rows=[
-            StatusTableRow(
-                "长期信任",
-                "中",
-                update_frequency=STATUS_UPDATE_FREQUENCY_DEFERRED,
-            )
-        ]
-    )
-    service.normal_table = replace(service.normal_table, document=deferred)
-
-    result = manager.commit_deferred_update(
-        1,
-        deferred,
-        processed_keys=("长期信任",),
-        last_processed_turn_id=4,
-        base_document=deferred,
     )
 
-    assert result["rows"] == [["长期信任", "中"]]
+    assert result[0]["rows"] == [["封印", "破裂"]]
     assert service.calls[-1][0] == "commit_document_batch"
+    assert len(service.calls[-1]) == 3
 
 
 def test_context_factory_initializes_status_manager_with_session_id(

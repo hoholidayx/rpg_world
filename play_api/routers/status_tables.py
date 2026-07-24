@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from commons.types import JsonObject
 from play_api.backends import get_data_manager_backend
-from rpg_core.scene.status import SceneStatusPolicyError
 from rpg_data.model import status as models
 
 router = APIRouter(tags=["play-status-tables"])
@@ -19,18 +18,8 @@ class StatusRowPayload(BaseModel):
     key: str
     value: str = ""
     runtime_key_locked: bool = Field(default=False, alias="runtimeKeyLocked")
-    metadata: JsonObject = Field(default_factory=dict)
-    update_frequency: str = Field(
-        default=models.STATUS_UPDATE_FREQUENCY_REALTIME,
-        alias=models.STATUS_ROW_UPDATE_FREQUENCY_KEY,
-    )
     update_rule: str = Field(default="", alias=models.STATUS_ROW_UPDATE_RULE_KEY)
-    deferred_interval_turns: int | None = Field(
-        default=None,
-        alias=models.STATUS_ROW_DEFERRED_INTERVAL_TURNS_KEY,
-        strict=True,
-        gt=0,
-    )
+    metadata: JsonObject = Field(default_factory=dict)
 
     @field_validator("key")
     @classmethod
@@ -40,15 +29,10 @@ class StatusRowPayload(BaseModel):
             raise ValueError("key must not be empty")
         return value
 
-    @model_validator(mode="after")
-    def _validate_update_policy(self) -> "StatusRowPayload":
-        self.update_frequency = models.validate_status_update_policy(
-            self.update_frequency,
-            update_rule=self.update_rule,
-            deferred_interval_turns=self.deferred_interval_turns,
-        )
-        self.update_rule = self.update_rule.strip()
-        return self
+    @field_validator("update_rule")
+    @classmethod
+    def _normalize_update_rule(cls, value: str) -> str:
+        return value.strip()
 
 
 class StatusDocumentPayload(BaseModel):
@@ -213,29 +197,18 @@ def _row_payload(row: dict[str, object]) -> StatusRowPayload:
         key=str(row.get("key", "")),
         value=str(row.get("value", "")),
         runtimeKeyLocked=bool(row.get("runtime_key_locked", False)),
-        metadata=dict(row.get("metadata") or {}),
-        update_frequency=str(
-            row.get("update_frequency")
-            or models.STATUS_UPDATE_FREQUENCY_REALTIME
-        ),
         update_rule=str(row.get("update_rule") or ""),
-        deferred_interval_turns=(
-            int(row["deferred_interval_turns"])
-            if row.get("deferred_interval_turns") is not None
-            else None
-        ),
+        metadata=dict(row.get("metadata") or {}),
     )
 
 
 def _to_status_row(row: StatusRowPayload) -> models.StatusTableRow:
     return models.StatusTableRow(
-        row.key,
-        row.value,
-        row.runtime_key_locked,
-        row.metadata,
-        row.update_frequency,
-        row.update_rule,
-        row.deferred_interval_turns,
+        key=row.key,
+        value=row.value,
+        runtime_key_locked=row.runtime_key_locked,
+        update_rule=row.update_rule,
+        metadata=row.metadata,
     )
 
 
@@ -302,8 +275,6 @@ async def create_story_status_table(
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )
-    except SceneStatusPolicyError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if item is None:
@@ -345,8 +316,6 @@ async def update_story_status_table(
             description=payload.description,
             sort_order=payload.sort_order,
         )
-    except SceneStatusPolicyError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if item is None:
@@ -401,8 +370,6 @@ async def create_session_status_table(
             sort_order=payload.sort_order,
             metadata=payload.metadata,
         )
-    except SceneStatusPolicyError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if item is None:
@@ -434,8 +401,6 @@ async def update_session_status_table(
             description=payload.description,
             sort_order=payload.sort_order,
         )
-    except SceneStatusPolicyError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if item is None:

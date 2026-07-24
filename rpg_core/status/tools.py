@@ -7,7 +7,6 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
-from rpg_data.model import status as models
 from rpg_core.tooling.base import BaseTool
 from rpg_core.status.manager import StatusValueUpdateResult
 
@@ -36,12 +35,8 @@ class StatusTableRuntime(Protocol):
 
 @dataclass(frozen=True)
 class StatusWritePolicy:
-    """Code-enforced table/key/frequency boundary for one tool binding."""
+    """Code-enforced table/key boundary for one tool binding."""
 
-    allowed_frequencies: frozenset[str] = frozenset({
-        models.STATUS_UPDATE_FREQUENCY_REALTIME,
-        models.STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
-    })
     allowed_keys: dict[int, frozenset[str]] | None = None
 
     def validate(
@@ -57,13 +52,10 @@ class StatusWritePolicy:
         rows = raw_document.get("rows")
         if not isinstance(rows, list):
             raise StatusWritePolicyError("状态表缺少可验证的 rows")
-        policies = {
-            str(row.get("key", "")): str(
-                row.get(models.STATUS_ROW_UPDATE_FREQUENCY_KEY)
-                or models.STATUS_UPDATE_FREQUENCY_REALTIME
-            )
+        existing_keys = {
+            str(row.get("key", ""))
             for row in rows
-            if isinstance(row, dict)
+            if isinstance(row, dict) and str(row.get("key", ""))
         }
         scoped_keys = (
             self.allowed_keys.get(table_id, frozenset())
@@ -73,13 +65,8 @@ class StatusWritePolicy:
         for key, _value in updates:
             if scoped_keys is not None and key not in scoped_keys:
                 raise StatusWritePolicyError(f"字段不在本阶段写入范围：{key}")
-            frequency = policies.get(key)
-            if frequency is None:
+            if key not in existing_keys:
                 raise KeyError(f"Status table key not found: {key}")
-            if frequency not in self.allowed_frequencies:
-                raise StatusWritePolicyError(
-                    f"字段更新频率不允许在本阶段写入：{key}/{frequency}"
-                )
 
 
 class StatusTableSetValuesTool(BaseTool):
@@ -207,7 +194,7 @@ class StatusTableToolProvider:
     def get_tools(self) -> list[BaseTool]:
         try:
             has_keys = any(
-                _has_llm_writable_field(table)
+                _has_status_field(table)
                 for table in self._runtime.list_context_tables()
             )
         except Exception as exc:
@@ -225,20 +212,13 @@ class StatusTableToolProvider:
         ] if has_keys else []
 
 
-def _has_llm_writable_field(table: dict[str, object]) -> bool:
+def _has_status_field(table: dict[str, object]) -> bool:
     document = table.get("document")
     rows = document.get("rows") if isinstance(document, dict) else None
     if not isinstance(rows, list):
         return False
     return any(
-        isinstance(row, dict)
-        and str(
-            row.get(models.STATUS_ROW_UPDATE_FREQUENCY_KEY)
-            or models.STATUS_UPDATE_FREQUENCY_REALTIME
-        ) in {
-            models.STATUS_UPDATE_FREQUENCY_REALTIME,
-            models.STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
-        }
+        isinstance(row, dict) and bool(str(row.get("key", "")))
         for row in rows
     )
 

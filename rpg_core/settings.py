@@ -328,7 +328,6 @@ class Settings(ProfiledYamlSettings):
 
     def _validate_status_sub_agent_settings(self) -> None:
         _ = self.status_sub_agent_settings
-        _ = self.status_deferred_default_interval_turns
 
     @property
     def jinja_dir(self) -> Path:
@@ -507,19 +506,6 @@ class Settings(ProfiledYamlSettings):
     @property
     def status_history_rounds(self) -> int:
         return self.status_sub_agent_settings.history_rounds
-
-    @property
-    def status_deferred_default_interval_turns(self) -> int:
-        deferred = self.status_sub_agent_config.get("deferred", {})
-        if not isinstance(deferred, dict):
-            raise ValueError("agent.status_sub_agent.deferred must be a mapping")
-        value = deferred.get("default_interval_turns", 5)
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError(
-                "agent.status_sub_agent.deferred.default_interval_turns "
-                "must be a positive integer"
-            )
-        return value
 
     @property
     def max_tool_calls(self) -> int:

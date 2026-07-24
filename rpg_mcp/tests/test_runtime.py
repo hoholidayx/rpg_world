@@ -104,27 +104,21 @@ def _pack() -> dict:
                             "key": "时间",
                             "value": "第 2019 年 1 月 1 日 9 时",
                             "runtimeKeyLocked": True,
-                            "updateFrequency": "realtime",
                             "updateRule": "",
-                            "deferredIntervalTurns": None,
                             "metadata": {},
                         },
                         {
                             "key": "位置",
                             "value": "旧车站",
                             "runtimeKeyLocked": True,
-                            "updateFrequency": "realtime",
                             "updateRule": "",
-                            "deferredIntervalTurns": None,
                             "metadata": {},
                         },
                         {
                             "key": "在场人物",
                             "value": "林澈",
                             "runtimeKeyLocked": True,
-                            "updateFrequency": "realtime",
                             "updateRule": "",
-                            "deferredIntervalTurns": None,
                             "metadata": {},
                         },
                     ],
@@ -142,9 +136,7 @@ def _pack() -> dict:
                             "key": "信任",
                             "value": "谨慎",
                             "runtimeKeyLocked": False,
-                            "updateFrequency": "event_driven",
                             "updateRule": "关系发生明确变化时更新。",
-                            "deferredIntervalTurns": None,
                             "metadata": {},
                         }
                     ],
@@ -255,7 +247,7 @@ def test_checked_in_story_pack_schema_accepts_runtime_fixture() -> None:
     Draft202012Validator(schema).validate(_pack())
 
 
-def test_story_pack_validation_catches_runtime_owned_text_and_scene_rules(
+def test_story_pack_validation_catches_runtime_owned_text_and_removed_status_fields(
     tmp_path,
 ) -> None:
     composition = build_runtime_composition(tmp_path / "runtime.sqlite3")
@@ -271,11 +263,10 @@ def test_story_pack_validation_catches_runtime_owned_text_and_scene_rules(
         invalid_scene = deepcopy(_pack())
         invalid_scene["resources"]["statusTables"][0]["rows"][0].update({
             "updateFrequency": "deferred",
-            "deferredIntervalTurns": 2,
         })
         result = composition.application.validate_story_pack(invalid_scene)
         assert result["valid"] is False
-        assert "scene status rows must use realtime" in result["errors"][0]
+        assert "updateFrequency" in result["errors"][0]
     finally:
         composition.close()
 

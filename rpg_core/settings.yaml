@@ -50,9 +50,6 @@ base:
       enabled: true
       # 普通 preflight 与派生初始化读取的最近完整 IC/GM turn 数。
       history_rounds: 5
-      deferred:
-        # deferred 字段未单独配置时，累计多少个已提交 turn 后归纳。
-        default_interval_turns: 5
 
   # ── RP Modules 玩法机制配置 ─────────────────────────────────────
   rp_modules:

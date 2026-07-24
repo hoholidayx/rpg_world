@@ -66,9 +66,15 @@ paths, `file:` URLs, and parent-directory traversal are rejected.
 第 2019 年 1 月 1 日 9 时
 ```
 
-`updateFrequency` is one of `realtime`, `event_driven`, `deferred`, or
-`manual`. `event_driven` requires `updateRule`; `deferred` requires a positive
-`deferredIntervalTurns`.
+Every status value is eligible for immediate Agent updates in the current
+turn. `updateRule` is an optional, trimmed semantic condition layered on top
+of the default rule: update only when a fact is explicit and the value
+actually changes. It does not schedule delayed or periodic work.
+
+`runtimeKeyLocked` protects only the row key from runtime deletion or rename;
+it never makes the value read-only. Status rows do not accept
+`updateFrequency`, `deferredIntervalTurns`, or replacement write-permission
+fields.
 
 `characterRef` points to one Character stable ID in the same Story. A full
 design validates this reference locally. A `statusTables`-only Story Pack may

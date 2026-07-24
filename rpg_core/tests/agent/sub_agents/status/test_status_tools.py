@@ -72,6 +72,13 @@ class FakeRuntimeStatusManager:
     def get_active_scene_table_ref(self):
         return 2, (STATUS_KIND_SCENE, "当前场景")
 
+    def get_scene_update_rules(self) -> dict[str, str]:
+        return {
+            row.key: row.update_rule
+            for row in self.documents[2].rows
+            if row.update_rule
+        }
+
     def get_table_by_id(self, table_id: int) -> dict[str, object]:
         if table_id not in self.documents:
             raise FileNotFoundError(f"unavailable: {table_id}")
@@ -161,7 +168,7 @@ async def test_status_table_tool_rejects_structure_and_access_errors() -> None:
     assert scratch.staged_changes == []
 
 
-def test_status_tool_provider_skips_empty_normal_tables() -> None:
+def test_status_tool_provider_exposes_all_nonempty_normal_tables() -> None:
     empty_manager = FakeRuntimeStatusManager(normal_rows=())
     _scratch, empty_runtime = _scratch_runtime(empty_manager)
     populated_manager = FakeRuntimeStatusManager()
@@ -172,42 +179,54 @@ def test_status_tool_provider_skips_empty_normal_tables() -> None:
         "status_table_set_values"
     ]
 
-    slow_manager = FakeRuntimeStatusManager()
-    slow_manager.documents[1] = StatusTableDocument.from_rows(rows=[
-        StatusTableRow("长期信任", "低", update_frequency="deferred"),
-        StatusTableRow("人工备注", "无", update_frequency="manual"),
+    rule_manager = FakeRuntimeStatusManager()
+    rule_manager.documents[1] = StatusTableDocument.from_rows(rows=[
+        StatusTableRow("长期信任", "低", update_rule="信任事实明确变化时更新"),
+        StatusTableRow("人工备注", "无"),
     ])
-    _scratch, slow_runtime = _scratch_runtime(slow_manager)
-    assert StatusTableToolProvider(slow_runtime).get_tools() == []
+    _scratch, rule_runtime = _scratch_runtime(rule_manager)
+    assert [tool.name for tool in StatusTableToolProvider(rule_runtime).get_tools()] == [
+        "status_table_set_values"
+    ]
 
 
 @pytest.mark.asyncio
-async def test_status_tool_enforces_frequency_and_scoped_key_policy() -> None:
+async def test_status_tool_allows_every_existing_value_and_enforces_scoped_keys() -> None:
     manager = FakeRuntimeStatusManager()
     manager.documents[1] = StatusTableDocument.from_rows(rows=[
         StatusTableRow("生命", "10"),
         StatusTableRow(
             "关系事件",
             "无",
-            update_frequency="event_driven",
             update_rule="明确结盟时更新",
         ),
-        StatusTableRow("长期信任", "低", update_frequency="deferred"),
-        StatusTableRow("隐藏设定", "是", update_frequency="manual"),
+        StatusTableRow("长期信任", "低"),
+        StatusTableRow("隐藏设定", "是", runtime_key_locked=True),
     ])
     _scratch, runtime = _scratch_runtime(manager)
     default_tool = StatusTableSetValuesTool(runtime)
 
-    blocked_deferred = json.loads(await default_tool.execute(
+    changed_untyped = json.loads(await default_tool.execute(
         table_id=1,
-        updates=[{"key": "长期信任", "value": "中"}],
+        updates=[
+            {"key": "关系事件", "value": "已结盟"},
+            {"key": "长期信任", "value": "中"},
+            {"key": "隐藏设定", "value": "否"},
+        ],
     ))
-    blocked_manual = json.loads(await default_tool.execute(
-        table_id=1,
-        updates=[{"key": "隐藏设定", "value": "否"}],
-    ))
-    assert blocked_deferred["errorCode"] == "write_not_allowed"
-    assert blocked_manual["errorCode"] == "write_not_allowed"
+    assert changed_untyped["changed"] is True
+    assert {item["key"] for item in changed_untyped["changes"]} == {
+        "关系事件",
+        "长期信任",
+        "隐藏设定",
+    }
+    hidden_row = next(
+        row
+        for row in runtime.get_table_by_id(1)["document"]["rows"]
+        if row["key"] == "隐藏设定"
+    )
+    assert hidden_row["value"] == "否"
+    assert hidden_row["runtimeKeyLocked"] is True
 
     scoped = StatusTableSetValuesTool(
         runtime,
@@ -215,7 +234,7 @@ async def test_status_tool_enforces_frequency_and_scoped_key_policy() -> None:
             allowed_keys={1: frozenset({"生命"})},
         ),
     )
-    blocked_event = json.loads(await scoped.execute(
+    blocked_rule_field = json.loads(await scoped.execute(
         table_id=1,
         updates=[{"key": "关系事件", "value": "已结盟"}],
     ))
@@ -223,7 +242,7 @@ async def test_status_tool_enforces_frequency_and_scoped_key_policy() -> None:
         table_id=1,
         updates=[{"key": "生命", "value": "8"}],
     ))
-    assert blocked_event["errorCode"] == "write_not_allowed"
+    assert blocked_rule_field["errorCode"] == "write_not_allowed"
     assert changed["changed"] is True
 
 
@@ -250,60 +269,6 @@ def test_status_scratch_keeps_first_read_snapshot_during_turn() -> None:
     result = runtime.runtime_set_existing_values(1, [("生命", "8")])
     assert result.changes[0].old_value == "10"
     assert scratch.staged_changes[0].base_document.data_rows == (("生命", "10"),)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("key", "value", "expected_updated", "expected_status"),
-    [
-        ("生命", "10", False, StatusSubAgentRecordStatus.NO_OP),
-        ("生命", "8", True, StatusSubAgentRecordStatus.CHANGED),
-        ("不存在", "8", False, StatusSubAgentRecordStatus.ERROR),
-    ],
-)
-async def test_status_sub_agent_updated_tracks_actual_scratch_change(
-    key: str,
-    value: str,
-    expected_updated: bool,
-    expected_status: StatusSubAgentRecordStatus,
-) -> None:
-    manager = FakeRuntimeStatusManager()
-    scratch, runtime = _scratch_runtime(manager)
-    tool = StatusTableSetValuesTool(runtime)
-
-    class Provider:
-        async def chat(self, _messages, *, tools):  # noqa: ANN001
-            assert tools[0]["function"]["name"] == "status_table_set_values"
-            return {
-                "tool_calls": [{
-                    "function": {
-                        "name": "status_table_set_values",
-                        "arguments": json.dumps({
-                            "table_id": 1,
-                            "updates": [{"key": key, "value": value}],
-                        }),
-                    },
-                }],
-            }
-
-    sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
-    sub_agent.bind_context(SubAgentContext())
-    sub_agent.register_tools([tool])
-    sub_agent.set_mutation_probe(lambda: scratch.change_token)
-    sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
-
-    result = await sub_agent.update(
-        history=[Message(Role.USER, "old")],
-        state_context="status",
-        user_input="act",
-    )
-
-    assert result.updated is expected_updated
-    assert result.records[0].changed is expected_updated
-    assert result.records[0].status is expected_status
-    assert result.records[0].success is (
-        expected_status is not StatusSubAgentRecordStatus.ERROR
-    )
 
 
 class _OutcomeTool(BaseTool):
@@ -358,7 +323,11 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
     manager = FakeRuntimeStatusManager()
     manager.documents[1] = StatusTableDocument.from_rows(rows=[
         StatusTableRow("生命", "RT_SENTINEL"),
-        StatusTableRow("长期信任", "SLOW_SENTINEL", update_frequency="deferred"),
+        StatusTableRow(
+            "长期信任",
+            "SLOW_SENTINEL",
+            update_rule="只有长期信任事实明确变化时更新",
+        ),
     ])
     scratch, runtime = _scratch_runtime(manager)
 
@@ -389,8 +358,7 @@ async def test_fixed_preflight_isolates_scene_and_routed_table_contexts(
                                 "scene": True,
                                 "tables": [{
                                     "table_id": 1,
-                                    "realtime_keys": ["生命"],
-                                    "event_keys": [],
+                                    "keys": ["生命"],
                                     "reason": "本轮生命值相关",
                                 }],
                             }, ensure_ascii=False),
@@ -515,8 +483,7 @@ async def test_fixed_preflight_keeps_other_targets_when_provider_fails() -> None
                                 "tables": [
                                     {
                                         "table_id": table_id,
-                                        "realtime_keys": [key],
-                                        "event_keys": [],
+                                        "keys": [key],
                                         "reason": "确定变化",
                                     }
                                     for table_id, key in (
@@ -603,8 +570,7 @@ async def test_fixed_preflight_rolls_back_only_failed_table_target() -> None:
                                 "tables": [
                                     {
                                         "table_id": table_id,
-                                        "realtime_keys": [key],
-                                        "event_keys": [],
+                                        "keys": [key],
                                         "reason": "确定变化",
                                     }
                                     for table_id, key in (
@@ -694,8 +660,7 @@ async def test_fixed_preflight_restores_failed_scene_and_continues_tables() -> N
                                 "scene": True,
                                 "tables": [{
                                     "table_id": 1,
-                                    "realtime_keys": ["生命"],
-                                    "event_keys": [],
+                                    "keys": ["生命"],
                                     "reason": "确定变化",
                                 }],
                             }, ensure_ascii=False),
@@ -815,41 +780,23 @@ def test_status_sub_agent_turn_tool_scope_restores_owned_bindings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_sub_agent_outcome_batch_skips_all_state_prewrites() -> None:
+async def test_fixed_preflight_stops_after_staging_outcome() -> None:
     manager = FakeRuntimeStatusManager()
     scratch, runtime = _scratch_runtime(manager)
     outcome_tool = _OutcomeTool()
 
     class Provider:
         async def chat(self, _messages, *, tools):  # noqa: ANN001
-            assert {schema["function"]["name"] for schema in tools} == {
-                NARRATIVE_OUTCOME_TOOL_NAME,
-                "status_table_set_values",
-            }
+            assert [schema["function"]["name"] for schema in tools] == [
+                NARRATIVE_OUTCOME_TOOL_NAME
+            ]
             return {
-                "tool_calls": [
-                    {
-                        "function": {
-                            "name": "status_table_set_values",
-                            "arguments": json.dumps({
-                                "table_id": 1,
-                                "updates": [{"key": "生命", "value": "1"}],
-                            }),
-                        },
+                "tool_calls": [{
+                    "function": {
+                        "name": NARRATIVE_OUTCOME_TOOL_NAME,
+                        "arguments": json.dumps({"reason": "能否脱离伏击"}),
                     },
-                    {
-                        "function": {
-                            "name": NARRATIVE_OUTCOME_TOOL_NAME,
-                            "arguments": json.dumps({"reason": "能否脱离伏击"}),
-                        },
-                    },
-                    {
-                        "function": {
-                            "name": "scene_attr",
-                            "arguments": json.dumps({"key": "位置", "value": "安全屋"}),
-                        },
-                    },
-                ],
+                }],
             }
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
@@ -861,9 +808,11 @@ async def test_status_sub_agent_outcome_batch_skips_all_state_prewrites() -> Non
     sub_agent.set_mutation_probe(lambda: scratch.change_token)
     sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
-    result = await sub_agent.update(
+    result = await sub_agent.run_preflight(
         history=[Message(Role.ASSISTANT, "伏击仍未解决")],
         state_context="status",
+        scene_context="scene",
+        context_tables=runtime.list_context_tables(),
         user_input="我冲出去并抵达安全屋",
     )
 
@@ -871,18 +820,15 @@ async def test_status_sub_agent_outcome_batch_skips_all_state_prewrites() -> Non
     assert result.outcome_staged is True
     assert result.updated is False
     assert result.failed is False
-    assert result.state_prewrites_skipped == 2
     assert [record.status for record in result.records] == [
-        StatusSubAgentRecordStatus.SKIPPED_DUE_TO_OUTCOME,
         StatusSubAgentRecordStatus.OUTCOME_STAGED,
-        StatusSubAgentRecordStatus.SKIPPED_DUE_TO_OUTCOME,
     ]
     assert outcome_tool.calls == 1
     assert scratch.staged_changes == []
     assert manager.documents[1].row_for_key("生命").value == "10"
 
 
-def test_status_sub_agent_prompt_and_schema_only_include_outcome_when_mounted() -> None:
+def test_status_sub_agent_turn_scope_only_exposes_mounted_tools() -> None:
     manager = FakeRuntimeStatusManager()
     _scratch, runtime = _scratch_runtime(manager)
     state_tool = StatusTableSetValuesTool(runtime)
@@ -894,9 +840,7 @@ def test_status_sub_agent_prompt_and_schema_only_include_outcome_when_mounted() 
         mutation_probe=None,
         create_checkpoint=None,
         restore_checkpoint=None,
-        outcome_preflight_enabled=False,
     ):
-        assert NARRATIVE_OUTCOME_TOOL_NAME not in sub_agent.system_prompt
         assert [schema["function"]["name"] for schema in sub_agent._schemas] == [
             "status_table_set_values"
         ]
@@ -906,15 +850,13 @@ def test_status_sub_agent_prompt_and_schema_only_include_outcome_when_mounted() 
         mutation_probe=None,
         create_checkpoint=None,
         restore_checkpoint=None,
-        outcome_preflight_enabled=True,
     ):
-        assert NARRATIVE_OUTCOME_TOOL_NAME in sub_agent.system_prompt
         assert NARRATIVE_OUTCOME_TOOL_NAME in [
             schema["function"]["name"] for schema in sub_agent._schemas
         ]
 
 
-def test_status_sub_agent_refreshes_provider_tools_before_binding_prompt() -> None:
+def test_status_sub_agent_refreshes_provider_tools_before_binding_context() -> None:
     class Provider:
         def get_tools(self) -> list[BaseTool]:
             return [_SceneAttrTool()]
@@ -925,9 +867,10 @@ def test_status_sub_agent_refreshes_provider_tools_before_binding_prompt() -> No
 
     sub_agent.bind_context(context)
 
-    rendered = context.render()
-    assert "scene_attr" in rendered
-    assert "本轮没有状态写入工具" not in rendered
+    assert [schema["function"]["name"] for schema in sub_agent._schemas] == [
+        "scene_attr"
+    ]
+    assert context.render() == ""
 
 
 @pytest.mark.asyncio
@@ -1022,7 +965,7 @@ async def test_status_sub_agent_logs_cache_fingerprint_and_usage_by_source(
     assert cache_usage.args[1:] == (source, 32, 68, 32.0)
 
 
-def test_status_sub_agent_prompt_uses_actual_value_only_scene_tools() -> None:
+def test_status_sub_agent_default_scene_tools_are_value_only() -> None:
     manager = FakeRuntimeStatusManager()
     _scratch, runtime = _scratch_runtime(manager)
     scene_tracker = SceneTracker()
@@ -1039,16 +982,10 @@ def test_status_sub_agent_prompt_uses_actual_value_only_scene_tools() -> None:
         mutation_probe=None,
         create_checkpoint=None,
         restore_checkpoint=None,
-        outcome_preflight_enabled=False,
     ):
-        prompt = sub_agent.system_prompt
-        assert "scene_attr" in prompt
-        assert "status_table_set_values" in prompt
-        assert "scene_time" not in prompt
-        assert "scene_del_attr" not in prompt
-        assert "主动清理" not in prompt
-        assert "只能修改已有 key 的 value" in prompt
-        assert "value 更新为空字符串或当前适用值" in prompt
+        assert {
+            schema["function"]["name"] for schema in sub_agent._schemas
+        } == {"scene_attr", "status_table_set_values"}
         attr_schema = next(
             schema
             for schema in sub_agent._schemas
@@ -1059,7 +996,7 @@ def test_status_sub_agent_prompt_uses_actual_value_only_scene_tools() -> None:
         ]
 
 
-def test_status_sub_agent_prompt_retains_structural_guidance_when_enabled() -> None:
+def test_status_sub_agent_exposes_structural_scene_tools_when_enabled() -> None:
     manager = FakeRuntimeStatusManager()
     _scratch, runtime = _scratch_runtime(manager)
     scene_tracker = SceneTracker(allow_runtime_key_changes=True)
@@ -1072,12 +1009,10 @@ def test_status_sub_agent_prompt_retains_structural_guidance_when_enabled() -> N
         mutation_probe=None,
         create_checkpoint=None,
         restore_checkpoint=None,
-        outcome_preflight_enabled=False,
     ):
-        prompt = sub_agent.system_prompt
-        assert "scene_time / scene_attr / scene_del_attr" in prompt
-        assert "主动清理" in prompt
-        assert "使用 scene_del_attr 将其移除" in prompt
+        assert {
+            schema["function"]["name"] for schema in sub_agent._schemas
+        } == {"scene_time", "scene_attr", "scene_del_attr"}
 
 
 @pytest.mark.asyncio
@@ -1121,61 +1056,53 @@ async def test_status_route_cannot_select_scene_without_scene_tools() -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_sub_agent_failed_state_target_restores_its_prewrites() -> None:
+async def test_status_sub_agent_checkpoint_creation_failure_remains_fatal() -> None:
     manager = FakeRuntimeStatusManager()
     scratch, runtime = _scratch_runtime(manager)
 
     class Provider:
         async def chat(self, _messages, *, tools):  # noqa: ANN001
-            assert tools[0]["function"]["name"] == "status_table_set_values"
+            assert [schema["function"]["name"] for schema in tools] == [
+                "select_status_targets"
+            ]
             return {
-                "tool_calls": [
-                    {
-                        "function": {
-                            "name": "status_table_set_values",
-                            "arguments": json.dumps({
+                "tool_calls": [{
+                    "function": {
+                        "name": "select_status_targets",
+                        "arguments": json.dumps({
+                            "scene": False,
+                            "tables": [{
                                 "table_id": 1,
-                                "updates": [{"key": "生命", "value": "8"}],
-                            }),
-                        },
+                                "keys": ["生命"],
+                                "reason": "生命值已明确变化",
+                            }],
+                        }, ensure_ascii=False),
                     },
-                    {
-                        "function": {
-                            "name": "status_table_set_values",
-                            "arguments": json.dumps({
-                                "table_id": 1,
-                                "updates": [{"key": "不存在", "value": "x"}],
-                            }),
-                        },
-                    },
-                ],
+                }],
             }
+
+    def fail_create() -> object:
+        raise RuntimeError("checkpoint unavailable")
 
     sub_agent = StatusSubAgent(provider_biz_key="agent.status_sub_agent")
     sub_agent.bind_context(SubAgentContext())
     sub_agent.register_tools([StatusTableSetValuesTool(runtime)])
     sub_agent.set_mutation_probe(lambda: scratch.change_token)
-    sub_agent.set_mutation_boundary(
-        scratch.create_checkpoint,
-        scratch.restore_checkpoint,
-    )
+    sub_agent.set_mutation_boundary(fail_create, lambda _checkpoint: None)
     sub_agent._get_provider = lambda: _async_value(Provider())  # type: ignore[method-assign]
 
-    result = await sub_agent.update(
-        history=[],
-        state_context="status",
-        user_input="更新两个值",
-    )
-
-    assert result.failed is True
-    assert result.updated is False
-    assert (
-        result.records[0].status
-        is StatusSubAgentRecordStatus.ROLLED_BACK_DUE_TO_FAILURE
-    )
-    assert result.records[1].status is StatusSubAgentRecordStatus.ERROR
-    assert scratch.staged_changes == []
-    assert manager.documents[1].row_for_key("生命").value == "10"
+    with pytest.raises(
+        RuntimeError,
+        match="failed to create status update target checkpoint",
+    ):
+        await sub_agent.run_preflight(
+            history=[],
+            state_context="status",
+            scene_context="",
+            context_tables=runtime.list_context_tables(),
+            user_input="更新生命值",
+        )
+    assert sub_agent._busy is False
 
 
 @pytest.mark.asyncio
@@ -1185,7 +1112,24 @@ async def test_status_sub_agent_checkpoint_restore_failure_remains_fatal() -> No
 
     class Provider:
         async def chat(self, _messages, *, tools):  # noqa: ANN001
-            assert tools[0]["function"]["name"] == "status_table_set_values"
+            names = [schema["function"]["name"] for schema in tools]
+            if names == ["select_status_targets"]:
+                return {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "select_status_targets",
+                            "arguments": json.dumps({
+                                "scene": False,
+                                "tables": [{
+                                    "table_id": 1,
+                                    "keys": ["生命"],
+                                    "reason": "生命值已明确变化",
+                                }],
+                            }, ensure_ascii=False),
+                        },
+                    }],
+                }
+            assert names == ["status_table_set_values"]
             return {
                 "tool_calls": [
                     {
@@ -1223,8 +1167,10 @@ async def test_status_sub_agent_checkpoint_restore_failure_remains_fatal() -> No
         RuntimeError,
         match="failed to restore status update target checkpoint",
     ):
-        await sub_agent.update(
+        await sub_agent.run_preflight(
             history=[],
             state_context="status",
+            scene_context="",
+            context_tables=runtime.list_context_tables(),
             user_input="更新两个值",
         )

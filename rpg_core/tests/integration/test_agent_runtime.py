@@ -26,7 +26,6 @@ from rpg_core.session.role import (
     PlayerCharacterBindingStatus,
     SessionRoleService,
 )
-from rpg_core.status.manager import StatusManager
 from tests.support.scripted_llm import (
     CONFIG_PROVIDER_KEY,
     SESSION_PROVIDER_KEY,
@@ -210,28 +209,17 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         source_story_table.id,
         document=current_story_document,
     )
-    deferred_document = models.StatusTableDocument.from_rows(rows=[
+    native_document = models.StatusTableDocument.from_rows(rows=[
         models.StatusTableRow(
             "长期进度",
-            "旧值",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
-            deferred_interval_turns=2,
+            "已推进",
+            update_rule="长期进度事实明确变化时更新",
         )
     ])
     native_table = integration_data_gateway.status.create_table(
         session_id,
         "会话原生状态",
-        document=deferred_document,
-    )
-    StatusManager(
-        session_id,
-        integration_data_gateway.status,
-    ).commit_deferred_update(
-        native_table.id,
-        deferred_document.with_existing_values([("长期进度", "已推进")]),
-        processed_keys=["长期进度"],
-        last_processed_turn_id=2,
-        base_document=deferred_document,
+        document=native_document,
     )
 
     runtime_dir = integration_data_gateway.catalog.get_session_runtime_dir(session_id)
@@ -280,7 +268,6 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
         is not None
     )
     assert integration_data_gateway.backup.messages.count(session_id) == backup_count + 1
-    assert integration_data_gateway.status.list_deferred_progress(session_id) == []
     rebuilt = integration_data_gateway.status.get_table(session_id, story_copy.name)
     assert rebuilt.document.rows[0].value == "当前 Story 状态值"
     native_after = integration_data_gateway.status.get_table_by_id(native_table.id)
@@ -289,8 +276,8 @@ async def test_clear_fully_resets_runtime_and_status_but_preserves_session_ident
     assert native_after.document.rows[0].key == "长期进度"
     assert native_after.document.rows[0].value == ""
     assert (
-        native_after.document.rows[0].update_frequency
-        == models.STATUS_UPDATE_FREQUENCY_DEFERRED
+        native_after.document.rows[0].update_rule
+        == "长期进度事实明确变化时更新"
     )
     assert not nested_file.exists()
     assert list(summary_dir.glob("*.md")) == []
@@ -700,83 +687,6 @@ async def test_memory_recall_falls_back_locally_then_retries_remote_capability(
     assert set(remote_attempts.values()) == {2}
     assert scripted_llm_manager.embedding.calls
     assert integration_data_gateway.messages.latest_turn_id(session_id) == 2
-
-
-@pytest.mark.asyncio
-async def test_deferred_status_runs_before_next_mailbox_item_and_isolates_batches(
-    integration_agent_factory,
-    integration_data_gateway,
-    scripted_llm_manager,
-):
-    from rpg_data import models
-
-    session_id = "integration_deferred"
-    agent = await integration_agent_factory(session_id, with_status=True)
-    failed_document = models.StatusTableDocument.from_rows(rows=[
-        models.StatusTableRow(
-            "长期警戒",
-            "低",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
-            deferred_interval_turns=1,
-        )
-    ])
-    successful_document = models.StatusTableDocument.from_rows(rows=[
-        models.StatusTableRow(
-            "长期信任",
-            "低",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
-            deferred_interval_turns=1,
-        )
-    ])
-    failed_table = integration_data_gateway.status.create_table(
-        session_id,
-        "失败批次",
-        document=failed_document,
-    )
-    successful_table = integration_data_gateway.status.create_table(
-        session_id,
-        "成功批次",
-        document=successful_document,
-    )
-    scripted_llm_manager.status.queue_chat(
-        response("", model="status-model"),
-        response("", model="status-model"),
-        response(
-            "",
-            model="status-model",
-            tool_calls=[tool_call("invalid_deferred_tool", "{}")],
-        ),
-        response(
-            "",
-            model="status-model",
-            tool_calls=[
-                tool_call(
-                    "set_deferred_values",
-                    '{"updates":[{"key":"长期信任","value":"中"}]}',
-                )
-            ],
-        ),
-    )
-
-    reply = await agent.send("我连续守约并帮助了同伴。")
-    command = await agent.execute_command("/help")
-
-    assert reply.committed_turn_id == 1
-    assert command.handled is True
-    failed_after = integration_data_gateway.status.get_table_for_session(
-        session_id,
-        failed_table.id,
-    )
-    successful_after = integration_data_gateway.status.get_table_for_session(
-        session_id,
-        successful_table.id,
-    )
-    assert failed_after.document.row_for_key("长期警戒").value == "低"
-    assert successful_after.document.row_for_key("长期信任").value == "中"
-    progress = integration_data_gateway.status.list_deferred_progress(session_id)
-    assert [(item.session_status_table_id, item.field_key, item.last_processed_turn_id) for item in progress] == [
-        (successful_table.id, "长期信任", 1),
-    ]
 
 
 @pytest.mark.asyncio

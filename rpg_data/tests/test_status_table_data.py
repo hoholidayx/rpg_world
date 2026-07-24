@@ -5,8 +5,7 @@ import json
 import pytest
 
 from rpg_data.model.status import (
-    STATUS_UPDATE_FREQUENCY_DEFERRED,
-    STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
+    STATUS_TABLE_SCHEMA_VERSION,
     StatusRowRef,
     StatusTableData,
     StatusTableDocument,
@@ -109,15 +108,9 @@ def test_status_document_clears_values_without_changing_structure() -> None:
                 "亲密",
                 True,
                 {"format": "text"},
-                update_frequency=STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
                 update_rule="关系发生明确变化时更新",
             ),
-            StatusTableRow(
-                "长期信任",
-                "高",
-                update_frequency=STATUS_UPDATE_FREQUENCY_DEFERRED,
-                deferred_interval_turns=8,
-            ),
+            StatusTableRow("长期信任", "高"),
         ],
         metadata={"ui": {"compact": True}},
     )
@@ -130,66 +123,108 @@ def test_status_document_clears_values_without_changing_structure() -> None:
     assert cleared.rows[0].runtime_key_locked is True
     assert cleared.rows[0].metadata == {"format": "text"}
     assert cleared.rows[0].update_rule == "关系发生明确变化时更新"
-    assert cleared.rows[1].deferred_interval_turns == 8
     assert document.data_rows == (("关系", "亲密"), ("长期信任", "高"))
 
 
-def test_status_update_policy_round_trips_and_legacy_defaults_to_realtime() -> None:
+def test_status_document_v2_round_trips_rules_and_metadata() -> None:
     document = StatusTableDocument.from_rows(rows=[
         StatusTableRow(
             "关系",
             "疏远",
-            update_frequency=STATUS_UPDATE_FREQUENCY_EVENT_DRIVEN,
-            update_rule="对方明确接受道歉时更新",
+            metadata={"format": "text"},
+            update_rule="  对方明确接受道歉时更新  ",
         ),
-        StatusTableRow(
-            "长期信任",
-            "低",
-            update_frequency=STATUS_UPDATE_FREQUENCY_DEFERRED,
-            deferred_interval_turns=8,
-        ),
+        StatusTableRow("长期信任", "低"),
     ])
 
     restored = parse_status_document(serialize_status_document(document))
 
+    assert restored.schema_version == STATUS_TABLE_SCHEMA_VERSION
     assert restored.rows[0].update_rule == "对方明确接受道歉时更新"
-    assert restored.rows[1].deferred_interval_turns == 8
-    legacy = parse_status_document(
-        '{"rows":[{"key":"位置","value":"森林"}]}'
-    )
-    assert legacy.rows[0].update_frequency == "realtime"
+    assert restored.rows[0].metadata == {"format": "text"}
 
 
-def test_status_update_policy_rejects_invalid_combinations() -> None:
-    with pytest.raises(ValueError, match="require updateRule"):
-        StatusTableDocument.from_rows(rows=[
-            StatusTableRow("关系", "普通", update_frequency="event_driven")
-        ])
-    with pytest.raises(ValueError, match="only supported for deferred"):
-        StatusTableDocument.from_rows(rows=[
-            StatusTableRow("位置", "森林", deferred_interval_turns=3)
-        ])
-    with pytest.raises(ValueError, match="positive integer"):
-        StatusTableDocument.from_rows(rows=[
-            StatusTableRow(
-                "长期信任",
-                "低",
-                update_frequency="deferred",
-                deferred_interval_turns=1.5,  # type: ignore[arg-type]
-            )
-        ])
-
-
-@pytest.mark.parametrize("value", [True, "5", 1.5])
-def test_status_document_rejects_malformed_deferred_interval(value: object) -> None:
+@pytest.mark.parametrize("schema_version", [None, 1, "2", True])
+def test_status_document_rejects_non_v2_schema(schema_version: object) -> None:
     raw = json.dumps({
-        "rows": [{
-            "key": "长期信任",
-            "value": "低",
-            "updateFrequency": "deferred",
-            "deferredIntervalTurns": value,
-        }]
+        "schemaVersion": schema_version,
+        "kind": "status_table",
+        "mode": "key_value",
+        "keyColumn": "属性",
+        "valueColumn": "值",
+        "rows": [],
+        "metadata": {},
     })
 
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(ValueError, match="schemaVersion"):
+        parse_status_document(raw)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("updateFrequency", "realtime"),
+        ("deferredIntervalTurns", 5),
+        ("llmWritable", True),
+    ],
+)
+def test_status_document_rejects_removed_or_unknown_row_fields(
+    field: str,
+    value: object,
+) -> None:
+    raw = json.dumps({
+        "schemaVersion": 2,
+        "kind": "status_table",
+        "mode": "key_value",
+        "keyColumn": "属性",
+        "valueColumn": "值",
+        "rows": [{
+            "key": "位置",
+            "value": "森林",
+            "runtimeKeyLocked": False,
+            "updateRule": "",
+            "metadata": {},
+            field: value,
+        }],
+        "metadata": {},
+    })
+
+    with pytest.raises(ValueError, match="unsupported fields"):
+        parse_status_document(raw)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("key", 1, "key must be a string"),
+        ("value", None, "value must be a string"),
+        ("runtimeKeyLocked", "false", "runtimeKeyLocked must be a boolean"),
+        ("updateRule", None, "updateRule must be a string"),
+        ("metadata", [], "metadata must be an object"),
+    ],
+)
+def test_status_document_rejects_invalid_v2_row_types(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    row = {
+        "key": "位置",
+        "value": "森林",
+        "runtimeKeyLocked": False,
+        "updateRule": "",
+        "metadata": {},
+    }
+    row[field] = value
+    raw = json.dumps({
+        "schemaVersion": 2,
+        "kind": "status_table",
+        "mode": "key_value",
+        "keyColumn": "属性",
+        "valueColumn": "值",
+        "rows": [row],
+        "metadata": {},
+    })
+
+    with pytest.raises(ValueError, match=message):
         parse_status_document(raw)

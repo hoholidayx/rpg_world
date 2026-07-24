@@ -9,7 +9,6 @@ from rpg_core.agent.protocol import AgentStreamEvent, TurnCancelResult
 from rpg_core.agent.command.dispatcher import CommandDispatcher
 from rpg_core.agent.command.models import CommandResult
 from rpg_core.agent.runtime.context import AgentContextService
-from rpg_core.agent.runtime.deferred_status import DeferredStatusCoordinator
 from rpg_core.agent.runtime.derivation import (
     AgentDerivationService,
     SessionDerivationPreparationResult,
@@ -185,7 +184,6 @@ class RPGGameAgent:
             orchestrator=orchestrator,
             stream_error_event=AgentMailbox.stream_error_event,
         )
-        deferred_status = DeferredStatusCoordinator(self._lifecycle)
         self._derivation_service = AgentDerivationService(
             lifecycle=self._lifecycle,
             context_service=self._context_service,
@@ -199,7 +197,6 @@ class RPGGameAgent:
             command_dispatcher=self._command_dispatcher,
             truncate_history=self._session_service.truncate_history_from_turn_now,
             materialize_derivation=self._derivation_service.materialize,
-            deferred_status=deferred_status.run,
         )
         self._session_service.bind_mailbox(self._mailbox)
 

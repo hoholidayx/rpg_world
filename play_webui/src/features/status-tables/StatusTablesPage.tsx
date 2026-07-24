@@ -22,7 +22,6 @@ import { useStorySelection } from '@/features/stories/useStorySelection'
 import {
   STATUS_KIND,
   STATUS_ORIGIN,
-  STATUS_UPDATE_FREQUENCY,
   type StatusKind,
   type StatusTable,
   type StatusTableInput,
@@ -213,14 +212,7 @@ function StatusTablesContent() {
       if (!draft.name.trim()) throw new Error('状态表名不能为空')
       const validated = validateRows(draft.rows)
       if (validated.error) throw new Error(validated.error)
-      const rows = kind === STATUS_KIND.SCENE
-        ? validated.rows.map((row) => ({
-            ...row,
-            updateFrequency: STATUS_UPDATE_FREQUENCY.REALTIME,
-            updateRule: '',
-            deferredIntervalTurns: null,
-          }))
-        : validated.rows
+      const rows = validated.rows
       if (view === STATUS_TABLE_VIEW.STORY) {
         if (!currentWorkspace || !storyId) throw new Error('Story 不可用')
         return updateStoryStatusTable(currentWorkspace, storyId, selected.id, {
@@ -348,7 +340,7 @@ function StatusTablesContent() {
               )}
               <label className="block"><FieldLabel label="用途与更新规则" note="可选" /><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className="min-h-24 w-full rounded-lg border border-slate-200 px-3 py-3 text-sm leading-6 outline-none focus:border-violet-300" /></label>
               <div className="grid gap-4 md:grid-cols-2"><label><FieldLabel label="Key 列名" /><input value={draft.keyColumn} onChange={(event) => setDraft({ ...draft, keyColumn: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><label><FieldLabel label="Value 列名" /><input value={draft.valueColumn} onChange={(event) => setDraft({ ...draft, valueColumn: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label></div>
-              <KvEditor draft={draft} onChange={setDraft} toolbarTitle="状态字段" isScene={kind === STATUS_KIND.SCENE} />
+              <KvEditor draft={draft} onChange={setDraft} toolbarTitle="状态字段" />
             </div>
           ) : <p className="px-6 py-20 text-center text-sm text-slate-400">请选择或新建状态表。</p>}
         </Panel>

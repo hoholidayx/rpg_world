@@ -1395,9 +1395,8 @@ function renderStatusRows(value) {
           <tr>
             <th>字段</th>
             <th>初始值</th>
-            <th>频率</th>
             <th>更新规则</th>
-            <th>约束</th>
+            <th>Key 结构</th>
           </tr>
         </thead>
         <tbody>
@@ -1405,12 +1404,8 @@ function renderStatusRows(value) {
             <tr>
               <td><code>${escapeHtml(row.key || "")}</code></td>
               <td>${escapeHtml(row.value || "—")}</td>
-              <td>${escapeHtml(row.updateFrequency || "realtime")}</td>
               <td>${escapeHtml(row.updateRule || "—")}</td>
-              <td>
-                ${row.runtimeKeyLocked ? "键锁定" : "可更新"}
-                ${row.deferredIntervalTurns == null ? "" : ` · ${escapeHtml(row.deferredIntervalTurns)} turns`}
-              </td>
+              <td>${row.runtimeKeyLocked ? "键锁定" : "未锁定"}</td>
             </tr>
           `).join("")}
         </tbody>

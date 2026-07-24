@@ -8,7 +8,6 @@ from rpg_core.session.deletion import (
     SessionDeletionService,
     SessionRuntimeCleanupStatus,
 )
-from rpg_core.status.manager import StatusManager
 from rpg_data import models
 from rpg_data.repositories.records import (
     SessionBackupMessageRecord,
@@ -16,7 +15,6 @@ from rpg_data.repositories.records import (
     SessionNarrativeOutcomeRecord,
     SessionProfileRecord,
     SessionRPModuleOverrideRecord,
-    SessionStatusDeferredProgressRecord,
     SessionStatusTableRecord,
     SessionStoryMemoryRecord,
 )
@@ -79,18 +77,10 @@ def _prepared_session(tmp_path):  # noqa: ANN001, ANN202
         models.StatusTableRow(
             "长期进度",
             "旧值",
-            update_frequency=models.STATUS_UPDATE_FREQUENCY_DEFERRED,
-            deferred_interval_turns=2,
+            update_rule="事实明确变化时更新",
         )
     ])
-    native = gateway.status.create_table(session.id, "Delete native", document=document)
-    StatusManager(session.id, gateway.status).commit_deferred_update(
-        native.id,
-        document,
-        processed_keys=["长期进度"],
-        last_processed_turn_id=1,
-        base_document=document,
-    )
+    gateway.status.create_table(session.id, "Delete native", document=document)
     runtime_dir = gateway.catalog.get_session_runtime_dir(session.id)
     marker = runtime_dir / "nested" / "marker.bin"
     marker.parent.mkdir(parents=True)
@@ -116,7 +106,6 @@ def test_delete_removes_catalog_children_and_runtime_directory(tmp_path) -> None
     assert SessionStoryMemoryRecord.select().where(SessionStoryMemoryRecord.session == session.id).count() == 0
     assert SessionNarrativeOutcomeRecord.select().where(SessionNarrativeOutcomeRecord.session == session.id).count() == 0
     assert SessionStatusTableRecord.select().where(SessionStatusTableRecord.session == session.id).count() == 0
-    assert SessionStatusDeferredProgressRecord.select().count() == 0
     assert SessionRPModuleOverrideRecord.select().where(SessionRPModuleOverrideRecord.session == session.id).count() == 0
 
 

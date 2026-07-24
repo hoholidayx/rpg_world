@@ -38,6 +38,13 @@ def test_scene_tracker_existing_table_round_trip():
             "name": "当前场景",
             "headers": ["属性", "值"],
             "rows": [["时间", "第 9 年 8 月 7 日 12 时"], ["位置", "大厅"]],
+            "document": {
+                "rows": [{
+                    "key": "位置",
+                    "value": "大厅",
+                    "updateRule": "角色明确抵达新地点时更新",
+                }],
+            },
         }
     )
     tracker = SceneTracker()
@@ -50,10 +57,12 @@ def test_scene_tracker_existing_table_round_trip():
     assert "大厅" in context
     assert "scene 数据可能不准确" in context
     assert "遵循核心状态同步协议" in context
+    assert "角色明确抵达新地点时更新" in context
     assert "第 9 年 8 月 7 日 12 时" in snapshot_context
     assert "大厅" in snapshot_context
     assert "scene 数据可能不准确" not in snapshot_context
     assert "遵循核心状态同步协议" not in snapshot_context
+    assert "角色明确抵达新地点时更新" not in snapshot_context
     assert snapshot_context.endswith("[/scene]")
     assert "StatusSubAgent" not in context
     assert "scene_time" not in context

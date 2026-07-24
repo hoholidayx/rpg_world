@@ -12,7 +12,6 @@ from peewee import Database, DoesNotExist, IntegrityError, SQL
 from rpg_data.model import status as models
 from rpg_data.repositories.records import (
     SessionRecord,
-    SessionStatusDeferredProgressRecord,
     SessionStatusTableRecord,
     StoryCharacterRecord,
     StoryRecord,
@@ -242,16 +241,12 @@ class StatusDataService:
         story_id = int(session.story_id)
         current = {table.id: table for table in self.list_tables(session_id)}
         delete_ids = _unique_positive_ids(plan.delete_table_ids, "delete_table_ids")
-        progress_ids = _unique_positive_ids(
-            plan.deferred_progress_table_ids,
-            "deferred_progress_table_ids",
-        )
         writes = tuple(plan.document_writes)
         write_ids = _unique_positive_ids(
             (write.table_id for write in writes),
             "document_writes",
         )
-        referenced_ids = set(delete_ids) | set(progress_ids) | set(write_ids)
+        referenced_ids = set(delete_ids) | set(write_ids)
         missing_ids = referenced_ids.difference(current)
         if missing_ids:
             raise FileNotFoundError(
@@ -267,18 +262,6 @@ class StatusDataService:
         )
 
         with self._database.atomic():
-            deferred_progress_cleared = 0
-            if progress_ids:
-                deferred_progress_cleared = int(
-                    SessionStatusDeferredProgressRecord
-                    .delete()
-                    .where(
-                        SessionStatusDeferredProgressRecord.session_status_table.in_(
-                            progress_ids
-                        )
-                    )
-                    .execute()
-                )
             if delete_ids:
                 deleted = int(
                     SessionStatusTableRecord
@@ -321,7 +304,6 @@ class StatusDataService:
             story_tables_cleared=len(delete_ids),
             story_tables_initialized=initialized_count,
             native_tables_reset=len(writes),
-            deferred_progress_cleared=deferred_progress_cleared,
         )
 
     @staticmethod
@@ -655,92 +637,28 @@ class StatusDataService:
             baseline_matched=baseline_matched,
         )
 
-    def list_deferred_progress(
-        self,
-        session_id: str,
-    ) -> list[models.StatusDeferredProgress]:
-        query = (
-            SessionStatusDeferredProgressRecord
-            .select(
-                SessionStatusDeferredProgressRecord,
-                SessionStatusTableRecord,
-            )
-            .join(SessionStatusTableRecord)
-            .where(SessionStatusTableRecord.session == session_id)
-        )
-        return [
-            models.StatusDeferredProgress(
-                session_status_table_id=int(row.session_status_table_id),
-                field_key=str(row.field_key),
-                last_processed_turn_id=max(0, int(row.last_processed_turn_id)),
-            )
-            for row in query
-        ]
-
-    def clamp_deferred_progress(
-        self,
-        session_id: str,
-        max_turn_id: int,
-    ) -> int:
-        """Clamp progress after history truncation without rolling back values."""
-        boundary = max(0, int(max_turn_id))
-        table_ids = (
-            SessionStatusTableRecord
-            .select(SessionStatusTableRecord.id)
-            .where(SessionStatusTableRecord.session == session_id)
-        )
-        return (
-            SessionStatusDeferredProgressRecord
-            .update(
-                last_processed_turn_id=boundary,
-                updated_at=SQL("CURRENT_TIMESTAMP"),
-            )
-            .where(
-                (SessionStatusDeferredProgressRecord.session_status_table.in_(table_ids))
-                & (SessionStatusDeferredProgressRecord.last_processed_turn_id > boundary)
-            )
-            .execute()
-        )
-
     def commit_document_batch(
         self,
         session_id: str,
         document_writes: Iterable[models.StatusDocumentWrite],
-        progress_writes: Iterable[models.StatusProgressWrite] = (),
     ) -> models.StatusDocumentBatchResult:
-        """Atomically apply caller-prepared documents and progress values."""
+        """Atomically apply caller-prepared status documents."""
 
         documents = tuple(document_writes)
-        progress = tuple(progress_writes)
         document_ids = _unique_positive_ids(
             (write.table_id for write in documents),
             "document_writes",
         )
-        progress_keys: set[tuple[int, str]] = set()
-        for write in progress:
-            if write.table_id <= 0:
-                raise ValueError("progress table_id must be positive")
-            if not write.field_key:
-                raise ValueError("progress field_key must not be empty")
-            if write.last_processed_turn_id <= 0:
-                raise ValueError("progress turn ID must be positive")
-            identity = (write.table_id, write.field_key)
-            if identity in progress_keys:
-                raise ValueError("progress writes contain duplicate table/key pairs")
-            progress_keys.add(identity)
 
-        affected_ids = set(document_ids) | {
-            write.table_id for write in progress
-        }
-        if not affected_ids:
+        if not document_ids:
             return models.StatusDocumentBatchResult(tables=())
         rows = {
             int(row.id): row
             for row in SessionStatusTableRecord.select().where(
-                SessionStatusTableRecord.id.in_(affected_ids)
+                SessionStatusTableRecord.id.in_(document_ids)
             )
         }
-        missing_ids = affected_ids.difference(rows)
+        missing_ids = set(document_ids).difference(rows)
         if missing_ids:
             raise FileNotFoundError(
                 "Session status tables not found: "
@@ -782,28 +700,6 @@ class StatusDataService:
                 )
                 row.updated_at = SQL("CURRENT_TIMESTAMP")
                 row.save()
-            for write in progress:
-                (
-                    SessionStatusDeferredProgressRecord.insert(
-                        session_status_table=write.table_id,
-                        field_key=write.field_key,
-                        last_processed_turn_id=write.last_processed_turn_id,
-                        updated_at=SQL("CURRENT_TIMESTAMP"),
-                    )
-                    .on_conflict(
-                        conflict_target=(
-                            SessionStatusDeferredProgressRecord.session_status_table,
-                            SessionStatusDeferredProgressRecord.field_key,
-                        ),
-                        update={
-                            SessionStatusDeferredProgressRecord.last_processed_turn_id:
-                                write.last_processed_turn_id,
-                            SessionStatusDeferredProgressRecord.updated_at:
-                                SQL("CURRENT_TIMESTAMP"),
-                        },
-                    )
-                    .execute()
-                )
         return models.StatusDocumentBatchResult(
             tables=tuple(_to_session_table(rows[table_id]) for table_id in document_ids),
             baseline_mismatch_table_ids=tuple(mismatches),

@@ -1565,10 +1565,8 @@ class RuntimeApplication:
                         key=row.key,
                         value=row.value,
                         runtime_key_locked=row.runtime_key_locked,
-                        metadata=row.metadata,
-                        update_frequency=row.update_frequency,
                         update_rule=row.update_rule,
-                        deferred_interval_turns=row.deferred_interval_turns,
+                        metadata=row.metadata,
                     )
                     for row in spec.rows
                 ],

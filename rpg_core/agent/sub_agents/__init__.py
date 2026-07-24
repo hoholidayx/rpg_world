@@ -20,7 +20,6 @@ from rpg_core.agent.sub_agents.status.bootstrap import (
     select_status_bootstrap_history,
 )
 from rpg_core.agent.sub_agents.status.models import (
-    DeferredStatusResult,
     OutcomeDecision,
     StatusBootstrapResult,
     StatusRouteResult,
@@ -42,7 +41,6 @@ __all__ = [
     "StatusSubAgent",
     "StatusBootstrapCoordinator",
     "select_status_bootstrap_history",
-    "DeferredStatusResult",
     "OutcomeDecision",
     "StatusBootstrapResult",
     "StatusRouteResult",

@@ -22,6 +22,13 @@ SECTIONS = {
     "plotSchedule",
     "visualCatalog",
 }
+STATUS_ROW_FIELDS = {
+    "key",
+    "value",
+    "runtimeKeyLocked",
+    "updateRule",
+    "metadata",
+}
 
 
 def validate(value: Any) -> list[str]:
@@ -55,7 +62,47 @@ def validate(value: Any) -> list[str]:
     policy = value.get("applyPolicy")
     if policy != {"mode": "merge", "deleteMissing": False}:
         errors.append("Story Pack v1 applyPolicy must be merge/non-deleting")
+    _validate_status_tables(value, errors)
     return errors
+
+
+def _validate_status_tables(value: dict[str, Any], errors: list[str]) -> None:
+    resources = value.get("resources")
+    if not isinstance(resources, dict):
+        return
+    tables = resources.get("statusTables", [])
+    if not isinstance(tables, list):
+        errors.append("resources.statusTables must be an array")
+        return
+    for table_index, table in enumerate(tables):
+        if not isinstance(table, dict):
+            errors.append(f"statusTables[{table_index}] must be an object")
+            continue
+        rows = table.get("rows", [])
+        if not isinstance(rows, list):
+            errors.append(f"statusTables[{table_index}].rows must be an array")
+            continue
+        for row_index, row in enumerate(rows):
+            path = f"statusTables[{table_index}].rows[{row_index}]"
+            if not isinstance(row, dict):
+                errors.append(f"{path} must be an object")
+                continue
+            unknown = sorted(set(row).difference(STATUS_ROW_FIELDS))
+            if unknown:
+                errors.append(f"{path} has unsupported fields: {unknown}")
+            if not isinstance(row.get("key"), str) or not row["key"].strip():
+                errors.append(f"{path}.key is required")
+            if "value" in row and not isinstance(row["value"], str):
+                errors.append(f"{path}.value must be a string")
+            if "runtimeKeyLocked" in row and not isinstance(
+                row["runtimeKeyLocked"],
+                bool,
+            ):
+                errors.append(f"{path}.runtimeKeyLocked must be a boolean")
+            if "updateRule" in row and not isinstance(row["updateRule"], str):
+                errors.append(f"{path}.updateRule must be a string")
+            if "metadata" in row and not isinstance(row["metadata"], dict):
+                errors.append(f"{path}.metadata must be an object")
 
 
 def main() -> int:

@@ -254,7 +254,15 @@ class SceneTracker:
         :meth:`get_snapshot_context`，避免把提示词写入消息正文。
         """
         lines = self._snapshot_lines()
-        lines.extend(("", self.RUNTIME_GUIDANCE, "[/scene]"))
+        lines.extend(("", self.RUNTIME_GUIDANCE))
+        update_rules = self._current_update_rules()
+        if update_rules:
+            lines.append("字段更新规则（满足对应条件时才更新）：")
+            lines.extend(
+                f"- {key}: {rule}"
+                for key, rule in update_rules.items()
+            )
+        lines.append("[/scene]")
         return "\n".join(lines)
 
     def get_snapshot_context(self) -> str:
@@ -291,6 +299,11 @@ class SceneTracker:
         if self._status_mgr is None:
             return {}
         return dict(self._status_mgr.get_scene_attrs() or {})
+
+    def _current_update_rules(self) -> dict[str, str]:
+        if self._status_mgr is None:
+            return {}
+        return dict(self._status_mgr.get_scene_update_rules() or {})
 
     def _attrs_from_table(self, table: dict[str, object]) -> dict[str, str]:
         attrs: dict[str, str] = {}

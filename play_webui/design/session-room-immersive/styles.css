@@ -2474,16 +2474,6 @@ kbd {
   font-weight: 850;
 }
 
-.table-mode--event {
-  background: rgba(216, 144, 158, 0.14);
-  color: var(--rose-deep);
-}
-
-.table-mode--deferred {
-  background: rgba(216, 177, 111, 0.17);
-  color: #8a6a35;
-}
-
 .state-table-card dl {
   margin: 0;
   padding: 7px 17px 11px;

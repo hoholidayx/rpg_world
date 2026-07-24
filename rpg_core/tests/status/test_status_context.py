@@ -27,6 +27,21 @@ def _table(
         "description": description,
         "headers": ["属性", "值"],
         "rows": [["生命", "10"]],
+        "document": {
+            "schemaVersion": 2,
+            "kind": "status_table",
+            "mode": "key_value",
+            "keyColumn": "属性",
+            "valueColumn": "值",
+            "rows": [{
+                "key": "生命",
+                "value": "10",
+                "runtimeKeyLocked": False,
+                "updateRule": "",
+                "metadata": {},
+            }],
+            "metadata": {},
+        },
         "metadata_json": json.dumps(metadata, ensure_ascii=False),
         "origin": "story_copy",
         "source_story_status_table_id": 100 + table_id,
@@ -34,8 +49,16 @@ def _table(
 
 
 def test_status_context_separates_regular_and_character_tables() -> None:
+    world_table = _table(1, "世界状态", description="追踪世界事实。")
+    world_table["document"] = {
+        "rows": [{
+            "key": "生命",
+            "value": "10",
+            "updateRule": "生命事实明确变化时更新",
+        }],
+    }
     rendered = render_status_tables_context([
-        _table(1, "世界状态", description="追踪世界事实。"),
+        world_table,
         _table(2, "身体状态", description="只在 Alice 受伤或恢复时更新。", character_name="Alice", character_id=7),
         _table(3, "装备状态", character_name="Alice", character_id=7),
     ])
@@ -45,8 +68,10 @@ def test_status_context_separates_regular_and_character_tables() -> None:
     assert "本轮回复前的普通状态表快照" in rendered
     assert "遵循核心状态同步协议" in rendered
     assert "只能修改已有键的值" in rendered
-    assert "event_driven 只在“事件规则”明确命中时同步" in rendered
-    assert "主 Agent 不得写 deferred 或 manual 字段" in rendered
+    assert "规则为空时使用默认语义" in rendered
+    assert "生命事实明确变化时更新" in rendered
+    assert "deferred" not in rendered
+    assert "manual" not in rendered
     assert "只有核验后确认无变化" not in rendered
     assert "### 世界状态" in rendered
     assert "运行时表 ID：1" in rendered
@@ -87,9 +112,9 @@ def test_status_context_ignores_character_metadata_on_session_native_table() -> 
     assert "伪造角色" not in rendered
 
 
-def test_empty_status_table_does_not_advertise_unregistered_writer() -> None:
+def test_status_context_does_not_fallback_to_flat_rows() -> None:
     table = _table(6, "空状态表")
-    table["rows"] = []
+    table["document"]["rows"] = []  # type: ignore[index]
 
     rendered = render_status_tables_context([table])
 

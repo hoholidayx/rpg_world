@@ -717,19 +717,6 @@
     "StatusRowSpec": {
       "additionalProperties": false,
       "properties": {
-        "deferredIntervalTurns": {
-          "anyOf": [
-            {
-              "exclusiveMinimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Deferredintervalturns"
-        },
         "key": {
           "title": "Key",
           "type": "string"
@@ -743,17 +730,6 @@
           "default": false,
           "title": "Runtimekeylocked",
           "type": "boolean"
-        },
-        "updateFrequency": {
-          "default": "realtime",
-          "enum": [
-            "realtime",
-            "event_driven",
-            "deferred",
-            "manual"
-          ],
-          "title": "Updatefrequency",
-          "type": "string"
         },
         "updateRule": {
           "default": "",

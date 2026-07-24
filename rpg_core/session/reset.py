@@ -48,7 +48,6 @@ class SessionResetResult:
     story_status_tables_cleared: int = 0
     story_status_tables_initialized: int = 0
     session_native_status_tables_reset: int = 0
-    deferred_progress_cleared: int = 0
     media_jobs_cleared: int = 0
     media_gallery_items_cleared: int = 0
     media_backgrounds_cleared: int = 0
@@ -101,7 +100,6 @@ class SessionResetService:
                 status_result.story_tables_initialized
             ),
             session_native_status_tables_reset=status_result.native_tables_reset,
-            deferred_progress_cleared=status_result.deferred_progress_cleared,
             media_jobs_cleared=media_result.jobs_cleared,
             media_gallery_items_cleared=media_result.gallery_items_cleared,
             media_backgrounds_cleared=media_result.backgrounds_cleared,
