@@ -32,6 +32,9 @@ For an unresolved, consequential choice:
 Use deterministic decision IDs, for example `decision-player-role` or
 `decision-ending-tone`. When a decision changes, mark the older record
 `superseded` and add a new record rather than rewriting history invisibly.
+After every successful `story_design_patch`, review `advisoryDiagnostics`.
+Correct field-duty warnings in the same design thread, or record why a
+deliberate exception is safe.
 
 ## JSON Patch examples
 
@@ -73,7 +76,7 @@ Add a character:
       "aliases": [],
       "details": [
         {
-          "stableId": "character-lin-personality",
+          "stableId": "detail-lin-personality",
           "name": "NPC 演绎性格",
           "content": "克制、观察力强，对自己的记忆保持怀疑。",
           "tags": ["kind:personality", "scope:npc_portrayal"],
@@ -94,6 +97,11 @@ Use a `test` operation when the patch depends on a field value in addition to
 the revision CAS.
 
 ## Checkpoint milestones
+
+Use `story_design_validate(profile="draft")` during iterative work. Before
+creating a milestone checkpoint or Story Pack, use `profile="package"`.
+Package-profile errors are deterministic readiness gates; warnings identify
+field responsibility or authoring quality risks that require review.
 
 Create a named checkpoint after:
 

@@ -8,6 +8,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+from rpg_mcp.authoring_rules import (
+    AUTHORING_RULES_RELATIVE_PATH,
+    AUTHORING_RULES_VERSION,
+    authoring_rules_catalog,
+    enrich_schema,
+    render_contract_reference,
+    render_reference_files,
+    render_skill_document,
+)
 from rpg_mcp.contracts import (
     CONTRACT_VERSION,
     PROJECT_SCHEMA_VERSION,
@@ -16,11 +25,11 @@ from rpg_mcp.contracts import (
     canonical_json,
 )
 
-
 DESIGN_TOOLS = (
     ("story_design_get_project", True, False),
     ("story_design_get_resume_context", True, False),
     ("story_design_get_section", True, False),
+    ("story_design_get_authoring_rules", True, False),
     ("story_design_patch", False, False),
     ("story_design_create_checkpoint", False, False),
     ("story_design_list_history", True, False),
@@ -29,6 +38,8 @@ DESIGN_TOOLS = (
     ("story_design_validate", True, False),
     ("story_design_build_pack", False, False),
     ("story_design_doctor", True, False),
+    ("story_design_preview_authoring_rules_refresh", True, False),
+    ("story_design_apply_authoring_rules_refresh", False, True),
 )
 
 RUNTIME_TOOLS = (
@@ -80,32 +91,52 @@ def generate(root: Path) -> None:
                 f"{manifest.get('schemaVersion')!r}; v1 projects must be "
                 "re-created as v2 because no converter is provided"
             )
-    contract = generate_schema_assets(root)
+    assets = build_managed_authoring_assets()
+    _write_managed_assets(root, assets)
+    metadata = managed_authoring_asset_metadata(assets)
     _initialize_revision(
         root,
-        contract_digest=_digest(contract),
+        contract_digest=metadata["contractDigest"],
+        authoring_rules_digest=metadata["authoringRulesDigest"],
+        authoring_asset_digests=metadata["authoringAssetDigests"],
+        authoring_assets_digest=metadata["authoringAssetsDigest"],
     )
 
 
 def generate_schema_assets(root: Path) -> dict[str, Any]:
-    """Write v2 schema artifacts without mutating DesignProject state."""
+    """Write managed v2 authoring assets without mutating design revisions."""
 
-    schemas = root / "schemas"
-    schemas.mkdir(parents=True, exist_ok=True)
+    assets = build_managed_authoring_assets()
+    _write_managed_assets(root, assets)
+    return json.loads(assets["schemas/rpg-mcp-contract-v2.json"])
+
+
+def build_managed_authoring_assets() -> dict[str, str]:
+    """Build deterministic portable assets from the authoring rule source."""
+
+    catalog = authoring_rules_catalog()
     design_schema = StoryDesignDocument.model_json_schema(
         by_alias=True,
         mode="validation",
     )
     design_schema["$id"] = "story-design-v2.schema.json"
     design_schema["title"] = "Portable Story Design v2"
+    design_schema = enrich_schema(
+        design_schema,
+        root_model="StoryDesignDocument",
+        catalog=catalog,
+    )
     pack_schema = StoryPack.model_json_schema(
         by_alias=True,
         mode="validation",
     )
     pack_schema["$id"] = "story-pack-v2.schema.json"
     pack_schema["title"] = "RPG World Story Pack v2"
-    _write_json(schemas / "story-design-v2.schema.json", design_schema)
-    _write_json(schemas / "story-pack-v2.schema.json", pack_schema)
+    pack_schema = enrich_schema(
+        pack_schema,
+        root_model="StoryPack",
+        catalog=catalog,
+    )
 
     contract = {
         "schemaVersion": "rpg-mcp-contract/2.0",
@@ -172,13 +203,81 @@ def generate_schema_assets(root: Path) -> dict[str, Any]:
             "promptsAreCodeOwned": True,
             "workspaceConfiguration": False,
         },
+        "authoringRules": {
+            "version": AUTHORING_RULES_VERSION,
+            "digest": catalog["catalogDigest"],
+            "path": AUTHORING_RULES_RELATIVE_PATH,
+            "profiles": ["draft", "package"],
+            "structuredDiagnostics": [
+                "ruleId",
+                "severity",
+                "path",
+                "message",
+                "suggestion",
+                "runtimeEffect",
+            ],
+            "managedAssetRefresh": {
+                "previewAndApplyAreSeparateTools": True,
+                "changesDesignRevision": False,
+                "changesStoryPacks": False,
+                "changesRuntimeIntegration": False,
+            },
+        },
     }
-    contract_path = schemas / "rpg-mcp-contract-v2.json"
-    _write_json(contract_path, contract)
-    return contract
+    assets = {
+        "schemas/story-design-v2.schema.json": _json_text(design_schema),
+        "schemas/story-pack-v2.schema.json": _json_text(pack_schema),
+        "schemas/rpg-mcp-contract-v2.json": _json_text(contract),
+        AUTHORING_RULES_RELATIVE_PATH: _json_text(catalog),
+        (
+            ".agents/skills/rpg-story-authoring/SKILL.md"
+        ): render_skill_document(catalog),
+        (
+            ".agents/skills/rpg-story-authoring/references/"
+            "story-design-contract.md"
+        ): render_contract_reference(catalog),
+    }
+    for filename, content in render_reference_files(catalog).items():
+        assets[
+            ".agents/skills/rpg-story-authoring/references/" + filename
+        ] = content
+    return dict(sorted(assets.items()))
 
 
-def _initialize_revision(root: Path, *, contract_digest: str) -> None:
+def managed_authoring_asset_metadata(
+    assets: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    values = assets or build_managed_authoring_assets()
+    asset_digests = {
+        path: hashlib.sha256(content.encode("utf-8")).hexdigest()
+        for path, content in sorted(values.items())
+    }
+    contract = json.loads(values["schemas/rpg-mcp-contract-v2.json"])
+    catalog = json.loads(values[AUTHORING_RULES_RELATIVE_PATH])
+    return {
+        "contractDigest": _digest(contract),
+        "authoringRulesVersion": AUTHORING_RULES_VERSION,
+        "authoringRulesDigest": catalog["catalogDigest"],
+        "authoringAssetDigests": asset_digests,
+        "authoringAssetsDigest": _digest(asset_digests),
+    }
+
+
+def _write_managed_assets(root: Path, assets: dict[str, str]) -> None:
+    for relative, content in assets.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def _initialize_revision(
+    root: Path,
+    *,
+    contract_digest: str,
+    authoring_rules_digest: str,
+    authoring_asset_digests: dict[str, str],
+    authoring_assets_digest: str,
+) -> None:
     manifest_path = root / "design-project.json"
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -192,6 +291,12 @@ def _initialize_revision(root: Path, *, contract_digest: str) -> None:
             )
         manifest["contractVersion"] = CONTRACT_VERSION
         manifest["contractDigest"] = contract_digest
+        manifest["authoringRulesVersion"] = AUTHORING_RULES_VERSION
+        manifest["authoringRulesDigest"] = authoring_rules_digest
+        manifest["authoringAssetDigests"] = authoring_asset_digests
+        manifest["authoringAssetsDigest"] = authoring_assets_digest
+        paths = manifest.setdefault("paths", {})
+        paths["authoringRules"] = AUTHORING_RULES_RELATIVE_PATH
         _write_json(manifest_path, manifest)
         return
     current_path = root / "design" / "current.json"
@@ -219,6 +324,10 @@ def _initialize_revision(root: Path, *, contract_digest: str) -> None:
         "schemaVersion": PROJECT_SCHEMA_VERSION,
         "contractVersion": CONTRACT_VERSION,
         "contractDigest": contract_digest,
+        "authoringRulesVersion": AUTHORING_RULES_VERSION,
+        "authoringRulesDigest": authoring_rules_digest,
+        "authoringAssetDigests": authoring_asset_digests,
+        "authoringAssetsDigest": authoring_assets_digest,
         "projectId": document["project"]["projectId"],
         "name": document["project"]["name"],
         "currentRevision": revision_id,
@@ -234,6 +343,7 @@ def _initialize_revision(root: Path, *, contract_digest: str) -> None:
             "snapshots": "artifacts/snapshots",
             "integration": "integrations/rpg-world.json",
             "reports": "reports",
+            "authoringRules": AUTHORING_RULES_RELATIVE_PATH,
         },
     }
     _write_json(manifest_path, manifest)
@@ -245,7 +355,11 @@ def _digest(value: Any) -> str:
 
 def _write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    path.write_text(_json_text(value), encoding="utf-8")
+
+
+def _json_text(value: Any) -> str:
+    return (
         json.dumps(
             value,
             ensure_ascii=False,
@@ -253,8 +367,7 @@ def _write_json(path: Path, value: Any) -> None:
             indent=2,
             sort_keys=True,
         )
-        + "\n",
-        encoding="utf-8",
+        + "\n"
     )
 
 

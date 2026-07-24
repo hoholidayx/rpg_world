@@ -2,32 +2,66 @@
   "$defs": {
     "CharacterDetailSpec": {
       "additionalProperties": false,
+      "description": "一条职责单一、带 kind 标签的客观或演绎详情。",
       "properties": {
         "content": {
           "default": "",
+          "description": "只写当前 kind 对应的一类信息，避免客观事实与演绎要求混写。",
+          "examples": [
+            "句子短，避免夸张修辞；紧张时会先确认事实。"
+          ],
           "title": "Content",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.character-detail.content",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "name": {
+          "description": "该条详情的职责标题，例如“外貌”或“NPC 说话方式”。",
+          "examples": [
+            "NPC 说话方式"
+          ],
           "title": "Name",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.character-detail.name",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "sortOrder": {
           "default": 0,
+          "description": "稳定显示顺序；数值越小越靠前。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Sortorder",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.character-detail.sort-order",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "detail-lin-che-speech"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.character-detail.stable-id",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "tags": {
+          "description": "使用一个主要 kind 标签；演绎 kind 会自动附加 scope:npc_portrayal。",
+          "examples": [
+            [
+              "kind:speech",
+              "scope:npc_portrayal"
+            ]
+          ],
           "items": {
             "type": "string"
           },
           "title": "Tags",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.character-detail.tags",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         }
       },
       "required": [
@@ -39,50 +73,105 @@
     },
     "CharacterSpec": {
       "additionalProperties": false,
+      "description": "Story 直属角色的客观身份卡、详情与视觉锚点。",
       "properties": {
         "aliases": {
+          "description": "角色可被识别的别名、称呼或旧名。",
+          "examples": [
+            [
+              "阿澈"
+            ]
+          ],
           "items": {
             "type": "string"
           },
           "title": "Aliases",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.character.aliases",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "description": {
           "default": "",
-          "description": "角色身份、经历与客观事实。不得写性格、说话方式、行为倾向或心理活动；这些演绎设定必须放入带内置 kind 标签的 details。",
+          "description": "只写角色身份、经历和客观事实；性格、口癖、行为倾向与心理必须拆到带演绎 kind 标签的 details。",
+          "examples": [
+            "调查记者，2018 年起追查旧城区失踪案。"
+          ],
           "title": "Description",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.character.description",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "details": {
+          "description": "按职责拆分的角色客观详情或 NPC 演绎详情。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/CharacterDetailSpec"
           },
           "title": "Details",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.character.details",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "metadata": {
           "additionalProperties": true,
+          "description": "仅放没有正式字段承载的中立扩展数据。",
+          "examples": [
+            {}
+          ],
           "title": "Metadata",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.character.metadata",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "name": {
+          "description": "面向作者和管理界面的名称。",
+          "examples": [
+            "林澈"
+          ],
           "title": "Name",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.character.name",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "sortOrder": {
           "default": 0,
+          "description": "稳定显示顺序；数值越小越靠前。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Sortorder",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.character.sort-order",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "character-lin-che"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.character.stable-id",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "visual": {
           "additionalProperties": true,
+          "description": "与本资源绑定的视觉身份锚点和可变造型资料。",
+          "examples": [
+            {
+              "identityAnchors": [
+                "黑色短发",
+                "旧银色录音笔"
+              ]
+            }
+          ],
           "title": "Visual",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.character.visual",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         }
       },
       "required": [
@@ -94,47 +183,104 @@
     },
     "LorebookSpec": {
       "additionalProperties": false,
+      "description": "地点、组织、时代、物件或世界规则的一条事实资料。",
       "properties": {
         "content": {
           "default": "",
+          "description": "Agent 可使用的完整世界事实、规则、地点或组织资料。",
+          "examples": [
+            "白鸢咖啡馆位于旧城区河岸，二层不对外开放。"
+          ],
           "title": "Content",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.lorebook.content",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         },
         "description": {
           "default": "",
+          "description": "供作者浏览的短管理摘要，不代替 content 世界事实。",
+          "examples": [
+            "旧城区的中立会面地点。"
+          ],
           "title": "Description",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.lorebook.description",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         },
         "metadata": {
           "additionalProperties": true,
+          "description": "仅放没有正式字段承载的中立扩展数据。",
+          "examples": [
+            {}
+          ],
           "title": "Metadata",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.lorebook.metadata",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         },
         "name": {
+          "description": "面向作者和管理界面的名称。",
+          "examples": [
+            "白鸢咖啡馆"
+          ],
           "title": "Name",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.lorebook.name",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         },
         "sortOrder": {
           "default": 0,
+          "description": "稳定显示顺序；数值越小越靠前。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Sortorder",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.lorebook.sort-order",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "lore-white-kite-cafe"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.lorebook.stable-id",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         },
         "tags": {
+          "description": "检索和运行时过滤使用的去重标签。",
+          "examples": [
+            [
+              "地点",
+              "旧城区"
+            ]
+          ],
           "items": {
             "type": "string"
           },
           "title": "Tags",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.lorebook.tags",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         },
         "visual": {
           "additionalProperties": true,
+          "description": "与本资源绑定的视觉身份锚点和可变造型资料。",
+          "examples": [
+            {
+              "identityAnchors": [
+                "临河红砖外墙",
+                "二层窄拱窗"
+              ]
+            }
+          ],
           "title": "Visual",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.lorebook.visual",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         }
       },
       "required": [
@@ -146,30 +292,61 @@
     },
     "NarrativeStyleSpec": {
       "additionalProperties": false,
+      "description": "Workspace 侧创建并绑定到 Story 的固定写作风格 Prompt。",
       "properties": {
         "isBase": {
           "default": false,
+          "description": "是否作为唯一基础叙事风格；同一 Story 最多一个。",
+          "examples": [
+            true
+          ],
           "title": "Isbase",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.narrative-style.is-base",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "name": {
+          "description": "面向作者和管理界面的名称。",
+          "examples": [
+            "克制悬疑"
+          ],
           "title": "Name",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.narrative-style.name",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "prompt": {
           "default": "",
+          "description": "提供给对应生成环节的正向指令正文。",
+          "examples": [
+            "使用克制的近距离感官描写，避免解释人物未说出口的动机。"
+          ],
           "title": "Prompt",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.narrative-style.prompt",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "sortOrder": {
           "default": 0,
+          "description": "稳定显示顺序；数值越小越靠前。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Sortorder",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.narrative-style.sort-order",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "style-close-suspense"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.narrative-style.stable-id",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         }
       },
       "required": [
@@ -181,24 +358,49 @@
     },
     "OpeningSpec": {
       "additionalProperties": false,
+      "description": "新 Session 绑定玩家角色后可选择的一条开场正文。",
       "properties": {
         "message": {
+          "description": "实际提交给玩家或 Agent 的正文文本。",
+          "examples": [
+            "雨水敲打窗面，一封没有寄件人的信滑进门缝。"
+          ],
           "title": "Message",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.opening.message",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "sortOrder": {
           "default": 0,
+          "description": "稳定显示顺序；数值越小越靠前。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Sortorder",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.opening.sort-order",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "opening-anonymous-letter"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.opening.stable-id",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "title": {
+          "description": "面向作者、玩家或管理界面的短标题。",
+          "examples": [
+            "匿名来信"
+          ],
           "title": "Title",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.opening.title",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         }
       },
       "required": [
@@ -211,11 +413,18 @@
     },
     "PlotEventSpec": {
       "additionalProperties": false,
+      "description": "可被事件池或大纲节点调度的一条世界/NPC指令。",
       "properties": {
         "allowRepeat": {
           "default": false,
+          "description": "该事件触发后是否允许再次候选。",
+          "examples": [
+            false
+          ],
           "title": "Allowrepeat",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.plot-event.allow-repeat",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "deadlineTime": {
           "anyOf": [
@@ -227,46 +436,94 @@
             }
           ],
           "default": null,
-          "title": "Deadlinetime"
+          "description": "事件窗口的排他上界；到达此时即不再候选。",
+          "examples": [
+            "第 2020 年 7 月 21 日 18 时"
+          ],
+          "title": "Deadlinetime",
+          "x-authoringRuleId": "field.plot-event.deadline-time",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "description": {
           "default": "",
+          "description": "管理摘要：事件是什么、为什么存在；不承担触发指令。",
+          "examples": [
+            "停电前第一次公开警报，为调查线提供转向机会。"
+          ],
           "title": "Description",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-event.description",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "directive": {
+          "description": "事件触发后必须落实的世界/NPC行为；保留玩家选择，不把后果提前写成事实。",
+          "examples": [
+            "让停电警报响起，并由在场 NPC 提出两种可调查方向。"
+          ],
           "title": "Directive",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-event.directive",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "dispatchMode": {
           "default": "soft",
+          "description": "forced 到时直接注入；soft 还需适宜性判断。",
           "enum": [
             "forced",
             "soft"
           ],
+          "examples": [
+            "soft"
+          ],
           "title": "Dispatchmode",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-event.dispatch-mode",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "enabled": {
           "default": true,
+          "description": "是否在导入后启用该资源或模块。",
+          "examples": [
+            true
+          ],
           "title": "Enabled",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.plot-event.enabled",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "poolRef": {
+          "description": "该事件所属事件池的 stableId。",
+          "examples": [
+            "pool-main"
+          ],
           "title": "Poolref",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-event.pool-ref",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "position": {
           "default": 0,
+          "description": "同一容器内的稳定顺序位置。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Position",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-event.position",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "repeatCooldownMinutes": {
           "default": 0,
+          "description": "重复事件两次触发之间的故事分钟冷却。",
+          "examples": [
+            0
+          ],
           "minimum": 0,
           "title": "Repeatcooldownminutes",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-event.repeat-cooldown-minutes",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "scheduledTime": {
           "anyOf": [
@@ -278,20 +535,44 @@
             }
           ],
           "default": null,
-          "title": "Scheduledtime"
+          "description": "事件或节点最早可进入候选的 SceneTime。",
+          "examples": [
+            "第 2020 年 7 月 18 日 9 时"
+          ],
+          "title": "Scheduledtime",
+          "x-authoringRuleId": "field.plot-event.scheduled-time",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "event-blackout-warning"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-event.stable-id",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "suitabilityHint": {
           "default": "",
+          "description": "只说明 soft 事件何时适合开始，包括阶段、地点、在场角色、前置事实和安全边界；不重复 directive。",
+          "examples": [
+            "玩家已抵达旧城区，且尚未取得录音笔中的第二段录音。"
+          ],
           "title": "Suitabilityhint",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-event.suitability-hint",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "title": {
+          "description": "面向作者、玩家或管理界面的短标题。",
+          "examples": [
+            "停电警报"
+          ],
           "title": "Title",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-event.title",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         }
       },
       "required": [
@@ -305,38 +586,75 @@
     },
     "PlotNodeSpec": {
       "additionalProperties": false,
+      "description": "在某个最早时间引用一个剧情事件的调度节点。",
       "properties": {
         "dispatchMode": {
           "default": "soft",
+          "description": "forced 到时直接注入；soft 还需适宜性判断。",
           "enum": [
             "forced",
             "soft"
           ],
+          "examples": [
+            "soft"
+          ],
           "title": "Dispatchmode",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-node.dispatch-mode",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "enabled": {
           "default": true,
+          "description": "是否在导入后启用该资源或模块。",
+          "examples": [
+            true
+          ],
           "title": "Enabled",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.plot-node.enabled",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "eventRef": {
+          "description": "该节点引用的剧情事件 stableId。",
+          "examples": [
+            "event-blackout-warning"
+          ],
           "title": "Eventref",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-node.event-ref",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "position": {
           "default": 0,
+          "description": "同一容器内的稳定顺序位置。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Position",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-node.position",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "scheduledTime": {
+          "description": "节点最早可注入时间；注入只代表触发 directive，不代表章节完成。",
+          "examples": [
+            "第 2020 年 7 月 18 日 9 时"
+          ],
           "title": "Scheduledtime",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-node.scheduled-time",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "node-blackout-warning"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-node.stable-id",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         }
       },
       "required": [
@@ -349,36 +667,73 @@
     },
     "PlotOutlineSpec": {
       "additionalProperties": false,
+      "description": "按位置和最早时间组织的一组一次性大纲节点。",
       "properties": {
         "description": {
           "default": "",
+          "description": "供作者和管理界面理解对象用途的说明。",
+          "examples": [
+            "按故事虚拟时间推进失踪案调查。"
+          ],
           "title": "Description",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-outline.description",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "enabled": {
           "default": true,
+          "description": "是否在导入后启用该资源或模块。",
+          "examples": [
+            true
+          ],
           "title": "Enabled",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.plot-outline.enabled",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "name": {
+          "description": "面向作者和管理界面的名称。",
+          "examples": [
+            "主线大纲"
+          ],
           "title": "Name",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-outline.name",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "nodes": {
+          "description": "该大纲按 position 排列的节点。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/PlotNodeSpec"
           },
           "title": "Nodes",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.plot-outline.nodes",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "priority": {
           "default": 0,
+          "description": "同类调度对象之间的相对优先级。",
+          "examples": [
+            10
+          ],
           "title": "Priority",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-outline.priority",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "outline-main"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-outline.stable-id",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         }
       },
       "required": [
@@ -390,38 +745,75 @@
     },
     "PlotPoolSpec": {
       "additionalProperties": false,
+      "description": "一组共享启用、排序和抽取策略的剧情事件。",
       "properties": {
         "description": {
           "default": "",
+          "description": "说明池的主题、用途和候选边界，不写单个事件指令。",
+          "examples": [
+            "承载推动失踪案调查的主线事件。"
+          ],
           "title": "Description",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-pool.description",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "enabled": {
           "default": true,
+          "description": "是否在导入后启用该资源或模块。",
+          "examples": [
+            true
+          ],
           "title": "Enabled",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.plot-pool.enabled",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "name": {
+          "description": "面向作者和管理界面的名称。",
+          "examples": [
+            "主线事件池"
+          ],
           "title": "Name",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-pool.name",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "priority": {
           "default": 0,
+          "description": "同类调度对象之间的相对优先级。",
+          "examples": [
+            10
+          ],
           "title": "Priority",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.plot-pool.priority",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "selectionMode": {
           "default": "random",
+          "description": "池内候选的 random 或 sequential 抽取方式。",
           "enum": [
             "random",
             "sequential"
           ],
+          "examples": [
+            "sequential"
+          ],
           "title": "Selectionmode",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-pool.selection-mode",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "pool-main"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.plot-pool.stable-id",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         }
       },
       "required": [
@@ -433,27 +825,46 @@
     },
     "PlotScheduleSpec": {
       "additionalProperties": false,
+      "description": "事件池、事件和大纲的 Story 级调度投影。",
       "properties": {
         "events": {
+          "description": "剧情事件定义；每条事件只归一个池。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/PlotEventSpec"
           },
           "title": "Events",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.plot-schedule.events",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "outlines": {
+          "description": "顺序大纲定义。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/PlotOutlineSpec"
           },
           "title": "Outlines",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.plot-schedule.outlines",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "pools": {
+          "description": "剧情事件池定义。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/PlotPoolSpec"
           },
           "title": "Pools",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.plot-schedule.pools",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         }
       },
       "title": "PlotScheduleSpec",
@@ -461,29 +872,60 @@
     },
     "QuickReplySpec": {
       "additionalProperties": false,
+      "description": "Story Composer 中供玩家主动选择的输入模板。",
       "properties": {
         "enabled": {
           "default": true,
+          "description": "是否在导入后启用该资源或模块。",
+          "examples": [
+            true
+          ],
           "title": "Enabled",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.quick-reply.enabled",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "message": {
+          "description": "实际提交给玩家或 Agent 的正文文本。",
+          "examples": [
+            "我先检查信封和门外是否留下痕迹。"
+          ],
           "title": "Message",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.quick-reply.message",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "sortOrder": {
           "default": 0,
+          "description": "稳定显示顺序；数值越小越靠前。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Sortorder",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.quick-reply.sort-order",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "quick-check-envelope"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.quick-reply.stable-id",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "title": {
+          "description": "面向作者、玩家或管理界面的短标题。",
+          "examples": [
+            "检查信封"
+          ],
           "title": "Title",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.quick-reply.title",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         }
       },
       "required": [
@@ -496,20 +938,39 @@
     },
     "RPModuleSpec": {
       "additionalProperties": false,
+      "description": "Story 挂载的内置 RP 玩法模块及其允许配置。",
       "properties": {
         "config": {
           "additionalProperties": true,
+          "description": "只填写模块公开 Schema 支持的配置；message_mode 是代码内置空配置模块。",
+          "examples": [
+            {}
+          ],
           "title": "Config",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.rp-module.config",
+          "x-runtimeEffect": "限定 Story 可用的内置 RP 能力；Session 只能在其内覆盖。"
         },
         "enabled": {
           "default": true,
+          "description": "是否在导入后启用该资源或模块。",
+          "examples": [
+            true
+          ],
           "title": "Enabled",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.rp-module.enabled",
+          "x-runtimeEffect": "限定 Story 可用的内置 RP 能力；Session 只能在其内覆盖。"
         },
         "moduleName": {
+          "description": "仓库内置 RP Module 的代码名称。",
+          "examples": [
+            "message_mode"
+          ],
           "title": "Modulename",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.rp-module.module-name",
+          "x-runtimeEffect": "限定 Story 可用的内置 RP 能力；Session 只能在其内覆盖。"
         }
       },
       "required": [
@@ -520,11 +981,18 @@
     },
     "RuntimeTarget": {
       "additionalProperties": false,
+      "description": "构建或预览 Story Pack 时使用的 RPG World 目标。",
       "properties": {
         "allowCreateWorkspace": {
           "default": false,
+          "description": "目标 Workspace 不存在时是否允许导入流程创建它。",
+          "examples": [
+            false
+          ],
           "title": "Allowcreateworkspace",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.target.allow-create-workspace",
+          "x-runtimeEffect": "只影响 DesignProject 恢复、构建目标和作者工作流。"
         },
         "storyId": {
           "anyOf": [
@@ -537,22 +1005,46 @@
             }
           ],
           "default": null,
-          "title": "Storyid"
+          "description": "已存在目标 Story 的运行时数字 ID；新建时留空。",
+          "examples": [
+            42
+          ],
+          "title": "Storyid",
+          "x-authoringRuleId": "field.target.story-id",
+          "x-runtimeEffect": "只影响 DesignProject 恢复、构建目标和作者工作流。"
         },
         "workspaceId": {
           "default": "",
+          "description": "目标 RPG World Workspace 的稳定文本 ID。",
+          "examples": [
+            "rain_world"
+          ],
           "title": "Workspaceid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.target.workspace-id",
+          "x-runtimeEffect": "只影响 DesignProject 恢复、构建目标和作者工作流。"
         },
         "workspaceName": {
           "default": "",
+          "description": "仅在允许创建 Workspace 时使用的显示名。",
+          "examples": [
+            "雨夜世界"
+          ],
           "title": "Workspacename",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.target.workspace-name",
+          "x-runtimeEffect": "只影响 DesignProject 恢复、构建目标和作者工作流。"
         },
         "workspaceRoot": {
           "default": "",
+          "description": "目标 Workspace 的安全相对运行目录。",
+          "examples": [
+            "data/rain_world"
+          ],
           "title": "Workspaceroot",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.target.workspace-root",
+          "x-runtimeEffect": "只影响 DesignProject 恢复、构建目标和作者工作流。"
         }
       },
       "title": "RuntimeTarget",
@@ -560,30 +1052,61 @@
     },
     "StatusRowSpec": {
       "additionalProperties": false,
+      "description": "当前 turn 可即时判断并更新的一个状态键值。",
       "properties": {
         "key": {
+          "description": "状态字段名；同一表内唯一。",
+          "examples": [
+            "时间"
+          ],
           "title": "Key",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.status-row.key",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "metadata": {
           "additionalProperties": true,
+          "description": "仅放没有正式字段承载的中立扩展数据。",
+          "examples": [
+            {}
+          ],
           "title": "Metadata",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.status-row.metadata",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "runtimeKeyLocked": {
           "default": false,
+          "description": "只保护 key 不被运行时增删或改名，不锁定 value。",
+          "examples": [
+            true
+          ],
           "title": "Runtimekeylocked",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.status-row.runtime-key-locked",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "updateRule": {
           "default": "",
+          "description": "只写额外的即时语义条件；不得写频率、延迟、后台调度、人工只读或数据库权限。留空时使用“事实明确且值实际变化”的通用规则。",
+          "examples": [
+            "当当前 Scene 中已确认发生时间推进时，立即更新为新的故事虚拟时间。"
+          ],
           "title": "Updaterule",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.status-row.update-rule",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "value": {
           "default": "",
+          "description": "当前初始值；运行时可在本 turn 依据已确认事实即时更新。",
+          "examples": [
+            "第 2020 年 7 月 18 日 9 时"
+          ],
           "title": "Value",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.status-row.value",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         }
       },
       "required": [
@@ -594,6 +1117,7 @@
     },
     "StatusTableSpec": {
       "additionalProperties": false,
+      "description": "创建或重置 Session 时复制的 Story 状态定义。",
       "properties": {
         "characterRef": {
           "anyOf": [
@@ -605,47 +1129,117 @@
             }
           ],
           "default": null,
-          "title": "Characterref"
+          "description": "可选的同 Story 角色 stableId，用于角色状态分组。",
+          "examples": [
+            null
+          ],
+          "title": "Characterref",
+          "x-authoringRuleId": "field.status-table.character-ref",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "description": {
           "default": "",
+          "description": "说明该表追踪什么，不在这里编写字段更新逻辑。",
+          "examples": [
+            "追踪当前 Session 的时间、位置与在场人物。"
+          ],
           "title": "Description",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.status-table.description",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "metadata": {
           "additionalProperties": true,
+          "description": "仅放没有正式字段承载的中立扩展数据。",
+          "examples": [
+            {}
+          ],
           "title": "Metadata",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.status-table.metadata",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "name": {
+          "description": "面向作者和管理界面的名称。",
+          "examples": [
+            "当前场景"
+          ],
           "title": "Name",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.status-table.name",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "rows": {
+          "description": "该状态表的有序字段定义。",
+          "examples": [
+            [
+              {
+                "key": "时间",
+                "metadata": {},
+                "runtimeKeyLocked": true,
+                "updateRule": "当当前 Scene 中已确认发生时间推进时立即更新。",
+                "value": "第 2020 年 7 月 18 日 9 时"
+              },
+              {
+                "key": "位置",
+                "metadata": {},
+                "runtimeKeyLocked": true,
+                "updateRule": "当当前 Scene 的地点已明确改变时立即更新。",
+                "value": "白鸢咖啡馆"
+              },
+              {
+                "key": "在场人物",
+                "metadata": {},
+                "runtimeKeyLocked": true,
+                "updateRule": "当人物明确进入或离开当前 Scene 时立即更新。",
+                "value": "林澈"
+              }
+            ]
+          ],
           "items": {
             "$ref": "#/$defs/StatusRowSpec"
           },
           "title": "Rows",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.status-table.rows",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "sortOrder": {
           "default": 0,
+          "description": "稳定显示顺序；数值越小越靠前。",
+          "examples": [
+            10
+          ],
           "minimum": 0,
           "title": "Sortorder",
-          "type": "integer"
+          "type": "integer",
+          "x-authoringRuleId": "field.status-table.sort-order",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "status-current-scene"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.status-table.stable-id",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "statusKind": {
           "default": "normal",
+          "description": "scene 表示当前场景；normal 表示普通 Story/角色状态。",
           "enum": [
             "scene",
             "normal"
           ],
+          "examples": [
+            "scene"
+          ],
           "title": "Statuskind",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.status-table.status-kind",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         }
       },
       "required": [
@@ -657,55 +1251,115 @@
     },
     "StoryCore": {
       "additionalProperties": false,
+      "description": "Story 的管理摘要、固定提示、主题、边界与时间背景。",
       "properties": {
         "boundaries": {
+          "description": "内容安全边界与明确不可发生的叙事行为。",
+          "examples": [
+            [
+              "不得替玩家决定行动或同意。"
+            ]
+          ],
           "items": {
             "type": "string"
           },
           "title": "Boundaries",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.story.boundaries",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "logline": {
           "default": "",
+          "description": "一句话核心冲突：主角、目标、阻力和主要代价。",
+          "examples": [
+            "失忆调查员必须在全城停电前找回自己主动删除的证词。"
+          ],
           "title": "Logline",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.story.logline",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "metadata": {
           "additionalProperties": true,
+          "description": "仅放没有正式字段承载的中立扩展数据。",
+          "examples": [
+            {}
+          ],
           "title": "Metadata",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.story.metadata",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "stableId": {
           "default": "story",
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "story-main"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.story.stable-id",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "storyPrompt": {
           "default": "",
+          "description": "每个可推进世界 turn 使用的固定 Story 规则与叙事约束。",
+          "examples": [
+            "保持悬疑节奏；所有关键选择由玩家作出。"
+          ],
           "title": "Storyprompt",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.story.story-prompt",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "summary": {
           "default": "",
+          "description": "Story 的短管理摘要，说明体验与前提，不写执行指令。",
+          "examples": [
+            "一名调查员在城市停电前追查被主动删除的证词。"
+          ],
           "title": "Summary",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.story.summary",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "themes": {
+          "description": "需要持续回响的主题关键词或短语。",
+          "examples": [
+            [
+              "记忆与责任",
+              "信任"
+            ]
+          ],
           "items": {
             "type": "string"
           },
           "title": "Themes",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.story.themes",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "timeSetting": {
           "default": "",
+          "description": "故事虚拟年代、历法与时间锚点的文字说明。",
+          "examples": [
+            "2020 年上海，故事从 7 月 18 日开始。"
+          ],
           "title": "Timesetting",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.story.time-setting",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         },
         "title": {
           "default": "",
+          "description": "面向作者、玩家或管理界面的短标题。",
+          "examples": [
+            "雨夜来信"
+          ],
           "title": "Title",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.story.title",
+          "x-runtimeEffect": "进入 Story 固定层或 Story 管理数据，并影响后续 Session。"
         }
       },
       "title": "StoryCore",
@@ -713,18 +1367,31 @@
     },
     "StoryPackApplyPolicy": {
       "additionalProperties": false,
+      "description": "Story Pack v2 固定的 merge-only、非删除策略。",
       "properties": {
         "deleteMissing": {
           "const": false,
           "default": false,
+          "description": "Story Pack v2 固定为 false；遗漏资源不代表删除。",
+          "examples": [
+            false
+          ],
           "title": "Deletemissing",
-          "type": "boolean"
+          "type": "boolean",
+          "x-authoringRuleId": "field.apply-policy.delete-missing",
+          "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
         },
         "mode": {
           "const": "merge",
           "default": "merge",
+          "description": "Story Pack v2 固定为 merge。",
+          "examples": [
+            "merge"
+          ],
           "title": "Mode",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.apply-policy.mode",
+          "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
         }
       },
       "title": "StoryPackApplyPolicy",
@@ -732,66 +1399,125 @@
     },
     "StoryResources": {
       "additionalProperties": false,
+      "description": "直接归当前 Story 所有的创作资源和调度配置。",
       "properties": {
         "characters": {
+          "description": "直接归当前 Story 所有的角色卡。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/CharacterSpec"
           },
           "title": "Characters",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.resources.characters",
+          "x-runtimeEffect": "进入角色卡；演绎 detail 会按玩家/NPC与 GM turn 过滤。"
         },
         "lorebook": {
+          "description": "直接归当前 Story 所有的世界书条目。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/LorebookSpec"
           },
           "title": "Lorebook",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.resources.lorebook",
+          "x-runtimeEffect": "作为 Story 世界知识进入运行时检索与 Context。"
         },
         "narrativeStyles": {
+          "description": "需在 Workspace 创建并绑定到 Story 的叙事风格。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/NarrativeStyleSpec"
           },
           "title": "Narrativestyles",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.resources.narrative-styles",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "openings": {
+          "description": "最多三条按 sortOrder 排序的 Opening。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/OpeningSpec"
           },
           "maxItems": 3,
           "title": "Openings",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.resources.openings",
+          "x-runtimeEffect": "进入 Story Opening 定义；首次有效绑定角色且历史为空时可追加所选开场。"
         },
         "plotSchedule": {
-          "$ref": "#/$defs/PlotScheduleSpec"
+          "$ref": "#/$defs/PlotScheduleSpec",
+          "description": "Story 级事件池、大纲和事件调度配置。",
+          "examples": [
+            {
+              "events": [],
+              "outlines": [],
+              "pools": []
+            }
+          ],
+          "x-authoringRuleId": "field.resources.plot-schedule",
+          "x-runtimeEffect": "影响可推进世界 turn 的剧情候选、判断和 directive 注入。"
         },
         "quickReplies": {
+          "description": "Story Composer 的快捷玩家输入。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/QuickReplySpec"
           },
           "title": "Quickreplies",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.resources.quick-replies",
+          "x-runtimeEffect": "影响 Story 叙事风格绑定或玩家快捷输入。"
         },
         "rpModules": {
+          "description": "Story 允许启用的内置 RP Module。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/RPModuleSpec"
           },
           "title": "Rpmodules",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.resources.rp-modules",
+          "x-runtimeEffect": "限定 Story 可用的内置 RP 能力；Session 只能在其内覆盖。"
         },
         "statusTables": {
+          "description": "直接归当前 Story 所有的状态定义。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/StatusTableSpec"
           },
           "title": "Statustables",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.resources.status-tables",
+          "x-runtimeEffect": "创建 Session 时复制；value 可由状态 Agent 在当前 turn 即时更新。"
         },
         "visualCatalog": {
+          "description": "只归档、不自动创建媒体任务的独立视觉 brief。",
+          "examples": [
+            []
+          ],
           "items": {
             "$ref": "#/$defs/VisualSpec"
           },
           "title": "Visualcatalog",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.resources.visual-catalog",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         }
       },
       "title": "StoryResources",
@@ -799,8 +1525,10 @@
     },
     "VisualSpec": {
       "additionalProperties": false,
+      "description": "可独立复用、可直接交给生图流程的归档 brief。",
       "properties": {
         "assetType": {
+          "description": "视觉资产用途类别，例如角色立绘、场景或地图。",
           "enum": [
             "character_portrait",
             "character_sprite",
@@ -811,44 +1539,96 @@
             "costume",
             "other"
           ],
+          "examples": [
+            "character_portrait"
+          ],
           "title": "Assettype",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.visual.asset-type",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         },
         "metadata": {
           "additionalProperties": true,
+          "description": "仅放没有正式字段承载的中立扩展数据。",
+          "examples": [
+            {}
+          ],
           "title": "Metadata",
-          "type": "object"
+          "type": "object",
+          "x-authoringRuleId": "field.visual.metadata",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         },
         "negativePrompt": {
           "default": "",
+          "description": "明确需要排除的视觉元素、瑕疵或风格。",
+          "examples": [
+            "文字、水印、多余手指"
+          ],
           "title": "Negativeprompt",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.visual.negative-prompt",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         },
         "prompt": {
+          "description": "可直接生图的正向 brief，写主体、场景、构图、光线和风格。",
+          "examples": [
+            "半身角色立绘，黑色短发调查员，雨夜窗边，冷蓝侧光。"
+          ],
           "title": "Prompt",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.visual.prompt",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         },
         "stableId": {
+          "description": "跨 revision、分包和运行时绑定保持稳定的文本 ID。",
+          "examples": [
+            "visual-lin-che-portrait"
+          ],
           "title": "Stableid",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.visual.stable-id",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         },
         "subjectRefs": {
+          "description": "该视觉 brief 涉及的 Story 资源 stableId。",
+          "examples": [
+            [
+              "character-lin-che"
+            ]
+          ],
           "items": {
             "type": "string"
           },
           "title": "Subjectrefs",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.visual.subject-refs",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         },
         "title": {
+          "description": "面向作者、玩家或管理界面的短标题。",
+          "examples": [
+            "林澈基础立绘"
+          ],
           "title": "Title",
-          "type": "string"
+          "type": "string",
+          "x-authoringRuleId": "field.visual.title",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         },
         "visualAnchors": {
+          "description": "只放跨变体必须稳定的身份或物件特征，不放姿势和光线。",
+          "examples": [
+            [
+              "黑色短发",
+              "左眉浅疤"
+            ]
+          ],
           "items": {
             "type": "string"
           },
           "title": "Visualanchors",
-          "type": "array"
+          "type": "array",
+          "x-authoringRuleId": "field.visual.visual-anchors",
+          "x-runtimeEffect": "仅归档可生图规格，不创建媒体资产、任务或消息。"
         }
       },
       "required": [
@@ -863,21 +1643,50 @@
   },
   "$id": "story-pack-v2.schema.json",
   "additionalProperties": false,
+  "description": "从一个已确认 revision 构建的单 Story、merge-only 导入包。",
   "properties": {
     "applyPolicy": {
-      "$ref": "#/$defs/StoryPackApplyPolicy"
+      "$ref": "#/$defs/StoryPackApplyPolicy",
+      "description": "固定的 merge-only、deleteMissing=false 导入策略。",
+      "examples": [
+        {
+          "deleteMissing": false,
+          "mode": "merge"
+        }
+      ],
+      "x-authoringRuleId": "field.pack.apply-policy",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "contractVersion": {
       "const": "2.0",
       "default": "2.0",
+      "description": "固定的 MCP/Story Pack 合约版本；只接受 2.0。",
+      "examples": [
+        "2.0"
+      ],
       "title": "Contractversion",
-      "type": "string"
+      "type": "string",
+      "x-authoringRuleId": "field.pack.contract-version",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "generatedAt": {
+      "description": "包构建时沿用的确定性 UTC 时间。",
+      "examples": [
+        "2026-07-24T09:00:00Z"
+      ],
       "title": "Generatedat",
-      "type": "string"
+      "type": "string",
+      "x-authoringRuleId": "field.pack.generated-at",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "includedSections": {
+      "description": "本包实际携带的 merge-only sections。",
+      "examples": [
+        [
+          "story",
+          "characters"
+        ]
+      ],
       "items": {
         "enum": [
           "story",
@@ -893,43 +1702,104 @@
         "type": "string"
       },
       "title": "Includedsections",
-      "type": "array"
+      "type": "array",
+      "x-authoringRuleId": "field.pack.included-sections",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "packId": {
+      "description": "由 revision、目标和 sections 确定的不可变 Story Pack ID。",
+      "examples": [
+        "rain-letter-r000012-a1b2c3d4e5f6"
+      ],
       "title": "Packid",
-      "type": "string"
+      "type": "string",
+      "x-authoringRuleId": "field.pack.pack-id",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "projectId": {
+      "description": "DesignProject 的稳定 ID；不是 Workspace ID。",
+      "examples": [
+        "rain-letter-design"
+      ],
       "title": "Projectid",
-      "type": "string"
+      "type": "string",
+      "x-authoringRuleId": "field.pack.project-id",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "resources": {
-      "$ref": "#/$defs/StoryResources"
+      "$ref": "#/$defs/StoryResources",
+      "description": "当前 Story 的可导入资源集合。",
+      "examples": [
+        {}
+      ],
+      "x-authoringRuleId": "field.pack.resources",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "schemaVersion": {
       "const": "rpg-story-pack/2.0",
       "default": "rpg-story-pack/2.0",
+      "description": "固定的文档 Schema 版本；只接受当前 v2 值。",
+      "examples": [
+        "rpg-story-pack/2.0"
+      ],
       "title": "Schemaversion",
-      "type": "string"
+      "type": "string",
+      "x-authoringRuleId": "field.pack.schema-version",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "sourceDigest": {
+      "description": "构建时源 Story Design 的 SHA-256 摘要。",
+      "examples": [
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ],
       "pattern": "^[0-9a-f]{64}$",
       "title": "Sourcedigest",
-      "type": "string"
+      "type": "string",
+      "x-authoringRuleId": "field.pack.source-digest",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "sourceRevision": {
+      "description": "构建本包的不可变 DesignProject revision。",
+      "examples": [
+        "r000012"
+      ],
       "title": "Sourcerevision",
-      "type": "string"
+      "type": "string",
+      "x-authoringRuleId": "field.pack.source-revision",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "story": {
-      "$ref": "#/$defs/StoryCore"
+      "$ref": "#/$defs/StoryCore",
+      "description": "当前唯一 Story 的核心设定。",
+      "examples": [
+        {
+          "stableId": "story-main",
+          "title": "雨夜来信"
+        }
+      ],
+      "x-authoringRuleId": "field.pack.story",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "storyStableId": {
+      "description": "Story 的稳定 ID，必须与 story.stableId 相同。",
+      "examples": [
+        "story-main"
+      ],
       "title": "Storystableid",
-      "type": "string"
+      "type": "string",
+      "x-authoringRuleId": "field.pack.story-stable-id",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     },
     "target": {
-      "$ref": "#/$defs/RuntimeTarget"
+      "$ref": "#/$defs/RuntimeTarget",
+      "description": "构建或同步时的 Workspace/Story 目标；不是 Story 内容。",
+      "examples": [
+        {
+          "workspaceId": "my_world"
+        }
+      ],
+      "x-authoringRuleId": "field.pack.target",
+      "x-runtimeEffect": "控制 Story Pack 身份、范围和 merge-only 导入行为。"
     }
   },
   "required": [
@@ -944,5 +1814,7 @@
     "story"
   ],
   "title": "RPG World Story Pack v2",
-  "type": "object"
+  "type": "object",
+  "x-authoringRulesDigest": "527f14f1bdb07acefe4cc182cea18f3379fb220f4f8b81a8992381f805d4625f",
+  "x-authoringRulesVersion": "1.0"
 }

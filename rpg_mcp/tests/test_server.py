@@ -38,7 +38,7 @@ bundle.close()
         text=True,
     )
     result = __import__("json").loads(completed.stdout)
-    assert len(result["names"]) == 11
+    assert len(result["names"]) == 14
     assert all(name.startswith("story_design_") for name in result["names"])
     assert result["forbidden"] == []
 
@@ -52,9 +52,12 @@ def test_all_mode_registers_complete_contract(tmp_path) -> None:
     try:
         tools = asyncio.run(bundle.server.list_tools())
         names = {item.name for item in tools}
-        assert len(names) == 26
+        assert len(names) == 29
         assert {
             "story_design_get_resume_context",
+            "story_design_get_authoring_rules",
+            "story_design_preview_authoring_rules_refresh",
+            "story_design_apply_authoring_rules_refresh",
             "story_design_preview_runtime_sync",
             "story_design_apply_runtime_sync",
             "rpg_preview_story_pack",
@@ -92,6 +95,7 @@ def test_all_mode_registers_complete_contract(tmp_path) -> None:
         for name in (
             "rpg_apply_story_pack",
             "rpg_apply_changes",
+            "story_design_apply_authoring_rules_refresh",
             "story_design_apply_runtime_sync",
         ):
             tool = next(item for item in tools if item.name == name)
@@ -145,9 +149,10 @@ async def test_stdio_protocol_lists_design_tools() -> None:
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             result = await session.list_tools()
-    assert len(result.tools) == 11
+    assert len(result.tools) == 14
     assert {
         "story_design_get_resume_context",
+        "story_design_get_authoring_rules",
         "story_design_patch",
         "story_design_build_pack",
     }.issubset({item.name for item in result.tools})

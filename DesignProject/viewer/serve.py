@@ -12,12 +12,12 @@ import re
 import threading
 import time
 import webbrowser
+from collections.abc import Mapping, Sequence
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
-
 
 VIEWER_VERSION = "story-design-viewer/2.0"
 DEFAULT_HOST = "127.0.0.1"
@@ -131,6 +131,9 @@ class ProjectReader:
             "currentRevision": current.get("currentRevision"),
             "headDigest": current.get("headDigest"),
             "updatedAt": current.get("updatedAt"),
+            "authoringAssetsDigest": current.get(
+                "authoringAssetsDigest"
+            ),
             "packSignature": self.story_pack_signature(),
         }
 
@@ -240,6 +243,69 @@ class ProjectReader:
             raise ViewerNotFoundError(f"unknown schema: {schema_name}")
         return _read_json(self.root / "schemas" / filename)
 
+    def authoring_rules(self) -> dict[str, Any]:
+        manifest = self.manifest()
+        relative = self._manifest_path_from(
+            manifest,
+            "authoringRules",
+            "schemas/story-authoring-rules-v1.json",
+        )
+        catalog = _read_json(self._project_path(relative))
+        if catalog.get("authoringRulesVersion") != manifest.get(
+            "authoringRulesVersion"
+        ):
+            raise ViewerValidationError(
+                "authoringRulesVersion differs from project manifest"
+            )
+        declared_digest = catalog.get("catalogDigest")
+        payload = dict(catalog)
+        payload.pop("catalogDigest", None)
+        if _json_digest(payload) != declared_digest:
+            raise ViewerValidationError(
+                "authoring rule catalog digest is invalid"
+            )
+        if declared_digest != manifest.get("authoringRulesDigest"):
+            raise ViewerValidationError(
+                "authoring rule catalog differs from project manifest"
+            )
+        return catalog
+
+    def diagnostics(
+        self,
+        revision_id: str,
+        *,
+        profile: str,
+    ) -> dict[str, Any]:
+        normalized_profile = str(profile or "draft").strip().lower()
+        if normalized_profile not in {"draft", "package"}:
+            raise ViewerValidationError(
+                "diagnostic profile must be draft or package"
+            )
+        revision = self.revision(revision_id)
+        catalog = self.authoring_rules()
+        diagnostics = _authoring_diagnostics(
+            revision["document"],
+            catalog,
+            profile=normalized_profile,
+        )
+        errors = [
+            item for item in diagnostics
+            if item["severity"] == "error"
+        ]
+        warnings = [
+            item for item in diagnostics
+            if item["severity"] == "warning"
+        ]
+        return {
+            "valid": not errors,
+            "revision": revision_id,
+            "profile": normalized_profile,
+            "authoringRulesVersion": catalog["authoringRulesVersion"],
+            "errors": errors,
+            "warnings": warnings,
+            "diagnostics": diagnostics,
+        }
+
     def story_packs(self) -> dict[str, Any]:
         pack_dir = self._project_path(
             self._manifest_path("storyPacks", "artifacts/story-packs")
@@ -285,9 +351,6 @@ class ProjectReader:
         normalized = str(filename or "").strip()
         if PACK_FILENAME_RE.fullmatch(normalized) is None:
             raise ViewerValidationError("invalid Story Pack filename")
-        pack_dir = self._project_path(
-            self._manifest_path("storyPacks", "artifacts/story-packs")
-        )
         path = self._project_path(
             str(
                 Path(
@@ -375,6 +438,272 @@ def _changed_sections(
     return rows
 
 
+def _authoring_diagnostics(
+    document: Mapping[str, Any],
+    catalog: Mapping[str, Any],
+    *,
+    profile: str,
+) -> list[dict[str, Any]]:
+    rules = {
+        str(item["ruleId"]): item
+        for item in catalog.get("diagnosticRules", [])
+    }
+    output: list[dict[str, Any]] = []
+
+    def emit(rule_id: str, path: str) -> None:
+        rule = rules.get(rule_id)
+        if rule is None:
+            return
+        if profile not in rule["profiles"]:
+            return
+        output.append({
+            "ruleId": rule_id,
+            "severity": rule["severity"],
+            "path": path,
+            "message": rule["message"],
+            "suggestion": rule["suggestion"],
+            "runtimeEffect": rule["runtimeEffect"],
+        })
+
+    story = _mapping(document.get("story"))
+    target = _mapping(document.get("target"))
+    resources = _mapping(document.get("resources"))
+    if not str(story.get("title", "")).strip():
+        emit(
+            (
+                "package.story-title-required"
+                if profile == "package"
+                else "quality.story-title-empty"
+            ),
+            "/story/title",
+        )
+    if not str(target.get("workspaceId", "")).strip():
+        emit(
+            (
+                "package.workspace-required"
+                if profile == "package"
+                else "quality.target-unset"
+            ),
+            "/target/workspaceId",
+        )
+    if target.get("allowCreateWorkspace") is True:
+        if not str(target.get("workspaceName", "")).strip():
+            emit("package.workspace-name-required", "/target/workspaceName")
+        if not str(target.get("workspaceRoot", "")).strip():
+            emit("package.workspace-root-required", "/target/workspaceRoot")
+    if not _sequence(resources.get("openings")):
+        emit("quality.opening-missing", "/resources/openings")
+    if profile == "package" and not str(
+        story.get("storyPrompt", "")
+    ).strip():
+        emit("quality.story-prompt-empty", "/story/storyPrompt")
+    if len(str(story.get("summary", "")).strip()) > 240:
+        emit("quality.story-summary-too-long", "/story/summary")
+    for index, question in enumerate(
+        _sequence(document.get("openQuestions"))
+    ):
+        if _mapping(question).get("status", "open") == "open":
+            emit(
+                "workflow.open-question-unresolved",
+                f"/openQuestions/{index}",
+            )
+
+    portrayal_pattern = re.compile(
+        r"(性格|口头禅|说话(?:方式|语气|习惯)|行为倾向|"
+        r"心理(?:活动|状态)|内心(?:想法|活动)|"
+        r"\bpersonality\b|\bspeech pattern\b|\bbehavior tendency\b)",
+        re.IGNORECASE,
+    )
+    objective_tags = {
+        "kind:appearance",
+        "kind:background",
+        "kind:relationship",
+        "kind:ability",
+    }
+    portrayal_tags = {
+        "kind:personality",
+        "kind:speech",
+        "kind:behavior",
+        "kind:psychology",
+    }
+    for character_index, raw_character in enumerate(
+        _sequence(resources.get("characters"))
+    ):
+        character = _mapping(raw_character)
+        base = f"/resources/characters/{character_index}"
+        if portrayal_pattern.search(
+            str(character.get("description", ""))
+        ):
+            emit(
+                "character.description-portrayal-leak",
+                f"{base}/description",
+            )
+        for detail_index, raw_detail in enumerate(
+            _sequence(character.get("details"))
+        ):
+            detail = _mapping(raw_detail)
+            tags = {
+                str(tag)
+                for tag in _sequence(detail.get("tags"))
+                if isinstance(tag, str)
+            }
+            objective = bool(tags.intersection(objective_tags))
+            portrayal = bool(tags.intersection(portrayal_tags))
+            path = f"{base}/details/{detail_index}/tags"
+            if objective and portrayal:
+                emit("character.detail-mixed-kinds", path)
+            if str(detail.get("content", "")).strip() and not (
+                objective or portrayal
+            ):
+                emit("character.detail-kind-missing", path)
+
+    scheduling_pattern = re.compile(
+        r"(每.{0,10}(回合|轮|turn|分钟|小时|天)|延迟|延期更新|"
+        r"定时|周期|defer(?:red)?|interval|read[\s_-]?only|"
+        r"只读|手动更新|manual)",
+        re.IGNORECASE,
+    )
+    for table_index, raw_table in enumerate(
+        _sequence(resources.get("statusTables"))
+    ):
+        table = _mapping(raw_table)
+        for row_index, raw_row in enumerate(
+            _sequence(table.get("rows"))
+        ):
+            row = _mapping(raw_row)
+            base = (
+                f"/resources/statusTables/{table_index}/rows/{row_index}"
+            )
+            update_rule = str(row.get("updateRule", ""))
+            if update_rule and scheduling_pattern.search(update_rule):
+                emit("status.update-rule-scheduling", f"{base}/updateRule")
+            if table.get("statusKind") == "scene" and row.get("key") == "时间":
+                match = re.search(
+                    r"第\s*(\d+)\s*年",
+                    str(row.get("value", "")),
+                )
+                if match and int(match.group(1)) < 1000:
+                    emit("status.scene-placeholder-year", f"{base}/value")
+
+    player_control_pattern = re.compile(
+        r"(玩家|用户|player|user).{0,8}"
+        r"(已经|必须|决定|选择|答应|拒绝|接受|同意|"
+        r"has|must|decides|chooses|agrees|refuses|accepts)",
+        re.IGNORECASE,
+    )
+    schedule = _mapping(resources.get("plotSchedule"))
+    for event_index, raw_event in enumerate(
+        _sequence(schedule.get("events"))
+    ):
+        event = _mapping(raw_event)
+        base = f"/resources/plotSchedule/events/{event_index}"
+        hint = str(event.get("suitabilityHint", "")).strip()
+        if event.get("dispatchMode", "soft") == "soft" and not hint:
+            emit("plot.soft-event-hint-empty", f"{base}/suitabilityHint")
+        if event.get("dispatchMode") == "forced" and hint:
+            emit("plot.forced-event-unused-hint", f"{base}/suitabilityHint")
+        if not str(event.get("description", "")).strip():
+            emit("plot.event-description-empty", f"{base}/description")
+        directive = re.sub(
+            r"(不得|不要|不可|避免)替玩家",
+            "",
+            str(event.get("directive", "")),
+        )
+        if player_control_pattern.search(directive):
+            emit("plot.directive-controls-player", f"{base}/directive")
+
+    for lore_index, raw_lore in enumerate(
+        _sequence(resources.get("lorebook"))
+    ):
+        lore = _mapping(raw_lore)
+        if not str(lore.get("content", "")).strip():
+            emit(
+                "lorebook.content-empty",
+                f"/resources/lorebook/{lore_index}/content",
+            )
+    for style_index, raw_style in enumerate(
+        _sequence(resources.get("narrativeStyles"))
+    ):
+        style = _mapping(raw_style)
+        if not str(style.get("prompt", "")).strip():
+            emit(
+                "composer.style-prompt-empty",
+                f"/resources/narrativeStyles/{style_index}/prompt",
+            )
+    known_ids = _viewer_stable_ids(document)
+    for visual_index, raw_visual in enumerate(
+        _sequence(resources.get("visualCatalog"))
+    ):
+        visual = _mapping(raw_visual)
+        base = f"/resources/visualCatalog/{visual_index}"
+        if not _sequence(visual.get("visualAnchors")):
+            emit("visual.anchors-empty", f"{base}/visualAnchors")
+        for ref_index, reference in enumerate(
+            _sequence(visual.get("subjectRefs"))
+        ):
+            if isinstance(reference, str) and reference not in known_ids:
+                emit(
+                    "visual.subject-ref-unresolved",
+                    f"{base}/subjectRefs/{ref_index}",
+                )
+    return sorted(
+        output,
+        key=lambda item: (
+            0 if item["severity"] == "error" else 1,
+            item["path"],
+            item["ruleId"],
+        ),
+    )
+
+
+def _viewer_stable_ids(document: Mapping[str, Any]) -> set[str]:
+    story = _mapping(document.get("story"))
+    resources = _mapping(document.get("resources"))
+    result = {
+        str(story["stableId"])
+        for _ in [0]
+        if story.get("stableId")
+    }
+    for key in (
+        "openings",
+        "characters",
+        "lorebook",
+        "statusTables",
+        "narrativeStyles",
+        "quickReplies",
+        "visualCatalog",
+    ):
+        for raw_item in _sequence(resources.get(key)):
+            item = _mapping(raw_item)
+            if item.get("stableId"):
+                result.add(str(item["stableId"]))
+            if key == "characters":
+                for raw_detail in _sequence(item.get("details")):
+                    detail = _mapping(raw_detail)
+                    if detail.get("stableId"):
+                        result.add(str(detail["stableId"]))
+    schedule = _mapping(resources.get("plotSchedule"))
+    for key in ("pools", "events", "outlines"):
+        for raw_item in _sequence(schedule.get(key)):
+            item = _mapping(raw_item)
+            if item.get("stableId"):
+                result.add(str(item["stableId"]))
+            if key == "outlines":
+                for raw_node in _sequence(item.get("nodes")):
+                    node = _mapping(raw_node)
+                    if node.get("stableId"):
+                        result.add(str(node["stableId"]))
+    return result
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _sequence(value: Any) -> Sequence[Any]:
+    return value if isinstance(value, list) else ()
+
+
 class ViewerHTTPServer(ThreadingHTTPServer):
     """Threaded loopback server with a shared immutable project reader."""
 
@@ -433,6 +762,24 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
                 if "/" in schema_name:
                     raise ViewerNotFoundError("schema route not found")
                 self._send_json(self.server.reader.schema(schema_name))
+                return
+            if path == "/api/authoring-rules":
+                self._send_json(self.server.reader.authoring_rules())
+                return
+            if path == "/api/diagnostics":
+                query = parse_qs(parsed.query)
+                revision_id = _single_query_value(query, "revision")
+                profile = (
+                    query.get("profile", ["draft"])[0]
+                    if query.get("profile")
+                    else "draft"
+                )
+                self._send_json(
+                    self.server.reader.diagnostics(
+                        revision_id,
+                        profile=profile,
+                    )
+                )
                 return
             if path == "/api/story-packs":
                 self._send_json(self.server.reader.story_packs())
@@ -551,11 +898,20 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
                 packs_changed = current.get(
                     "packSignature"
                 ) != previous.get("packSignature")
+                authoring_rules_changed = current.get(
+                    "authoringAssetsDigest"
+                ) != previous.get("authoringAssetsDigest")
                 if revision_changed:
                     self._write_event("revision", current)
                 if packs_changed:
                     self._write_event("packs", current)
-                if revision_changed or packs_changed:
+                if authoring_rules_changed:
+                    self._write_event("authoring-rules", current)
+                if (
+                    revision_changed
+                    or packs_changed
+                    or authoring_rules_changed
+                ):
                     previous = current
                 if time.monotonic() - last_heartbeat >= 15:
                     self.wfile.write(b": heartbeat\n\n")

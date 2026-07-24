@@ -730,6 +730,12 @@ pre {
   border-color: rgba(219, 96, 93, 0.25);
 }
 
+.tag.is-danger {
+  color: var(--danger);
+  background: rgba(230, 115, 115, 0.1);
+  border-color: rgba(230, 115, 115, 0.28);
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1240,6 +1246,101 @@ pre {
   margin-top: 4px;
 }
 
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.diagnostic-card {
+  min-width: 0;
+  padding: clamp(20px, 1.4vw, 30px);
+  background: rgba(21, 24, 33, 0.72);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 12px;
+}
+
+.diagnostic-card.is-error {
+  border-left-color: var(--danger);
+}
+
+.diagnostic-card.is-warning {
+  border-left-color: var(--warning);
+}
+
+.diagnostic-card header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--paper-dim);
+  font-size: 0.68rem;
+}
+
+.diagnostic-card.is-error header span {
+  color: var(--danger);
+}
+
+.diagnostic-card.is-warning header span {
+  color: var(--warning);
+}
+
+.diagnostic-card h3 {
+  margin: 16px 0 10px;
+  font-family: var(--serif);
+  font-size: 1.08rem;
+  line-height: 1.45;
+}
+
+.diagnostic-card p,
+.field-rule-detail p,
+.field-runtime-effect {
+  margin: 13px 0 0;
+  color: var(--paper-dim);
+  font-size: 0.75rem;
+  line-height: 1.65;
+}
+
+.diagnostic-card p strong,
+.field-rule-detail strong,
+.field-runtime-effect strong {
+  display: inline-block;
+  min-width: 72px;
+  margin-right: 9px;
+  color: var(--paper-soft);
+}
+
+.diagnostic-path,
+.field-rule-id {
+  display: block;
+  color: var(--blue);
+  font-size: 0.68rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.field-rule-detail {
+  margin-top: 18px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.field-rule-detail code {
+  color: var(--gold);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.field-rule-id {
+  margin-top: 18px;
+  color: var(--paper-dim);
+}
+
+.diagnostic-clear {
+  border-left: 3px solid var(--green);
+}
+
 .schema-chip {
   min-height: 23px;
   color: var(--blue);
@@ -1717,6 +1818,10 @@ pre {
 
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .diagnostic-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

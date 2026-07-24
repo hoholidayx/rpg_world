@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import importlib
 import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal, Mapping, Sequence
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -18,10 +19,12 @@ from mcp.types import ToolAnnotations
 from rpg_mcp.contracts import StoryDesignDocument, build_story_pack
 from rpg_mcp.design_store import DesignProjectStore
 
-
 MCP_INSTRUCTIONS = (
     "Resume Story design with story_design_get_resume_context before editing. "
-    "Persist confirmed decisions through expected-head CAS. Never apply RPG "
+    "Use story_design_get_authoring_rules instead of guessing field duties, "
+    "and persist confirmed decisions through expected-head CAS. Read patch "
+    "advisory diagnostics and run package-profile validation before release. "
+    "Never apply RPG "
     "runtime changes without first showing the separate preview to the user "
     "and receiving explicit confirmation; apply tools intentionally accept an "
     "opaque operation id instead of a confirmation boolean. Story Pack v2 is "
@@ -141,6 +144,24 @@ def _register_design_tools(
         return store.get_section(pointer)
 
     @server.tool(
+        name="story_design_get_authoring_rules",
+        title="Read Story authoring field rules",
+        description=(
+            "Read the versioned field semantics, examples, runtime effects, "
+            "and diagnostic rules. Optionally filter by domain or exact rule id."
+        ),
+        annotations=_annotations(read_only=True),
+    )
+    def get_authoring_rules(
+        domain: str | None = None,
+        rule_id: str | None = None,
+    ) -> dict[str, Any]:
+        return store.get_authoring_rules(
+            domain=domain,
+            rule_id=rule_id,
+        )
+
+    @server.tool(
         name="story_design_patch",
         title="Save confirmed Story design changes",
         description=(
@@ -235,11 +256,17 @@ def _register_design_tools(
     @server.tool(
         name="story_design_validate",
         title="Validate Story design",
-        description="Validate the current or selected immutable revision.",
+        description=(
+            "Validate the current or selected immutable revision with draft "
+            "or package readiness and return structured diagnostics."
+        ),
         annotations=_annotations(read_only=True),
     )
-    def validate(revision_id: str | None = None) -> dict[str, Any]:
-        return store.validate(revision_id)
+    def validate(
+        revision_id: str | None = None,
+        profile: Literal["draft", "package"] = "draft",
+    ) -> dict[str, Any]:
+        return store.validate(revision_id, profile=profile)
 
     @server.tool(
         name="story_design_build_pack",
@@ -275,6 +302,37 @@ def _register_design_tools(
     )
     def doctor() -> dict[str, Any]:
         return store.doctor()
+
+    @server.tool(
+        name="story_design_preview_authoring_rules_refresh",
+        title="Preview Story authoring rule asset refresh",
+        description=(
+            "Compare generated v2 rules, Schema, Skill, and references with "
+            "the portable project. This never changes design revisions or packs."
+        ),
+        annotations=_annotations(read_only=True),
+    )
+    def preview_authoring_rules_refresh() -> dict[str, Any]:
+        return store.preview_authoring_rules_refresh()
+
+    @server.tool(
+        name="story_design_apply_authoring_rules_refresh",
+        title="Apply confirmed Story authoring rule asset refresh",
+        description=(
+            "Apply a separately previewed managed-asset refresh by opaque "
+            "operation id. Design current/revisions/checkpoints, Story Packs, "
+            "and runtime integration files remain unchanged."
+        ),
+        annotations=_annotations(
+            read_only=False,
+            destructive=True,
+            idempotent=True,
+        ),
+    )
+    def apply_authoring_rules_refresh(
+        operation_id: str,
+    ) -> dict[str, Any]:
+        return store.apply_authoring_rules_refresh(operation_id)
 
 
 def _register_runtime_tools(

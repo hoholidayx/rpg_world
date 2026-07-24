@@ -22,7 +22,7 @@ const VIEW_DEFINITIONS = [
     id: "characters",
     label: "角色",
     eyebrow: "CHARACTER ARCHIVE",
-    description: "角色卡、性格、详情条目与视觉锚点。",
+    description: "角色客观身份卡、分层详情与视觉锚点。",
     countPath: ["resources", "characters"],
   },
   {
@@ -36,7 +36,7 @@ const VIEW_DEFINITIONS = [
     id: "status-tables",
     label: "状态表",
     eyebrow: "STATUS TABLES",
-    description: "Scene 与普通状态表的字段、频率和更新约束。",
+    description: "Scene 与普通状态表的字段和即时更新语义。",
     countPath: ["resources", "statusTables"],
   },
   {
@@ -87,6 +87,12 @@ const VIEW_DEFINITIONS = [
     eyebrow: "SOURCES & NOTES",
     description: "设计参考、定位信息与项目笔记。",
     countPath: ["sources"],
+  },
+  {
+    id: "field-guide",
+    label: "字段指南",
+    eyebrow: "AUTHORING CONTRACT",
+    description: "字段职责、示例、运行时影响与当前 revision 诊断。",
   },
   {
     id: "schemas",
@@ -210,6 +216,11 @@ const state = {
   history: { revisions: [], checkpoints: [] },
   packs: [],
   schemas: {},
+  authoringRules: null,
+  authoringAssetsDigest: null,
+  packSignature: null,
+  diagnostics: { diagnostics: [], errors: [], warnings: [] },
+  diagnosticProfile: "draft",
   selectedRevisionId: null,
   selectedRevision: null,
   headRevisionId: null,
@@ -223,6 +234,10 @@ const state = {
   pollTimer: null,
   toastTimer: null,
   selectionToken: 0,
+  diagnosticRequestToken: 0,
+  packRequestToken: 0,
+  authoringRulesRequestToken: 0,
+  schemaRequestToken: 0,
   revisionChanges: createEmptyRevisionChanges(),
 };
 
@@ -331,6 +346,12 @@ function bindStaticEvents() {
   });
 
   elements.contentStage.addEventListener("click", (event) => {
+    const profileButton = event.target.closest("[data-diagnostic-profile]");
+    if (profileButton) {
+      state.diagnosticProfile = profileButton.dataset.diagnosticProfile;
+      loadDiagnostics(state.selectedRevisionId).catch(showErrorToast);
+      return;
+    }
     const schemaButton = event.target.closest("[data-schema-kind]");
     if (schemaButton) {
       state.schemaKind = schemaButton.dataset.schemaKind;
@@ -344,16 +365,19 @@ function bindStaticEvents() {
     }
     const actionButton = event.target.closest("[data-viewer-action]");
     if (actionButton?.dataset.viewerAction === "back-to-packs") {
+      state.packRequestToken += 1;
       state.selectedPack = null;
       renderActiveView();
     }
   });
 
   elements.contentStage.addEventListener("input", (event) => {
-    if (event.target.id !== "schemaSearch") {
-      return;
+    if (event.target.id === "schemaSearch") {
+      filterSchemaCards(event.target.value);
     }
-    filterSchemaCards(event.target.value);
+    if (event.target.id === "fieldGuideSearch") {
+      filterFieldGuideCards(event.target.value);
+    }
   });
 
   window.addEventListener("hashchange", () => {
@@ -400,16 +424,34 @@ async function api(path) {
 
 async function refreshProject({ initial = false, manual = false } = {}) {
   const previousHead = state.headRevisionId;
-  const [projectResult, historyResult, packsResult] = await Promise.all([
+  const previousAuthoringAssetsDigest = state.authoringAssetsDigest;
+  const [
+    projectResult,
+    historyResult,
+    packsResult,
+    authoringRules,
+  ] = await Promise.all([
     api("/api/project"),
     api("/api/revisions"),
     api("/api/story-packs"),
+    api("/api/authoring-rules"),
   ]);
 
   state.manifest = projectResult.project;
   state.history = historyResult;
   state.packs = packsResult.packs || [];
+  state.authoringRules = authoringRules;
   state.headRevisionId = projectResult.live.currentRevision;
+  state.authoringAssetsDigest =
+    projectResult.live.authoringAssetsDigest || null;
+  if (
+    Object.keys(state.schemas).length
+    && previousAuthoringAssetsDigest !== state.authoringAssetsDigest
+  ) {
+    invalidateSchemaCache();
+  }
+  state.packSignature =
+    packsResult.signature || projectResult.live.packSignature || null;
 
   const wasFollowingHead =
     state.selectedRevisionId === null ||
@@ -448,16 +490,27 @@ async function selectRevision(
     throw new Error("没有可读取的 revision。");
   }
   const selectionToken = ++state.selectionToken;
+  const diagnosticProfile = state.diagnosticProfile;
+  const diagnosticRequestToken = ++state.diagnosticRequestToken;
   state.revisionChanges = createEmptyRevisionChanges();
   setContentLoading();
   const revision = await api(`/api/revisions/${encodeURIComponent(revisionId)}`);
-  const revisionChanges = await loadRevisionChanges(revision);
+  const [revisionChanges, diagnostics] = await Promise.all([
+    loadRevisionChanges(revision),
+    fetchDiagnostics(revision.revisionId, diagnosticProfile),
+  ]);
   if (selectionToken !== state.selectionToken) {
     return;
   }
   state.selectedRevision = revision;
   state.selectedRevisionId = revision.revisionId;
   state.revisionChanges = revisionChanges;
+  const diagnosticsAreCurrent =
+    diagnosticRequestToken === state.diagnosticRequestToken
+    && diagnosticProfile === state.diagnosticProfile;
+  state.diagnostics = diagnosticsAreCurrent
+    ? diagnostics
+    : { diagnostics: [], errors: [], warnings: [] };
   if (followHead || revision.revisionId === state.headRevisionId) {
     state.pendingHeadId = null;
   } else if (state.headRevisionId !== revision.revisionId) {
@@ -468,11 +521,46 @@ async function selectRevision(
   renderHistory();
   showUpdateBanner();
   renderActiveView();
+  if (!diagnosticsAreCurrent) {
+    loadDiagnostics(revision.revisionId).catch(showErrorToast);
+  }
   if (!quiet) {
     showToast(
       revision.revisionId === state.headRevisionId ? "已回到最新版" : "正在查看历史版本",
       `${revision.revisionId} · ${revision.reason || "未记录修订原因"}`,
     );
+  }
+}
+
+async function fetchDiagnostics(
+  revisionId,
+  profile = state.diagnosticProfile,
+) {
+  const query = new URLSearchParams({
+    revision: revisionId,
+    profile,
+  });
+  return api(`/api/diagnostics?${query.toString()}`);
+}
+
+async function loadDiagnostics(revisionId) {
+  if (!revisionId) {
+    return;
+  }
+  const profile = state.diagnosticProfile;
+  const requestToken = ++state.diagnosticRequestToken;
+  const diagnostics = await fetchDiagnostics(revisionId, profile);
+  if (
+    requestToken !== state.diagnosticRequestToken
+    || state.selectedRevisionId !== revisionId
+    || state.diagnosticProfile !== profile
+  ) {
+    return;
+  }
+  state.diagnostics = diagnostics;
+  renderNavigation();
+  if (state.activeView === "field-guide") {
+    renderActiveView();
   }
 }
 
@@ -501,8 +589,11 @@ function connectRevisionStream() {
   source.addEventListener("revision", (event) => {
     handleRevisionEvent(event).catch(showErrorToast);
   });
-  source.addEventListener("packs", () => {
-    refreshPacks().catch(showErrorToast);
+  source.addEventListener("packs", (event) => {
+    handlePacksEvent(event).catch(showErrorToast);
+  });
+  source.addEventListener("authoring-rules", (event) => {
+    handleAuthoringRulesEvent(event).catch(showErrorToast);
   });
   source.addEventListener("error", () => {
     setLiveStatus("offline", "重连中");
@@ -518,6 +609,18 @@ async function handleStreamSnapshot(event) {
   ) {
     await handleIncomingRevision(snapshot.currentRevision);
   }
+  if (
+    snapshot.authoringAssetsDigest
+    && snapshot.authoringAssetsDigest !== state.authoringAssetsDigest
+  ) {
+    await refreshAuthoringRules(snapshot);
+  }
+  if (
+    snapshot.packSignature
+    && snapshot.packSignature !== state.packSignature
+  ) {
+    await refreshPacks();
+  }
 }
 
 async function handleRevisionEvent(event) {
@@ -525,11 +628,27 @@ async function handleRevisionEvent(event) {
   await handleIncomingRevision(snapshot.currentRevision);
 }
 
+async function handlePacksEvent(event) {
+  const snapshot = parseEventData(event);
+  if (snapshot.packSignature !== state.packSignature) {
+    await refreshPacks();
+  }
+}
+
+async function handleAuthoringRulesEvent(event) {
+  const snapshot = parseEventData(event);
+  if (
+    snapshot.authoringAssetsDigest !== state.authoringAssetsDigest
+  ) {
+    await refreshAuthoringRules(snapshot);
+  }
+}
+
 function parseEventData(event) {
   try {
     return JSON.parse(event.data);
   } catch {
-    throw new Error("实时 revision 通知格式无效。");
+    throw new Error("实时项目通知格式无效。");
   }
 }
 
@@ -553,14 +672,40 @@ async function handleIncomingRevision(revisionId) {
 }
 
 async function refreshPacks() {
+  state.packRequestToken += 1;
   const result = await api("/api/story-packs");
   state.packs = result.packs || [];
+  state.packSignature = result.signature || null;
   renderNavigation();
   if (state.activeView === "story-packs") {
     state.selectedPack = null;
     renderActiveView();
   }
   showToast("Story Pack 已更新", "产物列表已经刷新。");
+}
+
+async function refreshAuthoringRules(snapshot = {}) {
+  const requestToken = ++state.authoringRulesRequestToken;
+  const rules = await api("/api/authoring-rules");
+  if (requestToken !== state.authoringRulesRequestToken) {
+    return;
+  }
+  state.authoringRules = rules;
+  state.authoringAssetsDigest =
+    snapshot.authoringAssetsDigest || state.authoringAssetsDigest;
+  invalidateSchemaCache();
+  if (state.selectedRevisionId) {
+    await loadDiagnostics(state.selectedRevisionId);
+  } else {
+    renderNavigation();
+    if (state.activeView === "field-guide") {
+      renderActiveView();
+    }
+  }
+  if (state.activeView === "schemas") {
+    renderActiveView();
+  }
+  showToast("字段指南已更新", "最新约束与诊断规则已经载入。");
 }
 
 function startFallbackPolling() {
@@ -570,9 +715,22 @@ function startFallbackPolling() {
   state.pollTimer = window.setInterval(async () => {
     try {
       const project = await api("/api/project");
-      const incoming = project.live.currentRevision;
+      const live = project.live || {};
+      const incoming = live.currentRevision;
       if (incoming && incoming !== state.headRevisionId) {
         await handleIncomingRevision(incoming);
+      }
+      if (
+        live.authoringAssetsDigest
+        && live.authoringAssetsDigest !== state.authoringAssetsDigest
+      ) {
+        await refreshAuthoringRules(live);
+      }
+      if (
+        live.packSignature
+        && live.packSignature !== state.packSignature
+      ) {
+        await refreshPacks();
       }
     } catch {
       setLiveStatus("offline", "离线");
@@ -644,6 +802,9 @@ function getViewCount(definition, document) {
   if (definition.id === "schemas") {
     return 2;
   }
+  if (definition.id === "field-guide") {
+    return safeArray(state.diagnostics?.diagnostics).length;
+  }
   if (!definition.countPath) {
     return null;
   }
@@ -693,6 +854,9 @@ function renderHistory() {
 function setActiveView(viewId, { updateHash = true } = {}) {
   if (!VIEW_DEFINITIONS.some((item) => item.id === viewId)) {
     return;
+  }
+  if (viewId !== "story-packs") {
+    state.packRequestToken += 1;
   }
   state.activeView = viewId;
   state.selectedPack = viewId === "story-packs" ? state.selectedPack : null;
@@ -757,6 +921,9 @@ function renderActiveView() {
       break;
     case "sources":
       result = renderSources(document.sources, document.notes);
+      break;
+    case "field-guide":
+      result = renderFieldGuide();
       break;
     case "schemas":
       result = renderSchemas();
@@ -1862,6 +2029,191 @@ function renderSources(sourceValue, noteValue) {
   };
 }
 
+function renderFieldGuide() {
+  const catalog = state.authoringRules;
+  if (!catalog) {
+    return {
+      path: "/schemas/story-authoring-rules-v1.json",
+      raw: undefined,
+      html: loadingMarkup("正在读取字段语义目录…"),
+    };
+  }
+  const diagnostics = safeArray(state.diagnostics?.diagnostics);
+  const errors = diagnostics.filter((item) => item.severity === "error");
+  const warnings = diagnostics.filter((item) => item.severity === "warning");
+  const fields = safeArray(catalog.fields);
+  const principles = safeArray(catalog.principles);
+  const domains = safeArray(catalog.domains);
+  return {
+    path: "/authoring-rules",
+    raw: {
+      catalog,
+      validation: state.diagnostics,
+    },
+    html: `
+      <div class="schema-toolbar field-guide-toolbar">
+        <div class="segmented" aria-label="校验 Profile">
+          ${diagnosticProfileButton("draft", "草稿")}
+          ${diagnosticProfileButton("package", "发布包")}
+        </div>
+        <input
+          class="search-input"
+          id="fieldGuideSearch"
+          type="search"
+          placeholder="搜索路径、字段、职责或运行时影响…"
+          autocomplete="off"
+          aria-label="搜索字段指南"
+        >
+      </div>
+      <article class="content-card schema-summary">
+        <div>
+          <p class="card-eyebrow">AUTHORING RULES ${escapeHtml(catalog.authoringRulesVersion || "—")}</p>
+          <h3>当前 revision · ${escapeHtml(state.diagnosticProfile)} profile</h3>
+          <p class="card-copy">
+            error 是确定性发布门禁；warning 用于字段职责与创作质量复核。
+            规则版本独立于 Story Pack contractVersion。
+          </p>
+        </div>
+        <div class="tag-row">
+          ${tag(`${errors.length} errors`, errors.length ? "is-danger" : "is-accent")}
+          ${tag(`${warnings.length} warnings`)}
+          ${tag(`${fields.length} field rules`)}
+          ${tag(`${domains.length} domains`)}
+        </div>
+      </article>
+      <section class="section-stack">
+        <div>
+          <p class="section-kicker">REVISION DIAGNOSTICS</p>
+          <h3>结构化诊断</h3>
+        </div>
+        ${
+          diagnostics.length
+            ? `<div class="diagnostic-grid">${diagnostics.map(renderAuthoringDiagnostic).join("")}</div>`
+            : `<article class="content-card diagnostic-clear">
+                <p class="card-eyebrow">CLEAR</p>
+                <h3>当前 profile 没有诊断项</h3>
+                <p class="card-copy">仍需由作者判断故事本身是否达到目标体验。</p>
+              </article>`
+        }
+      </section>
+      <section class="section-stack">
+        <div>
+          <p class="section-kicker">CROSS-FIELD PRINCIPLES</p>
+          <h3>跨字段原则</h3>
+        </div>
+        <div class="schema-definition-list">
+          ${principles.map((item) => `
+            <article
+              class="schema-card"
+              data-field-guide-search="${escapeHtml([
+                item.ruleId,
+                item.domain,
+                item.title,
+                item.description,
+                item.runtimeEffect,
+              ].join(" ").toLowerCase())}"
+            >
+              <header>
+                <div>
+                  <p class="schema-path">${escapeHtml(item.ruleId)}</p>
+                  <h3>${escapeHtml(item.title)}</h3>
+                </div>
+                <span class="schema-chip">${escapeHtml(item.domain)}</span>
+              </header>
+              <p class="card-copy">${escapeHtml(item.description)}</p>
+              <p class="field-runtime-effect">
+                <strong>运行时影响</strong>
+                ${escapeHtml(item.runtimeEffect)}
+              </p>
+            </article>
+          `).join("")}
+        </div>
+      </section>
+      <section class="section-stack">
+        <div>
+          <p class="section-kicker">FIELD DUTIES</p>
+          <h3>完整字段职责</h3>
+        </div>
+        <div class="schema-definition-list field-rule-list">
+          ${fields.map(renderAuthoringFieldRule).join("")}
+        </div>
+      </section>
+    `,
+  };
+}
+
+function diagnosticProfileButton(profile, label) {
+  return `
+    <button
+      class="${state.diagnosticProfile === profile ? "is-active" : ""}"
+      type="button"
+      data-diagnostic-profile="${escapeHtml(profile)}"
+    >${escapeHtml(label)}</button>
+  `;
+}
+
+function renderAuthoringDiagnostic(item) {
+  return `
+    <article class="diagnostic-card is-${escapeHtml(item.severity)}">
+      <header>
+        <span>${escapeHtml(item.severity.toUpperCase())}</span>
+        <code>${escapeHtml(item.ruleId)}</code>
+      </header>
+      <h3>${escapeHtml(item.message)}</h3>
+      <code class="diagnostic-path">${escapeHtml(item.path)}</code>
+      <p><strong>建议</strong>${escapeHtml(item.suggestion)}</p>
+      <p><strong>运行时</strong>${escapeHtml(item.runtimeEffect)}</p>
+    </article>
+  `;
+}
+
+function renderAuthoringFieldRule(item) {
+  const example = safeArray(item.examples)[0];
+  const searchText = [
+    item.ruleId,
+    item.domain,
+    item.model,
+    item.field,
+    item.pathPattern,
+    item.description,
+    item.avoid,
+    item.runtimeEffect,
+    stringifyCompact(example),
+  ].filter(Boolean).join(" ").toLowerCase();
+  return `
+    <article
+      class="schema-card field-rule-card"
+      data-field-guide-search="${escapeHtml(searchText)}"
+    >
+      <header>
+        <div>
+          <p class="schema-path">${escapeHtml(item.pathPattern)}</p>
+          <h3>${escapeHtml(item.model)} · ${escapeHtml(item.field)}</h3>
+        </div>
+        <span class="schema-chip">${escapeHtml(item.domain)}</span>
+      </header>
+      <p class="card-copy">${escapeHtml(item.description)}</p>
+      <div class="field-rule-detail">
+        <p><strong>避免</strong>${escapeHtml(item.avoid)}</p>
+        <p><strong>示例</strong><code>${escapeHtml(stringifyCompact(example))}</code></p>
+        <p><strong>运行时影响</strong>${escapeHtml(item.runtimeEffect)}</p>
+      </div>
+      <code class="field-rule-id">${escapeHtml(item.ruleId)}</code>
+    </article>
+  `;
+}
+
+function filterFieldGuideCards(query) {
+  const normalized = query.trim().toLowerCase();
+  elements.contentStage
+    .querySelectorAll("[data-field-guide-search]")
+    .forEach((card) => {
+      card.hidden =
+        normalized.length > 0 &&
+        !card.dataset.fieldGuideSearch.includes(normalized);
+    });
+}
+
 function renderSchemas() {
   const schema = state.schemas[state.schemaKind];
   if (!schema) {
@@ -1914,10 +2266,20 @@ function renderSchemas() {
 }
 
 async function loadSchema(kind) {
-  state.schemas[kind] = await api(`/api/schemas/${encodeURIComponent(kind)}`);
+  const requestToken = ++state.schemaRequestToken;
+  const schema = await api(`/api/schemas/${encodeURIComponent(kind)}`);
+  if (requestToken !== state.schemaRequestToken) {
+    return;
+  }
+  state.schemas[kind] = schema;
   if (state.activeView === "schemas" && state.schemaKind === kind) {
     renderActiveView();
   }
+}
+
+function invalidateSchemaCache() {
+  state.schemaRequestToken += 1;
+  state.schemas = {};
 }
 
 function schemaKindButton(kind, label) {
@@ -2105,10 +2467,18 @@ function renderStoryPacks() {
 }
 
 async function loadStoryPack(filename) {
+  const requestToken = ++state.packRequestToken;
   setContentLoading();
-  state.selectedPack = await api(
+  const pack = await api(
     `/api/story-packs/${encodeURIComponent(filename)}`,
   );
+  if (
+    requestToken !== state.packRequestToken
+    || state.activeView !== "story-packs"
+  ) {
+    return;
+  }
+  state.selectedPack = pack;
   renderActiveView();
 }
 

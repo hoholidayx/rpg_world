@@ -32,6 +32,46 @@ def test_portable_doctor_survives_project_relocation(tmp_path) -> None:
     assert result["currentRevision"] == "r000001"
 
 
+def test_portable_doctor_rejects_incomplete_managed_asset_map(
+    tmp_path,
+) -> None:
+    moved = tmp_path / "moved-project"
+    shutil.copytree("DesignProject", moved)
+    manifest_path = moved / "design-project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["authoringAssetDigests"].pop(
+        "schemas/story-pack-v2.schema.json"
+    )
+    manifest["authoringAssetsDigest"] = digest_json(
+        manifest["authoringAssetDigests"]
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            moved
+            / ".agents/skills/rpg-story-authoring/scripts/portable_doctor.py",
+            "--project-root",
+            moved,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    result = json.loads(completed.stdout)
+    assert completed.returncode == 1
+    assert result["healthy"] is False
+    assert any(
+        "omits managed assets" in message
+        for message in result["errors"]
+    )
+
+
 def test_portable_story_pack_validator_accepts_v2_fixture(tmp_path) -> None:
     path = tmp_path / "pack.json"
     pack = _pack()
@@ -44,8 +84,10 @@ def test_portable_story_pack_validator_accepts_v2_fixture(tmp_path) -> None:
     completed = subprocess.run(
         [
             sys.executable,
-            "DesignProject/.agents/skills/rpg-story-authoring/scripts/"
-            "validate_story_pack.py",
+            (
+                "DesignProject/.agents/skills/rpg-story-authoring/scripts/"
+                "validate_story_pack.py"
+            ),
             path,
         ],
         check=True,
@@ -77,6 +119,15 @@ def test_asset_generation_refreshes_manifest_contract_digest(tmp_path) -> None:
     assert refreshed["contractDigest"] != "0" * 64
     assert refreshed["contractDigest"] == digest_json(contract)
     assert refreshed["contractVersion"] == contract["contractVersion"]
+    assert refreshed["authoringRulesVersion"] == "1.0"
+    assert (
+        refreshed["authoringRulesDigest"]
+        == contract["authoringRules"]["digest"]
+    )
+    assert refreshed["authoringAssetDigests"]
+    assert refreshed["authoringAssetsDigest"] == digest_json(
+        refreshed["authoringAssetDigests"]
+    )
 
 
 def test_asset_generation_refuses_v1_project_without_conversion(tmp_path) -> None:

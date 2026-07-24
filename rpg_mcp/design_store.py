@@ -5,26 +5,40 @@ from __future__ import annotations
 import copy
 import difflib
 import fcntl
+import hashlib
 import json
 import os
 import re
 import tempfile
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any
 
 from pydantic import ValidationError
 
+from rpg_mcp.authoring_rules import (
+    AUTHORING_RULES_RELATIVE_PATH,
+    AUTHORING_RULES_SCHEMA_VERSION,
+    AUTHORING_RULES_VERSION,
+    advisory_diagnostics_for_paths,
+    evaluate_authoring_diagnostics,
+    filter_authoring_rules,
+    normalize_authoring_profile,
+)
 from rpg_mcp.contracts import (
     CONTRACT_VERSION,
     PROJECT_SCHEMA_VERSION,
     RESOURCE_SECTIONS,
     StoryDesignDocument,
-    StoryPack,
     build_story_pack,
     canonical_json,
     digest_json,
     utc_now,
+)
+from rpg_mcp.generate_design_assets import (
+    build_managed_authoring_assets,
+    managed_authoring_asset_metadata,
 )
 
 
@@ -70,7 +84,7 @@ class DesignProjectStore:
         document: StoryDesignDocument,
         *,
         project_name: str,
-    ) -> "DesignProjectStore":
+    ) -> DesignProjectStore:
         root = Path(project_root).expanduser().resolve()
         for relative in (
             "design/revisions",
@@ -156,6 +170,15 @@ class DesignProjectStore:
             ),
         }
 
+    def get_authoring_rules(
+        self,
+        *,
+        domain: str | None = None,
+        rule_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._manifest()
+        return filter_authoring_rules(domain=domain, rule_id=rule_id)
+
     def get_resume_context(self, *, recent_decisions: int = 12) -> dict[str, Any]:
         current = self.get_current()
         document = StoryDesignDocument.model_validate(current["document"])
@@ -212,11 +235,36 @@ class DesignProjectStore:
             self._require_expected_head(manifest, expected_head)
             current = self._verified_current(manifest).model_dump(by_alias=True)
             updated = apply_json_patch(current, operations)
-            return self._commit(
+            try:
+                validated = StoryDesignDocument.model_validate(updated)
+            except ValidationError as exc:
+                raise DesignValidationError(
+                    "; ".join(_validation_errors(exc))
+                ) from exc
+            diagnostics = evaluate_authoring_diagnostics(
+                validated,
+                profile="draft",
+            )
+            affected_paths = [
+                str(operation["path"])
+                for operation in operations
+                if operation.get("op") != "test"
+                and isinstance(operation.get("path"), str)
+            ]
+            result = self._commit(
                 manifest,
-                updated,
+                validated.model_dump(by_alias=True),
                 reason=str(reason).strip(),
             )
+            return {
+                **result,
+                "authoringRulesVersion": AUTHORING_RULES_VERSION,
+                "affectedPaths": affected_paths,
+                "advisoryDiagnostics": advisory_diagnostics_for_paths(
+                    diagnostics,
+                    affected_paths,
+                ),
+            }
 
     def restore_revision(
         self,
@@ -323,7 +371,13 @@ class DesignProjectStore:
             "unifiedDiff": diff,
         }
 
-    def validate(self, revision_id: str | None = None) -> dict[str, Any]:
+    def validate(
+        self,
+        revision_id: str | None = None,
+        *,
+        profile: str = "draft",
+    ) -> dict[str, Any]:
+        selected_profile = normalize_authoring_profile(profile)
         try:
             if revision_id is None:
                 manifest = self._manifest()
@@ -342,33 +396,22 @@ class DesignProjectStore:
             return {
                 "valid": False,
                 "revision": revision_id,
+                "profile": selected_profile,
+                "authoringRulesVersion": AUTHORING_RULES_VERSION,
                 "errors": _validation_errors(exc),
                 "warnings": [],
+                "diagnostics": _structural_diagnostics(exc),
             }
-        warnings: list[str] = []
-        if not document.story.title.strip():
-            warnings.append("Story title is still empty; Story Pack build will fail.")
-        if not document.target.workspace_id:
-            warnings.append(
-                "Runtime target workspaceId is unset; provide a build override "
-                "before creating a Story Pack."
-            )
-        if not document.resources.openings:
-            warnings.append(
-                "No Opening is defined. This is valid, but a new Session will "
-                "not have an authored opening."
-            )
-        if any(
-            question.status == "open" for question in document.open_questions
-        ):
-            warnings.append("The design still contains unresolved open questions.")
-        return {
-            "valid": True,
-            "revision": revision,
-            "headDigest": digest_json(document.model_dump(by_alias=True)),
-            "errors": [],
-            "warnings": warnings,
-        }
+        diagnostics = evaluate_authoring_diagnostics(
+            document,
+            profile=selected_profile,
+        )
+        return _validation_result(
+            diagnostics=diagnostics,
+            revision=revision,
+            head_digest=digest_json(document.model_dump(by_alias=True)),
+            profile=selected_profile,
+        )
 
     def build_pack(
         self,
@@ -383,6 +426,27 @@ class DesignProjectStore:
             self._require_expected_head(manifest, expected_head)
             document = self._verified_current(manifest)
             revision = self._revision(str(manifest["currentRevision"]))
+            validation_values = document.model_dump(by_alias=True)
+            validation_values["target"].update(target_overrides or {})
+            validation_document = StoryDesignDocument.model_validate(
+                validation_values
+            )
+            diagnostics = evaluate_authoring_diagnostics(
+                validation_document,
+                profile="package",
+            )
+            errors = [
+                item for item in diagnostics
+                if item["severity"] == "error"
+            ]
+            if errors:
+                raise DesignValidationError(
+                    "package profile validation failed: "
+                    + "; ".join(
+                        f"{item['path']}: {item['message']}"
+                        for item in errors
+                    )
+                )
             pack = build_story_pack(
                 document,
                 source_revision=manifest["currentRevision"],
@@ -409,6 +473,197 @@ class DesignProjectStore:
             "includedSections": list(pack.included_sections),
             "path": path.relative_to(self.root).as_posix(),
             "pack": value,
+            "authoringRulesVersion": AUTHORING_RULES_VERSION,
+            "diagnostics": diagnostics,
+            "warnings": [
+                item["message"]
+                for item in diagnostics
+                if item["severity"] == "warning"
+            ],
+        }
+
+    def preview_authoring_rules_refresh(self) -> dict[str, Any]:
+        """Preview updates to generated v2 authoring assets only."""
+
+        manifest = self._manifest()
+        return self._authoring_rules_refresh_preview(manifest)
+
+    def apply_authoring_rules_refresh(
+        self,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """Apply a confirmed managed-asset refresh without a design revision."""
+
+        normalized = str(operation_id or "").strip()
+        if not normalized:
+            raise ValueError("operation_id must not be empty")
+        # Reject unsupported projects before creating even the coordination
+        # lock file.  v1 refresh attempts are strict zero-write failures.
+        self._manifest()
+        with self._exclusive_lock():
+            self._recover_interrupted_commit()
+            manifest = self._manifest()
+            if (
+                manifest.get("lastAuthoringRulesRefreshOperationId")
+                == normalized
+            ):
+                repeated = self._authoring_rules_refresh_preview(manifest)
+                if (
+                    repeated["changedAssetCount"] == 0
+                    and not repeated["manifestUpdateRequired"]
+                ):
+                    return {
+                        **repeated,
+                        "status": "already_applied",
+                        "operationId": normalized,
+                    }
+            preview = self._authoring_rules_refresh_preview(manifest)
+            if preview["operationId"] != normalized:
+                raise DesignConflictError(
+                    "authoring rule assets changed after preview; run "
+                    "story_design_preview_authoring_rules_refresh again"
+                )
+            if (
+                preview["changedAssetCount"] == 0
+                and not preview["manifestUpdateRequired"]
+            ):
+                return {
+                    **preview,
+                    "status": "already_current",
+                }
+            assets = build_managed_authoring_assets()
+            metadata = managed_authoring_asset_metadata(assets)
+            for change in preview["changes"]:
+                if change["action"] == "unchanged":
+                    continue
+                relative = str(change["path"])
+                _atomic_write_text(self.root / relative, assets[relative])
+            updated_manifest = {
+                **manifest,
+                "contractVersion": CONTRACT_VERSION,
+                "contractDigest": metadata["contractDigest"],
+                "authoringRulesVersion": metadata[
+                    "authoringRulesVersion"
+                ],
+                "authoringRulesDigest": metadata[
+                    "authoringRulesDigest"
+                ],
+                "authoringAssetDigests": metadata[
+                    "authoringAssetDigests"
+                ],
+                "authoringAssetsDigest": metadata[
+                    "authoringAssetsDigest"
+                ],
+                "lastAuthoringRulesRefreshOperationId": normalized,
+            }
+            paths = dict(updated_manifest.get("paths", {}))
+            paths["authoringRules"] = AUTHORING_RULES_RELATIVE_PATH
+            updated_manifest["paths"] = paths
+            _atomic_write_json(self.project_path, updated_manifest)
+            return {
+                **preview,
+                "status": "applied",
+                "designRevisionChanged": False,
+                "currentRevision": manifest.get("currentRevision"),
+                "protectedPathsUnchanged": preview["protectedPaths"],
+            }
+
+    def _authoring_rules_refresh_preview(
+        self,
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        assets = build_managed_authoring_assets()
+        metadata = managed_authoring_asset_metadata(assets)
+        changes: list[dict[str, Any]] = []
+        current_digests: dict[str, str | None] = {}
+        for relative, expected_content in assets.items():
+            path = self.root / relative
+            current_digest = _file_digest(path)
+            expected_digest = hashlib.sha256(
+                expected_content.encode("utf-8")
+            ).hexdigest()
+            current_digests[relative] = current_digest
+            changes.append({
+                "path": relative,
+                "action": (
+                    "create"
+                    if current_digest is None
+                    else (
+                        "unchanged"
+                        if current_digest == expected_digest
+                        else "update"
+                    )
+                ),
+                "currentDigest": current_digest,
+                "expectedDigest": expected_digest,
+            })
+        operation_material = {
+            "schemaVersion": manifest.get("schemaVersion"),
+            "contractVersion": manifest.get("contractVersion"),
+            "currentContractDigest": manifest.get("contractDigest"),
+            "projectId": manifest.get("projectId"),
+            "currentAssets": current_digests,
+            "currentAuthoringAssetDigests": manifest.get(
+                "authoringAssetDigests"
+            ),
+            "currentAuthoringRulesVersion": manifest.get(
+                "authoringRulesVersion"
+            ),
+            "currentAuthoringRulesDigest": manifest.get(
+                "authoringRulesDigest"
+            ),
+            "currentAuthoringAssetsDigest": manifest.get(
+                "authoringAssetsDigest"
+            ),
+            "currentAuthoringRulesPath": manifest.get("paths", {}).get(
+                "authoringRules"
+            ),
+            "expectedAuthoringRulesVersion": AUTHORING_RULES_VERSION,
+            "expectedAuthoringRulesDigest": metadata[
+                "authoringRulesDigest"
+            ],
+            "expectedAuthoringAssetsDigest": metadata[
+                "authoringAssetsDigest"
+            ],
+        }
+        operation_id = (
+            "authoring-rules-refresh-"
+            + digest_json(operation_material)[:32]
+        )
+        changed = [
+            item for item in changes if item["action"] != "unchanged"
+        ]
+        manifest_update_required = any((
+            manifest.get("contractVersion") != CONTRACT_VERSION,
+            manifest.get("contractDigest") != metadata["contractDigest"],
+            manifest.get("authoringRulesVersion")
+            != metadata["authoringRulesVersion"],
+            manifest.get("authoringRulesDigest")
+            != metadata["authoringRulesDigest"],
+            manifest.get("authoringAssetDigests")
+            != metadata["authoringAssetDigests"],
+            manifest.get("authoringAssetsDigest")
+            != metadata["authoringAssetsDigest"],
+            manifest.get("paths", {}).get("authoringRules")
+            != AUTHORING_RULES_RELATIVE_PATH,
+        ))
+        return {
+            "status": "preview",
+            "operationId": operation_id,
+            "authoringRulesVersion": AUTHORING_RULES_VERSION,
+            "authoringRulesDigest": metadata["authoringRulesDigest"],
+            "authoringAssetsDigest": metadata["authoringAssetsDigest"],
+            "changedAssetCount": len(changed),
+            "manifestUpdateRequired": manifest_update_required,
+            "changes": changes,
+            "designRevisionChanged": False,
+            "protectedPaths": [
+                "design/current.json",
+                "design/revisions/",
+                "design/checkpoints/",
+                "artifacts/story-packs/",
+                "integrations/",
+            ],
         }
 
     def doctor(self) -> dict[str, Any]:
@@ -433,6 +688,12 @@ class DesignProjectStore:
                 f"service ({manifest.get('contractVersion')} != "
                 f"{CONTRACT_VERSION})."
             )
+        raw_paths = manifest.get("paths")
+        if isinstance(raw_paths, Mapping):
+            manifest_paths = raw_paths
+        else:
+            manifest_paths = {}
+            errors.append("design-project.json paths must be an object")
         expected_contract_digest = manifest.get("contractDigest")
         if expected_contract_digest:
             contract_path = self.root / "schemas" / "rpg-mcp-contract-v2.json"
@@ -450,10 +711,116 @@ class DesignProjectStore:
                 "project manifest has no contractDigest; this is valid for a "
                 "minimal programmatically initialized project."
             )
-        for key, value in manifest.get("paths", {}).items():
-            path = str(value)
-            if Path(path).is_absolute() or ".." in Path(path).parts:
-                errors.append(f"manifest path {key} is not portable: {path}")
+        if manifest.get("authoringRulesVersion") is None:
+            warnings.append(
+                "project manifest has no managed authoring-rule metadata; "
+                "preview a v2 authoring-rule asset refresh before using the "
+                "portable field guide"
+            )
+        else:
+            if (
+                manifest.get("authoringRulesVersion")
+                != AUTHORING_RULES_VERSION
+            ):
+                errors.append(
+                    "DesignProject authoringRulesVersion differs from the "
+                    f"installed MCP service "
+                    f"({manifest.get('authoringRulesVersion')} != "
+                    f"{AUTHORING_RULES_VERSION})"
+                )
+            try:
+                catalog_path = _project_relative_path(
+                    self.root,
+                    manifest_paths.get(
+                        "authoringRules",
+                        AUTHORING_RULES_RELATIVE_PATH,
+                    ),
+                )
+                catalog = _read_json(catalog_path)
+                if (
+                    catalog.get("schemaVersion")
+                    != AUTHORING_RULES_SCHEMA_VERSION
+                ):
+                    errors.append(
+                        "portable authoring-rule catalog has an unsupported "
+                        "schemaVersion"
+                    )
+                catalog_without_digest = dict(catalog)
+                catalog_digest = catalog_without_digest.pop(
+                    "catalogDigest",
+                    None,
+                )
+                if digest_json(catalog_without_digest) != catalog_digest:
+                    errors.append(
+                        "portable authoring-rule catalog digest is invalid"
+                    )
+                if catalog_digest != manifest.get("authoringRulesDigest"):
+                    errors.append(
+                        "authoring-rule catalog digest differs from "
+                        "design-project.json"
+                    )
+            except Exception as exc:
+                errors.append(f"cannot verify authoring-rule catalog: {exc}")
+            try:
+                expected = managed_authoring_asset_metadata()
+                declared = manifest.get("authoringAssetDigests")
+                if not isinstance(declared, dict):
+                    errors.append(
+                        "design-project.json has no authoringAssetDigests map"
+                    )
+                else:
+                    for relative, expected_digest in declared.items():
+                        try:
+                            path = _project_relative_path(
+                                self.root,
+                                relative,
+                            )
+                        except DesignStoreError:
+                            errors.append(
+                                "managed authoring asset path is not portable: "
+                                f"{relative}"
+                            )
+                            continue
+                        digest = _file_digest(path)
+                        if digest is None:
+                            errors.append(
+                                f"managed authoring asset is missing: {relative}"
+                            )
+                            continue
+                        if digest != expected_digest:
+                            errors.append(
+                                "managed authoring asset digest mismatch: "
+                                f"{relative}"
+                            )
+                    if digest_json(declared) != manifest.get(
+                        "authoringAssetsDigest"
+                    ):
+                        errors.append(
+                            "authoringAssetsDigest differs from the declared "
+                            "asset digest map"
+                        )
+                    if declared != expected["authoringAssetDigests"]:
+                        errors.append(
+                            "managed Schema/Skill/reference assets differ "
+                            "from the installed authoring rules; use the "
+                            "preview/apply refresh tools"
+                        )
+                if manifest.get("authoringRulesDigest") != expected[
+                    "authoringRulesDigest"
+                ]:
+                    errors.append(
+                        "authoringRulesDigest differs from the installed "
+                        "authoring rule catalog"
+                    )
+            except Exception as exc:
+                errors.append(f"cannot verify managed authoring assets: {exc}")
+        for key, value in manifest_paths.items():
+            try:
+                _project_relative_path(self.root, value)
+            except DesignStoreError:
+                errors.append(
+                    f"manifest path {key} is not portable: {value}"
+                )
         try:
             current = self._current_document().model_dump(by_alias=True)
             if (
@@ -947,6 +1314,11 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _atomic_write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = _pretty_json(value) + "\n"
+    _atomic_write_text(path, payload)
+
+
+def _atomic_write_text(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(
         dir=path.parent,
         prefix=f".{path.name}.",
@@ -983,6 +1355,98 @@ def _validation_errors(exc: Exception) -> list[str]:
             for error in exc.errors()
         ]
     return [str(exc)]
+
+
+def _structural_diagnostics(exc: Exception) -> list[dict[str, Any]]:
+    if isinstance(exc, ValidationError):
+        diagnostics: list[dict[str, Any]] = []
+        for error in exc.errors():
+            path = "/" + "/".join(
+                str(item).replace("~", "~0").replace("/", "~1")
+                for item in error["loc"]
+            )
+            diagnostics.append({
+                "ruleId": "contract.structure",
+                "severity": "error",
+                "path": path,
+                "message": error["msg"],
+                "suggestion": (
+                    "按 Story Design v2 Schema 修正字段类型、必填项、枚举或"
+                    "引用后重新校验。"
+                ),
+                "runtimeEffect": (
+                    "结构无效的设计不能创建 revision 或 Story Pack。"
+                ),
+            })
+        return diagnostics
+    return [{
+        "ruleId": "contract.integrity",
+        "severity": "error",
+        "path": "/",
+        "message": str(exc),
+        "suggestion": "运行 story_design_doctor 并修复项目完整性问题。",
+        "runtimeEffect": "项目完整性失败时禁止构建和同步。",
+    }]
+
+
+def _validation_result(
+    *,
+    diagnostics: Sequence[Mapping[str, Any]],
+    revision: str | None,
+    head_digest: str,
+    profile: str,
+) -> dict[str, Any]:
+    values = [dict(item) for item in diagnostics]
+    errors = [
+        f"{item['path']}: {item['message']}"
+        for item in values
+        if item["severity"] == "error"
+    ]
+    warnings = [
+        f"{item['path']}: {item['message']}"
+        for item in values
+        if item["severity"] == "warning"
+    ]
+    return {
+        "valid": not errors,
+        "revision": revision,
+        "headDigest": head_digest,
+        "profile": profile,
+        "authoringRulesVersion": AUTHORING_RULES_VERSION,
+        "errors": errors,
+        "warnings": warnings,
+        "diagnostics": values,
+    }
+
+
+def _file_digest(path: Path) -> str | None:
+    try:
+        payload = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _project_relative_path(root: Path, raw_path: object) -> Path:
+    candidate = Path(str(raw_path))
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise DesignStoreError(
+            f"DesignProject path is not portable: {raw_path}"
+        )
+    resolved_root = root.resolve()
+    try:
+        resolved = (resolved_root / candidate).resolve()
+    except (OSError, RuntimeError) as exc:
+        raise DesignStoreError(
+            f"DesignProject path cannot be resolved safely: {raw_path}"
+        ) from exc
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise DesignStoreError(
+            f"DesignProject path escapes the project root: {raw_path}"
+        ) from exc
+    return resolved
 
 
 __all__ = [

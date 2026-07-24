@@ -97,6 +97,7 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
         project = json.loads(body)
         assert project["viewerVersion"] == "story-design-viewer/2.0"
         assert project["live"]["currentRevision"] == "r000001"
+        assert project["live"]["authoringAssetsDigest"]
 
         status, headers, body = _request(port, "GET", "/")
         assert status == 200
@@ -106,6 +107,9 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
         status, _, body = _request(port, "GET", "/app.js")
         assert status == 200
         assert b"connectRevisionStream" in body
+        assert b"renderFieldGuide" in body
+        assert b"authoring-rules" in body
+        assert b"invalidateSchemaCache" in body
 
         status, _, body = _request(port, "GET", "/api/revisions")
         assert status == 200
@@ -118,6 +122,31 @@ def test_viewer_serves_only_read_only_loopback_apis(tmp_path) -> None:
         )
         assert status == 200
         assert json.loads(body)["$id"] == "story-design-v2.schema.json"
+
+        status, _, body = _request(
+            port,
+            "GET",
+            "/api/authoring-rules",
+        )
+        assert status == 200
+        rules = json.loads(body)
+        assert rules["authoringRulesVersion"] == "1.0"
+        assert len(rules["fields"]) >= 150
+
+        status, _, body = _request(
+            port,
+            "GET",
+            "/api/diagnostics?revision=r000001&profile=package",
+        )
+        assert status == 200
+        diagnostics = json.loads(body)
+        assert diagnostics["valid"] is False
+        assert {
+            "package.story-title-required",
+            "package.workspace-required",
+        }.issubset({
+            item["ruleId"] for item in diagnostics["diagnostics"]
+        })
 
         status, headers, body = _request(port, "POST", "/api/project")
         assert status == 405
@@ -176,6 +205,43 @@ def test_sse_stream_announces_manifest_revision_changes(tmp_path) -> None:
         assert event_name == "revision"
         assert snapshot["currentRevision"] == "r000002"
         assert snapshot["headDigest"] == "b" * 64
+    finally:
+        connection.close()
+        _stop_server(server, thread)
+
+
+def test_sse_stream_announces_authoring_asset_changes(tmp_path) -> None:
+    module = _viewer_module()
+    root = _copy_project(tmp_path)
+    server, thread = _start_server(module, root)
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_address[1],
+        timeout=3,
+    )
+    try:
+        connection.request(
+            "GET",
+            "/events",
+            headers={"Accept": "text/event-stream"},
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        event_name, snapshot = _read_sse_event(response)
+        assert event_name == "snapshot"
+        assert snapshot["authoringAssetsDigest"]
+
+        manifest_path = root / "design-project.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["authoringAssetsDigest"] = "c" * 64
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        event_name, snapshot = _read_sse_event(response)
+        assert event_name == "authoring-rules"
+        assert snapshot["authoringAssetsDigest"] == "c" * 64
     finally:
         connection.close()
         _stop_server(server, thread)

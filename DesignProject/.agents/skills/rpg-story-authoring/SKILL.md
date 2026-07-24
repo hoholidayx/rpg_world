@@ -1,9 +1,12 @@
 ---
 name: rpg-story-authoring
-description: Persist, resume, revise, inspect, validate, and package a portable RPG Story design, including story architecture, characters, lorebook entries, status tables, openings, composer settings, plot schedules, and image-worthy visual specifications. Use for story brainstorming or decisions, continuing after context compression or a new session, opening the live read-only revision/schema/Story Pack viewer, creating checkpoints, building full or section-scoped Story Packs, comparing a design with RPG World, and previewing or applying an explicitly confirmed runtime synchronization.
+description: Persist, resume, revise, inspect, validate, and package a portable RPG Story design, including story architecture, characters, lorebook entries, status tables, openings, composer settings, plot schedules, and image-worthy visual specifications. Use for story brainstorming or decisions, continuing after context compression or a new session, interpreting field semantics or diagnostics, opening the live read-only revision/schema/field-guide/Story Pack viewer, creating checkpoints, building full or section-scoped Story Packs, comparing a design with RPG World, and previewing or applying an explicitly confirmed runtime synchronization.
 ---
 
 # RPG Story Authoring
+
+<!-- authoring-rules-version: 1.0 -->
+<!-- authoring-rules-digest: 527f14f1bdb07acefe4cc182cea18f3379fb220f4f8b81a8992381f805d4625f -->
 
 Persist the Story design as immutable local revisions and use
 `rpg-world-mcp` as the only runtime boundary. Never rely on conversation
@@ -15,7 +18,9 @@ history as the durable design source.
    design.
 2. Summarize the current revision, confirmed decisions, unresolved questions,
    and the next useful decision.
-3. If the MCP tool is unavailable, stop before editing design state and run
+3. Call `story_design_get_authoring_rules` when a field's meaning or runtime
+   effect is uncertain. Do not infer semantics from its name alone.
+4. If the MCP tool is unavailable, stop before editing design state and run
    `scripts/portable_doctor.py` only for read-only diagnosis.
 
 ## Discuss and persist
@@ -28,7 +33,9 @@ confirmation. Once the user confirms a choice:
 3. Resolve the corresponding `/openQuestions` item if present.
 4. Call `story_design_patch` with the current revision as `expectedHead` and a
    specific reason.
-5. Treat a stale-head response as a CAS conflict: reload resume context,
+5. Read `advisoryDiagnostics`; correct field-duty warnings or explain a
+   deliberate exception.
+6. Treat a stale-head response as a CAS conflict: reload resume context,
    rebase the intended change, and never overwrite the newer head.
 
 Save confirmed decisions during the turn, not only at the end. Keep tentative
@@ -44,23 +51,40 @@ generation brief. Use Story virtual calendar years such as 2019 or 2020 when
 the fiction is anchored to those years; do not replace them with placeholder
 year 1.
 
-Read `references/story-design-contract.md` when adding resource structures.
-For Scene status tables, keep the fixed keys `时间`, `位置`, and `在场人物`;
-format time as `第 2019 年 1 月 1 日 9 时`.
+Read the relevant generated field reference before adding or substantially
+rewriting that domain:
+
+- Project, Story, Opening, target, or Story Pack:
+  `references/fields-project-story.md`
+- Character or Lorebook:
+  `references/fields-characters-lorebook.md`
+- Status or Scene:
+  `references/fields-status-scene.md`
+- Plot, RP Module, Narrative Style, or Quick Reply:
+  `references/fields-plot-rp-composer.md`
+- Visual Catalog, sources, decisions, or open questions:
+  `references/fields-visual-workflow.md`
+
+Use `references/story-design-contract.md` for ownership and cross-resource
+invariants. Do not copy the whole field catalog into the active context when
+only one domain is needed.
 
 ## Validate and checkpoint
 
-Call `story_design_validate` before a milestone or package build. Create a
-named checkpoint after a stable architecture, resource set, or import-ready
-state. Checkpoints do not replace automatic revisions.
+Call `story_design_validate(profile="draft")` while iterating. Before a
+milestone or package build, use `profile="package"` and resolve every error;
+warnings identify field-duty or quality risks and do not silently become
+errors. Package builds always run the package profile again.
 
-Use `story_design_diff_revisions` before restoring a revision. Restore with
+Create a named checkpoint after a stable architecture, resource set, or
+import-ready state. Checkpoints do not replace automatic revisions. Use
+`story_design_diff_revisions` before restoring a revision, and restore with
 `story_design_restore_revision`; never alter or delete an old revision file.
 
 ## Run the read-only viewer
 
 When the user asks to start, open, or inspect the Story visualization,
-revision history, Schema, or built Story Packs:
+revision history, field guide, diagnostics, Schema, or built Story Packs:
 
 1. Treat the current workspace as the DesignProject root and require
    `viewer/serve.py`. Do not copy the viewer elsewhere or import RPG modules.
@@ -72,17 +96,13 @@ revision history, Schema, or built Story Packs:
    `python3 viewer/serve.py --port 8787`. Add `--open` only when the user asks
    to open the browser and GUI launch is permitted.
 4. Verify `/api/project` reports the current revision, keep the process
-   running, and return the exact loopback URL. If the sandbox blocks loopback
-   launch or verification, request scoped escalation rather than weakening the
-   server's loopback-only rule.
-5. For stop or restart requests, target only the exact retained Viewer process;
-   never terminate an unknown listener.
+   running, and return the exact loopback URL.
+5. For stop or restart requests, target only the exact retained Viewer
+   process; never terminate an unknown listener.
 
 A Viewer-only request is operational and read-only; do not call mutation tools
-merely to start it. If the user also asks to interpret or change the design,
-follow the normal resume and expected-head workflow. Viewer failures never
-authorize direct edits to `design/current.json`, revisions, checkpoints,
-schemas, or Story Packs.
+merely to start it. Viewer failures never authorize direct edits to MCP-owned
+design state or Story Packs.
 
 ## Build and synchronize
 
@@ -103,7 +123,7 @@ For runtime work:
    operation after fixing the project path; do not repeat the database write.
 
 Read `references/mcp-delivery.md` for modes, local Inspector transport,
-ChatGPT Secure MCP Tunnel, relocation, and recovery behavior.
+ChatGPT Secure MCP Tunnel, relocation, rule-asset refresh, and recovery.
 
 ## Boundaries
 

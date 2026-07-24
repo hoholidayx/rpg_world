@@ -7,6 +7,7 @@
 - ChatGPT App connection
 - Streamable HTTP Inspector
 - Confirmation model
+- Authoring rule asset refresh
 - Cross-store recovery
 - Relocation
 
@@ -64,12 +65,35 @@ the Inspector port publicly.
 
 ## Confirmation model
 
-Preview tools create an opaque operation ID and a persistent plan. Apply tools
-accept that operation ID only. They intentionally do not accept
-`confirmed=true`; the user confirms in the conversation before the model calls
-the destructive apply tool. Each operation ID is tied to its preview lane
-(`story_pack`, `changes`, or `runtime_sync`) and must use the matching apply
-tool.
+Runtime preview tools create an opaque operation ID and a persistent plan.
+Their apply tools accept that operation ID only. They intentionally do not
+accept `confirmed=true`; the user confirms in the conversation before the
+model calls the destructive apply tool. Each runtime operation ID is tied to
+its preview lane (`story_pack`, `changes`, or `runtime_sync`) and must use the
+matching apply tool.
+
+The local authoring-rule refresh preview is read-only: its opaque ID is bound
+to the exact current and expected asset digests. Apply recomputes those
+digests and rejects a stale ID, so no preview ledger or design revision is
+needed.
+
+## Authoring rule asset refresh
+
+`authoringRulesVersion` evolves independently from the v2 Story Pack
+contract. When an updated `rpg-world-mcp` reports stale rule assets:
+
+1. Call `story_design_preview_authoring_rules_refresh`.
+2. Review every create/update path and the protected-path list.
+3. Ask for explicit user confirmation.
+4. Call `story_design_apply_authoring_rules_refresh` with only the returned
+   operation ID.
+5. Run `story_design_doctor`.
+
+The apply call may update only generated Schema, the machine-readable rule
+catalog, the workspace Skill, generated field references, and their manifest
+digests. It must leave `design/current.json`, revisions, checkpoints, Story
+Packs, and runtime integration files byte-identical. v1 DesignProjects are
+rejected before any write; there is no conversion path.
 
 ## Cross-store recovery
 

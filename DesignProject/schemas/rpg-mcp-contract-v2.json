@@ -1,4 +1,27 @@
 {
+  "authoringRules": {
+    "digest": "527f14f1bdb07acefe4cc182cea18f3379fb220f4f8b81a8992381f805d4625f",
+    "managedAssetRefresh": {
+      "changesDesignRevision": false,
+      "changesRuntimeIntegration": false,
+      "changesStoryPacks": false,
+      "previewAndApplyAreSeparateTools": true
+    },
+    "path": "schemas/story-authoring-rules-v1.json",
+    "profiles": [
+      "draft",
+      "package"
+    ],
+    "structuredDiagnostics": [
+      "ruleId",
+      "severity",
+      "path",
+      "message",
+      "suggestion",
+      "runtimeEffect"
+    ],
+    "version": "1.0"
+  },
   "characterCards": {
     "objectiveDetailTags": [
       "kind:appearance",
@@ -115,6 +138,14 @@
           "annotations": {
             "destructiveHint": false,
             "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_get_authoring_rules"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
             "readOnlyHint": false
           },
           "name": "story_design_patch"
@@ -174,6 +205,22 @@
             "readOnlyHint": true
           },
           "name": "story_design_doctor"
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": true
+          },
+          "name": "story_design_preview_authoring_rules_refresh"
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": false
+          },
+          "name": "story_design_apply_authoring_rules_refresh"
         }
       ]
     },
